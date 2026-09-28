@@ -358,7 +358,9 @@ describe.skipIf(!ready)("product label history", () => {
     await db
       .insert(schema.productLabelJobs)
       .values({ ...original, deviceId: otherStation.deviceId });
+    await insertAcceptedEvents(otherStation.deviceId, [{ ...f.prepared, eventId: randomUUID() }]);
     const first = (await agent.get(`/shifts/${f.shiftId}/product-labels?limit=1`).expect(200)).body;
+    expect(first.nextCursor).toEqual(expect.any(String));
     const second = (
       await agent
         .get(
