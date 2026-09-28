@@ -10,7 +10,11 @@ import {
   isLegacyWordmarkRelease,
   legacyWordmarkReleaseKeys,
 } from "../src/artifacts/legacy-wordmark.js";
-import { LEGAL_RELEASES } from "../src/registry.js";
+import {
+  isLegacyUpdateFieldsRelease,
+  legacyUpdateFieldsReleaseKeys,
+} from "../src/artifacts/legacy-update-fields.js";
+import { LEGAL_RELEASES, legalDocumentKind } from "../src/registry.js";
 import {
   findLegalDocument,
   findLegalRelease,
@@ -753,5 +757,75 @@ describe("wordmark alignment across the registry", () => {
     expect(isLegacyWordmarkRelease("MKR-INS-06", "2026.09/01")).toBe(true);
     expect(isLegacyWordmarkRelease("MKR-INS-06", "2026.09/02")).toBe(false);
     expect(isLegacyWordmarkRelease("MKR-INS-05", "2026.09/02")).toBe(false);
+  });
+});
+
+describe("field updates on open", () => {
+  // With w:updateFields in the settings Word opens every file with "This
+  // document contains fields that may refer to other files. Update the
+  // fields?". The only field rendered is PAGE in the footer, and Word and
+  // LibreOffice recalculate page numbers while paginating without it
+  // (ECMA-376 §17.15.1.94).
+  const PAGE_FIELD = /<w:instrText[^>]*>PAGE<\/w:instrText>/;
+
+  function expectNoUpdatePromptAndLivePageNumbers(bytes: Uint8Array): void {
+    const entries = docxEntries(bytes);
+    expect(xml(entries, "word/settings.xml")).not.toContain("w:updateFields");
+    const footers = xmlParts(entries, "word/footer");
+    expect(footers).toHaveLength(2);
+    for (const footer of footers) expect(footer).toMatch(PAGE_FIELD);
+  }
+
+  it("leaves it out of a registry release", async () => {
+    expectNoUpdatePromptAndLivePageNumbers(await renderLegalDocx(PRIVACY_REQUEST));
+  });
+
+  it("leaves it out of a draft agreement", async () => {
+    expectNoUpdatePromptAndLivePageNumbers(
+      await renderLegalDocxDraft({
+        code: "MKR-AGR-01",
+        revision: "2026.09/01",
+        effectiveDate: "2026-09-12",
+        locale: "ru",
+        verificationUrl: "https://markiro.ru/legal/",
+        classLabel: "ПРОЕКТ ДОГОВОРА",
+        operatorProfileId: "operator-2026-08-15",
+        content: {
+          locale: "ru",
+          title: "Заголовок",
+          summary: "Строка описания документа",
+          sections: [
+            { id: "one", heading: "1. Раздел", blocks: [{ kind: "paragraph", text: "Текст" }] },
+          ],
+        },
+      }),
+    );
+  });
+
+  it.each([LETTERHEAD_REQUEST, DPA_REQUEST])(
+    "keeps it in the published $code/$revision template, whose revision pins its bytes",
+    async (request) => {
+      const entries = docxEntries(await renderLegalDocx(request));
+      expect(xml(entries, "word/settings.xml")).toContain("<w:updateFields/>");
+    },
+  );
+
+  it("lists only releases that publish a DOCX", () => {
+    // A PDF comes out the same with or without the setting, so a release that
+    // publishes only a PDF has no bytes to pin and does not belong here.
+    const templates = new Set(
+      LEGAL_RELEASES.filter(({ code }) => legalDocumentKind(code) === "template").map(
+        (release) => `${release.code}/${release.revision}`,
+      ),
+    );
+    for (const key of legacyUpdateFieldsReleaseKeys()) {
+      expect(templates.has(key), `${key} is not a published template release`).toBe(true);
+    }
+    expect(legacyUpdateFieldsReleaseKeys()).toHaveLength(2);
+  });
+
+  it("drops the setting once a template is reissued", () => {
+    expect(isLegacyUpdateFieldsRelease("MKR-DPA-01", "2026.08/01")).toBe(true);
+    expect(isLegacyUpdateFieldsRelease("MKR-DPA-01", "2026.09/01")).toBe(false);
   });
 });
