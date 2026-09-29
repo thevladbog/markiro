@@ -87,8 +87,9 @@ function checked<T extends Record<string, unknown>>(
  * the quarantine's fail-closed delete took away. The feed never sends an older
  * revision after a newer one, but a stale run can: a page fetched before
  * `device_forget` that lands only after a new pairing with the same host has
- * stamped `host_id` again, when `hostGuard` no longer stops it. Only for the
- * records that grant access, operators and their badges.
+ * stamped `host_id` again, when `hostGuard` no longer stops it. Only for
+ * operators and their badges, not for `site`: its salt never changes after
+ * the wizard, so an older revision of it brings back nothing that grants access.
  */
 function notQuarantinedNewer(entity: string): string {
   return (

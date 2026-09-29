@@ -8,6 +8,7 @@ import {
   type ChangeItem,
   type ChangesResponse,
 } from "../src/host/protocol.js";
+import { hashPin } from "../src/lib/credentials.js";
 import { LocalDbError, type LocalExecutor, type LocalStatement } from "../src/local/executor.js";
 import {
   createSyncScheduler,
@@ -1239,6 +1240,83 @@ describe("operator and badge copies", () => {
     expect(tables(db).state).toEqual(state(57));
   });
 
+  it("replaces an operator's PIN hash, name and role for a newer revision and keeps them against an older one", async () => {
+    const { db, executor } = openLocalDb();
+    const newPinPhc = await hashPin("5930");
+    await syncReferences({
+      changes: feed({ 0: page(10, [operator(ANNA, 10, "0042", { role: "Упаковщик" })]) }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    // The office changes the PIN, renames the operator and clears the role: a
+    // record with a newer revision, not a tombstone. The old PIN stops working.
+    await expect(
+      syncReferences({
+        changes: feed({
+          10: page(20, [
+            operator(ANNA, 20, "0042", { name: "Анна Петрова", role: null, pinPhc: newPinPhc }),
+          ]),
+        }),
+        local: executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 20, quarantined: 0 });
+    const updated = {
+      id: ANNA,
+      login: "0042",
+      name: "Анна Петрова",
+      role: null,
+      pin_phc: newPinPhc,
+      rev: 20,
+    };
+    expect(people(db).operators).toEqual([updated]);
+    // The feed never sends an older revision after a newer one, but a stale
+    // run of a forgotten pairing can, once the new pairing has accepted the
+    // newer one instead of quarantining it: the old hash must not come back.
+    await expect(
+      syncReferences({
+        changes: feed({ 20: page(30, [operator(ANNA, 15, "0042", { role: "Упаковщик" })]) }),
+        local: executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 0 });
+    expect(people(db).operators).toEqual([updated]);
+  });
+
+  it("replaces a badge's label for a newer revision and keeps it against an older one", async () => {
+    // The host never changes a badge record today (a new badge gets a new id),
+    // but the update path of its upsert must hold the same rule.
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({ 0: page(10, [badge(PASS_7, 10, ANNA)]) }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    await expect(
+      syncReferences({
+        changes: feed({ 10: page(20, [badge(PASS_7, 20, ANNA, { label: "Пропуск №7" })]) }),
+        local: executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 20, quarantined: 0 });
+    const updated = {
+      id: PASS_7,
+      operator_id: ANNA,
+      badge_phc: BADGE_PHC,
+      label: "Пропуск №7",
+      rev: 20,
+    };
+    expect(people(db).badges).toEqual([updated]);
+    await expect(
+      syncReferences({
+        changes: feed({ 20: page(30, [badge(PASS_7, 15, ANNA, { label: "Старая подпись" })]) }),
+        local: executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 0 });
+    expect(people(db).badges).toEqual([updated]);
+  });
+
   it("quarantines an operator or a badge this build cannot use, deletes its older copy and applies the rest", async () => {
     const { db, executor } = openLocalDb();
     await syncReferences({
@@ -1307,18 +1385,34 @@ describe("operator and badge copies", () => {
     expect(people(db).badges).toHaveLength(1);
   });
 
-  it("keeps two badges with one hash: the copies hold no uniqueness of their own", async () => {
-    // The host keeps an active badge on one operator. A copy that refused a
-    // second row would fail its whole page, and the sync would never move on.
+  it("keeps two badges of one operator with one hash: the copies hold no uniqueness of their own", async () => {
+    // An operator may hold several badges, and the host keeps an active hash
+    // on one badge. These two belong to one operator and carry one hash, so a
+    // unique index on either column would refuse the second row: the whole
+    // page would fail, and the sync would never move on.
     const { db, executor } = openLocalDb();
     await expect(
       syncReferences({
-        changes: feed({ 0: page(12, [badge(PASS_7, 11, ANNA), badge(OLD_PASS, 12, VERA)]) }),
+        changes: feed({ 0: page(12, [badge(PASS_7, 11, ANNA), badge(OLD_PASS, 12, ANNA)]) }),
         local: executor,
         hostId: HOST_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
     expect(people(db).badges).toHaveLength(2);
+  });
+
+  it("keeps two operators with one personnel number: the copies hold no uniqueness of their own", async () => {
+    // The host keeps personnel numbers unique. A copy that refused a second
+    // row would fail its whole page, and the sync would never move on.
+    const { db, executor } = openLocalDb();
+    await expect(
+      syncReferences({
+        changes: feed({ 0: page(12, [operator(ANNA, 11, "0042"), operator(VERA, 12, "0042")]) }),
+        local: executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
+    expect(people(db).operators).toHaveLength(2);
   });
 
   it("keeps an older record out while its newer revision waits in quarantine, even from a stale run of a forgotten pairing with the same host", async () => {

@@ -242,19 +242,20 @@ access, the station's local table, an index on the new table's `rev` (as
 A change that removes access rides the feed as a tombstone, never as a
 flag. The records that grant access — `site`, `operators` and
 `operator_badges` — are read with `z.strictObject` and format checks (a
-personnel number of 3–12 digits; `isPinPhc` and `isBadgePhc` in
-`src/lib/credentials.ts`): a record with an unknown key, or with a hash no
-station could use, fails closed into the quarantine rather than being kept,
-so a field a newer host adds never just drops away on an older station.
-`org_profile` and `lines` are read with `z.object`, which drops unknown
-keys. An operator is in the feed only while active: a
-deactivation writes a tombstone for its id, and a reactivation drops the
-tombstone and sends the record again with a new `rev`. A badge is in the
-feed only while not revoked: a revocation writes a tombstone, and a revoked
-badge never comes back — a new badge gets a new id. A PIN change is a record
-update carrying the new `pinPhc`, so the station replaces the hash and the
-old PIN stops working. A badge record never grants access on its own: the
-station's operator login (plan 1f) requires the record of its `operatorId`.
+canonical 16-byte badge salt, `canonicalSaltSchema`; a personnel number of
+3–12 digits; `isPinPhc` and `isBadgePhc` in `src/lib/credentials.ts`): a
+record with an unknown key, or with a salt or a hash no station could use,
+fails closed into the quarantine rather than being kept, so a field a newer
+host adds never just drops away on an older station. `org_profile` and
+`lines` are read with `z.object`, which drops unknown keys. An operator is in
+the feed only while active: a deactivation writes a tombstone for its id, and
+a reactivation drops the tombstone and sends the record again with a new
+`rev`. A badge is in the feed only while not revoked: a revocation writes a
+tombstone, and a revoked badge never comes back — a new badge gets a new id.
+A PIN change is a record update carrying the new `pinPhc`, so the station
+replaces the hash and the old PIN stops working. A badge record never grants
+access on its own: the station's operator login (plan 1f) requires the record
+of its `operatorId`.
 
 On the device side a new entity also needs its entry in `ENTITIES`
 (`src/local/reference-sync.ts`), which derives `ENTITY_SET`; a new entity
@@ -313,6 +314,13 @@ rejected-device screen comes first. A badge is found by hashing the trimmed scan
 `ref_site.badge_salt` and comparing whole strings, and it signs in only
 with the record of its `operatorId`; a badge that matches more than one
 active operator is refused as ambiguous, never resolved to the first.
+Precondition: the sign-in must not read the copies until the sync's
+`hostGuard` is scoped to the pairing, not only to the host (the device id
+stored in `sync_state` next to `host_id` and checked with it). Today a stale
+page fetched before a `device_forget` passes the guard after a re-pair to the
+same host, brings back a record a tombstone deleted (a turned-off operator, a
+revoked badge) and rolls `last_rev` back until the next sync;
+`notQuarantinedNewer` covers only the quarantine case.
 
 ## Reference sync
 
