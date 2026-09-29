@@ -1655,6 +1655,9 @@
       "project": "Project",
       "session": "Session",
       "package": "Package",
+      "service": "Service",
+      "right": "Right",
+      "work": "Work",
       "other": "Other"
     },
     "vat": {
