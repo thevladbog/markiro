@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   pgTable,
   text,
@@ -8,6 +8,7 @@ import {
   index,
   unique,
   uniqueIndex,
+  check,
 } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
@@ -95,8 +96,12 @@ export const organization = pgTable(
     logo: text("logo"),
     createdAt: timestamp("created_at").notNull(),
     metadata: text("metadata"),
+    cabinetAccess: text("cabinet_access").$type<"enabled" | "none">().notNull().default("enabled"),
   },
-  (table) => [uniqueIndex("organization_slug_uidx").on(table.slug)],
+  (table) => [
+    uniqueIndex("organization_slug_uidx").on(table.slug),
+    check("organization_cabinet_access_ck", sql`${table.cabinetAccess} in ('enabled', 'none')`),
+  ],
 );
 
 export const member = pgTable(
