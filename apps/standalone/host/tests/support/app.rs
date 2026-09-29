@@ -270,6 +270,30 @@ impl Admin {
     }
 }
 
+/// `pinPhc` of `proto/fixtures/phc-password.json`: the PIN 4821. The host
+/// checks only the shape of a PIN hash, never which PIN it hides.
+pub const PIN_4821: &str =
+    "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=";
+
+/// A new operator with `login` through the office API; returns its id and
+/// revision.
+pub async fn add_operator(admin: &Admin, login: &str) -> (String, i64) {
+    let (status, created) = admin
+        .call(
+            "POST",
+            "/v1/office/operators",
+            Some(
+                serde_json::json!({ "login": login, "name": "Анна Кузнецова", "pinPhc": PIN_4821 }),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    (
+        created["id"].as_str().unwrap().to_owned(),
+        created["rev"].as_i64().unwrap(),
+    )
+}
+
 /// The host's current revision (`host_revision.rev`).
 pub async fn host_revision(app: &TestApp) -> i64 {
     sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
