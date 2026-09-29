@@ -28,33 +28,35 @@ Spec: `docs/superpowers/specs/2026-09-29-tenants-without-cabinet-design.md`.
 
 ## File Structure
 
-| File | Responsibility |
-| --- | --- |
-| `packages/db/src/schema/auth.ts` | `organization.cabinetAccess` column + check |
-| `packages/db/migrations/0176_*.sql` (generated) | migration |
-| `packages/db/test/tenant-cabinet-access-migration.test.ts` | migration test |
-| `packages/platform-contracts/src/tenants.ts` | `cabinetAccessSchema`, conditional create schema, nullable create response, list/detail field, grant contract |
-| `packages/platform-contracts/test/tenants.test.ts` | contract tests |
-| `apps/api/src/subscriptions/tenant-cabinet-access.ts` (new) | `OFFLINE_TENANT_KIND_ERROR`, `assertKindAllowedForTenant` |
-| `apps/api/src/subscriptions/subscription-lifecycle.service.ts` | call the guard from `assignPlan/AddonInTransaction` |
-| `apps/api/src/modules/platform-offers/platform-offer-draft.ts` | guard for offer lines |
-| `apps/api/src/modules/billing/billing.service.ts` | guard for invoice lines |
-| `apps/api/src/modules/platform-tenants/tenant-provisioning.service.ts` | `none` branch, extracted `provisionOwner`, `grantCabinetAccess` |
-| `apps/api/src/modules/platform-tenants/platform-tenants.service.ts` | expose `cabinetAccess`, grant wrapper, renew guard |
-| `apps/api/src/modules/platform-tenants/platform-tenants.controller.ts` | grant route |
-| `apps/api/test/*.ts` | e2e + contract + inventory tests |
-| `apps/saas-admin/src/pages/tenants/*`, `pages/offers/CreateOfferPage.tsx`, `i18n/*.json` | UI |
+| File                                                                                     | Responsibility                                                                                                |
+| ---------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `packages/db/src/schema/auth.ts`                                                         | `organization.cabinetAccess` column + check                                                                   |
+| `packages/db/migrations/0176_*.sql` (generated)                                          | migration                                                                                                     |
+| `packages/db/test/tenant-cabinet-access-migration.test.ts`                               | migration test                                                                                                |
+| `packages/platform-contracts/src/tenants.ts`                                             | `cabinetAccessSchema`, conditional create schema, nullable create response, list/detail field, grant contract |
+| `packages/platform-contracts/test/tenants.test.ts`                                       | contract tests                                                                                                |
+| `apps/api/src/subscriptions/tenant-cabinet-access.ts` (new)                              | `OFFLINE_TENANT_KIND_ERROR`, `assertKindAllowedForTenant`                                                     |
+| `apps/api/src/subscriptions/subscription-lifecycle.service.ts`                           | call the guard from `assignPlan/AddonInTransaction`                                                           |
+| `apps/api/src/modules/platform-offers/platform-offer-draft.ts`                           | guard for offer lines                                                                                         |
+| `apps/api/src/modules/billing/billing.service.ts`                                        | guard for invoice lines                                                                                       |
+| `apps/api/src/modules/platform-tenants/tenant-provisioning.service.ts`                   | `none` branch, extracted `provisionOwner`, `grantCabinetAccess`                                               |
+| `apps/api/src/modules/platform-tenants/platform-tenants.service.ts`                      | expose `cabinetAccess`, grant wrapper, renew guard                                                            |
+| `apps/api/src/modules/platform-tenants/platform-tenants.controller.ts`                   | grant route                                                                                                   |
+| `apps/api/test/*.ts`                                                                     | e2e + contract + inventory tests                                                                              |
+| `apps/saas-admin/src/pages/tenants/*`, `pages/offers/CreateOfferPage.tsx`, `i18n/*.json` | UI                                                                                                            |
 
 ---
 
 ### Task 1: `organization.cabinet_access` column and migration
 
 **Files:**
+
 - Modify: `packages/db/src/schema/auth.ts` (the `organization` table, ~line 89)
 - Create (generated): `packages/db/migrations/0176_tenant_cabinet_access.sql` + `meta` snapshot and journal entry
 - Test: `packages/db/test/tenant-cabinet-access-migration.test.ts`
 
 **Interfaces:**
+
 - Produces: `schema.organization.cabinetAccess: "enabled" | "none"` (not null, default `"enabled"`), used by every later task.
 
 - [ ] **Step 1: Write the failing migration test**
@@ -168,11 +170,13 @@ Expected: a new `0176_tenant_cabinet_access.sql` containing exactly an `ADD COLU
 - [ ] **Step 5: Build and run the test**
 
 Run:
+
 ```bash
 pnpm --filter @markiro/db build
 pnpm --filter @markiro/db exec vitest run test/tenant-cabinet-access-migration.test.ts
 pnpm --filter @markiro/db test
 ```
+
 Expected: PASS. If a schema snapshot/parity test fails, update it for the new column only.
 
 - [ ] **Step 6: Commit**
@@ -187,10 +191,12 @@ git commit -m "feat(db): add organization.cabinet_access"
 ### Task 2: Contracts
 
 **Files:**
+
 - Modify: `packages/platform-contracts/src/tenants.ts` (`tenantListItemSchema`, `tenantDetailSchema.tenant`, `createTenantSchema`, `createTenantResponseSchema`, `platformTenantContracts`, type exports)
 - Test: `packages/platform-contracts/test/tenants.test.ts`
 
 **Interfaces:**
+
 - Produces:
   - `cabinetAccessSchema = z.enum(["enabled","none"])`, type `CabinetAccess`
   - `createTenantSchema` input `{ tenantName; tenantSlug; email?: string; cabinetAccess?: CabinetAccess }`, output `cabinetAccess` always present; issue message `"email"` when `enabled` without email, `"emailNotAllowed"` when `none` with email
@@ -265,6 +271,7 @@ In `packages/platform-contracts/src/tenants.ts`:
 export const cabinetAccessSchema = z.enum(["enabled", "none"]);
 export type CabinetAccess = z.output<typeof cabinetAccessSchema>;
 ```
+
 (place near `tenantActivationPolicySchema`).
 
 `tenantListItemSchema`: add `cabinetAccess: cabinetAccessSchema,` after `slug`.
@@ -320,6 +327,7 @@ In `platformTenantContracts` add:
     response: grantCabinetAccessResponseSchema,
   },
 ```
+
 and near the other type exports:
 
 ```ts
@@ -333,12 +341,14 @@ The V2 and V3 contract objects spread `platformTenantContracts`, and V3 detail d
 - [ ] **Step 4: Build and run**
 
 Run:
+
 ```bash
 pnpm --filter @markiro/platform-contracts exec vitest run test/tenants.test.ts
 pnpm --filter @markiro/platform-contracts test
 pnpm --filter @markiro/platform-contracts typecheck
 pnpm --filter @markiro/platform-contracts build
 ```
+
 Expected: PASS. Existing tests that build a tenant list item or detail fixture will now fail on the missing `cabinetAccess`: add `cabinetAccess: "enabled"` to those fixtures (only that field).
 
 - [ ] **Step 5: Commit**
@@ -353,6 +363,7 @@ git commit -m "feat(contracts): cabinet access on tenants"
 ### Task 3: Refuse licences for `none` tenants (server guard)
 
 **Files:**
+
 - Create: `apps/api/src/subscriptions/tenant-cabinet-access.ts`
 - Modify: `apps/api/src/subscriptions/subscription-lifecycle.service.ts` (`assignPlanInTransaction` ~line 344, `assignAddonInTransaction` ~line 587)
 - Modify: `apps/api/src/modules/platform-offers/platform-offer-draft.ts` (line loop ~46)
@@ -360,6 +371,7 @@ git commit -m "feat(contracts): cabinet access on tenants"
 - Test: `apps/api/test/tenant-cabinet-access-guard.e2e.test.ts`
 
 **Interfaces:**
+
 - Produces (in `tenant-cabinet-access.ts`):
 
 ```ts
@@ -370,6 +382,7 @@ export async function assertKindAllowedForTenant(
   kind: "plan" | "addon" | "service",
 ): Promise<void>; // throws ConflictException({ code: OFFLINE_TENANT_KIND_ERROR })
 ```
+
 - Consumes: `schema.organization.cabinetAccess` (Task 1).
 
 - [ ] **Step 1: Write the failing e2e test**
@@ -444,27 +457,31 @@ export async function assertKindAllowedForTenant(
 `platform-offer-draft.ts`: in `prepareOfferDraft`, at the top of the `for (const line of input.lines)` body add:
 
 ```ts
-    await assertKindAllowedForTenant(tx, input.tenantId, line.kind);
+await assertKindAllowedForTenant(tx, input.tenantId, line.kind);
 ```
+
 `tx` there is `Pick<Db, "select">`, which matches the helper.
 
 `billing.service.ts` (`create`): after the tenant is found and before `assertCommercialPlanSequence(invoiceLines)`, add:
 
 ```ts
-      for (const line of invoiceLines) {
-        await assertKindAllowedForTenant(tx, normalizedInput.tenantId, line.kind);
-      }
+for (const line of invoiceLines) {
+  await assertKindAllowedForTenant(tx, normalizedInput.tenantId, line.kind);
+}
 ```
+
 Check that `invoiceLines` items expose `kind`; if the source-offer variant uses another property name, use the one `assertCommercialPlanSequence` reads.
 
 - [ ] **Step 4: Run tests**
 
 Run:
+
 ```bash
 pnpm --filter @markiro/api exec vitest run test/tenant-cabinet-access-guard.e2e.test.ts
 pnpm --filter @markiro/api exec vitest run test/platform-tenants.e2e.test.ts
 pnpm --filter @markiro/api typecheck
 ```
+
 Expected: PASS; the second command proves enabled tenants are unchanged.
 
 - [ ] **Step 5: Commit**
@@ -479,12 +496,14 @@ git commit -m "feat(api): refuse licences for tenants without a cabinet"
 ### Task 4: Provision a tenant without a cabinet
 
 **Files:**
+
 - Modify: `apps/api/src/modules/platform-tenants/tenant-provisioning.service.ts`
 - Modify: `apps/api/src/modules/platform-tenants/platform-tenants.service.ts` (`renewActivation`)
 - Modify: `apps/api/src/cli/provision-tenant-owner.ts` (types only, if `tsc` requires)
 - Test: `apps/api/test/provision-tenant-owner.e2e.test.ts` (new `describe` cases in the existing suite, plus cleanup patterns for the new slug prefix `offline-tenant-%`)
 
 **Interfaces:**
+
 - Consumes: `ProvisionTenantDto` with `cabinetAccess` and optional `email` (Task 2).
 - Produces:
   - `TenantProvisioningResult { tenantId: string; userId: string | null; memberId: string | null; deliveryId: string | null }`
@@ -493,124 +512,124 @@ git commit -m "feat(api): refuse licences for tenants without a cabinet"
 - [ ] **Step 1: Write failing tests** in `provision-tenant-owner.e2e.test.ts` (inside the existing `describe`; reuse `provisionTenantOwner`, `MailDeliveryService`, `connection`, `defaultDemo`). Add `like(schema.organization.slug, "offline-tenant-%")` to the `afterAll` tenant cleanup.
 
 ```ts
-  it("creates a tenant without cabinet: no owner, mail, token or subscription, and needs no demo", async () => {
-    // No default demo installed on purpose.
-    const suffix = crypto.randomUUID();
-    const tenantSlug = `offline-tenant-${suffix}`;
-    const mail = new MailDeliveryService(new MailCryptoService(Buffer.alloc(32, 0x72)), () =>
-      crypto.randomUUID(),
-    );
-    const actor = {
-      userId: crypto.randomUUID(),
-      role: "platform_admin",
-    } as const;
-    const input = { tenantName: "Офлайн завод", tenantSlug, cabinetAccess: "none" } as const;
-    const result = await provisionTenantOwner({
+it("creates a tenant without cabinet: no owner, mail, token or subscription, and needs no demo", async () => {
+  // No default demo installed on purpose.
+  const suffix = crypto.randomUUID();
+  const tenantSlug = `offline-tenant-${suffix}`;
+  const mail = new MailDeliveryService(new MailCryptoService(Buffer.alloc(32, 0x72)), () =>
+    crypto.randomUUID(),
+  );
+  const actor = {
+    userId: crypto.randomUUID(),
+    role: "platform_admin",
+  } as const;
+  const input = { tenantName: "Офлайн завод", tenantSlug, cabinetAccess: "none" } as const;
+  const result = await provisionTenantOwner({
+    db: connection.db,
+    mail,
+    adminOrigin: "https://cabinet.example.test",
+    input,
+    actor: { ...actor, capabilities: platformCapabilitiesForRole("platform_admin") },
+  });
+  expect(result).toEqual({
+    tenantId: expect.any(String),
+    userId: null,
+    memberId: null,
+    deliveryId: null,
+  });
+
+  const [org] = await connection.db
+    .select()
+    .from(schema.organization)
+    .where(eq(schema.organization.id, result.tenantId));
+  expect(org).toMatchObject({ slug: tenantSlug, cabinetAccess: "none" });
+  expect(
+    await connection.db
+      .select()
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, result.tenantId)),
+  ).toEqual([]);
+  expect(
+    await connection.db
+      .select()
+      .from(schema.tenantSubscriptions)
+      .where(eq(schema.tenantSubscriptions.tenantId, result.tenantId)),
+  ).toEqual([]);
+  expect(
+    await connection.db
+      .select()
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.sourceId, `tenant-owner:${result.tenantId}`)),
+  ).toEqual([]);
+  // Stock rows are still seeded.
+  expect(
+    (
+      await connection.db
+        .select()
+        .from(schema.orgProfiles)
+        .where(eq(schema.orgProfiles.tenantId, result.tenantId))
+    ).length,
+  ).toBe(1);
+
+  const audit = await connection.db
+    .select()
+    .from(schema.platformAuditEvents)
+    .where(eq(schema.platformAuditEvents.tenantId, result.tenantId));
+  expect(audit).toHaveLength(1);
+  expect(audit[0]).toMatchObject({
+    actorPlatformUserId: actor.userId,
+    actorRole: "platform_admin",
+    action: "platform.tenant.created",
+    outcome: "success",
+    targetType: "tenant",
+    targetId: result.tenantId,
+    reason: null,
+    before: null,
+    after: { cabinetAccess: "none", subscriptionStatus: "none", planVersionId: null },
+  });
+  const tenantAudit = await connection.db
+    .select()
+    .from(schema.tenantAuditEvents)
+    .where(eq(schema.tenantAuditEvents.organizationId, result.tenantId));
+  expect(tenantAudit).toEqual([]);
+
+  // Idempotent retry returns the same tenant.
+  await expect(
+    provisionTenantOwner({
       db: connection.db,
       mail,
       adminOrigin: "https://cabinet.example.test",
       input,
-      actor: { ...actor, capabilities: platformCapabilitiesForRole("platform_admin") },
-    });
-    expect(result).toEqual({
-      tenantId: expect.any(String),
-      userId: null,
-      memberId: null,
-      deliveryId: null,
-    });
+    }),
+  ).resolves.toEqual(result);
+});
 
-    const [org] = await connection.db
-      .select()
-      .from(schema.organization)
-      .where(eq(schema.organization.id, result.tenantId));
-    expect(org).toMatchObject({ slug: tenantSlug, cabinetAccess: "none" });
-    expect(
-      await connection.db
-        .select()
-        .from(schema.member)
-        .where(eq(schema.member.organizationId, result.tenantId)),
-    ).toEqual([]);
-    expect(
-      await connection.db
-        .select()
-        .from(schema.tenantSubscriptions)
-        .where(eq(schema.tenantSubscriptions.tenantId, result.tenantId)),
-    ).toEqual([]);
-    expect(
-      await connection.db
-        .select()
-        .from(schema.emailDeliveries)
-        .where(eq(schema.emailDeliveries.sourceId, `tenant-owner:${result.tenantId}`)),
-    ).toEqual([]);
-    // Stock rows are still seeded.
-    expect(
-      (
-        await connection.db
-          .select()
-          .from(schema.orgProfiles)
-          .where(eq(schema.orgProfiles.tenantId, result.tenantId))
-      ).length,
-    ).toBe(1);
-
-    const audit = await connection.db
-      .select()
-      .from(schema.platformAuditEvents)
-      .where(eq(schema.platformAuditEvents.tenantId, result.tenantId));
-    expect(audit).toHaveLength(1);
-    expect(audit[0]).toMatchObject({
-      actorPlatformUserId: actor.userId,
-      actorRole: "platform_admin",
-      action: "platform.tenant.created",
-      outcome: "success",
-      targetType: "tenant",
-      targetId: result.tenantId,
-      reason: null,
-      before: null,
-      after: { cabinetAccess: "none", subscriptionStatus: "none", planVersionId: null },
-    });
-    const tenantAudit = await connection.db
-      .select()
-      .from(schema.tenantAuditEvents)
-      .where(eq(schema.tenantAuditEvents.organizationId, result.tenantId));
-    expect(tenantAudit).toEqual([]);
-
-    // Idempotent retry returns the same tenant.
-    await expect(
-      provisionTenantOwner({
-        db: connection.db,
-        mail,
-        adminOrigin: "https://cabinet.example.test",
-        input,
-      }),
-    ).resolves.toEqual(result);
+it("refuses to reuse a slug with a different cabinet access", async () => {
+  const suffix = crypto.randomUUID();
+  const tenantSlug = `offline-tenant-${suffix}`;
+  const mail = new MailDeliveryService(new MailCryptoService(Buffer.alloc(32, 0x73)), () =>
+    crypto.randomUUID(),
+  );
+  await provisionTenantOwner({
+    db: connection.db,
+    mail,
+    adminOrigin: "https://cabinet.example.test",
+    input: { tenantName: "Офлайн", tenantSlug, cabinetAccess: "none" },
   });
-
-  it("refuses to reuse a slug with a different cabinet access", async () => {
-    const suffix = crypto.randomUUID();
-    const tenantSlug = `offline-tenant-${suffix}`;
-    const mail = new MailDeliveryService(new MailCryptoService(Buffer.alloc(32, 0x73)), () =>
-      crypto.randomUUID(),
-    );
-    await provisionTenantOwner({
+  await expect(
+    provisionTenantOwner({
       db: connection.db,
       mail,
       adminOrigin: "https://cabinet.example.test",
-      input: { tenantName: "Офлайн", tenantSlug, cabinetAccess: "none" },
-    });
-    await expect(
-      provisionTenantOwner({
-        db: connection.db,
-        mail,
-        adminOrigin: "https://cabinet.example.test",
-        input: {
-          tenantName: "Офлайн",
-          tenantSlug,
-          cabinetAccess: "enabled",
-          email: `mismatch-${suffix}@example.com`,
-        },
-      }),
-    ).rejects.toMatchObject({ response: { code: "tenant_cabinet_access_mismatch" } });
-  });
+      input: {
+        tenantName: "Офлайн",
+        tenantSlug,
+        cabinetAccess: "enabled",
+        email: `mismatch-${suffix}@example.com`,
+      },
+    }),
+  ).rejects.toMatchObject({ response: { code: "tenant_cabinet_access_mismatch" } });
+});
 ```
 
 Imports to add: `platformCapabilitiesForRole` from `../src/platform-auth/platform-access-policy`. Check the actual field names of `PlatformPrincipal` there and match them in `actor`. Also update existing assertions in this file that compare the result shape only if they fail (the enabled path is unchanged).
@@ -666,19 +685,19 @@ export interface TenantProvisioningResult {
 3. In `provisionInTransaction`, after the tenant insert/lookup, branch:
 
 ```ts
-    let owner: { user: { id: string }; memberId: string; deliveryId: string } | null = null;
-    if (input.cabinetAccess === "enabled") {
-      if (input.email === undefined) throw new Error("cabinet access enabled requires an e-mail");
-      owner = await this.provisionOwner(tx, {
-        tenantId: tenant.id,
-        tenantName: input.tenantName,
-        email: input.email,
-        operationAt,
-        createId,
-        createToken,
-        options,
-      });
-    }
+let owner: { user: { id: string }; memberId: string; deliveryId: string } | null = null;
+if (input.cabinetAccess === "enabled") {
+  if (input.email === undefined) throw new Error("cabinet access enabled requires an e-mail");
+  owner = await this.provisionOwner(tx, {
+    tenantId: tenant.id,
+    tenantName: input.tenantName,
+    email: input.email,
+    operationAt,
+    createId,
+    createToken,
+    options,
+  });
+}
 ```
 
 4. The two advisory locks: take the `tenant-owner-email` lock only when `input.email !== undefined`; the slug lock always. Keep the order (email first, then slug).
@@ -686,45 +705,46 @@ export interface TenantProvisioningResult {
 5. Existing-tenant mismatch: change the tenant lookup to also select `cabinetAccess`, and right after it:
 
 ```ts
-    if (tenant && tenant.cabinetAccess !== input.cabinetAccess) {
-      throw new ConflictException({ code: "tenant_cabinet_access_mismatch" });
-    }
+if (tenant && tenant.cabinetAccess !== input.cabinetAccess) {
+  throw new ConflictException({ code: "tenant_cabinet_access_mismatch" });
+}
 ```
+
 On insert of a new organization set `cabinetAccess: input.cabinetAccess`.
 
 6. Demo: `const demo = tenant || input.cabinetAccess === "none" ? null : await this.lockDefaultDemo(...)`. The later `if (tenantCreated && demo)` block is unchanged. Replace the `unmanaged` computation so a `none` tenant is not reported as unmanaged:
 
 ```ts
-    if (tenantCreated) {
-      const offline = input.cabinetAccess === "none";
-      const unmanaged = !offline && demo === null;
-      await this.audit.record(tx, {
-        actorPlatformUserId: options.actor?.userId ?? null,
-        actorRole: options.actor?.role ?? null,
-        action: unmanaged ? "platform.tenant.created_unmanaged" : "platform.tenant.created",
-        outcome: "success",
-        tenantId: tenant.id,
-        targetType: "tenant",
-        targetId: tenant.id,
-        reason: unmanaged ? "operator_allowed_unmanaged_without_default_demo" : null,
-        before: null,
-        after: {
-          cabinetAccess: input.cabinetAccess,
-          ownerUserId: owner?.user.id ?? null,
-          ownerMemberId: owner?.memberId ?? null,
-          subscriptionId,
-          subscriptionStatus: offline ? "none" : unmanaged ? "unmanaged" : "pending_activation",
-          planVersionId: demo?.versionId ?? null,
-        },
-        requestId: null,
-      });
-    }
-    return {
-      tenantId: tenant.id,
-      userId: owner?.user.id ?? null,
-      memberId: owner?.memberId ?? null,
-      deliveryId: owner?.deliveryId ?? null,
-    };
+if (tenantCreated) {
+  const offline = input.cabinetAccess === "none";
+  const unmanaged = !offline && demo === null;
+  await this.audit.record(tx, {
+    actorPlatformUserId: options.actor?.userId ?? null,
+    actorRole: options.actor?.role ?? null,
+    action: unmanaged ? "platform.tenant.created_unmanaged" : "platform.tenant.created",
+    outcome: "success",
+    tenantId: tenant.id,
+    targetType: "tenant",
+    targetId: tenant.id,
+    reason: unmanaged ? "operator_allowed_unmanaged_without_default_demo" : null,
+    before: null,
+    after: {
+      cabinetAccess: input.cabinetAccess,
+      ownerUserId: owner?.user.id ?? null,
+      ownerMemberId: owner?.memberId ?? null,
+      subscriptionId,
+      subscriptionStatus: offline ? "none" : unmanaged ? "unmanaged" : "pending_activation",
+      planVersionId: demo?.versionId ?? null,
+    },
+    requestId: null,
+  });
+}
+return {
+  tenantId: tenant.id,
+  userId: owner?.user.id ?? null,
+  memberId: owner?.memberId ?? null,
+  deliveryId: owner?.deliveryId ?? null,
+};
 ```
 
 Existing audit assertions in this suite check `after` with `toMatchObject`/exact equality; if an exact `toEqual` now fails on the extra `cabinetAccess: "enabled"` key, update that expectation to include it.
@@ -734,17 +754,17 @@ Existing audit assertions in this suite check `after` with `toMatchObject`/exact
 `platform-tenants.service.ts` `renewActivation`: the `provision` input needs `cabinetAccess: "enabled"`, and the result may now carry a null delivery:
 
 ```ts
-    const result = await this.provisioning.provision(
-      {
-        email: owner.email,
-        tenantName: owner.tenantName,
-        tenantSlug: owner.tenantSlug,
-        cabinetAccess: "enabled",
-      },
-      { actor, renewActivation: true },
-    );
-    if (result.deliveryId === null) throw new NotFoundException({ code: "tenant_owner_not_found" });
-    return { deliveryId: result.deliveryId };
+const result = await this.provisioning.provision(
+  {
+    email: owner.email,
+    tenantName: owner.tenantName,
+    tenantSlug: owner.tenantSlug,
+    cabinetAccess: "enabled",
+  },
+  { actor, renewActivation: true },
+);
+if (result.deliveryId === null) throw new NotFoundException({ code: "tenant_owner_not_found" });
+return { deliveryId: result.deliveryId };
 ```
 
 Run `pnpm --filter @markiro/api typecheck` and fix any other call site it reports (the CLI `parseProvisionTenantOwnerArgs` / `provisionTenantOwner` types: the CLI stays owner-only, so set `cabinetAccess: "enabled"` where it builds the input).
@@ -752,11 +772,13 @@ Run `pnpm --filter @markiro/api typecheck` and fix any other call site it report
 - [ ] **Step 5: Run tests**
 
 Run:
+
 ```bash
 pnpm --filter @markiro/api exec vitest run test/provision-tenant-owner.e2e.test.ts
 pnpm --filter @markiro/api exec vitest run test/platform-tenants.e2e.test.ts test/tenant-owner-activation.e2e.test.ts
 pnpm --filter @markiro/api typecheck
 ```
+
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -771,10 +793,12 @@ git commit -m "feat(api): provision tenants without a cabinet"
 ### Task 5: Expose `cabinetAccess` in list and detail
 
 **Files:**
+
 - Modify: `apps/api/src/modules/platform-tenants/platform-tenants.service.ts` (`list`, `get`, `TenantListRow`)
 - Test: `apps/api/test/platform-tenants.e2e.test.ts`, `apps/api/test/platform-tenants.contract.test.ts`
 
 **Interfaces:**
+
 - Consumes: contract fields from Task 2.
 - Produces: list items and `detail.tenant` include `cabinetAccess`; `ownerActivation` is `null` for `none` tenants.
 
@@ -783,68 +807,85 @@ git commit -m "feat(api): provision tenants without a cabinet"
 In `platform-tenants.contract.test.ts`, add `cabinetAccess: "enabled"` to the fixture item in the existing "parses service results" test and add a second assertion that an item without it fails to parse:
 
 ```ts
-    expect(() =>
-      parsePlatformResponse(platformTenantContracts.list.response, {
-        items: [{ id: "legacy_better_auth_org", name: "X", slug: "x", createdAt: "2026-08-11T18:08:42.158Z", subscriptionStatus: "unmanaged" }],
-        page: 1,
-        limit: 50,
-        total: 1,
-      }),
-    ).toThrow();
+expect(() =>
+  parsePlatformResponse(platformTenantContracts.list.response, {
+    items: [
+      {
+        id: "legacy_better_auth_org",
+        name: "X",
+        slug: "x",
+        createdAt: "2026-08-11T18:08:42.158Z",
+        subscriptionStatus: "unmanaged",
+      },
+    ],
+    page: 1,
+    limit: 50,
+    total: 1,
+  }),
+).toThrow();
 ```
 
 In `platform-tenants.e2e.test.ts` add:
 
 ```ts
-  it("creates a none tenant through the API and shows it as cabinet-less", async () => {
-    const tenantSlug = `offline-api-${randomUUID()}`;
-    const created = await admin
-      .post("/platform/tenants")
-      .send({ tenantName: "Offline API", tenantSlug, cabinetAccess: "none" })
-      .expect(201);
-    expect(created.body).toEqual({
-      tenantId: expect.any(String),
-      userId: null,
-      memberId: null,
-      deliveryId: null,
-    });
-    const detail = await admin
-      .get(`/platform/tenants/${created.body.tenantId}`)
-      .set("X-Markiro-Commercial-Version", "3")
-      .expect(200);
-    expect(detail.body.tenant).toMatchObject({ slug: tenantSlug, cabinetAccess: "none" });
-    expect(detail.body.ownerActivation).toBeNull();
-    expect(detail.body.subscriptionStatus).toBe("unmanaged");
-    const list = await admin
-      .get("/platform/tenants?limit=100")
-      .set("X-Markiro-Commercial-Version", "3")
-      .expect(200);
-    expect(
-      list.body.items.find((item: { id: string }) => item.id === created.body.tenantId),
-    ).toMatchObject({ cabinetAccess: "none" });
+it("creates a none tenant through the API and shows it as cabinet-less", async () => {
+  const tenantSlug = `offline-api-${randomUUID()}`;
+  const created = await admin
+    .post("/platform/tenants")
+    .send({ tenantName: "Offline API", tenantSlug, cabinetAccess: "none" })
+    .expect(201);
+  expect(created.body).toEqual({
+    tenantId: expect.any(String),
+    userId: null,
+    memberId: null,
+    deliveryId: null,
   });
+  const detail = await admin
+    .get(`/platform/tenants/${created.body.tenantId}`)
+    .set("X-Markiro-Commercial-Version", "3")
+    .expect(200);
+  expect(detail.body.tenant).toMatchObject({ slug: tenantSlug, cabinetAccess: "none" });
+  expect(detail.body.ownerActivation).toBeNull();
+  expect(detail.body.subscriptionStatus).toBe("unmanaged");
+  const list = await admin
+    .get("/platform/tenants?limit=100")
+    .set("X-Markiro-Commercial-Version", "3")
+    .expect(200);
+  expect(
+    list.body.items.find((item: { id: string }) => item.id === created.body.tenantId),
+  ).toMatchObject({ cabinetAccess: "none" });
+});
 
-  it("rejects a cabinet-less tenant with an e-mail and an enabled one without", async () => {
-    await admin
-      .post("/platform/tenants")
-      .send({ tenantName: "Bad", tenantSlug: `bad-${randomUUID()}`, cabinetAccess: "none", email: "a@b.co" })
-      .expect(400);
-    await admin
-      .post("/platform/tenants")
-      .send({ tenantName: "Bad", tenantSlug: `bad-${randomUUID()}` })
-      .expect(400);
-  });
+it("rejects a cabinet-less tenant with an e-mail and an enabled one without", async () => {
+  await admin
+    .post("/platform/tenants")
+    .send({
+      tenantName: "Bad",
+      tenantSlug: `bad-${randomUUID()}`,
+      cabinetAccess: "none",
+      email: "a@b.co",
+    })
+    .expect(400);
+  await admin
+    .post("/platform/tenants")
+    .send({ tenantName: "Bad", tenantSlug: `bad-${randomUUID()}` })
+    .expect(400);
+});
 
-  it("returns owner_not_found when renewing activation for a none tenant", async () => {
-    const created = await admin
-      .post("/platform/tenants")
-      .send({ tenantName: "Offline renew", tenantSlug: `offline-renew-${randomUUID()}`, cabinetAccess: "none" })
-      .expect(201);
-    const renewed = await admin
-      .post(`/platform/tenants/${created.body.tenantId}/owner-activation/renew`)
-      .expect(404);
-    expect(renewed.body.code).toBe("tenant_owner_not_found");
-  });
+it("returns owner_not_found when renewing activation for a none tenant", async () => {
+  const created = await admin
+    .post("/platform/tenants")
+    .send({
+      tenantName: "Offline renew",
+      tenantSlug: `offline-renew-${randomUUID()}`,
+      cabinetAccess: "none",
+    })
+    .expect(201);
+  const renewed = await admin
+    .post(`/platform/tenants/${created.body.tenantId}/owner-activation/renew`)
+    .expect(404);
+  expect(renewed.body.code).toBe("tenant_owner_not_found");
+});
 ```
 
 Adapt the `X-Markiro-Commercial-Version` header value to what the neighbouring detail tests in this file use for the current version.
@@ -863,10 +904,12 @@ Expected: FAIL (`cabinetAccess` missing / response parse errors).
 - [ ] **Step 4: Run tests**
 
 Run:
+
 ```bash
 pnpm --filter @markiro/api exec vitest run test/platform-tenants.contract.test.ts test/platform-tenants.e2e.test.ts
 pnpm --filter @markiro/api typecheck
 ```
+
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -881,6 +924,7 @@ git commit -m "feat(api): expose cabinet access in tenant list and detail"
 ### Task 6: Grant the cabinet later
 
 **Files:**
+
 - Modify: `apps/api/src/modules/platform-tenants/tenant-provisioning.service.ts` (`grantCabinetAccess`)
 - Modify: `apps/api/src/modules/platform-tenants/platform-tenants.service.ts` (wrapper)
 - Modify: `apps/api/src/modules/platform-tenants/platform-tenants.controller.ts` (route), `dto.ts` (re-exports)
@@ -888,6 +932,7 @@ git commit -m "feat(api): expose cabinet access in tenant list and detail"
 - Test: `apps/api/test/grant-cabinet-access.e2e.test.ts`
 
 **Interfaces:**
+
 - Consumes: `provisionOwner` (Task 4), `grantCabinetAccessSchema` / contract entry (Task 2).
 - Produces:
   - `TenantProvisioningService.grantCabinetAccess(tenantId: string, input: GrantCabinetAccessDto, options: { actor: PlatformPrincipal; now?: () => Date; createId?: () => string; createToken?: () => string }): Promise<{ tenantId: string; userId: string; memberId: string; deliveryId: string }>`
@@ -1050,6 +1095,7 @@ Import `NotFoundException` from `@nestjs/common` and the `GrantCabinetAccessDto`
     );
   }
 ```
+
 with the new imports from `./dto`. Confirm in `platform-access-policy.ts` that `accountant` lacks `tenants.write` (the create route relies on the same); if the create route has an extra role check elsewhere, mirror it.
 
 - [ ] **Step 4: Update the route inventories**
@@ -1059,11 +1105,13 @@ Run `grep -rn "owner-activation/renew" apps/api/test` and add the new route next
 - [ ] **Step 5: Run tests**
 
 Run:
+
 ```bash
 pnpm --filter @markiro/api exec vitest run test/grant-cabinet-access.e2e.test.ts
 pnpm --filter @markiro/api exec vitest run test/subscription-route-inventory.test.ts test/platform-contract-openapi.test.ts
 pnpm --filter @markiro/api typecheck
 ```
+
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -1078,6 +1126,7 @@ git commit -m "feat(api): grant cabinet access to a tenant created without one"
 ### Task 7: saas-admin — API client, create form, tenant card, badge
 
 **Files:**
+
 - Modify: `apps/saas-admin/src/pages/tenants/api.ts`, `errorMessages.ts`, `CreateTenantPanel.tsx`, `TenantPage.tsx`, `TenantsPage.tsx`
 - Create: `apps/saas-admin/src/pages/tenants/GrantCabinetAccessPanel.tsx`
 - Modify: `apps/saas-admin/src/i18n/ru.json`, `en.json`
@@ -1085,6 +1134,7 @@ git commit -m "feat(api): grant cabinet access to a tenant created without one"
 - Test: `apps/saas-admin/test/tenants-cabinet-access.test.tsx`
 
 **Interfaces:**
+
 - Consumes: contracts from Task 2; route from Task 6.
 - Produces: `grantCabinetAccess(tenantId: string, input: GrantCabinetAccessInput)` in `api.ts`; `<GrantCabinetAccessPanel tenantId canGrant />`.
 
@@ -1124,6 +1174,7 @@ export async function grantCabinetAccess(tenantId: string, input: GrantCabinetAc
   });
 }
 ```
+
 (import `platformTenantContracts` from `@markiro/platform-contracts`). Export `CreateTenantInput` as today; the create response schema is now nullable, and `createTenant`'s `responseSchema` already comes from `platformTenantV3Contracts.create.response`.
 
 `errorMessages.ts`: change `TenantOperation` to include `"grant"`; add
@@ -1136,6 +1187,7 @@ const GRANT_ERROR_KEYS: Readonly<Record<string, string>> = {
   tenant_email_conflict: "tenants.errors.tenant_email_conflict",
 };
 ```
+
 add `grant: "tenants.errors.grant_failed"` to `FALLBACK_KEYS`, and route `operation === "grant"` to `GRANT_ERROR_KEYS` in `tenantErrorMessageKey`. Add `tenant_cabinet_access_mismatch: "tenants.errors.tenant_cabinet_access_mismatch"` to `CREATE_ERROR_KEYS`.
 
 `CreateTenantPanel.tsx`: default values `{ tenantName: "", tenantSlug: "", email: "", cabinetAccess: "enabled" }`. Because the schema now rejects `email: ""` for `none` and treats `""` as an invalid address for `enabled`, convert on submit and hide the field:
@@ -1150,6 +1202,7 @@ add `grant: "tenants.errors.grant_failed"` to `FALLBACK_KEYS`, and route `operat
       rest.cabinetAccess === "none" ? rest : { ...rest, email: email ?? "" };
     // create.mutateAsync(payload) ...
 ```
+
 Add a labelled switch (use the `Switch`/`Checkbox` component that `@markiro/ui` already exports; find it with `grep -n "export" packages/ui/src/index.ts | grep -i "switch\|checkbox"`) bound with `form.setValue("cabinetAccess", checked ? "enabled" : "none", { shouldDirty: true })`; when switching to `none`, also `form.setValue("email", "")` and `form.clearErrors("email")`. Render the e-mail `Input` only when `cabinetAccess === "enabled"`. The `SectionHeader` description is `t(cabinetAccess === "enabled" ? "tenants.createForm.demoNotice" : "tenants.createForm.offlineNotice")`, the submit label `t(cabinetAccess === "enabled" ? "tenants.createForm.submit" : "tenants.createForm.submitOffline")`. Add `emailNotAllowed` to the `validationMessage` keys (`tenants.createForm.validation.emailNotAllowed`). Because `zodResolver` runs on the form values, register the schema's `email: ""` handling by passing `email: undefined` when `none`: set `defaultValues.email` to `undefined` only after the toggle by calling `form.unregister("email")` when the field is hidden, so the resolver sees no key.
 
 `TenantsPage.tsx`: in the status column render, when `item.cabinetAccess === "none"` add after the chip:
@@ -1157,9 +1210,11 @@ Add a labelled switch (use the `Switch`/`Checkbox` component that `@markiro/ui` 
 ```tsx
 <StatusChip phase="none" label={t("tenants.cabinet.none")} />
 ```
+
 (the `none` phase is grey and its label carries the meaning, so it is not colour-only).
 
 `TenantPage.tsx`:
+
 - Replace the `owner-activation` `<section>` with a conditional: when `detail.tenant.cabinetAccess === "none"` render `<GrantCabinetAccessPanel tenantId={detail.tenant.id} canGrant={canGrant} />` where `const canGrant = principal.role !== "accountant" && principal.capabilities.includes("tenants.write");`; otherwise keep the existing block untouched.
 - Render `<SubscriptionPanel ... />` only when `cabinetAccess === "enabled"`; for `none` render `<Alert tone="info">{t("tenants.detail.offline.documentsNotice")}</Alert>` instead (text: platform sends no documents; the operator downloads and sends them).
 - Do not show the `pendingActivation` alert for `none` (its status is `unmanaged`, so it already does not).
@@ -1167,6 +1222,7 @@ Add a labelled switch (use the `Switch`/`Checkbox` component that `@markiro/ui` 
 `GrantCabinetAccessPanel.tsx`: a section with heading `tenants.detail.offline.title` ("Кабинет не выдан"), explanatory text, and, if `canGrant`, a button opening an inline form (single `Input` e-mail, `Button` submit, cancel) built with `react-hook-form` + `zodResolver(grantCabinetAccessSchema)` (export the schema from `api.ts` as `grantCabinetAccessInputSchema`). On success invalidate `["platform","tenants",tenantId]` and `["platform","tenants"]`; on error show `t(tenantErrorMessageKey("grant", error))`. Keep the same `useUnsavedChanges(form.formState.isDirty, mutation.isPending)` guard as `CreateTenantPanel`.
 
 i18n (both files): add under `tenants`:
+
 - `createForm.cabinetAccess` ("Доступ в кабинет" / "Cabinet access"), `createForm.cabinetAccessHint`, `createForm.offlineNotice` ("Тенант без кабинета: владелец, письмо активации и демо не создаются. Лицензии недоступны, только услуги. Счета и акты вы отправляете вручную." / EN equivalent), `createForm.submitOffline` ("Создать тенант без кабинета"), `createForm.validation.emailNotAllowed`.
 - `cabinet.none` ("Без кабинета" / "No cabinet").
 - `detail.offline.title` ("Кабинет не выдан"), `detail.offline.body`, `detail.offline.grant` ("Выдать доступ в кабинет"), `detail.offline.email` ("Email владельца"), `detail.offline.submit` ("Выдать и отправить активацию"), `detail.offline.granted` ("Доступ выдан, письмо активации поставлено в очередь."), `detail.offline.documentsNotice`.
@@ -1177,12 +1233,14 @@ Keep key sets identical in both files (the repo has an i18n parity test: run it 
 - [ ] **Step 5: Run tests**
 
 Run:
+
 ```bash
 pnpm --filter @markiro/saas-admin exec vitest run test/tenants-cabinet-access.test.tsx
 pnpm --filter @markiro/saas-admin test
 pnpm --filter @markiro/saas-admin typecheck
 pnpm --filter @markiro/saas-admin lint
 ```
+
 Expected: PASS. Fix fixtures that fail only on the missing `cabinetAccess`.
 
 - [ ] **Step 6: Commit**
@@ -1197,12 +1255,14 @@ git commit -m "feat(saas-admin): create tenants without cabinet and grant it lat
 ### Task 8: Offer editor — create the tenant inline
 
 **Files:**
+
 - Create: `apps/saas-admin/src/pages/offers/CreateOfflineTenantDialog.tsx`
 - Modify: `apps/saas-admin/src/pages/offers/CreateOfferPage.tsx`
 - Modify: `apps/saas-admin/src/i18n/ru.json`, `en.json`
 - Test: `apps/saas-admin/test/offer-create-offline-tenant.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `createTenant` (Task 7, sends `cabinetAccess: "none"`).
 - Produces: `<CreateOfflineTenantDialog onCreated={(tenantId: string) => void} />`, shown only with `tenants.write` (and never for role `accountant`) and only when the page has no `requestId` (a request-bound offer has a locked tenant).
 
@@ -1227,6 +1287,7 @@ Expected: FAIL.
 const offlineTenantSchema = createTenantInputSchema; // from ../tenants/api.js, used as-is
 // defaultValues: { tenantName: "", tenantSlug: "", cabinetAccess: "none" as const }
 ```
+
 Fields: name `Input`, slug `Input` (`mono`). Submit calls `createTenant(values)`; success → `await queryClient.invalidateQueries({ queryKey: ["platform", "tenants"] })` then `onCreated(created.tenantId)`. Errors: `t(tenantErrorMessageKey("create", error))`.
 
 `CreateOfferPage.tsx`: render, above `<DocumentComposer />` and only when `requestId === undefined` and the principal has `tenants.write` and role is not `accountant` (use `usePlatformPrincipal` as `CreateTenantPanel` does):
@@ -1236,6 +1297,7 @@ Fields: name `Input`, slug `Input` (`mono`). Submit calls `createTenant(values)`
   onCreated={(tenantId) => void navigate(`/offers/new?tenantId=${tenantId}`, { replace: true })}
 />
 ```
+
 The page already derives `selectedTenantId` from `?tenantId=` and prefetches a tenant that is not in the first list page, so the new tenant is preselected without touching `DocumentComposer`.
 
 i18n: `offers.createOfflineTenant.button` ("Создать тенанта без кабинета" / "Create tenant without cabinet"), `.title`, `.hint` ("Владелец, письмо и демо не создаются; реквизиты заполните в карточке тенанта." / EN), `.submit`.
@@ -1243,12 +1305,14 @@ i18n: `offers.createOfflineTenant.button` ("Создать тенанта без
 - [ ] **Step 4: Run tests**
 
 Run:
+
 ```bash
 pnpm --filter @markiro/saas-admin exec vitest run test/offer-create-offline-tenant.test.tsx test/offer-editor.test.tsx
 pnpm --filter @markiro/saas-admin test
 pnpm --filter @markiro/saas-admin typecheck
 pnpm --filter @markiro/saas-admin lint
 ```
+
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -1263,6 +1327,7 @@ git commit -m "feat(saas-admin): create a tenant without cabinet from the offer 
 ### Task 9: Notification behaviour, docs and final gates
 
 **Files:**
+
 - Test: `apps/api/test/tenant-billing-notifications.service.test.ts` (one new case)
 - Modify: `docs/superpowers/specs/2026-09-29-tenants-without-cabinet-design.md` (status line) and `docs/architecture.md` only if it states that every tenant has an owner (`grep -n "owner" docs/architecture.md`)
 - Run: repo gates
@@ -1284,6 +1349,7 @@ git diff --check
 pnpm turbo lint typecheck test build --filter=@markiro/db --filter=@markiro/platform-contracts --filter=@markiro/api --filter=@markiro/saas-admin --concurrency=1 --force
 pnpm format:check
 ```
+
 Check `tools/ci/affected.mjs`: it already maps `packages/db`, `platform-contracts`, `apps/api` and `apps/saas-admin` changes to their jobs; no new surface was added, so no change is expected.
 
 - [ ] **Step 4: Refresh the local graph**
@@ -1306,6 +1372,7 @@ git commit -m "test(api): pin no-recipient billing notifications for tenants wit
 ## Self-Review
 
 **Spec coverage**
+
 - §1 data/contracts → Tasks 1, 2. Grant schemas in Task 2.
 - §2 provisioning branch, no demo, audit `platform.tenant.created` with `cabinetAccess: none`, idempotent retry and mismatch → Task 4.
 - §3 services only → Task 3 (lifecycle, offer, invoice). Billing-request lines: requests carry no catalog lines that activate licences; the payment route `applyPaidLicense` is covered because it goes through both lifecycle methods. Verify during Task 3 with `grep -n "catalogVersionId" apps/api/src/modules/platform-billing-requests/*.ts`; if requests hold catalog lines, add the same one-line guard there.

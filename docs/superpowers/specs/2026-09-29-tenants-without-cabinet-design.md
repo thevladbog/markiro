@@ -61,7 +61,7 @@ Decisions taken with the owner:
 ## 1. Data and contracts
 
 - Migration adds `organization.cabinet_access text not null default
-  'enabled'` with a check constraint for `('enabled','none')`. Existing rows
+'enabled'` with a check constraint for `('enabled','none')`. Existing rows
   become `enabled`. Add a new migration; do not edit applied ones. Update the
   schema test and the runtime-migration test. Rebuild `@markiro/db` before
   consumers.
@@ -82,7 +82,7 @@ In `provisionInTransaction`, when `cabinetAccess === "none"`:
 
 - Take the slug advisory lock only; skip the `tenant-owner-email` lock.
 - Insert the organization with `cabinet_access = 'none'`, `pickup_tenant_
-  policies`, the stock label templates and `org_profiles` exactly as today.
+policies`, the stock label templates and `org_profiles` exactly as today.
 - Do **not** insert a user, `user_profiles`, `member`, activation token,
   `verification` row, e-mail delivery or the `tenant.owner.provisioned`
   tenant audit event.
@@ -144,7 +144,7 @@ drift.
 - Platform audit `platform.tenant.cabinet_access.granted` with the exact
   actor, tenant, target member, `before: { cabinetAccess: "none" }` and
   `after: { cabinetAccess: "enabled", ownerUserId, deliveryId,
-  subscriptionId, subscriptionStatus: "pending_activation", planVersionId }`;
+subscriptionId, subscriptionStatus: "pending_activation", planVersionId }`;
   tenant audit `tenant.owner.provisioned`.
 - After the switch the tenant is a normal tenant, including the activation
   resend action. `enabled` → `none` is not offered.
@@ -207,7 +207,7 @@ above where they differ.
 - **Grant lock order:** owner e-mail advisory lock → tenant slug advisory
   lock → tenant subscription timeline advisory lock → `organization` row
   `FOR NO KEY UPDATE` → default demo (candidate catalog version `FOR KEY
-  SHARE` → `platform-default-demo-setting` advisory lock → `platform_settings`
+SHARE` → `platform-default-demo-setting` advisory lock → `platform_settings`
   row `FOR SHARE`). E-mail then slug is the provisioning order. Lifecycle
   paths take the timeline lock first and never an e-mail or slug lock. The
   timeline lock makes the licence guard see either `none` or the committed
