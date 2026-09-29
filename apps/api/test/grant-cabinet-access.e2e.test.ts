@@ -7,6 +7,7 @@ import { schema, type PlatformRole } from "@markiro/db";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { AppModule } from "../src/app.module";
+import { EntitlementsService } from "../src/subscriptions/entitlements.service";
 import { mountAuth, setupAuth, type AuthSetup } from "../src/auth/auth.setup";
 import { corsDelegate } from "../src/cors";
 import { loadEnv } from "../src/env";
@@ -184,8 +185,54 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
       .select({ count: sql<number>`count(*)::int` })
       .from(schema.tenantSubscriptions)
       .where(eq(schema.tenantSubscriptions.tenantId, tenantId));
+    const demoSubscriptions = await setup.db
+      .select({
+        id: schema.tenantSubscriptions.id,
+        planVersionId: schema.tenantSubscriptions.planVersionId,
+        status: schema.tenantSubscriptions.status,
+        startsAt: schema.tenantSubscriptions.startsAt,
+        endsAt: schema.tenantSubscriptions.endsAt,
+        source: schema.tenantSubscriptions.source,
+        createdByPlatformUserId: schema.tenantSubscriptions.createdByPlatformUserId,
+      })
+      .from(schema.tenantSubscriptions)
+      .where(
+        and(
+          eq(schema.tenantSubscriptions.tenantId, tenantId),
+          eq(schema.tenantSubscriptions.source, "demo"),
+        ),
+      );
+    const demoEvents = await setup.db
+      .select({
+        subscriptionId: schema.subscriptionEvents.subscriptionId,
+        eventKind: schema.subscriptionEvents.eventKind,
+        actorPlatformUserId: schema.subscriptionEvents.actorPlatformUserId,
+        source: schema.subscriptionEvents.source,
+        reason: schema.subscriptionEvents.reason,
+        before: schema.subscriptionEvents.before,
+        after: schema.subscriptionEvents.after,
+      })
+      .from(schema.subscriptionEvents)
+      .where(
+        and(
+          eq(schema.subscriptionEvents.tenantId, tenantId),
+          eq(schema.subscriptionEvents.eventKind, "demo.provisioned"),
+        ),
+      );
     const grantAudits = await setup.db
-      .select()
+      .select({
+        actorPlatformUserId: schema.platformAuditEvents.actorPlatformUserId,
+        actorRole: schema.platformAuditEvents.actorRole,
+        action: schema.platformAuditEvents.action,
+        outcome: schema.platformAuditEvents.outcome,
+        tenantId: schema.platformAuditEvents.tenantId,
+        targetType: schema.platformAuditEvents.targetType,
+        targetId: schema.platformAuditEvents.targetId,
+        reason: schema.platformAuditEvents.reason,
+        before: schema.platformAuditEvents.before,
+        after: schema.platformAuditEvents.after,
+        requestId: schema.platformAuditEvents.requestId,
+      })
       .from(schema.platformAuditEvents)
       .where(
         and(
@@ -213,6 +260,8 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
       members,
       deliveries,
       subscriptionCount: subscriptions?.count ?? 0,
+      demoSubscriptions,
+      demoEvents,
       grantAudits,
       ownerAudits,
     };
@@ -274,11 +323,13 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
     }
   });
 
-  it("grants the cabinet, provisions the owner and audits exactly, without a demo", async () => {
+  it("grants the cabinet, provisions the owner and the default demo, and audits exactly", async () => {
     const id = await createNoneTenant();
     const email = grantedEmail();
+    const requestId = randomUUID();
     const response = await admin
       .post(`/platform/tenants/${id}/cabinet-access`)
+      .set("X-Request-Id", requestId)
       .send({ email })
       .expect(201);
     const body = response.body as {
@@ -305,20 +356,57 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
         userId: body.userId,
       },
     ]);
-    expect(state.subscriptionCount).toBe(0);
-    expect(state.grantAudits).toHaveLength(1);
-    expect(state.grantAudits[0]).toMatchObject({
-      actorPlatformUserId: adminId,
-      actorRole: "platform_admin",
-      action: "platform.tenant.cabinet_access.granted",
-      outcome: "success",
-      tenantId: id,
-      targetType: "member",
-      targetId: body.memberId,
-      reason: null,
-      before: { cabinetAccess: "none" },
-      after: { cabinetAccess: "enabled", ownerUserId: body.userId, deliveryId: body.deliveryId },
-    });
+    // The default demo, exactly as a newly provisioned cabinet gets it.
+    expect(state.subscriptionCount).toBe(1);
+    const subscriptionId = state.demoSubscriptions[0]?.id;
+    expect(state.demoSubscriptions).toEqual([
+      {
+        id: expect.any(String),
+        planVersionId: demoVersionId,
+        status: "pending_activation",
+        startsAt: null,
+        endsAt: null,
+        source: "demo",
+        createdByPlatformUserId: adminId,
+      },
+    ]);
+    expect(state.demoEvents).toEqual([
+      {
+        subscriptionId,
+        eventKind: "demo.provisioned",
+        actorPlatformUserId: adminId,
+        source: "platform",
+        reason: null,
+        before: null,
+        after: {
+          status: "pending_activation",
+          planVersionId: demoVersionId,
+          demoDurationDays: 14,
+        },
+      },
+    ]);
+    expect(state.grantAudits).toEqual([
+      {
+        actorPlatformUserId: adminId,
+        actorRole: "platform_admin",
+        action: "platform.tenant.cabinet_access.granted",
+        outcome: "success",
+        tenantId: id,
+        targetType: "member",
+        targetId: body.memberId,
+        reason: null,
+        before: { cabinetAccess: "none" },
+        after: {
+          cabinetAccess: "enabled",
+          ownerUserId: body.userId,
+          deliveryId: body.deliveryId,
+          subscriptionId,
+          subscriptionStatus: "pending_activation",
+          planVersionId: demoVersionId,
+        },
+        requestId,
+      },
+    ]);
     expect(state.ownerAudits).toEqual([
       {
         actorUserId: null,
@@ -333,6 +421,48 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
       .from(schema.user)
       .where(eq(schema.user.id, body.userId));
     expect(user).toEqual({ email });
+
+    // A cabinet with no subscription would resolve as unmanaged (unlimited);
+    // the granted cabinet is read-only until the owner activates the demo.
+    const entitlements = await app!.get(EntitlementsService).resolve(id);
+    expect(entitlements).toEqual({
+      tenantId: id,
+      access: "read_only",
+      subscription: {
+        id: subscriptionId,
+        planVersionId: demoVersionId,
+        status: "pending_activation",
+        startsAt: null,
+        endsAt: null,
+      },
+      quotas: { lines: 0, stations: 0, kiosks: 0, cabinetUsers: 0 },
+      features: { labelEditor: false, publicApi: false, pallets: false },
+    });
+  });
+
+  it("fails without a configured default demo and changes nothing", async () => {
+    const id = await createNoneTenant();
+    // A published plan without a demo duration is not a usable default demo.
+    await defaultDemo.install(planVersionId);
+    try {
+      const refused = await admin
+        .post(`/platform/tenants/${id}/cabinet-access`)
+        .send({ email: grantedEmail() })
+        .expect(409);
+      expect(refused.body.code).toBe("default_demo_not_configured");
+    } finally {
+      await defaultDemo.install(demoVersionId);
+    }
+    expect(await tenantState(id)).toEqual({
+      cabinetAccess: "none",
+      members: [],
+      deliveries: [],
+      subscriptionCount: 0,
+      demoSubscriptions: [],
+      demoEvents: [],
+      grantAudits: [],
+      ownerAudits: [],
+    });
   });
 
   it("shows the tenant as enabled with an owner activation and allows renewal", async () => {
@@ -403,17 +533,37 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
     });
 
     // Support holds tenants.write and may create tenants, so it may also grant.
+    const requestId = randomUUID();
     const granted = await support
       .post(`/platform/tenants/${id}/cabinet-access`)
+      .set("X-Request-Id", requestId)
       .send({ email: grantedEmail() })
       .expect(201);
+    const grantedBody = granted.body as { userId: string; memberId: string; deliveryId: string };
     const state = await tenantState(id);
-    expect(state.grantAudits).toHaveLength(1);
-    expect(state.grantAudits[0]).toMatchObject({
-      actorPlatformUserId: supportId,
-      actorRole: "support",
-      targetId: (granted.body as { memberId: string }).memberId,
-    });
+    expect(state.grantAudits).toEqual([
+      {
+        actorPlatformUserId: supportId,
+        actorRole: "support",
+        action: "platform.tenant.cabinet_access.granted",
+        outcome: "success",
+        tenantId: id,
+        targetType: "member",
+        targetId: grantedBody.memberId,
+        reason: null,
+        before: { cabinetAccess: "none" },
+        after: {
+          cabinetAccess: "enabled",
+          ownerUserId: grantedBody.userId,
+          deliveryId: grantedBody.deliveryId,
+          subscriptionId: state.demoSubscriptions[0]?.id,
+          subscriptionStatus: "pending_activation",
+          planVersionId: demoVersionId,
+        },
+        requestId,
+      },
+    ]);
+    expect(state.demoSubscriptions).toHaveLength(1);
   });
 
   it("rejects an invalid body with 400 and changes nothing", async () => {
@@ -458,6 +608,9 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
     expect(state.members[0]?.role).toBe("owner");
     expect(state.deliveries).toHaveLength(1);
     expect(state.grantAudits).toHaveLength(1);
+    expect(state.subscriptionCount).toBe(1);
+    expect(state.demoSubscriptions).toHaveLength(1);
+    expect(state.demoEvents).toHaveLength(1);
   });
 
   it("serializes a grant with a concurrent plan assignment without deadlocking", async () => {
@@ -472,13 +625,17 @@ describe.skipIf(!ready)("POST /platform/tenants/:id/cabinet-access", () => {
     expect(grant.status).toBe(201);
     // Whichever took the tenant timeline lock first decides: before the grant
     // the licence is refused, after it the licence is assigned. Never a 500.
+    // Either way the grant created exactly one default demo.
+    const state = await tenantState(id);
     if (plan.status === 409) {
       expect(plan.body.code).toBe("catalog_kind_not_allowed_for_offline_tenant");
-      expect((await tenantState(id)).subscriptionCount).toBe(0);
+      expect(state.subscriptionCount).toBe(1);
     } else {
       expect(plan.status).toBe(201);
-      expect((await tenantState(id)).subscriptionCount).toBe(1);
+      expect(state.subscriptionCount).toBe(2);
     }
-    expect((await tenantState(id)).cabinetAccess).toBe("enabled");
+    expect(state.demoSubscriptions).toHaveLength(1);
+    expect(state.demoEvents).toHaveLength(1);
+    expect(state.cabinetAccess).toBe("enabled");
   });
 });

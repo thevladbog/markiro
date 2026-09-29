@@ -20,6 +20,7 @@ const GRANT_ERROR_KEYS: Readonly<Record<string, string>> = {
   tenant_owner_email_conflict: "tenants.errors.tenant_owner_email_conflict",
   tenant_email_conflict: "tenants.errors.tenant_email_conflict",
   tenant_not_found: "tenants.errors.tenant_not_found",
+  default_demo_not_configured: "tenants.errors.default_demo_not_configured",
 };
 
 const RENEW_ERROR_KEYS: Readonly<Record<string, string>> = {

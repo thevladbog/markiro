@@ -108,7 +108,7 @@ export class PlatformTenantsController {
   @ApiOperation({
     summary: "Grant cabinet access to a tenant created without one",
     description:
-      "Creates the owner account, sends the activation link and switches the tenant to cabinet_access=enabled. No demo is created.",
+      "Creates the owner account, sends the activation link, creates the default demo subscription (pending_activation, started by owner activation) and switches the tenant to cabinet_access=enabled. Fails with default_demo_not_configured when no default demo is configured.",
   })
   @PlatformApiProtectedCreated({
     body: platformTenantContracts.grantCabinetAccess.body,

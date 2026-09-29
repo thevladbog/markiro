@@ -206,6 +206,29 @@ describe("tenant cabinet access", () => {
     expect(await screen.findByText("У тенанта уже есть доступ в кабинет")).toBeDefined();
   });
 
+  it("explains the demo created on grant and maps a missing default demo", async () => {
+    installTenantApi({
+      me: PLATFORM_ADMIN_ME,
+      detail: OFFLINE_DETAIL,
+      grantResponses: [{ status: 409, code: "default_demo_not_configured" }],
+    });
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
+    const user = userEvent.setup();
+
+    expect(await screen.findByRole("heading", { name: "Первый завод" })).toBeDefined();
+    const panel = screen.getByRole("region", { name: "Кабинет не выдан" });
+    expect(
+      within(panel).getByText(/вместе с доступом создаётся демо-подписка по умолчанию/),
+    ).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Выдать доступ в кабинет" }));
+    await user.type(screen.getByLabelText("Email владельца"), "owner@example.com");
+    await user.click(screen.getByRole("button", { name: "Выдать и отправить активацию" }));
+
+    expect(
+      await screen.findByText("Сначала назначьте опубликованный демо-тариф по умолчанию"),
+    ).toBeDefined();
+  });
+
   it("marks a tenant without a cabinet in the list with a text badge", async () => {
     installTenantApi({
       me: SUPPORT_ME,

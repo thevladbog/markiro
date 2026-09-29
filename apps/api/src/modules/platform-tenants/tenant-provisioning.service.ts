@@ -216,37 +216,16 @@ export class TenantProvisioningService {
       });
     }
 
-    let subscriptionId: string | null = null;
-    if (tenantCreated && demo) {
-      subscriptionId = createId();
-      await tx.insert(schema.tenantSubscriptions).values({
-        id: subscriptionId,
-        tenantId: tenant.id,
-        planVersionId: demo.versionId,
-        status: "pending_activation",
-        startsAt: null,
-        endsAt: null,
-        source: "demo",
-        createdByPlatformUserId: options.actor?.userId ?? null,
-        createdAt: operationAt,
-        updatedAt: operationAt,
-      });
-      await tx.insert(schema.subscriptionEvents).values({
-        tenantId: tenant.id,
-        subscriptionId,
-        eventKind: "demo.provisioned",
-        effectiveAt: operationAt,
-        actorPlatformUserId: options.actor?.userId ?? null,
-        source: options.actor ? "platform" : "cli",
-        reason: null,
-        before: null,
-        after: {
-          status: "pending_activation",
-          planVersionId: demo.versionId,
-          demoDurationDays: demo.durationDays,
-        },
-      });
-    }
+    const subscriptionId =
+      tenantCreated && demo
+        ? await this.insertPendingDemo(tx, {
+            tenantId: tenant.id,
+            demo,
+            operationAt,
+            createId,
+            actor: options.actor,
+          })
+        : null;
 
     if (tenantCreated) {
       // "unmanaged" means a managed tenant created without a default demo; a
@@ -284,11 +263,18 @@ export class TenantProvisioningService {
   }
 
   /**
-   * Gives a tenant created without a cabinet its first owner. No demo is
-   * created retroactively; a subscription is assigned separately.
+   * Gives a tenant created without a cabinet its first owner and the default
+   * demo, exactly as provisioning gives a new tenant: a `pending_activation`
+   * demo subscription that starts when the owner activates. Without a
+   * configured default demo the grant fails with `default_demo_not_configured`
+   * and changes nothing; a default demo switched mid-grant retries the whole
+   * transaction, as provisioning does.
    *
    * Lock order: owner e-mail advisory lock, tenant slug advisory lock, tenant
-   * subscription timeline advisory lock, then the organization row.
+   * subscription timeline advisory lock, the organization row, then the
+   * default demo (candidate catalog version FOR KEY SHARE, then the
+   * 'platform-default-demo-setting' advisory lock and the settings row FOR
+   * SHARE).
    * - The e-mail then slug prefix is the provisioning order, so a grant and a
    *   provisioning (or activation renewal) of the same e-mail or slug queue
    *   behind each other instead of crossing.
@@ -296,13 +282,20 @@ export class TenantProvisioningService {
    *   takes, and none of them takes an e-mail or slug lock, so waiting for it
    *   while holding those cannot close a cycle. Holding it makes the licence
    *   guard (`assertKindAllowedForTenant`) see either `none` or the committed
-   *   `enabled`, never a switch between its check and its write. It is keyed
-   *   by tenant id, so two grants for one tenant serialize on it too.
+   *   `enabled`, never a switch between its check and its write, and puts the
+   *   demo insert under the same lock as every other timeline write. It is
+   *   keyed by tenant id, so two grants for one tenant serialize on it too.
    * - The organization row is taken FOR NO KEY UPDATE, the same strength the
    *   `cabinet_access` update needs anyway. It does not conflict with the
    *   FOR KEY SHARE locks that foreign-key inserts into tenant tables take,
    *   so a path that inserts tenant rows before taking the timeline lock
    *   cannot deadlock against a grant that holds the timeline lock.
+   * - The default-demo locks come last. Default selection and retirement take
+   *   the catalog version, then the setting, and never a tenant lock;
+   *   provisioning takes e-mail, slug, then the same catalog/setting pair and
+   *   no tenant lock after it; lifecycle paths never take the setting. So a
+   *   holder of the setting lock never waits for a lock the grant took
+   *   earlier, and tenant locks are always taken before catalog locks.
    */
   async grantCabinetAccess(
     tenantId: string,
@@ -314,77 +307,162 @@ export class TenantProvisioningService {
       createToken?: () => string;
     },
   ): Promise<GrantCabinetAccessResult> {
-    return this.db.transaction(async (tx) => {
-      const operationAt = (options.now ?? (() => new Date()))();
-      const createId = options.createId ?? randomUUID;
-      const createToken = options.createToken ?? (() => randomBytes(24).toString("base64url"));
-
-      const [located] = await tx
-        .select({ slug: schema.organization.slug })
-        .from(schema.organization)
-        .where(eq(schema.organization.id, tenantId))
-        .limit(1);
-      if (!located) throw new NotFoundException({ code: "tenant_not_found" });
-
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-owner-email:${input.email}`}, 0))`,
-      );
-      await tx.execute(
-        sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-owner-slug:${located.slug}`}, 0))`,
-      );
-      await lockTenantSubscriptionTimeline(tx, tenantId);
-      const [tenant] = await tx
-        .select({
-          id: schema.organization.id,
-          name: schema.organization.name,
-          cabinetAccess: schema.organization.cabinetAccess,
-        })
-        .from(schema.organization)
-        .where(eq(schema.organization.id, tenantId))
-        .for("no key update")
-        .limit(1);
-      if (!tenant) throw new NotFoundException({ code: "tenant_not_found" });
-      if (tenant.cabinetAccess !== "none") {
-        throw new ConflictException({ code: "cabinet_access_already_enabled" });
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      try {
+        return await this.db.transaction((tx) =>
+          this.grantCabinetAccessInTransaction(tx, tenantId, input, options),
+        );
+      } catch (error) {
+        if (error instanceof DefaultDemoChanged && attempt < 3) continue;
+        throw error;
       }
+    }
+    throw new ConflictException({ code: "default_demo_changed" });
+  }
 
-      const owner = await this.provisionOwner(tx, {
-        tenantId,
-        tenantName: tenant.name,
-        email: input.email,
-        operationAt,
-        createId,
-        createToken,
-        options: { actor: options.actor },
-      });
-      await tx
-        .update(schema.organization)
-        .set({ cabinetAccess: "enabled" })
-        .where(eq(schema.organization.id, tenantId));
-      await this.audit.record(tx, {
-        actorPlatformUserId: options.actor.userId,
-        actorRole: options.actor.role,
-        action: "platform.tenant.cabinet_access.granted",
-        outcome: "success",
-        tenantId,
-        targetType: "member",
-        targetId: owner.memberId,
-        reason: null,
-        before: { cabinetAccess: "none" },
-        after: {
-          cabinetAccess: "enabled",
-          ownerUserId: owner.user.id,
-          deliveryId: owner.deliveryId,
-        },
-        requestId: null,
-      });
-      return {
-        tenantId,
-        userId: owner.user.id,
-        memberId: owner.memberId,
-        deliveryId: owner.deliveryId,
-      };
+  private async grantCabinetAccessInTransaction(
+    tx: ProvisionTransaction,
+    tenantId: string,
+    input: GrantCabinetAccessDto,
+    options: {
+      actor: PlatformPrincipal;
+      now?: () => Date;
+      createId?: () => string;
+      createToken?: () => string;
+    },
+  ): Promise<GrantCabinetAccessResult> {
+    const operationAt = (options.now ?? (() => new Date()))();
+    const createId = options.createId ?? randomUUID;
+    const createToken = options.createToken ?? (() => randomBytes(24).toString("base64url"));
+
+    const [located] = await tx
+      .select({ slug: schema.organization.slug })
+      .from(schema.organization)
+      .where(eq(schema.organization.id, tenantId))
+      .limit(1);
+    if (!located) throw new NotFoundException({ code: "tenant_not_found" });
+
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-owner-email:${input.email}`}, 0))`,
+    );
+    await tx.execute(
+      sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-owner-slug:${located.slug}`}, 0))`,
+    );
+    await lockTenantSubscriptionTimeline(tx, tenantId);
+    const [tenant] = await tx
+      .select({
+        id: schema.organization.id,
+        name: schema.organization.name,
+        cabinetAccess: schema.organization.cabinetAccess,
+      })
+      .from(schema.organization)
+      .where(eq(schema.organization.id, tenantId))
+      .for("no key update")
+      .limit(1);
+    if (!tenant) throw new NotFoundException({ code: "tenant_not_found" });
+    if (tenant.cabinetAccess !== "none") {
+      throw new ConflictException({ code: "cabinet_access_already_enabled" });
+    }
+    // Never null: without a default demo this throws before any write.
+    const demo = await this.lockDefaultDemo(tx, false);
+    if (!demo) throw new ConflictException({ code: "default_demo_not_configured" });
+
+    const owner = await this.provisionOwner(tx, {
+      tenantId,
+      tenantName: tenant.name,
+      email: input.email,
+      operationAt,
+      createId,
+      createToken,
+      options: { actor: options.actor },
     });
+    await tx
+      .update(schema.organization)
+      .set({ cabinetAccess: "enabled" })
+      .where(eq(schema.organization.id, tenantId));
+    // Inserted directly, as provisioning does, not through plan assignment:
+    // the licence guard is for operator-assigned licences, and this demo is
+    // part of the cabinet being granted.
+    const subscriptionId = await this.insertPendingDemo(tx, {
+      tenantId,
+      demo,
+      operationAt,
+      createId,
+      actor: options.actor,
+    });
+    await this.audit.record(tx, {
+      actorPlatformUserId: options.actor.userId,
+      actorRole: options.actor.role,
+      action: "platform.tenant.cabinet_access.granted",
+      outcome: "success",
+      tenantId,
+      targetType: "member",
+      targetId: owner.memberId,
+      reason: null,
+      before: { cabinetAccess: "none" },
+      after: {
+        cabinetAccess: "enabled",
+        ownerUserId: owner.user.id,
+        deliveryId: owner.deliveryId,
+        subscriptionId,
+        subscriptionStatus: "pending_activation",
+        planVersionId: demo.versionId,
+      },
+      requestId: null,
+    });
+    return {
+      tenantId,
+      userId: owner.user.id,
+      memberId: owner.memberId,
+      deliveryId: owner.deliveryId,
+    };
+  }
+
+  /**
+   * The default demo as every new cabinet gets it: a `pending_activation`
+   * subscription with no dates, activated with the owner. The caller holds
+   * the default-demo locks (`lockDefaultDemo`).
+   */
+  private async insertPendingDemo(
+    tx: ProvisionTransaction,
+    ctx: {
+      tenantId: string;
+      demo: DefaultDemo;
+      operationAt: Date;
+      createId: () => string;
+      actor: PlatformPrincipal | undefined;
+    },
+  ): Promise<string> {
+    const { tenantId, demo, operationAt, actor } = ctx;
+    const subscriptionId = ctx.createId();
+    await tx.insert(schema.tenantSubscriptions).values({
+      id: subscriptionId,
+      tenantId,
+      planVersionId: demo.versionId,
+      status: "pending_activation",
+      startsAt: null,
+      endsAt: null,
+      source: "demo",
+      createdByPlatformUserId: actor?.userId ?? null,
+      createdAt: operationAt,
+      updatedAt: operationAt,
+    });
+    await tx.insert(schema.subscriptionEvents).values({
+      tenantId,
+      subscriptionId,
+      eventKind: "demo.provisioned",
+      effectiveAt: operationAt,
+      actorPlatformUserId: actor?.userId ?? null,
+      source: actor ? "platform" : "cli",
+      reason: null,
+      before: null,
+      after: {
+        status: "pending_activation",
+        planVersionId: demo.versionId,
+        demoDurationDays: demo.durationDays,
+      },
+    });
+    return subscriptionId;
   }
 
   private async provisionOwner(

@@ -1978,7 +1978,7 @@
       "historyEmpty": "No events yet",
       "offline": {
         "title": "Cabinet not granted",
-        "body": "This tenant has no owner or cabinet users. Access can be granted later: the owner will receive an activation email.",
+        "body": "This tenant has no owner or cabinet users. Access can be granted later: the owner will receive an activation email, and the default demo subscription is created with the grant. The demo starts when the owner activates.",
         "grant": "Grant cabinet access",
         "email": "Owner email",
         "submit": "Grant and send activation",
