@@ -154,6 +154,35 @@ describe.skipIf(!ready)("tenant billing notifications isolated Postgres integrat
     expect(outbox).toHaveLength(2);
   });
 
+  it("enqueues nothing and does not throw for a tenant without any cabinet member", async () => {
+    const cabinetlessTenantId = `billing-notifications-${randomUUID()}`;
+    await db.insert(schema.organization).values({
+      id: cabinetlessTenantId,
+      name: "Завод без кабинета",
+      slug: `billing-notifications-${randomUUID()}`,
+      createdAt: fixedNow,
+    });
+    const entityId = randomUUID();
+
+    await expect(
+      db.transaction((tx) =>
+        service.enqueueInTransaction(tx, {
+          tenantId: cabinetlessTenantId,
+          eventKind: "clarification_required" as const,
+          entityId,
+          revision: 1,
+          subjectName: "Заявка №43",
+        }),
+      ),
+    ).resolves.not.toThrow();
+
+    const deliveries = await db
+      .select()
+      .from(schema.emailDeliveries)
+      .where(eq(schema.emailDeliveries.sourceId, `billing:clarification_required:${entityId}:1`));
+    expect(deliveries).toEqual([]);
+  });
+
   it("keeps event and deliveries atomic and concurrent replays unique", async () => {
     const rolledBackEntity = randomUUID();
     await expect(
