@@ -6,6 +6,7 @@ import {
   grantCabinetAccessSchema,
   platformTenantContracts,
   platformTenantV2Contracts,
+  platformTenantV3Contracts,
 } from "../src/index.js";
 
 const LEGACY_TENANT_ID = "legacy_better_auth_org";
@@ -420,5 +421,47 @@ describe("grantCabinetAccessSchema", () => {
   it("normalises the e-mail and rejects unknown keys", () => {
     expect(grantCabinetAccessSchema.parse({ email: " A@B.co " })).toEqual({ email: "a@b.co" });
     expect(grantCabinetAccessSchema.safeParse({ email: "a@b.co", extra: 1 }).success).toBe(false);
+  });
+});
+
+describe("platformTenantV3Contracts cabinet access", () => {
+  const tenant = {
+    id: LEGACY_TENANT_ID,
+    name: "Производство",
+    slug: "legacy-factory",
+    createdAt: "2026-08-11T18:08:42.158Z",
+  };
+  const detail = {
+    tenant: { ...tenant, cabinetAccess: "none" },
+    subscriptionStatus: "unmanaged",
+    ownerActivation: null,
+    currentSubscription: null,
+    scheduledSubscription: null,
+    activeAddons: [],
+    scheduledAddons: [],
+    usage: { cabinetUsers: 0, kiosks: 0, lines: 0, stations: 0 },
+    events: [],
+  };
+  const listItem = {
+    ...tenant,
+    cabinetAccess: "none",
+    subscriptionStatus: "unmanaged",
+  };
+
+  it("requires cabinetAccess on the detail tenant", () => {
+    const contract = platformTenantV3Contracts.detail.response;
+    expect(contract.parse(detail).tenant.cabinetAccess).toBe("none");
+    expect(contract.safeParse({ ...detail, tenant }).success).toBe(false);
+  });
+
+  it("requires cabinetAccess on list items", () => {
+    const contract = platformTenantV3Contracts.list.response;
+    expect(
+      contract.parse({ items: [listItem], page: 1, limit: 20, total: 1 }).items[0]?.cabinetAccess,
+    ).toBe("none");
+    const without = { ...tenant, subscriptionStatus: "unmanaged" };
+    expect(contract.safeParse({ items: [without], page: 1, limit: 20, total: 1 }).success).toBe(
+      false,
+    );
   });
 });
