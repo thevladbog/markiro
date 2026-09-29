@@ -31,6 +31,7 @@ interface TenantListRow {
   id: string;
   name: string;
   slug: string;
+  cabinetAccess: "enabled" | "none";
   createdAt: Date | string;
   subscriptionId: string | null;
   subscriptionStatus: Exclude<TenantSubscriptionStatus, "unmanaged"> | null;
@@ -87,6 +88,7 @@ export class PlatformTenantsService {
         organization.id,
         organization.name,
         organization.slug,
+        organization.cabinet_access as "cabinetAccess",
         organization.created_at as "createdAt",
         latest.id as "subscriptionId",
         latest.status::text as "subscriptionStatus",
@@ -126,6 +128,7 @@ export class PlatformTenantsService {
         id: row.id,
         name: row.name,
         slug: row.slug,
+        cabinetAccess: row.cabinetAccess,
         createdAt: serializeTenantListTimestamp(row.createdAt),
         subscriptionStatus: row.subscriptionStatus ?? "unmanaged",
         ...(row.subscriptionId
@@ -308,6 +311,7 @@ export class PlatformTenantsService {
         id: tenant.id,
         name: tenant.name,
         slug: tenant.slug,
+        cabinetAccess: tenant.cabinetAccess,
         createdAt: tenant.createdAt,
       },
       subscriptionStatus: current?.status ?? scheduled?.status ?? "unmanaged",
