@@ -1128,7 +1128,7 @@ describe("sync quarantine", () => {
     // tables, the quarantine, the sync state), per entity one delete and one
     // upsert, the quarantine upsert, the quarantine lift and the sync state:
     // 3 × 3 + 6 = 15. Each new entity adds 3 (a wipe, a delete, an upsert),
-    // so plan 1d3's operators and badges make it 21, within the shell's 32.
+    // so plan 1d4's operators and badges make it 21, within the shell's 32.
     expect(recorded.batches.map((batch) => batch.length)).toEqual([1, 15]);
     expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 42 }]);
   });

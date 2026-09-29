@@ -477,15 +477,19 @@ pairing lock, like `select_line`, and writes `device.json` only when the
 line changed. One read runs at a time and events during it ask for exactly
 one more; its answer replaces the device status (`device_refreshed`) only
 for the same pairing. A refused key or a changed certificate is a rejected
-device, as on every host path; any other failure, the host away included,
-keeps the station on its line. A failed
+device, as on every host path. Any other failure keeps the station on the
+line it has (offline first), and the read is tried again like a failed sync
+(below), with a failure count of its own: a station must not stay on a line
+the host no longer has until some unrelated event. A read that finds no
+pairing (`not_paired`) is not retried. A failed
 run (neither another host nor a rejected device) is retried while the link
 is online: after 2, 4, 8, 16 and 32 s, then every 60 s (`nextSyncRetryMs`).
 A successful run starts the count again; any other run replaces the
 pending retry; a status that is not `online` drops it (a run that failed
 while the link was already not `online` never armed one); and an `online`
 status after a failed run with no retry pending — dropped, or never
-armed — syncs at once. The
+armed — syncs at once. Reads follow the same rules, and the line-selection
+screen's «Повторить» (`requestSync`) asks for a sync and a read together. The
 run's error sets the sync state's `failure`: `local` for a
 `LocalDbError`; `feed` for an answer this build cannot read (a
 `HostError` with code `invalid_response`), a `SyncFeedError` or anything

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { HostError } from "../host/client.js";
 import type { ConnectionApi } from "../host/connection.js";
+import { DeviceError } from "../host/device.js";
 import type { ChangesResponse, DeviceStatus } from "../host/protocol.js";
 import { LocalDbError, type LocalExecutor } from "../local/executor.js";
 import {
@@ -62,7 +63,9 @@ export interface HostLinkOptions {
  * drops the pending retry, and the link coming back syncs at once. At the
  * same moments it reads this device's record again (`refresh`): a line the
  * office assigns takes a revision but no feed item, so only the record
- * carries it. Returns a function that asks for a sync now.
+ * carries it. A failed read — not a rejected device, not a missing pairing —
+ * keeps the line the station has and is retried the same way, with a count
+ * of its own. Returns a function that asks for a sync and a read now.
  */
 export function useHostLink({
   hostId,
@@ -89,6 +92,16 @@ export function useHostLink({
       if (retry === null) return;
       clearTimeout(retry);
       retry = null;
+    };
+    // The same for reading this device's record again: failed reads in a row,
+    // and the pending retry, which exists only while no read is in flight,
+    // the last read failed and the link is online.
+    let refreshFailures = 0;
+    let refreshRetry: ReturnType<typeof setTimeout> | null = null;
+    const cancelRefreshRetry = () => {
+      if (refreshRetry === null) return;
+      clearTimeout(refreshRetry);
+      refreshRetry = null;
     };
     const scheduler = createSyncScheduler(async () => {
       if (!active) return;
@@ -142,27 +155,52 @@ export function useHostLink({
       }
     });
     // One read of this device at a time; events during a read ask for
-    // exactly one more, as for the sync.
+    // exactly one more, as for the sync. A failed read is retried like a
+    // failed sync: the station keeps the line it has meanwhile (offline
+    // first), but must not stay on one the host no longer has until some
+    // unrelated event.
     const refresher = createSyncScheduler(async () => {
       if (!active) return;
+      // Any read — an event's, a request's or the retry itself — replaces
+      // the pending retry.
+      cancelRefreshRetry();
       try {
         const status = await refresh();
-        if (active) dispatch({ type: "device_refreshed", status });
+        if (!active) return;
+        refreshFailures = 0;
+        dispatch({ type: "device_refreshed", status });
       } catch (error) {
         if (!active) return;
         // A refused key or a changed certificate needs a new pairing, as on
-        // every other host path. Anything else — the host away, a failed
-        // write of `device.json` — keeps the line this station already has
-        // (offline first), and the next event tries again.
+        // every other host path: nothing more should reach that host.
         const reason = deviceRejection(error);
         if (reason !== null) {
           scheduler.stop();
           refresher.stop();
+          cancelRetry();
+          cancelRefreshRetry();
           dispatch({ type: "device_rejected", reason });
+          return;
+        }
+        // No pairing: the shell is about to drop the link, and there is
+        // nothing to read again.
+        if (error instanceof DeviceError && error.code === "not_paired") return;
+        // Anything else — the host away, an answer this build cannot read, a
+        // failed write of `device.json` — keeps the line this station already
+        // has, and the read is tried again while the link is online.
+        refreshFailures += 1;
+        if (online) {
+          refreshRetry = setTimeout(() => {
+            refreshRetry = null;
+            refresher.trigger();
+          }, nextSyncRetryMs(refreshFailures));
         }
       }
     });
-    syncNow.current = scheduler.trigger;
+    syncNow.current = () => {
+      scheduler.trigger();
+      refresher.trigger();
+    };
     let unwatch: (() => void) | null = null;
     connection
       .watch({
@@ -172,13 +210,18 @@ export function useHostLink({
           online = status.state === "online";
           if (!online) {
             // Nothing to retry against: the first revision event after the
-            // reconnect syncs again.
+            // reconnect syncs and reads the device again.
             cancelRetry();
-          } else if (failures > 0 && !running && retry === null) {
+            cancelRefreshRetry();
+            return;
+          }
+          if (failures > 0 && !running && retry === null) {
             // Back online after a failed run whose retry the lost link
             // dropped: no need to wait for the revision event.
             scheduler.trigger();
           }
+          // The same for a failed read of this device.
+          if (refreshFailures > 0 && refreshRetry === null) refresher.trigger();
         },
         onRevision: (rev) => {
           if (!active) return;
@@ -213,6 +256,7 @@ export function useHostLink({
       scheduler.stop();
       refresher.stop();
       cancelRetry();
+      cancelRefreshRetry();
       unwatch?.();
     };
   }, [hostId, connection, local, changes, refresh, dispatch]);

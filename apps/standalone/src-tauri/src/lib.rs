@@ -109,8 +109,9 @@ async fn device_select_line(
 }
 
 /// Read this device's record from the host again and keep the line the
-/// office assigned; the webview calls it after the first sync and after
-/// every revision event.
+/// office assigned; the webview calls it at the same moments as the
+/// reference sync (once the link's `watch` has subscribed or failed, and
+/// after every revision event), and again after a failed read.
 #[tauri::command]
 async fn device_refresh(state: tauri::State<'_, DeviceState>) -> Result<DeviceStatus, String> {
     state

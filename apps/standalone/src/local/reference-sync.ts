@@ -56,7 +56,7 @@ const MAX_REASON_LENGTH = 200;
 /**
  * Why a record fails its schema, from Zod issue paths and codes only
  * (`archived: invalid_type`; `data` names the record itself): never a value,
- * since operator records will carry PIN and badge hashes (plan 1d3).
+ * since operator records will carry PIN and badge hashes (plan 1d4).
  */
 function quarantineReason(error: z.ZodError): string {
   const reason = error.issues
@@ -296,7 +296,7 @@ async function readState(local: LocalExecutor): Promise<StoredState> {
  *
  * `syncReferences` prepends `hostGuard` and, when starting over, `WIPE`: for
  * E kept entities a batch holds at most 1 + (E + 2) + 2E + 3 = 3E + 6
- * statements — 15 today, 21 with plan 1d3's two entities, and E = 8 at most
+ * statements — 15 today, 21 with plan 1d4's two entities, and E = 8 at most
  * within the shell's 32.
  */
 function pageStatements(page: ChangesResponse, hostId: string, seenAt: number): LocalStatement[] {

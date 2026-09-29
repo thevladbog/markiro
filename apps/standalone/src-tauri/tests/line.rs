@@ -334,8 +334,45 @@ async fn a_refresh_does_not_bring_back_a_forgotten_pairing() {
     host.stop().await.unwrap();
 }
 
+/// A refresh reads the pairing only once it holds the lock: one queued behind
+/// a forget finds no pairing and writes nothing. The test above always lets
+/// `refresh` take the lock first, so it cannot tell `refresh` from one that
+/// read the pairing before waiting for the lock; this one queues it. The first
+/// poll of `join!` goes through its futures in the order given, and tokio's
+/// mutex hands the lock out first come, first served (`sync/mutex.rs`), so
+/// `select_line` holds the lock across its `PUT`, and the forget and then the
+/// refresh wait behind it. A refresh that had read the pairing earlier would
+/// still hold the one the forget removed: it would ask the host with that key
+/// and write the line the choice just made back into `device.json`.
+#[tokio::test]
+async fn a_refresh_queued_behind_a_forget_finds_no_pairing() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let station = paired_station(&host, station_dir.path()).await;
+    let line = line_ids(&station).await.remove(0);
+
+    let (selected, forgotten, refreshed) = tokio::join!(
+        station.select_line(&line),
+        station.forget(),
+        station.refresh()
+    );
+    assert_eq!(selected.unwrap().line_id.as_deref(), Some(line.as_str()));
+    forgotten.unwrap();
+    assert_eq!(refreshed, Err(DeviceError::NotPaired));
+    assert_eq!(station.status(), Ok(None));
+    assert!(!device_config::path(station_dir.path()).exists());
+    host.stop().await.unwrap();
+}
+
 /// A refresh and a line choice at the same moment end on the line the host
-/// took last, on the host, in memory and in `device.json` alike.
+/// took last, on the host, in memory and in `device.json` alike. Every round
+/// the office puts the station on `second` while the station chooses
+/// `first`: after round 0 the station's own line is `first`, so the office's
+/// line is a real change for the refresh to adopt. Were the answer to that
+/// read taken after the choice, it would write `second` over it — which the
+/// assertions below see. (Assigning the station's current line instead
+/// would leave the refresh nothing to write, and the race nothing to show.)
 #[tokio::test]
 async fn a_refresh_and_a_line_choice_never_undo_each_other() {
     let host_dir = tempfile::tempdir().unwrap();
@@ -344,12 +381,8 @@ async fn a_refresh_and_a_line_choice_never_undo_each_other() {
     let (station, token) = office_station(&host, station_dir.path()).await;
     let first = line_ids(&station).await.remove(0);
     let second = office_line(&station, &token, "Линия 2").await;
+    let (assigned, chosen) = (&second, &first);
     for round in 0..6 {
-        let (assigned, chosen) = if round % 2 == 0 {
-            (&second, &first)
-        } else {
-            (&first, &second)
-        };
         assign_line(&station, &token, Some(assigned)).await;
         let (refreshed, selected) = tokio::join!(station.refresh(), station.select_line(chosen));
         refreshed.unwrap();

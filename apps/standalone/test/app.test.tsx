@@ -197,6 +197,22 @@ function firstCallOrder(mockFn: { mock: { invocationCallOrder: number[] } }): nu
   return order;
 }
 
+/**
+ * Only `setTimeout` is fake, and it also advances with real time: React's
+ * scheduler (`setImmediate`) and Testing Library's polling stay real, and
+ * `elapse` jumps the retry waits (the sync's and the device read's).
+ */
+function fakeRetryTimers(): void {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+}
+
+/** Moves the clock on by `ms`; what the timers set off settles inside `act`. */
+async function elapse(ms: number): Promise<void> {
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(ms);
+  });
+}
+
 describe("App", () => {
   it("creates the site on a fresh host and opens the office", async () => {
     const device = fakeDevice(null);
@@ -1019,22 +1035,6 @@ describe("reference sync retries", () => {
     vi.useRealTimers();
   });
 
-  /**
-   * Only `setTimeout` is fake, and it also advances with real time: React's
-   * scheduler (`setImmediate`) and Testing Library's polling stay real, and
-   * `elapse` jumps the retry waits.
-   */
-  function fakeRetryTimers(): void {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
-  }
-
-  /** Moves the clock on by `ms`; what the timers set off settles inside `act`. */
-  async function elapse(ms: number): Promise<void> {
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(ms);
-    });
-  }
-
   /** The station without a line says the first sync failed. */
   async function firstSyncFailed(): Promise<void> {
     expect(await screen.findByText("Не удалось получить справочники с хоста.")).toBeTruthy();
@@ -1347,6 +1347,10 @@ describe("reference sync health on screen", () => {
 });
 
 describe("the line the office assigns", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   /** Lets every pending effect and timer task settle. */
   async function settle(): Promise<void> {
     await new Promise((resolve) => setImmediate(resolve));
@@ -1395,6 +1399,8 @@ describe("the line the office assigns", () => {
     );
     await link.revision(43);
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(2));
+    await settle();
+    expect(device.refresh).toHaveBeenCalledTimes(2);
     // Two more revisions while that read is on its way ask for one more read.
     await link.revision(44);
     await link.revision(45);
@@ -1453,5 +1459,160 @@ describe("the line the office assigns", () => {
     expect(screen.getByText("Цех")).toBeTruthy();
     expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
     expect(link.stop).not.toHaveBeenCalled();
+  });
+
+  it("retries a failed read of the device after the sync's wait while the link is online", async () => {
+    fakeRetryTimers();
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    // Neither a rejection nor a missing pairing: the station keeps its line
+    // and reads again, as a failed sync tries again.
+    device.refresh
+      .mockRejectedValueOnce(new DeviceError("request_failed", "the host answered with an error"))
+      .mockResolvedValueOnce(NEW_STATION);
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: fakeHost(),
+      connection: link.connection,
+    });
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
+    await elapse(500);
+    expect(device.refresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Цех")).toBeTruthy();
+    await elapse(2000);
+    expect(device.refresh).toHaveBeenCalledTimes(2);
+    // The retried read finds the line the office cleared meanwhile.
+    expect(await screen.findByText("Выбор линии")).toBeTruthy();
+  });
+
+  it("drops the retry while the link is down and reads at once when it is back", async () => {
+    fakeRetryTimers();
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.refresh
+      .mockRejectedValueOnce(new DeviceError("request_failed", "the host answered with an error"))
+      .mockResolvedValueOnce(NEW_STATION);
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: fakeHost(),
+      connection: link.connection,
+    });
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
+    await settle();
+    // The failed read armed a retry.
+    expect(vi.getTimerCount()).toBe(1);
+    await link.status({
+      state: "offline",
+      lastContactAt: 1_790_000_000_000,
+      lastError: "unreachable",
+      seq: 2,
+    });
+    expect(vi.getTimerCount()).toBe(0);
+    await elapse(120_000);
+    expect(device.refresh).toHaveBeenCalledTimes(1);
+    // Back online: no need to wait for the next revision event.
+    await link.status({ ...ONLINE, seq: 3 });
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(2));
+    await settle();
+    expect(device.refresh).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText("Выбор линии")).toBeTruthy();
+  });
+
+  it("reads the device again on «sync now»", async () => {
+    fakeRetryTimers();
+    const link = fakeConnection();
+    const device = fakeDevice(NEW_STATION);
+    const host = fakeHost();
+    host.getChanges.mockRejectedValueOnce(hostDown());
+    renderApp({ probe: probeAnswering(true), device, host, connection: link.connection });
+    // The first sync failed, so the line-selection screen offers to try again.
+    expect(await screen.findByText("Не удалось получить справочники с хоста.")).toBeTruthy();
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(device.refresh).toHaveBeenCalledTimes(1);
+    expect(host.getChanges).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    // One request asks for a sync and for a read of the device.
+    await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(2));
+    await settle();
+    expect(device.refresh).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry when there is no pairing", async () => {
+    fakeRetryTimers();
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.refresh.mockRejectedValue(new DeviceError("not_paired", "not paired"));
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: fakeHost(),
+      connection: link.connection,
+    });
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
+    await settle();
+    // No pairing, nothing to read again: no retry is armed.
+    expect(vi.getTimerCount()).toBe(0);
+    await elapse(60_000);
+    expect(device.refresh).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("Цех")).toBeTruthy();
+  });
+
+  it("waits longer after each failed read in a row, and starts over after a read succeeds", async () => {
+    fakeRetryTimers();
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    const failure = new DeviceError("request_failed", "the host answered with an error");
+    device.refresh
+      .mockRejectedValueOnce(failure)
+      .mockRejectedValueOnce(failure)
+      .mockResolvedValueOnce(DEVICE_STATUS)
+      .mockRejectedValueOnce(failure);
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: fakeHost(),
+      connection: link.connection,
+    });
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
+    // The first failure waits 2 s; the second, in a row, twice as long.
+    await elapse(2500);
+    expect(device.refresh).toHaveBeenCalledTimes(2);
+    await elapse(2000);
+    expect(device.refresh).toHaveBeenCalledTimes(2);
+    await elapse(2500);
+    expect(device.refresh).toHaveBeenCalledTimes(3);
+
+    // That read succeeded, so the count starts over: after this failure the
+    // wait is 2 s again, not 8 s.
+    await link.revision(43);
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(4));
+    await elapse(500);
+    expect(device.refresh).toHaveBeenCalledTimes(4);
+    await elapse(2000);
+    expect(device.refresh).toHaveBeenCalledTimes(5);
+  });
+
+  it("reads the device once when watch fails", async () => {
+    const device = fakeDevice(DEVICE_STATUS);
+    const connection: ConnectionApi = {
+      watch: vi.fn(async () => {
+        throw new Error("the connection task could not be reached");
+      }),
+    };
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost(), connection });
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    // The read starts in the link effect, which runs after the floor shows.
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(device.refresh).toHaveBeenCalledTimes(1);
   });
 });

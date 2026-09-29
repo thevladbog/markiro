@@ -217,7 +217,7 @@ impl LocalDb {
 
     /// Delete every row of every table but sqlx's migration journal, in one
     /// writer transaction: forgetting the device must not leave another
-    /// pairing's copies behind (from plan 1d3 on, PIN and badge hashes).
+    /// pairing's copies behind (from plan 1d4 on, PIN and badge hashes).
     /// Every table here is treated as a disposable copy of the host's data;
     /// the first plan that adds data this device owns instead of a copy —
     /// the scan journal, boxes, the outbox (the station design's §6.2,
