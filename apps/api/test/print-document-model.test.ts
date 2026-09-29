@@ -128,6 +128,8 @@ describe("print document model", () => {
     ["service", "услуга"],
     ["right", "право"],
     ["work", "работа"],
+    ["month", "мес."],
+    ["year", "год"],
     ["месяц", "месяц"],
     ["license", "license"],
   ])("prints the stored line unit %s as %s", (stored, printed) => {

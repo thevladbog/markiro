@@ -162,6 +162,8 @@ const PRINT_UNIT_LABELS: Readonly<Record<string, string>> = {
   service: "услуга",
   right: "право",
   work: "работа",
+  month: "мес.",
+  year: "год",
 };
 
 function printUnitLabel(unit: string): string {
