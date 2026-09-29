@@ -89,7 +89,8 @@ describe("office devices", () => {
     renderOffice(fakeOfficeSession({ user: TECHNOLOGIST }));
     await screen.findByRole("link", { name: "Профиль" });
     expect(screen.queryByRole("link", { name: "Устройства" })).toBeNull();
-    expect(screen.queryByText("Производство")).toBeNull();
+    // «Производство» stays for the technologist: it holds «Линии».
+    expect(screen.getByRole("link", { name: "Линии" })).toBeTruthy();
   });
 
   it("lists the devices, naming lines from the local copies", async () => {

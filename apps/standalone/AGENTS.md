@@ -552,6 +552,13 @@ requests and offer a retry.
   архиве» box, and there is no delete. The host keeps no uniqueness for
   counterparties (an owner question), so the page checks no duplicates; a
   second click while the request is on its way sends nothing.
+- «Линии» lists every line, archived ones included; every role reads it and
+  administrators change it. A name an active line already has, compared
+  without case, answers `conflict` on `line_name` when adding, renaming or
+  bringing a line back from the archive, and goes under the name: bringing a
+  line back is a dialog with its name, so it can take another one. Archiving
+  asks first and says that stations already on the line stay there: the host
+  does not touch devices when a line is archived.
 - `@markiro/ui` has English defaults: `Table` shows «No data» without
   `empty`, and `Modal` names its × «Close» without `closeLabel`. Every
   office table passes a localized `empty`, and every dialog passes
