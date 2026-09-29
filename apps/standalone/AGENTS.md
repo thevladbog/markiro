@@ -191,7 +191,11 @@ forgetting goes on; plan 1d3 revisits this before PIN and badge hashes land.
   is not whitespace, so `str::trim` keeps it while SQLite's `length()` stops
   at it and a table `CHECK` fails (a 500 instead of `validation_failed`); a
   control character inside a name would let two names that look identical
-  both be active. The office forms mirror this rule (plan 1d3).
+  both be active. The webview's forms check the same rule before sending
+  (`isPlainText` and `plainTextRule` in `src/lib/rules.ts`): the office forms,
+  the wizard and the device name at pairing. JavaScript's `trim` differs from
+  Rust's only at the edges (a NEL, U+0085, is refused rather than trimmed; a
+  BOM, U+FEFF, is trimmed), so a form is never more lenient than the host.
 - Admin writes re-check rights with `OfficeContext::require_admin_in` inside
   the transaction, in addition to the early `require_admin` rejection. The
   extractor's role and active flag are read before the request hashes a

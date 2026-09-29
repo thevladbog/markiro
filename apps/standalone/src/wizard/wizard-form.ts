@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import type { BootstrapRequest } from "../host/protocol.js";
 import {
-  characters,
+  isPlainText,
   issuerPrefix,
   loginRule,
   ORG_HOST_FIELDS,
@@ -130,7 +130,7 @@ function lineIssues(lines: readonly { name: string }[]): FieldIssue[] {
   lines.forEach((line, index) => {
     const name = line.name.trim();
     const field: WizardField = `lines.${index}.name`;
-    if (characters(name) < 1 || characters(name) > 100) {
+    if (!isPlainText(name, 100)) {
       issues.push({ field, message: "wizard.errors.lineName" });
       return;
     }

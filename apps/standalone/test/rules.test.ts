@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  companyNameRule,
+  deviceNameRule,
+  glnRule,
+  gs1PrefixesRule,
+  innRule,
+  isPlainText,
+  lineNameRule,
   loginRule,
   ORG_HOST_FIELDS,
   orgFieldsSchema,
@@ -79,6 +86,58 @@ describe("office user rules", () => {
     // 100 emoji are 200 code units but 100 characters: still a valid name.
     expect(personNameRule.safeParse("😀".repeat(100)).success).toBe(true);
     expect(passwordRule.safeParse("x".repeat(129)).success).toBe(false);
+  });
+});
+
+describe("free text", () => {
+  it("takes 1 to max characters, counted as the host counts them", () => {
+    expect(isPlainText("Линия 1", 100)).toBe(true);
+    expect(isPlainText("", 100)).toBe(false);
+    expect(isPlainText("я".repeat(100), 100)).toBe(true);
+    expect(isPlainText("я".repeat(101), 100)).toBe(false);
+    // 100 emoji are 200 UTF-16 code units but 100 characters.
+    expect(isPlainText("😀".repeat(100), 100)).toBe(true);
+  });
+
+  it("refuses a control character anywhere, as `char::is_control` does", () => {
+    for (const control of ["\u0000", "\t", "\n", "\u001f", "\u007f", "\u0085", "\u009f"]) {
+      expect(isPlainText(`Линия${control}1`, 100)).toBe(false);
+    }
+    // Not control characters: a no-break space, a soft hyphen, a zero-width joiner.
+    for (const text of ["Линия\u00a01", "Линия\u00ad1", "Линия\u200d1"]) {
+      expect(isPlainText(text, 100)).toBe(true);
+    }
+  });
+
+  it("trims before it counts, and a NUL at the edge is not trimmed away", () => {
+    expect(lineNameRule.safeParse("  Линия 2  ").data).toBe("Линия 2");
+    expect(lineNameRule.safeParse(" ").error?.issues[0]?.message).toBe("rules.lineName");
+    expect(lineNameRule.safeParse("\u0000Линия").error?.issues[0]?.message).toBe("rules.lineName");
+    expect(lineNameRule.safeParse("л".repeat(101)).error?.issues[0]?.message).toBe(
+      "rules.lineName",
+    );
+  });
+
+  it("holds every free-text field the office and the wizard send", () => {
+    expect(personNameRule.safeParse("Павел\tОрлов").error?.issues[0]?.message).toBe("rules.name");
+    expect(deviceNameRule.safeParse(" Станция 2 ").data).toBe("Станция 2");
+    expect(deviceNameRule.safeParse("Станция\u00002").error?.issues[0]?.message).toBe("rules.name");
+    expect(companyNameRule.safeParse("я".repeat(201)).error?.issues[0]?.message).toBe(
+      "rules.orgName",
+    );
+    expect(orgMessage({ orgName: "ООО\t«Атолл»" })).toBe("rules.orgName");
+  });
+
+  it("checks company fields with the organization's rules", () => {
+    expect(innRule.safeParse(" 7812345678 ").data).toBe("7812345678");
+    expect(innRule.safeParse("").success).toBe(true);
+    expect(innRule.safeParse("781234567").error?.issues[0]?.message).toBe("rules.inn");
+    expect(glnRule.safeParse("4601234000017").success).toBe(true);
+    expect(glnRule.safeParse("4601234000010").error?.issues[0]?.message).toBe(
+      "rules.glnCheckDigit",
+    );
+    expect(gs1PrefixesRule.safeParse("4601234, 4609876").success).toBe(true);
+    expect(gs1PrefixesRule.safeParse("123").error?.issues[0]?.message).toBe("rules.gs1Prefixes");
   });
 });
 

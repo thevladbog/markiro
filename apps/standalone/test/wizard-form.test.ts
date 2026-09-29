@@ -86,6 +86,10 @@ describe("wizard steps", () => {
     expect(validateStep("lines", values({ lines: [{ name: " " }] }))).toEqual([
       { field: "lines.0.name", message: "wizard.errors.lineName" },
     ]);
+    // A control character inside a name is refused like on the host.
+    expect(validateStep("lines", values({ lines: [{ name: "Линия\t1" }] }))).toEqual([
+      { field: "lines.0.name", message: "wizard.errors.lineName" },
+    ]);
     const many = Array.from({ length: 21 }, (_, index) => ({ name: `Линия ${index + 1}` }));
     expect(validateStep("lines", values({ lines: many }))).toEqual([
       { field: "lines.0.name", message: "wizard.errors.lines" },
