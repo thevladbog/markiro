@@ -4,13 +4,12 @@ import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import { Alert, Button, Input } from "@markiro/ui";
+import { Button, Input } from "@markiro/ui";
 
 import type { SsccState } from "../../host/protocol.js";
-import { errorProp } from "../../lib/form-error.js";
-import { writeFailure } from "../form-errors.js";
+import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
 import { useOfficeMutation } from "../office-query.js";
-import { StaleAlert } from "../page-state.js";
+import { WriteFailureAlert } from "../page-state.js";
 
 /** The host's limits (`put_block_sizes`): 1-100 000 box serials, 1-10 000 pallet serials. */
 const blockSizesSchema = z.object({
@@ -39,11 +38,14 @@ export interface BlockSizesFormProps {
 /** How many serials a station takes at a time; administrators only. */
 export function BlockSizesForm({ state, onSaved, onSubmitStart, onReload }: BlockSizesFormProps) {
   const { t } = useTranslation();
-  const [failure, setFailure] = useState<
-    { kind: "stale" } | { kind: "alert"; message: string } | null
-  >(null);
+  const fieldError = useFieldError();
+  const [failure, setFailure] = useState<AlertFailure | null>(null);
   const update = useOfficeMutation((api, token, sizes: BlockSizes) =>
-    api.updateBlockSizes(token, { ...sizes, expectedRev: state.blockSizesRev }),
+    api.updateBlockSizes(token, {
+      boxBlockSize: sizes.boxBlockSize,
+      palletBlockSize: sizes.palletBlockSize,
+      expectedRev: state.blockSizesRev,
+    }),
   );
   const {
     register,
@@ -54,8 +56,6 @@ export function BlockSizesForm({ state, onSaved, onSubmitStart, onReload }: Bloc
     resolver: zodResolver(blockSizesSchema),
     defaultValues: { boxBlockSize: state.boxBlockSize, palletBlockSize: state.palletBlockSize },
   });
-  const fieldError = (message: string | undefined) =>
-    errorProp(message === undefined ? undefined : t(message));
 
   const submit = handleSubmit(async (sizes) => {
     onSubmitStart();
@@ -74,8 +74,7 @@ export function BlockSizesForm({ state, onSaved, onSubmitStart, onReload }: Bloc
 
   return (
     <form className="standalone-form" onSubmit={(event) => void submit(event)} noValidate>
-      {failure?.kind === "stale" && <StaleAlert onReload={onReload} />}
-      {failure?.kind === "alert" && <Alert tone="error">{t(failure.message)}</Alert>}
+      <WriteFailureAlert failure={failure} onReload={onReload} />
       <Input
         type="number"
         min={1}

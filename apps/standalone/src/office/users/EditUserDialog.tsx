@@ -1,15 +1,15 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Checkbox, Input, Modal } from "@markiro/ui";
+import { Checkbox, Input } from "@markiro/ui";
 
 import type { OfficeUserRecord } from "../../host/protocol.js";
-import { errorProp } from "../../lib/form-error.js";
-import { writeFailure } from "../form-errors.js";
+import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
+import { FormDialog } from "../FormDialog.js";
 import { useOfficeMutation } from "../office-query.js";
-import { StaleAlert } from "../page-state.js";
+import { WriteFailureAlert } from "../page-state.js";
 import { RoleRadios } from "./RoleRadios.js";
 import { userEditSchema, type UserEditValues } from "./user-forms.js";
 
@@ -27,10 +27,8 @@ export interface EditUserDialogProps {
 
 export function EditUserDialog({ user, own, onClose, onSaved, onReload }: EditUserDialogProps) {
   const { t } = useTranslation();
-  const formId = useId();
-  const [failure, setFailure] = useState<
-    { kind: "stale" } | { kind: "alert"; message: string } | null
-  >(null);
+  const fieldError = useFieldError();
+  const [failure, setFailure] = useState<AlertFailure | null>(null);
   const update = useOfficeMutation((api, token, values: UserEditValues) =>
     api.updateUser(token, user.id, {
       name: values.name,
@@ -44,17 +42,11 @@ export function EditUserDialog({ user, own, onClose, onSaved, onReload }: EditUs
     control,
     handleSubmit,
     setError,
-    formState: { errors, isDirty, isSubmitting },
+    formState: { errors, isDirty },
   } = useForm<UserEditValues>({
     resolver: zodResolver(userEditSchema),
     defaultValues: { name: user.name, role: user.role, active: user.active },
   });
-  const fieldError = (message: string | undefined) =>
-    errorProp(message === undefined ? undefined : t(message));
-
-  const close = () => {
-    if (!isSubmitting) onClose();
-  };
 
   const submit = handleSubmit(async (values) => {
     setFailure(null);
@@ -71,61 +63,44 @@ export function EditUserDialog({ user, own, onClose, onSaved, onReload }: EditUs
   });
 
   return (
-    <Modal
-      open
+    <FormDialog
       title={t("office.users.editTitle", { login: user.login })}
-      onClose={close}
-      closeLabel={t("office.common.close")}
-      footer={
-        <>
-          <Button variant="secondary" onClick={close} disabled={isSubmitting}>
-            {t("office.common.cancel")}
-          </Button>
-          <Button type="submit" form={formId} loading={isSubmitting} disabled={!isDirty}>
-            {t("office.common.save")}
-          </Button>
-        </>
-      }
+      submitLabel={t("office.common.save")}
+      submitDisabled={!isDirty}
+      onSubmit={submit}
+      onClose={onClose}
+      alert={<WriteFailureAlert failure={failure} onReload={onReload} />}
     >
-      <form
-        id={formId}
-        className="standalone-form"
-        onSubmit={(event) => void submit(event)}
-        noValidate
-      >
-        {failure?.kind === "stale" && <StaleAlert onReload={onReload} />}
-        {failure?.kind === "alert" && <Alert tone="error">{t(failure.message)}</Alert>}
-        <Input
-          label={t("office.users.fields.name")}
-          {...fieldError(errors.name?.message)}
-          {...register("name")}
-        />
-        <Controller
-          control={control}
-          name="role"
-          render={({ field }) => (
-            <RoleRadios
-              value={field.value}
-              onChange={field.onChange}
-              disabled={own}
-              hint={own ? t("office.users.ownRoleHint") : null}
-            />
-          )}
-        />
-        <Controller
-          control={control}
-          name="active"
-          render={({ field }) => (
-            <Checkbox
-              label={t("office.users.fields.active")}
-              checked={field.value}
-              onCheckedChange={field.onChange}
-              disabled={own}
-              {...(own ? { hint: t("office.users.ownAccessHint") } : {})}
-            />
-          )}
-        />
-      </form>
-    </Modal>
+      <Input
+        label={t("office.users.fields.name")}
+        {...fieldError(errors.name?.message)}
+        {...register("name")}
+      />
+      <Controller
+        control={control}
+        name="role"
+        render={({ field }) => (
+          <RoleRadios
+            value={field.value}
+            onChange={field.onChange}
+            disabled={own}
+            hint={own ? t("office.users.ownRoleHint") : null}
+          />
+        )}
+      />
+      <Controller
+        control={control}
+        name="active"
+        render={({ field }) => (
+          <Checkbox
+            label={t("office.users.fields.active")}
+            checked={field.value}
+            onCheckedChange={field.onChange}
+            disabled={own}
+            {...(own ? { hint: t("office.users.ownAccessHint") } : {})}
+          />
+        )}
+      />
+    </FormDialog>
   );
 }

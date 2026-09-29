@@ -7,7 +7,6 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, Combobox, DefinitionGrid, Input, PageHeader } from "@markiro/ui";
 
 import type { OrgProfile } from "../../host/protocol.js";
-import { errorProp } from "../../lib/form-error.js";
 import {
   issuerPrefix,
   ORG_HOST_FIELDS,
@@ -17,10 +16,10 @@ import {
   type OrgFields,
 } from "../../lib/rules.js";
 import { TIME_ZONE_OPTIONS } from "../../lib/time-zones.js";
-import { writeFailure } from "../form-errors.js";
+import { useCan } from "../access.js";
+import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
-import { useOfficeSession } from "../office-session.js";
-import { LoadError, PageLoading, StaleAlert } from "../page-state.js";
+import { LoadError, PageLoading, WriteFailureAlert } from "../page-state.js";
 
 /** The organization profile (spec §5.5): administrators edit it, technologists read it. */
 export function OrgProfilePage() {
@@ -35,7 +34,7 @@ export function OrgProfilePage() {
 
 function OrgProfileContent() {
   const { t } = useTranslation();
-  const { user } = useOfficeSession();
+  const canEdit = useCan("editReference");
   const queryClient = useQueryClient();
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
   // The revision the last save produced; its notice stays until the data changes.
@@ -52,7 +51,7 @@ function OrgProfileContent() {
   return (
     <Card>
       {savedRev === org.data.rev && <Alert tone="ok">{t("office.common.saved")}</Alert>}
-      {user.role === "admin" ? (
+      {canEdit ? (
         // A new revision — after a save or a reload — starts the form afresh.
         <OrgProfileForm
           key={org.data.rev}
@@ -77,9 +76,8 @@ interface OrgProfileFormProps {
 
 function OrgProfileForm({ profile, onSaved, onSubmitStart, onReload }: OrgProfileFormProps) {
   const { t } = useTranslation();
-  const [failure, setFailure] = useState<
-    { kind: "stale" } | { kind: "alert"; message: string } | null
-  >(null);
+  const fieldError = useFieldError();
+  const [failure, setFailure] = useState<AlertFailure | null>(null);
   const update = useOfficeMutation((api, token, values: OrgFields) =>
     api.updateOrg(token, { ...toOrgInput(values), expectedRev: profile.rev }),
   );
@@ -99,8 +97,6 @@ function OrgProfileForm({ profile, onSaved, onSubmitStart, onReload }: OrgProfil
       timeZone: profile.timeZone,
     },
   });
-  const fieldError = (message: string | undefined) =>
-    errorProp(message === undefined ? undefined : t(message));
   const gln = useWatch({ control, name: "gln" }).trim();
   const newPrefix =
     THIRTEEN_DIGITS.test(gln) && issuerPrefix(gln) !== issuerPrefix(profile.gln)
@@ -124,8 +120,7 @@ function OrgProfileForm({ profile, onSaved, onSubmitStart, onReload }: OrgProfil
 
   return (
     <form className="standalone-form" onSubmit={(event) => void submit(event)} noValidate>
-      {failure?.kind === "stale" && <StaleAlert onReload={onReload} />}
-      {failure?.kind === "alert" && <Alert tone="error">{t(failure.message)}</Alert>}
+      <WriteFailureAlert failure={failure} onReload={onReload} />
       <Input
         label={t("org.name")}
         {...fieldError(errors.orgName?.message)}

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, Spinner } from "@markiro/ui";
 
 import { errorMessageKey } from "../host/errors.js";
+import { failureMessage, type AlertFailure } from "./form-errors.js";
 
 /** An office page while its data loads. */
 export function PageLoading() {
@@ -51,4 +52,19 @@ export function StaleAlert({ onReload }: StaleAlertProps) {
       {t("errors.api.stale_revision")}
     </Alert>
   );
+}
+
+export interface WriteFailureAlertProps {
+  /** `null` shows nothing. */
+  failure: AlertFailure | null;
+  /** Loads the data again after a stale write; without it a stale write is only explained. */
+  onReload?: () => void;
+}
+
+/** A failed write above a form: a stale one offers to reload when the form can, the rest are explained. */
+export function WriteFailureAlert({ failure, onReload }: WriteFailureAlertProps) {
+  const { t } = useTranslation();
+  if (failure === null) return null;
+  if (failure.kind === "stale" && onReload !== undefined) return <StaleAlert onReload={onReload} />;
+  return <Alert tone="error">{t(failureMessage(failure))}</Alert>;
 }

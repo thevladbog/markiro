@@ -14,8 +14,8 @@ import {
 } from "@markiro/ui";
 
 import type { SsccCounter, SsccState } from "../../host/protocol.js";
+import { useCan } from "../access.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
-import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { BlockSizesForm } from "./BlockSizesForm.js";
 import { CounterDialog } from "./CounterDialog.js";
@@ -52,7 +52,7 @@ export function SsccPage() {
 
 function SsccContent() {
   const { t } = useTranslation();
-  const { user } = useOfficeSession();
+  const canEdit = useCan("editReference");
   const queryClient = useQueryClient();
   const sscc = useOfficeQuery(officeKeys.sscc, (api, token) => api.getSscc(token));
   const [editing, setEditing] = useState<SsccCounter | null>(null);
@@ -62,7 +62,6 @@ function SsccContent() {
   if (sscc.isError) return <LoadError error={sscc.error} onRetry={() => void sscc.refetch()} />;
 
   const state = sscc.data;
-  const admin = user.role === "admin";
   const kindOf = (counter: SsccCounter) =>
     t(counterKindKey(counter), { extension: counter.extension });
   const columns: TableColumn<SsccCounter>[] = [
@@ -98,7 +97,7 @@ function SsccContent() {
       render: (counter) => String(counter.maxSerial),
     },
   ];
-  if (admin) {
+  if (canEdit) {
     columns.push({
       key: "actions",
       title: t("office.sscc.table.actions"),
@@ -137,7 +136,7 @@ function SsccContent() {
       <Card title={t("office.sscc.blocksTitle")} titleAs="h2">
         {saved === "blocks" && <Alert tone="ok">{t("office.common.saved")}</Alert>}
         <p className="office-note">{t("office.sscc.blocksIntro")}</p>
-        {admin ? (
+        {canEdit ? (
           <BlockSizesForm
             key={state.blockSizesRev}
             state={state}
@@ -170,7 +169,7 @@ function SsccContent() {
           </>
         )}
       </Card>
-      {admin && editing && (
+      {canEdit && editing && (
         <CounterDialog
           counter={editing}
           onClose={() => setEditing(null)}

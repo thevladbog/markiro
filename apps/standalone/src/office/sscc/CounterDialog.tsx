@@ -1,17 +1,17 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useId, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import { Alert, Button, Input, Modal } from "@markiro/ui";
+import { Input } from "@markiro/ui";
 
 import { HostError } from "../../host/client.js";
 import type { SsccCounter } from "../../host/protocol.js";
-import { errorProp } from "../../lib/form-error.js";
-import { writeFailure } from "../form-errors.js";
+import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
+import { FormDialog } from "../FormDialog.js";
 import { useOfficeMutation } from "../office-query.js";
-import { StaleAlert } from "../page-state.js";
+import { WriteFailureAlert } from "../page-state.js";
 import { counterKindKey } from "./counter-kind.js";
 
 const COUNTER_FIELDS = { nextSerial: "nextSerial" } as const;
@@ -31,12 +31,10 @@ export interface CounterDialogProps {
 /** Moves one SSCC counter forward; it never goes back (spec §4.3). */
 export function CounterDialog({ counter, onClose, onSaved, onReload }: CounterDialogProps) {
   const { t } = useTranslation();
-  const formId = useId();
+  const fieldError = useFieldError();
   // The smallest allowed value: the loaded counter, or the host's newer one.
   const [floor, setFloor] = useState(counter.nextSerial);
-  const [failure, setFailure] = useState<
-    { kind: "stale" } | { kind: "alert"; message: string } | null
-  >(null);
+  const [failure, setFailure] = useState<AlertFailure | null>(null);
   const schema = useMemo(
     () =>
       z.object({
@@ -59,19 +57,13 @@ export function CounterDialog({ counter, onClose, onSaved, onReload }: CounterDi
     register,
     handleSubmit,
     setError,
-    formState: { errors, isDirty, isSubmitting },
+    formState: { errors, isDirty },
   } = useForm<CounterValues>({
     resolver: zodResolver(schema),
     defaultValues: { nextSerial: counter.nextSerial },
   });
   const limits = { min: floor, max: counter.maxSerial };
-  const message = errors.nextSerial?.message;
   const kind = t(counterKindKey(counter), { extension: counter.extension });
-
-  const close = () => {
-    if (isSubmitting) return;
-    onClose();
-  };
 
   const submit = handleSubmit(async ({ nextSerial }) => {
     setFailure(null);
@@ -94,43 +86,26 @@ export function CounterDialog({ counter, onClose, onSaved, onReload }: CounterDi
   });
 
   return (
-    <Modal
-      open
+    <FormDialog
       title={t("office.sscc.counterDialog.title", { kind, prefix: counter.issuerPrefix })}
-      onClose={close}
-      closeLabel={t("office.common.close")}
-      footer={
-        <>
-          <Button variant="secondary" onClick={close} disabled={isSubmitting}>
-            {t("office.common.cancel")}
-          </Button>
-          <Button type="submit" form={formId} loading={isSubmitting} disabled={!isDirty}>
-            {t("office.common.save")}
-          </Button>
-        </>
-      }
+      submitLabel={t("office.common.save")}
+      submitDisabled={!isDirty}
+      onSubmit={submit}
+      onClose={onClose}
+      alert={<WriteFailureAlert failure={failure} onReload={onReload} />}
     >
-      <form
-        id={formId}
-        className="standalone-form"
-        onSubmit={(event) => void submit(event)}
-        noValidate
-      >
-        {failure?.kind === "stale" && <StaleAlert onReload={onReload} />}
-        {failure?.kind === "alert" && <Alert tone="error">{t(failure.message)}</Alert>}
-        <p>{t("office.sscc.counterDialog.intro")}</p>
-        <Input
-          type="number"
-          min={floor}
-          max={counter.maxSerial}
-          step={1}
-          mono
-          label={t("office.sscc.counterDialog.field")}
-          hint={t("office.sscc.counterDialog.hint", limits)}
-          {...errorProp(message === undefined ? undefined : t(message, limits))}
-          {...register("nextSerial", { valueAsNumber: true })}
-        />
-      </form>
-    </Modal>
+      <p>{t("office.sscc.counterDialog.intro")}</p>
+      <Input
+        type="number"
+        min={floor}
+        max={counter.maxSerial}
+        step={1}
+        mono
+        label={t("office.sscc.counterDialog.field")}
+        hint={t("office.sscc.counterDialog.hint", limits)}
+        {...fieldError(errors.nextSerial?.message, limits)}
+        {...register("nextSerial", { valueAsNumber: true })}
+      />
+    </FormDialog>
   );
 }

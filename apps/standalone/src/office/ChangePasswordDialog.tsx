@@ -1,17 +1,18 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useId, useState } from "react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 
-import { Alert, Button, Input, Modal } from "@markiro/ui";
+import { Input } from "@markiro/ui";
 
 import { HostError } from "../host/client.js";
-import { errorMessageKey } from "../host/errors.js";
 import type { PasswordChange } from "../host/protocol.js";
-import { errorProp } from "../lib/form-error.js";
 import { passwordRule } from "../lib/rules.js";
+import { useFieldError, writeFailure, type AlertFailure } from "./form-errors.js";
+import { FormDialog } from "./FormDialog.js";
 import { useOfficeMutation } from "./office-query.js";
+import { WriteFailureAlert } from "./page-state.js";
 
 const passwordSchema = z.object({
   currentPassword: z.string().min(1, "office.password.required"),
@@ -21,6 +22,11 @@ const passwordSchema = z.object({
 
 type PasswordValues = z.infer<typeof passwordSchema>;
 
+/** The host names the new password when it refuses it; the form says why in its own words. */
+const PASSWORD_FIELDS = {
+  newPassword: { field: "newPassword", message: "rules.password" },
+} as const;
+
 export interface ChangePasswordDialogProps {
   open: boolean;
   onClose: () => void;
@@ -29,35 +35,31 @@ export interface ChangePasswordDialogProps {
 
 export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswordDialogProps) {
   const { t } = useTranslation();
+  const fieldError = useFieldError();
   const change = useOfficeMutation((api, token, request: PasswordChange) =>
     api.officeChangePassword(token, request),
   );
-  const formId = useId();
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [failure, setFailure] = useState<AlertFailure | null>(null);
   const {
     register,
     handleSubmit,
     setError,
     reset,
-    formState: { errors, isSubmitting },
+    formState: { errors },
   } = useForm<PasswordValues>({
     resolver: zodResolver(passwordSchema),
     defaultValues: { currentPassword: "", newPassword: "", confirmPassword: "" },
   });
-  const fieldError = (message: string | undefined) =>
-    errorProp(message === undefined ? undefined : t(message));
 
+  // The dialog stays mounted between openings: closing starts it afresh.
   const close = () => {
-    // Escape, the overlay click and the × all route here too: a request in
-    // flight must not be abandoned or have its error state wiped from under it.
-    if (isSubmitting) return;
     reset();
-    setSubmitError(null);
+    setFailure(null);
     onClose();
   };
 
   const submit = handleSubmit(async (values) => {
-    setSubmitError(null);
+    setFailure(null);
     if (values.newPassword !== values.confirmPassword) {
       setError("confirmPassword", { type: "validate", message: "rules.passwordConfirm" });
       return;
@@ -74,61 +76,46 @@ export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswor
         setError("currentPassword", { type: "server", message: "office.password.wrongCurrent" });
         return;
       }
-      if (error instanceof HostError && error.field === "newPassword") {
-        setError("newPassword", { type: "server", message: "rules.password" });
-        return;
+      const outcome = writeFailure(error, PASSWORD_FIELDS);
+      if (outcome.kind === "field") {
+        setError(outcome.field, { type: "server", message: outcome.message });
+      } else {
+        setFailure(outcome);
       }
-      setSubmitError(errorMessageKey(error));
     }
   });
 
   return (
-    <Modal
+    <FormDialog
       open={open}
       title={t("office.password.title")}
+      submitLabel={t("office.password.submit")}
+      onSubmit={submit}
       onClose={close}
-      closeLabel={t("office.common.close")}
-      footer={
-        <>
-          <Button variant="secondary" onClick={close} disabled={isSubmitting}>
-            {t("office.common.cancel")}
-          </Button>
-          <Button type="submit" form={formId} loading={isSubmitting}>
-            {t("office.password.submit")}
-          </Button>
-        </>
-      }
+      alert={<WriteFailureAlert failure={failure} />}
     >
-      <form
-        id={formId}
-        className="standalone-form"
-        onSubmit={(event) => void submit(event)}
-        noValidate
-      >
-        {submitError && <Alert tone="error">{t(submitError)}</Alert>}
-        <Input
-          type="password"
-          autoComplete="current-password"
-          label={t("office.password.current")}
-          {...fieldError(errors.currentPassword?.message)}
-          {...register("currentPassword")}
-        />
-        <Input
-          type="password"
-          autoComplete="new-password"
-          label={t("office.password.new")}
-          hint={t("office.password.hint")}
-          {...fieldError(errors.newPassword?.message)}
-          {...register("newPassword")}
-        />
-        <Input
-          type="password"
-          autoComplete="new-password"
-          label={t("office.password.confirm")}
-          {...fieldError(errors.confirmPassword?.message)}
-          {...register("confirmPassword")}
-        />
-      </form>
-    </Modal>
+      <Input
+        type="password"
+        autoComplete="current-password"
+        label={t("office.password.current")}
+        {...fieldError(errors.currentPassword?.message)}
+        {...register("currentPassword")}
+      />
+      <Input
+        type="password"
+        autoComplete="new-password"
+        label={t("office.password.new")}
+        hint={t("office.password.hint")}
+        {...fieldError(errors.newPassword?.message)}
+        {...register("newPassword")}
+      />
+      <Input
+        type="password"
+        autoComplete="new-password"
+        label={t("office.password.confirm")}
+        {...fieldError(errors.confirmPassword?.message)}
+        {...register("confirmPassword")}
+      />
+    </FormDialog>
   );
 }

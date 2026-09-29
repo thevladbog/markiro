@@ -523,6 +523,18 @@ requests and offer a retry.
   never retries with `details.currentRev`.
 - A success notice is an `Alert` on the page or dialog; it goes away when
   the next save starts (or the next dialog opens).
+- A dialog around one form is a `FormDialog` (`src/office/FormDialog.tsx`):
+  the title, the fields, «Отмена» and the submit button. From the submit
+  until its promise settles it cannot be closed and a second submit is
+  dropped, so a double click sends nothing twice. `writeFailure` (`src/office/form-errors.ts`)
+  sorts a refused write: a `validation_failed` field or a `conflict`
+  constraint the form names (`line_name`, `login`) goes under that field,
+  `stale_revision` offers to reload, anything else is an alert
+  (`WriteFailureAlert`). Whether a page shows a form or a read-only view comes
+  from `useCan` (`src/office/access.ts`), the table of spec §4.8.
+- Request bodies are built field by field, never spread from form values, so
+  nothing the form holds reaches the host by accident; ids go into the path
+  only.
 - `@markiro/ui` has English defaults: `Table` shows «No data» without
   `empty`, and `Modal` names its × «Close» without `closeLabel`. Every
   office table passes a localized `empty`, and every dialog passes
