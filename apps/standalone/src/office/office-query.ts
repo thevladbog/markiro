@@ -19,6 +19,7 @@ export const officeKeys = {
   counterparties: ["office", "counterparties"],
   lines: ["office", "lines"],
   operators: ["office", "operators"],
+  badgeSalt: ["office", "badge-salt"],
 } as const;
 
 /**
@@ -48,6 +49,11 @@ export function createOfficeQueryClient(): QueryClient {
 export interface OfficeQueryOptions {
   /** Read again every this many milliseconds while mounted; never by default. */
   refetchInterval?: number;
+  /**
+   * How long an answer stays fresh: 0 by default, so a page reads again
+   * whenever it opens; `Infinity` for data that never changes in a session.
+   */
+  staleTime?: number;
 }
 
 /** Reads office data through `session.call`. */
@@ -61,6 +67,7 @@ export function useOfficeQuery<T>(
     queryKey: key,
     queryFn: () => call((token) => read(api, token)),
     refetchInterval: options.refetchInterval ?? false,
+    staleTime: options.staleTime ?? 0,
   });
 }
 

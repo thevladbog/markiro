@@ -582,13 +582,13 @@ requests and offer a retry.
   until its promise settles it cannot be closed and a second submit is
   dropped, so a double click sends nothing twice. `writeFailure` (`src/office/form-errors.ts`)
   sorts a refused write: a `validation_failed` field or a `conflict`
-  constraint the form names (`line_name`, `login`) goes under that field,
+  constraint the form names (`line_name`, `login`, `badge`) goes under that field,
   `stale_revision` offers to reload, anything else is an alert
   (`WriteFailureAlert`). A `FormDialog`'s `onSubmit` must never reject: it
   sorts every failure itself, and a rejection would only surface as an
   unhandled one, so a caller's bug is not hidden. Only the awaited write sits
-  in the `try`, with the hashing that builds its body where there is one (an
-  operator's PIN); the callback after a saved write (`onSaved`, `onRevoked`, …)
+  in the `try`, with the hashing that builds its body where there is one (a
+  PIN, a badge code); the callback after a saved write (`onSaved`, `onRevoked`, …)
   and whatever else follows a success run after the `try/catch`, whose `catch`
   ends with `return`, so a throw there is never shown as a failed write (a
   retry would add a second counterparty: the host keeps no uniqueness). The
@@ -635,6 +635,19 @@ requests and offer a retry.
   `FormDialog` guard covers the hashing too, and the mutation's variables,
   which the query cache keeps, hold only the hash. There is no delete, and
   the page offers none.
+- «Бейджи» on an operator's row lists that operator's badges, revoked ones
+  too, dimmed and marked «Отозван»: they are the record of what was issued.
+  «Добавить бейдж» reads the site's salt once per session
+  (`GET /v1/office/badge-salt` with `staleTime: Infinity`; `not_found` means
+  a host before its wizard) and focuses the code, which a keyboard-wedge
+  scanner types and submits with Enter. The dialog hashes the code with the
+  salt (`hashBadge`) and sends only the hash. The answer is the new badge,
+  not its operator, so the badge goes into the cached operator at once. A
+  `badge` conflict names the holder under the code when `details.operatorId`
+  is a UUID of an operator in the list, and otherwise says only that the
+  badge is taken. «Отозвать» asks first and says that the badge stops
+  opening the stations once they sync and never comes back; after the host's
+  204 the badge shows as revoked at once, and the list is read again.
 - `@markiro/ui` has English defaults: `Table` shows «No data» without
   `empty`, and `Modal` names its × «Close» without `closeLabel`. Every
   office table passes a localized `empty`, and every dialog passes

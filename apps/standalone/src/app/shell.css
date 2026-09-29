@@ -163,6 +163,34 @@
   color: var(--fg-2);
 }
 
+/* An operator's badges: revoked ones stay listed, dimmed, as the record of what was issued. */
+.badge-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.badge-list__item {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.badge-list__item--revoked {
+  color: var(--fg-2);
+}
+
+.badge-list__name {
+  display: grid;
+}
+
+.badge-list__date {
+  color: var(--fg-2);
+}
+
 .pairing-code {
   display: grid;
   justify-items: center;

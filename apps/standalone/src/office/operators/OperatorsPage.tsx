@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -12,21 +13,29 @@ import {
   type TableColumn,
 } from "@markiro/ui";
 
-import type { OfficeOperator } from "../../host/protocol.js";
+import type { BadgeInfo, OfficeOperator } from "../../host/protocol.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { useStoreRecord } from "../records.js";
+import { AddBadgeDialog } from "./AddBadgeDialog.js";
+import { BadgesDialog } from "./BadgesDialog.js";
 import { CreateOperatorDialog } from "./CreateOperatorDialog.js";
 import { EditOperatorDialog } from "./EditOperatorDialog.js";
 import { OperatorAccessDialog } from "./OperatorAccessDialog.js";
 import { OperatorPinDialog } from "./OperatorPinDialog.js";
-import { activeFirstByLogin } from "./operator-records.js";
+import { activeFirstByLogin, withBadge, withBadgeRevoked } from "./operator-records.js";
+import { RevokeBadgeDialog } from "./RevokeBadgeDialog.js";
 
+// The badge dialogs name their operator by id and read it from the cached
+// list, so the badges they show follow every change stored there.
 type OperatorsDialog =
   | { kind: "create" }
   | { kind: "edit"; operator: OfficeOperator }
   | { kind: "pin"; operator: OfficeOperator }
-  | { kind: "access"; operator: OfficeOperator };
+  | { kind: "access"; operator: OfficeOperator }
+  | { kind: "badges"; operatorId: string; notice: string | null }
+  | { kind: "addBadge"; operatorId: string }
+  | { kind: "revokeBadge"; operatorId: string; badge: BadgeInfo };
 
 /**
  * Operators (spec §4.3, §5.5, administrators only; the route is wrapped in
@@ -36,6 +45,7 @@ type OperatorsDialog =
  */
 export function OperatorsPage() {
   const { t } = useTranslation();
+  const queryClient = useQueryClient();
   const operators = useOfficeQuery(officeKeys.operators, (api, token) => api.listOperators(token));
   const store = useStoreRecord<OfficeOperator>(officeKeys.operators);
   const [dialog, setDialog] = useState<OperatorsDialog | null>(null);
@@ -54,6 +64,20 @@ export function OperatorsPage() {
     setDialog(null);
     void operators.refetch();
   };
+  // A badge write answers with the badge, or nothing: the change goes into
+  // the cached list at once, and with no list loaded the list is read again.
+  const changeList = (change: (list: readonly OfficeOperator[]) => OfficeOperator[]) => {
+    const list = queryClient.getQueryData<OfficeOperator[]>(officeKeys.operators);
+    if (list) {
+      queryClient.setQueryData(officeKeys.operators, change(list));
+    } else {
+      void queryClient.invalidateQueries({ queryKey: officeKeys.operators });
+    }
+  };
+  const badgeLabel = (badge: BadgeInfo) => badge.label ?? t("office.operators.badges.unnamed");
+  const operatorOf = (id: string) => operators.data?.find((operator) => operator.id === id);
+  const badgesOf = (operatorId: string, notice: string | null) =>
+    setDialog({ kind: "badges", operatorId, notice });
   const badgeSummary = (operator: OfficeOperator) => {
     const active = operator.badges.filter((badge) => badge.revokedAt === null);
     if (active.length === 0) return t("office.operators.noBadges");
@@ -122,6 +146,14 @@ export function OperatorsPage() {
           <Button
             variant="secondary"
             size="compact"
+            aria-label={t("office.operators.badgesNamed", { name: operator.name })}
+            onClick={() => open({ kind: "badges", operatorId: operator.id, notice: null })}
+          >
+            {t("office.operators.badgesOpen")}
+          </Button>
+          <Button
+            variant="secondary"
+            size="compact"
             aria-label={t(
               operator.active
                 ? "office.operators.deactivateNamed"
@@ -136,6 +168,62 @@ export function OperatorsPage() {
       ),
     },
   ];
+
+  const badgeDialog = () => {
+    if (dialog === null) return null;
+    if (dialog.kind !== "badges" && dialog.kind !== "addBadge" && dialog.kind !== "revokeBadge") {
+      return null;
+    }
+    const operator = operatorOf(dialog.operatorId);
+    if (operator === undefined) return null;
+    switch (dialog.kind) {
+      case "badges":
+        return (
+          <BadgesDialog
+            operator={operator}
+            notice={dialog.notice}
+            onAdd={() => setDialog({ kind: "addBadge", operatorId: operator.id })}
+            onRevoke={(badge) => setDialog({ kind: "revokeBadge", operatorId: operator.id, badge })}
+            onClose={() => setDialog(null)}
+          />
+        );
+      case "addBadge":
+        return (
+          <AddBadgeDialog
+            operator={operator}
+            operators={operators.data ?? []}
+            onClose={() => badgesOf(operator.id, null)}
+            onAdded={(badge) => {
+              changeList((list) => withBadge(list, operator.id, badge));
+              badgesOf(
+                operator.id,
+                t("office.operators.badges.added", { label: badgeLabel(badge) }),
+              );
+            }}
+          />
+        );
+      case "revokeBadge":
+        return (
+          <RevokeBadgeDialog
+            operator={operator}
+            badge={dialog.badge}
+            onClose={() => badgesOf(operator.id, null)}
+            onRevoked={() => {
+              // Revoked now, not when the list has been read again; the host's
+              // own time replaces this PC's when it has.
+              changeList((list) =>
+                withBadgeRevoked(list, operator.id, dialog.badge.id, new Date().toISOString()),
+              );
+              badgesOf(
+                operator.id,
+                t("office.operators.badges.revoked", { label: badgeLabel(dialog.badge) }),
+              );
+              void operators.refetch();
+            }}
+          />
+        );
+    }
+  };
 
   const content = () => {
     if (operators.isPending) return <PageLoading />;
@@ -205,6 +293,7 @@ export function OperatorsPage() {
           onReload={reload}
         />
       )}
+      {badgeDialog()}
     </>
   );
 }
