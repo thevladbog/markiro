@@ -15,6 +15,28 @@ import {
 } from "./render.js";
 
 const REQUEST_ID = "81111111-1111-4111-8111-111111111111";
+const REQUEST_CREATED_AT = "2026-08-21T10:00:00.000Z";
+
+function billingRequestDetail() {
+  return {
+    id: REQUEST_ID,
+    tenantId: TENANT_ID,
+    tenantName: "Первый завод",
+    number: "BR-42",
+    type: "renewal",
+    status: "under_review",
+    description: "Renew",
+    desiredAt: null,
+    context: null,
+    responsibleSide: "markiro",
+    createdAt: REQUEST_CREATED_AT,
+    updatedAt: REQUEST_CREATED_AT,
+    allowedTransitions: [],
+    offerAction: null,
+    events: [],
+    links: [],
+  };
+}
 const BUTTON = "Создать тенанта без кабинета";
 
 afterEach(() => {
@@ -25,7 +47,8 @@ afterEach(() => {
 function installApi({
   me = PLATFORM_ADMIN_ME,
   createResponse = 201,
-}: { me?: Record<string, unknown>; createResponse?: number } = {}) {
+  createCode = "tenant_conflict",
+}: { me?: Record<string, unknown>; createResponse?: number; createCode?: string } = {}) {
   const posts: Array<{ path: string; body: Record<string, unknown> }> = [];
   vi.stubGlobal(
     "fetch",
@@ -40,7 +63,7 @@ function installApi({
       if (url.endsWith("/api/platform/tenants") && method === "POST") {
         posts.push({ path: url, body: JSON.parse(String(init.body)) });
         if (createResponse !== 201) {
-          return jsonResponse(createResponse, { code: "tenant_conflict" });
+          return jsonResponse(createResponse, { code: createCode });
         }
         return jsonResponse(201, {
           tenantId: TENANT_ID,
@@ -51,6 +74,9 @@ function installApi({
       }
       if (url.endsWith(`/api/platform/tenants/${TENANT_ID}`) && method === "GET") {
         return jsonResponse(200, TENANT_DETAIL);
+      }
+      if (url.endsWith(`/api/platform/billing/requests/${REQUEST_ID}`) && method === "GET") {
+        return jsonResponse(200, billingRequestDetail());
       }
       if (url.endsWith("/api/platform/catalog/items")) {
         return jsonResponse(200, { items: [PUBLISHED_PLAN, ADDON, SERVICE] });
@@ -76,8 +102,11 @@ describe("offer editor: tenant without cabinet", () => {
 
     installApi();
     renderSaasApp({ initialEntry: `/billing-requests/${REQUEST_ID}/offers/new` });
-    // The request route loads its own detail; without it the page never shows the button.
-    await waitFor(() => expect(screen.queryByRole("button", { name: BUTTON })).toBeNull());
+    // The composer is rendered with the request's locked tenant, and the
+    // button is absent because the tenant is bound, not because it is loading.
+    expect(await screen.findByText(`Тенант заявки · ${TENANT_ID}`)).toBeDefined();
+    expect(screen.getByRole("button", { name: "Создать черновик предложения" })).toBeDefined();
+    expect(screen.queryByRole("button", { name: BUTTON })).toBeNull();
   });
 
   it("creates the tenant without an email and preselects it", async () => {
@@ -106,7 +135,7 @@ describe("offer editor: tenant without cabinet", () => {
   });
 
   it("keeps the form open and shows the mapped error on conflict", async () => {
-    installApi({ createResponse: 409 });
+    installApi({ createResponse: 409, createCode: "tenant_cabinet_access_mismatch" });
     const user = userEvent.setup();
     const rendered = renderSaasApp({ initialEntry: "/offers/new" });
 
@@ -116,7 +145,9 @@ describe("offer editor: tenant without cabinet", () => {
     await user.type(screen.getByLabelText("Slug"), "first-factory");
     await user.click(screen.getByRole("button", { name: "Создать тенанта" }));
 
-    expect(await screen.findByRole("alert")).toBeDefined();
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Тенант с этим slug уже создан с другим режимом доступа в кабинет",
+    );
     expect(screen.getByLabelText("Slug")).toBeDefined();
     expect(rendered.router.state.location.search).toBe("");
 
