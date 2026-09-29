@@ -182,7 +182,9 @@ data still move a device forward.
 an event whenever the revision grew: events are strictly increasing, so a
 burst of commits collapses into one, and an event means "fetch since your
 revision", not "a commit happened"; a comment heartbeat keeps the connection
-alive every 15 s, and streams end when the host stops. A new feed entity
+alive every 15 s, and streams end when the host stops or when their device
+is revoked: a revocation raises `AppState::revocations` after its commit,
+and every open stream re-reads its own device then. A new feed entity
 needs a branch in `FEED_KEYS` and in `record`, its proto record type, Zod
 schema and fixture, a tombstone wherever it is deleted or stops granting
 access, the station's local table, an index on the new table's `rev` (as
@@ -386,6 +388,14 @@ each revision and never opens the stream itself.
   gets `DeviceStatus`, and `host_request` attaches the key in Rust. A file
   written on another system or for another Windows user is
   `config_unreadable`; the app offers to reset and pair again.
+- An administrator revokes a device with `POST /v1/office/devices/{id}/revoke`:
+  its key is refused at once (`unauthorized` with `credential: device`), its
+  office sessions are deleted in the same transaction and its open change
+  streams end. It stays in `GET /v1/office/devices` with `revokedAt`, and
+  revoking it again changes nothing. `PUT /v1/office/devices/{id}` renames a
+  device or sets its line (`lineId: null` clears it; only a station's, only
+  an active line). Devices have no `rev` and are not in the feed, so the last
+  office write wins and the host revision stays.
 - The office session token lives only in webview memory. «Выйти в цех» ends
   the session at once: the app returns to the floor, drops the token and
   tells the host in the background. There is no hidden session (owner

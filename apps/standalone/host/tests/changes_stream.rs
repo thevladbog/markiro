@@ -312,3 +312,45 @@ async fn open_streams_end_when_the_host_stops() {
         "the stream ended cleanly with the host"
     );
 }
+
+/// A revocation ends the revoked device's open stream at once, not at its
+/// next heartbeat (15 s here), and leaves other devices' streams open.
+#[tokio::test]
+async fn revoking_a_device_ends_its_open_stream_and_no_other() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let token = bootstrap(&app, &key).await;
+    let (other, other_key) = pair_device(&app, "station").await;
+
+    let (status, _, mut revoked) = open_stream(&app, &other_key).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(next_text(&mut revoked).await, rev_event(1));
+    let (_, _, mut kept) = open_stream(&app, &key).await;
+    assert_eq!(next_text(&mut kept).await, rev_event(1));
+
+    let (status, body) = app
+        .send(empty(with_session(
+            request("POST", &format!("/v1/office/devices/{other}/revoke")),
+            &key,
+            &token,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let frame = tokio::time::timeout(Duration::from_secs(5), revoked.frame())
+        .await
+        .expect("the revoked device's stream ends within 5 s");
+    assert!(frame.is_none(), "the stream ended cleanly");
+
+    // The other stream is still open and gets the next revision.
+    let (status, org) = app
+        .send(json_request(
+            with_session(request("PUT", "/v1/office/org"), &key, &token),
+            org_update(1),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{org}");
+    assert_eq!(
+        next_text(&mut kept).await,
+        rev_event(org["rev"].as_i64().unwrap())
+    );
+}

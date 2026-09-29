@@ -266,7 +266,10 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
   поля; `role: null` очищает должность, её отсутствие — оставляет);
 - бейджи — `badge-create.json` (`badgePhc` с солью площадки и `label`; ответ —
   сведения о бейдже, как в `office-operator.json`), `badge-salt.json` (ответ
-  `GET /v1/office/badge-salt`).
+  `GET /v1/office/badge-salt`);
+- устройства — `device-update.json` (`PUT` меняет только присланные `name` и
+  `lineId`; `lineId: null` снимает линию); ответ `PUT` и отзыва —
+  `device-record.json`.
 
 ### 4.6. Ошибки
 
@@ -299,8 +302,13 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
   подключение и отказ. Неверный код засчитывается всем живым кодам: по хешу
   нельзя понять, какой код пытались ввести. Отказы — `pairing_code_invalid`
   (код неизвестен, использован или исчерпал попытки) и `pairing_code_expired`.
-- Отзыв устройства в офисе делает его ключ недействительным сразу; сессии офиса этого
-  устройства закрываются.
+- Отзыв устройства в офисе (`POST /v1/office/devices/{id}/revoke`) делает его ключ
+  недействительным сразу (`unauthorized` с `credential: device`); сессии офиса этого
+  устройства закрываются, его открытые потоки изменений заканчиваются. Отозванное
+  устройство остаётся в списке с `revokedAt`; повторный отзыв ничего не меняет.
+  `PUT /v1/office/devices/{id}` меняет имя и линию (`lineId: null` снимает линию;
+  линия — только у станции и только неархивная). У устройств нет `rev`: побеждает
+  последняя запись, ревизия хоста не меняется.
 
 ### 4.8. Роли
 

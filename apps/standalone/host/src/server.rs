@@ -49,6 +49,9 @@ pub struct AppState {
     pub revisions: Arc<watch::Sender<i64>>,
     /// Becomes `true` once when the host stops; open change streams end.
     pub stopping: Arc<watch::Sender<bool>>,
+    /// Counts device revocations; raised after each revoking commit. A change
+    /// stream woken by it checks its own device and ends if that was revoked.
+    pub revocations: Arc<watch::Sender<u64>>,
     /// How often a change stream writes a comment to keep the connection
     /// alive (15 s; tests shorten it).
     pub stream_heartbeat: Duration,
@@ -76,6 +79,7 @@ impl AppState {
             },
             revisions: Arc::new(watch::channel(0).0),
             stopping: Arc::new(watch::channel(false).0),
+            revocations: Arc::new(watch::channel(0).0),
             stream_heartbeat: Duration::from_secs(15),
             clock,
         }
@@ -133,6 +137,14 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/devices",
             get(crate::routes::devices::list_devices),
+        )
+        .route(
+            "/v1/office/devices/{id}",
+            put(crate::routes::devices::update_device),
+        )
+        .route(
+            "/v1/office/devices/{id}/revoke",
+            post(crate::routes::devices::revoke_device),
         )
         .route("/v1/office/login", post(crate::routes::office_auth::login))
         .route(

@@ -3,12 +3,12 @@ use markiro_proto::{
     display_fingerprint, BadgeCreate, BadgeSalt, BlockSizesUpdate, BootstrapRequest,
     BootstrapResponse, ChangesResponse, ClaimRequest, Compatibility, CounterpartyCreate,
     CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind, DeviceLineRequest,
-    DeviceRecord, ErrorBody, Hello, HelloEnvelope, LineCreate, LineRecord, LineUpdate,
-    LocalPairRequest, OfficeLine, OfficeLoginRequest, OfficeOperator, OfficeRole, OfficeSession,
-    OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord,
-    OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord,
-    PairResponse, PairingCode, PasswordChange, PasswordSet, SiteRecord, SsccCounterUpdate,
-    SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
+    DeviceRecord, DeviceUpdate, ErrorBody, Hello, HelloEnvelope, LineCreate, LineRecord,
+    LineUpdate, LocalPairRequest, OfficeLine, OfficeLoginRequest, OfficeOperator, OfficeRole,
+    OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
+    OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
+    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PasswordChange, PasswordSet,
+    SiteRecord, SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -332,6 +332,22 @@ fn badge_fixtures_round_trip_without_leaking() {
     let mut value = fixture("badge-create.json");
     value["code"] = Value::String("MRK-000742".into());
     assert!(serde_json::from_value::<BadgeCreate>(value).is_err());
+}
+
+#[test]
+fn a_device_update_tells_a_cleared_line_from_an_absent_one() {
+    let update: DeviceUpdate = round_trip("device-update.json");
+    assert_eq!(update.line_id, Some(None));
+    let rename: DeviceUpdate =
+        serde_json::from_value(serde_json::json!({ "name": "Станция" })).unwrap();
+    assert_eq!(rename.line_id, None);
+    let line = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
+    let assign: DeviceUpdate =
+        serde_json::from_value(serde_json::json!({ "lineId": line })).unwrap();
+    assert_eq!(assign.line_id, Some(Some(line.to_owned())));
+    let mut value = fixture("device-update.json");
+    value["kind"] = Value::String("office".into());
+    assert!(serde_json::from_value::<DeviceUpdate>(value).is_err());
 }
 
 #[test]

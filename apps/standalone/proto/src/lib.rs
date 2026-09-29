@@ -334,6 +334,17 @@ pub struct DeviceRecord {
     pub revoked_at: Option<String>,
 }
 
+/// `PUT /v1/office/devices/{id}`: only the fields sent change; `lineId: null`
+/// clears the line.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeviceUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
+    pub line_id: Option<Option<String>>,
+}
+
 /// Entities of the change feed (spec §4.4). Plan 1e adds products,
 /// templates and template defaults.
 pub mod entities {

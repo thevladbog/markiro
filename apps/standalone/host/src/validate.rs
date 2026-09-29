@@ -269,13 +269,7 @@ pub fn device_registration<'a>(
     app_version: &'a str,
     capabilities: &[String],
 ) -> Result<(&'a str, &'a str), ApiError> {
-    let name = name.trim();
-    if name.is_empty() || name.chars().count() > 100 {
-        return Err(ApiError::validation(
-            "name",
-            "the name must be 1-100 characters",
-        ));
-    }
+    let name = device_name("name", name)?;
     let app_version = app_version.trim();
     if app_version.is_empty() || app_version.len() > 50 {
         return Err(ApiError::validation(
@@ -294,6 +288,19 @@ pub fn device_registration<'a>(
         ));
     }
     Ok((name, app_version))
+}
+
+/// A device's name: trimmed, 1-100 characters.
+pub fn device_name<'a>(field: &str, name: &'a str) -> Result<&'a str, ApiError> {
+    let name = name.trim();
+    if name.is_empty() || name.chars().count() > 100 {
+        Err(ApiError::validation(
+            field,
+            "the name must be 1-100 characters",
+        ))
+    } else {
+        Ok(name)
+    }
 }
 
 /// A production line name: trimmed, 1-100 characters. Returns the name and
@@ -458,6 +465,15 @@ mod tests {
                 "{count}"
             );
         }
+    }
+
+    #[test]
+    fn a_device_name_is_trimmed_to_1_to_100_characters() {
+        assert_eq!(device_name("name", " Станция 2 ").unwrap(), "Станция 2");
+        assert!(device_name("name", &"с".repeat(100)).is_ok());
+        assert_eq!(field(device_name("name", " ")), "name");
+        assert_eq!(field(device_name("name", &"с".repeat(101))), "name");
+        assert_eq!(field(device_registration(" ", "0.1.0", &[])), "name");
     }
 
     #[test]

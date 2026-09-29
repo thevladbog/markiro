@@ -2,7 +2,8 @@
 //! /v1/changes` returns reference records changed after a device's revision,
 //! in pages that never split a revision; `GET /v1/changes/stream` follows up
 //! with server-sent events so a device does not have to poll for the next
-//! one. Adding an entity means a branch in `FEED_KEYS` and in `record`, its
+//! one, until the host stops or the device is revoked. Adding an entity
+//! means a branch in `FEED_KEYS` and in `record`, its
 //! proto record type, Zod schema and fixture, and a tombstone wherever it is
 //! deleted or stops granting access (`feed`).
 
@@ -16,12 +17,13 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use futures_util::stream::unfold;
 use markiro_proto::{
-    entities, ChangeItem, ChangesResponse, LineRecord, OperatorBadgeRecord, OperatorRecord,
-    OrgRecord, Secret, SiteRecord,
+    credentials, entities, ChangeItem, ChangesResponse, LineRecord, OperatorBadgeRecord,
+    OperatorRecord, OrgRecord, Secret, SiteRecord,
 };
 use serde::Deserialize;
 use serde_json::json;
-use sqlx::SqliteConnection;
+use sqlx::{SqliteConnection, SqliteExecutor, SqlitePool};
+use tokio::sync::watch;
 
 use crate::auth::AuthDevice;
 use crate::db;
@@ -262,63 +264,126 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
 /// grew. Events are strictly increasing, so a burst of commits collapses
 /// into one, and an event means "fetch since your revision", not "a commit
 /// happened". A comment line every heartbeat keeps the connection alive; the
-/// stream ends when the host stops.
+/// stream ends when the host stops or its device is revoked.
 pub async fn stream(
     State(state): State<AppState>,
-    _device: AuthDevice,
+    device: AuthDevice,
 ) -> Result<impl IntoResponse, ApiError> {
     // Subscribe before reading the current revision: a commit in between
-    // then shows up as one more event instead of being missed.
+    // then shows up as one more event instead of being missed. Revocations
+    // likewise: one committed after `AuthDevice` read the key but before
+    // this subscription is caught by the check below instead.
     let revisions = state.revisions.subscribe();
+    let revocations = state.revocations.subscribe();
     let stopping = state.stopping.subscribe();
     let current = {
         let mut conn = state.pool.acquire().await.map_err(ApiError::internal)?;
+        if !device_active(&mut *conn, &device.id)
+            .await
+            .map_err(ApiError::internal)?
+        {
+            return Err(ApiError::unauthorized(
+                credentials::DEVICE,
+                "unknown or revoked device key",
+            ));
+        }
         db::current_revision(&mut conn)
             .await
             .map_err(ApiError::internal)?
     };
-    let events = unfold(
-        (Some(current), current, revisions, stopping),
-        |(first, mut last, mut revisions, mut stopping)| async move {
-            if let Some(rev) = first {
-                last = rev;
-                return Some((
-                    Ok::<_, Infallible>(rev_event(rev)),
-                    (None, last, revisions, stopping),
-                ));
+    let follow = Follow {
+        first: Some(current),
+        last: current,
+        revisions,
+        revocations,
+        stopping,
+        pool: state.pool.clone(),
+        device_id: device.id,
+    };
+    let events = unfold(follow, |mut follow| async move {
+        if let Some(rev) = follow.first.take() {
+            follow.last = rev;
+            return Some((Ok::<_, Infallible>(rev_event(rev)), follow));
+        }
+        loop {
+            if *follow.stopping.borrow() {
+                return None;
             }
-            loop {
-                if *stopping.borrow() {
-                    return None;
-                }
-                // An arm body cannot move `stopping` into the next `unfold`
-                // state: `wait_for` resolves to a `watch::Ref` that borrows
-                // `stopping` and lives in `select!`'s output until the whole
-                // expression ends. Resolve only the new revision here, then
-                // build the next state in a later statement, once that
-                // borrow has ended.
-                let rev = tokio::select! {
-                    changed = revisions.changed() => {
-                        changed.ok()?;
-                        Some(*revisions.borrow_and_update())
+            // `wait_for` resolves to a `watch::Ref` that borrows `stopping`
+            // until the whole `select!` ends, so the arms only say what woke
+            // the stream; `follow` moves into the next state afterwards.
+            let wake = tokio::select! {
+                changed = follow.revisions.changed() => match changed {
+                    Ok(()) => Wake::Revision(*follow.revisions.borrow_and_update()),
+                    Err(_) => Wake::Stop,
+                },
+                changed = follow.revocations.changed() => match changed {
+                    Ok(()) => Wake::Revocation,
+                    Err(_) => Wake::Stop,
+                },
+                _ = follow.stopping.wait_for(|stopping| *stopping) => Wake::Stop,
+            };
+            match wake {
+                Wake::Stop => return None,
+                // Some device was revoked: end this stream if it was this
+                // one. A failed check ends it too; the device reconnects, and
+                // `AuthDevice` checks its key again.
+                Wake::Revocation => {
+                    if !device_active(&follow.pool, &follow.device_id)
+                        .await
+                        .unwrap_or(false)
+                    {
+                        return None;
                     }
-                    _ = stopping.wait_for(|stopping| *stopping) => None,
-                };
-                let rev = rev?;
+                }
                 // A watch change is not always news: a burst of commits can
                 // coalesce into one wakeup, and a value at or below `last`
                 // (nothing yet on the host, or a lower value written
                 // directly, as in tests) is not forward progress. Keep
                 // waiting for a revision the device has not already been
                 // told about instead of sending a non-increasing event.
-                if rev > last {
-                    last = rev;
-                    return Some((Ok(rev_event(rev)), (None, last, revisions, stopping)));
+                Wake::Revision(rev) if rev > follow.last => {
+                    follow.last = rev;
+                    return Some((Ok(rev_event(rev)), follow));
                 }
+                Wake::Revision(_) => {}
             }
-        },
-    );
+        }
+    });
     Ok(Sse::new(events).keep_alive(KeepAlive::new().interval(state.stream_heartbeat)))
+}
+
+/// What a change stream carries from one event to the next.
+struct Follow {
+    /// The current revision, sent as the first event.
+    first: Option<i64>,
+    /// The last revision sent.
+    last: i64,
+    revisions: watch::Receiver<i64>,
+    revocations: watch::Receiver<u64>,
+    stopping: watch::Receiver<bool>,
+    pool: SqlitePool,
+    device_id: String,
+}
+
+/// What woke a change stream.
+enum Wake {
+    Revision(i64),
+    Revocation,
+    Stop,
+}
+
+/// The device is paired and not revoked.
+async fn device_active<'c>(
+    executor: impl SqliteExecutor<'c>,
+    id: &str,
+) -> Result<bool, sqlx::Error> {
+    let found: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM devices WHERE id = ? AND revoked_at IS NULL")
+            .bind(id)
+            .fetch_optional(executor)
+            .await?;
+    Ok(found.is_some())
 }
 
 fn rev_event(rev: i64) -> Event {
