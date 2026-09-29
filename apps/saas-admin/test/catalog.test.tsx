@@ -485,6 +485,42 @@ describe("commercial catalog", () => {
   });
 
   it.each([
+    ["30000", "30000.00"],
+    ["30000,5", "30000.50"],
+  ])("sends a price typed as %s as %s", async (typed, sent) => {
+    const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+    await user.type(screen.getByLabelText("Код позиции"), "plan-pro");
+    await user.type(screen.getByLabelText("Название на русском"), "Профи");
+    await user.type(screen.getByLabelText("Название на английском"), "Pro");
+    await user.clear(screen.getByLabelText("Цена за единицу"));
+    await user.type(screen.getByLabelText("Цена за единицу"), typed);
+    await chooseP1Defaults(user);
+    await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
+    expect(await screen.findByRole("region", { name: "Версия 1 · Профи" })).toBeDefined();
+    expect(api.items()[0]?.unitPrice).toBe(sent);
+  });
+
+  it("names the price field when the amount cannot be sent", async () => {
+    const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
+    renderSaasApp();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+    await user.type(screen.getByLabelText("Код позиции"), "plan-pro");
+    await user.type(screen.getByLabelText("Название на русском"), "Профи");
+    await user.type(screen.getByLabelText("Название на английском"), "Pro");
+    await user.clear(screen.getByLabelText("Цена за единицу"));
+    await user.type(screen.getByLabelText("Цена за единицу"), "30 000");
+    await chooseP1Defaults(user);
+    await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
+    expect(await screen.findByText("Введите сумму в формате 0.00")).toBeDefined();
+    expect(screen.queryByText("Не удалось создать позицию.")).toBeNull();
+    expect(api.items()).toHaveLength(0);
+  });
+
+  it.each([
     [409, "Позиция с таким кодом уже существует или недоступна"],
     [
       {
@@ -534,6 +570,27 @@ describe("commercial catalog", () => {
       vatRateBps: 1234,
       vatIncluded: true,
     });
+  });
+
+  it.each([
+    ["Услуга", "service"],
+    ["Право", "right"],
+    ["Работа", "work"],
+  ])("offers %s as a service unit and submits it as %s", async (label, unit) => {
+    const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
+    renderSaasApp();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("tab", { name: "Услуги" }));
+    await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+    await chooseOption(user, "Единица учёта", label);
+    await user.type(screen.getByLabelText("Код позиции"), `service-${unit}`);
+    await user.type(screen.getByLabelText("Название на русском"), "Позиция");
+    await user.type(screen.getByLabelText("Название на английском"), "Item");
+    await chooseP1Defaults(user);
+    await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
+
+    expect(api.createCalls()[0]?.body).toMatchObject({ unit });
   });
 
   it("submits without VAT explicitly", async () => {

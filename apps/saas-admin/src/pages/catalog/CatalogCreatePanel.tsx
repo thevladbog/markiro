@@ -19,6 +19,7 @@ import {
   toAddonEffects,
   type EditableAddonEffect,
 } from "./AddonEffectsEditor.js";
+import { normalizeMoneyInput } from "../documents/documentDraft.js";
 import { CatalogQuotaField } from "./CatalogQuotaField.js";
 import { CatalogUnitField } from "./CatalogUnitField.js";
 import { CatalogVatField } from "./CatalogVatField.js";
@@ -156,7 +157,7 @@ export function CatalogCreatePanel({
         descriptionRu: descriptionRu.trim() || null,
         descriptionEn: descriptionEn.trim() || null,
         unit: unit.trim(),
-        unitPrice: price,
+        unitPrice: normalizeMoneyInput(price),
         vatRateBps,
         vatIncluded: vatRateBps !== null && vatIncluded,
       };
@@ -261,6 +262,10 @@ export function CatalogCreatePanel({
           }
           if (!code.trim() || !nameRu.trim() || !nameEn.trim() || !unit.trim()) {
             setError(t("catalog.createRequired"));
+            return;
+          }
+          if (!/^\d{1,12}\.\d{2}$/.test(normalizeMoneyInput(price))) {
+            setError(t("catalog.validation.money"));
             return;
           }
           if (kind === "plan" && Object.values(p1Features).some((value) => value === null)) {
