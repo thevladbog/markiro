@@ -642,30 +642,44 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
     ).toBe(1);
 
     const audit = await connection.db
-      .select()
+      .select({
+        actorPlatformUserId: schema.platformAuditEvents.actorPlatformUserId,
+        actorRole: schema.platformAuditEvents.actorRole,
+        action: schema.platformAuditEvents.action,
+        outcome: schema.platformAuditEvents.outcome,
+        tenantId: schema.platformAuditEvents.tenantId,
+        targetType: schema.platformAuditEvents.targetType,
+        targetId: schema.platformAuditEvents.targetId,
+        reason: schema.platformAuditEvents.reason,
+        before: schema.platformAuditEvents.before,
+        after: schema.platformAuditEvents.after,
+        requestId: schema.platformAuditEvents.requestId,
+      })
       .from(schema.platformAuditEvents)
       .where(eq(schema.platformAuditEvents.tenantId, result.tenantId));
-    expect(audit).toHaveLength(1);
-    expect(audit[0]).toMatchObject({
-      actorPlatformUserId: actorUserId,
-      actorRole: "platform_admin",
-      action: "platform.tenant.created",
-      outcome: "success",
-      tenantId: result.tenantId,
-      targetType: "tenant",
-      targetId: result.tenantId,
-      reason: null,
-      before: null,
-      after: {
-        cabinetAccess: "none",
-        ownerUserId: null,
-        ownerMemberId: null,
-        subscriptionId: null,
-        subscriptionStatus: "none",
-        planVersionId: null,
+    // Called outside an HTTP request, so there is no request id to record.
+    expect(audit).toEqual([
+      {
+        actorPlatformUserId: actorUserId,
+        actorRole: "platform_admin",
+        action: "platform.tenant.created",
+        outcome: "success",
+        tenantId: result.tenantId,
+        targetType: "tenant",
+        targetId: result.tenantId,
+        reason: null,
+        before: null,
+        after: {
+          cabinetAccess: "none",
+          ownerUserId: null,
+          ownerMemberId: null,
+          subscriptionId: null,
+          subscriptionStatus: "none",
+          planVersionId: null,
+        },
+        requestId: null,
       },
-      requestId: null,
-    });
+    ]);
     const tenantAudit = await connection.db
       .select()
       .from(schema.tenantAuditEvents)
