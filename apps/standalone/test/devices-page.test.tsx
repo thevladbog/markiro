@@ -399,7 +399,7 @@ describe("office devices", () => {
     ]);
   });
 
-  it("asks for one code on a double click, from the page and from the dialog", async () => {
+  it("asks for one code when the page's button is double-clicked", async () => {
     const session = adminSession();
     const answers: Array<(code: PairingCode) => void> = [];
     session.api.createPairingCode.mockImplementation(
@@ -410,8 +410,12 @@ describe("office devices", () => {
     );
     await openDevices(session);
     const add = screen.getByRole("button", { name: "Подключить устройство" });
-    fireEvent.click(add);
-    fireEvent.click(add);
+    // Both clicks in one `act`: nothing renders between them, so the button is
+    // not yet disabled for the second, and only the page's own guard drops it.
+    act(() => {
+      fireEvent.click(add);
+      fireEvent.click(add);
+    });
     await waitFor(() => expect(session.api.createPairingCode).toHaveBeenCalledTimes(1));
     // Exactly once: let every pending task settle, then look again.
     await new Promise((resolve) => setImmediate(resolve));
@@ -420,10 +424,23 @@ describe("office devices", () => {
     await act(async () => {
       answers[0]?.(pairingCode(0));
     });
+    expect(await screen.findByRole("dialog")).toBeTruthy();
+  });
+
+  it("asks for one new code when the dialog's «Новый код» is double-clicked", async () => {
+    const session = adminSession();
+    session.api.createPairingCode.mockResolvedValueOnce(pairingCode(0));
+    await openDevices(session);
+    fireEvent.click(screen.getByRole("button", { name: "Подключить устройство" }));
     const pairing = await screen.findByRole("dialog");
+    expect(session.api.createPairingCode).toHaveBeenCalledTimes(1);
+    // The request for the new code stays on its way while both clicks land.
+    session.api.createPairingCode.mockImplementationOnce(() => new Promise(() => undefined));
     const regenerate = within(pairing).getByRole("button", { name: "Новый код" });
-    fireEvent.click(regenerate);
-    fireEvent.click(regenerate);
+    act(() => {
+      fireEvent.click(regenerate);
+      fireEvent.click(regenerate);
+    });
     await waitFor(() => expect(session.api.createPairingCode).toHaveBeenCalledTimes(2));
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
@@ -583,6 +600,12 @@ describe("office devices", () => {
     });
     expect(screen.getByText("Устройство «Станция во время перевыпуска» подключено.")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
+    // The join closed the dialog, but its code is kept behind the notice: a
+    // code asked for from the page replaces nothing, so the request has no body.
+    session.api.createPairingCode.mockResolvedValueOnce(pairingCode(0));
+    fireEvent.click(screen.getByRole("button", { name: "Подключить устройство" }));
+    await waitFor(() => expect(session.api.createPairingCode).toHaveBeenCalledTimes(3));
+    expect(session.api.createPairingCode).toHaveBeenLastCalledWith("office-session-token");
   });
 
   it("shows no stray failure when a request abandoned by closing the dialog later fails", async () => {

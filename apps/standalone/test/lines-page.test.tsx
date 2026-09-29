@@ -83,7 +83,7 @@ describe("office lines", () => {
     localStorage.removeItem("markiro.theme");
   });
 
-  it("is in the menu for both roles, under «Производство»", async () => {
+  it("is in the menu for a technologist, under «Производство»", async () => {
     renderOffice(fakeOfficeSession({ user: TECHNOLOGIST }));
     expect(await screen.findByRole("link", { name: "Линии" })).toBeTruthy();
     expect(screen.getByText("Производство")).toBeTruthy();
@@ -194,6 +194,32 @@ describe("office lines", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Загрузить заново" }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(session.api.listLines).toHaveBeenCalledTimes(2));
+  });
+
+  it("offers to load the lines again when the line to archive changed meanwhile", async () => {
+    const session = adminSession();
+    session.api.updateLine.mockRejectedValueOnce(
+      new HostError({
+        kind: "api",
+        code: "stale_revision",
+        status: 409,
+        message: "stale",
+        details: { currentRev: 43 },
+      }),
+    );
+    await openLines(session);
+    expect(session.api.listLines).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Убрать линию «Фасовка» в архив" }));
+    fireEvent.click(within(dialog()).getByRole("button", { name: "В архив" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Загрузить заново" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(session.api.listLines).toHaveBeenCalledTimes(2));
+    // Exactly one read again, and the archive itself is never sent a second
+    // time with the host's newer revision: let every pending task settle.
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(session.api.listLines).toHaveBeenCalledTimes(2);
+    expect(session.api.updateLine).toHaveBeenCalledTimes(1);
   });
 
   it("archives a line after saying that its stations stay on it", async () => {

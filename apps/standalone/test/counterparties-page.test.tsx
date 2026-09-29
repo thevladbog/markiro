@@ -85,7 +85,7 @@ describe("office counterparties", () => {
     localStorage.removeItem("markiro.theme");
   });
 
-  it("is in the menu for both roles", async () => {
+  it("is in the menu for a technologist", async () => {
     renderOffice(fakeOfficeSession({ user: TECHNOLOGIST }));
     expect(await screen.findByRole("link", { name: "Контрагенты" })).toBeTruthy();
   });
@@ -282,8 +282,12 @@ describe("office counterparties", () => {
     type("Название", "ООО «Юг»");
     type("GLN контрагента", "4607091000009");
     const add = within(dialog()).getByRole("button", { name: "Добавить" });
-    fireEvent.click(add);
-    fireEvent.click(add);
+    // Both clicks in one `act`: nothing renders between them, so the button is
+    // not yet disabled for the second, and only the dialog's own guard drops it.
+    act(() => {
+      fireEvent.click(add);
+      fireEvent.click(add);
+    });
     await waitFor(() => expect(add).toHaveProperty("disabled", true));
     fireEvent.click(add);
     expect(session.api.createCounterparty).toHaveBeenCalledTimes(1);

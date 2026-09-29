@@ -1376,7 +1376,7 @@ describe("the line the office assigns", () => {
     expect(device.selectLine).not.toHaveBeenCalled();
   });
 
-  it("reads the device once after the first sync and once per revision, one read at a time", async () => {
+  it("reads the device once together with the first sync and once per revision, one read at a time", async () => {
     const link = fakeConnection();
     const device = fakeDevice(DEVICE_STATUS);
     renderApp({
@@ -1522,7 +1522,7 @@ describe("the line the office assigns", () => {
     expect(await screen.findByText("Выбор линии")).toBeTruthy();
   });
 
-  it("reads the device again on «sync now»", async () => {
+  it("reads the device again, with the sync, when the line screen's «Повторить» asks for one", async () => {
     fakeRetryTimers();
     const link = fakeConnection();
     const device = fakeDevice(NEW_STATION);
@@ -1537,7 +1537,8 @@ describe("the line the office assigns", () => {
     expect(host.getChanges).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
-    // One request asks for a sync and for a read of the device.
+    // One request (`requestSync`, which a `line_rejected` triggers too) asks
+    // for a sync and for a read of the device.
     await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(2));
     await settle();
@@ -1601,6 +1602,31 @@ describe("the line the office assigns", () => {
     expect(device.refresh).toHaveBeenCalledTimes(5);
   });
 
+  it("lets every read replace the pending retry, so a revision's read does not leave the old wait running", async () => {
+    fakeRetryTimers();
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    const failure = new DeviceError("request_failed", "the host answered with an error");
+    device.refresh.mockRejectedValueOnce(failure).mockRejectedValueOnce(failure);
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: fakeHost(),
+      connection: link.connection,
+    });
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
+    // The first failure armed a retry 2 s away. A revision reads again before
+    // it fires; that read fails too, so the wait is now 4 s for two failures
+    // in a row, and the first retry must be gone.
+    await link.revision(43);
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(2));
+    await elapse(2500);
+    expect(device.refresh).toHaveBeenCalledTimes(2);
+    await elapse(2000);
+    expect(device.refresh).toHaveBeenCalledTimes(3);
+  });
+
   it("reads the device once when watch fails", async () => {
     const device = fakeDevice(DEVICE_STATUS);
     const connection: ConnectionApi = {
@@ -1613,6 +1639,27 @@ describe("the line the office assigns", () => {
     // The read starts in the link effect, which runs after the floor shows.
     await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
     await settle();
+    expect(device.refresh).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry a failed read on its own when watch failed: the link never comes online", async () => {
+    fakeRetryTimers();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.refresh.mockRejectedValue(
+      new DeviceError("request_failed", "the host answered with an error"),
+    );
+    const connection: ConnectionApi = {
+      watch: vi.fn(async () => {
+        throw new Error("the connection task could not be reached");
+      }),
+    };
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost(), connection });
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
+    await settle();
+    // `online` never became true, so the failed read armed no retry.
+    expect(vi.getTimerCount()).toBe(0);
+    await elapse(120_000);
     expect(device.refresh).toHaveBeenCalledTimes(1);
   });
 });
