@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
@@ -27,6 +27,10 @@ export function GrantCabinetAccessPanel({
   const queryClient = useQueryClient();
   const titleId = useId();
   const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLDivElement>(null);
+  // The trigger is unmounted while the form is open, so focus returns to it
+  // after the re-render that mounts it again, not to <body>.
+  const returnFocus = useRef(false);
   const [errorKey, setErrorKey] = useState<string | null>(null);
   const form = useForm<GrantCabinetAccessInput>({
     resolver: zodResolver(grantCabinetAccessInputSchema),
@@ -39,12 +43,18 @@ export function GrantCabinetAccessPanel({
   const { setFocus } = form;
 
   useEffect(() => {
-    if (open) setFocus("email");
+    if (open) {
+      setFocus("email");
+    } else if (returnFocus.current) {
+      returnFocus.current = false;
+      triggerRef.current?.querySelector("button")?.focus();
+    }
   }, [open, setFocus]);
 
   const close = () => {
     form.reset();
     setErrorKey(null);
+    returnFocus.current = true;
     setOpen(false);
   };
 
@@ -53,6 +63,7 @@ export function GrantCabinetAccessPanel({
     try {
       await grant.mutateAsync(values);
       form.reset();
+      returnFocus.current = true;
       setOpen(false);
       onGranted?.();
       // The prefix covers this tenant's detail and every list page.
@@ -67,9 +78,11 @@ export function GrantCabinetAccessPanel({
       <h3 id={titleId}>{t("tenants.detail.offline.title")}</h3>
       <span>{t("tenants.detail.offline.body")}</span>
       {canGrant && !open ? (
-        <Button variant="secondary" onClick={() => setOpen(true)}>
-          {t("tenants.detail.offline.grant")}
-        </Button>
+        <div ref={triggerRef}>
+          <Button variant="secondary" onClick={() => setOpen(true)}>
+            {t("tenants.detail.offline.grant")}
+          </Button>
+        </div>
       ) : null}
       {canGrant && open ? (
         <form className="tenant-create-form" noValidate onSubmit={(event) => void submit(event)}>

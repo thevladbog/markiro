@@ -189,6 +189,24 @@ describe("tenant cabinet access", () => {
     expect(screen.queryByRole("region", { name: "Кабинет не выдан" })).toBeNull();
   });
 
+  it("returns focus to the grant button when the form is cancelled", async () => {
+    installTenantApi({ me: PLATFORM_ADMIN_ME, detail: OFFLINE_DETAIL });
+    renderSaasApp({ initialEntry: `/tenants/${TENANT_ID}` });
+    const user = userEvent.setup();
+
+    expect(await screen.findByRole("heading", { name: "Первый завод" })).toBeDefined();
+    await user.click(screen.getByRole("button", { name: "Выдать доступ в кабинет" }));
+    expect(document.activeElement).toBe(screen.getByLabelText("Email владельца"));
+    await user.click(screen.getByRole("button", { name: "Отмена" }));
+
+    expect(screen.queryByLabelText("Email владельца")).toBeNull();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Выдать доступ в кабинет" }),
+      ),
+    );
+  });
+
   it("maps a grant conflict to an allowlisted message", async () => {
     installTenantApi({
       me: PLATFORM_ADMIN_ME,
