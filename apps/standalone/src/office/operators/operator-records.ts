@@ -1,7 +1,9 @@
+import type { TFunction } from "i18next";
 import { z } from "zod";
 
 import { HostError } from "../../host/client.js";
 import type { BadgeInfo, OfficeOperator } from "../../host/protocol.js";
+import { withRecord } from "../records.js";
 
 /**
  * Active operators before the ones turned off, each group by personnel
@@ -15,14 +17,27 @@ export function activeFirstByLogin(operators: readonly OfficeOperator[]): Office
   );
 }
 
-/** `operators` with `badge` added to the badges of `operatorId`: the newest badge goes last. */
+/** How the office names a badge: by its label, or «Без подписи» when it has none. */
+export function badgeLabel(badge: BadgeInfo, t: TFunction): string {
+  return badge.label ?? t("office.operators.badges.unnamed");
+}
+
+/**
+ * `operators` with `badge` among the badges of `operatorId`: in place of the
+ * one with its id, which keeps its position, or after the others when none
+ * has that id (the host orders badges by `created_at, id`, so a new one goes
+ * last). Applied twice it changes nothing more than once: a re-read that
+ * raced the write may have brought the badge already.
+ */
 export function withBadge(
   operators: readonly OfficeOperator[],
   operatorId: string,
   badge: BadgeInfo,
 ): OfficeOperator[] {
   return operators.map((operator) =>
-    operator.id === operatorId ? { ...operator, badges: [...operator.badges, badge] } : operator,
+    operator.id === operatorId
+      ? { ...operator, badges: withRecord(operator.badges, badge) }
+      : operator,
   );
 }
 

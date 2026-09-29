@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   activeFirstByName,
+  useChangeList,
   useStoreRecord,
   withRecord,
   type ArchivableRecord,
@@ -113,15 +114,57 @@ describe("activeFirstByName", () => {
   });
 });
 
+/** A query client with `cached` stored under `KEY` when given, and the wrapper that provides it. */
+function cachedClient(cached?: ArchivableRecord[]) {
+  const client = new QueryClient();
+  if (cached) client.setQueryData(KEY, cached);
+  const invalidate = vi.spyOn(client, "invalidateQueries");
+  function Wrapper({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  }
+  return { client, invalidate, Wrapper };
+}
+
+describe("useChangeList", () => {
+  function setup(cached?: ArchivableRecord[]) {
+    const { client, invalidate, Wrapper } = cachedClient(cached);
+    const { result } = renderHook(() => useChangeList<ArchivableRecord>(KEY), { wrapper: Wrapper });
+    return { client, invalidate, change: result.current };
+  }
+
+  it("applies the change to the cached list and stores what it returns", () => {
+    const first = row("a", "Первая");
+    const second = row("b", "Вторая");
+    const added = row("c", "Третья");
+    const { client, invalidate, change } = setup([first, second]);
+    const seen: ArchivableRecord[][] = [];
+    change((list) => {
+      seen.push(list);
+      return [...list.filter((each) => each.id !== "a"), added];
+    });
+    // The change gets the list that was cached, once; the result replaces it.
+    expect(seen).toStrictEqual([[first, second]]);
+    expect(client.getQueryData<ArchivableRecord[]>(KEY)).toStrictEqual([second, added]);
+    expect(invalidate).not.toHaveBeenCalled();
+  });
+
+  it("reads the list again, and stores nothing, when no list is loaded", () => {
+    const { client, invalidate, change } = setup();
+    const apply = vi.fn((list: ArchivableRecord[]) => list);
+    change(apply);
+    // Nothing to change: a list of one row would be shown as the whole list.
+    expect(apply).not.toHaveBeenCalled();
+    expect(invalidate).toHaveBeenCalledTimes(1);
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: KEY });
+    expect(client.getQueryData(KEY)).toBeUndefined();
+  });
+});
+
 describe("useStoreRecord", () => {
   function setup(cached?: ArchivableRecord[]) {
-    const client = new QueryClient();
-    if (cached) client.setQueryData(KEY, cached);
-    const invalidate = vi.spyOn(client, "invalidateQueries");
+    const { client, invalidate, Wrapper } = cachedClient(cached);
     const { result } = renderHook(() => useStoreRecord<ArchivableRecord>(KEY), {
-      wrapper: function Wrapper({ children }: { children: ReactNode }) {
-        return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
-      },
+      wrapper: Wrapper,
     });
     return { client, invalidate, store: result.current };
   }

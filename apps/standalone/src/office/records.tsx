@@ -39,20 +39,30 @@ export function withRecord<T extends { id: string }>(records: readonly T[], reco
 }
 
 /**
+ * Changes the cached list of `key`: `change` gets the list that is cached and
+ * returns the list to keep. With no list loaded there is nothing to change,
+ * so the whole list is read again rather than shown as what one write knows.
+ */
+export function useChangeList<T>(key: QueryKey): (change: (list: T[]) => T[]) => void {
+  const queryClient = useQueryClient();
+  return (change) => {
+    const list = queryClient.getQueryData<T[]>(key);
+    if (list) {
+      queryClient.setQueryData(key, change(list));
+    } else {
+      void queryClient.invalidateQueries({ queryKey: key });
+    }
+  };
+}
+
+/**
  * Keeps a record a write returned in the cached list of `key`, in place of
  * the one with its id (`withRecord`: same position) or added; with no list
  * loaded, the whole list is read again rather than shown as one row.
  */
 export function useStoreRecord<T extends { id: string }>(key: QueryKey): (record: T) => void {
-  const queryClient = useQueryClient();
-  return (record) => {
-    const list = queryClient.getQueryData<T[]>(key);
-    if (list) {
-      queryClient.setQueryData(key, withRecord(list, record));
-    } else {
-      void queryClient.invalidateQueries({ queryKey: key });
-    }
-  };
+  const change = useChangeList<T>(key);
+  return (record) => change((list) => withRecord(list, record));
 }
 
 /** Whether a record is in use or archived, in words and not by colour alone. */

@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
+import { verifyPhc } from "@markiro/domain";
+
 import { HostError } from "../src/host/client.js";
 import type { BadgeInfo, OfficeOperator } from "../src/host/protocol.js";
 import { fakeOfficeSession, renderOffice, type FakeOfficeSession } from "./support/office.js";
@@ -123,14 +125,65 @@ function rowOf(name: string): HTMLElement {
   return row;
 }
 
-/** What a keyboard-wedge scanner does: type the code, then Enter submits the form. */
-function scan(code: string): void {
+function codeField(): HTMLInputElement {
   const field = screen.getByLabelText("Код бейджа");
-  fireEvent.change(field, { target: { value: code } });
+  if (!(field instanceof HTMLInputElement)) throw new Error("the code field is not an input");
+  return field;
+}
+
+/** The scanner's Enter: submits the form the field is in. */
+function pressEnter(field: HTMLElement): void {
   const form = field.closest("form");
   if (!form) throw new Error("the code field is not in a form");
   fireEvent.submit(form);
 }
+
+/** What a keyboard-wedge scanner does: type the code, then Enter submits the form. */
+function scan(code: string): void {
+  const field = codeField();
+  fireEvent.change(field, { target: { value: code } });
+  pressEnter(field);
+}
+
+/**
+ * What a wedge really does: it types after whatever the field already holds,
+ * which nobody can see, because the field is masked, and then presses Enter.
+ * `scan` replaces the value instead, and so cannot show a scan glued to an
+ * earlier one.
+ */
+function wedge(text: string): void {
+  const field = codeField();
+  fireEvent.change(field, { target: { value: field.value + text } });
+  pressEnter(field);
+}
+
+/** The hash the `call`th `createBadge` request carried. */
+function sentHash(session: FakeOfficeSession, call: number): string {
+  const body = session.api.createBadge.mock.calls[call]?.[2];
+  if (!body) throw new Error(`no createBadge call ${call}`);
+  return body.badgePhc;
+}
+
+/** What the host can refuse a badge's code with, and the text the field then shows. */
+const CODE_REFUSALS: [name: string, refusal: HostError, message: string][] = [
+  [
+    "names the operator who holds it",
+    badgeTaken(VERA.id),
+    "Этот бейдж уже у оператора «Вера Лебедева»",
+  ],
+  ["does not know who holds it", badgeTaken(undefined), "Этот бейдж уже выдан оператору"],
+  [
+    "refuses its hash",
+    new HostError({
+      kind: "api",
+      code: "validation_failed",
+      status: 422,
+      message: "the badge hash is not valid",
+      details: { field: "badgePhc" },
+    }),
+    "Хост не принял это значение. Проверьте его.",
+  ],
+];
 
 describe("operator badges", () => {
   beforeEach(() => {
@@ -173,7 +226,7 @@ describe("operator badges", () => {
     expect(session.api.listOperators).toHaveBeenCalledTimes(1);
   });
 
-  it("reads the site's salt once per session", async () => {
+  it("reads the site's salt once and reuses it when the dialog is opened again soon", async () => {
     const session = adminSession();
     await openAdd(session);
     fireEvent.click(within(dialog()).getByRole("button", { name: "Отмена" }));
@@ -214,6 +267,85 @@ describe("operator badges", () => {
     await openAdd(session);
     scan("MRK-000742");
     expect(await screen.findByText("Этот бейдж уже выдан оператору")).toBeTruthy();
+  });
+
+  it("empties the masked code after the layout refusal, so the next scan is not glued to it", async () => {
+    const session = adminSession();
+    session.api.createBadge.mockResolvedValue(PASS_8);
+    await openAdd(session);
+    wedge("ЬКЛ-000742");
+    const refusal = "Код набран русскими буквами — переключите раскладку на английскую";
+    expect(await screen.findByText(refusal)).toBeTruthy();
+    // Nobody can see or correct a masked field: the refused code goes, the focus
+    // is on the field for the next scan, and the message stays until it is typed.
+    await waitFor(() => {
+      expect(codeField().value).toBe("");
+      expect(document.activeElement).toBe(codeField());
+    });
+    expect(screen.getByText(refusal)).toBeTruthy();
+    expect(session.api.createBadge).not.toHaveBeenCalled();
+    wedge("MRK-000742");
+    await waitFor(() => expect(session.api.createBadge).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Бейдж «Пропуск №8» добавлен.")).toBeTruthy();
+    // The hash of the second scan alone, not of «ЬКЛ-000742MRK-000742».
+    expect(session.api.createBadge.mock.calls).toStrictEqual([
+      ["office-session-token", ANNA.id, { badgePhc: BADGE_PHC, label: null }],
+    ]);
+  });
+
+  it.each(CODE_REFUSALS)(
+    "empties the masked code when the host %s, so the next scan is not glued to it",
+    async (_case, refusal, message) => {
+      const session = adminSession();
+      session.api.createBadge.mockRejectedValueOnce(refusal).mockResolvedValueOnce(PASS_8);
+      await openAdd(session);
+      await waitFor(() => expect(document.activeElement).toBe(codeField()));
+      // A person who pressed «Добавить» has the focus on the button, not on the field.
+      act(() => within(dialog()).getByRole("button", { name: "Добавить" }).focus());
+      wedge("MRK-000742");
+      expect(await screen.findByText(message)).toBeTruthy();
+      await waitFor(() => {
+        expect(codeField().value).toBe("");
+        expect(document.activeElement).toBe(codeField());
+      });
+      expect(screen.getByText(message)).toBeTruthy();
+      wedge("MRK-000743");
+      await waitFor(() => expect(session.api.createBadge).toHaveBeenCalledTimes(2));
+      expect(await screen.findByText("Бейдж «Пропуск №8» добавлен.")).toBeTruthy();
+      // The second request hashes the second scan alone, not «MRK-000742MRK-000743»
+      // (a code that passes every rule, and that no station's scan would ever match).
+      await expect(verifyPhc("MRK-000743", sentHash(session, 1))).resolves.toBe(true);
+    },
+  );
+
+  it("keeps the masked code when the refusal is not about it, so the same scan can go again", async () => {
+    const session = adminSession();
+    session.api.createBadge
+      .mockRejectedValueOnce(
+        new HostError({ kind: "transport", code: "unreachable", message: "no answer" }),
+      )
+      .mockResolvedValueOnce(PASS_8);
+    await openAdd(session);
+    // A label the form refuses: the code beside it stays as it was scanned.
+    type("Подпись", "п".repeat(101));
+    wedge("MRK-000742");
+    expect(await screen.findByText("Подпись — до 100 символов")).toBeTruthy();
+    expect(codeField().value).toBe("MRK-000742");
+    expect(session.api.createBadge).not.toHaveBeenCalled();
+    // A failure with no field to go under: the code stays too.
+    type("Подпись", "Пропуск №8");
+    pressEnter(codeField());
+    expect(
+      await screen.findByText(
+        "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.",
+      ),
+    ).toBeTruthy();
+    expect(codeField().value).toBe("MRK-000742");
+    // The same scan, sent again: the same hash.
+    pressEnter(codeField());
+    await waitFor(() => expect(session.api.createBadge).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Бейдж «Пропуск №8» добавлен.")).toBeTruthy();
+    expect([sentHash(session, 0), sentHash(session, 1)]).toStrictEqual([BADGE_PHC, BADGE_PHC]);
   });
 
   it("explains a host that has no badge salt yet and keeps the form from sending", async () => {

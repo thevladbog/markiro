@@ -637,17 +637,26 @@ requests and offer a retry.
   the page offers none.
 - «Бейджи» on an operator's row lists that operator's badges, revoked ones
   too, dimmed and marked «Отозван»: they are the record of what was issued.
-  «Добавить бейдж» reads the site's salt once per session
-  (`GET /v1/office/badge-salt` with `staleTime: Infinity`; `not_found` means
-  a host before its wizard) and focuses the code, which a keyboard-wedge
-  scanner types and submits with Enter. The dialog hashes the code with the
-  salt (`hashBadge`) and sends only the hash. The answer is the new badge,
-  not its operator, so the badge goes into the cached operator at once. A
-  `badge` conflict names the holder under the code when `details.operatorId`
-  is a UUID of an operator in the list, and otherwise says only that the
-  badge is taken. «Отозвать» asks first and says that the badge stops
-  opening the stations once they sync and never comes back; after the host's
-  204 the badge shows as revoked at once, and the list is read again.
+  «Добавить бейдж» reads the site's salt (`GET /v1/office/badge-salt`;
+  `not_found` means a host before its wizard) with `staleTime: Infinity`: it
+  is not read again while it is cached, so a dialog opened again soon reuses
+  it, and it is read again once the cache has dropped it (about five minutes
+  without an add dialog, the default `gcTime`), which is harmless, since it
+  never changes. The dialog focuses the code, which a keyboard-wedge scanner
+  types and submits with Enter, hashes it with the salt (`hashBadge`) and
+  sends only the hash. The answer is the new badge, not its operator, so the
+  badge goes into the cached operator at once (`useChangeList`, by id: the
+  same badge twice is one badge). A `badge` conflict names the holder under
+  the code when `details.operatorId` is a UUID of an operator in the list,
+  and otherwise says only that the badge is taken. The code field is masked
+  and a scanner types after whatever it holds, so a code the form or the host
+  refuses (the layout hint, a `badge` conflict, a `validation_failed` on
+  `badgePhc`) is emptied, with the focus back on the field and its message
+  kept until the next input; a refusal that is not about the code (the label,
+  a failed request) keeps it, and the same scan can be sent again. «Отозвать»
+  asks first and says that the badge stops opening the stations once they
+  sync and never comes back; after the host's 204 the badge shows as revoked
+  at once, and the list is read again.
 - `@markiro/ui` has English defaults: `Table` shows «No data» without
   `empty`, and `Modal` names its × «Close» without `closeLabel`. Every
   office table passes a localized `empty`, and every dialog passes

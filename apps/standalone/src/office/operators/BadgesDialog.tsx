@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, cn, Modal, StatusChip } from "@markiro/ui";
 
 import type { BadgeInfo, OfficeOperator } from "../../host/protocol.js";
+import { badgeLabel } from "./operator-records.js";
 
 const DATE = new Intl.DateTimeFormat("ru-RU", { dateStyle: "short" });
 
@@ -45,7 +46,7 @@ export function BadgesDialog({ operator, notice, onAdd, onRevoke, onClose }: Bad
         ) : (
           <ul className="badge-list">
             {operator.badges.map((badge) => {
-              const label = badge.label ?? t("office.operators.badges.unnamed");
+              const label = badgeLabel(badge, t);
               const date = DATE.format(new Date(badge.createdAt));
               const revoked = badge.revokedAt !== null;
               return (

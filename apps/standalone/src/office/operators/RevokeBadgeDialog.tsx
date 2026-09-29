@@ -6,6 +6,7 @@ import { alertFailure, type AlertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { useOfficeMutation } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
+import { badgeLabel } from "./operator-records.js";
 
 export interface RevokeBadgeDialogProps {
   operator: OfficeOperator;
@@ -25,7 +26,7 @@ export function RevokeBadgeDialog({ operator, badge, onClose, onRevoked }: Revok
   const revoke = useOfficeMutation((api, token, _variables: void) =>
     api.revokeBadge(token, operator.id, badge.id),
   );
-  const label = badge.label ?? t("office.operators.badges.unnamed");
+  const label = badgeLabel(badge, t);
 
   const submit = async () => {
     setFailure(null);

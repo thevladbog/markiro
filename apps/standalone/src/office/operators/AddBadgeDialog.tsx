@@ -1,6 +1,6 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useEffect, useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, type SubmitErrorHandler } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Input } from "@markiro/ui";
@@ -35,8 +35,11 @@ export interface AddBadgeDialogProps {
 /**
  * A new badge for an operator. A keyboard-wedge scanner types the code and
  * Enter, which submits the form, so the code field takes the focus. The code
- * is hashed here with the site's salt, read once per session, and only the
- * hash goes; a badge another operator holds is named under the code.
+ * is hashed here and only the hash goes, under the site's salt: it stays
+ * cached (`staleTime: Infinity`), so a dialog opened again soon reuses it, and
+ * it is read again once the cache has dropped it (about five minutes without
+ * an add dialog), which is harmless, since it never changes. A badge another
+ * operator holds is named under the code.
  */
 export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBadgeDialogProps) {
   const { t } = useTranslation();
@@ -55,6 +58,7 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
     handleSubmit,
     setError,
     setFocus,
+    setValue,
     formState: { errors },
   } = useForm<BadgeFormValues>({
     resolver: zodResolver(badgeFormSchema),
@@ -63,6 +67,22 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
   useEffect(() => {
     setFocus("code");
   }, [setFocus]);
+
+  // The code field is masked, so nobody can see what it holds, and a scanner
+  // types after it: a code the form or the host refused would be glued to the
+  // next scan, which can pass every rule and be saved as a badge that no
+  // station's scan will ever match. So a refused code is scanned again from
+  // scratch: the field is emptied, without validating (the message stays until
+  // the next input), and takes the focus back.
+  const scanAgain = () => {
+    setValue("code", "");
+    setFocus("code");
+  };
+  // Only a refusal of the code empties it: a label the form refuses leaves the
+  // scan where it is, as does a failure with no field to go under.
+  const refused: SubmitErrorHandler<BadgeFormValues> = (invalid) => {
+    if (invalid.code !== undefined) scanAgain();
+  };
 
   const submit = handleSubmit(async (values) => {
     setFailure(null);
@@ -77,18 +97,20 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
       if (taken !== null) {
         setHolder(taken.name);
         setError("code", { type: "server", message: TAKEN_BY });
+        scanAgain();
         return;
       }
       const outcome = writeFailure(error, BADGE_FIELDS, BADGE_CONFLICTS);
       if (outcome.kind === "field") {
         setError(outcome.field, { type: "server", message: outcome.message });
+        if (outcome.field === "code") scanAgain();
       } else {
         setFailure(outcome);
       }
       return;
     }
     onAdded(added);
-  });
+  }, refused);
 
   const saltFailure = () => {
     if (!salt.isError) return null;

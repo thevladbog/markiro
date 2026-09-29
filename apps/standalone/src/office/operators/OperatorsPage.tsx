@@ -1,4 +1,3 @@
-import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -16,14 +15,14 @@ import {
 import type { BadgeInfo, OfficeOperator } from "../../host/protocol.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
-import { useStoreRecord } from "../records.js";
+import { useChangeList, useStoreRecord } from "../records.js";
 import { AddBadgeDialog } from "./AddBadgeDialog.js";
 import { BadgesDialog } from "./BadgesDialog.js";
 import { CreateOperatorDialog } from "./CreateOperatorDialog.js";
 import { EditOperatorDialog } from "./EditOperatorDialog.js";
 import { OperatorAccessDialog } from "./OperatorAccessDialog.js";
 import { OperatorPinDialog } from "./OperatorPinDialog.js";
-import { activeFirstByLogin, withBadge, withBadgeRevoked } from "./operator-records.js";
+import { activeFirstByLogin, badgeLabel, withBadge, withBadgeRevoked } from "./operator-records.js";
 import { RevokeBadgeDialog } from "./RevokeBadgeDialog.js";
 
 // The badge dialogs name their operator by id and read it from the cached
@@ -45,9 +44,11 @@ type OperatorsDialog =
  */
 export function OperatorsPage() {
   const { t } = useTranslation();
-  const queryClient = useQueryClient();
   const operators = useOfficeQuery(officeKeys.operators, (api, token) => api.listOperators(token));
   const store = useStoreRecord<OfficeOperator>(officeKeys.operators);
+  // A badge write answers with the badge, or nothing: the change goes into the
+  // cached list at once, and with no list loaded the list is read again.
+  const changeList = useChangeList<OfficeOperator>(officeKeys.operators);
   const [dialog, setDialog] = useState<OperatorsDialog | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
@@ -64,24 +65,13 @@ export function OperatorsPage() {
     setDialog(null);
     void operators.refetch();
   };
-  // A badge write answers with the badge, or nothing: the change goes into
-  // the cached list at once, and with no list loaded the list is read again.
-  const changeList = (change: (list: readonly OfficeOperator[]) => OfficeOperator[]) => {
-    const list = queryClient.getQueryData<OfficeOperator[]>(officeKeys.operators);
-    if (list) {
-      queryClient.setQueryData(officeKeys.operators, change(list));
-    } else {
-      void queryClient.invalidateQueries({ queryKey: officeKeys.operators });
-    }
-  };
-  const badgeLabel = (badge: BadgeInfo) => badge.label ?? t("office.operators.badges.unnamed");
   const operatorOf = (id: string) => operators.data?.find((operator) => operator.id === id);
   const badgesOf = (operatorId: string, notice: string | null) =>
     setDialog({ kind: "badges", operatorId, notice });
   const badgeSummary = (operator: OfficeOperator) => {
     const active = operator.badges.filter((badge) => badge.revokedAt === null);
     if (active.length === 0) return t("office.operators.noBadges");
-    const labels = active.map((badge) => badge.label ?? t("office.operators.badges.unnamed"));
+    const labels = active.map((badge) => badgeLabel(badge, t));
     return t("office.operators.badgeSummary", { n: active.length, labels: labels.join(", ") });
   };
 
@@ -197,7 +187,7 @@ export function OperatorsPage() {
               changeList((list) => withBadge(list, operator.id, badge));
               badgesOf(
                 operator.id,
-                t("office.operators.badges.added", { label: badgeLabel(badge) }),
+                t("office.operators.badges.added", { label: badgeLabel(badge, t) }),
               );
             }}
           />
@@ -216,7 +206,7 @@ export function OperatorsPage() {
               );
               badgesOf(
                 operator.id,
-                t("office.operators.badges.revoked", { label: badgeLabel(dialog.badge) }),
+                t("office.operators.badges.revoked", { label: badgeLabel(dialog.badge, t) }),
               );
               void operators.refetch();
             }}
