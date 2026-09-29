@@ -147,10 +147,33 @@ const party = (profileValue: unknown, accountValue: unknown): BillingProfileSnap
   };
 };
 
+// The catalog form stores a preset as its key ("project"); a printed Russian
+// document shows the word. A value that is not a preset key is a custom unit
+// the operator typed, and stays literal.
+const PRINT_UNIT_LABELS: Readonly<Record<string, string>> = {
+  unit: "шт.",
+  hour: "час",
+  person: "чел.",
+  person_day: "чел.-дн.",
+  day: "дн.",
+  project: "проект",
+  session: "сессия",
+  package: "пакет",
+  service: "услуга",
+  right: "право",
+  work: "работа",
+  month: "мес.",
+  year: "год",
+};
+
+function printUnitLabel(unit: string): string {
+  return Object.hasOwn(PRINT_UNIT_LABELS, unit) ? (PRINT_UNIT_LABELS[unit] ?? unit) : unit;
+}
+
 function commercialPrintUnit(value: unknown, legacyUnit: string): string {
   const terms = readStoredCommercialTerms(value);
   if (terms?.version === 2) return "мес.";
-  if (terms?.subject !== "software_license") return legacyUnit;
+  if (terms?.subject !== "software_license") return printUnitLabel(legacyUnit);
   return terms.billingPeriod === "year" ? "год" : "мес.";
 }
 

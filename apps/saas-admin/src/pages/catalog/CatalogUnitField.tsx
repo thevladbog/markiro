@@ -14,6 +14,9 @@ const SERVICE_UNITS = [
   "project",
   "session",
   "package",
+  "service",
+  "right",
+  "work",
 ] as const;
 const OTHER = "__other__";
 
