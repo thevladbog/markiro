@@ -443,6 +443,24 @@ mod tests {
     }
 
     #[test]
+    fn a_zero_padded_iteration_count_is_a_second_spelling_and_is_refused() {
+        // A station reads `0100000` as 100 000, but the unique index over a
+        // badge's text tells it from `100000` and would keep both copies.
+        let salt: Vec<u8> = (0..16).collect();
+        let canonical = "pbkdf2$sha256$100000$AAECAwQFBgcICQoLDA0ODw==$LEcu0ewwRD5rBHrpCjvxni/q2cURiavbRlNRgDPb+n0=";
+        assert!(badge_phc("badgePhc", canonical, &salt).is_ok());
+        for count in ["0100000", "000000100000"] {
+            let padded = canonical.replacen("$100000$", &format!("${count}$"), 1);
+            assert_ne!(padded, canonical);
+            assert_eq!(
+                field(badge_phc("badgePhc", &padded, &salt)),
+                "badgePhc",
+                "{count}"
+            );
+        }
+    }
+
+    #[test]
     fn a_badge_label_is_optional_text_of_at_most_100_characters() {
         assert_eq!(badge_label("label", Some(" ")).unwrap(), None);
         assert!(badge_label("label", Some(&"п".repeat(100))).is_ok());

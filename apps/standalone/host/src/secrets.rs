@@ -64,7 +64,9 @@ impl Phc {
 /// Parse a PHC string in the `@markiro/domain` format: canonical standard
 /// base64 with padding, a 16-byte salt and a 32-byte digest. Stricter than
 /// `parsePhc` on the iteration count, which must be plain ASCII digits
-/// within `MIN_ITERATIONS..=MAX_ITERATIONS`.
+/// without a leading zero, within `MIN_ITERATIONS..=MAX_ITERATIONS`: a padded
+/// `0100000` would be a second spelling of `100000`, which the unique index
+/// over a badge's text cannot see.
 pub fn parse_phc(text: &str) -> Option<Phc> {
     let mut parts = text.split('$');
     let (Some("pbkdf2"), Some("sha256"), Some(iterations), Some(salt), Some(digest), None) = (
@@ -77,7 +79,9 @@ pub fn parse_phc(text: &str) -> Option<Phc> {
     ) else {
         return None;
     };
-    if !iterations.bytes().all(|byte| byte.is_ascii_digit()) {
+    // `u32::parse` takes "0100000", and a station's `Number()` reads it as
+    // 100000 too, so a leading zero is refused here, at the source.
+    if iterations.starts_with('0') || !iterations.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
     let iterations: u32 = iterations.parse().ok()?;
@@ -243,6 +247,13 @@ mod tests {
             "pbkdf2$sha256$10000$bWFya2lyby1zdGFuZGFsbw$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
             "pbkdf2$sha1$10000$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
             "pbkdf2$sha256$+10000$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            // A zero-padded count reads as 100 000 but is a second spelling of
+            // the same verifier: the badge index compares the text.
+            "pbkdf2$sha256$0100000$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            "pbkdf2$sha256$000000100000$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            // Overflows u32, and an empty field.
+            "pbkdf2$sha256$4294967296$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
+            "pbkdf2$sha256$$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=",
             "pbkdf2$sha256$10000$bWFya2lyby1zdGFuZGFsbw==$33q/nWS7HYqVkEapiJW+qfJkAK+dEw5JDvZadD5palE=$x",
             "",
         ] {

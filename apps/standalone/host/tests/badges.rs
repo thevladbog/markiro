@@ -52,6 +52,14 @@ async fn feed(admin: &Admin, since: i64) -> Value {
     body["items"].clone()
 }
 
+/// Every audit row, whatever its action: a refused request writes none.
+async fn audit_rows(admin: &Admin) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM audit_log")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+}
+
 #[tokio::test]
 async fn the_badge_salt_is_the_sites_and_only_for_administrators() {
     let admin = admin().await;
@@ -121,6 +129,8 @@ async fn a_badge_hash_must_carry_the_site_salt_and_the_domain_iterations() {
     let salt = site_salt(&admin).await;
     let id = operator(&admin, "0042").await;
     let path = format!("/v1/office/operators/{id}/badges");
+    let revision = host_revision(&admin.app).await;
+    let audit_rows_before = audit_rows(&admin).await;
     for badge_phc in [
         badge(&salt, 200_000, 1),
         badge(&salt, 10_000, 1),
@@ -150,6 +160,9 @@ async fn a_badge_hash_must_carry_the_site_salt_and_the_domain_iterations() {
     assert!(audit_trail(&admin.app, "operator_badge.create")
         .await
         .is_empty());
+    // The refusals wrote nothing: no revision and no audit row of any action.
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin).await, audit_rows_before);
     // A blank label is no label.
     let (status, added) = admin
         .call(
@@ -213,6 +226,51 @@ async fn one_badge_code_belongs_to_one_operator_at_a_time() {
         .await;
     assert_eq!(status, StatusCode::OK, "{again}");
     assert_ne!(again["id"], added["id"]);
+}
+
+#[tokio::test]
+async fn a_zero_padded_copy_of_an_active_badge_is_refused_not_stored_twice() {
+    let admin = admin().await;
+    let salt = site_salt(&admin).await;
+    let id = operator(&admin, "0042").await;
+    let path = format!("/v1/office/operators/{id}/badges");
+    let card = badge(&salt, 100_000, 1);
+    let (status, added) = admin
+        .call("POST", &path, Some(json!({ "badgePhc": card })))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{added}");
+    // The same card, salt and digest, with the count written `0100000`: a
+    // station reads it as 100000, but the unique index compares the text and
+    // would take it for another badge.
+    let padded = card.replacen("$100000$", "$0100000$", 1);
+    assert_ne!(padded, card);
+    let revision = host_revision(&admin.app).await;
+    let (_, before) = admin.call("GET", "/v1/office/operators", None).await;
+    let (status, body) = admin
+        .call("POST", &path, Some(json!({ "badgePhc": padded })))
+        .await;
+    assert_eq!(
+        (
+            status,
+            body["error"]["code"].clone(),
+            body["error"]["details"]["field"].clone()
+        ),
+        (
+            StatusCode::BAD_REQUEST,
+            json!("validation_failed"),
+            json!("badgePhc")
+        ),
+        "{body}"
+    );
+    // No second badge: no revision, and the operator's badges are as before.
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let (_, after) = admin.call("GET", "/v1/office/operators", None).await;
+    assert_eq!(after, before);
+    assert_eq!(after[0]["badges"], json!([added]));
+    assert_eq!(
+        audit_trail(&admin.app, "operator_badge.create").await.len(),
+        1
+    );
 }
 
 #[tokio::test]
@@ -285,6 +343,7 @@ async fn a_badge_is_found_only_under_its_own_operator() {
         )
         .await;
     let badge_id = added["id"].as_str().unwrap();
+    let revision = host_revision(&admin.app).await;
     for path in [
         format!("/v1/office/operators/{other}/badges/{badge_id}"),
         format!("/v1/office/operators/{owner}/badges/9b2e4a6c-0000-4000-8000-000000000000"),
@@ -310,6 +369,12 @@ async fn a_badge_is_found_only_under_its_own_operator() {
     assert!(audit_trail(&admin.app, "operator_badge.revoke")
         .await
         .is_empty());
+    // The refusals changed nothing: no revision was taken and the badge is
+    // still active under its owner.
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let (_, list) = admin.call("GET", "/v1/office/operators", None).await;
+    assert_eq!(list[0]["badges"], json!([added]));
+    assert_eq!(list[0]["badges"][0]["revokedAt"], Value::Null);
 }
 
 #[tokio::test]

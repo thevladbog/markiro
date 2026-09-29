@@ -218,12 +218,14 @@ with the count the hash carries. A badge hash must also carry exactly the
 domain's 100 000 iterations and the site's badge salt
 (`GET /v1/office/badge-salt`, the same value as the `site` record's
 `badgeSalt`), as the cloud hashes badges: one badge code then always gives
-one string, and the partial unique index `operator_badges_active_phc` keeps
-it on one operator (`conflict` with `constraint: badge`). The office never
-gets a hash back: operator reads carry `hasPin` and each badge's `id`,
-`label`, `createdAt` and `revokedAt`. Revoking a badge is
-`DELETE …/badges/{badgeId}`, and revoking it again changes nothing.
-Operators, badges and the salt are for administrators only, reads included.
+one string — `parse_phc` refuses a leading zero in the count, so `0100000`
+is not a second spelling of `100000` — and the partial unique index
+`operator_badges_active_phc` keeps it on one operator (`conflict` with
+`constraint: badge`). The office never gets a hash back: operator reads carry
+`hasPin` and each badge's `id`, `label`, `createdAt` and `revokedAt`.
+Revoking a badge is `DELETE …/badges/{badgeId}`, and revoking it again
+changes nothing. Operators, badges and the salt are for administrators only,
+reads included.
 
 ## Reference sync
 

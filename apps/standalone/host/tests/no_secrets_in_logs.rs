@@ -196,7 +196,8 @@ async fn secrets_never_reach_the_process_log() {
 
     // An operator with a PIN, a badge added and revoked, and the feed that
     // carries both hashes to stations: no hash may reach the log, and
-    // neither may the badge salt the office reads.
+    // neither may the badge salt the office reads. The refusals and the PIN
+    // change go through the same handlers, so they are part of the flow.
     let operator: serde_json::Value = client
         .post(format!("{base}/v1/office/operators"))
         .header(protocol.0, &protocol.1)
@@ -238,6 +239,55 @@ async fn secrets_never_reach_the_process_log() {
         .json()
         .await
         .unwrap();
+    // A hash with another salt is refused (`validation_failed`)...
+    let wrong_salt_phc = format!(
+        "pbkdf2$sha256$100000${}${}",
+        STANDARD.encode([0xa5u8; 16]),
+        STANDARD.encode([8u8; 32])
+    );
+    let wrong_salt = client
+        .post(format!("{base}/v1/office/operators/{operator_id}/badges"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({ "badgePhc": wrong_salt_phc }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(wrong_salt.status(), 400);
+    let wrong_salt: serde_json::Value = wrong_salt.json().await.unwrap();
+    assert_eq!(wrong_salt["error"]["code"], "validation_failed");
+    assert_eq!(wrong_salt["error"]["details"]["field"], "badgePhc");
+    // ...the same badge twice is a `conflict`, mapped from the database
+    // error...
+    let duplicate = client
+        .post(format!("{base}/v1/office/operators/{operator_id}/badges"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({ "badgePhc": badge_phc }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(duplicate.status(), 409);
+    let duplicate: serde_json::Value = duplicate.json().await.unwrap();
+    assert_eq!(duplicate["error"]["code"], "conflict");
+    assert_eq!(duplicate["error"]["details"]["constraint"], "badge");
+    // ...and a new PIN hash replaces the operator's.
+    let new_pin_phc = format!(
+        "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==${}",
+        STANDARD.encode([9u8; 32])
+    );
+    let pin_changed = client
+        .put(format!("{base}/v1/office/operators/{operator_id}"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({ "pinPhc": new_pin_phc, "expectedRev": operator["rev"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pin_changed.status(), 200);
     let feed = client
         .get(format!("{base}/v1/changes?since=0"))
         .header(protocol.0, &protocol.1)
@@ -343,6 +393,10 @@ async fn secrets_never_reach_the_process_log() {
         "3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=".to_owned(),
         badge_phc,
         STANDARD.encode([7u8; 32]),
+        wrong_salt_phc,
+        STANDARD.encode([8u8; 32]),
+        new_pin_phc,
+        STANDARD.encode([9u8; 32]),
         format!("{salt:?}"),
         salt_hex,
         salt_standard_base64,
