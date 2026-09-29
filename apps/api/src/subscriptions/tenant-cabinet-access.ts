@@ -7,8 +7,14 @@ export const OFFLINE_TENANT_KIND_ERROR = "catalog_kind_not_allowed_for_offline_t
 /**
  * A tenant created without a cabinet may only order services. Licences (plan,
  * add-on) grant entitlements to a cabinet that does not exist for it. Callers
- * run this inside the transaction that writes, so a concurrent grant of the
- * cabinet cannot slip a licence in between check and write.
+ * run this inside the transaction that writes. The subscription lifecycle
+ * callers hold the tenant subscription timeline lock here, and the cabinet
+ * grant takes the same lock before it switches `none` to `enabled`, so for
+ * them the check and the grant serialize. Offer and invoice drafts do not
+ * take that lock; that is still safe because cabinet access only ever moves
+ * from `none` to `enabled`: a stale read can refuse a licence that the grant
+ * has just made acceptable, but it can never admit one for a tenant without a
+ * cabinet.
  */
 export async function assertKindAllowedForTenant(
   tx: Pick<Db, "select">,

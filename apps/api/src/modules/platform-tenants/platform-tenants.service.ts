@@ -8,6 +8,7 @@ import {
   type TenantDetailV3,
   type AddonAssignmentResult,
   type CreateTenantResult,
+  type GrantCabinetAccessResult,
   type PlanAssignmentResult,
   type RenewTenantActivationResult,
   type TenantListResult,
@@ -21,7 +22,13 @@ import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { sanitizeSupportAuditMetadata } from "../../platform-auth/platform-audit.service";
 import { SubscriptionLifecycleService } from "../../subscriptions/subscription-lifecycle.service";
-import type { AssignAddonDto, AssignPlanDto, ProvisionTenantDto, TenantListQueryDto } from "./dto";
+import type {
+  AssignAddonDto,
+  AssignPlanDto,
+  GrantCabinetAccessDto,
+  ProvisionTenantDto,
+  TenantListQueryDto,
+} from "./dto";
 import { TenantProvisioningService } from "./tenant-provisioning.service";
 
 type SubscriptionRow = typeof schema.tenantSubscriptions.$inferSelect;
@@ -387,6 +394,16 @@ export class PlatformTenantsService {
     );
     if (result.deliveryId === null) throw new NotFoundException({ code: "tenant_owner_not_found" });
     return { deliveryId: result.deliveryId };
+  }
+
+  async grantCabinetAccess(
+    actor: PlatformPrincipal,
+    tenantId: string,
+    input: GrantCabinetAccessDto,
+  ): Promise<GrantCabinetAccessResult> {
+    return platformTenantContracts.grantCabinetAccess.response.parse(
+      await this.provisioning.grantCabinetAccess(tenantId, input, { actor }),
+    );
   }
 
   async assignPlan(

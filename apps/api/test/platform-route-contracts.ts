@@ -455,6 +455,13 @@ export const CURRENT_SAAS_ROUTES = [
   }),
   route(
     "post",
+    "/platform/tenants/{id}/cabinet-access",
+    "201",
+    platformTenantContracts.grantCabinetAccess.response,
+    { body: platformTenantContracts.grantCabinetAccess.body },
+  ),
+  route(
+    "post",
     "/platform/tenants/{id}/owner-activation/renew",
     "200",
     platformTenantContracts.renewActivation.response,

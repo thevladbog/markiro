@@ -929,6 +929,9 @@ const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
   "PlatformTenantsController.create": platform(
     "tenant provisioning is administered by the isolated platform trust domain",
   ),
+  "PlatformTenantsController.grantCabinetAccess": platform(
+    "granting a cabinet to a tenant is administered by the isolated platform trust domain",
+  ),
   "PlatformTenantsController.renewActivation": platform(
     "tenant owner lifecycle is administered by the isolated platform trust domain",
   ),

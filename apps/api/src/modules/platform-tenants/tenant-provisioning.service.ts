@@ -1,5 +1,5 @@
 import { randomBytes, randomUUID } from "node:crypto";
-import { ConflictException, Inject, Injectable } from "@nestjs/common";
+import { ConflictException, Inject, Injectable, NotFoundException } from "@nestjs/common";
 import { and, desc, eq, inArray, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
@@ -12,6 +12,8 @@ import {
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
+import type { GrantCabinetAccessDto, GrantCabinetAccessResult } from "@markiro/platform-contracts";
+import { lockTenantSubscriptionTimeline } from "../../subscriptions/subscription-locks";
 import { MailDeliveryService } from "../mail/mail-delivery.service";
 import { activationIdentifier } from "../tenant-owner-activation/token";
 import { provisionTenantSchema, type ProvisionTenantDto, type ProvisionTenantInput } from "./dto";
@@ -279,6 +281,110 @@ export class TenantProvisioningService {
       memberId: owner?.memberId ?? null,
       deliveryId: owner?.deliveryId ?? null,
     };
+  }
+
+  /**
+   * Gives a tenant created without a cabinet its first owner. No demo is
+   * created retroactively; a subscription is assigned separately.
+   *
+   * Lock order: owner e-mail advisory lock, tenant slug advisory lock, tenant
+   * subscription timeline advisory lock, then the organization row.
+   * - The e-mail then slug prefix is the provisioning order, so a grant and a
+   *   provisioning (or activation renewal) of the same e-mail or slug queue
+   *   behind each other instead of crossing.
+   * - The timeline lock is the first lock every subscription lifecycle path
+   *   takes, and none of them takes an e-mail or slug lock, so waiting for it
+   *   while holding those cannot close a cycle. Holding it makes the licence
+   *   guard (`assertKindAllowedForTenant`) see either `none` or the committed
+   *   `enabled`, never a switch between its check and its write. It is keyed
+   *   by tenant id, so two grants for one tenant serialize on it too.
+   * - The organization row is taken FOR NO KEY UPDATE, the same strength the
+   *   `cabinet_access` update needs anyway. It does not conflict with the
+   *   FOR KEY SHARE locks that foreign-key inserts into tenant tables take,
+   *   so a path that inserts tenant rows before taking the timeline lock
+   *   cannot deadlock against a grant that holds the timeline lock.
+   */
+  async grantCabinetAccess(
+    tenantId: string,
+    input: GrantCabinetAccessDto,
+    options: {
+      actor: PlatformPrincipal;
+      now?: () => Date;
+      createId?: () => string;
+      createToken?: () => string;
+    },
+  ): Promise<GrantCabinetAccessResult> {
+    return this.db.transaction(async (tx) => {
+      const operationAt = (options.now ?? (() => new Date()))();
+      const createId = options.createId ?? randomUUID;
+      const createToken = options.createToken ?? (() => randomBytes(24).toString("base64url"));
+
+      const [located] = await tx
+        .select({ slug: schema.organization.slug })
+        .from(schema.organization)
+        .where(eq(schema.organization.id, tenantId))
+        .limit(1);
+      if (!located) throw new NotFoundException({ code: "tenant_not_found" });
+
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-owner-email:${input.email}`}, 0))`,
+      );
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-owner-slug:${located.slug}`}, 0))`,
+      );
+      await lockTenantSubscriptionTimeline(tx, tenantId);
+      const [tenant] = await tx
+        .select({
+          id: schema.organization.id,
+          name: schema.organization.name,
+          cabinetAccess: schema.organization.cabinetAccess,
+        })
+        .from(schema.organization)
+        .where(eq(schema.organization.id, tenantId))
+        .for("no key update")
+        .limit(1);
+      if (!tenant) throw new NotFoundException({ code: "tenant_not_found" });
+      if (tenant.cabinetAccess !== "none") {
+        throw new ConflictException({ code: "cabinet_access_already_enabled" });
+      }
+
+      const owner = await this.provisionOwner(tx, {
+        tenantId,
+        tenantName: tenant.name,
+        email: input.email,
+        operationAt,
+        createId,
+        createToken,
+        options: { actor: options.actor },
+      });
+      await tx
+        .update(schema.organization)
+        .set({ cabinetAccess: "enabled" })
+        .where(eq(schema.organization.id, tenantId));
+      await this.audit.record(tx, {
+        actorPlatformUserId: options.actor.userId,
+        actorRole: options.actor.role,
+        action: "platform.tenant.cabinet_access.granted",
+        outcome: "success",
+        tenantId,
+        targetType: "member",
+        targetId: owner.memberId,
+        reason: null,
+        before: { cabinetAccess: "none" },
+        after: {
+          cabinetAccess: "enabled",
+          ownerUserId: owner.user.id,
+          deliveryId: owner.deliveryId,
+        },
+        requestId: null,
+      });
+      return {
+        tenantId,
+        userId: owner.user.id,
+        memberId: owner.memberId,
+        deliveryId: owner.deliveryId,
+      };
+    });
   }
 
   private async provisionOwner(

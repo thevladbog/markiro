@@ -17,11 +17,13 @@ import { ZodValidationPipe } from "../../zod.pipe";
 import {
   assignAddonSchema,
   assignPlanSchema,
+  grantCabinetAccessSchema,
   provisionTenantSchema,
   tenantListQuerySchema,
   tenantReferenceSchema,
   type AssignAddonDto,
   type AssignPlanDto,
+  type GrantCabinetAccessDto,
   type ProvisionTenantDto,
   type TenantListQueryDto,
 } from "./dto";
@@ -99,6 +101,28 @@ export class PlatformTenantsController {
     return parsePlatformResponse(
       platformTenantContracts.renewActivation.response,
       await this.tenants.renewActivation(request.platformPrincipal!, id),
+    );
+  }
+
+  @Post(":id/cabinet-access")
+  @ApiOperation({
+    summary: "Grant cabinet access to a tenant created without one",
+    description:
+      "Creates the owner account, sends the activation link and switches the tenant to cabinet_access=enabled. No demo is created.",
+  })
+  @PlatformApiProtectedCreated({
+    body: platformTenantContracts.grantCabinetAccess.body,
+    response: platformTenantContracts.grantCabinetAccess.response,
+  })
+  @RequirePlatformCapabilities("tenants.write")
+  async grantCabinetAccess(
+    @Req() request: RequestWithPlatformPrincipal,
+    @Param("id", new ZodValidationPipe(tenantReferenceSchema)) id: string,
+    @Body(new ZodValidationPipe(grantCabinetAccessSchema)) body: GrantCabinetAccessDto,
+  ) {
+    return parsePlatformResponse(
+      platformTenantContracts.grantCabinetAccess.response,
+      await this.tenants.grantCabinetAccess(request.platformPrincipal!, id, body),
     );
   }
 
