@@ -156,7 +156,10 @@ forgetting goes on; plan 1d3 revisits this before PIN and badge hashes land.
   hit `SQLITE_BUSY` on a stale WAL snapshot before `busy_timeout` gets a
   chance to help.
 - One `next_revision` per changing transaction, stamped on every row that
-  transaction changes.
+  transaction changes. A device's line change is the one revision with no
+  row to stamp: devices have no `rev` column and are not feed data, so
+  `PUT /v1/office/devices/{id}` takes a revision only to wake the streams,
+  and only when the line really changes.
 - A transaction that called `next_revision` commits through
   `db::commit_with_revision`, which wakes change-stream subscribers only
   after the commit: a device that reacts at once already reads the new rows.
@@ -182,6 +185,13 @@ forgetting goes on; plan 1d3 revisits this before PIN and badge hashes land.
   write lock across that work.
 - Return no-ops before `next_revision`: no revision bump, no row write, no
   audit row for a request that changes nothing.
+- Free text (names, roles, labels, device registration fields) is checked in
+  one place, `validate.rs`: trimmed, counted in characters (not bytes), and
+  refused when it holds any control character (`char::is_control`). A NUL
+  is not whitespace, so `str::trim` keeps it while SQLite's `length()` stops
+  at it and a table `CHECK` fails (a 500 instead of `validation_failed`); a
+  control character inside a name would let two names that look identical
+  both be active. The office forms mirror this rule (plan 1d3).
 - Admin writes re-check rights with `OfficeContext::require_admin_in` inside
   the transaction, in addition to the early `require_admin` rejection. The
   extractor's role and active flag are read before the request hashes a
