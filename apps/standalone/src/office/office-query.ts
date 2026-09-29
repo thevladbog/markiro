@@ -16,6 +16,7 @@ export const officeKeys = {
   sscc: ["office", "sscc"],
   users: ["office", "users"],
   devices: ["office", "devices"],
+  counterparties: ["office", "counterparties"],
   /** Line names from this installation's local copies, not from the host. */
   lineNames: ["office", "line-names"],
 } as const;

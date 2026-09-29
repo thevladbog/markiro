@@ -1,5 +1,6 @@
 import type { RouteObject } from "react-router";
 
+import { CounterpartiesPage } from "./counterparties/CounterpartiesPage.js";
 import { DevicesPage } from "./devices/DevicesPage.js";
 import { OfficeOverview } from "./OfficeOverview.js";
 import { OfficeShell } from "./OfficeShell.js";
@@ -17,6 +18,7 @@ export const officeRoutes: RouteObject[] = [
       { index: true, element: <OfficeOverview /> },
       { path: "org", element: <OrgProfilePage /> },
       { path: "sscc", element: <SsccPage /> },
+      { path: "counterparties", element: <CounterpartiesPage /> },
       {
         path: "devices",
         element: (

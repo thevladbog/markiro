@@ -542,6 +542,16 @@ requests and offer a retry.
 - Request bodies are built field by field, never spread from form values, so
   nothing the form holds reaches the host by accident; ids go into the path
   only.
+- Lists of archivable records (counterparties, lines) show active records
+  before archived ones, each by name in Russian order with numbers by value
+  (`activeFirstByName` in `src/office/records.tsx`, with
+  `Intl.Collator("ru", { numeric: true })`); the host sorts bytewise, which
+  puts «Линия 10» before «Линия 2».
+- «Контрагенты» is read by every role and changed by administrators. An edit
+  sends the whole record with `expectedRev`; archiving is the dialog's «В
+  архиве» box, and there is no delete. The host keeps no uniqueness for
+  counterparties (an owner question), so the page checks no duplicates; a
+  second click while the request is on its way sends nothing.
 - `@markiro/ui` has English defaults: `Table` shows «No data» without
   `empty`, and `Modal` names its × «Close» without `closeLabel`. Every
   office table passes a localized `empty`, and every dialog passes
