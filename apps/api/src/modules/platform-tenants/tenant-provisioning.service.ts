@@ -14,7 +14,7 @@ import type { PlatformPrincipal } from "../../platform-auth/platform-access-poli
 import { PlatformAuditService } from "../../platform-auth/platform-audit.service";
 import { MailDeliveryService } from "../mail/mail-delivery.service";
 import { activationIdentifier } from "../tenant-owner-activation/token";
-import { provisionTenantSchema, type ProvisionTenantDto } from "./dto";
+import { provisionTenantSchema, type ProvisionTenantDto, type ProvisionTenantInput } from "./dto";
 
 export const TENANT_OWNER_ACTIVATION_BASE_URL = "TENANT_OWNER_ACTIVATION_BASE_URL";
 
@@ -24,9 +24,9 @@ type ProvisionTransaction = Parameters<Db["transaction"]>[0] extends (arg: infer
 
 export interface TenantProvisioningResult {
   tenantId: string;
-  userId: string;
-  memberId: string;
-  deliveryId: string;
+  userId: string | null;
+  memberId: string | null;
+  deliveryId: string | null;
 }
 
 export interface TenantProvisioningOptions {
@@ -55,7 +55,7 @@ export class TenantProvisioningService {
   ) {}
 
   async provision(
-    rawInput: ProvisionTenantDto,
+    rawInput: ProvisionTenantInput,
     options: TenantProvisioningOptions = {},
   ): Promise<TenantProvisioningResult> {
     const input = provisionTenantSchema.parse(rawInput);
@@ -83,31 +83,43 @@ export class TenantProvisioningService {
     // This order is shared by CLI and browser provisioning. It serializes a
     // normalized identity before a slug, preventing the same new account
     // from becoming the first owner of two tenants concurrently.
-    await tx.execute(
-      sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-owner-email:${input.email}`}, 0))`,
-    );
+    // A tenant without cabinet has no e-mail and therefore no identity to
+    // serialize; it takes the slug lock only.
+    if (input.email !== undefined) {
+      await tx.execute(
+        sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-owner-email:${input.email}`}, 0))`,
+      );
+    }
     await tx.execute(
       sql`select pg_advisory_xact_lock(hashtextextended(${`tenant-owner-slug:${input.tenantSlug}`}, 0))`,
     );
 
     let [tenant] = await tx
-      .select({ id: schema.organization.id })
+      .select({ id: schema.organization.id, cabinetAccess: schema.organization.cabinetAccess })
       .from(schema.organization)
       .where(eq(schema.organization.slug, input.tenantSlug))
       .limit(1);
+    // An idempotent retry must describe the same tenant; a slug reused with a
+    // different cabinet access is a conflict, never a silent switch.
+    if (tenant && tenant.cabinetAccess !== input.cabinetAccess) {
+      throw new ConflictException({ code: "tenant_cabinet_access_mismatch" });
+    }
     const tenantCreated = !tenant;
     // Existing tenants keep their historical managed/unmanaged state. A
     // default demo is required only before the organization insert, never
-    // to renew an existing owner's activation or to retry idempotently.
-    const demo = tenant
-      ? null
-      : await this.lockDefaultDemo(tx, options.allowUnmanagedWithoutDemo === true);
+    // to renew an existing owner's activation or to retry idempotently. A
+    // tenant without cabinet gets no subscription and so needs no demo.
+    const demo =
+      tenant || input.cabinetAccess === "none"
+        ? null
+        : await this.lockDefaultDemo(tx, options.allowUnmanagedWithoutDemo === true);
     if (!tenant) {
-      tenant = { id: createId() };
+      tenant = { id: createId(), cabinetAccess: input.cabinetAccess };
       await tx.insert(schema.organization).values({
         id: tenant.id,
         name: input.tenantName,
         slug: input.tenantSlug,
+        cabinetAccess: input.cabinetAccess,
         createdAt: operationAt,
       });
       await tx
@@ -188,17 +200,115 @@ export class TenantProvisioningService {
       });
     }
 
+    let owner: { user: { id: string }; memberId: string; deliveryId: string } | null = null;
+    if (input.cabinetAccess === "enabled") {
+      if (input.email === undefined) throw new Error("cabinet access enabled requires an e-mail");
+      owner = await this.provisionOwner(tx, {
+        tenantId: tenant.id,
+        tenantName: input.tenantName,
+        email: input.email,
+        operationAt,
+        createId,
+        createToken,
+        options,
+      });
+    }
+
+    let subscriptionId: string | null = null;
+    if (tenantCreated && demo) {
+      subscriptionId = createId();
+      await tx.insert(schema.tenantSubscriptions).values({
+        id: subscriptionId,
+        tenantId: tenant.id,
+        planVersionId: demo.versionId,
+        status: "pending_activation",
+        startsAt: null,
+        endsAt: null,
+        source: "demo",
+        createdByPlatformUserId: options.actor?.userId ?? null,
+        createdAt: operationAt,
+        updatedAt: operationAt,
+      });
+      await tx.insert(schema.subscriptionEvents).values({
+        tenantId: tenant.id,
+        subscriptionId,
+        eventKind: "demo.provisioned",
+        effectiveAt: operationAt,
+        actorPlatformUserId: options.actor?.userId ?? null,
+        source: options.actor ? "platform" : "cli",
+        reason: null,
+        before: null,
+        after: {
+          status: "pending_activation",
+          planVersionId: demo.versionId,
+          demoDurationDays: demo.durationDays,
+        },
+      });
+    }
+
+    if (tenantCreated) {
+      // "unmanaged" means a managed tenant created without a default demo; a
+      // tenant without cabinet is a different fact and is never reported so.
+      const offline = input.cabinetAccess === "none";
+      const unmanaged = !offline && demo === null;
+      await this.audit.record(tx, {
+        actorPlatformUserId: options.actor?.userId ?? null,
+        actorRole: options.actor?.role ?? null,
+        action: unmanaged ? "platform.tenant.created_unmanaged" : "platform.tenant.created",
+        outcome: "success",
+        tenantId: tenant.id,
+        targetType: "tenant",
+        targetId: tenant.id,
+        reason: unmanaged ? "operator_allowed_unmanaged_without_default_demo" : null,
+        before: null,
+        after: {
+          cabinetAccess: input.cabinetAccess,
+          ownerUserId: owner?.user.id ?? null,
+          ownerMemberId: owner?.memberId ?? null,
+          subscriptionId,
+          subscriptionStatus: offline ? "none" : unmanaged ? "unmanaged" : "pending_activation",
+          planVersionId: demo?.versionId ?? null,
+        },
+        requestId: null,
+      });
+    }
+
+    return {
+      tenantId: tenant.id,
+      userId: owner?.user.id ?? null,
+      memberId: owner?.memberId ?? null,
+      deliveryId: owner?.deliveryId ?? null,
+    };
+  }
+
+  private async provisionOwner(
+    tx: ProvisionTransaction,
+    ctx: {
+      tenantId: string;
+      tenantName: string;
+      email: string;
+      operationAt: Date;
+      createId: () => string;
+      createToken: () => string;
+      options: TenantProvisioningOptions;
+    },
+  ): Promise<{
+    user: { id: string; emailVerified: boolean };
+    memberId: string;
+    deliveryId: string;
+  }> {
+    const { tenantId, tenantName, email, operationAt, createId, createToken, options } = ctx;
     let [user] = await tx
       .select({ id: schema.user.id, emailVerified: schema.user.emailVerified })
       .from(schema.user)
-      .where(eq(schema.user.email, input.email))
+      .where(eq(schema.user.email, email))
       .limit(1);
     if (!user) {
       user = { id: createId(), emailVerified: false };
       await tx.insert(schema.user).values({
         id: user.id,
-        email: input.email,
-        name: input.email,
+        email: email,
+        name: email,
         emailVerified: false,
       });
     }
@@ -210,7 +320,7 @@ export class TenantProvisioningService {
         role: schema.member.role,
       })
       .from(schema.member)
-      .where(eq(schema.member.organizationId, tenant.id));
+      .where(eq(schema.member.organizationId, tenantId));
     const existingMember = tenantMembers.find((member) => member.userId === user.id);
     if (tenantMembers.length > 0 && !existingMember) {
       throw new ConflictException({ code: "tenant_first_owner_conflict" });
@@ -228,13 +338,13 @@ export class TenantProvisioningService {
     if (!existingMember) {
       await tx.insert(schema.member).values({
         id: memberId,
-        organizationId: tenant.id,
+        organizationId: tenantId,
         userId: user.id,
         role: "owner",
         createdAt: operationAt,
       });
       await tx.insert(schema.tenantAuditEvents).values({
-        organizationId: tenant.id,
+        organizationId: tenantId,
         actorUserId: null,
         action: "tenant.owner.provisioned",
         outcome: "success",
@@ -243,8 +353,8 @@ export class TenantProvisioningService {
       });
     }
 
-    const sourceId = `tenant-owner:${tenant.id}`;
-    const subjectValue = JSON.stringify({ userId: user.id, tenantId: tenant.id });
+    const sourceId = `tenant-owner:${tenantId}`;
+    const subjectValue = JSON.stringify({ userId: user.id, tenantId });
     let [existingDelivery] = await tx
       .select({ id: schema.emailDeliveries.id, status: schema.emailDeliveries.status })
       .from(schema.emailDeliveries)
@@ -351,19 +461,19 @@ export class TenantProvisioningService {
       actionUrl.hash = new URLSearchParams({ token }).toString();
       deliveryId = await this.mail.enqueue(tx, {
         scope: { userId: user.id },
-        recipient: input.email,
+        recipient: email,
         sourceId,
         template: {
           kind: "tenant-owner-activation",
           recipientName: "Пользователь",
-          organizationName: input.tenantName,
+          organizationName: tenantName,
           actionUrl: actionUrl.toString(),
           expiresInMinutes: 60,
         },
       });
       if (options.renewActivation && existingDelivery) {
         await tx.insert(schema.tenantAuditEvents).values({
-          organizationId: tenant.id,
+          organizationId: tenantId,
           actorUserId: null,
           action: "tenant.owner.activation_renewed",
           outcome: "success",
@@ -376,7 +486,7 @@ export class TenantProvisioningService {
             actorRole: options.actor.role,
             action: "platform.tenant.owner.activation_renewed",
             outcome: "success",
-            tenantId: tenant.id,
+            tenantId,
             targetType: "email_delivery",
             targetId: deliveryId,
             reason: null,
@@ -388,62 +498,8 @@ export class TenantProvisioningService {
       }
     }
 
-    let subscriptionId: string | null = null;
-    if (tenantCreated && demo) {
-      subscriptionId = createId();
-      await tx.insert(schema.tenantSubscriptions).values({
-        id: subscriptionId,
-        tenantId: tenant.id,
-        planVersionId: demo.versionId,
-        status: "pending_activation",
-        startsAt: null,
-        endsAt: null,
-        source: "demo",
-        createdByPlatformUserId: options.actor?.userId ?? null,
-        createdAt: operationAt,
-        updatedAt: operationAt,
-      });
-      await tx.insert(schema.subscriptionEvents).values({
-        tenantId: tenant.id,
-        subscriptionId,
-        eventKind: "demo.provisioned",
-        effectiveAt: operationAt,
-        actorPlatformUserId: options.actor?.userId ?? null,
-        source: options.actor ? "platform" : "cli",
-        reason: null,
-        before: null,
-        after: {
-          status: "pending_activation",
-          planVersionId: demo.versionId,
-          demoDurationDays: demo.durationDays,
-        },
-      });
-    }
-
-    if (tenantCreated) {
-      const unmanaged = demo === null;
-      await this.audit.record(tx, {
-        actorPlatformUserId: options.actor?.userId ?? null,
-        actorRole: options.actor?.role ?? null,
-        action: unmanaged ? "platform.tenant.created_unmanaged" : "platform.tenant.created",
-        outcome: "success",
-        tenantId: tenant.id,
-        targetType: "tenant",
-        targetId: tenant.id,
-        reason: unmanaged ? "operator_allowed_unmanaged_without_default_demo" : null,
-        before: null,
-        after: {
-          ownerUserId: user.id,
-          ownerMemberId: memberId,
-          subscriptionId,
-          subscriptionStatus: unmanaged ? "unmanaged" : "pending_activation",
-          planVersionId: demo?.versionId ?? null,
-        },
-        requestId: null,
-      });
-    }
-
-    return { tenantId: tenant.id, userId: user.id, memberId, deliveryId };
+    if (!deliveryId) throw new Error("tenant owner activation delivery missing");
+    return { user, memberId, deliveryId };
   }
 
   private async lockDefaultDemo(

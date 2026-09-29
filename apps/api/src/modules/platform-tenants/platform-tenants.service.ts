@@ -373,9 +373,15 @@ export class PlatformTenantsService {
       .limit(1);
     if (!owner) throw new NotFoundException({ code: "tenant_owner_not_found" });
     const result = await this.provisioning.provision(
-      { email: owner.email, tenantName: owner.tenantName, tenantSlug: owner.tenantSlug },
+      {
+        email: owner.email,
+        tenantName: owner.tenantName,
+        tenantSlug: owner.tenantSlug,
+        cabinetAccess: "enabled",
+      },
       { actor, renewActivation: true },
     );
+    if (result.deliveryId === null) throw new NotFoundException({ code: "tenant_owner_not_found" });
     return { deliveryId: result.deliveryId };
   }
 

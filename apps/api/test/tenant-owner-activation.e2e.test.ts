@@ -14,6 +14,7 @@ import {
 import { PlatformAuditService } from "../src/platform-auth/platform-audit.service";
 import { SubscriptionLifecycleService } from "../src/subscriptions/subscription-lifecycle.service";
 import { DefaultDemoSettingFixture } from "./support/default-demo-setting";
+import { requireOwner } from "./support/provisioned-owner";
 
 const hashCredentialPassword = hashPassword as unknown as (password: string) => Promise<string>;
 const verifyCredentialPassword = verifyPassword as unknown as (input: {
@@ -160,17 +161,19 @@ describe.skipIf(!ready)("tenant owner activation", () => {
     const demoVersionId = await usePublishedDemo(9);
     const token = `fresh-${randomUUID()}`;
     const email = `fresh-activation-${randomUUID()}@example.com`;
-    const result = await provisionTenantOwner({
-      db: connection.db,
-      mail,
-      adminOrigin: "https://cabinet.example.test",
-      input: {
-        email,
-        tenantName: "Fresh activation tenant",
-        tenantSlug: `fresh-activation-${randomUUID()}`,
-      },
-      createToken: () => token,
-    });
+    const result = requireOwner(
+      await provisionTenantOwner({
+        db: connection.db,
+        mail,
+        adminOrigin: "https://cabinet.example.test",
+        input: {
+          email,
+          tenantName: "Fresh activation tenant",
+          tenantSlug: `fresh-activation-${randomUUID()}`,
+        },
+        createToken: () => token,
+      }),
+    );
 
     await expect(activation.getStatus(token)).resolves.toEqual({ hasAccount: false });
     const [pendingBeforeCompletion] = await connection.db
