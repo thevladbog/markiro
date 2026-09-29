@@ -9,6 +9,11 @@ import { WriteFailureAlert } from "../page-state.js";
 
 export interface RevokeDeviceDialogProps {
   device: DeviceRecord;
+  /**
+   * The device this office runs on: revoking it disconnects the app here,
+   * which then has to be paired again. Nothing stops it; the dialog says so.
+   */
+  own: boolean;
   onClose: () => void;
   onRevoked: (device: DeviceRecord) => void;
 }
@@ -18,7 +23,7 @@ export interface RevokeDeviceDialogProps {
  * office sessions end. There is no way back; the device pairs again as a
  * new one.
  */
-export function RevokeDeviceDialog({ device, onClose, onRevoked }: RevokeDeviceDialogProps) {
+export function RevokeDeviceDialog({ device, own, onClose, onRevoked }: RevokeDeviceDialogProps) {
   const { t } = useTranslation();
   const [failure, setFailure] = useState<AlertFailure | null>(null);
   const revoke = useOfficeMutation((api, token, _variables: void) =>
@@ -39,14 +44,18 @@ export function RevokeDeviceDialog({ device, onClose, onRevoked }: RevokeDeviceD
 
   return (
     <FormDialog
-      title={t("office.devices.revokeTitle")}
+      title={t(own ? "office.devices.revokeOwnTitle" : "office.devices.revokeTitle")}
       submitLabel={t("office.devices.revokeSubmit")}
       submitVariant="destructive"
       onSubmit={submit}
       onClose={onClose}
       alert={<WriteFailureAlert failure={failure} />}
     >
-      <p>{t("office.devices.revokeBody", { name: device.name })}</p>
+      <p>
+        {t(own ? "office.devices.revokeOwnBody" : "office.devices.revokeBody", {
+          name: device.name,
+        })}
+      </p>
     </FormDialog>
   );
 }

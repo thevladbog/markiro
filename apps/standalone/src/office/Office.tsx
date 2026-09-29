@@ -8,6 +8,7 @@ import { OfficeLinkProvider } from "./office-link.js";
 import { createOfficeQueryClient } from "./office-query.js";
 import { OfficeSessionProvider, type OfficeSessionValue } from "./office-session.js";
 import { officeRoutes } from "./routes.js";
+import { ThisDeviceProvider } from "./this-device.js";
 
 export interface OfficeProps {
   session: OfficeSessionValue;
@@ -21,6 +22,12 @@ export interface OfficeProps {
    * shows without a new sign-in. Open pages are not reloaded under the user.
    */
   hostRevision?: number | null;
+  /**
+   * The device this office runs on (`DeviceStatus.deviceId`): «Устройства»
+   * marks its row and asks more before it revokes itself. `null` outside
+   * the app.
+   */
+  deviceId?: string | null;
 }
 
 /**
@@ -28,7 +35,13 @@ export interface OfficeProps {
  * a query cache, both living exactly as long as one session — `App` mounts
  * `Office` with the session token as its key.
  */
-export function Office({ session, link = null, sync = null, hostRevision = null }: OfficeProps) {
+export function Office({
+  session,
+  link = null,
+  sync = null,
+  hostRevision = null,
+  deviceId = null,
+}: OfficeProps) {
   const [router] = useState(() => createMemoryRouter(officeRoutes, { initialEntries: ["/"] }));
   const [queryClient] = useState(createOfficeQueryClient);
   const shownRevision = useRef(hostRevision);
@@ -46,7 +59,9 @@ export function Office({ session, link = null, sync = null, hostRevision = null 
     <QueryClientProvider client={queryClient}>
       <OfficeSessionProvider value={session}>
         <OfficeLinkProvider value={officeLink}>
-          <RouterProvider router={router} />
+          <ThisDeviceProvider deviceId={deviceId}>
+            <RouterProvider router={router} />
+          </ThisDeviceProvider>
         </OfficeLinkProvider>
       </OfficeSessionProvider>
     </QueryClientProvider>

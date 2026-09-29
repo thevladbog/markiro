@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import {
   Alert,
+  Badge,
   Button,
   Card,
   PageHeader,
@@ -18,6 +19,7 @@ import { pairingCodeRequest } from "../../host/requests.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { useStoreRecord } from "../records.js";
+import { useThisDeviceId } from "../this-device.js";
 import { DeviceDialog } from "./DeviceDialog.js";
 import { lineLabel } from "./line-label.js";
 import { codeLifetimeMs, PairingCodeDialog } from "./PairingCodeDialog.js";
@@ -51,6 +53,7 @@ type DevicesDialog =
  */
 export function DevicesPage() {
   const { t } = useTranslation();
+  const thisDevice = useThisDeviceId();
   const devices = useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token));
   const lines = useOfficeQuery(officeKeys.lines, (api, token) => api.listLines(token));
   const storeDevice = useStoreRecord<DeviceRecord>(officeKeys.devices);
@@ -141,7 +144,21 @@ export function DevicesPage() {
   };
 
   const columns: TableColumn<DeviceRecord>[] = [
-    { key: "name", title: t("office.devices.table.name"), render: (device) => device.name },
+    {
+      key: "name",
+      title: t("office.devices.table.name"),
+      render: (device) => (
+        <>
+          {device.name}
+          {device.id === thisDevice && (
+            <>
+              {" "}
+              <Badge tone="info">{t("office.devices.thisDevice")}</Badge>
+            </>
+          )}
+        </>
+      ),
+    },
     {
       key: "kind",
       title: t("office.devices.table.kind"),
@@ -270,6 +287,7 @@ export function DevicesPage() {
       {dialog?.kind === "revoke" && (
         <RevokeDeviceDialog
           device={dialog.device}
+          own={dialog.device.id === thisDevice}
           onClose={() => setDialog(null)}
           onRevoked={(device) => {
             // The record the revoke returned goes in first: the row is dead

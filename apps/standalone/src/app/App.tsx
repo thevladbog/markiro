@@ -296,6 +296,7 @@ export function App({
         link={state.link}
         sync={state.sync}
         hostRevision={state.hostRevision}
+        deviceId={pairedStatus?.deviceId ?? null}
       />
     );
   }

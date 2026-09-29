@@ -103,26 +103,33 @@ export function LineSelect({ local, sync, link, onSelect, onSync, onOffice }: Li
   const content = () => {
     if (lines === null) {
       // The latest failure: a sync failed after the last read, or the read
-      // failed after the last sync. A sync in progress, the retry's too,
-      // shows progress instead of an older failure. The read failure is
-      // pinned to the `sync.synced` it happened at, so a later successful
-      // sync stops showing it the moment that sync finishes, not only once
-      // its own (still pending) read resolves.
+      // failed after the last sync. A failed sync stays on screen through
+      // its automatic retries — the button shows the run in progress — until
+      // a sync succeeds: the alert is a live region, and mounting it again
+      // for every retry would announce the same failure every few seconds.
+      // A sync in progress after a read failure shows progress instead. The
+      // read failure is pinned to the `sync.synced` it happened at, so a
+      // later successful sync stops showing it the moment that sync
+      // finishes, not only once its own (still pending) read resolves.
       const readFailed = readFailedAt === sync.synced;
-      if (sync.kind === "failed" || (readFailed && sync.kind !== "running")) {
+      const syncFailed = sync.kind === "failed" || sync.failure !== null;
+      if (syncFailed || (readFailed && sync.kind !== "running")) {
         return (
           <Alert
             tone="error"
             action={
-              <Button variant="secondary" size="compact" onClick={onSync}>
+              <Button
+                variant="secondary"
+                size="compact"
+                loading={sync.kind === "running"}
+                onClick={onSync}
+              >
                 {t("shell.lineSelect.retry")}
               </Button>
             }
           >
             {t(
-              sync.kind === "failed"
-                ? SYNC_FAILED_KEY[sync.failure ?? "host"]
-                : "shell.lineSelect.readFailed",
+              syncFailed ? SYNC_FAILED_KEY[sync.failure ?? "host"] : "shell.lineSelect.readFailed",
             )}
           </Alert>
         );

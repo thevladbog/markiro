@@ -309,6 +309,35 @@ describe("office devices", () => {
     expect(session.api.listDevices.mock.calls.length).toBe(reads + 1);
   });
 
+  it("marks this PC's row in words and asks more before this PC revokes itself", async () => {
+    const session = adminSession();
+    session.api.revokeDevice.mockResolvedValue({ ...HOST_PC, revokedAt: "2026-09-28T10:00:00Z" });
+    renderOffice(session, { deviceId: HOST_PC.id });
+    fireEvent.click(await screen.findByRole("link", { name: "Устройства" }));
+    await screen.findByText("Рабочее место хоста");
+    expect(within(rowOf("Рабочее место хоста")).getByText("Этот ПК")).toBeTruthy();
+    expect(screen.getAllByText("Этот ПК")).toHaveLength(1);
+    // Another device: the usual confirmation.
+    fireEvent.click(screen.getByRole("button", { name: "Отозвать устройство «Станция упаковки»" }));
+    expect(within(dialog()).getByText("Отозвать устройство?")).toBeTruthy();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Отмена" }));
+    // This PC: the app here disconnects and has to be paired again. Nothing stops it.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Отозвать устройство «Рабочее место хоста»" }),
+    );
+    expect(within(dialog()).getByText("Отозвать этот ПК?")).toBeTruthy();
+    expect(
+      within(dialog()).getByText(
+        "«Рабочее место хоста» — этот ПК, на нём открыт офис. После отзыва приложение здесь отключится от хоста, а чтобы снова работать на этом ПК, его нужно подключить заново. Отменить отзыв нельзя.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Отозвать" }));
+    expect(await screen.findByText("Устройство «Рабочее место хоста» отозвано.")).toBeTruthy();
+    expect(session.api.revokeDevice.mock.calls).toStrictEqual([
+      ["office-session-token", HOST_PC.id],
+    ]);
+  });
+
   it("explains a revocation the host refused, in the dialog", async () => {
     const session = adminSession();
     session.api.revokeDevice.mockRejectedValueOnce(

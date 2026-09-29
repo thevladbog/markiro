@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -1661,5 +1661,42 @@ describe("the line the office assigns", () => {
     expect(vi.getTimerCount()).toBe(0);
     await elapse(120_000);
     expect(device.refresh).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the office on this device", () => {
+  it("tells the office which device it runs on, so «Устройства» marks this PC", async () => {
+    const host = fakeHost();
+    host.listDevices.mockResolvedValue([
+      {
+        id: DEVICE_STATUS.deviceId,
+        kind: "station",
+        name: "Рабочее место хоста",
+        lineId: LINE_ID,
+        appVersion: "0.1.0",
+        pairedAt: "2026-09-26T09:15:00Z",
+        lastSeenAt: null,
+        revokedAt: null,
+      },
+      {
+        id: "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+        kind: "station",
+        name: "Станция упаковки",
+        lineId: null,
+        appVersion: "0.1.0",
+        pairedAt: "2026-09-26T09:30:00Z",
+        lastSeenAt: null,
+        revokedAt: null,
+      },
+    ]);
+    host.listLines.mockResolvedValue([]);
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    fireEvent.click(await screen.findByRole("link", { name: "Устройства" }));
+    const row = (await screen.findByText("Рабочее место хоста")).closest("tr");
+    if (!row) throw new Error("no row for this PC");
+    expect(within(row).getByText("Этот ПК")).toBeTruthy();
+    expect(screen.getAllByText("Этот ПК")).toHaveLength(1);
   });
 });

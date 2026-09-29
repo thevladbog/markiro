@@ -1,6 +1,6 @@
 import type { DatabaseSync } from "node:sqlite";
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { LineSelect, type LineSelectProps } from "../src/app/LineSelect.js";
@@ -237,13 +237,33 @@ describe("LineSelect", () => {
     expect(screen.queryByText("Справочники не обновились — повторим автоматически")).toBeNull();
   });
 
-  it("shows no failure line while a retry runs with no lines listed yet", () => {
+  it("keeps the failure's own alert, and no second failure line, while a retry runs with no lines listed yet", () => {
     renderLineSelect(
       { kind: "running", synced: 0, failure: "host", quarantined: 0 },
       { link: { state: "online", lastContactAt: 1_790_000_000_000, lastError: null, seq: 1 } },
     );
-    expect(screen.getByText("Получаем справочники с хоста…")).toBeTruthy();
+    expect(screen.getByText("Не удалось получить справочники с хоста.")).toBeTruthy();
+    expect(screen.queryByText("Получаем справочники с хоста…")).toBeNull();
     expect(screen.queryByText("Справочники не обновились — повторим автоматически")).toBeNull();
+  });
+
+  it("announces a failed sync once: its alert stays mounted through the automatic retries", () => {
+    const failed: SyncState = { kind: "failed", synced: 0, failure: "host", quarantined: 0 };
+    const { props, view } = renderLineSelect(failed);
+    const alert = screen.getByRole("alert");
+    // The retry's run shows on the button instead of a spinner in the alert's place.
+    view.rerender(<LineSelect {...props} sync={{ ...failed, kind: "running" }} />);
+    expect(screen.getByRole("alert")).toBe(alert);
+    expect(within(alert).getByRole("button", { name: "Повторить" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    view.rerender(<LineSelect {...props} sync={failed} />);
+    expect(screen.getByRole("alert")).toBe(alert);
+    expect(within(alert).getByRole("button", { name: "Повторить" })).toHaveProperty(
+      "disabled",
+      false,
+    );
   });
 
   it("shows the failure line once lines are already listed, since nothing else reports it", async () => {

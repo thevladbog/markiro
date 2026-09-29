@@ -604,7 +604,10 @@ state how many feed records the copies did not accept (`quarantined`); the
 office header reads the sync state next to the link (`OfficeLinkProvider`).
 The line screen's alert names a failed sync by its class in the same words
 (its own host wording for `host`, `errors.sync.local` and `errors.sync.feed`
-otherwise) and a copy it cannot read as this computer's failure. There is no
+otherwise) and a copy it cannot read as this computer's failure. A failed
+sync's alert stays through the automatic retries, with «Повторить» showing
+the run in progress, until a sync succeeds: the alert is a live region, so
+a screen reader hears one failure once, not again at every retry. There is no
 blocking overlay while the host is away: office pages explain their own failed
 requests and offer a retry.
 
@@ -732,7 +735,12 @@ requests and offer a retry.
   (`deviceUpdate`): only an active line can be chosen, and a station's
   current line stays on the list even when archived. A revoked device is a
   dead record and offers no controls; revoking asks first, names the device
-  and says it cannot be undone, then the list is read again. A claim raises
+  and says it cannot be undone, then the list is read again. The row of this
+  PC — the device the office runs on, whose `deviceId` `App` passes into
+  `Office` (`useThisDeviceId`) — is marked «Этот ПК», and revoking it asks
+  more: the app on this PC disconnects and has to be paired again. Nothing
+  stops it; the host then refuses the key, and the shell shows the
+  rejected-device screen. A claim raises
   no revision, so the pairing-code dialog reads the list every 3 s
   (`DEVICE_POLL_MS`) and closes once a device paired after the code was
   created appears. «Новый код» sends the code on screen as `{ replaces }`
