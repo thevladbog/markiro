@@ -83,13 +83,28 @@ export function documentVatLabel(model: PrintDocumentModel): string {
   return rates.length === 0 ? "Без НДС" : `НДС ${rates.map((rate) => `${rate}%`).join(", ")}`;
 }
 
+const NPD_VAT_BASIS =
+  "Без НДС: Исполнитель применяет НПД; основание — часть 9 статьи 2 Федерального закона от 27.11.2018 № 422-ФЗ.";
+
+/** The statutory basis for «Без НДС», read from the seller tax policy frozen with the document. */
+export function documentVatBasis(model: PrintDocumentModel): string | null {
+  const policy = model.seller.taxPolicy;
+  return policy?.kind === "without_vat" &&
+    policy.regime === "npd" &&
+    documentVatLabel(model) === "Без НДС"
+    ? NPD_VAT_BASIS
+    : null;
+}
+
 export function paymentPurpose(model: PrintDocumentModel): string {
   const vat = Number(model.vatTotal);
   const label = documentVatLabel(model);
   const vatText =
     label !== "НДС"
       ? label === "Без НДС"
-        ? "Без НДС."
+        ? documentVatBasis(model)
+          ? "Без НДС (НПД)."
+          : "Без НДС."
         : `В том числе ${label} ${formatMoney(model.vatTotal)}.`
       : Number.isFinite(vat) && vat > 0
         ? `В том числе НДС ${formatMoney(model.vatTotal)}.`
@@ -241,7 +256,9 @@ export function profileIdentity(profile: BillingProfileSnapshot): string {
   return [
     profile.taxId ? `ИНН ${profile.taxId}` : null,
     profile.kpp ? `КПП ${profile.kpp}` : null,
-    profile.registrationId ? `ОГРН ${profile.registrationId}` : null,
+    profile.registrationId
+      ? `${profile.registrationKind === "ogrnip" ? "ОГРНИП" : "ОГРН"} ${profile.registrationId}`
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");

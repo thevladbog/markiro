@@ -1,14 +1,20 @@
-import type { CommercialLineTermsV4 } from "@markiro/platform-contracts";
-import type { BillingActServiceUsageSnapshot } from "@markiro/platform-contracts";
+import {
+  sellerTaxPolicySchema,
+  type BillingActServiceUsageSnapshot,
+  type CommercialLineTermsV4,
+  type SellerTaxPolicy,
+} from "@markiro/platform-contracts";
 import { commercialTermDescription, readStoredCommercialTerms } from "./commercial-line-terms";
 
 export type PrintDocumentKind = "invoice" | "offer" | "act";
+export type PrintRegistrationKind = "ogrn" | "ogrnip";
 
 export interface BillingProfileSnapshot {
   legalName?: string | null;
   taxId?: string | null;
   kpp?: string | null;
   registrationId?: string | null;
+  registrationKind?: PrintRegistrationKind | null;
   address?: string | null;
   bankAccount?: string | null;
   bankName?: string | null;
@@ -17,6 +23,8 @@ export interface BillingProfileSnapshot {
   currency?: string | null;
   phone?: string | null;
   email?: string | null;
+  /** Frozen with the seller snapshot; absent from buyer and pre-policy snapshots. */
+  taxPolicy?: SellerTaxPolicy | null;
   [key: string]: unknown;
 }
 
@@ -97,6 +105,25 @@ export function printSellerTaxId(profileValue: unknown): string | null {
   return optionalText(source.taxId, source.inn);
 }
 
+function registration(source: BillingProfileSnapshot): {
+  registrationId: string | null;
+  registrationKind: PrintRegistrationKind | null;
+} {
+  const unlabeled = optionalText(source.registrationId);
+  if (unlabeled) {
+    return {
+      registrationId: unlabeled,
+      registrationKind: source.kind === "sole_proprietor" ? "ogrnip" : "ogrn",
+    };
+  }
+  const ogrn = optionalText(source.ogrn);
+  if (ogrn) return { registrationId: ogrn, registrationKind: "ogrn" };
+  const ogrnip = optionalText(source.ogrnip);
+  return ogrnip
+    ? { registrationId: ogrnip, registrationKind: "ogrnip" }
+    : { registrationId: null, registrationKind: null };
+}
+
 const party = (profileValue: unknown, accountValue: unknown): BillingProfileSnapshot => {
   const source = profile(profileValue);
   const contact = record(source.contact);
@@ -107,7 +134,7 @@ const party = (profileValue: unknown, accountValue: unknown): BillingProfileSnap
     legalName: optionalText(source.legalName, source.fullName),
     taxId: printSellerTaxId(source),
     kpp: optionalText(source.kpp),
-    registrationId: optionalText(source.registrationId, source.ogrn, source.ogrnip),
+    ...registration(source),
     address: optionalText(source.address, source.legalAddressRaw),
     bankAccount: optionalText(source.bankAccount, account.settlementAccount),
     bankName: optionalText(source.bankName, account.bankName),
@@ -116,6 +143,7 @@ const party = (profileValue: unknown, accountValue: unknown): BillingProfileSnap
     currency: optionalText(source.currency, account.currency),
     phone: optionalText(source.phone, contact.phone),
     email: optionalText(source.email, contact.email),
+    taxPolicy: source.taxPolicy == null ? null : sellerTaxPolicySchema.parse(source.taxPolicy),
   };
 };
 

@@ -10,6 +10,7 @@ import type {
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { BillingService } from "../src/modules/billing/billing.service";
+import { documentVatBasis, paymentPurpose } from "../src/modules/billing/print-document-layout";
 import {
   toInvoicePrintModel,
   toOfferPrintModel,
@@ -215,7 +216,12 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
     expect(invoicePrintBefore.seller).toMatchObject({
       legalName: "ООО Маркиро",
       bankAccount: "40702810900000000001",
+      registrationKind: "ogrn",
+      taxPolicy: { kind: "without_vat", regime: "other" },
     });
+    expect(offerPrintBefore.seller.taxPolicy).toEqual({ kind: "without_vat", regime: "other" });
+    expect(documentVatBasis(toInvoicePrintModel(invoiceAfter))).toBeNull();
+    expect(paymentPurpose(toInvoicePrintModel(invoiceAfter))).toMatch(/ Без НДС\.$/);
     expect(offerPrintBefore.buyer).toMatchObject({
       legalName: "ООО Покупатель",
       bankAccount: "40702810900000000002",
@@ -276,11 +282,10 @@ describe.skipIf(!databaseUrl)("commercial document account snapshots", () => {
       .update(schema.operatorBillingProfiles)
       .set({ isCurrent: false })
       .where(eq(schema.operatorBillingProfiles.isCurrent, true));
-    await connection.db
-      .insert(schema.operatorBillingProfiles)
-      .values(
-        sellerProfileValues(2, "ООО Маркиро Новое", "7707083893", "773601001", "1027700132195"),
-      );
+    await connection.db.insert(schema.operatorBillingProfiles).values({
+      ...sellerProfileValues(2, "ООО Маркиро Новое", "7707083893", "773601001", "1027700132195"),
+      taxPolicy: { kind: "without_vat", regime: "npd" },
+    });
     await connection.db
       .update(schema.tenantBillingProfiles)
       .set({ isCurrent: false })
