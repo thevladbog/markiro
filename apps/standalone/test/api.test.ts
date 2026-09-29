@@ -5,10 +5,14 @@ import { describe, expect, it } from "vitest";
 import { createHostApi, type HostApi } from "../src/host/api.js";
 import type { HostClient, HttpMethod } from "../src/host/client.js";
 import {
+  badgeCreateSchema,
   counterpartyCreateSchema,
   counterpartyUpdateSchema,
   deviceUpdateSchema,
   lineUpdateSchema,
+  officeOperatorSchema,
+  operatorCreateSchema,
+  operatorUpdateSchema,
   orgProfileUpdateSchema,
   pairingCodeRequestSchema,
 } from "../src/host/protocol.js";
@@ -50,6 +54,11 @@ const COUNTERPARTY_UPDATE = counterpartyUpdateSchema.parse(fixture("counterparty
 const LINE_UPDATE = lineUpdateSchema.parse(fixture("line-update.json"));
 const DEVICE_UPDATE = deviceUpdateSchema.parse(fixture("device-update.json"));
 const PAIRING_CODE_REQUEST = pairingCodeRequestSchema.parse(fixture("pairing-code-request.json"));
+const OPERATOR = officeOperatorSchema.parse(fixture("office-operator.json"));
+const OPERATOR_CREATE = operatorCreateSchema.parse(fixture("operator-create.json"));
+const OPERATOR_UPDATE = operatorUpdateSchema.parse(fixture("operator-update.json"));
+const BADGE_CREATE = badgeCreateSchema.parse(fixture("badge-create.json"));
+const BADGE_ID = "c4e2a1b3-5d6f-4a8b-9c0d-1e2f3a4b5c6d";
 
 type Case = [
   name: string,
@@ -221,6 +230,46 @@ const CASES: Case[] = [
     fixture("office-line.json"),
     (api) => api.updateLine(TOKEN, LINE_ID, LINE_UPDATE),
     { method: "PUT", path: `/v1/office/lines/${LINE_ID}`, body: LINE_UPDATE },
+  ],
+  [
+    "listOperators",
+    [fixture("office-operator.json")],
+    (api) => api.listOperators(TOKEN),
+    { method: "GET", path: "/v1/office/operators", body: undefined },
+  ],
+  [
+    "createOperator",
+    fixture("office-operator.json"),
+    (api) => api.createOperator(TOKEN, OPERATOR_CREATE),
+    { method: "POST", path: "/v1/office/operators", body: OPERATOR_CREATE },
+  ],
+  [
+    "updateOperator",
+    fixture("office-operator.json"),
+    (api) => api.updateOperator(TOKEN, OPERATOR.id, OPERATOR_UPDATE),
+    { method: "PUT", path: `/v1/office/operators/${OPERATOR.id}`, body: OPERATOR_UPDATE },
+  ],
+  [
+    "createBadge",
+    OPERATOR.badges[1],
+    (api) => api.createBadge(TOKEN, OPERATOR.id, BADGE_CREATE),
+    { method: "POST", path: `/v1/office/operators/${OPERATOR.id}/badges`, body: BADGE_CREATE },
+  ],
+  [
+    "revokeBadge",
+    null,
+    (api) => api.revokeBadge(TOKEN, OPERATOR.id, BADGE_ID),
+    {
+      method: "DELETE",
+      path: `/v1/office/operators/${OPERATOR.id}/badges/${BADGE_ID}`,
+      body: undefined,
+    },
+  ],
+  [
+    "getBadgeSalt",
+    fixture("badge-salt.json"),
+    (api) => api.getBadgeSalt(TOKEN),
+    { method: "GET", path: "/v1/office/badge-salt", body: undefined },
   ],
   [
     "setUserPassword",

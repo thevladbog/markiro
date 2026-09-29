@@ -57,6 +57,12 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     listLines: vi.fn<HostApi["listLines"]>(() => unexpected("listLines")),
     createLine: vi.fn<HostApi["createLine"]>(() => unexpected("createLine")),
     updateLine: vi.fn<HostApi["updateLine"]>(() => unexpected("updateLine")),
+    listOperators: vi.fn<HostApi["listOperators"]>(() => unexpected("listOperators")),
+    createOperator: vi.fn<HostApi["createOperator"]>(() => unexpected("createOperator")),
+    updateOperator: vi.fn<HostApi["updateOperator"]>(() => unexpected("updateOperator")),
+    createBadge: vi.fn<HostApi["createBadge"]>(() => unexpected("createBadge")),
+    revokeBadge: vi.fn<HostApi["revokeBadge"]>(() => unexpected("revokeBadge")),
+    getBadgeSalt: vi.fn<HostApi["getBadgeSalt"]>(() => unexpected("getBadgeSalt")),
     ...overrides,
   };
 }

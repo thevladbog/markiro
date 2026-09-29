@@ -1,4 +1,5 @@
 import type {
+  BadgeCreate,
   CounterpartyCreate,
   CounterpartyUpdate,
   DeviceRecord,
@@ -6,6 +7,9 @@ import type {
   LineCreate,
   LineUpdate,
   OfficeLine,
+  OfficeOperator,
+  OperatorCreate,
+  OperatorUpdate,
   PairingCodeRequest,
 } from "./protocol.js";
 
@@ -112,4 +116,69 @@ export function deviceUpdate(
  */
 export function pairingCodeRequest(replaces: string): PairingCodeRequest {
   return { replaces };
+}
+
+/**
+ * A new operator: the trimmed values the form accepted, `role: null` for
+ * none (`toOptionalText`), and the PIN's hash (`hashPin`), never the PIN.
+ */
+export interface OperatorInput {
+  login: string;
+  name: string;
+  role: string | null;
+  pinPhc: string;
+}
+
+/** `POST /v1/office/operators` (`operator-create.json`). */
+export function operatorCreate(operator: OperatorInput): OperatorCreate {
+  return {
+    login: operator.login,
+    name: operator.name,
+    role: operator.role,
+    pinPhc: operator.pinPhc,
+  };
+}
+
+/**
+ * What an operator is to become; a field left out stays as it is. `name` and
+ * `role` are the trimmed values the form accepted (`role: null` for none);
+ * `pinPhc` is a new PIN's hash.
+ */
+export interface OperatorChange {
+  name?: string;
+  role?: string | null;
+  active?: boolean;
+  pinPhc?: string;
+}
+
+/**
+ * `PUT /v1/office/operators/{id}` (`operator-update.json`): only the fields
+ * that differ from the loaded operator, with its revision; `role: null`
+ * clears the role. A new PIN's hash always goes: its fresh salt makes every
+ * hash differ, and the host keeps no PIN to compare with.
+ */
+export function operatorUpdate(
+  operator: Pick<OfficeOperator, "name" | "role" | "active" | "rev">,
+  next: OperatorChange,
+): OperatorUpdate {
+  const update: OperatorUpdate = { expectedRev: operator.rev };
+  if (next.name !== undefined && next.name !== operator.name) update.name = next.name;
+  if (next.role !== undefined && next.role !== operator.role) update.role = next.role;
+  if (next.active !== undefined && next.active !== operator.active) update.active = next.active;
+  if (next.pinPhc !== undefined) update.pinPhc = next.pinPhc;
+  return update;
+}
+
+/**
+ * A new badge: the code's hash under the site's salt (`hashBadge`), never the
+ * code, and the trimmed label, `null` for none.
+ */
+export interface BadgeInput {
+  badgePhc: string;
+  label: string | null;
+}
+
+/** `POST /v1/office/operators/{id}/badges` (`badge-create.json`). */
+export function badgeCreate(badge: BadgeInput): BadgeCreate {
+  return { badgePhc: badge.badgePhc, label: badge.label };
 }

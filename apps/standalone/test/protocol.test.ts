@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  badgeCreateSchema,
+  badgeSaltSchema,
   blockSizesUpdateSchema,
   bootstrapRequestSchema,
   bootstrapResponseSchema,
@@ -21,11 +23,14 @@ import {
   lineUpdateSchema,
   officeLineSchema,
   officeLoginRequestSchema,
+  officeOperatorSchema,
   officeSessionSchema,
   officeUserCreateSchema,
   officeUserRecordSchema,
   officeUserSchema,
   officeUserUpdateSchema,
+  operatorCreateSchema,
+  operatorUpdateSchema,
   orgProfileSchema,
   orgProfileUpdateSchema,
   orgRecordSchema,
@@ -38,11 +43,14 @@ import {
   ssccStateSchema,
 } from "../src/host/protocol.js";
 import {
+  badgeCreate,
   counterpartyCreate,
   counterpartyUpdate,
   deviceUpdate,
   lineCreate,
   lineUpdate,
+  operatorCreate,
+  operatorUpdate,
   pairingCodeRequest,
 } from "../src/host/requests.js";
 
@@ -130,6 +138,8 @@ const RESPONSES = [
   ["changes-response.json", changesResponseSchema],
   ["counterparty-record.json", counterpartyRecordSchema],
   ["office-line.json", officeLineSchema],
+  ["office-operator.json", officeOperatorSchema],
+  ["badge-salt.json", badgeSaltSchema],
 ] as const;
 
 const REQUESTS = [
@@ -148,6 +158,9 @@ const REQUESTS = [
   ["line-update.json", lineUpdateSchema],
   ["device-update.json", deviceUpdateSchema],
   ["pairing-code-request.json", pairingCodeRequestSchema],
+  ["operator-create.json", operatorCreateSchema],
+  ["operator-update.json", operatorUpdateSchema],
+  ["badge-create.json", badgeCreateSchema],
 ] as const;
 
 function extended(name: string): Record<string, unknown> {
@@ -219,6 +232,24 @@ describe("request builders produce their fixtures exactly", () => {
     const code = pairingCodeSchema.parse(fixture("pairing-code.json"));
     expect(pairingCodeRequest(code.id)).toStrictEqual(fixture("pairing-code-request.json"));
   });
+
+  it("an operator to create, and one to update that clears the role, turns off and gets a new PIN", () => {
+    const { pinPhc } = operatorCreateSchema.parse(fixture("operator-create.json"));
+    expect(
+      operatorCreate({ login: "0042", name: "Анна Кузнецова", role: "Упаковщик", pinPhc }),
+    ).toStrictEqual(fixture("operator-create.json"));
+    const operator = officeOperatorSchema.parse(fixture("office-operator.json"));
+    expect(
+      operatorUpdate({ ...operator, role: "Упаковщик" }, { role: null, active: false, pinPhc }),
+    ).toStrictEqual(fixture("operator-update.json"));
+  });
+
+  it("a badge to add", () => {
+    const { badgePhc } = badgeCreateSchema.parse(fixture("badge-create.json"));
+    expect(badgeCreate({ badgePhc, label: "Пропуск №7" })).toStrictEqual(
+      fixture("badge-create.json"),
+    );
+  });
 });
 
 describe("request builders send only what changes", () => {
@@ -256,6 +287,32 @@ describe("request builders send only what changes", () => {
     expect(
       deviceUpdate({ kind: "office", name: "Офис", lineId: null }, { name: "Офис", lineId: other }),
     ).toStrictEqual({});
+  });
+
+  it("names only the operator fields that differ, clears a role with null and always sends a new PIN", () => {
+    const anna = { name: "Анна Кузнецова", role: "Упаковщик", active: true, rev: 55 };
+    const pinPhc = "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$new";
+    expect(operatorUpdate(anna, { name: "Анна Кузнецова", role: "Упаковщик" })).toStrictEqual({
+      expectedRev: 55,
+    });
+    expect(operatorUpdate(anna, { name: "Анна Петрова", role: "Упаковщик" })).toStrictEqual({
+      name: "Анна Петрова",
+      expectedRev: 55,
+    });
+    expect(operatorUpdate(anna, { name: "Анна Кузнецова", role: null })).toStrictEqual({
+      role: null,
+      expectedRev: 55,
+    });
+    expect(operatorUpdate({ ...anna, role: null }, { role: "Наладчик" })).toStrictEqual({
+      role: "Наладчик",
+      expectedRev: 55,
+    });
+    expect(operatorUpdate(anna, { active: false })).toStrictEqual({
+      active: false,
+      expectedRev: 55,
+    });
+    expect(operatorUpdate(anna, { active: true })).toStrictEqual({ expectedRev: 55 });
+    expect(operatorUpdate(anna, { pinPhc })).toStrictEqual({ pinPhc, expectedRev: 55 });
   });
 
   it("copies the prefix list rather than handing over the caller's array", () => {

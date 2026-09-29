@@ -264,6 +264,36 @@ export const officeLineSchema = z.object({
 });
 export type OfficeLine = z.infer<typeof officeLineSchema>;
 
+/** A badge as the administrator sees it: never its hash; revoked badges stay listed with `revokedAt`. */
+export const badgeInfoSchema = z.object({
+  id: z.uuid(),
+  label: z.string().nullable(),
+  createdAt: z.iso.datetime(),
+  revokedAt: z.iso.datetime().nullable(),
+});
+export type BadgeInfo = z.infer<typeof badgeInfoSchema>;
+
+/**
+ * `GET /v1/office/operators`: an operator as the administrator sees it,
+ * `hasPin` and the badges' details instead of any hash. `login` is the
+ * personnel number, text with its leading zeros.
+ */
+export const officeOperatorSchema = z.object({
+  id: z.uuid(),
+  login: z.string(),
+  name: z.string(),
+  role: z.string().nullable(),
+  active: z.boolean(),
+  hasPin: z.boolean(),
+  badges: z.array(badgeInfoSchema),
+  rev: z.number().int(),
+});
+export type OfficeOperator = z.infer<typeof officeOperatorSchema>;
+
+/** `GET /v1/office/badge-salt`: the site's badge salt, 16 bytes in standard base64 with padding. */
+export const badgeSaltSchema = z.object({ badgeSalt: z.base64().length(24) });
+export type BadgeSalt = z.infer<typeof badgeSaltSchema>;
+
 // --- Request bodies (strict) ---
 
 export const officeLoginRequestSchema = z
@@ -401,3 +431,33 @@ export type DeviceUpdate = z.infer<typeof deviceUpdateSchema>;
 /** The optional body of `POST /v1/office/pairing-codes`: the code «Новый код» replaces. */
 export const pairingCodeRequestSchema = z.object({ replaces: z.uuid().optional() }).strict();
 export type PairingCodeRequest = z.infer<typeof pairingCodeRequestSchema>;
+
+/**
+ * `POST /v1/office/operators`: the PIN's hash, never the PIN; the office
+ * always sends `role`, `null` for none.
+ */
+export const operatorCreateSchema = z
+  .object({ login: z.string(), name: z.string(), role: z.string().nullable(), pinPhc: z.string() })
+  .strict();
+export type OperatorCreate = z.infer<typeof operatorCreateSchema>;
+
+/** `PUT /v1/office/operators/{id}`: only the fields sent change; `role: null` clears the role. */
+export const operatorUpdateSchema = z
+  .object({
+    name: z.string().optional(),
+    role: z.string().nullable().optional(),
+    active: z.boolean().optional(),
+    pinPhc: z.string().optional(),
+    expectedRev: z.number().int(),
+  })
+  .strict();
+export type OperatorUpdate = z.infer<typeof operatorUpdateSchema>;
+
+/**
+ * `POST /v1/office/operators/{id}/badges`: the badge code's hash under the
+ * site's salt, never the code; the office always sends `label`, `null` for none.
+ */
+export const badgeCreateSchema = z
+  .object({ badgePhc: z.string(), label: z.string().nullable() })
+  .strict();
+export type BadgeCreate = z.infer<typeof badgeCreateSchema>;

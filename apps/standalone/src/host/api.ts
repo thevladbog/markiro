@@ -2,11 +2,14 @@ import { z } from "zod";
 
 import type { HostClient } from "./client.js";
 import {
+  badgeInfoSchema,
+  badgeSaltSchema,
   bootstrapResponseSchema,
   changesResponseSchema,
   counterpartyRecordSchema,
   deviceRecordSchema,
   officeLineSchema,
+  officeOperatorSchema,
   officeSessionSchema,
   officeUserRecordSchema,
   officeUserSchema,
@@ -14,6 +17,9 @@ import {
   pairingCodeSchema,
   ssccCounterSchema,
   ssccStateSchema,
+  type BadgeCreate,
+  type BadgeInfo,
+  type BadgeSalt,
   type BlockSizesUpdate,
   type BootstrapRequest,
   type BootstrapResponse,
@@ -27,11 +33,14 @@ import {
   type LineUpdate,
   type OfficeLine,
   type OfficeLoginRequest,
+  type OfficeOperator,
   type OfficeSession,
   type OfficeUser,
   type OfficeUserCreate,
   type OfficeUserRecord,
   type OfficeUserUpdate,
+  type OperatorCreate,
+  type OperatorUpdate,
   type OrgProfile,
   type OrgProfileUpdate,
   type PairingCode,
@@ -96,6 +105,15 @@ export interface HostApi {
   listLines: (token: string) => Promise<OfficeLine[]>;
   createLine: (token: string, create: LineCreate) => Promise<OfficeLine>;
   updateLine: (token: string, id: string, update: LineUpdate) => Promise<OfficeLine>;
+  listOperators: (token: string) => Promise<OfficeOperator[]>;
+  createOperator: (token: string, create: OperatorCreate) => Promise<OfficeOperator>;
+  updateOperator: (token: string, id: string, update: OperatorUpdate) => Promise<OfficeOperator>;
+  /** Answers the new badge, not its operator: a badge is a record of its own. */
+  createBadge: (token: string, operatorId: string, create: BadgeCreate) => Promise<BadgeInfo>;
+  /** `204`; revoking a badge that is already revoked changes nothing. */
+  revokeBadge: (token: string, operatorId: string, badgeId: string) => Promise<void>;
+  /** The site's badge salt; `not_found` before the wizard created it. */
+  getBadgeSalt: (token: string) => Promise<BadgeSalt>;
 }
 
 /** A 204 answer parses as `null`. */
@@ -225,6 +243,40 @@ export function createHostApi(client: HostClient): HostApi {
         body: update,
         officeToken: token,
         schema: officeLineSchema,
+      }),
+    listOperators: (token) =>
+      client.request("GET", "/v1/office/operators", {
+        officeToken: token,
+        schema: z.array(officeOperatorSchema),
+      }),
+    createOperator: (token, create) =>
+      client.request("POST", "/v1/office/operators", {
+        body: create,
+        officeToken: token,
+        schema: officeOperatorSchema,
+      }),
+    updateOperator: (token, id, update) =>
+      client.request("PUT", `/v1/office/operators/${id}`, {
+        body: update,
+        officeToken: token,
+        schema: officeOperatorSchema,
+      }),
+    createBadge: (token, operatorId, create) =>
+      client.request("POST", `/v1/office/operators/${operatorId}/badges`, {
+        body: create,
+        officeToken: token,
+        schema: badgeInfoSchema,
+      }),
+    revokeBadge: async (token, operatorId, badgeId) => {
+      await client.request("DELETE", `/v1/office/operators/${operatorId}/badges/${badgeId}`, {
+        officeToken: token,
+        schema: NO_CONTENT,
+      });
+    },
+    getBadgeSalt: (token) =>
+      client.request("GET", "/v1/office/badge-salt", {
+        officeToken: token,
+        schema: badgeSaltSchema,
       }),
   };
 }
