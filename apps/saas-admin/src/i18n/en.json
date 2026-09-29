@@ -385,6 +385,12 @@
     }
   },
   "offers": {
+    "createOfflineTenant": {
+      "button": "Create tenant without cabinet",
+      "title": "Tenant without cabinet",
+      "hint": "No owner, email, or demo is created; fill in the requisites on the tenant card.",
+      "submit": "Create tenant"
+    },
     "title": "Commercial offers",
     "description": "Commercial terms before an invoice is issued.",
     "registryEyebrow": "Sales pipeline",

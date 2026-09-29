@@ -9,6 +9,7 @@ import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { useNavigationGuard } from "../../layout/NavigationGuard.js";
 import { listCatalogVersions } from "../catalog/api.js";
+import { CreateOfflineTenantDialog } from "./CreateOfflineTenantDialog.js";
 import { DocumentComposer } from "../documents/DocumentComposer.js";
 import { toOfferCreateInput, type DocumentDraft } from "../documents/documentDraft.js";
 import {
@@ -44,6 +45,7 @@ export function CreateOfferPage() {
 
 function OfferEditor({ forbidden, onForbidden }: { forbidden: boolean; onForbidden: () => void }) {
   const { t } = useTranslation();
+  const principal = usePlatformPrincipal();
   const navigate = useNavigate();
   const client = useQueryClient();
   const { requestId } = useParams();
@@ -326,8 +328,20 @@ function OfferEditor({ forbidden, onForbidden }: { forbidden: boolean; onForbidd
     );
   }
 
+  const canCreateTenant =
+    requestId === undefined &&
+    principal.role !== "accountant" &&
+    principal.capabilities.includes("tenants.write");
+
   return (
     <div className="offer-editor">
+      {canCreateTenant ? (
+        <CreateOfflineTenantDialog
+          onCreated={(tenantId) =>
+            void navigate(`/offers/new?tenantId=${tenantId}`, { replace: true })
+          }
+        />
+      ) : null}
       <DocumentComposer
         kind="offer"
         initialDraft={initialDraft}
