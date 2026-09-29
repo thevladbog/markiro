@@ -2139,6 +2139,7 @@
       "commercial_plan_quantity_invalid": "Количество тарифа должно быть равно 1.",
       "commercial_amount_out_of_range": "Сумма строки, налога или документа превышает допустимый предел. Уменьшите цену или количество.",
       "commercial_line_terms_invalid": "Проверьте предмет продажи и срок лицензии.",
+      "catalog_kind_not_allowed_for_offline_tenant": "У тенанта нет кабинета: ему можно продать только услуги.",
       "commercial_subject_required": "Укажите предмет продажи.",
       "document_name_required": "Укажите название для документов."
     }

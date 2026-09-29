@@ -2137,6 +2137,7 @@
       "commercial_plan_quantity_invalid": "A plan quantity must be 1.",
       "commercial_amount_out_of_range": "A line, tax or document amount exceeds the supported limit. Reduce the price or quantity.",
       "commercial_line_terms_invalid": "Review the commercial subject and license period.",
+      "catalog_kind_not_allowed_for_offline_tenant": "This tenant has no cabinet: only services can be ordered for it.",
       "commercial_subject_required": "Select the commercial subject.",
       "document_name_required": "Enter the document name."
     }
