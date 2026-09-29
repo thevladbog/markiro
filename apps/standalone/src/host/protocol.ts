@@ -290,8 +290,19 @@ export const officeOperatorSchema = z.object({
 });
 export type OfficeOperator = z.infer<typeof officeOperatorSchema>;
 
+/**
+ * A canonical 16-byte salt: standard base64 with padding, 22 characters and
+ * `==`. Those 22 characters hold 132 bits for 128 of data, so the last one
+ * carries 2 data bits and 4 zero ones: it is `A`, `Q`, `g` or `w`. This is the
+ * host's `decode_canonical` (`secrets::parse_phc`), which refuses anything
+ * else, and `hashBadge` embeds the salt verbatim, so a salt that only looks
+ * like base64 (unpadded, 17 or 18 bytes, stray bits) would make the host refuse
+ * every badge hash as `validation_failed`.
+ */
+export const canonicalSaltSchema = z.string().regex(/^[A-Za-z0-9+/]{21}[AQgw]==$/);
+
 /** `GET /v1/office/badge-salt`: the site's badge salt, 16 bytes in standard base64 with padding. */
-export const badgeSaltSchema = z.object({ badgeSalt: z.base64().length(24) });
+export const badgeSaltSchema = z.object({ badgeSalt: canonicalSaltSchema });
 export type BadgeSalt = z.infer<typeof badgeSaltSchema>;
 
 // --- Request bodies (strict) ---

@@ -8,6 +8,7 @@ import {
   blockSizesUpdateSchema,
   bootstrapRequestSchema,
   bootstrapResponseSchema,
+  canonicalSaltSchema,
   changesResponseSchema,
   counterpartyCreateSchema,
   counterpartyRecordSchema,
@@ -184,6 +185,90 @@ describe.each(REQUESTS)("request fixture %s", (name, schema) => {
 
   it("rejects an unknown field, like the host", () => {
     expect(schema.safeParse(extended(name)).success).toBe(false);
+  });
+});
+
+// The site's badge salt: `hashBadge` embeds it verbatim, and the host refuses a
+// badge hash under a salt that is not canonical (`decode_canonical` behind
+// `secrets::parse_phc`): standard base64 with padding that holds exactly 16
+// bytes and encodes back to the same text. The rule has two entry points, the
+// response schema of `GET /v1/office/badge-salt` and the constant it is built
+// from; both are held to a reference (`isCanonicalSalt`) that restates it.
+const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/** A canonical salt whose bytes put both `+` and `/` in its base64 text. */
+const SALT_WITH_PLUS_AND_SLASH = "++++////++++////++++/w==";
+
+/**
+ * The last data character of a canonical 16-byte salt: 22 characters hold 132
+ * bits for 128 of data, so the last carries 2 data bits and 4 zero ones, which
+ * leaves alphabet positions 0, 16, 32 and 48.
+ */
+const LAST_DATA_CHARACTERS = "AQgw";
+
+/** The host's `decode_canonical` for a salt: 16 bytes that encode back to the same text. */
+function isCanonicalSalt(text: string): boolean {
+  try {
+    const bytes = atob(text);
+    return bytes.length === 16 && btoa(bytes) === text;
+  } catch {
+    return false;
+  }
+}
+
+/** The standard base64 of the bytes 0, 1, 2 and so on: `count` of them. */
+function saltOfBytes(count: number): string {
+  return btoa(String.fromCharCode(...Array.from({ length: count }, (_, byte) => byte)));
+}
+
+const SALT_CHECKS = [
+  ["badgeSaltSchema", (salt: string) => badgeSaltSchema.safeParse({ badgeSalt: salt }).success],
+  ["canonicalSaltSchema", (salt: string) => canonicalSaltSchema.safeParse(salt).success],
+] as const;
+
+describe.each(SALT_CHECKS)("%s takes only a canonical 16-byte salt", (_name, accepts) => {
+  it("takes the salt of the fixture, and a salt with + and /", () => {
+    const { badgeSalt } = fixture("badge-salt.json") as { badgeSalt: string };
+    expect(accepts(badgeSalt), badgeSalt).toBe(true);
+    expect(accepts(SALT_WITH_PLUS_AND_SLASH), SALT_WITH_PLUS_AND_SLASH).toBe(true);
+  });
+
+  it.each([
+    ["24 characters without padding (18 bytes)", saltOfBytes(18)],
+    ["23 characters and one = (17 bytes)", saltOfBytes(17)],
+    ["a last data character with stray bits (x for w)", "AAECAwQFBgcICQoLDA0ODx=="],
+    ["a - where the standard alphabet has a +", SALT_WITH_PLUS_AND_SLASH.replaceAll("+", "-")],
+    ["a _ where the standard alphabet has a /", SALT_WITH_PLUS_AND_SLASH.replaceAll("/", "_")],
+    ["15 bytes", saltOfBytes(15)],
+    ["32 bytes", saltOfBytes(32)],
+    ["nothing", ""],
+  ])("refuses %s", (_what, salt) => {
+    expect(accepts(salt), salt).toBe(false);
+    expect(isCanonicalSalt(salt), salt).toBe(false);
+  });
+
+  it("takes A, Q, g and w as the last data character and no other", () => {
+    const prefix = "AAECAwQFBgcICQoLDA0OD";
+    const taken = [...BASE64_ALPHABET].filter((last) => accepts(`${prefix}${last}==`));
+    expect(taken).toStrictEqual([...LAST_DATA_CHARACTERS]);
+    for (const last of BASE64_ALPHABET) {
+      const salt = `${prefix}${last}==`;
+      expect(accepts(salt), salt).toBe(isCanonicalSalt(salt));
+    }
+  });
+
+  it("agrees with the reference on 200 random salts and on each one with a stray bit", () => {
+    const strays = [...BASE64_ALPHABET]
+      .filter((character) => !LAST_DATA_CHARACTERS.includes(character))
+      .join("");
+    for (let round = 0; round < 200; round++) {
+      const salt = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
+      expect(isCanonicalSalt(salt), salt).toBe(true);
+      expect(accepts(salt), salt).toBe(true);
+      const spoiled = `${salt.slice(0, 21)}${strays.charAt(round % strays.length)}==`;
+      expect(isCanonicalSalt(spoiled), spoiled).toBe(false);
+      expect(accepts(spoiled), spoiled).toBe(false);
+    }
   });
 });
 
