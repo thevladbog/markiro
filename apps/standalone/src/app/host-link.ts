@@ -2,14 +2,14 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { HostError } from "../host/client.js";
 import type { ConnectionApi } from "../host/connection.js";
-import type { ChangesResponse } from "../host/protocol.js";
+import type { ChangesResponse, DeviceStatus } from "../host/protocol.js";
 import { LocalDbError, type LocalExecutor } from "../local/executor.js";
 import {
   createSyncScheduler,
   readQuarantineCount,
   syncReferences,
 } from "../local/reference-sync.js";
-import { shellActionFor, type ShellAction, type SyncFailure } from "./shell.js";
+import { deviceRejection, shellActionFor, type ShellAction, type SyncFailure } from "./shell.js";
 
 /** The waits before the first retries of a failed sync, in milliseconds. */
 const RETRY_MS = [2000, 4000, 8000, 16000, 32000] as const;
@@ -47,6 +47,8 @@ export interface HostLinkOptions {
   local: LocalExecutor;
   /** `HostApi.getChanges`. */
   changes: (since: number) => Promise<ChangesResponse>;
+  /** `DeviceApi.refresh`: this device's record, read again with the office's line. */
+  refresh: () => Promise<DeviceStatus>;
   dispatch: (action: ShellAction) => void;
 }
 
@@ -57,14 +59,17 @@ export interface HostLinkOptions {
  * reconnect carries the host's current revision, so catching up needs
  * nothing more. A failed run — not another host, not a rejected device — is
  * retried while the link is online, after `nextSyncRetryMs`; a lost link
- * drops the pending retry, and the link coming back syncs at once. Returns
- * a function that asks for a sync now.
+ * drops the pending retry, and the link coming back syncs at once. At the
+ * same moments it reads this device's record again (`refresh`): a line the
+ * office assigns takes a revision but no feed item, so only the record
+ * carries it. Returns a function that asks for a sync now.
  */
 export function useHostLink({
   hostId,
   connection,
   local,
   changes,
+  refresh,
   dispatch,
 }: HostLinkOptions): () => void {
   const syncNow = useRef<() => void>(() => undefined);
@@ -102,6 +107,7 @@ export function useHostLink({
           // also stops the scheduler) only runs after React re-renders with
           // `hostId: null`, and that is later than this microtask chain.
           scheduler.stop();
+          refresher.stop();
         }
         dispatch({ type: "sync_finished", result });
       } catch (error) {
@@ -112,6 +118,7 @@ export function useHostLink({
           // Same reasoning as above: nothing more should reach a host that
           // just refused this device's key or presented another certificate.
           scheduler.stop();
+          refresher.stop();
           dispatch(action);
         }
         // Worth reading only when nothing else is about to reset the sync
@@ -132,6 +139,27 @@ export function useHostLink({
         }
       } finally {
         running = false;
+      }
+    });
+    // One read of this device at a time; events during a read ask for
+    // exactly one more, as for the sync.
+    const refresher = createSyncScheduler(async () => {
+      if (!active) return;
+      try {
+        const status = await refresh();
+        if (active) dispatch({ type: "device_refreshed", status });
+      } catch (error) {
+        if (!active) return;
+        // A refused key or a changed certificate needs a new pairing, as on
+        // every other host path. Anything else — the host away, a failed
+        // write of `device.json` — keeps the line this station already has
+        // (offline first), and the next event tries again.
+        const reason = deviceRejection(error);
+        if (reason !== null) {
+          scheduler.stop();
+          refresher.stop();
+          dispatch({ type: "device_rejected", reason });
+        }
       }
     });
     syncNow.current = scheduler.trigger;
@@ -156,6 +184,7 @@ export function useHostLink({
           if (!active) return;
           dispatch({ type: "host_revision", rev });
           scheduler.trigger();
+          refresher.trigger();
         },
       })
       .then(
@@ -169,19 +198,23 @@ export function useHostLink({
           // not replayed, so a sync started earlier could miss a commit that
           // landed between its fetch and the listener.
           scheduler.trigger();
+          refresher.trigger();
         },
         () => {
           // Without events the copies still sync once here and on request.
-          if (active) scheduler.trigger();
+          if (!active) return;
+          scheduler.trigger();
+          refresher.trigger();
         },
       );
     return () => {
       active = false;
       syncNow.current = () => undefined;
       scheduler.stop();
+      refresher.stop();
       cancelRetry();
       unwatch?.();
     };
-  }, [hostId, connection, local, changes, dispatch]);
+  }, [hostId, connection, local, changes, refresh, dispatch]);
   return useCallback(() => syncNow.current(), []);
 }

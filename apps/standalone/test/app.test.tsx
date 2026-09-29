@@ -145,6 +145,11 @@ function fakeDevice(
       paired = null;
       broken = null;
     }),
+    // The host's record of the device: by default what the shell keeps.
+    refresh: vi.fn<DeviceApi["refresh"]>(async () => {
+      if (!paired) throw new DeviceError("not_paired", "not paired");
+      return paired;
+    }),
   };
 }
 
@@ -1338,5 +1343,115 @@ describe("reference sync health on screen", () => {
     await signIn();
     await screen.findByText("Вы вошли как Ирина Смирнова.");
     expect(screen.getByText("Не приняты записи справочников: 1")).toBeTruthy();
+  });
+});
+
+describe("the line the office assigns", () => {
+  /** Lets every pending effect and timer task settle. */
+  async function settle(): Promise<void> {
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+
+  it("goes back to choosing a line when the office clears it, and on when the office sets one", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    const host = fakeHost();
+    host.getChanges.mockResolvedValue(feedPage(42, [lineItem(42, "Линия 1")]));
+    renderApp({ probe: probeAnswering(true), device, host, connection: link.connection });
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
+
+    device.refresh.mockResolvedValueOnce(NEW_STATION);
+    await link.revision(43);
+    expect(await screen.findByText("Выбор линии")).toBeTruthy();
+
+    device.refresh.mockResolvedValueOnce(DEVICE_STATUS);
+    await link.revision(44);
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(device.selectLine).not.toHaveBeenCalled();
+  });
+
+  it("reads the device once after the first sync and once per revision, one read at a time", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: fakeHost(),
+      connection: link.connection,
+    });
+    await screen.findByText("Цех");
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(device.refresh).toHaveBeenCalledTimes(1);
+
+    let answer: (status: DeviceStatus) => void = () => undefined;
+    device.refresh.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    await link.revision(43);
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(2));
+    // Two more revisions while that read is on its way ask for one more read.
+    await link.revision(44);
+    await link.revision(45);
+    await settle();
+    expect(device.refresh).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      answer(DEVICE_STATUS);
+    });
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(3));
+    await settle();
+    expect(device.refresh).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    [
+      "key_rejected",
+      "Хост не узнаёт ключ этого устройства: устройство могли отключить в офисе или восстановить базу хоста из копии.",
+    ],
+    [
+      "certificate_mismatch",
+      "Хост на этом компьютере сменился: его сертификат не совпадает с сохранённым при подключении.",
+    ],
+  ] as const)(
+    "sends a station whose refresh meets %s to pairing again, and stops the link",
+    async (code, reason) => {
+      const link = fakeConnection();
+      const device = fakeDevice(DEVICE_STATUS);
+      device.refresh.mockRejectedValue(new DeviceError(code, "refused"));
+      renderApp({
+        probe: probeAnswering(true),
+        device,
+        host: fakeHost(),
+        connection: link.connection,
+      });
+      expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+      expect(screen.getByText(reason)).toBeTruthy();
+      await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
+    },
+  );
+
+  it("keeps the station on its line when a refresh cannot reach the host", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.refresh.mockRejectedValue(new DeviceError("unreachable", "host down"));
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: fakeHost(),
+      connection: link.connection,
+    });
+    await screen.findByText("Цех");
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(1));
+    await link.revision(43);
+    await waitFor(() => expect(device.refresh).toHaveBeenCalledTimes(2));
+    await settle();
+    expect(screen.getByText("Цех")).toBeTruthy();
+    expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
+    expect(link.stop).not.toHaveBeenCalled();
   });
 });

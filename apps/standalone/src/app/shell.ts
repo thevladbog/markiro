@@ -1,5 +1,5 @@
 import { HostError } from "../host/client.js";
-import type { DeviceErrorCode } from "../host/device.js";
+import { DeviceError, type DeviceErrorCode } from "../host/device.js";
 import type { HelloObservation, HostProbeErrorCode } from "../host/probe.js";
 import type { DeviceStatus, HostStatus, OfficeSession, OfficeUser } from "../host/protocol.js";
 import type { SyncResult } from "../local/reference-sync.js";
@@ -114,7 +114,8 @@ export type ShellAction =
   | { type: "sync_started" }
   | { type: "sync_finished"; result: SyncResult }
   | { type: "sync_failed"; failure: SyncFailure; quarantined: number | null }
-  | { type: "line_selected"; status: DeviceStatus };
+  | { type: "line_selected"; status: DeviceStatus }
+  | { type: "device_refreshed"; status: DeviceStatus };
 
 const CLOSED_OFFICE: OfficeState = { kind: "closed" };
 const IDLE_SYNC: SyncState = { kind: "idle", synced: 0, failure: null, quarantined: 0 };
@@ -340,7 +341,35 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       };
     case "line_selected":
       return { ...state, device: { kind: "ready", status: action.status } };
+    case "device_refreshed": {
+      // The line the office assigned (plan 1d3). Only the pairing the answer
+      // belongs to takes it, so a late answer cannot bring back a pairing
+      // that ended or changed; an answer with the same line changes nothing.
+      // A cleared line sends the station back to choosing one.
+      if (state.device.kind !== "ready" || state.device.status === null) return state;
+      const current = state.device.status;
+      if (
+        current.deviceId !== action.status.deviceId ||
+        current.hostId !== action.status.hostId ||
+        current.lineId === action.status.lineId
+      ) {
+        return state;
+      }
+      return { ...state, device: { kind: "ready", status: action.status } };
+    }
   }
+}
+
+/**
+ * Why a failed device command needs a new pairing: the host refused this
+ * device's key, or presented another certificate than the one pinned at
+ * pairing. `null` for anything else, which the caller explains or ignores.
+ */
+export function deviceRejection(error: unknown): RejectionReason | null {
+  if (!(error instanceof DeviceError)) return null;
+  if (error.code === "key_rejected") return "key_rejected";
+  if (error.code === "certificate_mismatch") return "host_changed";
+  return null;
 }
 
 /**

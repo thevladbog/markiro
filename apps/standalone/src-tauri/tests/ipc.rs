@@ -415,7 +415,7 @@ fn forgetting_the_device_clears_the_local_copies_first() {
 /// clear: `device_forget` still removes `device.json` on its own. This test
 /// needs no host, so it runs in the sandbox — so does the test above, which
 /// also uses an unreadable config and no host, but opens a working local
-/// database with copies to clear instead of leaving it unopened. Plan 1d3
+/// database with copies to clear instead of leaving it unopened. Plan 1d4
 /// revisits this decision before PIN and badge hashes live in the local
 /// database.
 #[test]
@@ -580,6 +580,72 @@ fn a_station_selects_its_line_through_the_ipc_shapes() {
 
     drop(webview);
     host.stop();
+}
+
+/// `device_refresh` takes no arguments (`src/host/device.ts`) and answers the
+/// pairing's `DeviceStatus` with the line the office assigned.
+#[test]
+fn a_station_takes_the_office_line_through_the_ipc_shapes() {
+    let host = Host::start();
+    let app_dir = tempfile::tempdir().unwrap();
+    let pairing = DeviceState::load(app_dir.path().to_path_buf());
+    let paired = host
+        .runtime
+        .block_on(pairing.local_pair(&host.address(), NAME, "0.1.0"))
+        .unwrap();
+    let bootstrap: Value = serde_json::from_str(BOOTSTRAP).unwrap();
+    let created = host
+        .runtime
+        .block_on(pairing.request("POST", "/v1/bootstrap", Some(&bootstrap), None))
+        .unwrap();
+    let token = created.body.unwrap()["session"]["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let feed = host
+        .runtime
+        .block_on(pairing.request("GET", "/v1/changes?since=0", None, None))
+        .unwrap();
+    let line = feed.body.unwrap()["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["entity"] == "lines")
+        .unwrap()["id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let assigned = host
+        .runtime
+        .block_on(pairing.request(
+            "PUT",
+            &format!("/v1/office/devices/{}", paired.device_id),
+            Some(&json!({ "lineId": line })),
+            Some(&token),
+        ))
+        .unwrap();
+    assert_eq!(assigned.status, 200);
+    drop(pairing);
+    let (_app, webview) = mock_app(DeviceState::load(app_dir.path().to_path_buf()));
+
+    let refreshed = invoke(&webview, "device_refresh", json!({})).unwrap();
+    assert_eq!(refreshed["lineId"], line);
+    assert_eq!(refreshed["deviceId"], paired.device_id);
+    assert_eq!(invoke(&webview, "device_status", json!({})), Ok(refreshed));
+
+    drop(webview);
+    host.stop();
+}
+
+/// Without a pairing there is nothing to read again; no host needs to answer.
+#[test]
+fn an_unpaired_device_has_nothing_to_refresh() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app(DeviceState::load(dir.path().to_path_buf()));
+    assert_eq!(
+        invoke(&webview, "device_refresh", json!({})),
+        Err(json!("not_paired"))
+    );
 }
 
 /// `src/host/connection.ts` reads this snapshot before the first event.

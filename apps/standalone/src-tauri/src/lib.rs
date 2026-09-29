@@ -108,6 +108,17 @@ async fn device_select_line(
         .map_err(|error| error.code().to_owned())
 }
 
+/// Read this device's record from the host again and keep the line the
+/// office assigned; the webview calls it after the first sync and after
+/// every revision event.
+#[tauri::command]
+async fn device_refresh(state: tauri::State<'_, DeviceState>) -> Result<DeviceStatus, String> {
+    state
+        .refresh()
+        .await
+        .map_err(|error| error.code().to_owned())
+}
+
 /// Forget the pairing: the local copies go first, so when clearing them
 /// fails the command answers `storage` and `device.json` stays for another
 /// try. Without a local database (it did not open) there is nothing this
@@ -167,6 +178,7 @@ pub fn invoke_handler<R: tauri::Runtime>(
         host_claim,
         host_request,
         device_select_line,
+        device_refresh,
         device_forget,
         local_query,
         local_transaction,

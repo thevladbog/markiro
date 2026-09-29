@@ -1,5 +1,6 @@
-//! Line selection and the webview's route list against a real `markiro-host`
-//! on 127.0.0.1 (stage 1 spec §5.1–5.2).
+//! Line selection, the station adopting the line the office assigns, and the
+//! webview's route list against a real `markiro-host` on 127.0.0.1 (stage 1
+//! spec §5.1–5.2).
 
 use std::path::Path;
 
@@ -31,8 +32,9 @@ fn address(host: &RunningHost) -> String {
     format!("https://{}", host.addr)
 }
 
-/// A station paired over loopback with the wizard done (one line).
-async fn paired_station(host: &RunningHost, dir: &Path) -> DeviceState {
+/// A station paired over loopback with the wizard done (one line), and the
+/// office session of the administrator the wizard created on it.
+async fn office_station(host: &RunningHost, dir: &Path) -> (DeviceState, String) {
     let station = DeviceState::load(dir.to_path_buf());
     station
         .local_pair(&address(host), "Рабочее место хоста", "0.1.0")
@@ -44,7 +46,64 @@ async fn paired_station(host: &RunningHost, dir: &Path) -> DeviceState {
         .await
         .unwrap();
     assert_eq!(created.status, 200, "{:?}", created.body);
-    station
+    let token = created.body.unwrap()["session"]["token"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    (station, token)
+}
+
+/// A station paired over loopback with the wizard done (one line).
+async fn paired_station(host: &RunningHost, dir: &Path) -> DeviceState {
+    office_station(host, dir).await.0
+}
+
+/// Another line, added in the office.
+async fn office_line(station: &DeviceState, token: &str, name: &str) -> String {
+    let created = station
+        .request(
+            "POST",
+            "/v1/office/lines",
+            Some(&json!({ "name": name })),
+            Some(token),
+        )
+        .await
+        .unwrap();
+    assert_eq!(created.status, 200, "{:?}", created.body);
+    created.body.unwrap()["id"].as_str().unwrap().to_owned()
+}
+
+/// The office sets this station's line, or clears it with `None`.
+async fn assign_line(station: &DeviceState, token: &str, line_id: Option<&str>) {
+    let device_id = station.status().unwrap().unwrap().device_id;
+    let updated = station
+        .request(
+            "PUT",
+            &format!("/v1/office/devices/{device_id}"),
+            Some(&json!({ "lineId": line_id })),
+            Some(token),
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.status, 200, "{:?}", updated.body);
+}
+
+/// The line the host has for this station (`GET /v1/device`).
+async fn host_line(station: &DeviceState) -> Value {
+    let device = station
+        .request("GET", "/v1/device", None, None)
+        .await
+        .unwrap();
+    device.body.unwrap()["lineId"].clone()
+}
+
+/// The line `device.json` holds, read as the app does at start.
+fn saved_line(dir: &Path) -> Option<String> {
+    DeviceState::load(dir.to_path_buf())
+        .status()
+        .unwrap()
+        .unwrap()
+        .line_id
 }
 
 /// The ids of the host's lines, read from the change feed as the webview does.
@@ -123,6 +182,190 @@ async fn a_key_the_host_does_not_know_is_rejected() {
         station.select_line(UNKNOWN_LINE).await,
         Err(DeviceError::KeyRejected)
     );
+    host.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_station_adopts_the_line_the_office_assigns_and_keeps_it_across_restarts() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let (station, token) = office_station(&host, station_dir.path()).await;
+    let first = line_ids(&station).await.remove(0);
+    station.select_line(&first).await.unwrap();
+    let second = office_line(&station, &token, "Линия 2").await;
+
+    assign_line(&station, &token, Some(&second)).await;
+    let status = station.refresh().await.unwrap();
+    assert_eq!(status.line_id.as_deref(), Some(second.as_str()));
+    assert_eq!(station.status(), Ok(Some(status)));
+    assert_eq!(saved_line(station_dir.path()), Some(second));
+    host.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_refresh_that_finds_the_same_line_writes_nothing() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let (station, token) = office_station(&host, station_dir.path()).await;
+    let line = line_ids(&station).await.remove(0);
+    let chosen = station.select_line(&line).await.unwrap();
+    // A rename in the office is no line change for the station.
+    let device_id = chosen.device_id.clone();
+    let renamed = station
+        .request(
+            "PUT",
+            &format!("/v1/office/devices/{device_id}"),
+            Some(&json!({ "name": "Станция упаковки" })),
+            Some(&token),
+        )
+        .await
+        .unwrap();
+    assert_eq!(renamed.status, 200, "{:?}", renamed.body);
+    let config = device_config::path(station_dir.path());
+    let before = std::fs::read(&config).unwrap();
+    #[cfg(unix)]
+    let inode = std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&config).unwrap());
+
+    assert_eq!(station.refresh().await, Ok(chosen));
+    assert_eq!(std::fs::read(&config).unwrap(), before);
+    // `device_config::save` writes a new file and renames it into place, so
+    // an untouched inode shows that nothing was written at all.
+    #[cfg(unix)]
+    assert_eq!(
+        std::os::unix::fs::MetadataExt::ino(&std::fs::metadata(&config).unwrap()),
+        inode
+    );
+    host.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_line_the_office_clears_is_cleared_on_the_station() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let (station, token) = office_station(&host, station_dir.path()).await;
+    let line = line_ids(&station).await.remove(0);
+    station.select_line(&line).await.unwrap();
+
+    assign_line(&station, &token, None).await;
+    assert_eq!(station.refresh().await.unwrap().line_id, None);
+    assert_eq!(station.status().unwrap().unwrap().line_id, None);
+    assert_eq!(saved_line(station_dir.path()), None);
+    host.stop().await.unwrap();
+}
+
+/// Offline first: with the host away the station keeps working on its line.
+#[tokio::test]
+async fn an_unreachable_host_leaves_the_line_alone() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let (station, token) = office_station(&host, station_dir.path()).await;
+    let first = line_ids(&station).await.remove(0);
+    station.select_line(&first).await.unwrap();
+    let second = office_line(&station, &token, "Линия 2").await;
+    assign_line(&station, &token, Some(&second)).await;
+    host.stop().await.unwrap();
+
+    assert_eq!(
+        station.refresh().await,
+        Err(DeviceError::Request(RequestError::Unreachable))
+    );
+    assert_eq!(
+        station.status().unwrap().unwrap().line_id.as_deref(),
+        Some(first.as_str())
+    );
+    assert_eq!(saved_line(station_dir.path()), Some(first));
+}
+
+/// A `device.json` whose key the host never issued (as after a revocation).
+#[tokio::test]
+async fn a_refresh_with_a_key_the_host_does_not_know_is_rejected() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let config = DeviceConfig {
+        host_address: address(&host),
+        fingerprint: host.fingerprint.clone(),
+        host_id: host.host_id.clone(),
+        device_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7".into(),
+        kind: DeviceKind::Station,
+        line_id: Some(UNKNOWN_LINE.into()),
+        device_key: secret_store::protect("not-a-key-the-host-issued").unwrap(),
+    };
+    device_config::save(station_dir.path(), &config).unwrap();
+    let station = DeviceState::load(station_dir.path().to_path_buf());
+
+    assert_eq!(station.refresh().await, Err(DeviceError::KeyRejected));
+    assert_eq!(
+        station.status().unwrap().unwrap().line_id.as_deref(),
+        Some(UNKNOWN_LINE)
+    );
+    host.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_refresh_needs_a_pairing() {
+    let station_dir = tempfile::tempdir().unwrap();
+    let station = DeviceState::load(station_dir.path().to_path_buf());
+    assert_eq!(station.refresh().await, Err(DeviceError::NotPaired));
+}
+
+/// A refresh holds the pairing lock like `select_line`: a forget that starts
+/// while the host is still answering waits for it, so the answer cannot
+/// write `device.json` back after the forget removed it.
+#[tokio::test]
+async fn a_refresh_does_not_bring_back_a_forgotten_pairing() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let (station, token) = office_station(&host, station_dir.path()).await;
+    let line = line_ids(&station).await.remove(0);
+    // The station has no line yet; the office's line makes the refresh write.
+    assign_line(&station, &token, Some(&line)).await;
+
+    let (refreshed, forgotten) = tokio::join!(station.refresh(), station.forget());
+    assert_eq!(refreshed.unwrap().line_id.as_deref(), Some(line.as_str()));
+    forgotten.unwrap();
+    assert_eq!(station.status(), Ok(None));
+    assert!(!device_config::path(station_dir.path()).exists());
+    host.stop().await.unwrap();
+}
+
+/// A refresh and a line choice at the same moment end on the line the host
+/// took last, on the host, in memory and in `device.json` alike.
+#[tokio::test]
+async fn a_refresh_and_a_line_choice_never_undo_each_other() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let (station, token) = office_station(&host, station_dir.path()).await;
+    let first = line_ids(&station).await.remove(0);
+    let second = office_line(&station, &token, "Линия 2").await;
+    for round in 0..6 {
+        let (assigned, chosen) = if round % 2 == 0 {
+            (&second, &first)
+        } else {
+            (&first, &second)
+        };
+        assign_line(&station, &token, Some(assigned)).await;
+        let (refreshed, selected) = tokio::join!(station.refresh(), station.select_line(chosen));
+        refreshed.unwrap();
+        assert_eq!(selected.unwrap().line_id.as_deref(), Some(chosen.as_str()));
+        assert_eq!(host_line(&station).await, json!(chosen), "round {round}");
+        assert_eq!(
+            station.status().unwrap().unwrap().line_id.as_deref(),
+            Some(chosen.as_str()),
+            "round {round}"
+        );
+        assert_eq!(
+            saved_line(station_dir.path()).as_deref(),
+            Some(chosen.as_str()),
+            "round {round}"
+        );
+    }
     host.stop().await.unwrap();
 }
 

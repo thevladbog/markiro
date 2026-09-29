@@ -35,7 +35,13 @@ import {
   PairFailedScreen,
   WaitScreen,
 } from "./screens.js";
-import { initialShellState, nextShellView, shellActionFor, shellReducer } from "./shell.js";
+import {
+  deviceRejection,
+  initialShellState,
+  nextShellView,
+  shellActionFor,
+  shellReducer,
+} from "./shell.js";
 
 export interface AppProps {
   probe?: HostProbe;
@@ -78,6 +84,7 @@ export function App({
     connection: connectionApi,
     local: localDb,
     changes: hostApi.getChanges,
+    refresh: deviceApi.refresh,
     dispatch,
   });
 
@@ -159,12 +166,9 @@ export function App({
       try {
         dispatch({ type: "line_selected", status: await deviceApi.selectLine(lineId) });
       } catch (error) {
-        if (error instanceof DeviceError && error.code === "key_rejected") {
-          dispatch({ type: "device_rejected", reason: "key_rejected" });
-          return;
-        }
-        if (error instanceof DeviceError && error.code === "certificate_mismatch") {
-          dispatch({ type: "device_rejected", reason: "host_changed" });
+        const reason = deviceRejection(error);
+        if (reason !== null) {
+          dispatch({ type: "device_rejected", reason });
           return;
         }
         throw error;

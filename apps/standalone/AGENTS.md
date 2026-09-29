@@ -147,7 +147,7 @@ the scan journal, boxes, the outbox (the design's §6.2, "Логическая �
 records exist, not extend this list silently. If clearing fails, the
 command fails with `storage` and the pairing stays for another try; without
 a local database (it did not open) there is nothing this app can clear, and
-forgetting goes on; plan 1d3 revisits this before PIN and badge hashes land.
+forgetting goes on; plan 1d4 revisits this before PIN and badge hashes land.
 
 ## Writes
 
@@ -297,7 +297,7 @@ loop.
 For E kept entities a page batch holds at most 3E + 6 statements: the
 guard, a deferred wipe (E copy tables, the quarantine, the sync state),
 two per entity, the quarantine upsert and lift, and the sync state. That
-is 15 today and 21 with plan 1d3's operators and badges, within the
+is 15 today and 21 with plan 1d4's operators and badges, within the
 shell's 32 (E = 8 at most); a test builds the worst-case page.
 `ENTITY_SET` names the kept entities and `SYNC_SCHEMA_VERSION`
 (`"org_profile,site,lines;v2"`): raise the version whenever a record
@@ -380,7 +380,9 @@ or a `.` segment, and only the routes `/v1/device[/…]` except
 `/v1/device/line`, `/v1/bootstrap`, `/v1/changes` (not `/v1/changes/stream`)
 and `/v1/office/…`. The line goes through `device_select_line`, which also
 keeps the host's answer in `device.json`, so the station opens on its line
-with the host away; the change stream belongs to the connection task.
+with the host away; `device_refresh` reads `GET /v1/device` again and keeps
+a line the office changed the same way; the change stream belongs to the
+connection task.
 Pairing routes return a new device key, so they stay behind their own
 commands (`host_local_pair`, `host_claim`) and the key never reaches the
 webview. `%` is refused because an encoded `..` would slip past the route
@@ -439,10 +441,11 @@ each revision and never opens the stream itself.
   even if that line has been archived since, so a full-form save can still
   rename the station). Devices have no `rev` and are not in the feed, so the
   last office write wins. A change of a device's line takes one host
-  revision without a feed item, so open streams wake and the station can read
-  `GET /v1/device` again; a rename, a repeat of the same line and a
-  revocation take none. The station's adoption of an office-assigned line is
-  plan 1d3, and how that meets a running shift is plan 2a.
+  revision without a feed item, so open streams wake and the station reads
+  `GET /v1/device` again (`device_refresh`, see "App shell"); a rename, a
+  repeat of the same line and a revocation take none. How a line change
+  meets a running shift is plan 2a's decision; stage 1 has only the floor
+  stub.
 - The office session token lives only in webview memory. «Выйти в цех» ends
   the session at once: the app returns to the floor, drops the token and
   tells the host in the background. There is no hidden session (owner
@@ -466,7 +469,16 @@ host, the local host's version and identity, then the office or the floor.
 While a host is paired, `useHostLink` (`src/app/host-link.ts`) follows the
 shell's link and syncs reference data at start and after every revision
 event; it stops when the pairing ends, is rejected or turns out to belong
-to another host (`other_host`, which only a new pairing clears). A failed
+to another host (`other_host`, which only a new pairing clears). At the
+same moments it reads this device's record again (`device_refresh`): a line
+the office sets or clears takes a revision but no feed item, so only the
+record carries it. `DeviceState::refresh` reads `GET /v1/device` under the
+pairing lock, like `select_line`, and writes `device.json` only when the
+line changed. One read runs at a time and events during it ask for exactly
+one more; its answer replaces the device status (`device_refreshed`) only
+for the same pairing. A refused key or a changed certificate is a rejected
+device, as on every host path; any other failure, the host away included,
+keeps the station on its line. A failed
 run (neither another host nor a rejected device) is retried while the link
 is online: after 2, 4, 8, 16 and 32 s, then every 60 s (`nextSyncRetryMs`).
 A successful run starts the count again; any other run replaces the
@@ -494,7 +506,8 @@ open page, so a form keeps what was typed and a save over a newer record meets
 `stale_revision`. Pages read fresh data whenever they open (`staleTime` 0).
 
 A paired station without a line chooses one (`LineSelect`) among the active
-lines of the local copies, read only after a sync in this session brought them
+lines of the local copies (a line the office clears brings the station back
+here, and a line the office sets moves it on), read only after a sync in this session brought them
 up to date and again after every sync, so a previous pairing's lines never
 show; the host's answer goes to `device.json` through `device_select_line`. A
 refused device key or a changed certificate from that call is a rejected device

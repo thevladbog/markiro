@@ -62,6 +62,20 @@ describe("Tauri device API", () => {
     expect(call).toHaveBeenCalledWith("device_select_line", { lineId });
   });
 
+  it("reads the device again from the host, with the line the office assigned", async () => {
+    const lineId = "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21";
+    const call = vi.fn().mockResolvedValue({ ...DEVICE_STATUS, lineId });
+    const { refresh } = createTauriDeviceApi(call);
+    // Unbound on purpose: `useHostLink` receives the function on its own.
+    await expect(refresh()).resolves.toEqual({ ...DEVICE_STATUS, lineId });
+    expect(call).toHaveBeenCalledWith("device_refresh", {});
+  });
+
+  it("keeps the shell's reason when the host refuses the key on a refresh", async () => {
+    const call = vi.fn().mockRejectedValue("key_rejected");
+    expect((await failure(createTauriDeviceApi(call).refresh())).code).toBe("key_rejected");
+  });
+
   it.each(DEVICE_ERROR_CODES)("keeps the shell's %s code", async (code) => {
     const call = vi.fn().mockRejectedValue(code);
     expect((await failure(createTauriDeviceApi(call).pairLocally("x"))).code).toBe(code);

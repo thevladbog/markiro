@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  deviceRejection,
   initialShellState,
   nextShellView,
   shellActionFor,
@@ -9,6 +10,7 @@ import {
   type ShellState,
 } from "../src/app/shell.js";
 import { HostError } from "../src/host/client.js";
+import { DeviceError } from "../src/host/device.js";
 import type { HostStatus } from "../src/host/protocol.js";
 import { DEVICE_STATUS, NEW_STATION, observation, SESSION } from "./support/fixtures.js";
 
@@ -293,6 +295,31 @@ describe("shellReducer", () => {
     expect(nextShellView(chosen, ADDRESS)).toEqual({ kind: "floor" });
   });
 
+  it("follows a line the office assigned or cleared, on a refresh of this device", () => {
+    const station = paired();
+    const cleared = shellReducer(station, { type: "device_refreshed", status: NEW_STATION });
+    expect(cleared.device).toEqual({ kind: "ready", status: NEW_STATION });
+    expect(nextShellView(cleared, ADDRESS)).toEqual({ kind: "line_select" });
+    const assigned = shellReducer(cleared, { type: "device_refreshed", status: DEVICE_STATUS });
+    expect(nextShellView(assigned, ADDRESS)).toEqual({ kind: "floor" });
+  });
+
+  it("keeps the state for a refresh that changes nothing or belongs to another pairing", () => {
+    const station = paired();
+    expect(shellReducer(station, { type: "device_refreshed", status: DEVICE_STATUS })).toBe(
+      station,
+    );
+    const otherDevice = { ...NEW_STATION, deviceId: "5d2f0a1c-3b4e-4f6a-8c9d-0e1f2a3b4c5d" };
+    expect(shellReducer(station, { type: "device_refreshed", status: otherDevice })).toBe(station);
+    const otherHost = { ...NEW_STATION, hostId: "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f" };
+    expect(shellReducer(station, { type: "device_refreshed", status: otherHost })).toBe(station);
+    // A late answer after the pairing was forgotten does not bring it back.
+    const forgotten = shellReducer(station, { type: "forgotten" });
+    expect(shellReducer(forgotten, { type: "device_refreshed", status: NEW_STATION })).toBe(
+      forgotten,
+    );
+  });
+
   it("retries a failed pairing", () => {
     const failed = unpaired({ pairing: { kind: "failed", code: "unreachable" } });
     expect(shellReducer(failed, { type: "pairing_retried" }).pairing).toEqual({ kind: "idle" });
@@ -474,6 +501,21 @@ describe("link and reference sync", () => {
     expect(next.link).toBeNull();
     expect(next.sync).toEqual({ kind: "idle", synced: 0, failure: null, quarantined: 0 });
     expect(next.hostRevision).toBeNull();
+  });
+});
+
+describe("deviceRejection", () => {
+  it("needs a new pairing for a refused key or a changed certificate, and nothing else", () => {
+    expect(deviceRejection(new DeviceError("key_rejected", "revoked"))).toBe("key_rejected");
+    expect(deviceRejection(new DeviceError("certificate_mismatch", "reinstalled"))).toBe(
+      "host_changed",
+    );
+    expect(deviceRejection(new DeviceError("unreachable", "down"))).toBeNull();
+    expect(deviceRejection(new DeviceError("storage", "disk"))).toBeNull();
+    expect(
+      deviceRejection(new HostError({ kind: "transport", code: "unreachable", message: "" })),
+    ).toBeNull();
+    expect(deviceRejection(new Error("boom"))).toBeNull();
   });
 });
 

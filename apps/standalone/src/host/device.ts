@@ -59,6 +59,13 @@ export interface DeviceApi {
   selectLine(lineId: string): Promise<DeviceStatus>;
   /** Forget the pairing kept on this computer. */
   forget(): Promise<void>;
+  /**
+   * Read this device's record from the host again (`device_refresh`); the
+   * shell keeps the line the office assigned in `device.json`. A
+   * function-typed property, unlike the methods above, because `useHostLink`
+   * takes it unbound (`@typescript-eslint/unbound-method`).
+   */
+  refresh: () => Promise<DeviceStatus>;
 }
 
 type Invoke = (command: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -90,6 +97,7 @@ export function createTauriDeviceApi(call: Invoke = invoke): DeviceApi {
     async forget() {
       await run("device_forget", {});
     },
+    refresh: async () => parseStatus(await run("device_refresh", {})),
   };
 }
 

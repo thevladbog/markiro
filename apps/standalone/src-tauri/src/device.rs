@@ -1,7 +1,7 @@
 //! The paired device (spec §5.2): `device.json`, local pairing with the host
-//! on this computer, pairing by code, line selection, and authenticated
-//! requests. The device key never leaves this module: the webview sees
-//! `DeviceStatus`, never the key.
+//! on this computer, pairing by code, line selection, the line the office
+//! assigns, and authenticated requests. The device key never leaves this
+//! module: the webview sees `DeviceStatus`, never the key.
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -22,6 +22,10 @@ use crate::secret_store;
 /// A station's line (`PUT /v1/device/line`): only [`DeviceState::select_line`]
 /// reaches it, so `device.json` always holds the line the host confirmed.
 const LINE_ROUTE: &str = "/v1/device/line";
+
+/// This device's own record (`GET /v1/device`), which [`DeviceState::refresh`]
+/// reads for the line the office assigned.
+const DEVICE_ROUTE: &str = "/v1/device";
 
 /// What the webview may know about the pairing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -332,10 +336,55 @@ impl DeviceState {
             401 => return Err(DeviceError::KeyRejected),
             _ => return Err(DeviceError::RequestFailed),
         }
-        let info: DeviceInfo = response
-            .body
+        self.keep_line(&device, response.body)
+    }
+
+    /// Read this device's record again (`GET /v1/device`) and keep the line
+    /// the host has for it, so a line an administrator set or cleared in the
+    /// office reaches the station (plan 1d3). `device.json` is written only
+    /// when the line differs. Serialised with pairing, forgetting and
+    /// [`Self::select_line`] through the same lock, so an answer never
+    /// writes over a pairing or a line choice that changed meanwhile. A host
+    /// that cannot be reached changes nothing: the station keeps working on
+    /// its line (offline first).
+    pub async fn refresh(&self) -> Result<DeviceStatus, DeviceError> {
+        let _pairing = self.pairing.lock().await;
+        let device = self.paired()?;
+        let response = device
+            .client
+            .send(
+                "GET",
+                DEVICE_ROUTE,
+                None,
+                Credentials {
+                    device_key: Some(&device.key),
+                    office_token: None,
+                },
+            )
+            .await
+            .map_err(DeviceError::Request)?;
+        match response.status {
+            200 => {}
+            401 => return Err(DeviceError::KeyRejected),
+            _ => return Err(DeviceError::RequestFailed),
+        }
+        self.keep_line(&device, response.body)
+    }
+
+    /// Make the line in the host's answer (`DeviceInfo`) this device's line:
+    /// `device.json` first, then the pairing in memory, and neither when the
+    /// line is already the one kept. Called with the pairing lock held.
+    fn keep_line(
+        &self,
+        device: &PairedDevice,
+        body: Option<Value>,
+    ) -> Result<DeviceStatus, DeviceError> {
+        let info: DeviceInfo = body
             .and_then(|body| serde_json::from_value(body).ok())
             .ok_or(DeviceError::Request(RequestError::InvalidResponse))?;
+        if info.line_id == device.config.line_id {
+            return Ok(device.status());
+        }
         let config = DeviceConfig {
             line_id: info.line_id,
             ..device.config.clone()
@@ -449,7 +498,8 @@ impl DeviceState {
 /// Routes the webview may reach through `host_request`. Pairing routes are
 /// excluded: their answers carry a new device key, which must never cross
 /// IPC. The line goes through [`DeviceState::select_line`], which also keeps
-/// it in `device.json`; the change stream belongs to the connection task.
+/// it in `device.json` (as [`DeviceState::refresh`] keeps the line the
+/// office assigns); the change stream belongs to the connection task.
 /// This string-level exclusion of `LINE_ROUTE` only holds because
 /// `host_client::validate_path` separately refuses a `.` path segment: it
 /// stops a spelling such as `/v1/device/./line`, which a URL parser would
