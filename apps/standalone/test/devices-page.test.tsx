@@ -108,6 +108,12 @@ function dialog(): HTMLElement {
   return screen.getByRole("dialog");
 }
 
+/** The names column, top to bottom. */
+function names(): (string | null | undefined)[] {
+  const rows = within(screen.getByRole("table")).getAllByRole("row").slice(1);
+  return rows.map((row) => within(row).getAllByRole("cell")[0]?.textContent);
+}
+
 /** The labels of a select's options, top to bottom. */
 function optionLabels(select: HTMLElement): (string | null)[] {
   return Array.from(select.querySelectorAll("option"), (option) => option.textContent);
@@ -167,6 +173,9 @@ describe("office devices", () => {
       ["office-session-token", HOST_PC.id, { name: "Станция 1", lineId: other.id }],
     ]);
     expect(within(rowOf("Станция 1")).getByText("Линия 2")).toBeTruthy();
+    // The saved record keeps its row: the table shows the host's order, and an
+    // edit does not send the device to the bottom.
+    expect(names()).toEqual(["Станция 1", "Станция упаковки", "Офис бухгалтерии", "Старый ТСД"]);
   });
 
   it("takes a station off its line with null", async () => {

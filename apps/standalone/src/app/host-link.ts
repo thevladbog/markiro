@@ -244,9 +244,9 @@ export function useHostLink({
           refresher.trigger();
         },
         () => {
-          // Without events the copies still sync once here and on request, and
-          // the device is read once. `online` never becomes true, so neither a
-          // failed sync nor a failed read is retried on its own.
+          // Without events the copies sync and the device is read once here,
+          // and both again on request. `online` never becomes true, so neither
+          // a failed sync nor a failed read is retried on its own.
           if (!active) return;
           scheduler.trigger();
           refresher.trigger();

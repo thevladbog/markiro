@@ -355,9 +355,9 @@ parses every fixture whose shape crosses the IPC boundary. An office request
 body the webview has built since plan 1d3 has one builder in
 `src/host/requests.ts`, which names every field it sends;
 `test/protocol.test.ts` checks that each builder produces its fixture exactly.
-The older forms (users, the organization, SSCC and the wizard) build their
-bodies inline, field by field. Raise `PROTOCOL_VERSION` for an incompatible
-change; the host keeps accepting the
+The older forms (users, the organization, SSCC, sign-in and the own-password
+change) build their bodies inline, field by field, as does the wizard. Raise
+`PROTOCOL_VERSION` for an incompatible change; the host keeps accepting the
 previous version. Response types, which devices of different versions read,
 tolerate unknown fields; request types, which the host parses, reject them
 with `deny_unknown_fields`. The `product`, `protocol` and `minProtocol`
@@ -486,37 +486,34 @@ for the same pairing. A refused key or a changed certificate is a rejected
 device, as on every host path. Any other failure keeps the station on the
 line it has (offline first), and the read is tried again like a failed sync
 (below), with a failure count of its own: a station must not stay on a line
-the host no longer has until some unrelated event. A read that finds no
-pairing (`not_paired`) is not retried. A failed
-run (neither another host nor a rejected device) is retried while the link
-is online: after 2, 4, 8, 16 and 32 s, then every 60 s (`nextSyncRetryMs`).
-A successful run starts the count again; any other run replaces the
-pending retry; a status that is not `online` drops it (a run that failed
-while the link was already not `online` never armed one); and an `online`
-status after a failed run with no retry pending — dropped, or never
+the host no longer has until some unrelated event. A read that finds no pairing
+(`not_paired`) is not retried. A failed run (neither another host nor a rejected
+device) is retried while the link is online: after 2, 4, 8, 16 and 32 s, then
+every 60 s (`nextSyncRetryMs`). A successful run starts the count again; any
+other run replaces the pending retry; a status that is not `online` drops it (a
+run that failed while the link was already not `online` never armed one); and an
+`online` status after a failed run with no retry pending — dropped, or never
 armed — syncs at once. Reads follow the same rules, but a failed read of the
-device shows no message of its own: it is retried quietly, and the sync
-state's `failure`, below, belongs to the sync alone. `requestSync` asks for a
-sync and a read together: from the line-selection screen's «Повторить» and
-after a `line_rejected` (`LineSelect.tsx`). The sync run's error sets the sync
-state's `failure`: `local` for a
-`LocalDbError`; `feed` for an answer this build cannot read (a
-`HostError` with code `invalid_response`), a `SyncFeedError` or anything
-else; `host` for every other `HostError`. It stays through the retry's
-own run, so a warning does not flicker; a successful run clears it and
-sets `quarantined` from `readQuarantineCount` (`src/local/reference-sync.ts`,
-also used by a successful run itself, so the query lives in one place). A
-failed run whose error is not a rejection reads the same count and carries
-it too, so a restart with the host permanently away still shows how many
-records are quarantined instead of a bare zero; `readQuarantineCount`
-returns `null` if the read itself fails, and the reducer takes `null` as
-"keep whatever count is already shown" rather than resetting it — only a
-number replaces it. A link
-`lastError` of `key_rejected` or `certificate_mismatch` is a rejected
-device, exactly like the same answer to an office call. A new revision
-re-reads the signed-in user (`Office`, `hostRevision`); it does not reload an
-open page, so a form keeps what was typed and a save over a newer record meets
-`stale_revision`. Pages read fresh data whenever they open (`staleTime` 0).
+device shows no message of its own: it is retried quietly, and the sync state's
+`failure`, below, belongs to the sync alone. `requestSync` asks for a sync and a
+read together: from the line-selection screen's «Повторить» and after a
+`line_rejected` (`LineSelect.tsx`). The sync run's error sets the sync state's
+`failure`: `local` for a `LocalDbError`; `feed` for an answer this build cannot
+read (a `HostError` with code `invalid_response`), a `SyncFeedError` or anything
+else; `host` for every other `HostError`. It stays through the retry's own run,
+so a warning does not flicker; a successful run clears it and sets `quarantined`
+from `readQuarantineCount` (`src/local/reference-sync.ts`, also used by a
+successful run itself, so the query lives in one place). A failed run whose
+error is not a rejection reads the same count and carries it too, so a restart
+with the host permanently away still shows how many records are quarantined
+instead of a bare zero; `readQuarantineCount` returns `null` if the read itself
+fails, and the reducer takes `null` as "keep whatever count is already shown"
+rather than resetting it — only a number replaces it. A link `lastError` of
+`key_rejected` or `certificate_mismatch` is a rejected device, exactly like the
+same answer to an office call. A new revision re-reads the signed-in user
+(`Office`, `hostRevision`); it does not reload an open page, so a form keeps
+what was typed and a save over a newer record meets `stale_revision`. Pages read
+fresh data whenever they open (`staleTime` 0).
 
 A paired station without a line chooses one (`LineSelect`) among the active
 lines of the local copies (a line the office clears brings the station back
