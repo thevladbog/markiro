@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { isBadgePhc, isPinPhc } from "../lib/credentials.js";
 import { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from "./pairing-code.js";
 
 /** Mirrors `markiro_proto::PROTOCOL_VERSION` (apps/standalone/proto). */
@@ -144,6 +145,17 @@ export const changesResponseSchema = z.object({
 });
 export type ChangesResponse = z.infer<typeof changesResponseSchema>;
 
+/**
+ * A canonical 16-byte salt: standard base64 with padding, 22 characters and
+ * `==`. Those 22 characters hold 132 bits for 128 of data, so the last one
+ * carries 2 data bits and 4 zero ones: it is `A`, `Q`, `g` or `w`. This is the
+ * host's `decode_canonical` (`secrets::parse_phc`), which refuses anything
+ * else, and `hashBadge` embeds the salt verbatim, so a salt that only looks
+ * like base64 (unpadded, 17 or 18 bytes, stray bits) would make the host refuse
+ * every badge hash as `validation_failed`.
+ */
+export const canonicalSaltSchema = z.string().regex(/^[A-Za-z0-9+/]{21}[AQgw]==$/);
+
 /** `data` of an `org_profile` item. */
 export const orgRecordSchema = z.object({
   name: z.string(),
@@ -154,9 +166,13 @@ export const orgRecordSchema = z.object({
 });
 export type OrgRecord = z.infer<typeof orgRecordSchema>;
 
-/** `data` of a `site` item: the badge salt is 16 bytes, standard base64 with padding. */
-export const siteRecordSchema = z.object({
-  badgeSalt: z.base64().length(24),
+/**
+ * `data` of a `site` item: the badge salt is 16 bytes, standard base64 with
+ * padding. Exactly these keys (`z.strictObject`), like the people records:
+ * the salt decides which badges a station matches.
+ */
+export const siteRecordSchema = z.strictObject({
+  badgeSalt: canonicalSaltSchema,
   boxBlockSize: z.number().int().positive(),
   palletBlockSize: z.number().int().positive(),
 });
@@ -165,6 +181,32 @@ export type SiteRecord = z.infer<typeof siteRecordSchema>;
 /** `data` of a `lines` item. */
 export const lineRecordSchema = z.object({ name: z.string(), archived: z.boolean() });
 export type LineRecord = z.infer<typeof lineRecordSchema>;
+
+/**
+ * `data` of an `operators` item. It grants sign-in, so it has exactly these
+ * keys (`z.strictObject`): an unknown one, which a newer host could use to
+ * say something this build would miss, quarantines the record instead of
+ * being dropped. A personnel number of 3–12 digits, and a PIN hash a station
+ * can verify (`isPinPhc`).
+ */
+export const operatorRecordSchema = z.strictObject({
+  login: z.string().regex(/^[0-9]{3,12}$/),
+  name: z.string(),
+  role: z.string().nullable(),
+  pinPhc: z.string().refine(isPinPhc),
+});
+export type OperatorRecord = z.infer<typeof operatorRecordSchema>;
+
+/**
+ * `data` of an `operator_badges` item: exactly these keys, as for an
+ * operator, and a badge hash a station can match (`isBadgePhc`).
+ */
+export const operatorBadgeRecordSchema = z.strictObject({
+  operatorId: z.uuid(),
+  badgePhc: z.string().refine(isBadgePhc),
+  label: z.string().nullable(),
+});
+export type OperatorBadgeRecord = z.infer<typeof operatorBadgeRecordSchema>;
 
 /** The signed-in office user. */
 export const officeUserSchema = z.object({
@@ -289,17 +331,6 @@ export const officeOperatorSchema = z.object({
   rev: z.number().int(),
 });
 export type OfficeOperator = z.infer<typeof officeOperatorSchema>;
-
-/**
- * A canonical 16-byte salt: standard base64 with padding, 22 characters and
- * `==`. Those 22 characters hold 132 bits for 128 of data, so the last one
- * carries 2 data bits and 4 zero ones: it is `A`, `Q`, `g` or `w`. This is the
- * host's `decode_canonical` (`secrets::parse_phc`), which refuses anything
- * else, and `hashBadge` embeds the salt verbatim, so a salt that only looks
- * like base64 (unpadded, 17 or 18 bytes, stray bits) would make the host refuse
- * every badge hash as `validation_failed`.
- */
-export const canonicalSaltSchema = z.string().regex(/^[A-Za-z0-9+/]{21}[AQgw]==$/);
 
 /** `GET /v1/office/badge-salt`: the site's badge salt, 16 bytes in standard base64 with padding. */
 export const badgeSaltSchema = z.object({ badgeSalt: canonicalSaltSchema });

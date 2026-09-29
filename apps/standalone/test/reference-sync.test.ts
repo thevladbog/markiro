@@ -1,8 +1,13 @@
+import { readFileSync } from "node:fs";
 import type { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
-import type { ChangeItem, ChangesResponse } from "../src/host/protocol.js";
+import {
+  changesResponseSchema,
+  type ChangeItem,
+  type ChangesResponse,
+} from "../src/host/protocol.js";
 import { LocalDbError, type LocalExecutor, type LocalStatement } from "../src/local/executor.js";
 import {
   createSyncScheduler,
@@ -53,9 +58,70 @@ function brokenLine(id: string, rev: number): ChangeItem {
   return { entity: "lines", id, rev, deleted: false, data: { name: "Линия 1", archived: "да" } };
 }
 
+// See test/protocol.test.ts: bind import.meta.url before building the URL.
+const testModuleUrl = import.meta.url;
+
+/** `changes-people.json`: an operator, a badge, a badge's and an operator's tombstones. */
+const PEOPLE = changesResponseSchema.parse(
+  JSON.parse(readFileSync(new URL("../proto/fixtures/changes-people.json", testModuleUrl), "utf8")),
+);
+const ANNA = "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b";
+const PASS_7 = "c4e2a1b3-5d6f-4a8b-9c0d-1e2f3a4b5c6d";
+/** The badge and the operator `PEOPLE` deletes. */
+const OLD_PASS = "e7f6d5c4-b3a2-4918-8a7b-6c5d4e3f2a19";
+const TURNED_OFF = "5b9d2e4f-6a1c-4d3e-8f2a-7b6c5d4e3f21";
+const VERA = "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f";
+/** The PIN 4821 and the badge «MRK-000742», as the office hashed them (`proto/fixtures`). */
+const PIN_PHC =
+  "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=";
+const BADGE_PHC =
+  "pbkdf2$sha256$100000$AAECAwQFBgcICQoLDA0ODw==$LEcu0ewwRD5rBHrpCjvxni/q2cURiavbRlNRgDPb+n0=";
+
+function operator(id: string, rev: number, login: string, data: object = {}): ChangeItem {
+  return {
+    entity: "operators",
+    id,
+    rev,
+    deleted: false,
+    data: { login, name: "Анна Кузнецова", role: null, pinPhc: PIN_PHC, ...data },
+  };
+}
+
+function badge(id: string, rev: number, operatorId: string, data: object = {}): ChangeItem {
+  return {
+    entity: "operator_badges",
+    id,
+    rev,
+    deleted: false,
+    data: { operatorId, badgePhc: BADGE_PHC, label: null, ...data },
+  };
+}
+
+/** The operator and badge copies as plain rows. */
+function people(db: DatabaseSync) {
+  const rows = (sql: string) => Array.from(db.prepare(sql).all(), (row) => ({ ...row }));
+  return {
+    operators: rows("SELECT id, login, name, role, pin_phc, rev FROM ref_operators ORDER BY id"),
+    badges: rows(
+      "SELECT id, operator_id, badge_phc, label, rev FROM ref_operator_badges ORDER BY id",
+    ),
+  };
+}
+
 function page(rev: number, items: ChangeItem[], more = false, hostId = HOST_ID): ChangesResponse {
   return { hostId, rev, hasMore: more, items };
 }
+
+/** Every table `clear_copies` empties. */
+const COPY_TABLES = [
+  "ref_org",
+  "ref_site",
+  "ref_lines",
+  "ref_operators",
+  "ref_operator_badges",
+  "sync_quarantine",
+  "sync_state",
+];
 
 /** A change feed answering each `since` with its page; any other `since` fails the sync. */
 function feed(pages: Record<number, ChangesResponse>) {
@@ -170,7 +236,7 @@ describe("ENTITY_SET", () => {
   it("names the kept entities and the version of their records", () => {
     // Derived from the entity table and `SYNC_SCHEMA_VERSION`; pinned so a
     // build cannot change one and forget the other.
-    expect(ENTITY_SET).toBe("org_profile,site,lines;v2");
+    expect(ENTITY_SET).toBe("org_profile,site,lines,operators,operator_badges;v3");
   });
 });
 
@@ -738,9 +804,7 @@ describe("reference sync", () => {
 
     // `clear_copies` (`device_forget`) deletes every row of every table,
     // `sync_state` included, in one transaction of its own.
-    for (const table of ["ref_org", "ref_site", "ref_lines", "sync_quarantine", "sync_state"]) {
-      db.prepare(`DELETE FROM ${table}`).run();
-    }
+    for (const table of COPY_TABLES) db.prepare(`DELETE FROM ${table}`).run();
 
     resolve?.(page(11, [line(LINE_1, 11, "Линия 1 (после сброса)")]));
     const error: unknown = await run.then(
@@ -801,14 +865,15 @@ describe("reference sync", () => {
 
   it("skips entities this build does not keep", async () => {
     const { db, executor } = openLocalDb();
-    const operator: ChangeItem = {
-      entity: "operators",
+    // Products come with plan 1e.
+    const product: ChangeItem = {
+      entity: "products",
       id: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
       rev: 42,
       deleted: false,
-      data: { login: "1001" },
+      data: { gtin14: "04600682000013" },
     };
-    const changes = feed({ 0: page(42, [operator, line(LINE_1, 42, "Линия 1")]) });
+    const changes = feed({ 0: page(42, [product, line(LINE_1, 42, "Линия 1")]) });
     await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
       kind: "synced",
       rev: 42,
@@ -855,7 +920,7 @@ describe("sync quarantine", () => {
         entity: "site",
         id: "1",
         rev: 41,
-        reason: "badgeSalt: invalid_format; badgeSalt: too_small; palletBlockSize: invalid_type",
+        reason: "badgeSalt: invalid_format; palletBlockSize: invalid_type",
         seen_at: SEEN_AT,
       },
     ]);
@@ -1115,6 +1180,14 @@ describe("sync quarantine", () => {
       tombstone(LINE_2, 40),
       line(LINE_1, 42, "Линия 1"),
       brokenLine("9b2e4a6c-0000-4000-8000-000000000000", 42),
+      { entity: "operators", id: TURNED_OFF, rev: 40, deleted: true },
+      operator(ANNA, 42, "0042"),
+      operator(VERA, 42, "0099", { pinPhc: "4821" }),
+      { entity: "operator_badges", id: OLD_PASS, rev: 40, deleted: true },
+      badge(PASS_7, 42, ANNA),
+      badge("9b2e4a6c-0000-4000-8000-000000000001", 42, ANNA, {
+        badgePhc: PIN_PHC.replace("100000", "200000"),
+      }),
     ];
     await expect(
       syncReferences({
@@ -1123,14 +1196,186 @@ describe("sync quarantine", () => {
         hostId: HOST_ID,
         now: () => SEEN_AT,
       }),
-    ).resolves.toEqual({ kind: "synced", rev: 42, quarantined: 3 });
-    // The `host_id` stamp, then the page: the guard, the wipe (3 copy
+    ).resolves.toEqual({ kind: "synced", rev: 42, quarantined: 5 });
+    // The `host_id` stamp, then the page: the guard, the wipe (5 copy
     // tables, the quarantine, the sync state), per entity one delete and one
     // upsert, the quarantine upsert, the quarantine lift and the sync state:
-    // 3 × 3 + 6 = 15. Each new entity adds 3 (a wipe, a delete, an upsert),
-    // so plan 1d4's operators and badges make it 21, within the shell's 32.
-    expect(recorded.batches.map((batch) => batch.length)).toEqual([1, 15]);
+    // 3 × 5 + 6 = 21. Each new entity adds 3 (a wipe, a delete, an upsert):
+    // plan 1e's products, templates and their defaults would make it 30, the
+    // most the shell's 32 takes.
+    expect(recorded.batches.map((batch) => batch.length)).toEqual([1, 21]);
     expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 42 }]);
+  });
+});
+
+describe("operator and badge copies", () => {
+  it("keeps the people fixture's operator and badge and applies its tombstones", async () => {
+    const { db, executor } = openLocalDb();
+    // Synced before the fixture's page: the operator it deletes, the badge it
+    // revokes.
+    await syncReferences({
+      changes: feed({ 0: page(54, [operator(TURNED_OFF, 50, "0043"), badge(OLD_PASS, 52, ANNA)]) }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    expect(people(db).operators).toHaveLength(1);
+    expect(people(db).badges).toHaveLength(1);
+    await expect(
+      syncReferences({ changes: feed({ 54: PEOPLE }), local: executor, hostId: HOST_ID }),
+    ).resolves.toEqual({ kind: "synced", rev: 57, quarantined: 0 });
+    expect(people(db)).toEqual({
+      operators: [
+        {
+          id: ANNA,
+          login: "0042",
+          name: "Анна Кузнецова",
+          role: "Упаковщик",
+          pin_phc: PIN_PHC,
+          rev: 55,
+        },
+      ],
+      badges: [{ id: PASS_7, operator_id: ANNA, badge_phc: BADGE_PHC, label: null, rev: 56 }],
+    });
+    expect(tables(db).state).toEqual(state(57));
+  });
+
+  it("quarantines an operator or a badge this build cannot use, deletes its older copy and applies the rest", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({
+        0: page(20, [
+          operator(ANNA, 10, "0042"),
+          operator(VERA, 11, "0099"),
+          badge(PASS_7, 12, ANNA),
+          badge(OLD_PASS, 13, VERA),
+        ]),
+      }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    const changes = feed({
+      20: page(30, [
+        // A key a newer host added: the record fails closed, not trimmed.
+        operator(ANNA, 21, "0042", { shiftId: "7" }),
+        // More work than a station may spend on a PIN.
+        operator(VERA, 22, "0099", { pinPhc: PIN_PHC.replace("100000", "1000001") }),
+        // A count the host never takes for a badge: no scan would match it.
+        badge(PASS_7, 23, ANNA, { badgePhc: BADGE_PHC.replace("100000", "0100000") }),
+        badge(OLD_PASS, 24, VERA, { label: "Пропуск №9" }),
+      ]),
+    });
+    await expect(
+      syncReferences({ changes, local: executor, hostId: HOST_ID, now: () => SEEN_AT }),
+    ).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 3 });
+    expect(people(db)).toEqual({
+      operators: [],
+      badges: [
+        { id: OLD_PASS, operator_id: VERA, badge_phc: BADGE_PHC, label: "Пропуск №9", rev: 24 },
+      ],
+    });
+    expect(quarantine(db)).toEqual([
+      {
+        entity: "operator_badges",
+        id: PASS_7,
+        rev: 23,
+        reason: "badgePhc: custom",
+        seen_at: SEEN_AT,
+      },
+      { entity: "operators", id: VERA, rev: 22, reason: "pinPhc: custom", seen_at: SEEN_AT },
+      {
+        entity: "operators",
+        id: ANNA,
+        rev: 21,
+        reason: "data: unrecognized_keys",
+        seen_at: SEEN_AT,
+      },
+    ]);
+  });
+
+  it("keeps a badge whose operator is not among the copies: no foreign key", async () => {
+    // The feed keeps the badge of an operator who was turned off, and a badge
+    // can come in a page before its operator.
+    const { db, executor } = openLocalDb();
+    await expect(
+      syncReferences({
+        changes: feed({ 0: page(12, [badge(PASS_7, 12, ANNA)]) }),
+        local: executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
+    expect(people(db).operators).toEqual([]);
+    expect(people(db).badges).toHaveLength(1);
+  });
+
+  it("keeps two badges with one hash: the copies hold no uniqueness of their own", async () => {
+    // The host keeps an active badge on one operator. A copy that refused a
+    // second row would fail its whole page, and the sync would never move on.
+    const { db, executor } = openLocalDb();
+    await expect(
+      syncReferences({
+        changes: feed({ 0: page(12, [badge(PASS_7, 11, ANNA), badge(OLD_PASS, 12, VERA)]) }),
+        local: executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
+    expect(people(db).badges).toHaveLength(2);
+  });
+
+  it("keeps an older record out while its newer revision waits in quarantine, even from a stale run of a forgotten pairing with the same host", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({ 0: page(20, [operator(ANNA, 20, "0042"), badge(PASS_7, 20, ANNA)]) }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    // The next sync's fetch stays in flight across `device_forget`.
+    let resolve: ((value: ChangesResponse) => void) | undefined;
+    const held = vi.fn(
+      () =>
+        new Promise<ChangesResponse>((resolveFetch) => {
+          resolve = resolveFetch;
+        }),
+    );
+    const stale = syncReferences({ changes: held, local: executor, hostId: HOST_ID });
+    await vi.waitFor(() => expect(held).toHaveBeenCalledWith(20));
+    // `device_forget` clears every table; the device pairs again with the
+    // same host, whose first sync quarantines the newer revisions: fields
+    // this build does not read.
+    for (const table of COPY_TABLES) db.prepare(`DELETE FROM ${table}`).run();
+    await expect(
+      syncReferences({
+        changes: feed({
+          0: page(40, [
+            operator(ANNA, 35, "0042", { shiftId: "7" }),
+            badge(PASS_7, 36, ANNA, { zone: "B" }),
+          ]),
+        }),
+        local: executor,
+        hostId: HOST_ID,
+        now: () => SEEN_AT,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 40, quarantined: 2 });
+    // The forgotten pairing's page lands last. `hostGuard` lets it through:
+    // the new pairing stamped the same `host_id`.
+    resolve?.(page(30, [operator(ANNA, 25, "0042"), badge(PASS_7, 25, ANNA)]));
+    await expect(stale).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 2 });
+    expect(people(db)).toEqual({ operators: [], badges: [] });
+    expect(quarantine(db)).toEqual([
+      {
+        entity: "operator_badges",
+        id: PASS_7,
+        rev: 36,
+        reason: "data: unrecognized_keys",
+        seen_at: SEEN_AT,
+      },
+      {
+        entity: "operators",
+        id: ANNA,
+        rev: 35,
+        reason: "data: unrecognized_keys",
+        seen_at: SEEN_AT,
+      },
+    ]);
   });
 });
 

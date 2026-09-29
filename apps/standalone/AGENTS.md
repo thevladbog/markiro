@@ -240,9 +240,14 @@ access, the station's local table, an index on the new table's `rev` (as
 `feed::remove` and `feed::restore` for both.
 
 A change that removes access rides the feed as a tombstone, never as a
-flag: the webview reads records with `z.object`, which drops unknown keys,
-so a newer host expressing a revocation as a new field would leave an older
-station with the access. An operator is in the feed only while active: a
+flag. The records that grant access — `site`, `operators` and
+`operator_badges` — are read with `z.strictObject` and format checks (a
+personnel number of 3–12 digits; `isPinPhc` and `isBadgePhc` in
+`src/lib/credentials.ts`): a record with an unknown key, or with a hash no
+station could use, fails closed into the quarantine rather than being kept,
+so a field a newer host adds never just drops away on an older station.
+`org_profile` and `lines` are read with `z.object`, which drops unknown
+keys. An operator is in the feed only while active: a
 deactivation writes a tombstone for its id, and a reactivation drops the
 tombstone and sends the record again with a new `rev`. A badge is in the
 feed only while not revoked: a revocation writes a tombstone, and a revoked
@@ -293,6 +298,22 @@ exactly so. A keyboard-wedge scanner presses keys, and a station types the
 same badge through its own layout, so a code in Cyrillic is refused with a
 hint to switch the layout, never read by key position.
 
+A station keeps its copies in `ref_operators` and `ref_operator_badges`
+(`src-tauri/migrations/0003_operators_badges.sql`), with no foreign key from
+a badge to its operator — the feed keeps the badge of an operator who was
+turned off, and a badge can come in a page before its operator — and no
+uniqueness besides the key: the host keeps personnel numbers and active
+badges unique, and a copy that refused a row would abort its whole page and
+stop the sync for good. Rules for the station's sign-in (plan 1f): it reads
+these copies only on the floor screen of a paired device that is not
+rejected. The hashes already on disk stay when the host revokes the device
+or its certificate changes, and only a forget clears them, so such a device
+must keep showing no floor, as `nextShellView` does today: the
+rejected-device screen comes first. A badge is found by hashing the trimmed scan with
+`ref_site.badge_salt` and comparing whole strings, and it signs in only
+with the record of its `operatorId`; a badge that matches more than one
+active operator is refused as ambiguous, never resolved to the first.
+
 ## Reference sync
 
 `src/local/reference-sync.ts` keeps the local copies in step with the host
@@ -313,7 +334,9 @@ advances. A readable record or a tombstone at least as new lifts
 the quarantine; so does a build that reads the record, since it syncs
 from zero. `reason` holds Zod issue paths and codes only
 (`archived: invalid_type`, at most 200 characters), never a value:
-operator records will carry PIN and badge hashes. `seen_at` is a
+operator records carry PIN and badge hashes. That is safe only because
+every record schema has fixed keys: a schema with a dynamic-key `z.record`
+would put keys taken from the data into the paths. `seen_at` is a
 parameter from the webview's clock, never SQL time. Entities this build
 does not keep are skipped, not quarantined, and applying a page again
 changes nothing. A successful run reports the quarantine's size
@@ -324,13 +347,23 @@ loop.
 For E kept entities a page batch holds at most 3E + 6 statements: the
 guard, a deferred wipe (E copy tables, the quarantine, the sync state),
 two per entity, the quarantine upsert and lift, and the sync state. That
-is 15 today and 21 with plan 1d4's operators and badges, within the
-shell's 32 (E = 8 at most); a test builds the worst-case page.
+is 21 for the five entities kept today, within the shell's 32 (E = 8 at
+most, 30 statements); a test builds the worst-case page.
 `ENTITY_SET` names the kept entities and `SYNC_SCHEMA_VERSION`
-(`"org_profile,site,lines;v2"`): raise the version whenever a record
-schema or the meaning of a copy table changes, so every device syncs
-from zero once and gets back what an older build quarantined or kept
-differently.
+(`"org_profile,site,lines,operators,operator_badges;v3"`): raise the
+version whenever a record schema or the meaning of a copy table changes,
+so every device syncs from zero once and gets back what an older build
+quarantined or kept differently.
+The upserts of operators and badges also skip a record whose newer
+revision waits in the quarantine (`notQuarantinedNewer`): the insert would
+otherwise bring back what the quarantine's fail-closed delete took away.
+The feed never sends an older revision after a newer one, but a stale run
+can: a page fetched before `device_forget` that lands only after a new
+pairing with the same host has stamped `host_id` again. `hostGuard` (below)
+stops such a page until that stamp, not after it. The same late page can
+still put back a record the new run deleted by tombstone, and it moves
+`last_rev` back to its own revision, so the next sync fetches that tombstone
+again and deletes the record anew.
 The copies, and the quarantine with them, start from zero when `host_id`
 names another host, when
 `entity_set` is not this build's `ENTITY_SET`, or when the feed answers

@@ -69,6 +69,8 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
         names,
         [
             "ref_lines",
+            "ref_operator_badges",
+            "ref_operators",
             "ref_org",
             "ref_site",
             "sync_quarantine",

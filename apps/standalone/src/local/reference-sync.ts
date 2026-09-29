@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import {
   lineRecordSchema,
+  operatorBadgeRecordSchema,
+  operatorRecordSchema,
   orgRecordSchema,
   siteRecordSchema,
   type ChangeItem,
@@ -56,7 +58,9 @@ const MAX_REASON_LENGTH = 200;
 /**
  * Why a record fails its schema, from Zod issue paths and codes only
  * (`archived: invalid_type`; `data` names the record itself): never a value,
- * since operator records will carry PIN and badge hashes (plan 1d4).
+ * since operator records carry PIN and badge hashes. That holds only while
+ * every record schema has fixed keys: a `z.record` would put keys taken from
+ * the data into the paths.
  */
 function quarantineReason(error: z.ZodError): string {
   const reason = error.issues
@@ -75,6 +79,22 @@ function checked<T extends Record<string, unknown>>(
   const parsed = schema.safeParse(item.data);
   if (!parsed.success) return { reason: quarantineReason(parsed.error) };
   return { row: { ...parsed.data, id: item.id, rev: item.rev } };
+}
+
+/**
+ * The `WHERE` of an upsert that keeps an older revision of a record out while
+ * a newer one waits in quarantine: the insert would otherwise bring back what
+ * the quarantine's fail-closed delete took away. The feed never sends an older
+ * revision after a newer one, but a stale run can: a page fetched before
+ * `device_forget` that lands only after a new pairing with the same host has
+ * stamped `host_id` again, when `hostGuard` no longer stops it. Only for the
+ * records that grant access, operators and their badges.
+ */
+function notQuarantinedNewer(entity: string): string {
+  return (
+    "WHERE NOT EXISTS (SELECT 1 FROM sync_quarantine AS q " +
+    `WHERE q.entity = '${entity}' AND q.id = r.value ->> 'id' AND q.rev > r.value ->> 'rev')`
+  );
 }
 
 const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
@@ -126,6 +146,38 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
         "WHERE excluded.rev > ref_lines.rev",
     },
   ],
+  [
+    "operators",
+    {
+      table: "ref_operators",
+      check: (item) => checked(operatorRecordSchema, item),
+      upsert:
+        "INSERT INTO ref_operators (id, login, name, role, pin_phc, rev) " +
+        "SELECT r.value ->> 'id', r.value ->> 'login', r.value ->> 'name', r.value ->> 'role', " +
+        "r.value ->> 'pinPhc', r.value ->> 'rev' " +
+        "FROM json_each(?) AS r " +
+        notQuarantinedNewer("operators") +
+        " ON CONFLICT (id) DO UPDATE SET login = excluded.login, name = excluded.name, " +
+        "role = excluded.role, pin_phc = excluded.pin_phc, rev = excluded.rev " +
+        "WHERE excluded.rev > ref_operators.rev",
+    },
+  ],
+  [
+    "operator_badges",
+    {
+      table: "ref_operator_badges",
+      check: (item) => checked(operatorBadgeRecordSchema, item),
+      upsert:
+        "INSERT INTO ref_operator_badges (id, operator_id, badge_phc, label, rev) " +
+        "SELECT r.value ->> 'id', r.value ->> 'operatorId', r.value ->> 'badgePhc', " +
+        "r.value ->> 'label', r.value ->> 'rev' " +
+        "FROM json_each(?) AS r " +
+        notQuarantinedNewer("operator_badges") +
+        " ON CONFLICT (id) DO UPDATE SET operator_id = excluded.operator_id, " +
+        "badge_phc = excluded.badge_phc, label = excluded.label, rev = excluded.rev " +
+        "WHERE excluded.rev > ref_operator_badges.rev",
+    },
+  ],
 ]);
 
 /**
@@ -134,15 +186,16 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
  * matches, every device syncs from zero, and records an older build
  * quarantined or kept differently come again.
  */
-const SYNC_SCHEMA_VERSION = 2;
+const SYNC_SCHEMA_VERSION = 3;
 
 /**
  * This build's copies, in `sync_state.entity_set`: the feed entities it
  * keeps (derived from `ENTITIES`, so a new entity cannot update that map and
  * forget this value, or the reverse) and `SYNC_SCHEMA_VERSION`. Today:
- * `"org_profile,site,lines;v2"`. A build that keeps other entities, or reads
- * them differently, finds another value there and syncs from zero: records
- * the old build skipped or quarantined would never come otherwise.
+ * `"org_profile,site,lines,operators,operator_badges;v3"`. A build that
+ * keeps other entities, or reads them differently, finds another value there
+ * and syncs from zero: records the old build skipped or quarantined would
+ * never come otherwise.
  */
 export const ENTITY_SET = `${[...ENTITIES.keys()].join(",")};v${SYNC_SCHEMA_VERSION}`;
 
@@ -296,8 +349,8 @@ async function readState(local: LocalExecutor): Promise<StoredState> {
  *
  * `syncReferences` prepends `hostGuard` and, when starting over, `WIPE`: for
  * E kept entities a batch holds at most 1 + (E + 2) + 2E + 3 = 3E + 6
- * statements — 15 today, 21 with plan 1d4's two entities, and E = 8 at most
- * within the shell's 32.
+ * statements — 21 for the five kept today, and E = 8 (30) at most within the
+ * shell's 32.
  */
 function pageStatements(page: ChangesResponse, hostId: string, seenAt: number): LocalStatement[] {
   const statements: LocalStatement[] = [];

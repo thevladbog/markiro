@@ -111,6 +111,8 @@ describe("local database on node:sqlite", () => {
     );
     expect(tables.map((table) => table.name)).toEqual([
       "ref_lines",
+      "ref_operator_badges",
+      "ref_operators",
       "ref_org",
       "ref_site",
       "sync_quarantine",

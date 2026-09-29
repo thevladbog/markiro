@@ -30,7 +30,9 @@ import {
   officeUserRecordSchema,
   officeUserSchema,
   officeUserUpdateSchema,
+  operatorBadgeRecordSchema,
   operatorCreateSchema,
+  operatorRecordSchema,
   operatorUpdateSchema,
   orgProfileSchema,
   orgProfileUpdateSchema,
@@ -121,6 +123,61 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
     expect(changes.items[3]).toMatchObject({ deleted: true });
     expect(changes.items[3]?.data).toBeUndefined();
   });
+
+  it("change feed of people", () => {
+    const rawChanges = fixture("changes-people.json") as { items: Array<{ data?: unknown }> };
+    const changes = changesResponseSchema.parse(rawChanges);
+    expect(changes.items).toHaveLength(4);
+    expect(operatorRecordSchema.parse(changes.items[0]?.data)).toEqual(rawChanges.items[0]?.data);
+    expect(operatorBadgeRecordSchema.parse(changes.items[1]?.data)).toEqual(
+      rawChanges.items[1]?.data,
+    );
+    expect(changes.items.slice(2).map((item) => [item.entity, item.deleted, item.data])).toEqual([
+      ["operator_badges", true, undefined],
+      ["operators", true, undefined],
+    ]);
+  });
+});
+
+/** `data` of item `index` of a feed fixture, as an object. */
+function feedRecord(name: string, index: number): Record<string, unknown> {
+  const changes = changesResponseSchema.parse(fixture(name));
+  const data = changes.items[index]?.data;
+  if (typeof data !== "object" || data === null) throw new Error(`${name} has no record ${index}`);
+  return { ...data };
+}
+
+describe("feed records that grant access", () => {
+  const OPERATOR = feedRecord("changes-people.json", 0);
+  const BADGE = feedRecord("changes-people.json", 1);
+  const SITE = feedRecord("changes-response.json", 2);
+
+  it("have exactly their keys: an unknown key or a missing one fails closed", () => {
+    for (const [schema, record] of [
+      [operatorRecordSchema, OPERATOR],
+      [operatorBadgeRecordSchema, BADGE],
+      [siteRecordSchema, SITE],
+    ] as const) {
+      expect(schema.safeParse(record).success).toBe(true);
+      expect(schema.safeParse({ ...record, addedLater: true }).success).toBe(false);
+    }
+    const withoutRole = Object.fromEntries(
+      Object.entries(OPERATOR).filter(([key]) => key !== "role"),
+    );
+    expect(operatorRecordSchema.safeParse(withoutRole).success).toBe(false);
+  });
+
+  it("take a personnel number of 3 to 12 digits and a badge's operator by UUID", () => {
+    for (const login of ["042", "123456789012"]) {
+      expect(operatorRecordSchema.safeParse({ ...OPERATOR, login }).success).toBe(true);
+    }
+    for (const login of ["42", "1234567890123", "0042a", " 0042"]) {
+      expect(operatorRecordSchema.safeParse({ ...OPERATOR, login }).success).toBe(false);
+    }
+    expect(operatorBadgeRecordSchema.safeParse({ ...BADGE, operatorId: "0042" }).success).toBe(
+      false,
+    );
+  });
 });
 
 // Host responses pass through the shell unchanged: lenient, like the Rust
@@ -191,9 +248,10 @@ describe.each(REQUESTS)("request fixture %s", (name, schema) => {
 // The site's badge salt: `hashBadge` embeds it verbatim, and the host refuses a
 // badge hash under a salt that is not canonical (`decode_canonical` behind
 // `secrets::parse_phc`): standard base64 with padding that holds exactly 16
-// bytes and encodes back to the same text. The rule has two entry points, the
-// response schema of `GET /v1/office/badge-salt` and the constant it is built
-// from; both are held to a reference (`isCanonicalSalt`) that restates it.
+// bytes and encodes back to the same text. The rule has three entry points, the
+// response schema of `GET /v1/office/badge-salt`, the constant it is built from
+// and the feed's `site` record, which carries the same value; all are held to a
+// reference (`isCanonicalSalt`) that restates it.
 const BASE64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 /** A canonical salt whose bytes put both `+` and `/` in its base64 text. */
@@ -224,6 +282,12 @@ function saltOfBytes(count: number): string {
 const SALT_CHECKS = [
   ["badgeSaltSchema", (salt: string) => badgeSaltSchema.safeParse({ badgeSalt: salt }).success],
   ["canonicalSaltSchema", (salt: string) => canonicalSaltSchema.safeParse(salt).success],
+  [
+    "siteRecordSchema",
+    (salt: string) =>
+      siteRecordSchema.safeParse({ badgeSalt: salt, boxBlockSize: 2000, palletBlockSize: 200 })
+        .success,
+  ],
 ] as const;
 
 describe.each(SALT_CHECKS)("%s takes only a canonical 16-byte salt", (_name, accepts) => {

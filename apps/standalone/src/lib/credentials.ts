@@ -1,4 +1,10 @@
-import { deriveDigestB64, formatPhc, PHC_ITERATIONS } from "@markiro/domain";
+import {
+  deriveDigestB64,
+  formatPhc,
+  parsePhc,
+  PHC_ITERATIONS,
+  type ParsedPhc,
+} from "@markiro/domain";
 
 // Operator credentials as the office makes them (stage 1 spec §5.5): the PIN
 // and the badge code are hashed here, in the webview, and only the PHC
@@ -47,4 +53,42 @@ export async function hashBadge(code: string, saltB64: string): Promise<string> 
     saltB64,
     await deriveDigestB64(code, saltB64, BADGE_ITERATIONS),
   );
+}
+
+/** The fewest iterations the host takes in a verifier (`secrets::MIN_ITERATIONS`). */
+export const MIN_PHC_ITERATIONS = 10_000;
+/** The most (`secrets::MAX_ITERATIONS`): a station verifies with the count a hash carries. */
+export const MAX_PHC_ITERATIONS = 1_000_000;
+
+/**
+ * `phc` parsed, when it is written exactly as the host writes a verifier:
+ * the domain's format (`parsePhc`) with a count in plain digits, so writing
+ * it out again gives the same string. The host's `parse_phc` refuses
+ * `0100000` or `1e5`, which `parsePhc` reads as 100 000.
+ */
+function asHostWrites(phc: string): ParsedPhc | null {
+  const parsed = parsePhc(phc);
+  if (parsed === null) return null;
+  return formatPhc(parsed.iterations, parsed.saltB64, parsed.digestB64) === phc ? parsed : null;
+}
+
+/** A PIN verifier a station can use: as the host writes it, with 10 000–1 000 000 iterations. */
+export function isPinPhc(phc: string): boolean {
+  const parsed = asHostWrites(phc);
+  return (
+    parsed !== null &&
+    parsed.iterations >= MIN_PHC_ITERATIONS &&
+    parsed.iterations <= MAX_PHC_ITERATIONS
+  );
+}
+
+/**
+ * A badge verifier a station can match: as the host writes it, with exactly
+ * `BADGE_ITERATIONS`. The salt is not checked against the `site` record: the
+ * host takes only the site's, the salt never changes after the wizard, and a
+ * copy with another salt matches no scan anyway, since a station hashes a
+ * scan with the site's salt and compares whole strings.
+ */
+export function isBadgePhc(phc: string): boolean {
+  return asHostWrites(phc)?.iterations === BADGE_ITERATIONS;
 }
