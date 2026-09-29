@@ -433,11 +433,17 @@ async fn revoking_a_device_refuses_its_key_and_ends_its_office_sessions() {
         )]
     );
 
-    // Revoking it again changes nothing.
+    // Revoking it again, later, changes nothing: not the record, and above
+    // all not `revokedAt`, which a rewrite would move to the new time. The
+    // clock moves first, so a rewritten time shows.
+    admin.app.clock.advance(time::Duration::minutes(5));
     let (status, again) = admin
         .call("POST", &format!("/v1/office/devices/{office}/revoke"), None)
         .await;
-    assert_eq!((status, again), (StatusCode::OK, revoked));
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again["revokedAt"], revoked["revokedAt"]);
+    assert_eq!(again, revoked);
+    assert_eq!(device(&admin, &office).await, revoked);
     assert_eq!(audit_trail(&admin.app, "device.revoke").await.len(), 1);
 }
 

@@ -7,16 +7,16 @@
   "hasPin": true,
   "badges": [
     {
-      "id": "c4e2a1b3-5d6f-4a8b-9c0d-1e2f3a4b5c6d",
-      "label": "Пропуск №7",
-      "createdAt": "2026-09-27T08:00:00Z",
-      "revokedAt": null
-    },
-    {
       "id": "e7f6d5c4-b3a2-4918-8a7b-6c5d4e3f2a19",
       "label": null,
       "createdAt": "2026-09-20T08:00:00Z",
       "revokedAt": "2026-09-27T08:00:00Z"
+    },
+    {
+      "id": "c4e2a1b3-5d6f-4a8b-9c0d-1e2f3a4b5c6d",
+      "label": "Пропуск №7",
+      "createdAt": "2026-09-27T08:00:00Z",
+      "revokedAt": null
     }
   ],
   "rev": 55

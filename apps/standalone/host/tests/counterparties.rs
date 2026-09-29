@@ -2,7 +2,7 @@ mod support;
 
 use axum::http::StatusCode;
 use serde_json::{json, Value};
-use support::app::{admin, audit_trail, empty, host_revision, request, with_device};
+use support::app::{admin, audit_rows, audit_trail, empty, host_revision, request, with_device};
 
 const BEREG: &str = "ООО «Северный берег»";
 
@@ -97,7 +97,9 @@ async fn an_administrator_creates_lists_and_updates_counterparties() {
         1
     );
 
-    // An update over an old revision is refused.
+    // An update over an old revision is refused, and changes nothing: no
+    // revision and no audit row, of any action.
+    let rows = audit_rows(&admin.app).await;
     let (status, body) = admin
         .call("PUT", &path, Some(full(Value::Null, false, 2)))
         .await;
@@ -108,6 +110,159 @@ async fn an_administrator_creates_lists_and_updates_counterparties() {
             body["error"]["details"]["currentRev"].clone()
         ),
         (StatusCode::CONFLICT, json!("stale_revision"), json!(3))
+    );
+    assert_eq!(host_revision(&admin.app).await, 3);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+/// `inn` is part of the whole record a `PUT` carries, so leaving it out clears
+/// it exactly as `null` does.
+#[tokio::test]
+async fn an_update_without_an_inn_clears_it_just_like_a_null() {
+    let admin = admin().await;
+    let mut body = new_counterparty();
+    body["inn"] = json!("7812345678");
+    let (status, created) = admin
+        .call("POST", "/v1/office/counterparties", Some(body))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    assert_eq!(created["inn"], json!("7812345678"));
+    let id = created["id"].as_str().unwrap().to_owned();
+    let path = format!("/v1/office/counterparties/{id}");
+
+    // `inn: null` clears it...
+    let (status, cleared) = admin
+        .call("PUT", &path, Some(full(Value::Null, false, 2)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert_eq!(
+        (cleared["inn"].clone(), cleared["rev"].clone()),
+        (Value::Null, json!(3))
+    );
+    // ...it can be set again...
+    let (status, set) = admin
+        .call("PUT", &path, Some(full(json!("7812345678"), false, 3)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    assert_eq!(
+        (set["inn"].clone(), set["rev"].clone()),
+        (json!("7812345678"), json!(4))
+    );
+    // ...and leaving `inn` out clears it again.
+    let mut without = full(Value::Null, false, 4);
+    without.as_object_mut().unwrap().remove("inn");
+    let (status, cleared_again) = admin.call("PUT", &path, Some(without)).await;
+    assert_eq!(status, StatusCode::OK, "{cleared_again}");
+    assert_eq!(
+        (cleared_again["inn"].clone(), cleared_again["rev"].clone()),
+        (Value::Null, json!(5))
+    );
+
+    let inn = |from: Value, to: Value| {
+        admin.row(
+            "counterparty.update",
+            "counterparty",
+            &id,
+            json!({ "changed": ["inn"], "inn": { "from": from, "to": to } }),
+        )
+    };
+    assert_eq!(
+        audit_trail(&admin.app, "counterparty.update").await,
+        vec![
+            inn(json!("7812345678"), Value::Null),
+            inn(Value::Null, json!("7812345678")),
+            inn(json!("7812345678"), Value::Null),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn an_archived_counterparty_can_be_brought_back() {
+    let admin = admin().await;
+    let (_, created) = admin
+        .call(
+            "POST",
+            "/v1/office/counterparties",
+            Some(new_counterparty()),
+        )
+        .await;
+    let id = created["id"].as_str().unwrap().to_owned();
+    let path = format!("/v1/office/counterparties/{id}");
+    let (status, archived) = admin
+        .call("PUT", &path, Some(full(Value::Null, true, 2)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{archived}");
+    assert_eq!(archived["archived"], json!(true));
+
+    let (status, restored) = admin
+        .call("PUT", &path, Some(full(Value::Null, false, 3)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{restored}");
+    assert_eq!(
+        (restored["archived"].clone(), restored["rev"].clone()),
+        (json!(false), json!(4))
+    );
+    let (_, list) = admin.call("GET", "/v1/office/counterparties", None).await;
+    assert_eq!(list, json!([restored]));
+    let archive = |from: bool, to: bool| {
+        admin.row(
+            "counterparty.update",
+            "counterparty",
+            &id,
+            json!({ "changed": ["archived"], "archived": { "from": from, "to": to } }),
+        )
+    };
+    assert_eq!(
+        audit_trail(&admin.app, "counterparty.update").await,
+        vec![archive(false, true), archive(true, false)]
+    );
+}
+
+/// The audit row of an update names each changed field, in the record's
+/// order, with the stored old value and the stored (trimmed, de-duplicated)
+/// new one.
+#[tokio::test]
+async fn an_update_records_a_changed_name_gln_and_prefixes_with_both_values() {
+    let admin = admin().await;
+    let (_, created) = admin
+        .call(
+            "POST",
+            "/v1/office/counterparties",
+            Some(new_counterparty()),
+        )
+        .await;
+    let id = created["id"].as_str().unwrap().to_owned();
+    let (status, updated) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/counterparties/{id}"),
+            Some(json!({
+                "name": " ООО «Южный берег» ",
+                "inn": null,
+                "gln": "4601234000024",
+                "gs1Prefixes": ["4601234", "4605555", " 4609876 ", "4605555"],
+                "archived": false,
+                "expectedRev": 2
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(
+        audit_trail(&admin.app, "counterparty.update").await,
+        vec![admin.row(
+            "counterparty.update",
+            "counterparty",
+            &id,
+            json!({
+                "changed": ["name", "gln", "gs1Prefixes"],
+                "name": { "from": BEREG, "to": "ООО «Южный берег»" },
+                "gln": { "from": "4601234000017", "to": "4601234000024" },
+                "gs1Prefixes": {
+                    "from": ["4601234", "4609876"],
+                    "to": ["4601234", "4605555", "4609876"]
+                }
+            })
+        )]
     );
 }
 
@@ -177,6 +332,11 @@ async fn counterparty_fields_follow_the_organization_rules() {
     assert_eq!(
         (status, error["error"]["code"].clone()),
         (StatusCode::BAD_REQUEST, json!("validation_failed"))
+    );
+    // A body that cannot be read names no field: there is none to name.
+    assert!(
+        error["error"]["details"]["field"].is_null(),
+        "an unknown field is not one field's error: {error}"
     );
     let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM counterparties")
         .fetch_one(&admin.app.state.pool)
@@ -303,6 +463,8 @@ async fn technologists_read_counterparties_but_do_not_change_them() {
 async fn an_unknown_counterparty_is_not_found_once_its_body_is_valid() {
     let admin = admin().await;
     let path = "/v1/office/counterparties/9b2e4a6c-0000-4000-8000-000000000000";
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
     let mut invalid = full(Value::Null, false, 1);
     invalid["gln"] = json!("1");
     let (status, body) = admin.call("PUT", path, Some(invalid)).await;
@@ -317,4 +479,7 @@ async fn an_unknown_counterparty_is_not_found_once_its_body_is_valid() {
         (status, body["error"]["code"].clone()),
         (StatusCode::NOT_FOUND, json!("not_found"))
     );
+    // Neither refusal wrote anything: no revision, no audit row of any action.
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
 }

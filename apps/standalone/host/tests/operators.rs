@@ -4,7 +4,9 @@ use axum::http::StatusCode;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use serde_json::{json, Value};
-use support::app::{admin, audit_trail, empty, host_revision, request, with_device, Admin};
+use support::app::{
+    admin, audit_rows, audit_trail, empty, host_revision, request, tombstones, with_device, Admin,
+};
 
 /// `pinPhc` of `proto/fixtures/phc-password.json`: the PIN 4821.
 const PIN_4821: &str =
@@ -121,6 +123,11 @@ async fn operator_fields_are_checked() {
     assert_eq!(
         (status, error["error"]["code"].clone()),
         (StatusCode::BAD_REQUEST, json!("validation_failed"))
+    );
+    assert_eq!(
+        field(&error),
+        Value::Null,
+        "an unknown field is not one field's error: {error}"
     );
     assert!(audit_trail(&admin.app, "operator.create").await.is_empty());
 
@@ -247,7 +254,9 @@ async fn an_update_names_the_changed_fields_and_never_the_pin_hash() {
     assert_eq!((status, same), (StatusCode::OK, updated));
     assert_eq!(host_revision(&admin.app).await, 3);
     assert_eq!(audit_trail(&admin.app, "operator.update").await.len(), 1);
-    // An old revision is refused.
+    // An old revision is refused, and changes nothing: no revision and no
+    // audit row, of any action.
+    let rows = audit_rows(&admin.app).await;
     let (status, body) = admin
         .call(
             "PUT",
@@ -263,6 +272,93 @@ async fn an_update_names_the_changed_fields_and_never_the_pin_hash() {
         ),
         (StatusCode::CONFLICT, json!("stale_revision"), json!(3))
     );
+    assert_eq!(host_revision(&admin.app).await, 3);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+/// `PUT { active }` on the operator at `path`, which is at `expected_rev`;
+/// returns the record.
+async fn set_active(admin: &Admin, path: &str, active: bool, expected_rev: i64) -> Value {
+    let (status, operator) = admin
+        .call(
+            "PUT",
+            path,
+            Some(json!({ "active": active, "expectedRev": expected_rev })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{operator}");
+    operator
+}
+
+/// Deactivate, reactivate, deactivate: at every step the feed holds the
+/// record or the tombstone of the key, never both, and in the end the one
+/// tombstone sits at the last revision. A `restore` that drops nothing would
+/// leave the first tombstone standing after the reactivation (the second
+/// deactivation would then hide it by moving it up).
+#[tokio::test]
+async fn deactivating_again_after_a_reactivation_leaves_one_tombstone_at_the_last_revision() {
+    let admin = admin().await;
+    let id = create(&admin).await;
+    let path = format!("/v1/office/operators/{id}");
+    let gone = |rev: i64| json!({ "entity": "operators", "id": id, "rev": rev, "deleted": true });
+
+    set_active(&admin, &path, false, 2).await;
+    assert_eq!(
+        tombstones(&admin.app).await,
+        vec![("operators".to_owned(), id.clone(), 3)]
+    );
+    assert_eq!(feed(&admin, 1).await, json!([gone(3)]));
+
+    set_active(&admin, &path, true, 3).await;
+    assert_eq!(tombstones(&admin.app).await, vec![], "the record is back");
+    assert_eq!(
+        feed(&admin, 1).await,
+        json!([{
+            "entity": "operators", "id": id, "rev": 4, "deleted": false,
+            "data": { "login": "0042", "name": "Анна Кузнецова", "role": "Упаковщик", "pinPhc": PIN_4821 }
+        }]),
+        "the record alone, no tombstone beside it"
+    );
+
+    let off_again = set_active(&admin, &path, false, 4).await;
+    assert_eq!(off_again["rev"], json!(5));
+    assert_eq!(
+        tombstones(&admin.app).await,
+        vec![("operators".to_owned(), id.clone(), 5)],
+        "exactly one tombstone, at the last revision"
+    );
+    // The feed carries no record for the key, from zero or from either
+    // earlier revision: only the tombstone.
+    for since in [1, 3, 4] {
+        assert_eq!(feed(&admin, since).await, json!([gone(5)]), "since {since}");
+    }
+    assert_eq!(feed(&admin, 5).await, json!([]));
+}
+
+/// `{ "active": true }` on an operator that is already active changes
+/// nothing: no revision, no audit row, no tombstone.
+#[tokio::test]
+async fn activating_an_active_operator_writes_nothing() {
+    let admin = admin().await;
+    let id = create(&admin).await;
+    let (_, before) = admin.call("GET", "/v1/office/operators", None).await;
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let station_feed = feed(&admin, 1).await;
+
+    let (status, same) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/operators/{id}"),
+            Some(json!({ "active": true, "expectedRev": 2 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{same}");
+    assert_eq!(json!([same]), before, "the record as it was, at rev 2");
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(tombstones(&admin.app).await, vec![]);
+    assert_eq!(feed(&admin, 1).await, station_feed);
 }
 
 #[tokio::test]
@@ -358,6 +454,8 @@ async fn technologists_have_no_access_to_operators() {
 async fn an_unknown_operator_is_not_found_once_its_body_is_valid() {
     let admin = admin().await;
     let path = "/v1/office/operators/9b2e4a6c-0000-4000-8000-000000000000";
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
     let (status, body) = admin
         .call("PUT", path, Some(json!({ "name": " ", "expectedRev": 1 })))
         .await;
@@ -376,4 +474,8 @@ async fn an_unknown_operator_is_not_found_once_its_body_is_valid() {
         (status, body["error"]["code"].clone()),
         (StatusCode::NOT_FOUND, json!("not_found"))
     );
+    // Neither refusal wrote anything: no revision, no audit row of any action.
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(tombstones(&admin.app).await, vec![]);
 }

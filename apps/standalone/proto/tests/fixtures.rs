@@ -20,6 +20,17 @@ fn fixture(name: &str) -> Value {
     serde_json::from_str(&text).unwrap_or_else(|error| panic!("parse {path}: {error}"))
 }
 
+/// The `site` item of `changes-response.json`, found by its entity: what the
+/// tests read from it must not depend on where the fixture lists it.
+fn site_item(feed: &Value) -> &Value {
+    feed["items"]
+        .as_array()
+        .expect("the feed fixture lists its items")
+        .iter()
+        .find(|item| item["entity"] == "site")
+        .expect("the feed fixture has a site item")
+}
+
 /// Deserialize into `T` and serialize back: the JSON must survive unchanged.
 fn round_trip<T: DeserializeOwned + Serialize>(name: &str) -> T {
     let original = fixture(name);
@@ -258,9 +269,21 @@ fn the_people_feed_fixture_round_trips_without_leaking_hashes() {
         serde_json::from_value(changes.items[1].data.clone().unwrap()).unwrap();
     assert_eq!(badge.operator_id, changes.items[0].id);
     assert_eq!(badge.label, None);
-    // The badge is hashed with the site's badge salt.
-    let salt = fixture("changes-response.json")["items"][2]["data"]["badgeSalt"].clone();
-    assert_eq!(badge.badge_phc.expose().split('$').nth(3), salt.as_str());
+    // The badge is hashed with the site's badge salt: both sides must exist,
+    // or two missing values would compare equal.
+    let feed = fixture("changes-response.json");
+    let salt = site_item(&feed)["data"]["badgeSalt"]
+        .as_str()
+        .expect("the site record carries a badge salt");
+    assert_eq!(
+        badge
+            .badge_phc
+            .expose()
+            .split('$')
+            .nth(3)
+            .expect("a PHC string carries a salt"),
+        salt
+    );
     assert!(changes.items[2..]
         .iter()
         .all(|item| item.deleted && item.data.is_none()));
@@ -279,11 +302,18 @@ fn the_feed_envelope_and_the_site_record_print_without_hashes_or_the_salt() {
     let text = |value: &Value| value.as_str().expect("a string").to_owned();
     let pin = text(&people["items"][0]["data"]["pinPhc"]);
     let badge = text(&people["items"][1]["data"]["badgePhc"]);
-    let salt = text(&feed["items"][2]["data"]["badgeSalt"]);
+    let salt = text(&site_item(&feed)["data"]["badgeSalt"]);
 
     let people: ChangesResponse = serde_json::from_value(people).unwrap();
     let feed: ChangesResponse = serde_json::from_value(feed).unwrap();
-    let site: SiteRecord = serde_json::from_value(feed.items[2].data.clone().unwrap()).unwrap();
+    let site: SiteRecord = serde_json::from_value(
+        feed.items
+            .iter()
+            .find(|item| item.entity == "site")
+            .and_then(|item| item.data.clone())
+            .expect("the feed fixture has a site record"),
+    )
+    .unwrap();
     let debug = format!("{people:?}\n{feed:?}\n{site:?}");
     for (name, secret) in [
         ("PIN hash", &pin),
@@ -329,14 +359,19 @@ fn line_fixtures_round_trip_and_an_update_carries_only_what_changes() {
     let mut value = fixture("line-update.json");
     value["rename"] = Value::Bool(true);
     assert!(serde_json::from_value::<LineUpdate>(value).is_err());
+    // A line is created active: `archived` is an update's field, not a create's.
+    let mut value = fixture("line-create.json");
+    value["archived"] = Value::Bool(true);
+    assert!(serde_json::from_value::<LineCreate>(value).is_err());
 }
 
 #[test]
 fn operator_fixtures_round_trip_without_leaking_the_pin_hash() {
     let operator: OfficeOperator = round_trip("office-operator.json");
     assert!(operator.has_pin);
+    // Oldest first, as the host lists them: the revoked badge, then the live one.
     assert_eq!(
-        operator.badges[1].revoked_at.as_deref(),
+        operator.badges[0].revoked_at.as_deref(),
         Some("2026-09-27T08:00:00Z")
     );
     let create: OperatorCreate = round_trip("operator-create.json");

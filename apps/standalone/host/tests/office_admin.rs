@@ -6,16 +6,9 @@ use axum::http::StatusCode;
 use markiro_host::secrets::{key_hash, verify_password};
 use serde_json::{json, Value};
 use support::app::{
-    admin, empty, json as json_request, login, pair_device, request, with_session, Admin,
+    admin, empty, host_revision, json as json_request, login, pair_device, request, with_session,
+    Admin,
 };
-
-/// The current global `host_revision.rev`.
-async fn host_revision(admin: &Admin) -> i64 {
-    sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
-        .fetch_one(&admin.app.state.pool)
-        .await
-        .unwrap()
-}
 
 /// How many audit rows exist for `action`/`target_id`; used to prove a no-op
 /// write did not add one.
@@ -139,7 +132,7 @@ async fn sscc_counters_move_only_forward_within_capacity() {
 
     // None of the failed attempts above touched anything: the global
     // revision is still exactly what bootstrap left it at.
-    let rev_before_move = host_revision(&admin).await;
+    let rev_before_move = host_revision(&admin.app).await;
     assert_eq!(
         rev_before_move, 1,
         "the conflict, validation and stale-revision attempts above must not bump the global revision"
@@ -155,7 +148,7 @@ async fn sscc_counters_move_only_forward_within_capacity() {
     assert_eq!(body["nextSerial"], 2000);
     let moved_rev = body["rev"].as_i64().unwrap();
     assert_eq!(moved_rev, rev_before_move + 1);
-    assert_eq!(host_revision(&admin).await, moved_rev);
+    assert_eq!(host_revision(&admin.app).await, moved_rev);
     assert_audit(
         &admin,
         "sscc.counter.update",
@@ -177,7 +170,7 @@ async fn sscc_counters_move_only_forward_within_capacity() {
     assert_eq!(moved_counter["nextSerial"], 2000);
     assert_eq!(
         moved_counter["rev"].as_i64().unwrap(),
-        host_revision(&admin).await
+        host_revision(&admin.app).await
     );
 
     // A no-op PUT (the same next serial) changes nothing.
@@ -192,7 +185,7 @@ async fn sscc_counters_move_only_forward_within_capacity() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["rev"].as_i64().unwrap(), moved_rev);
     assert_eq!(
-        host_revision(&admin).await,
+        host_revision(&admin.app).await,
         moved_rev,
         "a no-op must not bump the revision"
     );
@@ -251,7 +244,7 @@ async fn block_sizes_are_validated_and_versioned() {
         (StatusCode::BAD_REQUEST, json!("boxBlockSize"))
     );
 
-    let rev_before = host_revision(&admin).await;
+    let rev_before = host_revision(&admin.app).await;
     let (status, body) = admin
         .call(
             "PUT",
@@ -269,7 +262,7 @@ async fn block_sizes_are_validated_and_versioned() {
     );
     let new_rev = body["blockSizesRev"].as_i64().unwrap();
     assert_eq!(new_rev, rev_before + 1);
-    assert_eq!(host_revision(&admin).await, new_rev);
+    assert_eq!(host_revision(&admin.app).await, new_rev);
     assert_audit(
         &admin,
         "sscc.block_sizes.update",
@@ -295,7 +288,7 @@ async fn block_sizes_are_validated_and_versioned() {
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(body["blockSizesRev"].as_i64().unwrap(), new_rev);
     assert_eq!(
-        host_revision(&admin).await,
+        host_revision(&admin.app).await,
         new_rev,
         "a no-op must not bump the revision"
     );
@@ -573,7 +566,7 @@ async fn users_are_created_updated_and_the_last_admin_is_protected() {
 
     // A no-op PUT (identical values) changes nothing.
     let promoted_rev = promoted["rev"].as_i64().unwrap();
-    let host_rev_before_noop = host_revision(&admin).await;
+    let host_rev_before_noop = host_revision(&admin.app).await;
     let audit_rows_before_noop = audit_count(&admin, "office_user.update", &tech_id).await;
     let (status, unchanged) = admin
         .call(
@@ -587,7 +580,7 @@ async fn users_are_created_updated_and_the_last_admin_is_protected() {
     assert_eq!(status, StatusCode::OK, "{unchanged}");
     assert_eq!(unchanged["rev"].as_i64().unwrap(), promoted_rev);
     assert_eq!(
-        host_revision(&admin).await,
+        host_revision(&admin.app).await,
         host_rev_before_noop,
         "a no-op must not bump the revision"
     );

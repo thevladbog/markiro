@@ -5,7 +5,7 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use serde_json::{json, Value};
 use support::app::{
-    bootstrap, empty, pair_device, request, seed_office_user, with_device, TestApp,
+    bootstrap, empty, pair_device, request, seed_office_user, tombstones, with_device, TestApp,
 };
 
 async fn changes(app: &TestApp, key: &str, query: &str) -> (StatusCode, Value) {
@@ -419,6 +419,20 @@ async fn set_active(app: &TestApp, id: &str, active: bool) -> i64 {
     rev
 }
 
+/// Take a new revision and write the tombstone of `entity`/`id` at it, as a
+/// writer does when a record leaves the feed; returns the revision.
+async fn remove_at_new_revision(app: &TestApp, entity: &str, id: &str) -> i64 {
+    let mut tx = markiro_host::db::begin_write(&app.state.pool)
+        .await
+        .unwrap();
+    let rev = markiro_host::db::next_revision(&mut tx).await.unwrap();
+    markiro_host::feed::remove(&mut tx, entity, id, rev)
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    rev
+}
+
 /// Revoke a badge at a new revision with its tombstone; returns the revision.
 async fn revoke_badge(app: &TestApp, id: &str) -> i64 {
     let mut tx = markiro_host::db::begin_write(&app.state.pool)
@@ -509,20 +523,69 @@ async fn a_reactivated_operator_comes_back_without_its_tombstone() {
     let (_, key) = pair_device(&app, "station").await;
     bootstrap(&app, &key).await;
     let (operator, _) = add_operator(&app, "0042").await;
+    // Another operator stays deactivated: its tombstone must survive the
+    // first one's reactivation, so a `restore` that drops more than its own
+    // key is caught.
+    let (other, _) = add_operator(&app, "0043").await;
+    let other_off = set_active(&app, &other, false).await;
     let off = set_active(&app, &operator, false).await;
+    let mut both = vec![
+        ("operators".to_owned(), operator.clone(), off),
+        ("operators".to_owned(), other.clone(), other_off),
+    ];
+    both.sort();
+    assert_eq!(tombstones(&app).await, both, "two operators are removed");
     let on = set_active(&app, &operator, true).await;
 
-    let tombstones: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM tombstones")
-        .fetch_one(&app.state.pool)
-        .await
-        .unwrap();
-    assert_eq!(tombstones, 0, "re-creating a key drops its tombstone");
+    assert_eq!(
+        tombstones(&app).await,
+        vec![("operators".to_owned(), other.clone(), other_off)],
+        "re-creating a key drops its own tombstone and no other"
+    );
     // A station that applied the tombstone gets the record back...
     let (_, body) = changes(&app, &key, &format!("?since={off}")).await;
     assert_eq!(body["items"], json!([operator_item(&operator, on)]));
-    // ...and one syncing from zero sees only the record, never both.
+    // ...and one syncing from zero sees only the record, never both, plus the
+    // other operator's tombstone.
     let (_, body) = changes(&app, &key, "?since=1").await;
-    assert_eq!(body["items"], json!([operator_item(&operator, on)]));
+    assert_eq!(
+        body["items"],
+        json!([
+            tombstone("operators", &other, other_off),
+            operator_item(&operator, on)
+        ])
+    );
+}
+
+/// A key removed again, with no `restore` in between, keeps its one
+/// tombstone and moves it up to the new revision: a station that applied the
+/// first tombstone must still hear about the second removal, since the feed
+/// sends only what is newer than its revision. Callers always pass their
+/// transaction's newest revision, so `remove` needs no `MAX` guard against an
+/// older one.
+#[tokio::test]
+async fn removing_a_key_again_moves_its_tombstone_up_to_the_new_revision() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let gone = "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21";
+
+    let first = remove_at_new_revision(&app, "lines", gone).await;
+    assert_eq!(
+        tombstones(&app).await,
+        vec![("lines".to_owned(), gone.to_owned(), first)]
+    );
+    let second = remove_at_new_revision(&app, "lines", gone).await;
+    assert!(second > first, "the second removal takes a new revision");
+
+    assert_eq!(
+        tombstones(&app).await,
+        vec![("lines".to_owned(), gone.to_owned(), second)],
+        "one tombstone, moved up to the newer revision"
+    );
+    // A station that applied the first tombstone is told again.
+    let (_, body) = changes(&app, &key, &format!("?since={first}")).await;
+    assert_eq!(body["items"], json!([tombstone("lines", gone, second)]));
 }
 
 #[tokio::test]

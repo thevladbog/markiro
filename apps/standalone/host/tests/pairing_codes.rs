@@ -1,7 +1,9 @@
 mod support;
 
+use axum::body::Body;
 use axum::http::StatusCode;
 use markiro_host::clock::format_timestamp;
+use markiro_host::pairing_code::MAX_FAILED_ATTEMPTS;
 use markiro_host::secrets::key_hash;
 use serde_json::{json, Value};
 use support::app::{
@@ -301,6 +303,84 @@ async fn a_replaces_naming_no_live_code_of_this_administrator_is_ignored() {
     // The other administrator's code still pairs.
     let (status, body) = claim(&app, &theirs).await;
     assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+/// A code whose failed attempts reached the limit is dead already, and
+/// `replaces` takes over only a live one: naming it expires nothing, leaves
+/// its expiry as it was, and a new code is issued all the same.
+#[tokio::test]
+async fn an_exhausted_code_named_in_replaces_is_ignored() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let token = bootstrap(&app, &key).await;
+    let exhausted = issue(&app, &key, &token, None).await;
+    let exhausted_id = exhausted["id"].as_str().unwrap();
+    sqlx::query("UPDATE pairing_codes SET failed_attempts = ? WHERE id = ?")
+        .bind(MAX_FAILED_ATTEMPTS)
+        .bind(exhausted_id)
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+    let expiry = || async {
+        sqlx::query_scalar::<_, String>("SELECT expires_at FROM pairing_codes WHERE id = ?")
+            .bind(exhausted_id)
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap()
+    };
+    let expires_at = expiry().await;
+    assert_eq!(expires_at, exhausted["expiresAt"].as_str().unwrap());
+    // Later, so an expiry moved to «now» would show.
+    app.clock.advance(time::Duration::minutes(1));
+
+    let fresh = issue(&app, &key, &token, Some(exhausted_id)).await;
+    assert_ne!(fresh["id"], exhausted["id"], "a new code is issued");
+    assert_eq!(
+        created_details(&app, &fresh["id"]).await,
+        json!({ "expiresAt": fresh["expiresAt"] }),
+        "nothing was replaced, so the row names no `replaces`"
+    );
+    assert_eq!(
+        expiry().await,
+        expires_at,
+        "the exhausted code is untouched"
+    );
+}
+
+/// The optional body is read strictly once a `Content-Type` announces it: a
+/// type that is not JSON, JSON that does not parse and a `replaces` that is
+/// not a string are each `validation_failed`, and no code is issued.
+#[tokio::test]
+async fn a_code_request_body_that_cannot_be_read_is_validation_failed() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let token = bootstrap(&app, &key).await;
+    for (label, content_type, body) in [
+        ("a wrong content type", "text/plain", "{}"),
+        ("invalid JSON", "application/json", "{\"replaces\":"),
+        (
+            "a replaces that is not a string",
+            "application/json",
+            "{\"replaces\":5}",
+        ),
+    ] {
+        let post = with_session(request("POST", "/v1/office/pairing-codes"), &key, &token)
+            .header("content-type", content_type)
+            .body(Body::from(body))
+            .unwrap();
+        let (status, answer) = app.send(post).await;
+        assert_eq!(
+            (status, answer["error"]["code"].clone()),
+            (StatusCode::BAD_REQUEST, json!("validation_failed")),
+            "{label}: {answer}"
+        );
+    }
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM pairing_codes")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 0);
+    assert!(code_audit(&app).await.is_empty());
 }
 
 #[tokio::test]

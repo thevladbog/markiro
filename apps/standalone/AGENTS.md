@@ -42,8 +42,9 @@ since the hash cannot tell which one was meant. The answer carries the code's
 and a live code the same administrator created then expires at once: a claim
 with it answers `pairing_code_expired`. A `replaces` that names anything else
 — another administrator's code, an unknown, used, expired or exhausted one —
-is ignored, and the new code is issued anyway; without a body (no
-`Content-Type`) nothing is replaced. The claiming device pins the
+is ignored, and the new code is issued anyway. A request without `Content-Type`
+has no body (axum treats it as none even if bytes are sent), so a `replaces`
+sent without the header is ignored, not refused. The claiming device pins the
 fingerprint from the scanned payload, or one a person compared with the office
 screen: `host_claim` refuses a malformed fingerprint (`invalid_request`) and a
 code that cannot be a code (`pairing_code_invalid`, checked with
@@ -85,10 +86,11 @@ Every office change, login outcome, pairing and initialization writes one
 `audit_log` row. Action names come only from `audit::actions`; a new writer
 adds its name there. Every `denied` row carries `details.reason` from
 `audit::reasons`. An update row carries `details.changed` (field names) and
-`{ from, to }` for each changed field (`audit::update_details`). Details never
-hold pairing codes, keys, tokens, passwords, salts or hashes, and a refused
-login never records the typed login. An attempt refused by a rate limiter
-writes no row, so a flood cannot fill the log. An office write the host
+`{ from, to }` for each changed field (`audit::update_details`), except `pinPhc`:
+it is named in `changed` without a value (`audit::update_details_hiding`).
+Details never hold pairing codes, keys, tokens, passwords, salts or hashes, and
+a refused login never records the typed login. An attempt refused by a rate
+limiter writes no row, so a flood cannot fill the log. An office write the host
 refuses (`validation_failed`, `forbidden`, `not_found`, `stale_revision`,
 `conflict`) changed nothing and writes no row either, as for every office
 writer since plan 1b1: the `denied` rows are refused sign-ins, password
@@ -174,8 +176,10 @@ forgetting goes on; plan 1d3 revisits this before PIN and badge hashes land.
   the transaction (`&mut *tx`) instead of acquiring a second pooled
   connection: the pool has only 4 connections, and a second acquire can wait
   behind another writer's `busy_timeout` instead of returning at once.
-- Hash passwords (PBKDF2) before `begin_write`, off the async runtime
-  (`spawn_blocking`); never hold the write lock across that work.
+- Hash passwords (PBKDF2) before `begin_write`, off the async runtime: inside
+  a handler, with `secrets::hash_password_blocking`. `change_password`'s
+  verify-then-hash is one `spawn_blocking` closure of its own. Never hold the
+  write lock across that work.
 - Return no-ops before `next_revision`: no revision bump, no row write, no
   audit row for a request that changes nothing.
 - Admin writes re-check rights with `OfficeContext::require_admin_in` inside
@@ -365,8 +369,9 @@ commands (`host_local_pair`, `host_claim`) and the key never reaches the
 webview. `%` is refused because an encoded `..` would slip past the route
 check; a `.` segment is refused for the same reason, since the URL parser
 would normalize it past the route checks. Add a route the webview needs to
-that list deliberately; never let a listed prefix cover a route that returns
-a secret.
+that list deliberately; never let a listed prefix cover a route whose response
+carries a credential the webview must never hold (a device key, a password
+hash, another session's token).
 
 The webview's IPC contract — command names, argument names such as
 `officeToken`, the `{ status, body }` answer and bare-string rejections — is

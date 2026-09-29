@@ -278,6 +278,23 @@ pub async fn host_revision(app: &TestApp) -> i64 {
         .unwrap()
 }
 
+/// Every tombstone the host holds, as `(entity, id, rev)`.
+pub async fn tombstones(app: &TestApp) -> Vec<(String, String, i64)> {
+    sqlx::query_as("SELECT entity, id, rev FROM tombstones ORDER BY entity, id")
+        .fetch_all(&app.state.pool)
+        .await
+        .unwrap()
+}
+
+/// Every audit row, whatever its action: a refused request or a no-op writes
+/// none.
+pub async fn audit_rows(app: &TestApp) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM audit_log")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap()
+}
+
 /// An audit row: actor kind and id, action, target type and id, result and
 /// the parsed `details`.
 pub type AuditRow = (

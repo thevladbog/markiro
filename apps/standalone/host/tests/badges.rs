@@ -4,7 +4,9 @@ use axum::http::StatusCode;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use serde_json::{json, Value};
-use support::app::{admin, audit_trail, empty, host_revision, request, with_device, Admin};
+use support::app::{
+    admin, audit_rows, audit_trail, empty, host_revision, request, with_device, Admin,
+};
 
 /// `pinPhc` of `proto/fixtures/phc-password.json`: the PIN 4821.
 const PIN_4821: &str =
@@ -50,14 +52,6 @@ async fn feed(admin: &Admin, since: i64) -> Value {
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
     body["items"].clone()
-}
-
-/// Every audit row, whatever its action: a refused request writes none.
-async fn audit_rows(admin: &Admin) -> i64 {
-    sqlx::query_scalar("SELECT COUNT(*) FROM audit_log")
-        .fetch_one(&admin.app.state.pool)
-        .await
-        .unwrap()
 }
 
 #[tokio::test]
@@ -130,7 +124,7 @@ async fn a_badge_hash_must_carry_the_site_salt_and_the_domain_iterations() {
     let id = operator(&admin, "0042").await;
     let path = format!("/v1/office/operators/{id}/badges");
     let revision = host_revision(&admin.app).await;
-    let audit_rows_before = audit_rows(&admin).await;
+    let audit_rows_before = audit_rows(&admin.app).await;
     for badge_phc in [
         badge(&salt, 200_000, 1),
         badge(&salt, 10_000, 1),
@@ -162,7 +156,7 @@ async fn a_badge_hash_must_carry_the_site_salt_and_the_domain_iterations() {
         .is_empty());
     // The refusals wrote nothing: no revision and no audit row of any action.
     assert_eq!(host_revision(&admin.app).await, revision);
-    assert_eq!(audit_rows(&admin).await, audit_rows_before);
+    assert_eq!(audit_rows(&admin.app).await, audit_rows_before);
     // A blank label is no label.
     let (status, added) = admin
         .call(
@@ -319,10 +313,18 @@ async fn revoking_a_badge_writes_a_tombstone_and_the_badge_never_comes_back() {
         )]
     );
 
-    // Revoking it again changes nothing.
+    // Revoking it again, later, changes nothing: the revocation time the
+    // office shows stays, and so does the tombstone's revision, which a
+    // rewrite would move up. The clock moves first, so a rewritten time shows.
+    let revoked_at = list[0]["badges"][0]["revokedAt"].clone();
+    admin.app.clock.advance(time::Duration::minutes(5));
     let (status, _) = admin.call("DELETE", &path, None).await;
     assert_eq!(status, StatusCode::NO_CONTENT);
     assert_eq!(host_revision(&admin.app).await, 4);
+    let (_, later) = admin.call("GET", "/v1/office/operators", None).await;
+    assert_eq!(later[0]["badges"][0]["revokedAt"], revoked_at);
+    assert_eq!(feed(&admin, 3).await, json!([tombstone]));
+    assert_eq!(feed(&admin, 4).await, json!([]));
     assert_eq!(
         audit_trail(&admin.app, "operator_badge.revoke").await.len(),
         1

@@ -391,7 +391,9 @@ pub struct DeviceRecord {
 }
 
 /// `PUT /v1/office/devices/{id}`: only the fields sent change; `lineId: null`
-/// clears the line.
+/// clears the line. `name: null` reads as «not sent», like every plain
+/// `Option<T>` field (see [`LineUpdate`]): only `lineId`, the double-optional
+/// one, tells `null` from an absent field.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeviceUpdate {
@@ -787,7 +789,11 @@ pub struct LineCreate {
     pub name: String,
 }
 
-/// `PUT /v1/office/lines/{id}`: only the fields sent change.
+/// `PUT /v1/office/lines/{id}`: only the fields sent change. `null` in `name`
+/// or `archived` reads as «not sent»: `Option<T>` with `#[serde(default)]` maps
+/// it to absent, so `{ "name": null, "expectedRev": 7 }` changes nothing. Only
+/// the deliberately double-optional fields (`Option<Option<T>>` with
+/// [`nullable`]) tell `null` from an absent one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct LineUpdate {
@@ -838,7 +844,9 @@ pub struct OperatorCreate {
 }
 
 /// `PUT /v1/office/operators/{id}`: only the fields sent change; `role:
-/// null` clears the role, and a new `pin_phc` replaces the PIN.
+/// null` clears the role, and a new `pin_phc` replaces the PIN. `null` in
+/// `name`, `active` or `pin_phc` reads as «not sent» (see [`LineUpdate`]): only
+/// `role`, the double-optional field, tells `null` from an absent one.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OperatorUpdate {

@@ -45,8 +45,8 @@ mod tests {
     use crate::clock::{format_timestamp, parse_timestamp};
 
     /// The shared fixture is what this host answers: the payload it builds
-    /// for the fixture's code, and a lifetime of `CODE_LIFETIME` from
-    /// `createdAt` to `expiresAt`.
+    /// for the fixture's code, both timestamps in the host's own format, and
+    /// a lifetime of `CODE_LIFETIME` from `createdAt` to `expiresAt`.
     #[test]
     fn the_shared_pairing_code_fixture_matches_the_host() {
         let fixture: serde_json::Value =
@@ -62,6 +62,7 @@ mod tests {
             text("payload")
         );
         let created = parse_timestamp(&text("createdAt")).unwrap();
+        assert_eq!(format_timestamp(created), text("createdAt"));
         assert_eq!(format_timestamp(created + CODE_LIFETIME), text("expiresAt"));
     }
 

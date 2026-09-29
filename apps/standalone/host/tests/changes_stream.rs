@@ -7,11 +7,15 @@ use std::time::Duration;
 
 use axum::body::Body;
 use axum::extract::connect_info::MockConnectInfo;
+use axum::extract::State;
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
 use http_body_util::BodyExt;
+use markiro_host::auth::AuthDevice;
 use markiro_host::config::HostPaths;
 use markiro_host::server::router;
 use markiro_host::{start, StartOptions};
+use markiro_proto::DeviceKind;
 use serde_json::{json, Value};
 use support::app::{
     audit_trail, bootstrap, empty, host_revision, json as json_request, pair_device, request,
@@ -379,6 +383,44 @@ async fn revoking_a_device_ends_its_open_stream_and_no_other() {
     assert_eq!(
         next_text(&mut kept).await,
         rev_event(org["rev"].as_i64().unwrap())
+    );
+}
+
+/// `stream` looks its device up itself when it opens, since a revocation can
+/// land after `AuthDevice` read the key. A request through the router never
+/// gets that far with a key revoked beforehand (`AuthDevice` refuses it
+/// first), so the handler is called directly with the extractor's value.
+#[tokio::test]
+async fn opening_a_stream_for_a_device_revoked_meanwhile_is_refused() {
+    let app = TestApp::new().await;
+    let (id, _) = pair_device(&app, "station").await;
+    sqlx::query("UPDATE devices SET revoked_at = ? WHERE id = ?")
+        .bind(app.state.timestamp())
+        .bind(&id)
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+
+    let refused = markiro_host::routes::changes::stream(
+        State(app.state.clone()),
+        AuthDevice {
+            id,
+            kind: DeviceKind::Station,
+        },
+    )
+    .await
+    .err()
+    .expect("a revoked device is not given a stream")
+    .into_response();
+    assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
+    let bytes = refused.into_body().collect().await.unwrap().to_bytes();
+    let body: Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        (
+            body["error"]["code"].clone(),
+            body["error"]["details"]["credential"].clone()
+        ),
+        (json!("unauthorized"), json!("device"))
     );
 }
 
