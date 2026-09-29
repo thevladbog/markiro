@@ -150,7 +150,9 @@ describe("office lines", () => {
     fireEvent.click(screen.getByRole("button", { name: "Добавить линию" }));
     type("Название линии", "Линия\t3");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
-    expect(await screen.findByText("Укажите название линии, до 100 символов")).toBeTruthy();
+    expect(
+      await screen.findByText("Уберите табуляцию, перенос строки или другой служебный символ"),
+    ).toBeTruthy();
     expect(session.api.createLine).not.toHaveBeenCalled();
   });
 

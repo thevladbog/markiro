@@ -1,6 +1,7 @@
 import { hasValidCheckDigit } from "@markiro/domain";
 import { z } from "zod";
 
+import { hasCyrillic } from "../host/pairing-code.js";
 import type { OrgProfileInput } from "../host/protocol.js";
 
 // Field rules shared by the first-run wizard and the office pages. They
@@ -22,6 +23,9 @@ export function characters(text: string): number {
  */
 const CONTROL_OR_LONE_SURROGATE = /[\p{Cc}\p{Cs}]/u;
 
+/** An unpaired surrogate on its own (see `CONTROL_OR_LONE_SURROGATE`). */
+const LONE_SURROGATE = /\p{Cs}/u;
+
 /**
  * Free text as the host takes it (`validate::clean_text`, already trimmed
  * here): 1 to `max` characters, counted as the host counts them, with no
@@ -35,12 +39,47 @@ export function isPlainText(text: string, max: number): boolean {
   return count >= 1 && count <= max && !CONTROL_OR_LONE_SURROGATE.test(text);
 }
 
-/** A free-text field of 1 to `max` characters (`isPlainText`); the value is trimmed. */
+/**
+ * Whether `text` can reach the host at all: no unpaired surrogate, which no
+ * Rust string holds (see `CONTROL_OR_LONE_SURROGATE`), so the IPC call would
+ * fail before the host and the form would blame the connection. Fields that
+ * are not free text check it on their own: passwords and the sign-in's login.
+ */
+export function isTransferable(text: string): boolean {
+  return !LONE_SURROGATE.test(text);
+}
+
+/**
+ * A free-text field of 1 to `max` characters (`isPlainText`); the value is
+ * trimmed. A wrong length says `message`; a control character or an unpaired
+ * surrogate says `rules.controlCharacter`, since a tab pasted from a
+ * spreadsheet is invisible and a length message would not explain it.
+ */
 export function plainTextRule(max: number, message: string): z.ZodString {
   return z
     .string()
     .trim()
-    .refine((text) => isPlainText(text, max), message);
+    .refine((text) => characters(text) >= 1 && characters(text) <= max, message)
+    .refine((text) => !CONTROL_OR_LONE_SURROGATE.test(text), "rules.controlCharacter");
+}
+
+/**
+ * An optional free-text field (`validate::optional_text`): blank is none,
+ * otherwise as `plainTextRule`, at most `max` characters. The value is
+ * trimmed; `toOptionalText` turns a blank one into `null`.
+ */
+export function optionalTextRule(max: number, message: string): z.ZodString {
+  return z
+    .string()
+    .trim()
+    .refine((text) => characters(text) <= max, message)
+    .refine((text) => !CONTROL_OR_LONE_SURROGATE.test(text), "rules.controlCharacter");
+}
+
+/** An optional text as the host takes it: trimmed, and `null` when blank. */
+export function toOptionalText(text: string): string | null {
+  const trimmed = text.trim();
+  return trimmed === "" ? null : trimmed;
 }
 
 export const THIRTEEN_DIGITS = /^\d{13}$/;
@@ -75,6 +114,43 @@ export const deviceNameRule = plainTextRule(100, "rules.name");
 /** A production line's name (`validate::line_name`). */
 export const lineNameRule = plainTextRule(100, "rules.lineName");
 
+/**
+ * An operator's personnel number (`validate::operator_login`): 3 to 12 ASCII
+ * digits. Leading zeros are part of it, so it stays text and is never
+ * compared as a number.
+ */
+export const operatorLoginRule = z
+  .string()
+  .trim()
+  .regex(/^[0-9]{3,12}$/, "rules.operatorLogin");
+
+/** An operator's PIN: 4 to 6 ASCII digits. Only its hash leaves the office (`hashPin`). */
+export const pinRule = z
+  .string()
+  .trim()
+  .regex(/^[0-9]{4,6}$/, "rules.pin");
+
+/** An operator's role (`validate::operator_role`): at most 120 characters, or none. */
+export const operatorRoleRule = optionalTextRule(120, "rules.role");
+
+/** A badge's label (`validate::badge_label`): at most 100 characters, or none. */
+export const badgeLabelRule = optionalTextRule(100, "rules.badgeLabel");
+
+/**
+ * A badge code as a scanner types it: 1 to 256 characters after trimming, as
+ * the cloud takes one (`issueBadgeSchema`), and printable ASCII only. A
+ * keyboard-wedge scanner presses keys, so under the Russian layout the code
+ * arrives in Cyrillic, while a station types the same badge through its own
+ * layout: a Cyrillic code is refused with a hint to switch the layout and is
+ * never read by key position, as a typed pairing code is (plan 1c3). Only the
+ * code's hash leaves the office (`hashBadge`).
+ */
+export const badgeCodeRule = z
+  .string()
+  .trim()
+  .refine((code) => !hasCyrillic(code), "rules.badgeCodeLayout")
+  .refine((code) => /^[ -~]{1,256}$/.test(code), "rules.badgeCode");
+
 /** The organization's or a counterparty's name (`validate::company`). */
 export const companyNameRule = plainTextRule(200, "rules.orgName");
 
@@ -94,10 +170,11 @@ export const glnRule = z
 /** GS1 prefixes as one comma-separated string: at most 10 of 4-12 digits (`validate::company`). */
 export const gs1PrefixesRule = z.string().refine(isValidPrefixList, "rules.gs1Prefixes");
 
-/** A password (`validate::password`). */
+/** A password (`validate::password`), with no unpaired surrogate (`isTransferable`). */
 export const passwordRule = z
   .string()
-  .refine((password) => characters(password) >= 8 && characters(password) <= 128, "rules.password");
+  .refine((password) => characters(password) >= 8 && characters(password) <= 128, "rules.password")
+  .refine(isTransferable, "rules.passwordCharacter");
 
 /** Organization fields as a form holds them; `gs1Prefixes` is one comma-separated string. */
 export const orgFieldsSchema = z.object({

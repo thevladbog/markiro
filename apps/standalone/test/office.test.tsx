@@ -33,6 +33,23 @@ describe("OfficeLogin", () => {
     expect(onLogin).not.toHaveBeenCalled();
   });
 
+  it("refuses a broken character in the login or the password before calling the host", async () => {
+    // An unpaired surrogate cannot cross the IPC: the call would fail as a
+    // lost connection, so the form names the field instead.
+    const onLogin = vi.fn();
+    render(<OfficeLogin notice={null} onLogin={onLogin} onBack={vi.fn()} />);
+    type("Логин", "admin\ud800");
+    type("Пароль", "correct horse battery\udc00");
+    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+    expect(
+      await screen.findByText("В пароле есть повреждённый символ — наберите пароль заново"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("3–64 символа: латиница, цифры, точка, дефис, подчёркивание"),
+    ).toBeTruthy();
+    expect(onLogin).not.toHaveBeenCalled();
+  });
+
   it.each([
     [
       new HostError({
@@ -197,6 +214,18 @@ describe("ChangePasswordDialog", () => {
     type("Повторите новый пароль", "a different one here");
     fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
     expect(await screen.findByText("Пароли не совпадают")).toBeTruthy();
+    expect(session.api.officeChangePassword).not.toHaveBeenCalled();
+  });
+
+  it("refuses a broken character in the current password before calling the host", async () => {
+    const session = fakeOfficeSession();
+    renderOffice(session);
+    await openDialog();
+    fill("correct horse battery\ud800", "another long password");
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    expect(
+      await screen.findByText("В пароле есть повреждённый символ — наберите пароль заново"),
+    ).toBeTruthy();
     expect(session.api.officeChangePassword).not.toHaveBeenCalled();
   });
 

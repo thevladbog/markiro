@@ -154,7 +154,9 @@ describe("office counterparties", () => {
     type("GLN контрагента", "4607091000000");
     type("Префиксы GS1", "123");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
-    expect(await screen.findByText("Укажите название, до 200 символов")).toBeTruthy();
+    expect(
+      await screen.findByText("Уберите табуляцию, перенос строки или другой служебный символ"),
+    ).toBeTruthy();
     expect(screen.getByText("ИНН — 10 или 12 цифр")).toBeTruthy();
     expect(screen.getByText("Неверная контрольная цифра GLN")).toBeTruthy();
     expect(

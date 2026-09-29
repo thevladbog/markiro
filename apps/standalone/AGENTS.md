@@ -199,7 +199,14 @@ forgetting goes on; plan 1d4 revisits this before PIN and badge hashes land.
   than the host only because it sends the trimmed value it validated. A lone
   surrogate is refused as well: no Rust string holds one, `JSON.stringify`
   writes it as an escape serde_json rejects, and the IPC call would fail
-  before the host as a lost connection.
+  before the host as a lost connection. `plainTextRule`, and
+  `optionalTextRule` for a role or a label that may be blank, says a wrong
+  length in the field's own words and a control character or a lone
+  surrogate with `rules.controlCharacter`: a tab pasted from a spreadsheet is
+  invisible, and a length message would not explain it. The wizard's line
+  names call `isPlainText` directly and keep their one message. Fields that
+  are not free text refuse a lone surrogate themselves (`isTransferable`):
+  every password (`rules.passwordCharacter`), and the sign-in's login.
 - Admin writes re-check rights with `OfficeContext::require_admin_in` inside
   the transaction, in addition to the early `require_admin` rejection. The
   extractor's role and active flag are read before the request hashes a
@@ -269,6 +276,20 @@ is not a second spelling of `100000` — and the partial unique index
 Revoking a badge is `DELETE …/badges/{badgeId}`, and revoking it again
 changes nothing. Operators, badges and the salt are for administrators only,
 reads included.
+
+The office's side lives in `src/lib/credentials.ts`: `hashPin` takes 16
+fresh random salt bytes and the domain's `PHC_ITERATIONS`, `hashBadge` the
+site's salt and exactly `BADGE_ITERATIONS` (100 000, the host's
+`secrets::BADGE_ITERATIONS`), both in the domain's format, standard base64
+with padding; `test/credentials.test.ts` reproduces `operator-create.json`
+and `badge-create.json` byte for byte. Their fields follow the host
+(`src/lib/rules.ts`): a personnel number of 3–12 ASCII digits, kept as text
+with its leading zeros, a PIN of 4–6 ASCII digits, a role of up to 120
+characters and a label of up to 100, both blank for none. A badge code is
+what a scanner types: trimmed, 1–256 printable ASCII characters, and hashed
+exactly so. A keyboard-wedge scanner presses keys, and a station types the
+same badge through its own layout, so a code in Cyrillic is refused with a
+hint to switch the layout, never read by key position.
 
 ## Reference sync
 

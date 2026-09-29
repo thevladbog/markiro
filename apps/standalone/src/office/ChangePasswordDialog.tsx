@@ -8,14 +8,17 @@ import { Input } from "@markiro/ui";
 
 import { HostError } from "../host/client.js";
 import type { PasswordChange } from "../host/protocol.js";
-import { passwordRule } from "../lib/rules.js";
+import { isTransferable, passwordRule } from "../lib/rules.js";
 import { useFieldError, writeFailure, type AlertFailure } from "./form-errors.js";
 import { FormDialog } from "./FormDialog.js";
 import { useOfficeMutation } from "./office-query.js";
 import { WriteFailureAlert } from "./page-state.js";
 
 const passwordSchema = z.object({
-  currentPassword: z.string().min(1, "office.password.required"),
+  currentPassword: z
+    .string()
+    .min(1, "office.password.required")
+    .refine(isTransferable, "rules.passwordCharacter"),
   newPassword: passwordRule,
   confirmPassword: z.string(),
 });

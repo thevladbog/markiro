@@ -1,19 +1,26 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  badgeCodeRule,
+  badgeLabelRule,
   companyNameRule,
   deviceNameRule,
   glnRule,
   gs1PrefixesRule,
   innRule,
   isPlainText,
+  isTransferable,
   lineNameRule,
   loginRule,
+  operatorLoginRule,
+  operatorRoleRule,
   ORG_HOST_FIELDS,
   orgFieldsSchema,
   parsePrefixList,
   passwordRule,
   personNameRule,
+  pinRule,
+  toOptionalText,
   toOrgInput,
   type OrgFields,
 } from "../src/lib/rules.js";
@@ -87,6 +94,19 @@ describe("office user rules", () => {
     expect(personNameRule.safeParse("😀".repeat(100)).success).toBe(true);
     expect(passwordRule.safeParse("x".repeat(129)).success).toBe(false);
   });
+
+  it("refuses an unpaired surrogate in a password with its own message, which cannot reach the host", () => {
+    expect(passwordRule.safeParse("пароль12\ud800").error?.issues[0]?.message).toBe(
+      "rules.passwordCharacter",
+    );
+    expect(passwordRule.safeParse("\udc00пароль12").error?.issues[0]?.message).toBe(
+      "rules.passwordCharacter",
+    );
+    // A pair is one character and crosses the IPC as it is.
+    expect(passwordRule.safeParse("пароль😀12").success).toBe(true);
+    expect(isTransferable("пароль\ud800")).toBe(false);
+    expect(isTransferable("пароль😀")).toBe(true);
+  });
 });
 
 describe("free text", () => {
@@ -137,42 +157,69 @@ describe("free text", () => {
     }
   });
 
-  it("refuses an unpaired surrogate in every free-text field", () => {
-    expect(personNameRule.safeParse("Павел\ud800").error?.issues[0]?.message).toBe("rules.name");
-    expect(deviceNameRule.safeParse("\udc00Станция").error?.issues[0]?.message).toBe("rules.name");
-    expect(lineNameRule.safeParse("Ли\ud800ния").error?.issues[0]?.message).toBe("rules.lineName");
-    expect(companyNameRule.safeParse("ООО\udc00").error?.issues[0]?.message).toBe("rules.orgName");
-    expect(orgMessage({ orgName: "ООО «Ат\ud800олл»" })).toBe("rules.orgName");
+  it("refuses an unpaired surrogate in every free-text field, as a control character", () => {
+    for (const rule of [personNameRule, deviceNameRule, lineNameRule, companyNameRule]) {
+      for (const text of ["Павел\ud800", "\udc00Станция", "Ли\ud800ния"]) {
+        expect(rule.safeParse(text).error?.issues[0]?.message).toBe("rules.controlCharacter");
+      }
+    }
+    expect(orgMessage({ orgName: "ООО «Ат\ud800олл»" })).toBe("rules.controlCharacter");
     expect(deviceNameRule.safeParse("Станция 😀").success).toBe(true);
+  });
+
+  it("names a control character in its own words and keeps each field's length message", () => {
+    // A tab pasted from a spreadsheet is invisible: a length message would not explain it.
+    expect(personNameRule.safeParse("Павел\tОрлов").error?.issues[0]?.message).toBe(
+      "rules.controlCharacter",
+    );
+    expect(companyNameRule.safeParse("ООО\u0085«Юг»").error?.issues[0]?.message).toBe(
+      "rules.controlCharacter",
+    );
+    expect(personNameRule.safeParse("я".repeat(101)).error?.issues[0]?.message).toBe("rules.name");
+    expect(lineNameRule.safeParse(" ").error?.issues[0]?.message).toBe("rules.lineName");
+    // Both wrong: the length comes first.
+    expect(lineNameRule.safeParse("л".repeat(101) + "\t2").error?.issues[0]?.message).toBe(
+      "rules.lineName",
+    );
   });
 
   it("trims a tab at the edge of a value, but refuses one inside", () => {
     expect(lineNameRule.safeParse("\tЛиния 2\t").data).toBe("Линия 2");
-    expect(lineNameRule.safeParse("Линия\t2").error?.issues[0]?.message).toBe("rules.lineName");
+    expect(lineNameRule.safeParse("Линия\t2").error?.issues[0]?.message).toBe(
+      "rules.controlCharacter",
+    );
     // A NUL is trimmed by neither JavaScript nor Rust, at the edge or inside.
     expect(lineNameRule.safeParse("Линия 2\u0000").error?.issues[0]?.message).toBe(
-      "rules.lineName",
+      "rules.controlCharacter",
     );
-    expect(lineNameRule.safeParse("Ли\u0000ния").error?.issues[0]?.message).toBe("rules.lineName");
+    expect(lineNameRule.safeParse("Ли\u0000ния").error?.issues[0]?.message).toBe(
+      "rules.controlCharacter",
+    );
   });
 
   it("trims before it counts, and a NUL at the edge is not trimmed away", () => {
     expect(lineNameRule.safeParse("  Линия 2  ").data).toBe("Линия 2");
     expect(lineNameRule.safeParse(" ").error?.issues[0]?.message).toBe("rules.lineName");
-    expect(lineNameRule.safeParse("\u0000Линия").error?.issues[0]?.message).toBe("rules.lineName");
+    expect(lineNameRule.safeParse("\u0000Линия").error?.issues[0]?.message).toBe(
+      "rules.controlCharacter",
+    );
     expect(lineNameRule.safeParse("л".repeat(101)).error?.issues[0]?.message).toBe(
       "rules.lineName",
     );
   });
 
   it("holds every free-text field the office and the wizard send", () => {
-    expect(personNameRule.safeParse("Павел\tОрлов").error?.issues[0]?.message).toBe("rules.name");
+    expect(personNameRule.safeParse("Павел\tОрлов").error?.issues[0]?.message).toBe(
+      "rules.controlCharacter",
+    );
     expect(deviceNameRule.safeParse(" Станция 2 ").data).toBe("Станция 2");
-    expect(deviceNameRule.safeParse("Станция\u00002").error?.issues[0]?.message).toBe("rules.name");
+    expect(deviceNameRule.safeParse("Станция\u00002").error?.issues[0]?.message).toBe(
+      "rules.controlCharacter",
+    );
     expect(companyNameRule.safeParse("я".repeat(201)).error?.issues[0]?.message).toBe(
       "rules.orgName",
     );
-    expect(orgMessage({ orgName: "ООО\t«Атолл»" })).toBe("rules.orgName");
+    expect(orgMessage({ orgName: "ООО\t«Атолл»" })).toBe("rules.controlCharacter");
   });
 
   it("takes a company name of exactly 200 characters and refuses 201: counterparties depend on it", () => {
@@ -203,6 +250,65 @@ describe("free text", () => {
     );
     expect(gs1PrefixesRule.safeParse("4601234, 4609876").success).toBe(true);
     expect(gs1PrefixesRule.safeParse("123").error?.issues[0]?.message).toBe("rules.gs1Prefixes");
+  });
+});
+
+describe("operator rules", () => {
+  it("takes a personnel number of 3 to 12 ASCII digits, trimmed, leading zeros kept", () => {
+    expect(operatorLoginRule.safeParse(" 0042 ").data).toBe("0042");
+    expect(operatorLoginRule.safeParse("123").success).toBe(true);
+    expect(operatorLoginRule.safeParse("123456789012").success).toBe(true);
+    // Arabic-Indic and full-width digits are digits to Unicode, not to the host.
+    for (const login of ["", "12", "1234567890123", "12a4", "0042 1", "١٢٣٤", "１２３"]) {
+      expect(operatorLoginRule.safeParse(login).error?.issues[0]?.message).toBe(
+        "rules.operatorLogin",
+      );
+    }
+  });
+
+  it("takes a PIN of 4 to 6 ASCII digits, trimmed", () => {
+    expect(pinRule.safeParse(" 4821 ").data).toBe("4821");
+    expect(pinRule.safeParse("123456").success).toBe(true);
+    for (const pin of ["", "123", "1234567", "12a4", "12 34", "١٢٣٤"]) {
+      expect(pinRule.safeParse(pin).error?.issues[0]?.message).toBe("rules.pin");
+    }
+  });
+
+  it("takes an optional role of up to 120 characters and a label of up to 100, blank as none", () => {
+    expect(operatorRoleRule.safeParse("   ").data).toBe("");
+    expect(toOptionalText("   ")).toBeNull();
+    expect(toOptionalText(" Упаковщик ")).toBe("Упаковщик");
+    expect(operatorRoleRule.safeParse("я".repeat(120)).success).toBe(true);
+    expect(operatorRoleRule.safeParse("я".repeat(121)).error?.issues[0]?.message).toBe(
+      "rules.role",
+    );
+    expect(operatorRoleRule.safeParse("Упа\tковщик").error?.issues[0]?.message).toBe(
+      "rules.controlCharacter",
+    );
+    expect(badgeLabelRule.safeParse("").success).toBe(true);
+    expect(badgeLabelRule.safeParse("п".repeat(100)).success).toBe(true);
+    expect(badgeLabelRule.safeParse("п".repeat(101)).error?.issues[0]?.message).toBe(
+      "rules.badgeLabel",
+    );
+    expect(badgeLabelRule.safeParse("Пропуск\u0000").error?.issues[0]?.message).toBe(
+      "rules.controlCharacter",
+    );
+  });
+
+  it("takes a badge code of 1 to 256 printable ASCII characters, trimmed", () => {
+    expect(badgeCodeRule.safeParse(" MRK-000742 ").data).toBe("MRK-000742");
+    expect(badgeCodeRule.safeParse("x".repeat(256)).success).toBe(true);
+    expect(badgeCodeRule.safeParse("0001 2345").success).toBe(true);
+    for (const code of ["", "   ", "x".repeat(257), "MRK\t742", "Café", "MRK\ud800"]) {
+      expect(badgeCodeRule.safeParse(code).error?.issues[0]?.message).toBe("rules.badgeCode");
+    }
+  });
+
+  it("refuses a badge code typed under the Russian layout with a hint to switch it", () => {
+    // «MRK-000742» as a keyboard-wedge scanner types it with the Russian layout on.
+    expect(badgeCodeRule.safeParse("ЬКЛ-000742").error?.issues[0]?.message).toBe(
+      "rules.badgeCodeLayout",
+    );
   });
 });
 

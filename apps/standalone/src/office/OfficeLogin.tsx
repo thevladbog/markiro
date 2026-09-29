@@ -10,10 +10,16 @@ import type { OfficeLoginNotice } from "../app/shell.js";
 import { errorMessageKey } from "../host/errors.js";
 import type { OfficeLoginRequest } from "../host/protocol.js";
 import { errorProp } from "../lib/form-error.js";
+import { isTransferable } from "../lib/rules.js";
 
+// An unpaired surrogate (pasted half of an emoji) cannot reach the host: the
+// IPC call would fail as a lost connection, so the form refuses it first.
 const loginSchema = z.object({
-  login: z.string().trim().min(1, "office.login.required"),
-  password: z.string().min(1, "office.login.required"),
+  login: z.string().trim().min(1, "office.login.required").refine(isTransferable, "rules.login"),
+  password: z
+    .string()
+    .min(1, "office.login.required")
+    .refine(isTransferable, "rules.passwordCharacter"),
 });
 
 type LoginValues = z.infer<typeof loginSchema>;

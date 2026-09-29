@@ -237,7 +237,9 @@ describe("office devices", () => {
     );
     fireEvent.change(screen.getByLabelText("Имя"), { target: { value: "Станция\t1" } });
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
-    expect(await screen.findByText("Укажите имя, до 100 символов")).toBeTruthy();
+    expect(
+      await screen.findByText("Уберите табуляцию, перенос строки или другой служебный символ"),
+    ).toBeTruthy();
     expect(session.api.updateDevice).not.toHaveBeenCalled();
   });
 
