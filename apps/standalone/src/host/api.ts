@@ -4,7 +4,9 @@ import type { HostClient } from "./client.js";
 import {
   bootstrapResponseSchema,
   changesResponseSchema,
+  counterpartyRecordSchema,
   deviceRecordSchema,
+  officeLineSchema,
   officeSessionSchema,
   officeUserRecordSchema,
   officeUserSchema,
@@ -16,7 +18,14 @@ import {
   type BootstrapRequest,
   type BootstrapResponse,
   type ChangesResponse,
+  type CounterpartyCreate,
+  type CounterpartyRecord,
+  type CounterpartyUpdate,
   type DeviceRecord,
+  type DeviceUpdate,
+  type LineCreate,
+  type LineUpdate,
+  type OfficeLine,
   type OfficeLoginRequest,
   type OfficeSession,
   type OfficeUser,
@@ -26,6 +35,7 @@ import {
   type OrgProfile,
   type OrgProfileUpdate,
   type PairingCode,
+  type PairingCodeRequest,
   type PasswordChange,
   type PasswordSet,
   type SsccCounter,
@@ -67,7 +77,20 @@ export interface HostApi {
   /** Reference records changed after revision `since`; the device key only, no office session. */
   getChanges: (since: number) => Promise<ChangesResponse>;
   listDevices: (token: string) => Promise<DeviceRecord[]>;
-  createPairingCode: (token: string) => Promise<PairingCode>;
+  updateDevice: (token: string, id: string, update: DeviceUpdate) => Promise<DeviceRecord>;
+  revokeDevice: (token: string, id: string) => Promise<DeviceRecord>;
+  /** Without `request` no body is sent; with it, the code it names ends at once. */
+  createPairingCode: (token: string, request?: PairingCodeRequest) => Promise<PairingCode>;
+  listCounterparties: (token: string) => Promise<CounterpartyRecord[]>;
+  createCounterparty: (token: string, create: CounterpartyCreate) => Promise<CounterpartyRecord>;
+  updateCounterparty: (
+    token: string,
+    id: string,
+    update: CounterpartyUpdate,
+  ) => Promise<CounterpartyRecord>;
+  listLines: (token: string) => Promise<OfficeLine[]>;
+  createLine: (token: string, create: LineCreate) => Promise<OfficeLine>;
+  updateLine: (token: string, id: string, update: LineUpdate) => Promise<OfficeLine>;
 }
 
 /** A 204 answer parses as `null`. */
@@ -147,10 +170,56 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: z.array(deviceRecordSchema),
       }),
-    createPairingCode: (token) =>
+    updateDevice: (token, id, update) =>
+      client.request("PUT", `/v1/office/devices/${id}`, {
+        body: update,
+        officeToken: token,
+        schema: deviceRecordSchema,
+      }),
+    revokeDevice: (token, id) =>
+      client.request("POST", `/v1/office/devices/${id}/revoke`, {
+        officeToken: token,
+        schema: deviceRecordSchema,
+      }),
+    createPairingCode: (token, request) =>
       client.request("POST", "/v1/office/pairing-codes", {
+        body: request,
         officeToken: token,
         schema: pairingCodeSchema,
+      }),
+    listCounterparties: (token) =>
+      client.request("GET", "/v1/office/counterparties", {
+        officeToken: token,
+        schema: z.array(counterpartyRecordSchema),
+      }),
+    createCounterparty: (token, create) =>
+      client.request("POST", "/v1/office/counterparties", {
+        body: create,
+        officeToken: token,
+        schema: counterpartyRecordSchema,
+      }),
+    updateCounterparty: (token, id, update) =>
+      client.request("PUT", `/v1/office/counterparties/${id}`, {
+        body: update,
+        officeToken: token,
+        schema: counterpartyRecordSchema,
+      }),
+    listLines: (token) =>
+      client.request("GET", "/v1/office/lines", {
+        officeToken: token,
+        schema: z.array(officeLineSchema),
+      }),
+    createLine: (token, create) =>
+      client.request("POST", "/v1/office/lines", {
+        body: create,
+        officeToken: token,
+        schema: officeLineSchema,
+      }),
+    updateLine: (token, id, update) =>
+      client.request("PUT", `/v1/office/lines/${id}`, {
+        body: update,
+        officeToken: token,
+        schema: officeLineSchema,
       }),
   };
 }

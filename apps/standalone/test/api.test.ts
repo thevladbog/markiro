@@ -4,7 +4,14 @@ import { describe, expect, it } from "vitest";
 
 import { createHostApi, type HostApi } from "../src/host/api.js";
 import type { HostClient, HttpMethod } from "../src/host/client.js";
-import { orgProfileUpdateSchema } from "../src/host/protocol.js";
+import {
+  counterpartyCreateSchema,
+  counterpartyUpdateSchema,
+  deviceUpdateSchema,
+  lineUpdateSchema,
+  orgProfileUpdateSchema,
+  pairingCodeRequestSchema,
+} from "../src/host/protocol.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
 const testModuleUrl = import.meta.url;
@@ -35,6 +42,14 @@ function recording(answer: unknown) {
 const TOKEN = "office-session-token";
 const USER_ID = "1b4e28ba-2fa1-41d2-883f-0016d3cca427";
 const ORG_UPDATE = orgProfileUpdateSchema.parse(fixture("org-profile-update.json"));
+const COUNTERPARTY_ID = "d2b7c9e1-4f3a-4b6c-8d5e-9f0a1b2c3d4e";
+const LINE_ID = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
+const DEVICE_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+const COUNTERPARTY_CREATE = counterpartyCreateSchema.parse(fixture("counterparty-create.json"));
+const COUNTERPARTY_UPDATE = counterpartyUpdateSchema.parse(fixture("counterparty-update.json"));
+const LINE_UPDATE = lineUpdateSchema.parse(fixture("line-update.json"));
+const DEVICE_UPDATE = deviceUpdateSchema.parse(fixture("device-update.json"));
+const PAIRING_CODE_REQUEST = pairingCodeRequestSchema.parse(fixture("pairing-code-request.json"));
 
 type Case = [
   name: string,
@@ -148,6 +163,64 @@ const CASES: Case[] = [
     fixture("pairing-code.json"),
     (api) => api.createPairingCode(TOKEN),
     { method: "POST", path: "/v1/office/pairing-codes", body: undefined },
+  ],
+  [
+    "createPairingCode replacing the code on screen",
+    fixture("pairing-code.json"),
+    (api) => api.createPairingCode(TOKEN, PAIRING_CODE_REQUEST),
+    { method: "POST", path: "/v1/office/pairing-codes", body: PAIRING_CODE_REQUEST },
+  ],
+  [
+    "updateDevice",
+    fixture("device-record.json"),
+    (api) => api.updateDevice(TOKEN, DEVICE_ID, DEVICE_UPDATE),
+    { method: "PUT", path: `/v1/office/devices/${DEVICE_ID}`, body: DEVICE_UPDATE },
+  ],
+  [
+    "revokeDevice",
+    fixture("device-record.json"),
+    (api) => api.revokeDevice(TOKEN, DEVICE_ID),
+    { method: "POST", path: `/v1/office/devices/${DEVICE_ID}/revoke`, body: undefined },
+  ],
+  [
+    "listCounterparties",
+    [fixture("counterparty-record.json")],
+    (api) => api.listCounterparties(TOKEN),
+    { method: "GET", path: "/v1/office/counterparties", body: undefined },
+  ],
+  [
+    "createCounterparty",
+    fixture("counterparty-record.json"),
+    (api) => api.createCounterparty(TOKEN, COUNTERPARTY_CREATE),
+    { method: "POST", path: "/v1/office/counterparties", body: COUNTERPARTY_CREATE },
+  ],
+  [
+    "updateCounterparty",
+    fixture("counterparty-record.json"),
+    (api) => api.updateCounterparty(TOKEN, COUNTERPARTY_ID, COUNTERPARTY_UPDATE),
+    {
+      method: "PUT",
+      path: `/v1/office/counterparties/${COUNTERPARTY_ID}`,
+      body: COUNTERPARTY_UPDATE,
+    },
+  ],
+  [
+    "listLines",
+    [fixture("office-line.json")],
+    (api) => api.listLines(TOKEN),
+    { method: "GET", path: "/v1/office/lines", body: undefined },
+  ],
+  [
+    "createLine",
+    fixture("office-line.json"),
+    (api) => api.createLine(TOKEN, { name: "Линия 3" }),
+    { method: "POST", path: "/v1/office/lines", body: { name: "Линия 3" } },
+  ],
+  [
+    "updateLine",
+    fixture("office-line.json"),
+    (api) => api.updateLine(TOKEN, LINE_ID, LINE_UPDATE),
+    { method: "PUT", path: `/v1/office/lines/${LINE_ID}`, body: LINE_UPDATE },
   ],
   [
     "setUserPassword",

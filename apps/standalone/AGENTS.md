@@ -347,7 +347,10 @@ device's revision goes unnoticed until the feed carries an epoch (plan 5).
 
 Changing a wire shape means changing `proto`, the Zod schemas and the
 fixtures together; the Rust tests parse every fixture, and the Vitest suite
-parses every fixture whose shape crosses the IPC boundary. Raise
+parses every fixture whose shape crosses the IPC boundary. An office request
+body the webview builds has one builder in `src/host/requests.ts`, which
+names every field it sends; `test/protocol.test.ts` checks that each builder
+produces its fixture exactly. Raise
 `PROTOCOL_VERSION` for an incompatible change; the host keeps accepting the
 previous version. Response types, which devices of different versions read,
 tolerate unknown fields; request types, which the host parses, reject them

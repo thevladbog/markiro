@@ -243,6 +243,27 @@ export const officeUserRecordSchema = z.object({
 });
 export type OfficeUserRecord = z.infer<typeof officeUserRecordSchema>;
 
+/** `GET /v1/office/counterparties`: a customer of contract manufacturing; archived instead of deleted. */
+export const counterpartyRecordSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  inn: z.string().nullable(),
+  gln: z.string(),
+  gs1Prefixes: z.array(z.string()),
+  archived: z.boolean(),
+  rev: z.number().int(),
+});
+export type CounterpartyRecord = z.infer<typeof counterpartyRecordSchema>;
+
+/** `GET /v1/office/lines`: a production line as the office sees it, archived ones included. */
+export const officeLineSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  archived: z.boolean(),
+  rev: z.number().int(),
+});
+export type OfficeLine = z.infer<typeof officeLineSchema>;
+
 // --- Request bodies (strict) ---
 
 export const officeLoginRequestSchema = z
@@ -332,3 +353,51 @@ export const passwordChangeSchema = z
   .object({ currentPassword: z.string(), newPassword: z.string() })
   .strict();
 export type PasswordChange = z.infer<typeof passwordChangeSchema>;
+
+/** `POST /v1/office/counterparties`; the office always sends `inn`, `null` for none. */
+export const counterpartyCreateSchema = z
+  .object({
+    name: z.string(),
+    inn: z.string().nullable(),
+    gln: z.string(),
+    gs1Prefixes: z.array(z.string()),
+  })
+  .strict();
+export type CounterpartyCreate = z.infer<typeof counterpartyCreateSchema>;
+
+/** `PUT /v1/office/counterparties/{id}`: the whole record, `archived` included. */
+export const counterpartyUpdateSchema = z
+  .object({
+    name: z.string(),
+    inn: z.string().nullable(),
+    gln: z.string(),
+    gs1Prefixes: z.array(z.string()),
+    archived: z.boolean(),
+    expectedRev: z.number().int(),
+  })
+  .strict();
+export type CounterpartyUpdate = z.infer<typeof counterpartyUpdateSchema>;
+
+/** `POST /v1/office/lines`. */
+export const lineCreateSchema = z.object({ name: z.string() }).strict();
+export type LineCreate = z.infer<typeof lineCreateSchema>;
+
+/** `PUT /v1/office/lines/{id}`: only the fields sent change. */
+export const lineUpdateSchema = z
+  .object({
+    name: z.string().optional(),
+    archived: z.boolean().optional(),
+    expectedRev: z.number().int(),
+  })
+  .strict();
+export type LineUpdate = z.infer<typeof lineUpdateSchema>;
+
+/** `PUT /v1/office/devices/{id}`: only the fields sent change; `lineId: null` clears the line. */
+export const deviceUpdateSchema = z
+  .object({ name: z.string().optional(), lineId: z.uuid().nullable().optional() })
+  .strict();
+export type DeviceUpdate = z.infer<typeof deviceUpdateSchema>;
+
+/** The optional body of `POST /v1/office/pairing-codes`: the code «Новый код» replaces. */
+export const pairingCodeRequestSchema = z.object({ replaces: z.uuid().optional() }).strict();
+export type PairingCodeRequest = z.infer<typeof pairingCodeRequestSchema>;

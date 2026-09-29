@@ -42,7 +42,21 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     setUserPassword: vi.fn<HostApi["setUserPassword"]>(() => unexpected("setUserPassword")),
     getChanges: vi.fn<HostApi["getChanges"]>(() => unexpected("getChanges")),
     listDevices: vi.fn<HostApi["listDevices"]>(() => unexpected("listDevices")),
+    updateDevice: vi.fn<HostApi["updateDevice"]>(() => unexpected("updateDevice")),
+    revokeDevice: vi.fn<HostApi["revokeDevice"]>(() => unexpected("revokeDevice")),
     createPairingCode: vi.fn<HostApi["createPairingCode"]>(() => unexpected("createPairingCode")),
+    listCounterparties: vi.fn<HostApi["listCounterparties"]>(() =>
+      unexpected("listCounterparties"),
+    ),
+    createCounterparty: vi.fn<HostApi["createCounterparty"]>(() =>
+      unexpected("createCounterparty"),
+    ),
+    updateCounterparty: vi.fn<HostApi["updateCounterparty"]>(() =>
+      unexpected("updateCounterparty"),
+    ),
+    listLines: vi.fn<HostApi["listLines"]>(() => unexpected("listLines")),
+    createLine: vi.fn<HostApi["createLine"]>(() => unexpected("createLine")),
+    updateLine: vi.fn<HostApi["updateLine"]>(() => unexpected("updateLine")),
     ...overrides,
   };
 }
