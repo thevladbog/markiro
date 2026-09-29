@@ -72,7 +72,11 @@ export function CreateTenantPanel() {
       />
       <Card className="tenant-create-card">
         <div className="tenant-create-intro">
-          <h2>{t("tenants.createForm.ownerTitle")}</h2>
+          <h2>
+            {t(
+              cabinetEnabled ? "tenants.createForm.ownerTitle" : "tenants.createForm.offlineTitle",
+            )}
+          </h2>
         </div>
         {submitErrorKey ? <Alert tone="error">{t(submitErrorKey)}</Alert> : null}
         <form className="tenant-create-form" noValidate onSubmit={(event) => void submit(event)}>

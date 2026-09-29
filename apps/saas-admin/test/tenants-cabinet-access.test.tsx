@@ -58,6 +58,7 @@ describe("tenant cabinet access", () => {
     const toggle = screen.getByRole("checkbox", { name: "Доступ в кабинет" });
     expect(toggle.getAttribute("aria-checked")).toBe("true");
     expect(screen.getByLabelText("Email владельца")).toBeDefined();
+    expect(screen.getByRole("heading", { name: "Организация и первый владелец" })).toBeDefined();
     expect(screen.getByText(/Демо начнётся только после активации владельца/)).toBeDefined();
 
     await user.type(screen.getByLabelText("Название"), "Первый завод");
@@ -80,6 +81,8 @@ describe("tenant cabinet access", () => {
     await user.click(screen.getByRole("checkbox", { name: "Доступ в кабинет" }));
 
     expect(screen.queryByLabelText("Email владельца")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Организация" })).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "Организация и первый владелец" })).toBeNull();
     expect(screen.queryByText(/Демо начнётся только после активации владельца/)).toBeNull();
     expect(
       screen.getByText(/Тенант без кабинета: владелец, письмо активации и демо не создаются/),

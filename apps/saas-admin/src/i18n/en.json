@@ -1831,6 +1831,7 @@
     "createForm": {
       "title": "New tenant",
       "ownerTitle": "Organization and first owner",
+      "offlineTitle": "Organization",
       "demoNotice": "The demo starts only after owner activation. No password is created here and no activation link is shown.",
       "name": "Name",
       "slug": "Slug",
