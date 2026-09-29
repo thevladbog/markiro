@@ -587,14 +587,16 @@ requests and offer a retry.
   (`WriteFailureAlert`). A `FormDialog`'s `onSubmit` must never reject: it
   sorts every failure itself, and a rejection would only surface as an
   unhandled one, so a caller's bug is not hidden. Only the awaited write sits
-  in the `try`; the callback after a saved write (`onSaved`, `onRevoked`, …)
+  in the `try`, with the hashing that builds its body where there is one (an
+  operator's PIN); the callback after a saved write (`onSaved`, `onRevoked`, …)
   and whatever else follows a success run after the `try/catch`, whose `catch`
   ends with `return`, so a throw there is never shown as a failed write (a
   retry would add a second counterparty: the host keeps no uniqueness). The
-  archive and revoke confirmations use the `destructive` submit variant
-  although archiving can be undone: here it means an action that takes a
-  record out of use. Whether a page shows a form or a read-only view comes
-  from `useCan` (`src/office/access.ts`), the table of spec §4.8.
+  archive, revoke and turn-off confirmations use the `destructive` submit
+  variant although archiving and turning off can be undone: here it means an
+  action that takes a record out of use. Whether a page shows a form or a
+  read-only view comes from `useCan` (`src/office/access.ts`), the table of
+  spec §4.8.
 - Request bodies are built field by field, never spread from form values, so
   nothing the form holds reaches the host by accident; ids go into the path
   only.
@@ -615,6 +617,24 @@ requests and offer a retry.
   line back is a dialog with its name, so it can take another one. Archiving
   asks first and says that stations already on the line stay there: the host
   does not touch devices when a line is archived.
+- «Операторы» is for administrators only: `RequireRole`, and `OFFICE_NAV`
+  shows it to them alone, between «Линии» and «Устройства». It lists every
+  operator, those turned off included: active ones first, each group by
+  personnel number as text, as the host orders them (leading zeros are part
+  of the number, so no numeric collator), with the role, whether a PIN is
+  set, the badges in use and the access in words. A new operator takes a
+  personnel number, a name, an optional role and a PIN typed twice. An edit
+  changes the name and the role and shows the number, which never changes:
+  a cleared role goes as `role: null`, an untouched one not at all.
+  «Сменить PIN» replaces the PIN, which is never shown. «Выключить» asks
+  first and says that the operator can no longer sign in on the stations
+  once they sync; «Включить» asks too, lightly. Every change sends only what
+  differs (`operatorUpdate`) with the loaded revision, and the record the
+  host returns replaces the row in place. A dialog hashes the PIN
+  (`hashPin`) inside its `onSubmit` and then builds the body: the
+  `FormDialog` guard covers the hashing too, and the mutation's variables,
+  which the query cache keeps, hold only the hash. There is no delete, and
+  the page offers none.
 - `@markiro/ui` has English defaults: `Table` shows «No data» without
   `empty`, and `Modal` names its × «Close» without `closeLabel`. Every
   office table passes a localized `empty`, and every dialog passes

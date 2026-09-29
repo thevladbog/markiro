@@ -18,6 +18,7 @@ export const officeKeys = {
   devices: ["office", "devices"],
   counterparties: ["office", "counterparties"],
   lines: ["office", "lines"],
+  operators: ["office", "operators"],
 } as const;
 
 /**

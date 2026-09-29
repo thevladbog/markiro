@@ -5,6 +5,7 @@ import { DevicesPage } from "./devices/DevicesPage.js";
 import { LinesPage } from "./lines/LinesPage.js";
 import { OfficeOverview } from "./OfficeOverview.js";
 import { OfficeShell } from "./OfficeShell.js";
+import { OperatorsPage } from "./operators/OperatorsPage.js";
 import { OrgProfilePage } from "./org/OrgProfilePage.js";
 import { RequireRole } from "./RequireRole.js";
 import { SsccPage } from "./sscc/SsccPage.js";
@@ -21,6 +22,14 @@ export const officeRoutes: RouteObject[] = [
       { path: "sscc", element: <SsccPage /> },
       { path: "counterparties", element: <CounterpartiesPage /> },
       { path: "lines", element: <LinesPage /> },
+      {
+        path: "operators",
+        element: (
+          <RequireRole roles={["admin"]}>
+            <OperatorsPage />
+          </RequireRole>
+        ),
+      },
       {
         path: "devices",
         element: (

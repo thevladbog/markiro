@@ -40,6 +40,12 @@ export const OFFICE_NAV: readonly OfficeNavItem[] = [
     roles: ["admin", "technologist"],
   },
   {
+    to: "/operators",
+    labelKey: "office.nav.operators",
+    sectionKey: "office.nav.sections.production",
+    roles: ["admin"],
+  },
+  {
     to: "/devices",
     labelKey: "office.nav.devices",
     sectionKey: "office.nav.sections.production",
