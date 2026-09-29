@@ -272,6 +272,9 @@ export function DevicesPage() {
           device={dialog.device}
           onClose={() => setDialog(null)}
           onRevoked={(device) => {
+            // The record the revoke returned goes in first: the row is dead
+            // now, not when the list has been read again.
+            storeDevice(device);
             setDialog(null);
             setNotice(t("office.devices.revoked", { name: device.name }));
             void devices.refetch();

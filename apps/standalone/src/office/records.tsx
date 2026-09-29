@@ -27,15 +27,21 @@ export function activeFirstByName<T extends ArchivableRecord>(records: readonly 
   );
 }
 
-/** `records` with `record` in place of the one with its id, or added. */
+/**
+ * `records` with `record` in place of the one with its id, which keeps its
+ * position, or added at the end when none has that id. A new array; neither
+ * argument is changed.
+ */
 export function withRecord<T extends { id: string }>(records: readonly T[], record: T): T[] {
-  return [...records.filter((each) => each.id !== record.id), record];
+  return records.some((each) => each.id === record.id)
+    ? records.map((each) => (each.id === record.id ? record : each))
+    : [...records, record];
 }
 
 /**
  * Keeps a record a write returned in the cached list of `key`, in place of
- * the one with its id or added; with no list loaded, the whole list is read
- * again rather than shown as one row.
+ * the one with its id (`withRecord`: same position) or added; with no list
+ * loaded, the whole list is read again rather than shown as one row.
  */
 export function useStoreRecord<T extends { id: string }>(key: QueryKey): (record: T) => void {
   const queryClient = useQueryClient();

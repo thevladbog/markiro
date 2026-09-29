@@ -267,17 +267,35 @@ describe("office devices", () => {
       ),
     ).toBeTruthy();
     const reads = session.api.listDevices.mock.calls.length;
-    session.api.listDevices.mockResolvedValue([HOST_PC, revoked, OFFICE_PC, RETIRED]);
+    // The read that follows the revoke stays pending until the row has been
+    // checked: what the revoke itself returned must already show.
+    let answerRead: (devices: DeviceRecord[]) => void = () => undefined;
+    session.api.listDevices.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          answerRead = resolve;
+        }),
+    );
     fireEvent.click(within(dialog()).getByRole("button", { name: "Отозвать" }));
     expect(await screen.findByText("Устройство «Станция упаковки» отозвано.")).toBeTruthy();
     expect(session.api.revokeDevice.mock.calls).toStrictEqual([
       ["office-session-token", PACKING.id],
     ]);
     await waitFor(() => expect(session.api.listDevices.mock.calls.length).toBe(reads + 1));
+    const dead = rowOf("Станция упаковки");
+    expect(within(dead).getByText("Отозвано")).toBeTruthy();
+    expect(within(dead).queryByText("Действует")).toBeNull();
+    expect(within(dead).queryByRole("button")).toBeNull();
+    // The other rows are as they were.
+    expect(within(rowOf("Рабочее место хоста")).getByText("Действует")).toBeTruthy();
+    await act(async () => {
+      answerRead([HOST_PC, revoked, OFFICE_PC, RETIRED]);
+    });
     await waitFor(() =>
       expect(within(rowOf("Станция упаковки")).getByText("Отозвано")).toBeTruthy(),
     );
     expect(within(rowOf("Станция упаковки")).queryByRole("button")).toBeNull();
+    expect(session.api.listDevices.mock.calls.length).toBe(reads + 1);
   });
 
   it("explains a revocation the host refused, in the dialog", async () => {

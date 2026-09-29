@@ -92,7 +92,7 @@ export function LineDialog({ mode, onClose, onSaved, onReload }: LineDialogProps
       ? t("office.lines.createTitle")
       : mode.kind === "rename"
         ? t("office.lines.renameTitle", { name: mode.line.name })
-        : t("office.lines.restoreTitle");
+        : t("office.lines.restoreTitle", { name: mode.line.name });
   const submitLabel =
     mode.kind === "create"
       ? t("office.lines.create")

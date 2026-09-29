@@ -222,6 +222,8 @@ describe("office lines", () => {
       .mockResolvedValueOnce({ ...OLD_LINE, name: "Линия 1 (старая)", archived: false, rev: 53 });
     await openLines(session);
     fireEvent.click(screen.getByRole("button", { name: "Вернуть линию «Линия 1» из архива" }));
+    // The title names the line, as the rename dialog's does.
+    expect(screen.getByRole("dialog", { name: "Вернуть линию «Линия 1» из архива" })).toBeTruthy();
     expect(
       within(dialog()).getByText(
         "Линия снова появится в выборе линии на станциях. Если её название уже заняла другая линия, дайте ей новое.",
