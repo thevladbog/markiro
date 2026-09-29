@@ -12,18 +12,27 @@ export function characters(text: string): number {
   return [...text].length;
 }
 
-/** A control character (`char::is_control`: the C0 range, DEL and the C1 range). */
-const CONTROL_CHARACTER = /\p{Cc}/u;
+/**
+ * What no free-text field may hold: a control character (`char::is_control`:
+ * the C0 range, DEL and the C1 range) or an unpaired surrogate. A Rust string
+ * cannot hold the latter: `JSON.stringify` writes it as an escape, serde_json
+ * refuses that, the IPC call fails before the host is reached and the form
+ * would blame the connection for a bad name. With the `u` flag a valid
+ * surrogate pair, an emoji, is one code point and stays.
+ */
+const CONTROL_OR_LONE_SURROGATE = /[\p{Cc}\p{Cs}]/u;
 
 /**
  * Free text as the host takes it (`validate::clean_text`, already trimmed
  * here): 1 to `max` characters, counted as the host counts them, with no
- * control character anywhere. A NUL or a tab survives `trim`, and the host
- * refuses both.
+ * control character anywhere and no unpaired surrogate. `trim` removes a tab
+ * at the edge of a value, in JavaScript and in Rust alike, so only a tab
+ * inside survives it; a NUL survives it anywhere, at the edge too (neither
+ * language trims it). The host refuses every control character.
  */
 export function isPlainText(text: string, max: number): boolean {
   const count = characters(text);
-  return count >= 1 && count <= max && !CONTROL_CHARACTER.test(text);
+  return count >= 1 && count <= max && !CONTROL_OR_LONE_SURROGATE.test(text);
 }
 
 /** A free-text field of 1 to `max` characters (`isPlainText`); the value is trimmed. */

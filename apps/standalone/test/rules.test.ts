@@ -100,13 +100,60 @@ describe("free text", () => {
   });
 
   it("refuses a control character anywhere, as `char::is_control` does", () => {
-    for (const control of ["\u0000", "\t", "\n", "\u001f", "\u007f", "\u0085", "\u009f"]) {
+    for (const control of [
+      "\u0000",
+      "\t",
+      "\n",
+      "\u001f",
+      "\u007f",
+      "\u0080",
+      "\u0085",
+      "\u009f",
+    ]) {
       expect(isPlainText(`Линия${control}1`, 100)).toBe(false);
     }
     // Not control characters: a no-break space, a soft hyphen, a zero-width joiner.
     for (const text of ["Линия\u00a01", "Линия\u00ad1", "Линия\u200d1"]) {
       expect(isPlainText(text, 100)).toBe(true);
     }
+  });
+
+  it("refuses an unpaired surrogate anywhere, and keeps a valid pair", () => {
+    // A Rust string cannot hold one: JSON.stringify would write an escape,
+    // serde_json would refuse it, and the form would report a lost connection.
+    for (const text of [
+      "\ud800Линия",
+      "Линия\udc00",
+      "Ли\ud800ния",
+      "Линия\udbffA",
+      "\udc00\ud800",
+      "\ud800",
+    ]) {
+      expect(isPlainText(text, 100)).toBe(false);
+    }
+    // A pair is one code point: an emoji at either end or inside, and a joined family.
+    for (const text of ["😀Линия", "Линия😀", "Ли😀ния", "👨\u200d👩\u200d👧"]) {
+      expect(isPlainText(text, 100)).toBe(true);
+    }
+  });
+
+  it("refuses an unpaired surrogate in every free-text field", () => {
+    expect(personNameRule.safeParse("Павел\ud800").error?.issues[0]?.message).toBe("rules.name");
+    expect(deviceNameRule.safeParse("\udc00Станция").error?.issues[0]?.message).toBe("rules.name");
+    expect(lineNameRule.safeParse("Ли\ud800ния").error?.issues[0]?.message).toBe("rules.lineName");
+    expect(companyNameRule.safeParse("ООО\udc00").error?.issues[0]?.message).toBe("rules.orgName");
+    expect(orgMessage({ orgName: "ООО «Ат\ud800олл»" })).toBe("rules.orgName");
+    expect(deviceNameRule.safeParse("Станция 😀").success).toBe(true);
+  });
+
+  it("trims a tab at the edge of a value, but refuses one inside", () => {
+    expect(lineNameRule.safeParse("\tЛиния 2\t").data).toBe("Линия 2");
+    expect(lineNameRule.safeParse("Линия\t2").error?.issues[0]?.message).toBe("rules.lineName");
+    // A NUL is trimmed by neither JavaScript nor Rust, at the edge or inside.
+    expect(lineNameRule.safeParse("Линия 2\u0000").error?.issues[0]?.message).toBe(
+      "rules.lineName",
+    );
+    expect(lineNameRule.safeParse("Ли\u0000ния").error?.issues[0]?.message).toBe("rules.lineName");
   });
 
   it("trims before it counts, and a NUL at the edge is not trimmed away", () => {
@@ -126,6 +173,24 @@ describe("free text", () => {
       "rules.orgName",
     );
     expect(orgMessage({ orgName: "ООО\t«Атолл»" })).toBe("rules.orgName");
+  });
+
+  it("takes a company name of exactly 200 characters and refuses 201: counterparties depend on it", () => {
+    expect(companyNameRule.safeParse("я".repeat(200)).success).toBe(true);
+    expect(companyNameRule.safeParse("я".repeat(201)).error?.issues[0]?.message).toBe(
+      "rules.orgName",
+    );
+    // 200 emoji are 400 UTF-16 code units but 200 characters, as the host counts them.
+    expect(companyNameRule.safeParse("😀".repeat(200)).success).toBe(true);
+    expect(orgMessage({ orgName: "я".repeat(200) })).toBeUndefined();
+    expect(orgMessage({ orgName: "я".repeat(201) })).toBe("rules.orgName");
+  });
+
+  it("takes a device name of exactly 100 characters and refuses 101, as validate::device_name does", () => {
+    expect(deviceNameRule.safeParse("с".repeat(100)).success).toBe(true);
+    expect(deviceNameRule.safeParse("с".repeat(101)).error?.issues[0]?.message).toBe("rules.name");
+    expect(deviceNameRule.safeParse("😀".repeat(100)).success).toBe(true);
+    expect(deviceNameRule.safeParse(" ").error?.issues[0]?.message).toBe("rules.name");
   });
 
   it("checks company fields with the organization's rules", () => {

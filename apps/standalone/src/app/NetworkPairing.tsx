@@ -7,7 +7,7 @@ import { DeviceError, type ClaimInput, type DeviceErrorCode } from "../host/devi
 import { hasCyrillic, normalizePairingCode, parsePairingPayload } from "../host/pairing-code.js";
 import { HostProbeError, type HostProbe } from "../host/probe.js";
 import { errorProp } from "../lib/form-error.js";
-import { personNameRule } from "../lib/rules.js";
+import { deviceNameRule } from "../lib/rules.js";
 import { formatFingerprint } from "./fingerprint.js";
 import { findHost, hostUrl, parseHostAddress, type HostSearch } from "./host-search.js";
 
@@ -139,7 +139,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
   }, [notice, manual, confirmation]);
 
   const checkedName = (): string | null => {
-    const parsed = personNameRule.safeParse(name);
+    const parsed = deviceNameRule.safeParse(name);
     setNameInvalid(!parsed.success);
     return parsed.success ? parsed.data : null;
   };

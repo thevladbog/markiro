@@ -90,6 +90,11 @@ describe("wizard steps", () => {
     expect(validateStep("lines", values({ lines: [{ name: "Линия\t1" }] }))).toEqual([
       { field: "lines.0.name", message: "wizard.errors.lineName" },
     ]);
+    // So is an unpaired surrogate, which cannot cross the IPC boundary; a pair is a name.
+    expect(validateStep("lines", values({ lines: [{ name: "Линия\ud8001" }] }))).toEqual([
+      { field: "lines.0.name", message: "wizard.errors.lineName" },
+    ]);
+    expect(validateStep("lines", values({ lines: [{ name: "Линия 😀" }] }))).toEqual([]);
     const many = Array.from({ length: 21 }, (_, index) => ({ name: `Линия ${index + 1}` }));
     expect(validateStep("lines", values({ lines: many }))).toEqual([
       { field: "lines.0.name", message: "wizard.errors.lines" },
