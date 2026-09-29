@@ -286,6 +286,65 @@ describe.skipIf(!ready)("platform tenant management", () => {
     }
   });
 
+  it("creates a none tenant through the API and shows it as cabinet-less", async () => {
+    const tenantSlug = `offline-api-${randomUUID()}`;
+    const created = await admin
+      .post("/platform/tenants")
+      .send({ tenantName: "Offline API", tenantSlug, cabinetAccess: "none" })
+      .expect(201);
+    expect(created.body).toEqual({
+      tenantId: expect.any(String),
+      userId: null,
+      memberId: null,
+      deliveryId: null,
+    });
+    const detail = await admin
+      .get(`/platform/tenants/${created.body.tenantId}`)
+      .set("X-Markiro-Commercial-Version", "3")
+      .expect(200);
+    expect(detail.body.tenant).toMatchObject({ slug: tenantSlug, cabinetAccess: "none" });
+    expect(detail.body.ownerActivation).toBeNull();
+    expect(detail.body.subscriptionStatus).toBe("unmanaged");
+    const list = await admin
+      .get("/platform/tenants?limit=100")
+      .set("X-Markiro-Commercial-Version", "3")
+      .expect(200);
+    expect(
+      list.body.items.find((item: { id: string }) => item.id === created.body.tenantId),
+    ).toMatchObject({ cabinetAccess: "none" });
+  });
+
+  it("rejects a cabinet-less tenant with an e-mail and an enabled one without", async () => {
+    await admin
+      .post("/platform/tenants")
+      .send({
+        tenantName: "Bad",
+        tenantSlug: `bad-${randomUUID()}`,
+        cabinetAccess: "none",
+        email: "a@b.co",
+      })
+      .expect(400);
+    await admin
+      .post("/platform/tenants")
+      .send({ tenantName: "Bad", tenantSlug: `bad-${randomUUID()}` })
+      .expect(400);
+  });
+
+  it("returns owner_not_found when renewing activation for a none tenant", async () => {
+    const created = await admin
+      .post("/platform/tenants")
+      .send({
+        tenantName: "Offline renew",
+        tenantSlug: `offline-renew-${randomUUID()}`,
+        cabinetAccess: "none",
+      })
+      .expect(201);
+    const renewed = await admin
+      .post(`/platform/tenants/${created.body.tenantId}/owner-activation/renew`)
+      .expect(404);
+    expect(renewed.body.code).toBe("tenant_owner_not_found");
+  });
+
   it("returns truthful zero quotas only in the negotiated tenant detail", async () => {
     const zeroPlan = await createPublishedPlan({
       code: `zero-${randomUUID()}`,

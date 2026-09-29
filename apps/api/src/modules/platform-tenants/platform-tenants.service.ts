@@ -8,6 +8,7 @@ import {
   type TenantDetailV3,
   type AddonAssignmentResult,
   type CreateTenantResult,
+  type GrantCabinetAccessResult,
   type PlanAssignmentResult,
   type RenewTenantActivationResult,
   type TenantListResult,
@@ -21,7 +22,13 @@ import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
 import { sanitizeSupportAuditMetadata } from "../../platform-auth/platform-audit.service";
 import { SubscriptionLifecycleService } from "../../subscriptions/subscription-lifecycle.service";
-import type { AssignAddonDto, AssignPlanDto, ProvisionTenantDto, TenantListQueryDto } from "./dto";
+import type {
+  AssignAddonDto,
+  AssignPlanDto,
+  GrantCabinetAccessDto,
+  ProvisionTenantDto,
+  TenantListQueryDto,
+} from "./dto";
 import { TenantProvisioningService } from "./tenant-provisioning.service";
 
 type SubscriptionRow = typeof schema.tenantSubscriptions.$inferSelect;
@@ -31,6 +38,7 @@ interface TenantListRow {
   id: string;
   name: string;
   slug: string;
+  cabinetAccess: "enabled" | "none";
   createdAt: Date | string;
   subscriptionId: string | null;
   subscriptionStatus: Exclude<TenantSubscriptionStatus, "unmanaged"> | null;
@@ -87,6 +95,7 @@ export class PlatformTenantsService {
         organization.id,
         organization.name,
         organization.slug,
+        organization.cabinet_access as "cabinetAccess",
         organization.created_at as "createdAt",
         latest.id as "subscriptionId",
         latest.status::text as "subscriptionStatus",
@@ -126,6 +135,7 @@ export class PlatformTenantsService {
         id: row.id,
         name: row.name,
         slug: row.slug,
+        cabinetAccess: row.cabinetAccess,
         createdAt: serializeTenantListTimestamp(row.createdAt),
         subscriptionStatus: row.subscriptionStatus ?? "unmanaged",
         ...(row.subscriptionId
@@ -308,6 +318,7 @@ export class PlatformTenantsService {
         id: tenant.id,
         name: tenant.name,
         slug: tenant.slug,
+        cabinetAccess: tenant.cabinetAccess,
         createdAt: tenant.createdAt,
       },
       subscriptionStatus: current?.status ?? scheduled?.status ?? "unmanaged",
@@ -373,10 +384,26 @@ export class PlatformTenantsService {
       .limit(1);
     if (!owner) throw new NotFoundException({ code: "tenant_owner_not_found" });
     const result = await this.provisioning.provision(
-      { email: owner.email, tenantName: owner.tenantName, tenantSlug: owner.tenantSlug },
+      {
+        email: owner.email,
+        tenantName: owner.tenantName,
+        tenantSlug: owner.tenantSlug,
+        cabinetAccess: "enabled",
+      },
       { actor, renewActivation: true },
     );
+    if (result.deliveryId === null) throw new NotFoundException({ code: "tenant_owner_not_found" });
     return { deliveryId: result.deliveryId };
+  }
+
+  async grantCabinetAccess(
+    actor: PlatformPrincipal,
+    tenantId: string,
+    input: GrantCabinetAccessDto,
+  ): Promise<GrantCabinetAccessResult> {
+    return platformTenantContracts.grantCabinetAccess.response.parse(
+      await this.provisioning.grantCabinetAccess(tenantId, input, { actor }),
+    );
   }
 
   async assignPlan(

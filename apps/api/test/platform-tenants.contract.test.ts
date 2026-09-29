@@ -30,6 +30,7 @@ describe("platform tenant list contract", () => {
             name: "Старое производство",
             slug: "legacy-factory",
             createdAt: "2026-08-11 18:08:42.158",
+            cabinetAccess: "enabled",
             subscriptionStatus: "unmanaged",
           },
         ],
@@ -46,5 +47,24 @@ describe("platform tenant list contract", () => {
         },
       ],
     });
+  });
+
+  it("rejects a list item without cabinetAccess", () => {
+    expect(() =>
+      parsePlatformResponse(platformTenantContracts.list.response, {
+        items: [
+          {
+            id: "legacy_better_auth_org",
+            name: "X",
+            slug: "x",
+            createdAt: "2026-08-11T18:08:42.158Z",
+            subscriptionStatus: "unmanaged",
+          },
+        ],
+        page: 1,
+        limit: 50,
+        total: 1,
+      }),
+    ).toThrow();
   });
 });

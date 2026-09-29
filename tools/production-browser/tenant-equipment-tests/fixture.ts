@@ -22,6 +22,7 @@ const tenant = platformTenantV3Contracts.detail.response.parse({
     id: TENANT_ID,
     name: "Первый завод",
     slug: "first-factory",
+    cabinetAccess: "enabled",
     createdAt: "2026-08-09T08:00:00.000Z",
   },
   subscriptionStatus: "unmanaged",

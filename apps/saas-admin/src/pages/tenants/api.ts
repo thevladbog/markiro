@@ -9,6 +9,8 @@ import {
   assignAddonSchema,
   assignPlanSchema,
   createTenantSchema,
+  grantCabinetAccessSchema,
+  platformTenantContracts,
   platformTenantV3Contracts,
   COMMERCIAL_VERSION_HEADER,
   platformTenantIdSchema,
@@ -18,6 +20,7 @@ import {
   type AssignAddonInput,
   type AssignPlanInput,
   type CreateTenantInput,
+  type GrantCabinetAccessInput,
   type TenantDetailV3 as TenantDetail,
   type TenantListItem,
   type TenantListQuery,
@@ -39,6 +42,7 @@ export {
   assignAddonSchema as assignAddonInputSchema,
   assignPlanSchema as assignPlanInputSchema,
   createTenantSchema as createTenantInputSchema,
+  grantCabinetAccessSchema as grantCabinetAccessInputSchema,
   platformTenantIdSchema as tenantIdSchema,
 };
 type DetailPlanVersion = TenantSubscription["planVersion"];
@@ -49,6 +53,7 @@ export type {
   AssignPlanInput,
   CreateTenantInput,
   DetailPlanVersion,
+  GrantCabinetAccessInput,
   TenantDetail,
   TenantListItem,
   TenantListResponse,
@@ -71,6 +76,17 @@ export async function createTenant(input: CreateTenantInput) {
   return platformApiFetch("/tenants", {
     headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
     responseSchema: platformTenantV3Contracts.create.response,
+    method: "POST",
+    body: JSON.stringify(validated),
+  });
+}
+
+export async function grantCabinetAccess(tenantId: string, input: GrantCabinetAccessInput) {
+  const validatedId = platformTenantIdSchema.parse(tenantId);
+  const validated = grantCabinetAccessSchema.parse(input);
+  return platformApiFetch(`/tenants/${validatedId}/cabinet-access`, {
+    headers: { [COMMERCIAL_VERSION_HEADER]: CURRENT_COMMERCIAL_VERSION },
+    responseSchema: platformTenantContracts.grantCabinetAccess.response,
     method: "POST",
     body: JSON.stringify(validated),
   });

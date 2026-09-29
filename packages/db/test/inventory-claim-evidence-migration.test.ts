@@ -55,12 +55,12 @@ describe.skipIf(!databaseUrl)("inventory claim evidence migration", () => {
     });
     await migrate(db, { migrationsFolder: legacyMigrations });
 
-    await db.insert(schema.organization).values({
-      id: tenantId,
-      name: "Claim migration",
-      slug: `${tenantId}-${randomUUID()}`,
-      createdAt: new Date(),
-    });
+    // Raw SQL for the same reason: `schema.organization` now lists
+    // `cabinet_access` (0176), which this migration-73 scratch DB does not have.
+    await pool.query(
+      `insert into organization (id, name, slug, created_at) values ($1, $2, $3, now())`,
+      [tenantId, "Claim migration", `${tenantId}-${randomUUID()}`],
+    );
     await db.insert(schema.user).values({
       id: userId,
       name: "Claim migration",

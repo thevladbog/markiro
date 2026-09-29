@@ -1,4 +1,4 @@
-import { asc, eq, notExists } from "drizzle-orm";
+import { and, asc, eq, ne, notExists } from "drizzle-orm";
 import { createDb, schema, type Db } from "@markiro/db";
 import { loadEnv } from "../env";
 
@@ -20,11 +20,16 @@ export async function reportUnmanagedTenants(db: Db): Promise<UnmanagedTenantRep
     })
     .from(schema.organization)
     .where(
-      notExists(
-        db
-          .select({ id: schema.tenantSubscriptions.id })
-          .from(schema.tenantSubscriptions)
-          .where(eq(schema.tenantSubscriptions.tenantId, schema.organization.id)),
+      and(
+        // A tenant without a cabinet has no subscription by design; it is
+        // not a managed tenant missing its demo.
+        ne(schema.organization.cabinetAccess, "none"),
+        notExists(
+          db
+            .select({ id: schema.tenantSubscriptions.id })
+            .from(schema.tenantSubscriptions)
+            .where(eq(schema.tenantSubscriptions.tenantId, schema.organization.id)),
+        ),
       ),
     )
     .orderBy(asc(schema.organization.slug), asc(schema.organization.id));

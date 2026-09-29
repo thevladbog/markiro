@@ -14,6 +14,7 @@ for (const width of [390, 1440]) {
       id: "report-fixture",
       name: "Тестовый завод",
       slug: "report-fixture",
+      cabinetAccess: "enabled",
       createdAt: "2026-09-01T00:00:00Z",
       subscriptionStatus: "trial",
     });

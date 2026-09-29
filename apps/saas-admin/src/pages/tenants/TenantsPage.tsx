@@ -95,10 +95,15 @@ export function TenantsPage() {
         key: "subscriptionStatus",
         title: t("tenants.columns.status"),
         render: (item) => (
-          <StatusChip
-            phase={SUBSCRIPTION_STATUS_TO_PHASE[item.subscriptionStatus]}
-            label={t(`tenants.status.${item.subscriptionStatus}`)}
-          />
+          <>
+            <StatusChip
+              phase={SUBSCRIPTION_STATUS_TO_PHASE[item.subscriptionStatus]}
+              label={t(`tenants.status.${item.subscriptionStatus}`)}
+            />
+            {item.cabinetAccess === "none" ? (
+              <StatusChip phase="none" label={t("tenants.cabinet.none")} />
+            ) : null}
+          </>
         ),
       },
       {

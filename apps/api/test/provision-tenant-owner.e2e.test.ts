@@ -12,12 +12,14 @@ import {
 import { MailCryptoService } from "../src/modules/mail/mail-crypto.service";
 import { MailDeliveryService } from "../src/modules/mail/mail-delivery.service";
 import { activationIdentifier } from "../src/modules/tenant-owner-activation/token";
+import { platformCapabilitiesForRole } from "../src/platform-auth/platform-access-policy";
 import {
   parseProvisionTenantOwnerArgs,
   provisionTenantOwner,
   runProvisionTenantOwnerCli,
 } from "../src/cli/provision-tenant-owner";
 import { DefaultDemoSettingFixture } from "./support/default-demo-setting";
+import { requireOwner } from "./support/provisioned-owner";
 
 const ready = Boolean(process.env.DATABASE_URL);
 
@@ -113,6 +115,7 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
             like(schema.organization.slug, "renew-tenant-%"),
             like(schema.organization.slug, "locked-renew-%"),
             like(schema.organization.slug, "unmanaged-%"),
+            like(schema.organization.slug, "offline-tenant-%"),
           ),
         );
       const tenantIds = tenants.map((tenant) => tenant.id);
@@ -147,7 +150,7 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       tenantName: "Первый завод",
       tenantSlug,
     };
-    const [first, concurrent] = await Promise.all([
+    const [firstResult, concurrent] = await Promise.all([
       provisionTenantOwner({
         db: connection.db,
         mail,
@@ -161,6 +164,7 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
         input,
       }),
     ]);
+    const first = requireOwner(firstResult);
     const repeated = await provisionTenantOwner({
       db: connection.db,
       mail,
@@ -380,10 +384,12 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       adminOrigin: "https://cabinet.example.test",
       input: { email, tenantName: "Renew tenant", tenantSlug },
     };
-    const first = await provisionTenantOwner({
-      ...base,
-      createToken: () => "old-activation-token",
-    });
+    const first = requireOwner(
+      await provisionTenantOwner({
+        ...base,
+        createToken: () => "old-activation-token",
+      }),
+    );
     await connection.db
       .update(schema.verification)
       .set({ expiresAt: new Date(Date.now() - 1_000) })
@@ -435,13 +441,15 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       tenantSlug: `locked-renew-${suffix}`,
     };
     const mail = new MailDeliveryService(new MailCryptoService(Buffer.alloc(32, 0x74)));
-    const first = await provisionTenantOwner({
-      db: connection.db,
-      mail,
-      adminOrigin: "https://cabinet.example.test",
-      input,
-      createToken: () => "locked-old-activation-token",
-    });
+    const first = requireOwner(
+      await provisionTenantOwner({
+        db: connection.db,
+        mail,
+        adminOrigin: "https://cabinet.example.test",
+        input,
+        createToken: () => "locked-old-activation-token",
+      }),
+    );
     const worker = await connection.pool.connect();
     await worker.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [first.deliveryId]);
     const renewal = provisionTenantOwner({
@@ -549,6 +557,184 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
     expect(renewed.deliveryId).not.toBe(unmanaged.deliveryId);
   });
 
+  it("creates a tenant without cabinet: no owner, mail, token or subscription, and needs no demo", async () => {
+    // An unusable default demo would fail a managed creation with
+    // default_demo_not_configured; a tenant without cabinet must not need it.
+    await useDemo(14, false);
+    const suffix = crypto.randomUUID();
+    const tenantSlug = `offline-tenant-${suffix}`;
+    const mail = new MailDeliveryService(new MailCryptoService(Buffer.alloc(32, 0x72)), () =>
+      crypto.randomUUID(),
+    );
+    const actorUserId = crypto.randomUUID();
+    await connection.db.insert(schema.platformUsers).values({
+      id: actorUserId,
+      email: `${actorUserId}@example.invalid`,
+      name: "Offline tenant provisioner",
+      role: "platform_admin",
+      status: "active",
+      twoFactorEnabled: true,
+    });
+    const actor = {
+      userId: actorUserId,
+      role: "platform_admin",
+      capabilities: platformCapabilitiesForRole("platform_admin"),
+      twoFactorReady: true,
+    } as const;
+    const input = { tenantName: "Офлайн завод", tenantSlug, cabinetAccess: "none" } as const;
+    const result = await provisionTenantOwner({
+      db: connection.db,
+      mail,
+      adminOrigin: "https://cabinet.example.test",
+      input,
+      actor,
+    });
+    expect(result).toEqual({
+      tenantId: expect.any(String),
+      userId: null,
+      memberId: null,
+      deliveryId: null,
+    });
+
+    const [org] = await connection.db
+      .select()
+      .from(schema.organization)
+      .where(eq(schema.organization.id, result.tenantId));
+    expect(org).toMatchObject({ slug: tenantSlug, cabinetAccess: "none" });
+    expect(
+      await connection.db
+        .select()
+        .from(schema.member)
+        .where(eq(schema.member.organizationId, result.tenantId)),
+    ).toEqual([]);
+    expect(
+      await connection.db
+        .select()
+        .from(schema.tenantSubscriptions)
+        .where(eq(schema.tenantSubscriptions.tenantId, result.tenantId)),
+    ).toEqual([]);
+    expect(
+      await connection.db
+        .select()
+        .from(schema.subscriptionEvents)
+        .where(eq(schema.subscriptionEvents.tenantId, result.tenantId)),
+    ).toEqual([]);
+    expect(
+      await connection.db
+        .select()
+        .from(schema.emailDeliveries)
+        .where(eq(schema.emailDeliveries.sourceId, `tenant-owner:${result.tenantId}`)),
+    ).toEqual([]);
+    expect(
+      await connection.db
+        .select()
+        .from(schema.verification)
+        .where(like(schema.verification.value, `%${result.tenantId}%`)),
+    ).toEqual([]);
+    // Stock rows are still seeded.
+    expect(
+      (
+        await connection.db
+          .select()
+          .from(schema.orgProfiles)
+          .where(eq(schema.orgProfiles.tenantId, result.tenantId))
+      ).length,
+    ).toBe(1);
+
+    const audit = await connection.db
+      .select({
+        actorPlatformUserId: schema.platformAuditEvents.actorPlatformUserId,
+        actorRole: schema.platformAuditEvents.actorRole,
+        action: schema.platformAuditEvents.action,
+        outcome: schema.platformAuditEvents.outcome,
+        tenantId: schema.platformAuditEvents.tenantId,
+        targetType: schema.platformAuditEvents.targetType,
+        targetId: schema.platformAuditEvents.targetId,
+        reason: schema.platformAuditEvents.reason,
+        before: schema.platformAuditEvents.before,
+        after: schema.platformAuditEvents.after,
+        requestId: schema.platformAuditEvents.requestId,
+      })
+      .from(schema.platformAuditEvents)
+      .where(eq(schema.platformAuditEvents.tenantId, result.tenantId));
+    // Called outside an HTTP request, so there is no request id to record.
+    expect(audit).toEqual([
+      {
+        actorPlatformUserId: actorUserId,
+        actorRole: "platform_admin",
+        action: "platform.tenant.created",
+        outcome: "success",
+        tenantId: result.tenantId,
+        targetType: "tenant",
+        targetId: result.tenantId,
+        reason: null,
+        before: null,
+        after: {
+          cabinetAccess: "none",
+          ownerUserId: null,
+          ownerMemberId: null,
+          subscriptionId: null,
+          subscriptionStatus: "none",
+          planVersionId: null,
+        },
+        requestId: null,
+      },
+    ]);
+    const tenantAudit = await connection.db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(eq(schema.tenantAuditEvents.organizationId, result.tenantId));
+    expect(tenantAudit).toEqual([]);
+
+    // Idempotent retry returns the same tenant.
+    await expect(
+      provisionTenantOwner({
+        db: connection.db,
+        mail,
+        adminOrigin: "https://cabinet.example.test",
+        input,
+      }),
+    ).resolves.toEqual(result);
+  });
+
+  it("refuses to reuse a slug with a different cabinet access", async () => {
+    const suffix = crypto.randomUUID();
+    const tenantSlug = `offline-tenant-${suffix}`;
+    const mail = new MailDeliveryService(new MailCryptoService(Buffer.alloc(32, 0x73)), () =>
+      crypto.randomUUID(),
+    );
+    const created = await provisionTenantOwner({
+      db: connection.db,
+      mail,
+      adminOrigin: "https://cabinet.example.test",
+      input: { tenantName: "Офлайн", tenantSlug, cabinetAccess: "none" },
+    });
+    await expect(
+      provisionTenantOwner({
+        db: connection.db,
+        mail,
+        adminOrigin: "https://cabinet.example.test",
+        input: {
+          tenantName: "Офлайн",
+          tenantSlug,
+          cabinetAccess: "enabled",
+          email: `mismatch-${suffix}@example.com`,
+        },
+      }),
+    ).rejects.toMatchObject({ response: { code: "tenant_cabinet_access_mismatch" } });
+    const [org] = await connection.db
+      .select({ cabinetAccess: schema.organization.cabinetAccess })
+      .from(schema.organization)
+      .where(eq(schema.organization.id, created.tenantId));
+    expect(org).toEqual({ cabinetAccess: "none" });
+    expect(
+      await connection.db
+        .select()
+        .from(schema.user)
+        .where(eq(schema.user.email, `mismatch-${suffix}@example.com`)),
+    ).toEqual([]);
+  });
+
   it("does not restore over a competing default-demo setting change", async () => {
     const earlierVersionId = await useDemo();
     const ownedVersionId = await useDemo();
@@ -615,7 +801,12 @@ describe("tenant owner provisioning CLI arguments", () => {
         "--tenant-slug",
         "zavod",
       ]),
-    ).toEqual({ email: "owner@example.com", tenantName: "Завод", tenantSlug: "zavod" });
+    ).toEqual({
+      email: "owner@example.com",
+      tenantName: "Завод",
+      tenantSlug: "zavod",
+      cabinetAccess: "enabled",
+    });
   });
 
   it("accepts the explicit activation-renewal switch without treating it as a value", () => {
@@ -629,7 +820,12 @@ describe("tenant owner provisioning CLI arguments", () => {
         "--tenant-slug",
         "zavod",
       ]),
-    ).toEqual({ email: "owner@example.com", tenantName: "Завод", tenantSlug: "zavod" });
+    ).toEqual({
+      email: "owner@example.com",
+      tenantName: "Завод",
+      tenantSlug: "zavod",
+      cabinetAccess: "enabled",
+    });
   });
 
   it("accepts only the exact valueless unmanaged migration switch", () => {
@@ -643,7 +839,12 @@ describe("tenant owner provisioning CLI arguments", () => {
         "--tenant-slug",
         "zavod",
       ]),
-    ).toEqual({ email: "owner@example.com", tenantName: "Завод", tenantSlug: "zavod" });
+    ).toEqual({
+      email: "owner@example.com",
+      tenantName: "Завод",
+      tenantSlug: "zavod",
+      cabinetAccess: "enabled",
+    });
     expect(() =>
       parseProvisionTenantOwnerArgs([
         "--allow-unmanaged-without-demo=true",
@@ -691,7 +892,12 @@ describe("tenant owner provisioning CLI arguments", () => {
         "--tenant-slug",
         "zavod",
       ]),
-    ).toEqual({ email: "owner@example.com", tenantName: "Завод", tenantSlug: "zavod" });
+    ).toEqual({
+      email: "owner@example.com",
+      tenantName: "Завод",
+      tenantSlug: "zavod",
+      cabinetAccess: "enabled",
+    });
   });
 
   it("keeps separated, equals, and positional secrets out of CLI output", async () => {

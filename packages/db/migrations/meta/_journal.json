@@ -1233,6 +1233,13 @@
       "when": 1790336144247,
       "tag": "0175_code_registry_shift_terminal_idx",
       "breakpoints": true
+    },
+    {
+      "idx": 176,
+      "version": "7",
+      "when": 1790686702864,
+      "tag": "0176_tenant_cabinet_access",
+      "breakpoints": true
     }
   ]
 }

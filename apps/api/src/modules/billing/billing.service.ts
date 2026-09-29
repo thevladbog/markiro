@@ -53,6 +53,7 @@ import {
   beginPlatformBillingMutation,
   commitPlatformBillingMutation,
 } from "../platform-billing-idempotency";
+import { assertKindAllowedForTenant } from "../../subscriptions/tenant-cabinet-access";
 import { storedPrintVariant } from "./print-document-layout";
 
 const cents = (value: string): bigint => {
@@ -159,6 +160,10 @@ export class BillingService {
       const invoiceLines = sourceLines
         ? sourceOfferInvoiceLines(sourceLines, normalizedInput.lines)
         : normalizedInput.lines;
+      for (const line of invoiceLines) {
+        if (line.kind !== "custom")
+          await assertKindAllowedForTenant(tx, normalizedInput.tenantId, line.kind);
+      }
       assertCommercialPlanSequence(invoiceLines);
       // sourceOfferInvoiceLines validates an exact copy of immutable sold terms.
       // A source request alone still uses caller-selected lines and must be checked.
