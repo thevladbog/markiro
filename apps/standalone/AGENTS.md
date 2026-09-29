@@ -140,14 +140,22 @@ to `src-tauri/tests/fixtures/local-sql.json`.
 `_sqlx_migrations`, in one writer transaction with foreign keys checked at
 the commit. The tables come from `pragma_table_list` (`type IN ('table',
 'virtual')`), so one a later migration adds is covered, PIN and badge hashes
-included. Every table here is treated as a disposable copy of the host's
-data: the first plan that adds data this device owns instead of copies —
-the scan journal, boxes, the outbox (the design's §6.2, "Логическая модель")
-— must exclude those tables from `clear_copies` and block or confirm a forget while unsynced
-records exist, not extend this list silently. If clearing fails, the
-command fails with `storage` and the pairing stays for another try; without
-a local database (it did not open) there is nothing this app can clear, and
-forgetting goes on; plan 1d4 revisits this before PIN and badge hashes land.
+included (`ref_operators`, `ref_operator_badges`). The writer runs with
+`secure_delete`, so a deleted row is zeroed where it stood, and the clear
+ends with `wal_checkpoint(TRUNCATE)`, which moves those pages into the file
+and empties the WAL that still held the frames written before the delete:
+no hash of the old pairing stays in either file (`VACUUM` would only shrink
+the file). A reader holding an older snapshot keeps the checkpoint from
+finishing, and the clear then fails as a whole. A local database that did
+not open is removed instead, with its `-wal`, `-shm` and `-journal` files
+(`LocalDbState::remove_unopened`), since it may still hold hashes. Every
+table here is treated as a disposable copy of the host's data: the first
+plan that adds data this device owns instead of copies — the scan journal,
+boxes, the outbox (the design's §6.2, "Логическая модель") — must exclude
+those tables from `clear_copies`, keep `remove_unopened` from deleting
+them, and block or confirm a forget while unsynced records exist, not
+extend this list silently. If clearing or removing fails, the command fails
+with `storage` and the pairing stays for another try.
 
 ## Writes
 

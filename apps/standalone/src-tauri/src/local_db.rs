@@ -10,7 +10,7 @@
 //! A large reference page goes in as one JSON parameter per entity
 //! (`json_each`), so the limits bound SQL, not rows.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use serde::Deserialize;
@@ -24,6 +24,9 @@ use sqlx::sqlite::{
 use sqlx::{Column, Row, Sqlite, TypeInfo, ValueRef};
 
 pub const FILE_NAME: &str = "standalone-station.db";
+/// The files SQLite keeps beside [`FILE_NAME`]: the database itself, its WAL,
+/// the WAL's shared-memory index and a rollback journal.
+const FILE_SUFFIXES: [&str; 4] = ["", "-wal", "-shm", "-journal"];
 /// `MAX_STATEMENTS`, `MAX_SQL_BYTES` and `MAX_VALUES` here, and
 /// `FORBIDDEN_WORDS` below, are mirrored for tests in
 /// `apps/standalone/test/support/local-db.ts`. A rule change here updates
@@ -136,7 +139,10 @@ impl LocalDb {
                     .journal_mode(SqliteJournalMode::Wal)
                     .synchronous(SqliteSynchronous::Full)
                     .foreign_keys(true)
-                    .busy_timeout(BUSY_TIMEOUT),
+                    .busy_timeout(BUSY_TIMEOUT)
+                    // A deleted row is zeroed where it stood, not merely
+                    // unlinked: the copies hold PIN and badge hashes.
+                    .pragma("secure_delete", "ON"),
             )
             .await?;
         MIGRATOR.run(&writer).await?;
@@ -217,7 +223,13 @@ impl LocalDb {
 
     /// Delete every row of every table but sqlx's migration journal, in one
     /// writer transaction: forgetting the device must not leave another
-    /// pairing's copies behind (from plan 1d4 on, PIN and badge hashes).
+    /// pairing's copies behind, PIN and badge hashes included. The writer
+    /// zeroes deleted rows (`secure_delete`), and a checkpoint that truncates
+    /// the WAL follows the commit: it moves the zeroed pages into the file
+    /// and empties the WAL, which still held the frames written before the
+    /// delete. A reader holding an older snapshot keeps it from finishing
+    /// within the busy timeout, and then this fails as a whole. `VACUUM` is
+    /// not needed: it would only shrink the file.
     /// Every table here is treated as a disposable copy of the host's data;
     /// the first plan that adds data this device owns instead of a copy —
     /// the scan journal, boxes, the outbox (the station design's §6.2,
@@ -256,26 +268,77 @@ impl LocalDb {
                 .await
                 .map_err(|_| LocalDbError::StatementFailed)?;
         }
-        tx.commit().await.map_err(|_| LocalDbError::StatementFailed)
+        tx.commit()
+            .await
+            .map_err(|_| LocalDbError::StatementFailed)?;
+        let (busy, _, _): (i64, i64, i64) = sqlx::query_as("PRAGMA wal_checkpoint(TRUNCATE)")
+            .fetch_one(&self.writer)
+            .await
+            .map_err(|_| LocalDbError::StatementFailed)?;
+        if busy == 0 {
+            Ok(())
+        } else {
+            Err(LocalDbError::StatementFailed)
+        }
     }
 }
 
-/// Tauri state: the local database, or `None` when it could not be opened.
+/// Tauri state: the local database, or none when it could not be opened.
 /// The app still starts — the office works without it — and the local
 /// commands answer `local_db_unavailable`.
-pub struct LocalDbState(Option<LocalDb>);
+pub struct LocalDbState {
+    db: Option<LocalDb>,
+    /// Where `open` looked for the database; `None` for a shell with no
+    /// local database at all (`unavailable`).
+    dir: Option<PathBuf>,
+}
 
 impl LocalDbState {
     pub async fn open(dir: &Path) -> Self {
-        Self(LocalDb::open(dir).await.ok())
+        Self {
+            db: LocalDb::open(dir).await.ok(),
+            dir: Some(dir.to_path_buf()),
+        }
     }
 
+    /// A shell with no local database and no directory for one, as the IPC
+    /// tests that need neither use.
     pub fn unavailable() -> Self {
-        Self(None)
+        Self {
+            db: None,
+            dir: None,
+        }
     }
 
     pub fn get(&self) -> Result<&LocalDb, LocalDbError> {
-        self.0.as_ref().ok_or(LocalDbError::Unavailable)
+        self.db.as_ref().ok_or(LocalDbError::Unavailable)
+    }
+
+    /// Remove the database `open` could not open, with its `-wal`, `-shm`
+    /// and `-journal` files: it may still hold PIN and badge hashes, and
+    /// forgetting the device must not leave them behind. Each file goes on a
+    /// best-effort basis, then all four are checked again, and one still
+    /// there fails the call. Does nothing for an open database, which
+    /// [`LocalDb::clear_copies`] empties instead, or without a directory.
+    pub fn remove_unopened(&self) -> std::io::Result<()> {
+        let (None, Some(dir)) = (&self.db, &self.dir) else {
+            return Ok(());
+        };
+        let files: Vec<PathBuf> = FILE_SUFFIXES
+            .iter()
+            .map(|suffix| dir.join(format!("{FILE_NAME}{suffix}")))
+            .collect();
+        for file in &files {
+            // Best effort: a file that stays is found just below.
+            let _ = std::fs::remove_file(file);
+        }
+        match files.iter().find(|file| file.symlink_metadata().is_ok()) {
+            Some(file) => Err(std::io::Error::other(format!(
+                "{} is still there",
+                file.display()
+            ))),
+            None => Ok(()),
+        }
     }
 }
 

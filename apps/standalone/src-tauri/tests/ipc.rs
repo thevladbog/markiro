@@ -405,25 +405,20 @@ fn forgetting_the_device_clears_the_local_copies_first() {
     );
     assert!(!config.exists());
     assert_eq!(copies(), json!([{ "n": 0 }]));
+    assert!(
+        app_dir.path().join(FILE_NAME).exists(),
+        "an open database is cleared, not removed"
+    );
     assert_eq!(
         invoke(&webview, "device_status", json!({})),
         Ok(Value::Null)
     );
 }
 
-/// Without a local database (it never opened) there is nothing this app can
-/// clear: `device_forget` still removes `device.json` on its own. This test
-/// needs no host, so it runs in the sandbox — so does the test above, which
-/// also uses an unreadable config and no host, but opens a working local
-/// database with copies to clear instead of leaving it unopened. Plan 1d4
-/// revisits this decision before PIN and badge hashes live in the local
-/// database.
-#[test]
-fn forgetting_the_device_without_a_local_database_still_forgets() {
-    let app_dir = tempfile::tempdir().unwrap();
-    let config = app_dir.path().join("device.json");
+/// A pairing on disk that the app can read, for tests that need no host.
+fn save_pairing(dir: &std::path::Path) {
     device_config::save(
-        app_dir.path(),
+        dir,
         &DeviceConfig {
             host_address: "https://127.0.0.1:45710".into(),
             fingerprint: "ab".repeat(32),
@@ -438,8 +433,75 @@ fn forgetting_the_device_without_a_local_database_still_forgets() {
         },
     )
     .unwrap();
-    let (_app, webview) = mock_app(DeviceState::load(app_dir.path().to_path_buf()));
+}
 
+/// The database file and the files SQLite keeps beside it.
+fn database_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+    ["", "-wal", "-shm", "-journal"]
+        .iter()
+        .map(|suffix| dir.join(format!("{FILE_NAME}{suffix}")))
+        .collect()
+}
+
+/// A local database that did not open (here, files of garbage) may still
+/// hold PIN and badge hashes: `device_forget` removes it with its `-wal`,
+/// `-shm` and `-journal` files before it removes `device.json`. Like the
+/// test above, this one needs no host and runs in the sandbox.
+#[test]
+fn forgetting_the_device_removes_a_local_database_that_did_not_open() {
+    let app_dir = tempfile::tempdir().unwrap();
+    let config = app_dir.path().join("device.json");
+    save_pairing(app_dir.path());
+    let files = database_files(app_dir.path());
+    for file in &files {
+        std::fs::write(file, "not a database").unwrap();
+    }
+    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    assert!(local.get().is_err(), "a file of garbage does not open");
+    // SQLite deletes a stray `-shm` and `-journal` while it fails to open the
+    // file; they come back here as files a crash could leave, so the forget
+    // has all four to remove.
+    for file in &files {
+        std::fs::write(file, "not a database").unwrap();
+    }
+    let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({})),
+        Ok(Value::Null)
+    );
+    assert!(!config.exists());
+    for file in &files {
+        assert!(!file.exists(), "{} is still there", file.display());
+    }
+}
+
+/// A database file that cannot be removed fails the forget with `storage`,
+/// and `device.json` stays for another try, as when clearing an open
+/// database fails. A directory in place of the WAL stands for a file that is
+/// locked or not the app's to remove.
+#[test]
+fn forgetting_the_device_keeps_the_pairing_while_an_unopened_database_stays() {
+    let app_dir = tempfile::tempdir().unwrap();
+    let config = app_dir.path().join("device.json");
+    save_pairing(app_dir.path());
+    let file = app_dir.path().join(FILE_NAME);
+    std::fs::write(&file, "not a database").unwrap();
+    let stuck = app_dir.path().join(format!("{FILE_NAME}-wal"));
+    std::fs::create_dir(&stuck).unwrap();
+    std::fs::write(stuck.join("kept"), "kept").unwrap();
+    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    assert!(local.get().is_err(), "a file of garbage does not open");
+    let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({})),
+        Err(json!("storage"))
+    );
+    assert!(config.exists(), "the pairing stays for another try");
+    assert!(!file.exists(), "what could go is gone");
+
+    std::fs::remove_dir_all(&stuck).unwrap();
     assert_eq!(
         invoke(&webview, "device_forget", json!({})),
         Ok(Value::Null)

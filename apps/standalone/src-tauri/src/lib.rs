@@ -120,19 +120,22 @@ async fn device_refresh(state: tauri::State<'_, DeviceState>) -> Result<DeviceSt
         .map_err(|error| error.code().to_owned())
 }
 
-/// Forget the pairing: the local copies go first, so when clearing them
-/// fails the command answers `storage` and `device.json` stays for another
-/// try. Without a local database (it did not open) there is nothing this
-/// app can clear, and forgetting goes on: the reset must stay possible.
+/// Forget the pairing: the local copies go first. An open local database is
+/// cleared (`LocalDb::clear_copies`); one that did not open is removed with
+/// its `-wal`, `-shm` and `-journal` files (`LocalDbState::remove_unopened`),
+/// since it may still hold PIN and badge hashes. When either fails, the
+/// command answers `storage` and `device.json` stays for another try.
 #[tauri::command]
 async fn device_forget(
     state: tauri::State<'_, DeviceState>,
     local: tauri::State<'_, LocalDbState>,
 ) -> Result<(), String> {
-    if let Ok(db) = local.get() {
-        db.clear_copies()
-            .await
-            .map_err(|_| DeviceError::Storage.code().to_owned())?;
+    let cleared = match local.get() {
+        Ok(db) => db.clear_copies().await.is_ok(),
+        Err(_) => local.remove_unopened().is_ok(),
+    };
+    if !cleared {
+        return Err(DeviceError::Storage.code().to_owned());
     }
     state
         .forget()

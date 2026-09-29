@@ -404,6 +404,59 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
     );
 }
 
+/// Whether the file at `path` holds `marker` anywhere; a missing file holds nothing.
+fn file_holds(path: &std::path::Path, marker: &str) -> bool {
+    std::fs::read(path).is_ok_and(|bytes| {
+        bytes
+            .windows(marker.len())
+            .any(|window| window == marker.as_bytes())
+    })
+}
+
+/// Forgetting a device leaves none of its PIN and badge hashes on disk:
+/// `secure_delete` zeroes a deleted row where it stood, and the checkpoint
+/// after `clear_copies` moves those pages into the file and empties the WAL,
+/// which still held the frames written before the delete. One marker is
+/// checkpointed into the file before the clear, the other is only in the WAL.
+#[tokio::test]
+async fn clearing_the_copies_leaves_no_deleted_hash_in_the_file_or_its_wal() {
+    const IN_FILE: &str = "pbkdf2$sha256$100000$marker-in-the-database-file";
+    const IN_WAL: &str = "pbkdf2$sha256$100000$marker-only-in-the-wal";
+    const BADGE: &str = "INSERT INTO ref_operator_badges (id, operator_id, badge_phc, label, rev) \
+        VALUES (?, 'operator-1', ?, NULL, 1)";
+    let (dir, db) = open().await;
+    let file = dir.path().join(FILE_NAME);
+    let wal = dir.path().join(format!("{FILE_NAME}-wal"));
+    db.transaction(vec![statement(BADGE, json!(["badge-1", IN_FILE]))])
+        .await
+        .unwrap();
+    let mut raw = SqliteConnectOptions::new()
+        .filename(&file)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+    db.transaction(vec![statement(BADGE, json!(["badge-2", IN_WAL]))])
+        .await
+        .unwrap();
+    assert!(
+        file_holds(&file, IN_FILE),
+        "the first marker is in the file"
+    );
+    assert!(file_holds(&wal, IN_WAL), "the second marker is in the WAL");
+
+    assert_eq!(db.clear_copies().await, Ok(()));
+
+    for marker in [IN_FILE, IN_WAL] {
+        assert!(!file_holds(&file, marker), "{marker} stayed in the file");
+        assert!(!file_holds(&wal, marker), "{marker} stayed in the WAL");
+    }
+}
+
 /// An FTS5 virtual table's shadow tables (`search_data`, `search_idx`, …)
 /// hold its index; `sqlite_master` lists them as ordinary tables, but
 /// deleting their rows directly — instead of through the virtual table —
