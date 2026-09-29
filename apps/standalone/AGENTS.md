@@ -271,7 +271,9 @@ domain's 100 000 iterations and the site's badge salt
 one string — `parse_phc` refuses a leading zero in the count, so `0100000`
 is not a second spelling of `100000` — and the partial unique index
 `operator_badges_active_phc` keeps it on one operator (`conflict` with
-`constraint: badge`). The office never gets a hash back: operator reads carry
+`constraint: badge` and `operatorId`, the operator who holds it, read in the
+same transaction; only administrators reach the route, and they see every
+operator anyway). The office never gets a hash back: operator reads carry
 `hasPin` and each badge's `id`, `label`, `createdAt` and `revokedAt`.
 Revoking a badge is `DELETE …/badges/{badgeId}`, and revoking it again
 changes nothing. Operators, badges and the salt are for administrators only,

@@ -171,6 +171,8 @@ async fn a_badge_hash_must_carry_the_site_salt_and_the_domain_iterations() {
     );
 }
 
+/// A badge code belongs to one operator at a time; the conflict names that
+/// operator (`details.operatorId`), whoever asks for the same code again.
 #[tokio::test]
 async fn one_badge_code_belongs_to_one_operator_at_a_time() {
     let admin = admin().await;
@@ -195,8 +197,11 @@ async fn one_badge_code_belongs_to_one_operator_at_a_time() {
             )
             .await;
         assert_eq!(
-            (status, body["error"]["details"]["constraint"].clone()),
-            (StatusCode::CONFLICT, json!("badge"))
+            (status, body["error"]["details"].clone()),
+            (
+                StatusCode::CONFLICT,
+                json!({ "constraint": "badge", "operatorId": first })
+            )
         );
     }
     // A revoked badge frees its code; the new badge gets a new id.

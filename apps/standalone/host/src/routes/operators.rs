@@ -15,8 +15,8 @@ use axum::Json;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use markiro_proto::{
-    entities, BadgeCreate, BadgeInfo, BadgeSalt, OfficeOperator, OperatorCreate, OperatorUpdate,
-    Secret,
+    codes, entities, BadgeCreate, BadgeInfo, BadgeSalt, OfficeOperator, OperatorCreate,
+    OperatorUpdate, Secret,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -296,13 +296,31 @@ async fn site_salt(conn: &mut SqliteConnection) -> Result<Vec<u8>, ApiError> {
 }
 
 /// A write that hit `operator_badges_active_phc`: the badge is already an
-/// active badge of some operator.
-fn badge_taken(error: sqlx::Error) -> ApiError {
-    ApiError::conflict_on_unique_violation(
+/// active badge of some operator, whom `details.operatorId` names, read in
+/// the same transaction. Only administrators reach this route, and they see
+/// every operator anyway. Any other failure is `internal`.
+async fn badge_taken(conn: &mut SqliteConnection, error: sqlx::Error, badge_phc: &str) -> ApiError {
+    let conflict = ApiError::conflict_on_unique_violation(
         error,
         "badge",
         "this badge already belongs to an operator",
+    );
+    if conflict.code() != codes::CONFLICT {
+        return conflict;
+    }
+    let owner: Result<Option<String>, sqlx::Error> = sqlx::query_scalar(
+        "SELECT operator_id FROM operator_badges WHERE badge_phc = ? AND revoked_at IS NULL",
     )
+    .bind(badge_phc)
+    .fetch_optional(&mut *conn)
+    .await;
+    match owner {
+        Ok(Some(operator_id)) => {
+            conflict.with_details(json!({ "constraint": "badge", "operatorId": operator_id }))
+        }
+        Ok(None) => conflict,
+        Err(error) => ApiError::internal(error),
+    }
 }
 
 /// `GET /v1/office/badge-salt` (administrators): the salt the office hashes
@@ -344,7 +362,7 @@ pub async fn create_badge(
         return Err(ApiError::not_found("no such operator"));
     }
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
-    sqlx::query(
+    let inserted = sqlx::query(
         "INSERT INTO operator_badges (id, operator_id, badge_phc, label, created_at, rev) \
          VALUES (?, ?, ?, ?, ?, ?)",
     )
@@ -355,8 +373,10 @@ pub async fn create_badge(
     .bind(&at)
     .bind(rev)
     .execute(&mut *tx)
-    .await
-    .map_err(badge_taken)?;
+    .await;
+    if let Err(error) = inserted {
+        return Err(badge_taken(&mut tx, error, create.badge_phc.expose()).await);
+    }
     audit::record(
         &mut tx,
         &at,

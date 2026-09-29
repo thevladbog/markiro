@@ -296,7 +296,9 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
 `session` — войти в офис заново, `password` — показывает текст под неверный
 логин или пароль), `forbidden`, `not_found`, `method_not_allowed`, `validation_failed` (с полями
 в `details`), `stale_revision`, `conflict` (с `details.constraint`: `gtin`, `login`,
-`badge`, `line_name`), `template_is_default`, `last_admin`, `sscc_below_floor`,
+`badge`, `line_name`; у `badge` ещё `details.operatorId` — оператор, у которого этот
+бейдж уже есть: маршрут только для администраторов, а они видят всех операторов),
+`template_is_default`, `last_admin`, `sscc_below_floor`,
 `pairing_code_invalid`, `pairing_code_expired`, `already_initialized`,
 `loopback_only`, `protocol_unsupported`, `rate_limited`, `internal`.
 
