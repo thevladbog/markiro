@@ -208,7 +208,7 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
                 .await
                 .map_err(ApiError::internal)?;
             serde_json::to_value(SiteRecord {
-                badge_salt: STANDARD.encode(badge_salt),
+                badge_salt: Secret::new(STANDARD.encode(badge_salt)),
                 box_block_size: u32::try_from(box_block_size).map_err(ApiError::internal)?,
                 pallet_block_size: u32::try_from(pallet_block_size).map_err(ApiError::internal)?,
             })
@@ -326,13 +326,18 @@ pub async fn stream(
             match wake {
                 Wake::Stop => return None,
                 // Some device was revoked: end this stream if it was this
-                // one. A failed check ends it too; the device reconnects, and
-                // `AuthDevice` checks its key again.
+                // one. A failed check ends it too (fail closed); the device
+                // reconnects, and `AuthDevice` checks its key again. The
+                // failure is logged: the cause would otherwise be lost, and
+                // it is a database error, which names no key or id.
                 Wake::Revocation => {
-                    if !device_active(&follow.pool, &follow.device_id)
+                    let active = device_active(&follow.pool, &follow.device_id)
                         .await
-                        .unwrap_or(false)
-                    {
+                        .inspect_err(
+                            |error| tracing::warn!(%error, "change stream: device check failed"),
+                        )
+                        .unwrap_or(false);
+                    if !active {
                         return None;
                     }
                 }

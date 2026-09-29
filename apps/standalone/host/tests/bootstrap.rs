@@ -233,6 +233,42 @@ async fn invalid_wizard_input_names_the_field() {
     assert_eq!(hello["initialized"], false);
 }
 
+/// A NUL first passes `trim` but fails the tables' CHECKs (SQLite's `length()`
+/// stops at it), which used to answer 500 from inside the wizard's
+/// transaction; every wizard text obeys the one control-character rule.
+#[tokio::test]
+async fn wizard_text_with_a_control_character_names_the_field_instead_of_failing() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let cases: [(&str, &str, &str); 5] = [
+        ("/org/name", "\u{0}ООО «Атолл»", "org.name"),
+        ("/org/name", "ООО\t«Атолл»", "org.name"),
+        ("/admin/name", "\u{0}Ирина Смирнова", "admin.name"),
+        ("/lines/0", "\u{0}Линия 1", "lines.0"),
+        ("/lines/1", "Линия\u{0}2", "lines.1"),
+    ];
+    for (pointer, text, field) in cases {
+        let mut body = bootstrap_body();
+        *body.pointer_mut(pointer).unwrap() = json!(text);
+        let (status, response) = app
+            .send(json_request(
+                with_device(request("POST", "/v1/bootstrap"), &key),
+                body,
+            ))
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{field} {text:?}");
+        assert_eq!(response["error"]["code"], "validation_failed", "{field}");
+        assert_eq!(response["error"]["details"]["field"], field, "{field}");
+    }
+    let (_, hello) = app.send(empty(request("GET", "/v1/hello"))).await;
+    assert_eq!(hello["initialized"], false);
+    let users: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM office_users")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(users, 0);
+}
+
 #[tokio::test]
 async fn the_org_profile_is_read_by_all_and_changed_by_admins_with_revisions() {
     let app = TestApp::new().await;

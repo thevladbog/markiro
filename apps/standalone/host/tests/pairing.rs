@@ -156,6 +156,49 @@ async fn invalid_local_pair_requests_are_validation_errors() {
     }
 }
 
+/// A device's own text (name, version, capabilities) obeys the one
+/// control-character rule: a NUL first used to fail the table's CHECK as a
+/// 500, and a control character elsewhere was stored as sent.
+#[tokio::test]
+async fn device_text_with_a_control_character_is_refused_on_local_pair() {
+    let app = TestApp::new().await;
+    let cases = [
+        (
+            json!({ "kind": "station", "name": "\u{0}Станция", "appVersion": "0.1.0" }),
+            "name",
+        ),
+        (
+            json!({ "kind": "station", "name": "Стан\tция", "appVersion": "0.1.0" }),
+            "name",
+        ),
+        (
+            json!({ "kind": "station", "name": "Станция", "appVersion": "0.1\u{0}.0" }),
+            "appVersion",
+        ),
+        (
+            json!({ "kind": "station", "name": "Станция", "appVersion": "0.1.0", "capabilities": ["scanner", "\u{0}printer"] }),
+            "capabilities",
+        ),
+    ];
+    for (body, field) in cases {
+        let (status, response) = app
+            .send(json_request(
+                request("POST", "/v1/local-pair"),
+                body.clone(),
+            ))
+            .await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+        assert_eq!(response["error"]["code"], "validation_failed", "{body}");
+        assert_eq!(response["error"]["details"]["field"], field, "{body}");
+    }
+    let devices: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM devices")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(devices, 0, "no device was created");
+    assert!(audit_rows(&app).await.is_empty());
+}
+
 #[tokio::test]
 async fn protected_routes_require_the_protocol_header() {
     let app = TestApp::new().await;

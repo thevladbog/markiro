@@ -100,12 +100,7 @@ async fn read_operator(
 
 /// A write that hit `operators.login UNIQUE`.
 fn login_taken(error: sqlx::Error) -> ApiError {
-    match error.as_database_error() {
-        Some(database) if database.is_unique_violation() => {
-            ApiError::conflict("login", "this personnel number is already taken")
-        }
-        _ => ApiError::internal(error),
-    }
+    ApiError::conflict_on_unique_violation(error, "login", "this personnel number is already taken")
 }
 
 pub async fn list_operators(
@@ -303,12 +298,11 @@ async fn site_salt(conn: &mut SqliteConnection) -> Result<Vec<u8>, ApiError> {
 /// A write that hit `operator_badges_active_phc`: the badge is already an
 /// active badge of some operator.
 fn badge_taken(error: sqlx::Error) -> ApiError {
-    match error.as_database_error() {
-        Some(database) if database.is_unique_violation() => {
-            ApiError::conflict("badge", "this badge already belongs to an operator")
-        }
-        _ => ApiError::internal(error),
-    }
+    ApiError::conflict_on_unique_violation(
+        error,
+        "badge",
+        "this badge already belongs to an operator",
+    )
 }
 
 /// `GET /v1/office/badge-salt` (administrators): the salt the office hashes

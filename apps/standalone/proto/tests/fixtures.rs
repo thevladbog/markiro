@@ -239,7 +239,7 @@ fn the_change_feed_fixture_round_trips_with_typed_records() {
     let org: OrgRecord = serde_json::from_value(changes.items[1].data.clone().unwrap()).unwrap();
     assert_eq!(org.inn, None);
     let site: SiteRecord = serde_json::from_value(changes.items[2].data.clone().unwrap()).unwrap();
-    assert_eq!(site.badge_salt.len(), 24);
+    assert_eq!(site.badge_salt.expose().len(), 24);
     assert!(changes.items[3].deleted && changes.items[3].data.is_none());
 }
 
@@ -266,6 +266,40 @@ fn the_people_feed_fixture_round_trips_without_leaking_hashes() {
         .all(|item| item.deleted && item.data.is_none()));
     let debug = format!("{operator:?} {badge:?}");
     assert!(!debug.contains("pbkdf2"), "{debug}");
+}
+
+/// The feed's envelope prints its entity, id and revision but never the
+/// record: `data` carries `pinPhc` and `badgePhc` on the wire, and the site
+/// record carries the badge salt, so a stray `{:?}` or a `tracing` field must
+/// not leak them.
+#[test]
+fn the_feed_envelope_and_the_site_record_print_without_hashes_or_the_salt() {
+    let people = fixture("changes-people.json");
+    let feed = fixture("changes-response.json");
+    let text = |value: &Value| value.as_str().expect("a string").to_owned();
+    let pin = text(&people["items"][0]["data"]["pinPhc"]);
+    let badge = text(&people["items"][1]["data"]["badgePhc"]);
+    let salt = text(&feed["items"][2]["data"]["badgeSalt"]);
+
+    let people: ChangesResponse = serde_json::from_value(people).unwrap();
+    let feed: ChangesResponse = serde_json::from_value(feed).unwrap();
+    let site: SiteRecord = serde_json::from_value(feed.items[2].data.clone().unwrap()).unwrap();
+    let debug = format!("{people:?}\n{feed:?}\n{site:?}");
+    for (name, secret) in [
+        ("PIN hash", &pin),
+        ("badge hash", &badge),
+        ("badge salt", &salt),
+    ] {
+        assert!(!debug.contains(secret.as_str()), "the {name} is printed");
+    }
+    assert!(!debug.contains("pbkdf2"), "a PHC string is printed");
+
+    // What is printed still tells the items apart.
+    for item in people.items.iter().chain(&feed.items) {
+        for shown in [&item.entity, &item.id, &item.rev.to_string()] {
+            assert!(debug.contains(shown.as_str()), "{shown} is not printed");
+        }
+    }
 }
 
 #[test]

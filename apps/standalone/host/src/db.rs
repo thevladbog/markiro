@@ -64,22 +64,60 @@ pub async fn current_revision(conn: &mut SqliteConnection) -> Result<i64, sqlx::
         .await
 }
 
+/// Commit a write transaction and, only if the commit succeeded, run
+/// `notify`, as ONE task that the caller's cancellation cannot split.
+///
+/// hyper drops a handler's future when the client hangs up (the shell's
+/// client gives up after 10 s, most likely when a commit is slow). With
+/// `commit().await` and the notification in the handler's own future, a drop
+/// can land between them: SQLite has the COMMIT, so the write is there, but
+/// nobody is woken. A station then keeps a deactivated operator or a revoked
+/// badge until some later commit, and a revoked device's stream stays open.
+/// Here both run in a spawned task that finishes whatever the caller does;
+/// the caller only waits for the outcome. A task that panicked or was
+/// cancelled with the runtime is reported as `WorkerCrashed`, whose message
+/// holds nothing of the panic.
+///
+/// A writer awaits nothing between its commit and its notification, and adds
+/// no drop guard that announces on the way out: a guard could announce a
+/// revision that was rolled back, and `rev > latest` would then suppress the
+/// real commit that reuses that number.
+pub async fn commit_and_notify(
+    tx: Transaction<'static, Sqlite>,
+    notify: impl FnOnce() + Send + 'static,
+) -> Result<(), sqlx::Error> {
+    tokio::spawn(async move {
+        tx.commit().await?;
+        notify();
+        Ok(())
+    })
+    .await
+    .map_err(|error| {
+        // Only whether it panicked: the payload could hold anything.
+        tracing::error!(panicked = error.is_panic(), "commit task did not finish");
+        sqlx::Error::WorkerCrashed
+    })?
+}
+
 /// Commit a write transaction that moved the global revision to `rev`, then
-/// wake change-stream subscribers. Notifying only after the commit means a
-/// device that reacts at once already reads the new rows.
+/// wake change-stream subscribers ([`commit_and_notify`]: the two cannot be
+/// separated by the caller going away). Notifying only after the commit means
+/// a device that reacts at once already reads the new rows.
 pub async fn commit_with_revision(
-    tx: Transaction<'_, Sqlite>,
+    tx: Transaction<'static, Sqlite>,
     revisions: &watch::Sender<i64>,
     rev: i64,
 ) -> Result<(), sqlx::Error> {
-    tx.commit().await?;
-    revisions.send_if_modified(|latest| {
-        if rev > *latest {
-            *latest = rev;
-            true
-        } else {
-            false
-        }
-    });
-    Ok(())
+    let revisions = revisions.clone();
+    commit_and_notify(tx, move || {
+        revisions.send_if_modified(|latest| {
+            if rev > *latest {
+                *latest = rev;
+                true
+            } else {
+                false
+            }
+        });
+    })
+    .await
 }

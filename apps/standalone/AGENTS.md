@@ -158,6 +158,18 @@ forgetting goes on; plan 1d3 revisits this before PIN and badge hashes land.
 - A transaction that called `next_revision` commits through
   `db::commit_with_revision`, which wakes change-stream subscribers only
   after the commit: a device that reacts at once already reads the new rows.
+  The commit and the notification are one uncancellable unit: both run in one
+  spawned task (`db::commit_and_notify`, which `commit_with_revision` wraps),
+  because hyper drops a handler's future when the client hangs up, and a drop
+  between COMMIT and the notification would land the write without its
+  wake-up, leaving a station on a deactivated operator or a revoked badge
+  until some later commit. A writer never `.await`s between the commit and
+  the notification, and never announces a revision from a drop guard: a guard
+  could announce a rolled-back revision, and `rev > latest` would then
+  suppress the real commit that reuses that number. A device revocation
+  commits through `commit_and_notify` too (its wake-up is
+  `AppState::revocations`), and revoking an already revoked device wakes the
+  streams once more, which recovers a wake-up an earlier attempt lost.
 - Never touch `state.pool` while a write transaction is open. Read through
   the transaction (`&mut *tx`) instead of acquiring a second pooled
   connection: the pool has only 4 connections, and a second acquire can wait
@@ -183,7 +195,8 @@ station-visible reference records changed after a device's revision:
 `operator_badges`, plus deletions from `tombstones`. Pages are ordered by
 `(rev, entity, id)` and never split a revision; with `hasMore = false`,
 `rev` is the host's current revision, so revisions that changed only office
-data still move a device forward.
+data still move a device forward; an office line assignment for a device is
+one of those (see «Device key and office session»).
 `GET /v1/changes/stream` sends the current revision as its first event, then
 an event whenever the revision grew: events are strictly increasing, so a
 burst of commits collapses into one, and an event means "fetch since your
@@ -400,8 +413,14 @@ each revision and never opens the stream itself.
   streams end. It stays in `GET /v1/office/devices` with `revokedAt`, and
   revoking it again changes nothing. `PUT /v1/office/devices/{id}` renames a
   device or sets its line (`lineId: null` clears it; only a station's, only
-  an active line). Devices have no `rev` and are not in the feed, so the last
-  office write wins and the host revision stays.
+  an active line; re-sending the line the station is already on keeps it,
+  even if that line has been archived since, so a full-form save can still
+  rename the station). Devices have no `rev` and are not in the feed, so the
+  last office write wins. A change of a device's line takes one host
+  revision without a feed item, so open streams wake and the station can read
+  `GET /v1/device` again; a rename, a repeat of the same line and a
+  revocation take none. The station's adoption of an office-assigned line is
+  plan 1d3, and how that meets a running shift is plan 2a.
 - The office session token lives only in webview memory. «Выйти в цех» ends
   the session at once: the app returns to the floor, drops the token and
   tells the host in the background. There is no hidden session (owner

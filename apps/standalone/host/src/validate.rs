@@ -21,17 +21,40 @@ pub fn office_login(field: &str, login: &str) -> Result<(), ApiError> {
     }
 }
 
-/// A person's display name: trimmed, 1-100 characters.
-pub fn person_name(field: &str, name: &str) -> Result<String, ApiError> {
-    let trimmed = name.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > 100 {
+/// Whether `text` is 1 to `max` characters (counted as `char`s, never bytes,
+/// so a Cyrillic name counts as its letters) with no control character
+/// (`char::is_control`: NUL, tab, line breaks, DEL and the C1 range).
+///
+/// The NUL is why controls are refused: it is not whitespace, so `str::trim`
+/// keeps it, but SQLite's `length()` stops at the first one. A name that
+/// starts with it fails the tables' `CHECK (length(trim(name)) BETWEEN …)` as
+/// a 500 instead of a validation error, and one with a NUL inside passes
+/// them, so two names that look the same could both be active. The count
+/// looks at `max + 1` characters at most, and the scan for control characters
+/// only runs on a text that fits, so an oversized input costs no more than a
+/// small one.
+fn is_plain(text: &str, max: usize) -> bool {
+    (1..=max).contains(&text.chars().take(max + 1).count()) && !text.chars().any(char::is_control)
+}
+
+/// Free text after the one rule every text field shares: trimmed, then
+/// [`is_plain`] of at most `max` characters. `what` names the field in the
+/// diagnostic message; the error is `validation_failed` on `field`.
+fn clean_text<'a>(field: &str, text: &'a str, max: usize, what: &str) -> Result<&'a str, ApiError> {
+    let text = text.trim();
+    if is_plain(text, max) {
+        Ok(text)
+    } else {
         Err(ApiError::validation(
             field,
-            "the name must be 1-100 characters",
+            format!("{what} must be 1-{max} characters without control characters"),
         ))
-    } else {
-        Ok(trimmed.to_owned())
     }
+}
+
+/// A person's display name: trimmed, 1-100 characters, no control character.
+pub fn person_name(field: &str, name: &str) -> Result<String, ApiError> {
+    clean_text(field, name, 100, "the name").map(str::to_owned)
 }
 
 /// An operator's personnel number: 3-12 ASCII digits, as in the cloud
@@ -47,27 +70,29 @@ pub fn operator_login(field: &str, login: &str) -> Result<(), ApiError> {
     }
 }
 
-/// Optional free text: trimmed, blank is none, at most `max` characters.
-fn optional_text(field: &str, text: Option<&str>, max: usize) -> Result<Option<String>, ApiError> {
-    match text.map(str::trim) {
-        None | Some("") => Ok(None),
-        Some(text) if text.chars().count() <= max => Ok(Some(text.to_owned())),
-        Some(_) => Err(ApiError::validation(
-            field,
-            format!("at most {max} characters"),
-        )),
+/// Optional free text: trimmed, blank is none, otherwise at most `max`
+/// characters without control characters.
+fn optional_text(
+    field: &str,
+    text: Option<&str>,
+    max: usize,
+    what: &str,
+) -> Result<Option<String>, ApiError> {
+    match text.filter(|text| !text.trim().is_empty()) {
+        None => Ok(None),
+        Some(text) => clean_text(field, text, max, what).map(|text| Some(text.to_owned())),
     }
 }
 
 /// An operator's role: free text like the cloud's employee role (at most
 /// 120 characters), or none.
 pub fn operator_role(field: &str, role: Option<&str>) -> Result<Option<String>, ApiError> {
-    optional_text(field, role, 120)
+    optional_text(field, role, 120, "the role")
 }
 
 /// A badge's label: free text of at most 100 characters, or none.
 pub fn badge_label(field: &str, label: Option<&str>) -> Result<Option<String>, ApiError> {
-    optional_text(field, label, 100)
+    optional_text(field, label, 100, "the label")
 }
 
 /// A badge verifier the office computed: a PHC string in the
@@ -85,7 +110,10 @@ pub fn badge_phc(field: &str, phc: &str, site_salt: &[u8]) -> Result<(), ApiErro
         }
         _ => Err(ApiError::validation(
             field,
-            "a PBKDF2 PHC string with 100000 iterations and the site's badge salt is required",
+            format!(
+                "a PBKDF2 PHC string with {} iterations and the site's badge salt is required",
+                crate::secrets::BADGE_ITERATIONS
+            ),
         )),
     }
 }
@@ -99,7 +127,11 @@ pub fn pin_phc(field: &str, phc: &str) -> Result<(), ApiError> {
     } else {
         Err(ApiError::validation(
             field,
-            "a PBKDF2 PHC string with 10000-1000000 iterations is required",
+            format!(
+                "a PBKDF2 PHC string with {}-{} iterations is required",
+                crate::secrets::MIN_ITERATIONS,
+                crate::secrets::MAX_ITERATIONS
+            ),
         ))
     }
 }
@@ -140,6 +172,9 @@ fn path(prefix: &str, name: &str) -> String {
     }
 }
 
+/// How many distinct GS1 prefixes a company may have.
+const MAX_GS1_PREFIXES: usize = 10;
+
 /// Company fields after validation (trimmed, normalized): the organization's
 /// and a counterparty's.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -161,13 +196,7 @@ pub fn company(
     gln: &str,
     gs1_prefixes: &[String],
 ) -> Result<ValidCompany, ApiError> {
-    let name = name.trim();
-    if name.is_empty() || name.chars().count() > 200 {
-        return Err(ApiError::validation(
-            &path(prefix, "name"),
-            "the name must be 1-200 characters",
-        ));
-    }
+    let name = clean_text(&path(prefix, "name"), name, 200, "the name")?;
     let inn = match inn.map(str::trim) {
         None | Some("") => None,
         Some(inn) if digits(inn, 10..=10) || digits(inn, 12..=12) => Some(inn.to_owned()),
@@ -195,14 +224,16 @@ pub fn company(
             ));
         }
         if !valid_prefixes.iter().any(|known| known == gs1_prefix) {
+            // The 11th distinct prefix ends it: the list never grows past the
+            // cap, so a huge request costs no more than a small one.
+            if valid_prefixes.len() == MAX_GS1_PREFIXES {
+                return Err(ApiError::validation(
+                    &path(prefix, "gs1Prefixes"),
+                    format!("at most {MAX_GS1_PREFIXES} GS1 prefixes"),
+                ));
+            }
             valid_prefixes.push(gs1_prefix.to_owned());
         }
-    }
-    if valid_prefixes.len() > 10 {
-        return Err(ApiError::validation(
-            &path(prefix, "gs1Prefixes"),
-            "at most 10 GS1 prefixes",
-        ));
     }
     Ok(ValidCompany {
         name: name.to_owned(),
@@ -270,51 +301,33 @@ pub fn device_registration<'a>(
     capabilities: &[String],
 ) -> Result<(&'a str, &'a str), ApiError> {
     let name = device_name("name", name)?;
-    let app_version = app_version.trim();
-    if app_version.is_empty() || app_version.len() > 50 {
-        return Err(ApiError::validation(
-            "appVersion",
-            "the app version must be 1-50 characters",
-        ));
-    }
+    let app_version = clean_text("appVersion", app_version, 50, "the app version")?;
+    // A capability is an identifier stored as sent, so it is checked as it
+    // stands, not trimmed: nothing the rule refuses can be stored through it.
     if capabilities.len() > 32
-        || capabilities
+        || !capabilities
             .iter()
-            .any(|capability| capability.is_empty() || capability.len() > 64)
+            .all(|capability| is_plain(capability.as_str(), 64) && !capability.trim().is_empty())
     {
         return Err(ApiError::validation(
             "capabilities",
-            "at most 32 capabilities of 1-64 characters",
+            "at most 32 capabilities of 1-64 characters without control characters",
         ));
     }
     Ok((name, app_version))
 }
 
-/// A device's name: trimmed, 1-100 characters.
+/// A device's name: trimmed, 1-100 characters, no control character.
 pub fn device_name<'a>(field: &str, name: &'a str) -> Result<&'a str, ApiError> {
-    let name = name.trim();
-    if name.is_empty() || name.chars().count() > 100 {
-        Err(ApiError::validation(
-            field,
-            "the name must be 1-100 characters",
-        ))
-    } else {
-        Ok(name)
-    }
+    clean_text(field, name, 100, "the name")
 }
 
-/// A production line name: trimmed, 1-100 characters. Returns the name and
-/// its uniqueness key (Unicode lower case; SQLite's `lower()` folds ASCII only).
+/// A production line name: trimmed, 1-100 characters, no control character.
+/// Returns the name and its uniqueness key (Unicode lower case; SQLite's
+/// `lower()` folds ASCII only).
 pub fn line_name(field: &str, name: &str) -> Result<(String, String), ApiError> {
-    let trimmed = name.trim();
-    if trimmed.is_empty() || trimmed.chars().count() > 100 {
-        Err(ApiError::validation(
-            field,
-            "the line name must be 1-100 characters",
-        ))
-    } else {
-        Ok((trimmed.to_owned(), trimmed.to_lowercase()))
-    }
+    let trimmed = clean_text(field, name, 100, "the line name")?;
+    Ok((trimmed.to_owned(), trimmed.to_lowercase()))
 }
 
 pub fn sscc_serial(field: &str, extension: u8, prefix: &str, serial: u64) -> Result<(), ApiError> {
@@ -591,6 +604,231 @@ mod tests {
         assert_eq!(badge_label("label", Some(" ")).unwrap(), None);
         assert!(badge_label("label", Some(&"п".repeat(100))).is_ok());
         assert_eq!(field(badge_label("label", Some(&"п".repeat(101)))), "label");
+    }
+
+    type TextCheck = fn(&str) -> Result<(), ApiError>;
+
+    /// The free-text validators that trim their input, each with the
+    /// `details.field` it names.
+    fn text_validators() -> [(&'static str, TextCheck); 8] {
+        [
+            ("name", |text| person_name("name", text).map(drop)),
+            ("org.name", |text| {
+                company("org", text, None, GLN, &[]).map(drop)
+            }),
+            ("lines.0", |text| line_name("lines.0", text).map(drop)),
+            ("name", |text| device_name("name", text).map(drop)),
+            ("name", |text| {
+                device_registration(text, "0.1.0", &[]).map(drop)
+            }),
+            ("appVersion", |text| {
+                device_registration("Станция", text, &[]).map(drop)
+            }),
+            ("role", |text| operator_role("role", Some(text)).map(drop)),
+            ("label", |text| badge_label("label", Some(text)).map(drop)),
+        ]
+    }
+
+    /// One rule for every free-text field: no control character, wherever it
+    /// stands. A NUL first passes `str::trim` but SQLite's `length()` stops at
+    /// it, so the tables' CHECKs failed as a 500; a NUL inside passed them, so
+    /// two names that look the same could both be stored.
+    #[test]
+    fn every_free_text_field_refuses_a_control_character_wherever_it_stands() {
+        for (expected, check) in text_validators() {
+            for text in [
+                "\u{0}Иванов",
+                "Ива\u{0}нов",
+                "Иванов\u{0}",
+                "Ива\tнов",
+                "Иван\nов",
+                "Ива\u{7f}нов",
+                "Ива\u{85}нов",
+            ] {
+                assert_eq!(field(check(text)), expected, "{text:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_free_text_field_still_accepts_ordinary_text() {
+        for (expected, check) in text_validators() {
+            for text in [
+                "Иванов Иван",
+                "Ирина-Мария О'Нил",
+                "  Иванов  ",
+                // Whitespace at the edges, control characters among it, is
+                // trimmed before the rule looks at the text.
+                "\tИванов\n",
+                "\u{85}Иванов",
+                // A no-break space is text, not a control character.
+                "Иван\u{a0}Иванов",
+            ] {
+                assert!(check(text).is_ok(), "{expected} {text:?}");
+            }
+        }
+    }
+
+    /// A capability is an identifier stored as sent, so the rule checks it as
+    /// it stands: nothing the rule refuses can be stored through it.
+    #[test]
+    fn a_capability_is_checked_as_sent_without_control_characters() {
+        let capability =
+            |text: &str| device_registration("Станция", "0.1.0", &[text.to_owned()]).map(drop);
+        for text in ["scanner", "validation-dm-duplicate-v1", "сканер", " x "] {
+            assert!(capability(text).is_ok(), "{text:?}");
+        }
+        for text in [
+            "",
+            "\u{0}scanner",
+            "scan\u{0}ner",
+            "scanner\u{0}",
+            "scan\tner",
+            "scanner\n",
+            "scan\u{7f}ner",
+            "scan\u{85}ner",
+            "   ",
+        ] {
+            assert_eq!(field(capability(text)), "capabilities", "{text:?}");
+        }
+    }
+
+    #[test]
+    fn a_line_name_is_at_most_100_characters_not_bytes() {
+        // 100 Cyrillic letters are 200 bytes: the limit counts characters, and
+        // after trimming.
+        let longest = "л".repeat(100);
+        assert_eq!(line_name("name", &longest).unwrap().0, longest);
+        assert_eq!(
+            line_name("name", &format!("  {longest} ")).unwrap().1,
+            longest
+        );
+        assert_eq!(field(line_name("name", &"л".repeat(101))), "name");
+        assert_eq!(
+            field(line_name("name", &format!(" {} ", "л".repeat(101)))),
+            "name"
+        );
+    }
+
+    #[test]
+    fn a_device_registration_counts_characters_and_pins_every_limit() {
+        // 50 Cyrillic letters are 100 bytes.
+        let version = |text: &str| device_registration("Станция", text, &[]).map(drop);
+        assert!(version(&"в".repeat(50)).is_ok());
+        assert_eq!(field(version(&"в".repeat(51))), "appVersion");
+        let capabilities = |count: usize| {
+            let list: Vec<String> = (0..count).map(|n| format!("c{n}")).collect();
+            device_registration("Станция", "0.1.0", &list).map(drop)
+        };
+        assert!(capabilities(0).is_ok());
+        assert!(capabilities(32).is_ok());
+        assert_eq!(field(capabilities(33)), "capabilities");
+        let capability =
+            |text: &str| device_registration("Станция", "0.1.0", &[text.to_owned()]).map(drop);
+        assert!(capability(&"я".repeat(64)).is_ok());
+        assert_eq!(field(capability(&"я".repeat(65))), "capabilities");
+    }
+
+    #[test]
+    fn a_time_zone_is_an_iana_name_of_at_most_64_characters() {
+        let zone = |text: &str| {
+            org(
+                "org",
+                &OrgProfileInput {
+                    time_zone: text.to_owned(),
+                    ..input_named("ООО «Атолл»")
+                },
+            )
+            .map(|org| org.time_zone)
+        };
+        for text in [
+            "Asia/Ust-Nera",
+            "America/Argentina/Buenos_Aires",
+            "Etc/GMT+3",
+            &"A".repeat(64),
+        ] {
+            assert_eq!(zone(text).unwrap(), text);
+        }
+        assert_eq!(field(zone(&"A".repeat(65))), "org.timeZone");
+        assert_eq!(field(zone("Europe/Мск")), "org.timeZone");
+    }
+
+    #[test]
+    fn a_person_name_is_measured_after_trimming_and_unicode_whitespace_is_trimmed() {
+        let longest = "и".repeat(100);
+        assert_eq!(
+            person_name("name", &format!("  {longest}  ")).unwrap(),
+            longest
+        );
+        assert_eq!(
+            field(person_name("name", &format!("  {}  ", "и".repeat(101)))),
+            "name"
+        );
+        // No-break space, em space and ideographic space are whitespace.
+        assert_eq!(
+            person_name("name", "\u{a0}\u{2003}Ирина\u{3000}").unwrap(),
+            "Ирина"
+        );
+        assert_eq!(field(person_name("name", "\u{a0}\u{3000}")), "name");
+    }
+
+    /// Pins today's rule: an office login is checked for its letters, not
+    /// their case; the column's NOCASE collation makes «Admin» and «admin» one
+    /// login.
+    #[test]
+    fn an_office_login_may_have_upper_case_letters() {
+        assert!(office_login("login", "Admin.User").is_ok());
+        assert!(office_login("login", "TECH_1").is_ok());
+    }
+
+    /// More than 10 distinct prefixes are refused at the 11th, not after a
+    /// pass that compares every prefix with every other.
+    #[test]
+    fn a_huge_prefix_list_is_refused_at_the_eleventh_distinct_prefix() {
+        let many: Vec<String> = (0..50_000).map(|n| format!("{n:07}")).collect();
+        let started = std::time::Instant::now();
+        let refusal = company("", "Берег", None, GLN, &many).unwrap_err();
+        assert_eq!(refusal.code(), "validation_failed");
+        assert_eq!(refusal.details().unwrap()["field"], "gs1Prefixes");
+        assert_eq!(refusal.message(), "at most 10 GS1 prefixes");
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(500),
+            "the refusal took {:?}",
+            started.elapsed()
+        );
+        // Ten distinct prefixes, each sent many times, stay fine.
+        let repeated: Vec<String> = (0..50_000).map(|n| format!("{:07}", n % 10)).collect();
+        assert_eq!(
+            company("", "Берег", None, GLN, &repeated)
+                .unwrap()
+                .gs1_prefixes
+                .len(),
+            10
+        );
+    }
+
+    /// The bounds in the messages are the constants', so a raised ceiling or
+    /// a changed badge count cannot leave a stale number behind.
+    #[test]
+    fn the_iteration_messages_are_built_from_the_constants() {
+        let pin = pin_phc("pinPhc", "x").unwrap_err();
+        assert!(
+            pin.message().contains(&format!(
+                "{}-{} iterations",
+                crate::secrets::MIN_ITERATIONS,
+                crate::secrets::MAX_ITERATIONS
+            )),
+            "{}",
+            pin.message()
+        );
+        let badge = badge_phc("badgePhc", "x", &[]).unwrap_err();
+        assert!(
+            badge
+                .message()
+                .contains(&format!("{} iterations", crate::secrets::BADGE_ITERATIONS)),
+            "{}",
+            badge.message()
+        );
     }
 
     #[test]

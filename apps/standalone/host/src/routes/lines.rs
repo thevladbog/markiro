@@ -49,12 +49,7 @@ async fn read(conn: &mut SqliteConnection, id: &str) -> Result<Option<OfficeLine
 /// A write that hit `lines_active_name_key`: another active line already has
 /// the name, compared without case.
 fn name_taken(error: sqlx::Error) -> ApiError {
-    match error.as_database_error() {
-        Some(database) if database.is_unique_violation() => {
-            ApiError::conflict("line_name", "another active line has this name")
-        }
-        _ => ApiError::internal(error),
-    }
+    ApiError::conflict_on_unique_violation(error, "line_name", "another active line has this name")
 }
 
 pub async fn list_lines(

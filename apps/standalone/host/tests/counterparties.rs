@@ -188,6 +188,75 @@ async fn counterparty_fields_follow_the_organization_rules() {
         .is_empty());
 }
 
+/// A name is free text with one rule: no control character. A NUL first
+/// used to pass `trim` but fail the table's CHECK (SQLite's `length()` stops
+/// at a NUL) as a 500; a NUL inside passed the CHECK, so two names that look
+/// the same could both be stored.
+#[tokio::test]
+async fn a_counterparty_name_with_a_control_character_is_refused() {
+    let admin = admin().await;
+    let refused = |body: &(StatusCode, Value), label: &str| {
+        assert_eq!(
+            (
+                body.0,
+                body.1["error"]["code"].clone(),
+                body.1["error"]["details"]["field"].clone()
+            ),
+            (
+                StatusCode::BAD_REQUEST,
+                json!("validation_failed"),
+                json!("name")
+            ),
+            "{label}"
+        );
+    };
+    for name in ["\u{0}ООО «Берег»", "ООО\u{0} «Берег»", "ООО\t«Берег»"]
+    {
+        let created = admin
+            .call(
+                "POST",
+                "/v1/office/counterparties",
+                Some(json!({ "name": name, "gln": "4601234000017", "gs1Prefixes": [] })),
+            )
+            .await;
+        refused(&created, &format!("create {name:?}"));
+    }
+
+    // The same on an update of an existing counterparty.
+    let (_, existing) = admin
+        .call(
+            "POST",
+            "/v1/office/counterparties",
+            Some(new_counterparty()),
+        )
+        .await;
+    let path = format!(
+        "/v1/office/counterparties/{}",
+        existing["id"].as_str().unwrap()
+    );
+    let revision = host_revision(&admin.app).await;
+    for name in ["\u{0}ООО «Берег»", "ООО\u{0} «Берег»", "ООО\t«Берег»"]
+    {
+        let mut body = full(Value::Null, false, 2);
+        body["name"] = json!(name);
+        let updated = admin.call("PUT", &path, Some(body)).await;
+        refused(&updated, &format!("update {name:?}"));
+    }
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM counterparties")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(count, 1, "only the valid one exists");
+    assert_eq!(
+        audit_trail(&admin.app, "counterparty.create").await.len(),
+        1
+    );
+    assert!(audit_trail(&admin.app, "counterparty.update")
+        .await
+        .is_empty());
+}
+
 #[tokio::test]
 async fn technologists_read_counterparties_but_do_not_change_them() {
     let admin = admin().await;

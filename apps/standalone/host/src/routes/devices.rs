@@ -2,8 +2,10 @@
 //! (`PUT /v1/device/line`) and the administrator's devices:
 //! `GET /v1/office/devices`, `PUT /v1/office/devices/{id}` (name and line)
 //! and `POST /v1/office/devices/{id}/revoke`. Devices are not in the change
-//! feed and have no `rev`: office writes are last-write-wins and leave the
-//! host revision alone.
+//! feed and have no `rev`: office writes are last-write-wins. A change of a
+//! device's line still takes one host revision, without a feed item, so open
+//! streams wake and the station can read `GET /v1/device` again; a rename and
+//! a revocation take none.
 
 use axum::extract::State;
 use axum::Json;
@@ -13,7 +15,7 @@ use sqlx::SqliteConnection;
 
 use crate::audit::{self, actions, Actor, Entry, Outcome};
 use crate::auth::{AuthDevice, OfficeContext};
-use crate::db::begin_write;
+use crate::db::{begin_write, commit_and_notify, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::server::AppState;
 use crate::validate;
@@ -60,7 +62,9 @@ async fn require_active_line(conn: &mut SqliteConnection, line_id: &str) -> Resu
 }
 
 /// A station picks the line it works on: only an existing, active line.
-/// Devices are not in the change feed, so the host revision stays.
+/// Devices are not in the change feed, and the station already knows what it
+/// chose, so the host revision stays (an office assignment takes one:
+/// `update_device`).
 pub async fn select_line(
     State(state): State<AppState>,
     device: AuthDevice,
@@ -166,7 +170,9 @@ pub async fn list_devices(
 
 /// `PUT /v1/office/devices/{id}` (administrators): rename a device or set
 /// its line — only a station's, only an active line; `lineId: null` clears
-/// it.
+/// it, and re-sending the line the station is already on keeps it. A line
+/// change takes one host revision (no feed item), so open streams wake and
+/// the station can read its device again; a rename takes none.
 pub async fn update_device(
     State(state): State<AppState>,
     context: OfficeContext,
@@ -188,6 +194,12 @@ pub async fn update_device(
     let line_id = match &update.line_id {
         None => current.line_id.clone(),
         Some(None) => None,
+        // The line the station is already on is «keep», even if it has been
+        // archived since (archiving leaves stations on their line): a
+        // full-form save `{ name, lineId }` must still be able to rename it.
+        Some(Some(line_id)) if current.line_id.as_deref() == Some(line_id.as_str()) => {
+            current.line_id.clone()
+        }
         Some(Some(line_id)) => {
             if current.kind != DeviceKind::Station {
                 return Err(ApiError::validation(
@@ -207,6 +219,14 @@ pub async fn update_device(
         // Nothing actually changed: report the device as-is without writing a
         // row nobody changed or auditing a no-op.
         return Ok(Json(current));
+    };
+    // Only a line change is news for a station: it takes the one revision
+    // that wakes the streams. Devices are not in the feed, so the revision
+    // carries no item; the station reads `GET /v1/device` after it.
+    let rev = if line_id == current.line_id {
+        None
+    } else {
+        Some(next_revision(&mut tx).await.map_err(ApiError::internal)?)
     };
     sqlx::query("UPDATE devices SET name = ?, line_id = ? WHERE id = ?")
         .bind(&name)
@@ -232,7 +252,11 @@ pub async fn update_device(
     let updated = read_record(&mut tx, &id)
         .await?
         .ok_or_else(|| ApiError::internal("device vanished"))?;
-    tx.commit().await.map_err(ApiError::internal)?;
+    match rev {
+        Some(rev) => commit_with_revision(tx, &state.revisions, rev).await,
+        None => tx.commit().await,
+    }
+    .map_err(ApiError::internal)?;
     Ok(Json(updated))
 }
 
@@ -253,7 +277,13 @@ pub async fn revoke_device(
         .await?
         .ok_or_else(|| ApiError::not_found("no such device"))?;
     if current.revoked_at.is_some() {
-        // Already revoked: no row write, no audit row.
+        // Already revoked: no row write, no audit row. The streams are woken
+        // once more, though: a woken stream only re-reads its own device, so
+        // this costs one read each, and it recovers a wake-up an earlier
+        // attempt lost, for the administrator who retries.
+        state
+            .revocations
+            .send_modify(|count| *count = count.wrapping_add(1));
         return Ok(Json(current));
     }
     sqlx::query("UPDATE devices SET revoked_at = ? WHERE id = ?")
@@ -284,11 +314,14 @@ pub async fn revoke_device(
     let revoked = read_record(&mut tx, &id)
         .await?
         .ok_or_else(|| ApiError::internal("device vanished"))?;
-    tx.commit().await.map_err(ApiError::internal)?;
-    // After the commit, like a revision: a stream that checks its device at
-    // once already reads the revocation.
-    state
-        .revocations
-        .send_modify(|count| *count = count.wrapping_add(1));
+    // The commit and the wake-up are one task the caller going away cannot
+    // split, and the wake-up comes after the commit, like a revision: a
+    // stream that checks its device at once already reads the revocation.
+    let revocations = state.revocations.clone();
+    commit_and_notify(tx, move || {
+        revocations.send_modify(|count| *count = count.wrapping_add(1));
+    })
+    .await
+    .map_err(ApiError::internal)?;
     Ok(Json(revoked))
 }

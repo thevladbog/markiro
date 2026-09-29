@@ -1,6 +1,8 @@
 mod support;
 
+use std::io::Write;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use axum::body::Body;
@@ -12,8 +14,8 @@ use markiro_host::server::router;
 use markiro_host::{start, StartOptions};
 use serde_json::{json, Value};
 use support::app::{
-    bootstrap, empty, host_revision, json as json_request, pair_device, request, with_device,
-    with_session, TestApp, LOOPBACK,
+    audit_trail, bootstrap, empty, host_revision, json as json_request, pair_device, request,
+    with_device, with_session, TestApp, LOOPBACK,
 };
 use tower::ServiceExt;
 
@@ -306,6 +308,38 @@ async fn open_streams_end_when_the_host_stops() {
     );
 }
 
+/// An office line assignment takes a host revision without a feed item, so
+/// the station's open stream gets an event and the station can read its
+/// device again.
+#[tokio::test]
+async fn an_office_line_assignment_wakes_the_stations_stream() {
+    let app = TestApp::new().await;
+    let (station, key) = pair_device(&app, "station").await;
+    let token = bootstrap(&app, &key).await;
+    let line: String = sqlx::query_scalar("SELECT id FROM lines ORDER BY name LIMIT 1")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+
+    let (status, _, mut body) = open_stream(&app, &key).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(next_text(&mut body).await, rev_event(1));
+
+    let (status, device) = app
+        .send(json_request(
+            with_session(
+                request("PUT", &format!("/v1/office/devices/{station}")),
+                &key,
+                &token,
+            ),
+            json!({ "lineId": line }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{device}");
+    assert_eq!(next_text(&mut body).await, rev_event(2));
+    assert_eq!(host_revision(&app).await, 2);
+}
+
 /// A revocation ends the revoked device's open stream at once, not at its
 /// next heartbeat (15 s here), and leaves other devices' streams open.
 #[tokio::test]
@@ -346,4 +380,101 @@ async fn revoking_a_device_ends_its_open_stream_and_no_other() {
         next_text(&mut kept).await,
         rev_event(org["rev"].as_i64().unwrap())
     );
+}
+
+/// A revocation whose wake-up was lost (here the row is revoked by SQL, so
+/// nothing announced it) leaves the device's stream open. The administrator's
+/// retry finds the device already revoked and writes nothing, yet wakes the
+/// streams once more, and the stream ends.
+#[tokio::test]
+async fn retrying_a_revocation_whose_wake_up_was_lost_ends_the_stream() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let token = bootstrap(&app, &key).await;
+    let (other, other_key) = pair_device(&app, "station").await;
+    let (status, _, mut stream) = open_stream(&app, &other_key).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(next_text(&mut stream).await, rev_event(1));
+
+    sqlx::query("UPDATE devices SET revoked_at = ? WHERE id = ?")
+        .bind(app.state.timestamp())
+        .bind(&other)
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+    assert!(
+        tokio::time::timeout(Duration::from_millis(300), stream.frame())
+            .await
+            .is_err(),
+        "nothing announced the revocation, so the stream is still open"
+    );
+
+    let (status, body) = app
+        .send(empty(with_session(
+            request("POST", &format!("/v1/office/devices/{other}/revoke")),
+            &key,
+            &token,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let frame = tokio::time::timeout(Duration::from_secs(5), stream.frame())
+        .await
+        .expect("the retry wakes the stream, which ends within 5 s");
+    assert!(frame.is_none(), "the stream ended cleanly");
+    assert!(
+        audit_trail(&app, "device.revoke").await.is_empty(),
+        "the retry changed nothing and wrote no row"
+    );
+}
+
+/// What the test's own `tracing` calls printed.
+#[derive(Clone, Default)]
+struct Log(Arc<Mutex<Vec<u8>>>);
+
+impl Write for Log {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// A stream whose device re-read fails ends (fail closed, as before) and says
+/// why in the log, instead of throwing the cause away; the line names no key.
+/// The current-thread test runtime polls the stream on this thread, so this
+/// thread's subscriber sees its warning.
+#[tokio::test]
+async fn a_failed_device_check_ends_the_stream_and_is_logged() {
+    let log = Log::default();
+    let writer = log.clone();
+    let _scope = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .with_max_level(tracing::Level::INFO)
+            .finish(),
+    );
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let (status, _, mut stream) = open_stream(&app, &key).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(next_text(&mut stream).await, rev_event(0));
+
+    // The database is gone when a revocation (of any device) wakes the stream.
+    app.state.pool.close().await;
+    app.state.revocations.send_modify(|count| *count += 1);
+    let frame = tokio::time::timeout(Duration::from_secs(5), stream.frame())
+        .await
+        .expect("a stream that cannot check its device ends within 5 s");
+    assert!(frame.is_none(), "the stream ended cleanly");
+
+    let printed = String::from_utf8(log.0.lock().unwrap().clone()).unwrap();
+    assert!(
+        printed.contains("change stream: device check failed"),
+        "{printed}"
+    );
+    assert!(!printed.contains(&key), "the log holds no device key");
 }

@@ -41,6 +41,11 @@ impl ApiError {
         &self.body.error.code
     }
 
+    /// The diagnostic text; never shown to a person.
+    pub fn message(&self) -> &str {
+        &self.body.error.message
+    }
+
     /// The structured detail, if any (`field`, `constraint`, `currentRev`, …).
     pub fn details(&self) -> Option<&serde_json::Map<String, Value>> {
         self.body.error.details.as_ref()
@@ -106,6 +111,21 @@ impl ApiError {
     pub fn conflict(constraint: &str, message: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, codes::CONFLICT, message)
             .with_details(json!({ "constraint": constraint }))
+    }
+
+    /// A write that failed on a table with a unique index: a unique violation
+    /// is the client's `conflict` on `constraint`, and any other error is
+    /// `internal` (logged with its cause). One place decides which sqlx
+    /// errors are the client's doing.
+    pub fn conflict_on_unique_violation(
+        error: sqlx::Error,
+        constraint: &str,
+        message: impl Into<String>,
+    ) -> Self {
+        match error.as_database_error() {
+            Some(database) if database.is_unique_violation() => Self::conflict(constraint, message),
+            _ => Self::internal(error),
+        }
     }
 
     /// The row changed since the client read it.
@@ -204,6 +224,59 @@ where
         match Query::<T>::from_request_parts(parts, state).await {
             Ok(Query(value)) => Ok(Self(value)),
             Err(rejection) => Err(ApiError::malformed(rejection.body_text())),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Real failures from SQLite: only a unique violation is the client's
+    /// `conflict`; another constraint or a failure that is not the database's
+    /// at all is `internal`, and its cause stays out of the response.
+    #[tokio::test]
+    async fn only_a_unique_violation_is_the_clients_conflict() {
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        sqlx::query("CREATE TABLE names (name TEXT NOT NULL UNIQUE)")
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO names (name) VALUES ('a')")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let duplicate = sqlx::query("INSERT INTO names (name) VALUES ('a')")
+            .execute(&pool)
+            .await
+            .unwrap_err();
+        let conflict = ApiError::conflict_on_unique_violation(duplicate, "name", "taken");
+        assert_eq!(
+            (conflict.status(), conflict.code(), conflict.message()),
+            (StatusCode::CONFLICT, "conflict", "taken")
+        );
+        assert_eq!(conflict.details().unwrap()["constraint"], "name");
+
+        let not_null = sqlx::query("INSERT INTO names (name) VALUES (NULL)")
+            .execute(&pool)
+            .await
+            .unwrap_err();
+        for error in [not_null, sqlx::Error::RowNotFound] {
+            let internal = ApiError::conflict_on_unique_violation(error, "name", "taken");
+            assert_eq!(
+                (internal.status(), internal.code(), internal.message()),
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal",
+                    "internal error"
+                )
+            );
+            assert!(internal.details().is_none());
         }
     }
 }

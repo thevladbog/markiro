@@ -207,9 +207,10 @@ impl ErrorBody {
     }
 }
 
-/// A secret on the wire: a device key, a session token or a password. It
-/// serializes as a plain JSON string, but `Debug` never prints the value, so
-/// a stray `{:?}` or a `tracing` field cannot leak it.
+/// A secret on the wire: a device key, a session token, a password, a PIN or
+/// badge verifier or the badge salt. It serializes as a plain JSON string, but
+/// `Debug` never prints the value, so a stray `{:?}` or a `tracing` field
+/// cannot leak it.
 #[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Secret(String);
@@ -257,29 +258,44 @@ impl DeviceKind {
 }
 
 /// A stored name that is no variant of the enum it was read as
-/// ([`DeviceKind`], [`OfficeRole`]).
+/// ([`DeviceKind`], [`OfficeRole`]). `what` says which enum failed, so a log
+/// line reads `unknown office role "x"`, not just `unknown value "x"`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct UnknownVariant(pub String);
+pub struct UnknownVariant {
+    pub what: &'static str,
+    pub value: String,
+}
 
 impl std::fmt::Display for UnknownVariant {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(formatter, "unknown value {:?}", self.0)
+        write!(formatter, "unknown {} {:?}", self.what, self.value)
     }
 }
 
 impl std::error::Error for UnknownVariant {}
+
+/// The variant `text` names, read by serde itself (`rename_all` included), so
+/// the set of names lives only in the enum's derive: a variant added there is
+/// parsed at once, and a hand-written parser cannot fall behind it.
+fn parse_variant<T: serde::de::DeserializeOwned>(
+    what: &'static str,
+    text: &str,
+) -> Result<T, UnknownVariant> {
+    use serde::de::IntoDeserializer;
+    T::deserialize(IntoDeserializer::<serde::de::value::Error>::into_deserializer(text)).map_err(
+        |_| UnknownVariant {
+            what,
+            value: text.to_owned(),
+        },
+    )
+}
 
 impl std::str::FromStr for DeviceKind {
     type Err = UnknownVariant;
 
     /// The name [`DeviceKind::as_str`] gives, as `devices.kind` stores it.
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        match text {
-            "station" => Ok(DeviceKind::Station),
-            "office" => Ok(DeviceKind::Office),
-            "handheld" => Ok(DeviceKind::Handheld),
-            other => Err(UnknownVariant(other.to_owned())),
-        }
+        parse_variant("device kind", text)
     }
 }
 
@@ -409,7 +425,7 @@ pub struct ChangesResponse {
 }
 
 /// One changed or deleted reference record.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ChangeItem {
     /// One of [`entities`].
@@ -421,6 +437,22 @@ pub struct ChangeItem {
     /// [`OperatorRecord`], [`OperatorBadgeRecord`]); absent when `deleted`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
+}
+
+/// Prints what the item is (entity, id, revision, deletion) and never its
+/// `data`: on the wire it holds `pinPhc`, `badgePhc` and the badge salt, and
+/// it is untyped JSON, so no field can hide itself. A `{:?}` of a
+/// [`ChangesResponse`] prints through this.
+impl std::fmt::Debug for ChangeItem {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ChangeItem")
+            .field("entity", &self.entity)
+            .field("id", &self.id)
+            .field("rev", &self.rev)
+            .field("deleted", &self.deleted)
+            .finish_non_exhaustive()
+    }
 }
 
 /// `data` of an `org_profile` item.
@@ -439,7 +471,7 @@ pub struct OrgRecord {
 #[serde(rename_all = "camelCase")]
 pub struct SiteRecord {
     /// The site's badge salt: 16 bytes, standard base64 with padding.
-    pub badge_salt: String,
+    pub badge_salt: Secret,
     pub box_block_size: u32,
     pub pallet_block_size: u32,
 }
@@ -501,11 +533,7 @@ impl std::str::FromStr for OfficeRole {
 
     /// The name [`OfficeRole::as_str`] gives, as `office_users.role` stores it.
     fn from_str(text: &str) -> Result<Self, Self::Err> {
-        match text {
-            "admin" => Ok(OfficeRole::Admin),
-            "technologist" => Ok(OfficeRole::Technologist),
-            other => Err(UnknownVariant(other.to_owned())),
-        }
+        parse_variant("office role", text)
     }
 }
 
@@ -848,29 +876,97 @@ pub struct BadgeSalt {
 mod tests {
     use super::{DeviceKind, OfficeRole, UnknownVariant};
 
+    /// Every `DeviceKind`. The `match` has no wildcard arm, so a new variant
+    /// does not compile until it is listed here; the round trip below then
+    /// checks its `as_str` name against serde and `FromStr`.
+    fn device_kinds() -> Vec<DeviceKind> {
+        let kinds = vec![
+            DeviceKind::Station,
+            DeviceKind::Office,
+            DeviceKind::Handheld,
+        ];
+        for kind in &kinds {
+            match kind {
+                DeviceKind::Station | DeviceKind::Office | DeviceKind::Handheld => {}
+            }
+        }
+        kinds
+    }
+
+    /// Every `OfficeRole`, listed the same way.
+    fn office_roles() -> Vec<OfficeRole> {
+        let roles = vec![OfficeRole::Admin, OfficeRole::Technologist];
+        for role in &roles {
+            match role {
+                OfficeRole::Admin | OfficeRole::Technologist => {}
+            }
+        }
+        roles
+    }
+
     /// The host stores `as_str` names and reads them back with `FromStr`;
     /// serde writes the same names on the wire.
     #[test]
     fn stored_names_parse_back_into_their_variants() {
-        for kind in [
-            DeviceKind::Station,
-            DeviceKind::Office,
-            DeviceKind::Handheld,
-        ] {
+        for kind in device_kinds() {
             assert_eq!(kind.as_str().parse::<DeviceKind>(), Ok(kind));
             assert_eq!(serde_json::to_value(kind).unwrap(), kind.as_str());
         }
-        for role in [OfficeRole::Admin, OfficeRole::Technologist] {
+        for role in office_roles() {
             assert_eq!(role.as_str().parse::<OfficeRole>(), Ok(role));
             assert_eq!(serde_json::to_value(role).unwrap(), role.as_str());
         }
+    }
+
+    /// Names are exact: another case, padding or an unknown name is refused,
+    /// and the error says which enum failed.
+    #[test]
+    fn a_name_that_is_not_exactly_a_variant_is_refused_and_says_what_failed() {
+        for text in [
+            "Station",
+            "STATION",
+            "Office",
+            "tablet",
+            "",
+            "station ",
+            " handheld",
+        ] {
+            let refused = text.parse::<DeviceKind>();
+            assert_eq!(
+                refused,
+                Err(UnknownVariant {
+                    what: "device kind",
+                    value: text.to_owned()
+                }),
+                "{text:?}"
+            );
+        }
+        for text in [
+            "Admin",
+            "ADMIN",
+            "Technologist",
+            "owner",
+            "",
+            "admin ",
+            " technologist",
+        ] {
+            let refused = text.parse::<OfficeRole>();
+            assert_eq!(
+                refused,
+                Err(UnknownVariant {
+                    what: "office role",
+                    value: text.to_owned()
+                }),
+                "{text:?}"
+            );
+        }
         assert_eq!(
-            "Station".parse::<DeviceKind>(),
-            Err(UnknownVariant("Station".to_owned()))
+            "owner".parse::<OfficeRole>().unwrap_err().to_string(),
+            "unknown office role \"owner\""
         );
         assert_eq!(
-            "owner".parse::<OfficeRole>(),
-            Err(UnknownVariant("owner".to_owned()))
+            "Station".parse::<DeviceKind>().unwrap_err().to_string(),
+            "unknown device kind \"Station\""
         );
     }
 }

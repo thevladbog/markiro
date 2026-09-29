@@ -1,5 +1,7 @@
 mod support;
 
+use std::time::Duration;
+
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
@@ -68,8 +70,8 @@ async fn an_administrator_renames_a_device_and_sets_its_line() {
     assert_eq!(cleared, device(&admin, &station).await);
     assert_eq!(
         host_revision(&admin.app).await,
-        revision,
-        "devices are not in the change feed"
+        revision + 2,
+        "assigning a line and clearing it each take a revision; the rename takes none"
     );
     assert_eq!(
         audit_trail(&admin.app, "device.update").await,
@@ -166,6 +168,205 @@ async fn a_device_line_is_an_active_line_and_only_a_stations() {
         (status, body["error"]["code"].clone()),
         (StatusCode::BAD_REQUEST, json!("validation_failed"))
     );
+    assert!(audit_trail(&admin.app, "device.update").await.is_empty());
+}
+
+/// An office line assignment takes one host revision, so open streams wake
+/// and the station can read `GET /v1/device` again, but it produces no feed
+/// item: devices are not in the feed. A rename and a no-op take no revision.
+#[tokio::test]
+async fn a_line_change_takes_one_revision_and_wakes_the_streams_without_a_feed_item() {
+    let admin = admin().await;
+    let (station, station_key) = pair_device(&admin.app, "station").await;
+    let lines = line_ids(&admin).await;
+    let path = format!("/v1/office/devices/{station}");
+    let mut wake = admin.app.state.revisions.subscribe();
+    let start = host_revision(&admin.app).await;
+
+    // A rename alone takes no revision and wakes nobody.
+    let (status, _) = admin
+        .call("PUT", &path, Some(json!({ "name": "Станция упаковки" })))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(host_revision(&admin.app).await, start);
+    assert!(!wake.has_changed().unwrap());
+
+    // A line assignment takes exactly one revision...
+    let (status, _) = admin
+        .call("PUT", &path, Some(json!({ "lineId": lines[0] })))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(host_revision(&admin.app).await, start + 1);
+    // ...and wakes the streams with it...
+    tokio::time::timeout(Duration::from_secs(5), wake.changed())
+        .await
+        .expect("the streams are woken by the line change")
+        .unwrap();
+    assert_eq!(*wake.borrow_and_update(), start + 1);
+    // ...but the feed has no item for it: the station reads its device.
+    let (status, feed) = admin
+        .app
+        .send(empty(with_device(
+            request("GET", &format!("/v1/changes?since={start}")),
+            &station_key,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{feed}");
+    assert_eq!(
+        feed,
+        json!({ "hostId": admin.app.state.host_id, "rev": start + 1, "hasMore": false, "items": [] })
+    );
+
+    // The same line again changes nothing: no revision, no wake, no row.
+    let (status, _) = admin
+        .call(
+            "PUT",
+            &path,
+            Some(json!({ "name": "Станция упаковки", "lineId": lines[0] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(host_revision(&admin.app).await, start + 1);
+    assert!(!wake.has_changed().unwrap());
+    assert_eq!(audit_trail(&admin.app, "device.update").await.len(), 2);
+
+    // Another line, and a rename together with clearing the line, take one
+    // revision each.
+    let (status, _) = admin
+        .call("PUT", &path, Some(json!({ "lineId": lines[1] })))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(host_revision(&admin.app).await, start + 2);
+    let (status, cleared) = admin
+        .call(
+            "PUT",
+            &path,
+            Some(json!({ "name": "Резерв", "lineId": null })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert_eq!(host_revision(&admin.app).await, start + 3);
+    assert_eq!(
+        audit_trail(&admin.app, "device.update").await.last(),
+        Some(&admin.row(
+            "device.update",
+            "device",
+            &station,
+            json!({
+                "changed": ["name", "lineId"],
+                "name": { "from": "Станция упаковки", "to": "Резерв" },
+                "lineId": { "from": lines[1], "to": null }
+            })
+        ))
+    );
+}
+
+/// A full-form save `{ name, lineId }` re-sends the station's current line.
+/// Archiving a line leaves its stations on it, so that line may be archived by
+/// now; re-sending it is «keep», not a refusal, and it takes no revision.
+#[tokio::test]
+async fn re_sending_a_stations_current_line_keeps_it_even_when_the_line_is_archived() {
+    let admin = admin().await;
+    let (station, _) = pair_device(&admin.app, "station").await;
+    let lines = line_ids(&admin).await;
+    let path = format!("/v1/office/devices/{station}");
+    let (status, _) = admin
+        .call("PUT", &path, Some(json!({ "lineId": lines[0] })))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, archived) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/lines/{}", lines[0]),
+            Some(json!({ "archived": true, "expectedRev": 1 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{archived}");
+    let revision = host_revision(&admin.app).await;
+
+    let (status, saved) = admin
+        .call(
+            "PUT",
+            &path,
+            Some(json!({ "name": "Станция упаковки", "lineId": lines[0] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{saved}");
+    assert_eq!(
+        (saved["name"].clone(), saved["lineId"].clone()),
+        (json!("Станция упаковки"), json!(lines[0]))
+    );
+    assert_eq!(saved, device(&admin, &station).await);
+    assert_eq!(
+        host_revision(&admin.app).await,
+        revision,
+        "keeping the line takes no revision"
+    );
+    let trail = audit_trail(&admin.app, "device.update").await;
+    assert_eq!(trail.len(), 2, "the assignment and the rename");
+    assert_eq!(
+        trail[1],
+        admin.row(
+            "device.update",
+            "device",
+            &station,
+            json!({ "changed": ["name"], "name": { "from": "Тестовое устройство", "to": "Станция упаковки" } })
+        )
+    );
+
+    // Re-sending it alone changes nothing at all.
+    let (status, body) = admin
+        .call("PUT", &path, Some(json!({ "lineId": lines[0] })))
+        .await;
+    assert_eq!((status, body), (StatusCode::OK, saved));
+    assert_eq!(audit_trail(&admin.app, "device.update").await.len(), 2);
+    // Only the station's own line is «keep»: another archived line is refused.
+    let other = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/lines/{}", lines[1]),
+            Some(json!({ "archived": true, "expectedRev": 1 })),
+        )
+        .await;
+    assert_eq!(other.0, StatusCode::OK);
+    let (status, body) = admin
+        .call("PUT", &path, Some(json!({ "lineId": lines[1] })))
+        .await;
+    assert_eq!(
+        (status, body["error"]["details"]["field"].clone()),
+        (StatusCode::BAD_REQUEST, json!("lineId"))
+    );
+}
+
+/// A rename obeys the one control-character rule: a NUL first used to fail
+/// the table's CHECK as a 500, and a tab inside was stored as sent.
+#[tokio::test]
+async fn a_device_name_with_a_control_character_is_refused_on_update() {
+    let admin = admin().await;
+    let (station, _) = pair_device(&admin.app, "station").await;
+    let path = format!("/v1/office/devices/{station}");
+    let before = device(&admin, &station).await;
+    let revision = host_revision(&admin.app).await;
+    for name in ["\u{0}Станция", "Стан\tция", "Станция\u{0}"] {
+        let (status, body) = admin
+            .call("PUT", &path, Some(json!({ "name": name })))
+            .await;
+        assert_eq!(
+            (
+                status,
+                body["error"]["code"].clone(),
+                body["error"]["details"]["field"].clone()
+            ),
+            (
+                StatusCode::BAD_REQUEST,
+                json!("validation_failed"),
+                json!("name")
+            ),
+            "{name:?}"
+        );
+    }
+    assert_eq!(device(&admin, &station).await, before);
+    assert_eq!(host_revision(&admin.app).await, revision);
     assert!(audit_trail(&admin.app, "device.update").await.is_empty());
 }
 

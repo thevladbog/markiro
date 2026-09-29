@@ -130,7 +130,7 @@ pub async fn create_user(
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_admin_in(&mut tx).await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
-    let inserted = sqlx::query(
+    sqlx::query(
         "INSERT INTO office_users (id, login, name, role, password_phc, active, created_at, rev) \
          VALUES (?, ?, ?, ?, ?, 1, ?, ?)",
     )
@@ -142,15 +142,10 @@ pub async fn create_user(
     .bind(&at)
     .bind(rev)
     .execute(&mut *tx)
-    .await;
-    if let Err(error) = inserted {
-        return Err(match error.as_database_error() {
-            Some(database) if database.is_unique_violation() => {
-                ApiError::conflict("login", "this login is already taken")
-            }
-            _ => ApiError::internal(error),
-        });
-    }
+    .await
+    .map_err(|error| {
+        ApiError::conflict_on_unique_violation(error, "login", "this login is already taken")
+    })?;
     audit::record(
         &mut tx,
         &at,

@@ -301,6 +301,34 @@ async fn a_claim_is_checked_before_the_code() {
     assert_eq!(claim(&app, claim_body(&code)).await.0, StatusCode::OK);
 }
 
+/// The device's name obeys the one control-character rule here too, and the
+/// refusal comes before the code is looked at: the code is neither used nor
+/// counted against.
+#[tokio::test]
+async fn a_claim_with_a_control_character_in_the_device_name_creates_no_device() {
+    let app = TestApp::new().await;
+    let (key, token) = host(&app).await;
+    let (code, code_id) = new_code(&app, &key, &token).await;
+
+    for name in ["\u{0}Станция 2", "Стан\tция 2"] {
+        let mut body = claim_body(&code);
+        body["name"] = json!(name);
+        let (status, response) = claim(&app, body).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{name:?}");
+        assert_eq!(response["error"]["code"], "validation_failed", "{name:?}");
+        assert_eq!(response["error"]["details"]["field"], "name", "{name:?}");
+    }
+    let devices: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM devices")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(devices, 1, "only the host's own device exists");
+    assert_eq!(failed_attempts(&app, &code_id).await, 0);
+    assert!(claim_audit(&app).await.is_empty());
+    // The code was never touched: it still pairs a device with a clean name.
+    assert_eq!(claim(&app, claim_body(&code)).await.0, StatusCode::OK);
+}
+
 #[tokio::test]
 async fn a_handheld_pairs_with_a_code() {
     let app = TestApp::new().await;

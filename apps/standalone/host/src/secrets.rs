@@ -48,6 +48,19 @@ pub const MAX_ITERATIONS: u32 = 1_000_000;
 /// code under the site's salt always gives one PHC string.
 pub const BADGE_ITERATIONS: u32 = 100_000;
 
+// The host must accept the hashes it makes itself: `parse_phc` refuses a count
+// outside `MIN_ITERATIONS..=MAX_ITERATIONS`, so raising `PASSWORD_ITERATIONS`
+// past the ceiling (or lowering it under the floor) would make every new
+// password hash unreadable, and a badge's fixed count must stay readable too.
+const _: () = assert!(
+    PASSWORD_ITERATIONS >= MIN_ITERATIONS && PASSWORD_ITERATIONS <= MAX_ITERATIONS,
+    "PASSWORD_ITERATIONS must lie within MIN_ITERATIONS..=MAX_ITERATIONS"
+);
+const _: () = assert!(
+    BADGE_ITERATIONS >= MIN_ITERATIONS && BADGE_ITERATIONS <= MAX_ITERATIONS,
+    "BADGE_ITERATIONS must lie within MIN_ITERATIONS..=MAX_ITERATIONS"
+);
+
 /// A parsed `pbkdf2$sha256$<iterations>$<salt>$<digest>` string.
 pub struct Phc {
     pub iterations: u32,
