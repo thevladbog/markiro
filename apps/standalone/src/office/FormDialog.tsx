@@ -13,7 +13,13 @@ export interface FormDialogProps {
   submitVariant?: "primary" | "destructive";
   /** `false` hides a dialog that stays mounted between openings; open by default. */
   open?: boolean;
-  /** Sends the form; the dialog waits until the promise settles. */
+  /**
+   * Sends the form; the dialog waits until the promise settles. It sorts its
+   * own failures into a field error or the `alert` and must not reject: a
+   * rejection, or a throw before the promise, still releases the dialog but
+   * surfaces as an unhandled rejection. That is intended: a `.catch` here
+   * would hide a bug in the caller.
+   */
   onSubmit: (event: FormEvent<HTMLFormElement>) => Promise<void>;
   onClose: () => void;
   /** Above the fields: a failed write (`WriteFailureAlert`), or nothing. */
@@ -54,7 +60,9 @@ export function FormDialog({
     if (inFlight.current) return;
     inFlight.current = true;
     setSending(true);
-    void onSubmit(event).finally(() => {
+    // `onSubmit` may throw before it returns a promise: wrapping the call turns
+    // that into a rejection too, so the flag is released either way.
+    void new Promise<void>((resolve) => resolve(onSubmit(event))).finally(() => {
       inFlight.current = false;
       setSending(false);
     });
