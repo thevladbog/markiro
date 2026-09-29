@@ -41,7 +41,29 @@ pub fn payload(addresses: &[Ipv4Addr], port: u16, fingerprint: &str, code: &str)
 mod tests {
     use std::net::Ipv4Addr;
 
-    use super::{generate, payload, ALPHABET, CODE_LENGTH};
+    use super::{generate, payload, ALPHABET, CODE_LENGTH, CODE_LIFETIME};
+    use crate::clock::{format_timestamp, parse_timestamp};
+
+    /// The shared fixture is what this host answers: the payload it builds
+    /// for the fixture's code, and a lifetime of `CODE_LIFETIME` from
+    /// `createdAt` to `expiresAt`.
+    #[test]
+    fn the_shared_pairing_code_fixture_matches_the_host() {
+        let fixture: serde_json::Value =
+            serde_json::from_str(include_str!("../../proto/fixtures/pairing-code.json")).unwrap();
+        let text = |key: &str| fixture[key].as_str().unwrap().to_owned();
+        assert_eq!(
+            payload(
+                &[Ipv4Addr::new(10, 0, 0, 5), Ipv4Addr::new(192, 168, 1, 10)],
+                45710,
+                &"ab".repeat(32),
+                &text("code"),
+            ),
+            text("payload")
+        );
+        let created = parse_timestamp(&text("createdAt")).unwrap();
+        assert_eq!(format_timestamp(created + CODE_LIFETIME), text("expiresAt"));
+    }
 
     #[test]
     fn a_code_is_ten_crockford_characters() {

@@ -1,5 +1,7 @@
 {
+  "id": "4c2a9e7b-1d3f-4a5b-8c6d-7e8f9a0b1c2d",
   "code": "7K3MQ9XV2D",
+  "createdAt": "2026-09-26T09:15:00Z",
   "expiresAt": "2026-09-26T09:25:00Z",
   "payload": "markiro-host:1?h=10.0.0.5,192.168.1.10&p=45710&f=abababababababababababababababababababababababababababababababab&c=7K3MQ9XV2D"
 }

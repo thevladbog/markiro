@@ -291,15 +291,28 @@ pub struct PairResponse {
 }
 
 /// `POST /v1/office/pairing-codes`: a one-time code for pairing another
-/// device. The code and the payload carrying it are shown once.
+/// device. The code and the payload carrying it are shown once; `id` is what
+/// «Новый код» sends as `replaces`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairingCode {
+    pub id: String,
     /// 10 Crockford base32 characters.
     pub code: Secret,
+    pub created_at: String,
     pub expires_at: String,
     /// `markiro-host:1?h=<addresses>&p=<port>&f=<fingerprint>&c=<code>`.
     pub payload: Secret,
+}
+
+/// The optional body of `POST /v1/office/pairing-codes`. `replaces` names the
+/// code «Новый код» takes over: a live code the same office user created
+/// expires at once; anything else is ignored.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PairingCodeRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replaces: Option<String>,
 }
 
 /// `GET /v1/device`.

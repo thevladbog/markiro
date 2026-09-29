@@ -7,8 +7,8 @@ use markiro_proto::{
     LineUpdate, LocalPairRequest, OfficeLine, OfficeLoginRequest, OfficeOperator, OfficeRole,
     OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
     OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
-    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PasswordChange, PasswordSet,
-    SiteRecord, SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
+    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PasswordChange,
+    PasswordSet, SiteRecord, SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -159,9 +159,23 @@ fn password_change_fixture_round_trips_without_leaking() {
 #[test]
 fn pairing_code_fixture_round_trips_without_leaking() {
     let code: PairingCode = round_trip("pairing-code.json");
+    assert_eq!(code.created_at, "2026-09-26T09:15:00Z");
     let debug = format!("{code:?}");
     assert!(!debug.contains(code.code.expose()), "{debug}");
     assert!(!debug.contains("markiro-host:1"), "{debug}");
+}
+
+#[test]
+fn a_pairing_code_request_is_optional_and_strict() {
+    let request: PairingCodeRequest = round_trip("pairing-code-request.json");
+    let code: PairingCode = serde_json::from_value(fixture("pairing-code.json")).unwrap();
+    assert_eq!(request.replaces, Some(code.id));
+    let empty: PairingCodeRequest = serde_json::from_value(serde_json::json!({})).unwrap();
+    assert_eq!(empty.replaces, None);
+    assert_eq!(serde_json::to_value(&empty).unwrap(), serde_json::json!({}));
+    let mut value = fixture("pairing-code-request.json");
+    value["code"] = Value::String("7K3MQ9XV2D".into());
+    assert!(serde_json::from_value::<PairingCodeRequest>(value).is_err());
 }
 
 #[test]

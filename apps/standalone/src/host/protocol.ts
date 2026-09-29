@@ -187,9 +187,14 @@ export type OfficeSession = z.infer<typeof officeSessionSchema>;
 export const bootstrapResponseSchema = z.object({ session: officeSessionSchema });
 export type BootstrapResponse = z.infer<typeof bootstrapResponseSchema>;
 
-/** `POST /v1/office/pairing-codes`: a one-time code; the payload is what the DataMatrix encodes. */
+/**
+ * `POST /v1/office/pairing-codes`: a one-time code; the payload is what the DataMatrix encodes.
+ * `id` is what «Новый код» sends as `replaces`, and `createdAt` starts the code's lifetime.
+ */
 export const pairingCodeSchema = z.object({
+  id: z.uuid(),
   code: z.string().regex(new RegExp(`^[${PAIRING_CODE_ALPHABET}]{${PAIRING_CODE_LENGTH}}$`)),
+  createdAt: z.iso.datetime(),
   expiresAt: z.iso.datetime(),
   payload: z.string().startsWith("markiro-host:1?"),
 });

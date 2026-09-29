@@ -153,6 +153,25 @@ where
     }
 }
 
+/// An optional JSON body: without a `Content-Type` header there is none
+/// (`None`); with one, the body must parse, and its rejections become
+/// `validation_failed` like `ApiJson`'s.
+impl<S, T> axum::extract::OptionalFromRequest<S> for ApiJson<T>
+where
+    T: DeserializeOwned,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(request: Request, state: &S) -> Result<Option<Self>, Self::Rejection> {
+        match <Json<T> as axum::extract::OptionalFromRequest<S>>::from_request(request, state).await
+        {
+            Ok(value) => Ok(value.map(|Json(value)| Self(value))),
+            Err(rejection) => Err(ApiError::malformed(rejection.body_text())),
+        }
+    }
+}
+
 /// `Path<T>` whose rejections become `validation_failed`.
 pub struct ApiPath<T>(pub T);
 

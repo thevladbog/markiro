@@ -37,7 +37,13 @@ Devices on the network pair only with a one-time code. An administrator creates
 it (`POST /v1/office/pairing-codes`); it lives 10 minutes, is stored as a hash,
 is claimed once (`POST /v1/pairing/claim`, 10 attempts a minute per address)
 and dies after 5 failed claims — a wrong code counts against every live code,
-since the hash cannot tell which one was meant. The claiming device pins the
+since the hash cannot tell which one was meant. The answer carries the code's
+`id` and `createdAt`. «Новый код» sends the previous `id` as `{ replaces }`,
+and a live code the same administrator created then expires at once: a claim
+with it answers `pairing_code_expired`. A `replaces` that names anything else
+— another administrator's code, an unknown, used, expired or exhausted one —
+is ignored, and the new code is issued anyway; without a body (no
+`Content-Type`) nothing is replaced. The claiming device pins the
 fingerprint from the scanned payload, or one a person compared with the office
 screen: `host_claim` refuses a malformed fingerprint (`invalid_request`) and a
 code that cannot be a code (`pairing_code_invalid`, checked with

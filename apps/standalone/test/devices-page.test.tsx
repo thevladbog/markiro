@@ -50,7 +50,9 @@ const RETIRED: DeviceRecord = {
 /** A code the host issued `secondsAgo` seconds ago: it lives 10 minutes. */
 function pairingCode(secondsAgo: number, hosts = "10.0.0.5,192.168.1.10"): PairingCode {
   return {
+    id: "4c2a9e7b-1d3f-4a5b-8c6d-7e8f9a0b1c2d",
     code: "7K3MQ9XV2D",
+    createdAt: new Date(Date.now() - secondsAgo * 1000).toISOString(),
     expiresAt: new Date(Date.now() + (600 - secondsAgo) * 1000).toISOString(),
     payload: `markiro-host:1?h=${hosts}&p=45710&f=${FINGERPRINT}&c=7K3MQ9XV2D`,
   };
@@ -217,7 +219,9 @@ describe("office devices", () => {
     // issued the code at 09:50 UTC (issuedAt = expiresAt - 10 min) and it
     // lives until 10:00.
     const code: PairingCode = {
+      id: "4c2a9e7b-1d3f-4a5b-8c6d-7e8f9a0b1c2d",
       code: "7K3MQ9XV2D",
+      createdAt: "2026-09-27T09:50:00.000Z",
       expiresAt: "2026-09-27T10:00:00.000Z",
       payload: `markiro-host:1?h=10.0.0.5,192.168.1.10&p=45710&f=${FINGERPRINT}&c=7K3MQ9XV2D`,
     };
@@ -377,7 +381,9 @@ describe("office devices", () => {
     expect(within(dialog).queryByText(/^Код действует ещё (10:00|09:59)$/)).toBeNull();
 
     const secondCode: PairingCode = {
+      id: "9d8c7b6a-5f4e-4d3c-8b2a-1f0e9d8c7b6a",
       code: "AAAAABBBBB",
+      createdAt: pairingCode(0).createdAt,
       expiresAt: pairingCode(0).expiresAt,
       payload: `markiro-host:1?h=10.0.0.5,192.168.1.10&p=45710&f=${FINGERPRINT}&c=AAAAABBBBB`,
     };

@@ -8,7 +8,8 @@ use axum::extract::{ConnectInfo, State};
 use axum::http::StatusCode;
 use axum::{Extension, Json};
 use markiro_proto::{
-    codes, ClaimRequest, DeviceKind, LocalPairRequest, PairResponse, PairingCode, Secret,
+    codes, ClaimRequest, DeviceKind, LocalPairRequest, PairResponse, PairingCode,
+    PairingCodeRequest, Secret,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -256,12 +257,18 @@ pub async fn claim(
 
 /// `POST /v1/office/pairing-codes` (administrators): a one-time code for a
 /// device in the local network. Only its hash is stored; the code and the
-/// payload are returned once.
+/// payload are returned once. «Новый код» sends `{ replaces: <id> }` (owner
+/// decision 2026-09-27): a live code this same office user created expires
+/// at once, so a claim with it answers `pairing_code_expired`. Anything else
+/// in `replaces` — another user's code, an unknown, used, expired or
+/// exhausted one — is ignored, and the new code is issued anyway.
 pub async fn create_code(
     State(state): State<AppState>,
     context: OfficeContext,
+    request: Option<ApiJson<PairingCodeRequest>>,
 ) -> Result<Json<PairingCode>, ApiError> {
     context.require_admin()?;
+    let replaces = request.and_then(|ApiJson(request)| request.replaces);
     let code = pairing_code::generate();
     let now = state.now();
     let at = format_timestamp(now);
@@ -269,6 +276,26 @@ pub async fn create_code(
     let id = uuid::Uuid::new_v4().to_string();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_admin_in(&mut tx).await?;
+    // Expiring the replaced code now makes a claim refuse it as expired and
+    // takes it out of the live codes a wrong guess counts against.
+    let replaced = match replaces.as_deref() {
+        Some(old) => {
+            let expired = sqlx::query(
+                "UPDATE pairing_codes SET expires_at = ? WHERE id = ? AND created_by = ? \
+                 AND used_at IS NULL AND expires_at > ? AND failed_attempts < ?",
+            )
+            .bind(&at)
+            .bind(old)
+            .bind(&context.user.id)
+            .bind(&at)
+            .bind(pairing_code::MAX_FAILED_ATTEMPTS)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+            (expired.rows_affected() == 1).then_some(old)
+        }
+        None => None,
+    };
     sqlx::query(
         "INSERT INTO pairing_codes (id, code_hash, created_by, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
     )
@@ -289,7 +316,10 @@ pub async fn create_code(
             target_type: Some("pairing_code"),
             target_id: Some(&id),
             outcome: Outcome::Ok,
-            details: json!({ "expiresAt": expires }),
+            details: match replaced {
+                Some(old) => json!({ "expiresAt": expires, "replaces": old }),
+                None => json!({ "expiresAt": expires }),
+            },
         },
     )
     .await
@@ -303,7 +333,9 @@ pub async fn create_code(
         &code,
     );
     Ok(Json(PairingCode {
+        id,
         code: Secret::new(code),
+        created_at: at,
         expires_at: expires,
         payload: Secret::new(payload),
     }))
