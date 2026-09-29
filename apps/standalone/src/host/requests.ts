@@ -51,12 +51,18 @@ export function counterpartyUpdate(
   };
 }
 
-/** `POST /v1/office/lines` (`line-create.json`). */
+/**
+ * `POST /v1/office/lines` (`line-create.json`). `name` is the trimmed value
+ * `lineNameRule` accepted: the builder sends it as it is.
+ */
 export function lineCreate(name: string): LineCreate {
   return { name };
 }
 
-/** What a line is to become; `lineUpdate` sends what differs from the loaded line. */
+/**
+ * What a line is to become; `lineUpdate` sends what differs from the loaded
+ * line. `name` is the trimmed value `lineNameRule` accepted.
+ */
 export interface LineChange {
   name: string;
   archived: boolean;
@@ -76,7 +82,10 @@ export function lineUpdate(
   return update;
 }
 
-/** What a device is to become: its name and, for a station, its line (`null` for none). */
+/**
+ * What a device is to become: its name, the trimmed value `deviceNameRule`
+ * accepted, and, for a station, its line (`null` for none).
+ */
 export interface DeviceChange {
   name: string;
   lineId: string | null;

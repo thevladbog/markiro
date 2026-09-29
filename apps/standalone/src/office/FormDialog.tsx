@@ -9,7 +9,7 @@ export interface FormDialogProps {
   submitLabel: string;
   /** Keeps the submit button off, for example until something changed. */
   submitDisabled?: boolean;
-  /** `destructive` for an action that cannot be undone. */
+  /** `destructive` for an action that takes a record out of use (archive, revoke). */
   submitVariant?: "primary" | "destructive";
   /** `false` hides a dialog that stays mounted between openings; open by default. */
   open?: boolean;

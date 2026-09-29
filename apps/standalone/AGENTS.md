@@ -193,9 +193,13 @@ forgetting goes on; plan 1d4 revisits this before PIN and badge hashes land.
   control character inside a name would let two names that look identical
   both be active. The webview's forms check the same rule before sending
   (`isPlainText` and `plainTextRule` in `src/lib/rules.ts`): the office forms,
-  the wizard and the device name at pairing. JavaScript's `trim` differs from
-  Rust's only at the edges (a NEL, U+0085, is refused rather than trimmed; a
-  BOM, U+FEFF, is trimmed), so a form is never more lenient than the host.
+  the wizard and the device name at pairing. The trim sets of JavaScript and
+  Rust differ in exactly two characters (U+0085, a NEL, is trimmed only by
+  Rust; U+FEFF, a BOM, only by JavaScript), and a form is never more lenient
+  than the host only because it sends the trimmed value it validated. A lone
+  surrogate is refused as well: no Rust string holds one, `JSON.stringify`
+  writes it as an escape serde_json rejects, and the IPC call would fail
+  before the host as a lost connection.
 - Admin writes re-check rights with `OfficeContext::require_admin_in` inside
   the transaction, in addition to the early `require_admin` rejection. The
   extractor's role and active flag are read before the request hashes a
@@ -348,10 +352,12 @@ device's revision goes unnoticed until the feed carries an epoch (plan 5).
 Changing a wire shape means changing `proto`, the Zod schemas and the
 fixtures together; the Rust tests parse every fixture, and the Vitest suite
 parses every fixture whose shape crosses the IPC boundary. An office request
-body the webview builds has one builder in `src/host/requests.ts`, which
-names every field it sends; `test/protocol.test.ts` checks that each builder
-produces its fixture exactly. Raise
-`PROTOCOL_VERSION` for an incompatible change; the host keeps accepting the
+body the webview has built since plan 1d3 has one builder in
+`src/host/requests.ts`, which names every field it sends;
+`test/protocol.test.ts` checks that each builder produces its fixture exactly.
+The older forms (users, the organization, SSCC and the wizard) build their
+bodies inline, field by field. Raise `PROTOCOL_VERSION` for an incompatible
+change; the host keeps accepting the
 previous version. Response types, which devices of different versions read,
 tolerate unknown fields; request types, which the host parses, reject them
 with `deny_unknown_fields`. The `product`, `protocol` and `minProtocol`
@@ -488,9 +494,12 @@ A successful run starts the count again; any other run replaces the
 pending retry; a status that is not `online` drops it (a run that failed
 while the link was already not `online` never armed one); and an `online`
 status after a failed run with no retry pending — dropped, or never
-armed — syncs at once. Reads follow the same rules, and the line-selection
-screen's «Повторить» (`requestSync`) asks for a sync and a read together. The
-run's error sets the sync state's `failure`: `local` for a
+armed — syncs at once. Reads follow the same rules, but a failed read of the
+device shows no message of its own: it is retried quietly, and the sync
+state's `failure`, below, belongs to the sync alone. `requestSync` asks for a
+sync and a read together: from the line-selection screen's «Повторить» and
+after a `line_rejected` (`LineSelect.tsx`). The sync run's error sets the sync
+state's `failure`: `local` for a
 `LocalDbError`; `feed` for an answer this build cannot read (a
 `HostError` with code `invalid_response`), a `SyncFeedError` or anything
 else; `host` for every other `HostError`. It stays through the retry's
@@ -511,11 +520,12 @@ open page, so a form keeps what was typed and a save over a newer record meets
 
 A paired station without a line chooses one (`LineSelect`) among the active
 lines of the local copies (a line the office clears brings the station back
-here, and a line the office sets moves it on), read only after a sync in this session brought them
-up to date and again after every sync, so a previous pairing's lines never
-show; the host's answer goes to `device.json` through `device_select_line`. A
-refused device key or a changed certificate from that call is a rejected device
-— `key_rejected` or `host_changed` — exactly as on every other host path.
+here, and a line the office sets moves it on), read only after a sync in this
+session brought them up to date and again after every sync, so a previous
+pairing's lines never show; the host's answer goes to `device.json` through
+`device_select_line`. A refused device key or a changed certificate from that
+call is a rejected device — `key_rejected` or `host_changed` — exactly as on
+every other host path.
 `HostStatusLine` shows the link on the floor, on the line screen and in the
 office header — online, connecting, or silent since the last contact, with the
 reason — as a phase tag with words in a polite live region. In the same region
@@ -554,7 +564,16 @@ requests and offer a retry.
   sorts a refused write: a `validation_failed` field or a `conflict`
   constraint the form names (`line_name`, `login`) goes under that field,
   `stale_revision` offers to reload, anything else is an alert
-  (`WriteFailureAlert`). Whether a page shows a form or a read-only view comes
+  (`WriteFailureAlert`). A `FormDialog`'s `onSubmit` must never reject: it
+  sorts every failure itself, and a rejection would only surface as an
+  unhandled one, so a caller's bug is not hidden. Only the awaited write sits
+  in the `try`; the callback after a saved write (`onSaved`, `onRevoked`, …)
+  and whatever else follows a success run after the `try/catch`, whose `catch`
+  ends with `return`, so a throw there is never shown as a failed write (a
+  retry would add a second counterparty: the host keeps no uniqueness). The
+  archive and revoke confirmations use the `destructive` submit variant
+  although archiving can be undone: here it means an action that takes a
+  record out of use. Whether a page shows a form or a read-only view comes
   from `useCan` (`src/office/access.ts`), the table of spec §4.8.
 - Request bodies are built field by field, never spread from form values, so
   nothing the form holds reaches the host by accident; ids go into the path

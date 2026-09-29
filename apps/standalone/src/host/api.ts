@@ -79,7 +79,12 @@ export interface HostApi {
   listDevices: (token: string) => Promise<DeviceRecord[]>;
   updateDevice: (token: string, id: string, update: DeviceUpdate) => Promise<DeviceRecord>;
   revokeDevice: (token: string, id: string) => Promise<DeviceRecord>;
-  /** Without `request` no body is sent; with it, the code it names ends at once. */
+  /**
+   * Without `request` no body is sent. With it, the host ends the code it names
+   * at once only if that code is live and this office user created it, and
+   * ignores any other; the new code is issued either way (`PairingCodeRequest`
+   * in `proto/src/lib.rs`, `create_code` in `host/src/routes/pairing.rs`).
+   */
   createPairingCode: (token: string, request?: PairingCodeRequest) => Promise<PairingCode>;
   listCounterparties: (token: string) => Promise<CounterpartyRecord[]>;
   createCounterparty: (token: string, create: CounterpartyCreate) => Promise<CounterpartyRecord>;

@@ -525,7 +525,10 @@ TypeScript-модуль `src/local/reference-sync.ts`:
   хосту только через `session.call` с методами `session.api` (`HostApi`,
   `src/host/api.ts`) — хуки `useOfficeQuery` и `useOfficeMutation`
   (`src/office/office-query.ts`), а не через `apiFetch`. Облачные
-  понятия (тенант, `useCan`, подписка, Нацкаталог, фото через сервер) убираются.
+  понятия (тенант, подписка, Нацкаталог, фото через сервер) убираются, а `useCan`
+  кабинета заменяется собственным помощником только по роли: `useCan` из
+  `src/office/access.ts` читает таблицу ролей §4.8 (план 1e добавляет в неё
+  `editCatalog`), и страницы ниже показывают форму или только чтение по нему.
   Формы проверяют поля правилами `@markiro/domain` (`normalizeToGtin14`,
   `gtinMatchesPrefix`, `labelTemplateSpecSchema`) до отправки на хост.
 - Контрагенты (план 1d3): список видят все роли, меняет администратор. Правка
