@@ -116,4 +116,43 @@ describe("print document model", () => {
     expect(model.seller).toMatchObject({ registrationKind: "ogrn", taxPolicy: null });
     expect(model.buyer).toMatchObject({ registrationKind: "ogrnip", taxPolicy: null });
   });
+  it.each([
+    ["unit", "шт."],
+    ["hour", "час"],
+    ["person", "чел."],
+    ["person_day", "чел.-дн."],
+    ["day", "дн."],
+    ["project", "проект"],
+    ["session", "сессия"],
+    ["package", "пакет"],
+    ["service", "услуга"],
+    ["right", "право"],
+    ["work", "работа"],
+    ["месяц", "месяц"],
+    ["license", "license"],
+  ])("prints the stored line unit %s as %s", (stored, printed) => {
+    const model = toInvoicePrintModel({
+      number: "INV-000003",
+      status: "issued",
+      issueDate: new Date("2026-08-12T00:00:00.000Z"),
+      dueDate: null,
+      sellerSnapshot: { legalName: "ООО Оператор" },
+      buyerSnapshot: { legalName: "ООО Покупатель" },
+      subtotal: "100.00",
+      vatTotal: "0.00",
+      total: "100.00",
+      lines: [
+        {
+          position: 1,
+          nameRu: "Позиция",
+          unit: stored,
+          quantity: 1,
+          agreedUnitPrice: "100.00",
+          vatIncluded: false,
+          lineTotal: "100.00",
+        },
+      ],
+    });
+    expect(model.lines[0]?.unit).toBe(printed);
+  });
 });
