@@ -291,7 +291,6 @@ export function App({
         session={officeSession}
         link={state.link}
         sync={state.sync}
-        local={localDb}
         hostRevision={state.hostRevision}
       />
     );

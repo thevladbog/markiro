@@ -18,8 +18,6 @@ export const officeKeys = {
   devices: ["office", "devices"],
   counterparties: ["office", "counterparties"],
   lines: ["office", "lines"],
-  /** Line names from this installation's local copies, not from the host. */
-  lineNames: ["office", "line-names"],
 } as const;
 
 /**

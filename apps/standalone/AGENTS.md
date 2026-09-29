@@ -572,18 +572,28 @@ requests and offer a retry.
   password goes through «Сменить пароль» with the current password.
 - An ended session unmounts the office: unsaved edits are lost, and the next
   sign-in starts at «Обзор».
-- «Устройства» lists `GET /v1/office/devices`; line names come from this
-  installation's local copies (`useQuery` with `officeKeys.lineNames` — a
-  local read, not a host request), and `lastSeenAt` is «Последний раз»,
-  never «на связи»: the host touches it at most once a minute and a stream
-  only when it opens. A claim raises no revision, so the pairing-code
-  dialog reads the list every 3 s (`DEVICE_POLL_MS`) and closes once a
-  device paired after the code was issued appears. The DataMatrix encoder
-  loads lazily (`PairingDataMatrix`); when it fails, the typed code, the
-  fingerprint and the host's addresses stay the way to pair. The code's own
-  countdown runs on this PC's clock from the moment the code was requested,
-  since the host and the office PCs on a cloud-less LAN are not promised to
-  agree on the time; join detection compares host timestamps only.
+- «Устройства» lists `GET /v1/office/devices` and names lines from
+  `GET /v1/office/lines`, the list its edit dialog offers, so a line added a
+  moment ago can be chosen at once; an archived line is marked «в архиве».
+  `lastSeenAt` is «Последний раз», never «на связи»: the host touches it at
+  most once a minute and a stream only when it opens. One dialog renames a
+  device and sets a station's line, sending only what changed
+  (`deviceUpdate`): only an active line can be chosen, and a station's
+  current line stays on the list even when archived. A revoked device is a
+  dead record and offers no controls; revoking asks first, names the device
+  and says it cannot be undone, then the list is read again. A claim raises
+  no revision, so the pairing-code dialog reads the list every 3 s
+  (`DEVICE_POLL_MS`) and closes once a device paired after the code was
+  created appears. «Новый код» sends the code on screen as `{ replaces }`
+  (no code on screen, no body), and a second click while a code is on its
+  way asks for nothing. The DataMatrix encoder loads lazily
+  (`PairingDataMatrix`); when it fails, the typed code, the fingerprint and
+  the host's addresses stay the way to pair. The countdown takes the code's
+  lifetime from the host (`codeLifetimeMs`: `expiresAt − createdAt`) and
+  counts it on this PC's clock from the moment the code was requested: the
+  host and the office PCs on a cloud-less LAN are not promised to agree on
+  the time, so no host timestamp is compared with this PC's clock, and join
+  detection compares host timestamps only.
 
 ## Marking rules
 
