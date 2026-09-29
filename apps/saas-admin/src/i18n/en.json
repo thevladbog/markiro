@@ -1835,8 +1835,13 @@
         "nameTooLong": "Use no more than 300 characters",
         "slugTooLong": "Use no more than 128 characters",
         "slug": "Use lowercase Latin letters, digits, and hyphens only",
-        "email": "Enter a valid address"
-      }
+        "email": "Enter a valid address",
+        "emailNotAllowed": "A tenant without a cabinet takes no email"
+      },
+      "cabinetAccess": "Cabinet access",
+      "cabinetAccessHint": "Clear this for an offline-product customer: no cabinet, owner or demo is created, and access can be granted later.",
+      "offlineNotice": "Tenant without a cabinet: no owner, activation email or demo is created. Licenses are unavailable, only services. You send invoices and acts yourself.",
+      "submitOffline": "Create tenant without a cabinet"
     },
     "unsaved": {
       "title": "Unsaved changes",
@@ -1964,7 +1969,17 @@
         "quantity": "Quantity: {{quantity}}"
       },
       "historyTitle": "Subscription history",
-      "historyEmpty": "No events yet"
+      "historyEmpty": "No events yet",
+      "offline": {
+        "title": "Cabinet not granted",
+        "body": "This tenant has no owner or cabinet users. Access can be granted later: the owner will receive an activation email.",
+        "grant": "Grant cabinet access",
+        "email": "Owner email",
+        "submit": "Grant and send activation",
+        "granted": "Access granted; the activation email is queued.",
+        "created": "Tenant created without a cabinet.",
+        "documentsNotice": "The platform sends this tenant no documents or notifications. Download invoices and acts and send them to the customer yourself."
+      }
     },
     "usage": {
       "lines": "Lines",
@@ -2069,7 +2084,15 @@
       "subscription_addon_timeline_changed": "The add-on timeline changed. Refresh the page and review again.",
       "create_failed": "Could not create the tenant",
       "renew_failed": "Could not renew activation",
-      "assignment_failed": "Could not save the assignment"
+      "assignment_failed": "Could not save the assignment",
+      "cabinet_access_already_enabled": "This tenant already has cabinet access",
+      "tenant_cabinet_access_mismatch": "A tenant with this slug already exists with a different cabinet access mode",
+      "grant_owner_conflict": "This tenant already has another cabinet member",
+      "tenant_not_found": "Tenant not found",
+      "grant_failed": "Could not grant cabinet access"
+    },
+    "cabinet": {
+      "none": "No cabinet"
     }
   },
   "commercial": {

@@ -27,6 +27,7 @@ function toTenantListItem(detail: TenantDetail): TenantListItem {
     id: detail.tenant.id,
     name: detail.tenant.name,
     slug: detail.tenant.slug,
+    cabinetAccess: detail.tenant.cabinetAccess,
     createdAt: detail.tenant.createdAt,
     subscriptionStatus: detail.subscriptionStatus,
   };

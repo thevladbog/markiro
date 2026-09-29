@@ -586,6 +586,7 @@ export const TENANT_LIST_ITEM = {
   name: "Первый завод",
   slug: "first-factory",
   createdAt: "2026-08-09T08:00:00.000Z",
+  cabinetAccess: "enabled",
   subscriptionStatus: "trial",
   subscription: {
     id: "b1111111-1111-4111-8111-111111111111",
@@ -608,6 +609,7 @@ export const TENANT_DETAIL = {
     name: "Первый завод",
     slug: "first-factory",
     createdAt: "2026-08-09T08:00:00.000Z",
+    cabinetAccess: "enabled",
   },
   subscriptionStatus: "trial",
   ownerActivation: {
@@ -827,6 +829,7 @@ export function installTenantApi({
   total = items.length,
   createResponses = [],
   renewResponses = [],
+  grantResponses = [],
   assignmentResponses = [],
   detailResponses = [],
   catalogResponse = { items: [PUBLISHED_PLAN, SCHEDULED_PLAN, ADDON] },
@@ -882,6 +885,7 @@ export function installTenantApi({
   total?: number;
   createResponses?: Array<{ status: number; code?: string }>;
   renewResponses?: Array<{ status: number; code?: string }>;
+  grantResponses?: Array<{ status: number; code?: string }>;
   assignmentResponses?: Array<{ status: number; code?: string }>;
   detailResponses?: Array<Record<string, unknown>>;
   catalogResponse?: unknown;
@@ -935,12 +939,31 @@ export function installTenantApi({
         if (response.status !== 201) {
           return jsonResponse(response.status, { code: response.code ?? "tenant_conflict" });
         }
-        return jsonResponse(201, {
-          tenantId: TENANT_ID,
-          userId: "owner-user-1",
-          memberId: "member-1",
-          deliveryId: "c1111111-1111-4111-8111-111111111111",
-        });
+        return jsonResponse(
+          201,
+          body.cabinetAccess === "none"
+            ? { tenantId: TENANT_ID, userId: null, memberId: null, deliveryId: null }
+            : {
+                tenantId: TENANT_ID,
+                userId: "owner-user-1",
+                memberId: "member-1",
+                deliveryId: "c1111111-1111-4111-8111-111111111111",
+              },
+        );
+      }
+      if (url.endsWith(`/api/platform/tenants/${TENANT_ID}/cabinet-access`) && method === "POST") {
+        mutationCalls.push({ method, path: url, body: JSON.parse(String(init.body)) });
+        const response = grantResponses.shift() ?? { status: 201 };
+        return response.status === 201
+          ? jsonResponse(201, {
+              tenantId: TENANT_ID,
+              userId: "owner-user-1",
+              memberId: "member-1",
+              deliveryId: "c1111111-1111-4111-8111-111111111111",
+            })
+          : jsonResponse(response.status, {
+              code: response.code ?? "cabinet_access_already_enabled",
+            });
       }
       if (url.endsWith(`/api/platform/tenants/${TENANT_ID}`) && method === "GET") {
         const response = detailResponses[detailRequestCount] ?? detail;

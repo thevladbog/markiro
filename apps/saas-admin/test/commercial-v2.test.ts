@@ -14,6 +14,7 @@ describe("current commercial fixtures", () => {
         name: "Legacy tenant",
         slug: "legacy",
         createdAt: "2026-09-01T00:00:00.000Z",
+        cabinetAccess: "enabled",
       },
       subscriptionStatus: "unmanaged",
       ownerActivation: null,
