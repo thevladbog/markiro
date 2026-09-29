@@ -33,6 +33,8 @@ export const tenantSubscriptionStatusFilterSchema = z.union([
   z.literal("unmanaged"),
 ]);
 export const tenantActivationPolicySchema = z.enum(["immediate", "after_current"]);
+export const cabinetAccessSchema = z.enum(["enabled", "none"]);
+export type CabinetAccess = z.output<typeof cabinetAccessSchema>;
 
 const catalogStatusSchema = z.enum(["draft", "published", "retired"]);
 const catalogKindSchema = z.enum(["plan", "addon", "service"]);
@@ -77,6 +79,7 @@ export const tenantListItemSchema = z.object({
   id: platformTenantIdSchema,
   name: z.string().min(1).max(300),
   slug: z.string().min(1).max(128),
+  cabinetAccess: cabinetAccessSchema,
   createdAt: responseTimestampSchema,
   subscriptionStatus: tenantSubscriptionStatusFilterSchema,
   subscription: z
@@ -180,6 +183,7 @@ export const tenantDetailSchema = z.object({
     id: platformTenantIdSchema,
     name: z.string().min(1).max(300),
     slug: z.string().min(1).max(128),
+    cabinetAccess: cabinetAccessSchema,
     createdAt: responseTimestampSchema,
   }),
   subscriptionStatus: tenantSubscriptionStatusFilterSchema,
@@ -282,11 +286,28 @@ export const createTenantSchema = z
       .trim()
       .max(128, "slugTooLong")
       .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, "slug"),
-    email: normalizedEmailSchema,
+    email: normalizedEmailSchema.optional(),
+    cabinetAccess: cabinetAccessSchema.default("enabled"),
   })
-  .strict();
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.cabinetAccess === "enabled" && value.email === undefined) {
+      ctx.addIssue({ code: "custom", path: ["email"], message: "email" });
+    }
+    if (value.cabinetAccess === "none" && value.email !== undefined) {
+      ctx.addIssue({ code: "custom", path: ["email"], message: "emailNotAllowed" });
+    }
+  });
 
 export const createTenantResponseSchema = z.object({
+  tenantId: platformTenantIdSchema,
+  userId: z.string().min(1).max(128).nullable(),
+  memberId: z.string().min(1).max(128).nullable(),
+  deliveryId: platformUuidSchema.nullable(),
+});
+
+export const grantCabinetAccessSchema = z.object({ email: normalizedEmailSchema }).strict();
+export const grantCabinetAccessResponseSchema = z.object({
   tenantId: platformTenantIdSchema,
   userId: z.string().min(1).max(128),
   memberId: z.string().min(1).max(128),
@@ -369,6 +390,11 @@ export const platformTenantContracts = {
   list: { query: tenantListQuerySchema, response: tenantListResponseSchema },
   detail: { params: tenantParamsSchema, response: tenantDetailSchema },
   create: { body: createTenantSchema, response: createTenantResponseSchema },
+  grantCabinetAccess: {
+    params: tenantParamsSchema,
+    body: grantCabinetAccessSchema,
+    response: grantCabinetAccessResponseSchema,
+  },
   renewActivation: {
     params: tenantParamsSchema,
     response: renewTenantActivationResponseSchema,
@@ -398,6 +424,9 @@ export type DetailPlanVersion = TenantSubscription["planVersion"];
 export type AssignableCatalogVersion = z.output<typeof assignableCatalogVersionSchema>;
 export type AssignableCatalogResponse = z.output<typeof assignableCatalogResponseSchema>;
 export type CreateTenantInput = z.input<typeof createTenantSchema>;
+export type GrantCabinetAccessInput = z.input<typeof grantCabinetAccessSchema>;
+export type GrantCabinetAccessDto = z.output<typeof grantCabinetAccessSchema>;
+export type GrantCabinetAccessResult = z.output<typeof grantCabinetAccessResponseSchema>;
 export type CreateTenantDto = z.output<typeof createTenantSchema>;
 export type CreateTenantResult = z.output<typeof createTenantResponseSchema>;
 export type CreateTenantResponse = z.output<typeof createTenantResponseSchema>;
