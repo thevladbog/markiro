@@ -27,11 +27,14 @@ export function RevokeDeviceDialog({ device, onClose, onRevoked }: RevokeDeviceD
 
   const submit = async () => {
     setFailure(null);
+    let revoked: DeviceRecord;
     try {
-      onRevoked(await revoke.mutateAsync());
+      revoked = await revoke.mutateAsync();
     } catch (error) {
       setFailure(alertFailure(error));
+      return;
     }
+    onRevoked(revoked);
   };
 
   return (

@@ -78,8 +78,9 @@ export function DeviceDialog({ device, lines, onClose, onSaved }: DeviceDialogPr
 
   const submit = handleSubmit(async (values) => {
     setFailure(null);
+    let saved: DeviceRecord;
     try {
-      onSaved(await save.mutateAsync(values));
+      saved = await save.mutateAsync(values);
     } catch (error) {
       const outcome = writeFailure(error, DEVICE_FIELDS);
       if (outcome.kind === "field") {
@@ -87,7 +88,9 @@ export function DeviceDialog({ device, lines, onClose, onSaved }: DeviceDialogPr
       } else {
         setFailure(outcome);
       }
+      return;
     }
+    onSaved(saved);
   });
 
   return (

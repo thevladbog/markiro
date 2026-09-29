@@ -30,11 +30,14 @@ export function ArchiveLineDialog({ line, onClose, onArchived, onReload }: Archi
 
   const submit = async () => {
     setFailure(null);
+    let archived: OfficeLine;
     try {
-      onArchived(await archive.mutateAsync());
+      archived = await archive.mutateAsync();
     } catch (error) {
       setFailure(alertFailure(error));
+      return;
     }
+    onArchived(archived);
   };
 
   return (

@@ -67,8 +67,9 @@ export function CounterDialog({ counter, onClose, onSaved, onReload }: CounterDi
 
   const submit = handleSubmit(async ({ nextSerial }) => {
     setFailure(null);
+    let saved: SsccCounter;
     try {
-      onSaved(await update.mutateAsync(nextSerial));
+      saved = await update.mutateAsync(nextSerial);
     } catch (error) {
       if (error instanceof HostError && error.code === "sscc_below_floor") {
         const minSerial = error.details.minSerial;
@@ -82,7 +83,9 @@ export function CounterDialog({ counter, onClose, onSaved, onReload }: CounterDi
       } else {
         setFailure(outcome);
       }
+      return;
     }
+    onSaved(saved);
   });
 
   return (

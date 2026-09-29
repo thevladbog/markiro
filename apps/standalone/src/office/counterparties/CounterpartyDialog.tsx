@@ -64,8 +64,9 @@ export function CounterpartyDialog({
 
   const submit = handleSubmit(async (values) => {
     setFailure(null);
+    let saved: CounterpartyRecord;
     try {
-      onSaved(await save.mutateAsync(values));
+      saved = await save.mutateAsync(values);
     } catch (error) {
       const outcome = writeFailure(error, COUNTERPARTY_FIELDS);
       if (outcome.kind === "field") {
@@ -73,7 +74,9 @@ export function CounterpartyDialog({
       } else {
         setFailure(outcome);
       }
+      return;
     }
+    onSaved(saved);
   });
 
   return (

@@ -42,7 +42,6 @@ export function SetPasswordDialog({ user, onClose, onChanged }: SetPasswordDialo
     setFailure(null);
     try {
       await set.mutateAsync(values.password);
-      onChanged();
     } catch (error) {
       const outcome = writeFailure(error, PASSWORD_FIELDS);
       if (outcome.kind === "field") {
@@ -50,7 +49,9 @@ export function SetPasswordDialog({ user, onClose, onChanged }: SetPasswordDialo
       } else {
         setFailure(outcome);
       }
+      return;
     }
+    onChanged();
   });
 
   return (

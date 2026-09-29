@@ -106,8 +106,9 @@ function OrgProfileForm({ profile, onSaved, onSubmitStart, onReload }: OrgProfil
   const submit = handleSubmit(async (values) => {
     onSubmitStart();
     setFailure(null);
+    let saved: OrgProfile;
     try {
-      onSaved(await update.mutateAsync(values));
+      saved = await update.mutateAsync(values);
     } catch (error) {
       const outcome = writeFailure(error, ORG_HOST_FIELDS);
       if (outcome.kind === "field") {
@@ -115,7 +116,9 @@ function OrgProfileForm({ profile, onSaved, onSubmitStart, onReload }: OrgProfil
       } else {
         setFailure(outcome);
       }
+      return;
     }
+    onSaved(saved);
   });
 
   return (

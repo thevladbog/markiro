@@ -75,8 +75,9 @@ export function LineDialog({ mode, onClose, onSaved, onReload }: LineDialogProps
 
   const submit = handleSubmit(async ({ name }) => {
     setFailure(null);
+    let saved: OfficeLine;
     try {
-      onSaved(await save.mutateAsync(name));
+      saved = await save.mutateAsync(name);
     } catch (error) {
       const outcome = writeFailure(error, LINE_FIELDS, LINE_CONFLICTS);
       if (outcome.kind === "field") {
@@ -84,7 +85,9 @@ export function LineDialog({ mode, onClose, onSaved, onReload }: LineDialogProps
       } else {
         setFailure(outcome);
       }
+      return;
     }
+    onSaved(saved);
   });
 
   const title =

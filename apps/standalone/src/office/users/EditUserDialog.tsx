@@ -50,8 +50,9 @@ export function EditUserDialog({ user, own, onClose, onSaved, onReload }: EditUs
 
   const submit = handleSubmit(async (values) => {
     setFailure(null);
+    let saved: OfficeUserRecord;
     try {
-      onSaved(await update.mutateAsync(values));
+      saved = await update.mutateAsync(values);
     } catch (error) {
       const outcome = writeFailure(error, EDIT_FIELDS);
       if (outcome.kind === "field") {
@@ -59,7 +60,9 @@ export function EditUserDialog({ user, own, onClose, onSaved, onReload }: EditUs
       } else {
         setFailure(outcome);
       }
+      return;
     }
+    onSaved(saved);
   });
 
   return (

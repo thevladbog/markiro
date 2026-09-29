@@ -69,8 +69,6 @@ export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswor
         currentPassword: values.currentPassword,
         newPassword: values.newPassword,
       });
-      reset();
-      onChanged();
     } catch (error) {
       if (error instanceof HostError && error.credential === "password") {
         setError("currentPassword", { type: "server", message: "office.password.wrongCurrent" });
@@ -82,7 +80,10 @@ export function ChangePasswordDialog({ open, onClose, onChanged }: ChangePasswor
       } else {
         setFailure(outcome);
       }
+      return;
     }
+    reset();
+    onChanged();
   });
 
   return (

@@ -48,8 +48,9 @@ export function CreateUserDialog({ onClose, onCreated }: CreateUserDialogProps) 
 
   const submit = handleSubmit(async (values) => {
     setFailure(null);
+    let created: OfficeUserRecord;
     try {
-      onCreated(await create.mutateAsync(values));
+      created = await create.mutateAsync(values);
     } catch (error) {
       const outcome = writeFailure(error, CREATE_FIELDS, CREATE_CONFLICTS);
       if (outcome.kind === "field") {
@@ -57,7 +58,9 @@ export function CreateUserDialog({ onClose, onCreated }: CreateUserDialogProps) 
       } else {
         setFailure(outcome);
       }
+      return;
     }
+    onCreated(created);
   });
 
   return (

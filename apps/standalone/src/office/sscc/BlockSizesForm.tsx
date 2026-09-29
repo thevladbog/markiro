@@ -60,8 +60,9 @@ export function BlockSizesForm({ state, onSaved, onSubmitStart, onReload }: Bloc
   const submit = handleSubmit(async (sizes) => {
     onSubmitStart();
     setFailure(null);
+    let saved: SsccState;
     try {
-      onSaved(await update.mutateAsync(sizes));
+      saved = await update.mutateAsync(sizes);
     } catch (error) {
       const outcome = writeFailure(error, BLOCK_FIELDS);
       if (outcome.kind === "field") {
@@ -69,7 +70,9 @@ export function BlockSizesForm({ state, onSaved, onSubmitStart, onReload }: Bloc
       } else {
         setFailure(outcome);
       }
+      return;
     }
+    onSaved(saved);
   });
 
   return (
