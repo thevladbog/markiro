@@ -532,6 +532,12 @@ hash or the TLS private key.
 - `cargo test --manifest-path apps/standalone/Cargo.toml --workspace`. The
   Tauri crate needs `apps/standalone/dist`: build the webview first with
   `pnpm turbo run build --filter='@markiro/standalone...'`.
+- Host integration tests share `host/tests/support/app.rs`: `admin()` is a
+  host after the wizard with its administrator signed in on the station that
+  ran it (`Admin::call`, `call_as`, `technologist`), `audit_trail` reads the
+  exact audit rows of one action and `Admin::row` builds the expected `ok`
+  row, `host_revision` reads the revision. Add a helper there before copying
+  one into a second test file.
 - `pnpm --filter @markiro/standalone test`, `typecheck`, `lint`, `build`.
 - The Windows service and DPAPI run only in the `standalone-windows-build`
   job: it compiles the service and the Tauri app for Windows, and its cargo

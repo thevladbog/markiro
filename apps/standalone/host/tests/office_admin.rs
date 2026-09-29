@@ -6,46 +6,8 @@ use axum::http::StatusCode;
 use markiro_host::secrets::{key_hash, verify_password};
 use serde_json::{json, Value};
 use support::app::{
-    bootstrap, empty, json as json_request, login, pair_device, request, with_session, TestApp,
+    admin, empty, json as json_request, login, pair_device, request, with_session, Admin,
 };
-
-struct Admin {
-    app: TestApp,
-    key: String,
-    token: String,
-    id: String,
-}
-
-async fn admin() -> Admin {
-    let app = TestApp::new().await;
-    let (_, key) = pair_device(&app, "station").await;
-    let token = bootstrap(&app, &key).await;
-    let (status, me) = app
-        .send(empty(with_session(
-            request("GET", "/v1/office/me"),
-            &key,
-            &token,
-        )))
-        .await;
-    assert_eq!(status, StatusCode::OK, "{me}");
-    let id = me["id"].as_str().unwrap().to_owned();
-    Admin {
-        app,
-        key,
-        token,
-        id,
-    }
-}
-
-impl Admin {
-    async fn call(&self, method: &str, path: &str, body: Option<Value>) -> (StatusCode, Value) {
-        let builder = with_session(request(method, path), &self.key, &self.token);
-        match body {
-            Some(body) => self.app.send(json_request(builder, body)).await,
-            None => self.app.send(empty(builder)).await,
-        }
-    }
-}
 
 /// The current global `host_revision.rev`.
 async fn host_revision(admin: &Admin) -> i64 {

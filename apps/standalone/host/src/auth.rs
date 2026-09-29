@@ -53,8 +53,7 @@ impl FromRequestParts<AppState> for AuthDevice {
         let (id, kind) = row.ok_or_else(|| {
             ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
         })?;
-        let kind: DeviceKind =
-            serde_json::from_value(serde_json::Value::String(kind)).map_err(ApiError::internal)?;
+        let kind: DeviceKind = kind.parse().map_err(ApiError::internal)?;
         // Record activity at most once a minute to keep writes rare.
         let now = state.now();
         sqlx::query(
@@ -129,7 +128,7 @@ impl OfficeContext {
                 "office session ended",
             ));
         }
-        serde_json::from_value(serde_json::Value::String(role)).map_err(ApiError::internal)
+        role.parse().map_err(ApiError::internal)
     }
 
     /// For writes any office user may make (their own password): the session
@@ -210,8 +209,7 @@ impl FromRequestParts<AppState> for OfficeContext {
         .execute(&state.pool)
         .await
         .map_err(ApiError::internal)?;
-        let role: OfficeRole =
-            serde_json::from_value(serde_json::Value::String(role)).map_err(ApiError::internal)?;
+        let role: OfficeRole = role.parse().map_err(ApiError::internal)?;
         Ok(Self {
             device_id: device.id,
             session_id,

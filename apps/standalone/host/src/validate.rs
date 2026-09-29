@@ -403,6 +403,116 @@ mod tests {
     }
 
     #[test]
+    fn an_office_login_is_3_to_64_latin_letters_digits_dots_underscores_or_hyphens() {
+        let longest = "a".repeat(64);
+        for login in ["adm", "i.smirnova", "tech_1", "a-b", longest.as_str()] {
+            assert!(office_login("login", login).is_ok(), "{login}");
+        }
+        let too_long = "a".repeat(65);
+        for login in ["ad", too_long.as_str(), "ирина", "a b", "a@b"] {
+            assert_eq!(field(office_login("login", login)), "login", "{login}");
+        }
+    }
+
+    #[test]
+    fn a_person_name_is_trimmed_to_1_to_100_characters() {
+        assert_eq!(person_name("name", " Ирина ").unwrap(), "Ирина");
+        assert!(person_name("name", &"и".repeat(100)).is_ok());
+        assert_eq!(field(person_name("name", "  ")), "name");
+        assert_eq!(field(person_name("name", &"и".repeat(101))), "name");
+    }
+
+    #[test]
+    fn a_password_is_8_to_128_characters() {
+        assert!(password("password", "12345678").is_ok());
+        assert!(password("password", &"п".repeat(128)).is_ok());
+        assert_eq!(field(password("password", "1234567")), "password");
+        assert_eq!(field(password("password", &"п".repeat(129))), "password");
+    }
+
+    #[test]
+    fn the_organization_adds_a_time_zone_to_the_company_fields() {
+        let input = |time_zone: &str| OrgProfileInput {
+            name: "ООО «Атолл»".to_owned(),
+            inn: None,
+            gln: GLN.to_owned(),
+            gs1_prefixes: vec![],
+            time_zone: time_zone.to_owned(),
+        };
+        assert_eq!(
+            org("org", &input(" Europe/Moscow ")).unwrap().time_zone,
+            "Europe/Moscow"
+        );
+        assert!(org("", &input("Etc/GMT+3")).is_ok());
+        assert_eq!(field(org("org", &input(""))), "org.timeZone");
+        assert_eq!(field(org("", &input("Europe Moscow"))), "timeZone");
+        assert_eq!(field(org("org", &input_named(""))), "org.name");
+    }
+
+    fn input_named(name: &str) -> OrgProfileInput {
+        OrgProfileInput {
+            name: name.to_owned(),
+            inn: None,
+            gln: GLN.to_owned(),
+            gs1_prefixes: vec![],
+            time_zone: "Europe/Moscow".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_line_name_comes_with_its_unicode_lower_case_key() {
+        assert_eq!(
+            line_name("lines.0", " Линия 1 ").unwrap(),
+            ("Линия 1".to_owned(), "линия 1".to_owned())
+        );
+        assert_eq!(field(line_name("lines.0", " ")), "lines.0");
+        assert_eq!(field(line_name("name", &"л".repeat(101))), "name");
+    }
+
+    #[test]
+    fn an_sscc_serial_lies_between_the_first_serial_and_the_capacity() {
+        assert_eq!(issuer_prefix(GLN), "460123400");
+        assert_eq!(serial_capacity("460123400"), 10_000_000);
+        assert_eq!((first_serial(0), first_serial(1)), (1, 0));
+        assert!(sscc_serial("sscc.boxNextSerial", 0, "460123400", 1).is_ok());
+        assert!(sscc_serial("sscc.palletNextSerial", 1, "460123400", 0).is_ok());
+        assert!(sscc_serial("nextSerial", 0, "460123400", 9_999_999).is_ok());
+        assert_eq!(
+            field(sscc_serial("sscc.boxNextSerial", 0, "460123400", 0)),
+            "sscc.boxNextSerial"
+        );
+        assert_eq!(
+            field(sscc_serial("nextSerial", 1, "460123400", 10_000_000)),
+            "nextSerial"
+        );
+    }
+
+    #[test]
+    fn a_device_registration_checks_its_version_and_capabilities() {
+        assert_eq!(
+            device_registration(" Станция ", " 0.1.0 ", &["scanner".to_owned()]).unwrap(),
+            ("Станция", "0.1.0")
+        );
+        assert_eq!(
+            field(device_registration("Станция", " ", &[])),
+            "appVersion"
+        );
+        assert_eq!(
+            field(device_registration("Станция", &"1".repeat(51), &[])),
+            "appVersion"
+        );
+        assert_eq!(
+            field(device_registration("Станция", "0.1.0", &[String::new()])),
+            "capabilities"
+        );
+        let many: Vec<String> = (0..33).map(|n| format!("c{n}")).collect();
+        assert_eq!(
+            field(device_registration("Станция", "0.1.0", &many)),
+            "capabilities"
+        );
+    }
+
+    #[test]
     fn a_personnel_number_is_3_to_12_ascii_digits() {
         for login in ["042", "0042", "123456789012"] {
             assert!(operator_login("login", login).is_ok(), "{login}");

@@ -12,8 +12,8 @@ use markiro_host::server::router;
 use markiro_host::{start, StartOptions};
 use serde_json::{json, Value};
 use support::app::{
-    bootstrap, empty, json as json_request, pair_device, request, with_device, with_session,
-    TestApp, LOOPBACK,
+    bootstrap, empty, host_revision, json as json_request, pair_device, request, with_device,
+    with_session, TestApp, LOOPBACK,
 };
 use tower::ServiceExt;
 
@@ -59,13 +59,6 @@ fn org_update(expected_rev: i64) -> Value {
         "timeZone": "Europe/Moscow",
         "expectedRev": expected_rev
     })
-}
-
-async fn host_revision(app: &TestApp) -> i64 {
-    sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
-        .fetch_one(&app.state.pool)
-        .await
-        .unwrap()
 }
 
 #[tokio::test]

@@ -5,7 +5,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
 use markiro_proto::{
-    codes, OfficeRole, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, PasswordSet, Secret,
+    codes, OfficeRole, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, PasswordSet,
 };
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -14,7 +14,7 @@ use crate::audit::{self, actions, Actor, Entry, Outcome};
 use crate::auth::OfficeContext;
 use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson, ApiPath};
-use crate::secrets::hash_password;
+use crate::secrets::hash_password_blocking;
 use crate::server::AppState;
 use crate::validate;
 
@@ -27,8 +27,7 @@ fn record(
         id,
         login,
         name,
-        role: serde_json::from_value(serde_json::Value::String(role))
-            .map_err(ApiError::internal)?,
+        role: role.parse().map_err(ApiError::internal)?,
         active: active == 1,
         created_at,
         rev,
@@ -47,12 +46,6 @@ async fn read_user(
     .await
     .map_err(ApiError::internal)?;
     row.map(record).transpose()
-}
-
-async fn hash(password: Secret) -> Result<String, ApiError> {
-    tokio::task::spawn_blocking(move || hash_password(password.expose()))
-        .await
-        .map_err(ApiError::internal)
 }
 
 /// The write tail shared by an admin resetting another user's password
@@ -129,7 +122,9 @@ pub async fn create_user(
     validate::office_login("login", &login)?;
     let name = validate::person_name("name", &create.name)?;
     validate::password("password", create.password.expose())?;
-    let password_phc = hash(create.password).await?;
+    let password_phc = hash_password_blocking(create.password)
+        .await
+        .map_err(ApiError::internal)?;
     let at = state.timestamp();
     let id = uuid::Uuid::new_v4().to_string();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
@@ -276,7 +271,9 @@ pub async fn set_password(
 ) -> Result<StatusCode, ApiError> {
     context.require_admin()?;
     validate::password("password", body.password.expose())?;
-    let password_phc = hash(body.password).await?;
+    let password_phc = hash_password_blocking(body.password)
+        .await
+        .map_err(ApiError::internal)?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_admin_in(&mut tx).await?;

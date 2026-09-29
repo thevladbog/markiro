@@ -256,6 +256,33 @@ impl DeviceKind {
     }
 }
 
+/// A stored name that is no variant of the enum it was read as
+/// ([`DeviceKind`], [`OfficeRole`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnknownVariant(pub String);
+
+impl std::fmt::Display for UnknownVariant {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "unknown value {:?}", self.0)
+    }
+}
+
+impl std::error::Error for UnknownVariant {}
+
+impl std::str::FromStr for DeviceKind {
+    type Err = UnknownVariant;
+
+    /// The name [`DeviceKind::as_str`] gives, as `devices.kind` stores it.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        match text {
+            "station" => Ok(DeviceKind::Station),
+            "office" => Ok(DeviceKind::Office),
+            "handheld" => Ok(DeviceKind::Handheld),
+            other => Err(UnknownVariant(other.to_owned())),
+        }
+    }
+}
+
 /// `POST /v1/local-pair`: a device on the host's own computer.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -465,6 +492,19 @@ impl OfficeRole {
         match self {
             OfficeRole::Admin => "admin",
             OfficeRole::Technologist => "technologist",
+        }
+    }
+}
+
+impl std::str::FromStr for OfficeRole {
+    type Err = UnknownVariant;
+
+    /// The name [`OfficeRole::as_str`] gives, as `office_users.role` stores it.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        match text {
+            "admin" => Ok(OfficeRole::Admin),
+            "technologist" => Ok(OfficeRole::Technologist),
+            other => Err(UnknownVariant(other.to_owned())),
         }
     }
 }
@@ -802,4 +842,35 @@ pub struct BadgeCreate {
 #[serde(rename_all = "camelCase")]
 pub struct BadgeSalt {
     pub badge_salt: Secret,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DeviceKind, OfficeRole, UnknownVariant};
+
+    /// The host stores `as_str` names and reads them back with `FromStr`;
+    /// serde writes the same names on the wire.
+    #[test]
+    fn stored_names_parse_back_into_their_variants() {
+        for kind in [
+            DeviceKind::Station,
+            DeviceKind::Office,
+            DeviceKind::Handheld,
+        ] {
+            assert_eq!(kind.as_str().parse::<DeviceKind>(), Ok(kind));
+            assert_eq!(serde_json::to_value(kind).unwrap(), kind.as_str());
+        }
+        for role in [OfficeRole::Admin, OfficeRole::Technologist] {
+            assert_eq!(role.as_str().parse::<OfficeRole>(), Ok(role));
+            assert_eq!(serde_json::to_value(role).unwrap(), role.as_str());
+        }
+        assert_eq!(
+            "Station".parse::<DeviceKind>(),
+            Err(UnknownVariant("Station".to_owned()))
+        );
+        assert_eq!(
+            "owner".parse::<OfficeRole>(),
+            Err(UnknownVariant("owner".to_owned()))
+        );
+    }
 }

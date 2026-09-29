@@ -3,8 +3,8 @@ mod support;
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
-    bootstrap, empty, json as json_request, login, pair_device, request, seed_office_user,
-    with_device, with_session, TestApp,
+    audit_trail, bootstrap, empty, host_revision, json as json_request, login, pair_device,
+    request, seed_office_user, with_device, with_session, AuditRow, TestApp,
 };
 
 async fn line_ids(app: &TestApp) -> Vec<String> {
@@ -22,54 +22,8 @@ async fn select(app: &TestApp, key: &str, body: Value) -> (StatusCode, Value) {
     .await
 }
 
-type AuditRow = (
-    String,
-    Option<String>,
-    String,
-    Option<String>,
-    Option<String>,
-    String,
-    Value,
-);
-
 async fn line_audit(app: &TestApp) -> Vec<AuditRow> {
-    let rows: Vec<(
-        String,
-        Option<String>,
-        String,
-        Option<String>,
-        Option<String>,
-        String,
-        String,
-    )> = sqlx::query_as(
-        "SELECT actor_kind, actor_id, action, target_type, target_id, result, details \
-             FROM audit_log WHERE action = 'device.line' ORDER BY id",
-    )
-    .fetch_all(&app.state.pool)
-    .await
-    .unwrap();
-    rows.into_iter()
-        .map(
-            |(kind, id, action, target_type, target_id, result, details)| {
-                (
-                    kind,
-                    id,
-                    action,
-                    target_type,
-                    target_id,
-                    result,
-                    serde_json::from_str(&details).unwrap(),
-                )
-            },
-        )
-        .collect()
-}
-
-async fn host_revision(app: &TestApp) -> i64 {
-    sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
-        .fetch_one(&app.state.pool)
-        .await
-        .unwrap()
+    audit_trail(app, "device.line").await
 }
 
 #[tokio::test]

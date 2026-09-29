@@ -18,7 +18,7 @@ use crate::auth::{open_session, require_loopback, AuthDevice};
 use crate::clock::format_timestamp;
 use crate::db::{begin_write, commit_with_revision, next_revision};
 use crate::error::{ApiError, ApiJson};
-use crate::secrets::hash_password;
+use crate::secrets::hash_password_blocking;
 use crate::server::AppState;
 use crate::validate;
 
@@ -62,8 +62,7 @@ pub async fn bootstrap(
 
     // Hash before taking the write lock: PBKDF2 takes a noticeable fraction
     // of a second.
-    let password = request.admin.password.clone();
-    let password_phc = tokio::task::spawn_blocking(move || hash_password(password.expose()))
+    let password_phc = hash_password_blocking(request.admin.password.clone())
         .await
         .map_err(ApiError::internal)?;
 

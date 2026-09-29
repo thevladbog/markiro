@@ -4,8 +4,8 @@ use axum::http::StatusCode;
 use markiro_host::secrets::key_hash;
 use serde_json::{json, Value};
 use support::app::{
-    empty, json as json_request, login, pair_device, request, seed_office_user, with_device,
-    with_session, TestApp, LAN, LOOPBACK,
+    empty, host_revision, json as json_request, login, pair_device, request, seed_office_user,
+    with_device, with_session, TestApp, LAN, LOOPBACK,
 };
 
 async fn last_audit(
@@ -512,13 +512,6 @@ async fn malformed_logins_are_denied_without_recording_the_input() {
             json!({ "reason": "invalid_login" })
         )
     );
-}
-
-async fn host_revision(app: &TestApp) -> i64 {
-    sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")
-        .fetch_one(&app.state.pool)
-        .await
-        .unwrap()
 }
 
 type AuditRow = (

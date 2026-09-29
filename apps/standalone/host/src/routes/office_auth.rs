@@ -109,8 +109,7 @@ pub async fn login(
     };
     match (row, refusal) {
         (Some((id, login, name, role, _, _)), None) => {
-            let role: OfficeRole = serde_json::from_value(serde_json::Value::String(role))
-                .map_err(ApiError::internal)?;
+            let role: OfficeRole = role.parse().map_err(ApiError::internal)?;
             let (token, expires) = open_session(&mut tx, &id, &device.id, now)
                 .await
                 .map_err(ApiError::internal)?;

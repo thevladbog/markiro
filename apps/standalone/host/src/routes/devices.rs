@@ -122,8 +122,7 @@ struct DeviceRow {
 }
 
 fn record(row: DeviceRow) -> Result<DeviceRecord, ApiError> {
-    let kind: DeviceKind =
-        serde_json::from_value(serde_json::Value::String(row.kind)).map_err(ApiError::internal)?;
+    let kind: DeviceKind = row.kind.parse().map_err(ApiError::internal)?;
     Ok(DeviceRecord {
         id: row.id,
         kind,

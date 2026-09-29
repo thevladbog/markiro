@@ -9,6 +9,7 @@ use aws_lc_rs::digest::{digest, SHA256};
 use aws_lc_rs::pbkdf2;
 use base64::engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD};
 use base64::Engine;
+use markiro_proto::Secret;
 
 const KEY_BYTES: usize = 32;
 
@@ -125,6 +126,12 @@ pub fn hash_password(password: &str) -> String {
     let mut salt = [0u8; SALT_BYTES];
     aws_lc_rs::rand::fill(&mut salt).expect("the system random generator is available");
     hash_password_with_salt(password, &salt, PASSWORD_ITERATIONS)
+}
+
+/// [`hash_password`] off the async threads: PBKDF2 at 600 000 iterations
+/// takes a noticeable fraction of a second. Call it before `begin_write`.
+pub async fn hash_password_blocking(password: Secret) -> Result<String, tokio::task::JoinError> {
+    tokio::task::spawn_blocking(move || hash_password(password.expose())).await
 }
 
 /// Constant-time check of `password` against a stored PHC string; a

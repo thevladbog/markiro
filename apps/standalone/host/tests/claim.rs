@@ -4,51 +4,12 @@ use axum::http::StatusCode;
 use markiro_host::secrets::key_hash;
 use serde_json::{json, Value};
 use support::app::{
-    bootstrap, empty, json as json_request, pair_device, request, with_device, with_session,
-    TestApp, LAN, LOOPBACK,
+    audit_trail, bootstrap, empty, json as json_request, pair_device, request, with_device,
+    with_session, AuditRow, TestApp, LAN, LOOPBACK,
 };
 
-type AuditRow = (
-    String,
-    Option<String>,
-    String,
-    Option<String>,
-    Option<String>,
-    String,
-    Value,
-);
-
 async fn claim_audit(app: &TestApp) -> Vec<AuditRow> {
-    let rows: Vec<(
-        String,
-        Option<String>,
-        String,
-        Option<String>,
-        Option<String>,
-        String,
-        String,
-    )> = sqlx::query_as(
-        "SELECT actor_kind, actor_id, action, target_type, target_id, result, details \
-             FROM audit_log WHERE action = 'device.claim' ORDER BY id",
-    )
-    .fetch_all(&app.state.pool)
-    .await
-    .unwrap();
-    rows.into_iter()
-        .map(
-            |(kind, id, action, target_type, target_id, result, details)| {
-                (
-                    kind,
-                    id,
-                    action,
-                    target_type,
-                    target_id,
-                    result,
-                    serde_json::from_str(&details).unwrap(),
-                )
-            },
-        )
-        .collect()
+    audit_trail(app, "device.claim").await
 }
 
 /// A host after the wizard: the host device's key and the admin's session.
