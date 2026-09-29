@@ -39,11 +39,12 @@ export function withRecord<T extends { id: string }>(records: readonly T[], reco
 }
 
 /**
- * Changes the cached list of `key`: `change` gets the list that is cached and
- * returns the list to keep. With no list loaded there is nothing to change,
- * so the whole list is read again rather than shown as what one write knows.
+ * Changes the cached list of `key`: `change` gets the list that is cached, as
+ * a read-only view, and returns the list to keep. With no list loaded there is
+ * nothing to change, so the whole list is read again rather than shown as what
+ * one write knows.
  */
-export function useChangeList<T>(key: QueryKey): (change: (list: T[]) => T[]) => void {
+export function useChangeList<T>(key: QueryKey): (change: (list: readonly T[]) => T[]) => void {
   const queryClient = useQueryClient();
   return (change) => {
     const list = queryClient.getQueryData<T[]>(key);

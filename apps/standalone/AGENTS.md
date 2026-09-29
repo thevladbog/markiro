@@ -644,19 +644,23 @@ requests and offer a retry.
   without an add dialog, the default `gcTime`), which is harmless, since it
   never changes. The dialog focuses the code, which a keyboard-wedge scanner
   types and submits with Enter, hashes it with the salt (`hashBadge`) and
-  sends only the hash. The answer is the new badge, not its operator, so the
-  badge goes into the cached operator at once (`useChangeList`, by id: the
+  sends only the hash; until the salt is read the code field is read-only
+  (still focusable), so a scan typed then is not taken. The answer is the new
+  badge, not its operator, so the badge goes into the cached operator at once
+  (`useChangeList` with `withBadge`, which replaces a badge by its id: the
   same badge twice is one badge). A `badge` conflict names the holder under
   the code when `details.operatorId` is a UUID of an operator in the list,
   and otherwise says only that the badge is taken. The code field is masked
-  and a scanner types after whatever it holds, so a code the form or the host
-  refuses (the layout hint, a `badge` conflict, a `validation_failed` on
-  `badgePhc`) is emptied, with the focus back on the field and its message
-  kept until the next input; a refusal that is not about the code (the label,
-  a failed request) keeps it, and the same scan can be sent again. «Отозвать»
-  asks first and says that the badge stops opening the stations once they
-  sync and never comes back; after the host's 204 the badge shows as revoked
-  at once, and the list is read again.
+  and a scanner types after whatever it holds, so after any failed attempt
+  that involved the code (the form refuses it: the layout hint; the host
+  refuses it: a `badge` conflict or a `validation_failed` on `badgePhc`; or
+  the request fails: an alert) the field is emptied and refocused, and a
+  message under it stays until the next input: a retry is a new scan, never a
+  press of the button over the old code. Only a refusal of the label alone
+  (the form's, or a `validation_failed` on `label`) keeps the code, and the
+  label is corrected beside it. «Отозвать» asks first and says that the badge
+  stops opening the stations once they sync and never comes back; after the
+  host's 204 the badge shows as revoked at once, and the list is read again.
 - `@markiro/ui` has English defaults: `Table` shows «No data» without
   `empty`, and `Modal` names its × «Close» without `closeLabel`. Every
   office table passes a localized `empty`, and every dialog passes

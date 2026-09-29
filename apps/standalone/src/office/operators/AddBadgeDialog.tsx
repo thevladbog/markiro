@@ -35,11 +35,11 @@ export interface AddBadgeDialogProps {
 /**
  * A new badge for an operator. A keyboard-wedge scanner types the code and
  * Enter, which submits the form, so the code field takes the focus. The code
- * is hashed here and only the hash goes, under the site's salt: it stays
- * cached (`staleTime: Infinity`), so a dialog opened again soon reuses it, and
- * it is read again once the cache has dropped it (about five minutes without
- * an add dialog), which is harmless, since it never changes. A badge another
- * operator holds is named under the code.
+ * is hashed here and only the hash goes, under the site's salt: it is not read
+ * again while it is cached (`staleTime: Infinity`), so a dialog opened again
+ * soon reuses it, and it is read again once the cache has dropped it (about
+ * five minutes without an add dialog), which is harmless, since it never
+ * changes. A badge another operator holds is named under the code.
  */
 export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBadgeDialogProps) {
   const { t } = useTranslation();
@@ -69,17 +69,18 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
   }, [setFocus]);
 
   // The code field is masked, so nobody can see what it holds, and a scanner
-  // types after it: a code the form or the host refused would be glued to the
-  // next scan, which can pass every rule and be saved as a badge that no
-  // station's scan will ever match. So a refused code is scanned again from
-  // scratch: the field is emptied, without validating (the message stays until
-  // the next input), and takes the focus back.
+  // types after it: a code that did not go through would be glued to the next
+  // scan, which can pass every rule and be saved as a badge that no station's
+  // scan will ever match. So after any failed attempt that involved the code
+  // (the form refused it, the host refused it, or the request failed) the
+  // field is emptied, without validating (a message stays until the next
+  // input), and takes the focus back: a retry is a new scan.
   const scanAgain = () => {
     setValue("code", "");
     setFocus("code");
   };
-  // Only a refusal of the code empties it: a label the form refuses leaves the
-  // scan where it is, as does a failure with no field to go under.
+  // A refusal of the code empties it; a refusal of the label alone keeps it,
+  // and the label is corrected beside it.
   const refused: SubmitErrorHandler<BadgeFormValues> = (invalid) => {
     if (invalid.code !== undefined) scanAgain();
   };
@@ -106,6 +107,7 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
         if (outcome.field === "code") scanAgain();
       } else {
         setFailure(outcome);
+        scanAgain();
       }
       return;
     }
@@ -120,12 +122,16 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
     return <LoadError error={salt.error} onRetry={() => void salt.refetch()} />;
   };
   const codeMessage = errors.code?.message;
+  // Until the salt is read nothing can be sent: the submit button is off, and
+  // the code field takes no scan (it stays focusable), which would sit in it,
+  // masked, in front of the next one.
+  const saltMissing = salt.data === undefined;
 
   return (
     <FormDialog
       title={t("office.operators.badges.addTitle", { name: operator.name })}
       submitLabel={t("office.operators.badges.addSubmit")}
-      submitDisabled={salt.data === undefined}
+      submitDisabled={saltMissing}
       onSubmit={submit}
       onClose={onClose}
       alert={
@@ -140,6 +146,7 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
         label={t("office.operators.badges.fields.code")}
         hint={t("office.operators.badges.fields.codeHint")}
         mono
+        readOnly={saltMissing}
         {...fieldError(codeMessage, codeMessage === TAKEN_BY ? { name: holder } : undefined)}
         {...register("code")}
       />

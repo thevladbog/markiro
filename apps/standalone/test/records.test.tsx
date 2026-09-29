@@ -137,7 +137,7 @@ describe("useChangeList", () => {
     const second = row("b", "Вторая");
     const added = row("c", "Третья");
     const { client, invalidate, change } = setup([first, second]);
-    const seen: ArchivableRecord[][] = [];
+    const seen: (readonly ArchivableRecord[])[] = [];
     change((list) => {
       seen.push(list);
       return [...list.filter((each) => each.id !== "a"), added];
@@ -150,7 +150,7 @@ describe("useChangeList", () => {
 
   it("reads the list again, and stores nothing, when no list is loaded", () => {
     const { client, invalidate, change } = setup();
-    const apply = vi.fn((list: ArchivableRecord[]) => list);
+    const apply = vi.fn((list: readonly ArchivableRecord[]) => [...list]);
     change(apply);
     // Nothing to change: a list of one row would be shown as the whole list.
     expect(apply).not.toHaveBeenCalled();

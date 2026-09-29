@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { verifyPhc } from "@markiro/domain";
 
 import { HostError } from "../src/host/client.js";
-import type { BadgeInfo, OfficeOperator } from "../src/host/protocol.js";
+import type { BadgeInfo, BadgeSalt, OfficeOperator } from "../src/host/protocol.js";
 import { fakeOfficeSession, renderOffice, type FakeOfficeSession } from "./support/office.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
@@ -164,8 +164,12 @@ function sentHash(session: FakeOfficeSession, call: number): string {
   return body.badgePhc;
 }
 
-/** What the host can refuse a badge's code with, and the text the field then shows. */
-const CODE_REFUSALS: [name: string, refusal: HostError, message: string][] = [
+/**
+ * What can fail a badge's code once the form has accepted it, and the text then
+ * shown: the host's refusals of the code, under the field, and a request that
+ * fails, in the alert above the form.
+ */
+const CODE_FAILURES: [name: string, failure: HostError, message: string][] = [
   [
     "names the operator who holds it",
     badgeTaken(VERA.id),
@@ -182,6 +186,11 @@ const CODE_REFUSALS: [name: string, refusal: HostError, message: string][] = [
       details: { field: "badgePhc" },
     }),
     "Хост не принял это значение. Проверьте его.",
+  ],
+  [
+    "cannot be reached",
+    new HostError({ kind: "transport", code: "unreachable", message: "no answer" }),
+    "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.",
   ],
 ];
 
@@ -293,11 +302,11 @@ describe("operator badges", () => {
     ]);
   });
 
-  it.each(CODE_REFUSALS)(
+  it.each(CODE_FAILURES)(
     "empties the masked code when the host %s, so the next scan is not glued to it",
-    async (_case, refusal, message) => {
+    async (_case, failure, message) => {
       const session = adminSession();
-      session.api.createBadge.mockRejectedValueOnce(refusal).mockResolvedValueOnce(PASS_8);
+      session.api.createBadge.mockRejectedValueOnce(failure).mockResolvedValueOnce(PASS_8);
       await openAdd(session);
       await waitFor(() => expect(document.activeElement).toBe(codeField()));
       // A person who pressed «Добавить» has the focus on the button, not on the field.
@@ -318,34 +327,88 @@ describe("operator badges", () => {
     },
   );
 
-  it("keeps the masked code when the refusal is not about it, so the same scan can go again", async () => {
+  it("keeps the masked code when the form refuses only the label, and sends it once the label is corrected", async () => {
     const session = adminSession();
-    session.api.createBadge
-      .mockRejectedValueOnce(
-        new HostError({ kind: "transport", code: "unreachable", message: "no answer" }),
-      )
-      .mockResolvedValueOnce(PASS_8);
+    session.api.createBadge.mockResolvedValue(PASS_8);
     await openAdd(session);
-    // A label the form refuses: the code beside it stays as it was scanned.
     type("Подпись", "п".repeat(101));
     wedge("MRK-000742");
     expect(await screen.findByText("Подпись — до 100 символов")).toBeTruthy();
+    // The code is not what was refused: it stays as it was scanned.
     expect(codeField().value).toBe("MRK-000742");
     expect(session.api.createBadge).not.toHaveBeenCalled();
-    // A failure with no field to go under: the code stays too.
+    // The label is corrected beside it and the button pressed again.
     type("Подпись", "Пропуск №8");
     pressEnter(codeField());
+    await waitFor(() => expect(session.api.createBadge).toHaveBeenCalledTimes(1));
+    expect(await screen.findByText("Бейдж «Пропуск №8» добавлен.")).toBeTruthy();
+    expect(session.api.createBadge.mock.calls).toStrictEqual([
+      ["office-session-token", ANNA.id, { badgePhc: BADGE_PHC, label: "Пропуск №8" }],
+    ]);
+  });
+
+  it("keeps the masked code when the host refuses only the label, and shows it under the label", async () => {
+    const session = adminSession();
+    session.api.createBadge
+      .mockRejectedValueOnce(
+        new HostError({
+          kind: "api",
+          code: "validation_failed",
+          status: 422,
+          message: "the badge label is not valid",
+          details: { field: "label" },
+        }),
+      )
+      .mockResolvedValueOnce(PASS_8);
+    await openAdd(session);
+    type("Подпись", "Пропуск №8");
+    wedge("MRK-000742");
+    const message = await screen.findByText("Хост не принял это значение. Проверьте его.");
+    expect(screen.getByLabelText("Подпись").getAttribute("aria-describedby")).toBe(message.id);
+    // The code is not what was refused: it stays as it was scanned.
+    expect(codeField().value).toBe("MRK-000742");
+    // The label is corrected beside it and the button pressed again: the same scan.
+    type("Подпись", "Пропуск № 8");
+    pressEnter(codeField());
+    await waitFor(() => expect(session.api.createBadge).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText("Бейдж «Пропуск №8» добавлен.")).toBeTruthy();
+    expect([sentHash(session, 0), sentHash(session, 1)]).toStrictEqual([BADGE_PHC, BADGE_PHC]);
+  });
+
+  it("keeps the code field read-only until the site's salt is read", async () => {
+    const session = adminSession();
+    let answerSalt: (salt: BadgeSalt) => void = () => undefined;
+    session.api.getBadgeSalt.mockImplementation(
+      () =>
+        new Promise<BadgeSalt>((resolve) => {
+          answerSalt = resolve;
+        }),
+    );
+    await openBadges(session);
+    fireEvent.click(screen.getByRole("button", { name: "Добавить бейдж" }));
+    await screen.findByRole("dialog", { name: "Новый бейдж: Анна Кузнецова" });
+    await waitFor(() => expect(session.api.getBadgeSalt).toHaveBeenCalledTimes(1));
+    // Nothing can be sent yet: a scan typed now would sit, masked, in front of the next one.
+    expect(codeField().readOnly).toBe(true);
+    await act(async () => {
+      answerSalt({ badgeSalt: SITE_SALT });
+    });
+    await waitFor(() => expect(codeField().readOnly).toBe(false));
+  });
+
+  it("keeps the code field read-only when the site's salt could not be read", async () => {
+    const session = adminSession();
+    session.api.getBadgeSalt.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "no answer" }),
+    );
+    await openBadges(session);
+    fireEvent.click(screen.getByRole("button", { name: "Добавить бейдж" }));
     expect(
       await screen.findByText(
         "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.",
       ),
     ).toBeTruthy();
-    expect(codeField().value).toBe("MRK-000742");
-    // The same scan, sent again: the same hash.
-    pressEnter(codeField());
-    await waitFor(() => expect(session.api.createBadge).toHaveBeenCalledTimes(2));
-    expect(await screen.findByText("Бейдж «Пропуск №8» добавлен.")).toBeTruthy();
-    expect([sentHash(session, 0), sentHash(session, 1)]).toStrictEqual([BADGE_PHC, BADGE_PHC]);
+    expect(codeField().readOnly).toBe(true);
   });
 
   it("explains a host that has no badge salt yet and keeps the form from sending", async () => {
