@@ -17,6 +17,7 @@ import { loadShiftRows, shiftColumns } from "./shift-report-source";
 import { INVENTORY_COLUMNS, loadInventoryRows } from "./inventory-report-source";
 import { COMMERCEML_COLUMNS, loadCommerceMlRows } from "./commerceml-report-source";
 import { USAGE_COLUMNS, USAGE_DEFINITIONS, loadUsageRows } from "./usage-report-source";
+import { QUALITY_COLUMNS, QUALITY_DEFINITIONS, loadQualityRows } from "./quality-report-source";
 
 // One source snapshot across all application processes; contention is not a failed generation attempt.
 export const REPORT_SOURCE_LOCK_KEY = "7314982016401";
@@ -34,6 +35,8 @@ function definitionsFor(reportType: PlatformReportInput["reportType"]): Record<s
   switch (reportType) {
     case "usage":
       return { ...EVIDENCE_COMMON_DEFINITIONS, ...USAGE_DEFINITIONS };
+    case "quality":
+      return { ...EVIDENCE_COMMON_DEFINITIONS, ...QUALITY_DEFINITIONS };
     default:
       return { ...REPORT_DEFINITIONS };
   }
@@ -70,6 +73,9 @@ export class PlatformReportSourceService {
           if (input.reportType === "usage") {
             columns = [...USAGE_COLUMNS];
             rows = await loadUsageRows(tx, input);
+          } else if (input.reportType === "quality") {
+            columns = [...QUALITY_COLUMNS];
+            rows = await loadQualityRows(tx, input);
           } else if (input.reportType === "commerceml") {
             columns = COMMERCEML_COLUMNS;
             rows = await loadCommerceMlRows(tx, input);
