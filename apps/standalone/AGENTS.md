@@ -766,7 +766,11 @@ requests and offer a retry.
   guard, so a `labelHasCode` refusal clears it although nothing is sent, while
   a refusal by the form itself leaves it). A refusal of the label alone, by
   the form or by the host, keeps the code, and the label is corrected beside
-  it.
+  it. One residual stays with those two rows: the focus is on the label, so a
+  reflex re-scan lands there, but a deliberate click into the masked code
+  field and a scan would glue the two scans and save a badge that no station
+  matches. Nothing leaks and it is accepted; emptying the code on every
+  refusal would close it, at the cost of one more scan after such a refusal.
 
   The last row is the exception, and the guard against the one way a code
   could leave the webview in clear text by accident: a label typed first, with
