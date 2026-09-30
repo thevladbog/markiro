@@ -95,6 +95,14 @@ describe("office user rules", () => {
     expect(passwordRule.safeParse("x".repeat(129)).success).toBe(false);
   });
 
+  it("says the length first when a password is too short and holds an unpaired surrogate too", () => {
+    // The forms show the first issue: the length, then the damaged character.
+    expect(passwordRule.safeParse("ab\ud800").error?.issues.map((issue) => issue.message)).toEqual([
+      "rules.password",
+      "rules.passwordCharacter",
+    ]);
+  });
+
   it("refuses an unpaired surrogate in a password with its own message, which cannot reach the host", () => {
     expect(passwordRule.safeParse("пароль12\ud800").error?.issues[0]?.message).toBe(
       "rules.passwordCharacter",
@@ -295,6 +303,37 @@ describe("operator rules", () => {
     );
   });
 
+  it("refuses an unpaired surrogate in a role and a label, as a control character", () => {
+    // Both cross the IPC as JSON, which a lone surrogate would break before the host.
+    for (const rule of [operatorRoleRule, badgeLabelRule]) {
+      for (const text of ["Упаковщик\ud800", "\udc00Упаковщик", "Упа\ud800ковщик", "\ud800"]) {
+        expect(rule.safeParse(text).error?.issues[0]?.message).toBe("rules.controlCharacter");
+      }
+      // A pair is one character and stays.
+      expect(rule.safeParse("Упаковщик 😀").success).toBe(true);
+    }
+  });
+
+  it("counts a role and a label in characters, not UTF-16 units: an emoji is one", () => {
+    // 120 emoji are 240 UTF-16 code units but 120 characters, as the host counts them.
+    expect(operatorRoleRule.safeParse("😀".repeat(120)).success).toBe(true);
+    expect(operatorRoleRule.safeParse("😀".repeat(121)).error?.issues[0]?.message).toBe(
+      "rules.role",
+    );
+    expect(badgeLabelRule.safeParse("😀".repeat(100)).success).toBe(true);
+    expect(badgeLabelRule.safeParse("😀".repeat(101)).error?.issues[0]?.message).toBe(
+      "rules.badgeLabel",
+    );
+  });
+
+  it("says the length first when a role or a label is too long and holds a control character too", () => {
+    // The forms show the first issue. The tab is inside, where `trim` leaves it.
+    const messages = (rule: typeof operatorRoleRule, max: number) =>
+      rule.safeParse(`${"я".repeat(max)}\tя`).error?.issues.map((issue) => issue.message);
+    expect(messages(operatorRoleRule, 120)).toEqual(["rules.role", "rules.controlCharacter"]);
+    expect(messages(badgeLabelRule, 100)).toEqual(["rules.badgeLabel", "rules.controlCharacter"]);
+  });
+
   it("takes a badge code of 1 to 256 printable ASCII characters, trimmed", () => {
     expect(badgeCodeRule.safeParse(" MRK-000742 ").data).toBe("MRK-000742");
     expect(badgeCodeRule.safeParse("x".repeat(256)).success).toBe(true);
@@ -302,6 +341,16 @@ describe("operator rules", () => {
     for (const code of ["", "   ", "x".repeat(257), "MRK\t742", "Café", "MRK\ud800"]) {
       expect(badgeCodeRule.safeParse(code).error?.issues[0]?.message).toBe("rules.badgeCode");
     }
+  });
+
+  it("ends printable ASCII at the tilde: ~ is a code character, DEL is not", () => {
+    expect(badgeCodeRule.safeParse("MRK~742").data).toBe("MRK~742");
+    expect(badgeCodeRule.safeParse("~").data).toBe("~");
+    // DEL is the character right after the tilde, and a control character.
+    expect(badgeCodeRule.safeParse("MRK\u007f742").error?.issues[0]?.message).toBe(
+      "rules.badgeCode",
+    );
+    expect(badgeCodeRule.safeParse("\u007f").error?.issues[0]?.message).toBe("rules.badgeCode");
   });
 
   it("refuses a badge code typed under the Russian layout with a hint to switch it", () => {

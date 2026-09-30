@@ -104,7 +104,8 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
   const { t } = useTranslation();
   const [manual, setManual] = useState(false);
   const [name, setName] = useState(() => t("shell.networkPairing.defaultName"));
-  const [nameInvalid, setNameInvalid] = useState(false);
+  // The i18n key of the first thing wrong with the device name, if anything.
+  const [nameError, setNameError] = useState<string | null>(null);
   const [scan, setScan] = useState("");
   const [address, setAddress] = useState("");
   const [addressInvalid, setAddressInvalid] = useState(false);
@@ -140,7 +141,9 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
 
   const checkedName = (): string | null => {
     const parsed = deviceNameRule.safeParse(name);
-    setNameInvalid(!parsed.success);
+    // The first refusal in its own words, as the office's forms show it: a tab
+    // or a lone surrogate is invisible, and a length message would not explain it.
+    setNameError(parsed.success ? null : (parsed.error.issues[0]?.message ?? "rules.name"));
     return parsed.success ? parsed.data : null;
   };
 
@@ -247,7 +250,7 @@ export function NetworkPairing({ probe, onClaim, onBack }: NetworkPairingProps) 
       hint={t("shell.networkPairing.nameHint")}
       value={name}
       onChange={(event) => setName(event.target.value)}
-      {...errorProp(nameInvalid ? t("rules.name") : undefined)}
+      {...errorProp(nameError === null ? undefined : t(nameError))}
     />
   );
 

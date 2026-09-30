@@ -171,7 +171,7 @@ describe("LineSelect", () => {
     expect(props.onSync).toHaveBeenCalledTimes(1);
   });
 
-  it("shows progress, not the older alert, while the retry syncs", async () => {
+  it("shows progress, not the older read failure, while the retry syncs", async () => {
     const { props, view } = renderLineSelect(syncState("done", 1), { local: UNREADABLE });
     await screen.findByText("Не удалось прочитать справочники на этом компьютере.");
     view.rerender(<LineSelect {...props} sync={syncState("running", 1)} />);

@@ -274,6 +274,47 @@ describe("NetworkPairing", () => {
     expect(props.probe.hello).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["empty", ""],
+    ["over 100 characters", "с".repeat(101)],
+  ])("keeps the length message for a device name that is %s", async (_what, name) => {
+    const props = renderPairing();
+    type("Имя устройства", name);
+    scan(PAYLOAD);
+    expect(await screen.findByText("Укажите имя, до 100 символов")).toBeTruthy();
+    expect(props.probe.hello).not.toHaveBeenCalled();
+    expect(props.onClaim).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["a tab inside it", "Станция\t2"],
+    ["an unpaired surrogate", "Станция\ud800"],
+  ])("names %s in a device name in its own words, not as a wrong length", async (_what, name) => {
+    const props = renderPairing();
+    type("Имя устройства", name);
+    scan(PAYLOAD);
+    expect(
+      await screen.findByText("Уберите табуляцию, перенос строки или другой служебный символ"),
+    ).toBeTruthy();
+    expect(screen.queryByText("Укажите имя, до 100 символов")).toBeNull();
+    expect(props.probe.hello).not.toHaveBeenCalled();
+    expect(props.onClaim).not.toHaveBeenCalled();
+  });
+
+  it("says the same on the manual form, where the name is checked too", async () => {
+    const props = renderPairing();
+    fireEvent.click(screen.getByRole("button", { name: "Ввести адрес и код вручную" }));
+    type("Имя устройства", "Станция\t2");
+    type("Адрес хоста", "192.168.1.10");
+    type("Код подключения", "7K3MQ9XV2D");
+    fireEvent.click(screen.getByRole("button", { name: "Далее" }));
+    expect(
+      await screen.findByText("Уберите табуляцию, перенос строки или другой служебный символ"),
+    ).toBeTruthy();
+    expect(screen.queryByText("Укажите имя, до 100 символов")).toBeNull();
+    expect(props.probe.hello).not.toHaveBeenCalled();
+  });
+
   it("pairs by hand after a person confirms the host's fingerprint", async () => {
     const props = renderPairing();
     fireEvent.click(screen.getByRole("button", { name: "Ввести адрес и код вручную" }));

@@ -100,6 +100,17 @@ function refusal(code: string, details: Record<string, unknown>): HostError {
   return new HostError({ kind: "api", code, status: 409, message: code, details });
 }
 
+/** The host refusing one field of a form: 422 with the field's name in `details`. */
+function validationFailed(field: string): HostError {
+  return new HostError({
+    kind: "api",
+    code: "validation_failed",
+    status: 422,
+    message: "the value is not valid",
+    details: { field },
+  });
+}
+
 function type(label: string, value: string): void {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
 }
@@ -149,8 +160,9 @@ function fillNewOperator(): void {
   type("Табельный номер", " 0043 ");
   type("Имя", " Иван Петров ");
   type("Должность", " Наладчик ");
-  type("PIN", "4821");
-  type("Повторите PIN", "4821");
+  // A PIN pasted with spaces around it: the form trims it, and the hash is of the trimmed PIN.
+  type("PIN", " 4821 ");
+  type("Повторите PIN", " 4821 ");
 }
 
 describe("office operators", () => {
@@ -158,7 +170,7 @@ describe("office operators", () => {
     localStorage.removeItem("markiro.theme");
   });
 
-  it("is in the menu for administrators only, between «Линии» and «Устройства»", async () => {
+  it("sits between «Линии» and «Устройства» in an administrator's menu", async () => {
     renderOffice(adminSession());
     await screen.findByRole("link", { name: "Операторы" });
     const links = screen.getAllByRole("link").map((link) => link.textContent);
@@ -280,6 +292,18 @@ describe("office operators", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
+  it("says under the PIN when the host refuses its hash in a new operator", async () => {
+    const session = adminSession();
+    session.api.createOperator.mockRejectedValueOnce(validationFailed("pinPhc"));
+    await openOperators(session);
+    fireEvent.click(screen.getByRole("button", { name: "Добавить оператора" }));
+    fillNewOperator();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
+    const message = await screen.findByText("Хост не принял это значение. Проверьте его.");
+    expect(screen.getByLabelText("PIN").getAttribute("aria-describedby")).toBe(message.id);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
   it("hashes and sends one operator for a double click", async () => {
     const session = adminSession();
     session.api.createOperator.mockImplementation(async (_token, body) => created(body));
@@ -348,6 +372,32 @@ describe("office operators", () => {
     await waitFor(() => expect(session.api.listOperators).toHaveBeenCalledTimes(2));
   });
 
+  it("offers to load the operators again after a stale PIN change", async () => {
+    const session = adminSession();
+    session.api.updateOperator.mockRejectedValueOnce(refusal("stale_revision", { currentRev: 70 }));
+    await openOperators(session);
+    fireEvent.click(screen.getByRole("button", { name: "Сменить PIN оператора «Анна Кузнецова»" }));
+    type("PIN", "1357");
+    type("Повторите PIN", "1357");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сменить PIN" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Загрузить заново" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(session.api.listOperators).toHaveBeenCalledTimes(2));
+  });
+
+  it("says under the PIN when the host refuses its hash in a new PIN", async () => {
+    const session = adminSession();
+    session.api.updateOperator.mockRejectedValueOnce(validationFailed("pinPhc"));
+    await openOperators(session);
+    fireEvent.click(screen.getByRole("button", { name: "Сменить PIN оператора «Анна Кузнецова»" }));
+    type("PIN", "1357");
+    type("Повторите PIN", "1357");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сменить PIN" }));
+    const message = await screen.findByText("Хост не принял это значение. Проверьте его.");
+    expect(screen.getByLabelText("PIN").getAttribute("aria-describedby")).toBe(message.id);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
   it("replaces the PIN with a new hash and the loaded revision", async () => {
     const session = adminSession();
     session.api.updateOperator.mockResolvedValue({ ...ANNA, rev: 64 });
@@ -358,11 +408,12 @@ describe("office operators", () => {
         "Прежний PIN перестанет работать на станциях, как только они получат изменение.",
       ),
     ).toBeTruthy();
-    type("PIN", "1357");
-    type("Повторите PIN", "1375");
+    // Spaces around both, as a pasted PIN has them: the hash is of the trimmed PIN.
+    type("PIN", " 1357 ");
+    type("Повторите PIN", " 1375 ");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Сменить PIN" }));
     expect(await screen.findByText("PIN-коды не совпадают")).toBeTruthy();
-    type("Повторите PIN", "1357");
+    type("Повторите PIN", " 1357 ");
     await submitAgain("Сменить PIN");
     expect(await screen.findByText("PIN оператора «Анна Кузнецова» изменён.")).toBeTruthy();
     expect(session.api.updateOperator.mock.calls).toStrictEqual([
@@ -376,6 +427,17 @@ describe("office operators", () => {
     await expect(verifyPhc("1357", pinPhc)).resolves.toBe(true);
   });
 
+  it("offers to load the operators again after a stale turn-off", async () => {
+    const session = adminSession();
+    session.api.updateOperator.mockRejectedValueOnce(refusal("stale_revision", { currentRev: 70 }));
+    await openOperators(session);
+    fireEvent.click(screen.getByRole("button", { name: "Выключить оператора «Анна Кузнецова»" }));
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Загрузить заново" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(session.api.listOperators).toHaveBeenCalledTimes(2));
+  });
+
   it("turns an operator off after saying they can no longer sign in on the stations", async () => {
     const session = adminSession();
     session.api.updateOperator.mockResolvedValue({ ...ANNA, active: false, rev: 65 });
@@ -386,7 +448,10 @@ describe("office operators", () => {
         "Оператор «Анна Кузнецова» больше не сможет входить на станциях, как только они получат изменение. Включить его снова можно здесь же.",
       ),
     ).toBeTruthy();
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
+    const turnOff = within(dialog()).getByRole("button", { name: "Выключить" });
+    // Taking an operator out of use is the destructive kind of submit.
+    expect(turnOff.className).toContain("mk-btn--destructive");
+    fireEvent.click(turnOff);
     expect(await screen.findByText("Оператор «Анна Кузнецова» выключен.")).toBeTruthy();
     expect(session.api.updateOperator.mock.calls).toStrictEqual([
       ["office-session-token", ANNA.id, { active: false, expectedRev: 55 }],
@@ -405,7 +470,11 @@ describe("office operators", () => {
         "Оператор «Глеб Сидоров» снова сможет входить на станциях по своему PIN и бейджам, как только они получат изменение.",
       ),
     ).toBeTruthy();
-    fireEvent.click(within(dialog()).getByRole("button", { name: "Включить" }));
+    const turnOn = within(dialog()).getByRole("button", { name: "Включить" });
+    // Giving access back is a light confirmation: the primary submit.
+    expect(turnOn.className).toContain("mk-btn--primary");
+    expect(turnOn.className).not.toContain("mk-btn--destructive");
+    fireEvent.click(turnOn);
     expect(await screen.findByText("Оператор «Глеб Сидоров» включён.")).toBeTruthy();
     expect(session.api.updateOperator.mock.calls).toStrictEqual([
       ["office-session-token", GLEB.id, { active: true, expectedRev: 30 }],

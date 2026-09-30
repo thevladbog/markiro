@@ -279,6 +279,9 @@ function saltOfBytes(count: number): string {
   return btoa(String.fromCharCode(...Array.from({ length: count }, (_, byte) => byte)));
 }
 
+/** A canonical salt: 16 bytes, 24 characters. */
+const SALT = saltOfBytes(16);
+
 const SALT_CHECKS = [
   ["badgeSaltSchema", (salt: string) => badgeSaltSchema.safeParse({ badgeSalt: salt }).success],
   ["canonicalSaltSchema", (salt: string) => canonicalSaltSchema.safeParse(salt).success],
@@ -306,6 +309,12 @@ describe.each(SALT_CHECKS)("%s takes only a canonical 16-byte salt", (_name, acc
     ["15 bytes", saltOfBytes(15)],
     ["32 bytes", saltOfBytes(32)],
     ["nothing", ""],
+    ["16 bytes without padding (22 characters)", SALT.slice(0, 22)],
+    ["16 bytes with one = (23 characters)", SALT.slice(0, 23)],
+    ["19 bytes, which end in a valid last data character (28 characters)", saltOfBytes(19)],
+    ["a character in front of a canonical salt", `x${SALT}`],
+    ["a character after a canonical salt", `${SALT}A`],
+    ["a newline after a canonical salt", `${SALT}\n`],
   ])("refuses %s", (_what, salt) => {
     expect(accepts(salt), salt).toBe(false);
     expect(isCanonicalSalt(salt), salt).toBe(false);
@@ -384,9 +393,9 @@ describe("request builders produce their fixtures exactly", () => {
 
   it("an operator to create, and one to update that clears the role, turns off and gets a new PIN", () => {
     const { pinPhc } = operatorCreateSchema.parse(fixture("operator-create.json"));
-    expect(
-      operatorCreate({ login: "0042", name: "Анна Кузнецова", role: "Упаковщик", pinPhc }),
-    ).toStrictEqual(fixture("operator-create.json"));
+    // A form holds more than the builder names: the PIN itself must not go.
+    const typed = { login: "0042", name: "Анна Кузнецова", role: "Упаковщик", pinPhc, pin: "4821" };
+    expect(operatorCreate(typed)).toStrictEqual(fixture("operator-create.json"));
     const operator = officeOperatorSchema.parse(fixture("office-operator.json"));
     expect(
       operatorUpdate({ ...operator, role: "Упаковщик" }, { role: null, active: false, pinPhc }),
@@ -395,9 +404,9 @@ describe("request builders produce their fixtures exactly", () => {
 
   it("a badge to add", () => {
     const { badgePhc } = badgeCreateSchema.parse(fixture("badge-create.json"));
-    expect(badgeCreate({ badgePhc, label: "Пропуск №7" })).toStrictEqual(
-      fixture("badge-create.json"),
-    );
+    // The scanned code is in the form too, and must never go.
+    const scanned = { badgePhc, label: "Пропуск №7", code: "MRK-000742" };
+    expect(badgeCreate(scanned)).toStrictEqual(fixture("badge-create.json"));
   });
 });
 
@@ -461,6 +470,18 @@ describe("request builders send only what changes", () => {
       expectedRev: 55,
     });
     expect(operatorUpdate(anna, { active: true })).toStrictEqual({ expectedRev: 55 });
+    // Turned off, then on again: the change to `true` goes as well.
+    expect(operatorUpdate({ ...anna, active: false }, { active: true })).toStrictEqual({
+      active: true,
+      expectedRev: 55,
+    });
+    // An operator with no role, renamed: `role: null` over `null` is no change.
+    expect(
+      operatorUpdate({ ...anna, role: null }, { name: "Анна Петрова", role: null }),
+    ).toStrictEqual({ name: "Анна Петрова", expectedRev: 55 });
+    expect(operatorUpdate({ ...anna, role: null }, { name: anna.name, role: null })).toStrictEqual({
+      expectedRev: 55,
+    });
     expect(operatorUpdate(anna, { pinPhc })).toStrictEqual({ pinPhc, expectedRev: 55 });
   });
 

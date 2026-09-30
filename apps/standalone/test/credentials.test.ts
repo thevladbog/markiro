@@ -74,6 +74,25 @@ describe("operator credentials", () => {
     await expect(hashPin("4821")).resolves.toBe(PIN_PHC);
   });
 
+  it("writes the salt in standard base64 with padding, with + and / where the bytes need them", async () => {
+    // 0xfb 0xff 0xbf encode to «+/+/»: the two characters a URL-safe alphabet
+    // spells otherwise. The 16th byte, alone in its group, ends in the padding.
+    const bytes = new Uint8Array([
+      0xfb, 0xff, 0xbf, 0xfb, 0xff, 0xbf, 0xfb, 0xff, 0xbf, 0xfb, 0xff, 0xbf, 0xfb, 0xff, 0xbf,
+      0xfb,
+    ]);
+    vi.spyOn(crypto, "getRandomValues").mockImplementation(
+      <T extends ArrayBufferView | null>(array: T): T => {
+        if (array instanceof Uint8Array) array.set(bytes);
+        return array;
+      },
+    );
+    const phc = await hashPin("4821");
+    expect(phc.split("$")[3]).toBe("+/+/+/+/+/+/+/+/+/+/+w==");
+    expect(parsePhc(phc)?.saltB64).toBe("+/+/+/+/+/+/+/+/+/+/+w==");
+    await expect(verifyPhc("4821", phc)).resolves.toBe(true);
+  });
+
   it("gives every PIN hash a fresh salt, in standard base64 with padding", async () => {
     const first = await hashPin("4821");
     const second = await hashPin("4821");
