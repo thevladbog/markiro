@@ -520,6 +520,28 @@ describe("commercial catalog", () => {
     expect(api.items()).toHaveLength(0);
   });
 
+  it.each(["1c-offline", "Plan-Pro", "plan_pro", "-plan", `a${"b".repeat(64)}`])(
+    "names the code field when %s cannot be an item code",
+    async (typed) => {
+      const api = installCatalogApi({ me: PLATFORM_ADMIN_ME, items: [] });
+      renderSaasApp();
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole("button", { name: "Создать позицию" }));
+      await user.type(screen.getByLabelText("Код позиции"), typed);
+      await user.type(screen.getByLabelText("Название на русском"), "Профи");
+      await user.type(screen.getByLabelText("Название на английском"), "Pro");
+      await chooseP1Defaults(user);
+      await user.click(screen.getAllByRole("button", { name: "Создать позицию" })[1]!);
+      expect(
+        await screen.findByText(
+          "Код позиции: строчные латинские буквы, цифры и дефис, начинается с буквы, до 64 символов",
+        ),
+      ).toBeDefined();
+      expect(screen.queryByText("Не удалось создать позицию.")).toBeNull();
+      expect(api.items()).toHaveLength(0);
+    },
+  );
+
   it.each([
     [409, "Позиция с таким кодом уже существует или недоступна"],
     [
