@@ -14,7 +14,15 @@ export const LOCAL_HOST_ADDRESS = `https://127.0.0.1:${DEFAULT_HOST_PORT}`;
 // - payloads the Rust shell rebuilds from proto types are strict: an unknown
 //   key means the webview and the shell come from different builds;
 // - host response bodies pass through the shell unchanged and are lenient,
-//   like the Rust response types (a newer host may add fields);
+//   like the Rust response types (a newer host may add fields), except the
+//   feed records that grant access or carry the salt (`site`, `operators`,
+//   `operator_badges`): those are read strictly, so an added field on one is
+//   breaking for older stations, which quarantine the record and delete their
+//   copy (fail-closed): an operator edited after a host upgrade cannot sign in
+//   on a station that has not been updated, and `site` takes the badge salt
+//   and the block sizes with it. The policy (versioning, or lenient additive
+//   fields) is carried to plan 5, and the coupling of the block sizes to a
+//   fail-closed record to plan 2a and the owner;
 // - request bodies are strict, like the host's `deny_unknown_fields`.
 
 /** Mirrors `markiro_proto::Hello`; rebuilt by the shell, so strict. */
@@ -102,6 +110,11 @@ export type HostStatus = z.infer<typeof hostStatusSchema>;
 export const hostRevisionSchema = z.object({ rev: z.number().int().nonnegative() }).strict();
 
 // --- Host responses (lenient) ---
+// The exception is the feed records that grant access or carry the salt
+// (`site`, `operators`, `operator_badges`, below): they are strict, so an
+// added field breaks older stations (quarantine, then the fail-closed delete
+// of their copy); see the note at the top. The policy is plan 5's, and the
+// block sizes' coupling to a fail-closed record is plan 2a's and the owner's.
 
 /** `GET /v1/device`. */
 export const deviceInfoSchema = z.object({

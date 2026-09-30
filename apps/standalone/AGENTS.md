@@ -145,10 +145,18 @@ included (`ref_operators`, `ref_operator_badges`). The writer runs with
 ends with `wal_checkpoint(TRUNCATE)`, which moves those pages into the file
 and empties the WAL that still held the frames written before the delete:
 no hash of the old pairing stays in either file (`VACUUM` would only shrink
-the file). A reader holding an older snapshot keeps the checkpoint from
-finishing, and the clear then fails as a whole. A local database that did
-not open is removed instead, with its `-wal`, `-shm` and `-journal` files
-(`LocalDbState::remove_unopened`), since it may still hold hashes. Every
+the file). That is true of the two files only: the checkpoint, and the
+removal of an unopened database, free blocks without overwriting them; the
+file system's free space, SSD wear levelling and shadow copies or backups can
+keep old bytes (a 4–6-digit PBKDF2 PIN is cheap to brute-force); and bytes a
+writer freed before it ran with `secure_delete` (a development database from
+before that setting) are not scrubbed, so for that database `VACUUM` would do
+more than shrink the file, and nothing here runs it. A reader holding an
+older snapshot keeps the checkpoint from finishing, and the call then fails;
+the delete stays committed and a retry repeats only the checkpoint. A local
+database that did not open is removed instead, with its `-wal`, `-shm` and
+`-journal` files (`LocalDbState::remove_unopened`), since it may still hold
+hashes. Every
 table here is treated as a disposable copy of the host's data: the first
 plan that adds data this device owns instead of copies — the scan journal,
 boxes, the outbox (the design's §6.2, "Логическая модель") — must exclude
@@ -285,9 +293,10 @@ domain's 100 000 iterations and the site's badge salt
 one string — `parse_phc` refuses a leading zero in the count, so `0100000`
 is not a second spelling of `100000` — and the partial unique index
 `operator_badges_active_phc` keeps it on one operator (`conflict` with
-`constraint: badge` and `operatorId`, the operator who holds it, read in the
-same transaction; only administrators reach the route, and they see every
-operator anyway). The office never gets a hash back: operator reads carry
+`constraint: badge` and, when the holder is found, `operatorId`, the operator
+who holds it, read in the same transaction; only administrators reach the
+route, and they see every operator anyway). The office never gets a hash
+back: operator reads carry
 `hasPin` and each badge's `id`, `label`, `createdAt` and `revokedAt`.
 Revoking a badge is `DELETE …/badges/{badgeId}`, and revoking it again
 changes nothing. Operators, badges and the salt are for administrators only,
@@ -298,14 +307,16 @@ fresh random salt bytes and the domain's `PHC_ITERATIONS`, `hashBadge` the
 site's salt and exactly `BADGE_ITERATIONS` (100 000, the host's
 `secrets::BADGE_ITERATIONS`), both in the domain's format, standard base64
 with padding; `test/credentials.test.ts` reproduces `operator-create.json`
-and `badge-create.json` byte for byte. Their fields follow the host
-(`src/lib/rules.ts`): a personnel number of 3–12 ASCII digits, kept as text
-with its leading zeros, a PIN of 4–6 ASCII digits, a role of up to 120
-characters and a label of up to 100, both blank for none. A badge code is
-what a scanner types: trimmed, 1–256 printable ASCII characters, and hashed
-exactly so. A keyboard-wedge scanner presses keys, and a station types the
-same badge through its own layout, so a code in Cyrillic is refused with a
-hint to switch the layout, never read by key position.
+and `badge-create.json` byte for byte. The forms' rules (`src/lib/rules.ts`)
+follow the host's for a personnel number of 3–12 ASCII digits, kept as text
+with its leading zeros, a role of up to 120 characters and a label of up to
+100, both blank for none. The PIN rule, 4–6 ASCII digits, mirrors the
+cloud's (`apps/api/src/modules/operators/dto.ts`): the host never sees a
+PIN. A badge code is what a scanner types: trimmed, 1–256 printable ASCII
+characters, and hashed exactly so. A keyboard-wedge scanner presses keys,
+and a station types the same badge through its own layout, so a code in
+Cyrillic is refused with a hint to switch the layout, never read by key
+position.
 
 A station keeps its copies in `ref_operators` and `ref_operator_badges`
 (`src-tauri/migrations/0003_operators_badges.sql`), with no foreign key from
@@ -318,9 +329,11 @@ these copies only on the floor screen of a paired device that is not
 rejected. The hashes already on disk stay when the host revokes the device
 or its certificate changes, and only a forget clears them, so such a device
 must keep showing no floor, as `nextShellView` does today: the
-rejected-device screen comes first. A badge is found by hashing the trimmed scan with
-`ref_site.badge_salt` and comparing whole strings, and it signs in only
-with the record of its `operatorId`; a badge that matches more than one
+rejected-device screen comes first. A scan is trimmed as `badgeCodeRule`
+trims a code, and a Cyrillic one is refused with the hint to switch the
+layout, never read by key position. A badge is found by hashing the trimmed
+scan with `ref_site.badge_salt` and comparing whole strings, and it signs in
+only with the record of its `operatorId`; a badge that matches more than one
 active operator is refused as ambiguous, never resolved to the first.
 Precondition: the sign-in must not read the copies until the sync's
 `hostGuard` is scoped to the pairing, not only to the host (the device id
@@ -408,12 +421,13 @@ cancel a request already sent, and without this guard a late page for the
 old host would win `excluded.rev > rev` against the new host's rows under
 the same ids (`ref_org`/`ref_site` are keyed `'1'` on every host). The same
 guard also catches a page that outlives `device_forget`'s `clear_copies`,
-which deletes the `host_id` row along with everything else: without it
-requiring the row to still match, a page fetched before the forget and
-committed after the clear would find nothing to conflict with and rewrite
-the old pairing's copies into a device that was told to forget them. A feed
-from another host than the paired one stops the sync with `other_host` and
-applies nothing. `createSyncScheduler` runs one sync at a time: triggers during a
+until a new pairing with the same host stamps `host_id` again (as above):
+`clear_copies` deletes the `host_id` row along with everything else, and
+without the guard requiring the row to still match, a page fetched before
+the forget and committed after the clear would find nothing to conflict with
+and rewrite the old pairing's copies into a device that was told to forget
+them. A feed from another host than the paired one stops the sync with
+`other_host` and applies nothing. `createSyncScheduler` runs one sync at a time: triggers during a
 run ask for exactly one more, and a failed run waits for the next trigger;
 `run` must report its own failure, since the scheduler swallows every
 rejection. A host restored from a copy that has already passed the
@@ -432,9 +446,17 @@ change) build their bodies inline, field by field, as does the wizard. Raise
 `PROTOCOL_VERSION` for an incompatible change; the host keeps accepting the
 previous version. Response types, which devices of different versions read,
 tolerate unknown fields; request types, which the host parses, reject them
-with `deny_unknown_fields`. The `product`, `protocol` and `minProtocol`
-fields of `hello` never change shape: read `HelloEnvelope` first and decide
-compatibility (`host_too_old`, `app_too_old`) before parsing the rest.
+with `deny_unknown_fields`. The feed records that grant access or carry the
+salt (`site`, `operators`, `operator_badges`) are the exception: a station
+reads them strictly, so an additive field on one is breaking for older
+stations, which quarantine the record and delete their copy (fail-closed): an
+operator edited after a host upgrade cannot sign in on a station that has not
+been updated, and `site` takes the badge salt and the block sizes with it. The
+policy (versioning, or lenient additive fields) is carried to plan 5, and the
+coupling of the block sizes to a fail-closed record to plan 2a and the owner.
+The `product`, `protocol` and `minProtocol` fields of `hello` never change
+shape: read `HelloEnvelope` first and decide compatibility (`host_too_old`,
+`app_too_old`) before parsing the rest.
 
 ## Network and TLS
 
@@ -585,7 +607,9 @@ rather than resetting it — only a number replaces it. A link `lastError` of
 same answer to an office call. A new revision re-reads the signed-in user
 (`Office`, `hostRevision`); it does not reload an open page, so a form keeps
 what was typed and a save over a newer record meets `stale_revision`. Pages read
-fresh data whenever they open (`staleTime` 0).
+fresh data whenever they open (`staleTime` 0), except the site's badge salt,
+which never changes and is not read again while it is cached (`staleTime:
+Infinity`, see «Office pages»).
 
 A paired station without a line chooses one (`LineSelect`) among the active
 lines of the local copies (a line the office clears brings the station back
@@ -604,10 +628,13 @@ state how many feed records the copies did not accept (`quarantined`); the
 office header reads the sync state next to the link (`OfficeLinkProvider`).
 The line screen's alert names a failed sync by its class in the same words
 (its own host wording for `host`, `errors.sync.local` and `errors.sync.feed`
-otherwise) and a copy it cannot read as this computer's failure. A failed
-sync's alert stays through the automatic retries, with «Повторить» showing
-the run in progress, until a sync succeeds: the alert is a live region, so
-a screen reader hears one failure once, not again at every retry. There is no
+otherwise) and a copy it cannot read as this computer's failure; while no
+lines are listed yet (`lines` is `null`), its status line is given the sync
+state without `failure` and repeats only `quarantined`, so the alert is the
+one place that names the failure. A failed sync's alert stays through the
+automatic retries, with «Повторить» showing the run in progress, until a
+sync succeeds: the alert is a live region, so a screen reader hears one
+failure once, not again at every retry. There is no
 blocking overlay while the host is away: office pages explain their own failed
 requests and offer a retry.
 
@@ -696,23 +723,48 @@ requests and offer a retry.
   without an add dialog, the default `gcTime`), which is harmless, since it
   never changes. The dialog focuses the code, which a keyboard-wedge scanner
   types and submits with Enter, hashes it with the salt (`hashBadge`) and
-  sends only the hash; until the salt is read the code field is read-only
-  (still focusable), so a scan typed then is not taken. The answer is the new
-  badge, not its operator, so the badge goes into the cached operator at once
-  (`useChangeList` with `withBadge`, which replaces a badge by its id: the
-  same badge twice is one badge). A `badge` conflict names the holder under
-  the code when `details.operatorId` is a UUID of an operator in the list,
-  and otherwise says only that the badge is taken. The code field is masked
-  and a scanner types after whatever it holds, so after any failed attempt
-  that involved the code (the form refuses it: the layout hint; the host
-  refuses it: a `badge` conflict or a `validation_failed` on `badgePhc`; or
-  the request fails: an alert) the field is emptied and refocused, and a
-  message under it stays until the next input: a retry is a new scan, never a
-  press of the button over the old code. Only a refusal of the label alone
-  (the form's, or a `validation_failed` on `label`) keeps the code, and the
-  label is corrected beside it. «Отозвать» asks first and says that the badge
-  stops opening the stations once they sync and never comes back; after the
-  host's 204 the badge shows as revoked at once, and the list is read again.
+  sends only the hash. The code field is read-only (still focusable) until
+  the salt is read and again while a submit is in flight
+  (`formState.isSubmitting`, which spans the validation, the hashing and the
+  request, where `add.isPending` would miss the hashing), so a scan typed
+  then is not taken and cannot be glued to the code being sent; once the
+  answer is in, a success closes the dialog and after a failure the field is
+  editable again. The answer is the new badge, not its operator, so the badge
+  goes into the cached operator at once (`useChangeList` with `withBadge`,
+  which replaces a badge by its id: the same badge twice is one badge). A
+  `badge` conflict names the holder under the code when `details.operatorId`
+  is a UUID of an operator in the list, and otherwise says only that the
+  badge is taken. The code field is masked and a scanner types after
+  whatever it holds, so a code that did not go through must not stay in it: a
+  retry is a new scan, never a press of the button over the old code. What a
+  refused add does:
+
+  | Failure                                                             | Code field | Focus goes to | Message appears        |
+  | ------------------------------------------------------------------- | ---------- | ------------- | ---------------------- |
+  | The form refuses the code (layout hint, empty, too long, not ASCII) | emptied    | code          | under the code         |
+  | A `badge` conflict                                                  | emptied    | code          | under the code         |
+  | `validation_failed` on `badgePhc`                                   | emptied    | code          | under the code         |
+  | The request fails, answered by an alert                             | emptied    | code          | alert above the fields |
+  | The form refuses the label (too long, control character)            | kept       | label         | under the label        |
+  | `validation_failed` on `label`                                      | kept       | label         | under the label        |
+  | The label contains the code (`labelHasCode`)                        | kept       | label         | under the label        |
+
+  A message under a field stays until the next input into it, an alert until
+  the next send. Only a refusal of the label alone keeps the code, and the
+  label is corrected beside it. The last row is the guard against the one way
+  a code could leave the webview in clear text: a label typed first, with the
+  focus left in it, takes the scan, and the second scan into the code field
+  would send it as the label, which the host stores, writes to the audit row,
+  lists and sends to every station, and revoking the badge takes back none of
+  it. Once the form accepts both fields, and before anything is hashed or
+  sent, a label that contains the code is refused. The test is a plain
+  substring test of the two trimmed values, so it also refuses a label that
+  repeats the number printed on the card on purpose, and a very short code
+  that is a substring of the label by coincidence: both are accepted costs.
+  «Отозвать» asks first and says that the badge stops opening the stations
+  once they sync and never comes back; after the host's 204 the badge shows
+  as revoked at once, and the list is read again.
+
 - `@markiro/ui` has English defaults: `Table` shows «No data» without
   `empty`, and `Modal` names its × «Close» without `closeLabel`. Every
   office table passes a localized `empty`, and every dialog passes
@@ -761,8 +813,9 @@ arbitrates but does not reimplement them.
 
 ## Logs
 
-Never log device keys, session tokens, pairing codes, passwords, PINs, any
-hash or the TLS private key.
+Never log device keys, session tokens, pairing codes, passwords, PINs, badge
+codes (a scan is one; plan 1f will handle them), any hash or the TLS private
+key.
 
 ## Verification
 
