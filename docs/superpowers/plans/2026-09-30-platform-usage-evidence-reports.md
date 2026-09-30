@@ -2508,15 +2508,13 @@ describe.skipIf(!local)("commercial report projection on real Postgres", () => {
     ]);
     // Legacy offer payment: a separate flow from invoice payments, summed with them.
     const legacyOfferId = randomUUID();
-    await db
-      .insert(schema.commercialOffers)
-      .values({
-        id: legacyOfferId,
-        tenantId: base.tenant,
-        revision: 1,
-        status: "draft",
-        total: "250.00",
-      });
+    await db.insert(schema.commercialOffers).values({
+      id: legacyOfferId,
+      tenantId: base.tenant,
+      revision: 1,
+      status: "draft",
+      total: "250.00",
+    });
     await db.insert(schema.payments).values({
       tenantId: base.tenant,
       offerId: legacyOfferId,
