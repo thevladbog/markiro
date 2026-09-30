@@ -12,7 +12,17 @@ export const platformReportTypeSchema = z.enum([
   "inventories",
   "summary",
   "commerceml",
+  "usage",
+  "quality",
+  "commercial",
 ]);
+export const platformEvidenceReportTypes = ["usage", "quality", "commercial"] as const;
+export type PlatformEvidenceReportType = (typeof platformEvidenceReportTypes)[number];
+export function isPlatformEvidenceReportType(
+  reportType: z.infer<typeof platformReportTypeSchema>,
+): reportType is PlatformEvidenceReportType {
+  return (platformEvidenceReportTypes as readonly string[]).includes(reportType);
+}
 export const platformReportPeriodBasisSchema = z.enum(["events", "production_date"]);
 export const platformReportPrivacySchema = z.enum(["identified", "pseudonymous", "aggregate"]);
 export const platformReportStatusSchema = z.enum([
@@ -141,6 +151,13 @@ export const platformReportInputSchema = z
         path: ["outcome"],
         message: "Outcome is CommerceML-only",
       });
+    }
+    if (isPlatformEvidenceReportType(value.reportType)) {
+      for (const filter of ["lineId", "productId", "gtin14", "status"] as const) {
+        if (value[filter] !== undefined) {
+          context.addIssue({ code: "custom", path: [filter], message: "Filter is not supported" });
+        }
+      }
     }
     if (value.reportType === "summary" && value.status !== undefined) {
       context.addIssue({
