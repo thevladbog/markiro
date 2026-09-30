@@ -44,38 +44,40 @@ If Docker is unavailable, every DB-backed step below skips. Report that explicit
 
 ## File Structure
 
-| File | Action | Responsibility |
-|---|---|---|
-| `docs/superpowers/specs/2026-09-30-platform-usage-evidence-reports-design.md` | modify | correct facts found during planning |
-| `packages/platform-contracts/src/platform-reports.ts` | modify | new type values, guard, filter rejection |
-| `packages/platform-contracts/src/index.ts` | modify | export the guard and type list |
-| `packages/platform-contracts/test/platform-reports.test.ts` | modify | contract tests |
-| `apps/api/src/platform-reports/report-definitions.ts` | modify | `REPORT_DEFINITIONS_VERSION`, common evidence definitions, tenant privacy |
-| `apps/api/src/platform-reports/report-renderer.ts` | modify | `definitionsVersion`, `dataSha256`, tenant-id stripping |
-| `apps/api/src/platform-reports/report-query.ts` | modify | `localDay`, `pivotMetrics` |
-| `apps/api/src/platform-reports/usage-report-source.ts` | create | `usage` columns, definitions, SQL |
-| `apps/api/src/platform-reports/quality-report-source.ts` | create | `quality` columns, definitions, SQL, inventory merge |
-| `apps/api/src/platform-reports/commercial-report-source.ts` | create | `commercial` columns, definitions, SQL |
-| `apps/api/src/platform-reports/report-source.service.ts` | modify | dispatch and per-type definitions |
-| `apps/api/test/support/platform-report-evidence-base.ts` | create | shared tenant fixture and cleanup |
-| `apps/api/test/platform-report-evidence-privacy.test.ts` | create | pure privacy, renderer and metadata tests |
-| `apps/api/test/platform-report-evidence-definitions.test.ts` | create | every column has a definition |
-| `apps/api/test/platform-report-usage-source.test.ts` | create | DB test for `usage` |
-| `apps/api/test/platform-report-quality-source.test.ts` | create | DB test for `quality` and the pure merge |
-| `apps/api/test/platform-report-commercial-source.test.ts` | create | DB test for `commercial` |
-| `apps/saas-admin/src/pages/reports/ReportsPage.tsx` | modify | selector, hidden filters, privacy help |
-| `apps/saas-admin/src/i18n/en.json`, `ru.json` | modify | labels and help text |
-| `apps/saas-admin/test/reports-page.test.tsx` | modify | UI tests |
-| `docs/operations/platform-report-exports.md` | modify | operations guide |
+| File                                                                          | Action | Responsibility                                                            |
+| ----------------------------------------------------------------------------- | ------ | ------------------------------------------------------------------------- |
+| `docs/superpowers/specs/2026-09-30-platform-usage-evidence-reports-design.md` | modify | correct facts found during planning                                       |
+| `packages/platform-contracts/src/platform-reports.ts`                         | modify | new type values, guard, filter rejection                                  |
+| `packages/platform-contracts/src/index.ts`                                    | modify | export the guard and type list                                            |
+| `packages/platform-contracts/test/platform-reports.test.ts`                   | modify | contract tests                                                            |
+| `apps/api/src/platform-reports/report-definitions.ts`                         | modify | `REPORT_DEFINITIONS_VERSION`, common evidence definitions, tenant privacy |
+| `apps/api/src/platform-reports/report-renderer.ts`                            | modify | `definitionsVersion`, `dataSha256`, tenant-id stripping                   |
+| `apps/api/src/platform-reports/report-query.ts`                               | modify | `localDay`, `pivotMetrics`                                                |
+| `apps/api/src/platform-reports/usage-report-source.ts`                        | create | `usage` columns, definitions, SQL                                         |
+| `apps/api/src/platform-reports/quality-report-source.ts`                      | create | `quality` columns, definitions, SQL, inventory merge                      |
+| `apps/api/src/platform-reports/commercial-report-source.ts`                   | create | `commercial` columns, definitions, SQL                                    |
+| `apps/api/src/platform-reports/report-source.service.ts`                      | modify | dispatch and per-type definitions                                         |
+| `apps/api/test/support/platform-report-evidence-base.ts`                      | create | shared tenant fixture and cleanup                                         |
+| `apps/api/test/platform-report-evidence-privacy.test.ts`                      | create | pure privacy, renderer and metadata tests                                 |
+| `apps/api/test/platform-report-evidence-definitions.test.ts`                  | create | every column has a definition                                             |
+| `apps/api/test/platform-report-usage-source.test.ts`                          | create | DB test for `usage`                                                       |
+| `apps/api/test/platform-report-quality-source.test.ts`                        | create | DB test for `quality` and the pure merge                                  |
+| `apps/api/test/platform-report-commercial-source.test.ts`                     | create | DB test for `commercial`                                                  |
+| `apps/saas-admin/src/pages/reports/ReportsPage.tsx`                           | modify | selector, hidden filters, privacy help                                    |
+| `apps/saas-admin/src/i18n/en.json`, `ru.json`                                 | modify | labels and help text                                                      |
+| `apps/saas-admin/test/reports-page.test.tsx`                                  | modify | UI tests                                                                  |
+| `docs/operations/platform-report-exports.md`                                  | modify | operations guide                                                          |
 
 ---
 
 ### Task 1: Correct the spec with facts found while planning
 
 **Files:**
+
 - Modify: `docs/superpowers/specs/2026-09-30-platform-usage-evidence-reports-design.md`
 
 **Interfaces:**
+
 - Produces: a spec that matches the plan. No code depends on it.
 
 Facts verified in code while writing this plan: `payments` (legacy, offer payments) has a RUB check constraint, and offer payments write only `payments` while invoice payments write only `billing_payments`, so the flows are disjoint; `print_verified_at` is the station's device clock carried in the closure record; `quality` can read the inventory projection without changing `inventory-report-source.ts`.
@@ -157,11 +159,13 @@ git commit -m "docs(specs): correct payment flows, print clock and inventory joi
 ### Task 2: Contract — three new report types
 
 **Files:**
+
 - Modify: `packages/platform-contracts/src/platform-reports.ts` (the `platformReportTypeSchema` enum at line 9, and the `superRefine` block after the `commerceml` branch)
 - Modify: `packages/platform-contracts/src/index.ts` (the `platform-reports.js` export block)
 - Test: `packages/platform-contracts/test/platform-reports.test.ts`
 
 **Interfaces:**
+
 - Produces: `platformEvidenceReportTypes` (`readonly ["usage","quality","commercial"]`), `type PlatformEvidenceReportType`, `isPlatformEvidenceReportType(reportType): reportType is PlatformEvidenceReportType`, and the widened `PlatformReportInput["reportType"]` union. Every later task consumes these.
 
 - [ ] **Step 1: Write the failing tests**
@@ -169,16 +173,21 @@ git commit -m "docs(specs): correct payment flows, print clock and inventory joi
 Append this block inside the top-level `describe("platform operational report contracts", ...)` in `packages/platform-contracts/test/platform-reports.test.ts`, before its closing `});`:
 
 ```ts
-  describe("usage, quality and commercial report types", () => {
-    const evidenceTypes = ["usage", "quality", "commercial"] as const;
+describe("usage, quality and commercial report types", () => {
+  const evidenceTypes = ["usage", "quality", "commercial"] as const;
 
-    it.each(evidenceTypes)("accepts %s with tenants, dates, timezone and privacy only", (reportType) => {
-      expect(
-        platformReportContracts.create.body.safeParse({ ...valid, reportType }).success,
-      ).toBe(true);
-    });
+  it.each(evidenceTypes)(
+    "accepts %s with tenants, dates, timezone and privacy only",
+    (reportType) => {
+      expect(platformReportContracts.create.body.safeParse({ ...valid, reportType }).success).toBe(
+        true,
+      );
+    },
+  );
 
-    it.each(evidenceTypes)("rejects every optional filter and production_date for %s", (reportType) => {
+  it.each(evidenceTypes)(
+    "rejects every optional filter and production_date for %s",
+    (reportType) => {
       const overrides = [
         { lineId: uuid },
         { productId: uuid },
@@ -194,55 +203,65 @@ Append this block inside the top-level `describe("platform operational report co
             .success,
         ).toBe(false);
       }
-    });
+    },
+  );
 
-    it("reports the unsupported filter at its own path", () => {
-      const result = platformReportContracts.create.body.safeParse({
-        ...valid,
-        reportType: "usage",
-        lineId: uuid,
-      });
-      expect(result.error?.issues).toEqual([
-        { code: "custom", path: ["lineId"], message: "Filter is not supported" },
-      ]);
+  it("reports the unsupported filter at its own path", () => {
+    const result = platformReportContracts.create.body.safeParse({
+      ...valid,
+      reportType: "usage",
+      lineId: uuid,
     });
-
-    it("keeps the existing types unchanged", () => {
-      expect(
-        platformReportContracts.create.body.safeParse({ ...valid, reportType: "shifts", lineId: uuid })
-          .success,
-      ).toBe(true);
-    });
-
-    it("exposes the evidence type list and its guard", () => {
-      expect(platformEvidenceReportTypes).toEqual(["usage", "quality", "commercial"]);
-      for (const reportType of platformEvidenceReportTypes)
-        expect(isPlatformEvidenceReportType(reportType)).toBe(true);
-      for (const reportType of ["shifts", "shift_operators", "inventories", "summary", "commerceml"] as const)
-        expect(isPlatformEvidenceReportType(reportType)).toBe(false);
-    });
-
-    it("parses stored parameters of the new types into the report DTO", () => {
-      const parameters = (({ idempotencyKey: _, ...rest }) => rest)({
-        ...valid,
-        reportType: "commercial" as const,
-      });
-      const report = platformReportContracts.create.response.parse({
-        id: uuid,
-        parameters,
-        status: "queued",
-        createdAt: "2026-09-30T08:00:00Z",
-        snapshotAt: null,
-        completedAt: null,
-        expiresAt: "2026-10-07T08:00:00Z",
-        errorCode: null,
-        rowCount: null,
-        byteSize: null,
-        filename: null,
-      });
-      expect(report.parameters.reportType).toBe("commercial");
-    });
+    expect(result.error?.issues).toEqual([
+      { code: "custom", path: ["lineId"], message: "Filter is not supported" },
+    ]);
   });
+
+  it("keeps the existing types unchanged", () => {
+    expect(
+      platformReportContracts.create.body.safeParse({
+        ...valid,
+        reportType: "shifts",
+        lineId: uuid,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("exposes the evidence type list and its guard", () => {
+    expect(platformEvidenceReportTypes).toEqual(["usage", "quality", "commercial"]);
+    for (const reportType of platformEvidenceReportTypes)
+      expect(isPlatformEvidenceReportType(reportType)).toBe(true);
+    for (const reportType of [
+      "shifts",
+      "shift_operators",
+      "inventories",
+      "summary",
+      "commerceml",
+    ] as const)
+      expect(isPlatformEvidenceReportType(reportType)).toBe(false);
+  });
+
+  it("parses stored parameters of the new types into the report DTO", () => {
+    const parameters = (({ idempotencyKey: _, ...rest }) => rest)({
+      ...valid,
+      reportType: "commercial" as const,
+    });
+    const report = platformReportContracts.create.response.parse({
+      id: uuid,
+      parameters,
+      status: "queued",
+      createdAt: "2026-09-30T08:00:00Z",
+      snapshotAt: null,
+      completedAt: null,
+      expiresAt: "2026-10-07T08:00:00Z",
+      errorCode: null,
+      rowCount: null,
+      byteSize: null,
+      filename: null,
+    });
+    expect(report.parameters.reportType).toBe("commercial");
+  });
+});
 ```
 
 Change the import at the top of the same file to:
@@ -300,13 +319,13 @@ In the same file, inside `superRefine`, immediately after the block that ends wi
 insert:
 
 ```ts
-    if (isPlatformEvidenceReportType(value.reportType)) {
-      for (const filter of ["lineId", "productId", "gtin14", "status"] as const) {
-        if (value[filter] !== undefined) {
-          context.addIssue({ code: "custom", path: [filter], message: "Filter is not supported" });
-        }
-      }
+if (isPlatformEvidenceReportType(value.reportType)) {
+  for (const filter of ["lineId", "productId", "gtin14", "status"] as const) {
+    if (value[filter] !== undefined) {
+      context.addIssue({ code: "custom", path: [filter], message: "Filter is not supported" });
     }
+  }
+}
 ```
 
 `operatorId`, `periodBasis=production_date` and `outcome` are already rejected for every type outside their own scope, so no further branches are needed.
@@ -360,11 +379,13 @@ git commit -m "feat(contracts): usage, quality and commercial platform report ty
 ### Task 3: Privacy, definitions version and renderer metadata
 
 **Files:**
+
 - Modify: `apps/api/src/platform-reports/report-definitions.ts`
 - Modify: `apps/api/src/platform-reports/report-renderer.ts`
 - Test: `apps/api/test/platform-report-evidence-privacy.test.ts` (create)
 
 **Interfaces:**
+
 - Consumes: `isPlatformEvidenceReportType`, `PlatformReportInput` from Task 2.
 - Produces:
   - `REPORT_DEFINITIONS_VERSION: Record<PlatformReportInput["reportType"], string>`
@@ -756,6 +777,7 @@ git commit -m "feat(reports): tenant labels, definitionsVersion and dataSha256 f
 ### Task 4: `usage` report source
 
 **Files:**
+
 - Modify: `apps/api/src/platform-reports/report-query.ts`
 - Create: `apps/api/src/platform-reports/usage-report-source.ts`
 - Modify: `apps/api/src/platform-reports/report-source.service.ts`
@@ -764,6 +786,7 @@ git commit -m "feat(reports): tenant labels, definitionsVersion and dataSha256 f
 - Test: `apps/api/test/platform-report-usage-source.test.ts` (create)
 
 **Interfaces:**
+
 - Consumes: Task 3 exports; `reportRows`, `tenantScope`, `inWindow` from `report-query.ts`.
 - Produces:
   - `localDay(column: SQL, input: PlatformReportInput): SQL` — the local calendar date of a timestamptz column.
@@ -1631,12 +1654,14 @@ git commit -m "feat(reports): usage report source" \
 ### Task 5: `quality` report source
 
 **Files:**
+
 - Create: `apps/api/src/platform-reports/quality-report-source.ts`
 - Modify: `apps/api/src/platform-reports/report-source.service.ts`
 - Modify: `apps/api/test/platform-report-evidence-definitions.test.ts`
 - Test: `apps/api/test/platform-report-quality-source.test.ts` (create)
 
 **Interfaces:**
+
 - Consumes: `localDay`, `pivotMetrics`, `reportRows`, `tenantScope`, `inWindow` (Task 4); `loadInventoryRows` from `inventory-report-source.ts` (unchanged); `seedEvidenceBase`, `cleanupEvidence` (Task 4); `seedReportInventory` (existing).
 - Produces: `QUALITY_COLUMNS`, `QUALITY_DEFINITIONS`, `loadQualityRows(tx, input)`, and the pure `mergeInventoryCompletions(rows, completions, projections): ReportRow[]`.
 
@@ -1645,13 +1670,16 @@ git commit -m "feat(reports): usage report source" \
 Add to `apps/api/test/platform-report-evidence-definitions.test.ts` (extend the imports and the `describe`):
 
 ```ts
-import { QUALITY_COLUMNS, QUALITY_DEFINITIONS } from "../src/platform-reports/quality-report-source";
+import {
+  QUALITY_COLUMNS,
+  QUALITY_DEFINITIONS,
+} from "../src/platform-reports/quality-report-source";
 ```
 
 ```ts
-  it("defines every quality column", () => {
-    expect(undefinedColumns(QUALITY_COLUMNS, QUALITY_DEFINITIONS)).toEqual([]);
-  });
+it("defines every quality column", () => {
+  expect(undefinedColumns(QUALITY_COLUMNS, QUALITY_DEFINITIONS)).toEqual([]);
+});
 ```
 
 Create `apps/api/test/platform-report-quality-source.test.ts`:
@@ -1683,8 +1711,20 @@ describe("mergeInventoryCompletions", () => {
     const rows = mergeInventoryCompletions(
       [empty],
       [
-        { tenant_id: "t", tenant_name: "T", inventory_id: "i-1", day: "2026-09-01", has_snapshot: 1 },
-        { tenant_id: "t", tenant_name: "T", inventory_id: "i-2", day: "2026-09-03", has_snapshot: 0 },
+        {
+          tenant_id: "t",
+          tenant_name: "T",
+          inventory_id: "i-1",
+          day: "2026-09-01",
+          has_snapshot: 1,
+        },
+        {
+          tenant_id: "t",
+          tenant_name: "T",
+          inventory_id: "i-2",
+          day: "2026-09-03",
+          has_snapshot: 0,
+        },
       ],
       [{ tenant_id: "t", inventory_id: "i-1", current_expected: 3, current_missing_expected: 2 }],
     );
@@ -1709,10 +1749,28 @@ describe("mergeInventoryCompletions", () => {
   it("skips null projection values instead of inferring zero-valued facts", () => {
     const [row] = mergeInventoryCompletions(
       [],
-      [{ tenant_id: "t", tenant_name: "T", inventory_id: "i-1", day: "2026-09-01", has_snapshot: 1 }],
-      [{ tenant_id: "t", inventory_id: "i-1", current_expected: null, current_missing_expected: null }],
+      [
+        {
+          tenant_id: "t",
+          tenant_name: "T",
+          inventory_id: "i-1",
+          day: "2026-09-01",
+          has_snapshot: 1,
+        },
+      ],
+      [
+        {
+          tenant_id: "t",
+          inventory_id: "i-1",
+          current_expected: null,
+          current_missing_expected: null,
+        },
+      ],
     );
-    expect(row).toMatchObject({ inventory_expected_current: 0, inventory_missing_expected_current: 0 });
+    expect(row).toMatchObject({
+      inventory_expected_current: 0,
+      inventory_missing_expected_current: 0,
+    });
   });
 });
 
@@ -2084,14 +2142,16 @@ export function mergeInventoryCompletions(
       inventory_missing_expected_current: 0,
     });
   }
-  const projection = new Map(
-    projections.map((row) => [key(row.tenant_id, row.inventory_id), row]),
-  );
+  const projection = new Map(projections.map((row) => [key(row.tenant_id, row.inventory_id), row]));
   for (const done of completions) {
     const rowKey = key(done.tenant_id, done.day);
     let row = rows.get(rowKey);
     if (!row) {
-      row = { tenant_id: done.tenant_id ?? null, tenant_name: done.tenant_name ?? null, day: done.day ?? null };
+      row = {
+        tenant_id: done.tenant_id ?? null,
+        tenant_name: done.tenant_name ?? null,
+        day: done.day ?? null,
+      };
       for (const column of QUALITY_COLUMNS.slice(3)) row[column] = 0;
       rows.set(rowKey, row);
     }
@@ -2239,12 +2299,14 @@ git commit -m "feat(reports): quality report source" \
 ### Task 6: `commercial` report source
 
 **Files:**
+
 - Create: `apps/api/src/platform-reports/commercial-report-source.ts`
 - Modify: `apps/api/src/platform-reports/report-source.service.ts`
 - Modify: `apps/api/test/platform-report-evidence-definitions.test.ts`
 - Test: `apps/api/test/platform-report-commercial-source.test.ts` (create)
 
 **Interfaces:**
+
 - Consumes: `pivotMetrics`, `localDay`, `reportRows`, `tenantScope`, `inWindow`; `seedEvidenceBase`, `cleanupEvidence`; `createOrganization`, `createPublishedPlan`, `createManagedSubscription` from `apps/api/test/support/subscription-fixtures.ts`.
 - Produces: `COMMERCIAL_COLUMNS`, `COMMERCIAL_DEFINITIONS`, `loadCommercialRows(tx, input)`.
 
@@ -2260,9 +2322,9 @@ import {
 ```
 
 ```ts
-  it("defines every commercial column", () => {
-    expect(undefinedColumns(COMMERCIAL_COLUMNS, COMMERCIAL_DEFINITIONS)).toEqual([]);
-  });
+it("defines every commercial column", () => {
+  expect(undefinedColumns(COMMERCIAL_COLUMNS, COMMERCIAL_DEFINITIONS)).toEqual([]);
+});
 ```
 
 Create `apps/api/test/platform-report-commercial-source.test.ts`:
@@ -2360,7 +2422,11 @@ describe.skipIf(!local)("commercial report projection on real Postgres", () => {
       status: "active",
     });
     const invoice = (
-      values: Partial<typeof schema.invoices.$inferInsert> & { subtotal: string; vatTotal: string; total: string },
+      values: Partial<typeof schema.invoices.$inferInsert> & {
+        subtotal: string;
+        vatTotal: string;
+        total: string;
+      },
     ): typeof schema.invoices.$inferInsert => ({
       tenantId: base.tenant,
       number: `EV-${randomUUID()}`,
@@ -2400,7 +2466,15 @@ describe.skipIf(!local)("commercial report projection on real Postgres", () => {
         cancelledAt: new Date("2026-09-01T12:00:00Z"),
       }),
       // A draft is never issued.
-      invoice({ status: "draft", issueDate: null, sellerSnapshot: null, buyerSnapshot: null, subtotal: "0", vatTotal: "0", total: "0" }),
+      invoice({
+        status: "draft",
+        issueDate: null,
+        sellerSnapshot: null,
+        buyerSnapshot: null,
+        subtotal: "0",
+        vatTotal: "0",
+        total: "0",
+      }),
       // Foreign tenant, issued in the window.
       invoice({
         tenantId: base.other,
@@ -2436,7 +2510,13 @@ describe.skipIf(!local)("commercial report projection on real Postgres", () => {
     const legacyOfferId = randomUUID();
     await db
       .insert(schema.commercialOffers)
-      .values({ id: legacyOfferId, tenantId: base.tenant, revision: 1, status: "draft", total: "250.00" });
+      .values({
+        id: legacyOfferId,
+        tenantId: base.tenant,
+        revision: 1,
+        status: "draft",
+        total: "250.00",
+      });
     await db.insert(schema.payments).values({
       tenantId: base.tenant,
       offerId: legacyOfferId,
@@ -2489,7 +2569,11 @@ describe.skipIf(!local)("commercial report projection on real Postgres", () => {
         signedSnapshot: {},
       }),
       // Signed but not linked to a tenant: never reported.
-      agreement({ status: "signed", signedAt: new Date("2026-09-01T16:30:00Z"), signedSnapshot: {} }),
+      agreement({
+        status: "signed",
+        signedAt: new Date("2026-09-01T16:30:00Z"),
+        signedSnapshot: {},
+      }),
       agreement({ status: "draft", tenantId: base.tenant }),
     ]);
     // Tenant C: a paid subscription with no start date falls back to its creation time.
@@ -2559,7 +2643,12 @@ describe.skipIf(!local)("commercial report projection on real Postgres", () => {
   it("excludes the foreign tenant, drafts and unlinked agreements", async () => {
     const both = await service.load({ ...input, tenantIds: [base.tenant, base.other] });
     expect(both.rows.filter((row) => row.tenant_id === base.other)).toEqual([
-      expect.objectContaining({ tenant_name: "Evidence fixture B", invoices_issued: 1, invoices_issued_total_minor: 7700, agreements_signed: 0 }),
+      expect.objectContaining({
+        tenant_name: "Evidence fixture B",
+        invoices_issued: 1,
+        invoices_issued_total_minor: 7700,
+        agreements_signed: 0,
+      }),
     ]);
     const only = await service.load(input);
     expect(only.rows.every((row) => row.tenant_id === base.tenant)).toBe(true);
@@ -2568,7 +2657,11 @@ describe.skipIf(!local)("commercial report projection on real Postgres", () => {
   it("dates a paid subscription without a start date by its creation time and ignores manual ones", async () => {
     const result = await service.load({ ...input, tenantIds: [tenantC, tenantD] });
     expect(result.rows).toEqual([
-      expect.objectContaining({ tenant_id: tenantC, day: "2026-09-02", paid_subscriptions_started: 1 }),
+      expect.objectContaining({
+        tenant_id: tenantC,
+        day: "2026-09-02",
+        paid_subscriptions_started: 1,
+      }),
     ]);
   });
 
@@ -2632,14 +2725,14 @@ export const COMMERCIAL_DEFINITIONS: Record<string, string> = {
     "Sum of invoices.subtotal of invoices_issued, in RUB kopecks (integer).",
   invoices_issued_vat_minor:
     "Sum of invoices.vat_total of invoices_issued, in RUB kopecks (integer).",
-  invoices_issued_total_minor: "Sum of invoices.total of invoices_issued, in RUB kopecks (integer).",
+  invoices_issued_total_minor:
+    "Sum of invoices.total of invoices_issued, in RUB kopecks (integer).",
   invoices_cancelled: "Invoices with cancelled_at on the day (server clock).",
   invoices_paid:
     "Invoices with paid_at on the day. paid_at is set only when the invoice is fully paid, so a partially paid invoice is not counted here.",
   payments_received:
     "Payments at paid_at: billing_payments (invoice payments) plus legacy payments (offer payments). The two flows are disjoint: an offer payment writes only payments and an invoice payment writes only billing_payments, so they are summed without deduplication. A partial payment is counted when received.",
-  payments_received_minor:
-    "Sum of the amounts of payments_received, in RUB kopecks (integer).",
+  payments_received_minor: "Sum of the amounts of payments_received, in RUB kopecks (integer).",
   acts_issued: "billing_acts with issued_at on the day (server clock).",
   paid_subscriptions_started:
     "Subscriptions whose source is paid_offer_line or paid_invoice_line, dated by starts_at, or by created_at when starts_at is null. Demo, manual and other sources are not counted.",
@@ -2764,11 +2857,13 @@ git commit -m "feat(reports): commercial report source" \
 ### Task 7: SaaS admin — templates, hidden filters, privacy help
 
 **Files:**
+
 - Modify: `apps/saas-admin/src/pages/reports/ReportsPage.tsx`
 - Modify: `apps/saas-admin/src/i18n/en.json`, `apps/saas-admin/src/i18n/ru.json`
 - Test: `apps/saas-admin/test/reports-page.test.tsx`
 
 **Interfaces:**
+
 - Consumes: `isPlatformEvidenceReportType` (Task 2, built into `dist`).
 - Produces: nothing consumed later.
 
@@ -2777,25 +2872,27 @@ git commit -m "feat(reports): commercial report source" \
 Append these two tests inside `describe("platform reports", ...)` in `apps/saas-admin/test/reports-page.test.tsx`, after the test `omits filters cleared by a template change`:
 
 ```ts
-  it("offers the usage template without source filters and explains tenant privacy", async () => {
-    installReportsApi();
-    const user = userEvent.setup();
-    const view = renderSaasApp({ initialEntry: "/reports" });
-    await user.click(await within(view.container).findByRole("checkbox", { name: /завод/i }));
-    const form = view.container.querySelector("form")!;
-    await selectOption(user, form, /шаблон/i, "Использование платформы");
-    expect(within(form).queryByLabelText(/статус/i)).toBeNull();
-    expect(within(form).queryByLabelText(/gtin-14/i)).toBeNull();
-    expect(within(form).queryByRole("combobox", { name: /^линия$/i })).toBeNull();
-    expect(within(form).getByText("Для этого шаблона дополнительных фильтров нет.")).toBeTruthy();
-    expect(within(form).getByText(/tenant-01/)).toBeTruthy();
-  });
+it("offers the usage template without source filters and explains tenant privacy", async () => {
+  installReportsApi();
+  const user = userEvent.setup();
+  const view = renderSaasApp({ initialEntry: "/reports" });
+  await user.click(await within(view.container).findByRole("checkbox", { name: /завод/i }));
+  const form = view.container.querySelector("form")!;
+  await selectOption(user, form, /шаблон/i, "Использование платформы");
+  expect(within(form).queryByLabelText(/статус/i)).toBeNull();
+  expect(within(form).queryByLabelText(/gtin-14/i)).toBeNull();
+  expect(within(form).queryByRole("combobox", { name: /^линия$/i })).toBeNull();
+  expect(within(form).getByText("Для этого шаблона дополнительных фильтров нет.")).toBeTruthy();
+  expect(within(form).getByText(/tenant-01/)).toBeTruthy();
+});
 
-  it.each([
-    ["Использование платформы", "usage"],
-    ["Качество и автономность", "quality"],
-    ["Коммерческая активность", "commercial"],
-  ])("creates a %s report with the pseudonymous default and no source filters", async (label, reportType) => {
+it.each([
+  ["Использование платформы", "usage"],
+  ["Качество и автономность", "quality"],
+  ["Коммерческая активность", "commercial"],
+])(
+  "creates a %s report with the pseudonymous default and no source filters",
+  async (label, reportType) => {
     const calls = installReportsApi();
     const user = userEvent.setup();
     const view = renderSaasApp({ initialEntry: "/reports" });
@@ -2807,7 +2904,8 @@ Append these two tests inside `describe("platform reports", ...)` in `apps/saas-
     expect(body).toMatchObject({ reportType, privacy: "pseudonymous", periodBasis: "events" });
     for (const key of ["lineId", "productId", "gtin14", "status", "operatorId", "outcome"])
       expect(body).not.toHaveProperty(key);
-  });
+  },
+);
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -2935,19 +3033,19 @@ The existing `) : (` branch that follows the CommerceML `Select` stays as the fi
 5. Use the tenant privacy text for the new types:
 
 ```tsx
-          <p className="report-help">
-            {t(
-              isPlatformEvidenceReportType(reportType)
-                ? `reports.privacyHelpTenant.${privacy}`
-                : `reports.privacyHelp.${privacy}`,
-            )}
-          </p>
+<p className="report-help">
+  {t(
+    isPlatformEvidenceReportType(reportType)
+      ? `reports.privacyHelpTenant.${privacy}`
+      : `reports.privacyHelp.${privacy}`,
+  )}
+</p>
 ```
 
 6. Add the help paragraph after `<p>{t("reports.help.commerceml")}</p>`:
 
 ```tsx
-        <p>{t("reports.help.evidence")}</p>
+<p>{t("reports.help.evidence")}</p>
 ```
 
 Then run `pnpm exec prettier --write apps/saas-admin/src/pages/reports/ReportsPage.tsx`.
@@ -2979,9 +3077,11 @@ git commit -m "feat(saas-admin): usage, quality and commercial report templates"
 ### Task 8: Operations guide and final gates
 
 **Files:**
+
 - Modify: `docs/operations/platform-report-exports.md`
 
 **Interfaces:**
+
 - Consumes: everything above.
 
 - [ ] **Step 1: Update the operations guide**
@@ -3076,24 +3176,25 @@ List, separately: behavior changed; files and areas changed; automated checks wi
 
 **Spec coverage**
 
-| Spec section | Task |
-|---|---|
-| §2 scope, grain, filter rejection | Task 2 (contract), Tasks 4–6 (grain in SQL) |
-| §2.1 `usage` columns and clocks | Task 4 |
-| §2.2 `quality` columns, buckets, inventory columns | Task 5 |
-| §2.3 `commercial` columns, kopecks, both payment flows | Task 6 |
-| §3 framework changes 1–7 | Tasks 2–8 (contract, sources, inventory join in code, definitions per type, privacy, renderer, UI, docs) |
-| §4 privacy, `tenantCount`, warning in definitions | Task 3 (`EVIDENCE_COMMON_DEFINITIONS.privacy`, `artifactParameters`) |
-| §5 `definitionsVersion`, `dataSha256`, seven-day retention | Task 3, Task 8 |
-| §6 non-goals | not implemented, stated in Task 8 docs |
-| §7 implementation checks | Task 1 rewrites them; check 1 in Task 4 Step 8; checks 2–4 are enforced by the code shapes and tests in Tasks 4–6 |
-| §8 tests | Tasks 2–7 |
+| Spec section                                               | Task                                                                                                              |
+| ---------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| §2 scope, grain, filter rejection                          | Task 2 (contract), Tasks 4–6 (grain in SQL)                                                                       |
+| §2.1 `usage` columns and clocks                            | Task 4                                                                                                            |
+| §2.2 `quality` columns, buckets, inventory columns         | Task 5                                                                                                            |
+| §2.3 `commercial` columns, kopecks, both payment flows     | Task 6                                                                                                            |
+| §3 framework changes 1–7                                   | Tasks 2–8 (contract, sources, inventory join in code, definitions per type, privacy, renderer, UI, docs)          |
+| §4 privacy, `tenantCount`, warning in definitions          | Task 3 (`EVIDENCE_COMMON_DEFINITIONS.privacy`, `artifactParameters`)                                              |
+| §5 `definitionsVersion`, `dataSha256`, seven-day retention | Task 3, Task 8                                                                                                    |
+| §6 non-goals                                               | not implemented, stated in Task 8 docs                                                                            |
+| §7 implementation checks                                   | Task 1 rewrites them; check 1 in Task 4 Step 8; checks 2–4 are enforced by the code shapes and tests in Tasks 4–6 |
+| §8 tests                                                   | Tasks 2–7                                                                                                         |
 
 No spec requirement is without a task. The spec's §3 item 3 (inventory completion time) is deliberately changed by Task 1 to a code-side join, because it leaves `inventory-report-source.ts` untouched.
 
 **Placeholder scan.** No task refers to "similar to Task N" or defers code. Task 1 and Task 7 use scripted edits with assertions instead of prose edits.
 
 **Type consistency.**
+
 - `USAGE_COLUMNS`, `QUALITY_COLUMNS`, `COMMERCIAL_COLUMNS` are `as const` tuples; the service spreads them into `string[]`, and the definition tests take `readonly string[]`.
 - `pivotMetrics(metrics, floatMetrics?)` is called with `USAGE_METRICS`, `SQL_METRICS`, and `COMMERCIAL_METRICS` plus `MONEY_METRICS`, all defined in the calling files.
 - `mergeInventoryCompletions(factRows, completions, projections)` has the same signature in Task 5's tests and implementation.
@@ -3102,5 +3203,6 @@ No spec requirement is without a task. The spec's §3 item 3 (inventory completi
 - `seedEvidenceBase` and `cleanupEvidence` are defined in Task 4 and reused in Tasks 5 and 6 with the same `EvidenceBase` field names.
 
 **Known limits to state, not hide**
+
 - Fixture columns were read from `packages/db/src/schema` when this plan was written. If a NOT NULL column or check constraint has changed since, a fixture insert will fail with a precise Postgres error; fix the fixture, not the assertion.
 - The 366-day, 10-tenant time budget cannot be proven on fixtures. Task 4 Step 8 checks plan shape only.
