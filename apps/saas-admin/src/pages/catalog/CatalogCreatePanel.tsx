@@ -1,4 +1,4 @@
-import { planEntitlementsV3Schema } from "@markiro/platform-contracts";
+import { catalogMachineCodeSchema, planEntitlementsV3Schema } from "@markiro/platform-contracts";
 import { CatalogP1Fields, UNKNOWN_P1_FEATURES, type P1DraftFeatures } from "./CatalogP1Fields.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
@@ -264,6 +264,10 @@ export function CatalogCreatePanel({
             setError(t("catalog.createRequired"));
             return;
           }
+          if (!catalogMachineCodeSchema.safeParse(code.trim()).success) {
+            setError(t("catalog.validation.code"));
+            return;
+          }
           if (!/^\d{1,12}\.\d{2}$/.test(normalizeMoneyInput(price))) {
             setError(t("catalog.validation.money"));
             return;
@@ -304,6 +308,7 @@ export function CatalogCreatePanel({
               value={code}
               onChange={(event) => setCode(event.target.value)}
               placeholder="plan-pro"
+              hint={t("catalog.form.codeHint")}
               required
             />
             <Input

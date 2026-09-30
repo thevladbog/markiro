@@ -1685,6 +1685,7 @@
     "validation": {
       "required": "This field is required",
       "money": "Enter an amount in 0.00 format",
+      "code": "Item code: lowercase Latin letters, digits and hyphens, starting with a letter, up to 64 characters",
       "positiveOrEmpty": "Enter a positive integer or leave the field empty",
       "positive": "Enter a positive integer",
       "integer32OrEmpty": "Enter an integer from 1 to 2147483647 or leave the field empty",
@@ -1700,6 +1701,7 @@
     "form": {
       "identity": "Version parameters",
       "code": "Item code",
+      "codeHint": "Lowercase Latin letters, digits and hyphens; must start with a letter. It cannot be changed later.",
       "nameRu": "Russian name",
       "nameEn": "English name",
       "descriptionRu": "Russian description",
