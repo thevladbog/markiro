@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import {
+  COMMERCIAL_COLUMNS,
+  COMMERCIAL_DEFINITIONS,
+} from "../src/platform-reports/commercial-report-source";
 import { EVIDENCE_COMMON_DEFINITIONS } from "../src/platform-reports/report-definitions";
 import {
   QUALITY_COLUMNS,
@@ -17,6 +21,10 @@ describe("evidence report definitions", () => {
 
   it("defines every quality column", () => {
     expect(undefinedColumns(QUALITY_COLUMNS, QUALITY_DEFINITIONS)).toEqual([]);
+  });
+
+  it("defines every commercial column", () => {
+    expect(undefinedColumns(COMMERCIAL_COLUMNS, COMMERCIAL_DEFINITIONS)).toEqual([]);
   });
 
   it("states the aggregate-mode grain, where the tenant dimension is removed", () => {
