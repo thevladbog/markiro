@@ -340,17 +340,24 @@ export function ReportsPage() {
             onValueChange={(value) => setToDate(value ?? "")}
           />
           <ReportTimezoneSelect value={timezone} onValueChange={setTimezone} />
-          <Select<"events" | "production_date">
-            label={t("reports.fields.basis")}
-            value={periodBasis}
-            onValueChange={setPeriodBasis}
-            options={[
-              { value: "events", label: t("reports.basis.events") },
-              ...(["shifts", "shift_operators"].includes(reportType)
-                ? [{ value: "production_date" as const, label: t("reports.basis.production_date") }]
-                : []),
-            ]}
-          />
+          {isPlatformEvidenceReportType(reportType) ? null : (
+            <Select<"events" | "production_date">
+              label={t("reports.fields.basis")}
+              value={periodBasis}
+              onValueChange={setPeriodBasis}
+              options={[
+                { value: "events", label: t("reports.basis.events") },
+                ...(["shifts", "shift_operators"].includes(reportType)
+                  ? [
+                      {
+                        value: "production_date" as const,
+                        label: t("reports.basis.production_date"),
+                      },
+                    ]
+                  : []),
+              ]}
+            />
+          )}
         </fieldset>
         <fieldset className="report-form__grid">
           <legend>{t("reports.sections.filters")}</legend>

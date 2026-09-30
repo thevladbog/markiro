@@ -45,13 +45,14 @@ export const COMMERCIAL_DEFINITIONS: Record<string, string> = {
     "Sum of invoices.total of invoices_issued, in RUB kopecks (integer).",
   invoices_cancelled: "Invoices with cancelled_at on the day (server clock).",
   invoices_paid:
-    "Invoices with paid_at on the day. paid_at is set only when the invoice is fully paid, so a partially paid invoice is not counted here.",
+    "Invoices with paid_at on the day. paid_at is set only when the invoice is fully paid, so a partially paid invoice is not counted here. paid_at equals the paid_at of the completing payment and follows its clock (see payments_received).",
   payments_received:
-    "Payments at paid_at: billing_payments (invoice payments) plus legacy payments (offer payments). The two flows are disjoint: an offer payment writes only payments and an invoice payment writes only billing_payments, so they are summed without deduplication. A partial payment is counted when received.",
-  payments_received_minor: "Sum of the amounts of payments_received, in RUB kopecks (integer).",
+    "Payments at paid_at: billing_payments (invoice payments) plus legacy payments (offer payments). The two flows are disjoint: an offer payment writes only payments and an invoice payment writes only billing_payments, so they are summed without deduplication. A partial payment is counted when received. paid_at is not one clock: a bank-imported invoice payment stores the bank operation date as 00:00 UTC (in a timezone west of UTC that falls on the previous local day; UTC+ zones such as Europe/Moscow keep it on its own date), a manual invoice payment stores the paid-at time sent when it was recorded (the SaaS admin sends the operator's current time), and a legacy offer payment stores the server time at recording.",
+  payments_received_minor:
+    "Sum of the amounts of payments_received, in RUB kopecks (integer). Dated like payments_received.",
   acts_issued: "billing_acts with issued_at on the day (server clock).",
   paid_subscriptions_started:
-    "Subscriptions whose source is paid_offer_line or paid_invoice_line, dated by starts_at, or by created_at when starts_at is null. Demo, manual and other sources are not counted.",
+    "Subscriptions whose source is paid_offer_line or paid_invoice_line, dated by starts_at, or by created_at when starts_at is null. Demo, manual and other sources are not counted. starts_at is set when the paid line is applied: an immediate start uses the server time of that application (not the payment's paid_at), and a start scheduled after the current term uses that term's end. A scheduled start is therefore counted on its scheduled day even if at snapshotAt it has not begun or was later cancelled.",
   agreements_signed:
     "platform_agreements with signed_at on the day (server clock) whose tenant_id is a selected tenant. Agreements not linked to a tenant are never reported.",
 };

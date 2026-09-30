@@ -30,4 +30,17 @@ describe("evidence report definitions", () => {
   it("states the aggregate-mode grain, where the tenant dimension is removed", () => {
     expect(EVIDENCE_COMMON_DEFINITIONS.grain).toMatch(/aggregate/i);
   });
+
+  it("names the bank-date clock behind payments_received", () => {
+    expect(COMMERCIAL_DEFINITIONS.payments_received).toMatch(/bank/i);
+    expect(COMMERCIAL_DEFINITIONS.payments_received).toMatch(/UTC/);
+  });
+
+  it("ties invoices_paid to the clock of the completing payment", () => {
+    expect(COMMERCIAL_DEFINITIONS.invoices_paid).toMatch(/payments_received/);
+  });
+
+  it("says a scheduled paid subscription start is counted on its scheduled day", () => {
+    expect(COMMERCIAL_DEFINITIONS.paid_subscriptions_started).toMatch(/scheduled/i);
+  });
 });

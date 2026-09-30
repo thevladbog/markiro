@@ -514,8 +514,17 @@ describe("platform reports", () => {
     expect(within(form).queryByLabelText(/статус/i)).toBeNull();
     expect(within(form).queryByLabelText(/gtin-14/i)).toBeNull();
     expect(within(form).queryByRole("combobox", { name: /^линия$/i })).toBeNull();
+    expect(within(form).queryByRole("combobox", { name: /основа периода/i })).toBeNull();
     expect(within(form).getByText("Для этого шаблона дополнительных фильтров нет.")).toBeTruthy();
     expect(within(form).getByText(/tenant-01/)).toBeTruthy();
+  });
+
+  it("keeps the period basis control for the default shifts template", async () => {
+    installReportsApi();
+    const view = renderSaasApp({ initialEntry: "/reports" });
+    await within(view.container).findByRole("checkbox", { name: /завод/i });
+    const form = view.container.querySelector("form")!;
+    expect(within(form).getByRole("combobox", { name: /основа периода/i })).toBeTruthy();
   });
 
   it.each([

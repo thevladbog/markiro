@@ -1119,7 +1119,7 @@
       "metrics": "Confirmed labels use print_verified_at; reprint requests are separate facts. Inventory values are current projections, not historical snapshots.",
       "metadata": "The ZIP includes data.csv and metadata.json with parameters, snapshot time, definitions version, the SHA-256 of data.csv and definitions. Dates are inclusive in the selected timezone; event timestamps remain UTC.",
       "commerceml": "CommerceML reports the journal and current temporary upload presence. A historical source file can be unavailable and is not reconstructed.",
-      "evidence": "Usage, quality and commercial exports have one row per tenant and local day; a day with no recorded facts has no row. Values are additive counts, and amounts are RUB kopecks. Figures can be restated by late device sync, so compare exports by snapshot time and definitions version."
+      "evidence": "Usage, quality and commercial exports have one row per tenant and local day (in aggregate mode, one row per local day summed across the selected tenants); a day with no recorded facts has no row. Values are additive counts, and amounts are RUB kopecks. Figures can be restated by late device sync, so compare exports by snapshot time and definitions version."
     },
     "history": "Generation history",
     "previous": "Previous",
