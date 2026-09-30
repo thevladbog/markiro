@@ -1,6 +1,7 @@
-import type {
-  PlatformReportInput,
-  platformReportErrorCodeSchema,
+import {
+  isPlatformEvidenceReportType,
+  type PlatformReportInput,
+  type platformReportErrorCodeSchema,
 } from "@markiro/platform-contracts";
 import type { z } from "zod";
 
@@ -94,15 +95,63 @@ export const REPORT_DEFINITIONS: Record<string, string> = {
     "CommerceML item-grain journal retention is 14 days, session-grain/session retention 90 days. Completeness of older activity is unknown; zero retained rows is not proof of zero real activity.",
 };
 
+/** Bumped whenever a formula or clock basis of that report type changes. */
+export const REPORT_DEFINITIONS_VERSION: Record<PlatformReportInput["reportType"], string> = {
+  shifts: "1",
+  shift_operators: "1",
+  inventories: "1",
+  summary: "1",
+  commerceml: "1",
+  usage: "1",
+  quality: "1",
+  commercial: "1",
+};
+
+export const EVIDENCE_TENANT_FIELDS = ["tenant_id", "tenant_name"] as const;
+
+export const EVIDENCE_COMMON_DEFINITIONS: Record<string, string> = {
+  grain:
+    "One row per tenant and local calendar day in the selected IANA timezone. A day appears only if at least one fact of this report was recorded for that tenant on that day; a missing row means no recorded fact, not a measured zero. Every numeric column is an additive count or sum, so rows can be summed across days.",
+  day: "Local calendar date (YYYY-MM-DD) of the fact's own timestamp in the selected timezone. Each metric names its clock in its own definition.",
+  tenant_id:
+    "Tenant identifier. Replaced by an export-local label in pseudonymous mode and removed in aggregate mode.",
+  tenant_name:
+    "Current organization name at the snapshot, not an asserted historical name. Replaced or removed like tenant_id.",
+  selection:
+    "Inclusive local calendar dates, implemented as [local midnight fromDate, local midnight after toDate) in the selected timezone. No optional filters are supported.",
+  restatement:
+    "Late device synchronisation can add facts to past days, so the same parameters run later can return different numbers. Compare exports by snapshotAt and definitionsVersion.",
+  privacy:
+    "Pseudonymous and aggregate output is not legal anonymization: a distinctive volume or a small tenant selection can still identify a tenant. Aggregate removes the tenant columns and sums days across the selected tenants.",
+};
+
+function labelTenants(rows: ReportRow[]): Map<string, string> {
+  const ids = [
+    ...new Set(
+      rows.map((row) => row.tenant_id).filter((id): id is string => typeof id === "string"),
+    ),
+  ].sort();
+  return new Map(ids.map((id, index) => [id, `tenant-${String(index + 1).padStart(2, "0")}`]));
+}
+
 export function applyReportPrivacy(
   input: PlatformReportInput,
   source: PlatformReportSource,
 ): PlatformReportSource {
   if (input.privacy === "identified") return source;
+  const tenantLabelled = isPlatformEvidenceReportType(input.reportType);
   const labels = new Map<string, string>();
+  const tenantLabels = tenantLabelled ? labelTenants(source.rows) : new Map<string, string>();
   const personFields = new Set(["operator_id", "operator_name"]);
   const removed = new Set(
-    input.privacy === "aggregate" ? [...personFields, "first_event_at", "last_event_at"] : [],
+    input.privacy === "aggregate"
+      ? [
+          ...personFields,
+          "first_event_at",
+          "last_event_at",
+          ...(tenantLabelled ? EVIDENCE_TENANT_FIELDS : []),
+        ]
+      : [],
   );
   const columns = source.columns.filter((column) => !removed.has(column));
   const rows = source.rows.map((row) => {
@@ -115,6 +164,11 @@ export function applyReportPrivacy(
         labels.set(key, `operator-${String(labels.size + 1).padStart(3, "0")}`);
       result.operator_id = id === null ? null : (labels.get(key) ?? null);
       result.operator_name = id === null ? "unknown" : (labels.get(key) ?? null);
+    }
+    if (input.privacy === "pseudonymous" && tenantLabelled && columns.includes("tenant_id")) {
+      const label = tenantLabels.get(String(row.tenant_id)) ?? null;
+      result.tenant_id = label;
+      if (columns.includes("tenant_name")) result.tenant_name = label;
     }
     return result;
   });

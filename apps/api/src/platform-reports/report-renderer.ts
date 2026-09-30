@@ -1,8 +1,13 @@
-import type { PlatformReportInput } from "@markiro/platform-contracts";
+import { createHash } from "node:crypto";
+import {
+  isPlatformEvidenceReportType,
+  type PlatformReportInput,
+} from "@markiro/platform-contracts";
 import { zipSync } from "fflate";
 import {
   applyReportPrivacy,
   PlatformReportSourceError,
+  REPORT_DEFINITIONS_VERSION,
   REPORT_MAX_BYTES,
   REPORT_MAX_ROWS,
   type PlatformReportSource,
@@ -22,6 +27,17 @@ function csvCell(value: string | number | null, column: string): string {
   return `"${text.replaceAll('"', '""')}"`;
 }
 
+/** Outside identified mode the evidence types record how many tenants, never which. */
+function artifactParameters(
+  input: PlatformReportInput,
+  parameters: Omit<PlatformReportInput, "operatorId">,
+): Record<string, unknown> {
+  if (input.privacy === "identified") return input;
+  if (!isPlatformEvidenceReportType(input.reportType)) return parameters;
+  const { tenantIds, ...withoutTenants } = parameters;
+  return { ...withoutTenants, tenantCount: tenantIds.length };
+}
+
 export function renderPlatformReport(
   input: PlatformReportInput,
   rawSource: PlatformReportSource,
@@ -30,31 +46,35 @@ export function renderPlatformReport(
     throw new PlatformReportSourceError("REPORT_LIMIT_EXCEEDED");
   const source = applyReportPrivacy(input, rawSource);
   const { operatorId, ...parameters } = input;
-  const metadata = Buffer.from(
-    JSON.stringify(
-      {
-        formatVersion: 1,
-        snapshotAt: source.snapshotAt.toISOString(),
-        parameters: input.privacy === "identified" ? input : parameters,
-        operatorFilterApplied: operatorId !== undefined,
-        rowCount: source.rows.length,
-        columns: source.columns,
-        definitions: source.definitions,
-        csv: {
-          encoding: "UTF-8 BOM",
-          lineEnding: "CRLF",
-          delimiter: ",",
-          nullValue: "empty cell",
-          identifierTextPrefix: "apostrophe",
-          formulaProtection: "leading apostrophe",
+  const metadataFor = (dataSha256: string) =>
+    Buffer.from(
+      JSON.stringify(
+        {
+          formatVersion: 1,
+          snapshotAt: source.snapshotAt.toISOString(),
+          parameters: artifactParameters(input, parameters),
+          operatorFilterApplied: operatorId !== undefined,
+          rowCount: source.rows.length,
+          columns: source.columns,
+          definitionsVersion: REPORT_DEFINITIONS_VERSION[input.reportType],
+          dataSha256,
+          definitions: source.definitions,
+          csv: {
+            encoding: "UTF-8 BOM",
+            lineEnding: "CRLF",
+            delimiter: ",",
+            nullValue: "empty cell",
+            identifierTextPrefix: "apostrophe",
+            formulaProtection: "leading apostrophe",
+          },
         },
-      },
-      null,
-      2,
-    ),
-    "utf8",
-  );
-  let size = metadata.byteLength + 3;
+        null,
+        2,
+      ),
+      "utf8",
+    );
+  // A SHA-256 hex digest has a fixed length, so a placeholder gives the final metadata size.
+  let size = metadataFor("0".repeat(64)).byteLength + 3;
   const chunks: string[] = ["\ufeff"];
   const append = (line: string) => {
     size += Buffer.byteLength(line);
@@ -64,12 +84,9 @@ export function renderPlatformReport(
   append(`${source.columns.map((column) => csvCell(column, "")).join(",")}\r\n`);
   for (const row of source.rows)
     append(`${source.columns.map((column) => csvCell(row[column] ?? null, column)).join(",")}\r\n`);
-  const body = Buffer.from(
-    zipSync(
-      { "data.csv": Buffer.from(chunks.join(""), "utf8"), "metadata.json": metadata },
-      { level: 6 },
-    ),
-  );
+  const data = Buffer.from(chunks.join(""), "utf8");
+  const metadata = metadataFor(createHash("sha256").update(data).digest("hex"));
+  const body = Buffer.from(zipSync({ "data.csv": data, "metadata.json": metadata }, { level: 6 }));
   return {
     body,
     filename: `${input.reportType}-${input.fromDate}-${input.toDate}.zip`,
