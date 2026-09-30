@@ -119,6 +119,30 @@ function optionLabels(select: HTMLElement): (string | null)[] {
   return Array.from(select.querySelectorAll("option"), (option) => option.textContent);
 }
 
+const COUNTDOWN = /^Код действует ещё (\d{2}):(\d{2})$/;
+
+/**
+ * Waits for a code's countdown in `scope` and checks that it started when this
+ * PC asked for the code: `since` is a `Date.now()` read just before the
+ * request. It may lose only what this PC's clock has counted since (the dialog
+ * rounds up, so a started second counts). A fixed «10:00 or 09:59» broke when a
+ * loaded run took two seconds between the request and the check; a countdown
+ * that starts from the host's timestamps or from another lifetime still fails
+ * here.
+ */
+async function expectCountdownFrom(
+  scope: Pick<typeof screen, "findByText">,
+  since: number,
+  lifetimeMs = LIFETIME_MS,
+): Promise<void> {
+  const shown = (await scope.findByText(COUNTDOWN)).textContent ?? "";
+  const passedSeconds = Math.ceil((Date.now() - since) / 1000);
+  const [, minutes = "", seconds = ""] = COUNTDOWN.exec(shown) ?? [];
+  const left = Number(minutes) * 60 + Number(seconds);
+  expect(left).toBeLessThanOrEqual(lifetimeMs / 1000);
+  expect(left).toBeGreaterThanOrEqual(lifetimeMs / 1000 - passedSeconds);
+}
+
 describe("office devices", () => {
   beforeEach(() => {
     localStorage.removeItem("markiro.theme");
@@ -353,7 +377,9 @@ describe("office devices", () => {
     const session = adminSession();
     session.api.createPairingCode.mockResolvedValue(pairingCode(30));
     await openDevices(session);
-    fireEvent.click(screen.getByRole("button", { name: "Подключить устройство" }));
+    const add = screen.getByRole("button", { name: "Подключить устройство" });
+    const askedAt = Date.now();
+    fireEvent.click(add);
     const pairing = await screen.findByRole("dialog");
     const matrix = await within(pairing).findByRole("img", { name: "Код подключения для сканера" });
     expect(matrix.querySelector("svg")).not.toBeNull();
@@ -363,7 +389,7 @@ describe("office devices", () => {
     // A fresh code always starts a full local countdown: its lifetime comes
     // from the host, but it counts from when this PC asked, not from the
     // host's `createdAt`, so `secondsAgo` above (30) does not shift it.
-    expect(within(pairing).getByText(/^Код действует ещё (10:00|09:59)$/)).toBeTruthy();
+    await expectCountdownFrom(within(pairing), askedAt);
     expect(
       within(pairing).getByText(
         "После пяти неверных попыток с любого устройства код перестаёт действовать. Если устройство пишет, что код неверен, создайте новый.",
@@ -382,11 +408,13 @@ describe("office devices", () => {
       const session = adminSession();
       session.api.createPairingCode.mockResolvedValue(pairingCode(secondsAgo));
       await openDevices(session);
-      fireEvent.click(screen.getByRole("button", { name: "Подключить устройство" }));
+      const add = screen.getByRole("button", { name: "Подключить устройство" });
+      const askedAt = Date.now();
+      fireEvent.click(add);
       const pairing = await screen.findByRole("dialog");
       expect(within(pairing).getByText("7K3MQ 9XV2D")).toBeTruthy();
       expect(within(pairing).queryByText("Срок кода истёк. Создайте новый код.")).toBeNull();
-      expect(within(pairing).getByText(/^Код действует ещё (10:00|09:59)$/)).toBeTruthy();
+      await expectCountdownFrom(within(pairing), askedAt);
     },
   );
 
@@ -402,8 +430,10 @@ describe("office devices", () => {
       expiresAt: "2026-09-28T08:05:00Z",
     });
     await openDevices(session);
-    fireEvent.click(screen.getByRole("button", { name: "Подключить устройство" }));
-    expect(await screen.findByText(/^Код действует ещё (05:00|04:59)$/)).toBeTruthy();
+    const add = screen.getByRole("button", { name: "Подключить устройство" });
+    const askedAt = Date.now();
+    fireEvent.click(add);
+    await expectCountdownFrom(screen, askedAt, 5 * 60 * 1000);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5 * 60 * 1000);
     });
@@ -422,8 +452,10 @@ describe("office devices", () => {
       .mockImplementationOnce(() => Promise.resolve(pairingCode(0)))
       .mockImplementationOnce(() => Promise.resolve(pairingCode(0)));
     await openDevices(session);
-    fireEvent.click(screen.getByRole("button", { name: "Подключить устройство" }));
-    expect(await screen.findByText(/^Код действует ещё (10:00|09:59)$/)).toBeTruthy();
+    const add = screen.getByRole("button", { name: "Подключить устройство" });
+    const askedAt = Date.now();
+    fireEvent.click(add);
+    await expectCountdownFrom(screen, askedAt);
     // Only this PC's own elapsed time can expire a freshly received code
     // (fix round 1, item 1): wait out the full local countdown.
     await act(async () => {
@@ -702,11 +734,14 @@ describe("office devices", () => {
       payload: `markiro-host:1?h=10.0.0.5,192.168.1.10&p=45710&f=${FINGERPRINT}&c=AAAAABBBBB`,
     };
     session.api.createPairingCode.mockResolvedValueOnce(secondCode);
-    fireEvent.click(within(pairing).getByRole("button", { name: "Новый код" }));
+    const regenerate = within(pairing).getByRole("button", { name: "Новый код" });
+    // The restarted countdown counts from this second request, not the first.
+    const askedAt = Date.now();
+    fireEvent.click(regenerate);
     pairing = await screen.findByRole("dialog");
     expect(await within(pairing).findByText("AAAAA BBBBB")).toBeTruthy();
     expect(within(pairing).queryByText("7K3MQ 9XV2D")).toBeNull();
-    expect(within(pairing).getByText(/^Код действует ещё (10:00|09:59)$/)).toBeTruthy();
+    await expectCountdownFrom(within(pairing), askedAt);
     // «Новый код» named the code on screen, so the host ends it at once.
     expect(session.api.createPairingCode.mock.calls).toStrictEqual([
       ["office-session-token"],
