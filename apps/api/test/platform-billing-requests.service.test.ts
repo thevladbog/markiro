@@ -1569,7 +1569,8 @@ function invoiceInput(tenantId: string): CreateInvoiceDto {
 function requestOfferInput(idempotencyKey: string) {
   return {
     idempotencyKey,
-    expiresAt: "2026-09-30",
+    // Relative, not a calendar date: an absolute expiry turns this fixture into a time bomb.
+    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
     lines: [
       {
         kind: "service" as const,
