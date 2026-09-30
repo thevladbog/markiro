@@ -188,8 +188,8 @@ async fn one_badge_code_belongs_to_one_operator_at_a_time() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{added}");
-    // A refused conflict writes nothing. It is the one refusal that takes a
-    // revision before it fails, so the rollback has to give it back.
+    // A refused conflict writes nothing. It is the one badge refusal that
+    // takes a revision before it fails, so the rollback has to give it back.
     let revision = host_revision(&admin.app).await;
     let audit_rows_before = audit_rows(&admin.app).await;
     for asker in [&second, &first] {

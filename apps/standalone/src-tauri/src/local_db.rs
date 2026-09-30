@@ -233,7 +233,10 @@ impl LocalDb {
     /// delete. A reader holding an older snapshot keeps it from finishing
     /// within the busy timeout, and the call then fails; the delete stays
     /// committed and a retry repeats only the checkpoint. `VACUUM` is not
-    /// needed: it would only shrink the file.
+    /// needed for the rows deleted here: it would only shrink the file. It
+    /// would do more for bytes a writer freed before it ran with
+    /// `secure_delete`, which nothing here scrubs (see "Local database" in
+    /// `apps/standalone/AGENTS.md`).
     /// Every table here is treated as a disposable copy of the host's data;
     /// the first plan that adds data this device owns instead of a copy —
     /// the scan journal, boxes, the outbox (the station design's §6.2,

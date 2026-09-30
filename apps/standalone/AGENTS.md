@@ -731,7 +731,16 @@ requests and offer a retry.
   request, where `add.isPending` would miss the hashing), so a scan typed
   then is not taken and cannot be glued to the code being sent; once the
   answer is in, a success closes the dialog and after a failure the field is
-  editable again. The answer is the new badge, not its operator, so the badge
+  editable again. One residual stays: a scan that straddles the moment the
+  field becomes editable loses its head, which a read-only field does not
+  take, and sends its tail, which `badgeCodeRule` accepts. The moment is the
+  salt's arrival, on the first opening of the dialog, and the end of a failed
+  submit (`scanAgain` empties and focuses the field inside the callback, while
+  `readOnly` drops only when React renders `isSubmitting: false`). Nothing
+  detects it: the badge then matches no station, and the remedy is to revoke
+  it and add it again (plan 1f's sign-in test is the first place it shows). It
+  is accepted, since a scan of about 0.1 s has to straddle a boundary. The
+  answer is the new badge, not its operator, so the badge
   goes into the cached operator at once (`useChangeList` with `withBadge`,
   which replaces a badge by its id: the same badge twice is one badge). A
   `badge` conflict names the holder under the code when `details.operatorId`
@@ -752,7 +761,10 @@ requests and offer a retry.
   | The label has the code or its Russian-layout form (`labelHasCode`)  | kept       | label         | under the label        |
 
   A message under a field stays until the next input into it, an alert until
-  the next send. Only a refusal of the label alone keeps the code, and the
+  the next submit the form accepts (`setFailure(null)` runs before the label
+  guard, so a `labelHasCode` refusal clears it although nothing is sent, while
+  a refusal by the form itself leaves it). Only a refusal of the label alone
+  keeps the code, and the
   label is corrected beside it. The last row is the guard against the one way
   a code could leave the webview in clear text by accident: a label typed
   first, with the focus left in it, takes the scan, and the second scan into
