@@ -80,10 +80,16 @@ function add(row: ReportRow, column: string, amount: number): void {
   row[column] = (typeof current === "number" ? current : 0) + amount;
 }
 
-function byTenantDay(a: ReportRow, b: ReportRow): number {
-  const left = `${String(a.tenant_id)}|${String(a.day)}`;
-  const right = `${String(b.tenant_id)}|${String(b.day)}`;
+function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+/** Tenant id first, then day. Two explicit comparisons: a joined key mis-sorts prefix ids. */
+function byTenantDay(a: ReportRow, b: ReportRow): number {
+  return (
+    compareText(String(a.tenant_id), String(b.tenant_id)) ||
+    compareText(String(a.day), String(b.day))
+  );
 }
 
 /**
