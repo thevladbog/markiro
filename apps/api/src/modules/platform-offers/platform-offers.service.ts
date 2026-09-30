@@ -7,7 +7,7 @@ import {
   Injectable,
   NotFoundException,
 } from "@nestjs/common";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
   platformCommercialV2Contracts,
@@ -40,6 +40,7 @@ import {
 } from "../billing-workflow-locks";
 import type { CreateOfferDto, PaymentDto } from "./dto";
 import { createOfferDraft, prepareOfferDraft } from "./platform-offer-draft";
+import { nextOfferNumber } from "./offer-number";
 import { resolveOfferPrintInput } from "./offer-preview.service";
 import {
   beginPlatformBillingMutation,
@@ -204,20 +205,14 @@ export class PlatformOffersService {
         .select({
           tenantId: schema.commercialOffers.tenantId,
           familyId: schema.commercialOffers.familyId,
-          revision: schema.commercialOffers.revision,
         })
         .from(schema.commercialOffers)
         .where(eq(schema.commercialOffers.id, canonicalOfferId))
         .limit(1);
       if (!located) throw new ConflictException({ code: "offer_not_draft" });
-      const offerYear = new Date().getFullYear();
-      const primaryNumber = `KP-${offerYear}-${located.revision.toString().padStart(6, "0")}`;
-      const fallbackNumber = `KP-${offerYear}-${canonicalOfferId.slice(0, 8).toUpperCase()}`;
       await acquireBillingWorkflowLocks(tx, located.tenantId, [
         { kind: "offer_family", id: located.familyId },
         { kind: "offer", id: canonicalOfferId },
-        { kind: "offer_number", id: primaryNumber },
-        { kind: "offer_number", id: fallbackNumber },
       ]);
       const family = await tx
         .select()
@@ -257,12 +252,17 @@ export class PlatformOffersService {
         throw new ConflictException({ code: "offer_preview_changed" });
       }
       const { sellerAccount, buyerAccount } = printInput.details;
+      const numberSuffix = sql<string>`coalesce(
+        nullif(ltrim(substring(${schema.commercialOffers.number} from 8), '0'), ''),
+        '0'
+      )`;
       const [latest] = await tx
         .select({ number: schema.commercialOffers.number })
         .from(schema.commercialOffers)
-        .where(eq(schema.commercialOffers.number, primaryNumber))
+        .where(sql`${schema.commercialOffers.number} ~ '^MRK-CO-[0-9]+$'`)
+        .orderBy(desc(sql`length(${numberSuffix})`), desc(sql`${numberSuffix} collate "C"`))
         .limit(1);
-      const number = latest ? fallbackNumber : primaryNumber;
+      const number = nextOfferNumber(latest?.number);
       const now = new Date();
       await tx
         .update(schema.commercialOffers)
