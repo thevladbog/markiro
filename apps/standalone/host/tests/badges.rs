@@ -188,11 +188,15 @@ async fn one_badge_code_belongs_to_one_operator_at_a_time() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{added}");
-    for owner in [&second, &first] {
+    // A refused conflict writes nothing. It is the one refusal that takes a
+    // revision before it fails, so the rollback has to give it back.
+    let revision = host_revision(&admin.app).await;
+    let audit_rows_before = audit_rows(&admin.app).await;
+    for asker in [&second, &first] {
         let (status, body) = admin
             .call(
                 "POST",
-                &format!("/v1/office/operators/{owner}/badges"),
+                &format!("/v1/office/operators/{asker}/badges"),
                 Some(same.clone()),
             )
             .await;
@@ -204,6 +208,8 @@ async fn one_badge_code_belongs_to_one_operator_at_a_time() {
             )
         );
     }
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, audit_rows_before);
     // A revoked badge frees its code; the new badge gets a new id.
     let (status, _) = admin
         .call(
@@ -220,11 +226,31 @@ async fn one_badge_code_belongs_to_one_operator_at_a_time() {
         .call(
             "POST",
             &format!("/v1/office/operators/{second}/badges"),
-            Some(same),
+            Some(same.clone()),
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{again}");
     assert_ne!(again["id"], added["id"]);
+    // The code is the second operator's now, and the conflict names the holder
+    // it has today, not the earlier one whose revoked row the table still keeps.
+    let revision = host_revision(&admin.app).await;
+    let audit_rows_before = audit_rows(&admin.app).await;
+    let (status, body) = admin
+        .call(
+            "POST",
+            &format!("/v1/office/operators/{first}/badges"),
+            Some(same),
+        )
+        .await;
+    assert_eq!(
+        (status, body["error"]["details"].clone()),
+        (
+            StatusCode::CONFLICT,
+            json!({ "constraint": "badge", "operatorId": second })
+        )
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, audit_rows_before);
 }
 
 #[tokio::test]

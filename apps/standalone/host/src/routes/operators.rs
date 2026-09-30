@@ -296,9 +296,11 @@ async fn site_salt(conn: &mut SqliteConnection) -> Result<Vec<u8>, ApiError> {
 }
 
 /// A write that hit `operator_badges_active_phc`: the badge is already an
-/// active badge of some operator, whom `details.operatorId` names, read in
-/// the same transaction. Only administrators reach this route, and they see
-/// every operator anyway. Any other failure is `internal`.
+/// active badge of some operator, whom `details.operatorId` names when the
+/// holder is found, read in the same transaction. If it is not (only the new
+/// badge's random id colliding with an existing one gets there), the conflict
+/// is answered plain, without `operatorId`. Only administrators reach this
+/// route, and they see every operator anyway. Any other failure is `internal`.
 async fn badge_taken(conn: &mut SqliteConnection, error: sqlx::Error, badge_phc: &str) -> ApiError {
     let conflict = ApiError::conflict_on_unique_violation(
         error,

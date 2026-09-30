@@ -443,6 +443,23 @@ fn database_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
         .collect()
 }
 
+/// A local database that did not open: a file of garbage where the database
+/// belongs. The open fails with that file alone in the directory, and only
+/// then do the files SQLite keeps beside it appear (`beside`, by suffix), as a
+/// crash could leave them. With a garbage `-wal` already there, SQLite maps
+/// `-shm` before it reports "not a database", and sqlx closes the handle
+/// asynchronously: writing over the files right after the failed open could
+/// truncate one that is still mapped, which Windows refuses.
+fn unopened_database(dir: &std::path::Path, beside: &[&str]) -> LocalDbState {
+    std::fs::write(dir.join(FILE_NAME), "not a database").unwrap();
+    let local = tauri::async_runtime::block_on(LocalDbState::open(dir));
+    assert!(local.get().is_err(), "a file of garbage does not open");
+    for suffix in beside {
+        std::fs::write(dir.join(format!("{FILE_NAME}{suffix}")), "not a database").unwrap();
+    }
+    local
+}
+
 /// A local database that did not open (here, files of garbage) may still
 /// hold PIN and badge hashes: `device_forget` removes it with its `-wal`,
 /// `-shm` and `-journal` files before it removes `device.json`. Like the
@@ -452,17 +469,10 @@ fn forgetting_the_device_removes_a_local_database_that_did_not_open() {
     let app_dir = tempfile::tempdir().unwrap();
     let config = app_dir.path().join("device.json");
     save_pairing(app_dir.path());
+    let local = unopened_database(app_dir.path(), &["-wal", "-shm", "-journal"]);
     let files = database_files(app_dir.path());
     for file in &files {
-        std::fs::write(file, "not a database").unwrap();
-    }
-    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
-    assert!(local.get().is_err(), "a file of garbage does not open");
-    // SQLite deletes a stray `-shm` and `-journal` while it fails to open the
-    // file; they come back here as files a crash could leave, so the forget
-    // has all four to remove.
-    for file in &files {
-        std::fs::write(file, "not a database").unwrap();
+        assert!(file.exists(), "{} is not there to remove", file.display());
     }
     let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
 
@@ -479,27 +489,44 @@ fn forgetting_the_device_removes_a_local_database_that_did_not_open() {
 /// A database file that cannot be removed fails the forget with `storage`,
 /// and `device.json` stays for another try, as when clearing an open
 /// database fails. A directory in place of the WAL stands for a file that is
-/// locked or not the app's to remove.
+/// locked or not the app's to remove. The removal does not stop there: the
+/// `-shm` and `-journal` files that come after the WAL in its order go too.
 #[test]
 fn forgetting_the_device_keeps_the_pairing_while_an_unopened_database_stays() {
     let app_dir = tempfile::tempdir().unwrap();
     let config = app_dir.path().join("device.json");
     save_pairing(app_dir.path());
     let file = app_dir.path().join(FILE_NAME);
-    std::fs::write(&file, "not a database").unwrap();
+    let local = unopened_database(app_dir.path(), &["-shm", "-journal"]);
     let stuck = app_dir.path().join(format!("{FILE_NAME}-wal"));
     std::fs::create_dir(&stuck).unwrap();
     std::fs::write(stuck.join("kept"), "kept").unwrap();
-    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
-    assert!(local.get().is_err(), "a file of garbage does not open");
+    let after_the_wal = [
+        app_dir.path().join(format!("{FILE_NAME}-shm")),
+        app_dir.path().join(format!("{FILE_NAME}-journal")),
+    ];
     let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+    let paired = invoke(&webview, "device_status", json!({}));
+    assert!(
+        matches!(&paired, Ok(status) if !status.is_null()),
+        "the app starts paired"
+    );
 
     assert_eq!(
         invoke(&webview, "device_forget", json!({})),
         Err(json!("storage"))
     );
     assert!(config.exists(), "the pairing stays for another try");
+    assert_eq!(
+        invoke(&webview, "device_status", json!({})),
+        paired,
+        "the pairing stays"
+    );
+    assert!(stuck.exists(), "the file that cannot go stays");
     assert!(!file.exists(), "what could go is gone");
+    for file in &after_the_wal {
+        assert!(!file.exists(), "{} is still there", file.display());
+    }
 
     std::fs::remove_dir_all(&stuck).unwrap();
     assert_eq!(

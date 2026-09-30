@@ -70,7 +70,10 @@ pub enum LocalDbError {
     /// A parameter is not a scalar, an integer does not fit 64 bits, or a
     /// result column holds a BLOB.
     UnsupportedValue,
-    /// SQLite refused or failed the statement; a batch rolled back whole.
+    /// SQLite refused or failed the statement; a batch rolled back whole. The
+    /// one exception is the checkpoint that ends [`LocalDb::clear_copies`]:
+    /// when it reports busy the call fails, but the delete stays committed and
+    /// a retry repeats only the checkpoint.
     StatementFailed,
     /// A statement changed another number of rows than `expectedChanges`;
     /// the batch rolled back whole.
@@ -228,8 +231,9 @@ impl LocalDb {
     /// the WAL follows the commit: it moves the zeroed pages into the file
     /// and empties the WAL, which still held the frames written before the
     /// delete. A reader holding an older snapshot keeps it from finishing
-    /// within the busy timeout, and then this fails as a whole. `VACUUM` is
-    /// not needed: it would only shrink the file.
+    /// within the busy timeout, and the call then fails; the delete stays
+    /// committed and a retry repeats only the checkpoint. `VACUUM` is not
+    /// needed: it would only shrink the file.
     /// Every table here is treated as a disposable copy of the host's data;
     /// the first plan that adds data this device owns instead of a copy —
     /// the scan journal, boxes, the outbox (the station design's §6.2,
@@ -320,6 +324,11 @@ impl LocalDbState {
     /// best-effort basis, then all four are checked again, and one still
     /// there fails the call. Does nothing for an open database, which
     /// [`LocalDb::clear_copies`] empties instead, or without a directory.
+    /// Everything in these files is treated as a disposable copy, as in
+    /// `clear_copies`: the first plan that adds data this device owns instead
+    /// of a copy (the scan journal, boxes, the outbox) must keep this removal
+    /// from deleting it, and block or confirm a forget while unsynced records
+    /// exist (`AGENTS.md`, "Local database").
     pub fn remove_unopened(&self) -> std::io::Result<()> {
         let (None, Some(dir)) = (&self.db, &self.dir) else {
             return Ok(());
