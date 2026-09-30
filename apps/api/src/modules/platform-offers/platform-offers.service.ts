@@ -252,6 +252,9 @@ export class PlatformOffersService {
         throw new ConflictException({ code: "offer_preview_changed" });
       }
       const { sellerAccount, buyerAccount } = printInput.details;
+      // No per-number lock is needed: `lockSellerPolicy(tx)` above holds a transaction-scoped
+      // advisory lock on this same `tx`, so concurrent publishes queue up and each one reads the
+      // previous publisher's committed maximum. Keep the lock ahead of this read.
       const numberSuffix = sql<string>`coalesce(
         nullif(ltrim(substring(${schema.commercialOffers.number} from 8), '0'), ''),
         '0'
