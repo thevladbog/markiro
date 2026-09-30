@@ -23,6 +23,8 @@ const BADGE_CONFLICTS = {
   badge: { field: "code", message: "office.operators.badges.errors.taken" },
 } as const;
 const TAKEN_BY = "office.operators.badges.errors.takenBy";
+/** The label holds the scanned code, which would leave in clear text (see `submit`). */
+const LABEL_HAS_CODE = "office.operators.badges.errors.labelHasCode";
 
 export interface AddBadgeDialogProps {
   operator: OfficeOperator;
@@ -39,7 +41,8 @@ export interface AddBadgeDialogProps {
  * again while it is cached (`staleTime: Infinity`), so a dialog opened again
  * soon reuses it, and it is read again once the cache has dropped it (about
  * five minutes without an add dialog), which is harmless, since it never
- * changes. A badge another operator holds is named under the code.
+ * changes. A badge another operator holds is named under the code, and a label
+ * that holds the code is refused: it would leave the webview in clear text.
  */
 export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBadgeDialogProps) {
   const { t } = useTranslation();
@@ -59,7 +62,7 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
     setError,
     setFocus,
     setValue,
-    formState: { errors },
+    formState: { errors, isSubmitting },
   } = useForm<BadgeFormValues>({
     resolver: zodResolver(badgeFormSchema),
     defaultValues: { code: "", label: "" },
@@ -79,8 +82,9 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
     setValue("code", "");
     setFocus("code");
   };
-  // A refusal of the code empties it; a refusal of the label alone keeps it,
-  // and the label is corrected beside it.
+  // A refusal of the code empties it; a refusal of the label alone (this one,
+  // the host's, or a label that holds the code) keeps it, and the label is
+  // corrected beside it.
   const refused: SubmitErrorHandler<BadgeFormValues> = (invalid) => {
     if (invalid.code !== undefined) scanAgain();
   };
@@ -89,6 +93,17 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
     setFailure(null);
     // The submit button stays off until the salt is read.
     if (salt.data === undefined) return;
+    // A scan lands in the label when the label was typed first and the focus
+    // stayed there: the code is then appended to it, in clear text, and the
+    // second scan into the code field would send it as the label. The host
+    // keeps a label, writes it to the audit log, lists it and sends it to every
+    // station, and revoking the badge takes none of that back. So it goes no
+    // further: nothing is hashed or sent, and the code stays, since only the
+    // label is wrong. Both values are the form's trimmed output.
+    if (values.label.includes(values.code)) {
+      setError("label", { type: "validate", message: LABEL_HAS_CODE }, { shouldFocus: true });
+      return;
+    }
     let added: BadgeInfo;
     try {
       const badgePhc = await hashBadge(values.code, salt.data.badgeSalt);
@@ -103,7 +118,15 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
       }
       const outcome = writeFailure(error, BADGE_FIELDS, BADGE_CONFLICTS);
       if (outcome.kind === "field") {
-        setError(outcome.field, { type: "server", message: outcome.message });
+        // The focus goes to the field the host refused. It matters for the
+        // label, which keeps the code beside it: the focus would stay in the
+        // code field, and a reflex re-scan would be glued to the kept code.
+        // A refused code is emptied and takes the focus back just below.
+        setError(
+          outcome.field,
+          { type: "server", message: outcome.message },
+          { shouldFocus: true },
+        );
         if (outcome.field === "code") scanAgain();
       } else {
         setFailure(outcome);
@@ -124,7 +147,11 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
   const codeMessage = errors.code?.message;
   // Until the salt is read nothing can be sent: the submit button is off, and
   // the code field takes no scan (it stays focusable), which would sit in it,
-  // masked, in front of the next one.
+  // masked, in front of the next one. The same while a submit is in flight:
+  // `isSubmitting` spans the validation, the hashing (about 100 ms of PBKDF2)
+  // and the request, where `add.isPending` would start only with the request.
+  // The field is editable again once the answer is in: a success closes the
+  // dialog, and a failure empties the field for the next scan (`scanAgain`).
   const saltMissing = salt.data === undefined;
 
   return (
@@ -146,7 +173,7 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
         label={t("office.operators.badges.fields.code")}
         hint={t("office.operators.badges.fields.codeHint")}
         mono
-        readOnly={saltMissing}
+        readOnly={saltMissing || isSubmitting}
         {...fieldError(codeMessage, codeMessage === TAKEN_BY ? { name: holder } : undefined)}
         {...register("code")}
       />
