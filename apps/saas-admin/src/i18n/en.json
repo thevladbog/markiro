@@ -1063,7 +1063,10 @@
       "shift_operators": "Shift operators",
       "inventories": "Inventories",
       "summary": "Summary",
-      "commerceml": "CommerceML"
+      "commerceml": "CommerceML",
+      "usage": "Platform usage",
+      "quality": "Quality and offline behaviour",
+      "commercial": "Commercial activity"
     },
     "basis": {
       "events": "Events in period",
@@ -1115,8 +1118,9 @@
     "help": {
       "title": "What the export means",
       "metrics": "Confirmed labels use print_verified_at; reprint requests are separate facts. Inventory values are current projections, not historical snapshots.",
-      "metadata": "The ZIP includes CSV and definitions.json with parameters, snapshot time and definitions. Dates are inclusive in the selected timezone; event timestamps remain UTC.",
-      "commerceml": "CommerceML reports the journal and current temporary upload presence. A historical source file can be unavailable and is not reconstructed."
+      "metadata": "The ZIP includes data.csv and metadata.json with parameters, snapshot time, definitions version, the SHA-256 of data.csv and definitions. Dates are inclusive in the selected timezone; event timestamps remain UTC.",
+      "commerceml": "CommerceML reports the journal and current temporary upload presence. A historical source file can be unavailable and is not reconstructed.",
+      "evidence": "Usage, quality and commercial exports have one row per tenant and local day (in aggregate mode, one row per local day summed across the selected tenants); a day with no recorded facts has no row. Values are additive counts, and amounts are RUB kopecks. Figures can be restated by late device sync, so compare exports by snapshot time and definitions version."
     },
     "history": "Generation history",
     "previous": "Previous",
@@ -1136,7 +1140,12 @@
     "createError": "Could not queue the report. The delivery can be retried safely.",
     "loadError": "Could not load report history.",
     "validationError": "Check required fields, period, timezone, and filter compatibility.",
-    "downloadError": "Could not obtain a link. History was refreshed; check status and retry."
+    "downloadError": "Could not obtain a link. History was refreshed; check status and retry.",
+    "privacyHelpTenant": {
+      "identified": "Includes tenant names and IDs. Requires the identified-data capability.",
+      "pseudonymous": "Tenants are replaced with export-local labels (tenant-01, tenant-02…). Volumes can still identify a tenant.",
+      "aggregate": "Tenant columns are removed and days are summed across the selected tenants. A small selection can still permit inference."
+    }
   },
   "shell": {
     "routeLoading": "Loading section",

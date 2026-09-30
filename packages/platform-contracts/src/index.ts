@@ -16,6 +16,8 @@ export type {
   PlatformUuid,
 } from "./primitives.js";
 export {
+  isPlatformEvidenceReportType,
+  platformEvidenceReportTypes,
   platformReportContracts,
   platformReportErrorCodeSchema,
   platformReportInputSchema,
@@ -25,7 +27,11 @@ export {
   platformReportStatusSchema,
   platformReportTypeSchema,
 } from "./platform-reports.js";
-export type { PlatformReport, PlatformReportInput } from "./platform-reports.js";
+export type {
+  PlatformEvidenceReportType,
+  PlatformReport,
+  PlatformReportInput,
+} from "./platform-reports.js";
 export {
   approveOfflineGrantPolicySchema,
   createOfflineGrantPolicySchema,
