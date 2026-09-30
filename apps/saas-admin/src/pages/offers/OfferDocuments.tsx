@@ -3,6 +3,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { Alert, Button, ConfirmDialog, Spinner, StatusChip, type TagPhase } from "@markiro/ui";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { openDocumentInNewTab } from "../documents/openDocumentInNewTab.js";
 import { downloadOfferDocument, listOfferDocuments, renderOfferDocuments } from "./api.js";
 import { offerErrorKey } from "./offerPresentation.js";
 
@@ -50,10 +51,15 @@ export function OfferDocuments({
       await documents.refetch();
     },
   });
+  const [popupBlocked, setPopupBlocked] = useState(false);
   const download = useMutation({
     mutationFn: (id: string) => downloadOfferDocument(workspace.offer.id, id),
-    onSuccess: ({ url }) => window.location.assign(url),
   });
+  const openDocument = (id: string) => {
+    setPopupBlocked(false);
+    const opened = openDocumentInNewTab(() => download.mutateAsync(id).then(({ url }) => url));
+    if (!opened) setPopupBlocked(true);
+  };
   return (
     <section className="offer-section" aria-labelledby="offer-documents-title">
       <header className="offer-section__header">
@@ -74,6 +80,7 @@ export function OfferDocuments({
           {t(offerErrorKey(documents.error ?? generate.error ?? download.error))}
         </Alert>
       ) : null}
+      {popupBlocked ? <Alert tone="error">{t("offerWorkspace.popupBlocked")}</Alert> : null}
       {!documents.data.length ? (
         <p className="offer-muted">{t("offerWorkspace.noDocuments")}</p>
       ) : null}
@@ -99,7 +106,7 @@ export function OfferDocuments({
                     variant="secondary"
                     loading={download.isPending && download.variables === item.id}
                     disabled={download.isPending}
-                    onClick={() => download.mutate(item.id)}
+                    onClick={() => openDocument(item.id)}
                   >
                     {t(
                       item.format === "html"

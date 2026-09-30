@@ -31,7 +31,9 @@ import {
   paymentQrPayload,
   profileIdentity,
   resolvePrintVariant,
+  signaturePlan,
   type PrintRenderOptions,
+  type SignaturePlan,
 } from "./print-document-layout";
 import type { BillingProfileSnapshot, PrintDocumentModel, PrintLine } from "./print-document-model";
 
@@ -59,6 +61,8 @@ const colors = {
   paperTint: "#fafaf8",
   fill: "#f0f1ed",
 };
+
+const columnSealSize = 76;
 
 const styles = StyleSheet.create({
   page: {
@@ -173,22 +177,30 @@ const styles = StyleSheet.create({
   signing: { flexDirection: "row", alignItems: "flex-end", gap: 36, marginTop: 14 },
   signature: { flex: 1, position: "relative", minHeight: 88 },
   signatureLine: { marginTop: 23 },
-  signedSignatureLine: { marginTop: 53 },
   signatureHint: { fontSize: 6.5, color: colors.muted, marginTop: 3 },
+  signedLine: { flexDirection: "row", alignItems: "flex-end", marginTop: 45 },
+  // The act seal sits in the right of the executor column: keep its width free of text so a long
+  // name wraps instead of running under the seal.
+  signedLineBesideSeal: { paddingRight: columnSealSize + 4 },
+  signatureField: { position: "relative", flexShrink: 0 },
+  // react-pdf trims the outer spaces of a Text, so the slash gets margins instead of spaces.
+  signatureSlash: { marginHorizontal: 3, flexShrink: 0 },
+  signerName: { flex: 1 },
   authorizedSignature: {
     position: "absolute",
-    left: 24,
-    bottom: 13,
-    width: 122,
-    height: 65,
+    left: 0,
+    bottom: -6,
+    width: 82,
+    height: 40,
     objectFit: "contain",
   },
-  legalSeal: {
+  legalSeal: { width: 88, height: 88, objectFit: "contain" },
+  legalSealColumn: {
     position: "absolute",
-    left: 112,
+    right: 0,
     bottom: -3,
-    width: 88,
-    height: 88,
+    width: columnSealSize,
+    height: columnSealSize,
     objectFit: "contain",
   },
   stamp: {
@@ -385,25 +397,49 @@ function LinesTable({ lines }: { lines: PrintLine[] }) {
   );
 }
 
-function Signature({ label, signed }: { label: string; signed: boolean }) {
+// A word wider than the room beside the act seal cannot wrap by itself (react-pdf does not break
+// inside a word, nor at a zero-width space) and would run under the seal, so it is cut by hand.
+const wrapLongWords = (text: string) =>
+  text.replace(/\S{17,}/g, (word) => word.match(/.{1,12}/g)?.join("\n") ?? word);
+
+// Beside the act seal the decoding has ~80 pt: a blank line is shortened and a name is wrapped.
+function decodingText(plan: SignaturePlan): string {
+  const besideSeal = plan.seal === "column";
+  if (plan.signerName === null) return besideSeal ? "_______________" : "____________________";
+  return besideSeal ? wrapLongWords(plan.signerName) : plan.signerName;
+}
+
+function Signature({ label, plan }: { label: string; plan: SignaturePlan | null }) {
   return (
     <View style={styles.signature}>
       <Text style={styles.sectionLabel}>{label}</Text>
-      {signed ? (
-        <>
-          <Image style={styles.authorizedSignature} src={authorizedSignature} cache={false} />
-          <Image style={styles.legalSeal} src={legalSeal} cache={false} />
-        </>
-      ) : null}
-      <Text style={signed ? styles.signedSignatureLine : styles.signatureLine}>
-        ________________ / ____________________
-      </Text>
+      {plan ? (
+        <View
+          style={
+            plan.seal === "column"
+              ? [styles.signedLine, styles.signedLineBesideSeal]
+              : styles.signedLine
+          }
+        >
+          <View style={styles.signatureField}>
+            <Image style={styles.authorizedSignature} src={authorizedSignature} cache={false} />
+            <Text>________________</Text>
+          </View>
+          <Text style={styles.signatureSlash}>/</Text>
+          <Text style={styles.signerName}>{decodingText(plan)}</Text>
+        </View>
+      ) : (
+        <Text style={styles.signatureLine}>________________ / ____________________</Text>
+      )}
       <Text style={styles.signatureHint}>подпись / расшифровка</Text>
+      {plan?.seal === "column" ? (
+        <Image style={styles.legalSealColumn} src={legalSeal} cache={false} />
+      ) : null}
     </View>
   );
 }
 
-function Closing({ model, signed }: { model: PrintDocumentModel; signed: boolean }) {
+function Closing({ model, plan }: { model: PrintDocumentModel; plan: SignaturePlan }) {
   const vatBasis = documentVatBasis(model);
   return (
     <>
@@ -446,10 +482,15 @@ function Closing({ model, signed }: { model: PrintDocumentModel; signed: boolean
         </View>
       )}
       <View style={styles.signing} wrap={false}>
-        <Signature label={model.kind === "act" ? "ИСПОЛНИТЕЛЬ" : "ПОСТАВЩИК"} signed={signed} />
+        <Signature
+          label={model.kind === "act" ? "ИСПОЛНИТЕЛЬ" : "ПОСТАВЩИК"}
+          plan={plan.signed ? plan : null}
+        />
         {model.kind === "act" ? (
-          <Signature label="ЗАКАЗЧИК" signed={false} />
-        ) : signed ? null : (
+          <Signature label="ЗАКАЗЧИК" plan={null} />
+        ) : plan.seal === "slot" ? (
+          <Image style={styles.legalSeal} src={legalSeal} cache={false} />
+        ) : (
           <View style={styles.stamp}>
             <Text style={styles.stampText}>МЕСТО ДЛЯ ПЕЧАТИ</Text>
           </View>
@@ -553,7 +594,7 @@ export async function renderPrintPdf(
           </View>
           <LinesTable lines={model.lines} />
           <ServiceUsageTable entries={model.serviceUsage ?? []} />
-          <Closing model={model} signed={printVariant === "signed"} />
+          <Closing model={model} plan={signaturePlan(model, printVariant)} />
         </View>
         <Footer model={model} barcode={barcode} />
       </Page>

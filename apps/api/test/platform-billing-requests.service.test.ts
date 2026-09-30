@@ -1566,11 +1566,14 @@ function invoiceInput(tenantId: string): CreateInvoiceDto {
   };
 }
 
+// A calendar literal goes stale: the offer must still be unexpired when the journey publishes it.
+// Computed once so every call with one idempotency key sends the same payload.
+const OFFER_EXPIRES_ON = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+
 function requestOfferInput(idempotencyKey: string) {
   return {
     idempotencyKey,
-    // Relative, not a calendar date: an absolute expiry turns this fixture into a time bomb.
-    expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10),
+    expiresAt: OFFER_EXPIRES_ON,
     lines: [
       {
         kind: "service" as const,
