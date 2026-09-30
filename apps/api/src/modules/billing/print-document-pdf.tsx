@@ -62,6 +62,8 @@ const colors = {
   fill: "#f0f1ed",
 };
 
+const columnSealSize = 76;
+
 const styles = StyleSheet.create({
   page: {
     paddingTop: 93,
@@ -177,11 +179,17 @@ const styles = StyleSheet.create({
   signatureLine: { marginTop: 23 },
   signatureHint: { fontSize: 6.5, color: colors.muted, marginTop: 3 },
   signedLine: { flexDirection: "row", alignItems: "flex-end", marginTop: 45 },
-  signatureField: { position: "relative" },
+  // The act seal sits in the right of the executor column: keep its width free of text so a long
+  // name wraps instead of running under the seal.
+  signedLineBesideSeal: { paddingRight: columnSealSize + 4 },
+  signatureField: { position: "relative", flexShrink: 0 },
+  // react-pdf trims the outer spaces of a Text, so the slash gets margins instead of spaces.
+  signatureSlash: { marginHorizontal: 3, flexShrink: 0 },
+  signerName: { flex: 1 },
   authorizedSignature: {
     position: "absolute",
     left: 0,
-    bottom: -2,
+    bottom: -6,
     width: 82,
     height: 40,
     objectFit: "contain",
@@ -191,8 +199,8 @@ const styles = StyleSheet.create({
     position: "absolute",
     right: 0,
     bottom: -3,
-    width: 76,
-    height: 76,
+    width: columnSealSize,
+    height: columnSealSize,
     objectFit: "contain",
   },
   stamp: {
@@ -389,18 +397,36 @@ function LinesTable({ lines }: { lines: PrintLine[] }) {
   );
 }
 
+// A word wider than the room beside the act seal cannot wrap by itself (react-pdf does not break
+// inside a word, nor at a zero-width space) and would run under the seal, so it is cut by hand.
+const wrapLongWords = (text: string) =>
+  text.replace(/\S{17,}/g, (word) => word.match(/.{1,12}/g)?.join("\n") ?? word);
+
+// Beside the act seal the decoding has ~80 pt: a blank line is shortened and a name is wrapped.
+function decodingText(plan: SignaturePlan): string {
+  const besideSeal = plan.seal === "column";
+  if (plan.signerName === null) return besideSeal ? "_______________" : "____________________";
+  return besideSeal ? wrapLongWords(plan.signerName) : plan.signerName;
+}
+
 function Signature({ label, plan }: { label: string; plan: SignaturePlan | null }) {
   return (
     <View style={styles.signature}>
       <Text style={styles.sectionLabel}>{label}</Text>
       {plan ? (
-        <View style={styles.signedLine}>
+        <View
+          style={
+            plan.seal === "column"
+              ? [styles.signedLine, styles.signedLineBesideSeal]
+              : styles.signedLine
+          }
+        >
           <View style={styles.signatureField}>
             <Image style={styles.authorizedSignature} src={authorizedSignature} cache={false} />
             <Text>________________</Text>
           </View>
-          <Text> / </Text>
-          <Text>{plan.signerName ?? "____________________"}</Text>
+          <Text style={styles.signatureSlash}>/</Text>
+          <Text style={styles.signerName}>{decodingText(plan)}</Text>
         </View>
       ) : (
         <Text style={styles.signatureLine}>________________ / ____________________</Text>
