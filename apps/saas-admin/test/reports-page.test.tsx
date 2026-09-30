@@ -504,6 +504,41 @@ describe("platform reports", () => {
     expect(calls.find((call) => call.body)?.body).not.toHaveProperty("lineId");
   });
 
+  it("offers the usage template without source filters and explains tenant privacy", async () => {
+    installReportsApi();
+    const user = userEvent.setup();
+    const view = renderSaasApp({ initialEntry: "/reports" });
+    await user.click(await within(view.container).findByRole("checkbox", { name: /завод/i }));
+    const form = view.container.querySelector("form")!;
+    await selectOption(user, form, /шаблон/i, "Использование платформы");
+    expect(within(form).queryByLabelText(/статус/i)).toBeNull();
+    expect(within(form).queryByLabelText(/gtin-14/i)).toBeNull();
+    expect(within(form).queryByRole("combobox", { name: /^линия$/i })).toBeNull();
+    expect(within(form).getByText("Для этого шаблона дополнительных фильтров нет.")).toBeTruthy();
+    expect(within(form).getByText(/tenant-01/)).toBeTruthy();
+  });
+
+  it.each([
+    ["Использование платформы", "usage"],
+    ["Качество и автономность", "quality"],
+    ["Коммерческая активность", "commercial"],
+  ])(
+    "creates a %s report with the pseudonymous default and no source filters",
+    async (label, reportType) => {
+      const calls = installReportsApi();
+      const user = userEvent.setup();
+      const view = renderSaasApp({ initialEntry: "/reports" });
+      await user.click(await within(view.container).findByRole("checkbox", { name: /завод/i }));
+      await selectOption(user, view.container, /шаблон/i, label);
+      await user.click(within(view.container).getByRole("button", { name: /сформировать/i }));
+      await waitFor(() => expect(calls.some((call) => call.body)).toBe(true));
+      const body = calls.find((call) => call.body)?.body as Record<string, unknown>;
+      expect(body).toMatchObject({ reportType, privacy: "pseudonymous", periodBasis: "events" });
+      for (const key of ["lineId", "productId", "gtin14", "status", "operatorId", "outcome"])
+        expect(body).not.toHaveProperty(key);
+    },
+  );
+
   it("removes download when a ready report reaches its local expiry deadline", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const expiresAt = new Date(Date.now() + 1_000).toISOString();

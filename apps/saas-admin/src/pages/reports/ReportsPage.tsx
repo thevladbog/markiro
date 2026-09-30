@@ -16,6 +16,7 @@ import {
   type TagPhase,
 } from "@markiro/ui";
 import {
+  isPlatformEvidenceReportType,
   platformReportInputSchema,
   type PlatformReport,
   type PlatformReportInput,
@@ -136,7 +137,13 @@ export function ReportsPage() {
       enabled,
     });
   const optionQueries = {
-    lines: useReportOption("lines", canRead && tenantIds.length > 0 && reportType !== "commerceml"),
+    lines: useReportOption(
+      "lines",
+      canRead &&
+        tenantIds.length > 0 &&
+        reportType !== "commerceml" &&
+        !isPlatformEvidenceReportType(reportType),
+    ),
     operators: useReportOption(
       "operators",
       canIdentify &&
@@ -258,7 +265,16 @@ export function ReportsPage() {
             value={reportType}
             onValueChange={changeType}
             options={(
-              ["shifts", "shift_operators", "inventories", "summary", "commerceml"] as const
+              [
+                "shifts",
+                "shift_operators",
+                "inventories",
+                "summary",
+                "commerceml",
+                "usage",
+                "quality",
+                "commercial",
+              ] as const
             ).map((value) => ({ value, label: t(`reports.types.${value}`) }))}
           />
           <div className="report-tenants">
@@ -338,7 +354,9 @@ export function ReportsPage() {
         </fieldset>
         <fieldset className="report-form__grid">
           <legend>{t("reports.sections.filters")}</legend>
-          {reportType === "commerceml" ? (
+          {isPlatformEvidenceReportType(reportType) ? (
+            <p className="report-help">{t("reports.noFilters")}</p>
+          ) : reportType === "commerceml" ? (
             <Select
               label={t("reports.fields.outcome")}
               value={outcome}
@@ -481,7 +499,13 @@ export function ReportsPage() {
               if (mode === "aggregate") setOperatorId("");
             }}
           />
-          <p className="report-help">{t(`reports.privacyHelp.${privacy}`)}</p>
+          <p className="report-help">
+            {t(
+              isPlatformEvidenceReportType(reportType)
+                ? `reports.privacyHelpTenant.${privacy}`
+                : `reports.privacyHelp.${privacy}`,
+            )}
+          </p>
         </fieldset>
         {validationError ? <Alert tone="error">{t("reports.validationError")}</Alert> : null}
         {submitError ? (
@@ -511,6 +535,7 @@ export function ReportsPage() {
         <p>{t("reports.help.metrics")}</p>
         <p>{t("reports.help.metadata")}</p>
         <p>{t("reports.help.commerceml")}</p>
+        <p>{t("reports.help.evidence")}</p>
       </details>
       <section className="commerce-ledger" aria-labelledby="reports-history-title">
         <header className="commerce-ledger__header">
