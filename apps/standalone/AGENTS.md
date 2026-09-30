@@ -734,9 +734,10 @@ requests and offer a retry.
   editable again. One residual stays: a scan that straddles the moment the
   field becomes editable loses its head, which a read-only field does not
   take, and sends its tail, which `badgeCodeRule` accepts. The moment is the
-  salt's arrival, on the first opening of the dialog, and the end of a failed
-  submit (`scanAgain` empties and focuses the field inside the callback, while
-  `readOnly` drops only when React renders `isSubmitting: false`). Nothing
+  salt's arrival, on an opening that reads the salt (the first, or one after
+  the cache dropped it, see above), and the end of a failed submit (`scanAgain`
+  empties and focuses the field inside the callback, while `readOnly` drops
+  only when React renders `isSubmitting: false`). Nothing
   detects it: the badge then matches no station, and the remedy is to revoke
   it and add it again (plan 1f's sign-in test is the first place it shows). It
   is accepted, since a scan of about 0.1 s has to straddle a boundary. The
@@ -758,33 +759,55 @@ requests and offer a retry.
   | The request fails, answered by an alert                             | emptied    | code          | alert above the fields |
   | The form refuses the label (too long, control character)            | kept       | label         | under the label        |
   | `validation_failed` on `label`                                      | kept       | label         | under the label        |
-  | The label has the code or its Russian-layout form (`labelHasCode`)  | kept       | label         | under the label        |
+  | The label has the code or its Russian-layout form (`labelHasCode`)  | emptied    | label         | under the label        |
 
   A message under a field stays until the next input into it, an alert until
   the next submit the form accepts (`setFailure(null)` runs before the label
   guard, so a `labelHasCode` refusal clears it although nothing is sent, while
-  a refusal by the form itself leaves it). Only a refusal of the label alone
-  keeps the code, and the
-  label is corrected beside it. The last row is the guard against the one way
-  a code could leave the webview in clear text by accident: a label typed
-  first, with the focus left in it, takes the scan, and the second scan into
-  the code field would send it as the label, which the host stores, writes to
-  the audit row, lists and sends to every station, and revoking the badge
-  takes back none of it. Once the form accepts both fields, and before
-  anything is hashed or sent, a label that has the code is refused, as typed
-  and as the Russian layout types it. A wedge scanner presses keys, and a
-  label typed in Russian needs that layout, so it takes the scan in Cyrillic
-  («MRK-000742» arrives as «ЬКЛ-000742», «123,45678» as «123б45678»); the code
-  field refuses that form with the layout hint, and once the layout is
-  switched the next scan arrives in Latin. So the label is also read back to
-  the keys (`fromRussianLayout` in `src/host/pairing-code.ts`, the mapping the
-  pairing scans use) before the second comparison. Both tests are plain
+  a refusal by the form itself leaves it). A refusal of the label alone, by
+  the form or by the host, keeps the code, and the label is corrected beside
+  it.
+
+  The last row is the exception, and the guard against the one way a code
+  could leave the webview in clear text by accident: a label typed first, with
+  the focus left in it, takes the scan, and the second scan into the code
+  field would send it as the label, which the host stores, writes to the audit
+  row, lists and sends to every station, and revoking the badge takes back
+  none of it. Once the form accepts both fields, and before anything is hashed
+  or sent, a label that has the code is refused. The guard empties the code
+  (`setValue`, without validating) but leaves the focus on the label
+  (`setError` with `shouldFocus`; `scanAgain` would take it to the code field),
+  because a re-scan into a kept code would be glued to it
+  («MRK-000742MRK-000742»), the label would then no longer hold that string,
+  and the label would go out with a hash no station matches. Once the label is
+  corrected the code is scanned again; an empty code is refused, and
+  `scanAgain` focuses the field.
+
+  The label is read three ways and the comparison ignores case: as typed, as
+  the Russian layout types it, and as it types it with Caps Lock on. A wedge
+  scanner presses keys, and a label typed in Russian needs that layout, so it
+  takes the scan in Cyrillic («MRK-000742» arrives as «ЬКЛ-000742»,
+  «123,45678» as «123б45678»); the code field refuses that form with the
+  layout hint, and once the layout is switched the next scan arrives in Latin.
+  So the label is also read back to the keys with the two readings the pairing
+  scans use (`src/host/pairing-code.ts`): `fromRussianLayout`, the layout
+  mapping, and the same after `withCyrillicCaseSwapped`, the reading for Caps
+  Lock. Under the Russian layout the keys of the comma, the period, the
+  semicolon, the apostrophe, the square brackets and the grave accent are the
+  letters б ю ж э х ъ ё, so Caps Lock capitalizes them («123,45678» arrives as
+  «123Б45678», which the mapping alone reads as `123<45678`), while the
+  English layout leaves them alone. Caps Lock also changes the case of the
+  Latin letters (a scanner that corrects for it types «mrk,742» as
+  «ьклБ742»), so the comparison ignores case. The three tests are plain
   substring tests of the two trimmed values, so they also refuse a label that
   repeats the number printed on the card on purpose, and a very short code
   that is a substring of the label by coincidence: both are accepted costs,
-  which the second test widens only by the mapped text. The guard catches the
-  accidental forms only: a scan whose case or layout was changed between the
-  two scans (another layout, Caps Lock toggled in between) is not recognised.
+  which the mapped readings and the comparison without case widen slightly.
+  The guard covers the Russian layout and Caps Lock as long as the state is
+  the same for the label scan and the code scan. It does not recognise a
+  layout or Caps Lock state that changed between the two scans, any other
+  layout, or a label edited after the scan.
+
   «Отозвать» asks first and says that the badge stops opening the stations
   once they sync and never comes back; after the host's 204 the badge shows
   as revoked at once, and the list is read again.

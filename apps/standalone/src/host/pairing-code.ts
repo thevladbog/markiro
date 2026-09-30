@@ -85,7 +85,7 @@ export function isIpv4(address: string): boolean {
  * punctuation letters included, while digits, `-`, `=` and the shifted
  * digit-row symbols (not letters) stay the same either way.
  */
-function withCyrillicCaseSwapped(text: string): string {
+export function withCyrillicCaseSwapped(text: string): string {
   return Array.from(text, (symbol) => {
     if (!CYRILLIC.test(symbol)) return symbol;
     const lower = symbol.toLowerCase();

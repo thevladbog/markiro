@@ -405,51 +405,76 @@ describe("operator badges", () => {
     expect([sentHash(session, 0), sentHash(session, 1)]).toStrictEqual([BADGE_PHC, BADGE_PHC]);
   });
 
-  it("refuses a label that holds the scanned code before hashing or sending, and keeps the code", async () => {
-    const session = adminSession();
-    session.api.createBadge.mockResolvedValue(PASS_8);
-    const derive = vi.spyOn(crypto.subtle, "deriveBits");
-    await openAdd(session);
-    // The label is typed first and the focus stays in it: the scan lands in the
-    // label, after what is there, and its Enter submits an empty code.
-    type("Подпись", "Пропуск №7");
-    wedgeInto(labelField(), "MRK-000742");
-    expect(
-      await screen.findByText("Код бейджа — от 1 до 256 символов: латинские буквы, цифры и знаки"),
-    ).toBeTruthy();
-    await waitFor(() => expect(document.activeElement).toBe(codeField()));
-    expect(labelField().value).toBe("Пропуск №7MRK-000742");
-    expect(session.api.createBadge).not.toHaveBeenCalled();
-    // The next scan goes to the code field, as it should, while the label still
-    // holds the first one: refused, and nothing is hashed or sent.
-    wedge("MRK-000742");
-    const message = await screen.findByText(
-      "В подписи есть код бейджа — уберите его: подпись видят все станции",
-    );
-    expect(labelField().getAttribute("aria-describedby")).toBe(message.id);
-    await waitFor(() => expect(document.activeElement).toBe(labelField()));
-    // Only the label is wrong: the code stays as it was scanned.
-    expect(codeField().value).toBe("MRK-000742");
-    expect(derive).not.toHaveBeenCalled();
-    expect(session.api.createBadge).not.toHaveBeenCalled();
-    // The label corrected beside it and the form sent again: one request, with
-    // the code's hash and the label without the code.
-    type("Подпись", "Пропуск №8");
-    pressEnter(codeField());
-    await waitFor(() => expect(session.api.createBadge).toHaveBeenCalledTimes(1));
-    expect(session.api.createBadge.mock.calls).toStrictEqual([
-      ["office-session-token", ANNA.id, { badgePhc: BADGE_PHC, label: "Пропуск №8" }],
-    ]);
-    expect(await screen.findByText("Бейдж «Пропуск №8» добавлен.")).toBeTruthy();
-    expect(derive).toHaveBeenCalledTimes(1);
-  });
-
+  // A wedge under the English layout types the code as it is, «,» included: the
+  // label then holds it verbatim, which the layout mapping would turn into «?».
   it.each([
-    ["a letter code", "MRK-000742", "ЬКЛ-000742"],
-    ["a code with a separator", "123,45678", "123б45678"],
+    ["a letter code", "MRK-000742"],
+    ["a code with a separator", "123,45678"],
   ])(
-    "refuses a label that holds %s as the Russian layout types it, before hashing or sending, and keeps the code",
-    async (_case, code, typedInRussian) => {
+    "refuses a label that holds %s as scanned, before hashing or sending, and empties the code",
+    async (_case, code) => {
+      const session = adminSession();
+      session.api.createBadge.mockResolvedValue(PASS_8);
+      const derive = vi.spyOn(crypto.subtle, "deriveBits");
+      await openAdd(session);
+      // The label is typed first and the focus stays in it: the scan lands in the
+      // label, after what is there, and its Enter submits an empty code.
+      type("Подпись", "Пропуск №7");
+      wedgeInto(labelField(), code);
+      expect(
+        await screen.findByText(
+          "Код бейджа — от 1 до 256 символов: латинские буквы, цифры и знаки",
+        ),
+      ).toBeTruthy();
+      await waitFor(() => expect(document.activeElement).toBe(codeField()));
+      expect(labelField().value).toBe(`Пропуск №7${code}`);
+      expect(session.api.createBadge).not.toHaveBeenCalled();
+      // The next scan goes to the code field, as it should, while the label still
+      // holds the first one: refused, and nothing is hashed or sent.
+      wedge(code);
+      const message = await screen.findByText(
+        "В подписи есть код бейджа — уберите его: подпись видят все станции",
+      );
+      expect(labelField().getAttribute("aria-describedby")).toBe(message.id);
+      // The focus stays on the label, which is what has to change, and the code
+      // is emptied like after every refusal that involved it: a re-scan into the
+      // kept code would be glued to it, and the label would no longer hold it.
+      await waitFor(() => expect(document.activeElement).toBe(labelField()));
+      expect(codeField().value).toBe("");
+      expect(derive).not.toHaveBeenCalled();
+      expect(session.api.createBadge).not.toHaveBeenCalled();
+      // The label corrected beside it and the code scanned again: one request,
+      // with the hash of that scan alone and the label without the code.
+      type("Подпись", "Пропуск №8");
+      wedge(code);
+      await waitFor(() => expect(session.api.createBadge).toHaveBeenCalledTimes(1));
+      expect(session.api.createBadge.mock.calls).toStrictEqual([
+        [
+          "office-session-token",
+          ANNA.id,
+          { badgePhc: expect.stringMatching(/^pbkdf2\$sha256\$100000\$/), label: "Пропуск №8" },
+        ],
+      ]);
+      expect(await screen.findByText("Бейдж «Пропуск №8» добавлен.")).toBeTruthy();
+      expect(derive).toHaveBeenCalledTimes(1);
+      await expect(verifyPhc(code, sentHash(session, 0))).resolves.toBe(true);
+    },
+  );
+
+  // `label` is what the administrator typed first, `code` what the wedge types
+  // under the English layout and `typedInRussian` what the same keys type under
+  // the Russian one. Caps Lock on, the same for both scans, capitalizes the
+  // Russian letters that sit on the punctuation keys («,» is «Б»), which the
+  // English layout leaves alone, and a scanner that corrects the case of the
+  // letters for Caps Lock types «mrk,742» as «ьклБ742».
+  it.each([
+    ["a letter code", "Пропуск №7", "MRK-000742", "ЬКЛ-000742"],
+    ["a code with a separator", "Пропуск №7", "123,45678", "123б45678"],
+    ["a separator code with Caps Lock on", "ПРОПУСК 7", "123,45678", "123Б45678"],
+    ["a mixed code with Caps Lock on", "ПРОПУСК 7", "mrk,742", "ьклБ742"],
+  ])(
+    "refuses a label that holds %s as the Russian layout types it, before hashing or sending, and empties the code",
+    async (_case, label, code, typedInRussian) => {
       const session = adminSession();
       session.api.createBadge.mockResolvedValue(PASS_8);
       const derive = vi.spyOn(crypto.subtle, "deriveBits");
@@ -457,7 +482,7 @@ describe("operator badges", () => {
       // A label typed in Russian needs the Russian layout, and a wedge presses
       // keys: the first scan lands in the label, in Cyrillic, and its Enter
       // submits an empty code.
-      type("Подпись", "Пропуск №7");
+      type("Подпись", label);
       wedgeInto(labelField(), typedInRussian);
       expect(
         await screen.findByText(
@@ -465,7 +490,7 @@ describe("operator badges", () => {
         ),
       ).toBeTruthy();
       await waitFor(() => expect(document.activeElement).toBe(codeField()));
-      expect(labelField().value).toBe(`Пропуск №7${typedInRussian}`);
+      expect(labelField().value).toBe(`${label}${typedInRussian}`);
       expect(session.api.createBadge).not.toHaveBeenCalled();
       // The next scan goes to the code field, the layout still Russian: refused
       // with the hint, and the field is emptied.
@@ -487,9 +512,9 @@ describe("operator badges", () => {
         "В подписи есть код бейджа — уберите его: подпись видят все станции",
       );
       expect(labelField().getAttribute("aria-describedby")).toBe(message.id);
+      // The focus stays on the label and the code is emptied.
       await waitFor(() => expect(document.activeElement).toBe(labelField()));
-      // Only the label is wrong: the code stays as it was scanned.
-      expect(codeField().value).toBe(code);
+      expect(codeField().value).toBe("");
       expect(derive).not.toHaveBeenCalled();
       expect(session.api.createBadge).not.toHaveBeenCalled();
     },

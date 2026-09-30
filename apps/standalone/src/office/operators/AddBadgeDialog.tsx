@@ -6,7 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, Input } from "@markiro/ui";
 
 import { HostError } from "../../host/client.js";
-import { fromRussianLayout } from "../../host/pairing-code.js";
+import { fromRussianLayout, withCyrillicCaseSwapped } from "../../host/pairing-code.js";
 import type { BadgeCreate, BadgeInfo, OfficeOperator } from "../../host/protocol.js";
 import { badgeCreate } from "../../host/requests.js";
 import { hashBadge } from "../../lib/credentials.js";
@@ -26,6 +26,19 @@ const BADGE_CONFLICTS = {
 const TAKEN_BY = "office.operators.badges.errors.takenBy";
 /** The label holds the scanned code, which would leave in clear text (see `submit`). */
 const LABEL_HAS_CODE = "office.operators.badges.errors.labelHasCode";
+
+/**
+ * What a label that holds a scan can read as. A wedge scanner presses keys, so a
+ * label typed in Russian takes the scan as the Russian layout renders them: the
+ * label as it stands, mapped back to the keys (`fromRussianLayout`), and mapped
+ * back after the case of every Cyrillic letter is swapped, for Caps Lock. Caps
+ * Lock capitalizes the letters б ю ж э х ъ ё, which sit on the keys for , . ; ' [ ]
+ * and the grave accent, while the English layout leaves those keys alone. The
+ * two mapped readings are the ones the pairing scans use (`parsePairingPayload`).
+ */
+function labelReadings(label: string): string[] {
+  return [label, fromRussianLayout(label), fromRussianLayout(withCyrillicCaseSwapped(label))];
+}
 
 export interface AddBadgeDialogProps {
   operator: OfficeOperator;
@@ -84,8 +97,8 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
     setFocus("code");
   };
   // A refusal of the code empties it; a refusal of the label alone (this one,
-  // the host's, or a label that holds the code) keeps it, and the label is
-  // corrected beside it.
+  // or the host's) keeps it, and the label is corrected beside it. A label that
+  // holds the code is the exception, see `submit`.
   const refused: SubmitErrorHandler<BadgeFormValues> = (invalid) => {
     if (invalid.code !== undefined) scanAgain();
   };
@@ -99,18 +112,24 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
     // second scan into the code field would send it as the label. The host
     // keeps a label, writes it to the audit log, lists it and sends it to every
     // station, and revoking the badge takes none of that back. So it goes no
-    // further: nothing is hashed or sent, and the code stays, since only the
-    // label is wrong. Both values are the form's trimmed output. A wedge
-    // scanner types by key position, and a label typed in Russian needs the
-    // Russian layout, so the scan lands in the label as that layout renders it
-    // ("MRK-000742" as "ЬКЛ-000742"). The code field refuses a Cyrillic scan and
-    // the layout is switched as the hint says, so the code that reaches it is
-    // Latin: the label is tested as typed and as the Russian layout types it.
-    if (
-      values.label.includes(values.code) ||
-      fromRussianLayout(values.label).includes(values.code)
-    ) {
+    // further: nothing is hashed or sent, and the code is emptied like after
+    // every refusal that involved it, since a re-scan into a kept code would be
+    // glued to it and the label would then no longer hold that string. Not
+    // `scanAgain`, which would take the focus to the code field: it stays on the
+    // label, which is what has to change, and the code is scanned again once
+    // the label is corrected. Both values are the form's trimmed output. A scan
+    // is typed by key position, and a label typed in Russian needs the Russian
+    // layout, so the scan lands in the label as that layout renders it
+    // ("MRK-000742" as "ЬКЛ-000742"), with Caps Lock on or off, the same for
+    // the label scan and the code scan. The code field refuses a Cyrillic scan
+    // and the layout is switched as the hint says, so the code that reaches it
+    // is Latin: the label is read as typed and as the Russian layout types it
+    // (`labelReadings`). Caps Lock also changes the case of the Latin letters,
+    // so the comparison ignores case.
+    const scanned = values.code.toLowerCase();
+    if (labelReadings(values.label).some((reading) => reading.toLowerCase().includes(scanned))) {
       setError("label", { type: "validate", message: LABEL_HAS_CODE }, { shouldFocus: true });
+      setValue("code", "");
       return;
     }
     let added: BadgeInfo;
