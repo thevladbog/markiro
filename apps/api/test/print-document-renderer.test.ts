@@ -233,7 +233,7 @@ describe("print document HTML renderer", () => {
     expect(html).toContain("ОГРН 1000000000000");
   });
 
-  it("renders signed offers with supplier images and no counterparty stamp placeholder", async () => {
+  it("renders signed offers with supplier images and the seal in the right-hand slot", async () => {
     const offer = {
       ...baseInvoice,
       kind: "offer" as const,
@@ -242,6 +242,7 @@ describe("print document HTML renderer", () => {
     const html = renderPrintHtml(offer, { printVariant: "signed" });
     expect(count(html, 'class="authorized-signature"')).toBe(1);
     expect(count(html, 'class="legal-seal"')).toBe(1);
+    expect(html).toContain('class="stamp stamp--sealed"');
     expect(renderPrintHtml(offer, { printVariant: "clean" })).toContain("МЕСТО ДЛЯ ПЕЧАТИ");
     expect(html).not.toContain("МЕСТО ДЛЯ ПЕЧАТИ");
     await expect(renderPrintPdf(offer, { printVariant: "signed" })).resolves.toBeInstanceOf(Buffer);
