@@ -1,6 +1,12 @@
+import { SIGNED_PRINT_SELLER_TAX_ID } from "@markiro/platform-contracts";
 import { describe, expect, it } from "vitest";
 
-import { toInvoicePrintModel } from "../src/modules/billing/print-document-model";
+import { signaturePlan } from "../src/modules/billing/print-document-layout";
+import {
+  toBillingActPrintModel,
+  toInvoicePrintModel,
+  toOfferPrintModel,
+} from "../src/modules/billing/print-document-model";
 
 describe("print document model", () => {
   it("uses only the issued invoice snapshot and literal line values", () => {
@@ -156,5 +162,105 @@ describe("print document model", () => {
       ],
     });
     expect(model.lines[0]?.unit).toBe(printed);
+  });
+});
+
+/** Shaped like `billingProfileSnapshot(...)`: what is frozen into a document's seller snapshot. */
+const frozenSeller = (contact: { name: string | null; email: null; phone: null } | null) => ({
+  kind: "sole_proprietor",
+  fullName: "Индивидуальный предприниматель Богатырев Владислав Сергеевич",
+  displayName: "ИП Богатырев В. С.",
+  inn: SIGNED_PRINT_SELLER_TAX_ID,
+  kpp: null,
+  ogrn: null,
+  ogrnip: "324237500123456",
+  legalAddressRaw: "г. Геленджик, ул. Примерная, д. 1",
+  legalAddress: null,
+  actualSameAsLegal: true,
+  actualAddressRaw: null,
+  actualAddress: null,
+  postalSameAsLegal: true,
+  postalAddressRaw: null,
+  postalAddress: null,
+  contact,
+  revision: 3,
+  taxPolicy: { kind: "without_vat", regime: "npd" },
+  confirmedAt: "2026-09-29T09:00:00.000Z",
+});
+
+const frozenContact = { name: "Богатырев Владислав Сергеевич", email: null, phone: null } as const;
+
+const buyerSnapshot = { kind: "legal_entity", fullName: "ООО Покупатель", inn: "7812014560" };
+
+const offerInput = (sellerSnapshot: unknown) => ({
+  number: "MRK-CO-000001",
+  status: "published",
+  publishedAt: new Date("2026-09-30T09:00:00.000Z"),
+  expiresAt: null,
+  sellerSnapshot,
+  buyerSnapshot,
+  linesSnapshot: [],
+  subtotal: "0.00",
+  vatTotal: "0.00",
+  total: "0.00",
+  termsHtml: null,
+});
+
+const invoiceInput = (sellerSnapshot: unknown) => ({
+  number: "MRK-INV-000001",
+  status: "issued",
+  issueDate: new Date("2026-09-30T09:00:00.000Z"),
+  dueDate: null,
+  sellerSnapshot,
+  buyerSnapshot,
+  subtotal: "0.00",
+  vatTotal: "0.00",
+  total: "0.00",
+  lines: [],
+});
+
+describe("signer name from the frozen seller snapshot", () => {
+  it("prints the frozen contact name on a signed offer with the seal in the right-hand slot", () => {
+    const model = toOfferPrintModel(offerInput(frozenSeller(frozenContact)));
+
+    expect(signaturePlan(model, "signed")).toEqual({
+      signed: true,
+      signerName: "В. С. Богатырев",
+      seal: "slot",
+    });
+  });
+
+  it("prints the frozen contact name on a signed act with the seal in the executor column", () => {
+    const model = toBillingActPrintModel(
+      {
+        number: "MRK-ACT-000001",
+        createdAt: new Date("2026-09-30T10:00:00.000Z"),
+        periodStart: "2026-09-01",
+        periodEnd: "2026-09-30",
+      },
+      invoiceInput(frozenSeller(frozenContact)),
+    );
+
+    expect(signaturePlan(model, "signed")).toEqual({
+      signed: true,
+      signerName: "В. С. Богатырев",
+      seal: "column",
+    });
+  });
+
+  it("leaves the decoding blank when the frozen seller has no contact", () => {
+    const offer = toOfferPrintModel(offerInput(frozenSeller(null)));
+    const invoice = toInvoicePrintModel(invoiceInput(frozenSeller(null)));
+
+    expect(signaturePlan(offer, "signed")).toEqual({
+      signed: true,
+      signerName: null,
+      seal: "slot",
+    });
+    expect(signaturePlan(invoice, "signed")).toEqual({
+      signed: true,
+      signerName: null,
+      seal: "slot",
+    });
   });
 });

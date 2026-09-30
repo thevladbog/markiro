@@ -59,6 +59,9 @@ describe("signed print form signature block", () => {
     const executor =
       html.match(/<div class="signature signature--signed">.*?<\/small>(.*?)<\/div>/s)?.[1] ?? "";
     expect(executor).toContain('<img class="legal-seal"');
+    const executorBlock =
+      html.match(/<div class="signature signature--signed">.*?<\/small>/s)?.[0] ?? "";
+    expect(executorBlock).toContain('<span class="signer-name">В. С. Богатырев</span>');
     expect(html).toContain("ЗАКАЗЧИК");
     expect(html.split('class="legal-seal"')).toHaveLength(2);
   });

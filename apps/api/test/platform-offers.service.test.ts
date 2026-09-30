@@ -8,6 +8,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 
 import { createOfferSchema, type CreateOfferDto } from "../src/modules/platform-offers/dto";
 import type { OfferDocumentsService } from "../src/modules/platform-offers/offer-documents.service";
+import { nextOfferNumber } from "../src/modules/platform-offers/offer-number";
 import type { OfferWorkspaceService } from "../src/modules/platform-offers/offer-workspace.service";
 import type { OfferPreviewService } from "../src/modules/platform-offers/offer-preview.service";
 import { PlatformOffersController } from "../src/modules/platform-offers/platform-offers.controller";
@@ -998,6 +999,13 @@ describe.skipIf(!databaseUrl)("platform offer revisions on isolated Postgres", (
         outcome.status === "fulfilled" ? [outcome.value] : [],
       );
       expect(new Set(published.map(({ number }) => number)).size).toBe(2);
+      const numbers = published.map(({ number }) => number ?? "");
+      for (const number of numbers) expect(number).toMatch(/^MRK-CO-\d{6,}$/);
+      // Equal-width zero-padded counters sort by length first, then lexicographically.
+      const [first, second] = [...numbers].sort(
+        (left, right) => left.length - right.length || (left < right ? -1 : left > right ? 1 : 0),
+      );
+      expect(second).toBe(nextOfferNumber(first));
     } finally {
       await barrier.query("select pg_advisory_unlock_all()");
       barrier.release();
