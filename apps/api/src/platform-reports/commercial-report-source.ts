@@ -115,7 +115,7 @@ export async function loadCommercialRows(tx: ReportTransaction, input: PlatformR
     FROM metrics m
     JOIN organization o ON o.id = m.tenant_id
     GROUP BY m.tenant_id, o.name, m.local_day
-    ORDER BY m.tenant_id, m.local_day
+    ORDER BY m.tenant_id COLLATE "C", m.local_day
     LIMIT ${REPORT_MAX_ROWS + 1}
   `,
   );

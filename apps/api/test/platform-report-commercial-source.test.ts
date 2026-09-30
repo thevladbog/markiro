@@ -28,6 +28,7 @@ describe.skipIf(!local)("commercial report projection on real Postgres", () => {
   let base: EvidenceBase;
   let tenantC: string;
   let tenantD: string;
+  let tenantF: string;
   // Sorts after base.tenant and base.other, so multi-tenant row order does not depend on uuids.
   const tenantE = `evidence-e-${randomUUID()}`;
   let planVersionId: string;
@@ -97,6 +98,7 @@ describe.skipIf(!local)("commercial report projection on real Postgres", () => {
     base = await seedEvidenceBase(db);
     tenantC = await createOrganization(db);
     tenantD = await createOrganization(db);
+    tenantF = await createOrganization(db);
     await createOrganization(db, tenantE);
     planVersionId = await createPublishedPlan(db, {
       maxLines: 1,
@@ -520,10 +522,36 @@ describe.skipIf(!local)("commercial report projection on real Postgres", () => {
       startsAt: new Date("2026-09-01T07:00:00Z"),
       endsAt: null,
     });
+
+    // Tenant F: two invoice payments of the same amount on the same local day, for one invoice that
+    // stays below its total. Identical rows must both count: the received set is a UNION ALL.
+    const duplicatePaymentInvoiceId = randomUUID();
+    await db.insert(schema.invoices).values(
+      invoice({
+        id: duplicatePaymentInvoiceId,
+        tenantId: tenantF,
+        subtotal: "1000.00",
+        vatTotal: "200.00",
+        total: "1200.00",
+        issuedAt: new Date("2026-08-01T00:00:00Z"),
+      }),
+    );
+    await db.insert(schema.billingPayments).values(
+      ["2026-09-01T10:00:00Z", "2026-09-01T11:00:00Z"].map((paidAt) => ({
+        tenantId: tenantF,
+        invoiceId: duplicatePaymentInvoiceId,
+        source: "manual" as const,
+        paidAt: new Date(paidAt),
+        amount: "10.00",
+        bankReference: `EV-${randomUUID()}`,
+        platformUserId: actor,
+        idempotencyKey: `ev-${randomUUID()}`,
+      })),
+    );
   });
 
   afterAll(async () => {
-    const tenants = [base.tenant, base.other, tenantC, tenantD, tenantE];
+    const tenants = [base.tenant, base.other, tenantC, tenantD, tenantE, tenantF];
     const tenantList = sql.join(
       tenants.map((tenant) => sql`${tenant}`),
       sql`, `,
@@ -678,6 +706,28 @@ describe.skipIf(!local)("commercial report projection on real Postgres", () => {
         day: "2026-09-02",
         paid_subscriptions_started: 1,
       }),
+    ]);
+  });
+
+  it("counts every payment when several have the same amount on the same local day", async () => {
+    const result = await service.load({ ...input, tenantIds: [tenantF] });
+    expect(result.rows).toEqual([
+      {
+        tenant_id: tenantF,
+        tenant_name: `Subscription fixture ${tenantF}`,
+        day: "2026-09-01",
+        invoices_issued: 0,
+        invoices_issued_net_minor: 0,
+        invoices_issued_vat_minor: 0,
+        invoices_issued_total_minor: 0,
+        invoices_cancelled: 0,
+        invoices_paid: 0,
+        payments_received: 2,
+        payments_received_minor: 2000,
+        acts_issued: 0,
+        paid_subscriptions_started: 0,
+        agreements_signed: 0,
+      },
     ]);
   });
 

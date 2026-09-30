@@ -165,9 +165,10 @@ export function applyReportPrivacy(
       result.operator_id = id === null ? null : (labels.get(key) ?? null);
       result.operator_name = id === null ? "unknown" : (labels.get(key) ?? null);
     }
-    if (input.privacy === "pseudonymous" && tenantLabelled && columns.includes("tenant_id")) {
+    if (input.privacy === "pseudonymous" && tenantLabelled) {
+      // tenant_name is replaced on its own: a source that emits it without tenant_id must not leak it.
       const label = tenantLabels.get(String(row.tenant_id)) ?? null;
-      result.tenant_id = label;
+      if (columns.includes("tenant_id")) result.tenant_id = label;
       if (columns.includes("tenant_name")) result.tenant_name = label;
     }
     return result;
@@ -191,7 +192,15 @@ export function applyReportPrivacy(
           if (typeof row[column] === "number" && typeof previous[column] === "number")
             previous[column] += row[column];
     }
-    return { ...source, columns, rows: [...grouped.values()], definitions };
+    const collapsed = [...grouped.values()];
+    // Evidence rows arrive per tenant, so the collapsed days would follow first appearance; order them by day.
+    if (tenantLabelled)
+      collapsed.sort((a, b) => {
+        const left = String(a.day);
+        const right = String(b.day);
+        return left < right ? -1 : left > right ? 1 : 0;
+      });
+    return { ...source, columns, rows: collapsed, definitions };
   }
   return { ...source, columns, rows, definitions };
 }

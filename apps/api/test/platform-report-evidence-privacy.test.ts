@@ -79,6 +79,61 @@ describe("evidence report privacy", () => {
     expect(metadata.parameters).not.toHaveProperty("tenantIds");
   });
 
+  it("replaces tenant_name in pseudonymous mode even when tenant_id is not a column", () => {
+    const input = { ...identified, privacy: "pseudonymous" as const };
+    const nameOnly: PlatformReportSource = {
+      snapshotAt: source.snapshotAt,
+      columns: ["tenant_name", "day", "accepted_units"],
+      rows: [
+        { tenant_name: "Alpha Factory", day: "2026-09-01", accepted_units: 7 },
+        { tenant_name: "Beta Factory", day: "2026-09-01", accepted_units: 5 },
+      ],
+      definitions: { tenant_name: "tenant name", accepted_units: "accepted units" },
+    };
+    const safe = applyReportPrivacy(input, nameOnly);
+    expect(safe.columns).toEqual(["tenant_name", "day", "accepted_units"]);
+    const text = JSON.stringify(safe.rows);
+    expect(text).not.toContain("Alpha Factory");
+    expect(text).not.toContain("Beta Factory");
+    expect(safe.rows.map((row) => row.accepted_units)).toEqual([7, 5]);
+  });
+
+  it("aggregate orders days ascending, not by first appearance across tenants", () => {
+    const input = { ...identified, privacy: "aggregate" as const };
+    const interleaved: PlatformReportSource = {
+      ...source,
+      rows: [
+        {
+          tenant_id: "tenant-a-real",
+          tenant_name: "Alpha Factory",
+          day: "2026-09-01",
+          accepted_units: 1,
+          active_lines: 1,
+        },
+        {
+          tenant_id: "tenant-a-real",
+          tenant_name: "Alpha Factory",
+          day: "2026-09-03",
+          accepted_units: 3,
+          active_lines: 3,
+        },
+        {
+          tenant_id: "tenant-b-real",
+          tenant_name: "Beta Factory",
+          day: "2026-09-02",
+          accepted_units: 20,
+          active_lines: 2,
+        },
+      ],
+    };
+    const safe = applyReportPrivacy(input, interleaved);
+    expect(safe.rows).toEqual([
+      { day: "2026-09-01", accepted_units: 1, active_lines: 1 },
+      { day: "2026-09-02", accepted_units: 20, active_lines: 2 },
+      { day: "2026-09-03", accepted_units: 3, active_lines: 3 },
+    ]);
+  });
+
   it("identified keeps names and tenant ids", () => {
     const { text, metadata } = artifact(identified, source);
     expect(text).toContain("Alpha Factory");
