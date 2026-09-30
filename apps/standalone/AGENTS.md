@@ -283,8 +283,10 @@ sync"), which must stay within the shell's 32.
 
 Operators sign in on stations with a personnel number and a PIN, or with a
 badge (plan 1f). The office hashes both with `@markiro/domain`, so the host
-never sees a PIN or a badge code: it stores PHC strings and checks their
-format with `secrets::parse_phc` — canonical base64, a 16-byte salt, a
+never sees a PIN or a badge code (the one field a code could reach is a
+badge's label, and the add dialog guards it as described under «Бейджи» in
+"Office pages"). It stores PHC strings and checks their format with
+`secrets::parse_phc` — canonical base64, a 16-byte salt, a
 32-byte digest and 10 000–1 000 000 iterations, since a station verifies
 with the count the hash carries. A badge hash must also carry exactly the
 domain's 100 000 iterations and the site's badge salt
@@ -747,20 +749,30 @@ requests and offer a retry.
   | The request fails, answered by an alert                             | emptied    | code          | alert above the fields |
   | The form refuses the label (too long, control character)            | kept       | label         | under the label        |
   | `validation_failed` on `label`                                      | kept       | label         | under the label        |
-  | The label contains the code (`labelHasCode`)                        | kept       | label         | under the label        |
+  | The label has the code or its Russian-layout form (`labelHasCode`)  | kept       | label         | under the label        |
 
   A message under a field stays until the next input into it, an alert until
   the next send. Only a refusal of the label alone keeps the code, and the
   label is corrected beside it. The last row is the guard against the one way
-  a code could leave the webview in clear text: a label typed first, with the
-  focus left in it, takes the scan, and the second scan into the code field
-  would send it as the label, which the host stores, writes to the audit row,
-  lists and sends to every station, and revoking the badge takes back none of
-  it. Once the form accepts both fields, and before anything is hashed or
-  sent, a label that contains the code is refused. The test is a plain
-  substring test of the two trimmed values, so it also refuses a label that
+  a code could leave the webview in clear text by accident: a label typed
+  first, with the focus left in it, takes the scan, and the second scan into
+  the code field would send it as the label, which the host stores, writes to
+  the audit row, lists and sends to every station, and revoking the badge
+  takes back none of it. Once the form accepts both fields, and before
+  anything is hashed or sent, a label that has the code is refused, as typed
+  and as the Russian layout types it. A wedge scanner presses keys, and a
+  label typed in Russian needs that layout, so it takes the scan in Cyrillic
+  («MRK-000742» arrives as «ЬКЛ-000742», «123,45678» as «123б45678»); the code
+  field refuses that form with the layout hint, and once the layout is
+  switched the next scan arrives in Latin. So the label is also read back to
+  the keys (`fromRussianLayout` in `src/host/pairing-code.ts`, the mapping the
+  pairing scans use) before the second comparison. Both tests are plain
+  substring tests of the two trimmed values, so they also refuse a label that
   repeats the number printed on the card on purpose, and a very short code
-  that is a substring of the label by coincidence: both are accepted costs.
+  that is a substring of the label by coincidence: both are accepted costs,
+  which the second test widens only by the mapped text. The guard catches the
+  accidental forms only: a scan whose case or layout was changed between the
+  two scans (another layout, Caps Lock toggled in between) is not recognised.
   «Отозвать» asks first and says that the badge stops opening the stations
   once they sync and never comes back; after the host's 204 the badge shows
   as revoked at once, and the list is read again.

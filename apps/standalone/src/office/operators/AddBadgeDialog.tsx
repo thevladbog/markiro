@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, Input } from "@markiro/ui";
 
 import { HostError } from "../../host/client.js";
+import { fromRussianLayout } from "../../host/pairing-code.js";
 import type { BadgeCreate, BadgeInfo, OfficeOperator } from "../../host/protocol.js";
 import { badgeCreate } from "../../host/requests.js";
 import { hashBadge } from "../../lib/credentials.js";
@@ -99,8 +100,16 @@ export function AddBadgeDialog({ operator, operators, onClose, onAdded }: AddBad
     // keeps a label, writes it to the audit log, lists it and sends it to every
     // station, and revoking the badge takes none of that back. So it goes no
     // further: nothing is hashed or sent, and the code stays, since only the
-    // label is wrong. Both values are the form's trimmed output.
-    if (values.label.includes(values.code)) {
+    // label is wrong. Both values are the form's trimmed output. A wedge
+    // scanner types by key position, and a label typed in Russian needs the
+    // Russian layout, so the scan lands in the label as that layout renders it
+    // ("MRK-000742" as "ЬКЛ-000742"). The code field refuses a Cyrillic scan and
+    // the layout is switched as the hint says, so the code that reaches it is
+    // Latin: the label is tested as typed and as the Russian layout types it.
+    if (
+      values.label.includes(values.code) ||
+      fromRussianLayout(values.label).includes(values.code)
+    ) {
       setError("label", { type: "validate", message: LABEL_HAS_CODE }, { shouldFocus: true });
       return;
     }

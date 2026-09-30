@@ -358,6 +358,9 @@ describe("operator badges", () => {
     type("Подпись", "п".repeat(101));
     wedge("MRK-000742");
     expect(await screen.findByText("Подпись — до 100 символов")).toBeTruthy();
+    // The form focuses the label it refused (in a timer), not the code field
+    // that keeps its code: a reflex re-scan would be glued to it.
+    await waitFor(() => expect(document.activeElement).toBe(labelField()));
     // The code is not what was refused: it stays as it was scanned.
     expect(codeField().value).toBe("MRK-000742");
     expect(session.api.createBadge).not.toHaveBeenCalled();
@@ -440,6 +443,57 @@ describe("operator badges", () => {
     expect(await screen.findByText("Бейдж «Пропуск №8» добавлен.")).toBeTruthy();
     expect(derive).toHaveBeenCalledTimes(1);
   });
+
+  it.each([
+    ["a letter code", "MRK-000742", "ЬКЛ-000742"],
+    ["a code with a separator", "123,45678", "123б45678"],
+  ])(
+    "refuses a label that holds %s as the Russian layout types it, before hashing or sending, and keeps the code",
+    async (_case, code, typedInRussian) => {
+      const session = adminSession();
+      session.api.createBadge.mockResolvedValue(PASS_8);
+      const derive = vi.spyOn(crypto.subtle, "deriveBits");
+      await openAdd(session);
+      // A label typed in Russian needs the Russian layout, and a wedge presses
+      // keys: the first scan lands in the label, in Cyrillic, and its Enter
+      // submits an empty code.
+      type("Подпись", "Пропуск №7");
+      wedgeInto(labelField(), typedInRussian);
+      expect(
+        await screen.findByText(
+          "Код бейджа — от 1 до 256 символов: латинские буквы, цифры и знаки",
+        ),
+      ).toBeTruthy();
+      await waitFor(() => expect(document.activeElement).toBe(codeField()));
+      expect(labelField().value).toBe(`Пропуск №7${typedInRussian}`);
+      expect(session.api.createBadge).not.toHaveBeenCalled();
+      // The next scan goes to the code field, the layout still Russian: refused
+      // with the hint, and the field is emptied.
+      wedge(typedInRussian);
+      expect(
+        await screen.findByText(
+          "Код набран русскими буквами — переключите раскладку на английскую",
+        ),
+      ).toBeTruthy();
+      await waitFor(() => {
+        expect(codeField().value).toBe("");
+        expect(document.activeElement).toBe(codeField());
+      });
+      // The layout is switched as the hint says and the third scan is the Latin
+      // code, while the label holds the first scan in Cyrillic: refused all the
+      // same, and nothing is hashed or sent.
+      wedge(code);
+      const message = await screen.findByText(
+        "В подписи есть код бейджа — уберите его: подпись видят все станции",
+      );
+      expect(labelField().getAttribute("aria-describedby")).toBe(message.id);
+      await waitFor(() => expect(document.activeElement).toBe(labelField()));
+      // Only the label is wrong: the code stays as it was scanned.
+      expect(codeField().value).toBe(code);
+      expect(derive).not.toHaveBeenCalled();
+      expect(session.api.createBadge).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps the code field read-only from the submit to the answer, hashing included, and editable after", async () => {
     const session = adminSession();
