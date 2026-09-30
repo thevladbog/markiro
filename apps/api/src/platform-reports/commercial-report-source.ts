@@ -52,7 +52,7 @@ export const COMMERCIAL_DEFINITIONS: Record<string, string> = {
     "Sum of the amounts of payments_received, in RUB kopecks (integer). Dated like payments_received.",
   acts_issued: "billing_acts with issued_at on the day (server clock).",
   paid_subscriptions_started:
-    "Subscriptions whose source is paid_offer_line or paid_invoice_line, dated by starts_at, or by created_at when starts_at is null. Demo, manual and other sources are not counted. starts_at is set when the paid line is applied: an immediate start uses the server time of that application (not the payment's paid_at), and a start scheduled after the current term uses that term's end. A scheduled start is therefore counted on its scheduled day even if at snapshotAt it has not begun or was later cancelled.",
+    "Subscriptions whose source is paid_offer_line or paid_invoice_line, dated by starts_at, or by created_at when starts_at is null. Demo, manual and other sources are not counted. starts_at is set when the paid line is applied: an immediate start uses the server time at which the paid line is applied: for an offer line that is the legacy payment's own paid_at (both are recorded together); for an invoice line it is the application time, which can be later than the payment's paid_at; and a start scheduled after the current term uses that term's end. A scheduled start is therefore counted on its scheduled day even if at snapshotAt it has not begun or was later cancelled.",
   agreements_signed:
     "platform_agreements with signed_at on the day (server clock) whose tenant_id is a selected tenant. Agreements not linked to a tenant are never reported.",
 };
