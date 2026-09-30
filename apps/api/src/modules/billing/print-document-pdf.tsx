@@ -31,7 +31,9 @@ import {
   paymentQrPayload,
   profileIdentity,
   resolvePrintVariant,
+  signaturePlan,
   type PrintRenderOptions,
+  type SignaturePlan,
 } from "./print-document-layout";
 import type { BillingProfileSnapshot, PrintDocumentModel, PrintLine } from "./print-document-model";
 
@@ -173,22 +175,24 @@ const styles = StyleSheet.create({
   signing: { flexDirection: "row", alignItems: "flex-end", gap: 36, marginTop: 14 },
   signature: { flex: 1, position: "relative", minHeight: 88 },
   signatureLine: { marginTop: 23 },
-  signedSignatureLine: { marginTop: 53 },
   signatureHint: { fontSize: 6.5, color: colors.muted, marginTop: 3 },
+  signedLine: { flexDirection: "row", alignItems: "flex-end", marginTop: 45 },
+  signatureField: { position: "relative" },
   authorizedSignature: {
     position: "absolute",
-    left: 24,
-    bottom: 13,
-    width: 122,
-    height: 65,
+    left: 0,
+    bottom: -2,
+    width: 82,
+    height: 40,
     objectFit: "contain",
   },
-  legalSeal: {
+  legalSeal: { width: 88, height: 88, objectFit: "contain" },
+  legalSealColumn: {
     position: "absolute",
-    left: 112,
+    right: 0,
     bottom: -3,
-    width: 88,
-    height: 88,
+    width: 76,
+    height: 76,
     objectFit: "contain",
   },
   stamp: {
@@ -385,25 +389,31 @@ function LinesTable({ lines }: { lines: PrintLine[] }) {
   );
 }
 
-function Signature({ label, signed }: { label: string; signed: boolean }) {
+function Signature({ label, plan }: { label: string; plan: SignaturePlan | null }) {
   return (
     <View style={styles.signature}>
       <Text style={styles.sectionLabel}>{label}</Text>
-      {signed ? (
-        <>
-          <Image style={styles.authorizedSignature} src={authorizedSignature} cache={false} />
-          <Image style={styles.legalSeal} src={legalSeal} cache={false} />
-        </>
-      ) : null}
-      <Text style={signed ? styles.signedSignatureLine : styles.signatureLine}>
-        ________________ / ____________________
-      </Text>
+      {plan ? (
+        <View style={styles.signedLine}>
+          <View style={styles.signatureField}>
+            <Image style={styles.authorizedSignature} src={authorizedSignature} cache={false} />
+            <Text>________________</Text>
+          </View>
+          <Text> / </Text>
+          <Text>{plan.signerName ?? "____________________"}</Text>
+        </View>
+      ) : (
+        <Text style={styles.signatureLine}>________________ / ____________________</Text>
+      )}
       <Text style={styles.signatureHint}>подпись / расшифровка</Text>
+      {plan?.seal === "column" ? (
+        <Image style={styles.legalSealColumn} src={legalSeal} cache={false} />
+      ) : null}
     </View>
   );
 }
 
-function Closing({ model, signed }: { model: PrintDocumentModel; signed: boolean }) {
+function Closing({ model, plan }: { model: PrintDocumentModel; plan: SignaturePlan }) {
   const vatBasis = documentVatBasis(model);
   return (
     <>
@@ -446,10 +456,15 @@ function Closing({ model, signed }: { model: PrintDocumentModel; signed: boolean
         </View>
       )}
       <View style={styles.signing} wrap={false}>
-        <Signature label={model.kind === "act" ? "ИСПОЛНИТЕЛЬ" : "ПОСТАВЩИК"} signed={signed} />
+        <Signature
+          label={model.kind === "act" ? "ИСПОЛНИТЕЛЬ" : "ПОСТАВЩИК"}
+          plan={plan.signed ? plan : null}
+        />
         {model.kind === "act" ? (
-          <Signature label="ЗАКАЗЧИК" signed={false} />
-        ) : signed ? null : (
+          <Signature label="ЗАКАЗЧИК" plan={null} />
+        ) : plan.seal === "slot" ? (
+          <Image style={styles.legalSeal} src={legalSeal} cache={false} />
+        ) : (
           <View style={styles.stamp}>
             <Text style={styles.stampText}>МЕСТО ДЛЯ ПЕЧАТИ</Text>
           </View>
@@ -553,7 +568,7 @@ export async function renderPrintPdf(
           </View>
           <LinesTable lines={model.lines} />
           <ServiceUsageTable entries={model.serviceUsage ?? []} />
-          <Closing model={model} signed={printVariant === "signed"} />
+          <Closing model={model} plan={signaturePlan(model, printVariant)} />
         </View>
         <Footer model={model} barcode={barcode} />
       </Page>
