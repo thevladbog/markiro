@@ -70,11 +70,12 @@ describe("signed print form signature block", () => {
   });
 
   it("escapes the contact name", () => {
-    const html = renderPrintHtml(model("offer", 'Иванов <b>Иван</b> "Иванович"'), {
+    // A single word is printed as entered (no initials), so the markup characters reach escape().
+    const html = renderPrintHtml(model("offer", 'Иванов<b>x</b>"'), {
       printVariant: "signed",
     });
-    expect(html).not.toContain("<b>Иван</b>");
-    expect(html).toContain('class="signer-name"');
+    expect(html).toContain('<span class="signer-name">Иванов&lt;b&gt;x&lt;/b&gt;&quot;</span>');
+    expect(html).not.toContain("<b>x</b>");
   });
 });
 
