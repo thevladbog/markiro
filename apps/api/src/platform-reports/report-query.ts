@@ -59,3 +59,29 @@ export async function validateReportFilters(
     if (result.rows.length !== 1) throw new PlatformReportSourceError("REPORT_INVALID_PARAMETERS");
   }
 }
+
+/**
+ * Local calendar date of a timestamptz column in the report timezone.
+ * The timezone is a bind parameter, so never repeat this expression in a GROUP BY: Postgres treats
+ * two occurrences as different expressions. Compute it in a CTE column and group by that column.
+ */
+export function localDay(column: SQL, input: PlatformReportInput): SQL {
+  return sql`((${column} AT TIME ZONE ${input.timezone})::date)`;
+}
+
+/**
+ * Select list that pivots `metrics(tenant_id, local_day, metric, n)` rows, aliased `m`, into one
+ * column per metric. Counts become int, metrics named in `floatMetrics` become float8.
+ */
+export function pivotMetrics(
+  metrics: readonly string[],
+  floatMetrics: ReadonlySet<string> = new Set(),
+): SQL {
+  return sql.join(
+    metrics.map(
+      (metric) =>
+        sql`coalesce(sum(m.n) FILTER (WHERE m.metric = ${metric}), 0)::${sql.raw(floatMetrics.has(metric) ? "float8" : "int")} AS ${sql.identifier(metric)}`,
+    ),
+    sql`, `,
+  );
+}

@@ -111,7 +111,7 @@ export const EVIDENCE_TENANT_FIELDS = ["tenant_id", "tenant_name"] as const;
 
 export const EVIDENCE_COMMON_DEFINITIONS: Record<string, string> = {
   grain:
-    "One row per tenant and local calendar day in the selected IANA timezone. A day appears only if at least one fact of this report was recorded for that tenant on that day; a missing row means no recorded fact, not a measured zero. Every numeric column is an additive count or sum, so rows can be summed across days.",
+    "One row per tenant and local calendar day in the selected IANA timezone. In aggregate mode the tenant dimension is removed and each row is one local day summed across the selected tenants. A day appears only if at least one fact of this report was recorded for that tenant on that day; a missing row means no recorded fact, not a measured zero. Every numeric column is an additive count or sum, so rows can be summed across days.",
   day: "Local calendar date (YYYY-MM-DD) of the fact's own timestamp in the selected timezone. Each metric names its clock in its own definition.",
   tenant_id:
     "Tenant identifier. Replaced by an export-local label in pseudonymous mode and removed in aggregate mode.",

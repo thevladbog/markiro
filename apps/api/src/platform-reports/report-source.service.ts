@@ -5,6 +5,7 @@ import { sql } from "drizzle-orm";
 import { DB } from "../auth/auth.module";
 import {
   applyReportPrivacy,
+  EVIDENCE_COMMON_DEFINITIONS,
   PlatformReportSourceError,
   REPORT_DEFINITIONS,
   REPORT_MAX_ROWS,
@@ -15,6 +16,7 @@ import { validateReportFilters } from "./report-query";
 import { loadShiftRows, shiftColumns } from "./shift-report-source";
 import { INVENTORY_COLUMNS, loadInventoryRows } from "./inventory-report-source";
 import { COMMERCEML_COLUMNS, loadCommerceMlRows } from "./commerceml-report-source";
+import { USAGE_COLUMNS, USAGE_DEFINITIONS, loadUsageRows } from "./usage-report-source";
 
 // One source snapshot across all application processes; contention is not a failed generation attempt.
 export const REPORT_SOURCE_LOCK_KEY = "7314982016401";
@@ -26,6 +28,16 @@ export class PlatformReportSourceBusyError extends Error {
 }
 export { PlatformReportSourceError } from "./report-definitions";
 export type { PlatformReportSource } from "./report-definitions";
+
+/** The three evidence types carry only their own definitions; the older types keep the shared map. */
+function definitionsFor(reportType: PlatformReportInput["reportType"]): Record<string, string> {
+  switch (reportType) {
+    case "usage":
+      return { ...EVIDENCE_COMMON_DEFINITIONS, ...USAGE_DEFINITIONS };
+    default:
+      return { ...REPORT_DEFINITIONS };
+  }
+}
 
 @Injectable()
 export class PlatformReportSourceService {
@@ -55,7 +67,10 @@ export class PlatformReportSourceService {
           await validateReportFilters(tx, input);
           let columns: string[];
           let rows: ReportRow[];
-          if (input.reportType === "commerceml") {
+          if (input.reportType === "usage") {
+            columns = [...USAGE_COLUMNS];
+            rows = await loadUsageRows(tx, input);
+          } else if (input.reportType === "commerceml") {
             columns = COMMERCEML_COLUMNS;
             rows = await loadCommerceMlRows(tx, input);
           } else if (input.reportType === "inventories") {
@@ -87,7 +102,7 @@ export class PlatformReportSourceService {
             snapshotAt,
             columns,
             rows,
-            definitions: { ...REPORT_DEFINITIONS },
+            definitions: definitionsFor(input.reportType),
           });
         },
         { isolationLevel: "repeatable read", accessMode: "read only" },
