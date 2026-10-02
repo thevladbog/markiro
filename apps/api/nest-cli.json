@@ -3,7 +3,7 @@
   "sourceRoot": "src",
   "compilerOptions": {
     "tsConfigPath": "tsconfig.build.json",
-    "assets": ["modules/billing/assets/**/*"],
+    "assets": ["modules/billing/assets/**/*", "modules/traceability/plans/assets/**/*"],
     "watchAssets": true
   }
 }
