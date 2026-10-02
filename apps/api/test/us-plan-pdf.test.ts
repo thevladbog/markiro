@@ -72,13 +72,13 @@ const sections: UsPlanSections = {
   },
 };
 
-function model(synthetic = false, configuredFacts = facts) {
+function model(synthetic = false, configuredFacts = facts, planSections = sections) {
   const snapshot = buildUsPlanSnapshot(
     configuredFacts,
-    sections,
+    planSections,
     synthetic ? "trusted_synthetic" : "operational",
   );
-  const factSources = buildUsPlanDraftFactSources(configuredFacts, sections);
+  const factSources = buildUsPlanDraftFactSources(configuredFacts, planSections);
   const evidence = buildUsPlanApprovedEvidence(snapshot, factSources, {
     kind: synthetic ? "synthetic" : "operational",
     actorId: "actor-1",
@@ -138,6 +138,9 @@ describe("US plan PDF", () => {
       /Frozen TLC-source locations \(configured source\) • Example Foods Receiving/u,
     );
     expect(text).toContain("100 Sample Street");
+    expect(text).toContain("Location phone: +1 312 555 0123");
+    expect(text).toContain("Party: party-1");
+    expect(text).toContain("Chicago, IL, 60601, US");
     expect(text).toContain("product-1");
     expect(text).toContain("Alex Example");
     expect(text).toContain("The processor reports no farming");
@@ -145,18 +148,27 @@ describe("US plan PDF", () => {
     expect(text).toContain("configured");
     expect(text).toContain("operator confirmed by actor-1 at 2026-10-02T10:00:00.000Z");
     expect(text).toContain("application policy v1");
-    expect(text).toContain("Previous versions are retained");
+    expect(text).toContain(
+      "Retention policy requires previous versions for at least two years after update",
+    );
+    expect(text).not.toContain("Previous versions are retained");
     expect(text).toContain("does not independently verify");
     expect(text).not.toContain("Synthetic demo");
     expect(text).not.toContain("DRAFT");
   });
 
   it("marks each page of a multi-page synthetic PDF", async () => {
-    const input = model(true);
-    input.evidence.snapshot.sections.recordMaintenance.narrative = Array.from(
-      { length: 35 },
-      (_, index) => `Synthetic procedure ${index + 1}: receiving staff preserve source records.`,
-    );
+    const input = model(true, facts, {
+      ...sections,
+      recordMaintenance: {
+        ...sections.recordMaintenance,
+        narrative: Array.from(
+          { length: 35 },
+          (_, index) =>
+            "Synthetic procedure " + (index + 1) + ": receiving staff preserve source records.",
+        ),
+      },
+    });
     const result = await renderUsPlanPdf(input);
     const pages = extractedPages(result.bytes);
     expect(pages.length).toBeGreaterThan(1);
@@ -199,6 +211,14 @@ describe("US plan PDF", () => {
     await expect(renderUsPlanPdf(input)).rejects.toThrow("us_plan_pdf_input_invalid");
   });
 
+  it("refuses a missing provenance path for a listed narrative item", async () => {
+    const input = model();
+    input.evidence.factSources.entries = input.evidence.factSources.entries.filter(
+      (entry) => entry.path !== "/sections/recordMaintenance/narrative/0",
+    );
+    await expect(renderUsPlanPdf(input)).rejects.toThrow("us_plan_pdf_input_invalid");
+  });
+
   it("refuses synthetic provenance on an unmarked operational PDF", async () => {
     const input = model();
     const source = input.evidence.factSources.entries.find(
@@ -210,6 +230,102 @@ describe("US plan PDF", () => {
       trustedSeed: { seedId: "seed-1", verifiedBy: "server", verifiedAt: approvedAt },
     };
     await expect(renderUsPlanPdf(input)).rejects.toThrow("us_plan_pdf_input_invalid");
+  });
+
+  it("refuses a source actor or time that contradicts the approval", async () => {
+    for (const sourceChange of [
+      { actorId: "different-actor", confirmedAt: approvedAt },
+      { actorId: "actor-1", confirmedAt: "2026-10-02T11:00:00.000Z" },
+    ]) {
+      const input = model();
+      const entry = input.evidence.factSources.entries.find(
+        ({ path }) => path === "/sections/pointOfContact/name",
+      );
+      if (!entry) throw new Error("fixture_missing_source");
+      entry.source = { origin: "operator_confirmed", ...sourceChange };
+      await expect(renderUsPlanPdf(input)).rejects.toThrow("us_plan_pdf_input_invalid");
+    }
+  });
+
+  it("refuses an extra path or inconsistent synthetic trusted seed", async () => {
+    const extra = model();
+    extra.evidence.factSources.entries.push({
+      path: "/sections/invented",
+      source: { origin: "configured" },
+    });
+    await expect(renderUsPlanPdf(extra)).rejects.toThrow("us_plan_pdf_input_invalid");
+
+    const synthetic = model(true);
+    const entry = synthetic.evidence.factSources.entries.find(
+      ({ path }) => path === "/sections/pointOfContact/name",
+    );
+    if (!entry) throw new Error("fixture_missing_source");
+    entry.source = {
+      origin: "synthetic_fixture",
+      trustedSeed: { seedId: "other-seed", verifiedBy: "server", verifiedAt: approvedAt },
+    };
+    await expect(renderUsPlanPdf(synthetic)).rejects.toThrow("us_plan_pdf_input_invalid");
+
+    const confirmation = model(true);
+    confirmation.evidence.confirmations.contact = {
+      origin: "synthetic_fixture",
+      trustedSeed: { seedId: "other-seed", verifiedBy: "server", verifiedAt: approvedAt },
+    };
+    await expect(renderUsPlanPdf(confirmation)).rejects.toThrow("us_plan_pdf_input_invalid");
+
+    const operationalConfirmation = model();
+    operationalConfirmation.evidence.confirmations.contact = {
+      origin: "operator_confirmed",
+      actorId: "actor-1",
+      confirmedAt: "2026-10-02T11:00:00.000Z",
+    };
+    await expect(renderUsPlanPdf(operationalConfirmation)).rejects.toThrow(
+      "us_plan_pdf_input_invalid",
+    );
+  });
+
+  it("refuses a timezone-less approval instant", async () => {
+    const input = model();
+    input.approvedAt = "2026-10-02T10:00:00";
+    await expect(renderUsPlanPdf(input)).rejects.toThrow("us_plan_pdf_input_invalid");
+  });
+
+  it("omits a null TLC location phone without printing a placeholder", async () => {
+    const withoutPhone: UsPlanConfiguredFacts = {
+      ...facts,
+      tlcSourceLocations: facts.tlcSourceLocations.map((location) => ({
+        ...location,
+        description: { ...location.description, phoneNumber: null },
+      })),
+    };
+    const text = extractedPages((await renderUsPlanPdf(model(false, withoutPhone))).bytes).join(
+      " ",
+    );
+    expect(text).toContain("100 Sample Street");
+    expect(text).not.toContain("Location phone:");
+    expect(text).not.toContain("null");
+  });
+
+  it("prints the frozen coordinate address rather than an absent street address", async () => {
+    const coordinates: UsPlanConfiguredFacts = {
+      ...facts,
+      tlcSourceLocations: facts.tlcSourceLocations.map((location) => ({
+        ...location,
+        description: {
+          ...location.description,
+          addressKind: "coordinates" as const,
+          streetAddress: null,
+          latitude: "41.881832",
+          longitude: "-87.623177",
+        },
+      })),
+    };
+    const text = extractedPages((await renderUsPlanPdf(model(false, coordinates))).bytes)
+      .join(" ")
+      .replace(/\s+/gu, " ");
+    expect(text).toContain("Coordinates: 41.881832, -87.623177");
+    expect(text).not.toContain("100 Sample Street");
+    expect(text).not.toContain("null");
   });
 
   it("fails before layout for oversized text and arrays", async () => {

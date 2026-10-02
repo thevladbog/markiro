@@ -5,6 +5,12 @@ import type {
   UsPlanFactSourceManifest,
   UsPlanSnapshot,
 } from "@markiro/domain";
+import {
+  buildUsPlanApprovedEvidence,
+  buildUsPlanDraftFactSources,
+  buildUsPlanSnapshot,
+  canonicalExportDigest,
+} from "@markiro/domain";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
@@ -112,46 +118,57 @@ function assertBounded(model: RenderModel): void {
     (contact.email !== null && contact.email.length > 254)
   )
     throw new TypeError("us_plan_pdf_input_limit");
-  const sources = new Map(model.factSources.entries.map((entry) => [entry.path, entry.source]));
-  if (sources.size !== model.factSources.entries.length)
-    throw new TypeError("us_plan_pdf_input_invalid");
-  const sectionPaths = [
-    "/sections/recordMaintenance/systemOfRecord",
-    "/sections/ftlIdentification/procedure",
-    "/sections/tlcAssignment/procedure",
-    "/sections/pointOfContact/name",
-    "/sections/farmActivity/status",
-    "/sections/reviewAndUpdate/procedure",
-  ];
-  const configuredPaths = ["/configured/tlcSourceLocations", "/configured/productProfiles"];
-  const statementOrigin = model.approval
-    ? model.snapshot.provenance === "trusted_synthetic"
-      ? "synthetic_fixture"
-      : "operator_confirmed"
-    : "operator_pending";
-  const confirmationNames = ["procedures", "backupAndRecovery", "contact", "nonFarmScope"] as const;
-  if (
-    sectionPaths.some((path) => sources.get(path)?.origin !== statementOrigin) ||
-    configuredPaths.some((path) => sources.get(path)?.origin !== "configured") ||
-    sources.get("/ftlReviewWorkflow")?.origin !== "application_policy" ||
-    (model.approval &&
-      confirmationNames.some(
-        (name) => model.approval?.confirmations[name]?.origin !== statementOrigin,
-      ))
-  )
-    throw new TypeError("us_plan_pdf_input_invalid");
   if (
     !Number.isSafeInteger(model.versionNumber) ||
     model.versionNumber < 1 ||
     model.snapshot.schemaVersion !== 1 ||
+    (model.snapshot.provenance !== "operational" &&
+      model.snapshot.provenance !== "trusted_synthetic") ||
     model.snapshot.configured.profileCode !== "US_FSMA204_PROCESSOR" ||
     model.snapshot.sections.farmActivity.status !== "no" ||
     model.factSources.schemaVersion !== 1 ||
-    (model.approval &&
-      (!model.approval.approvedBy.trim() ||
-        !Number.isFinite(Date.parse(model.approval.approvedAt))))
+    (model.approval && !model.approval.approvedBy.trim())
   )
     throw new TypeError("us_plan_pdf_input_invalid");
+  try {
+    const snapshot = buildUsPlanSnapshot(
+      model.snapshot.configured,
+      model.snapshot.sections,
+      model.snapshot.provenance,
+    );
+    if (canonicalExportDigest(snapshot) !== canonicalExportDigest(model.snapshot))
+      throw new TypeError("snapshot_mismatch");
+    const draftSources = buildUsPlanDraftFactSources(
+      model.snapshot.configured,
+      model.snapshot.sections,
+    );
+    const expectedSources = model.approval
+      ? buildUsPlanApprovedEvidence(model.snapshot, draftSources, {
+          kind: model.snapshot.provenance === "trusted_synthetic" ? "synthetic" : "operational",
+          actorId: model.approval.approvedBy,
+          confirmedAt: model.approval.approvedAt,
+          confirmations: {
+            procedures: true,
+            backupAndRecovery: true,
+            contact: true,
+            nonFarmScope: true,
+          },
+          ...(model.approval.confirmations.procedures.origin === "synthetic_fixture"
+            ? { trustedSeed: model.approval.confirmations.procedures.trustedSeed }
+            : {}),
+        })
+      : null;
+    if (
+      canonicalExportDigest(model.factSources) !==
+        canonicalExportDigest(expectedSources?.factSources ?? draftSources) ||
+      (expectedSources &&
+        canonicalExportDigest(model.approval?.confirmations) !==
+          canonicalExportDigest(expectedSources.confirmations))
+    )
+      throw new TypeError("source_mismatch");
+  } catch {
+    throw new TypeError("us_plan_pdf_input_invalid");
+  }
 }
 
 function civilDate(instant: string, timeZone: string): string {
@@ -282,26 +299,26 @@ function Section({
 function PlanDocument({ model }: { model: RenderModel }): React.JSX.Element {
   const { configured, sections, ftlReviewWorkflow } = model.snapshot;
   const synthetic = model.snapshot.provenance === "trusted_synthetic";
-  const locations = configured.tlcSourceLocations.map(
-    ({ id, description }) =>
-      description.businessName +
-      " [" +
-      id +
-      "]: " +
-      (description.addressKind === "street"
-        ? description.streetAddress
-        : description.latitude + ", " + description.longitude) +
-      ", " +
-      description.city +
-      ", " +
-      description.stateOrRegion +
-      " " +
-      description.zipOrPostalCode +
-      ", " +
-      description.countryCode +
-      ". TLC source location; party " +
-      description.partyId +
-      ".",
+  const locations = configured.tlcSourceLocations.map(({ id, description }) =>
+    [
+      description.businessName + " [" + id + "]",
+      "Party: " + description.partyId,
+      description.phoneNumber ? "Location phone: " + description.phoneNumber : null,
+      description.addressKind === "street"
+        ? "Street: " + description.streetAddress
+        : "Coordinates: " + description.latitude + ", " + description.longitude,
+      [
+        description.city,
+        description.stateOrRegion,
+        description.zipOrPostalCode,
+        description.countryCode,
+      ]
+        .filter((part) => part !== null)
+        .join(", "),
+      "TLC source location",
+    ]
+      .filter((part) => part !== null)
+      .join("; "),
   );
   const products = configured.productProfiles.map(
     ({ productId, revision, coverageStatus }) =>
@@ -449,9 +466,9 @@ function PlanDocument({ model }: { model: RenderModel }): React.JSX.Element {
         >
           <Text style={styles.body}>{sections.reviewAndUpdate.procedure}</Text>
           <Text style={styles.body}>
-            Previous versions are retained for at least two years after update. The configured
-            retention period is {configured.retentionYears} years; a longer hold may apply. This
-            note describes policy, not proof of storage or backup enforcement.
+            Retention policy requires previous versions for at least two years after update. The
+            configured retention period is {configured.retentionYears} years; a longer hold may
+            apply. This note describes policy, not proof of storage or backup enforcement.
           </Text>
         </Section>
         <Section
