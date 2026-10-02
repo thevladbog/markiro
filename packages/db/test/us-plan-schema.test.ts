@@ -31,6 +31,10 @@ it("exports all draft, approval and retention columns with civil-date retention"
     "superseded_by_id",
     "superseded_at",
     "retain_through",
+    "retention_floor",
+    "hold_until",
+    "indefinite_hold",
+    "retention_indefinite_reason",
   ]);
   expect(schema.traceabilityPlanVersions.id.primary).toBe(true);
   expect(schema.traceabilityPlanVersions.id.getSQLType()).toBe("uuid");

@@ -1,6 +1,7 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  boolean,
   date,
   foreignKey,
   integer,
@@ -45,6 +46,10 @@ export const traceabilityPlanVersions = pgTable(
     supersededById: uuid("superseded_by_id"),
     supersededAt: timestamp("superseded_at", { withTimezone: true }),
     retainThrough: date("retain_through", { mode: "string" }),
+    retentionFloor: date("retention_floor", { mode: "string" }),
+    holdUntil: date("hold_until", { mode: "string" }),
+    indefiniteHold: boolean("indefinite_hold").notNull().default(false),
+    retentionIndefiniteReason: text("retention_indefinite_reason"),
   },
   (t) => [
     unique("traceability_plan_tenant_id_uq").on(t.tenantId, t.id),
@@ -112,8 +117,38 @@ export const traceabilityPlanVersions = pgTable(
       "traceability_plan_supersession_shape",
       sql`
       (${t.status} IN ('draft','effective') AND ${t.supersededById} IS NULL AND ${t.supersededAt} IS NULL AND ${t.retainThrough} IS NULL)
-      OR (${t.status} = 'superseded' AND ${t.supersededById} IS NOT NULL AND ${t.supersededAt} IS NOT NULL AND ${t.retainThrough} IS NOT NULL)
+      OR (${t.status} = 'superseded' AND ${t.supersededById} IS NOT NULL AND ${t.supersededAt} IS NOT NULL AND (${t.retainThrough} IS NOT NULL OR ${t.retentionIndefiniteReason} IS NOT NULL))
     `,
+    ),
+    check(
+      "traceability_plan_retention_reason_valid",
+      sql`${t.retentionIndefiniteReason} IS NULL OR (${t.status} = 'superseded' AND ${t.retainThrough} IS NULL AND ${t.retentionIndefiniteReason} IN ('hold', 'date_range_exceeded'))`,
+    ),
+  ],
+);
+
+/** Permanent never-publish tombstones. No version FK: discarded drafts cannot erase fences. */
+export const traceabilityPlanCleanupFences = pgTable(
+  "traceability_plan_cleanup_fences",
+  {
+    objectKey: text("object_key").primaryKey(),
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => organization.id),
+    versionId: uuid("version_id").notNull(),
+    versionNumber: integer("version_number").notNull(),
+    actorUserId: text("actor_user_id").notNull(),
+    requestId: text("request_id").notNull(),
+    sha256: text("sha256").notNull(),
+    state: text("state").notNull().default("fenced"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    check("traceability_plan_cleanup_state_valid", sql`${t.state} IN ('fenced', 'deleted')`),
+    check("traceability_plan_cleanup_hash_valid", sql`${t.sha256} ~ '^[a-f0-9]{64}$'`),
+    check(
+      "traceability_plan_cleanup_scope_valid",
+      sql`${t.objectKey} LIKE 'us/plans/' || ${t.tenantId} || '/' || ${t.versionId}::text || '/%.pdf'`,
     ),
   ],
 );

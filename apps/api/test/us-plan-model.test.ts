@@ -28,6 +28,10 @@ function row(): typeof schema.traceabilityPlanVersions.$inferSelect {
     supersededById: null,
     supersededAt: null,
     retainThrough: null,
+    retentionFloor: null,
+    holdUntil: null,
+    indefiniteHold: false,
+    retentionIndefiniteReason: null,
     sections: {
       recordMaintenance: {
         systemOfRecord: "",

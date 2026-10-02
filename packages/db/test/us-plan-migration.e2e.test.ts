@@ -40,7 +40,11 @@ type PlanFields = Partial<
     | keyof typeof binding
     | "superseded_by_id"
     | "superseded_at"
-    | "retain_through",
+    | "retain_through"
+    | "retention_floor"
+    | "hold_until"
+    | "indefinite_hold"
+    | "retention_indefinite_reason",
     unknown
   >
 >;
@@ -150,12 +154,12 @@ describe.skipIf(!url)("US plan storage migration in owned disposable PostgreSQL"
     await fixture?.close();
   });
 
-  it("preserves exact pre-existing organization/profile/event/root bytes and applies journal 137", async () => {
+  it("preserves exact pre-existing organization/profile/event/root bytes and applies journal 138", async () => {
     expect(await existingRows()).toEqual(before);
     expect(
       (await fixture.pool.query("SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations"))
         .rows,
-    ).toEqual([{ count: 138 }]);
+    ).toEqual([{ count: 139 }]);
     expect(
       (await fixture.pool.query("SELECT count(*)::int AS count FROM traceability_plan_versions"))
         .rows,
@@ -233,6 +237,92 @@ describe.skipIf(!url)("US plan storage migration in owned disposable PostgreSQL"
       code: "23503",
       constraint: "traceability_plan_superseded_by_fk",
     });
+  });
+  it("keeps a cleanup fence across rollback and forbids deletion, identity edits or reopening", async () => {
+    const own = await tenant();
+    const version = randomUUID();
+    const key = `us/plans/${own}/${version}/${randomUUID()}.pdf`;
+    await fixture.pool.query(
+      "INSERT INTO traceability_plan_cleanup_fences(object_key,tenant_id,version_id,version_number,actor_user_id,request_id,sha256) VALUES($1,$2,$3,1,'actor','request',$4)",
+      [key, own, version, "a".repeat(64)],
+    );
+    const tx = await fixture.pool.connect();
+    try {
+      await tx.query("BEGIN");
+      await tx.query(
+        "UPDATE traceability_plan_cleanup_fences SET state='deleted' WHERE object_key=$1",
+        [key],
+      );
+      await tx.query("ROLLBACK");
+    } finally {
+      tx.release();
+    }
+    expect(
+      (
+        await fixture.pool.query(
+          "SELECT state FROM traceability_plan_cleanup_fences WHERE object_key=$1",
+          [key],
+        )
+      ).rows,
+    ).toEqual([{ state: "fenced" }]);
+    await expect(
+      fixture.pool.query("DELETE FROM traceability_plan_cleanup_fences WHERE object_key=$1", [key]),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      fixture.pool.query(
+        "UPDATE traceability_plan_cleanup_fences SET sha256=$2 WHERE object_key=$1",
+        [key, "b".repeat(64)],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+    await fixture.pool.query(
+      "UPDATE traceability_plan_cleanup_fences SET state='deleted' WHERE object_key=$1",
+      [key],
+    );
+    await expect(
+      fixture.pool.query(
+        "UPDATE traceability_plan_cleanup_fences SET state='fenced' WHERE object_key=$1",
+        [key],
+      ),
+    ).rejects.toMatchObject({ code: "23514" });
+  });
+  it("permits explicit indefinite retention only on supersession and keeps policy inputs immutable", async () => {
+    const own = await tenant();
+    const first = await effective(own, { indefinite_hold: true, retention_floor: "2040-01-01" });
+    const next = await insert(own, { version_number: 2 });
+    await expect(
+      update(first, {
+        status: "superseded",
+        superseded_by_id: next,
+        superseded_at: "2026-10-03T00:00:00Z",
+        retain_through: null,
+      }),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      update(first, {
+        status: "superseded",
+        superseded_by_id: next,
+        superseded_at: "2026-10-03T00:00:00Z",
+        retain_through: null,
+        retention_indefinite_reason: "hold",
+        indefinite_hold: false,
+      }),
+    ).rejects.toMatchObject({ code: "23514" });
+    await update(first, {
+      status: "superseded",
+      superseded_by_id: next,
+      superseded_at: "2026-10-03T00:00:00Z",
+      retain_through: null,
+      retention_indefinite_reason: "hold",
+    });
+    expect(await row(first)).toMatchObject({
+      retain_through: null,
+      indefinite_hold: true,
+      retention_indefinite_reason: "hold",
+      retention_floor: "2040-01-01",
+    });
+    await expect(
+      update(first, { retention_indefinite_reason: null, retain_through: "2028-01-01" }),
+    ).rejects.toMatchObject({ code: "23514" });
   });
   it.each(Object.keys(frozen) as (keyof typeof frozen)[])(
     "rejects an effective row missing %s",

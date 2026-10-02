@@ -43,9 +43,10 @@ export interface UsPlanArtifactAttempt {
 }
 
 /**
- * The caller MUST hold its tenant/publication DB lock, check the exact key against
- * committed plan references, permanently fence this losing attempt against
- * publication, and invoke remove only while that lock is held.
+ * The caller MUST hold its tenant/publication DB lock while checking the exact
+ * key against committed plan references and writing a permanent never-publish
+ * fence. Commit that fence BEFORE invoking remove outside the transaction.
+ * Every publisher must honor the durable fence under the same publication lock.
  * An unknown commit outcome is never sufficient evidence of non-reference.
  */
 export type UsPlanArtifactCleanupGuard = (
