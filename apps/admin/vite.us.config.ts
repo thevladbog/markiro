@@ -35,6 +35,67 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
     ["limit", "cursor"].map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`).join("") +
     `(\\?${traceHistoryField}(?:&${traceHistoryField})?)?$`;
   const traceRoutes = [new RegExp(tracePath), new RegExp(traceHistoryPath)];
+  const encodedText = "(?:%[a-fA-F0-9]{2}|[a-zA-Z0-9_.!~*'()+-])";
+  const searchKeys = [
+    "q",
+    "tlc",
+    "tlcList",
+    "tlcFrom",
+    "tlcTo",
+    "lotId",
+    "productId",
+    "productText",
+    "sourceLocationId",
+    "sourceReferenceValue",
+    "eventType",
+    "eventDateFrom",
+    "eventDateTo",
+    "locationId",
+    "documentType",
+    "documentNumber",
+    "sscc",
+    "status",
+    "limit",
+    "cursor",
+  ];
+  const searchField =
+    `(?:` +
+    [
+      `(?:q|productText)=${encodedText}{1,2400}`,
+      `(?:tlc|tlcFrom|tlcTo)=${encodedText}{1,2400}`,
+      `tlcList=${encodedText}{1,24576}`,
+      `(?:lotId|productId|sourceLocationId|locationId)=${uuid}`,
+      `sourceReferenceValue=${encodedText}{1,12288}`,
+      `eventType=(?:receiving|transformation|shipping)`,
+      `(?:eventDateFrom|eventDateTo)=[0-9]{4}-[0-9]{2}-[0-9]{2}`,
+      `documentType=${encodedText}{1,24000}`,
+      `documentNumber=${encodedText}{1,1536}`,
+      `sscc=[0-9]{18}`,
+      `status=(?:active|consumed|shipped|quarantined|recalled|archived)`,
+      `limit=(?:[1-9]|[1-9][0-9]|100)`,
+      `cursor=[A-Za-z0-9_-]{1,512}`,
+    ].join("|") +
+    ")";
+  const searchPath =
+    "^/api/us/traceability/search" +
+    searchKeys.map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`).join("") +
+    `(\\?${searchField}(?:&${searchField}){0,19})?$`;
+  const cardPath = `^/api/us/traceability/lots/${uuid}/card$`;
+  const cardEvidenceField = "(?:limit=(?:[1-9]|[1-4][0-9]|50)|cursor=[A-Za-z0-9_-]{1,512})";
+  const cardEvidencePath =
+    `^/api/us/traceability/lots/${uuid}/card/evidence` +
+    ["limit", "cursor"].map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`).join("") +
+    `(\\?${cardEvidenceField}(?:&${cardEvidenceField})?)?$`;
+  const searchCardPaths = [searchPath, cardPath, cardEvidencePath];
+  const searchCardRoutes = searchCardPaths.map((path) => new RegExp(path));
+  const readinessField = `(?:(?:eventDateFrom|eventDateTo)=[0-9]{4}-[0-9]{2}-[0-9]{2}|(?:productId|lotId)=${uuid})`;
+  const readinessPath =
+    "^/api/us/traceability/readiness" +
+    ["eventDateFrom", "eventDateTo", "productId", "lotId"]
+      .map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`)
+      .join("") +
+    `(\\?${readinessField}(?:&${readinessField}){0,3})?$`;
+  const readinessRoute = new RegExp(readinessPath);
   const lifecyclePagePath =
     `^/api/us/traceability/(?:receiving/${uuid}/revisions|lots/${uuid}/receiving-basis)` +
     ["limit", "offset"].map((key) => `(?!.*[?&]${key}=[^&]*(?:&[^&]*)*&${key}=)`).join("") +
@@ -77,6 +138,21 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
       .join("") +
     `(\\?${casesQueryField}(?:&${casesQueryField}){0,2})?$`;
   const proxy = {
+    [readinessPath]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
+    ...Object.fromEntries(
+      searchCardPaths.map((path) => [
+        path,
+        {
+          target: "http://localhost:3100",
+          changeOrigin: true,
+          rewrite: (url: string) => url.replace(/^\/api\/us/, ""),
+        },
+      ]),
+    ),
     [tracePath]: {
       target: "http://localhost:3100",
       changeOrigin: true,
@@ -242,17 +318,23 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
       const path = request.url ?? "/";
       if (
         path.startsWith("/api/") &&
-        (path.startsWith("/api/us/traceability/shipments") || path.includes("/shipping-balance")
-          ? !shippingRoutes.some(
-              (route) =>
-                route.pattern.test(path) &&
-                route.methods.includes(request.method ?? "") &&
-                (!path.includes("expectedDraftVersion=") ||
-                  Number(path.slice(path.lastIndexOf("=") + 1)) <= 2147483647),
-            )
-          : /^\/api\/us\/traceability\/lots\/[^/]+\/trace(?:[/?]|$)/.test(path)
-            ? request.method !== "GET" || !traceRoutes.some((pattern) => pattern.test(path))
-            : !Object.keys(proxy).some((pattern) => new RegExp(pattern).test(path)))
+        (path.startsWith("/api/us/traceability/readiness")
+          ? request.method !== "GET" || !readinessRoute.test(path)
+          : path.startsWith("/api/us/traceability/shipments") || path.includes("/shipping-balance")
+            ? !shippingRoutes.some(
+                (route) =>
+                  route.pattern.test(path) &&
+                  route.methods.includes(request.method ?? "") &&
+                  (!path.includes("expectedDraftVersion=") ||
+                    Number(path.slice(path.lastIndexOf("=") + 1)) <= 2147483647),
+              )
+            : /^\/api\/us\/traceability\/(?:search(?:[/?]|$)|lots\/[^/]+\/card(?:[/?]|$))/.test(
+                  path,
+                )
+              ? request.method !== "GET" || !searchCardRoutes.some((pattern) => pattern.test(path))
+              : /^\/api\/us\/traceability\/lots\/[^/]+\/trace(?:[/?]|$)/.test(path)
+                ? request.method !== "GET" || !traceRoutes.some((pattern) => pattern.test(path))
+                : !Object.keys(proxy).some((pattern) => new RegExp(pattern).test(path)))
       ) {
         response.writeHead(404, { "Cache-Control": "no-store" });
         response.end();

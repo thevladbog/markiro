@@ -5,6 +5,7 @@ import { loadUsDevelopmentEnv } from "./entry-policy";
 import { UsDevelopmentModule } from "./us-development.module";
 import { UsRuntime } from "./us-runtime";
 import { mountUsHttp } from "./us-http";
+import { UsHttpAdapter } from "./us-http-adapter";
 
 export async function createUsDevelopmentApplication(
   raw: NodeJS.ProcessEnv,
@@ -20,7 +21,7 @@ export async function createUsDevelopmentApplication(
   let app: INestApplication | undefined;
   try {
     const runtime = new UsRuntime(env, connection);
-    app = await NestFactory.create(UsDevelopmentModule.register(runtime), {
+    app = await NestFactory.create(UsDevelopmentModule.register(runtime), new UsHttpAdapter(), {
       logger: false,
       bodyParser: false,
       abortOnError: false,

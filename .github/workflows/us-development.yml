@@ -63,10 +63,40 @@ jobs:
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-trace-store.e2e.test.ts test/us-trace-evidence.e2e.test.ts test/us-trace-history.e2e.test.ts test/us-trace-http.e2e.test.ts
+      - name: Verify US search and lot card contracts and query parsing
+        run: |
+          pnpm --filter @markiro/platform-contracts exec vitest run test/us-search-lot-card.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-trace-search-query.test.ts
+      - name: Verify US search and lot card storage and HTTP on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/us-trace-search.e2e.test.ts test/us-lot-card.e2e.test.ts test/us-search-lot-card-http.e2e.test.ts
+      - name: Verify US readiness rules, contract and strict scope
+        run: |
+          pnpm --filter @markiro/domain exec vitest run test/readiness-sweep.test.ts
+          pnpm --filter @markiro/platform-contracts exec vitest run test/us-readiness-sweep.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-readiness-query.test.ts
+      - name: Verify US readiness evidence, assessment and HTTP on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/us-readiness-evidence.e2e.test.ts test/us-readiness-assessment.e2e.test.ts test/us-readiness-http.e2e.test.ts --maxWorkers=1
+      - name: Verify US frozen export contracts, mapping, workbook and XLSX adapter
+        run: |
+          pnpm --filter @markiro/platform-contracts exec vitest run test/us-export-core.test.ts
+          pnpm --filter @markiro/domain exec vitest run test/us-export-registry.test.ts test/us-export-rows.test.ts test/us-export-workbook.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-export-xlsx-writer.test.ts test/us-export-adapter.test.ts
+      - name: Verify US pinned export source reader on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/us-export-source-reader.e2e.test.ts
       - name: Build shared browser components
         run: pnpm --filter @markiro/ui build
       - name: Verify US browser flow and contracts
         run: pnpm --filter @markiro/admin exec vitest run test/us-client.test.ts test/us-master-data-client.test.ts test/us-master-data-forms.test.ts test/us-master-data-ui.test.tsx test/us-catalog-client.test.ts test/us-catalog-ui.test.tsx test/us-product-profile-client.test.ts test/us-product-profile-ui.test.tsx test/us-lot-client.test.ts test/us-lots-ui.test.tsx test/us-app.test.tsx
+      - name: Verify US readiness office and exact source navigation
+        run: pnpm --filter @markiro/admin exec vitest run test/us-readiness-client.test.ts test/us-readiness-view.test.tsx test/us-readiness-picker.test.tsx test/us-readiness-navigation.test.tsx
+      - name: Verify US Search, lot card, Trace and workspace navigation
+        run: pnpm --filter @markiro/admin exec vitest run test/us-search-trace-client.test.ts test/us-search-view.test.tsx test/us-lot-card-panel.test.tsx test/us-trace-projection.test.tsx test/us-trace-view.test.tsx test/us-search-trace-navigation.test.tsx
       - name: Verify receiving draft, finalization and exempt-review browser boundaries
         run: pnpm --filter @markiro/admin exec vitest run test/us-receiving-client.test.ts test/us-receiving-command-acknowledgement.test.ts test/us-receiving-live-client.test.ts test/us-receiving-revision-acknowledgement.test.ts test/us-receiving-lifecycle-client.test.ts test/us-receiving-lifecycle.test.tsx test/us-receiving-amendment-editor.test.tsx test/us-receiving-amendment-finalization.test.tsx test/us-receiving-ui.test.tsx test/us-receiving-references.test.tsx test/us-receiving-readiness-client.test.ts test/us-receiving-readiness.test.tsx test/us-receiving-finalization-client.test.ts test/us-receiving-finalization.test.tsx test/us-receiving-exemption-client.test.ts test/us-receiving-exemption.test.tsx
       - name: Verify exact receiving revision navigation and Unicode TLC entry
@@ -83,6 +113,10 @@ jobs:
         run: pnpm --filter @markiro/admin build:us
       - name: Verify compiled local-only runtime
         run: node --test tools/us-development/test/runtime-entry.smoke.mjs tools/us-development/test/owner-command.smoke.mjs
+      - name: Verify US dev and preview encoded search transport
+        run: node --test tools/us-development/test/search-transport.smoke.mjs
+      - name: Verify US readiness dev and preview transport
+        run: node --test tools/us-development/test/readiness-transport.smoke.mjs
       - name: Verify US Shipping pure rules and strict contracts
         run: |
           pnpm --filter @markiro/domain exec vitest run test/us-shipping-balance.test.ts test/us-shipping-readiness.test.ts
@@ -102,6 +136,7 @@ jobs:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: |
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-case-bridge.test.ts
+          pnpm --filter @markiro/db exec vitest run test/us-plan-schema.test.ts test/us-plan-migration.e2e.test.ts
           pnpm --filter @markiro/db exec vitest run test/us-case-bridge-schema.test.ts test/us-case-bridge-migration.e2e.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-case-commands.e2e.test.ts test/us-case-concurrency.e2e.test.ts test/us-case-reads.e2e.test.ts test/us-case-http.e2e.test.ts
           pnpm --filter @markiro/domain exec vitest run test/us-transformation-readiness.test.ts test/us-transformation-genealogy.test.ts

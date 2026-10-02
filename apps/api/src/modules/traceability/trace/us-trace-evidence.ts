@@ -299,7 +299,7 @@ export function validateCurrentTraceEvent(
   throw unavailable();
 }
 
-async function loadAndValidateFrozenEvents(
+export async function loadAndValidateFrozenEvents(
   tx: UsMasterDataTransaction,
   tenantId: string,
   ids: string[],

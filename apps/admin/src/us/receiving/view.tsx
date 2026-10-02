@@ -11,6 +11,8 @@ import { ReceivingAmendmentEditor } from "./amendment-editor.js";
 import { ReceivingFinalizedDetail } from "./finalized-detail.js";
 import { ReceivingLifecycleActions } from "./lifecycle-dialog.js";
 import { ReceivingRevisionNavigation } from "./revision-history.js";
+import type { ReadinessEventTarget } from "../readiness/source.js";
+import { ReadinessSourceNotice, useReadinessSourceFocus } from "../readiness/view.js";
 import {
   isReceivingDraftView,
   isReceivingFrozenView,
@@ -24,6 +26,7 @@ export function ReceivingView(
     canManageQa?: boolean;
     canExport?: boolean;
     initialRecord?: ReceivingLiveRecord;
+    sourceTarget?: ReadinessEventTarget;
     startNew?: boolean;
     startImport?: boolean;
     onOpenLot?: (id: string, record: ReceivingFrozenView) => void;
@@ -51,6 +54,11 @@ export function ReceivingView(
         : null,
   );
   const [refresh, setRefresh] = useState(0);
+  const sourceRef = useReadinessSourceFocus(props.sourceTarget, editor?.initial?.id);
+  const sourceNotice =
+    props.sourceTarget && editor?.initial?.id === props.sourceTarget.eventId ? (
+      <ReadinessSourceNotice target={props.sourceTarget} />
+    ) : null;
   const [importing, setImporting] = useState(props.startImport ?? false);
   const openRecord = useCallback((initial: ReceivingLiveRecord) => setEditor({ initial }), []);
   const run = useRef(0);
@@ -137,37 +145,40 @@ export function ReceivingView(
   const frozen = editor?.initial;
   if (frozen && isReceivingFrozenView(frozen))
     return (
-      <ReceivingFinalizedDetail
-        record={frozen}
-        onClose={close}
-        {...(props.backLabel ? { backLabel: props.backLabel } : {})}
-        onOpenLot={props.onOpenLot ?? (() => {})}
-        disabled={mutationPending}
-        actions={
-          <>
-            <ReceivingCsvExport
-              client={client}
-              record={frozen}
-              canExport={props.canExport ?? false}
-              dirty={false}
-              disabled={mutationPending}
-              onReload={() => void open(frozen.id)}
-              onForbidden={onForbidden}
-              onSessionLost={onSessionLost}
-            />
-            <ReceivingRevisionNavigation
-              key={`${frozen.id}/${frozen.lifecycle.lifecycleVersion}`}
-              {...props}
-              record={frozen}
-              disabled={mutationPending}
-              onOpenRecord={openRecord}
-            />
-            {props.canManageQa ? (
-              <ReceivingLifecycleActions {...props} record={frozen} onOpenRecord={openRecord} />
-            ) : null}
-          </>
-        }
-      />
+      <div ref={sourceRef}>
+        {sourceNotice}
+        <ReceivingFinalizedDetail
+          record={frozen}
+          onClose={close}
+          {...(props.backLabel ? { backLabel: props.backLabel } : {})}
+          onOpenLot={props.onOpenLot ?? (() => {})}
+          disabled={mutationPending}
+          actions={
+            <>
+              <ReceivingCsvExport
+                client={client}
+                record={frozen}
+                canExport={props.canExport ?? false}
+                dirty={false}
+                disabled={mutationPending}
+                onReload={() => void open(frozen.id)}
+                onForbidden={onForbidden}
+                onSessionLost={onSessionLost}
+              />
+              <ReceivingRevisionNavigation
+                key={`${frozen.id}/${frozen.lifecycle.lifecycleVersion}`}
+                {...props}
+                record={frozen}
+                disabled={mutationPending}
+                onOpenRecord={openRecord}
+              />
+              {props.canManageQa ? (
+                <ReceivingLifecycleActions {...props} record={frozen} onOpenRecord={openRecord} />
+              ) : null}
+            </>
+          }
+        />
+      </div>
     );
   if (
     editor?.initial &&
@@ -175,27 +186,34 @@ export function ReceivingView(
     editor.initial.lifecycle.previousRevisionId !== null
   )
     return (
-      <ReceivingAmendmentEditor
-        key={`${editor.initial.id}/${editor.initial.status}/${Boolean(props.canManageQa)}`}
-        {...props}
-        initial={editor.initial}
-        onClose={close}
-        onOpenRecord={openRecord}
-      />
+      <div ref={sourceRef}>
+        {sourceNotice}
+        <ReceivingAmendmentEditor
+          key={`${editor.initial.id}/${editor.initial.status}/${Boolean(props.canManageQa)}`}
+          {...props}
+          initial={editor.initial}
+          onClose={close}
+          onOpenRecord={openRecord}
+        />
+      </div>
     );
   if (editor && (!editor.initial || isReceivingDraftView(editor.initial)))
     return (
-      <ReceivingEditor
-        key={editor.initial ? `${editor.initial.id}/${editor.initial.status}` : "new"}
-        {...props}
-        canWrite={
-          canWrite &&
-          (!editor.initial || (editor.initial.status === "draft" && editor.initial.revision === 1))
-        }
-        initial={editor.initial}
-        onClose={close}
-        onOpenRecord={openRecord}
-      />
+      <div ref={sourceRef}>
+        {sourceNotice}
+        <ReceivingEditor
+          key={editor.initial ? `${editor.initial.id}/${editor.initial.status}` : "new"}
+          {...props}
+          canWrite={
+            canWrite &&
+            (!editor.initial ||
+              (editor.initial.status === "draft" && editor.initial.revision === 1))
+          }
+          initial={editor.initial}
+          onClose={close}
+          onOpenRecord={openRecord}
+        />
+      </div>
     );
   const columns: TableColumn<ReceivingLiveRecordList["items"][number]>[] = [
     {

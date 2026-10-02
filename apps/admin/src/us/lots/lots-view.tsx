@@ -12,6 +12,7 @@ import { LotReceivingBasisSection } from "./receiving-basis.js";
 import type { ReceivingFrozenView } from "../receiving/live-record.js";
 import { LotCasesPanel } from "../transformation/cases.js";
 import { TransformationGenealogyPanel } from "../transformation/genealogy.js";
+import { LotCardPanels, type LotCardPanelProps } from "./card-panels.js";
 import "./lots.css";
 
 type Props = MasterDataViewProps & {
@@ -24,6 +25,11 @@ type Props = MasterDataViewProps & {
   onOpenReceiving: (lotId: string, record: ReceivingFrozenView) => void;
   onOpenTransformation: (eventId: string, lotId: string) => void;
   canTransform: boolean;
+  onOpenEvent?: (
+    target: Parameters<NonNullable<LotCardPanelProps["onOpenEvent"]>>[0],
+    lotId: string,
+  ) => void;
+  onOpenTrace?: (direction: "backward" | "forward", lotId: string) => void;
 };
 
 export function LotsView(props: Props) {
@@ -365,6 +371,20 @@ export function LotsView(props: Props) {
           ) : null}
         </div>
         <p className="us-lot-note">{t("lots.unavailableFeatures")}</p>
+        <LotCardPanels
+          key={`${lot.id}/${lot.revision}`}
+          client={client}
+          lotId={lot.id}
+          disabled={opening || mutationPending || casesProtected || needsReload}
+          {...(props.onOpenEvent
+            ? { onOpenEvent: (target) => props.onOpenEvent?.(target, lot.id) }
+            : {})}
+          {...(props.onOpenTrace
+            ? { onOpenTrace: (direction) => props.onOpenTrace?.(direction, lot.id) }
+            : {})}
+          onForbidden={onForbidden}
+          onSessionLost={onSessionLost}
+        />
         <LotReceivingBasisSection
           key={lot.id}
           {...props}

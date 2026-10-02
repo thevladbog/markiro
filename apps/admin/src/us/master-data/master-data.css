@@ -382,3 +382,18 @@
     justify-content: space-between;
   }
 }
+
+.us-readiness-source-context {
+  padding: var(--space-3, 12px);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+  color: var(--fg-1);
+  overflow-wrap: anywhere;
+}
+
+[data-readiness-line]:focus {
+  outline: 2px solid var(--accent-strong);
+  outline-offset: 4px;
+  scroll-margin-block: 24px;
+}

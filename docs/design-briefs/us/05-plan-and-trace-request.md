@@ -11,6 +11,8 @@
 > chips or the PDF viewer chrome; reuse them. Grounded in slice specs US-08 (plan), US-09 (trace
 > request) and US-07 (what the package contains).
 
+> US-08 implementation correction (2026-10-02): use the [owner-approved current plan design](../../superpowers/specs/2026-10-02-us-08-traceability-plan-current-design.md). The screen concepts below are target states, not the current route structure. Build them in `apps/admin/src/us/` with the US-only API. A processor profile alone does not establish farm-map non-applicability, and infrastructure statements require an attributed operator confirmation. Synthetic plans and PDFs need a persistent demo label.
+
 ## Purpose
 
 An FDA trace request gives a processor 24 hours to hand over its records. This brief makes that
@@ -54,7 +56,8 @@ Below the table a quiet **retention note**: "Prior versions are retained for at 
 Two banners may appear above the table (warning tone, icon + text):
 
 - **Configuration changed** — "Configuration changed since v2 became effective: TLC source
-  locations, point of contact." with a link to open a new draft. The section list is data.
+  locations, product classifications." with a link to open a new draft. The section list is data;
+  a plan-owned contact is not inferred from unrelated configuration.
 - **Annual review due** (P1) — "Annual review due on 09/10/2027" when within 30 days or past.
 
 States to draw: empty (no plan yet — explains what the plan is in allowed wording, offers New
@@ -66,17 +69,18 @@ one superseded row; effective + configuration-changed banner; loading; error; st
 Route `/traceability/plans/:id` for the draft. `DataTabs`, one tab per section in the fixed order
 of the domain model:
 
-| Tab                | Derived from configuration (read-only block)                                                          | User-editable             |
-| ------------------ | ----------------------------------------------------------------------------------------------------- | ------------------------- |
-| Record maintenance | system of record, export formats, storage class, backup statement, retention calendar years, timezone | narrative paragraphs      |
-| FTL identification | classification workflow: coverage statuses in use, review cadence, count of covered products          | narrative paragraphs      |
-| TLC assignment     | rule "Transformation assigns; shipping never assigns", TLC source locations (name, city/ST)           | narrative paragraphs      |
-| Point of contact   | —                                                                                                     | name, title, phone, email |
-| Farm map           | fixed "Not applicable to the processor profile"                                                       | explanation paragraph     |
-| Review and update  | review cadence default (365 days)                                                                     | narrative paragraphs      |
+| Tab                | Derived from configuration (read-only block)                                                   | User-editable                                                                                                 |
+| ------------------ | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Record maintenance | profile, retention and timezone; never an unverified backup or storage claim                   | system of record, actual procedures, formats, record locations, roles and confirmed backup/recovery statement |
+| FTL identification | current classification workflow and reviewed product facts                                     | identification procedure and actual review cadence                                                            |
+| TLC assignment     | current assignment rules, including reviewed exempt-source receiving, and TLC source locations | narrative paragraphs                                                                                          |
+| Point of contact   | —                                                                                              | name, title, phone, email                                                                                     |
+| Farm map           | only after confirmed no growing/raising of applicable FTL food in this operation               | non-farm declaration and explanation; yes/unknown blocks P0 approval                                          |
+| Review and update  | no system-enforced cadence currently                                                           | actual review/update procedure and cadence                                                                    |
 
-Every derived block is labelled "Derived from configuration" and links to the screen that owns the
-fact (profile, locations, products) — the plan is edited _there_, not here. Narrative is plain-text
+Every genuinely derived block is labelled "Derived from configuration" and links to the screen that owns the
+fact (profile, locations, products). Operator-confirmed procedures are distinct editable fields in the plan;
+they are not automatically derived from architecture or storage settings. Narrative is plain-text
 paragraphs (OQ-US08-10). A **Change summary** field sits above the tabs and is mandatory from v2
 on. Phone example: `+1 (503) 555-0120`.
 
@@ -84,7 +88,9 @@ on. Phone example: `+1 (503) 555-0120`.
 of docs/us/limitations.md ("FDA approved", "guarantees compliance", …) is underlined in the
 textarea and listed in a small issues panel quoting the phrase and naming the tab. Approve stays
 disabled while any issue exists. This is a validation state, not a spell-checker: unmissable, not
-shaming.
+shaming. The server checks affirmative variants with spaces, line breaks or hyphens; a simple
+explicit negative disclaimer such as "not FDA approved" is not marked as an affirmative claim.
+The editor may explain the bounded check, but must not present it as legal review.
 
 Toolbar: **Save draft**, **Preview PDF** (opens a new tab, announced), **Approve**, **Discard
 draft** (confirmation; drafts are not regulated records, OQ-US08-4).
@@ -102,8 +108,8 @@ The PDF is rendered by the API and shown in the existing viewer chrome. Draw the
 
 - Header: tenant name, profile code, regulatory baseline ID and verified date (`US-REG-2026-09-03`),
   **Version 2**, **Effective 09/10/2026 2:15 PM PDT (21:15 UTC)**, approver name and title.
-- The six sections in order; Farm map prints "Not applicable to the processor profile" plus the
-  explanation.
+- The six sections in order; Farm map prints "Not applicable to this confirmed non-farm
+  operation" plus the explanation. A synthetic demo PDF shows its demo marker on every page.
 - **Change history** table on the last page: every prior version — number, effective date,
   approver, change summary (OQ-US08-13).
 - Footer on every page: renderer version, "Page 2 of 5", the allowed-wording disclaimer.

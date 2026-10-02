@@ -117,8 +117,8 @@ The requirement matrix owns per-requirement status and slice assignments. A boun
 | US-04 | Transformation and P0 server case bridge | TRN-001..014, LOT-010               | 14–18 | US-02/03    | In progress |
 | US-05 | Shipping CTE                             | SHP-001..010                        | 8–11  | US-04       | In progress |
 | US-06 | Trace graph, search, completeness        | TRC-001..010                        | 9–12  | US-03/04/05 | Not started |
-| US-07 | FDA-aligned XLSX adapter                 | EXP-001..012                        | 12–16 | US-06       | Not started |
-| US-08 | Traceability Plan                        | PLN-001..010                        | 7–10  | US-00/02    | Not started |
+| US-07 | FDA-aligned XLSX adapter                 | EXP-001..012                        | 12–16 | US-06       | In progress |
+| US-08 | Traceability Plan                        | PLN-001..010                        | 7–10  | US-00/02    | In progress |
 | US-09 | Trace request / mock recall              | RQ-001..008                         | 8–11  | US-06/07/08 | Not started |
 | US-10 | Station/label lot link                   | STN-001..009                        | 8–12  | US-02/04    | Not started |
 | US-11 | Demo seed, screenshots/video, release    | EVD-001..012                        | 10–14 | US-09       | Not started |
@@ -590,6 +590,20 @@ was performed. The US fixture created/removed only owned disposable databases;
 read-only inspection confirmed zero temporary API test databases afterward.
 No main merge, PR, tag, deployment or operational workflow dispatch was performed;
 release isolation remains locked. Task 4 and US-03 remain partial.
+
+### US-07 export core local checkpoint — 2026-10-02
+
+The internal US-only adapter composes strict frozen input parsing, the pinned English registry, canonical input digest, exact CTE rows, a library-independent workbook model, deterministic XLSX rendering and semantic/ZIP verification. It accepts explicit captured event revisions; no current catalog lookup or bounded trace graph feeds export cells. The result carries lowercase `metadata`, `definitions`, `receiving`, `transformation`, `shipping` and `validation` row-count keys. An out-of-scope CTE has zero rows; when model construction fails, all six counts are zero, while a writer-only failure retains the model row counts. KDE findings remain separate from typed artifact failures, which retain the exact source record and field key. A candidate workbook is not a request-ready or regulatory conclusion.
+
+Focused local checks cover strict contract (`packages/platform-contracts/test/us-export-core.test.ts`), pinned source reader on an owned disposable U.S. database (`apps/api/test/us-export-source-reader.e2e.test.ts`), registry/dictionary/canonical digest (`packages/domain/test/us-export-registry.test.ts`), row identity and Transformation 2→2 (`packages/domain/test/us-export-rows.test.ts`), workbook validation and safe cell modeling (`packages/domain/test/us-export-workbook.test.ts`), XLSX ZIP/semantic safety (`apps/api/test/us-export-xlsx-writer.test.ts`) and composed adapter (`apps/api/test/us-export-adapter.test.ts`). The latter checks stable bytes and digest after event reordering, a later captured revision without rewriting the earlier revision, a readable historical record with visible findings, a model-level unsafe cell, an XLSX-only render refusal, and a controlled 100-line three-CTE synthetic fixture with an automated `<60 s` bound. On local Node v24.18.0 arm64, the verbose adapter run measured 131 ms for that synthetic fixture on 2026-10-02; this is a development-machine baseline, not hosted throughput evidence. These are local code and synthetic-data checks; hosted CI has not been observed for this uncommitted checkpoint.
+
+US-07 remains in progress. Task 6 opened and re-saved a synthetic writer-model workbook in headless LibreOffice; opening the composed three-CTE P0 fixture there and in Microsoft Excel, real hosted performance, independent FDA/legal mapping review, complete request scope, manifest/SHA256SUMS/package, persistence, audit, download and publication are separate future gates. EXP-008 depends on US-09 package orchestration; EXP-009 is P1. No public route, UI export action, storage write, request-ready verdict, release, push or deployment is added here. The US development release locks remain in force.
+
+### US-08 rules and contracts local checkpoint — 2026-10-02
+
+The [approved current design](../superpowers/specs/2026-10-02-us-08-traceability-plan-current-design.md) now has a [first rules/contracts increment](../superpowers/plans/2026-10-02-us-08-plan-rules-contracts.md): deterministic approval issues for required sections, non-farm scope, real-operator confirmations and bounded prohibited wording; a detached, digestible configuration snapshot with code-owned manual FTL-review characteristics and precise changed-section detection; and strict draft-save/approve body schemas that reject client-supplied tenant, actor and demo provenance. Two integration-review gaps—separator variants/negative disclaimers and the missing FTL workflow descriptor—were corrected with separate failing tests and independent reviews. Per-fact snapshot provenance, including server actor/time and verified synthetic identity, is required in the next server/persistence increment; the current top-level provenance is not sufficient to approve a persisted plan.
+
+On the final local source, domain tests passed 1,309/1,309 across 62 files and platform-contracts tests passed 943/943 across 52 files. Both packages passed typecheck, lint and build; full-worktree formatting and diff checks passed. The broad Turbo wrapper stopped before tests because its child selected pnpm 11.18.0 instead of the repository's 11.22.0; direct Corepack package commands ran all named gates without changing configuration. These are local code checks only. No plan table, version service, US route, PDF, private US artifact store, cabinet screen, browser journey, operational backup or hosted non-RF storage check was added or exercised. US-08 and PLN acceptance remain open. No commit, push, merge, release or deployment occurred.
 
 ## 6. Final rule
 

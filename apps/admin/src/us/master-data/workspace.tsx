@@ -9,6 +9,13 @@ import { PartiesView } from "./parties-view.js";
 import { ProductsView } from "../catalog/products-view.js";
 import { LotsView } from "../lots/lots-view.js";
 import { EventsView } from "../events/events-view.js";
+import type { UsReadinessQuery } from "@markiro/platform-contracts";
+import { ReadinessView, SourceBackLabelContext } from "../readiness/view.js";
+import type { ReadinessEventTarget } from "../readiness/source.js";
+import { SearchView } from "../search/view.js";
+import { emptySearchState } from "../search/filters.js";
+import { TraceView, type TraceEntry } from "../trace/view.js";
+import { traceCopy } from "../trace/copy.js";
 import { UsBrandMark } from "../brand-mark.js";
 import { navStyle, type NoticeKind } from "./workspace-shared.js";
 import "./master-data.css";
@@ -21,7 +28,19 @@ export type MasterDataProps = {
   onSessionLost: () => void;
 };
 
-type View = "parties" | "locations" | "products" | "lots" | "events";
+type View =
+  "parties" | "locations" | "products" | "lots" | "events" | "readiness" | "search" | "trace";
+type Entry =
+  | { kind: "parties" | "locations" | "products" | "readiness" | "search" }
+  | { kind: "lots"; lotId?: string }
+  | { kind: "trace"; entry: TraceEntry | null }
+  | {
+      kind: "events";
+      target?: ReadinessEventTarget;
+      receiving?: ReceivingFrozenView;
+      transformationId?: string;
+    };
+type ReturnFrame = { entry: Entry };
 type Notice = { kind: NoticeKind; key: string } | null;
 
 export function MasterDataWorkspace({
@@ -31,25 +50,16 @@ export function MasterDataWorkspace({
   onBack,
   onSessionLost,
 }: MasterDataProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const [capabilities, setCapabilities] = useState<readonly string[] | null>(null);
   const [accessError, setAccessError] = useState(false);
   const [accessPending, setAccessPending] = useState(false);
   const [view, setView] = useState<View>("parties");
   const [viewGeneration, setViewGeneration] = useState(0);
-  const [receivingLotEntry, setReceivingLotEntry] = useState<{
-    lotId: string;
-    record: ReceivingFrozenView;
-  } | null>(null);
-  const [basisReceivingEntry, setBasisReceivingEntry] = useState<{
-    lotId: string;
-    record: ReceivingFrozenView;
-  } | null>(null);
-  const [basisTransformationEntry, setBasisTransformationEntry] = useState<{
-    lotId: string;
-    eventId: string;
-  } | null>(null);
-  const [transformationLotEntry, setTransformationLotEntry] = useState<string | null>(null);
+  const [readinessQuery, setReadinessQuery] = useState<UsReadinessQuery>({});
+  const [entry, setEntry] = useState<Entry>({ kind: "parties" });
+  const [returnStack, setReturnStack] = useState<ReturnFrame[]>([]);
+  const [searchState, setSearchState] = useState(emptySearchState);
   const [mutationPending, setMutationPending] = useState(false);
   const mutationCount = useRef(0);
   const [editorDirty, setEditorDirty] = useState(false);
@@ -57,6 +67,7 @@ export function MasterDataWorkspace({
   const alive = useRef(true);
   const main = useRef<HTMLElement>(null);
   const focusAfterAccess = useRef(false);
+  const focusAfterReturn = useRef(false);
   const accessRun = useRef(0);
 
   const canRead = capabilities?.includes(US_CAPABILITY.READ) ?? false;
@@ -71,6 +82,14 @@ export function MasterDataWorkspace({
     if (canRead)
       (main.current?.querySelector<HTMLElement>('h1[tabindex="-1"]') ?? main.current)?.focus();
   }, [accessPending, accessError, canRead]);
+
+  useEffect(() => {
+    if (!focusAfterReturn.current) return;
+    focusAfterReturn.current = false;
+    // Focus a stable return target immediately. Search moves focus to its initiating
+    // row after a successful refresh; missing rows and failures retain this heading.
+    (main.current?.querySelector<HTMLElement>('h1[tabindex="-1"]') ?? main.current)?.focus();
+  }, [view, viewGeneration]);
 
   const reloadAccess = useCallback(async () => {
     const run = ++accessRun.current;
@@ -140,20 +159,51 @@ export function MasterDataWorkspace({
     };
   }, []);
 
-  function navigate(next: View | "profile") {
-    if (mutationPending || (editorDirty && !window.confirm(t("md.discardConfirm")))) return;
+  function navigate(next: View | "profile", editorConfirmed = false) {
+    if (
+      mutationPending ||
+      (!editorConfirmed && editorDirty && !window.confirm(t("md.discardConfirm")))
+    )
+      return false;
     setEditorDirty(false);
     if (next === "profile") {
       onBack();
-      return;
+      return true;
     }
     setView(next);
-    setReceivingLotEntry(null);
-    setBasisReceivingEntry(null);
-    setBasisTransformationEntry(null);
-    setTransformationLotEntry(null);
+    setEntry(next === "trace" ? { kind: "trace", entry: null } : { kind: next });
+    setReturnStack([]);
     setViewGeneration((current) => current + 1);
+    return true;
   }
+
+  function openEntry(next: Entry, source: Entry = entry, editorConfirmed = false) {
+    if (!canRead || accessPending || accessError || !navigate(next.kind, editorConfirmed)) return;
+    setReturnStack([...returnStack, { entry: source }]);
+    setEntry(next);
+  }
+
+  function returnToSource(editorConfirmed = false) {
+    const frame = returnStack.at(-1);
+    if (!frame || !navigate(frame.entry.kind, editorConfirmed)) return;
+    setEntry(frame.entry);
+    setReturnStack(returnStack.slice(0, -1));
+    focusAfterReturn.current = true;
+  }
+
+  const source = returnStack.at(-1)?.entry;
+  const backLabel =
+    source?.kind === "search"
+      ? t("navigation.backSearch")
+      : source?.kind === "trace"
+        ? t("navigation.backTrace")
+        : source?.kind === "readiness"
+          ? t("usReadiness.back")
+          : source?.kind === "lots"
+            ? t("lots.backToLot")
+            : source?.kind === "events" && (source.receiving || source.target?.type === "receiving")
+              ? t("receiving.back")
+              : t("events.back");
 
   if (capabilities === null) {
     return (
@@ -210,6 +260,29 @@ export function MasterDataWorkspace({
           </span>
         </div>
         <nav aria-label={t("md.referenceData")}>
+          {(["search", "trace"] as const).map((item) => (
+            <Button
+              key={item}
+              variant="secondary"
+              className={`us-md-nav ${view === item ? "is-active" : ""}`}
+              style={navStyle(view === item)}
+              disabled={mutationPending}
+              aria-current={view === item ? "page" : undefined}
+              onClick={() => navigate(item)}
+            >
+              {item === "search" ? t("usSearch.title") : traceCopy(i18n.language).title}
+            </Button>
+          ))}
+          <Button
+            variant="secondary"
+            className={`us-md-nav ${view === "readiness" ? "is-active" : ""}`}
+            style={navStyle(view === "readiness")}
+            disabled={mutationPending}
+            aria-current={view === "readiness" ? "page" : undefined}
+            onClick={() => navigate("readiness")}
+          >
+            {t("usReadiness.title")}
+          </Button>
           <Button
             variant="secondary"
             className={`us-md-nav ${view === "events" ? "is-active" : ""}`}
@@ -272,7 +345,7 @@ export function MasterDataWorkspace({
         </nav>
       </aside>
 
-      <section ref={main} tabIndex={-1} className="us-md-main">
+      <section ref={main} role="main" tabIndex={-1} className="us-md-main">
         {accessError ? (
           <div className="us-md-notice us-md-notice--alert" role="alert">
             <p>{t("md.accessError")}</p>
@@ -292,124 +365,122 @@ export function MasterDataWorkspace({
             {t(notice.key)}
           </div>
         ) : null}
-        {view === "events" ? (
-          <EventsView
-            key={`events-${viewGeneration}`}
-            {...viewProps}
-            timeZone={profile.timeZone}
-            canExport={
-              !accessError && !accessPending && capabilities.includes(US_CAPABILITY.EXPORT_READ)
-            }
-            canManageQa={
-              !accessError && !accessPending && capabilities.includes(US_CAPABILITY.QA_MANAGE)
-            }
-            {...(receivingLotEntry
-              ? { initialReceiving: receivingLotEntry.record }
-              : basisReceivingEntry
-                ? { initialReceiving: basisReceivingEntry.record }
-                : {})}
-            {...(basisReceivingEntry
-              ? {
-                  backLabel: t("lots.backToLot"),
-                  onEntryBack: () => {
-                    setReceivingLotEntry(null);
-                    setView("lots");
-                    setViewGeneration((n) => n + 1);
-                  },
-                }
-              : {})}
-            {...(basisTransformationEntry
-              ? {
-                  initialTransformationId: basisTransformationEntry.eventId,
-                  backLabel: t("lots.backToLot"),
-                  onEntryBack: () => {
-                    setView("lots");
-                    setViewGeneration((n) => n + 1);
-                  },
-                }
-              : {})}
-            onOpenLot={(lotId, record) => {
-              setReceivingLotEntry({ lotId, record });
-              setTransformationLotEntry(null);
-              setView("lots");
-              setViewGeneration((n) => n + 1);
-            }}
-            onOpenTransformationLot={(lotId) => {
-              setReceivingLotEntry(null);
-              setTransformationLotEntry(lotId);
-              setView("lots");
-              setViewGeneration((n) => n + 1);
-            }}
-            canWrite={
-              !accessError && !accessPending && capabilities.includes(US_CAPABILITY.RECEIVING_WRITE)
-            }
-            canTransform={
-              !accessError &&
-              !accessPending &&
-              capabilities.includes(US_CAPABILITY.TRANSFORMATION_WRITE)
-            }
-            canShip={
-              !accessError && !accessPending && capabilities.includes(US_CAPABILITY.SHIPPING_WRITE)
-            }
+        {view === "search" ? (
+          <SearchView
+            key={`search-${viewGeneration}`}
+            client={client}
+            state={searchState}
+            onStateChange={setSearchState}
+            onForbidden={onForbidden}
+            onSessionLost={onSessionLost}
+            onOpenLot={(lotId) => openEntry({ kind: "lots", lotId })}
           />
+        ) : view === "trace" && entry.kind === "trace" ? (
+          <>
+            {source ? (
+              <Button
+                variant="secondary"
+                disabled={mutationPending}
+                onClick={() => returnToSource()}
+              >
+                {backLabel}
+              </Button>
+            ) : null}
+            <TraceView
+              key={`trace-${viewGeneration}`}
+              client={client}
+              entry={entry.entry}
+              onEntryChange={(next) => setEntry({ kind: "trace", entry: next })}
+              onForbidden={onForbidden}
+              onSessionLost={onSessionLost}
+              onOpenLot={(lotId) => openEntry({ kind: "lots", lotId })}
+              onOpenEvent={(target) => openEntry({ kind: "events", target })}
+            />
+          </>
+        ) : view === "readiness" ? (
+          <ReadinessView
+            key={`readiness-${viewGeneration}`}
+            client={client}
+            profileCode={profile.code}
+            initialQuery={readinessQuery}
+            onQueryChange={setReadinessQuery}
+            onForbidden={onForbidden}
+            onSessionLost={onSessionLost}
+            onOpenEvent={(target) => openEntry({ kind: "events", target })}
+            onOpenLot={(lotId) => openEntry({ kind: "lots", lotId })}
+            onOpenEvents={() => openEntry({ kind: "events" })}
+          />
+        ) : view === "events" ? (
+          <SourceBackLabelContext.Provider value={source ? backLabel : undefined}>
+            <EventsView
+              key={`events-${viewGeneration}`}
+              {...viewProps}
+              {...(entry.kind === "events" && entry.target ? { initialEvent: entry.target } : {})}
+              {...(entry.kind === "events" && entry.receiving
+                ? { initialReceiving: entry.receiving }
+                : {})}
+              {...(entry.kind === "events" && entry.transformationId
+                ? { initialTransformationId: entry.transformationId }
+                : {})}
+              {...(source ? { backLabel, onEntryBack: () => returnToSource(true) } : {})}
+              timeZone={profile.timeZone}
+              canExport={
+                !accessError && !accessPending && capabilities.includes(US_CAPABILITY.EXPORT_READ)
+              }
+              canManageQa={
+                !accessError && !accessPending && capabilities.includes(US_CAPABILITY.QA_MANAGE)
+              }
+              onOpenLot={(lotId, record) =>
+                openEntry(
+                  { kind: "lots", lotId },
+                  entry.kind === "events" && entry.target
+                    ? entry
+                    : { kind: "events", receiving: record },
+                  true,
+                )
+              }
+              onOpenTransformationLot={(lotId) => openEntry({ kind: "lots", lotId }, entry, true)}
+              canWrite={
+                !accessError &&
+                !accessPending &&
+                capabilities.includes(US_CAPABILITY.RECEIVING_WRITE)
+              }
+              canTransform={
+                !accessError &&
+                !accessPending &&
+                capabilities.includes(US_CAPABILITY.TRANSFORMATION_WRITE)
+              }
+              canShip={
+                !accessError &&
+                !accessPending &&
+                capabilities.includes(US_CAPABILITY.SHIPPING_WRITE)
+              }
+            />
+          </SourceBackLabelContext.Provider>
         ) : view === "lots" ? (
           <LotsView
             key={`lots-${viewGeneration}`}
             {...viewProps}
             profileCode={profile.code}
+            {...(entry.kind === "lots" && entry.lotId ? { entryLotId: entry.lotId } : {})}
+            {...(source
+              ? { entryBackLabel: backLabel, onEntryBack: () => returnToSource(true) }
+              : entry.kind === "lots" && entry.lotId
+                ? { entryBackLabel: t("lots.back"), onEntryBack: () => navigate("lots", true) }
+                : {})}
             timeZone={profile.timeZone}
-            onOpenReceiving={(lotId, record) => {
-              setBasisReceivingEntry({ lotId, record });
-              setReceivingLotEntry(null);
-              setView("events");
-              setViewGeneration((n) => n + 1);
-            }}
-            onOpenTransformation={(eventId, lotId) => {
-              if (mutationPending || (editorDirty && !window.confirm(t("md.discardConfirm"))))
-                return;
-              setBasisTransformationEntry({ eventId, lotId });
-              setBasisReceivingEntry(null);
-              setReceivingLotEntry(null);
-              setView("events");
-              setViewGeneration((n) => n + 1);
-            }}
-            {...(receivingLotEntry
-              ? {
-                  entryLotId: receivingLotEntry.lotId,
-                  onEntryBack: () => {
-                    setView("events");
-                    setViewGeneration((n) => n + 1);
-                  },
-                }
-              : transformationLotEntry
-                ? {
-                    entryLotId: transformationLotEntry,
-                    entryBackLabel: t("events.back"),
-                    onEntryBack: () => {
-                      setTransformationLotEntry(null);
-                      setView("events");
-                      setViewGeneration((n) => n + 1);
-                    },
-                  }
-                : basisReceivingEntry
-                  ? {
-                      entryLotId: basisReceivingEntry.lotId,
-                      entryBackLabel: t("lots.back"),
-                      onEntryBack: () => {
-                        setBasisReceivingEntry(null);
-                        setViewGeneration((n) => n + 1);
-                      },
-                    }
-                  : basisTransformationEntry
-                    ? {
-                        entryLotId: basisTransformationEntry.lotId,
-                        entryBackLabel: t("lots.back"),
-                        onEntryBack: () => {
-                          setBasisTransformationEntry(null);
-                          setViewGeneration((n) => n + 1);
-                        },
-                      }
-                    : {})}
+            onOpenReceiving={(lotId, record) =>
+              openEntry({ kind: "events", receiving: record }, { kind: "lots", lotId })
+            }
+            onOpenTransformation={(eventId, lotId) =>
+              openEntry({ kind: "events", transformationId: eventId }, { kind: "lots", lotId })
+            }
+            onOpenEvent={(target, lotId) =>
+              openEntry({ kind: "events", target }, { kind: "lots", lotId })
+            }
+            onOpenTrace={(direction, lotId) =>
+              openEntry({ kind: "trace", entry: { lotId, direction } }, { kind: "lots", lotId })
+            }
             canManageQa={
               !accessError && !accessPending && capabilities.includes(US_CAPABILITY.QA_MANAGE)
             }

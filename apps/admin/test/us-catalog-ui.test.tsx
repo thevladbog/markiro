@@ -402,14 +402,14 @@ describe("connected US catalog", () => {
     expect(await screen.findByRole("button", { name: "Apple cups" })).toBeTruthy();
     const search = screen.getByLabelText("Search products by name or GTIN");
     await user.type(search, "old");
-    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Search" }));
     expect(screen.getByText("Refreshing products…")).toBeTruthy();
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Apple cups" }).disabled).toBe(
       true,
     );
     await user.clear(search);
     await user.type(search, "new");
-    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Search" }));
     expect(await screen.findByText("Products could not be loaded. Try again.")).toBeTruthy();
     await act(async () =>
       releaseOld(
@@ -467,7 +467,7 @@ describe("connected US catalog", () => {
     );
     await user.click(screen.getByRole("button", { name: "Next page" }));
     await user.type(screen.getByLabelText("Search products by name or GTIN"), "Pear");
-    await user.click(screen.getByRole("button", { name: "Search" }));
+    await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Search" }));
     await waitFor(() =>
       expect(send.mock.calls.at(-1)?.[0]).toBe(
         `${path}?archived=true&limit=50&offset=0&search=Pear`,

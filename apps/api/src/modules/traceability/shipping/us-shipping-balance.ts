@@ -47,7 +47,10 @@ export async function readCurrentShippingBalance(
     .balance;
 }
 
-/** Same locked snapshot as the finalization balance, with origin UOM retained separately. */
+/** Pure reads, with origin UOM retained separately. Command callers must hold the lot lock
+ * before using this as a finalization decision; display callers use a repeatable-read snapshot
+ * and must not acquire a production lot lock or interpret it as historical inventory.
+ */
 export async function readCurrentShippingBalanceProjection(
   tx: UsMasterDataTransaction,
   tenantId: string,

@@ -16,6 +16,13 @@ import type { MasterDataViewProps } from "../master-data/workspace-shared.js";
 import { ReceivingReferencePicker } from "../receiving/reference-picker.js";
 import { TransformationReadinessPanel } from "./readiness-panel.js";
 import { TransformationDetail } from "./detail.js";
+import type { ReadinessEventTarget } from "../readiness/source.js";
+import {
+  readinessSourceMatches,
+  ReadinessSourceError,
+  ReadinessSourceNotice,
+  useReadinessSourceFocus,
+} from "../readiness/view.js";
 import { TransformationRevisionHistory } from "./revision-history.js";
 import {
   TransformationLifecycleActions,
@@ -111,6 +118,8 @@ type Props = Pick<
   | "accessRecovery"
 > & {
   eventId: string | null;
+  sourceTarget?: ReadinessEventTarget;
+  backLabel?: string;
   timeZone: string;
   canTransform: boolean;
   canManageQa: boolean;
@@ -131,6 +140,8 @@ function quantitySummary(draft: TransformationDraft) {
 
 export function TransformationRecordView({
   eventId,
+  sourceTarget,
+  backLabel,
   timeZone,
   client,
   canTransform,
@@ -150,6 +161,8 @@ export function TransformationRecordView({
   const [draft, setDraft] = useState<TransformationDraft>(emptyDraft);
   const [loading, setLoading] = useState(eventId !== null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [sourceFailed, setSourceFailed] = useState(false);
+  const [sourceRetry, setSourceRetry] = useState(0);
   const [busy, setBusy] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [uncertain, setUncertain] = useState(false);
@@ -278,10 +291,26 @@ export function TransformationRecordView({
   useEffect(() => {
     if (!eventId) return;
     let current = true;
+    setLoading(true);
+    setSourceFailed(false);
     void client
       .getTransformation(eventId)
       .then((record) => {
         if (!current) return;
+        if (sourceTarget) {
+          const lines =
+            "snapshot" in record
+              ? record.snapshot
+              : {
+                  inputs: record.draft.inputs.map((_, index) => ({ lineNo: index + 1 })),
+                  outputs: record.draft.outputs.map((_, index) => ({ lineNo: index + 1 })),
+                };
+          if (!readinessSourceMatches(sourceTarget, record, lines)) {
+            setSourceFailed(true);
+            setLoading(false);
+            return;
+          }
+        }
         revisionRun.current += 1;
         setHistoryReading(false);
         setSavedRecord(record);
@@ -296,13 +325,15 @@ export function TransformationRecordView({
         if (!current) return;
         setLoading(false);
         setLoadFailed(true);
+        if (sourceTarget && error instanceof UsClientError && error.code === "invalid_response")
+          setSourceFailed(true);
         if (error instanceof UsClientError && error.code === "session_required") onSessionLost();
         if (error instanceof UsClientError && error.code === "forbidden") await onForbidden();
       });
     return () => {
       current = false;
     };
-  }, [eventId, client, onForbidden, onSessionLost]);
+  }, [eventId, client, onForbidden, onSessionLost, sourceTarget, sourceRetry]);
   useEffect(() => {
     if (!savedRecord?.lifecycle) return;
     const record = savedRecord;
@@ -758,15 +789,32 @@ export function TransformationRecordView({
     ).map((value) => ({ value, label: t(`transformation.${value}`) })),
   ];
 
+  const sourceRef = useReadinessSourceFocus(sourceTarget, savedRecord?.id);
+  if (sourceFailed)
+    return (
+      <ReadinessSourceError
+        disabled={busy || mutationPending}
+        onRetry={() => setSourceRetry((n) => n + 1)}
+        onBack={close}
+      />
+    );
   if (loading || loadFailed)
     return (
       <div className="us-tr-page">
+        {sourceTarget ? (
+          <Button variant="secondary" disabled={busy || mutationPending} onClick={close}>
+            {backLabel ?? t("events.back")}
+          </Button>
+        ) : null}
         {fallback}
         <p role={loadFailed ? "alert" : "status"}>
           {t(loadFailed ? "transformation.loadError" : "md.stale")}
         </p>
         {loadFailed ? (
-          <Button type="button" onClick={() => void reload()}>
+          <Button
+            type="button"
+            onClick={() => (sourceTarget ? setSourceRetry((n) => n + 1) : void reload())}
+          >
             {t("md.retry")}
           </Button>
         ) : null}
@@ -774,10 +822,13 @@ export function TransformationRecordView({
     );
 
   return (
-    <div className="us-tr-page" aria-busy={busy}>
+    <div ref={sourceRef} className="us-tr-page" aria-busy={busy}>
       <Button type="button" variant="secondary" disabled={busy || mutationPending} onClick={close}>
-        {t("events.back")}
+        {backLabel ?? t("events.back")}
       </Button>
+      {sourceTarget && savedRecord?.id === sourceTarget.eventId ? (
+        <ReadinessSourceNotice target={sourceTarget} />
+      ) : null}
       <header className="us-tr-header">
         <span className="us-tr-kicker">
           {savedRecord

@@ -1,9 +1,11 @@
 # US-08 — Traceability Plan versions and PDF — Design Spec
 
+> Superseded design draft. The owner-approved current design is [2026-10-02-us-08-traceability-plan-current-design.md](2026-10-02-us-08-traceability-plan-current-design.md). The older route, storage and farm-map recommendations below are retained only as design history.
+
 > Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
 
 **Date:** 2026-09-03
-**Status:** Draft for review (not implemented)
+**Status:** Superseded draft (not implemented)
 **Slice:** US-08 from docs/us/implementation-plan.md; depends on US-00 (regulatory profile, baseline, retention value, U.S. capabilities), US-01 (locations, TLC source flag), US-02 (product classification workflow)
 **Requirements:** PLN-001, PLN-002, PLN-003, PLN-004, PLN-005, PLN-006, PLN-007, PLN-008, PLN-009 (P1), PLN-010; contributes evidence to REG-007, REG-009, C-012
 **Related:**

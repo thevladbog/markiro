@@ -1,0 +1,111 @@
+.us-trace-presentation {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  max-width: 100%;
+}
+.us-trace-presentation .mk-btn {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.us-trace-table table {
+  min-width: 1280px;
+}
+.us-trace-table [data-trace-edge-action] {
+  min-width: 260px;
+  overflow-wrap: normal;
+}
+.us-trace-lots,
+.us-trace-event-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+.us-trace-event-actions > div {
+  display: grid;
+  gap: 4px;
+  max-width: 100%;
+}
+.us-trace-event-actions time {
+  color: var(--fg-2);
+  font: var(--text-meta);
+}
+.us-trace-id {
+  display: block;
+  font: var(--text-code);
+  color: var(--fg-2);
+  overflow-wrap: anywhere;
+}
+.us-trace-graph-scroll {
+  overflow: auto;
+  max-height: 640px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-card);
+}
+.us-trace-graph-scroll:focus-visible {
+  outline: 2px solid var(--fg-1);
+  outline-offset: 2px;
+}
+.us-trace-edge path {
+  fill: none;
+  stroke: var(--fg-2);
+  stroke-width: 1.5;
+}
+.us-trace-arrow {
+  fill: var(--fg-2);
+}
+.us-trace-edge text {
+  fill: var(--fg-1);
+  stroke: var(--surface-card);
+  stroke-width: 5px;
+  paint-order: stroke;
+  font: var(--text-code);
+}
+.us-trace-node rect,
+.us-trace-node ellipse,
+.us-trace-node polygon {
+  fill: var(--surface-panel);
+  stroke: var(--fg-2);
+}
+.us-trace-node-material rect {
+  stroke-dasharray: 4 3;
+}
+.us-trace-node text {
+  fill: var(--fg-1);
+  font: var(--text-body-sm);
+}
+.us-trace-node .us-trace-node-reference {
+  font: var(--text-meta);
+  fill: var(--fg-2);
+}
+.us-trace-view,
+.us-trace-current,
+.us-trace-history {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  max-width: 100%;
+}
+.us-trace-controls {
+  display: flex;
+  align-items: end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.us-trace-history {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+.us-trace-history li {
+  display: grid;
+  gap: 8px;
+  margin-block: 16px;
+  overflow-wrap: anywhere;
+}
+.us-trace-view [role="tabpanel"]:focus-visible {
+  outline: 2px solid var(--fg-1);
+  outline-offset: 2px;
+}

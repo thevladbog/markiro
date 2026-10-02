@@ -56,6 +56,21 @@ export type {
 export { UOM_CODES_V1 } from "./traceability/uom.js";
 export { parseTraceabilityQuantity } from "./traceability/quantity.js";
 export {
+  assessFrozenReadiness,
+  FROZEN_READINESS_RULE_VERSION,
+} from "./traceability/readiness-sweep.js";
+export type {
+  ReadinessDependencyFact,
+  ReadinessEventFact,
+  ReadinessLineFact,
+  ReadinessLocationDescriptionFact,
+  ReadinessLotFact,
+  ReadinessProductDescriptionFact,
+  ReadinessRuleFinding,
+  ReadinessRuleInput,
+  ReadinessSourceIdentity,
+} from "./traceability/readiness-sweep.js";
+export {
   computeShippingBalance,
   projectShippingRemaining,
 } from "./traceability/shipping-balance.js";
@@ -434,6 +449,39 @@ export {
   SHIFT_EXPORT_FORMATS,
   ShiftExportDomainError,
 } from "./shift-exports.js";
+export {
+  FDA_SORTABLE_REGISTRY_V1,
+  renderUsExportDictionary,
+  traceExportRegistryHash,
+} from "./traceability/export/registry-v1.js";
+export type {
+  TraceExportField,
+  TraceExportFieldType,
+  TraceExportRequired,
+  TraceExportSheet,
+  TraceExportSheetKey,
+} from "./traceability/export/registry-v1.js";
+export { canonicalExportDigest } from "./traceability/export/canonical.js";
+export { buildUsExportWorkbook } from "./traceability/export/workbook.js";
+export { ExportWorkbookInputError } from "./traceability/export/validation.js";
+export { validateUsPlanApproval } from "./traceability/plan/validation.js";
+export type {
+  UsPlanSections,
+  UsPlanApprovalInput,
+  UsPlanValidationIssue,
+} from "./traceability/plan/model.js";
+export type {
+  ExportArtifactFailure,
+  ExportFinding,
+  ExportWorkbookInput,
+  ExportWorkbookMode,
+  ExportWorkbookResult,
+  WorkbookCell,
+  WorkbookColumn,
+  WorkbookModel,
+  WorkbookRow,
+  WorkbookSheet,
+} from "./traceability/export/workbook.js";
 export type {
   RenderShiftExportInput,
   ShiftExportBoxMode,
@@ -443,3 +491,9 @@ export type {
   ShiftExportPart,
   ShiftExportSource,
 } from "./shift-exports.js";
+export {
+  buildUsPlanSnapshot,
+  changedUsPlanSections,
+  usPlanSnapshotDigest,
+} from "./traceability/plan/snapshot.js";
+export type { UsPlanConfiguredFacts, UsPlanSnapshot } from "./traceability/plan/snapshot.js";

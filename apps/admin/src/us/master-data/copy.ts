@@ -9,9 +9,14 @@ import { receivingConflictCopy } from "../receiving/conflict-copy.js";
 import { eventsCopy } from "../events/copy.js";
 import { transformationCopy } from "../transformation/copy.js";
 import { shippingCopy } from "../shipping/copy.js";
+import { usReadinessCopy } from "../readiness/copy.js";
+import { searchCopy } from "../search/copy.js";
 
 export const masterDataCopy = {
   "en-US": {
+    navigation: { backSearch: "Back to Search", backTrace: "Back to Trace" },
+    usSearch: searchCopy["en-US"],
+    usReadiness: usReadinessCopy["en-US"],
     events: eventsCopy["en-US"],
     transformation: transformationCopy["en-US"],
     shipping: shippingCopy["en-US"],
@@ -140,6 +145,9 @@ export const masterDataCopy = {
     },
   },
   "es-US": {
+    navigation: { backSearch: "Volver a Buscar", backTrace: "Volver a Trazabilidad" },
+    usSearch: searchCopy["es-US"],
+    usReadiness: usReadinessCopy["es-US"],
     events: eventsCopy["es-US"],
     transformation: transformationCopy["es-US"],
     shipping: shippingCopy["es-US"],

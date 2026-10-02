@@ -14,6 +14,13 @@ import { UsClientError, UsShippingConflictError } from "../client.js";
 import type { MasterDataViewProps } from "../master-data/workspace-shared.js";
 import { ReceivingReferencePicker } from "../receiving/reference-picker.js";
 import { ShippingDetail } from "./detail.js";
+import type { ReadinessEventTarget } from "../readiness/source.js";
+import {
+  readinessSourceMatches,
+  ReadinessSourceError,
+  ReadinessSourceNotice,
+  useReadinessSourceFocus,
+} from "../readiness/view.js";
 import { ShippingBalanceRead } from "./balance-read.js";
 import { ShippingReadinessPanel } from "./readiness-panel.js";
 import { ShippingRevisionHistory } from "./revision-history.js";
@@ -62,6 +69,8 @@ type Props = Pick<
   | "accessRecovery"
 > & {
   eventId: string | null;
+  sourceTarget?: ReadinessEventTarget;
+  backLabel?: string;
   timeZone: string;
   canShip: boolean;
   canManageQa: boolean;
@@ -74,6 +83,8 @@ function isDraft(record: ShippingHistoricalRecord | null): record is ShippingDra
 
 export function ShippingRecordView({
   eventId,
+  sourceTarget,
+  backLabel,
   timeZone,
   client,
   canShip,
@@ -91,6 +102,8 @@ export function ShippingRecordView({
   const [draft, setDraft] = useState<ShippingDraft>(emptyDraft);
   const [loading, setLoading] = useState(eventId !== null);
   const [loadFailed, setLoadFailed] = useState(false);
+  const [sourceFailed, setSourceFailed] = useState(false);
+  const [sourceRetry, setSourceRetry] = useState(0);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<string | null>(null);
   const [blocked, setBlocked] = useState(false);
@@ -186,6 +199,18 @@ export function ShippingRecordView({
       .getShipping(eventId)
       .then((result) => {
         if (!active) return;
+        if (sourceTarget) {
+          const items =
+            "snapshot" in result
+              ? result.snapshot.items
+              : result.draft.items.map((_, index) => ({ lineNo: index + 1 }));
+          if (!readinessSourceMatches(sourceTarget, result, { items })) {
+            setSourceFailed(true);
+            setLoading(false);
+            return;
+          }
+        }
+        setSourceFailed(false);
         setRecord(result);
         if (isDraft(result)) setDraft(result.draft);
         setLoading(false);
@@ -195,12 +220,14 @@ export function ShippingRecordView({
         if (!active) return;
         setLoading(false);
         setLoadFailed(true);
+        if (sourceTarget && error instanceof UsClientError && error.code === "invalid_response")
+          setSourceFailed(true);
         await handleAuth(error);
       });
     return () => {
       active = false;
     };
-  }, [eventId, client, handleAuth]);
+  }, [eventId, client, handleAuth, sourceTarget, sourceRetry]);
   useEffect(() => {
     if (!record?.lifecycle) return;
     const selected = record;
@@ -507,20 +534,45 @@ export function ShippingRecordView({
   const quantitySummary =
     draft.items.map((item) => `${item.quantity ?? "—"} ${item.unitOfMeasure ?? "—"}`).join(", ") ||
     "—";
+  const sourceRef = useReadinessSourceFocus(sourceTarget, record?.id);
+  if (sourceFailed)
+    return (
+      <ReadinessSourceError
+        disabled={busy || mutationPending}
+        onRetry={() => {
+          setSourceFailed(false);
+          setLoading(true);
+          setSourceRetry((n) => n + 1);
+        }}
+        onBack={close}
+      />
+    );
   if (loading || loadFailed)
     return (
       <div className="us-sh-page">
+        {sourceTarget ? (
+          <Button variant="secondary" disabled={busy || mutationPending} onClick={close}>
+            {backLabel ?? t("events.back")}
+          </Button>
+        ) : null}
         <p role={loadFailed ? "alert" : "status"}>
           {t(loadFailed ? "shipping.loadError" : "md.stale")}
         </p>
-        {loadFailed ? <Button onClick={() => void reload()}>{t("md.retry")}</Button> : null}
+        {loadFailed ? (
+          <Button onClick={() => (sourceTarget ? setSourceRetry((n) => n + 1) : void reload())}>
+            {t("md.retry")}
+          </Button>
+        ) : null}
       </div>
     );
   return (
-    <div className="us-sh-page" aria-busy={busy}>
+    <div ref={sourceRef} className="us-sh-page" aria-busy={busy}>
       <Button type="button" variant="secondary" disabled={busy || mutationPending} onClick={close}>
-        {t("events.back")}
+        {backLabel ?? t("events.back")}
       </Button>
+      {sourceTarget && record?.id === sourceTarget.eventId ? (
+        <ReadinessSourceNotice target={sourceTarget} />
+      ) : null}
       <header className="us-sh-header">
         <div className="us-sh-header__identity">
           <span>

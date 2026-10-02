@@ -106,7 +106,12 @@ export function ReceivingFinalizedDetail({
             const receiptBasis =
               snapshot.snapshotVersion !== 1 ? snapshot.items[index]?.receiptBasis : null;
             return (
-              <li key={item.lineNo} className="us-rec-section">
+              <li
+                key={item.lineNo}
+                className="us-rec-section"
+                tabIndex={-1}
+                data-readiness-line={`items:${item.lineNo}`}
+              >
                 <h3>
                   {t("receiving.line", { number: item.lineNo })} ·{" "}
                   {item.productDescription.productName}

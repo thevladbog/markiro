@@ -14,6 +14,7 @@ export function LotReferencePicker({
   onChange,
   onSessionLost,
   onForbidden,
+  includeArchived = false,
 }: {
   client: UsBrowserClient;
   kind: "product" | "location";
@@ -23,6 +24,7 @@ export function LotReferencePicker({
   onChange: (id: string) => void;
   onSessionLost: () => void;
   onForbidden: () => Promise<void>;
+  includeArchived?: boolean;
 }) {
   const { t } = useTranslation();
   const [draft, setDraft] = useState("");
@@ -37,11 +39,16 @@ export function LotReferencePicker({
     setPending(true);
     setFailed(false);
     try {
-      const query = { archived: "false", search, limit: 50, offset };
+      const query = { archived: includeArchived ? "all" : "false", search, limit: 50, offset };
       const result =
         kind === "product" ? await client.listProducts(query) : await client.listLocations(query);
       if (run.current !== current) return;
-      setRows(result.items.map((row) => ({ value: row.id, label: row.name })));
+      setRows(
+        result.items.map((row) => ({
+          value: row.id,
+          label: includeArchived ? `${row.name} · ${row.id}` : row.name,
+        })),
+      );
     } catch (error) {
       if (run.current !== current) return;
       setRows([]);
@@ -51,7 +58,7 @@ export function LotReferencePicker({
     } finally {
       if (run.current === current) setPending(false);
     }
-  }, [client, kind, offset, search, onForbidden, onSessionLost]);
+  }, [client, kind, offset, search, onForbidden, onSessionLost, includeArchived]);
   useEffect(() => {
     void load();
     return () => {
@@ -77,6 +84,7 @@ export function LotReferencePicker({
         />
         <Button
           type="button"
+          aria-label={includeArchived ? `${t("md.search")} · ${label}` : undefined}
           variant="secondary"
           disabled={pending || disabled}
           onClick={() => {

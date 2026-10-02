@@ -7,9 +7,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "dev:us": "vite --config vite.us.config.ts --mode development",
+    "dev:us": "node --max-http-header-size=65536 node_modules/vite/bin/vite.js --config vite.us.config.ts --mode development",
     "build:us": "vite build --config vite.us.config.ts --mode development",
-    "preview:us": "vite preview --config vite.us.config.ts --mode development",
+    "preview:us": "node --max-http-header-size=65536 node_modules/vite/bin/vite.js preview --config vite.us.config.ts --mode development",
     "lint": "eslint .",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"

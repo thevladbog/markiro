@@ -8,6 +8,8 @@ import type { ReceivingFrozenView } from "../receiving/live-record.js";
 import { ReceivingView } from "../receiving/view.js";
 import { TransformationRecordView } from "../transformation/editor.js";
 import { ShippingRecordView } from "../shipping/editor.js";
+import type { ReadinessEventTarget } from "../readiness/source.js";
+import { readinessSourceMatches, ReadinessSourceError } from "../readiness/view.js";
 import "./events.css";
 
 type Selected =
@@ -26,6 +28,7 @@ type Props = MasterDataViewProps & {
   canManageQa: boolean;
   canExport: boolean;
   initialReceiving?: ReceivingLiveRecord;
+  initialEvent?: ReadinessEventTarget;
   initialTransformationId?: string;
   onOpenLot: (id: string, record: ReceivingFrozenView) => void;
   onOpenTransformationLot: (id: string) => void;
@@ -110,20 +113,66 @@ export function EventsView(props: Props) {
   const [failure, setFailure] = useState(false);
   const [opening, setOpening] = useState(false);
   const [openFailure, setOpenFailure] = useState(false);
+  const [sourceFailure, setSourceFailure] = useState(false);
+  const [sourceRetry, setSourceRetry] = useState(0);
   const [selected, setSelected] = useState<Selected | null>(
-    props.initialReceiving
-      ? { type: "receiving", id: props.initialReceiving.id, mode: "record" }
-      : props.initialTransformationId
-        ? { type: "transformation", id: props.initialTransformationId }
-        : null,
+    props.initialEvent
+      ? props.initialEvent.type === "receiving"
+        ? null
+        : { type: props.initialEvent.type, id: props.initialEvent.eventId }
+      : props.initialReceiving
+        ? { type: "receiving", id: props.initialReceiving.id, mode: "record" }
+        : props.initialTransformationId
+          ? { type: "transformation", id: props.initialTransformationId }
+          : null,
   );
   const [receivingRecord, setReceivingRecord] = useState<ReceivingLiveRecord | null>(
-    props.initialReceiving ?? null,
+    props.initialEvent ? null : (props.initialReceiving ?? null),
   );
   const [refresh, setRefresh] = useState(0);
   const run = useRef(0);
   const openRun = useRef(0);
   const heading = useRef<HTMLHeadingElement>(null);
+
+  useEffect(() => {
+    const target = props.initialEvent;
+    if (!target || target.type !== "receiving") return;
+    let active = true;
+    setOpening(true);
+    setOpenFailure(false);
+    setSourceFailure(false);
+    void client
+      .getReceivingRecord(target.eventId)
+      .then((record) => {
+        if (!active) return;
+        const items =
+          record.content.kind === "draft"
+            ? record.content.draft.items.map((_, index) => ({ lineNo: index + 1 }))
+            : record.content.kind === "finalized"
+              ? record.content.snapshot.items
+              : [];
+        if (!readinessSourceMatches(target, record, { items })) {
+          setSourceFailure(true);
+          return;
+        }
+        setReceivingRecord(record);
+        setSelected({ type: "receiving", id: target.eventId, mode: "record" });
+      })
+      .catch(async (error: unknown) => {
+        if (!active) return;
+        setOpenFailure(true);
+        if (error instanceof UsClientError && error.code === "invalid_response")
+          setSourceFailure(true);
+        if (error instanceof UsClientError && error.code === "session_required") onSessionLost();
+        if (error instanceof UsClientError && error.code === "forbidden") await onForbidden();
+      })
+      .finally(() => {
+        if (active) setOpening(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [props.initialEvent, client, onForbidden, onSessionLost, sourceRetry]);
 
   const load = useCallback(async () => {
     const current = ++run.current;
@@ -196,10 +245,32 @@ export function EventsView(props: Props) {
     setRefresh((value) => value + 1);
   }
 
+  if (props.initialEvent?.type === "receiving" && !selected)
+    return sourceFailure ? (
+      <ReadinessSourceError
+        onRetry={() => setSourceRetry((n) => n + 1)}
+        onBack={close}
+        disabled={opening || mutationPending}
+      />
+    ) : (
+      <div>
+        <Button variant="secondary" disabled={mutationPending} onClick={close}>
+          {props.backLabel ?? t("events.back")}
+        </Button>
+        <p role={openFailure ? "alert" : "status"}>
+          {t(openFailure ? "events.openError" : "md.stale")}
+        </p>
+        {openFailure ? (
+          <Button onClick={() => setSourceRetry((n) => n + 1)}>{t("md.retry")}</Button>
+        ) : null}
+      </div>
+    );
+
   if (selected?.type === "receiving")
     return (
       <ReceivingView
         {...props}
+        {...(props.initialEvent ? { sourceTarget: props.initialEvent } : {})}
         key={`${selected.mode}/${selected.id ?? "new"}`}
         {...(selected.mode === "record" && receivingRecord
           ? { initialRecord: receivingRecord }
@@ -214,6 +285,7 @@ export function EventsView(props: Props) {
     return (
       <TransformationRecordView
         {...props}
+        {...(props.initialEvent ? { sourceTarget: props.initialEvent } : {})}
         onOpenLot={props.onOpenTransformationLot}
         key={selected.id ?? "new"}
         eventId={selected.id}
@@ -227,6 +299,7 @@ export function EventsView(props: Props) {
     return (
       <ShippingRecordView
         {...props}
+        {...(props.initialEvent ? { sourceTarget: props.initialEvent } : {})}
         key={selected.id ?? "new"}
         eventId={selected.id}
         onClose={close}
@@ -314,6 +387,11 @@ export function EventsView(props: Props) {
   ];
   return (
     <div className="us-events-page" aria-busy={pending || opening}>
+      {props.onEntryBack ? (
+        <Button variant="secondary" disabled={mutationPending} onClick={close}>
+          {props.backLabel ?? t("events.back")}
+        </Button>
+      ) : null}
       <header className="us-md-page-header">
         <div>
           <h1 ref={heading} tabIndex={-1}>

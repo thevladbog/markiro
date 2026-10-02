@@ -99,6 +99,23 @@ import {
   caseLinkResultSchema,
   caseUnlinkCommandSchema,
   caseUnlinkResultSchema,
+  usReadinessQuerySchema,
+  usReadinessResultSchema,
+  type UsReadinessResult,
+  usTraceSearchQuerySchema,
+  usTraceSearchPageSchema,
+  usLotCardSchema,
+  usLotCardEvidenceQuerySchema,
+  usLotCardEvidencePageSchema,
+  usCurrentTraceQuerySchema,
+  usCurrentTraceResultSchema,
+  usTraceHistoryQuerySchema,
+  usTraceHistoryPageSchema,
+  type UsTraceSearchPage,
+  type UsLotCard,
+  type UsLotCardEvidencePage,
+  type UsCurrentTraceResult,
+  type UsTraceHistoryPage,
 } from "@markiro/platform-contracts";
 import {
   matchesReceivingCreateAcknowledgement,
@@ -133,6 +150,10 @@ export type UsClientErrorCode =
   | "case_link_conflict"
   | "case_origin_not_current"
   | "case_link_stale"
+  | "readiness_scope_too_large"
+  | "readiness_scope_not_found"
+  | "readiness_invalid_scope"
+  | "trace_lot_not_found"
   | "invalid_input"
   | "invalid_response"
   | "session_required"
@@ -284,8 +305,10 @@ const partiesPath = "/api/us/traceability/parties";
 const locationsPath = "/api/us/traceability/locations";
 const productsPath = "/api/us/traceability/catalog/products";
 const lotsPath = "/api/us/traceability/lots";
+const searchPath = "/api/us/traceability/search";
 const receivingPath = "/api/us/traceability/receiving";
 const eventsPath = "/api/us/traceability/events";
+const readinessPath = "/api/us/traceability/readiness";
 const transformationPath = "/api/us/traceability/transformation";
 const shippingPath = "/api/us/traceability/shipments";
 const casesPath = "/api/us/traceability/lots";
@@ -420,6 +443,28 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
         if (response.ok) throw new UsClientError("invalid_response");
       }
       if (!response.ok) {
+        const pathname = new URL(path, "http://localhost").pathname;
+        const traceLotReadPath =
+          method === "GET" &&
+          new RegExp(`^${lotsPath}/${uuidPath}/(?:card(?:/evidence)?|trace(?:/history)?)$`).test(
+            pathname,
+          );
+        const traceReadPath = traceLotReadPath || (method === "GET" && pathname === searchPath);
+        if (response.status === 400 && traceReadPath) throw new UsClientError("invalid_input");
+        if (response.status === 404 && traceLotReadPath)
+          throw new UsClientError("trace_lot_not_found");
+        if (path === readinessPath || path.startsWith(`${readinessPath}?`)) {
+          if (response.status === 400) throw new UsClientError("readiness_invalid_scope");
+          if (response.status === 404) throw new UsClientError("readiness_scope_not_found");
+          if (
+            response.status === 503 &&
+            z
+              .object({ code: z.literal("us_readiness_scope_too_large") })
+              .strict()
+              .safeParse(value).success
+          )
+            throw new UsClientError("readiness_scope_too_large");
+        }
         if (shippingErrorRoute.test(path) && [404, 409].includes(response.status)) {
           if (response.status === 404) {
             const missing = z
@@ -601,6 +646,79 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
     }
   }
   return {
+    async searchTraceLots(input: unknown = {}): Promise<UsTraceSearchPage> {
+      const query = checked(usTraceSearchQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams({ limit: String(query.limit) });
+      for (const key of [
+        "q",
+        "tlc",
+        "tlcFrom",
+        "tlcTo",
+        "lotId",
+        "productId",
+        "productText",
+        "sourceLocationId",
+        "sourceReferenceValue",
+        "eventType",
+        "eventDateFrom",
+        "eventDateTo",
+        "locationId",
+        "documentType",
+        "documentNumber",
+        "sscc",
+        "status",
+        "cursor",
+      ] as const) {
+        const value = query[key];
+        if (value !== undefined) params.set(key, value);
+      }
+      if (query.tlcList !== null) params.set("tlcList", JSON.stringify(query.tlcList));
+      return request(`${searchPath}?${params}`, usTraceSearchPageSchema);
+    },
+    async getLotCard(id: unknown): Promise<UsLotCard> {
+      const lotId = checked(platformUuidSchema, id, "invalid_input");
+      const result = await request(`${lotsPath}/${lotId}/card`, usLotCardSchema);
+      if (result.lot.id !== lotId) throw new UsClientError("invalid_response");
+      return result;
+    },
+    async listLotCardEvidence(id: unknown, input: unknown = {}): Promise<UsLotCardEvidencePage> {
+      const lotId = checked(platformUuidSchema, id, "invalid_input");
+      const query = checked(usLotCardEvidenceQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams({ limit: String(query.limit) });
+      if (query.cursor !== undefined) params.set("cursor", query.cursor);
+      return request(`${lotsPath}/${lotId}/card/evidence?${params}`, usLotCardEvidencePageSchema);
+    },
+    async readCurrentTrace(id: unknown, input: unknown = {}): Promise<UsCurrentTraceResult> {
+      const lotId = checked(platformUuidSchema, id, "invalid_input");
+      const query = checked(usCurrentTraceQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams({
+        direction: query.direction,
+        maxDepth: String(query.maxDepth),
+        maxNodes: String(query.maxNodes),
+      });
+      const result = await request(
+        `${lotsPath}/${lotId}/trace?${params}`,
+        usCurrentTraceResultSchema,
+      );
+      if (result.rootLotId !== lotId) throw new UsClientError("invalid_response");
+      return result;
+    },
+    async listTraceHistory(id: unknown, input: unknown = {}): Promise<UsTraceHistoryPage> {
+      const lotId = checked(platformUuidSchema, id, "invalid_input");
+      const query = checked(usTraceHistoryQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams({ limit: String(query.limit) });
+      if (query.cursor !== undefined) params.set("cursor", query.cursor);
+      return request(`${lotsPath}/${lotId}/trace/history?${params}`, usTraceHistoryPageSchema);
+    },
+    async readReadiness(input: unknown = {}): Promise<UsReadinessResult> {
+      const query = checked(usReadinessQuerySchema, input, "invalid_input");
+      const params = new URLSearchParams();
+      for (const key of ["eventDateFrom", "eventDateTo", "productId", "lotId"] as const) {
+        const value = query[key];
+        if (value !== undefined) params.set(key, value);
+      }
+      return request(`${readinessPath}${params.size ? `?${params}` : ""}`, usReadinessResultSchema);
+    },
     async listEvents(input: unknown = {}) {
       const query = checked(usEventListQuerySchema, input, "invalid_input");
       const params = new URLSearchParams({

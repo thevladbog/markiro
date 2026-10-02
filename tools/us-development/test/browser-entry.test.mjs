@@ -5,6 +5,247 @@ import { load } from "js-yaml";
 
 const path = "apps/admin/vite.us.config.ts";
 
+test("US CI owns readiness rules, strict contract and disposable-DB HTTP coverage", () => {
+  const workflow = load(readFileSync(".github/workflows/us-development.yml", "utf8"));
+  assert.deepEqual(Object.keys(workflow.jobs), ["isolation"]);
+  assert.deepEqual(workflow.permissions, { contents: "read" });
+  const job = workflow.jobs.isolation;
+  assert.equal(job.environment, undefined);
+  for (const suite of [
+    "readiness-sweep.test.ts",
+    "us-readiness-sweep.test.ts",
+    "us-readiness-query.test.ts",
+    "us-readiness-evidence.e2e.test.ts",
+    "us-readiness-assessment.e2e.test.ts",
+    "us-readiness-http.e2e.test.ts",
+    "us-readiness-client.test.ts",
+    "us-readiness-view.test.tsx",
+    "us-readiness-picker.test.tsx",
+    "us-readiness-navigation.test.tsx",
+  ]) {
+    const step = job.steps.find((entry) => entry.run?.includes(`test/${suite}`));
+    assert.ok(step, suite);
+    assert.equal(step.if, undefined);
+    if (suite.includes(".e2e.")) {
+      const url = new URL(step.env.US_TEST_DATABASE_URL);
+      assert.equal(url.hostname, "127.0.0.1");
+      assert.equal(url.port, "55432");
+      assert.equal(url.pathname, "/markiro_us_dev");
+      assert.equal(step.env.DATABASE_URL, undefined);
+    }
+  }
+  assert.doesNotMatch(
+    JSON.stringify(workflow),
+    /secrets\.|docker push|gh workflow run|packages:write/,
+  );
+});
+
+test("US readiness dev/preview proxy accepts only exact GET with four unique approved keys", async () => {
+  const { createUsAdminConfig } = await import("../../../apps/admin/vite.us.config.ts");
+  const config = createUsAdminConfig({ VITE_DEPLOYMENT_EDITION: "US" }, "test");
+  const id = "a0000000-0000-4000-8000-000000000001";
+  const route = "/api/us/traceability/readiness";
+  const accepted = [
+    route,
+    `${route}?lotId=${id}`,
+    `${route}?productId=${id}`,
+    `${route}?eventDateFrom=2026-09-01&eventDateTo=2026-09-28`,
+    `${route}?productId=${id}&eventDateTo=2026-09-28&lotId=${id}&eventDateFrom=2026-09-01`,
+  ];
+  const rejected = [
+    `${route}/`,
+    `${route}/extra`,
+    `${route}?`,
+    `${route}?tenantId=${id}`,
+    `${route}?profileCode=US_GENERIC_LOT_TRACEABILITY`,
+    `${route}?limit=10`,
+    `${route}?lotId=invalid`,
+    `${route}?productId=invalid`,
+    `${route}?lotId[]=x`,
+    `${route}?lotId=${id}&lotId=${id}`,
+    `${route}?lotId=${id}&%6cotId=${id}`,
+    `${route}?eventDateFrom=2026-09-01&eventDateTo=2026-09-28&eventDateFrom=2026-09-01`,
+    `${route}?eventDateFrom=2026-09-01&%65ventDateFrom=2026-09-01`,
+    `${route}?eventDateFrom=2026-9-1&eventDateTo=2026-09-28`,
+    `${route}?eventDateFrom=2026-09-01T00%3A00%3A00Z&eventDateTo=2026-09-28`,
+    route.replace("/api/us/", "/api/"),
+    route.replace("readiness", "Readiness"),
+    "/api/boxes",
+    "/api/us/boxes",
+  ];
+  for (const surface of [config.server, config.preview]) {
+    const entries = Object.entries(surface.proxy);
+    for (const url of accepted) {
+      const entry = entries.find(([pattern]) => new RegExp(pattern).test(url));
+      assert.ok(entry, url);
+      assert.equal(entry[1].target, "http://localhost:3100");
+      assert.equal(entry[1].changeOrigin, true);
+      assert.equal(entry[1].rewrite(url), url.replace(/^\/api\/us/, ""));
+    }
+    for (const url of rejected)
+      assert.equal(
+        entries.some(([pattern]) => new RegExp(pattern).test(url)),
+        false,
+        url,
+      );
+  }
+  const guard = config.plugins.find((plugin) => plugin.name === "us-api-allowlist");
+  for (const hook of ["configureServer", "configurePreviewServer"]) {
+    let middleware;
+    guard[hook]({
+      middlewares: {
+        use(handler) {
+          middleware = handler;
+        },
+      },
+    });
+    for (const [method, url, allowed] of [
+      ...accepted.map((url) => ["GET", url, true]),
+      ...rejected.map((url) => ["GET", url, false]),
+      ...["POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"].flatMap((method) =>
+        accepted.map((url) => [method, url, false]),
+      ),
+    ]) {
+      let next = false,
+        status;
+      middleware(
+        { method, url },
+        {
+          writeHead(value, headers) {
+            status = value;
+            assert.equal(headers["Cache-Control"], "no-store");
+          },
+          end() {},
+        },
+        () => {
+          next = true;
+        },
+      );
+      assert.equal(next, allowed, `${method} ${url}`);
+      assert.equal(status, allowed ? undefined : 404);
+    }
+  }
+});
+
+test("US CI owns search and card suites on disposable PostgreSQL without publication", () => {
+  const workflow = load(readFileSync(".github/workflows/us-development.yml", "utf8"));
+  assert.deepEqual(Object.keys(workflow.jobs), ["isolation"]);
+  assert.deepEqual(workflow.permissions, { contents: "read" });
+  const job = workflow.jobs.isolation;
+  assert.equal(job.environment, undefined);
+  for (const suite of [
+    "us-search-lot-card.test.ts",
+    "us-trace-search-query.test.ts",
+    "us-trace-search.e2e.test.ts",
+    "us-lot-card.e2e.test.ts",
+    "us-search-lot-card-http.e2e.test.ts",
+  ]) {
+    const step = job.steps.find((entry) => entry.run?.includes(`test/${suite}`));
+    assert.ok(step, suite);
+    assert.equal(step.if, undefined);
+    if (suite.includes(".e2e.")) assert.equal(new URL(step.env.US_TEST_DATABASE_URL).port, "55432");
+  }
+  assert.doesNotMatch(
+    JSON.stringify(workflow),
+    /secrets\.|docker push|gh workflow run|packages:write/,
+  );
+  const transport = job.steps.findIndex((step) =>
+    step.run?.includes("test/search-transport.smoke.mjs"),
+  );
+  const build = job.steps.findIndex((step) => step.run === "pnpm --filter @markiro/admin build:us");
+  assert.ok(transport > build, "dev/preview transport must run against the built US entry");
+  assert.equal(job.steps[transport].if, undefined);
+});
+
+test("US search/card proxy allows only bounded exact GET paths and query keys", async () => {
+  const { createUsAdminConfig } = await import("../../../apps/admin/vite.us.config.ts");
+  const config = createUsAdminConfig({ VITE_DEPLOYMENT_EDITION: "US" }, "test");
+  const id = "a0000000-0000-4000-8000-000000000001";
+  const search = "/api/us/traceability/search";
+  const card = `/api/us/traceability/lots/${id}/card`;
+  const accepted = [
+    search,
+    `${search}?limit=100&cursor=abc_-`,
+    `${search}?tlcList=${encodeURIComponent(JSON.stringify(["ABC", "Два"]))}`,
+    `${search}?q=ABC&tlc=ABC&tlcFrom=A&tlcTo=Z&productText=Food`,
+    `${search}?lotId=${id}&productId=${id}&sourceLocationId=${id}&locationId=${id}`,
+    `${search}?eventType=receiving&eventDateFrom=2026-01-01&eventDateTo=2026-09-27&status=active`,
+    `${search}?sourceReferenceValue=https%3A%2F%2Fexample.test&documentType=other&documentNumber=A%2F1&sscc=000123456789012343`,
+    card,
+    `${card}/evidence`,
+    `${card}/evidence?limit=50&cursor=abc_-`,
+  ];
+  const rejected = [
+    `${search}/extra`,
+    `${search}?tenantId=x`,
+    `${search}?limit=101`,
+    `${search}?limit=1&limit=2`,
+    `${search}?limit=1&%6cimit=2`,
+    `${search}?tlcList=A&tlcList=B`,
+    `${search}?cursor=a&cursor=b`,
+    `${search}?lotId=invalid`,
+    `${card}?limit=1`,
+    `${card}/extra`,
+    card.replace(id, "invalid"),
+    `${card}/evidence?limit=51`,
+    `${card}/evidence?tenantId=x`,
+    `${card}/evidence?cursor=a&cursor=b`,
+    "/api/traceability/search",
+    "/api/us/boxes",
+  ];
+  const entries = Object.entries(config.server.proxy);
+  for (const status of ["active", "consumed", "shipped", "quarantined", "recalled", "archived"]) {
+    accepted.push(`${search}?status=${status}`);
+  }
+  for (const url of accepted) {
+    const route = entries.find(([pattern]) => new RegExp(pattern).test(url));
+    assert.ok(route, url);
+    assert.equal(route[1].target, "http://localhost:3100");
+    assert.equal(route[1].rewrite(url), url.replace(/^\/api\/us/, ""));
+  }
+  for (const url of rejected)
+    assert.equal(
+      entries.some(([pattern]) => new RegExp(pattern).test(url)),
+      false,
+      url,
+    );
+  const guard = config.plugins.find((plugin) => plugin.name === "us-api-allowlist");
+  for (const hook of ["configureServer", "configurePreviewServer"]) {
+    let middleware;
+    guard[hook]({
+      middlewares: {
+        use: (handler) => {
+          middleware = handler;
+        },
+      },
+    });
+    for (const [method, url, allowed] of [
+      ...accepted.map((url) => ["GET", url, true]),
+      ...rejected.map((url) => ["GET", url, false]),
+      ...["POST", "PUT", "PATCH", "DELETE", "HEAD"].flatMap((method) =>
+        accepted.map((url) => [method, url, false]),
+      ),
+    ]) {
+      let next = false,
+        status;
+      middleware(
+        { method, url },
+        {
+          writeHead: (value) => {
+            status = value;
+          },
+          end() {},
+        },
+        () => {
+          next = true;
+        },
+      );
+      assert.equal(next, allowed, `${method} ${url}`);
+      assert.equal(status, allowed ? undefined : 404);
+    }
+  }
+});
+
 test("Receiving read-only observer recognizes only a strict bounded genealogy POST", async () => {
   const { isBoundedGenealogyRead } = await import("./genealogy-read-observer.mjs");
   const base = "http://localhost:5174/api/us/traceability";

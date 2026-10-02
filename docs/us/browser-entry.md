@@ -31,6 +31,8 @@ VITE_DEPLOYMENT_EDITION=US pnpm --filter @markiro/admin build:us
 
 The build command creates optimized assets for local validation, not an authorized deployment. See [development isolation](development-isolation.md) for the separate API/dependency setup. Auth requires an explicitly initialized isolated database and owner; this increment did not initialize or provision the base `markiro_us_dev` database.
 
+The US search API accepts an 8 KiB JSON TLC list, whose URL encoding can exceed Node's default 16 KiB HTTP header envelope. The isolated API creates its HTTP server with a finite 64 KiB envelope; the US admin `dev:us` and `preview:us` commands apply the same Node launch limit. Use these commands for local transport validation. Direct Vite invocation keeps Node's default. RU commands and global `NODE_OPTIONS` are unchanged. Query schemas retain their existing bounds, including the 8 KiB decoded list limit. The 64 KiB envelope includes the request line and headers/cookies; oversized aggregate HTTP messages can still be rejected before route validation. This is a local transport setting, not a hosted reverse-proxy or deployment guarantee.
+
 ## Verification
 
 - Focused client/component tests: 36 passed, including timeout, session loss, cross-account cleanup, duplicate actions, stale responses and serialized logout. Tests were added before the corresponding implementation/fixes.

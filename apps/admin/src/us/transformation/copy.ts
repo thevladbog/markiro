@@ -198,7 +198,7 @@ export const transformationCopy = {
     noCases: "Finalization creates output lots; it does not link Cases.",
     noCasesAmendment: "Finalization updates the current revision; it does not link Cases.",
     invalid: "Check the highlighted draft fields.",
-    loadError: "Current Transformation could not be loaded.",
+    loadError: "Transformation record could not be loaded.",
   },
   "es-US": {
     detail: {
@@ -406,6 +406,6 @@ export const transformationCopy = {
     noCases: "La finalización crea lotes de salida; no vincula cajas.",
     noCasesAmendment: "La finalización actualiza la revisión vigente; no vincula cajas.",
     invalid: "Revise los campos señalados del borrador.",
-    loadError: "No se pudo cargar la transformación actual.",
+    loadError: "No se pudo cargar el registro de transformación.",
   },
 } as const;

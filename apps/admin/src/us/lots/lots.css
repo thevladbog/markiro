@@ -3,6 +3,14 @@
   gap: 20px;
   min-width: 0;
 }
+.us-lot-card .us-lot-facts,
+.us-lot-card .us-lot-actions {
+  margin-top: 20px;
+}
+.us-lot-card .mk-btn {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .us-lot-page > .mk-btn {
   justify-self: start;
 }
@@ -105,7 +113,8 @@
   font: var(--text-body-sm);
   color: var(--fg-2);
 }
-.us-lot-basis .mk-btn {
+.us-lot-basis .mk-btn,
+.us-lot-card .mk-btn {
   white-space: normal;
   overflow-wrap: anywhere;
   min-width: 0;

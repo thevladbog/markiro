@@ -191,7 +191,7 @@ export function ShippingDetail({
         {frozen ? (
           <ol className="us-sh-lines">
             {frozen.items.map((line) => (
-              <li key={line.lineNo}>
+              <li key={line.lineNo} tabIndex={-1} data-readiness-line={`items:${line.lineNo}`}>
                 <div className="us-sh-line-identity">
                   <strong className="us-sh-mono">{line.tlc}</strong>
                   <span>{line.product.description.productName}</span>

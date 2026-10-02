@@ -29,4 +29,5 @@ export * from "./schema/traceability-shipping-roots.js";
 export * from "./schema/traceability-shipping-events.js";
 export * from "./schema/traceability-receiving-csv.js";
 export * from "./schema/traceability-case-bridge.js";
+export * from "./schema/traceability-plans.js";
 export * from "./schema/us-auth.js";

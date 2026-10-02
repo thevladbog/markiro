@@ -116,7 +116,7 @@ export function TransformationDetail({
             <h2>{t("transformation.inputs")}</h2>
             <ol className="us-tr-detail__lines">
               {frozen.inputs.map((row) => (
-                <li key={row.lineNo}>
+                <li key={row.lineNo} tabIndex={-1} data-readiness-line={`inputs:${row.lineNo}`}>
                   <span>{row.product.description}</span>
                   {row.kind === "ftl_lot" ? (
                     <span className="us-tr-mono">
@@ -141,7 +141,7 @@ export function TransformationDetail({
             <h2>{t("transformation.outputs")}</h2>
             <ol className="us-tr-detail__lines">
               {frozen.outputs.map((row) => (
-                <li key={row.lotId}>
+                <li key={row.lotId} tabIndex={-1} data-readiness-line={`outputs:${row.lineNo}`}>
                   <span>{row.product.description}</span>
                   <Button
                     type="button"
@@ -231,7 +231,7 @@ export function TransformationDetail({
             <h2>{t("transformation.inputs")}</h2>
             <ol className="us-tr-detail__lines">
               {saved.inputs.map((row, index) => (
-                <li key={index}>
+                <li key={index} tabIndex={-1} data-readiness-line={`inputs:${index + 1}`}>
                   <span className="us-tr-mono">
                     {row.kind === "ftl_lot" ? row.lotId : row.productId}
                   </span>
@@ -247,7 +247,7 @@ export function TransformationDetail({
             <h2>{t("transformation.outputs")}</h2>
             <ol className="us-tr-detail__lines">
               {saved.outputs.map((row, index) => (
-                <li key={index}>
+                <li key={index} tabIndex={-1} data-readiness-line={`outputs:${index + 1}`}>
                   <span className="us-tr-mono">{row.tlc}</span>
                   <span className="us-tr-mono">{row.productId}</span>
                   <strong className="us-tr-mono">

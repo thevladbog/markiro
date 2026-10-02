@@ -442,7 +442,7 @@ it("applies server filters and opens the existing blank Receiving editor", async
     ).toBe(true),
   );
   await user.type(screen.getByLabelText("Search event number"), "REC");
-  await user.click(screen.getByRole("button", { name: "Search" }));
+  await user.click(within(screen.getByRole("main")).getByRole("button", { name: "Search" }));
   await waitFor(() =>
     expect(send.mock.calls.some(([url]) => String(url).includes("search=REC"))).toBe(true),
   );

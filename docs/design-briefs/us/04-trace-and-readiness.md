@@ -1,6 +1,6 @@
 # U.S. Design Brief 04 — Search, Lot Card, Trace Graph and Readiness
 
-> Revised 2026-09-27 to match the [current US-06 design](../../superpowers/specs/2026-09-27-us-06-current-trace-search-readiness-design.md) and the [shared MVP contract](../../us/mvp-contract.md). Design only; implementation is not claimed.
+> Revised 2026-09-28 to match the [current US-06 design](../../superpowers/specs/2026-09-27-us-06-current-trace-search-readiness-design.md), the [Search/Trace office design](../../superpowers/specs/2026-09-28-us-06-search-trace-office-design.md), the [detailed Readiness design](../../superpowers/specs/2026-09-28-us-06-readiness-server-design.md) and the [shared MVP contract](../../us/mvp-contract.md). Design only; implementation is not claimed.
 
 > Fourth brief of the U.S. series. Office mode, desktop-first 1440px, adaptive down to 1024.
 > Users: the QA / Traceability Manager (runs traces, watches readiness), the Auditor / Read-only
@@ -46,14 +46,14 @@ measured and reported in P0, not a P0 gate. Below: a filter row — product, TLC
 range** with the visible note "text order (A–Z), not numeric", date range, CTE type, location,
 reference type + number, SSCC, lot status.
 
-Results are lot rows: TLC (mono), product snapshot summary, source, status chip, chain counts
-(Receiving 1 · Transformation 1 · Shipping 1), first / last event date, "matched by" chips
+Results are lot rows: TLC (mono), product ID and optional **current** catalog name, source,
+status chip, current CTE total, first / last event date, "matched by" chips
 (TLC, reference, SSCC, product, location, date). Equal TLCs show their distinct sources in
 the result rows. An SSCC hit names current or historical link status, timestamps and synthetic
 or existing-record provenance; it never implies a physical scan or pack. Row click opens the
-lot card. Header action
-"Create trace request from these results" (QA capability) hands the applied filters to brief
-05 as a scope summary — no second search there.
+lot card. The frozen product description and per-event CTE detail are on the card, not inferred
+from this search response. The future "Create trace request from these results" action belongs
+to US-09; do not render an inactive control in US-06.
 
 Demo: `NRF-260915-APL01` → one hit, matched by TLC; product "Fresh-Cut Red Delicious Apple
 Slices" → `OSS-260914-A1`, `OSS-260914-A2`; `BOL-0916-H` → `NRF-260915-APL01` matched by
@@ -84,7 +84,7 @@ forward**, Change status (reason required), Link cases (P0 server-side only).
 | CTE timeline | Current finalized entries: date, type, event number, revision, location and exact line quantity; an adjacent expandable history lists draft/amended/void revisions with reason      |
 | Documents    | Type, number as snapshotted, event, link                                                                                                                                            |
 | Cases        | Active link count and SSCC rows; synthetic demo / existing record provenance, manual / demo seed link origin, audited history and unlink reason (P0 server-side; no Station action) |
-| Findings     | Completeness findings for this lot: severity chip with text, field, message, deep link; "No gaps found" when clean                                                                  |
+| Findings     | Readiness findings for this lot in the **displayed server period**: severity chip with text, field, message, deep link; "No findings in this period" when clean                     |
 | Genealogy    | Inputs and outputs as lot links (2 inputs for the demo output; 1 output for each input)                                                                                             |
 
 Demo: `NRF-260915-APL01` — Transformation, source North River Fresh Foods LLC (Portland, OR),
@@ -101,7 +101,8 @@ generic-profile variant (Scenario B banner, "lot source" instead of "TLC source"
 
 ### 3. Trace view
 
-Trace detail inside the U.S. workspace. Controls: direction segmented
+Trace detail inside the U.S. workspace. Entering from the sidebar starts with a lot selector;
+entering from a lot card uses that exact lot. Controls: direction segmented
 control **Backward | Forward | Both** (text labels) and depth (default 16). No draft toggle
 alters the current graph; drafts are available only in Excluded/history. A metric strip — nodes,
 edges, excluded — sits
@@ -138,21 +139,26 @@ U.S. workspace view `Traceability → Readiness`. Metric strip: **Data readiness
 checked, errors, warnings and infos — **no percentage or score in P0**. Scope line "last 24 months"
 with a date window, product and lot filters. Group-by select **CTE | Product | Severity** in
 P0; a grouped table with severity chip (text), CTE, product, field, message
-and a record link (event number + revision, or lot TLC) — every gap deep-links to the event
-or lot it belongs to. An info alert states that coverage status remains a manual review.
+and a record link (event number + revision, or lot TLC). Event-wide findings link to their event
+without a lot; Transformation non-FTL inputs link to the event and show input line number without
+inventing a lot or line UUID. Lot-only findings link to the lot without inventing an event.
+The displayed counts cover current finalized records in the selected scope;
+older origins checked as dependencies are identified separately, not added to that count. An
+empty scope is distinct from “No findings in the displayed scope.” An info alert states that
+coverage status remains a manual review.
 
 **Overdue classification reviews (P1)** — a group "Product reviews due" from the review due
 date, each row linking to the product FTL card. **TLC / source consistency findings** appear
 in the same table with the presentation of screen 5.
 
-Demo (the acceptance screenshot): 0 errors, 0 warnings across 3 events and 3 lots — "0 required
-elements missing". A second mock: `REC-26-0001` rev 1 · Line 2 · "TLC source location or
-reference is missing" (error); lot `OSS-260914-A3` · "created by a void event" (warning);
+Demo clean-state mock: server-derived event and lot counts, 0 errors, 0 warnings — “No findings
+in the displayed scope.” A second mock: `REC-26-0001` rev 1 · Line 2 · “TLC source location or
+reference is missing” (error); lot `OSS-260914-A3` · “No current origin after void” (error);
 product Fresh-Cut Apple Snack Cups · "coverage status unknown — review required" (error).
 
 States to draw: empty ("Nothing to check yet" when there are no lots); no gaps in the displayed
 scope; findings grouped by each P0 group-by; filtered to one product; date window changed; loading
-("Checking 3 events, 3 lots…"); error with retry; generic-profile variant (Scenario B banner,
+(“Checking records in the selected scope…”); error with retry; generic-profile variant (Scenario B banner,
 FTL rules absent); P1 partner group present.
 
 ### 5. Consistency-rule finding

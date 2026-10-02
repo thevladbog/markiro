@@ -622,6 +622,41 @@ export {
 } from "./traceability/current-trace.js";
 export type { UsCurrentTraceResult, UsTraceHistoryPage } from "./traceability/current-trace.js";
 export {
+  usReadinessQuerySchema,
+  usReadinessScopeSchema,
+  usReadinessFindingSchema,
+  usReadinessDraftRefSchema,
+  usReadinessResultSchema,
+} from "./traceability/readiness-sweep.js";
+export type {
+  UsProfileCode,
+  UsReadinessQuery,
+  UsReadinessScope,
+  UsReadinessFinding,
+  UsReadinessDraftRef,
+  UsReadinessResult,
+} from "./traceability/readiness-sweep.js";
+export {
+  usTraceSearchQuerySchema,
+  usTraceSearchCursorSchema,
+  usTraceSearchAppliedFiltersSchema,
+  usTraceSearchSsccLinkSchema,
+  usTraceSearchHitSchema,
+  usTraceSearchPageSchema,
+  usLotCardEvidenceQuerySchema,
+  usLotCardEvidenceCursorSchema,
+  usLotCardSchema,
+  usLotCardEvidenceItemSchema,
+  usLotCardEvidencePageSchema,
+} from "./traceability/search-lot-card.js";
+export type {
+  UsTraceSearchQuery,
+  UsTraceSearchPage,
+  UsLotCardEvidenceQuery,
+  UsLotCard,
+  UsLotCardEvidencePage,
+} from "./traceability/search-lot-card.js";
+export {
   transformationGenealogyRequestSchema,
   transformationGenealogyResultSchema,
 } from "./traceability/transformation-genealogy.js";
@@ -762,3 +797,22 @@ export type {
   CaseListResult,
   CaseLookupResult,
 } from "./traceability/case-bridge.js";
+export {
+  usExportInputV1Schema,
+  usExportBuildIdentitySchema,
+  type ExportInputV1,
+  type ExportSourceRecord,
+  type ExportFinding,
+  type EventPin,
+  type ExportMode,
+  type ExportMetadataV1,
+  type UsExportBuildIdentity,
+} from "./traceability/export-core.js";
+export {
+  usPlanSectionsSchema,
+  usPlanDraftSaveBodySchema,
+  usPlanApproveBodySchema,
+  type UsPlanSectionsBody,
+  type UsPlanDraftSaveBody,
+  type UsPlanApproveBody,
+} from "./traceability/plans.js";
