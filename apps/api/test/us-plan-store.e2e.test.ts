@@ -143,17 +143,24 @@ describe.skipIf(!url)("US plan internal drafts in disposable PostgreSQL", () => 
     });
     const before = await audits();
     const staleAudit = before.find((audit) => audit.requestId === "stale");
-    expect(staleAudit).toMatchObject({
+    expect(staleAudit).toEqual({
+      id: expect.any(String),
+      createdAt: expect.any(Date),
       organizationId: tenant,
       actorUserId: actor,
       action: "traceability.plan.draft_updated",
       outcome: "conflict",
       targetType: "traceability_plan_version",
       targetId: draft.id,
+      requestId: "stale",
       before: null,
-      after: { code: "us_plan_revision_conflict" },
+      after: {
+        code: "us_plan_revision_conflict",
+        expectedRevision: 1,
+        versionNumber: 1,
+        draftRevision: 2,
+      },
     });
-    expect(staleAudit?.after).toEqual({ code: "us_plan_revision_conflict" });
     expect(
       await store.saveDraft(tenant, actor, draft.id, { ...save, expectedRevision: 2 }, "noop"),
     ).toEqual(current);
@@ -258,6 +265,25 @@ describe.skipIf(!url)("US plan internal drafts in disposable PostgreSQL", () => 
     await expect(
       store.discardDraft(tenant, actor, draft.id, { expectedRevision: 2 }, "stale"),
     ).rejects.toMatchObject({ response: { code: "us_plan_revision_conflict" } });
+    const staleAudit = (await audits()).find((audit) => audit.requestId === "stale");
+    expect(staleAudit).toEqual({
+      id: expect.any(String),
+      createdAt: expect.any(Date),
+      organizationId: tenant,
+      actorUserId: actor,
+      action: "traceability.plan.draft_discarded",
+      outcome: "conflict",
+      targetType: "traceability_plan_version",
+      targetId: draft.id,
+      requestId: "stale",
+      before: null,
+      after: {
+        code: "us_plan_revision_conflict",
+        expectedRevision: 2,
+        versionNumber: 1,
+        draftRevision: 1,
+      },
+    });
     await store.discardDraft(tenant, actor, draft.id, { expectedRevision: 1 }, "discard");
     expect(await store.listVersions(tenant, actor, "read")).toEqual({ items: [] });
     expect(await audits()).toEqual(
@@ -275,6 +301,41 @@ describe.skipIf(!url)("US plan internal drafts in disposable PostgreSQL", () => 
         }),
       ]),
     );
+  });
+
+  it("never discovers revision metadata for foreign or missing draft IDs", async () => {
+    const foreign = await store.createDraft(otherTenant, actor, input, "other-create");
+    const missing = randomUUID();
+    for (const id of [foreign.id, missing]) {
+      await expect(
+        store.saveDraft(tenant, actor, id, { ...input, expectedRevision: 9 }, `save-${id}`),
+      ).rejects.toMatchObject({ response: { code: "us_plan_version_not_found" } });
+      await expect(
+        store.discardDraft(tenant, actor, id, { expectedRevision: 9 }, `discard-${id}`),
+      ).rejects.toMatchObject({ response: { code: "us_plan_version_not_found" } });
+    }
+    const rows = await audits();
+    expect(rows).toHaveLength(4);
+    for (const id of [foreign.id, missing]) {
+      for (const [prefix, action] of [
+        ["save", "traceability.plan.draft_updated"],
+        ["discard", "traceability.plan.draft_discarded"],
+      ]) {
+        expect(rows.find((audit) => audit.requestId === `${prefix}-${id}`)).toEqual({
+          id: expect.any(String),
+          createdAt: expect.any(Date),
+          organizationId: tenant,
+          actorUserId: actor,
+          action,
+          outcome: "rejected",
+          targetType: "traceability_plan_version",
+          targetId: id,
+          requestId: `${prefix}-${id}`,
+          before: null,
+          after: { code: "us_plan_version_not_found" },
+        });
+      }
+    }
   });
 
   it("allocates v2 after retained v1 and exposes only published metadata; published writes conflict", async () => {

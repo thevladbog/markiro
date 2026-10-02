@@ -66,6 +66,19 @@ const metadata = (row: UsPlanVersionRow) => ({
   draftRevision: row.draftRevision,
 });
 
+/** Captured only after authorization and a tenant-scoped draft lock; never re-query after rollback. */
+class DraftRevisionConflict extends ConflictException {
+  constructor(
+    readonly auditContext: {
+      expectedRevision: number;
+      versionNumber: number;
+      draftRevision: number;
+    },
+  ) {
+    super({ code: "us_plan_revision_conflict" });
+  }
+}
+
 /** Internal only: all identity arguments come from a verified server boundary. */
 export class UsPlanStore {
   constructor(private readonly db: Db) {}
@@ -165,7 +178,10 @@ export class UsPlanStore {
               targetType: "traceability_plan_version",
               targetId: target.success ? target.data : null,
               before: null,
-              after: { code },
+              after: {
+                code,
+                ...(error instanceof DraftRevisionConflict ? error.auditContext : {}),
+              },
             });
           });
         }
@@ -232,7 +248,7 @@ export class UsPlanStore {
     if (!row) throw new NotFoundException({ code: "us_plan_version_not_found" });
     if (row.status !== "draft") throw new ConflictException({ code: "us_plan_not_draft" });
     if (row.draftRevision !== revision)
-      throw new ConflictException({ code: "us_plan_revision_conflict" });
+      throw new DraftRevisionConflict({ expectedRevision: revision, ...metadata(row) });
     parseUsPlanDraftRow(row);
     return row;
   }
