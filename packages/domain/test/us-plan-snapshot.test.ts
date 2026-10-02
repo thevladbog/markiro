@@ -7,6 +7,24 @@ import {
   type UsPlanSections,
 } from "../src/index.js";
 
+function description(
+  businessName: string,
+): UsPlanConfiguredFacts["tlcSourceLocations"][number]["description"] {
+  return {
+    partyId: "party-1",
+    businessName,
+    phoneNumber: null,
+    addressKind: "street",
+    streetAddress: null,
+    latitude: null,
+    longitude: null,
+    city: null,
+    stateOrRegion: null,
+    zipOrPostalCode: null,
+    countryCode: null,
+  };
+}
+
 function facts(): UsPlanConfiguredFacts {
   return {
     tenantName: "Fictional Foods",
@@ -15,8 +33,8 @@ function facts(): UsPlanConfiguredFacts {
     timeZone: "America/New_York",
     retentionYears: 5,
     tlcSourceLocations: [
-      { id: "location-2", description: "Packing room" },
-      { id: "location-1", description: "Kitchen" },
+      { id: "location-2", description: description("Packing room") },
+      { id: "location-1", description: description("Kitchen") },
     ],
     productProfiles: [
       { productId: "product-2", revision: 3, coverageStatus: "not_covered" },
@@ -133,8 +151,8 @@ describe("US plan configuration snapshot", () => {
     expect(changedUsPlanSections(a, current)).toEqual([]);
     expect(input).toEqual(before);
     expect(a.configured.tlcSourceLocations).toEqual([
-      { id: "location-1", description: "Kitchen" },
-      { id: "location-2", description: "Packing room" },
+      { id: "location-1", description: description("Kitchen") },
+      { id: "location-2", description: description("Packing room") },
     ]);
   });
 
@@ -167,8 +185,8 @@ describe("US plan configuration snapshot", () => {
       "location description",
       {
         tlcSourceLocations: [
-          { id: "location-2", description: "New packing room" },
-          { id: "location-1", description: "Kitchen" },
+          { id: "location-2", description: description("New packing room") },
+          { id: "location-1", description: description("Kitchen") },
         ],
       },
       ["tlcAssignment"],
@@ -220,7 +238,8 @@ describe("US plan configuration snapshot", () => {
     const originalBytes = JSON.stringify(snapshot);
     const originalDigest = usPlanSnapshotDigest(snapshot);
     inputFacts.tlcSourceLocations.forEach((location) => {
-      location.description = "Changed";
+      location.description.businessName = "Changed";
+      location.description.phoneNumber = "+1 555-0100";
     });
     inputFacts.productProfiles.forEach((product) => {
       product.revision = 99;

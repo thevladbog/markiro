@@ -7,6 +7,7 @@ import {
   type CoverageStatus,
 } from "../products/coverage.js";
 import type { UsPlanSections } from "./model.js";
+import type { LocationDescriptionInput } from "../location-description.js";
 
 export interface UsPlanConfiguredFacts {
   tenantName: string;
@@ -14,7 +15,10 @@ export interface UsPlanConfiguredFacts {
   baselineVersion: string;
   timeZone: string;
   retentionYears: number;
-  tlcSourceLocations: { id: string; description: string }[];
+  tlcSourceLocations: {
+    id: string;
+    description: LocationDescriptionInput & { partyId: string };
+  }[];
   productProfiles: { productId: string; revision: number; coverageStatus: string }[];
 }
 
@@ -90,7 +94,22 @@ function configuredFacts(facts: UsPlanConfiguredFacts): UsPlanConfiguredFacts {
     timeZone: facts.timeZone,
     retentionYears: facts.retentionYears,
     tlcSourceLocations: facts.tlcSourceLocations
-      .map(({ id, description }) => ({ id, description }))
+      .map(({ id, description }) => ({
+        id,
+        description: {
+          partyId: description.partyId,
+          businessName: description.businessName,
+          phoneNumber: description.phoneNumber,
+          addressKind: description.addressKind,
+          streetAddress: description.streetAddress,
+          latitude: description.latitude,
+          longitude: description.longitude,
+          city: description.city,
+          stateOrRegion: description.stateOrRegion,
+          zipOrPostalCode: description.zipOrPostalCode,
+          countryCode: description.countryCode,
+        },
+      }))
       .sort((a, b) => compareIds(a.id, b.id)),
     productProfiles: facts.productProfiles
       .map(({ productId, revision, coverageStatus }) => ({ productId, revision, coverageStatus }))
