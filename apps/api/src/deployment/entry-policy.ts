@@ -1,5 +1,13 @@
 import { parseDeploymentEdition } from "@markiro/domain";
 import { loadEnv, type Env } from "../env";
+import {
+  loadUsPlanArtifactStorageConfig,
+  type UsPlanArtifactStorageConfig,
+} from "../modules/traceability/plans/us-plan-artifact-config";
+
+export type UsDevelopmentEnv = Env & {
+  readonly planArtifactStorage: UsPlanArtifactStorageConfig | null;
+};
 
 /** The historical RU executable never accepts a US deployment configuration. */
 export function assertRuEntryEdition(value: unknown): void {
@@ -38,7 +46,7 @@ function localUrl(
 }
 
 /** Local-only until the owner separately approves a reviewed US release path. */
-export function loadUsDevelopmentEnv(raw: NodeJS.ProcessEnv): Env {
+export function loadUsDevelopmentEnv(raw: NodeJS.ProcessEnv): UsDevelopmentEnv {
   if (parseDeploymentEdition(raw.MARKIRO_DEPLOYMENT_EDITION) !== "US")
     reject("MARKIRO_DEPLOYMENT_EDITION");
   if (parseDeploymentEdition(raw.VITE_DEPLOYMENT_EDITION) !== "US")
@@ -73,7 +81,7 @@ export function loadUsDevelopmentEnv(raw: NodeJS.ProcessEnv): Env {
   }
   if (raw.LANDING_DEMO_SUBMISSION_ENABLED !== "false") reject("LANDING_DEMO_SUBMISSION_ENABLED");
   try {
-    return loadEnv(raw);
+    return { ...loadEnv(raw), planArtifactStorage: loadUsPlanArtifactStorageConfig(raw) };
   } catch {
     throw new Error("US development configuration is invalid; check the local environment example");
   }
