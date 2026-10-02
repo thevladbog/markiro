@@ -41,7 +41,7 @@
     "fflate": "0.8.3",
     "markdown-it": "15.0.0",
     "multer": "2.3.0",
-    "nodemailer": "9.1.1",
+    "nodemailer": "10.0.9",
     "pg-boss": "12.27.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
