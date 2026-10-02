@@ -52,6 +52,14 @@ export const usPlanApproveBodySchema = z
   })
   .strict();
 
+export const usPlanDraftCreateBodySchema = z
+  .object({ sections: usPlanSectionsSchema, changeSummary: text })
+  .strict();
+export const usPlanDraftDiscardBodySchema = z
+  .object({ expectedRevision: z.number().int().min(1) })
+  .strict();
 export type UsPlanSectionsBody = z.infer<typeof usPlanSectionsSchema>;
+export type UsPlanDraftCreateBody = z.infer<typeof usPlanDraftCreateBodySchema>;
+export type UsPlanDraftDiscardBody = z.infer<typeof usPlanDraftDiscardBodySchema>;
 export type UsPlanDraftSaveBody = z.infer<typeof usPlanDraftSaveBodySchema>;
 export type UsPlanApproveBody = z.infer<typeof usPlanApproveBodySchema>;

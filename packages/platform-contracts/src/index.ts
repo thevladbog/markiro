@@ -811,6 +811,10 @@ export {
 export {
   usPlanSectionsSchema,
   usPlanDraftSaveBodySchema,
+  usPlanDraftCreateBodySchema,
+  usPlanDraftDiscardBodySchema,
+  type UsPlanDraftCreateBody,
+  type UsPlanDraftDiscardBody,
   usPlanApproveBodySchema,
   type UsPlanSectionsBody,
   type UsPlanDraftSaveBody,

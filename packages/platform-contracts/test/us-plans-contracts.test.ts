@@ -4,6 +4,8 @@ import {
   usPlanApproveBodySchema,
   usPlanDraftSaveBodySchema,
   usPlanSectionsSchema,
+  usPlanDraftCreateBodySchema,
+  usPlanDraftDiscardBodySchema,
   type UsPlanSectionsBody,
 } from "../src/index.js";
 
@@ -43,6 +45,30 @@ const textFields = sectionEntries.flatMap(([section, fields]) =>
 const arrayFields = ["formats", "recordLocations", "responsibleRoles", "narrative"];
 
 describe("US plan request contracts", () => {
+  it("accepts strict create/discard bodies and prohibits client authority", () => {
+    expect(usPlanDraftCreateBodySchema.parse({ sections, changeSummary: "" })).toEqual({
+      sections,
+      changeSummary: "",
+    });
+    expect(usPlanDraftDiscardBodySchema.parse({ expectedRevision: 1 })).toEqual({
+      expectedRevision: 1,
+    });
+    for (const field of ["extra", ...authorityFields]) {
+      expect(
+        usPlanDraftCreateBodySchema.safeParse({ sections, changeSummary: "", [field]: true })
+          .success,
+      ).toBe(false);
+      expect(
+        usPlanDraftDiscardBodySchema.safeParse({ expectedRevision: 1, [field]: true }).success,
+      ).toBe(false);
+    }
+    for (const expectedRevision of [0, -1, 1.5, "1", null, undefined]) {
+      expect(usPlanDraftDiscardBodySchema.safeParse({ expectedRevision }).success).toBe(false);
+    }
+    expect(usPlanDraftCreateBodySchema.safeParse({ sections: {}, changeSummary: "" }).success).toBe(
+      false,
+    );
+  });
   it("accepts incomplete drafts without trimming or turning them into approval validation", () => {
     expect(usPlanDraftSaveBodySchema.parse(draft)).toEqual(draft);
     expect(usPlanApproveBodySchema.parse(approval)).toEqual(approval);

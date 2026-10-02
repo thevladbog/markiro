@@ -135,9 +135,9 @@ jobs:
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: |
-          pnpm --filter @markiro/platform-contracts exec vitest run test/us-case-bridge.test.ts
+          pnpm --filter @markiro/platform-contracts exec vitest run test/us-case-bridge.test.ts test/us-plans-contracts.test.ts
           pnpm --filter @markiro/db exec vitest run test/us-plan-schema.test.ts test/us-plan-migration.e2e.test.ts
-          pnpm --filter @markiro/api exec vitest run test/us-plan-configuration.e2e.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-plan-configuration.e2e.test.ts test/us-plan-model.test.ts test/us-plan-store.e2e.test.ts
           pnpm --filter @markiro/db exec vitest run test/us-case-bridge-schema.test.ts test/us-case-bridge-migration.e2e.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-case-commands.e2e.test.ts test/us-case-concurrency.e2e.test.ts test/us-case-reads.e2e.test.ts test/us-case-http.e2e.test.ts
           pnpm --filter @markiro/domain exec vitest run test/us-transformation-readiness.test.ts test/us-transformation-genealogy.test.ts
