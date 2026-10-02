@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { schema } from "@markiro/db";
-import type { UsPlanSections } from "@markiro/domain";
+import { canonicalExportDigest, type UsPlanSections } from "@markiro/domain";
+import type * as Domain from "@markiro/domain";
 import { eq } from "drizzle-orm";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { UsPlanStore } from "../src/modules/traceability/plans/us-plan-store";
@@ -12,6 +13,67 @@ import {
 import { loadUsPlanArtifactStorageConfig } from "../src/modules/traceability/plans/us-plan-artifact-config";
 import { createUsProfileTestDatabase } from "./support/us-profile-database";
 import { UsDevelopmentOwnerStore } from "../src/deployment/us-development-owner";
+import { renderUsPlanPdf } from "../src/modules/traceability/plans/us-plan-pdf";
+import { parseUsPlanPublishedRow } from "../src/modules/traceability/plans/us-plan-published";
+import type * as HistoricalPolicy from "../src/modules/traceability/plans/us-plan-historical-policy";
+
+const policyDeployment = vi.hoisted(() => ({ v2: false }));
+// Simulate a future deployment, including its explicitly registered v2 decoder.
+// Historical v1 decoding always uses the real production implementation.
+vi.mock("../src/modules/traceability/plans/us-plan-historical-policy", async (importOriginal) => {
+  const original = await importOriginal<typeof HistoricalPolicy>();
+  return {
+    ...original,
+    parseUsPlanHistoricalWorkflow(value: unknown) {
+      if (
+        policyDeployment.v2 &&
+        value !== null &&
+        typeof value === "object" &&
+        "version" in value &&
+        value.version === 2
+      ) {
+        return { ...original.parseUsPlanHistoricalWorkflow({ ...value, version: 1 }), version: 2 };
+      }
+      return original.parseUsPlanHistoricalWorkflow(value);
+    },
+  };
+});
+vi.mock("@markiro/domain", async (importOriginal) => {
+  const original = await importOriginal<typeof Domain>();
+  return {
+    ...original,
+    buildUsPlanSnapshot(...args: Parameters<typeof original.buildUsPlanSnapshot>) {
+      const snapshot = original.buildUsPlanSnapshot(...args);
+      if (policyDeployment.v2) snapshot.ftlReviewWorkflow.version = 2;
+      return snapshot;
+    },
+    buildUsPlanDraftFactSources(...args: Parameters<typeof original.buildUsPlanDraftFactSources>) {
+      const manifest = original.buildUsPlanDraftFactSources(...args);
+      if (policyDeployment.v2) {
+        for (const entry of manifest.entries) {
+          if (entry.source.origin === "application_policy") entry.source.version = 2;
+        }
+      }
+      return manifest;
+    },
+    buildUsPlanApprovedEvidence(...args: Parameters<typeof original.buildUsPlanApprovedEvidence>) {
+      const [snapshot, manifest, authority] = args;
+      const priorManifest = structuredClone(manifest);
+      if (policyDeployment.v2) {
+        for (const entry of priorManifest.entries) {
+          if (entry.source.origin === "application_policy") entry.source.version = 1;
+        }
+      }
+      const evidence = original.buildUsPlanApprovedEvidence(snapshot, priorManifest, authority);
+      if (policyDeployment.v2) {
+        for (const entry of evidence.factSources.entries) {
+          if (entry.source.origin === "application_policy") entry.source.version = 2;
+        }
+      }
+      return evidence;
+    },
+  };
+});
 
 const url = process.env.US_TEST_DATABASE_URL;
 const confirmations = {
@@ -46,6 +108,7 @@ describe.skipIf(!url)("US plan atomic approval in owned disposable PostgreSQL", 
   let onPut: (() => Promise<void>) | undefined;
   let putFailure: boolean;
   let deleteFailure: boolean;
+  let realPdf: boolean;
   const objects = new Map<string, Buffer>();
   const deleted: string[] = [];
   const request = (versionId: string, idempotencyKey = randomUUID()) => ({
@@ -65,6 +128,8 @@ describe.skipIf(!url)("US plan atomic approval in owned disposable PostgreSQL", 
     await fixture?.close();
   });
   beforeEach(async () => {
+    policyDeployment.v2 = false;
+    realPdf = false;
     tenant = randomUUID();
     actor = randomUUID();
     location = randomUUID();
@@ -164,6 +229,7 @@ describe.skipIf(!url)("US plan atomic approval in owned disposable PostgreSQL", 
       fixture.db,
       new UsPlanArtifactStore(config, transport),
       async (model) => {
+        if (realPdf) return renderUsPlanPdf(model);
         const bytes = Buffer.from(JSON.stringify(model));
         return {
           bytes,
@@ -175,6 +241,34 @@ describe.skipIf(!url)("US plan atomic approval in owned disposable PostgreSQL", 
       () => new Date("2026-10-03T01:00:00.000Z"),
     );
   });
+
+  it("retains v1 detail, exact PDF, retries and supersession after a current-policy v2 deployment", async () => {
+    realPdf = true;
+    const firstDraft = await create();
+    const input = request(firstDraft.id);
+    const first = await approvals.approve(tenant, actor, input, "policy-v1");
+    const bytes = await approvals.readPdf(tenant, actor, first.id, "v1-before");
+    expect(bytes.subarray(0, 5).toString()).toBe("%PDF-");
+    expect(first.evidence.snapshot.ftlReviewWorkflow.version).toBe(1);
+
+    policyDeployment.v2 = true;
+    expect(await approvals.getPublished(tenant, actor, first.id)).toEqual(first);
+    expect(await approvals.readPdf(tenant, actor, first.id, "v1-after")).toEqual(bytes);
+    expect(await approvals.approve(tenant, actor, input, "v1-retry")).toEqual(first);
+    const nextDraft = await create(sections, "New application policy");
+    const second = await approvals.approve(tenant, actor, request(nextDraft.id), "policy-v2");
+    expect(second.evidence.snapshot.ftlReviewWorkflow.version).toBe(2);
+    const retained = await approvals.getPublished(tenant, actor, first.id);
+    expect(retained).toMatchObject({
+      status: "superseded",
+      evidence: first.evidence,
+      artifact: first.artifact,
+      configDigest: first.configDigest,
+    });
+    expect(await approvals.readPdf(tenant, actor, first.id, "v1-superseded")).toEqual(bytes);
+    expect(await approvals.approve(tenant, actor, input, "v1-superseded-retry")).toEqual(first);
+    expect(deleted).toEqual([]);
+  }, 20_000);
 
   it("publishes frozen evidence, exact audit, same-key retry and immutable retained v1", async () => {
     const draft = await create();
@@ -687,6 +781,93 @@ describe.skipIf(!url)("US plan atomic approval in owned disposable PostgreSQL", 
       await fixture.pool.query("ALTER TABLE traceability_plan_versions ENABLE TRIGGER USER");
     }
   });
+  it.each([
+    "unknown_policy",
+    "changed_policy",
+    "missing_path",
+    "duplicate_path",
+    "extra_path",
+    "wrong_policy_root",
+    "wrong_policy_leaf",
+    "wrong_actor",
+    "wrong_time",
+    "pending_source",
+    "unknown_snapshot_schema",
+    "unknown_evidence_schema",
+    "duplicate_configured_id",
+    "blank_approver",
+  ])("rejects historical %s even with a matching snapshot digest", async (kind) => {
+    const draft = await create();
+    const published = await approvals.approve(tenant, actor, request(draft.id), "approve");
+    const [stored] = await fixture.db
+      .select()
+      .from(schema.traceabilityPlanVersions)
+      .where(eq(schema.traceabilityPlanVersions.id, draft.id));
+    if (!stored) throw new Error("Missing published fixture");
+    const row = structuredClone(stored);
+    const evidence = structuredClone(published.evidence);
+    const entries = evidence.factSources.entries;
+    if (kind === "unknown_policy") evidence.snapshot.ftlReviewWorkflow.version = 99;
+    if (kind === "changed_policy")
+      evidence.snapshot.ftlReviewWorkflow.positiveCoverageStatuses = [];
+    if (kind === "missing_path") entries.pop();
+    if (kind === "duplicate_path")
+      entries.push({ path: "/provenance", source: { origin: "configured" } });
+    if (kind === "extra_path")
+      entries.push({ path: "/not-a-fact", source: { origin: "configured" } });
+    if (kind === "wrong_policy_root" || kind === "wrong_policy_leaf") {
+      const entry = entries.find(
+        ({ path }) =>
+          path ===
+          (kind === "wrong_policy_root" ? "/ftlReviewWorkflow" : "/ftlReviewWorkflow/version"),
+      );
+      if (!entry) throw new Error("Missing policy fixture");
+      entry.source = { origin: "application_policy", version: 2 };
+    }
+    if (kind === "wrong_actor")
+      evidence.confirmations.contact = {
+        origin: "operator_confirmed",
+        actorId: randomUUID(),
+        confirmedAt: published.approvedAt,
+      };
+    if (kind === "wrong_time")
+      evidence.confirmations.contact = {
+        origin: "operator_confirmed",
+        actorId: actor,
+        confirmedAt: "2026-10-02T01:00:00.000Z",
+      };
+    if (kind === "pending_source") {
+      const entry = entries.find(({ path }) => path === "/sections/pointOfContact/name");
+      if (!entry) throw new Error("Missing contact fixture");
+      entry.source = { origin: "operator_pending" };
+    }
+    if (kind === "duplicate_configured_id") {
+      const source = evidence.snapshot.configured.tlcSourceLocations[0];
+      if (!source) throw new Error("Missing source fixture");
+      evidence.snapshot.configured.tlcSourceLocations.push(structuredClone(source));
+    }
+    if (kind === "blank_approver") {
+      row.approvedBy = " ";
+      for (const confirmation of Object.values(evidence.confirmations)) {
+        if (confirmation.origin === "operator_confirmed") confirmation.actorId = " ";
+      }
+      for (const entry of entries) {
+        if (entry.source.origin === "operator_confirmed") entry.source.actorId = " ";
+      }
+    }
+    row.configSnapshot =
+      kind === "unknown_snapshot_schema"
+        ? { ...evidence.snapshot, schemaVersion: 2 }
+        : evidence.snapshot;
+    row.configDigest = canonicalExportDigest(row.configSnapshot);
+    row.approvedEvidence =
+      kind === "unknown_evidence_schema" ? { ...evidence, schemaVersion: 2 } : evidence;
+    expect(() => parseUsPlanPublishedRow(row)).toThrow(
+      expect.objectContaining({
+        response: { code: "us_plan_stored_published_invalid" },
+      }),
+    );
+  });
   it("rejects real foreign IDs with exact non-disclosing audit", async () => {
     const draft = await create();
     const other = randomUUID();
@@ -834,6 +1015,10 @@ describe.skipIf(!url)("US plan atomic approval in owned disposable PostgreSQL", 
         verifiedAt: "2026-10-03T01:00:00.000Z",
       },
     });
+    const bytes = await approvals.readPdf(tenant, actor, draft.id, "synthetic-v1-before");
+    policyDeployment.v2 = true;
+    expect(await approvals.getPublished(tenant, actor, draft.id)).toEqual(published);
+    expect(await approvals.readPdf(tenant, actor, draft.id, "synthetic-v1-after")).toEqual(bytes);
   });
   it("requires change summary for v2 and uses current years with the frozen v1 timezone", async () => {
     const first = await create();

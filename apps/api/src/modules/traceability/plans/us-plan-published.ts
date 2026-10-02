@@ -1,17 +1,40 @@
 import {
-  buildUsPlanSnapshot,
-  buildUsPlanApprovedEvidence,
-  buildUsPlanDraftFactSources,
   canonicalExportDigest,
+  type UsPlanApprovedEvidence,
+  type UsPlanFactSource,
+  type UsPlanSnapshot,
 } from "@markiro/domain";
-import { usPlanSectionsSchema } from "@markiro/platform-contracts";
 import { ServiceUnavailableException } from "@nestjs/common";
 import { z } from "zod";
 import type { UsPlanVersionRow } from "./us-plan-model";
 import type { UsPlanArtifactEvidence } from "./us-plan-artifacts";
+import { parseUsPlanHistoricalWorkflow } from "./us-plan-historical-policy";
 
 const text = z.string().max(4096);
 const nullableText = text.nullable();
+const texts = z.array(text).max(50);
+// Frozen schema v1, independent of the editable/current approval contract.
+const sectionsV1Schema = z
+  .object({
+    recordMaintenance: z
+      .object({
+        systemOfRecord: text,
+        formats: texts,
+        recordLocations: texts,
+        responsibleRoles: texts,
+        backupAndRecovery: text,
+        narrative: texts,
+      })
+      .strict(),
+    ftlIdentification: z.object({ procedure: text, reviewCadence: text }).strict(),
+    tlcAssignment: z.object({ procedure: text }).strict(),
+    pointOfContact: z
+      .object({ name: text, title: text, phone: text, email: nullableText })
+      .strict(),
+    farmActivity: z.object({ status: z.literal("no"), explanation: text }).strict(),
+    reviewAndUpdate: z.object({ procedure: text }).strict(),
+  })
+  .strict();
 const snapshotSchema = z
   .object({
     schemaVersion: z.literal(1),
@@ -59,17 +82,110 @@ const snapshotSchema = z
           .max(200),
       })
       .strict(),
-    sections: usPlanSectionsSchema,
+    sections: sectionsV1Schema,
     provenance: z.enum(["operational", "trusted_synthetic"]),
-    ftlReviewWorkflow: z.unknown(),
+    ftlReviewWorkflow: z.unknown().transform(parseUsPlanHistoricalWorkflow),
   })
   .strict();
 const seedSchema = z
-  .object({ seedId: text, verifiedBy: text, verifiedAt: z.iso.datetime() })
+  .object({
+    seedId: text.min(1),
+    verifiedBy: text.min(1),
+    verifiedAt: z.iso.datetime().refine((value) => new Date(value).toISOString() === value),
+  })
   .strict();
 const seedSourceSchema = z
   .object({ origin: z.literal("synthetic_fixture"), trustedSeed: seedSchema })
   .strict();
+
+/** Validate the exhaustive v1 manifest against stored values and approval identity only. */
+function historicalEvidenceV1(
+  snapshot: UsPlanSnapshot,
+  approvedBy: string,
+  approvedAt: string,
+  raw: unknown,
+): UsPlanApprovedEvidence {
+  const envelope = z
+    .object({
+      schemaVersion: z.literal(1),
+      snapshot: z.unknown(),
+      factSources: z.unknown(),
+      confirmations: z
+        .object({
+          procedures: z.unknown(),
+          backupAndRecovery: z.unknown(),
+          contact: z.unknown(),
+          nonFarmScope: z.unknown(),
+        })
+        .strict(),
+    })
+    .strict()
+    .parse(raw);
+  const confirmation: UsPlanApprovedEvidence["confirmations"]["procedures"] =
+    snapshot.provenance === "trusted_synthetic"
+      ? seedSourceSchema.parse(envelope.confirmations.procedures)
+      : { origin: "operator_confirmed", actorId: approvedBy, confirmedAt: approvedAt };
+  const entries: UsPlanApprovedEvidence["factSources"]["entries"] = [];
+  const segment = (value: string) => value.replaceAll("~", "~0").replaceAll("/", "~1");
+  function walk(value: unknown, path: string, source: UsPlanFactSource, policy = false): void {
+    if (Array.isArray(value)) {
+      entries.push({ path, source });
+      value.forEach((item, index) => walk(item, `${path}/${index}`, source, policy));
+    } else if (value !== null && typeof value === "object") {
+      if (policy) entries.push({ path, source });
+      Object.entries(value).forEach(([key, item]) =>
+        walk(item, `${path}/${segment(key)}`, source, policy),
+      );
+    } else {
+      entries.push({ path, source });
+    }
+  }
+  const configured: UsPlanFactSource = { origin: "configured" };
+  const { tlcSourceLocations, productProfiles, ...scalars } = snapshot.configured;
+  walk(scalars, "/configured", configured);
+  function collection<T>(items: T[], path: string, idOf: (item: T) => string): void {
+    entries.push({ path, source: configured });
+    let previous: string | undefined;
+    for (const item of items) {
+      const id = idOf(item);
+      if (previous !== undefined && previous >= id)
+        throw new TypeError("invalid_historical_fact_ids");
+      previous = id;
+      walk(item, `${path}/${segment(id)}`, configured);
+    }
+  }
+  collection(tlcSourceLocations, "/configured/tlcSourceLocations", (item) => item.id);
+  collection(productProfiles, "/configured/productProfiles", (item) => item.productId);
+  walk(snapshot.sections, "/sections", confirmation);
+  walk(
+    snapshot.ftlReviewWorkflow,
+    "/ftlReviewWorkflow",
+    {
+      origin: "application_policy",
+      version: snapshot.ftlReviewWorkflow.version,
+    },
+    true,
+  );
+  entries.push({
+    path: "/provenance",
+    source: snapshot.provenance === "trusted_synthetic" ? confirmation : configured,
+  });
+  entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+  const evidence: UsPlanApprovedEvidence = {
+    schemaVersion: 1,
+    snapshot,
+    factSources: { schemaVersion: 1, entries },
+    confirmations: {
+      procedures: confirmation,
+      backupAndRecovery: confirmation,
+      contact: confirmation,
+      nonFarmScope: confirmation,
+    },
+  };
+  if (canonicalExportDigest(envelope) !== canonicalExportDigest(evidence))
+    throw new TypeError("invalid_historical_evidence");
+  return evidence;
+}
 
 /** Frozen schema-v1 parser: no current configuration, wall clock or rendering is read. */
 export function parseUsPlanPublishedRow(row: UsPlanVersionRow) {
@@ -77,60 +193,25 @@ export function parseUsPlanPublishedRow(row: UsPlanVersionRow) {
     if (
       (row.status !== "effective" && row.status !== "superseded") ||
       !row.approvedBy ||
+      !row.approvedBy.trim() ||
       !row.approvedAt ||
       row.schemaVersion !== 1 ||
       !row.idempotencyKeyHash ||
       !row.approvalRequestDigest
     )
       throw new Error("shape");
-    const persisted = snapshotSchema.parse(row.configSnapshot);
-    const snapshot = buildUsPlanSnapshot(
-      persisted.configured,
-      persisted.sections,
-      persisted.provenance,
-    );
+    const snapshot = snapshotSchema.parse(row.configSnapshot);
     if (
-      canonicalExportDigest(snapshot) !== canonicalExportDigest(persisted) ||
       canonicalExportDigest(snapshot) !== row.configDigest ||
       canonicalExportDigest(row.sections) !== canonicalExportDigest(snapshot.sections)
     )
       throw new Error("digest");
-    const envelope = z
-      .object({
-        schemaVersion: z.literal(1),
-        snapshot: z.unknown(),
-        factSources: z.unknown(),
-        confirmations: z
-          .object({
-            procedures: z.unknown(),
-            backupAndRecovery: z.unknown(),
-            contact: z.unknown(),
-            nonFarmScope: z.unknown(),
-          })
-          .strict(),
-      })
-      .strict()
-      .parse(row.approvedEvidence);
-    const evidence = buildUsPlanApprovedEvidence(
+    const evidence = historicalEvidenceV1(
       snapshot,
-      buildUsPlanDraftFactSources(snapshot.configured, snapshot.sections),
-      {
-        kind: snapshot.provenance === "trusted_synthetic" ? "synthetic" : "operational",
-        actorId: row.approvedBy,
-        confirmedAt: row.approvedAt.toISOString(),
-        confirmations: {
-          procedures: true,
-          backupAndRecovery: true,
-          contact: true,
-          nonFarmScope: true,
-        },
-        ...(snapshot.provenance === "trusted_synthetic"
-          ? { trustedSeed: seedSourceSchema.parse(envelope.confirmations.procedures).trustedSeed }
-          : {}),
-      },
+      row.approvedBy,
+      row.approvedAt.toISOString(),
+      row.approvedEvidence,
     );
-    if (canonicalExportDigest(envelope) !== canonicalExportDigest(evidence))
-      throw new Error("evidence");
     const artifact: UsPlanArtifactEvidence = z
       .object({
         objectKey: z.string().max(200),
