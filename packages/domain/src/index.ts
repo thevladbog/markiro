@@ -493,7 +493,14 @@ export type {
 } from "./shift-exports.js";
 export {
   buildUsPlanSnapshot,
+  buildUsPlanDraftFactSources,
+  validateUsPlanDraftFactSources,
   changedUsPlanSections,
   usPlanSnapshotDigest,
 } from "./traceability/plan/snapshot.js";
-export type { UsPlanConfiguredFacts, UsPlanSnapshot } from "./traceability/plan/snapshot.js";
+export type {
+  UsPlanConfiguredFacts,
+  UsPlanSnapshot,
+  UsPlanFactSource,
+  UsPlanFactSourceManifest,
+} from "./traceability/plan/snapshot.js";

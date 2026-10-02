@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
   buildUsPlanSnapshot,
+  buildUsPlanDraftFactSources,
+  validateUsPlanDraftFactSources,
+  canonicalExportDigest,
   changedUsPlanSections,
   usPlanSnapshotDigest,
   type UsPlanConfiguredFacts,
@@ -272,4 +275,145 @@ describe("US plan configuration snapshot", () => {
     );
     expect(() => usPlanSnapshotDigest(snapshot)).toThrow(TypeError);
   });
+});
+
+describe("US plan draft fact sources", () => {
+  it("uses stable IDs for configured items and preserves pending statement ownership", () => {
+    const input = facts();
+    const manifest = buildUsPlanDraftFactSources(input, sections());
+    const reordered = {
+      ...input,
+      tlcSourceLocations: [...input.tlcSourceLocations].reverse(),
+      productProfiles: [...input.productProfiles].reverse(),
+    };
+    expect(buildUsPlanDraftFactSources(reordered, sections())).toEqual(manifest);
+    expect(canonicalExportDigest(buildUsPlanDraftFactSources(reordered, sections()))).toBe(
+      canonicalExportDigest(manifest),
+    );
+    expect(manifest.entries).toContainEqual({
+      path: "/configured/tlcSourceLocations/location-1/description/phoneNumber",
+      source: { origin: "configured" },
+    });
+    expect(manifest.entries).toContainEqual({
+      path: "/configured/productProfiles/product-2/revision",
+      source: { origin: "configured" },
+    });
+    expect(manifest.entries).toContainEqual({
+      path: "/sections/recordMaintenance/narrative/0",
+      source: { origin: "operator_pending" },
+    });
+    expect(manifest.entries).toContainEqual({
+      path: "/ftlReviewWorkflow",
+      source: { origin: "application_policy", version: 1 },
+    });
+    expect(
+      manifest.entries
+        .filter((entry) => entry.path.startsWith("/sections/"))
+        .every((entry) => entry.source.origin === "operator_pending"),
+    ).toBe(true);
+    expect(validateUsPlanDraftFactSources(input, sections(), manifest)).toBeUndefined();
+    expect(
+      manifest.entries
+        .filter((entry) => entry.path.startsWith("/configured/"))
+        .every((entry) => entry.source.origin === "configured"),
+    ).toBe(true);
+    expect(
+      manifest.entries
+        .filter((entry) => entry.path.startsWith("/configured/tlcSourceLocations/location-1/"))
+        .map((entry) => entry.path),
+    ).toEqual([
+      "/configured/tlcSourceLocations/location-1/description/addressKind",
+      "/configured/tlcSourceLocations/location-1/description/businessName",
+      "/configured/tlcSourceLocations/location-1/description/city",
+      "/configured/tlcSourceLocations/location-1/description/countryCode",
+      "/configured/tlcSourceLocations/location-1/description/latitude",
+      "/configured/tlcSourceLocations/location-1/description/longitude",
+      "/configured/tlcSourceLocations/location-1/description/partyId",
+      "/configured/tlcSourceLocations/location-1/description/phoneNumber",
+      "/configured/tlcSourceLocations/location-1/description/stateOrRegion",
+      "/configured/tlcSourceLocations/location-1/description/streetAddress",
+      "/configured/tlcSourceLocations/location-1/description/zipOrPostalCode",
+      "/configured/tlcSourceLocations/location-1/id",
+    ]);
+  });
+
+  it("covers all operator fields, including empty ordered lists and nullable contact", () => {
+    const input = sections();
+    input.recordMaintenance.narrative = [];
+    const paths = buildUsPlanDraftFactSources(facts(), input)
+      .entries.filter((entry) => entry.path.startsWith("/sections/"))
+      .map((entry) => entry.path);
+    expect(paths).toEqual([
+      "/sections/farmActivity/explanation",
+      "/sections/farmActivity/status",
+      "/sections/ftlIdentification/procedure",
+      "/sections/ftlIdentification/reviewCadence",
+      "/sections/pointOfContact/email",
+      "/sections/pointOfContact/name",
+      "/sections/pointOfContact/phone",
+      "/sections/pointOfContact/title",
+      "/sections/recordMaintenance/backupAndRecovery",
+      "/sections/recordMaintenance/formats",
+      "/sections/recordMaintenance/formats/0",
+      "/sections/recordMaintenance/formats/1",
+      "/sections/recordMaintenance/narrative",
+      "/sections/recordMaintenance/recordLocations",
+      "/sections/recordMaintenance/recordLocations/0",
+      "/sections/recordMaintenance/recordLocations/1",
+      "/sections/recordMaintenance/responsibleRoles",
+      "/sections/recordMaintenance/responsibleRoles/0",
+      "/sections/recordMaintenance/responsibleRoles/1",
+      "/sections/recordMaintenance/systemOfRecord",
+      "/sections/reviewAndUpdate/procedure",
+      "/sections/tlcAssignment/procedure",
+    ]);
+  });
+
+  it("rejects missing, duplicate, extra paths and workflow claimed as operator confirmation", () => {
+    const manifest = buildUsPlanDraftFactSources(facts(), sections());
+    const first = manifest.entries.at(0);
+    if (!first) throw new Error("expected manifest entries");
+    for (const entries of [
+      manifest.entries.slice(1),
+      [...manifest.entries, first],
+      [...manifest.entries, { path: "/invented", source: { origin: "configured" } }],
+      manifest.entries.map((entry) =>
+        entry.path === "/ftlReviewWorkflow"
+          ? {
+              ...entry,
+              source: {
+                origin: "operator_confirmed",
+                actorId: "actor",
+                confirmedAt: "2026-10-02T00:00:00.000Z",
+              },
+            }
+          : entry,
+      ),
+      manifest.entries.map((entry) =>
+        entry.path.startsWith("/sections/")
+          ? { ...entry, source: { origin: "operator_confirmed" } }
+          : entry,
+      ),
+      manifest.entries.map((entry) =>
+        entry.path.startsWith("/sections/")
+          ? { ...entry, source: { origin: "synthetic_fixture" } }
+          : entry,
+      ),
+    ]) {
+      expect(() =>
+        validateUsPlanDraftFactSources(facts(), sections(), { ...manifest, entries }),
+      ).toThrow(TypeError);
+    }
+  });
+
+  it.each(["tlcSourceLocations", "productProfiles"] as const)(
+    "rejects duplicate stable IDs in %s",
+    (field) => {
+      const input = facts();
+      if (field === "tlcSourceLocations")
+        input.tlcSourceLocations = [...input.tlcSourceLocations, ...input.tlcSourceLocations];
+      else input.productProfiles = [...input.productProfiles, ...input.productProfiles];
+      expect(() => buildUsPlanDraftFactSources(input, sections())).toThrow("duplicate_fact_id");
+    },
+  );
 });

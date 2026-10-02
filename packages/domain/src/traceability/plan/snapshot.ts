@@ -161,6 +161,85 @@ export function usPlanSnapshotDigest(snapshot: UsPlanSnapshot): string {
   return canonicalExportDigest(snapshot);
 }
 
+/** Approval-only variants require server-recorded evidence; drafts never emit them. */
+export type UsPlanFactSource =
+  | { origin: "configured" }
+  | { origin: "application_policy"; version: number }
+  | { origin: "operator_pending" }
+  | { origin: "operator_confirmed"; actorId: string; confirmedAt: string }
+  | {
+      origin: "synthetic_fixture";
+      trustedSeed: { seedId: string; verifiedBy: string; verifiedAt: string };
+    };
+
+export interface UsPlanFactSourceManifest {
+  schemaVersion: 1;
+  entries: { path: string; source: UsPlanFactSource }[];
+}
+
+function pointerSegment(value: string): string {
+  return value.replaceAll("~", "~0").replaceAll("/", "~1");
+}
+
+/**
+ * Separate from snapshot v1: stable configured IDs, frozen operator list indices,
+ * and one explicitly versioned code-policy descriptor. Lists carry a container
+ * entry as well, so an empty list still has ownership. No approval is inferred.
+ */
+export function buildUsPlanDraftFactSources(
+  facts: UsPlanConfiguredFacts,
+  sections: UsPlanSections,
+): UsPlanFactSourceManifest {
+  const snapshot = buildUsPlanSnapshot(facts, sections, "operational");
+  const entries: UsPlanFactSourceManifest["entries"] = [];
+  function walk(value: unknown, path: string, source: UsPlanFactSource): void {
+    if (Array.isArray(value)) {
+      entries.push({ path, source: { ...source } });
+      value.forEach((item: unknown, index: number) => walk(item, `${path}/${index}`, source));
+    } else if (value !== null && typeof value === "object") {
+      Object.entries(value).forEach(([key, item]) =>
+        walk(item, `${path}/${pointerSegment(key)}`, source),
+      );
+    } else {
+      entries.push({ path, source: { ...source } });
+    }
+  }
+  const { tlcSourceLocations, productProfiles, ...scalars } = snapshot.configured;
+  walk(scalars, "/configured", { origin: "configured" });
+  function itemsById<T>(items: T[], collection: string, idOf: (item: T) => string): void {
+    const seen = new Set<string>();
+    entries.push({ path: collection, source: { origin: "configured" } });
+    for (const item of items) {
+      const id = idOf(item);
+      if (!id.trim()) throw new TypeError("invalid_fact_id");
+      if (seen.has(id)) throw new TypeError("duplicate_fact_id");
+      seen.add(id);
+      walk(item, `${collection}/${pointerSegment(id)}`, { origin: "configured" });
+    }
+  }
+  itemsById(tlcSourceLocations, "/configured/tlcSourceLocations", (item) => item.id);
+  itemsById(productProfiles, "/configured/productProfiles", (item) => item.productId);
+  walk(snapshot.sections, "/sections", { origin: "operator_pending" });
+  entries.push({
+    path: "/ftlReviewWorkflow",
+    source: { origin: "application_policy", version: snapshot.ftlReviewWorkflow.version },
+  });
+  entries.sort((a, b) => compareIds(a.path, b.path));
+  return { schemaVersion: 1, entries };
+}
+
+/** Strict, exhaustive validation also rejects forged draft confirmation evidence. */
+export function validateUsPlanDraftFactSources(
+  facts: UsPlanConfiguredFacts,
+  sections: UsPlanSections,
+  manifest: unknown,
+): void {
+  const expected = buildUsPlanDraftFactSources(facts, sections);
+  if (canonicalExportDigest(manifest) !== canonicalExportDigest(expected)) {
+    throw new TypeError("invalid_draft_fact_sources");
+  }
+}
+
 /** Only configured facts have live counterparts; operator-owned sections do not. */
 export function changedUsPlanSections(
   effective: UsPlanSnapshot,
