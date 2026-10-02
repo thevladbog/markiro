@@ -45,7 +45,7 @@ jobs:
       - name: Verify local-only browser entry and strict proxy
         run: node --test tools/us-development/test/browser-entry.test.mjs
       - name: Verify shared domain foundation
-        run: pnpm --filter @markiro/domain test && pnpm --filter @markiro/domain typecheck && pnpm --filter @markiro/domain lint && pnpm --filter @markiro/domain build
+        run: pnpm --filter @markiro/domain test && pnpm --filter @markiro/domain build && pnpm --filter @markiro/domain typecheck && pnpm --filter @markiro/domain lint
       - name: Build isolated API dependencies and entry points
         run: pnpm turbo build --filter '@markiro/api...'
       - name: Verify API entry boundaries

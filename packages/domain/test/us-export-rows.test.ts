@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import type { ExportInputV1, ExportSourceRecord } from "../../platform-contracts/dist/index.js";
+import type {
+  ExportInputV1,
+  ExportSourceRecord,
+} from "../../platform-contracts/src/traceability/export-core.js";
 import {
   at,
   snapshotV1,
