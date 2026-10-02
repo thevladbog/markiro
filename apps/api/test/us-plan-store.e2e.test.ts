@@ -158,17 +158,25 @@ describe.skipIf(!url)("US plan internal drafts in disposable PostgreSQL", () => 
       await store.saveDraft(tenant, actor, draft.id, { ...save, expectedRevision: 2 }, "noop"),
     ).toEqual(current);
     expect(await audits()).toEqual(before);
-    expect(before).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          action: "traceability.plan.draft_updated",
-          outcome: "success",
-          targetId: draft.id,
-          before: { versionNumber: 1, draftRevision: 1 },
-          after: { versionNumber: 1, draftRevision: 2 },
-        }),
-      ]),
+    const winningRequestId = results[0]?.status === "fulfilled" ? "a" : "b";
+    const successfulSaveAudits = before.filter(
+      (audit) => audit.action === "traceability.plan.draft_updated" && audit.outcome === "success",
     );
+    expect(successfulSaveAudits).toEqual([
+      {
+        id: expect.any(String),
+        createdAt: expect.any(Date),
+        organizationId: tenant,
+        actorUserId: actor,
+        action: "traceability.plan.draft_updated",
+        outcome: "success",
+        targetType: "traceability_plan_version",
+        targetId: draft.id,
+        requestId: winningRequestId,
+        before: { versionNumber: 1, draftRevision: 1 },
+        after: { versionNumber: 1, draftRevision: 2 },
+      },
+    ]);
   });
 
   it("denies cross-tenant IDs and malformed IDs/bodies without touching the draft", async () => {
