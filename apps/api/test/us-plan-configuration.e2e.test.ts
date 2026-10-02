@@ -192,6 +192,99 @@ describe.skipIf(!url)("US plan configuration in disposable PostgreSQL", () => {
     expect(after.digest).not.toBe(before.digest);
   });
 
+  it("preserves decimal text and observes every configured fact from the same statement", async () => {
+    const before = await read();
+    const nextParty = randomUUID();
+    await fixture.db.transaction(async (tx) => {
+      await tx
+        .insert(schema.traceabilityParties)
+        .values({ id: nextParty, tenantId, name: "Next party" });
+      await tx
+        .update(schema.organization)
+        .set({ name: "Next tenant" })
+        .where(eq(schema.organization.id, tenantId));
+      await tx
+        .update(schema.traceabilityProfiles)
+        .set({ baselineVersion: "US-REG-2026-10-03", retentionYears: 7 })
+        .where(eq(schema.traceabilityProfiles.tenantId, tenantId));
+      await tx
+        .update(schema.orgProfiles)
+        .set({ timeZone: "America/New_York" })
+        .where(eq(schema.orgProfiles.tenantId, tenantId));
+      await tx
+        .update(schema.traceabilityLocations)
+        .set({
+          partyId: nextParty,
+          businessName: "Next source",
+          phoneNumber: "+1 555-0199",
+          addressKind: "coordinates",
+          streetAddress: null,
+          latitude: "40.123456",
+          longitude: "-74.100000",
+          city: "New York",
+          stateOrRegion: "NY",
+          zipOrPostalCode: "10001",
+          countryCode: "CA",
+        })
+        .where(eq(schema.traceabilityLocations.tenantId, tenantId));
+      await tx
+        .update(schema.productTraceabilityProfiles)
+        .set({
+          revision: 4,
+          coverageStatus: "covered",
+          reviewedBy: "synthetic-reviewer",
+          reviewedAt: new Date("2026-10-02T12:00:00Z"),
+        })
+        .where(eq(schema.productTraceabilityProfiles.tenantId, tenantId));
+    });
+    const after = await read();
+    expect(after.facts).toEqual({
+      tenantName: "Next tenant",
+      profileCode: "US_FSMA204_PROCESSOR",
+      baselineVersion: "US-REG-2026-10-03",
+      retentionYears: 7,
+      timeZone: "America/New_York",
+      tlcSourceLocations: locationIds.map((id) => ({
+        id,
+        description: {
+          partyId: nextParty,
+          businessName: "Next source",
+          phoneNumber: "+1 555-0199",
+          addressKind: "coordinates",
+          streetAddress: null,
+          latitude: "40.123456",
+          longitude: "-74.100000",
+          city: "New York",
+          stateOrRegion: "NY",
+          zipOrPostalCode: "10001",
+          countryCode: "CA",
+        },
+      })),
+      productProfiles: productIds.map((productId) => ({
+        productId,
+        revision: 4,
+        coverageStatus: "covered",
+      })),
+    });
+    expect(after.digest).toBe(canonicalExportDigest(after.facts));
+    expect(after.digest).not.toBe(before.digest);
+  });
+
+  it("returns empty arrays when all configured collection members are removed", async () => {
+    const before = await read();
+    await fixture.db
+      .update(schema.traceabilityLocations)
+      .set({ archived: true })
+      .where(eq(schema.traceabilityLocations.tenantId, tenantId));
+    await fixture.db
+      .delete(schema.productTraceabilityProfiles)
+      .where(eq(schema.productTraceabilityProfiles.tenantId, tenantId));
+    const after = await read();
+    expect(after.facts.tlcSourceLocations).toEqual([]);
+    expect(after.facts.productProfiles).toEqual([]);
+    expect(after.digest).not.toBe(before.digest);
+  });
+
   it("fails closed for a processor configuration lacking a baseline", async () => {
     // Corrupt-storage specimen only in this invocation's owned disposable DB.
     await fixture.pool.query(

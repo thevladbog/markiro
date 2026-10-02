@@ -496,6 +496,155 @@ describe.skipIf(!url)("US plan atomic approval in owned disposable PostgreSQL", 
     expect(deleted).toHaveLength(1);
   });
 
+  it.each([
+    "fence",
+    "configuration",
+    "product",
+    "location",
+    "timezone",
+    "retention",
+    "baseline",
+  ] as const)(
+    "sees a committed %s change after Phase B waits for the organization lock",
+    async (kind) => {
+      const draft = await create();
+      const connect = () => fixture.pool.connect();
+      let blocker: Awaited<ReturnType<typeof connect>> | undefined;
+      const expectedCode =
+        kind === "fence"
+          ? "us_plan_attempt_fenced"
+          : kind === "baseline"
+            ? "traceability_profile_invalid"
+            : "us_plan_configuration_conflict";
+      let blockerPid: number | undefined;
+      onPut = async () => {
+        blocker = await connect();
+        await blocker.query("BEGIN");
+        const identity = await blocker.query<{ pid: number }>("SELECT pg_backend_pid() AS pid");
+        blockerPid = identity.rows[0]?.pid;
+        await blocker.query("SELECT id FROM organization WHERE id=$1 FOR UPDATE", [tenant]);
+      };
+      const resultPromise = approvals
+        .approve(tenant, actor, request(draft.id), `lock-wait-${kind}`)
+        .then(
+          (value) => ({ ok: true as const, value }),
+          (error: unknown) => ({ ok: false as const, error }),
+        );
+      try {
+        const deadline = Date.now() + 3000;
+        let waiting = false;
+        while (Date.now() < deadline) {
+          if (blockerPid !== undefined) {
+            const state = await fixture.pool.query<{ blocked: boolean }>(
+              "SELECT EXISTS(SELECT 1 FROM pg_stat_activity WHERE datname=current_database() AND $1=ANY(pg_blocking_pids(pid))) AS blocked",
+              [blockerPid],
+            );
+            if (state.rows[0]?.blocked) {
+              waiting = true;
+              break;
+            }
+          }
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        expect(waiting).toBe(true);
+        if (!blocker) throw new Error("Missing blocker");
+        const [key, bytes] = [...objects.entries()][0] ?? [];
+        if (!key || !bytes) throw new Error("Missing uploaded artifact");
+        if (kind === "fence") {
+          await blocker.query(
+            "INSERT INTO traceability_plan_cleanup_fences(object_key,tenant_id,version_id,version_number,actor_user_id,request_id,sha256) VALUES($1,$2,$3,1,$4,'lock-wait-cleanup',$5)",
+            [key, tenant, draft.id, actor, createHash("sha256").update(bytes).digest("hex")],
+          );
+        } else if (kind === "product") {
+          const productId = randomUUID();
+          await blocker.query(
+            "INSERT INTO products(id,tenant_id,name) VALUES($1,$2,'Later product')",
+            [productId, tenant],
+          );
+          await blocker.query(
+            "INSERT INTO product_traceability_profiles(product_id,tenant_id,product_name) VALUES($1,$2,'Later product')",
+            [productId, tenant],
+          );
+        } else if (kind === "location") {
+          await blocker.query(
+            "UPDATE traceability_locations SET archived=true WHERE tenant_id=$1 AND id=$2",
+            [tenant, location],
+          );
+        } else if (kind === "timezone") {
+          await blocker.query(
+            "UPDATE org_profiles SET time_zone='America/New_York' WHERE tenant_id=$1",
+            [tenant],
+          );
+        } else if (kind === "retention") {
+          await blocker.query(
+            "UPDATE traceability_profiles SET retention_years=7 WHERE tenant_id=$1",
+            [tenant],
+          );
+        } else if (kind === "baseline") {
+          await blocker.query(
+            "UPDATE traceability_profiles SET baseline_version='US-REG-2026-10-03' WHERE tenant_id=$1",
+            [tenant],
+          );
+        } else {
+          await blocker.query(
+            "UPDATE traceability_locations SET phone_number='+1 555 0199' WHERE tenant_id=$1 AND id=$2",
+            [tenant, location],
+          );
+        }
+        await blocker.query("COMMIT");
+        if (kind === "fence") objects.delete(key);
+        blocker.release();
+        blocker = undefined;
+        const result = await resultPromise;
+        expect(result).toMatchObject({
+          ok: false,
+          error: {
+            response: {
+              code: expectedCode,
+            },
+          },
+        });
+        expect(
+          (
+            await fixture.pool.query(
+              "SELECT status FROM traceability_plan_versions WHERE tenant_id=$1 AND id=$2",
+              [tenant, draft.id],
+            )
+          ).rows,
+        ).toEqual([{ status: "draft" }]);
+        const audits = await fixture.db
+          .select()
+          .from(schema.tenantAuditEvents)
+          .where(eq(schema.tenantAuditEvents.requestId, `lock-wait-${kind}`));
+        expect(audits.filter((audit) => audit.action === "traceability.plan.approved")).toEqual([
+          expect.objectContaining({
+            organizationId: tenant,
+            actorUserId: actor,
+            targetId: draft.id,
+            targetType: "traceability_plan_version",
+            requestId: `lock-wait-${kind}`,
+            before: null,
+            action: "traceability.plan.approved",
+            outcome: kind === "baseline" ? "unconfirmed" : "conflict",
+            after: {
+              code: expectedCode,
+              versionNumber: 1,
+              draftRevision: 1,
+              objectKey: key,
+              sha256: createHash("sha256").update(bytes).digest("hex"),
+            },
+          }),
+        ]);
+      } finally {
+        if (blocker) {
+          await blocker.query("ROLLBACK");
+          blocker.release();
+        }
+        await resultPromise;
+      }
+    },
+  );
+
   it("rejects tampered stored evidence and object bytes without rerendering", async () => {
     const draft = await create();
     const published = await approvals.approve(tenant, actor, request(draft.id), "approve");

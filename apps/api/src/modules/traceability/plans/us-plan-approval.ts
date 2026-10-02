@@ -209,8 +209,9 @@ export class UsPlanApprovalStore {
         objectKey: attempt.artifact.objectKey,
       };
       const artifact = await this.artifacts.putVerified(attempt);
-      const result = await this.serialized(async (tx) => {
-        // Organization -> authorization -> versions. SERIALIZABLE detects source write skew.
+      const result = await this.publicationTransaction(async (tx) => {
+        // Organization -> authorization -> versions. READ COMMITTED is essential:
+        // a fence/config commit while waiting for this lock must be visible below.
         await this.lockTenant(tx, tenantId);
         await this.authorize(tx, tenantId, actor, US_CAPABILITY.QA_MANAGE);
         const retry = await this.retry(tx, tenantId, input);
@@ -339,10 +340,12 @@ export class UsPlanApprovalStore {
     if (row.draftRevision !== revision)
       throw new ConflictException({ code: "us_plan_revision_conflict" });
   }
-  private async serialized<T>(run: (tx: UsMasterDataTransaction) => Promise<T>): Promise<T> {
+  private async publicationTransaction<T>(
+    run: (tx: UsMasterDataTransaction) => Promise<T>,
+  ): Promise<T> {
     for (let tries = 0; ; tries++) {
       try {
-        return await this.db.transaction(run, { isolationLevel: "serializable" });
+        return await this.db.transaction(run, { isolationLevel: "read committed" });
       } catch (error) {
         const cause = error && typeof error === "object" && "cause" in error ? error.cause : error;
         const code = cause && typeof cause === "object" && "code" in cause ? cause.code : null;
