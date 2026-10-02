@@ -816,7 +816,9 @@ export {
   type UsPlanDraftCreateBody,
   type UsPlanDraftDiscardBody,
   usPlanApproveBodySchema,
+  usPlanInternalApproveInputSchema,
   type UsPlanSectionsBody,
   type UsPlanDraftSaveBody,
   type UsPlanApproveBody,
+  type UsPlanInternalApproveInput,
 } from "./traceability/plans.js";

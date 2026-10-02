@@ -497,10 +497,18 @@ export {
   validateUsPlanDraftFactSources,
   changedUsPlanSections,
   usPlanSnapshotDigest,
+  buildUsPlanApprovedEvidence,
+  usPlanApprovalRequestDigest,
+  usPlanIdempotencyKeyHash,
+  compareUsPlanIdempotency,
 } from "./traceability/plan/snapshot.js";
 export type {
   UsPlanConfiguredFacts,
   UsPlanSnapshot,
   UsPlanFactSource,
   UsPlanFactSourceManifest,
+  UsPlanApprovedEvidence,
+  UsPlanApprovalAuthority,
+  UsPlanApprovalRequest,
+  UsPlanConfirmationName,
 } from "./traceability/plan/snapshot.js";

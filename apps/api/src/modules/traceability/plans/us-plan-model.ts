@@ -36,6 +36,9 @@ export function parseUsPlanDraftRow(row: UsPlanVersionRow): UsPlanDraftView {
     row.approvedAt !== null ||
     row.configSnapshot !== null ||
     row.configDigest !== null ||
+    row.approvedEvidence !== null ||
+    row.idempotencyKeyHash !== null ||
+    row.approvalRequestDigest !== null ||
     row.pdfObjectKey !== null ||
     row.pdfSha256 !== null ||
     row.pdfByteSize !== null ||

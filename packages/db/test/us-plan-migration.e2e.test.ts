@@ -15,6 +15,11 @@ const frozen = {
   pdf_byte_size: 1234,
   renderer_version: "plan-pdf-v1",
 };
+const binding = {
+  approved_evidence: { schemaVersion: 1, snapshot: { tenant: "Synthetic" } },
+  idempotency_key_hash: "c".repeat(64),
+  approval_request_digest: "d".repeat(64),
+};
 const draft = {
   id: randomUUID(),
   tenant_id: "placeholder",
@@ -32,6 +37,7 @@ type PlanFields = Partial<
   Record<
     | keyof typeof draft
     | keyof typeof frozen
+    | keyof typeof binding
     | "superseded_by_id"
     | "superseded_at"
     | "retain_through",
@@ -42,7 +48,8 @@ type PlanFields = Partial<
 // pg treats JS arrays as PostgreSQL arrays; encode JSON columns explicitly so
 // negative array/scalar fixtures reach JSONB unchanged rather than as '{}'.
 function parameter([key, value]: [string, unknown]) {
-  return (key === "sections" || key === "config_snapshot") && value !== null
+  return (key === "sections" || key === "config_snapshot" || key === "approved_evidence") &&
+    value !== null
     ? JSON.stringify(value)
     : value;
 }
@@ -106,7 +113,7 @@ describe.skipIf(!url)("US plan storage migration in owned disposable PostgreSQL"
 
   beforeAll(async () => {
     if (!url) throw new Error("Missing isolated US database URL");
-    fixture = await createUsProfileTestDatabase(url, 135);
+    fixture = await createUsProfileTestDatabase(url, 136);
     await fixture.pool.query(
       "INSERT INTO organization(id,name,slug,created_at) VALUES($1,'Pre-existing synthetic',$1,'2026-09-01T10:00:00Z')",
       [existingTenant],
@@ -134,22 +141,67 @@ describe.skipIf(!url)("US plan storage migration in owned disposable PostgreSQL"
       tx.release();
     }
     before = await existingRows();
+    await expect(
+      fixture.pool.query("SELECT approved_evidence FROM traceability_plan_versions"),
+    ).rejects.toMatchObject({ code: "42703" });
     await migrate(fixture.db, { migrationsFolder: resolve("migrations") });
   }, 60_000);
   afterAll(async () => {
     await fixture?.close();
   });
 
-  it("preserves exact pre-existing organization/profile/event/root bytes and applies journal 136", async () => {
+  it("preserves exact pre-existing organization/profile/event/root bytes and applies journal 137", async () => {
     expect(await existingRows()).toEqual(before);
     expect(
       (await fixture.pool.query("SELECT count(*)::int AS count FROM drizzle.__drizzle_migrations"))
         .rows,
-    ).toEqual([{ count: 137 }]);
+    ).toEqual([{ count: 138 }]);
     expect(
       (await fixture.pool.query("SELECT count(*)::int AS count FROM traceability_plan_versions"))
         .rows,
     ).toEqual([{ count: 0 }]);
+  });
+  it("requires an all-or-none binding only on approved rows and isolates key reuse by tenant", async () => {
+    const own = await tenant();
+    const foreign = await tenant();
+    const first = await effective(own, binding);
+    const foreignFirst = await effective(foreign, binding);
+    expect(await row(first)).toMatchObject(binding);
+    expect(await row(foreignFirst)).toMatchObject(binding);
+    await expect(
+      insert(await tenant(), { approved_evidence: binding.approved_evidence }),
+    ).rejects.toMatchObject({ code: "23514" });
+    await expect(
+      effective(await tenant(), { approved_evidence: binding.approved_evidence }),
+    ).rejects.toMatchObject({ code: "23514" });
+    const next = await insert(own, { version_number: 2, change_summary: "Changed" });
+    await supersede(first, next);
+    await expect(
+      update(next, { status: "effective", ...frozen, ...binding }),
+    ).rejects.toMatchObject({
+      code: "23505",
+      constraint: "traceability_plan_idempotency_key_uq",
+    });
+    await expect(
+      update(next, {
+        status: "effective",
+        ...frozen,
+        ...binding,
+        approval_request_digest: "e".repeat(64),
+      }),
+    ).rejects.toMatchObject({
+      code: "23505",
+      constraint: "traceability_plan_idempotency_key_uq",
+    });
+    await update(next, {
+      status: "effective",
+      ...frozen,
+      ...binding,
+      idempotency_key_hash: "e".repeat(64),
+    });
+    expect(await row(next)).toMatchObject({
+      approval_request_digest: binding.approval_request_digest,
+    });
   });
   it.each(["draft", "effective"])(
     "allows only one %s per tenant, with independent tenant slots",
@@ -277,6 +329,9 @@ describe.skipIf(!url)("US plan storage migration in owned disposable PostgreSQL"
     { approved_at: "2026-10-02T11:00:00Z" },
     { config_snapshot: { changed: true } },
     { config_digest: "c".repeat(64) },
+    { approved_evidence: binding.approved_evidence },
+    { idempotency_key_hash: binding.idempotency_key_hash },
+    { approval_request_digest: binding.approval_request_digest },
     { pdf_object_key: "private/changed.pdf" },
     { pdf_sha256: "c".repeat(64) },
     { pdf_byte_size: 999 },

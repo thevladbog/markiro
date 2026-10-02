@@ -52,6 +52,13 @@ export const usPlanApproveBodySchema = z
   })
   .strict();
 
+/** Internal command input; identity, provenance, configuration and clock are server-owned. */
+export const usPlanInternalApproveInputSchema = usPlanApproveBodySchema
+  .extend({
+    versionId: platformUuidSchema,
+  })
+  .strict();
+
 export const usPlanDraftCreateBodySchema = z
   .object({ sections: usPlanSectionsSchema, changeSummary: text })
   .strict();
@@ -63,3 +70,4 @@ export type UsPlanDraftCreateBody = z.infer<typeof usPlanDraftCreateBodySchema>;
 export type UsPlanDraftDiscardBody = z.infer<typeof usPlanDraftDiscardBodySchema>;
 export type UsPlanDraftSaveBody = z.infer<typeof usPlanDraftSaveBodySchema>;
 export type UsPlanApproveBody = z.infer<typeof usPlanApproveBodySchema>;
+export type UsPlanInternalApproveInput = z.infer<typeof usPlanInternalApproveInputSchema>;

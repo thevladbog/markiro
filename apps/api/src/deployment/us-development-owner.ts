@@ -40,6 +40,71 @@ function conflict(): never {
 export class UsDevelopmentOwnerStore {
   constructor(private readonly db: Db) {}
 
+  /** Treat the local fixture as synthetic only when its persisted origin is intact. */
+  async verifyTrustedSeed(
+    tenantId: string,
+    verifiedAt: Date,
+  ): Promise<{ seedId: string; verifiedBy: string; verifiedAt: string } | null> {
+    if (!Number.isFinite(verifiedAt.getTime())) return null;
+    return this.db.transaction(
+      async (tx) => {
+        const [organization] = await tx
+          .select()
+          .from(schema.organization)
+          .where(and(eq(schema.organization.id, tenantId), eq(schema.organization.slug, SLUG)));
+        if (
+          !organization ||
+          organization.metadata !== METADATA ||
+          organization.name !== "Synthetic US development"
+        )
+          return null;
+        const [user] = await tx.select().from(schema.user).where(eq(schema.user.email, EMAIL));
+        if (!user || user.name !== "Synthetic US development owner") return null;
+        const memberships = await tx
+          .select()
+          .from(schema.member)
+          .where(
+            and(eq(schema.member.organizationId, tenantId), eq(schema.member.userId, user.id)),
+          );
+        if (memberships.length !== 1 || memberships[0]?.role !== "owner") return null;
+        const credentials = await tx
+          .select()
+          .from(schema.account)
+          .where(
+            and(eq(schema.account.userId, user.id), eq(schema.account.providerId, "credential")),
+          );
+        if (
+          credentials.length !== 1 ||
+          credentials[0]?.accountId !== user.id ||
+          !credentials[0].password
+        )
+          return null;
+        const audits = await tx
+          .select()
+          .from(schema.tenantAuditEvents)
+          .where(
+            and(
+              eq(schema.tenantAuditEvents.organizationId, tenantId),
+              eq(schema.tenantAuditEvents.action, "us.development.owner.provisioned"),
+            ),
+          );
+        if (audits.length !== 1) return null;
+        const audit = audits[0];
+        if (
+          audit?.actorUserId !== user.id ||
+          audit.outcome !== "success" ||
+          audit.targetType !== "tenant" ||
+          audit.targetId !== tenantId ||
+          audit.before !== null ||
+          JSON.stringify(audit.after) !== METADATA
+        )
+          return null;
+        return { seedId: tenantId, verifiedBy: SEED_VERSION, verifiedAt: verifiedAt.toISOString() };
+      },
+      { isolationLevel: "repeatable read" },
+    );
+  }
+
   async provision(password: string, requestId: string): Promise<UsDevelopmentOwnerResult> {
     validateUsOwnerPassword(password);
     return this.db.transaction(async (tx) => {

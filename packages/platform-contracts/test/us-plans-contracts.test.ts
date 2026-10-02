@@ -2,6 +2,7 @@ import type { UsPlanSections } from "@markiro/domain";
 import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   usPlanApproveBodySchema,
+  usPlanInternalApproveInputSchema,
   usPlanDraftSaveBodySchema,
   usPlanSectionsSchema,
   usPlanDraftCreateBodySchema,
@@ -45,6 +46,31 @@ const textFields = sectionEntries.flatMap(([section, fields]) =>
 const arrayFields = ["formats", "recordLocations", "responsibleRoles", "narrative"];
 
 describe("US plan request contracts", () => {
+  it("accepts only a version ID and bounded approval body at the internal boundary", () => {
+    const input = { versionId: "00000000-0000-4000-8000-000000000002", ...approval };
+    expect(usPlanInternalApproveInputSchema.parse(input)).toEqual(input);
+    for (const field of [
+      "tenantId",
+      "actorId",
+      "approvedAt",
+      "trustedSeed",
+      "configSnapshot",
+      "configDigest",
+      "pdfObjectKey",
+      "provenance",
+      "syntheticDemo",
+    ]) {
+      expect(
+        usPlanInternalApproveInputSchema.safeParse({ ...input, [field]: "forged" }).success,
+      ).toBe(false);
+    }
+    expect(
+      usPlanInternalApproveInputSchema.safeParse({
+        ...input,
+        confirmations: { ...approval.confirmations, actorId: "forged" },
+      }).success,
+    ).toBe(false);
+  });
   it("accepts strict create/discard bodies and prohibits client authority", () => {
     expect(usPlanDraftCreateBodySchema.parse({ sections, changeSummary: "" })).toEqual({
       sections,

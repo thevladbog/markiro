@@ -83,6 +83,47 @@ describe.skipIf(!base)("local US synthetic owner provisioning", () => {
     ).toEqual([{ enabled: true }]);
   });
 
+  it("verifies only the exact server-provisioned seed identity", async () => {
+    const store = new ownerModule.UsDevelopmentOwnerStore(fixture.db);
+    const result = await store.provision(password, randomUUID());
+    const verifiedAt = new Date("2026-10-02T10:00:00.000Z");
+    expect(await store.verifyTrustedSeed(result.tenantId, verifiedAt)).toEqual({
+      seedId: result.tenantId,
+      verifiedBy: "us-development-owner-v1",
+      verifiedAt: verifiedAt.toISOString(),
+    });
+    const copiedTenant = randomUUID();
+    await fixture.db.insert(schema.organization).values({
+      id: copiedTenant,
+      name: "Synthetic US development copy",
+      slug: "copied-seed",
+      metadata: JSON.stringify({ synthetic: true, seedVersion: "us-development-owner-v1" }),
+      createdAt: new Date(),
+    });
+    expect(await store.verifyTrustedSeed(copiedTenant, verifiedAt)).toBeNull();
+    expect(await store.verifyTrustedSeed(randomUUID(), verifiedAt)).toBeNull();
+    await fixture.db.update(schema.member).set({ role: "member" });
+    expect(await store.verifyTrustedSeed(result.tenantId, verifiedAt)).toBeNull();
+  });
+
+  it("rejects a reserved slug whose metadata or owner identity does not match the provisioned seed", async () => {
+    const store = new ownerModule.UsDevelopmentOwnerStore(fixture.db);
+    const result = await store.provision(password, randomUUID());
+    const at = new Date("2026-10-02T10:00:00.000Z");
+    await fixture.db
+      .update(schema.organization)
+      .set({ metadata: JSON.stringify({ synthetic: true }) });
+    expect(await store.verifyTrustedSeed(result.tenantId, at)).toBeNull();
+    await fixture.db.update(schema.organization).set({
+      metadata: JSON.stringify({ synthetic: true, seedVersion: "us-development-owner-v1" }),
+    });
+    await fixture.db.update(schema.user).set({ email: "renamed@example.test" });
+    expect(await store.verifyTrustedSeed(result.tenantId, at)).toBeNull();
+    await fixture.db.update(schema.user).set({ email: result.email });
+    await fixture.db.delete(schema.tenantAuditEvents);
+    expect(await store.verifyTrustedSeed(result.tenantId, at)).toBeNull();
+  });
+
   it("serializes concurrent creation to one owner", async () => {
     const store = new ownerModule.UsDevelopmentOwnerStore(fixture.db);
     const results = await Promise.all([

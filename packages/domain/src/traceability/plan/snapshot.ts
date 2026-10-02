@@ -1,3 +1,5 @@
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 import { canonicalExportDigest } from "../export/canonical.js";
 import { US_CAPABILITY } from "../access.js";
 import {
@@ -238,6 +240,154 @@ export function validateUsPlanDraftFactSources(
   if (canonicalExportDigest(manifest) !== canonicalExportDigest(expected)) {
     throw new TypeError("invalid_draft_fact_sources");
   }
+}
+
+export type UsPlanConfirmationName =
+  "procedures" | "backupAndRecovery" | "contact" | "nonFarmScope";
+
+export interface UsPlanApprovalRequest {
+  tenantId: string;
+  versionId: string;
+  expectedRevision: number;
+  confirmations: Record<UsPlanConfirmationName, boolean>;
+}
+
+export interface UsPlanApprovedEvidence {
+  schemaVersion: 1;
+  snapshot: UsPlanSnapshot;
+  factSources: UsPlanFactSourceManifest;
+  confirmations: Record<
+    UsPlanConfirmationName,
+    Extract<UsPlanFactSource, { origin: "operator_confirmed" | "synthetic_fixture" }>
+  >;
+}
+
+export type UsPlanApprovalAuthority = {
+  kind: "operational" | "synthetic";
+  actorId: string;
+  confirmedAt: string;
+  confirmations: Record<UsPlanConfirmationName, boolean>;
+  trustedSeed?: { seedId: string; verifiedBy: string; verifiedAt: string };
+};
+
+/** Called only after the service has authenticated the actor and verified seed identity. */
+export function buildUsPlanApprovedEvidence(
+  snapshot: UsPlanSnapshot,
+  draftSources: UsPlanFactSourceManifest,
+  authority: UsPlanApprovalAuthority,
+): UsPlanApprovedEvidence {
+  validateUsPlanDraftFactSources(snapshot.configured, snapshot.sections, draftSources);
+  if (
+    !authority.actorId.trim() ||
+    new Date(authority.confirmedAt).toISOString() !== authority.confirmedAt
+  ) {
+    throw new TypeError("invalid_confirmation_identity");
+  }
+  const trustedSeed = authority.trustedSeed;
+  if (authority.kind === "synthetic") {
+    if (
+      snapshot.provenance !== "trusted_synthetic" ||
+      !trustedSeed?.seedId ||
+      !trustedSeed.verifiedBy ||
+      new Date(trustedSeed.verifiedAt).toISOString() !== trustedSeed.verifiedAt
+    ) {
+      throw new TypeError("trusted_seed_required");
+    }
+  } else if (snapshot.provenance !== "operational" || authority.trustedSeed) {
+    throw new TypeError("approval_provenance_mismatch");
+  }
+  const names: UsPlanConfirmationName[] = [
+    "procedures",
+    "backupAndRecovery",
+    "contact",
+    "nonFarmScope",
+  ];
+  if (
+    authority.kind === "operational" &&
+    names.some((name) => authority.confirmations[name] !== true)
+  ) {
+    throw new TypeError("plan_confirmation_required");
+  }
+  const assertion = { actorId: authority.actorId, confirmedAt: authority.confirmedAt };
+  const confirmationSource: UsPlanApprovedEvidence["confirmations"][UsPlanConfirmationName] =
+    authority.kind === "synthetic" && trustedSeed
+      ? { origin: "synthetic_fixture", trustedSeed: { ...trustedSeed } }
+      : { origin: "operator_confirmed", ...assertion };
+  const factSources: UsPlanFactSourceManifest = {
+    schemaVersion: 1,
+    entries: draftSources.entries.map(({ path, source }) => ({
+      path,
+      source:
+        source.origin !== "operator_pending"
+          ? structuredClone(source)
+          : authority.kind === "synthetic" && trustedSeed
+            ? { origin: "synthetic_fixture", trustedSeed: { ...trustedSeed } }
+            : { origin: "operator_confirmed", ...assertion },
+    })),
+  };
+  const policySource: UsPlanFactSource = {
+    origin: "application_policy",
+    version: snapshot.ftlReviewWorkflow.version,
+  };
+  function addPolicyPaths(value: unknown, path: string): void {
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => addPolicyPaths(item, `${path}/${index}`));
+    } else if (value !== null && typeof value === "object") {
+      Object.entries(value).forEach(([key, item]) =>
+        addPolicyPaths(item, `${path}/${pointerSegment(key)}`),
+      );
+    }
+    if (path !== "/ftlReviewWorkflow") factSources.entries.push({ path, source: policySource });
+  }
+  addPolicyPaths(snapshot.ftlReviewWorkflow, "/ftlReviewWorkflow");
+  factSources.entries.push({
+    path: "/provenance",
+    source:
+      authority.kind === "synthetic" && trustedSeed
+        ? { origin: "synthetic_fixture", trustedSeed: { ...trustedSeed } }
+        : { origin: "configured" },
+  });
+  factSources.entries.sort((a, b) => compareIds(a.path, b.path));
+  return {
+    schemaVersion: 1,
+    snapshot: structuredClone(snapshot),
+    factSources,
+    confirmations: {
+      procedures: structuredClone(confirmationSource),
+      backupAndRecovery: structuredClone(confirmationSource),
+      contact: structuredClone(confirmationSource),
+      nonFarmScope: structuredClone(confirmationSource),
+    },
+  };
+}
+
+/** The raw one-time key is deliberately excluded from this canonical request binding. */
+export function usPlanApprovalRequestDigest(request: UsPlanApprovalRequest): string {
+  return canonicalExportDigest({
+    schemaVersion: 1,
+    tenantId: request.tenantId,
+    versionId: request.versionId,
+    expectedRevision: request.expectedRevision,
+    confirmations: {
+      procedures: request.confirmations.procedures,
+      backupAndRecovery: request.confirmations.backupAndRecovery,
+      contact: request.confirmations.contact,
+      nonFarmScope: request.confirmations.nonFarmScope,
+    },
+  });
+}
+
+export function usPlanIdempotencyKeyHash(key: string): string {
+  return bytesToHex(sha256(utf8ToBytes(key)));
+}
+
+export function compareUsPlanIdempotency(
+  saved: { tenantId: string; keyHash: string; requestDigest: string } | null,
+  request: UsPlanApprovalRequest,
+  keyHash: string,
+): "absent" | "retry" | "conflict" {
+  if (!saved || saved.tenantId !== request.tenantId || saved.keyHash !== keyHash) return "absent";
+  return saved.requestDigest === usPlanApprovalRequestDigest(request) ? "retry" : "conflict";
 }
 
 /** Only configured facts have live counterparts; operator-owned sections do not. */

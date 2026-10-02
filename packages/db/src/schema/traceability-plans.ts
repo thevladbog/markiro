@@ -35,6 +35,9 @@ export const traceabilityPlanVersions = pgTable(
     approvedAt: timestamp("approved_at", { withTimezone: true }),
     configSnapshot: jsonb("config_snapshot").$type<unknown>(),
     configDigest: text("config_digest"),
+    approvedEvidence: jsonb("approved_evidence").$type<unknown>(),
+    idempotencyKeyHash: text("idempotency_key_hash"),
+    approvalRequestDigest: text("approval_request_digest"),
     pdfObjectKey: text("pdf_object_key"),
     pdfSha256: text("pdf_sha256"),
     pdfByteSize: integer("pdf_byte_size"),
@@ -52,6 +55,9 @@ export const traceabilityPlanVersions = pgTable(
     uniqueIndex("traceability_plan_one_effective_uq")
       .on(t.tenantId)
       .where(sql`${t.status} = 'effective'`),
+    uniqueIndex("traceability_plan_idempotency_key_uq")
+      .on(t.tenantId, t.idempotencyKeyHash)
+      .where(sql`${t.idempotencyKeyHash} is not null`),
     foreignKey({
       name: "traceability_plan_superseded_by_fk",
       columns: [t.tenantId, t.supersededById],
@@ -64,6 +70,25 @@ export const traceabilityPlanVersions = pgTable(
     ),
     check("traceability_plan_sections_object", sql`jsonb_typeof(${t.sections}) = 'object'`),
     check("traceability_plan_snapshot_object", sql`jsonb_typeof(${t.configSnapshot}) = 'object'`),
+    check(
+      "traceability_plan_approved_evidence_object",
+      sql`jsonb_typeof(${t.approvedEvidence}) = 'object'`,
+    ),
+    check(
+      "traceability_plan_idempotency_hash_valid",
+      sql`${t.idempotencyKeyHash} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      "traceability_plan_request_digest_valid",
+      sql`${t.approvalRequestDigest} ~ '^[a-f0-9]{64}$'`,
+    ),
+    check(
+      "traceability_plan_approval_binding_shape",
+      sql`
+      (${t.approvedEvidence} IS NULL AND ${t.idempotencyKeyHash} IS NULL AND ${t.approvalRequestDigest} IS NULL)
+      OR (${t.status} IN ('effective','superseded') AND ${t.approvedEvidence} IS NOT NULL AND ${t.idempotencyKeyHash} IS NOT NULL AND ${t.approvalRequestDigest} IS NOT NULL)
+    `,
+    ),
     check(
       "traceability_plan_actor_valid",
       sql`${t.createdBy} ~ '[^[:space:]]' AND ${t.approvedBy} ~ '[^[:space:]]'`,

@@ -21,6 +21,9 @@ it("exports all draft, approval and retention columns with civil-date retention"
     "approved_at",
     "config_snapshot",
     "config_digest",
+    "approved_evidence",
+    "idempotency_key_hash",
+    "approval_request_digest",
     "pdf_object_key",
     "pdf_sha256",
     "pdf_byte_size",
@@ -33,6 +36,7 @@ it("exports all draft, approval and retention columns with civil-date retention"
   expect(schema.traceabilityPlanVersions.id.getSQLType()).toBe("uuid");
   expect(schema.traceabilityPlanVersions.sections.getSQLType()).toBe("jsonb");
   expect(schema.traceabilityPlanVersions.configSnapshot.getSQLType()).toBe("jsonb");
+  expect(schema.traceabilityPlanVersions.approvedEvidence.getSQLType()).toBe("jsonb");
   expect(schema.traceabilityPlanVersions.retainThrough.getSQLType()).toBe("date");
   expect(schema.traceabilityPlanVersions.retainThrough.dataType).toBe("string");
   for (const name of ["createdAt", "updatedAt", "approvedAt", "supersededAt"] as const) {
@@ -47,7 +51,7 @@ it("models tenant-safe plan lineage and one draft/effective slot per tenant", ()
     ["tenant_id", "version_number"],
   ]);
   const indexes = table.indexes.filter((index) => index.config.unique && index.config.where);
-  expect(indexes).toHaveLength(2);
+  expect(indexes).toHaveLength(3);
   const dialect = new PgDialect();
   expect(
     indexes.map((index) => ({
@@ -65,6 +69,11 @@ it("models tenant-safe plan lineage and one draft/effective slot per tenant", ()
       name: "traceability_plan_one_effective_uq",
       columns: ["tenant_id"],
       predicate: '"traceability_plan_versions"."status" = \'effective\'',
+    },
+    {
+      name: "traceability_plan_idempotency_key_uq",
+      columns: ["tenant_id", "idempotency_key_hash"],
+      predicate: '"traceability_plan_versions"."idempotency_key_hash" is not null',
     },
   ]);
   expect(
