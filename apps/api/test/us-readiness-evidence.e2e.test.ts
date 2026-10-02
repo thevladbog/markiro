@@ -1070,9 +1070,11 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
 
   it("reads 2001 current events without the graph cap and refuses the 10001 sentinel", async () => {
     // A freshly bulk-loaded tenant can have stale statistics in production too.
-    // Keep this disposable table's statistics stale so maintenance cannot hide
-    // a selector that scans the whole tenant again for each current event.
+    // Keep all three disposable tables' statistics stale so maintenance cannot
+    // hide root scans or event joins that replay a whole tenant for each line.
     await f.db.execute(sql`ALTER TABLE receiving_event_roots SET (autovacuum_enabled=false)`);
+    await f.db.execute(sql`ALTER TABLE traceability_events SET (autovacuum_enabled=false)`);
+    await f.db.execute(sql`ALTER TABLE receiving_event_items SET (autovacuum_enabled=false)`);
     const c = await seedShippingLifecycle(f.db);
     const [event] = await f.db
       .select()
@@ -1088,9 +1090,11 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
       .from(schema.receivingEventItems)
       .where(eq(schema.receivingEventItems.eventId, event.id));
     if (!root) throw new Error("Missing seed root");
-    // Freeze the one-root estimate before the bulk insert, reproducing stale
-    // tenant selectivity rather than refreshing statistics to make it pass.
+    // Freeze this tenant's one-event/two-line estimates before the bulk insert.
+    // Root-only statistics leave the event joins dependent on autovacuum timing.
     await f.db.execute(sql`ANALYZE receiving_event_roots`);
+    await f.db.execute(sql`ANALYZE traceability_events`);
+    await f.db.execute(sql`ANALYZE receiving_event_items`);
     const clone = async (start: number, count: number) => {
       for (let offset = 0; offset < count; offset += 250) {
         const copies = Array.from({ length: Math.min(250, count - offset) }, (_, i) => ({
@@ -1151,7 +1155,7 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
       maxRootWork = Math.max(maxRootWork, plan ? rootScanWork(plan) : Infinity);
       maxPlanWork = Math.max(maxPlanWork, plan ? queryPlanWork(plan) : Infinity);
       if (plan && queryPlanWork(plan) >= 2001 * 64)
-        console.info("Readiness reader excessive plan", JSON.stringify(plan));
+        console.info("Readiness reader excessive plan", query, JSON.stringify(plan));
       expect(plan ? rootScanWork(plan) : Infinity).toBeLessThan(2001 * 4);
       // Include join filters and CTE/materialized replay above physical scans.
       // This linear budget allows the fixed reader plan's traversal overhead,

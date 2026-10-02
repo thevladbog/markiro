@@ -845,6 +845,12 @@ function eventRootLookup() {
     ) keyed LIMIT 1
   )`;
 }
+function lineEventLookup() {
+  // Fence the global UUID lookup before applying tenant/type predicates.
+  // With stale tenant statistics, an ordinary join can scan or replay every
+  // tenant event for each line. Callers retain their INNER/LEFT join semantics.
+  return sql`LATERAL (SELECT * FROM traceability_events WHERE id=l.event_id LIMIT 1)`;
+}
 function eventFilter(scope: UsReadinessScope) {
   return sql`
     ${scope.lotId === null ? sql`true` : sql`EXISTS (SELECT 1 FROM lines l WHERE l.tenant_id=e.tenant_id AND l.event_id=e.id AND l.lot_id=${scope.lotId})`}
@@ -912,14 +918,17 @@ export async function readUsReadinessEvidence(
     }>(sql`${relations(tenantId)}, candidates AS (
       SELECT l.lot_id AS id FROM lines l WHERE l.tenant_id=${tenantId} AND l.event_id=ANY(${sql.param(ids)}::uuid[]) AND l.lot_id IS NOT NULL
       UNION SELECT l.lot_id FROM lines l
-        JOIN traceability_events e ON e.tenant_id=l.tenant_id AND e.id=l.event_id AND e.type=l.type
+        JOIN ${lineEventLookup()} e
+          ON e.tenant_id=l.tenant_id AND e.id=l.event_id AND e.type=l.type
         JOIN traceability_lots lot ON lot.tenant_id=l.tenant_id AND lot.id=l.lot_id
         WHERE l.tenant_id=${tenantId} AND l.origin AND e.finalization_snapshot IS NOT NULL AND (${date})
           AND (${scope.lotId}::uuid IS NULL OR lot.id=${scope.lotId}::uuid)
           AND (${scope.productId}::uuid IS NULL OR lot.product_id=${scope.productId}::uuid)
       UNION SELECT lot.id FROM traceability_lots lot WHERE lot.tenant_id=${tenantId} AND lot.id=${scope.lotId}::uuid
         AND (${scope.productId}::uuid IS NULL OR lot.product_id=${scope.productId}::uuid)
-        AND NOT EXISTS (SELECT 1 FROM lines l JOIN traceability_events e ON e.tenant_id=l.tenant_id AND e.id=l.event_id AND e.type=l.type
+        AND NOT EXISTS (SELECT 1 FROM lines l
+          JOIN ${lineEventLookup()} e
+            ON e.tenant_id=l.tenant_id AND e.id=l.event_id AND e.type=l.type
           WHERE l.tenant_id=lot.tenant_id AND l.lot_id=lot.id AND l.origin AND e.finalization_snapshot IS NOT NULL)
     ) SELECT id FROM candidates ORDER BY id LIMIT ${MAX_RECORDS + 1}`);
     if (selectedLots.rows.length > MAX_RECORDS) throw new UsReadinessScopeTooLargeException();
@@ -928,7 +937,7 @@ export async function readUsReadinessEvidence(
     const integrity = await tx.execute<{ invalid: boolean }>(sql`${relations(tenantId)}
       SELECT EXISTS (
         SELECT 1 FROM lines l
-        LEFT JOIN traceability_events e ON e.tenant_id=l.tenant_id AND e.id=l.event_id
+        LEFT JOIN ${lineEventLookup()} e ON e.tenant_id=l.tenant_id AND e.id=l.event_id
         LEFT JOIN ${eventRootLookup()} r ON r.tenant_id=e.tenant_id AND r.id=e.root_event_id AND r.type=l.type
         WHERE l.tenant_id=${tenantId} AND l.lot_id=ANY(${sql.param(lotIds)}::uuid[]) AND (
           e.id IS NULL OR e.type<>l.type OR r.id IS NULL
@@ -963,7 +972,7 @@ export async function readUsReadinessEvidence(
     }>(sql`${relations(tenantId)}
       SELECT DISTINCT l.lot_id AS "lotId",e.id,e.type,e.event_number AS "eventNumber",(r.current_event_id=e.id AND e.status='finalized' AND e.superseded_by_event_id IS NULL) IS TRUE AS current,
         COALESCE(e.voided_at,e.finalized_at) AS "lifecycleAt", e.revision
-      FROM lines l LEFT JOIN traceability_events e ON e.tenant_id=l.tenant_id AND e.id=l.event_id AND e.type=l.type
+      FROM lines l LEFT JOIN ${lineEventLookup()} e ON e.tenant_id=l.tenant_id AND e.id=l.event_id AND e.type=l.type
       LEFT JOIN ${eventRootLookup()} r ON r.tenant_id=e.tenant_id AND r.id=e.root_event_id AND r.type=e.type
       WHERE l.tenant_id=${tenantId} AND l.origin AND l.lot_id=ANY(${sql.param(lotIds)}::uuid[]) AND e.finalization_snapshot IS NOT NULL
       ORDER BY "lifecycleAt",e.revision,e.id`);
