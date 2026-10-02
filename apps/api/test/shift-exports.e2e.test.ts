@@ -215,6 +215,22 @@ describe.skipIf(!ready)("shift exports e2e", () => {
     expect(response.body.formatVersion).toBe(2);
   });
 
+  it("creates a reversed boxes export (codes before the box) at format version 1", async () => {
+    const { agent, shiftId } = await fixture();
+    const response = await agent.post(`/shifts/${shiftId}/exports`).send({
+      formatId: "shift_txt_boxes_reversed",
+      formatVersion: 1,
+      maxLines: null,
+      idempotencyKey: randomUUID(),
+    });
+    expect(response.status).toBe(201);
+    expect(response.body).toMatchObject({
+      formatId: "shift_txt_boxes_reversed",
+      formatVersion: 1,
+      status: "queued",
+    });
+  });
+
   it("collapses only the same actor/idempotency key and creates a job for each distinct key", async () => {
     const { agent, shiftId } = await fixture();
     const key = randomUUID();

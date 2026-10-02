@@ -15,6 +15,7 @@ import {
 export type ShiftExportFormatId =
   | "shift_txt_flat"
   | "shift_txt_boxes"
+  | "shift_txt_boxes_reversed"
   | "shift_csv_flat"
   | "shift_csv_boxes"
   | "shift_xml_gismt_aggregation"
@@ -148,6 +149,16 @@ export const SHIFT_EXPORT_FORMATS = Object.freeze([
     id: "shift_txt_boxes",
     version: 2,
     label: "[TXT][С коробами] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "boxes",
+  } as const),
+  // The same boxes as `shift_txt_boxes` v2, each written codes-first with its
+  // SSCC closing the block -- the layout some receiving systems import.
+  Object.freeze({
+    id: "shift_txt_boxes_reversed",
+    version: 1,
+    label: "[TXT][С коробами][Обратная] Отчет смены",
     extension: "txt",
     mimeType: "text/plain; charset=utf-8",
     boxMode: "boxes",
@@ -287,6 +298,13 @@ export function getShiftExportFormat(id: string, version: number): ShiftExportFo
   return descriptor;
 }
 
+/** The frozen v1 boxes formats -- the only ones that write the bare 18-digit SSCC. */
+function isLegacyShiftExportFormat(descriptor: ShiftExportFormatDescriptor): boolean {
+  return LEGACY_SHIFT_EXPORT_FORMATS.some(
+    (legacy) => legacy.id === descriptor.id && legacy.version === descriptor.version,
+  );
+}
+
 export function renderShiftExport(input: RenderShiftExportInput): ShiftExportPart[] {
   const descriptor = getShiftExportFormat(input.formatId, input.formatVersion);
 
@@ -421,9 +439,12 @@ function createBlocks(
         };
       }
 
-      const ssccOut = descriptor.version >= 2 ? formatBoxSscc(box.sscc) : box.sscc;
+      const ssccOut = isLegacyShiftExportFormat(descriptor) ? box.sscc : formatBoxSscc(box.sscc);
       if (descriptor.extension === "txt") {
-        const lines = [ssccOut, ...box.codes, ""];
+        const lines =
+          descriptor.id === "shift_txt_boxes_reversed"
+            ? [...box.codes, ssccOut, ""]
+            : [ssccOut, ...box.codes, ""];
         return {
           lines,
           physicalLineCount: lines.length,
