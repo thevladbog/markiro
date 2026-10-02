@@ -852,13 +852,16 @@ function eventFilter(scope: UsReadinessScope) {
 
 /** Shared with controlled EXPLAIN checks so the measured query is the executed selector. */
 export function readinessEventSelectionQuery(tenantId: string, scope: UsReadinessScope) {
+  // Uncorrelated tuple membership lets PostgreSQL hash each tenant's current
+  // root pointers once. Correlated EXISTS under OR can repeatedly scan a whole
+  // tenant when bulk inserts have outpaced the planner's statistics.
   return sql`${relations(tenantId)}
     SELECT e.id FROM traceability_events e
     WHERE e.tenant_id=${tenantId} AND e.status='finalized' AND e.superseded_by_event_id IS NULL
       AND (
-        (e.type='receiving' AND EXISTS (SELECT 1 FROM receiving_event_roots r WHERE r.tenant_id=e.tenant_id AND r.id=e.root_event_id AND r.current_event_id=e.id))
-        OR (e.type='transformation' AND EXISTS (SELECT 1 FROM transformation_event_roots r WHERE r.tenant_id=e.tenant_id AND r.id=e.root_event_id AND r.current_event_id=e.id))
-        OR (e.type='shipping' AND EXISTS (SELECT 1 FROM shipping_event_roots r WHERE r.tenant_id=e.tenant_id AND r.id=e.root_event_id AND r.current_event_id=e.id))
+        (e.type='receiving' AND (e.root_event_id,e.id) IN (SELECT r.id,r.current_event_id FROM receiving_event_roots r WHERE r.tenant_id=${tenantId}))
+        OR (e.type='transformation' AND (e.root_event_id,e.id) IN (SELECT r.id,r.current_event_id FROM transformation_event_roots r WHERE r.tenant_id=${tenantId}))
+        OR (e.type='shipping' AND (e.root_event_id,e.id) IN (SELECT r.id,r.current_event_id FROM shipping_event_roots r WHERE r.tenant_id=${tenantId}))
       )
       AND e.event_date BETWEEN ${scope.eventDateFrom}::date AND ${scope.eventDateTo}::date AND (${eventFilter(scope)})
     ORDER BY e.event_date,e.id LIMIT ${MAX_RECORDS + 1}`;

@@ -1043,6 +1043,10 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
   }, 30_000);
 
   it("reads 2001 current events without the graph cap and refuses the 10001 sentinel", async () => {
+    // A freshly bulk-loaded tenant can have stale statistics in production too.
+    // Keep this disposable table's statistics stale so maintenance cannot hide
+    // a selector that scans the whole tenant again for each current event.
+    await f.db.execute(sql`ALTER TABLE receiving_event_roots SET (autovacuum_enabled=false)`);
     const c = await seedShippingLifecycle(f.db);
     const [event] = await f.db
       .select()
@@ -1058,6 +1062,9 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
       .from(schema.receivingEventItems)
       .where(eq(schema.receivingEventItems.eventId, event.id));
     if (!root) throw new Error("Missing seed root");
+    // Freeze the one-root estimate before the bulk insert, reproducing stale
+    // tenant selectivity rather than refreshing statistics to make it pass.
+    await f.db.execute(sql`ANALYZE receiving_event_roots`);
     const clone = async (start: number, count: number) => {
       for (let offset = 0; offset < count; offset += 250) {
         const copies = Array.from({ length: Math.min(250, count - offset) }, (_, i) => ({
@@ -1092,12 +1099,15 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
     const started = performance.now();
     expect((await read(c.tenant)).selectedEventCount).toBe(2001);
     console.info(`Readiness seed: 2001 roots in ${(performance.now() - started).toFixed(1)}ms`);
-    const explained = await f.db.execute<{ "QUERY PLAN": string }>(
-      sql`EXPLAIN (ANALYZE, BUFFERS) ${readinessEventSelectionQuery(c.tenant, scope)}`,
+    const explained = await f.db.execute<{ "QUERY PLAN": { Plan: ReadinessQueryPlan }[] }>(
+      sql`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${readinessEventSelectionQuery(c.tenant, scope)}`,
     );
-    console.info(
-      "Readiness candidate EXPLAIN:\n" + explained.rows.map((r) => r["QUERY PLAN"]).join("\n"),
-    );
+    const plan = explained.rows[0]?.["QUERY PLAN"][0]?.Plan;
+    expect(plan).toBeDefined();
+    console.info("Readiness candidate EXPLAIN:", JSON.stringify(explained.rows[0]?.["QUERY PLAN"]));
+    // Count actual rejected rows across loops, independently of the chosen
+    // index/join strategy. A quadratic tenant scan discards millions of rows.
+    expect(plan ? discardedRows(plan) : Infinity).toBeLessThan(2001 * 4);
     await clone(2000, 8000);
     expect(
       (await f.db.execute<{ id: string }>(readinessEventSelectionQuery(c.tenant, scope))).rows,
@@ -1108,3 +1118,17 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
     });
   }, 60_000);
 });
+
+type ReadinessQueryPlan = {
+  "Actual Loops": number;
+  "Rows Removed by Filter"?: number;
+  "Rows Removed by Join Filter"?: number;
+  Plans?: ReadinessQueryPlan[];
+};
+function discardedRows(plan: ReadinessQueryPlan): number {
+  return (
+    ((plan["Rows Removed by Filter"] ?? 0) + (plan["Rows Removed by Join Filter"] ?? 0)) *
+      plan["Actual Loops"] +
+    (plan.Plans ?? []).reduce((sum, child) => sum + discardedRows(child), 0)
+  );
+}
