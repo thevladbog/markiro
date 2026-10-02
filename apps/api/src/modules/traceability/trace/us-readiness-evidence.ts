@@ -823,15 +823,26 @@ async function load(
 }
 
 function relations(tenant: string) {
-  return sql`WITH roots AS (
-    SELECT tenant_id,id,current_event_id,pending_draft_id,event_number,next_revision,'receiving' AS type FROM receiving_event_roots WHERE tenant_id=${tenant}
-    UNION ALL SELECT tenant_id,id,current_event_id,pending_draft_id,event_number,next_revision,'transformation' FROM transformation_event_roots WHERE tenant_id=${tenant}
-    UNION ALL SELECT tenant_id,id,current_event_id,pending_draft_id,event_number,next_revision,'shipping' FROM shipping_event_roots WHERE tenant_id=${tenant}
-  ), lines AS (
+  return sql`WITH lines AS (
     SELECT tenant_id,event_id,line_no,lot_id,product_id,'receiving' AS type,true AS origin FROM receiving_event_items WHERE tenant_id=${tenant}
     UNION ALL SELECT tenant_id,event_id,line_no,lot_id,product_id,'transformation',false FROM transformation_event_inputs WHERE tenant_id=${tenant}
     UNION ALL SELECT tenant_id,event_id,line_no,lot_id,product_id,'transformation',true FROM transformation_event_outputs WHERE tenant_id=${tenant}
     UNION ALL SELECT tenant_id,event_id,line_no,lot_id,NULL::uuid,'shipping',false FROM shipping_event_items WHERE tenant_id=${tenant}
+  )`;
+}
+function eventRootLookup() {
+  // Each root table has a global UUID primary key. LIMIT fences the keyed
+  // lookup from tenant-selectivity estimates that otherwise cause a full
+  // tenant scan per event. The caller must retain the tenant/id/type join.
+  return sql`LATERAL (
+    SELECT * FROM (
+      SELECT tenant_id,id,current_event_id,pending_draft_id,event_number,next_revision,'receiving' AS type
+        FROM receiving_event_roots WHERE id=e.root_event_id AND e.type='receiving'
+      UNION ALL SELECT tenant_id,id,current_event_id,pending_draft_id,event_number,next_revision,'transformation'
+        FROM transformation_event_roots WHERE id=e.root_event_id AND e.type='transformation'
+      UNION ALL SELECT tenant_id,id,current_event_id,pending_draft_id,event_number,next_revision,'shipping'
+        FROM shipping_event_roots WHERE id=e.root_event_id AND e.type='shipping'
+    ) keyed LIMIT 1
   )`;
 }
 function eventFilter(scope: UsReadinessScope) {
@@ -887,7 +898,7 @@ export async function readUsReadinessEvidence(
     if (selected.rows.length > MAX_RECORDS) throw new UsReadinessScopeTooLargeException();
     const invalid = await tx.execute<{ invalid: boolean }>(sql`${relations(tenantId)}
       SELECT EXISTS (SELECT 1 FROM traceability_events e
-        LEFT JOIN roots r ON r.tenant_id=e.tenant_id AND r.id=e.root_event_id AND r.type=e.type
+        LEFT JOIN ${eventRootLookup()} r ON r.tenant_id=e.tenant_id AND r.id=e.root_event_id AND r.type=e.type
         WHERE e.tenant_id=${tenantId} AND (${date}) AND (${filter}) AND (
           r.id IS NULL OR e.event_number<>r.event_number OR e.revision>=r.next_revision
           OR (e.status='finalized' AND (r.current_event_id IS DISTINCT FROM e.id OR e.superseded_by_event_id IS NOT NULL))
@@ -918,7 +929,7 @@ export async function readUsReadinessEvidence(
       SELECT EXISTS (
         SELECT 1 FROM lines l
         LEFT JOIN traceability_events e ON e.tenant_id=l.tenant_id AND e.id=l.event_id
-        LEFT JOIN roots r ON r.tenant_id=e.tenant_id AND r.id=e.root_event_id AND r.type=l.type
+        LEFT JOIN ${eventRootLookup()} r ON r.tenant_id=e.tenant_id AND r.id=e.root_event_id AND r.type=l.type
         WHERE l.tenant_id=${tenantId} AND l.lot_id=ANY(${sql.param(lotIds)}::uuid[]) AND (
           e.id IS NULL OR e.type<>l.type OR r.id IS NULL
           OR e.event_number<>r.event_number OR e.revision>=r.next_revision
@@ -953,7 +964,7 @@ export async function readUsReadinessEvidence(
       SELECT DISTINCT l.lot_id AS "lotId",e.id,e.type,e.event_number AS "eventNumber",(r.current_event_id=e.id AND e.status='finalized' AND e.superseded_by_event_id IS NULL) IS TRUE AS current,
         COALESCE(e.voided_at,e.finalized_at) AS "lifecycleAt", e.revision
       FROM lines l LEFT JOIN traceability_events e ON e.tenant_id=l.tenant_id AND e.id=l.event_id AND e.type=l.type
-      LEFT JOIN roots r ON r.tenant_id=e.tenant_id AND r.id=e.root_event_id AND r.type=e.type
+      LEFT JOIN ${eventRootLookup()} r ON r.tenant_id=e.tenant_id AND r.id=e.root_event_id AND r.type=e.type
       WHERE l.tenant_id=${tenantId} AND l.origin AND l.lot_id=ANY(${sql.param(lotIds)}::uuid[]) AND e.finalization_snapshot IS NOT NULL
       ORDER BY "lifecycleAt",e.revision,e.id`);
     const originsByLot = new Map<string, typeof origins.rows>();
@@ -1070,7 +1081,7 @@ export async function readUsReadinessEvidence(
       total: string;
     }>(sql`${relations(tenantId)}
       SELECT e.id AS "eventId",e.root_event_id AS "rootId",e.type AS cte,e.event_number AS "eventNumber",e.revision,e.draft_version AS "draftVersion",e.event_date::text AS "eventDate",count(*) OVER()::text AS total
-      FROM traceability_events e JOIN roots r ON r.tenant_id=e.tenant_id AND r.id=e.root_event_id AND r.pending_draft_id=e.id AND r.type=e.type
+      FROM traceability_events e JOIN ${eventRootLookup()} r ON r.tenant_id=e.tenant_id AND r.id=e.root_event_id AND r.pending_draft_id=e.id AND r.type=e.type
       WHERE e.tenant_id=${tenantId} AND e.status='draft' AND (${date} OR (e.event_date IS NULL AND ${scope.lotId !== null || scope.productId !== null})) AND (${filter})
       ORDER BY e.event_date NULLS LAST,e.id LIMIT 100`);
     const items = drafts.rows.map(({ total: _total, draftVersion, ...draft }) => ({

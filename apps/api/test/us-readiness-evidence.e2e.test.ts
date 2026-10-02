@@ -9,6 +9,7 @@ import {
   type UsReadinessScope,
 } from "@markiro/platform-contracts";
 import { eq, sql } from "drizzle-orm";
+import { drizzle } from "drizzle-orm/node-postgres";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   readUsReadinessEvidence,
@@ -1042,6 +1043,31 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
     expect(many.selectedEventCount).toBe(1);
   }, 30_000);
 
+  it("rejects a foreign-tenant root for an otherwise coherent draft", async () => {
+    const c = await seedShippingLifecycle(f.db);
+    const other = await seedShippingLifecycle(f.db);
+    const otherBefore = await read(other.tenant);
+    const draft = await c.store.createDraft(
+      c.tenant,
+      c.actor,
+      { operationKey: randomUUID(), draft: c.draft },
+      "foreign-root",
+    );
+    expect((await read(c.tenant)).draftWork.total).toBe(1);
+    await f.db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL session_replication_role='replica'`);
+      await tx
+        .update(schema.shippingEventRoots)
+        .set({ tenantId: other.tenant })
+        .where(eq(schema.shippingEventRoots.id, draft.id));
+    });
+    await expect(read(c.tenant)).rejects.toMatchObject({
+      status: 503,
+      response: { code: "us_database_unavailable" },
+    });
+    expect(await read(other.tenant)).toEqual(otherBefore);
+  });
+
   it("reads 2001 current events without the graph cap and refuses the 10001 sentinel", async () => {
     // A freshly bulk-loaded tenant can have stale statistics in production too.
     // Keep this disposable table's statistics stale so maintenance cannot hide
@@ -1097,8 +1123,46 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
     };
     await clone(0, 2000);
     const started = performance.now();
-    expect((await read(c.tenant)).selectedEventCount).toBe(2001);
+    const queries: { query: string; params: unknown[] }[] = [];
+    const measuredDb = drizzle(f.pool, {
+      logger: {
+        logQuery(query, params) {
+          if (/^\s*(SELECT|WITH)\b/i.test(query)) queries.push({ query, params });
+        },
+      },
+    });
+    expect(
+      (
+        await transformationTransaction(measuredDb, (tx) =>
+          readUsReadinessEvidence(tx, c.tenant, scope),
+        )
+      ).selectedEventCount,
+    ).toBe(2001);
     console.info(`Readiness seed: 2001 roots in ${(performance.now() - started).toFixed(1)}ms`);
+    expect(queries.length).toBeGreaterThan(0);
+    let maxRootWork = 0;
+    let maxPlanWork = 0;
+    for (const { query, params } of queries) {
+      const explained = await f.pool.query<{ "QUERY PLAN": { Plan: ReadinessQueryPlan }[] }>(
+        `EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${query}`,
+        params,
+      );
+      const plan = explained.rows[0]?.["QUERY PLAN"][0]?.Plan;
+      maxRootWork = Math.max(maxRootWork, plan ? rootScanWork(plan) : Infinity);
+      maxPlanWork = Math.max(maxPlanWork, plan ? queryPlanWork(plan) : Infinity);
+      if (plan && queryPlanWork(plan) >= 2001 * 64)
+        console.info("Readiness reader excessive plan", JSON.stringify(plan));
+      expect(plan ? rootScanWork(plan) : Infinity).toBeLessThan(2001 * 4);
+      // Include join filters and CTE/materialized replay above physical scans.
+      // This linear budget allows the fixed reader plan's traversal overhead,
+      // but rejects millions of repeated rows even when scans run only once.
+      expect(plan ? queryPlanWork(plan) : Infinity).toBeLessThan(2001 * 64);
+    }
+    console.info("Readiness reader EXPLAIN work", {
+      queries: queries.length,
+      maxRootWork,
+      maxPlanWork,
+    });
     const explained = await f.db.execute<{ "QUERY PLAN": { Plan: ReadinessQueryPlan }[] }>(
       sql`EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) ${readinessEventSelectionQuery(c.tenant, scope)}`,
     );
@@ -1128,6 +1192,7 @@ type ReadinessQueryPlan = {
   "Actual Loops": number;
   "Rows Removed by Filter"?: number;
   "Rows Removed by Index Recheck"?: number;
+  "Rows Removed by Join Filter"?: number;
   Plans?: ReadinessQueryPlan[];
 };
 describe("readiness query work accounting", () => {
@@ -1170,4 +1235,14 @@ function rootScanWork(plan: ReadinessQueryPlan): number {
       plan["Actual Loops"]
     : 0;
   return scanned + (plan.Plans ?? []).reduce((sum, child) => sum + rootScanWork(child), 0);
+}
+function queryPlanWork(plan: ReadinessQueryPlan): number {
+  return (
+    (plan["Actual Rows"] +
+      (plan["Rows Removed by Filter"] ?? 0) +
+      (plan["Rows Removed by Index Recheck"] ?? 0) +
+      (plan["Rows Removed by Join Filter"] ?? 0)) *
+      plan["Actual Loops"] +
+    (plan.Plans ?? []).reduce((sum, child) => sum + queryPlanWork(child), 0)
+  );
 }
