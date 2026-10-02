@@ -1108,6 +1108,7 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
     // Bound all root rows processed across loops, whether returned or rejected,
     // independently of the chosen index/join strategy. A repeated full scan
     // that returns every root is just as quadratic as one that filters them.
+    // Include materialized root rows replayed without another physical scan.
     expect(plan ? rootScanWork(plan) : Infinity).toBeLessThan(2001 * 4);
     await clone(2000, 8000);
     expect(
@@ -1121,6 +1122,7 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
 });
 
 type ReadinessQueryPlan = {
+  "Node Type"?: string;
   "Relation Name"?: string;
   "Actual Rows": number;
   "Actual Loops": number;
@@ -1128,9 +1130,40 @@ type ReadinessQueryPlan = {
   "Rows Removed by Index Recheck"?: number;
   Plans?: ReadinessQueryPlan[];
 };
+describe("readiness query work accounting", () => {
+  it("counts materialized root rows replayed after a single physical scan", () => {
+    const plan: ReadinessQueryPlan = {
+      "Node Type": "Materialize",
+      "Actual Rows": 3,
+      "Actual Loops": 4,
+      Plans: [
+        {
+          "Relation Name": "receiving_event_roots",
+          "Actual Rows": 3,
+          "Actual Loops": 1,
+          "Rows Removed by Filter": 2,
+        },
+      ],
+    };
+    // Five physical rows processed, then three saved rows emitted four times.
+    expect(rootScanWork(plan)).toBe(17);
+  });
+});
+const rootRelations = [
+  "receiving_event_roots",
+  "transformation_event_roots",
+  "shipping_event_roots",
+];
+function hasRootScan(plan: ReadinessQueryPlan): boolean {
+  return (
+    rootRelations.includes(plan["Relation Name"] ?? "") || (plan.Plans ?? []).some(hasRootScan)
+  );
+}
 function rootScanWork(plan: ReadinessQueryPlan): number {
-  const roots = ["receiving_event_roots", "transformation_event_roots", "shipping_event_roots"];
-  const scanned = roots.includes(plan["Relation Name"] ?? "")
+  const countsRows =
+    rootRelations.includes(plan["Relation Name"] ?? "") ||
+    (plan["Node Type"] === "Materialize" && hasRootScan(plan));
+  const scanned = countsRows
     ? (plan["Actual Rows"] +
         (plan["Rows Removed by Filter"] ?? 0) +
         (plan["Rows Removed by Index Recheck"] ?? 0)) *
