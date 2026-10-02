@@ -1105,9 +1105,10 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
     const plan = explained.rows[0]?.["QUERY PLAN"][0]?.Plan;
     expect(plan).toBeDefined();
     console.info("Readiness candidate EXPLAIN:", JSON.stringify(explained.rows[0]?.["QUERY PLAN"]));
-    // Count actual rejected rows across loops, independently of the chosen
-    // index/join strategy. A quadratic tenant scan discards millions of rows.
-    expect(plan ? discardedRows(plan) : Infinity).toBeLessThan(2001 * 4);
+    // Bound all root rows processed across loops, whether returned or rejected,
+    // independently of the chosen index/join strategy. A repeated full scan
+    // that returns every root is just as quadratic as one that filters them.
+    expect(plan ? rootScanWork(plan) : Infinity).toBeLessThan(2001 * 4);
     await clone(2000, 8000);
     expect(
       (await f.db.execute<{ id: string }>(readinessEventSelectionQuery(c.tenant, scope))).rows,
@@ -1120,15 +1121,20 @@ describe.skipIf(!url)("US frozen readiness evidence", () => {
 });
 
 type ReadinessQueryPlan = {
+  "Relation Name"?: string;
+  "Actual Rows": number;
   "Actual Loops": number;
   "Rows Removed by Filter"?: number;
-  "Rows Removed by Join Filter"?: number;
+  "Rows Removed by Index Recheck"?: number;
   Plans?: ReadinessQueryPlan[];
 };
-function discardedRows(plan: ReadinessQueryPlan): number {
-  return (
-    ((plan["Rows Removed by Filter"] ?? 0) + (plan["Rows Removed by Join Filter"] ?? 0)) *
-      plan["Actual Loops"] +
-    (plan.Plans ?? []).reduce((sum, child) => sum + discardedRows(child), 0)
-  );
+function rootScanWork(plan: ReadinessQueryPlan): number {
+  const roots = ["receiving_event_roots", "transformation_event_roots", "shipping_event_roots"];
+  const scanned = roots.includes(plan["Relation Name"] ?? "")
+    ? (plan["Actual Rows"] +
+        (plan["Rows Removed by Filter"] ?? 0) +
+        (plan["Rows Removed by Index Recheck"] ?? 0)) *
+      plan["Actual Loops"]
+    : 0;
+  return scanned + (plan.Plans ?? []).reduce((sum, child) => sum + rootScanWork(child), 0);
 }
