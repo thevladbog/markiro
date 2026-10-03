@@ -7,6 +7,7 @@ import { I18nextProvider } from "react-i18next";
 import type { ReactNode } from "react";
 import { PlanInspection } from "../src/us/plans/inspection.js";
 import { PlanView } from "../src/us/plans/view.js";
+import { MasterDataWorkspace } from "../src/us/master-data/workspace.js";
 import { createUsBrowserClient } from "../src/us/client.js";
 import { draft, list, profile, renderPlanUi } from "./us-plans-fixtures.js";
 
@@ -33,6 +34,10 @@ function pdf(revision = 1) {
 function setup(issues: UsPlanValidationResponse["issues"] = []) {
   const send = vi.fn<typeof fetch>(async (path) => {
     const url = String(path);
+    if (url.endsWith("/access"))
+      return Response.json({
+        capabilities: ["traceability.read", "traceability.qa.manage", "traceability.export.read"],
+      });
     if (url.endsWith("/validate"))
       return Response.json({
         versionId: saved.id,
@@ -366,6 +371,93 @@ it("refreshes access after export denial and removes an existing preview when ex
   rerender(ui, <PlanInspection {...props} canExport={false} />);
   expect(screen.queryByRole("button", { name: "Preview saved revision" })).toBeNull();
 });
+
+it.each([
+  ["validate", true],
+  ["preview", true],
+  ["validate", false],
+  ["preview", false],
+] as const)(
+  "handles %s after explicit access recovery with capability restored=%s",
+  async (operation, restored) => {
+    const { props, send } = setup();
+    const transport = send.getMockImplementation();
+    if (!transport) throw new Error("transport fixture");
+    let recover!: (response: Response) => void;
+    let accessReads = 0;
+    let deniedOnce = false;
+    let shouldDeny = false;
+    send.mockImplementation((path, init) => {
+      const url = String(path);
+      if (url.endsWith("/access") && ++accessReads > 1)
+        return new Promise<Response>((resolve) => {
+          recover = resolve;
+        });
+      if (url.endsWith(`/${operation}`) && shouldDeny && !deniedOnce) {
+        deniedOnce = true;
+        return Promise.resolve(Response.json({ code: "forbidden" }, { status: 403 }));
+      }
+      return transport(path, init);
+    });
+    renderPlanUi(
+      <MasterDataWorkspace
+        client={props.client}
+        profile={profile}
+        organization={{ id: "tenant", name: "Tenant" }}
+        onBack={vi.fn()}
+        onSessionLost={props.onSessionLost}
+      />,
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Plan" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Edit draft" }));
+    const name = operation === "validate" ? "Validate saved revision" : "Preview saved revision";
+    if (operation === "preview") {
+      await userEvent.click(await screen.findByRole("button", { name }));
+      expect(
+        (await screen.findByRole("link", { name: "Open PDF in new tab" })).getAttribute("href"),
+      ).toBe("blob:preview-1");
+    }
+    shouldDeny = true;
+    await userEvent.click(await screen.findByRole("button", { name }));
+    await waitFor(() => expect(accessReads).toBe(2));
+    expect(screen.queryByRole("button", { name })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open PDF in new tab" })).toBeNull();
+    if (operation === "preview") expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:preview-1");
+    await act(async () =>
+      recover(
+        Response.json({
+          capabilities: [
+            "traceability.read",
+            "traceability.qa.manage",
+            "traceability.export.read",
+          ].filter(
+            (capability) =>
+              restored ||
+              capability !==
+                (operation === "validate" ? "traceability.qa.manage" : "traceability.export.read"),
+          ),
+        }),
+      ),
+    );
+    if (!restored) {
+      expect(screen.queryByRole("button", { name })).toBeNull();
+      expect(screen.queryByRole("link", { name: "Open PDF in new tab" })).toBeNull();
+      return;
+    }
+    const retry = await screen.findByRole("button", { name });
+    await waitFor(() => expect(retry.hasAttribute("disabled")).toBe(false));
+    await userEvent.click(retry);
+    if (operation === "validate")
+      expect(await screen.findByText(/No server issues reported/)).toBeTruthy();
+    else
+      expect(
+        (await screen.findByRole("link", { name: "Open PDF in new tab" })).getAttribute("href"),
+      ).toBe("blob:preview-2");
+    expect(send.mock.calls.filter(([url]) => String(url).endsWith(`/${operation}`))).toHaveLength(
+      operation === "preview" ? 3 : 2,
+    );
+  },
+);
 
 it("focuses the issue's editor section and prevents preview of unsaved local text in PlanView", async () => {
   const { props, send } = setup([

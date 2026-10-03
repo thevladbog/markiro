@@ -41,6 +41,7 @@ export function PlanInspection(props: PlanInspectionProps) {
   const [pending, setPending] = useState<"validate" | "preview" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [denied, setDenied] = useState({ validate: false, preview: false });
+  const previousAccess = useRef({ validate: props.canValidate, preview: props.canExport });
   const generation = useRef(0);
   const busy = useRef(false);
   const objectUrl = useRef<string | null>(null);
@@ -50,6 +51,20 @@ export function PlanInspection(props: PlanInspectionProps) {
     if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
     objectUrl.current = null;
   }
+  useEffect(() => {
+    // The workspace supplies true only after a successful access read, excluding
+    // pending/error states. Clear only the denial whose capability was restored;
+    // a void onForbidden result alone cannot establish successful recovery.
+    const before = previousAccess.current;
+    const restoredValidation = !before.validate && props.canValidate;
+    const restoredPreview = !before.preview && props.canExport;
+    if (restoredValidation || restoredPreview)
+      setDenied((current) => ({
+        validate: restoredValidation ? false : current.validate,
+        preview: restoredPreview ? false : current.preview,
+      }));
+    previousAccess.current = { validate: props.canValidate, preview: props.canExport };
+  }, [props.canValidate, props.canExport]);
   useEffect(() => {
     // A saved revision, local edits or access transition invalidates all in-flight
     // inspection results. Requests may finish, but cannot publish stale state.
