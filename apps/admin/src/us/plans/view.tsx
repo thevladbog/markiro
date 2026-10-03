@@ -368,9 +368,30 @@ export function PlanView(props: PlanViewProps) {
                 root.current?.querySelector<HTMLElement>("h1")?.focus();
               }}
               onReload={async () => {
-                const value = await client.getPlan(detail.value.id);
-                const versions = await client.listPlans();
-                setDetail({ kind: "ready", value });
+                const id = detail.value.id;
+                let versions = await client.listPlans();
+                let value: UsPlanDetailResponse | null = null;
+                if (versions.items.some((item) => item.id === id)) {
+                  try {
+                    value = await client.getPlan(id);
+                  } catch (error) {
+                    if (
+                      !(error instanceof UsClientError) ||
+                      error.code !== "us_plan_version_not_found"
+                    )
+                      throw error;
+                    // Discard may commit between list and detail. Reconcile the
+                    // absence with another authoritative list before removing UI.
+                    versions = await client.listPlans();
+                    if (versions.items.some((item) => item.id === id)) throw error;
+                  }
+                }
+                if (value) setDetail({ kind: "ready", value });
+                else {
+                  setSelectedId(null);
+                  setDetail({ kind: "loading" });
+                  root.current?.querySelector<HTMLElement>("h1")?.focus();
+                }
                 setList({ kind: "ready", value: versions });
                 // Remount the editor only after an explicit reload; local text
                 // never changes as a side effect of a failed approval.

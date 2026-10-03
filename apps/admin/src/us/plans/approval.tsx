@@ -51,6 +51,7 @@ function ApprovalIntent(props: PlanApprovalProps) {
   const [unavailable, setUnavailable] = useState(false);
   const [stale, setStale] = useState(false);
   const [attempted, setAttempted] = useState(false);
+  const [discardNeedsReload, setDiscardNeedsReload] = useState(false);
   const [completed, setCompleted] = useState<Receipt | "discarded" | null>(null);
   const approvalIntentKey = useRef<string | null>(null);
   const busy = useRef(false);
@@ -120,14 +121,15 @@ function ApprovalIntent(props: PlanApprovalProps) {
     ) {
       setStale(true);
       setValidation(null);
-      setError("usPlan.approvalStale");
-    } else setError("usPlan.approvalRetry");
+      setError(dialog === "discard" ? "usPlan.discardRecovery" : "usPlan.approvalStale");
+    } else setError(dialog === "discard" ? "usPlan.discardRecovery" : "usPlan.approvalRetry");
   }
   async function run(operation: "validate" | "approve" | "discard" | "reload" | "refresh") {
     if (
       busy.current ||
       blocked ||
       (operation === "approve" && !ready) ||
+      (operation === "discard" && discardNeedsReload) ||
       (operation === "validate" && storageUnavailable)
     )
       return;
@@ -175,12 +177,16 @@ function ApprovalIntent(props: PlanApprovalProps) {
         setStale(false);
         setUnavailable(false);
         setValidation(null);
+        setDiscardNeedsReload(false);
         // A reload reconciles an ambiguous receipt. Keep its key until the saved
         // revision actually changes; changed payload reuse would conflict.
         setDialog(null);
       }
     } catch (value) {
-      if (alive.current) await fail(value);
+      if (alive.current) {
+        if (operation === "discard") setDiscardNeedsReload(true);
+        await fail(value);
+      }
     } finally {
       busy.current = false;
       if (alive.current) setPending(false);
@@ -327,7 +333,18 @@ function ApprovalIntent(props: PlanApprovalProps) {
         cancelLabel={t("usPlan.cancel")}
         tone="destructive"
         busy={pending}
-        confirmDisabled={blocked}
+        confirmDisabled={blocked || (discardNeedsReload && !completed)}
+        entity={
+          discardNeedsReload ? (
+            <Button
+              variant="secondary"
+              disabled={pending || blocked}
+              onClick={() => void run("reload")}
+            >
+              {t("usPlan.refreshPublished")}
+            </Button>
+          ) : undefined
+        }
         error={error ? t(error) : undefined}
         onCancel={close}
         onConfirm={() => void run(completed ? "refresh" : "discard")}

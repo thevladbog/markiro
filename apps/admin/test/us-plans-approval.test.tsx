@@ -461,23 +461,128 @@ it("refreshes access after approval denial and keeps the draft", async () => {
   expect(screen.queryByRole("heading", { name: "v3 · Effective" })).toBeNull();
 });
 
-it("requires explicit revision-checked discard and preserves the draft after failure", async () => {
-  const { send } = setup();
+it.each([true, false])(
+  "recovers a persistent discard revision conflict and requires a new confirmation, storage=%s",
+  async (available) => {
+    const { send } = setup({ available });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit draft" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Discard draft" }));
+    expect(calls(send, "/discard")).toHaveLength(0);
+    const dialog = screen.getByRole("alertdialog");
+    let removed = false;
+    send.mockImplementation(async (path, init) => {
+      const url = String(path);
+      if (url.endsWith("/discard")) {
+        const body = JSON.parse(String(init?.body)) as { expectedRevision: number };
+        if (body.expectedRevision !== 2)
+          return Response.json({ code: "us_plan_revision_conflict" }, { status: 409 });
+        removed = true;
+        return new Response(null, { status: 204 });
+      }
+      if (url.endsWith("/plans"))
+        return Response.json({
+          ...list,
+          items: removed
+            ? []
+            : list.items
+                .filter((item) => item.id === saved.id)
+                .map((item) => ({ ...item, draftRevision: 2 })),
+          publicationAvailability: available ? "available" : "artifact_storage_unconfigured",
+        });
+      if (url.endsWith(`/plans/${saved.id}`))
+        return Response.json({
+          ...saved,
+          draftRevision: 2,
+          sections: {
+            ...saved.sections,
+            recordMaintenance: {
+              ...saved.sections.recordMaintenance,
+              systemOfRecord: "Other operator saved revision two",
+            },
+          },
+        });
+      throw new Error("unexpected recovery route");
+    });
+    await userEvent.click(within(dialog).getByRole("button", { name: "Discard draft" }));
+    expect(await within(dialog).findByRole("alert")).toBeTruthy();
+    expect(screen.getByLabelText("System of record")).toBeTruthy();
+    expect(JSON.parse(String(calls(send, "/discard")[0]?.[1]?.body))).toEqual({
+      expectedRevision: 1,
+    });
+    expect(
+      within(dialog).getByRole("button", { name: "Discard draft" }).hasAttribute("disabled"),
+    ).toBe(true);
+    await userEvent.click(within(dialog).getByRole("button", { name: "Refresh server state" }));
+    expect(await screen.findByText("Other operator saved revision two")).toBeTruthy();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(calls(send, "/discard")).toHaveLength(1);
+    await userEvent.click(screen.getByRole("button", { name: "Discard draft" }));
+    expect(within(screen.getByRole("alertdialog")).getByText(/saved revision 2/)).toBeTruthy();
+    expect(calls(send, "/discard")).toHaveLength(1);
+    await userEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Discard draft" }),
+    );
+    expect(await screen.findByRole("heading", { name: "No plan yet" })).toBeTruthy();
+    expect(JSON.parse(String(calls(send, "/discard")[1]?.[1]?.body))).toEqual({
+      expectedRevision: 2,
+    });
+  },
+);
+
+it("reconciles an uncommitted discard at the same revision and requires confirmation again", async () => {
+  const { send } = setup({ available: false });
   await userEvent.click(await screen.findByRole("button", { name: "Edit draft" }));
   await userEvent.click(await screen.findByRole("button", { name: "Discard draft" }));
-  expect(calls(send, "/discard")).toHaveLength(0);
   const dialog = screen.getByRole("alertdialog");
-  send.mockResolvedValueOnce(Response.json({ code: "us_plan_revision_conflict" }, { status: 409 }));
+  send.mockRejectedValueOnce(new Error("request never reached server"));
   await userEvent.click(within(dialog).getByRole("button", { name: "Discard draft" }));
-  expect(await within(dialog).findByRole("alert")).toBeTruthy();
-  expect(screen.getByLabelText("System of record")).toBeTruthy();
-  expect(JSON.parse(String(calls(send, "/discard")[0]?.[1]?.body))).toEqual({
-    expectedRevision: 1,
-  });
-  await userEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  await within(dialog).findByRole("alert");
+  await userEvent.click(within(dialog).getByRole("button", { name: "Refresh server state" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(calls(send, "/discard")).toHaveLength(1);
   await userEvent.click(screen.getByRole("button", { name: "Discard draft" }));
-  await userEvent.click(
-    within(screen.getByRole("alertdialog")).getByRole("button", { name: "Discard draft" }),
+  const confirmation = within(screen.getByRole("alertdialog"));
+  expect(confirmation.getByText(/saved revision 1/)).toBeTruthy();
+  expect(confirmation.getByRole("button", { name: "Discard draft" }).hasAttribute("disabled")).toBe(
+    false,
   );
+  await userEvent.click(confirmation.getByRole("button", { name: "Discard draft" }));
   expect(await screen.findByRole("heading", { name: "No plan yet" })).toBeTruthy();
 });
+
+it.each([false, true])(
+  "reconciles committed discard with a lost response without another mutation, list/detail race=%s",
+  async (race) => {
+    const { send } = setup({ available: false });
+    await userEvent.click(await screen.findByRole("button", { name: "Edit draft" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Discard draft" }));
+    let committed = false;
+    let listReads = 0;
+    send.mockImplementation(async (path) => {
+      const url = String(path);
+      if (url.endsWith("/discard")) {
+        if (committed) return Response.json({ code: "us_plan_version_not_found" }, { status: 404 });
+        committed = true;
+        throw new Error("204 response lost after commit");
+      }
+      if (url.endsWith("/plans"))
+        return Response.json({
+          ...list,
+          items: race && ++listReads === 1 ? list.items.filter((item) => item.id === saved.id) : [],
+          publicationAvailability: "artifact_storage_unconfigured",
+        });
+      if (url.endsWith(`/plans/${saved.id}`))
+        return Response.json({ code: "us_plan_version_not_found" }, { status: 404 });
+      throw new Error("unexpected recovery route");
+    });
+    const dialog = screen.getByRole("alertdialog");
+    await userEvent.click(within(dialog).getByRole("button", { name: "Discard draft" }));
+    expect(await within(dialog).findByRole("alert")).toBeTruthy();
+    expect(screen.getByLabelText("System of record")).toBeTruthy();
+    await userEvent.click(within(dialog).getByRole("button", { name: "Refresh server state" }));
+    expect(await screen.findByRole("heading", { name: "No plan yet" })).toBeTruthy();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(calls(send, "/discard")).toHaveLength(1);
+    expect(calls(send, `/plans/${saved.id}`)).toHaveLength(race ? 2 : 1);
+  },
+);

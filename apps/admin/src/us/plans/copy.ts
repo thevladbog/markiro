@@ -22,6 +22,8 @@ export const planCopy = {
     refreshRequired:
       "The server acknowledged the action. Reloading the versions and detail is required to show their current state.",
     discardDraft: "Discard draft",
+    discardRecovery:
+      "The draft changed or the discard result is unknown. Refresh server state before continuing. If the draft still exists, review and confirm its current saved revision before discarding it.",
     discardDescription:
       "Discard draft v{{version}}, saved revision {{revision}}? Published versions and their retained PDFs are not removed.",
     cancel: "Cancel",
@@ -285,6 +287,8 @@ export const planCopy = {
     refreshRequired:
       "El servidor confirmó la acción. Es necesario recargar las versiones y el detalle para mostrar su estado actual.",
     discardDraft: "Descartar borrador",
+    discardRecovery:
+      "El borrador cambió o se desconoce el resultado del descarte. Actualice el estado del servidor antes de continuar. Si el borrador aún existe, revise y confirme su revisión guardada actual antes de descartarlo.",
     discardDescription:
       "¿Descartar el borrador v{{version}}, revisión guardada {{revision}}? Las versiones publicadas y sus PDF retenidos no se eliminan.",
     cancel: "Cancelar",
