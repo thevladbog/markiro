@@ -217,7 +217,7 @@ export function parseUsPlanPublishedRow(row: UsPlanVersionRow) {
         objectKey: z.string().max(200),
         sha256: z.string().regex(/^[a-f0-9]{64}$/),
         byteSize: z.number().int().min(1).max(8_000_000),
-        rendererVersion: z.literal("us-plan-pdf-v1"),
+        rendererVersion: z.enum(["us-plan-pdf-v1", "us-plan-pdf-v2"]),
         contentType: z.literal("application/pdf"),
       })
       .parse({

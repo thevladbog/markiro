@@ -13,8 +13,9 @@ import {
 } from "@markiro/domain";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
+import { z } from "zod";
 
-export const US_PLAN_PDF_RENDERER_VERSION = "us-plan-pdf-v1";
+export const US_PLAN_PDF_RENDERER_VERSION = "us-plan-pdf-v2";
 const SYNTHETIC_MARKER = "Synthetic demo — not an operational record";
 const DRAFT_MARKER = "DRAFT — not effective";
 
@@ -26,12 +27,20 @@ Font.register({
   ],
 });
 
+export interface UsPlanPriorVersion {
+  versionNumber: number;
+  approvedAt: string;
+  approvedBy: string;
+  changeSummary: string;
+}
+
 export interface UsPlanPublishedPdfModel {
   versionNumber: number;
   approvedBy: string;
   approvedAt: string;
   changeSummary: string;
   evidence: UsPlanApprovedEvidence;
+  priorVersions: readonly UsPlanPriorVersion[];
 }
 
 export interface UsPlanDraftPdfModel {
@@ -45,7 +54,7 @@ export interface UsPlanPdfResult {
   bytes: Buffer;
   sha256: string;
   byteSize: number;
-  rendererVersion: typeof US_PLAN_PDF_RENDERER_VERSION;
+  rendererVersion: "us-plan-pdf-v1" | typeof US_PLAN_PDF_RENDERER_VERSION;
 }
 
 type RenderModel = {
@@ -58,7 +67,17 @@ type RenderModel = {
     approvedAt: string;
     confirmations: UsPlanApprovedEvidence["confirmations"];
   };
+  priorVersions?: readonly UsPlanPriorVersion[];
 };
+
+const priorVersionSchema = z
+  .object({
+    versionNumber: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    approvedAt: z.iso.datetime().refine((value) => new Date(value).toISOString() === value),
+    approvedBy: z.string().trim().min(1),
+    changeSummary: z.string(),
+  })
+  .strict();
 
 /** Bound every value before React PDF allocates its layout tree. */
 function assertBounded(model: RenderModel): void {
@@ -100,6 +119,16 @@ function assertBounded(model: RenderModel): void {
     }
   }
   visit(model, 0);
+  let previousVersion = 0;
+  for (const prior of model.priorVersions ?? []) {
+    if (
+      !priorVersionSchema.safeParse(prior).success ||
+      prior.versionNumber <= previousVersion ||
+      prior.versionNumber >= model.versionNumber
+    )
+      throw new TypeError("us_plan_pdf_input_invalid");
+    previousVersion = prior.versionNumber;
+  }
   const record = model.snapshot.sections.recordMaintenance;
   if (
     record.formats.length > 50 ||
@@ -253,6 +282,7 @@ const styles = StyleSheet.create({
   body: { marginTop: 3 },
   item: { marginLeft: 12, marginTop: 2 },
   provenance: { fontSize: 8, color: "#476375", marginTop: 5 },
+  historyRow: { borderTopWidth: 1, borderColor: "#CAD6DE", paddingVertical: 7 },
 });
 
 function Field({ label, value }: { label: string; value: string }): React.JSX.Element {
@@ -492,6 +522,22 @@ function PlanDocument({ model }: { model: RenderModel }): React.JSX.Element {
           )}
           <Field label="Renderer" value={US_PLAN_PDF_RENDERER_VERSION} />
         </Section>
+        {model.approval && (
+          <Section title="8. Prior version history" source="saved tenant approval records">
+            {model.priorVersions?.length ? (
+              model.priorVersions.map((prior) => (
+                <View key={prior.versionNumber} style={styles.historyRow}>
+                  <Field label="Prior version" value={String(prior.versionNumber)} />
+                  <Field label="Approval instant (UTC)" value={prior.approvedAt} />
+                  <Field label="Approved by" value={prior.approvedBy} />
+                  <Field label="Change summary" value={prior.changeSummary} />
+                </View>
+              ))
+            ) : (
+              <Text style={styles.body}>No prior approved versions.</Text>
+            )}
+          </Section>
+        )}
       </Page>
     </Document>
   );
@@ -506,12 +552,14 @@ async function render(model: RenderModel): Promise<Buffer> {
 
 /** Exact publishable bytes and digest; no storage or live lookups. */
 export async function renderUsPlanPdf(model: UsPlanPublishedPdfModel): Promise<UsPlanPdfResult> {
-  if (model.evidence.schemaVersion !== 1) throw new TypeError("us_plan_pdf_input_invalid");
+  if (model.evidence.schemaVersion !== 1 || !Array.isArray(model.priorVersions))
+    throw new TypeError("us_plan_pdf_input_invalid");
   const bytes = await render({
     versionNumber: model.versionNumber,
     changeSummary: model.changeSummary,
     snapshot: model.evidence.snapshot,
     factSources: model.evidence.factSources,
+    priorVersions: model.priorVersions,
     approval: {
       approvedBy: model.approvedBy,
       approvedAt: model.approvedAt,

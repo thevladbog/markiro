@@ -90,7 +90,7 @@ class PrivateStore implements UsPlanArtifactS3Transport {
   }
 }
 
-function setup() {
+function setup(rendererVersion: "us-plan-pdf-v1" | "us-plan-pdf-v2" = "us-plan-pdf-v1") {
   const config = loadUsPlanArtifactStorageConfig({
     NODE_ENV: "test",
     MARKIRO_DEPLOYMENT_EDITION: "US",
@@ -104,7 +104,7 @@ function setup() {
   if (!config) throw new Error("missing synthetic config");
   const privateStore = new PrivateStore();
   const store = new UsPlanArtifactStore(config, privateStore);
-  const attempt = store.createAttempt({ tenantId, versionId }, pdf());
+  const attempt = store.createAttempt({ tenantId, versionId }, { ...pdf(), rendererVersion });
   return { store, privateStore, attempt };
 }
 
@@ -116,22 +116,27 @@ const unreferenced = async (_evidence: UsPlanArtifactEvidence, remove: () => Pro
 afterEach(() => vi.useRealTimers());
 
 describe("US private plan artifact attempts", () => {
-  it("verifies actual private PDF bytes and returns frozen storage evidence under unique server attempt keys", async () => {
-    const { store, privateStore, attempt } = setup();
-    const evidence = await store.putVerified(attempt);
-    expect(evidence).toEqual({ ...attempt.artifact });
-    expect(evidence.objectKey).toMatch(
-      new RegExp(`^us/plans/${tenantId}/${versionId}/[a-f0-9-]{36}\\.pdf$`),
-    );
-    expect(Object.isFrozen(evidence)).toBe(true);
-    expect(await store.readVerified({ tenantId, versionId }, evidence)).toEqual(pdf().bytes);
-    const next = store.createAttempt({ tenantId, versionId }, pdf());
-    expect(next.artifact.objectKey).not.toBe(evidence.objectKey);
-    expect(privateStore.puts[0]?.ChecksumSHA256).toBe(
-      Buffer.from(pdf().sha256, "hex").toString("base64"),
-    );
-    await expect(store.putVerified(attempt)).rejects.toThrow("us_plan_artifact_attempt_invalid");
-  });
+  it.each(["us-plan-pdf-v1", "us-plan-pdf-v2"] as const)(
+    "writes and reads %s private bytes with frozen evidence and unique server attempt keys",
+    async (rendererVersion) => {
+      const { store, privateStore, attempt } = setup(rendererVersion);
+      const evidence = await store.putVerified(attempt);
+      expect(evidence).toEqual({ ...attempt.artifact });
+      expect(evidence.objectKey).toMatch(
+        new RegExp(`^us/plans/${tenantId}/${versionId}/[a-f0-9-]{36}\\.pdf$`),
+      );
+      expect(Object.isFrozen(evidence)).toBe(true);
+      expect(evidence.rendererVersion).toBe(rendererVersion);
+      expect(privateStore.puts[0]?.Metadata?.renderer).toBe(rendererVersion);
+      expect(await store.readVerified({ tenantId, versionId }, evidence)).toEqual(pdf().bytes);
+      const next = store.createAttempt({ tenantId, versionId }, pdf());
+      expect(next.artifact.objectKey).not.toBe(evidence.objectKey);
+      expect(privateStore.puts[0]?.ChecksumSHA256).toBe(
+        Buffer.from(pdf().sha256, "hex").toString("base64"),
+      );
+      await expect(store.putVerified(attempt)).rejects.toThrow("us_plan_artifact_attempt_invalid");
+    },
+  );
 
   it.each(["../tenant", "tenant text", otherTenantId.replace(/-/g, "")])(
     "rejects non-server UUID scope %s",

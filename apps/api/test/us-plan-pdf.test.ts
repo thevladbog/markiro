@@ -99,6 +99,12 @@ function model(synthetic = false, configuredFacts = facts, planSections = sectio
     approvedAt,
     changeSummary: "Receiving location and contact revised.",
     evidence,
+    priorVersions: [] as {
+      versionNumber: number;
+      approvedAt: string;
+      approvedBy: string;
+      changeSummary: string;
+    }[],
   };
 }
 
@@ -116,6 +122,112 @@ function extractedPages(bytes: Buffer): string[] {
 }
 
 describe("US plan PDF", () => {
+  it("freezes prior approval history only in later deterministic synthetic PDFs", async () => {
+    const priorVersions = [
+      {
+        versionNumber: 1,
+        approvedAt: "2026-10-02T12:00:00.000Z",
+        approvedBy: "actor-1",
+        changeSummary: "Initial plan",
+      },
+    ];
+    const v1 = await renderUsPlanPdf({ ...model(true), versionNumber: 1 });
+    const input = { ...model(true), priorVersions };
+    const first = await renderUsPlanPdf(input);
+    const second = await renderUsPlanPdf(input);
+    expect(first.bytes).toEqual(second.bytes);
+    expect(first.sha256).toBe(second.sha256);
+    const text = extractedPages(first.bytes).join(" ").replace(/\s+/gu, " ");
+    expect(text).toContain("Prior version: 1");
+    expect(text).toContain("Approval instant (UTC): 2026-10-02T12:00:00.000Z");
+    expect(text.match(/Approved by: actor-1/gu)).toHaveLength(2);
+    expect(text).toContain("Change summary: Initial plan");
+    const initialText = extractedPages(v1.bytes).join(" ");
+    expect(initialText).toContain("No prior approved versions.");
+    expect(initialText).not.toContain("Prior version: 1");
+    expect(initialText).not.toContain("2026-10-02T12:00:00.000Z");
+    expect(initialText).not.toContain("Initial plan");
+    for (const page of extractedPages(first.bytes))
+      expect(page).toContain("Synthetic demo — not an operational record");
+  });
+
+  it("flows long prior history across pages with the synthetic marker on every page", async () => {
+    const priorVersions = Array.from({ length: 40 }, (_, index) => ({
+      versionNumber: index + 1,
+      approvedAt: "2026-10-02T12:00:00.000Z",
+      approvedBy: "historical-actor-" + (index + 1),
+      changeSummary: "History revision " + (index + 1),
+    }));
+    const pages = extractedPages(
+      (await renderUsPlanPdf({ ...model(true), versionNumber: 41, priorVersions })).bytes,
+    );
+    expect(pages.length).toBeGreaterThan(3);
+    expect(pages.join(" ")).toContain("History revision 40");
+    for (const page of pages) expect(page).toContain("Synthetic demo — not an operational record");
+  });
+
+  it.each([
+    [{ versionNumber: 0, approvedAt, approvedBy: "actor-1", changeSummary: "Initial plan" }],
+    [{ versionNumber: 2, approvedAt, approvedBy: "actor-1", changeSummary: "Initial plan" }],
+    [
+      {
+        versionNumber: 1,
+        approvedAt: "2026-10-02T12:00:00",
+        approvedBy: "actor-1",
+        changeSummary: "Initial plan",
+      },
+    ],
+    [
+      {
+        versionNumber: 1,
+        approvedAt: "2026-02-30T12:00:00.000Z",
+        approvedBy: "actor-1",
+        changeSummary: "Initial plan",
+      },
+    ],
+    [{ versionNumber: 1, approvedAt, approvedBy: " ", changeSummary: "Initial plan" }],
+    [1, 1].map((versionNumber) => ({
+      versionNumber,
+      approvedAt,
+      approvedBy: "actor-1",
+      changeSummary: "Initial plan",
+    })),
+    [2, 1].map((versionNumber) => ({
+      versionNumber,
+      approvedAt,
+      approvedBy: "actor-1",
+      changeSummary: "Initial plan",
+    })),
+    [
+      {
+        versionNumber: 1,
+        approvedAt,
+        approvedBy: "actor-1",
+        changeSummary: "Initial plan",
+        extra: "unexpected",
+      },
+    ],
+  ])("rejects invalid or unordered prior history before layout (%#)", async (...priorVersions) => {
+    await expect(
+      renderUsPlanPdf({
+        ...model(),
+        versionNumber: priorVersions.length > 1 ? 3 : 2,
+        priorVersions,
+      }),
+    ).rejects.toThrow("us_plan_pdf_input_invalid");
+  });
+
+  it("bounds prior-history summaries before layout", async () => {
+    await expect(
+      renderUsPlanPdf({
+        ...model(),
+        priorVersions: [
+          { versionNumber: 1, approvedAt, approvedBy: "actor-1", changeSummary: "x".repeat(4097) },
+        ],
+      }),
+    ).rejects.toThrow("us_plan_pdf_input_limit");
+  });
+
   it("renders identical English bytes and hash from the same frozen evidence", async () => {
     const input = model();
     const first = await renderUsPlanPdf(input);

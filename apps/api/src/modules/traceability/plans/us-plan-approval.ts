@@ -23,7 +23,7 @@ import {
   NotFoundException,
   ServiceUnavailableException,
 } from "@nestjs/common";
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray, lt } from "drizzle-orm";
 import { UsDevelopmentOwnerStore } from "../../../deployment/us-development-owner";
 import {
   authorizeUsMasterData,
@@ -85,6 +85,36 @@ export class UsPlanApprovalStore {
     const [row] = await tx.select().from(versions).where(scope(tenantId, id)).for("update");
     if (!row) throw new NotFoundException({ code: "us_plan_version_not_found" });
     return row;
+  }
+  private async priorHistory(tx: UsMasterDataTransaction, tenantId: string, versionNumber: number) {
+    const rows = await tx
+      .select({
+        id: versions.id,
+        sha256: versions.pdfSha256,
+        versionNumber: versions.versionNumber,
+        approvedAt: versions.approvedAt,
+        approvedBy: versions.approvedBy,
+        changeSummary: versions.changeSummary,
+      })
+      .from(versions)
+      .where(
+        and(
+          eq(versions.tenantId, tenantId),
+          inArray(versions.status, ["effective", "superseded"]),
+          lt(versions.versionNumber, versionNumber),
+        ),
+      )
+      .orderBy(asc(versions.versionNumber));
+    return rows.map((prior) => {
+      if (
+        !prior.approvedAt ||
+        !prior.approvedBy ||
+        !prior.sha256 ||
+        !/^[a-f0-9]{64}$/u.test(prior.sha256)
+      )
+        throw new ServiceUnavailableException({ code: "us_plan_stored_published_invalid" });
+      return { ...prior, approvedBy: prior.approvedBy, approvedAt: prior.approvedAt.toISOString() };
+    });
   }
   private async retry(
     tx: UsMasterDataTransaction,
@@ -201,7 +231,8 @@ export class UsPlanApprovalStore {
               ...(seed ? { trustedSeed: seed } : {}),
             },
           );
-          return { row, config, approvedAt, evidence, seed };
+          const priorHistory = await this.priorHistory(tx, tenantId, row.versionNumber);
+          return { row, config, approvedAt, evidence, seed, priorHistory };
         },
         { isolationLevel: "repeatable read" },
       );
@@ -212,6 +243,12 @@ export class UsPlanApprovalStore {
         approvedAt: captured.approvedAt.toISOString(),
         changeSummary: captured.row.changeSummary,
         evidence: captured.evidence,
+        priorVersions: captured.priorHistory.map((prior) => ({
+          versionNumber: prior.versionNumber,
+          approvedAt: prior.approvedAt,
+          approvedBy: prior.approvedBy,
+          changeSummary: prior.changeSummary,
+        })),
       });
       const artifacts = this.configuredArtifacts();
       attempt = artifacts.createAttempt({ tenantId, versionId: input.versionId }, pdf);
@@ -235,6 +272,9 @@ export class UsPlanApprovalStore {
         if (fence) throw new ConflictException({ code: "us_plan_attempt_fenced" });
         const row = await this.version(tx, tenantId, input.versionId);
         this.checkDraft(row, input.expectedRevision);
+        const priorHistory = await this.priorHistory(tx, tenantId, row.versionNumber);
+        if (canonicalExportDigest(priorHistory) !== canonicalExportDigest(captured.priorHistory))
+          throw new ConflictException({ code: "us_plan_history_conflict" });
         const current = await readUsPlanConfiguration(tx, tenantId);
         const seed = await new UsDevelopmentOwnerStore(this.db).verifyTrustedSeed(
           tenantId,

@@ -1,4 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { schema } from "@markiro/db";
 import { canonicalExportDigest, type UsPlanSections } from "@markiro/domain";
 import type * as Domain from "@markiro/domain";
@@ -76,6 +80,19 @@ vi.mock("@markiro/domain", async (importOriginal) => {
 });
 
 const url = process.env.US_TEST_DATABASE_URL;
+function pdfText(bytes: Buffer): string {
+  const directory = mkdtempSync(join(tmpdir(), "us-plan-history-test-"));
+  try {
+    const path = join(directory, "plan.pdf");
+    writeFileSync(path, bytes);
+    return execFileSync("pdftotext", ["-layout", path, "-"], { encoding: "utf8" }).replace(
+      /\s+/gu,
+      " ",
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
 const confirmations = {
   procedures: true,
   backupAndRecovery: true,
@@ -235,7 +252,7 @@ describe.skipIf(!url)("US plan atomic approval in owned disposable PostgreSQL", 
           bytes,
           sha256: createHash("sha256").update(bytes).digest("hex"),
           byteSize: bytes.length,
-          rendererVersion: "us-plan-pdf-v1",
+          rendererVersion: "us-plan-pdf-v2",
         };
       },
       () => new Date("2026-10-03T01:00:00.000Z"),
@@ -282,6 +299,104 @@ describe.skipIf(!url)("US plan atomic approval in owned disposable PostgreSQL", 
     await expect(
       unavailable.readPdf(tenant, actor, draft.id, "revoked-download"),
     ).rejects.toMatchObject({ status: 403 });
+  });
+
+  it("publishes exactly tenant v1 history in v2 while preserving both PDFs after current edits", async () => {
+    realPdf = true;
+    const firstDraft = await create(sections, "Initial plan");
+    const first = await approvals.approve(tenant, actor, request(firstDraft.id), "history-v1");
+    const firstBytes = await approvals.readPdf(tenant, actor, first.id, "history-v1-before");
+    const secondDraft = await create(sections, "Updated contact");
+    const input = request(secondDraft.id);
+    const second = await approvals.approve(tenant, actor, input, "history-v2");
+    const secondBytes = await approvals.readPdf(tenant, actor, second.id, "history-v2-before");
+    const text = pdfText(secondBytes);
+    expect(text.match(/Prior version:/gu)).toHaveLength(1);
+    expect(text).toContain("Prior version: 1");
+    expect(text).toContain("Approval instant (UTC): 2026-10-03T01:00:00.000Z");
+    expect(text).toContain("Approved by: " + actor);
+    expect(text).toContain("Change summary: Initial plan");
+    expect(pdfText(firstBytes)).toContain("No prior approved versions.");
+    expect((await approvals.getPublished(tenant, actor, first.id)).artifact).toEqual(
+      first.artifact,
+    );
+    expect(await approvals.readPdf(tenant, actor, first.id, "history-v1-after-v2")).toEqual(
+      firstBytes,
+    );
+    await fixture.db
+      .update(schema.traceabilityLocations)
+      .set({ businessName: "Changed source" })
+      .where(eq(schema.traceabilityLocations.id, location));
+    await create(
+      {
+        ...sections,
+        pointOfContact: { ...sections.pointOfContact, name: "Changed current contact" },
+      },
+      "Draft contact edit",
+    );
+    expect(await approvals.readPdf(tenant, actor, first.id, "history-v1-after-edit")).toEqual(
+      firstBytes,
+    );
+    expect(await approvals.readPdf(tenant, actor, second.id, "history-v2-after-edit")).toEqual(
+      secondBytes,
+    );
+    expect(createHash("sha256").update(firstBytes).digest("hex")).toBe(first.artifact.sha256);
+    expect(createHash("sha256").update(secondBytes).digest("hex")).toBe(second.artifact.sha256);
+    onPut = async () => {
+      throw new Error("Retry must not render or upload");
+    };
+    expect(await approvals.approve(tenant, actor, input, "history-v2-retry")).toEqual(second);
+  }, 20_000);
+
+  it("rejects a captured history hash changed during upload without publishing the draft", async () => {
+    const firstDraft = await create(sections, "Initial plan");
+    const first = await approvals.approve(tenant, actor, request(firstDraft.id), "race-history-v1");
+    const secondDraft = await create(sections, "Second plan");
+    onPut = async () => {
+      // Inject out-of-band corruption only in this owned disposable database.
+      await fixture.pool.query("ALTER TABLE traceability_plan_versions DISABLE TRIGGER USER");
+      try {
+        await fixture.db
+          .update(schema.traceabilityPlanVersions)
+          .set({ pdfSha256: "a".repeat(64) })
+          .where(eq(schema.traceabilityPlanVersions.id, first.id));
+      } finally {
+        await fixture.pool.query("ALTER TABLE traceability_plan_versions ENABLE TRIGGER USER");
+      }
+    };
+    await expect(
+      approvals.approve(tenant, actor, request(secondDraft.id), "race-history-v2"),
+    ).rejects.toMatchObject({ response: { code: "us_plan_history_conflict" } });
+    expect(
+      (await drafts.getVersion(tenant, actor, secondDraft.id, "race-history-read")).status,
+    ).toBe("draft");
+    expect(deleted).toHaveLength(1);
+  });
+
+  it("decodes retained v1 and newly published v2 artifacts while rejecting unknown renderers", async () => {
+    const draft = await create();
+    const published = await approvals.approve(
+      tenant,
+      actor,
+      request(draft.id),
+      "renderer-compatibility",
+    );
+    const [row] = await fixture.db
+      .select()
+      .from(schema.traceabilityPlanVersions)
+      .where(eq(schema.traceabilityPlanVersions.id, published.id));
+    if (!row) throw new Error("Missing published fixture");
+    expect(
+      parseUsPlanPublishedRow({ ...row, rendererVersion: "us-plan-pdf-v1" }).artifact
+        .rendererVersion,
+    ).toBe("us-plan-pdf-v1");
+    expect(
+      parseUsPlanPublishedRow({ ...row, rendererVersion: "us-plan-pdf-v2" }).artifact
+        .rendererVersion,
+    ).toBe("us-plan-pdf-v2");
+    expect(() => parseUsPlanPublishedRow({ ...row, rendererVersion: "unknown-renderer" })).toThrow(
+      expect.objectContaining({ response: { code: "us_plan_stored_published_invalid" } }),
+    );
   });
 
   it("retains v1 detail, exact PDF, retries and supersession after a current-policy v2 deployment", async () => {
