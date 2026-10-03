@@ -1,7 +1,6 @@
 import { schema, type Db } from "@markiro/db";
 import {
   US_CAPABILITY,
-  buildLocationDescriptionSnapshot,
   buildUsPlanSnapshot,
   buildUsPlanDraftFactSources,
   buildUsPlanApprovedEvidence,
@@ -9,7 +8,6 @@ import {
   traceabilityRetention,
   usPlanApprovalRequestDigest,
   usPlanIdempotencyKeyHash,
-  validateUsPlanApproval,
   type UsCapability,
 } from "@markiro/domain";
 import {
@@ -36,6 +34,7 @@ import { parseUsPlanDraftRow, type UsPlanVersionRow } from "./us-plan-model";
 import type { UsPlanArtifactStore, UsPlanArtifactAttempt } from "./us-plan-artifacts";
 import { renderUsPlanPdf } from "./us-plan-pdf";
 import { parseUsPlanPublishedRow } from "./us-plan-published";
+import { validateUsPlanSavedContent } from "./us-plan-validation";
 
 const versions = schema.traceabilityPlanVersions;
 const fences = schema.traceabilityPlanCleanupFences;
@@ -52,10 +51,16 @@ type AuditMetadata = Record<string, unknown>;
 export class UsPlanApprovalStore {
   constructor(
     private readonly db: Db,
-    private readonly artifacts: UsPlanArtifactStore,
+    private readonly artifacts: UsPlanArtifactStore | null,
     private readonly render: typeof renderUsPlanPdf = renderUsPlanPdf,
     private readonly now: () => Date = () => new Date(),
   ) {}
+
+  private configuredArtifacts(): UsPlanArtifactStore {
+    if (!this.artifacts)
+      throw new ServiceUnavailableException({ code: "us_plan_artifact_storage_unconfigured" });
+    return this.artifacts;
+  }
 
   private async authorize(
     tx: UsMasterDataTransaction,
@@ -146,6 +151,7 @@ export class UsPlanApprovalStore {
       const captured = await this.db.transaction(
         async (tx) => {
           await this.authorize(tx, tenantId, actor, US_CAPABILITY.QA_MANAGE);
+          this.configuredArtifacts();
           const retry = await this.retry(tx, tenantId, input);
           if (retry) return { retry };
           const row = await this.version(tx, tenantId, input.versionId);
@@ -161,21 +167,16 @@ export class UsPlanApprovalStore {
             tx,
           );
           const provenance = seed ? "trusted_synthetic" : "operational";
-          const issues = validateUsPlanApproval({
-            ...draft,
-            profileCode: config.facts.profileCode,
-            tlcSourceLocationCount: config.facts.tlcSourceLocations.length,
-            provenance,
-            confirmations: input.confirmations,
-          });
-          for (const location of config.facts.tlcSourceLocations) {
-            if (!buildLocationDescriptionSnapshot({ id: location.id, ...location.description }).ok)
-              issues.push({
-                section: "tlcAssignment",
-                path: `tlcSourceLocations.${location.id}`,
-                code: "tlc_source_location_incomplete",
-              });
-          }
+          const issues = validateUsPlanSavedContent(
+            {
+              ...draft,
+              profileCode: config.facts.profileCode,
+              tlcSourceLocationCount: config.facts.tlcSourceLocations.length,
+              provenance,
+              confirmations: input.confirmations,
+            },
+            config.facts,
+          );
           if (issues.length)
             throw new ConflictException({ code: "us_plan_validation_failed", issues });
           const snapshot = buildUsPlanSnapshot(config.facts, draft.sections, provenance);
@@ -202,13 +203,14 @@ export class UsPlanApprovalStore {
         changeSummary: captured.row.changeSummary,
         evidence: captured.evidence,
       });
-      attempt = this.artifacts.createAttempt({ tenantId, versionId: input.versionId }, pdf);
+      const artifacts = this.configuredArtifacts();
+      attempt = artifacts.createAttempt({ tenantId, versionId: input.versionId }, pdf);
       context = {
         ...context,
         sha256: attempt.artifact.sha256,
         objectKey: attempt.artifact.objectKey,
       };
-      const artifact = await this.artifacts.putVerified(attempt);
+      const artifact = await artifacts.putVerified(attempt);
       const result = await this.publicationTransaction(async (tx) => {
         // Organization -> authorization -> versions. READ COMMITTED is essential:
         // a fence/config commit while waiting for this lock must be visible below.
@@ -301,7 +303,7 @@ export class UsPlanApprovalStore {
         );
         return parseUsPlanPublishedRow(published);
       });
-      if (result.artifact.objectKey === artifact.objectKey) this.artifacts.markReferenced(attempt);
+      if (result.artifact.objectKey === artifact.objectKey) artifacts.markReferenced(attempt);
       else await this.cleanup(tenantId, actor, input.versionId, number, requestId, attempt);
       return result;
     } catch (error) {
@@ -322,11 +324,13 @@ export class UsPlanApprovalStore {
           requestId,
           id,
           "traceability.plan.approved",
-          error instanceof ConflictException
-            ? "conflict"
-            : error instanceof HttpException && error.getStatus() < 500
-              ? "rejected"
-              : "unconfirmed",
+          code === "us_plan_artifact_storage_unconfigured"
+            ? "rejected"
+            : error instanceof ConflictException
+              ? "conflict"
+              : error instanceof HttpException && error.getStatus() < 500
+                ? "rejected"
+                : "unconfirmed",
           null,
           { code, ...context },
         ),
@@ -374,7 +378,7 @@ export class UsPlanApprovalStore {
     attempt: UsPlanArtifactAttempt,
   ) {
     try {
-      const outcome = await this.artifacts.cleanupUnreferenced(
+      const outcome = await this.configuredArtifacts().cleanupUnreferenced(
         attempt,
         async (artifact, remove) => {
           // Commit irreversible publication fence BEFORE provider I/O. A failed COMMIT
@@ -480,13 +484,14 @@ export class UsPlanApprovalStore {
     try {
       const published = await this.db.transaction(async (tx) => {
         await this.authorize(tx, tenantId, actor, US_CAPABILITY.EXPORT_READ);
+        this.configuredArtifacts();
         const id = parseMasterDataInput(platformUuidSchema, rawId);
         const [row] = await tx.select().from(versions).where(scope(tenantId, id));
         if (!row) throw new NotFoundException({ code: "us_plan_version_not_found" });
         return parseUsPlanPublishedRow(row);
       });
       context = { versionNumber: published.versionNumber, sha256: published.artifact.sha256 };
-      const bytes = await this.artifacts.readVerified(
+      const bytes = await this.configuredArtifacts().readVerified(
         { tenantId, versionId: published.id },
         published.artifact,
       );

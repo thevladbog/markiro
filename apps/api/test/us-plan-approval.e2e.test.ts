@@ -242,6 +242,48 @@ describe.skipIf(!url)("US plan atomic approval in owned disposable PostgreSQL", 
     );
   });
 
+  it("audits explicit unavailable publication/download only after current authorization", async () => {
+    const draft = await create();
+    const input = request(draft.id);
+    await approvals.approve(tenant, actor, input, "configured");
+    const unavailable = new UsPlanApprovalStore(fixture.db, null);
+    for (const method of ["approve", "download"] as const) {
+      const run = () =>
+        method === "approve"
+          ? unavailable.approve(tenant, actor, input, `unconfigured-${method}`)
+          : unavailable.readPdf(tenant, actor, draft.id, `unconfigured-${method}`);
+      await expect(run()).rejects.toMatchObject({
+        status: 503,
+        response: { code: "us_plan_artifact_storage_unconfigured" },
+      });
+      expect(
+        await fixture.db
+          .select()
+          .from(schema.tenantAuditEvents)
+          .where(eq(schema.tenantAuditEvents.requestId, `unconfigured-${method}`)),
+      ).toEqual([
+        expect.objectContaining({
+          organizationId: tenant,
+          actorUserId: actor,
+          targetId: draft.id,
+          targetType: "traceability_plan_version",
+          action:
+            method === "approve" ? "traceability.plan.approved" : "traceability.plan.downloaded",
+          outcome: "rejected",
+          before: null,
+          after: { code: "us_plan_artifact_storage_unconfigured" },
+        }),
+      ]);
+    }
+    await fixture.db.delete(schema.member).where(eq(schema.member.organizationId, tenant));
+    await expect(
+      unavailable.approve(tenant, actor, input, "revoked-unconfigured"),
+    ).rejects.toMatchObject({ status: 403 });
+    await expect(
+      unavailable.readPdf(tenant, actor, draft.id, "revoked-download"),
+    ).rejects.toMatchObject({ status: 403 });
+  });
+
   it("retains v1 detail, exact PDF, retries and supersession after a current-policy v2 deployment", async () => {
     realPdf = true;
     const firstDraft = await create();

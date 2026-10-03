@@ -6,10 +6,12 @@ import { UsDevelopmentModule } from "./us-development.module";
 import { UsRuntime } from "./us-runtime";
 import { mountUsHttp } from "./us-http";
 import { UsHttpAdapter } from "./us-http-adapter";
+import type { UsPlanArtifactS3Transport } from "../modules/traceability/plans/us-plan-artifacts";
 
 export async function createUsDevelopmentApplication(
   raw: NodeJS.ProcessEnv,
   connect: typeof createDb = createDb,
+  planArtifactTransport?: UsPlanArtifactS3Transport,
 ): Promise<INestApplication> {
   const env = loadUsDevelopmentEnv(raw);
   const connection = connect(env.DATABASE_URL, {
@@ -19,8 +21,9 @@ export async function createUsDevelopmentApplication(
     statement_timeout: 5000,
   });
   let app: INestApplication | undefined;
+  let runtime: UsRuntime | undefined;
   try {
-    const runtime = new UsRuntime(env, connection);
+    runtime = new UsRuntime(env, connection, planArtifactTransport);
     app = await NestFactory.create(UsDevelopmentModule.register(runtime), new UsHttpAdapter(), {
       logger: false,
       bodyParser: false,
@@ -32,6 +35,7 @@ export async function createUsDevelopmentApplication(
     return app;
   } catch (error) {
     if (app) await app.close();
+    else if (runtime) await runtime.onApplicationShutdown();
     else await connection.pool.end();
     throw error;
   }

@@ -4,7 +4,7 @@ import {
   type OnApplicationShutdown,
 } from "@nestjs/common";
 import type { createDb } from "@markiro/db";
-import type { Env } from "../env";
+import type { UsDevelopmentEnv } from "./entry-policy";
 import { createUsAuth, type UsAuth } from "../modules/traceability/auth/us-auth";
 import { UsCatalogStore } from "../modules/traceability/catalog/us-catalog-store";
 import { UsLotStore } from "../modules/traceability/lots/us-lot-store";
@@ -19,6 +19,14 @@ import { UsTransformationStore } from "../modules/traceability/transformation/us
 import { UsShippingStore } from "../modules/traceability/shipping/us-shipping-store";
 import { UsEventsStore } from "../modules/traceability/events/us-events-store";
 import { UsTraceStore } from "../modules/traceability/trace/us-trace-store";
+import { UsPlanReadStore } from "../modules/traceability/plans/us-plan-read";
+import { UsPlanStore } from "../modules/traceability/plans/us-plan-store";
+import { UsPlanInspectionStore } from "../modules/traceability/plans/us-plan-inspection";
+import { UsPlanApprovalStore } from "../modules/traceability/plans/us-plan-approval";
+import {
+  UsPlanArtifactStore,
+  type UsPlanArtifactS3Transport,
+} from "../modules/traceability/plans/us-plan-artifacts";
 
 /** Owns only the explicitly supplied US pool; never imports RU application providers. */
 export class UsRuntime implements OnApplicationShutdown {
@@ -36,10 +44,16 @@ export class UsRuntime implements OnApplicationShutdown {
   readonly shipping: UsShippingStore;
   readonly events: UsEventsStore;
   readonly trace: UsTraceStore;
+  readonly planRead: UsPlanReadStore;
+  readonly planDrafts: UsPlanStore;
+  readonly planInspection: UsPlanInspectionStore;
+  readonly planApproval: UsPlanApprovalStore;
+  readonly planArtifactStorage: UsPlanArtifactStore | null;
 
   constructor(
-    readonly env: Env,
+    readonly env: UsDevelopmentEnv,
     readonly connection: ReturnType<typeof createDb>,
+    planArtifactTransport?: UsPlanArtifactS3Transport,
   ) {
     this.auth = createUsAuth(connection.db, {
       secret: env.BETTER_AUTH_SECRET,
@@ -59,11 +73,20 @@ export class UsRuntime implements OnApplicationShutdown {
     this.shipping = new UsShippingStore(connection.db);
     this.events = new UsEventsStore(connection.db);
     this.trace = new UsTraceStore(connection.db);
+    this.planArtifactStorage = env.planArtifactStorage
+      ? new UsPlanArtifactStore(env.planArtifactStorage, planArtifactTransport)
+      : null;
+    const availability = this.planArtifactStorage ? "available" : "artifact_storage_unconfigured";
+    this.planRead = new UsPlanReadStore(connection.db, availability);
+    this.planDrafts = new UsPlanStore(connection.db);
+    this.planInspection = new UsPlanInspectionStore(connection.db, availability);
+    this.planApproval = new UsPlanApprovalStore(connection.db, this.planArtifactStorage);
     // Idle-pool failures must not crash the metadata/liveness process or log SQL.
     connection.pool.on("error", () => {});
   }
 
   async onApplicationShutdown(): Promise<void> {
+    this.planArtifactStorage?.onModuleDestroy();
     await this.connection.pool.end();
   }
 
@@ -76,7 +99,12 @@ export class UsRuntime implements OnApplicationShutdown {
                a.verified_at, p.baseline_version, o.time_zone, t.request_id,
                shipping_root.lifecycle_version, shipping_detail.recipient_snapshot,
                shipping_item.tlc_snapshot, shipping_document.position,
-               shipping_operation.input_digest, shipping_counter.sequence
+               shipping_operation.input_digest, shipping_counter.sequence,
+               plan.draft_revision, plan.approved_evidence, plan.pdf_object_key,
+               plan.retention_floor, plan.hold_until, plan.indefinite_hold,
+               plan_fence.object_key, plan_fence.tenant_id, plan_fence.version_id,
+               plan_fence.version_number, plan_fence.actor_user_id, plan_fence.request_id,
+               plan_fence.sha256, plan_fence.state
         FROM "user" u, us_two_factors f, us_session_assurances a,
              traceability_profiles p, org_profiles o, tenant_audit_events t,
              trace_lot_boxes case_links, traceability_synthetic_case_origins case_markers,
@@ -87,6 +115,7 @@ export class UsRuntime implements OnApplicationShutdown {
              shipping_event_documents shipping_document,
              shipping_operations shipping_operation,
              shipping_counters shipping_counter,
+             traceability_plan_versions plan, traceability_plan_cleanup_fences plan_fence,
              session, account, verification, organization, member, invitation
         LIMIT 0
       `);
