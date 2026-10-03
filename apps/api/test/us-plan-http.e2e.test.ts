@@ -397,6 +397,48 @@ describe.skipIf(!base)("US plan HTTP boundary", () => {
     ).toBe(204);
     expect((await request(`${path}/${nextDraft.id}`)).status).toBe(404);
   }, 30_000);
+  it("audits malformed approval bodies against the authoritative route target without publishing", async () => {
+    const created = await request(path, "POST", { sections, changeSummary: "Audit rejection" });
+    expect(created.status).toBe(201);
+    const draft = usPlanDraftCommandResponseSchema.parse(await created.json());
+    const objectsBefore = [...objects.entries()];
+    for (const invalid of [{ versionId: randomUUID() }, { expectedRevision: 0 }]) {
+      const rejected = await request(`${path}/${draft.id}/approve`, "POST", {
+        expectedRevision: 1,
+        confirmations,
+        idempotencyKey: randomUUID(),
+        ...invalid,
+      });
+      expect(rejected.status).toBe(400);
+      expect(await rejected.json()).toMatchObject({ code: "invalid_master_data" });
+      const requestId = rejected.headers.get("x-request-id");
+      expect(requestId).toBeTruthy();
+      const audits = await f.db
+        .select()
+        .from(schema.tenantAuditEvents)
+        .where(eq(schema.tenantAuditEvents.requestId, requestId ?? ""));
+      expect(audits).toHaveLength(1);
+      expect(audits[0]).toMatchObject({
+        organizationId: c.tenant,
+        actorUserId: c.actor,
+        requestId,
+        action: "traceability.plan.approved",
+        targetType: "traceability_plan_version",
+        targetId: draft.id,
+        outcome: "rejected",
+        before: null,
+        after: { code: "invalid_master_data" },
+      });
+      expect(audits[0]?.after).toEqual({ code: "invalid_master_data" });
+      expect(
+        usPlanDetailResponseSchema.parse(await (await request(`${path}/${draft.id}`)).json()),
+      ).toMatchObject({ status: "draft", draftRevision: 1 });
+      expect([...objects.entries()]).toEqual(objectsBefore);
+    }
+    expect(
+      (await request(`${path}/${draft.id}/discard`, "POST", { expectedRevision: 1 })).status,
+    ).toBe(204);
+  });
   it("enforces strict bodies, route limits, current capabilities and tenant lookup", async () => {
     const largeSections = {
       ...sections,

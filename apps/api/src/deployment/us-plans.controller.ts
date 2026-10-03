@@ -35,7 +35,6 @@ import {
 } from "@markiro/platform-contracts";
 import type { Response } from "express";
 import { ApiZodBody, ApiZodResponse, zodApiSchema } from "../lib/openapi";
-import { parseMasterDataInput } from "../modules/traceability/master-data/us-master-data-support";
 import { usMasterDataBadRequestSchema, usMasterDataErrorSchema } from "./us-master-data-openapi";
 import { UsRuntime } from "./us-runtime";
 import { UsSessionGuard, type UsRequest } from "./us-profile.controller";
@@ -244,14 +243,8 @@ export class UsPlansController {
   @ApiZodResponse({ status: 200, schema: usPlanApprovalResponseSchema })
   async approve(@Req() request: UsRequest, @Param("id") id: string, @Body() body: unknown) {
     const p = this.context(request);
-    const input = parseMasterDataInput(usPlanApproveBodySchema, body);
     const result = await this.runtime.databaseOperation(() =>
-      this.runtime.planApproval.approve(
-        p.tenantId,
-        p.userId,
-        { ...input, versionId: id },
-        p.requestId,
-      ),
+      this.runtime.planApproval.approve(p.tenantId, p.userId, body, p.requestId, id),
     );
     return usPlanApprovalResponseSchema.parse({
       id: result.id,

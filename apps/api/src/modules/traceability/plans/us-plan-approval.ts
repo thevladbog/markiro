@@ -12,6 +12,7 @@ import {
 } from "@markiro/domain";
 import {
   usPlanInternalApproveInputSchema,
+  usPlanApproveBodySchema,
   platformUuidSchema,
   type UsPlanInternalApproveInput,
 } from "@markiro/platform-contracts";
@@ -47,7 +48,7 @@ const metadata = (row: UsPlanVersionRow) => ({
 type Published = ReturnType<typeof parseUsPlanPublishedRow>;
 type AuditMetadata = Record<string, unknown>;
 
-/** Internal US service only; no runtime registration or public route. */
+/** US runtime service for audited approval and immutable published-plan access. */
 export class UsPlanApprovalStore {
   constructor(
     private readonly db: Db,
@@ -139,13 +140,22 @@ export class UsPlanApprovalStore {
     actor: string,
     raw: unknown,
     requestId: string,
+    routeVersionId?: string,
   ): Promise<Published> {
     let attempt: UsPlanArtifactAttempt | undefined;
     let context: AuditMetadata = {};
     let id: string | null = null;
     let number = 0;
     try {
-      const input = parseMasterDataInput(usPlanInternalApproveInputSchema, raw);
+      if (routeVersionId !== undefined)
+        id = parseMasterDataInput(platformUuidSchema, routeVersionId);
+      const input =
+        routeVersionId === undefined
+          ? parseMasterDataInput(usPlanInternalApproveInputSchema, raw)
+          : parseMasterDataInput(usPlanInternalApproveInputSchema, {
+              ...parseMasterDataInput(usPlanApproveBodySchema, raw),
+              versionId: id,
+            });
       id = input.versionId;
       // One coherent capture; locks end before rendering or provider I/O.
       const captured = await this.db.transaction(
