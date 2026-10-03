@@ -16,6 +16,7 @@ import { SearchView } from "../search/view.js";
 import { emptySearchState } from "../search/filters.js";
 import { TraceView, type TraceEntry } from "../trace/view.js";
 import { traceCopy } from "../trace/copy.js";
+import { PlanView } from "../plans/view.js";
 import { UsBrandMark } from "../brand-mark.js";
 import { navStyle, type NoticeKind } from "./workspace-shared.js";
 import "./master-data.css";
@@ -29,9 +30,17 @@ export type MasterDataProps = {
 };
 
 type View =
-  "parties" | "locations" | "products" | "lots" | "events" | "readiness" | "search" | "trace";
+  | "parties"
+  | "locations"
+  | "products"
+  | "lots"
+  | "events"
+  | "readiness"
+  | "search"
+  | "trace"
+  | "plans";
 type Entry =
-  | { kind: "parties" | "locations" | "products" | "readiness" | "search" }
+  | { kind: "parties" | "locations" | "products" | "readiness" | "search" | "plans" }
   | { kind: "lots"; lotId?: string }
   | { kind: "trace"; entry: TraceEntry | null }
   | {
@@ -71,6 +80,7 @@ export function MasterDataWorkspace({
   const accessRun = useRef(0);
 
   const canRead = capabilities?.includes(US_CAPABILITY.READ) ?? false;
+  const showPlan = profile.code === "US_FSMA204_PROCESSOR" && canRead;
   const canWrite =
     !accessError &&
     !accessPending &&
@@ -193,17 +203,20 @@ export function MasterDataWorkspace({
 
   const source = returnStack.at(-1)?.entry;
   const backLabel =
-    source?.kind === "search"
-      ? t("navigation.backSearch")
-      : source?.kind === "trace"
-        ? t("navigation.backTrace")
-        : source?.kind === "readiness"
-          ? t("usReadiness.back")
-          : source?.kind === "lots"
-            ? t("lots.backToLot")
-            : source?.kind === "events" && (source.receiving || source.target?.type === "receiving")
-              ? t("receiving.back")
-              : t("events.back");
+    source?.kind === "plans"
+      ? t("usPlan.back")
+      : source?.kind === "search"
+        ? t("navigation.backSearch")
+        : source?.kind === "trace"
+          ? t("navigation.backTrace")
+          : source?.kind === "readiness"
+            ? t("usReadiness.back")
+            : source?.kind === "lots"
+              ? t("lots.backToLot")
+              : source?.kind === "events" &&
+                  (source.receiving || source.target?.type === "receiving")
+                ? t("receiving.back")
+                : t("events.back");
 
   if (capabilities === null) {
     return (
@@ -260,6 +273,18 @@ export function MasterDataWorkspace({
           </span>
         </div>
         <nav aria-label={t("md.referenceData")}>
+          {showPlan ? (
+            <Button
+              variant="secondary"
+              className={`us-md-nav ${view === "plans" ? "is-active" : ""}`}
+              style={navStyle(view === "plans")}
+              disabled={mutationPending}
+              aria-current={view === "plans" ? "page" : undefined}
+              onClick={() => navigate("plans")}
+            >
+              {t("usPlan.title")}
+            </Button>
+          ) : null}
           {(["search", "trace"] as const).map((item) => (
             <Button
               key={item}
@@ -365,7 +390,34 @@ export function MasterDataWorkspace({
             {t(notice.key)}
           </div>
         ) : null}
-        {view === "search" ? (
+        {source?.kind === "plans" ? (
+          <Button variant="secondary" onClick={() => returnToSource()}>
+            {backLabel}
+          </Button>
+        ) : null}
+        {view === "plans" ? (
+          showPlan ? (
+            <PlanView
+              key={`plans-${viewGeneration}`}
+              client={client}
+              profile={profile}
+              canManageQa={
+                !accessError && !accessPending && capabilities.includes(US_CAPABILITY.QA_MANAGE)
+              }
+              canExport={
+                !accessError && !accessPending && capabilities.includes(US_CAPABILITY.EXPORT_READ)
+              }
+              onForbidden={onForbidden}
+              onSessionLost={onSessionLost}
+              onDirtyChange={setEditorDirty}
+              onOpenProfile={() => navigate("profile")}
+              onOpenLocations={() => openEntry({ kind: "locations" })}
+              onOpenProducts={() => openEntry({ kind: "products" })}
+            />
+          ) : (
+            <p role="alert">{t("usPlan.unavailable")}</p>
+          )
+        ) : view === "search" ? (
           <SearchView
             key={`search-${viewGeneration}`}
             client={client}

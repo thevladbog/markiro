@@ -11,9 +11,11 @@ import { transformationCopy } from "../transformation/copy.js";
 import { shippingCopy } from "../shipping/copy.js";
 import { usReadinessCopy } from "../readiness/copy.js";
 import { searchCopy } from "../search/copy.js";
+import { planCopy } from "../plans/copy.js";
 
 export const masterDataCopy = {
   "en-US": {
+    usPlan: planCopy["en-US"],
     navigation: { backSearch: "Back to Search", backTrace: "Back to Trace" },
     usSearch: searchCopy["en-US"],
     usReadiness: usReadinessCopy["en-US"],
@@ -145,6 +147,7 @@ export const masterDataCopy = {
     },
   },
   "es-US": {
+    usPlan: planCopy["es-US"],
     navigation: { backSearch: "Volver a Buscar", backTrace: "Volver a Trazabilidad" },
     usSearch: searchCopy["es-US"],
     usReadiness: usReadinessCopy["es-US"],

@@ -1,0 +1,137 @@
+.us-plan-view {
+  display: grid;
+  gap: 20px;
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  min-width: 0;
+}
+.us-plan-view h1,
+.us-plan-view h2,
+.us-plan-view h3,
+.us-plan-view p {
+  margin: 0;
+}
+.us-plan-view h1 {
+  font: var(--text-h1);
+}
+.us-plan-view h2 {
+  font: var(--text-h2);
+}
+.us-plan-view h3 {
+  font: var(--text-h3);
+}
+.us-plan-view p {
+  max-width: 80ch;
+}
+.us-plan-heading,
+.us-plan-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.us-plan-links {
+  justify-content: flex-start;
+}
+.us-plan-heading > div {
+  display: grid;
+  gap: 8px;
+}
+.us-plan-detail,
+.us-plan-detail section {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.us-plan-detail {
+  border-top: 2px solid var(--line);
+  padding-top: 24px;
+}
+.us-plan-impact {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-panel);
+}
+.us-plan-metadata,
+.us-plan-facts {
+  margin: 0;
+  display: grid;
+  gap: 12px;
+}
+.us-plan-metadata > div,
+.us-plan-facts > div {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+.us-plan-view dt {
+  color: var(--fg-2);
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.us-plan-view dd {
+  margin: 0;
+}
+.us-plan-facts .us-plan-facts {
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+  margin-top: 8px;
+}
+.us-plan-source {
+  display: block;
+  color: var(--fg-3);
+  font: var(--text-caption);
+  margin-top: 4px;
+}
+.us-plan-value {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.us-plan-view code,
+.us-plan-literal {
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.us-plan-publication {
+  color: var(--fg-2);
+}
+.us-plan-mobile-label {
+  display: none;
+}
+.us-plan-view :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+@media (max-width: 640px) {
+  .us-plan-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .us-plan-facts .us-plan-facts {
+    padding-left: 8px;
+  }
+  .us-plan-versions thead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+  }
+  .us-plan-versions tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    padding: 12px 0;
+  }
+  .us-plan-versions td {
+    white-space: normal !important;
+  }
+  .us-plan-mobile-label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--fg-2);
+    font: var(--text-caption);
+  }
+}
