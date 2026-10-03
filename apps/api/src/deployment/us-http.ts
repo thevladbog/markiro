@@ -64,9 +64,15 @@ export function mountUsHttp(app: INestApplication, runtime: UsRuntime): void {
         /^\/traceability\/shipments\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/?$/i.test(
           request.path,
         ));
+    const planWrite =
+      (request.method === "POST" && request.path === "/traceability/plans") ||
+      (request.method === "PUT" &&
+        /^\/traceability\/plans\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+          request.path,
+        ));
     const parseBody = csvPreviewWrite
       ? parseReceivingCsvJson
-      : receivingWrite || transformationWrite || shippingWrite
+      : receivingWrite || transformationWrite || shippingWrite || planWrite
         ? parseReceivingJson
         : parseJson;
     parseBody(request, response, (error: unknown) => {

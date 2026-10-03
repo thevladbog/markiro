@@ -6,6 +6,8 @@ import {
 import { describe, expect, it } from "vitest";
 import {
   usPlanValidateBodySchema,
+  usPlanDraftCommandResponseSchema,
+  usPlanApprovalResponseSchema,
   usPlanPreviewBodySchema,
   usPlanListResponseSchema,
   usPlanDetailResponseSchema,
@@ -18,6 +20,23 @@ import {
 
 const id = "00000000-0000-4000-8000-000000000001";
 const time = "2026-10-03T00:00:00.000Z";
+it("accepts only safe approval receipts without private artifact or evidence fields", () => {
+  const receipt = {
+    id,
+    versionNumber: 1,
+    status: "effective",
+    approvedAt: time,
+    sha256: "a".repeat(64),
+  };
+  expect(usPlanApprovalResponseSchema.parse(receipt)).toEqual(receipt);
+  for (const field of ["objectKey", "artifact", "evidence", "seed", "tenantId"])
+    expect(usPlanApprovalResponseSchema.safeParse({ ...receipt, [field]: "private" }).success).toBe(
+      false,
+    );
+  expect(usPlanApprovalResponseSchema.safeParse({ ...receipt, sha256: "invalid" }).success).toBe(
+    false,
+  );
+});
 const sections: UsPlanSections = {
   recordMaintenance: {
     systemOfRecord: "",
@@ -76,6 +95,23 @@ const draft = {
   updatedAt: time,
 };
 const artifact = { sha256: "a".repeat(64), byteSize: 123, rendererVersion: "us-plan-pdf-v1" };
+it("accepts a committed draft command without inventing independently read provenance", () => {
+  const { provenance: _provenance, ...common } = draft;
+  expect(_provenance).toBe("operational");
+  const command = {
+    ...common,
+    schemaVersion: 1,
+    sections,
+    changeSummary: "",
+    createdBy: id,
+    statementOwnership: "operator_pending",
+  };
+  expect(usPlanDraftCommandResponseSchema.parse(command)).toEqual(command);
+  expect(
+    usPlanDraftCommandResponseSchema.safeParse({ ...command, provenance: "trusted_synthetic" })
+      .success,
+  ).toBe(false);
+});
 const source = { origin: "operator_confirmed", actorId: id, confirmedAt: time };
 const published = {
   id,

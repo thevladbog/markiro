@@ -824,6 +824,8 @@ export {
 } from "./traceability/plans.js";
 export {
   usPlanValidateBodySchema,
+  usPlanDraftCommandResponseSchema,
+  usPlanApprovalResponseSchema,
   usPlanPreviewBodySchema,
   usPlanListResponseSchema,
   usPlanDetailResponseSchema,

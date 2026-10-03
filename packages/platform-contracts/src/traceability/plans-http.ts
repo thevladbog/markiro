@@ -224,3 +224,29 @@ export const usPlanDetailResponseSchema = z.discriminatedUnion("status", [
 export type UsPlanListResponse = z.infer<typeof usPlanListResponseSchema>;
 export type UsPlanDetailResponse = z.infer<typeof usPlanDetailResponseSchema>;
 export type UsPlanValidationResponse = z.infer<typeof usPlanValidationResponseSchema>;
+
+/** Acknowledges the committed command without a second, potentially racing read. */
+export const usPlanDraftCommandResponseSchema = z
+  .object({
+    id: platformUuidSchema,
+    versionNumber: positiveRevision,
+    status: z.literal("draft"),
+    draftRevision: positiveRevision,
+    schemaVersion: z.literal(1),
+    sections: usPlanSectionsSchema,
+    changeSummary: text,
+    createdBy: platformUuidSchema,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    statementOwnership: z.literal("operator_pending"),
+  })
+  .strict();
+export const usPlanApprovalResponseSchema = z
+  .object({
+    id: platformUuidSchema,
+    versionNumber: positiveRevision,
+    status: z.literal("effective"),
+    approvedAt: timestamp,
+    sha256: artifactSchema.shape.sha256,
+  })
+  .strict();
