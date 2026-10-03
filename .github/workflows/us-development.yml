@@ -103,6 +103,8 @@ jobs:
         run: pnpm --filter @markiro/ui build
       - name: Verify US browser flow and contracts
         run: pnpm --filter @markiro/admin exec vitest run test/us-client.test.ts test/us-master-data-client.test.ts test/us-master-data-forms.test.ts test/us-master-data-ui.test.tsx test/us-catalog-client.test.ts test/us-catalog-ui.test.tsx test/us-product-profile-client.test.ts test/us-product-profile-ui.test.tsx test/us-lot-client.test.ts test/us-lots-ui.test.tsx test/us-app.test.tsx
+      - name: Verify US Plan cabinet contracts and EN/ES flow
+        run: pnpm --filter @markiro/admin exec vitest run test/us-plans-client.test.ts test/us-plans-pdf-client.test.ts test/us-plans-navigation.test.tsx test/us-plans-versions.test.tsx test/us-plans-editor.test.tsx test/us-plans-inspection.test.tsx test/us-plans-approval.test.tsx test/us-plans-download.test.tsx test/us-plans-flow.test.tsx
       - name: Verify US readiness office and exact source navigation
         run: pnpm --filter @markiro/admin exec vitest run test/us-readiness-client.test.ts test/us-readiness-view.test.tsx test/us-readiness-picker.test.tsx test/us-readiness-navigation.test.tsx
       - name: Verify US Search, lot card, Trace and workspace navigation

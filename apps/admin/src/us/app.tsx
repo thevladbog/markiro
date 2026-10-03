@@ -59,7 +59,7 @@ const copy = {
       baseline: "Regulatory baseline",
       effective: "Effective",
       unfinished:
-        "Receiving, Transformation, and Shipping office workflows are available locally. Plan, request, and regulatory export workflows are not yet complete.",
+        "Receiving, Transformation, Shipping, and Plan office workflows are available for local development. Plan publication requires private US artifact storage. Request and regulatory export workflows remain incomplete; operational readiness is not established.",
       profileConflict:
         "A different profile already exists. Reload the server profile instead of overwriting it.",
       reload: "Reload server profile",
@@ -125,7 +125,7 @@ const copy = {
       baseline: "Base regulatoria",
       effective: "Vigente desde",
       unfinished:
-        "Los flujos de oficina de recepción, transformación y envío están disponibles localmente. Los flujos de plan, solicitud y exportación regulatoria aún no están completos.",
+        "Los flujos de oficina de recepción, transformación, envío y plan están disponibles para desarrollo local. La publicación del plan requiere almacenamiento privado de documentos de EE. UU. Los flujos de solicitud y exportación regulatoria siguen incompletos; no se ha establecido la preparación operativa.",
       profileConflict:
         "Ya existe un perfil diferente. Recargue el perfil del servidor en lugar de sobrescribirlo.",
       reload: "Recargar perfil del servidor",

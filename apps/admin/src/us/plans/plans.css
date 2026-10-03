@@ -196,6 +196,13 @@
   .us-plan-versions td {
     white-space: normal !important;
   }
+  .us-plan-versions .mk-chip {
+    max-width: 100%;
+    height: auto !important;
+    min-height: 24px;
+    padding-block: 4px !important;
+    white-space: normal !important;
+  }
   .us-plan-mobile-label {
     display: block;
     margin-bottom: 4px;
