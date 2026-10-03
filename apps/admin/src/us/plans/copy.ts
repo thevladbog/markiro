@@ -1,6 +1,34 @@
 export const planCopy = {
   "en-US": {
     title: "Plan",
+    approve: "Approve",
+    approvalActions: "Approve saved plan",
+    freshConfirmations: "Fresh confirmations for approval",
+    selfApproval: "You may approve your own draft in P0.",
+    approvalActor:
+      "On success, the server records your user ID and approval time. The time is not set until approval succeeds.",
+    checkApproval: "Check for approval",
+    approvalReady:
+      "This saved revision passed the server check. Approval will recheck current configuration and access.",
+    approvalIssues: "Review the reported issues before approval.",
+    approvalPending: "Processing saved revision…",
+    approvalSaveFirst: "Save your changes before approving or discarding this draft.",
+    approvalRetry:
+      "The result could not be confirmed. Retry the same action or reload to check the saved server state.",
+    approvalStale:
+      "The saved draft or current configuration changed. Your draft is preserved. Reload the saved draft before approving again.",
+    reloadSaved: "Reload saved draft",
+    refreshPublished: "Refresh server state",
+    refreshRequired:
+      "The server acknowledged the action. Reloading the versions and detail is required to show their current state.",
+    discardDraft: "Discard draft",
+    discardDescription:
+      "Discard draft v{{version}}, saved revision {{revision}}? Published versions and their retained PDFs are not removed.",
+    cancel: "Cancel",
+    downloadPublished: "Download published PDF",
+    downloading: "Downloading published PDF…",
+    downloadError:
+      "The published PDF could not be verified or downloaded. Try again when connected.",
     intro: "Versioned traceability procedures and their frozen evidence.",
     newDraft: "New draft",
     draftUnavailable: "A draft is not effective until approved.",
@@ -236,6 +264,34 @@ export const planCopy = {
   },
   "es-US": {
     title: "Plan",
+    approve: "Aprobar",
+    approvalActions: "Aprobar plan guardado",
+    freshConfirmations: "Nuevas confirmaciones para aprobar",
+    selfApproval: "Puede aprobar su propio borrador en P0.",
+    approvalActor:
+      "Al aprobar, el servidor registra su ID de usuario y la hora de aprobación. La hora solo se establece cuando la aprobación se completa.",
+    checkApproval: "Comprobar para aprobar",
+    approvalReady:
+      "Esta revisión guardada pasó la comprobación del servidor. La aprobación volverá a comprobar la configuración y el acceso actuales.",
+    approvalIssues: "Revise los problemas indicados antes de aprobar.",
+    approvalPending: "Procesando revisión guardada…",
+    approvalSaveFirst: "Guarde sus cambios antes de aprobar o descartar este borrador.",
+    approvalRetry:
+      "No se pudo confirmar el resultado. Reintente la misma acción o recargue para comprobar el estado guardado en el servidor.",
+    approvalStale:
+      "El borrador guardado o la configuración actual cambió. Su borrador se conserva. Recargue el borrador guardado antes de volver a aprobar.",
+    reloadSaved: "Recargar borrador guardado",
+    refreshPublished: "Actualizar estado del servidor",
+    refreshRequired:
+      "El servidor confirmó la acción. Es necesario recargar las versiones y el detalle para mostrar su estado actual.",
+    discardDraft: "Descartar borrador",
+    discardDescription:
+      "¿Descartar el borrador v{{version}}, revisión guardada {{revision}}? Las versiones publicadas y sus PDF retenidos no se eliminan.",
+    cancel: "Cancelar",
+    downloadPublished: "Descargar PDF publicado",
+    downloading: "Descargando PDF publicado…",
+    downloadError:
+      "No se pudo verificar o descargar el PDF publicado. Reintente cuando haya conexión.",
     intro: "Procedimientos de trazabilidad versionados y sus pruebas conservadas.",
     newDraft: "Nuevo borrador",
     draftUnavailable: "Un borrador no entra en vigor hasta su aprobación.",

@@ -131,6 +131,8 @@
   flex-wrap: wrap;
 }
 .us-plan-inspection,
+.us-plan-approval,
+.us-plan-approval-content,
 .us-plan-confirmations,
 .us-plan-preview {
   display: grid;

@@ -1,13 +1,119 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Alert, Button, Card, StatusChip } from "@markiro/ui";
 import type { UsPlanDetailResponse, UsPlanListResponse } from "@markiro/platform-contracts";
 import { useTranslation } from "react-i18next";
 import { planCopy } from "./copy.js";
 import { planDate } from "./versions.js";
+import { UsClientError, type UsBrowserClient } from "../client.js";
 
 type Published = Extract<UsPlanDetailResponse, { status: "effective" | "superseded" }>;
 type Source = Published["factSources"]["entries"][number]["source"];
 type Links = { onOpenProfile: () => void; onOpenLocations: () => void; onOpenProducts: () => void };
+type DownloadProps = {
+  client: UsBrowserClient;
+  canExport: boolean;
+  availability: UsPlanListResponse["publicationAvailability"];
+  onForbidden: () => Promise<void>;
+  onSessionLost: () => void;
+};
+
+function PublishedDownload({ detail, ...props }: DownloadProps & { detail: Published }) {
+  const { t } = useTranslation();
+  const [pending, setPending] = useState(false);
+  const [denied, setDenied] = useState(false);
+  const [unavailable, setUnavailable] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const generation = useRef(0);
+  const busy = useRef(false);
+  const previousAccess = useRef(props.canExport);
+  const downloadUrl = useRef<string | null>(null);
+  const releaseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function release() {
+    if (releaseTimer.current) clearTimeout(releaseTimer.current);
+    releaseTimer.current = null;
+    if (downloadUrl.current) URL.revokeObjectURL(downloadUrl.current);
+    downloadUrl.current = null;
+  }
+  useEffect(() => {
+    if (!previousAccess.current && props.canExport) setDenied(false);
+    previousAccess.current = props.canExport;
+    generation.current += 1;
+    busy.current = false;
+    setPending(false);
+    return () => {
+      generation.current += 1;
+      release();
+    };
+  }, [detail.id, props.canExport, props.availability]);
+  const storageUnavailable = props.availability !== "available" || unavailable;
+  async function download() {
+    if (busy.current || !props.canExport || denied || storageUnavailable) return;
+    const request = ++generation.current;
+    busy.current = true;
+    setPending(true);
+    setError(null);
+    try {
+      const result = await props.client.downloadPlanPdf(detail.id);
+      if (request !== generation.current) return;
+      const digest = await crypto.subtle.digest("SHA-256", result.bytes);
+      if (request !== generation.current) return;
+      const sha256 = Array.from(new Uint8Array(digest), (value) =>
+        value.toString(16).padStart(2, "0"),
+      ).join("");
+      if (result.bytes.byteLength !== detail.artifact.byteSize || sha256 !== detail.artifact.sha256)
+        throw new UsClientError("invalid_response");
+      release();
+      const url = URL.createObjectURL(new Blob([result.bytes], { type: "application/pdf" }));
+      downloadUrl.current = url;
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `traceability-plan-v${detail.versionNumber}.pdf`;
+      document.body.append(link);
+      try {
+        link.click();
+      } finally {
+        link.remove();
+      }
+      // Let the browser consume the click, then release the temporary bytes.
+      releaseTimer.current = setTimeout(release, 0);
+    } catch (value) {
+      if (request !== generation.current) return;
+      release();
+      if (value instanceof UsClientError && value.code === "forbidden") {
+        setDenied(true);
+        setError("usPlan.inspectionForbidden");
+        await props.onForbidden();
+      } else if (value instanceof UsClientError && value.code === "session_required") {
+        setDenied(true);
+        setError("usPlan.session");
+        props.onSessionLost();
+      } else if (
+        value instanceof UsClientError &&
+        value.code === "us_plan_artifact_storage_unconfigured"
+      ) {
+        setUnavailable(true);
+        setError("usPlan.publicationUnavailable");
+      } else setError("usPlan.downloadError");
+    } finally {
+      if (request === generation.current) {
+        busy.current = false;
+        setPending(false);
+      }
+    }
+  }
+  return (
+    <div className="us-plan-download">
+      {props.canExport ? (
+        <Button disabled={pending || denied || storageUnavailable} onClick={() => void download()}>
+          {t("usPlan.downloadPublished")}
+        </Button>
+      ) : null}
+      {pending ? <p role="status">{t("usPlan.downloading")}</p> : null}
+      {storageUnavailable && !error ? <p>{t("usPlan.publicationUnavailable")}</p> : null}
+      {error ? <p role="alert">{t(error)}</p> : null}
+    </div>
+  );
+}
 
 export function PlanCurrentImpact({
   impact,
@@ -192,8 +298,9 @@ function SnapshotFacts({
 export function PlanDetail({
   detail,
   onClose,
+  download,
   ...links
-}: { detail: UsPlanDetailResponse; onClose: () => void } & Links) {
+}: { detail: UsPlanDetailResponse; onClose: () => void; download?: DownloadProps } & Links) {
   const { t, i18n } = useTranslation();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -287,6 +394,7 @@ export function PlanDetail({
               </dl>
             </Card>
           </section>
+          {download ? <PublishedDownload key={detail.id} {...download} detail={detail} /> : null}
           <section aria-label={t("usPlan.frozen")}>
             <h2>{t("usPlan.frozen")}</h2>
             <p>{t("usPlan.frozenHelp")}</p>

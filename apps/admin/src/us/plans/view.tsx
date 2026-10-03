@@ -7,6 +7,7 @@ import { PlanVersions } from "./versions.js";
 import { PlanCurrentImpact, PlanDetail } from "./detail.js";
 import { PlanEditor } from "./editor.js";
 import { PlanInspection } from "./inspection.js";
+import { PlanApproval } from "./approval.js";
 import { emptyPlanSections } from "./section-fields.js";
 import "./plans.css";
 
@@ -45,6 +46,7 @@ export function PlanView(props: PlanViewProps) {
   const [dirty, setDirty] = useState(false);
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [actionPending, setActionPending] = useState(false);
   const [writeBlocked, setWriteBlocked] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
   const createPending = useRef(false);
@@ -52,6 +54,13 @@ export function PlanView(props: PlanViewProps) {
   const onEditorPending = useCallback(
     (pending: boolean) => {
       setSaving(pending);
+      onMutationPendingChange?.(pending);
+    },
+    [onMutationPendingChange],
+  );
+  const onActionPending = useCallback(
+    (pending: boolean) => {
+      setActionPending(pending);
       onMutationPendingChange?.(pending);
     },
     [onMutationPendingChange],
@@ -102,7 +111,9 @@ export function PlanView(props: PlanViewProps) {
   const openDraft =
     list.kind === "ready" ? list.value.items.find((item) => item.status === "draft") : undefined;
   function mayLeave() {
-    return !creating && !saving && (!dirty || window.confirm(t("md.discardConfirm")));
+    return (
+      !creating && !saving && !actionPending && (!dirty || window.confirm(t("md.discardConfirm")))
+    );
   }
   function openVersion(id: string, edit = false) {
     if (!mayLeave()) return;
@@ -165,7 +176,13 @@ export function PlanView(props: PlanViewProps) {
         {props.canManageQa ? (
           <div>
             <Button
-              disabled={list.kind !== "ready" || Boolean(openDraft) || creating || writeBlocked}
+              disabled={
+                list.kind !== "ready" ||
+                Boolean(openDraft) ||
+                creating ||
+                actionPending ||
+                writeBlocked
+              }
               aria-describedby="us-plan-draft-hint"
               onClick={() => void createDraft()}
             >
@@ -179,7 +196,11 @@ export function PlanView(props: PlanViewProps) {
             {openDraft ? (
               <Button
                 disabled={
-                  creating || saving || writeBlocked || (editing && selectedId === openDraft.id)
+                  creating ||
+                  saving ||
+                  actionPending ||
+                  writeBlocked ||
+                  (editing && selectedId === openDraft.id)
                 }
                 variant="secondary"
                 onClick={() => openVersion(openDraft.id, true)}
@@ -245,7 +266,7 @@ export function PlanView(props: PlanViewProps) {
                 key={detail.value.id}
                 draft={detail.value}
                 profile={profile}
-                canManageQa={props.canManageQa && !writeBlocked}
+                canManageQa={props.canManageQa && !writeBlocked && !actionPending}
                 inspection={{ client, canExport: props.canExport }}
                 onSave={async (id, body) => {
                   const acknowledgement = await client.savePlan(id, body);
@@ -278,7 +299,15 @@ export function PlanView(props: PlanViewProps) {
             ) : (
               <>
                 <PlanDetail
+                  key={detail.value.id}
                   detail={detail.value}
+                  download={{
+                    client,
+                    canExport: props.canExport,
+                    availability: list.value.publicationAvailability,
+                    onForbidden,
+                    onSessionLost,
+                  }}
                   onOpenProfile={props.onOpenProfile}
                   onOpenLocations={props.onOpenLocations}
                   onOpenProducts={props.onOpenProducts}
@@ -307,6 +336,49 @@ export function PlanView(props: PlanViewProps) {
                 ) : null}
               </>
             )
+          ) : null}
+          {detail.kind === "ready" && selectedId && detail.value.status === "draft" ? (
+            <PlanApproval
+              draft={detail.value}
+              client={client}
+              availability={list.value.publicationAvailability}
+              dirty={dirty}
+              saving={saving}
+              canManageQa={props.canManageQa && !writeBlocked}
+              onMutationPendingChange={onActionPending}
+              onForbidden={onForbidden}
+              onSessionLost={onSessionLost}
+              onApproved={async (receipt) => {
+                const versions = await client.listPlans();
+                const value = await client.getPlan(receipt.id);
+                setList({ kind: "ready", value: versions });
+                setDetail({ kind: "ready", value });
+                setEditing(false);
+                setDirty(false);
+                props.onDirtyChange(false);
+              }}
+              onDiscarded={async () => {
+                const versions = await client.listPlans();
+                setList({ kind: "ready", value: versions });
+                setSelectedId(null);
+                setDetail({ kind: "loading" });
+                setEditing(false);
+                setDirty(false);
+                props.onDirtyChange(false);
+                root.current?.querySelector<HTMLElement>("h1")?.focus();
+              }}
+              onReload={async () => {
+                const value = await client.getPlan(detail.value.id);
+                const versions = await client.listPlans();
+                setDetail({ kind: "ready", value });
+                setList({ kind: "ready", value: versions });
+                // Remount the editor only after an explicit reload; local text
+                // never changes as a side effect of a failed approval.
+                setEditing(false);
+                setDirty(false);
+                props.onDirtyChange(false);
+              }}
+            />
           ) : null}
         </>
       )}
