@@ -348,9 +348,14 @@ revoked badge) and rolls `last_rev` back until the next sync;
 ## Catalog and label templates
 
 The ЧЗ product groups are the cloud's static lookup: host migration `0008`
-copies the 51 rows of `packages/db/migrations/0099_chz_product_groups.sql`,
-and `host/tests/product_groups.rs` reads that file and compares the rows, so
-the copies cannot drift. Every office role reads them
+copies the 51 rows of `packages/db/migrations/0099_chz_product_groups.sql`.
+`host/tests/product_groups.rs` compares the host's rows with that file and
+fails when any other cloud migration writes the table, so a cloud migration
+that changes the lookup cannot go unnoticed once the standalone jobs run.
+Those jobs run when standalone files or the shared domain or ui packages
+change; a cloud-only change does not schedule them (`tools/ci/affected.mjs`
+maps `packages/db/**` to the station jobs), so the guard fires at the next
+standalone run. Every office role reads them
 (`GET /v1/office/product-groups`, by code); nothing writes them, and they
 are not in the station feed.
 

@@ -192,8 +192,11 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
   ничего не меняет.
 - `chz_product_groups(code PRIMARY KEY, alias UNIQUE, name)` — 51 строка из облачной
   миграции `0099`, перенесённая миграцией хоста `0008` строка в строку; тест
-  `host/tests/product_groups.rs` читает облачный файл и сверяет строки, поэтому
-  копии не разойдутся. Читают все роли (`GET /v1/office/product-groups`, по коду),
+  `host/tests/product_groups.rs` читает облачный файл и сверяет строки, а ещё падает,
+  если другая облачная миграция пишет в таблицу. Тест идёт в заданиях standalone,
+  которые правка одного облака не запускает (`tools/ci/affected.mjs` отправляет
+  `packages/db/**` только в станционные задания), поэтому такую миграцию поймает
+  следующий запуск этих заданий. Читают все роли (`GET /v1/office/product-groups`, по коду),
   не пишет никто; в ленту станций справочник не входит.
 - `products(id, gtin14 CHECK(length=14 AND цифры), name, print_name, chz_group_code REFERENCES chz_product_groups, box_capacity, pallet_box_capacity, shelf_life_days, default_box_template_id, default_pallet_template_id, archived, status GENERATED ALWAYS AS (CASE WHEN chz_group_code IS NOT NULL AND box_capacity IS NOT NULL AND pallet_box_capacity IS NOT NULL THEN 'active' ELSE 'draft' END) VIRTUAL, rev)`;
   частичный уникальный индекс `gtin14` среди неархивных (как `products_tenant_gtin_unarchived_uq`).
