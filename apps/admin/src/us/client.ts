@@ -1,5 +1,16 @@
 import { z } from "zod";
 import {
+  usPlanListResponseSchema,
+  usPlanDetailResponseSchema,
+  usPlanDraftCommandResponseSchema,
+  usPlanDraftCreateBodySchema,
+  usPlanDraftSaveBodySchema,
+  usPlanValidateBodySchema,
+  usPlanValidationResponseSchema,
+  usPlanPreviewBodySchema,
+  usPlanApproveBodySchema,
+  usPlanApprovalResponseSchema,
+  usPlanDraftDiscardBodySchema,
   receivingCsvPreviewInputSchema,
   receivingCsvPreviewSchema,
   receivingCsvApplyInputSchema,
@@ -125,10 +136,28 @@ import {
   matchesReceivingVoidAcknowledgement,
 } from "./receiving/command-acknowledgement.js";
 import { matchesReceivingCsvPreview } from "./receiving/csv-integrity.js";
+import { readPlanPdfResponse } from "./plans/pdf-transport.js";
+
+const planConflictCode = z.enum([
+  "us_plan_revision_conflict",
+  "us_plan_not_draft",
+  "us_plan_draft_exists",
+  "us_plan_version_conflict",
+  "us_plan_idempotency_conflict",
+  "us_plan_attempt_fenced",
+  "us_plan_history_conflict",
+  "us_plan_configuration_conflict",
+]);
+type PlanErrorCode =
+  | z.infer<typeof planConflictCode>
+  | "us_plan_validation_failed"
+  | "us_plan_version_not_found"
+  | "us_plan_artifact_storage_unconfigured";
 
 type ShippingHttpError = z.infer<typeof shippingHttpErrorSchema>;
 
 export type UsClientErrorCode =
+  | PlanErrorCode
   | "receiving_export_stale"
   | "export_value_too_large"
   | "receiving_csv_preview_expired"
@@ -196,6 +225,47 @@ export class UsClientError extends Error {
     super(code);
     this.name = "UsClientError";
   }
+}
+
+export class UsPlanValidationError extends UsClientError {
+  constructor(readonly issues: z.infer<typeof usPlanValidationResponseSchema>["issues"]) {
+    super("us_plan_validation_failed");
+    this.name = "UsPlanValidationError";
+  }
+}
+
+/** Status-specific, strict evidence only; never retain server messages. */
+function planResponseError(status: number, value: unknown): UsClientError {
+  if (status === 409) {
+    const validation = z
+      .object({
+        code: z.literal("us_plan_validation_failed"),
+        issues: usPlanValidationResponseSchema.shape.issues,
+      })
+      .strict()
+      .safeParse(value);
+    if (validation.success) return new UsPlanValidationError(validation.data.issues);
+    const conflict = z.object({ code: planConflictCode }).strict().safeParse(value);
+    if (conflict.success) return new UsClientError(conflict.data.code);
+  }
+  const specific = z
+    .object({
+      code:
+        status === 404
+          ? z.literal("us_plan_version_not_found")
+          : z.literal("us_plan_artifact_storage_unconfigured"),
+    })
+    .strict()
+    .safeParse(value);
+  if ((status === 404 || status === 503) && specific.success)
+    return new UsClientError(specific.data.code);
+  const errors: Record<number, UsClientErrorCode> = {
+    401: "session_required",
+    403: "forbidden",
+    409: "conflict",
+    429: "rate_limited",
+  };
+  return new UsClientError(errors[status] ?? (status >= 500 ? "unavailable" : "request_rejected"));
 }
 
 export class UsShippingConflictError extends UsClientError {
@@ -312,6 +382,7 @@ const readinessPath = "/api/us/traceability/readiness";
 const transformationPath = "/api/us/traceability/transformation";
 const shippingPath = "/api/us/traceability/shipments";
 const casesPath = "/api/us/traceability/lots";
+const plansPath = "/api/us/traceability/plans";
 const uuidPath = "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}";
 const lotErrorRoute = new RegExp(`^${lotsPath}/${uuidPath}(?:/(?:source|status))?$`);
 const caseErrorRoute = new RegExp(
@@ -420,6 +491,7 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
     schema: S,
     method = "GET",
     body?: unknown,
+    noContent = false,
   ): Promise<z.output<S>> {
     let response: Response;
     const controller = new AbortController();
@@ -435,6 +507,10 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
           ? {}
           : { headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }),
       });
+      if (noContent && response.ok) {
+        if (response.status !== 204) throw new UsClientError("invalid_response");
+        return checked(schema, undefined, "invalid_response");
+      }
       let value: unknown;
       try {
         value = await response.json();
@@ -443,6 +519,8 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
         if (response.ok) throw new UsClientError("invalid_response");
       }
       if (!response.ok) {
+        if (path === plansPath || path.startsWith(`${plansPath}/`))
+          throw planResponseError(response.status, value);
         const pathname = new URL(path, "http://localhost").pathname;
         const traceLotReadPath =
           method === "GET" &&
@@ -645,7 +723,100 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
       globalThis.clearTimeout(timeout);
     }
   }
+  async function planPdf(path: string, previewRevision: number | null) {
+    const controller = new AbortController();
+    const timeout = globalThis.setTimeout(() => controller.abort(), 15_000);
+    try {
+      const response = await send(path, {
+        method: previewRevision === null ? "GET" : "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+        redirect: "error",
+        signal: controller.signal,
+        ...(previewRevision === null
+          ? {}
+          : {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ expectedRevision: previewRevision }),
+            }),
+      });
+      if (!response.ok) {
+        let value: unknown;
+        try {
+          value = await response.json();
+        } catch {
+          /* Generic safe status fallback. */
+        }
+        throw planResponseError(response.status, value);
+      }
+      return await readPlanPdfResponse(response, previewRevision);
+    } catch (error) {
+      if (controller.signal.aborted) throw new UsClientError("unavailable");
+      if (error instanceof UsClientError) throw error;
+      throw new UsClientError("unavailable");
+    } finally {
+      globalThis.clearTimeout(timeout);
+    }
+  }
   return {
+    async listPlans() {
+      return request(plansPath, usPlanListResponseSchema);
+    },
+    async getPlan(id: unknown) {
+      return request(
+        `${plansPath}/${checked(platformUuidSchema, id, "invalid_input")}`,
+        usPlanDetailResponseSchema,
+      );
+    },
+    async createPlan(input: unknown) {
+      return request(
+        plansPath,
+        usPlanDraftCommandResponseSchema,
+        "POST",
+        checked(usPlanDraftCreateBodySchema, input, "invalid_input"),
+      );
+    },
+    async savePlan(id: unknown, input: unknown) {
+      return request(
+        `${plansPath}/${checked(platformUuidSchema, id, "invalid_input")}`,
+        usPlanDraftCommandResponseSchema,
+        "PUT",
+        checked(usPlanDraftSaveBodySchema, input, "invalid_input"),
+      );
+    },
+    async validatePlan(id: unknown, input: unknown) {
+      return request(
+        `${plansPath}/${checked(platformUuidSchema, id, "invalid_input")}/validate`,
+        usPlanValidationResponseSchema,
+        "POST",
+        checked(usPlanValidateBodySchema, input, "invalid_input"),
+      );
+    },
+    async approvePlan(id: unknown, input: unknown) {
+      return request(
+        `${plansPath}/${checked(platformUuidSchema, id, "invalid_input")}/approve`,
+        usPlanApprovalResponseSchema,
+        "POST",
+        checked(usPlanApproveBodySchema, input, "invalid_input"),
+      );
+    },
+    async discardPlan(id: unknown, input: unknown) {
+      return request(
+        `${plansPath}/${checked(platformUuidSchema, id, "invalid_input")}/discard`,
+        z.undefined(),
+        "POST",
+        checked(usPlanDraftDiscardBodySchema, input, "invalid_input"),
+        true,
+      );
+    },
+    async previewPlanPdf(id: unknown, input: unknown) {
+      const versionId = checked(platformUuidSchema, id, "invalid_input");
+      const body = checked(usPlanPreviewBodySchema, input, "invalid_input");
+      return planPdf(`${plansPath}/${versionId}/preview`, body.expectedRevision);
+    },
+    async downloadPlanPdf(id: unknown) {
+      return planPdf(`${plansPath}/${checked(platformUuidSchema, id, "invalid_input")}/pdf`, null);
+    },
     async searchTraceLots(input: unknown = {}): Promise<UsTraceSearchPage> {
       const query = checked(usTraceSearchQuerySchema, input, "invalid_input");
       const params = new URLSearchParams({ limit: String(query.limit) });
