@@ -130,6 +130,37 @@
 .us-plan-editor .mk-data-tabs {
   flex-wrap: wrap;
 }
+.us-plan-inspection,
+.us-plan-confirmations,
+.us-plan-preview {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.us-plan-inspection {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+.us-plan-confirmations,
+.us-plan-preview {
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+  background: var(--surface-panel);
+}
+.us-plan-issues {
+  display: grid;
+  gap: 8px;
+  padding-left: 20px;
+}
+.us-plan-issues button {
+  white-space: normal;
+  text-align: left;
+}
+.us-plan-preview a {
+  color: var(--accent);
+}
 .us-plan-mobile-label {
   display: none;
 }

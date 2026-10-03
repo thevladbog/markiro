@@ -12,6 +12,47 @@ export const planCopy = {
     saving: "Saving draft…",
     unsaved: "Unsaved changes",
     savedRevision: "Saved revision {{revision}}",
+    inspection: "Saved draft checks and preview",
+    inspectionHelp:
+      "The server checks the saved revision and current configuration. Checks are advisory and do not establish legal compliance.",
+    inspectionSaveFirst: "Save your changes before validating or previewing the saved revision.",
+    advisoryConfirmations: "Confirmations for advisory validation",
+    advisoryHelp:
+      "These statements apply only to this check. Approval requires fresh confirmations and another server check of the current saved revision.",
+    validateSaved: "Validate saved revision",
+    previewSaved: "Preview saved revision",
+    validating: "Checking saved revision…",
+    previewing: "Preparing draft PDF…",
+    validatedRevision: "Server checks for saved revision {{revision}}",
+    noValidationIssues:
+      "No server issues reported. Approval still requires a fresh check and publication availability.",
+    validationError: "The saved revision could not be checked. Reconnect and try again.",
+    previewError: "The draft PDF could not be loaded. Reconnect and try again.",
+    inspectionStale:
+      "The saved draft changed or is no longer editable. Reload the draft before checking or previewing it again.",
+    inspectionForbidden: "Your access changed. This action is disabled while access is refreshed.",
+    previewRevision: "Preview of saved revision {{revision}}",
+    previewHelp:
+      "English draft PDF. This temporary preview is not an approved artifact and remains available without publication storage.",
+    openPreview: "Open PDF in new tab",
+    closePreview: "Close preview",
+    checks: {
+      procedures: "I confirm the saved procedures describe this operation.",
+      backupAndRecovery: "I confirm the saved backup and recovery statement.",
+      contact: "I confirm the saved point of contact.",
+      nonFarmScope: "I confirm this operation has no farm activity in this plan's scope.",
+    },
+    issues: {
+      required_field: "Complete the required fields in this section.",
+      unsupported_profile: "Plan requires the processor profile.",
+      change_summary_required: "Enter a change summary for this version.",
+      tlc_source_location_required: "Configure a TLC source location in Locations.",
+      farm_scope_unsupported: "Declare non-farm activity; yes or unknown blocks P0 approval.",
+      confirmation_required: "Explicitly confirm the saved statements for this check.",
+      prohibited_claim:
+        "Remove affirmative prohibited wording; this bounded check is not legal review.",
+      unknown: "Review this section; the server reported an unrecognized issue.",
+    },
     summaryRequired: "A change summary is required from version 2 onward.",
     currentContext:
       "Current settings only. Approval captures a new frozen snapshot; source links open current locations and product coverage.",
@@ -206,6 +247,52 @@ export const planCopy = {
     saving: "Guardando borrador…",
     unsaved: "Cambios sin guardar",
     savedRevision: "Revisión guardada {{revision}}",
+    inspection: "Comprobaciones y vista previa del borrador guardado",
+    inspectionHelp:
+      "El servidor comprueba la revisión guardada y la configuración actual. Las comprobaciones son orientativas y no establecen cumplimiento legal.",
+    inspectionSaveFirst:
+      "Guarde los cambios antes de validar o previsualizar la revisión guardada.",
+    advisoryConfirmations: "Confirmaciones para la validación orientativa",
+    advisoryHelp:
+      "Estas declaraciones solo se aplican a esta comprobación. La aprobación requiere nuevas confirmaciones y otra comprobación del servidor de la revisión guardada actual.",
+    validateSaved: "Validar revisión guardada",
+    previewSaved: "Vista previa de revisión guardada",
+    validating: "Comprobando revisión guardada…",
+    previewing: "Preparando PDF del borrador…",
+    validatedRevision: "Comprobaciones del servidor para revisión guardada {{revision}}",
+    noValidationIssues:
+      "El servidor no informó problemas. La aprobación aún requiere una nueva comprobación y disponibilidad de publicación.",
+    validationError: "No se pudo comprobar la revisión guardada. Vuelva a conectarse y reintente.",
+    previewError: "No se pudo cargar el PDF del borrador. Vuelva a conectarse y reintente.",
+    inspectionStale:
+      "El borrador guardado cambió o ya no se puede editar. Recargue el borrador antes de comprobarlo o previsualizarlo de nuevo.",
+    inspectionForbidden:
+      "Su acceso cambió. Esta acción está desactivada mientras se actualiza el acceso.",
+    previewRevision: "Vista previa de revisión guardada {{revision}}",
+    previewHelp:
+      "PDF del borrador en inglés. Esta vista previa temporal no es un documento aprobado y sigue disponible sin almacenamiento de publicación.",
+    openPreview: "Abrir PDF en una pestaña nueva",
+    closePreview: "Cerrar vista previa",
+    checks: {
+      procedures: "Confirmo que los procedimientos guardados describen esta operación.",
+      backupAndRecovery: "Confirmo la declaración guardada de copias y recuperación.",
+      contact: "Confirmo el punto de contacto guardado.",
+      nonFarmScope:
+        "Confirmo que esta operación no tiene actividad agrícola dentro del alcance de este plan.",
+    },
+    issues: {
+      required_field: "Complete los campos requeridos de esta sección.",
+      unsupported_profile: "El plan requiere el perfil de procesador.",
+      change_summary_required: "Introduzca un resumen de cambios para esta versión.",
+      tlc_source_location_required: "Configure una ubicación de origen TLC en Ubicaciones.",
+      farm_scope_unsupported:
+        "Declare actividad no agrícola; sí o desconocido bloquea la aprobación P0.",
+      confirmation_required:
+        "Confirme explícitamente las declaraciones guardadas para esta comprobación.",
+      prohibited_claim:
+        "Quite las afirmaciones prohibidas; esta comprobación limitada no es una revisión legal.",
+      unknown: "Revise esta sección; el servidor informó un problema no reconocido.",
+    },
     summaryRequired: "Se requiere un resumen de cambios desde la versión 2.",
     currentContext:
       "Solo configuración actual. La aprobación conserva una nueva instantánea; los enlaces abren las ubicaciones y la cobertura de productos actuales.",

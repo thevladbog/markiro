@@ -6,6 +6,7 @@ import { UsClientError, type UsBrowserClient } from "../client.js";
 import { PlanVersions } from "./versions.js";
 import { PlanCurrentImpact, PlanDetail } from "./detail.js";
 import { PlanEditor } from "./editor.js";
+import { PlanInspection } from "./inspection.js";
 import { emptyPlanSections } from "./section-fields.js";
 import "./plans.css";
 
@@ -245,6 +246,7 @@ export function PlanView(props: PlanViewProps) {
                 draft={detail.value}
                 profile={profile}
                 canManageQa={props.canManageQa && !writeBlocked}
+                inspection={{ client, canExport: props.canExport }}
                 onSave={async (id, body) => {
                   const acknowledgement = await client.savePlan(id, body);
                   setDetail({
@@ -274,18 +276,36 @@ export function PlanView(props: PlanViewProps) {
                 onOpenProducts={props.onOpenProducts}
               />
             ) : (
-              <PlanDetail
-                detail={detail.value}
-                onOpenProfile={props.onOpenProfile}
-                onOpenLocations={props.onOpenLocations}
-                onOpenProducts={props.onOpenProducts}
-                onClose={() => {
-                  if (!mayLeave()) return;
-                  const id = selectedId;
-                  setSelectedId(null);
-                  root.current?.querySelector<HTMLElement>(`[data-plan-version="${id}"]`)?.focus();
-                }}
-              />
+              <>
+                <PlanDetail
+                  detail={detail.value}
+                  onOpenProfile={props.onOpenProfile}
+                  onOpenLocations={props.onOpenLocations}
+                  onOpenProducts={props.onOpenProducts}
+                  onClose={() => {
+                    if (!mayLeave()) return;
+                    const id = selectedId;
+                    setSelectedId(null);
+                    root.current
+                      ?.querySelector<HTMLElement>(`[data-plan-version="${id}"]`)
+                      ?.focus();
+                  }}
+                />
+                {detail.value.status === "draft" ? (
+                  <PlanInspection
+                    key={`${detail.value.id}:${detail.value.draftRevision}`}
+                    client={client}
+                    draft={detail.value}
+                    dirty={false}
+                    saving={false}
+                    canValidate={false}
+                    canExport={props.canExport}
+                    onOpenLocations={props.onOpenLocations}
+                    onForbidden={onForbidden}
+                    onSessionLost={onSessionLost}
+                  />
+                ) : null}
+              </>
             )
           ) : null}
         </>

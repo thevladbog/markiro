@@ -4,6 +4,7 @@ import type { UsPlanDetailResponse, UsPlanDraftSaveBody } from "@markiro/platfor
 import { useTranslation } from "react-i18next";
 import { UsClientError, type UsBrowserClient } from "../client.js";
 import { SectionFields, sectionIds, type SectionId } from "./section-fields.js";
+import { PlanInspection } from "./inspection.js";
 
 type Draft = Extract<UsPlanDetailResponse, { status: "draft" }>;
 export type PlanEditorState = { dirty: boolean; saving: boolean; draftRevision: number };
@@ -11,6 +12,7 @@ export type PlanEditorProps = {
   draft: Draft;
   profile: Awaited<ReturnType<UsBrowserClient["profile"]>>;
   canManageQa: boolean;
+  inspection?: { client: UsBrowserClient; canExport: boolean };
   onSave: (id: string, body: UsPlanDraftSaveBody) => ReturnType<UsBrowserClient["savePlan"]>;
   onReload: () => Promise<UsPlanDetailResponse>;
   onDirtyChange: (dirty: boolean) => void;
@@ -34,6 +36,9 @@ export function PlanEditor(props: PlanEditorProps) {
   const [error, setError] = useState<string | null>(null);
   const busy = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  const editor = useRef<HTMLElement>(null);
+  const [issueFocus, setIssueFocus] = useState<{ section: SectionId | "plan" } | null>(null);
   const dirty =
     JSON.stringify(sections) !== JSON.stringify(acknowledged.sections) ||
     changeSummary !== acknowledged.changeSummary;
@@ -42,6 +47,12 @@ export function PlanEditor(props: PlanEditorProps) {
   useEffect(() => {
     heading.current?.focus();
   }, []);
+  useEffect(() => {
+    if (!issueFocus) return;
+    if (issueFocus.section === "plan")
+      editor.current?.querySelector<HTMLElement>("#us-plan-change-summary")?.focus();
+    else panel.current?.focus();
+  }, [issueFocus]);
   useEffect(() => {
     onDirtyChange(dirty || saving);
     onStateChange?.({ dirty, saving, draftRevision: acknowledged.draftRevision });
@@ -124,7 +135,7 @@ export function PlanEditor(props: PlanEditorProps) {
     }
   }
   return (
-    <article className="us-plan-editor" aria-label={t("usPlan.editDraft")}>
+    <article ref={editor} className="us-plan-editor" aria-label={t("usPlan.editDraft")}>
       <h2 ref={heading} tabIndex={-1}>
         v{acknowledged.versionNumber} · {t("usPlan.draftMark")}
       </h2>
@@ -142,6 +153,7 @@ export function PlanEditor(props: PlanEditorProps) {
         })}
       </p>
       <Input
+        id="us-plan-change-summary"
         label={t("usPlan.changeSummary")}
         value={changeSummary}
         maxLength={4096}
@@ -193,6 +205,8 @@ export function PlanEditor(props: PlanEditorProps) {
         onChange={setSection}
       />
       <div
+        ref={panel}
+        tabIndex={-1}
         role="tabpanel"
         id={`us-plan-panel-${section}`}
         aria-label={t(`usPlan.fields.${section}`)}
@@ -216,6 +230,24 @@ export function PlanEditor(props: PlanEditorProps) {
           </Button>
         ) : null}
       </div>
+      {props.inspection ? (
+        <PlanInspection
+          key={`${acknowledged.id}:${acknowledged.draftRevision}`}
+          client={props.inspection.client}
+          draft={acknowledged}
+          dirty={dirty}
+          saving={saving}
+          canValidate={props.canManageQa && !blocked}
+          canExport={props.inspection.canExport}
+          onSection={(id) => {
+            if (id !== "plan") setSection(id);
+            setIssueFocus({ section: id });
+          }}
+          onOpenLocations={props.onOpenLocations}
+          onForbidden={props.onForbidden}
+          onSessionLost={props.onSessionLost}
+        />
+      ) : null}
     </article>
   );
 }
