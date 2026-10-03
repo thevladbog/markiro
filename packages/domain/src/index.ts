@@ -465,6 +465,8 @@ export { canonicalExportDigest } from "./traceability/export/canonical.js";
 export { buildUsExportWorkbook } from "./traceability/export/workbook.js";
 export { ExportWorkbookInputError } from "./traceability/export/validation.js";
 export { validateUsPlanApproval } from "./traceability/plan/validation.js";
+export { compareUsPlanConfiguredFacts } from "./traceability/plan/impact.js";
+export type { UsPlanImpact } from "./traceability/plan/impact.js";
 export type {
   UsPlanSections,
   UsPlanApprovalInput,
