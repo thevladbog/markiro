@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. A separate implementer and independent reviewer handle each task; the primary agent accepts the review before the next task.
 
-**Status:** owner-approved on 2026-10-03; implemented on `codex/us-mvp` through `5a14c9c40`, with each task independently reviewed. This is a development checkpoint, not a release or deployment approval.
+**Status:** owner-approved on 2026-10-03; implemented on `codex/us-mvp` with independent reviews of each task and a final audit correction (`5ca95e863`). This is a development checkpoint, not a release or deployment approval.
 
 **Goal:** Expose the existing US-only Traceability Plan draft, validation, approval and immutable PDF services through a strict, documented HTTP boundary without enabling a release.
 
