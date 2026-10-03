@@ -48,6 +48,7 @@ export function PlanView(props: PlanViewProps) {
   const [saving, setSaving] = useState(false);
   const [actionPending, setActionPending] = useState(false);
   const [writeBlocked, setWriteBlocked] = useState(false);
+  const previousAccess = useRef(props.canManageQa);
   const [createError, setCreateError] = useState<string | null>(null);
   const createPending = useRef(false);
   const { onMutationPendingChange } = props;
@@ -69,6 +70,13 @@ export function PlanView(props: PlanViewProps) {
   useEffect(() => {
     root.current?.querySelector<HTMLElement>("h1")?.focus();
   }, []);
+  useEffect(() => {
+    if (!previousAccess.current && props.canManageQa) {
+      setWriteBlocked(false);
+      setCreateError((current) => (current === "usPlan.forbidden" ? null : current));
+    }
+    previousAccess.current = props.canManageQa;
+  }, [props.canManageQa]);
   useEffect(() => {
     if (!supported) return;
     let active = true;
@@ -123,6 +131,35 @@ export function PlanView(props: PlanViewProps) {
     if (id === selectedId) return;
     setDetail({ kind: "loading" });
     setSelectedId(id);
+  }
+  async function reloadSelected() {
+    if (!selectedId) return null;
+    const id = selectedId;
+    let versions = await client.listPlans();
+    let value: UsPlanDetailResponse | null = null;
+    if (versions.items.some((item) => item.id === id)) {
+      try {
+        value = await client.getPlan(id);
+      } catch (error) {
+        if (!(error instanceof UsClientError) || error.code !== "us_plan_version_not_found")
+          throw error;
+        // Discard may commit between list and detail. Confirm absence with an
+        // authoritative list before removing the version and its local editor.
+        versions = await client.listPlans();
+        if (versions.items.some((item) => item.id === id)) throw error;
+      }
+    }
+    if (value) setDetail({ kind: "ready", value });
+    else {
+      setSelectedId(null);
+      setDetail({ kind: "loading" });
+      root.current?.querySelector<HTMLElement>("h1")?.focus();
+    }
+    setList({ kind: "ready", value: versions });
+    if (value?.status !== "draft") setEditing(false);
+    setDirty(false);
+    props.onDirtyChange(false);
+    return value;
   }
   async function createDraft() {
     if (
@@ -180,6 +217,7 @@ export function PlanView(props: PlanViewProps) {
                 list.kind !== "ready" ||
                 Boolean(openDraft) ||
                 creating ||
+                saving ||
                 actionPending ||
                 writeBlocked
               }
@@ -266,7 +304,8 @@ export function PlanView(props: PlanViewProps) {
                 key={detail.value.id}
                 draft={detail.value}
                 profile={profile}
-                canManageQa={props.canManageQa && !writeBlocked && !actionPending}
+                canManageQa={props.canManageQa && !writeBlocked}
+                actionPending={actionPending}
                 inspection={{ client, canExport: props.canExport }}
                 onSave={async (id, body) => {
                   const acknowledgement = await client.savePlan(id, body);
@@ -276,15 +315,7 @@ export function PlanView(props: PlanViewProps) {
                   });
                   return acknowledgement;
                 }}
-                onReload={async () => {
-                  const value = await client.getPlan(detail.value.id);
-                  if (value.status !== "draft") {
-                    setDirty(false);
-                    props.onDirtyChange(false);
-                  }
-                  setDetail({ kind: "ready", value });
-                  return value;
-                }}
+                onReload={reloadSelected}
                 onMutationPendingChange={onEditorPending}
                 onDirtyChange={(value) => {
                   setDirty(value);
@@ -326,10 +357,18 @@ export function PlanView(props: PlanViewProps) {
                     client={client}
                     draft={detail.value}
                     dirty={false}
-                    saving={false}
+                    saving={saving || actionPending}
                     canValidate={false}
                     canExport={props.canExport}
                     onOpenLocations={props.onOpenLocations}
+                    onReload={async () => {
+                      onEditorPending(true);
+                      try {
+                        await reloadSelected();
+                      } finally {
+                        onEditorPending(false);
+                      }
+                    }}
                     onForbidden={onForbidden}
                     onSessionLost={onSessionLost}
                   />
@@ -368,36 +407,10 @@ export function PlanView(props: PlanViewProps) {
                 root.current?.querySelector<HTMLElement>("h1")?.focus();
               }}
               onReload={async () => {
-                const id = detail.value.id;
-                let versions = await client.listPlans();
-                let value: UsPlanDetailResponse | null = null;
-                if (versions.items.some((item) => item.id === id)) {
-                  try {
-                    value = await client.getPlan(id);
-                  } catch (error) {
-                    if (
-                      !(error instanceof UsClientError) ||
-                      error.code !== "us_plan_version_not_found"
-                    )
-                      throw error;
-                    // Discard may commit between list and detail. Reconcile the
-                    // absence with another authoritative list before removing UI.
-                    versions = await client.listPlans();
-                    if (versions.items.some((item) => item.id === id)) throw error;
-                  }
-                }
-                if (value) setDetail({ kind: "ready", value });
-                else {
-                  setSelectedId(null);
-                  setDetail({ kind: "loading" });
-                  root.current?.querySelector<HTMLElement>("h1")?.focus();
-                }
-                setList({ kind: "ready", value: versions });
+                await reloadSelected();
                 // Remount the editor only after an explicit reload; local text
                 // never changes as a side effect of a failed approval.
                 setEditing(false);
-                setDirty(false);
-                props.onDirtyChange(false);
               }}
             />
           ) : null}

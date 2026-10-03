@@ -9,7 +9,7 @@ import { PlanInspection } from "../src/us/plans/inspection.js";
 import { PlanView } from "../src/us/plans/view.js";
 import { MasterDataWorkspace } from "../src/us/master-data/workspace.js";
 import { createUsBrowserClient } from "../src/us/client.js";
-import { draft, list, profile, renderPlanUi } from "./us-plans-fixtures.js";
+import { draft, list, profile, published, renderPlanUi } from "./us-plans-fixtures.js";
 
 const saved = (() => {
   if (draft.status !== "draft") throw new Error("draft fixture");
@@ -60,6 +60,7 @@ function setup(issues: UsPlanValidationResponse["issues"] = []) {
     onSection: vi.fn(),
     onOpenLocations: vi.fn(),
     onForbidden: vi.fn(async () => undefined),
+    onReload: vi.fn(async () => undefined),
     onSessionLost: vi.fn(),
   };
   return { props, send };
@@ -566,4 +567,278 @@ it("blocks preview during a pending save and previews only the newly acknowledge
   await userEvent.click(screen.getByRole("button", { name: "Preview saved revision" }));
   expect(await screen.findByText("Preview of saved revision 2")).toBeTruthy();
   expect(send.mock.calls.at(-1)?.[1]?.body).toBe('{"expectedRevision":2}');
+});
+
+it.each([
+  ["validate", true],
+  ["preview", true],
+  ["preview", false],
+] as const)(
+  "reconciles stale %s with editor=%s without storage and discards text only on explicit reload",
+  async (operation, editing) => {
+    const { props, send } = setup();
+    const transport = send.getMockImplementation();
+    if (!transport) throw new Error("transport fixture");
+    let revision = 1;
+    let detailReads = 0;
+    const requests: string[] = [];
+    send.mockImplementation(async (path, init) => {
+      const url = String(path);
+      if (url.endsWith(`/plans/${saved.id}`)) {
+        detailReads += 1;
+        if (detailReads === 2) return Response.json({}, { status: 503 });
+        return Response.json({
+          ...saved,
+          draftRevision: revision,
+          sections: {
+            ...saved.sections,
+            recordMaintenance: {
+              ...saved.sections.recordMaintenance,
+              systemOfRecord: "Server text",
+            },
+          },
+        });
+      }
+      if (url.endsWith(`/${operation}`)) {
+        requests.push(String(init?.body));
+        if (requests.length === 1)
+          return Response.json({ code: "us_plan_revision_conflict" }, { status: 409 });
+        return operation === "preview"
+          ? pdf(revision)
+          : Response.json({
+              versionId: saved.id,
+              draftRevision: revision,
+              issues: [],
+              publicationAvailability: "artifact_storage_unconfigured",
+            });
+      }
+      if (url.endsWith("/plans"))
+        return Response.json({
+          ...list,
+          items: list.items.map((item) =>
+            item.status === "draft" ? { ...item, draftRevision: revision } : item,
+          ),
+        });
+      return transport(path, init);
+    });
+    renderPlanUi(
+      <PlanView
+        client={props.client}
+        profile={profile}
+        canManageQa={editing}
+        canExport
+        onForbidden={props.onForbidden}
+        onSessionLost={props.onSessionLost}
+        onDirtyChange={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onOpenLocations={props.onOpenLocations}
+        onOpenProducts={vi.fn()}
+      />,
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: editing ? "Edit draft" : "View v3" }),
+    );
+    const name = operation === "preview" ? "Preview saved revision" : "Validate saved revision";
+    await screen.findByRole("button", { name });
+    revision = 2;
+    await userEvent.click(screen.getByRole("button", { name }));
+    expect(await screen.findByText(/Reload the draft before checking/)).toBeTruthy();
+    expect(screen.getByRole("button", { name })).toHaveProperty("disabled", true);
+    expect(detailReads).toBe(1);
+    if (editing) {
+      fireEvent.change(screen.getByLabelText("System of record"), {
+        target: { value: "Keep local text" },
+      });
+      expect(screen.getByLabelText("System of record")).toHaveProperty("value", "Keep local text");
+      expect(detailReads).toBe(1);
+    }
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: editing ? "Reload and discard local edits" : "Reload saved draft",
+      }),
+    );
+    await waitFor(() => expect(detailReads).toBe(2));
+    expect(screen.getByRole("button", { name })).toHaveProperty("disabled", true);
+    if (editing)
+      expect(screen.getByLabelText("System of record")).toHaveProperty("value", "Keep local text");
+    await userEvent.click(
+      screen.getByRole("button", {
+        name: editing ? "Reload and discard local edits" : "Reload saved draft",
+      }),
+    );
+    await waitFor(() => expect(detailReads).toBe(3));
+    if (editing)
+      expect(screen.getByLabelText("System of record")).toHaveProperty("value", "Server text");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name })).toHaveProperty("disabled", false),
+    );
+    await userEvent.click(screen.getByRole("button", { name }));
+    expect(
+      await screen.findByText(
+        operation === "preview"
+          ? "Preview of saved revision 2"
+          : "Server checks for saved revision 2",
+      ),
+    ).toBeTruthy();
+    expect(requests).toHaveLength(2);
+    expect(requests[1]).toContain('"expectedRevision":2');
+    expect(screen.getAllByText(/Publication unavailable/).length).toBeGreaterThan(0);
+    if (editing)
+      expect(screen.getByRole("button", { name: "Approve" })).toHaveProperty("disabled", true);
+  },
+);
+
+it.each([
+  [true, "published"],
+  [false, "published"],
+  [true, "discarded"],
+  [false, "discarded"],
+] as const)(
+  "reconciles inspection reload with editor=%s after the server draft is %s",
+  async (editing, outcome) => {
+    const { props, send } = setup();
+    const transport = send.getMockImplementation();
+    if (!transport) throw new Error("transport fixture");
+    let stale = false;
+    send.mockImplementation(async (path, init) => {
+      const url = String(path);
+      if (url.endsWith("/preview")) {
+        stale = true;
+        return Response.json({ code: "us_plan_not_draft" }, { status: 409 });
+      }
+      if (stale && url.endsWith("/plans"))
+        return Response.json({
+          ...list,
+          items:
+            outcome === "discarded"
+              ? []
+              : [{ ...published, id: saved.id, versionNumber: 3 }].map((item) => ({
+                  id: item.id,
+                  versionNumber: item.versionNumber,
+                  status: item.status,
+                  createdAt: item.createdAt,
+                  updatedAt: item.updatedAt,
+                  provenance: item.provenance,
+                  approvedAt: item.approvedAt,
+                  supersededAt: item.supersededAt,
+                  retainThrough: item.retainThrough,
+                  artifact: item.artifact,
+                })),
+        });
+      if (stale && url.endsWith(`/plans/${saved.id}`))
+        return outcome === "discarded"
+          ? Response.json({ code: "us_plan_version_not_found" }, { status: 404 })
+          : Response.json({ ...published, id: saved.id, versionNumber: 3 });
+      return transport(path, init);
+    });
+    renderPlanUi(
+      <PlanView
+        client={props.client}
+        profile={profile}
+        canManageQa={editing}
+        canExport
+        onForbidden={props.onForbidden}
+        onSessionLost={props.onSessionLost}
+        onDirtyChange={vi.fn()}
+        onOpenProfile={vi.fn()}
+        onOpenLocations={props.onOpenLocations}
+        onOpenProducts={vi.fn()}
+      />,
+    );
+    await userEvent.click(
+      await screen.findByRole("button", { name: editing ? "Edit draft" : "View v3" }),
+    );
+    await userEvent.click(await screen.findByRole("button", { name: "Preview saved revision" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Reload saved draft" }));
+    if (outcome === "published")
+      expect(await screen.findByRole("region", { name: "Frozen snapshot" })).toBeTruthy();
+    else expect(await screen.findByText("No plan yet")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Preview saved revision" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save draft" })).toBeNull();
+  },
+);
+
+it("locks QA actions and version navigation while read-only inspection reload is pending", async () => {
+  const { props, send } = setup();
+  const transport = send.getMockImplementation();
+  if (!transport) throw new Error("transport fixture");
+  let stale = false;
+  let resolve: (response: Response) => void = () => undefined;
+  send.mockImplementation(async (path, init) => {
+    const url = String(path);
+    if (url.endsWith("/preview")) {
+      stale = true;
+      return Response.json({ code: "us_plan_revision_conflict" }, { status: 409 });
+    }
+    if (stale && url.endsWith("/plans"))
+      return new Promise<Response>((done) => {
+        resolve = done;
+      });
+    return transport(path, init);
+  });
+  renderPlanUi(
+    <PlanView
+      client={props.client}
+      profile={profile}
+      canManageQa
+      canExport
+      onForbidden={props.onForbidden}
+      onSessionLost={props.onSessionLost}
+      onDirtyChange={vi.fn()}
+      onOpenProfile={vi.fn()}
+      onOpenLocations={props.onOpenLocations}
+      onOpenProducts={vi.fn()}
+    />,
+  );
+  await userEvent.click(await screen.findByRole("button", { name: "View v3" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Preview saved revision" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Reload saved draft" }));
+  expect(screen.getByRole("button", { name: "Discard draft" })).toHaveProperty("disabled", true);
+  await userEvent.click(screen.getByRole("button", { name: "View v2" }));
+  expect(screen.queryByRole("region", { name: "Frozen snapshot" })).toBeNull();
+  await act(async () => resolve(Response.json(list)));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Discard draft" })).toHaveProperty("disabled", false),
+  );
+});
+
+it("keeps editor writes blocked after inspection reload is forbidden without verified access recovery", async () => {
+  const { props, send } = setup();
+  const transport = send.getMockImplementation();
+  if (!transport) throw new Error("transport fixture");
+  let stale = false;
+  send.mockImplementation(async (path, init) => {
+    const url = String(path);
+    if (url.endsWith("/validate")) {
+      stale = true;
+      return Response.json({ code: "us_plan_revision_conflict" }, { status: 409 });
+    }
+    if (stale && url.endsWith(`/plans/${saved.id}`))
+      return Response.json({ code: "forbidden" }, { status: 403 });
+    return transport(path, init);
+  });
+  renderPlanUi(
+    <PlanView
+      client={props.client}
+      profile={profile}
+      canManageQa
+      canExport
+      onForbidden={props.onForbidden}
+      onSessionLost={props.onSessionLost}
+      onDirtyChange={vi.fn()}
+      onOpenProfile={vi.fn()}
+      onOpenLocations={props.onOpenLocations}
+      onOpenProducts={vi.fn()}
+    />,
+  );
+  await userEvent.click(await screen.findByRole("button", { name: "Edit draft" }));
+  await userEvent.click(await screen.findByRole("button", { name: "Validate saved revision" }));
+  await screen.findByRole("button", { name: "Reload saved draft" });
+  fireEvent.change(screen.getByLabelText("System of record"), {
+    target: { value: "Keep local text" },
+  });
+  await userEvent.click(screen.getByRole("button", { name: "Reload and discard local edits" }));
+  await waitFor(() => expect(props.onForbidden).toHaveBeenCalledOnce());
+  expect(screen.getByLabelText("System of record")).toHaveProperty("value", "Keep local text");
+  expect(screen.getByRole("button", { name: "Save draft" })).toHaveProperty("disabled", true);
 });

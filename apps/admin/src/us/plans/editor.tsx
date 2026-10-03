@@ -12,9 +12,10 @@ export type PlanEditorProps = {
   draft: Draft;
   profile: Awaited<ReturnType<UsBrowserClient["profile"]>>;
   canManageQa: boolean;
+  actionPending?: boolean;
   inspection?: { client: UsBrowserClient; canExport: boolean };
   onSave: (id: string, body: UsPlanDraftSaveBody) => ReturnType<UsBrowserClient["savePlan"]>;
-  onReload: () => Promise<UsPlanDetailResponse>;
+  onReload: () => Promise<UsPlanDetailResponse | null>;
   onDirtyChange: (dirty: boolean) => void;
   onStateChange?: (state: PlanEditorState) => void;
   onMutationPendingChange?: (pending: boolean) => void;
@@ -33,6 +34,7 @@ export function PlanEditor(props: PlanEditorProps) {
   const [section, setSection] = useState<SectionId>("recordMaintenance");
   const [saving, setSaving] = useState(false);
   const [blocked, setBlocked] = useState(false);
+  const previousAccess = useRef(props.canManageQa);
   const [error, setError] = useState<string | null>(null);
   const busy = useRef(false);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -42,11 +44,20 @@ export function PlanEditor(props: PlanEditorProps) {
   const dirty =
     JSON.stringify(sections) !== JSON.stringify(acknowledged.sections) ||
     changeSummary !== acknowledged.changeSummary;
-  const disabled = !props.canManageQa || blocked || saving;
+  const disabled = !props.canManageQa || blocked || saving || Boolean(props.actionPending);
   const summaryMissing = acknowledged.versionNumber > 1 && !changeSummary.trim();
   useEffect(() => {
     heading.current?.focus();
   }, []);
+  useEffect(() => {
+    // Only the workspace's verified access transition restores a denied write.
+    // UI action locks and a void refresh callback cannot prove restored access.
+    if (!previousAccess.current && props.canManageQa) {
+      setBlocked(false);
+      setError((current) => (current === "usPlan.writeForbidden" ? null : current));
+    }
+    previousAccess.current = props.canManageQa;
+  }, [props.canManageQa]);
   useEffect(() => {
     if (!issueFocus) return;
     if (issueFocus.section === "plan")
@@ -113,13 +124,13 @@ export function PlanEditor(props: PlanEditorProps) {
       setSaving(false);
     }
   }
-  async function reload() {
-    if (busy.current) return;
+  async function reload(reportFailure = true) {
+    if (busy.current || props.actionPending) return;
     busy.current = true;
     setSaving(true);
     try {
       const result = await props.onReload();
-      if (result.status !== "draft") {
+      if (result?.status !== "draft") {
         setError("usPlan.staleDraft");
         return;
       }
@@ -128,7 +139,17 @@ export function PlanEditor(props: PlanEditorProps) {
       setChangeSummary(result.changeSummary);
       setError(null);
     } catch (value) {
-      await failure(value);
+      if (reportFailure) await failure(value);
+      else {
+        // Inspection owns the error UI/access refresh, but a denied editor read
+        // must retain the same write latch as its own reload button.
+        if (
+          value instanceof UsClientError &&
+          (value.code === "forbidden" || value.code === "session_required")
+        )
+          setBlocked(true);
+        throw value;
+      }
     } finally {
       busy.current = false;
       setSaving(false);
@@ -225,7 +246,11 @@ export function PlanEditor(props: PlanEditorProps) {
           {t("usPlan.saveDraft")}
         </Button>
         {error ? (
-          <Button variant="secondary" disabled={saving} onClick={() => void reload()}>
+          <Button
+            variant="secondary"
+            disabled={saving || props.actionPending}
+            onClick={() => void reload()}
+          >
             {t("usPlan.reloadDiscard")}
           </Button>
         ) : null}
@@ -236,7 +261,7 @@ export function PlanEditor(props: PlanEditorProps) {
           client={props.inspection.client}
           draft={acknowledged}
           dirty={dirty}
-          saving={saving}
+          saving={saving || Boolean(props.actionPending)}
           canValidate={props.canManageQa && !blocked}
           canExport={props.inspection.canExport}
           onSection={(id) => {
@@ -244,6 +269,7 @@ export function PlanEditor(props: PlanEditorProps) {
             setIssueFocus({ section: id });
           }}
           onOpenLocations={props.onOpenLocations}
+          onReload={() => reload(false)}
           onForbidden={props.onForbidden}
           onSessionLost={props.onSessionLost}
         />

@@ -26,6 +26,7 @@ export type PlanInspectionProps = {
   saving: boolean;
   canValidate: boolean;
   canExport: boolean;
+  onReload: () => Promise<void>;
   onSection?: (section: SectionId | "plan") => void;
   onOpenLocations: () => void;
   onForbidden: () => Promise<void>;
@@ -38,19 +39,32 @@ export function PlanInspection(props: PlanInspectionProps) {
   const [validation, setValidation] = useState<UsPlanValidationResponse | null>(null);
   const [announceIssues, setAnnounceIssues] = useState(false);
   const [preview, setPreview] = useState<{ url: string; revision: number } | null>(null);
-  const [pending, setPending] = useState<"validate" | "preview" | null>(null);
+  const [pending, setPending] = useState<"validate" | "preview" | "reload" | null>(null);
+  const [stale, setStale] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [denied, setDenied] = useState({ validate: false, preview: false });
   const previousAccess = useRef({ validate: props.canValidate, preview: props.canExport });
   const generation = useRef(0);
   const busy = useRef(false);
   const objectUrl = useRef<string | null>(null);
+  const alive = useRef(true);
   const blocked = props.dirty || props.saving;
 
   function releasePreview() {
     if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
     objectUrl.current = null;
   }
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+  useEffect(() => {
+    // Only a new authoritative draft read/save resolves the conflict. Typing,
+    // access recovery and failed reloads must not re-enable the stale revision.
+    setStale(false);
+  }, [props.draft]);
   useEffect(() => {
     // The workspace supplies true only after a successful access read, excluding
     // pending/error states. Clear only the denial whose capability was restored;
@@ -85,6 +99,7 @@ export function PlanInspection(props: PlanInspectionProps) {
   async function inspect(operation: "validate" | "preview") {
     if (
       blocked ||
+      stale ||
       busy.current ||
       denied[operation] ||
       (operation === "validate" ? !props.canValidate : !props.canExport)
@@ -134,9 +149,17 @@ export function PlanInspection(props: PlanInspectionProps) {
         setPreview(null);
         props.onSessionLost();
       } else {
-        setError(
+        const conflict =
           value instanceof UsClientError &&
-            (value.code === "us_plan_revision_conflict" || value.code === "us_plan_not_draft")
+          (value.code === "us_plan_revision_conflict" || value.code === "us_plan_not_draft");
+        if (conflict) {
+          setStale(true);
+          setValidation(null);
+          releasePreview();
+          setPreview(null);
+        }
+        setError(
+          conflict
             ? "usPlan.inspectionStale"
             : operation === "validate"
               ? "usPlan.validationError"
@@ -150,6 +173,32 @@ export function PlanInspection(props: PlanInspectionProps) {
       }
     }
   }
+  async function reload() {
+    if (busy.current || props.saving) return;
+    busy.current = true;
+    setPending("reload");
+    setError(null);
+    try {
+      // The editor owns its unsaved text; this explicit action delegates both
+      // the read and replacement to it. Read-only detail uses the same list/detail
+      // reconciliation, including publication and discard by another session.
+      await props.onReload();
+    } catch (value) {
+      if (!alive.current) return;
+      if (value instanceof UsClientError && value.code === "forbidden") {
+        setDenied({ validate: true, preview: true });
+        setError("usPlan.forbidden");
+        await props.onForbidden();
+      } else if (value instanceof UsClientError && value.code === "session_required") {
+        props.onSessionLost();
+      } else setError("usPlan.detailError");
+    } finally {
+      if (alive.current) {
+        busy.current = false;
+        setPending(null);
+      }
+    }
+  }
   return (
     <section className="us-plan-inspection" aria-label={t("usPlan.inspection")}>
       <h3>{t("usPlan.inspection")}</h3>
@@ -158,7 +207,7 @@ export function PlanInspection(props: PlanInspectionProps) {
       {props.canValidate ? (
         <fieldset
           className="us-plan-confirmations"
-          disabled={blocked || Boolean(pending) || denied.validate}
+          disabled={blocked || stale || Boolean(pending) || denied.validate}
         >
           <legend>{t("usPlan.advisoryConfirmations")}</legend>
           <p>{t("usPlan.advisoryHelp")}</p>
@@ -167,7 +216,7 @@ export function PlanInspection(props: PlanInspectionProps) {
               key={id}
               label={t(`usPlan.checks.${id}`)}
               checked={confirmations[id]}
-              disabled={blocked || Boolean(pending) || denied.validate}
+              disabled={blocked || stale || Boolean(pending) || denied.validate}
               onCheckedChange={(value) => {
                 setConfirmations((current) => ({ ...current, [id]: value }));
                 setValidation(null);
@@ -179,7 +228,7 @@ export function PlanInspection(props: PlanInspectionProps) {
       <div className="us-plan-links">
         {props.canValidate ? (
           <Button
-            disabled={blocked || Boolean(pending) || denied.validate}
+            disabled={blocked || stale || Boolean(pending) || denied.validate}
             onClick={() => void inspect("validate")}
           >
             {t("usPlan.validateSaved")}
@@ -188,7 +237,7 @@ export function PlanInspection(props: PlanInspectionProps) {
         {props.canExport ? (
           <Button
             variant="secondary"
-            disabled={blocked || Boolean(pending) || denied.preview}
+            disabled={blocked || stale || Boolean(pending) || denied.preview}
             onClick={() => void inspect("preview")}
           >
             {t("usPlan.previewSaved")}
@@ -196,9 +245,26 @@ export function PlanInspection(props: PlanInspectionProps) {
         ) : null}
       </div>
       {pending ? (
-        <p role="status">{t(pending === "validate" ? "usPlan.validating" : "usPlan.previewing")}</p>
+        <p role="status">
+          {t(
+            pending === "reload"
+              ? "usPlan.detailLoading"
+              : pending === "validate"
+                ? "usPlan.validating"
+                : "usPlan.previewing",
+          )}
+        </p>
       ) : null}
       {error ? <p role="alert">{t(error)}</p> : null}
+      {stale ? (
+        <Button
+          variant="secondary"
+          disabled={props.saving || Boolean(pending)}
+          onClick={() => void reload()}
+        >
+          {t(props.dirty ? "usPlan.reloadDiscard" : "usPlan.reloadSaved")}
+        </Button>
+      ) : null}
       {validation ? (
         <div {...(validation.issues.length && announceIssues ? { role: "alert" } : {})}>
           <p>{t("usPlan.validatedRevision", { revision: validation.draftRevision })}</p>

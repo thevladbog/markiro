@@ -1,6 +1,12 @@
 import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, it, vi } from "vitest";
+import {
+  buildUsPlanApprovedEvidence,
+  buildUsPlanDraftFactSources,
+  buildUsPlanSnapshot,
+} from "@markiro/domain";
+import { usPlanDetailResponseSchema } from "@markiro/platform-contracts";
 import { PlanView } from "../src/us/plans/view.js";
 import { UsClientError } from "../src/us/client.js";
 import { planCopy } from "../src/us/plans/copy.js";
@@ -71,6 +77,49 @@ it("shows frozen facts, exact approver attribution and current impact separately
   expect(within(frozen).queryByText("Current impact for v2")).toBeNull();
   await userEvent.click(screen.getByRole("button", { name: "Close version" }));
   expect(screen.getByRole("button", { name: "View v2" })).toBe(document.activeElement);
+});
+it("renders workflow policy provenance from a domain-generated approved manifest", async () => {
+  const { client, props } = setup();
+  const snapshot = buildUsPlanSnapshot(
+    published.snapshot.configured,
+    published.snapshot.sections,
+    "operational",
+  );
+  const evidence = buildUsPlanApprovedEvidence(
+    snapshot,
+    buildUsPlanDraftFactSources(snapshot.configured, snapshot.sections),
+    {
+      kind: "operational",
+      actorId: actor,
+      confirmedAt: "2026-10-02T00:00:00.000Z",
+      confirmations: {
+        procedures: true,
+        backupAndRecovery: true,
+        contact: true,
+        nonFarmScope: true,
+      },
+    },
+  );
+  vi.spyOn(client, "getPlan").mockResolvedValue(
+    usPlanDetailResponseSchema.parse({
+      ...published,
+      provenance: "operational",
+      snapshot: evidence.snapshot,
+      factSources: evidence.factSources,
+      confirmations: evidence.confirmations,
+    }),
+  );
+  renderPlanUi(<PlanView {...props} />);
+  await userEvent.click(await screen.findByRole("button", { name: "View v2" }));
+  const frozen = await screen.findByRole("region", { name: "Frozen snapshot" });
+  const workflow = within(frozen).getByRole("heading", {
+    name: planCopy["en-US"].workflow,
+  }).nextElementSibling;
+  if (!(workflow instanceof HTMLElement)) throw new Error("workflow facts missing");
+  expect(
+    within(workflow).getAllByText(/Application policy.*Policy version: 1/).length,
+  ).toBeGreaterThan(0);
+  expect(within(workflow).queryByText(/Source not recorded/)).toBeNull();
 });
 it("distinguishes loading, failure, retry and successful empty response", async () => {
   const { client, props } = setup();
