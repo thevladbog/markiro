@@ -345,6 +345,15 @@ same host, brings back a record a tombstone deleted (a turned-off operator, a
 revoked badge) and rolls `last_rev` back until the next sync;
 `notQuarantinedNewer` covers only the quarantine case.
 
+## Catalog and label templates
+
+The ЧЗ product groups are the cloud's static lookup: host migration `0008`
+copies the 51 rows of `packages/db/migrations/0099_chz_product_groups.sql`,
+and `host/tests/product_groups.rs` reads that file and compares the rows, so
+the copies cannot drift. Every office role reads them
+(`GET /v1/office/product-groups`, by code); nothing writes them, and they
+are not in the station feed.
+
 ## Reference sync
 
 `src/local/reference-sync.ts` keeps the local copies in step with the host

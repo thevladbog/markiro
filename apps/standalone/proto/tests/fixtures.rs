@@ -8,7 +8,8 @@ use markiro_proto::{
     OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
     OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
     OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PasswordChange,
-    PasswordSet, SiteRecord, SsccCounterUpdate, SsccState, HOST_PRODUCT, PROTOCOL_VERSION,
+    PasswordSet, ProductGroup, SiteRecord, SsccCounterUpdate, SsccState, HOST_PRODUCT,
+    PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -431,6 +432,12 @@ fn a_device_update_tells_a_cleared_line_from_an_absent_one() {
     let mut value = fixture("device-update.json");
     value["kind"] = Value::String("office".into());
     assert!(serde_json::from_value::<DeviceUpdate>(value).is_err());
+}
+
+#[test]
+fn a_product_group_fixture_round_trips() {
+    let group: ProductGroup = round_trip("product-group.json");
+    assert_eq!((group.code, group.alias.as_str()), (8, "milk"));
 }
 
 #[test]

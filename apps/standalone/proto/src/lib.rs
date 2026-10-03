@@ -880,6 +880,18 @@ pub struct BadgeSalt {
     pub badge_salt: Secret,
 }
 
+/// A ЧЗ product group (`GET /v1/office/product-groups`): the cloud's static
+/// lookup (spec §2, decision 12), read by every office role and not in the
+/// station feed. Products and templates refer to `code`; `alias` is the
+/// latin name True API takes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductGroup {
+    pub code: u32,
+    pub alias: String,
+    pub name: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{DeviceKind, OfficeRole, UnknownVariant};

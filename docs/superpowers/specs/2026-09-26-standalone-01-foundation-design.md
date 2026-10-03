@@ -143,8 +143,9 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
   Проверки хоста: имя, ИНН, GLN и префиксы проверяет та же `validate::company`, что у
   контрагентов (правила — в их описании ниже), плюс часовой пояс — 1–64 символа из
   латинских букв, цифр и `/ _ - +`. Полную проверку IANA-имени делает интерфейс.
-  Столбцы шаблонов по умолчанию добавляются миграцией плана 1e вместе с таблицей
-  шаблонов.
+  Столбцы шаблонов по умолчанию добавила миграция хоста `0008` (план 1e1) вместе с
+  таблицей шаблонов: у каждого назначения — включённый шаблон этого назначения для
+  всех категорий или пусто (правила — у `category_template_defaults` ниже).
 - `counterparties(id, name, inn, gln, gs1_prefixes JSON, archived, rev)`. Проверки
   хоста — как у профиля организации (`validate::company`): имя 1–200 символов,
   ИНН 10 или 12 цифр либо пусто, GLN 13 цифр, не больше 10 префиксов по 4–12 цифр.
@@ -190,7 +191,10 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
   Отзыв — `DELETE …/badges/{badgeId}`: `revoked_at` и надгробие; повторный отзыв
   ничего не меняет.
 - `chz_product_groups(code PRIMARY KEY, alias UNIQUE, name)` — 51 строка из облачной
-  миграции `0099`.
+  миграции `0099`, перенесённая миграцией хоста `0008` строка в строку; тест
+  `host/tests/product_groups.rs` читает облачный файл и сверяет строки, поэтому
+  копии не разойдутся. Читают все роли (`GET /v1/office/product-groups`, по коду),
+  не пишет никто; в ленту станций справочник не входит.
 - `products(id, gtin14 CHECK(length=14 AND цифры), name, print_name, chz_group_code REFERENCES chz_product_groups, box_capacity, pallet_box_capacity, shelf_life_days, default_box_template_id, default_pallet_template_id, archived, status GENERATED ALWAYS AS (CASE WHEN chz_group_code IS NOT NULL AND box_capacity IS NOT NULL AND pallet_box_capacity IS NOT NULL THEN 'active' ELSE 'draft' END) VIRTUAL, rev)`;
   частичный уникальный индекс `gtin14` среди неархивных (как `products_tenant_gtin_unarchived_uq`).
   Ссылки на шаблоны — `ON DELETE SET NULL`.

@@ -209,6 +209,10 @@ fn protected_routes() -> Router<AppState> {
             get(crate::routes::operators::badge_salt),
         )
         .route(
+            "/v1/office/product-groups",
+            get(crate::routes::products::list_product_groups),
+        )
+        .route(
             "/v1/office/users",
             get(crate::routes::office_users::list_users)
                 .post(crate::routes::office_users::create_user),

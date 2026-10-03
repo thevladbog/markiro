@@ -10,4 +10,5 @@ pub mod office_users;
 pub mod operators;
 pub mod org;
 pub mod pairing;
+pub mod products;
 pub mod sscc;
