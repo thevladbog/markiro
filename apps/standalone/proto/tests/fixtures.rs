@@ -1,15 +1,15 @@
 use markiro_proto::{
-    certificate_fingerprint, codes, compatibility, compatibility_for, credentials,
-    display_fingerprint, BadgeCreate, BadgeSalt, BlockSizesUpdate, BootstrapRequest,
-    BootstrapResponse, ChangesResponse, ClaimRequest, Compatibility, CounterpartyCreate,
-    CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind, DeviceLineRequest,
-    DeviceRecord, DeviceUpdate, ErrorBody, Hello, HelloEnvelope, LineCreate, LineRecord,
-    LineUpdate, LocalPairRequest, OfficeLine, OfficeLoginRequest, OfficeOperator, OfficeRole,
-    OfficeSession, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
-    OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
-    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PasswordChange,
-    PasswordSet, ProductGroup, SiteRecord, SsccCounterUpdate, SsccState, HOST_PRODUCT,
-    PROTOCOL_VERSION,
+    category_default_id, certificate_fingerprint, codes, compatibility, compatibility_for,
+    credentials, display_fingerprint, BadgeCreate, BadgeSalt, BlockSizesUpdate, BootstrapRequest,
+    BootstrapResponse, CategoryTemplateDefault, ChangesResponse, ClaimRequest, Compatibility,
+    CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind,
+    DeviceLineRequest, DeviceRecord, DeviceUpdate, ErrorBody, Hello, HelloEnvelope,
+    LabelTemplateRecord, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine,
+    OfficeLoginRequest, OfficeOperator, OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate,
+    OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord, OperatorCreate, OperatorRecord,
+    OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode,
+    PairingCodeRequest, PasswordChange, PasswordSet, ProductGroup, ProductRecord, ProductStatus,
+    SiteRecord, SsccCounterUpdate, SsccState, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -432,6 +432,69 @@ fn a_device_update_tells_a_cleared_line_from_an_absent_one() {
     let mut value = fixture("device-update.json");
     value["kind"] = Value::String("office".into());
     assert!(serde_json::from_value::<DeviceUpdate>(value).is_err());
+}
+
+/// `value` read as `T` and written back unchanged: the typed record keeps
+/// every field the feed sent.
+fn typed<T: DeserializeOwned + Serialize>(value: &Value) -> T {
+    let typed: T = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(&serde_json::to_value(&typed).unwrap(), value);
+    typed
+}
+
+#[test]
+fn the_catalog_feed_fixture_round_trips_with_typed_records() {
+    let changes: ChangesResponse = round_trip("changes-catalog.json");
+    assert_eq!(changes.items.len(), 8);
+    let data = |index: usize| changes.items[index].data.clone().expect("a live record");
+    let id = |index: usize| changes.items[index].id.as_str();
+
+    let stock: LabelTemplateRecord = typed(&data(0));
+    assert!(stock.stock && stock.enabled);
+    assert_eq!(stock.chz_product_group_codes, None);
+    let milk: LabelTemplateRecord = typed(&data(1));
+    assert_eq!(
+        (milk.purpose, milk.chz_product_group_codes),
+        (TemplatePurpose::Box, Some(vec![8]))
+    );
+    // The organization's box default is the stock template, for every category.
+    let org: OrgRecord = typed(&data(2));
+    assert_eq!(org.default_box_template_id.as_deref(), Some(id(0)));
+    assert_eq!(org.default_pallet_template_id, None);
+    // A category default's id is its slot.
+    let default: CategoryTemplateDefault = typed(&data(3));
+    assert_eq!(
+        id(3),
+        category_default_id(default.chz_product_group_code, default.purpose)
+    );
+    assert_eq!(default.template_id, id(1));
+    let product: ProductRecord = typed(&data(4));
+    assert_eq!(
+        (product.status, product.default_box_template_id.as_deref()),
+        (ProductStatus::Active, Some(id(1)))
+    );
+    // An archived product rides the feed with its flag.
+    let archived: ProductRecord = typed(&data(5));
+    assert_eq!(
+        (archived.archived, archived.status),
+        (true, ProductStatus::Draft)
+    );
+    assert!(changes.items[6..]
+        .iter()
+        .all(|item| item.deleted && item.data.is_none()));
+
+    // An organization record from before plan 1e1 reads as no defaults.
+    let older: OrgRecord =
+        serde_json::from_value(fixture("changes-response.json")["items"][1]["data"].clone())
+            .unwrap();
+    assert_eq!(
+        (
+            older.default_box_template_id,
+            older.default_pallet_template_id,
+            older.default_duplicate_template_id
+        ),
+        (None, None, None)
+    );
 }
 
 #[test]

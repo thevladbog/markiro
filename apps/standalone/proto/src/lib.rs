@@ -403,14 +403,22 @@ pub struct DeviceUpdate {
     pub line_id: Option<Option<String>>,
 }
 
-/// Entities of the change feed (spec §4.4). Plan 1e adds products,
-/// templates and template defaults.
+/// Entities of the change feed (spec §4.4).
 pub mod entities {
     pub const ORG_PROFILE: &str = "org_profile";
     pub const SITE: &str = "site";
     pub const LINES: &str = "lines";
     pub const OPERATORS: &str = "operators";
     pub const OPERATOR_BADGES: &str = "operator_badges";
+    pub const PRODUCTS: &str = "products";
+    pub const LABEL_TEMPLATES: &str = "label_templates";
+    pub const CATEGORY_TEMPLATE_DEFAULTS: &str = "category_template_defaults";
+}
+
+/// The feed id of a category default: `<code>:<purpose>` (`8:box`), the
+/// same text the host's feed query builds in SQL.
+pub fn category_default_id(chz_product_group_code: u32, purpose: TemplatePurpose) -> String {
+    format!("{chz_product_group_code}:{}", purpose.as_str())
 }
 
 /// `GET /v1/changes`: reference records changed after `since`, oldest first.
@@ -436,7 +444,9 @@ pub struct ChangeItem {
     pub rev: i64,
     pub deleted: bool,
     /// The record ([`OrgRecord`], [`SiteRecord`], [`LineRecord`],
-    /// [`OperatorRecord`], [`OperatorBadgeRecord`]); absent when `deleted`.
+    /// [`OperatorRecord`], [`OperatorBadgeRecord`], [`ProductRecord`],
+    /// [`LabelTemplateRecord`], [`CategoryTemplateDefault`]); absent when
+    /// `deleted`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub data: Option<serde_json::Value>,
 }
@@ -466,6 +476,12 @@ pub struct OrgRecord {
     pub gln: String,
     pub gs1_prefixes: Vec<String>,
     pub time_zone: String,
+    /// The organization's default template of each purpose (spec §4.3), or
+    /// `null`. A record from before plan 1e1 has none of the three and reads
+    /// as `null`.
+    pub default_box_template_id: Option<String>,
+    pub default_pallet_template_id: Option<String>,
+    pub default_duplicate_template_id: Option<String>,
 }
 
 /// `data` of a `site` item: only what stations use.
@@ -511,6 +527,116 @@ pub struct OperatorBadgeRecord {
     /// PBKDF2 PHC string of the badge code, with the site's badge salt.
     pub badge_phc: Secret,
     pub label: Option<String>,
+}
+
+/// What a label template prints (spec §4.3). A template's purpose never
+/// changes after it is created, and a default slot takes only a template of
+/// its own purpose. The order is that of the stored names.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TemplatePurpose {
+    Box,
+    Pallet,
+    ProductDuplicate,
+}
+
+impl TemplatePurpose {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TemplatePurpose::Box => "box",
+            TemplatePurpose::Pallet => "pallet",
+            TemplatePurpose::ProductDuplicate => "product_duplicate",
+        }
+    }
+}
+
+impl std::str::FromStr for TemplatePurpose {
+    type Err = UnknownVariant;
+
+    /// The name [`TemplatePurpose::as_str`] gives, as `label_templates.purpose`
+    /// stores it.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("template purpose", text)
+    }
+}
+
+/// Whether a product is ready for production (spec §4.3): `active` once it
+/// has a product group and both capacities, `draft` before, as the cloud's
+/// `computeStatus`. The host computes it; nobody sends it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProductStatus {
+    Draft,
+    Active,
+}
+
+impl ProductStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ProductStatus::Draft => "draft",
+            ProductStatus::Active => "active",
+        }
+    }
+}
+
+impl std::str::FromStr for ProductStatus {
+    type Err = UnknownVariant;
+
+    /// The name [`ProductStatus::as_str`] gives, as `products.status` computes
+    /// it.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("product status", text)
+    }
+}
+
+/// `data` of a `products` item. An archived product stays in the feed with
+/// `archived: true`: stations keep it for history and leave it out of their
+/// pickers. A product is never deleted, so it never leaves as a tombstone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProductRecord {
+    /// 14 digits, as the office normalized it (`normalizeToGtin14`).
+    pub gtin14: String,
+    pub name: String,
+    pub print_name: Option<String>,
+    pub chz_product_group_code: Option<u32>,
+    pub box_capacity: Option<u32>,
+    pub pallet_box_capacity: Option<u32>,
+    pub shelf_life_days: Option<u32>,
+    /// Preferences: a station uses one only while the template still fits
+    /// the product (enabled, of the slot's purpose, covering its group).
+    pub default_box_template_id: Option<String>,
+    pub default_pallet_template_id: Option<String>,
+    pub archived: bool,
+    pub status: ProductStatus,
+}
+
+/// `data` of a `label_templates` item. A disabled template stays in the feed
+/// with `enabled: false`; a deleted one leaves as a tombstone. `spec` is the
+/// layout as JSON, which a station prints from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelTemplateRecord {
+    pub name: String,
+    pub purpose: TemplatePurpose,
+    pub enabled: bool,
+    /// `null` for every category, otherwise the product-group codes.
+    pub chz_product_group_codes: Option<Vec<u32>>,
+    /// A stock template: the wizard created it, and it never changes.
+    pub stock: bool,
+    pub spec: serde_json::Value,
+}
+
+/// A category's default template of one purpose: `data` of a
+/// `category_template_defaults` item, whose `id` is [`category_default_id`],
+/// and an entry of the office's template defaults. A cleared default leaves
+/// the feed as a tombstone of that id.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryTemplateDefault {
+    pub chz_product_group_code: u32,
+    pub purpose: TemplatePurpose,
+    pub template_id: String,
 }
 
 /// Role of an office user.
@@ -894,7 +1020,66 @@ pub struct ProductGroup {
 
 #[cfg(test)]
 mod tests {
-    use super::{DeviceKind, OfficeRole, UnknownVariant};
+    use super::{
+        category_default_id, DeviceKind, OfficeRole, ProductStatus, TemplatePurpose, UnknownVariant,
+    };
+
+    /// Every `TemplatePurpose`, listed like `device_kinds` below.
+    fn template_purposes() -> Vec<TemplatePurpose> {
+        let purposes = vec![
+            TemplatePurpose::Box,
+            TemplatePurpose::Pallet,
+            TemplatePurpose::ProductDuplicate,
+        ];
+        for purpose in &purposes {
+            match purpose {
+                TemplatePurpose::Box
+                | TemplatePurpose::Pallet
+                | TemplatePurpose::ProductDuplicate => {}
+            }
+        }
+        purposes
+    }
+
+    /// Every `ProductStatus`, listed the same way.
+    fn product_statuses() -> Vec<ProductStatus> {
+        let statuses = vec![ProductStatus::Draft, ProductStatus::Active];
+        for status in &statuses {
+            match status {
+                ProductStatus::Draft | ProductStatus::Active => {}
+            }
+        }
+        statuses
+    }
+
+    /// The catalog's stored names parse back like the others, and purposes
+    /// sort as their names do, so a list the host orders in SQL by `purpose`
+    /// and one ordered in Rust agree.
+    #[test]
+    fn catalog_names_parse_back_and_purposes_sort_as_their_names() {
+        for purpose in template_purposes() {
+            assert_eq!(purpose.as_str().parse::<TemplatePurpose>(), Ok(purpose));
+            assert_eq!(serde_json::to_value(purpose).unwrap(), purpose.as_str());
+        }
+        for status in product_statuses() {
+            assert_eq!(status.as_str().parse::<ProductStatus>(), Ok(status));
+            assert_eq!(serde_json::to_value(status).unwrap(), status.as_str());
+        }
+        let mut by_name: Vec<TemplatePurpose> = template_purposes().into_iter().rev().collect();
+        by_name.sort_by_key(|purpose| purpose.as_str());
+        let mut by_order: Vec<TemplatePurpose> = template_purposes().into_iter().rev().collect();
+        by_order.sort();
+        assert_eq!(by_name, by_order);
+        assert_eq!(by_order, template_purposes());
+        assert_eq!(
+            "Box".parse::<TemplatePurpose>().unwrap_err().to_string(),
+            "unknown template purpose \"Box\""
+        );
+        assert_eq!(
+            category_default_id(8, TemplatePurpose::ProductDuplicate),
+            "8:product_duplicate"
+        );
+    }
 
     /// Every `DeviceKind`. The `match` has no wildcard arm, so a new variant
     /// does not compile until it is listed here; the round trip below then

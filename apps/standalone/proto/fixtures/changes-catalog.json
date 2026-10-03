@@ -1,0 +1,146 @@
+{
+  "hostId": "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
+  "rev": 67,
+  "hasMore": false,
+  "items": [
+    {
+      "entity": "label_templates",
+      "id": "7c1e4b2a-9d3f-4e5a-8b6c-1d2e3f4a5b6c",
+      "rev": 61,
+      "deleted": false,
+      "data": {
+        "name": "Коробка 58×40",
+        "purpose": "box",
+        "enabled": true,
+        "chzProductGroupCodes": null,
+        "stock": true,
+        "spec": {
+          "widthMm": 58,
+          "heightMm": 40,
+          "dpi": 203,
+          "language": "zpl",
+          "elements": [
+            {
+              "kind": "field",
+              "id": "name",
+              "xMm": 2,
+              "yMm": 2,
+              "field": "product.name",
+              "fontSizePt": 9
+            },
+            {
+              "kind": "barcode",
+              "id": "sscc",
+              "xMm": 2,
+              "yMm": 12,
+              "format": "code128",
+              "data": "sscc",
+              "sizeMm": 14
+            }
+          ]
+        }
+      }
+    },
+    {
+      "entity": "label_templates",
+      "id": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+      "rev": 62,
+      "deleted": false,
+      "data": {
+        "name": "Молоко 58×40",
+        "purpose": "box",
+        "enabled": true,
+        "chzProductGroupCodes": [8],
+        "stock": false,
+        "spec": {
+          "widthMm": 58,
+          "heightMm": 40,
+          "dpi": 203,
+          "language": "tspl",
+          "elements": [
+            {
+              "kind": "field",
+              "id": "name",
+              "xMm": 2,
+              "yMm": 2,
+              "field": "product.printName",
+              "fontSizePt": 10
+            }
+          ]
+        }
+      }
+    },
+    {
+      "entity": "org_profile",
+      "id": "1",
+      "rev": 63,
+      "deleted": false,
+      "data": {
+        "name": "ООО «Атолл»",
+        "inn": null,
+        "gln": "4600682000013",
+        "gs1Prefixes": ["4600682"],
+        "timeZone": "Europe/Moscow",
+        "defaultBoxTemplateId": "7c1e4b2a-9d3f-4e5a-8b6c-1d2e3f4a5b6c",
+        "defaultPalletTemplateId": null,
+        "defaultDuplicateTemplateId": null
+      }
+    },
+    {
+      "entity": "category_template_defaults",
+      "id": "8:box",
+      "rev": 64,
+      "deleted": false,
+      "data": {
+        "chzProductGroupCode": 8,
+        "purpose": "box",
+        "templateId": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d"
+      }
+    },
+    {
+      "entity": "products",
+      "id": "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
+      "rev": 65,
+      "deleted": false,
+      "data": {
+        "gtin14": "04600682000013",
+        "name": "Молоко 3,2% 0,9 л",
+        "printName": "Молоко 3,2%",
+        "chzProductGroupCode": 8,
+        "boxCapacity": 12,
+        "palletBoxCapacity": 40,
+        "shelfLifeDays": 10,
+        "defaultBoxTemplateId": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+        "defaultPalletTemplateId": null,
+        "archived": false,
+        "status": "active"
+      }
+    },
+    {
+      "entity": "products",
+      "id": "0a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d",
+      "rev": 66,
+      "deleted": false,
+      "data": {
+        "gtin14": "04600682000020",
+        "name": "Кефир 1% 0,9 л",
+        "printName": null,
+        "chzProductGroupCode": null,
+        "boxCapacity": null,
+        "palletBoxCapacity": null,
+        "shelfLifeDays": null,
+        "defaultBoxTemplateId": null,
+        "defaultPalletTemplateId": null,
+        "archived": true,
+        "status": "draft"
+      }
+    },
+    { "entity": "category_template_defaults", "id": "15:pallet", "rev": 67, "deleted": true },
+    {
+      "entity": "label_templates",
+      "id": "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+      "rev": 67,
+      "deleted": true
+    }
+  ]
+}

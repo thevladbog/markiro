@@ -1,6 +1,7 @@
 //! The change feed (spec §4.4) and its live stream (spec §4.5). `GET
 //! /v1/changes` returns reference records changed after a device's revision,
-//! in pages that never split a revision; `GET /v1/changes/stream` follows up
+//! in pages that never split a revision and stop at about
+//! [`MAX_PAGE_BYTES`]; `GET /v1/changes/stream` follows up
 //! with server-sent events so a device does not have to poll for the next
 //! one, until the host stops or the device is revoked. Adding an entity
 //! means a branch in `FEED_KEYS` and in `record`, its
@@ -17,8 +18,9 @@ use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 use futures_util::stream::unfold;
 use markiro_proto::{
-    credentials, entities, ChangeItem, ChangesResponse, LineRecord, OperatorBadgeRecord,
-    OperatorRecord, OrgRecord, Secret, SiteRecord,
+    credentials, entities, CategoryTemplateDefault, ChangeItem, ChangesResponse,
+    LabelTemplateRecord, LineRecord, OperatorBadgeRecord, OperatorRecord, OrgRecord, ProductRecord,
+    Secret, SiteRecord,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -33,16 +35,29 @@ use crate::server::AppState;
 pub const DEFAULT_LIMIT: u32 = 500;
 pub const MAX_LIMIT: u32 = 1000;
 
+/// About how much item JSON one page carries. A template's `spec` may be
+/// 256 KB, so a page cut by count alone could reach a hundred megabytes; a
+/// page also ends before the revision that would take its items past this.
+/// A revision larger than the budget still comes whole when it starts the
+/// page, so the feed always moves on.
+pub const MAX_PAGE_BYTES: usize = 1024 * 1024;
+
 /// Every feed record changed after `?1`: live rows of each entity, then
 /// tombstones. `site` joins only once the wizard has initialized the host;
 /// an operator only while active and a badge only while not revoked, since
-/// their tombstones say they left.
+/// their tombstones say they left. Archived products and disabled templates
+/// stay, with their flags. A category default's id is `<code>:<purpose>`,
+/// as `markiro_proto::category_default_id` builds it.
 const FEED_KEYS: &str = "\
     SELECT 'org_profile' AS entity, '1' AS id, rev, 0 AS deleted FROM org_profile WHERE rev > ?1 \
     UNION ALL SELECT 'site', '1', rev, 0 FROM site WHERE rev > ?1 AND initialized_at IS NOT NULL \
     UNION ALL SELECT 'lines', id, rev, 0 FROM lines WHERE rev > ?1 \
     UNION ALL SELECT 'operators', id, rev, 0 FROM operators WHERE rev > ?1 AND active = 1 \
     UNION ALL SELECT 'operator_badges', id, rev, 0 FROM operator_badges WHERE rev > ?1 AND revoked_at IS NULL \
+    UNION ALL SELECT 'products', id, rev, 0 FROM products WHERE rev > ?1 \
+    UNION ALL SELECT 'label_templates', id, rev, 0 FROM label_templates WHERE rev > ?1 \
+    UNION ALL SELECT 'category_template_defaults', chz_group_code || ':' || purpose, rev, 0 \
+        FROM category_template_defaults WHERE rev > ?1 \
     UNION ALL SELECT entity, id, rev, 1 FROM tombstones WHERE rev > ?1";
 
 #[derive(Debug, Deserialize)]
@@ -65,6 +80,43 @@ struct Page {
     /// The last revision the page holds completely; `None` when nothing
     /// more follows, so the answer carries the host's current revision.
     more_after: Option<i64>,
+}
+
+#[derive(sqlx::FromRow)]
+struct OrgFeedRow {
+    name: String,
+    inn: Option<String>,
+    gln: String,
+    gs1_prefixes: String,
+    time_zone: String,
+    default_box_template_id: Option<String>,
+    default_pallet_template_id: Option<String>,
+    default_duplicate_template_id: Option<String>,
+}
+
+#[derive(sqlx::FromRow)]
+struct ProductFeedRow {
+    gtin14: String,
+    name: String,
+    print_name: Option<String>,
+    chz_group_code: Option<u32>,
+    box_capacity: Option<u32>,
+    pallet_box_capacity: Option<u32>,
+    shelf_life_days: Option<u32>,
+    default_box_template_id: Option<String>,
+    default_pallet_template_id: Option<String>,
+    archived: bool,
+    status: String,
+}
+
+#[derive(sqlx::FromRow)]
+struct TemplateFeedRow {
+    name: String,
+    purpose: String,
+    enabled: bool,
+    category_codes: Option<String>,
+    stock: bool,
+    spec: String,
 }
 
 pub async fn changes(
@@ -90,19 +142,45 @@ pub async fn changes(
         .await
         .map_err(ApiError::internal)?;
     let page = page(&mut tx, since, limit).await?;
-    let mut items = Vec::with_capacity(page.keys.len());
-    for key in &page.keys {
-        items.push(item(&mut tx, key).await?);
-    }
+    let (items, more_after) = within_budget(&mut tx, page).await?;
     tx.rollback().await.map_err(ApiError::internal)?;
     Ok(Json(ChangesResponse {
         host_id: state.host_id.clone(),
-        rev: page.more_after.unwrap_or(current),
+        rev: more_after.unwrap_or(current),
         // `more_after` can equal `current` when the last page happens to end
         // exactly on the host's newest revision: that is not "more to fetch".
-        has_more: page.more_after.is_some_and(|rev| rev < current),
+        has_more: more_after.is_some_and(|rev| rev < current),
         items,
     }))
+}
+
+/// The page's records, ending before the first revision that would take
+/// them past [`MAX_PAGE_BYTES`] of JSON; the first revision comes whole,
+/// however large. Returns them with the last revision they hold completely
+/// when more follow, or `None` when nothing does.
+async fn within_budget(
+    conn: &mut SqliteConnection,
+    page: Page,
+) -> Result<(Vec<ChangeItem>, Option<i64>), ApiError> {
+    let mut items: Vec<ChangeItem> = Vec::with_capacity(page.keys.len());
+    let mut bytes = 0;
+    let mut keys = page.keys.iter().peekable();
+    while let Some(rev) = keys.peek().map(|key| key.rev) {
+        let mut revision = Vec::new();
+        let mut revision_bytes = 0;
+        while let Some(key) = keys.next_if(|key| key.rev == rev) {
+            let item = item(conn, key).await?;
+            revision_bytes += serde_json::to_vec(&item).map_err(ApiError::internal)?.len();
+            revision.push(item);
+        }
+        if !items.is_empty() && bytes + revision_bytes > MAX_PAGE_BYTES {
+            let last = items.last().map(|item| item.rev);
+            return Ok((items, last));
+        }
+        bytes += revision_bytes;
+        items.append(&mut revision);
+    }
+    Ok((items, page.more_after))
 }
 
 /// Up to `limit` keys after `since`, cut only between revisions. When one
@@ -179,24 +257,24 @@ async fn item(conn: &mut SqliteConnection, key: &Key) -> Result<ChangeItem, ApiE
 async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Value, ApiError> {
     let value = match key.entity.as_str() {
         entities::ORG_PROFILE => {
-            let (name, inn, gln, gs1_prefixes, time_zone): (
-                String,
-                Option<String>,
-                String,
-                String,
-                String,
-            ) = sqlx::query_as(
-                "SELECT name, inn, gln, gs1_prefixes, time_zone FROM org_profile WHERE id = 1",
+            let row: OrgFeedRow = sqlx::query_as(
+                "SELECT name, inn, gln, gs1_prefixes, time_zone, default_box_template_id, \
+                 default_pallet_template_id, default_duplicate_template_id \
+                 FROM org_profile WHERE id = 1",
             )
             .fetch_one(&mut *conn)
             .await
             .map_err(ApiError::internal)?;
             serde_json::to_value(OrgRecord {
-                name,
-                inn,
-                gln,
-                gs1_prefixes: serde_json::from_str(&gs1_prefixes).map_err(ApiError::internal)?,
-                time_zone,
+                name: row.name,
+                inn: row.inn,
+                gln: row.gln,
+                gs1_prefixes: serde_json::from_str(&row.gs1_prefixes)
+                    .map_err(ApiError::internal)?,
+                time_zone: row.time_zone,
+                default_box_template_id: row.default_box_template_id,
+                default_pallet_template_id: row.default_pallet_template_id,
+                default_duplicate_template_id: row.default_duplicate_template_id,
             })
         }
         entities::SITE => {
@@ -248,6 +326,67 @@ async fn record(conn: &mut SqliteConnection, key: &Key) -> Result<serde_json::Va
                 operator_id,
                 badge_phc: Secret::new(badge_phc),
                 label,
+            })
+        }
+        entities::PRODUCTS => {
+            let row: ProductFeedRow = sqlx::query_as(
+                "SELECT gtin14, name, print_name, chz_group_code, box_capacity, \
+                 pallet_box_capacity, shelf_life_days, default_box_template_id, \
+                 default_pallet_template_id, archived, status FROM products WHERE id = ?",
+            )
+            .bind(&key.id)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+            serde_json::to_value(ProductRecord {
+                gtin14: row.gtin14,
+                name: row.name,
+                print_name: row.print_name,
+                chz_product_group_code: row.chz_group_code,
+                box_capacity: row.box_capacity,
+                pallet_box_capacity: row.pallet_box_capacity,
+                shelf_life_days: row.shelf_life_days,
+                default_box_template_id: row.default_box_template_id,
+                default_pallet_template_id: row.default_pallet_template_id,
+                archived: row.archived,
+                status: row.status.parse().map_err(ApiError::internal)?,
+            })
+        }
+        entities::LABEL_TEMPLATES => {
+            let row: TemplateFeedRow = sqlx::query_as(
+                "SELECT name, purpose, enabled, category_codes, stock, spec \
+                 FROM label_templates WHERE id = ?",
+            )
+            .bind(&key.id)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+            serde_json::to_value(LabelTemplateRecord {
+                name: row.name,
+                purpose: row.purpose.parse().map_err(ApiError::internal)?,
+                enabled: row.enabled,
+                chz_product_group_codes: row
+                    .category_codes
+                    .map(|codes| serde_json::from_str(&codes))
+                    .transpose()
+                    .map_err(ApiError::internal)?,
+                stock: row.stock,
+                spec: serde_json::from_str(&row.spec).map_err(ApiError::internal)?,
+            })
+        }
+        entities::CATEGORY_TEMPLATE_DEFAULTS => {
+            let (code, purpose, template_id): (u32, String, String) = sqlx::query_as(
+                "SELECT chz_group_code, purpose, template_id FROM category_template_defaults \
+                 WHERE chz_group_code || ':' || purpose = ?",
+            )
+            .bind(&key.id)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+            serde_json::to_value(CategoryTemplateDefault {
+                chz_product_group_code: code,
+                purpose: purpose.parse().map_err(ApiError::internal)?,
+                template_id,
             })
         }
         other => {

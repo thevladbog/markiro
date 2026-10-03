@@ -237,11 +237,17 @@ with `storage` and the pairing stays for another try.
 `GET /v1/changes?since=<rev>&limit=<n>` (`routes/changes.rs`) returns the
 station-visible reference records changed after a device's revision:
 `org_profile`, `site` (badge salt and block sizes), `lines`, `operators`,
-`operator_badges`, plus deletions from `tombstones`. Pages are ordered by
-`(rev, entity, id)` and never split a revision; with `hasMore = false`,
-`rev` is the host's current revision, so revisions that changed only office
-data still move a device forward; an office line assignment for a device is
-one of those (see «Device key and office session»).
+`operator_badges`, `products`, `label_templates`,
+`category_template_defaults`, plus deletions from `tombstones`. Pages are
+ordered by `(rev, entity, id)` and never split a revision; with
+`hasMore = false`, `rev` is the host's current revision, so revisions that
+changed only office data still move a device forward; an office line
+assignment for a device is one of those (see «Device key and office
+session»). A page holds at most `limit` records and ends before the
+revision that would take its items past `MAX_PAGE_BYTES` (1 MiB) of JSON,
+since a template's `spec` may be 256 KB; a revision larger than either
+bound still comes whole when it starts the page, so the feed always moves
+on.
 `GET /v1/changes/stream` sends the current revision as its first event, then
 an event whenever the revision grew: events are strictly increasing, so a
 burst of commits collapses into one, and an event means "fetch since your
@@ -272,6 +278,21 @@ A PIN change is a record update carrying the new `pinPhc`, so the station
 replaces the hash and the old PIN stops working. A badge record never grants
 access on its own: the station's operator login (plan 1f) requires the record
 of its `operatorId`.
+
+The catalog grants no access, so its flags stay flags: an archived product
+and a disabled template ride the feed with `archived` and `enabled`, since a
+station keeps them for history and leaves them out of its pickers. A
+product is never deleted and never has a tombstone; a deleted template
+leaves as one. A category default is keyed `<code>:<purpose>` (`8:box`,
+`markiro_proto::category_default_id`, the same text `FEED_KEYS` builds in
+SQL), and clearing it writes a tombstone of that key. The organization's
+three defaults ride its record (`defaultBoxTemplateId`,
+`defaultPalletTemplateId`, `defaultDuplicateTemplateId`, `null` when unset).
+A template's `spec` travels as JSON, not as text. Within one revision a
+deleted template's tombstone comes before the products whose defaults the
+delete cleared (entities sort by name), and a template a copy refers to may
+sit in the quarantine, so the station's copies take no foreign key from a
+product or a default to a template.
 
 On the device side a new entity also needs its entry in `ENTITIES`
 (`src/local/reference-sync.ts`), which derives `ENTITY_SET`; a new entity

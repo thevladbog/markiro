@@ -98,9 +98,13 @@ async fn after_the_wizard_the_feed_holds_the_organization_the_site_and_the_lines
             json!({ "entity": "lines", "id": id, "rev": 1, "deleted": false, "data": { "name": name, "archived": false } })
         })
         .collect();
+    // A wizard without stock templates leaves the three defaults unset.
     expected.push(json!({
         "entity": "org_profile", "id": "1", "rev": 1, "deleted": false,
-        "data": { "name": "ООО «Атолл»", "inn": "7701234567", "gln": "4600682000010", "gs1Prefixes": ["4600682"], "timeZone": "Europe/Moscow" }
+        "data": {
+            "name": "ООО «Атолл»", "inn": "7701234567", "gln": "4600682000010", "gs1Prefixes": ["4600682"], "timeZone": "Europe/Moscow",
+            "defaultBoxTemplateId": null, "defaultPalletTemplateId": null, "defaultDuplicateTemplateId": null
+        }
     }));
     expected.push(json!({
         "entity": "site", "id": "1", "rev": 1, "deleted": false,
@@ -631,4 +635,385 @@ async fn one_badge_is_active_for_one_operator_at_a_time() {
     // A revoked badge frees its code for another operator.
     revoke_badge(&app, &badge).await;
     insert_badge(&app, &second, BADGE_PHC).await.unwrap();
+}
+
+/// A small layout, stored as the host stores a spec: compact JSON.
+const SPEC: &str = r#"{"dpi":203,"elements":[],"heightMm":40,"language":"zpl","widthMm":58}"#;
+
+/// Items in the feed's order inside one revision: by entity, then by id.
+fn in_feed_order(mut items: Vec<Value>) -> Value {
+    items.sort_by(|a, b| {
+        (a["entity"].as_str(), a["id"].as_str()).cmp(&(b["entity"].as_str(), b["id"].as_str()))
+    });
+    Value::Array(items)
+}
+
+#[tokio::test]
+async fn catalog_records_ride_the_feed_with_their_flags() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let universal = uuid::Uuid::new_v4().to_string();
+    let milk = uuid::Uuid::new_v4().to_string();
+    let active = uuid::Uuid::new_v4().to_string();
+    let archived = uuid::Uuid::new_v4().to_string();
+    let mut tx = markiro_host::db::begin_write(&app.state.pool)
+        .await
+        .unwrap();
+    let rev = markiro_host::db::next_revision(&mut tx).await.unwrap();
+    for (id, name, enabled, codes, stock) in [
+        (&universal, "Коробка 58×40", true, None, true),
+        (&milk, "Молоко 58×40", false, Some("[8]"), false),
+    ] {
+        sqlx::query(
+            "INSERT INTO label_templates (id, name, purpose, enabled, category_codes, spec, stock, rev) \
+             VALUES (?, ?, 'box', ?, ?, ?, ?, ?)",
+        )
+        .bind(id)
+        .bind(name)
+        .bind(enabled)
+        .bind(codes)
+        .bind(SPEC)
+        .bind(stock)
+        .bind(rev)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+    sqlx::query("UPDATE org_profile SET default_box_template_id = ?, rev = ? WHERE id = 1")
+        .bind(&universal)
+        .bind(rev)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO category_template_defaults (chz_group_code, purpose, template_id, rev) \
+         VALUES (8, 'box', ?, ?)",
+    )
+    .bind(&universal)
+    .bind(rev)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO products (id, gtin14, name, print_name, chz_group_code, box_capacity, \
+         pallet_box_capacity, shelf_life_days, default_box_template_id, archived, rev) \
+         VALUES (?, '04600682000013', 'Молоко 3,2% 0,9 л', 'Молоко 3,2%', 8, 12, 40, 10, ?, 0, ?)",
+    )
+    .bind(&active)
+    .bind(&milk)
+    .bind(rev)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO products (id, gtin14, name, archived, rev) \
+         VALUES (?, '04600682000020', 'Кефир 1% 0,9 л', 1, ?)",
+    )
+    .bind(&archived)
+    .bind(rev)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    let spec: Value = serde_json::from_str(SPEC).unwrap();
+    let (status, body) = changes(&app, &key, "?since=1").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["items"],
+        in_feed_order(vec![
+            json!({
+                "entity": "label_templates", "id": universal, "rev": rev, "deleted": false,
+                "data": { "name": "Коробка 58×40", "purpose": "box", "enabled": true, "chzProductGroupCodes": null, "stock": true, "spec": spec }
+            }),
+            // A disabled template stays, with its flag.
+            json!({
+                "entity": "label_templates", "id": milk, "rev": rev, "deleted": false,
+                "data": { "name": "Молоко 58×40", "purpose": "box", "enabled": false, "chzProductGroupCodes": [8], "stock": false, "spec": spec }
+            }),
+            json!({
+                "entity": "org_profile", "id": "1", "rev": rev, "deleted": false,
+                "data": {
+                    "name": "ООО «Атолл»", "inn": "7701234567", "gln": "4600682000010", "gs1Prefixes": ["4600682"], "timeZone": "Europe/Moscow",
+                    "defaultBoxTemplateId": universal, "defaultPalletTemplateId": null, "defaultDuplicateTemplateId": null
+                }
+            }),
+            json!({
+                "entity": "category_template_defaults", "id": "8:box", "rev": rev, "deleted": false,
+                "data": { "chzProductGroupCode": 8, "purpose": "box", "templateId": universal }
+            }),
+            json!({
+                "entity": "products", "id": active, "rev": rev, "deleted": false,
+                "data": {
+                    "gtin14": "04600682000013", "name": "Молоко 3,2% 0,9 л", "printName": "Молоко 3,2%",
+                    "chzProductGroupCode": 8, "boxCapacity": 12, "palletBoxCapacity": 40, "shelfLifeDays": 10,
+                    "defaultBoxTemplateId": milk, "defaultPalletTemplateId": null, "archived": false, "status": "active"
+                }
+            }),
+            // An archived product stays, with its flag; without a group and
+            // capacities it is a draft.
+            json!({
+                "entity": "products", "id": archived, "rev": rev, "deleted": false,
+                "data": {
+                    "gtin14": "04600682000020", "name": "Кефир 1% 0,9 л", "printName": null,
+                    "chzProductGroupCode": null, "boxCapacity": null, "palletBoxCapacity": null, "shelfLifeDays": null,
+                    "defaultBoxTemplateId": null, "defaultPalletTemplateId": null, "archived": true, "status": "draft"
+                }
+            }),
+        ])
+    );
+}
+
+/// A spec of exactly `bytes` bytes of compact JSON.
+fn spec_of(bytes: usize) -> String {
+    format!(r#"{{"filler":"{}"}}"#, "x".repeat(bytes - 13))
+}
+
+/// Insert templates with the given specs in one transaction at a new
+/// revision; returns their ids, sorted as the feed sorts them, and the
+/// revision.
+async fn add_templates(app: &TestApp, specs: &[String]) -> (Vec<String>, i64) {
+    let mut tx = markiro_host::db::begin_write(&app.state.pool)
+        .await
+        .unwrap();
+    let rev = markiro_host::db::next_revision(&mut tx).await.unwrap();
+    let mut ids = Vec::new();
+    for (index, spec) in specs.iter().enumerate() {
+        let id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO label_templates (id, name, purpose, enabled, spec, rev) \
+             VALUES (?, ?, 'box', 1, ?, ?)",
+        )
+        .bind(&id)
+        .bind(format!("Шаблон {index}"))
+        .bind(spec)
+        .bind(rev)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+        ids.push(id);
+    }
+    tx.commit().await.unwrap();
+    ids.sort();
+    (ids, rev)
+}
+
+/// Five templates of 250 000 bytes each, one revision apiece: four fit in
+/// a page of `MAX_PAGE_BYTES`, the fifth would pass it and waits for the
+/// next page, although the count limit would take all five.
+#[tokio::test]
+async fn a_page_ends_before_the_revision_that_would_pass_the_byte_budget() {
+    assert_eq!(markiro_host::routes::changes::MAX_PAGE_BYTES, 1024 * 1024);
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let mut added = Vec::new();
+    for _ in 0..5 {
+        let (ids, rev) = add_templates(&app, &[spec_of(250_000)]).await;
+        added.push(("label_templates".to_owned(), ids[0].clone(), rev));
+    }
+
+    let (status, body) = changes(&app, &key, "?since=1").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(keys(&body), added[..4].to_vec());
+    assert_eq!(
+        (body["rev"].clone(), body["hasMore"].clone()),
+        (json!(added[3].2), json!(true))
+    );
+    let (_, body) = changes(&app, &key, &format!("?since={}", added[3].2)).await;
+    assert_eq!(keys(&body), added[4..].to_vec());
+    assert_eq!(
+        (body["rev"].clone(), body["hasMore"].clone()),
+        (json!(added[4].2), json!(false))
+    );
+}
+
+/// A revision larger than the budget is never split: it waits behind a
+/// smaller one, then comes whole as a page of its own.
+#[tokio::test]
+async fn a_revision_larger_than_the_byte_budget_still_comes_whole() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let (line, line_rev) = add_lines(&app, &["Линия A"]).await;
+    let (templates, big) = add_templates(&app, &vec![spec_of(250_000); 5]).await;
+
+    let (_, body) = changes(&app, &key, "?since=1").await;
+    assert_eq!(
+        keys(&body),
+        vec![("lines".to_owned(), line[0].clone(), line_rev)]
+    );
+    assert_eq!(
+        (body["rev"].clone(), body["hasMore"].clone()),
+        (json!(line_rev), json!(true))
+    );
+    let (_, body) = changes(&app, &key, &format!("?since={line_rev}")).await;
+    assert_eq!(
+        keys(&body),
+        templates
+            .iter()
+            .map(|id| ("label_templates".to_owned(), id.clone(), big))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        (body["rev"].clone(), body["hasMore"].clone()),
+        (json!(big), json!(false))
+    );
+}
+
+/// A page whose items come to exactly `MAX_PAGE_BYTES` is full, not over: the
+/// budget is passed only by a revision that takes the total a byte beyond it.
+/// The second revision is sized to land on the budget, or one byte past it.
+#[tokio::test]
+async fn a_page_may_end_exactly_on_the_byte_budget() {
+    let budget = markiro_host::routes::changes::MAX_PAGE_BYTES;
+    // What an item adds to a page, counted as the host counts it.
+    let size = |item: &Value| serde_json::to_vec(item).unwrap().len();
+    let total =
+        |body: &Value| -> usize { body["items"].as_array().unwrap().iter().map(size).sum() };
+    let of = |ids: &[String], rev: i64| -> Vec<(String, String, i64)> {
+        ids.iter()
+            .map(|id| ("label_templates".to_owned(), id.clone(), rev))
+            .collect()
+    };
+    for over in [0, 1] {
+        let app = TestApp::new().await;
+        let (_, key) = pair_device(&app, "station").await;
+        bootstrap(&app, &key).await;
+        let (first, first_rev) = add_templates(&app, &vec![spec_of(250_000); 4]).await;
+        let (_, body) = changes(&app, &key, "?since=1").await;
+        assert_eq!(keys(&body), of(&first, first_rev));
+        // An item is its spec and a frame that is the same for every template
+        // `add_templates` writes at a one-digit revision.
+        let frame = size(&body["items"][0]) - 250_000;
+        let (second, second_rev) =
+            add_templates(&app, &[spec_of(budget - total(&body) - frame + over)]).await;
+
+        let (_, body) = changes(&app, &key, "?since=1").await;
+        if over == 0 {
+            // Exactly the budget: the two revisions are one page.
+            assert_eq!(total(&body), budget);
+            assert_eq!(
+                keys(&body),
+                [of(&first, first_rev), of(&second, second_rev)].concat()
+            );
+            assert_eq!(
+                (body["rev"].clone(), body["hasMore"].clone()),
+                (json!(second_rev), json!(false))
+            );
+        } else {
+            // One byte over: the second revision waits for the next page.
+            assert_eq!(keys(&body), of(&first, first_rev));
+            assert_eq!(
+                (body["rev"].clone(), body["hasMore"].clone()),
+                (json!(first_rev), json!(true))
+            );
+            let (_, rest) = changes(&app, &key, &format!("?since={first_rev}")).await;
+            assert_eq!(keys(&rest), of(&second, second_rev));
+            assert_eq!(total(&body) + total(&rest), budget + 1);
+        }
+    }
+}
+
+/// Every purpose keeps its own place in the feed: a template's own purpose,
+/// each of the organization's three defaults, a category default's key and
+/// record, and a product's two template defaults. The test above puts only
+/// box defaults on the feed, where a swapped pallet or duplicate would not show.
+#[tokio::test]
+async fn each_purpose_rides_the_feed_in_its_own_place() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let purposes = ["box", "pallet", "product_duplicate"];
+    let ids: Vec<String> = purposes
+        .iter()
+        .map(|_| uuid::Uuid::new_v4().to_string())
+        .collect();
+    let product = uuid::Uuid::new_v4().to_string();
+    let mut tx = markiro_host::db::begin_write(&app.state.pool)
+        .await
+        .unwrap();
+    let rev = markiro_host::db::next_revision(&mut tx).await.unwrap();
+    for (id, purpose) in ids.iter().zip(purposes) {
+        sqlx::query(
+            "INSERT INTO label_templates (id, name, purpose, enabled, spec, rev) \
+             VALUES (?, ?, ?, 1, ?, ?)",
+        )
+        .bind(id)
+        .bind(format!("Шаблон {purpose}"))
+        .bind(purpose)
+        .bind(SPEC)
+        .bind(rev)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "UPDATE org_profile SET default_box_template_id = ?, default_pallet_template_id = ?, \
+         default_duplicate_template_id = ?, rev = ? WHERE id = 1",
+    )
+    .bind(&ids[0])
+    .bind(&ids[1])
+    .bind(&ids[2])
+    .bind(rev)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    for (code, purpose, template) in [(8, "pallet", &ids[1]), (15, "product_duplicate", &ids[2])] {
+        sqlx::query(
+            "INSERT INTO category_template_defaults (chz_group_code, purpose, template_id, rev) \
+             VALUES (?, ?, ?, ?)",
+        )
+        .bind(code)
+        .bind(purpose)
+        .bind(template)
+        .bind(rev)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+    sqlx::query(
+        "INSERT INTO products (id, gtin14, name, default_box_template_id, \
+         default_pallet_template_id, archived, rev) \
+         VALUES (?, '04600682000013', 'Молоко 3,2% 0,9 л', ?, ?, 0, ?)",
+    )
+    .bind(&product)
+    .bind(&ids[0])
+    .bind(&ids[1])
+    .bind(rev)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+
+    let (status, body) = changes(&app, &key, "?since=1").await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let data = |entity: &str, id: &str| -> Value {
+        body["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|item| item["entity"] == entity && item["id"] == id)
+            .unwrap_or_else(|| panic!("no {entity} {id} in {body}"))["data"]
+            .clone()
+    };
+    for (id, purpose) in ids.iter().zip(purposes) {
+        assert_eq!(data("label_templates", id)["purpose"], purpose);
+    }
+    let org = data("org_profile", "1");
+    assert_eq!(org["defaultBoxTemplateId"], json!(ids[0]));
+    assert_eq!(org["defaultPalletTemplateId"], json!(ids[1]));
+    assert_eq!(org["defaultDuplicateTemplateId"], json!(ids[2]));
+    assert_eq!(
+        data("category_template_defaults", "8:pallet"),
+        json!({ "chzProductGroupCode": 8, "purpose": "pallet", "templateId": ids[1] })
+    );
+    assert_eq!(
+        data("category_template_defaults", "15:product_duplicate"),
+        json!({ "chzProductGroupCode": 15, "purpose": "product_duplicate", "templateId": ids[2] })
+    );
+    let product = data("products", &product);
+    assert_eq!(product["defaultBoxTemplateId"], json!(ids[0]));
+    assert_eq!(product["defaultPalletTemplateId"], json!(ids[1]));
 }
