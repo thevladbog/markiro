@@ -410,6 +410,7 @@ export function MasterDataWorkspace({
               onForbidden={onForbidden}
               onSessionLost={onSessionLost}
               onDirtyChange={setEditorDirty}
+              onMutationPendingChange={setMutationPending}
               onOpenProfile={() => navigate("profile")}
               onOpenLocations={() => openEntry({ kind: "locations" })}
               onOpenProducts={() => openEntry({ kind: "products" })}

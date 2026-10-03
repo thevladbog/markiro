@@ -98,6 +98,38 @@
 .us-plan-publication {
   color: var(--fg-2);
 }
+.us-plan-editor,
+.us-plan-fields,
+.us-plan-context,
+.us-plan-array {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.us-plan-editor {
+  border-top: 2px solid var(--line);
+  padding-top: 24px;
+}
+.us-plan-context {
+  padding: 16px;
+  background: var(--surface-panel);
+  border: 1px solid var(--line);
+  border-radius: var(--r-3);
+}
+.us-plan-array {
+  margin: 0;
+  border: 1px solid var(--line);
+  padding: 12px;
+}
+.us-plan-array-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+.us-plan-editor .mk-data-tabs {
+  flex-wrap: wrap;
+}
 .us-plan-mobile-label {
   display: none;
 }
@@ -106,6 +138,9 @@
   outline-offset: 3px;
 }
 @media (max-width: 640px) {
+  .us-plan-array-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
   .us-plan-heading {
     align-items: flex-start;
     flex-direction: column;

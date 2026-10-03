@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@markiro/ui";
 import type { UsPlanDetailResponse, UsPlanListResponse } from "@markiro/platform-contracts";
 import { useTranslation } from "react-i18next";
 import { UsClientError, type UsBrowserClient } from "../client.js";
 import { PlanVersions } from "./versions.js";
 import { PlanCurrentImpact, PlanDetail } from "./detail.js";
+import { PlanEditor, type PlanEditorState } from "./editor.js";
+import { emptyPlanSections } from "./section-fields.js";
 import "./plans.css";
 
 export type PlanViewProps = {
@@ -15,6 +17,7 @@ export type PlanViewProps = {
   onForbidden: () => Promise<void>;
   onSessionLost: () => void;
   onDirtyChange: (dirty: boolean) => void;
+  onMutationPendingChange?: (pending: boolean) => void;
   onOpenProfile: () => void;
   onOpenLocations: () => void;
   onOpenProducts: () => void;
@@ -37,6 +40,21 @@ export function PlanView(props: PlanViewProps) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
   const [detailRetry, setDetailRetry] = useState(0);
+  const [editing, setEditing] = useState(false);
+  const [dirty, setDirty] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [writeBlocked, setWriteBlocked] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+  const createPending = useRef(false);
+  const { onMutationPendingChange } = props;
+  const onEditorState = useCallback(
+    (state: PlanEditorState) => {
+      setSaving(state.saving);
+      onMutationPendingChange?.(state.saving);
+    },
+    [onMutationPendingChange],
+  );
   const supported = profile.code === "US_FSMA204_PROCESSOR";
   useEffect(() => {
     root.current?.querySelector<HTMLElement>("h1")?.focus();
@@ -82,6 +100,60 @@ export function PlanView(props: PlanViewProps) {
   if (!supported) return <p role="alert">{t("usPlan.unavailable")}</p>;
   const openDraft =
     list.kind === "ready" ? list.value.items.find((item) => item.status === "draft") : undefined;
+  function mayLeave() {
+    return !creating && !saving && (!dirty || window.confirm(t("md.discardConfirm")));
+  }
+  function openVersion(id: string, edit = false) {
+    if (!mayLeave()) return;
+    setDirty(false);
+    props.onDirtyChange(false);
+    setEditing(edit);
+    if (id === selectedId) return;
+    setDetail({ kind: "loading" });
+    setSelectedId(id);
+  }
+  async function createDraft() {
+    if (
+      list.kind !== "ready" ||
+      openDraft ||
+      !props.canManageQa ||
+      writeBlocked ||
+      createPending.current ||
+      !mayLeave()
+    )
+      return;
+    createPending.current = true;
+    setCreating(true);
+    onMutationPendingChange?.(true);
+    props.onDirtyChange(true);
+    setCreateError(null);
+    try {
+      const effective = list.value.items.find((item) => item.status === "effective");
+      const source = effective ? await client.getPlan(effective.id) : null;
+      if (source && source.status !== "effective") throw new Error("Effective version changed");
+      const result = await client.createPlan({
+        sections: source?.snapshot.sections ?? emptyPlanSections(),
+        changeSummary: "",
+      });
+      setEditing(true);
+      setSelectedId(result.id);
+      setDetail({ kind: "loading" });
+      setRetry((n) => n + 1);
+    } catch (error) {
+      setCreateError(errorKey(error, "usPlan.createError"));
+      setRetry((n) => n + 1);
+      if (error instanceof UsClientError && error.code === "forbidden") {
+        setWriteBlocked(true);
+        await onForbidden();
+      }
+      if (error instanceof UsClientError && error.code === "session_required") onSessionLost();
+    } finally {
+      createPending.current = false;
+      setCreating(false);
+      onMutationPendingChange?.(false);
+      props.onDirtyChange(false);
+    }
+  }
   return (
     <section ref={root} className="us-plan-view" aria-label={t("usPlan.title")}>
       <header className="us-plan-heading">
@@ -91,17 +163,33 @@ export function PlanView(props: PlanViewProps) {
         </div>
         {props.canManageQa ? (
           <div>
-            <Button disabled aria-describedby="us-plan-draft-hint">
-              {t("usPlan.newDraft")}
+            <Button
+              disabled={list.kind !== "ready" || Boolean(openDraft) || creating || writeBlocked}
+              aria-describedby="us-plan-draft-hint"
+              onClick={() => void createDraft()}
+            >
+              {t(creating ? "usPlan.creating" : "usPlan.newDraft")}
             </Button>
             <p id="us-plan-draft-hint">
               {openDraft
                 ? t("usPlan.draftOpen", { version: openDraft.versionNumber })
-                : t("usPlan.draftUnavailable")}
+                : t("usPlan.createHint")}
             </p>
+            {openDraft ? (
+              <Button
+                disabled={
+                  creating || saving || writeBlocked || (editing && selectedId === openDraft.id)
+                }
+                variant="secondary"
+                onClick={() => openVersion(openDraft.id, true)}
+              >
+                {t("usPlan.editDraft")}
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </header>
+      {createError ? <p role="alert">{t(createError)}</p> : null}
       {list.kind === "loading" ? (
         <p role="status">{t("usPlan.loading")}</p>
       ) : list.kind === "failed" ? (
@@ -128,9 +216,7 @@ export function PlanView(props: PlanViewProps) {
                 timeZone={profile.timeZone}
                 selectedId={selectedId}
                 onSelect={(id) => {
-                  if (id === selectedId) return;
-                  setDetail({ kind: "loading" });
-                  setSelectedId(id);
+                  openVersion(id);
                 }}
               />
               {!list.value.items.some((item) => item.status === "effective") ? (
@@ -153,6 +239,52 @@ export function PlanView(props: PlanViewProps) {
                 <p>{t(detail.key)}</p>
                 <Button onClick={() => setDetailRetry((n) => n + 1)}>{t("usPlan.retry")}</Button>
               </div>
+            ) : editing && detail.value.status === "draft" ? (
+              <PlanEditor
+                key={detail.value.id}
+                draft={detail.value}
+                profile={profile}
+                canManageQa={props.canManageQa && !writeBlocked}
+                onSave={async (id, body) => {
+                  try {
+                    const acknowledgement = await client.savePlan(id, body);
+                    setDetail({
+                      kind: "ready",
+                      value: { ...acknowledgement, provenance: detail.value.provenance },
+                    });
+                    return acknowledgement;
+                  } finally {
+                    // Access refresh can unmount the editor after a rejected command.
+                    setSaving(false);
+                    onMutationPendingChange?.(false);
+                  }
+                }}
+                onReload={async () => {
+                  try {
+                    const value = await client.getPlan(detail.value.id);
+                    if (value.status !== "draft") {
+                      setDirty(false);
+                      props.onDirtyChange(false);
+                    }
+                    setDetail({ kind: "ready", value });
+                    return value;
+                  } finally {
+                    // A newly approved version replaces the editor with read-only detail.
+                    setSaving(false);
+                    onMutationPendingChange?.(false);
+                  }
+                }}
+                onStateChange={onEditorState}
+                onDirtyChange={(value) => {
+                  setDirty(value);
+                  props.onDirtyChange(value);
+                }}
+                onForbidden={onForbidden}
+                onSessionLost={onSessionLost}
+                onOpenProfile={props.onOpenProfile}
+                onOpenLocations={props.onOpenLocations}
+                onOpenProducts={props.onOpenProducts}
+              />
             ) : (
               <PlanDetail
                 detail={detail.value}
@@ -160,6 +292,7 @@ export function PlanView(props: PlanViewProps) {
                 onOpenLocations={props.onOpenLocations}
                 onOpenProducts={props.onOpenProducts}
                 onClose={() => {
+                  if (!mayLeave()) return;
                   const id = selectedId;
                   setSelectedId(null);
                   root.current?.querySelector<HTMLElement>(`[data-plan-version="${id}"]`)?.focus();

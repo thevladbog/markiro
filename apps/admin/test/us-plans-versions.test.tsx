@@ -178,7 +178,7 @@ it("renders Spanish detail with complete localized keys and no Russian fallback"
   expect(keys(planCopy["en-US"])).toEqual(keys(planCopy["es-US"]));
 });
 
-it("keeps the no-draft QA action disabled with the staged editor explanation", async () => {
+it("enables creation for QA when no draft exists", async () => {
   const { client, props } = setup(true);
   vi.spyOn(client, "listPlans").mockResolvedValue({
     ...list,
@@ -188,7 +188,7 @@ it("keeps the no-draft QA action disabled with the staged editor explanation", a
   });
   renderPlanUi(<PlanView {...props} />);
   await screen.findByText("No plan yet");
-  expect(screen.getByRole("button", { name: "New draft" }).hasAttribute("disabled")).toBe(true);
-  expect(screen.getByText("Draft editing is not available in this view yet.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "New draft" }).hasAttribute("disabled")).toBe(false);
+  expect(screen.getByText(/Start with the effective plan/)).toBeTruthy();
   expect(screen.getByText(/Draft approval still requires server validation/)).toBeTruthy();
 });
