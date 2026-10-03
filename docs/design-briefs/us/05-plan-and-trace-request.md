@@ -45,10 +45,13 @@ plan is "designed to support applicable FSMA 204 recordkeeping requirements"; ne
 
 ### 1. Plan versions list
 
-Route `/traceability/plans`. Table, newest first: **Version** (`v2`), **Status** chip with text
-(Draft / Effective / Superseded), **Effective date** (`09/10/2026`), **Approver** (name, title),
-**Change summary** (one line, tooltip for the rest), actions (View; Download PDF; Edit for the
-draft). Primary action **New draft**, disabled with a hint when a draft exists ("v3 is open").
+Conceptual route `/traceability/plans`; P0 uses the existing in-cabinet U.S. navigation. Table,
+newest first: **Version** (`v2`), **Status** chip with text (Draft / Effective / Superseded),
+**Effective date** (`09/10/2026`), **Provenance**, retention date when applicable, and actions
+(View; Download PDF; Edit for the draft). The version detail shows its change summary and, for a
+published version, the recorded approver user ID and approval time. P0 must not substitute the
+point-of-contact name/title or a mutable directory name for the approver. Primary action **New
+draft** is disabled with a hint when a draft exists ("v3 is open").
 
 Below the table a quiet **retention note**: "Prior versions are retained for at least 5 calendar years
 (tenant setting; minimum 2)". The number is data from the profile, not copy.
@@ -66,8 +69,8 @@ one superseded row; effective + configuration-changed banner; loading; error; st
 
 ### 2. Plan editor
 
-Route `/traceability/plans/:id` for the draft. `DataTabs`, one tab per section in the fixed order
-of the domain model:
+Conceptual detail `/traceability/plans/:id`; P0 selects the draft inside the cabinet. `DataTabs`,
+one tab per section in the fixed order of the domain model:
 
 | Tab                | Derived from configuration (read-only block)                                                   | User-editable                                                                                                 |
 | ------------------ | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
@@ -84,13 +87,14 @@ they are not automatically derived from architecture or storage settings. Narrat
 paragraphs (OQ-US08-10). A **Change summary** field sits above the tabs and is mandatory from v2
 on. Phone example: `+1 (503) 555-0120`.
 
-**Prohibited wording check, inline.** As the manager types, a phrase from the "Not allowed" column
-of docs/us/limitations.md ("FDA approved", "guarantees compliance", …) is underlined in the
-textarea and listed in a small issues panel quoting the phrase and naming the tab. Approve stays
-disabled while any issue exists. This is a validation state, not a spell-checker: unmissable, not
-shaming. The server checks affirmative variants with spaces, line breaks or hyphens; a simple
-explicit negative disclaimer such as "not FDA approved" is not marked as an affirmative claim.
-The editor may explain the bounded check, but must not present it as legal review.
+**Prohibited wording check.** As the manager types, a phrase from the "Not allowed" column
+of docs/us/limitations.md ("FDA approved", "guarantees compliance", …) is identified beside
+the affected plain-text field and in an issues panel naming the tab. Do not imply that the
+native textarea can underline only a substring. Approve stays disabled while server issues remain.
+This is a validation state, not a spell-checker: unmissable, not shaming. The server checks
+affirmative variants with spaces, line breaks or hyphens; a simple explicit negative disclaimer
+such as "not FDA approved" is not marked as an affirmative claim. The editor may explain the
+bounded check, but must not present it as legal review.
 
 Toolbar: **Save draft**, **Preview PDF** (opens a new tab, announced), **Approve**, **Discard
 draft** (confirmation; drafts are not regulated records, OQ-US08-4).
@@ -103,32 +107,39 @@ version (same tabs, no inputs, header "v1 — superseded on 09/10/2026 by v2"); 
 
 ### 3. Plan preview and PDF
 
-The PDF is rendered by the API and shown in the existing viewer chrome. Draw the **document itself**
+The PDF is rendered by the API and shown in the cabinet's document viewer. Draw the **document itself**
 (first and last page) because it is what the auditor will hold:
 
-- Header: tenant name, profile code, regulatory baseline ID and verified date (`US-REG-2026-09-03`),
-  **Version 2**, **Effective 09/10/2026 2:15 PM PDT (21:15 UTC)**, approver name and title.
-- The six sections in order; Farm map prints "Not applicable to this confirmed non-farm
-  operation" plus the explanation. A synthetic demo PDF shows its demo marker on every page.
-- **Change history** table on the last page: every prior version — number, effective date,
-  approver, change summary (OQ-US08-13).
-- Footer on every page: renderer version, "Page 2 of 5", the allowed-wording disclaimer.
+- Header: tenant name, profile code, regulatory baseline ID, **Version 2**, effective date with
+  timezone, recorded approver user ID and approval instant. The contact's name/title are a
+  separate operator statement, not the approver's identity.
+- The six plan sections in order, followed by provenance and limitations. Farm activity prints
+  the confirmed non-farm declaration plus its explanation; a synthetic demo PDF shows its demo
+  marker on every page.
+- **Change history** after the plan sections: every prior version — number, approval instant,
+  approver user ID, change summary (OQ-US08-13). The table may flow across final pages. This
+  approved P0 requirement is not yet in the current renderer and must be corrected before
+  claiming the Plan PDF complete.
+- Running page number on every page; renderer version and allowed-wording disclaimer in the
+  provenance/limitations section. Do not depict them in a footer the renderer does not produce.
 - There is **no "generated at"** line: the document is deterministic and prints only the effective
   date (OQ-US08-12). Do not add one.
 
 States to draw: draft preview with a diagonal "DRAFT — not effective" watermark; effective
 document; superseded document — the PDF is immutable, so "Superseded by v3 on 11/02/2026" lives in
 the **viewer header**, never on the page; download row with filename `traceability-plan-v2.pdf` and
-the SHA-256 (mono, copy button); viewer loading; "link expired, reopen" (download URLs live 300 s).
+the SHA-256 (mono, copy button); viewer loading; authenticated stream failure and retry. The P0
+HTTP endpoint streams a verified stored PDF; it does not issue a 300-second signed URL.
 
 ### 4. Approve flow
 
 `ConfirmDialog` from the design system, one screen, no wizard:
 
-- What happens: "Version 2 becomes effective now (09/10/2026 2:15 PM PDT) and supersedes v1."
+- What happens: "If approved, version 2 becomes effective and supersedes v1." Show the actual
+  server-recorded effective time only after success; do not predict it in the confirmation dialog.
 - Validation result: the issue list (each with its tab), or "All checks passed".
-- Approver line: "Approved by <you>, QA Manager" — self-approval is allowed in P0 and recorded
-  (OQ-US08-8).
+- Approver line: "Your account will be recorded as approver" — self-approval is allowed in P0.
+  The completed version displays the immutable approver user ID and approval time (OQ-US08-8).
 - Idempotent: pressing twice yields one effective version; show a neutral "Already approved"
   outcome, not an error.
 
@@ -290,8 +301,8 @@ layout is complete without it.
    propose one and note it on the mockup.
 3. Self-approval of the plan is allowed in P0 (OQ-US08-8): should the approve dialog show a soft
    "four-eyes recommended" hint, or stay silent?
-4. Prohibited-wording check: inline underline in the textarea, a side panel, or both? It must work
-   for Spanish narrative too.
+4. Resolved for P0: field-adjacent feedback and an issues panel, without substring underlining in
+   a native textarea. The server rule applies to English and Spanish narrative alike.
 5. Is the superseded marker in the viewer header enough, or should the versions list also badge the
    download as "historical"?
 
