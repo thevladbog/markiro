@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { UsClientError, type UsBrowserClient } from "../client.js";
 import { PlanVersions } from "./versions.js";
 import { PlanCurrentImpact, PlanDetail } from "./detail.js";
-import { PlanEditor, type PlanEditorState } from "./editor.js";
+import { PlanEditor } from "./editor.js";
 import { emptyPlanSections } from "./section-fields.js";
 import "./plans.css";
 
@@ -48,10 +48,10 @@ export function PlanView(props: PlanViewProps) {
   const [createError, setCreateError] = useState<string | null>(null);
   const createPending = useRef(false);
   const { onMutationPendingChange } = props;
-  const onEditorState = useCallback(
-    (state: PlanEditorState) => {
-      setSaving(state.saving);
-      onMutationPendingChange?.(state.saving);
+  const onEditorPending = useCallback(
+    (pending: boolean) => {
+      setSaving(pending);
+      onMutationPendingChange?.(pending);
     },
     [onMutationPendingChange],
   );
@@ -246,35 +246,23 @@ export function PlanView(props: PlanViewProps) {
                 profile={profile}
                 canManageQa={props.canManageQa && !writeBlocked}
                 onSave={async (id, body) => {
-                  try {
-                    const acknowledgement = await client.savePlan(id, body);
-                    setDetail({
-                      kind: "ready",
-                      value: { ...acknowledgement, provenance: detail.value.provenance },
-                    });
-                    return acknowledgement;
-                  } finally {
-                    // Access refresh can unmount the editor after a rejected command.
-                    setSaving(false);
-                    onMutationPendingChange?.(false);
-                  }
+                  const acknowledgement = await client.savePlan(id, body);
+                  setDetail({
+                    kind: "ready",
+                    value: { ...acknowledgement, provenance: detail.value.provenance },
+                  });
+                  return acknowledgement;
                 }}
                 onReload={async () => {
-                  try {
-                    const value = await client.getPlan(detail.value.id);
-                    if (value.status !== "draft") {
-                      setDirty(false);
-                      props.onDirtyChange(false);
-                    }
-                    setDetail({ kind: "ready", value });
-                    return value;
-                  } finally {
-                    // A newly approved version replaces the editor with read-only detail.
-                    setSaving(false);
-                    onMutationPendingChange?.(false);
+                  const value = await client.getPlan(detail.value.id);
+                  if (value.status !== "draft") {
+                    setDirty(false);
+                    props.onDirtyChange(false);
                   }
+                  setDetail({ kind: "ready", value });
+                  return value;
                 }}
-                onStateChange={onEditorState}
+                onMutationPendingChange={onEditorPending}
                 onDirtyChange={(value) => {
                   setDirty(value);
                   props.onDirtyChange(value);

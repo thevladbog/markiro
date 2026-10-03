@@ -15,6 +15,7 @@ export type PlanEditorProps = {
   onReload: () => Promise<UsPlanDetailResponse>;
   onDirtyChange: (dirty: boolean) => void;
   onStateChange?: (state: PlanEditorState) => void;
+  onMutationPendingChange?: (pending: boolean) => void;
   onForbidden: () => Promise<void>;
   onSessionLost: () => void;
   onOpenProfile: () => void;
@@ -23,7 +24,7 @@ export type PlanEditorProps = {
 };
 export function PlanEditor(props: PlanEditorProps) {
   const { t } = useTranslation();
-  const { onDirtyChange, onStateChange } = props;
+  const { onDirtyChange, onStateChange, onMutationPendingChange } = props;
   const [acknowledged, setAcknowledged] = useState(props.draft);
   const [sections, setSections] = useState(props.draft.sections);
   const [changeSummary, setChangeSummary] = useState(props.draft.changeSummary);
@@ -45,6 +46,12 @@ export function PlanEditor(props: PlanEditorProps) {
     onDirtyChange(dirty || saving);
     onStateChange?.({ dirty, saving, draftRevision: acknowledged.draftRevision });
   }, [dirty, saving, acknowledged.draftRevision, onDirtyChange, onStateChange]);
+  useEffect(() => {
+    // Saving includes access recovery after a rejection. Release on unmount too:
+    // revoked READ or a newly published version can remove this editor first.
+    onMutationPendingChange?.(saving);
+    return () => onMutationPendingChange?.(false);
+  }, [saving, onMutationPendingChange]);
   useEffect(() => {
     if (!dirty && !saving) return;
     const protect = (event: BeforeUnloadEvent) => {
