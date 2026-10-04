@@ -1,9 +1,11 @@
 import type {
   BadgeCreate,
+  CategoryTemplateDefault,
   CounterpartyCreate,
   CounterpartyUpdate,
   DeviceRecord,
   DeviceUpdate,
+  LabelTemplate,
   LineCreate,
   LineUpdate,
   OfficeLine,
@@ -11,6 +13,13 @@ import type {
   OperatorCreate,
   OperatorUpdate,
   PairingCodeRequest,
+  ProductCreate,
+  ProductUpdate,
+  TemplateCreate,
+  TemplateDefaultsUpdate,
+  TemplatePurpose,
+  TemplateSpec,
+  TemplateUpdate,
 } from "./protocol.js";
 
 // The office's request bodies, each built field by field and never spread
@@ -181,4 +190,158 @@ export interface BadgeInput {
 /** `POST /v1/office/operators/{id}/badges` (`badge-create.json`). */
 export function badgeCreate(badge: BadgeInput): BadgeCreate {
   return { badgePhc: badge.badgePhc, label: badge.label };
+}
+
+/**
+ * A product's fields: the trimmed values the form accepted, the GTIN as its
+ * 14 digits (`toGtin14`), `null` for a field left blank.
+ */
+export interface ProductInput {
+  gtin14: string;
+  name: string;
+  printName: string | null;
+  chzProductGroupCode: number | null;
+  boxCapacity: number | null;
+  palletBoxCapacity: number | null;
+  shelfLifeDays: number | null;
+  defaultBoxTemplateId: string | null;
+  defaultPalletTemplateId: string | null;
+}
+
+/** `POST /v1/office/products` (`product-create.json`): every field, `null` for none. */
+export function productCreate(product: ProductInput): ProductCreate {
+  return {
+    gtin14: product.gtin14,
+    name: product.name,
+    printName: product.printName,
+    chzProductGroupCode: product.chzProductGroupCode,
+    boxCapacity: product.boxCapacity,
+    palletBoxCapacity: product.palletBoxCapacity,
+    shelfLifeDays: product.shelfLifeDays,
+    defaultBoxTemplateId: product.defaultBoxTemplateId,
+    defaultPalletTemplateId: product.defaultPalletTemplateId,
+  };
+}
+
+/**
+ * `PUT /v1/office/products/{id}` (`product-update.json`): the whole record
+ * with `archived` and the loaded revision; `null` clears a field.
+ */
+export function productUpdate(
+  product: ProductInput,
+  archived: boolean,
+  expectedRev: number,
+): ProductUpdate {
+  return {
+    gtin14: product.gtin14,
+    name: product.name,
+    printName: product.printName,
+    chzProductGroupCode: product.chzProductGroupCode,
+    boxCapacity: product.boxCapacity,
+    palletBoxCapacity: product.palletBoxCapacity,
+    shelfLifeDays: product.shelfLifeDays,
+    defaultBoxTemplateId: product.defaultBoxTemplateId,
+    defaultPalletTemplateId: product.defaultPalletTemplateId,
+    archived,
+    expectedRev,
+  };
+}
+
+/**
+ * A new template: the trimmed name, the purpose, the categories (`null` for
+ * every category) and the layout the editor checked.
+ */
+export interface TemplateInput {
+  name: string;
+  purpose: TemplatePurpose;
+  enabled: boolean;
+  chzProductGroupCodes: readonly number[] | null;
+  spec: TemplateSpec;
+}
+
+/** `POST /v1/office/templates` (`template-create.json`). */
+export function templateCreate(template: TemplateInput): TemplateCreate {
+  return {
+    name: template.name,
+    purpose: template.purpose,
+    enabled: template.enabled,
+    chzProductGroupCodes:
+      template.chzProductGroupCodes === null ? null : [...template.chzProductGroupCodes],
+    spec: template.spec,
+  };
+}
+
+/**
+ * What a template is to become; a field left out stays as it is. `null`
+ * categories widen the template to every category; no other field takes
+ * `null`.
+ */
+export interface TemplateChange {
+  name?: string;
+  enabled?: boolean;
+  chzProductGroupCodes?: readonly number[] | null;
+  spec?: TemplateSpec;
+}
+
+/** Whether two category lists are the same, in the same order (`null` is every category). */
+function sameCodes(a: readonly number[] | null, b: readonly number[] | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.length === b.length && a.every((code, index) => code === b[index]);
+}
+
+/**
+ * `PUT /v1/office/templates/{id}` (`template-update.json`): the name, the
+ * enabled flag and the categories that differ from the loaded template, with
+ * its revision. Categories go in the order given, so a reordered list is a
+ * change. A layout goes whenever one is given: comparing layouts of up to
+ * 256 KB is the host's work, and an unchanged one writes nothing there.
+ */
+export function templateUpdate(
+  template: Pick<LabelTemplate, "name" | "enabled" | "chzProductGroupCodes" | "rev">,
+  next: TemplateChange,
+): TemplateUpdate {
+  const update: TemplateUpdate = { expectedRev: template.rev };
+  if (next.name !== undefined && next.name !== template.name) update.name = next.name;
+  if (next.enabled !== undefined && next.enabled !== template.enabled) {
+    update.enabled = next.enabled;
+  }
+  if (
+    next.chzProductGroupCodes !== undefined &&
+    !sameCodes(next.chzProductGroupCodes, template.chzProductGroupCodes)
+  ) {
+    update.chzProductGroupCodes =
+      next.chzProductGroupCodes === null ? null : [...next.chzProductGroupCodes];
+  }
+  if (next.spec !== undefined) update.spec = next.spec;
+  return update;
+}
+
+/** The template defaults as they are to become: each organization default (`null` for none) and every category default. */
+export interface TemplateDefaultsInput {
+  defaultBoxTemplateId: string | null;
+  defaultPalletTemplateId: string | null;
+  defaultDuplicateTemplateId: string | null;
+  categories: readonly CategoryTemplateDefault[];
+}
+
+/**
+ * `PUT /v1/office/template-defaults` (`template-defaults-update.json`): the
+ * whole document with the loaded revision; a category default left out is
+ * cleared.
+ */
+export function templateDefaultsUpdate(
+  defaults: TemplateDefaultsInput,
+  expectedRev: number,
+): TemplateDefaultsUpdate {
+  return {
+    defaultBoxTemplateId: defaults.defaultBoxTemplateId,
+    defaultPalletTemplateId: defaults.defaultPalletTemplateId,
+    defaultDuplicateTemplateId: defaults.defaultDuplicateTemplateId,
+    categories: defaults.categories.map((entry) => ({
+      chzProductGroupCode: entry.chzProductGroupCode,
+      purpose: entry.purpose,
+      templateId: entry.templateId,
+    })),
+    expectedRev,
+  };
 }

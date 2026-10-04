@@ -8,15 +8,20 @@ import {
   changesResponseSchema,
   counterpartyRecordSchema,
   deviceRecordSchema,
+  labelTemplateSchema,
+  labelTemplateSummarySchema,
   officeLineSchema,
   officeOperatorSchema,
+  officeProductSchema,
   officeSessionSchema,
   officeUserRecordSchema,
   officeUserSchema,
   orgProfileSchema,
   pairingCodeSchema,
+  productGroupSchema,
   ssccCounterSchema,
   ssccStateSchema,
+  templateDefaultsSchema,
   type BadgeCreate,
   type BadgeInfo,
   type BadgeSalt,
@@ -29,11 +34,14 @@ import {
   type CounterpartyUpdate,
   type DeviceRecord,
   type DeviceUpdate,
+  type LabelTemplate,
+  type LabelTemplateSummary,
   type LineCreate,
   type LineUpdate,
   type OfficeLine,
   type OfficeLoginRequest,
   type OfficeOperator,
+  type OfficeProduct,
   type OfficeSession,
   type OfficeUser,
   type OfficeUserCreate,
@@ -47,9 +55,16 @@ import {
   type PairingCodeRequest,
   type PasswordChange,
   type PasswordSet,
+  type ProductCreate,
+  type ProductGroup,
+  type ProductUpdate,
   type SsccCounter,
   type SsccCounterUpdate,
   type SsccState,
+  type TemplateCreate,
+  type TemplateDefaults,
+  type TemplateDefaultsUpdate,
+  type TemplateUpdate,
 } from "./protocol.js";
 
 /** An SSCC counter's address: its issuer prefix and extension digit (0 box, 1 pallet). */
@@ -114,6 +129,25 @@ export interface HostApi {
   revokeBadge: (token: string, operatorId: string, badgeId: string) => Promise<void>;
   /** The site's badge salt; `not_found` before the wizard created it. */
   getBadgeSalt: (token: string) => Promise<BadgeSalt>;
+  /** The ЧЗ product groups, by code: a static lookup. */
+  listProductGroups: (token: string) => Promise<ProductGroup[]>;
+  /** Every product, archived ones included. */
+  listProducts: (token: string) => Promise<OfficeProduct[]>;
+  createProduct: (token: string, create: ProductCreate) => Promise<OfficeProduct>;
+  updateProduct: (token: string, id: string, update: ProductUpdate) => Promise<OfficeProduct>;
+  /** Every template, without its layout. */
+  listTemplates: (token: string) => Promise<LabelTemplateSummary[]>;
+  /** One template with its layout. */
+  getTemplate: (token: string, id: string) => Promise<LabelTemplate>;
+  createTemplate: (token: string, create: TemplateCreate) => Promise<LabelTemplate>;
+  updateTemplate: (token: string, id: string, update: TemplateUpdate) => Promise<LabelTemplate>;
+  /** `204`; deleting it again after a lost answer answers `204` too. */
+  deleteTemplate: (token: string, id: string) => Promise<void>;
+  getTemplateDefaults: (token: string) => Promise<TemplateDefaults>;
+  updateTemplateDefaults: (
+    token: string,
+    update: TemplateDefaultsUpdate,
+  ) => Promise<TemplateDefaults>;
 }
 
 /** A 204 answer parses as `null`. */
@@ -277,6 +311,67 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", "/v1/office/badge-salt", {
         officeToken: token,
         schema: badgeSaltSchema,
+      }),
+    listProductGroups: (token) =>
+      client.request("GET", "/v1/office/product-groups", {
+        officeToken: token,
+        schema: z.array(productGroupSchema),
+      }),
+    listProducts: (token) =>
+      client.request("GET", "/v1/office/products", {
+        officeToken: token,
+        schema: z.array(officeProductSchema),
+      }),
+    createProduct: (token, create) =>
+      client.request("POST", "/v1/office/products", {
+        body: create,
+        officeToken: token,
+        schema: officeProductSchema,
+      }),
+    updateProduct: (token, id, update) =>
+      client.request("PUT", `/v1/office/products/${id}`, {
+        body: update,
+        officeToken: token,
+        schema: officeProductSchema,
+      }),
+    listTemplates: (token) =>
+      client.request("GET", "/v1/office/templates", {
+        officeToken: token,
+        schema: z.array(labelTemplateSummarySchema),
+      }),
+    getTemplate: (token, id) =>
+      client.request("GET", `/v1/office/templates/${id}`, {
+        officeToken: token,
+        schema: labelTemplateSchema,
+      }),
+    createTemplate: (token, create) =>
+      client.request("POST", "/v1/office/templates", {
+        body: create,
+        officeToken: token,
+        schema: labelTemplateSchema,
+      }),
+    updateTemplate: (token, id, update) =>
+      client.request("PUT", `/v1/office/templates/${id}`, {
+        body: update,
+        officeToken: token,
+        schema: labelTemplateSchema,
+      }),
+    deleteTemplate: async (token, id) => {
+      await client.request("DELETE", `/v1/office/templates/${id}`, {
+        officeToken: token,
+        schema: NO_CONTENT,
+      });
+    },
+    getTemplateDefaults: (token) =>
+      client.request("GET", "/v1/office/template-defaults", {
+        officeToken: token,
+        schema: templateDefaultsSchema,
+      }),
+    updateTemplateDefaults: (token, update) =>
+      client.request("PUT", "/v1/office/template-defaults", {
+        body: update,
+        officeToken: token,
+        schema: templateDefaultsSchema,
       }),
   };
 }

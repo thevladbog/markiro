@@ -61,6 +61,40 @@ export type OfficeRole = z.infer<typeof officeRoleSchema>;
 export const credentialSchema = z.enum(["device", "session", "password"]);
 export type Credential = z.infer<typeof credentialSchema>;
 
+/** Mirrors `markiro_proto::TemplatePurpose`: what a label template prints. */
+export const templatePurposeSchema = z.enum(["box", "pallet", "product_duplicate"]);
+export type TemplatePurpose = z.infer<typeof templatePurposeSchema>;
+
+/**
+ * Mirrors `markiro_proto::ProductStatus`: `active` once a product has a group
+ * and both capacities, `draft` before. The host computes it; nobody sends it.
+ */
+export const productStatusSchema = z.enum(["draft", "active"]);
+export type ProductStatus = z.infer<typeof productStatusSchema>;
+
+/** A ЧЗ product group's code (a `u32` in `proto`). */
+const groupCodeSchema = z.number().int().nonnegative();
+
+/** A template's categories: `null` for every category, otherwise the group codes. */
+const groupCodesSchema = z.array(groupCodeSchema).nullable();
+
+/** A count a product may leave empty: units in a box, boxes on a pallet, days (a `u32` in `proto`). */
+const countSchema = z.number().int().nonnegative().nullable();
+
+/**
+ * A label layout as the host keeps it: a JSON object, read as an opaque
+ * value. Its own contract (the domain's `labelTemplateSpecSchema`) is checked
+ * where a layout is used — by the template editor before it saves (plan 1e3)
+ * and by the station before it prints (plan 2a) — never at sync time. A
+ * dynamic-key `z.record` would put keys taken from the data into a quarantine
+ * reason's paths (`AGENTS.md`, "Reference sync"); this check gives one
+ * `custom` issue.
+ */
+export const templateSpecSchema = z.custom<Record<string, unknown>>(
+  (value) => typeof value === "object" && value !== null && !Array.isArray(value),
+);
+export type TemplateSpec = z.infer<typeof templateSpecSchema>;
+
 // --- The Rust shell's own payloads (strict) ---
 
 /** `device_status` / `host_local_pair`: the pairing, never the device key. */
@@ -349,6 +383,98 @@ export type OfficeOperator = z.infer<typeof officeOperatorSchema>;
 export const badgeSaltSchema = z.object({ badgeSalt: canonicalSaltSchema });
 export type BadgeSalt = z.infer<typeof badgeSaltSchema>;
 
+/**
+ * `GET /v1/office/product-groups`: a ЧЗ product group, the cloud's static
+ * lookup. The host answers a bare list by code, not the cloud's `{ items }`.
+ */
+export const productGroupSchema = z.object({
+  code: groupCodeSchema,
+  alias: z.string(),
+  name: z.string(),
+});
+export type ProductGroup = z.infer<typeof productGroupSchema>;
+
+/**
+ * `GET /v1/office/products`: a product as the office sees it, archived ones
+ * included. `gtin14` is the 14 digits the office saved; the two templates are
+ * preferences, which the host checks only for their purpose.
+ */
+export const officeProductSchema = z.object({
+  id: z.uuid(),
+  gtin14: z.string(),
+  name: z.string(),
+  printName: z.string().nullable(),
+  chzProductGroupCode: groupCodeSchema.nullable(),
+  boxCapacity: countSchema,
+  palletBoxCapacity: countSchema,
+  shelfLifeDays: countSchema,
+  defaultBoxTemplateId: z.uuid().nullable(),
+  defaultPalletTemplateId: z.uuid().nullable(),
+  archived: z.boolean(),
+  status: productStatusSchema,
+  rev: z.number().int(),
+});
+export type OfficeProduct = z.infer<typeof officeProductSchema>;
+
+/**
+ * `GET /v1/office/templates`: a label template without its layout. The size,
+ * the resolution and the language come from the stored layout as they stand:
+ * `null` where it has nothing of the right type, and a size may be fractional.
+ */
+export const labelTemplateSummarySchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  purpose: templatePurposeSchema,
+  enabled: z.boolean(),
+  chzProductGroupCodes: groupCodesSchema,
+  stock: z.boolean(),
+  widthMm: z.number().nullable(),
+  heightMm: z.number().nullable(),
+  dpi: z.number().int().nonnegative().nullable(),
+  language: z.string().nullable(),
+  rev: z.number().int(),
+});
+export type LabelTemplateSummary = z.infer<typeof labelTemplateSummarySchema>;
+
+/** `GET /v1/office/templates/{id}`, and the answer of `POST` and `PUT`: a template with its layout. */
+export const labelTemplateSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  purpose: templatePurposeSchema,
+  enabled: z.boolean(),
+  chzProductGroupCodes: groupCodesSchema,
+  stock: z.boolean(),
+  spec: templateSpecSchema,
+  rev: z.number().int(),
+});
+export type LabelTemplate = z.infer<typeof labelTemplateSchema>;
+
+/**
+ * A category's default template of one purpose: an entry of the template
+ * defaults, and `data` of a `category_template_defaults` feed item, whose id
+ * is `<code>:<purpose>` (`markiro_proto::CategoryTemplateDefault` is both).
+ */
+export const categoryTemplateDefaultSchema = z.object({
+  chzProductGroupCode: groupCodeSchema,
+  purpose: templatePurposeSchema,
+  templateId: z.uuid(),
+});
+export type CategoryTemplateDefault = z.infer<typeof categoryTemplateDefaultSchema>;
+
+/**
+ * `GET /v1/office/template-defaults`: the organization's default of each
+ * purpose and every category's, by code then purpose, as one document with its
+ * revision.
+ */
+export const templateDefaultsSchema = z.object({
+  defaultBoxTemplateId: z.uuid().nullable(),
+  defaultPalletTemplateId: z.uuid().nullable(),
+  defaultDuplicateTemplateId: z.uuid().nullable(),
+  categories: z.array(categoryTemplateDefaultSchema),
+  rev: z.number().int(),
+});
+export type TemplateDefaults = z.infer<typeof templateDefaultsSchema>;
+
 // --- Request bodies (strict) ---
 
 export const officeLoginRequestSchema = z
@@ -380,12 +506,30 @@ export const ssccStartSchema = z
   .strict();
 export type SsccStart = z.infer<typeof ssccStartSchema>;
 
+/**
+ * A stock label template of the wizard (plan 1e3 sends them): stored enabled,
+ * for every category, and kept as it came. `orgDefault: true` makes it the
+ * organization's default of its purpose; left out it is `false`, and the host
+ * refuses `null` there.
+ */
+export const stockTemplateSchema = z
+  .object({
+    name: z.string(),
+    purpose: templatePurposeSchema,
+    spec: templateSpecSchema,
+    orgDefault: z.boolean().optional(),
+  })
+  .strict();
+export type StockTemplate = z.infer<typeof stockTemplateSchema>;
+
+/** `templates` may be left out (a wizard before plan 1e3), never `null`. */
 export const bootstrapRequestSchema = z
   .object({
     admin: newOfficeUserSchema,
     org: orgProfileInputSchema,
     sscc: ssccStartSchema,
     lines: z.array(z.string()),
+    templates: z.array(stockTemplateSchema).optional(),
   })
   .strict();
 export type BootstrapRequest = z.infer<typeof bootstrapRequestSchema>;
@@ -516,3 +660,99 @@ export const badgeCreateSchema = z
   .object({ badgePhc: z.string(), label: z.string().nullable() })
   .strict();
 export type BadgeCreate = z.infer<typeof badgeCreateSchema>;
+
+/**
+ * `POST /v1/office/products`: the GTIN as its 14 digits; the office sends
+ * every field, `null` for one left blank.
+ */
+export const productCreateSchema = z
+  .object({
+    gtin14: z.string(),
+    name: z.string(),
+    printName: z.string().nullable(),
+    chzProductGroupCode: groupCodeSchema.nullable(),
+    boxCapacity: countSchema,
+    palletBoxCapacity: countSchema,
+    shelfLifeDays: countSchema,
+    defaultBoxTemplateId: z.uuid().nullable(),
+    defaultPalletTemplateId: z.uuid().nullable(),
+  })
+  .strict();
+export type ProductCreate = z.infer<typeof productCreateSchema>;
+
+/**
+ * `PUT /v1/office/products/{id}`: the whole record with `archived` and the
+ * loaded revision, as a counterparty's; `null` clears a field.
+ */
+export const productUpdateSchema = z
+  .object({
+    gtin14: z.string(),
+    name: z.string(),
+    printName: z.string().nullable(),
+    chzProductGroupCode: groupCodeSchema.nullable(),
+    boxCapacity: countSchema,
+    palletBoxCapacity: countSchema,
+    shelfLifeDays: countSchema,
+    defaultBoxTemplateId: z.uuid().nullable(),
+    defaultPalletTemplateId: z.uuid().nullable(),
+    archived: z.boolean(),
+    expectedRev: z.number().int(),
+  })
+  .strict();
+export type ProductUpdate = z.infer<typeof productUpdateSchema>;
+
+/** `POST /v1/office/templates`: a template of the office's own; `chzProductGroupCodes: null` for every category. */
+export const templateCreateSchema = z
+  .object({
+    name: z.string(),
+    purpose: templatePurposeSchema,
+    enabled: z.boolean(),
+    chzProductGroupCodes: groupCodesSchema,
+    spec: templateSpecSchema,
+  })
+  .strict();
+export type TemplateCreate = z.infer<typeof templateCreateSchema>;
+
+/**
+ * `PUT /v1/office/templates/{id}`: only the fields sent change. Categories
+ * have three states: left out keeps them, `null` widens the template to every
+ * category, a list narrows it to those. `name`, `enabled` and `spec` are left
+ * out or a value, never `null`: the host would read `null` there as «keep»,
+ * which only leaving the field out says here. A purpose never changes, so it
+ * is no field.
+ */
+export const templateUpdateSchema = z
+  .object({
+    name: z.string().optional(),
+    enabled: z.boolean().optional(),
+    chzProductGroupCodes: groupCodesSchema.optional(),
+    spec: templateSpecSchema.optional(),
+    expectedRev: z.number().int(),
+  })
+  .strict();
+export type TemplateUpdate = z.infer<typeof templateUpdateSchema>;
+
+/** A category default in `PUT /v1/office/template-defaults`. */
+export const categoryTemplateDefaultInputSchema = z
+  .object({
+    chzProductGroupCode: groupCodeSchema,
+    purpose: templatePurposeSchema,
+    templateId: z.uuid(),
+  })
+  .strict();
+
+/**
+ * `PUT /v1/office/template-defaults`: the whole document over the loaded
+ * revision. An organization default `null` is none; a category default left
+ * out of `categories` is cleared.
+ */
+export const templateDefaultsUpdateSchema = z
+  .object({
+    defaultBoxTemplateId: z.uuid().nullable(),
+    defaultPalletTemplateId: z.uuid().nullable(),
+    defaultDuplicateTemplateId: z.uuid().nullable(),
+    categories: z.array(categoryTemplateDefaultInputSchema),
+    expectedRev: z.number().int(),
+  })
+  .strict();
+export type TemplateDefaultsUpdate = z.infer<typeof templateDefaultsUpdateSchema>;

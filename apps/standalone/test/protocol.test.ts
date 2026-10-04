@@ -19,12 +19,15 @@ import {
   deviceUpdateSchema,
   errorBodySchema,
   helloSchema,
+  labelTemplateSchema,
+  labelTemplateSummarySchema,
   lineCreateSchema,
   lineRecordSchema,
   lineUpdateSchema,
   officeLineSchema,
   officeLoginRequestSchema,
   officeOperatorSchema,
+  officeProductSchema,
   officeSessionSchema,
   officeUserCreateSchema,
   officeUserRecordSchema,
@@ -41,9 +44,18 @@ import {
   pairingCodeSchema,
   passwordChangeSchema,
   passwordSetSchema,
+  productCreateSchema,
+  productGroupSchema,
+  productUpdateSchema,
   siteRecordSchema,
   ssccCounterUpdateSchema,
   ssccStateSchema,
+  stockTemplateSchema,
+  templateCreateSchema,
+  templateDefaultsSchema,
+  templateDefaultsUpdateSchema,
+  templateSpecSchema,
+  templateUpdateSchema,
 } from "../src/host/protocol.js";
 import {
   badgeCreate,
@@ -55,6 +67,11 @@ import {
   operatorCreate,
   operatorUpdate,
   pairingCodeRequest,
+  productCreate,
+  productUpdate,
+  templateCreate,
+  templateDefaultsUpdate,
+  templateUpdate,
 } from "../src/host/requests.js";
 
 // Vite statically rewrites the literal pattern `new URL(..., import.meta.url)`
@@ -198,6 +215,12 @@ const RESPONSES = [
   ["office-line.json", officeLineSchema],
   ["office-operator.json", officeOperatorSchema],
   ["badge-salt.json", badgeSaltSchema],
+  ["product-group.json", productGroupSchema],
+  ["office-product.json", officeProductSchema],
+  ["template-summary.json", labelTemplateSummarySchema],
+  ["label-template.json", labelTemplateSchema],
+  ["template-defaults.json", templateDefaultsSchema],
+  ["error-template-is-default.json", errorBodySchema],
 ] as const;
 
 const REQUESTS = [
@@ -219,6 +242,12 @@ const REQUESTS = [
   ["operator-create.json", operatorCreateSchema],
   ["operator-update.json", operatorUpdateSchema],
   ["badge-create.json", badgeCreateSchema],
+  ["product-create.json", productCreateSchema],
+  ["product-update.json", productUpdateSchema],
+  ["template-create.json", templateCreateSchema],
+  ["template-update.json", templateUpdateSchema],
+  ["template-defaults-update.json", templateDefaultsUpdateSchema],
+  ["bootstrap-request-templates.json", bootstrapRequestSchema],
 ] as const;
 
 function extended(name: string): Record<string, unknown> {
@@ -408,6 +437,131 @@ describe("request builders produce their fixtures exactly", () => {
     const scanned = { badgePhc, label: "Пропуск №7", code: "MRK-000742" };
     expect(badgeCreate(scanned)).toStrictEqual(fixture("badge-create.json"));
   });
+
+  it("a product to create, and one to update that clears the print name and archives it", () => {
+    // A form holds more than the builder names: the GTIN as typed must not go.
+    const typed = {
+      gtin14: "04600682000013",
+      name: "Молоко 3,2% 0,9 л",
+      printName: "Молоко 3,2%",
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 40,
+      shelfLifeDays: 10,
+      defaultBoxTemplateId: "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+      defaultPalletTemplateId: null,
+      gtin: "4600682000013",
+    };
+    expect(productCreate(typed)).toStrictEqual(fixture("product-create.json"));
+    const product = officeProductSchema.parse(fixture("office-product.json"));
+    expect(
+      productUpdate({ ...product, printName: null, palletBoxCapacity: 48 }, true, product.rev),
+    ).toStrictEqual(fixture("product-update.json"));
+  });
+
+  it("a template to create, and one to update that turns it off and adds a category", () => {
+    const { spec } = templateCreateSchema.parse(fixture("template-create.json"));
+    expect(
+      templateCreate({
+        name: "Молоко 58×40",
+        purpose: "box",
+        enabled: true,
+        chzProductGroupCodes: null,
+        spec,
+      }),
+    ).toStrictEqual(fixture("template-create.json"));
+    const template = labelTemplateSchema.parse(fixture("label-template.json"));
+    expect(
+      templateUpdate(template, {
+        name: template.name,
+        enabled: false,
+        chzProductGroupCodes: [8, 15],
+      }),
+    ).toStrictEqual(fixture("template-update.json"));
+  });
+
+  it("the template defaults, whole, over an older revision", () => {
+    const defaults = templateDefaultsSchema.parse(fixture("template-defaults.json"));
+    // The document's own `rev` is not sent: the builder names the fields it sends.
+    expect(templateDefaultsUpdate(defaults, 63)).toStrictEqual(
+      fixture("template-defaults-update.json"),
+    );
+  });
+
+  it("a template for some categories, switched off and of another purpose, from the fields it names", () => {
+    const codes = [8, 15];
+    const spec = { widthMm: 100, heightMm: 150 };
+    // A form holds more than the builder names: the note typed beside the name must not go.
+    const typed = {
+      name: "Паллета 100×150",
+      purpose: "pallet",
+      enabled: false,
+      chzProductGroupCodes: codes,
+      spec,
+      note: "для склада",
+    } as const;
+    const body = templateCreate(typed);
+    expect(body).toStrictEqual({
+      name: "Паллета 100×150",
+      purpose: "pallet",
+      enabled: false,
+      chzProductGroupCodes: [8, 15],
+      spec,
+    });
+    // The list sent is a copy: a later change to the caller's array does not reach it.
+    codes.push(3);
+    expect(body.chzProductGroupCodes).toEqual([8, 15]);
+  });
+
+  it("template defaults that keep each slot's own template and send only the fields they name", () => {
+    const box = "7c1e4b2a-9d3f-4e5a-8b6c-1d2e3f4a5b6c";
+    const pallet = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+    const duplicate = "0b1c2d3e-4f5a-4b6c-8d7e-8f9a0b1c2d3e";
+    const categories = [
+      { chzProductGroupCode: 8, purpose: "pallet", templateId: pallet },
+      { chzProductGroupCode: 15, purpose: "product_duplicate", templateId: duplicate },
+    ] as const;
+    // A table row holds more than the entry names: its caption must not go.
+    const rows = categories.map((entry) => ({ ...entry, caption: "Молочная продукция" }));
+    expect(
+      templateDefaultsUpdate(
+        {
+          defaultBoxTemplateId: box,
+          defaultPalletTemplateId: pallet,
+          defaultDuplicateTemplateId: duplicate,
+          categories: rows,
+        },
+        9,
+      ),
+    ).toStrictEqual({
+      defaultBoxTemplateId: box,
+      defaultPalletTemplateId: pallet,
+      defaultDuplicateTemplateId: duplicate,
+      categories: [
+        { chzProductGroupCode: 8, purpose: "pallet", templateId: pallet },
+        { chzProductGroupCode: 15, purpose: "product_duplicate", templateId: duplicate },
+      ],
+      expectedRev: 9,
+    });
+    // No default at all: `null` for each slot and an empty list.
+    expect(
+      templateDefaultsUpdate(
+        {
+          defaultBoxTemplateId: null,
+          defaultPalletTemplateId: null,
+          defaultDuplicateTemplateId: null,
+          categories: [],
+        },
+        9,
+      ),
+    ).toStrictEqual({
+      defaultBoxTemplateId: null,
+      defaultPalletTemplateId: null,
+      defaultDuplicateTemplateId: null,
+      categories: [],
+      expectedRev: 9,
+    });
+  });
 });
 
 describe("request builders send only what changes", () => {
@@ -485,6 +639,89 @@ describe("request builders send only what changes", () => {
     expect(operatorUpdate(anna, { pinPhc })).toStrictEqual({ pinPhc, expectedRev: 55 });
   });
 
+  it("names only the template fields that differ, with three states for the categories", () => {
+    const template = { name: "Молоко 58×40", enabled: true, chzProductGroupCodes: [8], rev: 62 };
+    const everyCategory = { ...template, chzProductGroupCodes: null };
+    // Left out: kept. The same list: no change.
+    expect(templateUpdate(template, {})).toStrictEqual({ expectedRev: 62 });
+    expect(
+      templateUpdate(template, { name: "Молоко 58×40", enabled: true, chzProductGroupCodes: [8] }),
+    ).toStrictEqual({ expectedRev: 62 });
+    // `null`: every category; a list: those, in the order given.
+    expect(templateUpdate(template, { chzProductGroupCodes: null })).toStrictEqual({
+      chzProductGroupCodes: null,
+      expectedRev: 62,
+    });
+    expect(templateUpdate(everyCategory, { chzProductGroupCodes: [15] })).toStrictEqual({
+      chzProductGroupCodes: [15],
+      expectedRev: 62,
+    });
+    expect(templateUpdate(everyCategory, { chzProductGroupCodes: null })).toStrictEqual({
+      expectedRev: 62,
+    });
+    expect(
+      templateUpdate(
+        { ...template, chzProductGroupCodes: [8, 15] },
+        { chzProductGroupCodes: [15, 8] },
+      ),
+    ).toStrictEqual({ chzProductGroupCodes: [15, 8], expectedRev: 62 });
+    expect(templateUpdate(template, { name: "Молоко 58×40 (2)", enabled: false })).toStrictEqual({
+      name: "Молоко 58×40 (2)",
+      enabled: false,
+      expectedRev: 62,
+    });
+    // A layout goes whenever it is given.
+    const spec = { widthMm: 58, heightMm: 40 };
+    expect(templateUpdate(template, { spec })).toStrictEqual({ spec, expectedRev: 62 });
+  });
+
+  it("calls a narrower or a wider category list a change, and sends a copy of the list", () => {
+    const template = {
+      name: "Молоко 58×40",
+      enabled: true,
+      chzProductGroupCodes: [8, 15],
+      rev: 62,
+    };
+    // The shorter list is the front of the loaded one: still a change.
+    expect(templateUpdate(template, { chzProductGroupCodes: [8] })).toStrictEqual({
+      chzProductGroupCodes: [8],
+      expectedRev: 62,
+    });
+    expect(
+      templateUpdate({ ...template, chzProductGroupCodes: [8] }, { chzProductGroupCodes: [8, 15] }),
+    ).toStrictEqual({ chzProductGroupCodes: [8, 15], expectedRev: 62 });
+    // The list sent is a copy: a later change to the caller's array does not reach it.
+    const codes = [15];
+    const body = templateUpdate(
+      { ...template, chzProductGroupCodes: null },
+      { chzProductGroupCodes: codes },
+    );
+    codes.push(3);
+    expect(body.chzProductGroupCodes).toEqual([15]);
+  });
+
+  it("builds only bodies the update schema takes: nothing, one field or all of them", () => {
+    const template = { name: "Молоко 58×40", enabled: true, chzProductGroupCodes: [8], rev: 62 };
+    const spec = { widthMm: 58, heightMm: 40 };
+    const bodies = [
+      templateUpdate(template, {}),
+      templateUpdate(template, { name: "Молоко 58×40 (2)" }),
+      templateUpdate(template, { enabled: false }),
+      templateUpdate(template, { chzProductGroupCodes: null }),
+      templateUpdate(template, { chzProductGroupCodes: [15] }),
+      templateUpdate(template, { spec }),
+      templateUpdate(template, {
+        name: "Молоко 58×40 (2)",
+        enabled: false,
+        chzProductGroupCodes: [15],
+        spec,
+      }),
+    ];
+    for (const body of bodies) {
+      expect(templateUpdateSchema.parse(body)).toStrictEqual(body);
+    }
+  });
+
   it("copies the prefix list rather than handing over the caller's array", () => {
     const gs1Prefixes = ["4601234"];
     const body = counterpartyCreate({
@@ -495,6 +732,165 @@ describe("request builders send only what changes", () => {
     });
     gs1Prefixes.push("4609876");
     expect(body.gs1Prefixes).toEqual(["4601234"]);
+  });
+});
+
+describe("catalog shapes", () => {
+  it("read a template-is-default refusal with the defaults the change would break", () => {
+    const body = errorBodySchema.parse(fixture("error-template-is-default.json"));
+    expect(body.error.code).toBe("conflict");
+    expect(body.error.details).toEqual({
+      constraint: "template_is_default",
+      organizationDefault: true,
+      categoryDefaults: [8, 15],
+    });
+  });
+
+  it("read a summary whose layout has no size, resolution or language, or a fractional size", () => {
+    const summary = labelTemplateSummarySchema.parse(fixture("template-summary.json"));
+    const bare = { ...summary, widthMm: null, heightMm: null, dpi: null, language: null };
+    expect(labelTemplateSummarySchema.parse(bare)).toEqual(bare);
+    const fractional = { ...summary, widthMm: 58.5, heightMm: 39.75 };
+    expect(labelTemplateSummarySchema.parse(fractional)).toEqual(fractional);
+    expect(labelTemplateSummarySchema.safeParse({ ...summary, dpi: 203.5 }).success).toBe(false);
+  });
+
+  it("read a layout as an opaque object: any keys, never an array, a scalar or nothing", () => {
+    const layout = { "10": "ten", widthMm: 58, elements: [{ kind: "field", id: "name" }] };
+    expect(templateSpecSchema.parse(layout)).toBe(layout);
+    expect(templateSpecSchema.safeParse({}).success).toBe(true);
+    for (const value of [[], "{}", 58, null, undefined]) {
+      expect(templateSpecSchema.safeParse(value).error?.issues.map((issue) => issue.code)).toEqual([
+        "custom",
+      ]);
+    }
+  });
+
+  it("refuse null where the host does not take it: a template's name, flag and layout, orgDefault, templates", () => {
+    for (const field of ["name", "enabled", "spec"]) {
+      expect(templateUpdateSchema.safeParse({ [field]: null, expectedRev: 62 }).success).toBe(
+        false,
+      );
+    }
+    expect(
+      templateUpdateSchema.safeParse({ chzProductGroupCodes: null, expectedRev: 62 }).success,
+    ).toBe(true);
+    const request = bootstrapRequestSchema.parse(fixture("bootstrap-request-templates.json"));
+    const [stock] = request.templates ?? [];
+    expect(stockTemplateSchema.safeParse({ ...stock, orgDefault: null }).success).toBe(false);
+    expect(bootstrapRequestSchema.safeParse({ ...request, templates: null }).success).toBe(false);
+  });
+
+  it("read a draft product, and refuse an unknown status, a count that is no whole number or an id that is no UUID", () => {
+    const product = officeProductSchema.parse(fixture("office-product.json"));
+    // Before it has a group and both capacities a product is a draft, and all of them are blank.
+    const draft = {
+      ...product,
+      printName: null,
+      chzProductGroupCode: null,
+      boxCapacity: null,
+      palletBoxCapacity: null,
+      shelfLifeDays: null,
+      defaultBoxTemplateId: null,
+      defaultPalletTemplateId: null,
+      status: "draft",
+    };
+    expect(officeProductSchema.parse(draft)).toEqual(draft);
+    expect(officeProductSchema.safeParse({ ...product, status: "archived" }).success).toBe(false);
+    for (const field of [
+      "chzProductGroupCode",
+      "boxCapacity",
+      "palletBoxCapacity",
+      "shelfLifeDays",
+    ]) {
+      for (const value of [12.5, -1]) {
+        const result = officeProductSchema.safeParse({ ...product, [field]: value });
+        expect(result.success, `${field} ${value}`).toBe(false);
+      }
+    }
+    for (const field of ["id", "defaultBoxTemplateId", "defaultPalletTemplateId"]) {
+      expect(officeProductSchema.safeParse({ ...product, [field]: "42" }).success, field).toBe(
+        false,
+      );
+    }
+  });
+
+  it("read a template for every category, and refuse an unknown purpose, an id that is no UUID or a group code that is no whole number", () => {
+    const template = labelTemplateSchema.parse(fixture("label-template.json"));
+    const summary = labelTemplateSummarySchema.parse(fixture("template-summary.json"));
+    // A stock template, the wizard's, is for every category: `null`, not a list.
+    const stockTemplate = { ...template, chzProductGroupCodes: null, stock: true };
+    expect(labelTemplateSchema.parse(stockTemplate)).toEqual(stockTemplate);
+    const stockSummary = { ...summary, chzProductGroupCodes: null, stock: true };
+    expect(labelTemplateSummarySchema.parse(stockSummary)).toEqual(stockSummary);
+    for (const [schema, value] of [
+      [labelTemplateSchema, template],
+      [labelTemplateSummarySchema, summary],
+    ] as const) {
+      expect(schema.safeParse({ ...value, purpose: "sticker" }).success).toBe(false);
+      expect(schema.safeParse({ ...value, id: "42" }).success).toBe(false);
+      for (const code of [8.5, -8]) {
+        const result = schema.safeParse({ ...value, chzProductGroupCodes: [code] });
+        expect(result.success, `${code}`).toBe(false);
+      }
+    }
+    expect(labelTemplateSummarySchema.safeParse({ ...summary, dpi: -203 }).success).toBe(false);
+  });
+
+  it("read the template defaults when none is set and when every slot has one, and refuse a bad entry", () => {
+    const defaults = templateDefaultsSchema.parse(fixture("template-defaults.json"));
+    const none = {
+      ...defaults,
+      defaultBoxTemplateId: null,
+      defaultPalletTemplateId: null,
+      defaultDuplicateTemplateId: null,
+      categories: [],
+    };
+    expect(templateDefaultsSchema.parse(none)).toEqual(none);
+    const every = {
+      ...defaults,
+      defaultBoxTemplateId: "7c1e4b2a-9d3f-4e5a-8b6c-1d2e3f4a5b6c",
+      defaultPalletTemplateId: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+      defaultDuplicateTemplateId: "0b1c2d3e-4f5a-4b6c-8d7e-8f9a0b1c2d3e",
+    };
+    expect(templateDefaultsSchema.parse(every)).toEqual(every);
+    const [entry] = defaults.categories;
+    for (const bad of [{ purpose: "sticker" }, { templateId: "42" }, { chzProductGroupCode: -8 }]) {
+      const result = templateDefaultsSchema.safeParse({
+        ...defaults,
+        categories: [{ ...entry, ...bad }],
+      });
+      expect(result.success, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it("refuse an unknown key inside a stock template or a category default, and a stock layout that is no object", () => {
+    const request = bootstrapRequestSchema.parse(fixture("bootstrap-request-templates.json"));
+    const [stock] = request.templates ?? [];
+    expect(stockTemplateSchema.safeParse(stock).success).toBe(true);
+    expect(stockTemplateSchema.safeParse({ ...stock, addedLater: true }).success).toBe(false);
+    for (const spec of [[], "{}", null]) {
+      expect(stockTemplateSchema.safeParse({ ...stock, spec }).success).toBe(false);
+    }
+    const defaults = templateDefaultsUpdateSchema.parse(fixture("template-defaults-update.json"));
+    const [entry] = defaults.categories;
+    const withExtra = { ...defaults, categories: [{ ...entry, addedLater: true }] };
+    expect(templateDefaultsUpdateSchema.safeParse(withExtra).success).toBe(false);
+  });
+
+  it("whole bodies name every field: leave one out and the schema refuses", () => {
+    for (const [name, schema] of [
+      ["product-create.json", productCreateSchema],
+      ["product-update.json", productUpdateSchema],
+      ["template-create.json", templateCreateSchema],
+      ["template-defaults-update.json", templateDefaultsUpdateSchema],
+    ] as const) {
+      const body = fixture(name) as Record<string, unknown>;
+      for (const key of Object.keys(body)) {
+        const without = Object.fromEntries(Object.entries(body).filter(([field]) => field !== key));
+        expect(schema.safeParse(without).success, `${name} without ${key}`).toBe(false);
+      }
+    }
   });
 });
 

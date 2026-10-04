@@ -617,8 +617,20 @@ parses every fixture whose shape crosses the IPC boundary. An office request
 body the webview has built since plan 1d3 has one builder in
 `src/host/requests.ts`, which names every field it sends;
 `test/protocol.test.ts` checks that each builder produces its fixture exactly.
+The catalog's builders (plan 1e2) cover the template routes too, which only
+plan 1e3's screens will call: `productCreate` and `productUpdate` send every
+field, `null` for a blank one; `templateCreate` sends the name, the purpose,
+the flag, the categories (`null` for every category) and the layout;
+`templateUpdate` sends the name, the flag and the categories that differ from
+the loaded template and a layout whenever one is given, its categories in
+three states (left out keeps them, `null` is every category, a list is those,
+and a reordered list is a change), and never `null` for a name, a flag or a
+layout, which the host would read as «keep»; `templateDefaultsUpdate` sends
+the whole document.
 The older forms (users, the organization, SSCC, sign-in and the own-password
-change) build their bodies inline, field by field, as does the wizard. Raise
+change) build their bodies inline, field by field, as does the wizard; its
+optional `templates`, which plan 1e3 sends, are typed by the strict
+`bootstrapRequestSchema`, which reads `bootstrap-request-templates.json`. Raise
 `PROTOCOL_VERSION` for an incompatible change; the host keeps accepting the
 previous version. Response types, which devices of different versions read,
 tolerate unknown fields; request types, which the host parses, reject them

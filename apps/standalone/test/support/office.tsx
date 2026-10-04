@@ -63,6 +63,21 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     createBadge: vi.fn<HostApi["createBadge"]>(() => unexpected("createBadge")),
     revokeBadge: vi.fn<HostApi["revokeBadge"]>(() => unexpected("revokeBadge")),
     getBadgeSalt: vi.fn<HostApi["getBadgeSalt"]>(() => unexpected("getBadgeSalt")),
+    listProductGroups: vi.fn<HostApi["listProductGroups"]>(() => unexpected("listProductGroups")),
+    listProducts: vi.fn<HostApi["listProducts"]>(() => unexpected("listProducts")),
+    createProduct: vi.fn<HostApi["createProduct"]>(() => unexpected("createProduct")),
+    updateProduct: vi.fn<HostApi["updateProduct"]>(() => unexpected("updateProduct")),
+    listTemplates: vi.fn<HostApi["listTemplates"]>(() => unexpected("listTemplates")),
+    getTemplate: vi.fn<HostApi["getTemplate"]>(() => unexpected("getTemplate")),
+    createTemplate: vi.fn<HostApi["createTemplate"]>(() => unexpected("createTemplate")),
+    updateTemplate: vi.fn<HostApi["updateTemplate"]>(() => unexpected("updateTemplate")),
+    deleteTemplate: vi.fn<HostApi["deleteTemplate"]>(() => unexpected("deleteTemplate")),
+    getTemplateDefaults: vi.fn<HostApi["getTemplateDefaults"]>(() =>
+      unexpected("getTemplateDefaults"),
+    ),
+    updateTemplateDefaults: vi.fn<HostApi["updateTemplateDefaults"]>(() =>
+      unexpected("updateTemplateDefaults"),
+    ),
     ...overrides,
   };
 }

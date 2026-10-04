@@ -9,12 +9,19 @@ import {
   counterpartyCreateSchema,
   counterpartyUpdateSchema,
   deviceUpdateSchema,
+  labelTemplateSchema,
   lineUpdateSchema,
   officeOperatorSchema,
+  officeProductSchema,
   operatorCreateSchema,
   operatorUpdateSchema,
   orgProfileUpdateSchema,
   pairingCodeRequestSchema,
+  productCreateSchema,
+  productUpdateSchema,
+  templateCreateSchema,
+  templateDefaultsUpdateSchema,
+  templateUpdateSchema,
 } from "../src/host/protocol.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
@@ -59,6 +66,15 @@ const OPERATOR_CREATE = operatorCreateSchema.parse(fixture("operator-create.json
 const OPERATOR_UPDATE = operatorUpdateSchema.parse(fixture("operator-update.json"));
 const BADGE_CREATE = badgeCreateSchema.parse(fixture("badge-create.json"));
 const BADGE_ID = "c4e2a1b3-5d6f-4a8b-9c0d-1e2f3a4b5c6d";
+const PRODUCT = officeProductSchema.parse(fixture("office-product.json"));
+const PRODUCT_CREATE = productCreateSchema.parse(fixture("product-create.json"));
+const PRODUCT_UPDATE = productUpdateSchema.parse(fixture("product-update.json"));
+const TEMPLATE = labelTemplateSchema.parse(fixture("label-template.json"));
+const TEMPLATE_CREATE = templateCreateSchema.parse(fixture("template-create.json"));
+const TEMPLATE_UPDATE = templateUpdateSchema.parse(fixture("template-update.json"));
+const DEFAULTS_UPDATE = templateDefaultsUpdateSchema.parse(
+  fixture("template-defaults-update.json"),
+);
 
 type Case = [
   name: string,
@@ -270,6 +286,72 @@ const CASES: Case[] = [
     fixture("badge-salt.json"),
     (api) => api.getBadgeSalt(TOKEN),
     { method: "GET", path: "/v1/office/badge-salt", body: undefined },
+  ],
+  [
+    "listProductGroups",
+    [fixture("product-group.json")],
+    (api) => api.listProductGroups(TOKEN),
+    { method: "GET", path: "/v1/office/product-groups", body: undefined },
+  ],
+  [
+    "listProducts",
+    [fixture("office-product.json")],
+    (api) => api.listProducts(TOKEN),
+    { method: "GET", path: "/v1/office/products", body: undefined },
+  ],
+  [
+    "createProduct",
+    fixture("office-product.json"),
+    (api) => api.createProduct(TOKEN, PRODUCT_CREATE),
+    { method: "POST", path: "/v1/office/products", body: PRODUCT_CREATE },
+  ],
+  [
+    "updateProduct",
+    fixture("office-product.json"),
+    (api) => api.updateProduct(TOKEN, PRODUCT.id, PRODUCT_UPDATE),
+    { method: "PUT", path: `/v1/office/products/${PRODUCT.id}`, body: PRODUCT_UPDATE },
+  ],
+  [
+    "listTemplates",
+    [fixture("template-summary.json")],
+    (api) => api.listTemplates(TOKEN),
+    { method: "GET", path: "/v1/office/templates", body: undefined },
+  ],
+  [
+    "getTemplate",
+    fixture("label-template.json"),
+    (api) => api.getTemplate(TOKEN, TEMPLATE.id),
+    { method: "GET", path: `/v1/office/templates/${TEMPLATE.id}`, body: undefined },
+  ],
+  [
+    "createTemplate",
+    fixture("label-template.json"),
+    (api) => api.createTemplate(TOKEN, TEMPLATE_CREATE),
+    { method: "POST", path: "/v1/office/templates", body: TEMPLATE_CREATE },
+  ],
+  [
+    "updateTemplate",
+    fixture("label-template.json"),
+    (api) => api.updateTemplate(TOKEN, TEMPLATE.id, TEMPLATE_UPDATE),
+    { method: "PUT", path: `/v1/office/templates/${TEMPLATE.id}`, body: TEMPLATE_UPDATE },
+  ],
+  [
+    "deleteTemplate",
+    null,
+    (api) => api.deleteTemplate(TOKEN, TEMPLATE.id),
+    { method: "DELETE", path: `/v1/office/templates/${TEMPLATE.id}`, body: undefined },
+  ],
+  [
+    "getTemplateDefaults",
+    fixture("template-defaults.json"),
+    (api) => api.getTemplateDefaults(TOKEN),
+    { method: "GET", path: "/v1/office/template-defaults", body: undefined },
+  ],
+  [
+    "updateTemplateDefaults",
+    fixture("template-defaults.json"),
+    (api) => api.updateTemplateDefaults(TOKEN, DEFAULTS_UPDATE),
+    { method: "PUT", path: "/v1/office/template-defaults", body: DEFAULTS_UPDATE },
   ],
   [
     "setUserPassword",
