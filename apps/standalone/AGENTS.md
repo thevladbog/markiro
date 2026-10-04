@@ -125,10 +125,13 @@ or the schema (`BEGIN`, `END`, `PRAGMA`, `ATTACH`, `CREATE`, `DROP`, `ALTER`,
 `ANALYZE`, …; a statement may not start with `END`, since SQLite treats it
 as `COMMIT`, but `CASE … END` mid-statement is unaffected) and never read
 BLOBs. A large reference page goes in as one JSON parameter per entity
-through `json_each`, so the limits bound SQL, not rows. Rejections are bare
-codes: `local_db_unavailable` (the database did not open; the app starts
-anyway), `invalid_statement`, `unsupported_value`, `statement_failed`,
-`changes_mismatch`.
+through `json_each`, so the limits bound SQL, not rows, and never the size
+of one value: a feed revision larger than a page's 1 MiB (the wizard's
+templates, a template delete that clears thousands of products) comes as a
+parameter of several MiB and passes whole (`tests/local_db.rs` pins it).
+Rejections are bare codes: `local_db_unavailable` (the database did not
+open; the app starts anyway), `invalid_statement`, `unsupported_value`,
+`statement_failed`, `changes_mismatch`.
 
 The webview reaches it only through `LocalExecutor` (`src/local/executor.ts`);
 Vitest runs the same migrations on node:sqlite behind the same interface
@@ -136,6 +139,19 @@ Vitest runs the same migrations on node:sqlite behind the same interface
 That file also mirrors `local_db.rs`'s statement rules and limits; a rule
 change there means updating `test/support/local-db.ts` too and adding a case
 to `src-tauri/tests/fixtures/local-sql.json`.
+
+The catalog's copies come from `src-tauri/migrations/0004_catalog.sql`:
+`ref_products`, `ref_templates` (the layout as JSON text, the categories as a
+JSON array, NULL for every category) and `ref_template_defaults` (keyed
+`<code>:<purpose>`, as the feed keys them), and the organization's three
+default templates as columns of `ref_org`. They keep the feed's flags
+(`archived`, `enabled`, `status`) and filter nothing: the station chooses
+among them later (plan 2a). They have no foreign key and no uniqueness
+besides the key, for the reasons the migration gives (an archived product
+keeps a GTIN that a product in use may hold too); `ref_products_gtin14` is a
+plain index for plan 2a's lookup of a scanned product. `0001`'s header still
+says products and templates «join with plans 1d and 1e», which `0004` did;
+an applied migration is never edited.
 
 `device_forget` clears the local copies before it removes `device.json`:
 `LocalDb::clear_copies` deletes every row of every table but
@@ -274,11 +290,15 @@ canonical 16-byte badge salt, `canonicalSaltSchema`; a personnel number of
 3–12 digits; `isPinPhc` and `isBadgePhc` in `src/lib/credentials.ts`): a
 record with an unknown key, or with a salt or a hash no station could use,
 fails closed into the quarantine rather than being kept, so a field a newer
-host adds never just drops away on an older station. `org_profile` and
-`lines` are read with `z.object`, which drops unknown keys. An operator is in
-the feed only while active: a deactivation writes a tombstone for its id, and
-a reactivation drops the tombstone and sends the record again with a new
-`rev`. A badge is in the feed only while not revoked: a revocation writes a
+host adds never just drops away on an older station. `org_profile`, `lines`
+and the catalog's records (`products`, `label_templates`,
+`category_template_defaults`) are read with `z.object`, which drops unknown
+keys; a value this build cannot read (an unknown purpose or status, a GTIN
+of other than 14 digits, a template id that is no UUID) still quarantines
+the record. An operator is in the feed only while active: a deactivation
+writes a tombstone for its id, and a reactivation drops the tombstone and
+sends the record again with a new `rev`. A badge is in the feed only while
+not revoked: a revocation writes a
 tombstone, and a revoked badge never comes back — a new badge gets a new id.
 A PIN change is a record update carrying the new `pinPhc`, so the station
 replaces the hash and the old PIN stops working. A badge record never grants
@@ -304,7 +324,8 @@ On the device side a new entity also needs its entry in `ENTITIES`
 (`src/local/reference-sync.ts`), which derives `ENTITY_SET`; a new entity
 there changes `ENTITY_SET` and makes every device sync from zero once. It
 also adds three statements to the worst-case page batch (see "Reference
-sync"), which must stay within the shell's 32.
+sync"), which must stay within the shell's 32: the eight entities kept
+since plan 1e2 take 30, so a ninth needs a smaller batch first.
 
 ## Operators and badges
 
@@ -541,10 +562,16 @@ from zero. `reason` holds Zod issue paths and codes only
 (`archived: invalid_type`, at most 200 characters), never a value:
 operator records carry PIN and badge hashes. That is safe only because
 every record schema has fixed keys: a schema with a dynamic-key `z.record`
-would put keys taken from the data into the paths. `seen_at` is a
-parameter from the webview's clock, never SQL time. Entities this build
-does not keep are skipped, not quarantined, and applying a page again
-changes nothing. A successful run reports the quarantine's size
+would put keys taken from the data into the paths. A template's layout is
+therefore one opaque object (`templateSpecSchema`, one `custom` issue),
+never checked at sync time: the station checks it where it prints (plan
+2a). A copy's `spec` is the text `JSON.stringify` gives for the parsed
+layout, which puts integer-like keys first, so it is not the host's
+byte-ordered text: whatever digests a layout (plan 2a's layout snapshots)
+canonicalizes it first. `seen_at` is a parameter from the webview's clock,
+never SQL time. Entities this build does not keep are skipped, not
+quarantined, and applying a page again changes nothing. A successful run
+reports the quarantine's size
 (`quarantined`). A feed that breaks its own contract (it went back twice
 in one run, or claims `hasMore` without moving past the revision it was
 fetched at) fails the run with `SyncFeedError`, not a silent infinite
@@ -552,16 +579,19 @@ loop.
 For E kept entities a page batch holds at most 3E + 6 statements: the
 guard, a deferred wipe (E copy tables, the quarantine, the sync state),
 two per entity, the quarantine upsert and lift, and the sync state. That
-is 21 for the five entities kept today, within the shell's 32 (E = 8 at
-most, 30 statements); a test builds the worst-case page.
+is 30 for the eight entities kept today, the most the shell's 32 takes: a
+ninth entity needs a smaller batch first. A test builds the worst-case page.
 `ENTITY_SET` names the kept entities and `SYNC_SCHEMA_VERSION`
-(`"org_profile,site,lines,operators,operator_badges;v3"`): raise the
-version whenever a record schema or the meaning of a copy table changes,
-so every device syncs from zero once and gets back what an older build
-quarantined or kept differently.
-The upserts of operators and badges also skip a record whose newer
-revision waits in the quarantine (`notQuarantinedNewer`): the insert would
-otherwise bring back what the quarantine's fail-closed delete took away.
+(`"org_profile,site,lines,operators,operator_badges,products,label_templates,category_template_defaults;v4"`):
+raise the version whenever a record schema or the meaning of a copy table
+changes, so every device syncs from zero once and gets back what an older
+build quarantined or kept differently.
+The upserts of operators, badges and the catalog's copies (products, label
+templates and category defaults) also skip a record whose newer revision
+waits in the quarantine (`notQuarantinedNewer`): the insert would otherwise
+bring back what the quarantine's fail-closed delete took away, an access
+for a person or an older layout or default for the catalog. The
+`org_profile`, `site` and `lines` upserts have no such guard (plan 2a).
 The feed never sends an older revision after a newer one, but a stale run
 can: a page fetched before `device_forget` that lands only after a new
 pairing with the same host has stamped `host_id` again. `hostGuard` (below)

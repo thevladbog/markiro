@@ -203,13 +203,20 @@ export type ChangesResponse = z.infer<typeof changesResponseSchema>;
  */
 export const canonicalSaltSchema = z.string().regex(/^[A-Za-z0-9+/]{21}[AQgw]==$/);
 
-/** `data` of an `org_profile` item. */
+/**
+ * `data` of an `org_profile` item. The organization's three default templates
+ * (plan 1e1) are absent from an older host's record and read as none: a
+ * required field would quarantine the record and delete the copy.
+ */
 export const orgRecordSchema = z.object({
   name: z.string(),
   inn: z.string().nullable(),
   gln: z.string(),
   gs1Prefixes: z.array(z.string()),
   timeZone: z.string(),
+  defaultBoxTemplateId: z.uuid().nullish(),
+  defaultPalletTemplateId: z.uuid().nullish(),
+  defaultDuplicateTemplateId: z.uuid().nullish(),
 });
 export type OrgRecord = z.infer<typeof orgRecordSchema>;
 
@@ -254,6 +261,44 @@ export const operatorBadgeRecordSchema = z.strictObject({
   label: z.string().nullable(),
 });
 export type OperatorBadgeRecord = z.infer<typeof operatorBadgeRecordSchema>;
+
+/**
+ * `data` of a `products` item. The catalog grants no access, so its records
+ * are read with `z.object`, as `org_profile` and `lines` are: a key a newer
+ * host adds is dropped, and a value this build cannot read quarantines the
+ * record. An archived product stays with `archived: true`; a product is never
+ * deleted.
+ */
+export const productRecordSchema = z.object({
+  gtin14: z.string().regex(/^[0-9]{14}$/),
+  name: z.string(),
+  printName: z.string().nullable(),
+  chzProductGroupCode: groupCodeSchema.nullable(),
+  boxCapacity: countSchema,
+  palletBoxCapacity: countSchema,
+  shelfLifeDays: countSchema,
+  defaultBoxTemplateId: z.uuid().nullable(),
+  defaultPalletTemplateId: z.uuid().nullable(),
+  archived: z.boolean(),
+  status: productStatusSchema,
+});
+export type ProductRecord = z.infer<typeof productRecordSchema>;
+
+/**
+ * `data` of a `label_templates` item, read as a product's is. A disabled
+ * template stays with `enabled: false`; a deleted one leaves as a tombstone.
+ * The layout is opaque here (`templateSpecSchema`): the station checks it
+ * before it prints (plan 2a).
+ */
+export const labelTemplateRecordSchema = z.object({
+  name: z.string(),
+  purpose: templatePurposeSchema,
+  enabled: z.boolean(),
+  chzProductGroupCodes: groupCodesSchema,
+  stock: z.boolean(),
+  spec: templateSpecSchema,
+});
+export type LabelTemplateRecord = z.infer<typeof labelTemplateRecordSchema>;
 
 /** The signed-in office user. */
 export const officeUserSchema = z.object({

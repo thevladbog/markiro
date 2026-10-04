@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   changesResponseSchema,
+  labelTemplateRecordSchema,
   type ChangeItem,
   type ChangesResponse,
 } from "../src/host/protocol.js";
@@ -109,6 +110,108 @@ function people(db: DatabaseSync) {
   };
 }
 
+/**
+ * `changes-catalog.json`: two templates, the organization's record with its
+ * default templates, a category default, two products (the second archived and
+ * a draft), and the tombstones of a category default and a template.
+ */
+const CATALOG = changesResponseSchema.parse(
+  JSON.parse(
+    readFileSync(new URL("../proto/fixtures/changes-catalog.json", testModuleUrl), "utf8"),
+  ),
+);
+const BOX_58 = "7c1e4b2a-9d3f-4e5a-8b6c-1d2e3f4a5b6c";
+const MILK_58 = "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d";
+/** The template `CATALOG` deletes. */
+const OLD_TEMPLATE = "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a";
+const MILK = "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b";
+const KEFIR = "0a9b8c7d-6e5f-4a3b-9c2d-1e0f9a8b7c6d";
+/** A small layout: to the sync a layout is one opaque object. */
+const LAYOUT = { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] };
+
+function product(id: string, rev: number, data: object = {}): ChangeItem {
+  return {
+    entity: "products",
+    id,
+    rev,
+    deleted: false,
+    data: {
+      gtin14: "04600682000013",
+      name: "Молоко 3,2% 0,9 л",
+      printName: null,
+      chzProductGroupCode: 8,
+      boxCapacity: 12,
+      palletBoxCapacity: 40,
+      shelfLifeDays: 10,
+      defaultBoxTemplateId: null,
+      defaultPalletTemplateId: null,
+      archived: false,
+      status: "active",
+      ...data,
+    },
+  };
+}
+
+function template(id: string, rev: number, data: object = {}): ChangeItem {
+  return {
+    entity: "label_templates",
+    id,
+    rev,
+    deleted: false,
+    data: {
+      name: "Коробка 58×40",
+      purpose: "box",
+      enabled: true,
+      chzProductGroupCodes: null,
+      stock: false,
+      spec: LAYOUT,
+      ...data,
+    },
+  };
+}
+
+/** A category's default template, keyed `<code>:<purpose>` as the feed keys it. */
+function categoryDefault(
+  code: number,
+  purpose: string,
+  rev: number,
+  data: object = {},
+): ChangeItem {
+  return {
+    entity: "category_template_defaults",
+    id: `${code}:${purpose}`,
+    rev,
+    deleted: false,
+    data: { chzProductGroupCode: code, purpose, templateId: MILK_58, ...data },
+  };
+}
+
+/** The catalog copies as plain rows; a template's layout is left to its own test. */
+function catalog(db: DatabaseSync) {
+  const rows = (sql: string) => Array.from(db.prepare(sql).all(), (row) => ({ ...row }));
+  return {
+    products: rows(
+      "SELECT id, gtin14, name, print_name, chz_group_code, box_capacity, pallet_box_capacity, " +
+        "shelf_life_days, default_box_template_id, default_pallet_template_id, archived, status, " +
+        "rev FROM ref_products ORDER BY id",
+    ),
+    templates: rows(
+      "SELECT id, name, purpose, enabled, category_codes, stock, rev FROM ref_templates ORDER BY id",
+    ),
+    defaults: rows(
+      "SELECT id, chz_group_code, purpose, template_id, rev FROM ref_template_defaults ORDER BY id",
+    ),
+  };
+}
+
+/** The organization's three default templates on its copy. */
+function orgDefaults(db: DatabaseSync) {
+  const sql =
+    "SELECT default_box_template_id, default_pallet_template_id, default_duplicate_template_id " +
+    "FROM ref_org";
+  return Array.from(db.prepare(sql).all(), (row) => ({ ...row }));
+}
+
 function page(rev: number, items: ChangeItem[], more = false, hostId = HOST_ID): ChangesResponse {
   return { hostId, rev, hasMore: more, items };
 }
@@ -120,6 +223,9 @@ const COPY_TABLES = [
   "ref_lines",
   "ref_operators",
   "ref_operator_badges",
+  "ref_products",
+  "ref_templates",
+  "ref_template_defaults",
   "sync_quarantine",
   "sync_state",
 ];
@@ -237,7 +343,10 @@ describe("ENTITY_SET", () => {
   it("names the kept entities and the version of their records", () => {
     // Derived from the entity table and `SYNC_SCHEMA_VERSION`; pinned so a
     // build cannot change one and forget the other.
-    expect(ENTITY_SET).toBe("org_profile,site,lines,operators,operator_badges;v3");
+    expect(ENTITY_SET).toBe(
+      "org_profile,site,lines,operators,operator_badges,products,label_templates," +
+        "category_template_defaults;v4",
+    );
   });
 });
 
@@ -866,15 +975,15 @@ describe("reference sync", () => {
 
   it("skips entities this build does not keep", async () => {
     const { db, executor } = openLocalDb();
-    // Products come with plan 1e.
-    const product: ChangeItem = {
-      entity: "products",
+    // Shifts would come with plan 2a.
+    const shift: ChangeItem = {
+      entity: "shifts",
       id: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
       rev: 42,
       deleted: false,
-      data: { gtin14: "04600682000013" },
+      data: { number: "0042" },
     };
-    const changes = feed({ 0: page(42, [product, line(LINE_1, 42, "Линия 1")]) });
+    const changes = feed({ 0: page(42, [shift, line(LINE_1, 42, "Линия 1")]) });
     await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
       kind: "synced",
       rev: 42,
@@ -1189,6 +1298,16 @@ describe("sync quarantine", () => {
       badge("9b2e4a6c-0000-4000-8000-000000000001", 42, ANNA, {
         badgePhc: PIN_PHC.replace("100000", "200000"),
       }),
+      // A product never leaves as a tombstone; its unreadable record takes
+      // the delete all the same.
+      product(MILK, 42),
+      product(KEFIR, 42, { status: "blocked" }),
+      { entity: "label_templates", id: OLD_TEMPLATE, rev: 40, deleted: true },
+      template(BOX_58, 42),
+      template(MILK_58, 42, { spec: [] }),
+      { entity: "category_template_defaults", id: "15:pallet", rev: 40, deleted: true },
+      categoryDefault(8, "box", 42),
+      categoryDefault(8, "pallet", 42, { templateId: "7" }),
     ];
     await expect(
       syncReferences({
@@ -1197,14 +1316,12 @@ describe("sync quarantine", () => {
         hostId: HOST_ID,
         now: () => SEEN_AT,
       }),
-    ).resolves.toEqual({ kind: "synced", rev: 42, quarantined: 5 });
-    // The `host_id` stamp, then the page: the guard, the wipe (5 copy
+    ).resolves.toEqual({ kind: "synced", rev: 42, quarantined: 8 });
+    // The `host_id` stamp, then the page: the guard, the wipe (8 copy
     // tables, the quarantine, the sync state), per entity one delete and one
     // upsert, the quarantine upsert, the quarantine lift and the sync state:
-    // 3 × 5 + 6 = 21. Each new entity adds 3 (a wipe, a delete, an upsert):
-    // plan 1e's products, templates and their defaults would make it 30, the
-    // most the shell's 32 takes.
-    expect(recorded.batches.map((batch) => batch.length)).toEqual([1, 21]);
+    // 3 × 8 + 6 = 30, within the shell's 32. A ninth entity would make it 33.
+    expect(recorded.batches.map((batch) => batch.length)).toEqual([1, 30]);
     expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 42 }]);
   });
 });
@@ -1470,6 +1587,629 @@ describe("operator and badge copies", () => {
         seen_at: SEEN_AT,
       },
     ]);
+  });
+});
+
+describe("catalog copies", () => {
+  it("keeps the catalog fixture's templates, category default and products with their flags and nulls, and applies its tombstones", async () => {
+    const { db, executor } = openLocalDb();
+    // Synced before the fixture's page: the template and the category default it deletes.
+    await syncReferences({
+      changes: feed({
+        0: page(60, [
+          template(OLD_TEMPLATE, 50),
+          categoryDefault(15, "pallet", 51, { templateId: OLD_TEMPLATE }),
+        ]),
+      }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    expect(catalog(db).templates).toHaveLength(1);
+    expect(catalog(db).defaults).toHaveLength(1);
+    await expect(
+      syncReferences({ changes: feed({ 60: CATALOG }), local: executor, hostId: HOST_ID }),
+    ).resolves.toEqual({ kind: "synced", rev: 67, quarantined: 0 });
+    expect(catalog(db)).toEqual({
+      products: [
+        {
+          id: KEFIR,
+          gtin14: "04600682000020",
+          name: "Кефир 1% 0,9 л",
+          print_name: null,
+          chz_group_code: null,
+          box_capacity: null,
+          pallet_box_capacity: null,
+          shelf_life_days: null,
+          default_box_template_id: null,
+          default_pallet_template_id: null,
+          archived: 1,
+          status: "draft",
+          rev: 66,
+        },
+        {
+          id: MILK,
+          gtin14: "04600682000013",
+          name: "Молоко 3,2% 0,9 л",
+          print_name: "Молоко 3,2%",
+          chz_group_code: 8,
+          box_capacity: 12,
+          pallet_box_capacity: 40,
+          shelf_life_days: 10,
+          default_box_template_id: MILK_58,
+          default_pallet_template_id: null,
+          archived: 0,
+          status: "active",
+          rev: 65,
+        },
+      ],
+      templates: [
+        {
+          id: BOX_58,
+          name: "Коробка 58×40",
+          purpose: "box",
+          enabled: 1,
+          category_codes: null,
+          stock: 1,
+          rev: 61,
+        },
+        {
+          id: MILK_58,
+          name: "Молоко 58×40",
+          purpose: "box",
+          enabled: 1,
+          category_codes: "[8]",
+          stock: 0,
+          rev: 62,
+        },
+      ],
+      defaults: [{ id: "8:box", chz_group_code: 8, purpose: "box", template_id: MILK_58, rev: 64 }],
+    });
+    expect(orgDefaults(db)).toEqual([
+      {
+        default_box_template_id: BOX_58,
+        default_pallet_template_id: null,
+        default_duplicate_template_id: null,
+      },
+    ]);
+    expect(tables(db).state).toEqual(state(67));
+  });
+
+  it("stores a layout as the JSON text JavaScript writes for it: integer-like keys first", async () => {
+    const { db, executor } = openLocalDb();
+    const spec = { widthMm: 58, "10": "ten", "2": "two", elements: [{ kind: "field" }] };
+    await syncReferences({
+      changes: feed({ 0: page(67, [...CATALOG.items, template(MILK_58, 68, { spec })]) }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    const rows = Array.from(
+      db
+        .prepare(
+          "SELECT id, spec, json_extract(spec, '$.elements[1].format') AS format FROM ref_templates ORDER BY id",
+        )
+        .all(),
+      (row) => ({ ...row }),
+    );
+    expect(rows).toEqual([
+      {
+        id: BOX_58,
+        spec: JSON.stringify(labelTemplateRecordSchema.parse(CATALOG.items[0]?.data).spec),
+        format: "code128",
+      },
+      {
+        id: MILK_58,
+        spec: '{"2":"two","10":"ten","widthMm":58,"elements":[{"kind":"field"}]}',
+        format: null,
+      },
+    ]);
+  });
+
+  it("reads an organization record from a host before plan 1e1, without default templates, as none", async () => {
+    const { db, executor } = openLocalDb();
+    await expect(
+      syncReferences({ changes: feed({ 0: page(41, [ORG]) }), local: executor, hostId: HOST_ID }),
+    ).resolves.toEqual({ kind: "synced", rev: 41, quarantined: 0 });
+    expect(tables(db).org).toHaveLength(1);
+    expect(orgDefaults(db)).toEqual([
+      {
+        default_box_template_id: null,
+        default_pallet_template_id: null,
+        default_duplicate_template_id: null,
+      },
+    ]);
+  });
+
+  it("drops a key a newer host adds to a catalog record and keeps the record: the catalog grants no access", async () => {
+    const { db, executor } = openLocalDb();
+    await expect(
+      syncReferences({
+        changes: feed({
+          0: page(12, [
+            product(MILK, 10, { shelfLifeHours: 240 }),
+            template(BOX_58, 11, { printer: "zebra" }),
+            categoryDefault(8, "box", 12, { since: "2026-10-04" }),
+          ]),
+        }),
+        local: executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
+    const copies = catalog(db);
+    expect([copies.products.length, copies.templates.length, copies.defaults.length]).toEqual([
+      1, 1, 1,
+    ]);
+  });
+
+  it("quarantines a product, a template or a category default this build cannot read, deletes its older copy and applies the rest", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({
+        0: page(20, [
+          product(MILK, 10),
+          product(KEFIR, 11),
+          template(BOX_58, 12),
+          template(MILK_58, 13),
+          categoryDefault(8, "box", 14),
+        ]),
+      }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    const changes = feed({
+      20: page(30, [
+        // A GTIN of 13 digits: no scan would find it.
+        product(MILK, 21, { gtin14: "4600682000013" }),
+        // A purpose a newer host might add.
+        template(BOX_58, 22, { purpose: "case" }),
+        // A layout that is no object.
+        template(MILK_58, 23, { spec: [] }),
+        categoryDefault(8, "box", 24, { templateId: "7" }),
+        product(KEFIR, 25, { name: "Кефир 2,5% 0,9 л" }),
+      ]),
+    });
+    await expect(
+      syncReferences({ changes, local: executor, hostId: HOST_ID, now: () => SEEN_AT }),
+    ).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 4 });
+    expect(catalog(db).products.map((row) => [row.id, row.name, row.rev])).toEqual([
+      [KEFIR, "Кефир 2,5% 0,9 л", 25],
+    ]);
+    expect(catalog(db).templates).toEqual([]);
+    expect(catalog(db).defaults).toEqual([]);
+    expect(quarantine(db)).toEqual([
+      {
+        entity: "category_template_defaults",
+        id: "8:box",
+        rev: 24,
+        reason: "templateId: invalid_format",
+        seen_at: SEEN_AT,
+      },
+      {
+        entity: "label_templates",
+        id: BOX_58,
+        rev: 22,
+        reason: "purpose: invalid_value",
+        seen_at: SEEN_AT,
+      },
+      { entity: "label_templates", id: MILK_58, rev: 23, reason: "spec: custom", seen_at: SEEN_AT },
+      {
+        entity: "products",
+        id: MILK,
+        rev: 21,
+        reason: "gtin14: invalid_format",
+        seen_at: SEEN_AT,
+      },
+    ]);
+  });
+
+  it("keeps an archived product and a disabled template as the feed sends them: the copies filter nothing", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({
+        0: page(12, [
+          product(MILK, 11, { archived: true, chzProductGroupCode: null, status: "draft" }),
+          template(BOX_58, 12, { enabled: false, stock: true }),
+        ]),
+      }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    const copies = catalog(db);
+    expect(copies.products.map((row) => [row.id, row.archived, row.status])).toEqual([
+      [MILK, 1, "draft"],
+    ]);
+    expect(copies.templates.map((row) => [row.id, row.enabled, row.stock])).toEqual([
+      [BOX_58, 0, 1],
+    ]);
+  });
+
+  it("applies the catalog page again without changing a record", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({ changes: feed({ 0: CATALOG }), local: executor, hostId: HOST_ID });
+    const before = catalog(db);
+    // As if the revision were lost: the same page arrives again.
+    db.prepare("UPDATE sync_state SET value = '0' WHERE key = 'last_rev'").run();
+    const recorded = counting(executor);
+    await syncReferences({
+      changes: feed({ 0: CATALOG }),
+      local: recorded.executor,
+      hostId: HOST_ID,
+    });
+    expect(catalog(db)).toEqual(before);
+    // The guard, then nothing newer to upsert and nothing older to delete,
+    // nothing quarantined to lift; only the sync state is written.
+    expect(recorded.batches).toEqual([[1, 0, 0, 0, 0, 0, 0, 0, 3]]);
+  });
+
+  it("takes a newer revision of a product, a template and a category default, and keeps each against an older one", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({
+        0: page(10, [product(MILK, 10), template(BOX_58, 10), categoryDefault(8, "box", 10)]),
+      }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    await syncReferences({
+      changes: feed({
+        10: page(20, [
+          product(MILK, 20, {
+            printName: "Молоко",
+            chzProductGroupCode: null,
+            archived: true,
+            status: "draft",
+          }),
+          template(BOX_58, 20, { enabled: false, chzProductGroupCodes: [8, 15] }),
+          categoryDefault(8, "box", 20, { templateId: BOX_58 }),
+        ]),
+      }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    const updated = catalog(db);
+    expect(
+      updated.products.map((row) => [
+        row.print_name,
+        row.chz_group_code,
+        row.archived,
+        row.status,
+        row.rev,
+      ]),
+    ).toEqual([["Молоко", null, 1, "draft", 20]]);
+    expect(updated.templates.map((row) => [row.enabled, row.category_codes, row.rev])).toEqual([
+      [0, "[8,15]", 20],
+    ]);
+    expect(updated.defaults.map((row) => [row.template_id, row.rev])).toEqual([[BOX_58, 20]]);
+    // The feed never sends an older revision after a newer one, but a stale run can.
+    await syncReferences({
+      changes: feed({
+        20: page(30, [product(MILK, 15), template(BOX_58, 15), categoryDefault(8, "box", 15)]),
+      }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    expect(catalog(db)).toEqual(updated);
+  });
+
+  it("keeps a product and a category default that name a template absent from the copies: no foreign key", async () => {
+    // A deleted template's tombstone comes before the products its delete
+    // cleared, and a template a copy names may wait in the quarantine.
+    const { db, executor } = openLocalDb();
+    await expect(
+      syncReferences({
+        changes: feed({
+          0: page(12, [
+            product(MILK, 11, { defaultBoxTemplateId: MILK_58, defaultPalletTemplateId: BOX_58 }),
+            categoryDefault(8, "box", 12),
+          ]),
+        }),
+        local: executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
+    expect(catalog(db).templates).toEqual([]);
+    expect(catalog(db).products).toHaveLength(1);
+    expect(catalog(db).defaults).toHaveLength(1);
+  });
+
+  it("keeps two products with one GTIN: the copies hold no uniqueness of their own", async () => {
+    // An archived product keeps its GTIN without reserving it, so a product
+    // in use can carry the same one; a unique index would fail the page.
+    const { db, executor } = openLocalDb();
+    await expect(
+      syncReferences({
+        changes: feed({
+          0: page(12, [product(KEFIR, 11, { archived: true }), product(MILK, 12)]),
+        }),
+        local: executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
+    expect(catalog(db).products.map((row) => row.gtin14)).toEqual([
+      "04600682000013",
+      "04600682000013",
+    ]);
+  });
+
+  it("keeps an older product, template or category default out while its newer revision waits in quarantine, even from a stale run of a forgotten pairing with the same host", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({
+        0: page(20, [product(MILK, 20), template(BOX_58, 20), categoryDefault(8, "box", 20)]),
+      }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    // The next sync's fetch stays in flight across `device_forget`.
+    let resolve: ((value: ChangesResponse) => void) | undefined;
+    const held = vi.fn(
+      () =>
+        new Promise<ChangesResponse>((resolveFetch) => {
+          resolve = resolveFetch;
+        }),
+    );
+    const stale = syncReferences({ changes: held, local: executor, hostId: HOST_ID });
+    await vi.waitFor(() => expect(held).toHaveBeenCalledWith(20));
+    // `device_forget` clears every table; the device pairs again with the
+    // same host, whose first sync quarantines the newer revisions: values
+    // this build does not read.
+    for (const table of COPY_TABLES) db.prepare(`DELETE FROM ${table}`).run();
+    await expect(
+      syncReferences({
+        changes: feed({
+          0: page(40, [
+            product(MILK, 35, { status: "blocked" }),
+            template(BOX_58, 36, { purpose: "case" }),
+            categoryDefault(8, "box", 37, { purpose: "case" }),
+          ]),
+        }),
+        local: executor,
+        hostId: HOST_ID,
+        now: () => SEEN_AT,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 40, quarantined: 3 });
+    // The forgotten pairing's page lands last. `hostGuard` lets it through:
+    // the new pairing stamped the same `host_id`.
+    resolve?.(page(30, [product(MILK, 25), template(BOX_58, 25), categoryDefault(8, "box", 25)]));
+    await expect(stale).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 3 });
+    expect(catalog(db)).toEqual({ products: [], templates: [], defaults: [] });
+    expect(quarantine(db).map((entry) => [entry.entity, entry.id, entry.rev])).toEqual([
+      ["category_template_defaults", "8:box", 37],
+      ["label_templates", BOX_58, 36],
+      ["products", MILK, 35],
+    ]);
+  });
+
+  it("applies a revision larger than a page's 1 MiB, a template's tombstone and 5000 products, in one batch", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({ 0: page(60, [template(OLD_TEMPLATE, 60)]) }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    // Deleting a template at revision 70 cleared the preference of 5000
+    // products: one revision, which the feed never splits.
+    const products = Array.from({ length: 5000 }, (_, n) =>
+      product(`00000000-0000-4000-8000-${String(n).padStart(12, "0")}`, 70, {
+        gtin14: String(4_600_682_000_000 + n).padStart(14, "0"),
+        name: `Товар ${n}: молоко питьевое ультрапастеризованное 3,2%, 0,9 л`,
+      }),
+    );
+    const items: ChangeItem[] = [
+      { entity: "label_templates", id: OLD_TEMPLATE, rev: 70, deleted: true },
+      ...products,
+    ];
+    expect(Buffer.byteLength(JSON.stringify(items), "utf8")).toBeGreaterThan(1024 * 1024);
+    const recorded = counting(executor);
+    await expect(
+      syncReferences({
+        changes: feed({ 60: page(70, items) }),
+        local: recorded.executor,
+        hostId: HOST_ID,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 70, quarantined: 0 });
+    // The guard, the products' upsert, the templates' delete, the quarantine
+    // lift and the sync state: one batch, one JSON parameter per entity.
+    expect(recorded.batches).toEqual([[1, 5000, 1, 0, 3]]);
+    expect({ ...db.prepare("SELECT count(*) AS n FROM ref_products").get() }).toEqual({ n: 5000 });
+  });
+
+  it("stores a layout of about 256 KB whole", async () => {
+    const { db, executor } = openLocalDb();
+    const elements = Array.from({ length: 1960 }, (_, n) => ({
+      kind: "text",
+      id: `line-${n}`,
+      xMm: 2,
+      yMm: 2 + n,
+      text: "Состав: молоко нормализованное",
+      fontSizePt: 8,
+    }));
+    const spec = { widthMm: 100, heightMm: 150, dpi: 203, language: "zpl", elements };
+    const text = JSON.stringify(spec);
+    expect(Buffer.byteLength(text, "utf8")).toBeGreaterThan(250 * 1024);
+    expect(Buffer.byteLength(text, "utf8")).toBeLessThanOrEqual(256 * 1024);
+    await syncReferences({
+      changes: feed({ 0: page(5, [template(BOX_58, 5, { spec })]) }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    expect({ ...db.prepare("SELECT spec FROM ref_templates").get() }).toEqual({ spec: text });
+  });
+
+  it("stores every field of a product, a template, a category default and the organization's default templates from its own key, and replaces each one for a newer revision", async () => {
+    const { db, executor } = openLocalDb();
+    const org = (rev: number, box: string, pallet: string, duplicate: string): ChangeItem => ({
+      entity: "org_profile",
+      id: "1",
+      rev,
+      deleted: false,
+      data: {
+        name: "ООО «Атолл»",
+        inn: null,
+        gln: "4600682000013",
+        gs1Prefixes: ["4600682"],
+        timeZone: "Europe/Moscow",
+        defaultBoxTemplateId: box,
+        defaultPalletTemplateId: pallet,
+        defaultDuplicateTemplateId: duplicate,
+      },
+    });
+    const layout = (widthMm: number) => ({ ...LAYOUT, widthMm });
+    const layouts = () =>
+      Array.from(db.prepare("SELECT spec FROM ref_templates").all(), (row) => String(row.spec));
+    await syncReferences({
+      changes: feed({
+        0: page(10, [
+          org(10, BOX_58, MILK_58, OLD_TEMPLATE),
+          product(MILK, 10, {
+            gtin14: "04600682000013",
+            name: "Молоко 3,2% 0,9 л",
+            printName: "Молоко 3,2%",
+            chzProductGroupCode: 8,
+            boxCapacity: 12,
+            palletBoxCapacity: 40,
+            shelfLifeDays: 10,
+            defaultBoxTemplateId: BOX_58,
+            defaultPalletTemplateId: MILK_58,
+            archived: false,
+            status: "active",
+          }),
+          template(BOX_58, 10, {
+            name: "Коробка 58×40",
+            purpose: "box",
+            enabled: true,
+            chzProductGroupCodes: [8],
+            stock: false,
+            spec: layout(58),
+          }),
+          categoryDefault(8, "box", 10, { templateId: BOX_58 }),
+        ]),
+      }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    expect(orgDefaults(db)).toEqual([
+      {
+        default_box_template_id: BOX_58,
+        default_pallet_template_id: MILK_58,
+        default_duplicate_template_id: OLD_TEMPLATE,
+      },
+    ]);
+    expect(catalog(db)).toEqual({
+      products: [
+        {
+          id: MILK,
+          gtin14: "04600682000013",
+          name: "Молоко 3,2% 0,9 л",
+          print_name: "Молоко 3,2%",
+          chz_group_code: 8,
+          box_capacity: 12,
+          pallet_box_capacity: 40,
+          shelf_life_days: 10,
+          default_box_template_id: BOX_58,
+          default_pallet_template_id: MILK_58,
+          archived: 0,
+          status: "active",
+          rev: 10,
+        },
+      ],
+      templates: [
+        {
+          id: BOX_58,
+          name: "Коробка 58×40",
+          purpose: "box",
+          enabled: 1,
+          category_codes: "[8]",
+          stock: 0,
+          rev: 10,
+        },
+      ],
+      defaults: [{ id: "8:box", chz_group_code: 8, purpose: "box", template_id: BOX_58, rev: 10 }],
+    });
+    expect(layouts()).toEqual([JSON.stringify(layout(58))]);
+
+    // The next revision changes every field of every record.
+    await syncReferences({
+      changes: feed({
+        10: page(20, [
+          org(20, MILK_58, OLD_TEMPLATE, BOX_58),
+          product(MILK, 20, {
+            gtin14: "04600682000020",
+            name: "Молоко 2,5% 1 л",
+            printName: "Молоко 2,5%",
+            chzProductGroupCode: 15,
+            boxCapacity: 6,
+            palletBoxCapacity: 80,
+            shelfLifeDays: 20,
+            defaultBoxTemplateId: MILK_58,
+            defaultPalletTemplateId: BOX_58,
+            archived: true,
+            status: "draft",
+          }),
+          template(BOX_58, 20, {
+            name: "Паллета 100×150",
+            purpose: "pallet",
+            enabled: false,
+            chzProductGroupCodes: [15, 8],
+            stock: true,
+            spec: layout(100),
+          }),
+          categoryDefault(8, "box", 20, { templateId: MILK_58 }),
+        ]),
+      }),
+      local: executor,
+      hostId: HOST_ID,
+    });
+    expect(orgDefaults(db)).toEqual([
+      {
+        default_box_template_id: MILK_58,
+        default_pallet_template_id: OLD_TEMPLATE,
+        default_duplicate_template_id: BOX_58,
+      },
+    ]);
+    expect(catalog(db)).toEqual({
+      products: [
+        {
+          id: MILK,
+          gtin14: "04600682000020",
+          name: "Молоко 2,5% 1 л",
+          print_name: "Молоко 2,5%",
+          chz_group_code: 15,
+          box_capacity: 6,
+          pallet_box_capacity: 80,
+          shelf_life_days: 20,
+          default_box_template_id: MILK_58,
+          default_pallet_template_id: BOX_58,
+          archived: 1,
+          status: "draft",
+          rev: 20,
+        },
+      ],
+      templates: [
+        {
+          id: BOX_58,
+          name: "Паллета 100×150",
+          purpose: "pallet",
+          enabled: 0,
+          category_codes: "[15,8]",
+          stock: 1,
+          rev: 20,
+        },
+      ],
+      defaults: [{ id: "8:box", chz_group_code: 8, purpose: "box", template_id: MILK_58, rev: 20 }],
+    });
+    expect(layouts()).toEqual([JSON.stringify(layout(100))]);
+  });
+
+  it("looks a scanned product up by its GTIN through an index, for plan 2a", () => {
+    const { db } = openLocalDb();
+    const plan = Array.from(
+      db
+        .prepare("EXPLAIN QUERY PLAN SELECT id FROM ref_products WHERE gtin14 = ?")
+        .all("04600682000013"),
+      (row) => String(row.detail),
+    );
+    expect(plan).toHaveLength(1);
+    expect(plan[0]).toContain("USING INDEX ref_products_gtin14");
   });
 });
 

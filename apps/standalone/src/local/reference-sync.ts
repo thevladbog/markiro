@@ -1,10 +1,13 @@
 import { z } from "zod";
 
 import {
+  categoryTemplateDefaultSchema,
+  labelTemplateRecordSchema,
   lineRecordSchema,
   operatorBadgeRecordSchema,
   operatorRecordSchema,
   orgRecordSchema,
+  productRecordSchema,
   siteRecordSchema,
   type ChangeItem,
   type ChangesResponse,
@@ -60,7 +63,8 @@ const MAX_REASON_LENGTH = 200;
  * (`archived: invalid_type`; `data` names the record itself): never a value,
  * since operator records carry PIN and badge hashes. That holds only while
  * every record schema has fixed keys: a `z.record` would put keys taken from
- * the data into the paths.
+ * the data into the paths, which is why a template's layout is one opaque
+ * value (`templateSpecSchema`, a single `custom` issue).
  */
 function quarantineReason(error: z.ZodError): string {
   const reason = error.issues
@@ -87,9 +91,12 @@ function checked<T extends Record<string, unknown>>(
  * the quarantine's fail-closed delete took away. The feed never sends an older
  * revision after a newer one, but a stale run can: a page fetched before
  * `device_forget` that lands only after a new pairing with the same host has
- * stamped `host_id` again, when `hostGuard` no longer stops it. Only for
- * operators and their badges, not for `site`: its salt never changes after
- * the wizard, so an older revision of it brings back nothing that grants access.
+ * stamped `host_id` again, when `hostGuard` no longer stops it. Operators and
+ * their badges carry it, since an older record would bring back access, and
+ * the catalog's copies too (products, templates, category defaults), since an
+ * older layout or default must not take the place the delete emptied. Not
+ * `org_profile`, `site` and `lines` (plan 2a): `site`'s salt never changes
+ * after the wizard.
  */
 function notQuarantinedNewer(entity: string): string {
   return (
@@ -104,15 +111,24 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
     {
       table: "ref_org",
       check: (item) => checked(orgRecordSchema, item),
-      // `->>` yields `gs1Prefixes` as the JSON text of the array.
+      // `->>` yields `gs1Prefixes` as the JSON text of the array, and a
+      // default template an older host does not send as NULL.
       upsert:
-        "INSERT INTO ref_org (id, name, inn, gln, gs1_prefixes, time_zone, rev) " +
+        "INSERT INTO ref_org (id, name, inn, gln, gs1_prefixes, time_zone, " +
+        "default_box_template_id, default_pallet_template_id, default_duplicate_template_id, " +
+        "rev) " +
         "SELECT value ->> 'id', value ->> 'name', value ->> 'inn', value ->> 'gln', " +
-        "value ->> 'gs1Prefixes', value ->> 'timeZone', value ->> 'rev' " +
+        "value ->> 'gs1Prefixes', value ->> 'timeZone', value ->> 'defaultBoxTemplateId', " +
+        "value ->> 'defaultPalletTemplateId', value ->> 'defaultDuplicateTemplateId', " +
+        "value ->> 'rev' " +
         "FROM json_each(?) WHERE true " +
         "ON CONFLICT (id) DO UPDATE SET name = excluded.name, inn = excluded.inn, " +
         "gln = excluded.gln, gs1_prefixes = excluded.gs1_prefixes, " +
-        "time_zone = excluded.time_zone, rev = excluded.rev " +
+        "time_zone = excluded.time_zone, " +
+        "default_box_template_id = excluded.default_box_template_id, " +
+        "default_pallet_template_id = excluded.default_pallet_template_id, " +
+        "default_duplicate_template_id = excluded.default_duplicate_template_id, " +
+        "rev = excluded.rev " +
         "WHERE excluded.rev > ref_org.rev",
     },
   ],
@@ -179,6 +195,71 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
         "WHERE excluded.rev > ref_operator_badges.rev",
     },
   ],
+  [
+    "products",
+    {
+      table: "ref_products",
+      check: (item) => checked(productRecordSchema, item),
+      // `->>` yields `archived` as 1 or 0 and a JSON `null` as NULL.
+      upsert:
+        "INSERT INTO ref_products (id, gtin14, name, print_name, chz_group_code, box_capacity, " +
+        "pallet_box_capacity, shelf_life_days, default_box_template_id, " +
+        "default_pallet_template_id, archived, status, rev) " +
+        "SELECT r.value ->> 'id', r.value ->> 'gtin14', r.value ->> 'name', " +
+        "r.value ->> 'printName', r.value ->> 'chzProductGroupCode', r.value ->> 'boxCapacity', " +
+        "r.value ->> 'palletBoxCapacity', r.value ->> 'shelfLifeDays', " +
+        "r.value ->> 'defaultBoxTemplateId', r.value ->> 'defaultPalletTemplateId', " +
+        "r.value ->> 'archived', r.value ->> 'status', r.value ->> 'rev' " +
+        "FROM json_each(?) AS r " +
+        notQuarantinedNewer("products") +
+        " ON CONFLICT (id) DO UPDATE SET gtin14 = excluded.gtin14, name = excluded.name, " +
+        "print_name = excluded.print_name, chz_group_code = excluded.chz_group_code, " +
+        "box_capacity = excluded.box_capacity, " +
+        "pallet_box_capacity = excluded.pallet_box_capacity, " +
+        "shelf_life_days = excluded.shelf_life_days, " +
+        "default_box_template_id = excluded.default_box_template_id, " +
+        "default_pallet_template_id = excluded.default_pallet_template_id, " +
+        "archived = excluded.archived, status = excluded.status, rev = excluded.rev " +
+        "WHERE excluded.rev > ref_products.rev",
+    },
+  ],
+  [
+    "label_templates",
+    {
+      table: "ref_templates",
+      check: (item) => checked(labelTemplateRecordSchema, item),
+      // `->>` yields the categories and the layout as JSON text, and `null`
+      // categories (every category) as NULL.
+      upsert:
+        "INSERT INTO ref_templates (id, name, purpose, enabled, category_codes, stock, spec, rev) " +
+        "SELECT r.value ->> 'id', r.value ->> 'name', r.value ->> 'purpose', " +
+        "r.value ->> 'enabled', r.value ->> 'chzProductGroupCodes', r.value ->> 'stock', " +
+        "r.value ->> 'spec', r.value ->> 'rev' " +
+        "FROM json_each(?) AS r " +
+        notQuarantinedNewer("label_templates") +
+        " ON CONFLICT (id) DO UPDATE SET name = excluded.name, purpose = excluded.purpose, " +
+        "enabled = excluded.enabled, category_codes = excluded.category_codes, " +
+        "stock = excluded.stock, spec = excluded.spec, rev = excluded.rev " +
+        "WHERE excluded.rev > ref_templates.rev",
+    },
+  ],
+  [
+    "category_template_defaults",
+    {
+      table: "ref_template_defaults",
+      // The feed's id, `<code>:<purpose>`, is the key.
+      check: (item) => checked(categoryTemplateDefaultSchema, item),
+      upsert:
+        "INSERT INTO ref_template_defaults (id, chz_group_code, purpose, template_id, rev) " +
+        "SELECT r.value ->> 'id', r.value ->> 'chzProductGroupCode', r.value ->> 'purpose', " +
+        "r.value ->> 'templateId', r.value ->> 'rev' " +
+        "FROM json_each(?) AS r " +
+        notQuarantinedNewer("category_template_defaults") +
+        " ON CONFLICT (id) DO UPDATE SET chz_group_code = excluded.chz_group_code, " +
+        "purpose = excluded.purpose, template_id = excluded.template_id, rev = excluded.rev " +
+        "WHERE excluded.rev > ref_template_defaults.rev",
+    },
+  ],
 ]);
 
 /**
@@ -187,16 +268,16 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
  * matches, every device syncs from zero, and records an older build
  * quarantined or kept differently come again.
  */
-const SYNC_SCHEMA_VERSION = 3;
+const SYNC_SCHEMA_VERSION = 4;
 
 /**
  * This build's copies, in `sync_state.entity_set`: the feed entities it
  * keeps (derived from `ENTITIES`, so a new entity cannot update that map and
- * forget this value, or the reverse) and `SYNC_SCHEMA_VERSION`. Today:
- * `"org_profile,site,lines,operators,operator_badges;v3"`. A build that
- * keeps other entities, or reads them differently, finds another value there
- * and syncs from zero: records the old build skipped or quarantined would
- * never come otherwise.
+ * forget this value, or the reverse) and `SYNC_SCHEMA_VERSION`, eight
+ * entities and `v4` today (`test/reference-sync.test.ts` pins the text). A
+ * build that keeps other entities, or reads them differently, finds another
+ * value there and syncs from zero: records the old build skipped or
+ * quarantined would never come otherwise.
  */
 export const ENTITY_SET = `${[...ENTITIES.keys()].join(",")};v${SYNC_SCHEMA_VERSION}`;
 
@@ -350,8 +431,10 @@ async function readState(local: LocalExecutor): Promise<StoredState> {
  *
  * `syncReferences` prepends `hostGuard` and, when starting over, `WIPE`: for
  * E kept entities a batch holds at most 1 + (E + 2) + 2E + 3 = 3E + 6
- * statements — 21 for the five kept today, and E = 8 (30) at most within the
- * shell's 32.
+ * statements — 30 for the eight kept today, the most within the shell's 32: a
+ * ninth entity would need 33. A revision larger than a page's byte bound
+ * still comes whole, as one JSON parameter per entity: the shell bounds SQL
+ * text and the number of values, not a value's size.
  */
 function pageStatements(page: ChangesResponse, hostId: string, seenAt: number): LocalStatement[] {
   const statements: LocalStatement[] = [];

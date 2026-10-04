@@ -114,7 +114,10 @@ describe("local database on node:sqlite", () => {
       "ref_operator_badges",
       "ref_operators",
       "ref_org",
+      "ref_products",
       "ref_site",
+      "ref_template_defaults",
+      "ref_templates",
       "sync_quarantine",
       "sync_state",
     ]);

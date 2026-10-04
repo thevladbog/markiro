@@ -72,7 +72,10 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "ref_operator_badges",
             "ref_operators",
             "ref_org",
+            "ref_products",
             "ref_site",
+            "ref_template_defaults",
+            "ref_templates",
             "sync_quarantine",
             "sync_state"
         ]
@@ -337,6 +340,58 @@ async fn one_statement_upserts_a_whole_page_through_json_each() {
     );
 }
 
+/// The limits bound SQL text (64 KB) and the number of values (256), never
+/// the size of one value: a feed revision is never split, so one larger than a
+/// page's 1 MiB (the wizard's templates, a template delete that clears
+/// thousands of products) reaches the shell as one JSON parameter per entity,
+/// several MiB long, and must pass whole (plan 1e2).
+#[tokio::test]
+async fn one_value_of_a_few_mebibytes_passes_the_limits() {
+    const UPSERT: &str = "INSERT INTO ref_templates (id, name, purpose, enabled, category_codes, \
+        stock, spec, rev) \
+        SELECT value ->> 'id', value ->> 'name', value ->> 'purpose', value ->> 'enabled', \
+        value ->> 'chzProductGroupCodes', value ->> 'stock', value ->> 'spec', value ->> 'rev' \
+        FROM json_each(?) WHERE true";
+    let (_dir, db) = open().await;
+    // Twelve layouts of the host's largest size, 256 KB each.
+    let spec = json!({ "widthMm": 58, "filler": "x".repeat(256 * 1024 - 32) });
+    let spec_length = spec.to_string().len();
+    let page = Value::Array(
+        (0..12)
+            .map(|n| {
+                json!({
+                    "id": format!("template-{n:02}"),
+                    "name": format!("Шаблон {n}"),
+                    "purpose": "box",
+                    "enabled": true,
+                    "chzProductGroupCodes": null,
+                    "stock": false,
+                    "spec": spec,
+                    "rev": 7
+                })
+            })
+            .collect(),
+    )
+    .to_string();
+    assert!(page.len() > 3 * 1024 * 1024, "{} bytes", page.len());
+    assert_eq!(
+        db.transaction(vec![statement(UPSERT, json!([page]))]).await,
+        Ok(vec![12])
+    );
+    let stored = db
+        .query(
+            "SELECT count(*) AS templates, min(length(spec)) AS shortest, \
+             max(length(spec)) AS longest FROM ref_templates",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Object(stored[0].clone()),
+        json!({ "templates": 12, "shortest": spec_length, "longest": spec_length })
+    );
+}
+
 /// Forgetting the device (`device_forget`) clears every table but sqlx's
 /// migration journal: tables a later migration adds too, since the list
 /// comes from `pragma_table_list`, and in any order despite foreign keys.
@@ -353,6 +408,21 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
             "INSERT INTO sync_quarantine (entity, id, rev, reason, seen_at) \
              VALUES ('lines', ?, 4, 'archived: invalid_type', 1790000000000)",
             json!([LINE_2]),
+        ),
+        statement(
+            "INSERT INTO ref_products (id, gtin14, name, archived, status, rev) \
+             VALUES ('product-1', '04600682000013', 'Молоко', 0, 'draft', 5)",
+            json!([]),
+        ),
+        statement(
+            "INSERT INTO ref_templates (id, name, purpose, enabled, stock, spec, rev) \
+             VALUES ('template-1', 'Коробка', 'box', 1, 0, '{}', 6)",
+            json!([]),
+        ),
+        statement(
+            "INSERT INTO ref_template_defaults (id, chz_group_code, purpose, template_id, rev) \
+             VALUES ('8:box', 8, 'box', 'template-1', 7)",
+            json!([]),
         ),
     ])
     .await
@@ -385,8 +455,9 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
         .query(
             "SELECT (SELECT count(*) FROM ref_org) + (SELECT count(*) FROM ref_site) \
              + (SELECT count(*) FROM ref_lines) + (SELECT count(*) FROM sync_state) \
-             + (SELECT count(*) FROM sync_quarantine) + (SELECT count(*) FROM extra_holder) \
-             + (SELECT count(*) FROM extra_item) AS n",
+             + (SELECT count(*) FROM sync_quarantine) + (SELECT count(*) FROM ref_products) \
+             + (SELECT count(*) FROM ref_templates) + (SELECT count(*) FROM ref_template_defaults) \
+             + (SELECT count(*) FROM extra_holder) + (SELECT count(*) FROM extra_item) AS n",
             vec![],
         )
         .await

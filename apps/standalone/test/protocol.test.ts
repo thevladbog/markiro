@@ -9,6 +9,7 @@ import {
   bootstrapRequestSchema,
   bootstrapResponseSchema,
   canonicalSaltSchema,
+  categoryTemplateDefaultSchema,
   changesResponseSchema,
   counterpartyCreateSchema,
   counterpartyRecordSchema,
@@ -19,6 +20,7 @@ import {
   deviceUpdateSchema,
   errorBodySchema,
   helloSchema,
+  labelTemplateRecordSchema,
   labelTemplateSchema,
   labelTemplateSummarySchema,
   lineCreateSchema,
@@ -46,6 +48,7 @@ import {
   passwordSetSchema,
   productCreateSchema,
   productGroupSchema,
+  productRecordSchema,
   productUpdateSchema,
   siteRecordSchema,
   ssccCounterUpdateSchema,
@@ -152,6 +155,23 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
     expect(changes.items.slice(2).map((item) => [item.entity, item.deleted, item.data])).toEqual([
       ["operator_badges", true, undefined],
       ["operators", true, undefined],
+    ]);
+  });
+
+  it("change feed of the catalog", () => {
+    const rawChanges = fixture("changes-catalog.json") as { items: Array<{ data?: unknown }> };
+    const changes = changesResponseSchema.parse(rawChanges);
+    const raw = (index: number) => rawChanges.items[index]?.data;
+    expect(changes.items).toHaveLength(8);
+    expect(labelTemplateRecordSchema.parse(changes.items[0]?.data)).toEqual(raw(0));
+    expect(labelTemplateRecordSchema.parse(changes.items[1]?.data)).toEqual(raw(1));
+    expect(orgRecordSchema.parse(changes.items[2]?.data)).toEqual(raw(2));
+    expect(categoryTemplateDefaultSchema.parse(changes.items[3]?.data)).toEqual(raw(3));
+    expect(productRecordSchema.parse(changes.items[4]?.data)).toEqual(raw(4));
+    expect(productRecordSchema.parse(changes.items[5]?.data)).toEqual(raw(5));
+    expect(changes.items.slice(6).map((item) => [item.entity, item.id, item.data])).toEqual([
+      ["category_template_defaults", "15:pallet", undefined],
+      ["label_templates", "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", undefined],
     ]);
   });
 });
@@ -732,6 +752,133 @@ describe("request builders send only what changes", () => {
     });
     gs1Prefixes.push("4609876");
     expect(body.gs1Prefixes).toEqual(["4601234"]);
+  });
+});
+
+describe("catalog feed records, which grant no access", () => {
+  const TEMPLATE = feedRecord("changes-catalog.json", 1);
+  const ORG = feedRecord("changes-catalog.json", 2);
+  const CATEGORY_DEFAULT = feedRecord("changes-catalog.json", 3);
+  const PRODUCT = feedRecord("changes-catalog.json", 4);
+
+  it("drop a key a newer host adds, as the organization's and the lines' records do", () => {
+    expect(productRecordSchema.parse({ ...PRODUCT, addedLater: true })).toEqual(PRODUCT);
+    expect(labelTemplateRecordSchema.parse({ ...TEMPLATE, addedLater: true })).toEqual(TEMPLATE);
+    expect(categoryTemplateDefaultSchema.parse({ ...CATEGORY_DEFAULT, addedLater: true })).toEqual(
+      CATEGORY_DEFAULT,
+    );
+  });
+
+  it("refuse a value no station can use: a GTIN of other than 14 digits, an unknown purpose or status, a template id that is no UUID", () => {
+    for (const product of [
+      { ...PRODUCT, gtin14: "4600682000013" },
+      { ...PRODUCT, status: "blocked" },
+      { ...PRODUCT, defaultBoxTemplateId: "7" },
+    ]) {
+      expect(productRecordSchema.safeParse(product).success).toBe(false);
+    }
+    expect(labelTemplateRecordSchema.safeParse({ ...TEMPLATE, purpose: "case" }).success).toBe(
+      false,
+    );
+    expect(labelTemplateRecordSchema.safeParse({ ...TEMPLATE, spec: [] }).success).toBe(false);
+    expect(
+      categoryTemplateDefaultSchema.safeParse({ ...CATEGORY_DEFAULT, templateId: "7" }).success,
+    ).toBe(false);
+  });
+
+  it("read an organization record without its default templates, from a host before plan 1e1, as none", () => {
+    const older = Object.fromEntries(
+      Object.entries(ORG).filter(([key]) => !key.endsWith("TemplateId")),
+    );
+    expect(Object.keys(older)).toHaveLength(5);
+    expect(orgRecordSchema.parse(older)).toEqual(older);
+    expect(orgRecordSchema.safeParse({ ...ORG, defaultBoxTemplateId: "7" }).success).toBe(false);
+  });
+
+  it("read each of the organization's default templates as a UUID, as null or as absent, and refuse another text", () => {
+    const TEMPLATE_ID = "7c1e4b2a-9d3f-4e5a-8b6c-1d2e3f4a5b6c";
+    const keys = [
+      "defaultBoxTemplateId",
+      "defaultPalletTemplateId",
+      "defaultDuplicateTemplateId",
+    ] as const;
+    for (const key of keys) {
+      const others = Object.fromEntries(Object.entries(ORG).filter(([name]) => name !== key));
+      expect(orgRecordSchema.parse({ ...others, [key]: TEMPLATE_ID })[key], key).toBe(TEMPLATE_ID);
+      expect(orgRecordSchema.parse({ ...others, [key]: null })[key], key).toBeNull();
+      expect(orgRecordSchema.parse(others)[key], key).toBeUndefined();
+      expect(orgRecordSchema.safeParse({ ...others, [key]: "7" }).success, key).toBe(false);
+    }
+  });
+
+  it("refuse a wrong type, a negative or fractional number and a GTIN of other than 14 digits in any field of a product, a template or a category default", () => {
+    const cases: Array<{
+      schema: { safeParse: (value: unknown) => { success: boolean } };
+      record: Record<string, unknown>;
+      refused: Record<string, unknown[]>;
+    }> = [
+      {
+        schema: productRecordSchema,
+        record: PRODUCT,
+        refused: {
+          // The host keeps 14 digits and a scan finds a product by exactly those.
+          gtin14: [
+            "",
+            "4600682000013",
+            "046006820000130",
+            "0460068200001A",
+            " 04600682000013",
+            "04600682000013\n",
+            7,
+            null,
+          ],
+          name: [7, null],
+          printName: [7],
+          chzProductGroupCode: ["8", -1, 1.5],
+          boxCapacity: ["12", -1, 1.5],
+          palletBoxCapacity: ["40", -1, 1.5],
+          shelfLifeDays: ["10", -1, 1.5],
+          defaultBoxTemplateId: [7, "7"],
+          defaultPalletTemplateId: [7, "7"],
+          archived: ["false", 0, null],
+          status: ["blocked", 1, null],
+        },
+      },
+      {
+        schema: labelTemplateRecordSchema,
+        record: TEMPLATE,
+        refused: {
+          name: [7, null],
+          purpose: ["case", 7],
+          enabled: ["true", 1, null],
+          chzProductGroupCodes: ["8", [-1], [1.5], ["8"]],
+          stock: ["false", 0, null],
+          spec: [[], null, "layout", 7],
+        },
+      },
+      {
+        schema: categoryTemplateDefaultSchema,
+        record: CATEGORY_DEFAULT,
+        refused: {
+          chzProductGroupCode: ["8", -1, 1.5, null],
+          purpose: ["case", 7],
+          templateId: ["7", 7, null],
+        },
+      },
+    ];
+    for (const { schema, record, refused } of cases) {
+      for (const [field, values] of Object.entries(refused)) {
+        for (const value of values) {
+          const result = schema.safeParse({ ...record, [field]: value });
+          expect(result.success, `${field}: ${JSON.stringify(value)}`).toBe(false);
+        }
+      }
+    }
+  });
+
+  it("keep a product whose GTIN has a wrong check digit: the host stores 14 digits, and the station keeps what the host keeps", () => {
+    const parsed = productRecordSchema.parse({ ...PRODUCT, gtin14: "00000000000001" });
+    expect(parsed.gtin14).toBe("00000000000001");
   });
 });
 
