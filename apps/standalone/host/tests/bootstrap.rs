@@ -4,8 +4,8 @@ use axum::http::StatusCode;
 use markiro_host::secrets::verify_password;
 use serde_json::{json, Value};
 use support::app::{
-    bootstrap, bootstrap_body, empty, json as json_request, login, pair_device, request,
-    seed_office_user, with_device, with_session, TestApp, LAN,
+    audit_rows, bootstrap, bootstrap_body, empty, host_revision, json as json_request, login,
+    pair_device, request, seed_office_user, with_device, with_session, TestApp, LAN,
 };
 
 #[tokio::test]
@@ -118,7 +118,8 @@ async fn the_wizard_initializes_the_host_and_signs_the_admin_in() {
             "issuerPrefix": "460068200",
             "lineCount": 2,
             "boxNextSerial": 1500,
-            "palletNextSerial": 40
+            "palletNextSerial": 40,
+            "templateCount": 0
         })
     );
 
@@ -511,4 +512,464 @@ async fn putting_the_org_profile_unchanged_is_a_no_op() {
             .await
             .unwrap();
     assert_eq!(audit_count_after, audit_count_before);
+}
+
+/// A layout of the given width, as the domain's stock builders make one.
+fn stock_spec(width: u32) -> Value {
+    json!({ "widthMm": width, "heightMm": 40, "dpi": 203, "language": "zpl", "elements": [] })
+}
+
+/// A layout `levels` objects deep, the innermost one empty.
+fn nested(levels: usize) -> Value {
+    let mut spec = json!({});
+    for _ in 1..levels {
+        spec = json!({ "elements": spec });
+    }
+    spec
+}
+
+/// Run the wizard from loopback with `templates` added to the valid request.
+async fn wizard_with(app: &TestApp, key: &str, templates: Value) -> (StatusCode, Value) {
+    let mut body = bootstrap_body();
+    body["templates"] = templates;
+    app.send(json_request(
+        with_device(request("POST", "/v1/bootstrap"), key),
+        body,
+    ))
+    .await
+}
+
+/// The id of the template named `name`.
+async fn template_id(app: &TestApp, name: &str) -> String {
+    sqlx::query_scalar("SELECT id FROM label_templates WHERE name = ?")
+        .bind(name)
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap()
+}
+
+/// What a wizard writes, counted table by table.
+async fn rows_the_wizard_writes(app: &TestApp) -> Vec<(&'static str, i64)> {
+    let mut counts = Vec::new();
+    for table in [
+        "office_users",
+        "office_sessions",
+        "org_profile",
+        "sscc_counters",
+        "lines",
+        "label_templates",
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+        counts.push((table, count));
+    }
+    counts
+}
+
+/// A refused or failed wizard leaves the host as it found it: nothing in any
+/// table the wizard fills, the host not initialized, no revision taken and no
+/// audit row written. `revision` and `audit` are the host's before the wizard.
+async fn assert_untouched(app: &TestApp, revision: i64, audit: i64, case: &str) {
+    assert_eq!(
+        rows_the_wizard_writes(app).await,
+        [
+            ("office_users", 0),
+            ("office_sessions", 0),
+            ("org_profile", 0),
+            ("sscc_counters", 0),
+            ("lines", 0),
+            ("label_templates", 0)
+        ],
+        "{case}"
+    );
+    let (status, hello) = app.send(empty(request("GET", "/v1/hello"))).await;
+    assert_eq!(status, StatusCode::OK, "{case}: {hello}");
+    assert_eq!(hello["initialized"], false, "{case}");
+    assert_eq!(host_revision(app).await, revision, "{case}");
+    assert_eq!(audit_rows(app).await, audit, "{case}");
+}
+
+#[tokio::test]
+async fn the_wizard_keeps_the_stock_templates_and_the_organizations_defaults() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let mut body = bootstrap_body();
+    body["templates"] = json!([
+        { "name": " Коробка 58×40 ", "purpose": "box", "spec": stock_spec(58), "orgDefault": true },
+        { "name": "Коробка 100×150", "purpose": "box", "spec": stock_spec(100) },
+        { "name": "Паллета 100×150", "purpose": "pallet", "spec": stock_spec(100), "orgDefault": true },
+        { "name": "Дубликат 58×40", "purpose": "product_duplicate", "spec": stock_spec(58) }
+    ]);
+    let (status, response) = app
+        .send(json_request(
+            with_device(request("POST", "/v1/bootstrap"), &key),
+            body,
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+
+    // Every template is a stock one, enabled for every category, at the
+    // wizard's revision.
+    let stored: Vec<(String, String, String, bool, Option<String>, bool, i64)> = sqlx::query_as(
+        "SELECT id, name, purpose, enabled, category_codes, stock, rev FROM label_templates ORDER BY name",
+    )
+    .fetch_all(&app.state.pool)
+    .await
+    .unwrap();
+    let id_of = |name: &str| {
+        stored
+            .iter()
+            .find(|row| row.1 == name)
+            .map(|row| row.0.clone())
+            .unwrap_or_else(|| panic!("no template {name}"))
+    };
+    assert_eq!(
+        stored
+            .iter()
+            .map(|(_, name, purpose, enabled, codes, stock, rev)| {
+                (
+                    name.as_str(),
+                    purpose.as_str(),
+                    *enabled,
+                    codes.clone(),
+                    *stock,
+                    *rev,
+                )
+            })
+            .collect::<Vec<_>>(),
+        vec![
+            ("Дубликат 58×40", "product_duplicate", true, None, true, 1),
+            ("Коробка 100×150", "box", true, None, true, 1),
+            ("Коробка 58×40", "box", true, None, true, 1),
+            ("Паллета 100×150", "pallet", true, None, true, 1),
+        ]
+    );
+    // The flagged ones are the organization's defaults; no duplicate default
+    // was asked for.
+    let token = response["session"]["token"].as_str().unwrap();
+    let (status, defaults) = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/template-defaults"),
+            &key,
+            token,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{defaults}");
+    assert_eq!(
+        defaults,
+        json!({
+            "defaultBoxTemplateId": id_of("Коробка 58×40"),
+            "defaultPalletTemplateId": id_of("Паллета 100×150"),
+            "defaultDuplicateTemplateId": null,
+            "categories": [],
+            "rev": 1
+        })
+    );
+    let details: String =
+        sqlx::query_scalar("SELECT details FROM audit_log WHERE action = 'host.bootstrap'")
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&details).unwrap()["templateCount"],
+        4
+    );
+    // Stations get the templates with the wizard's revision, layouts included.
+    let (status, feed) = app
+        .send(empty(with_device(
+            request("GET", "/v1/changes?since=0"),
+            &key,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{feed}");
+    let templates: Vec<&Value> = feed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["entity"] == "label_templates")
+        .collect();
+    assert_eq!(templates.len(), 4);
+    assert!(templates
+        .iter()
+        .all(|item| item["rev"] == 1 && item["data"]["stock"] == true));
+    assert!(templates
+        .iter()
+        .any(|item| item["data"]["spec"] == stock_spec(100)));
+    // The organization's record rides the same feed with the defaults, and
+    // each names a template the feed carries.
+    let org = feed["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|item| item["entity"] == "org_profile")
+        .expect("the organization is in the feed");
+    assert_eq!(
+        (
+            org["data"]["defaultBoxTemplateId"].clone(),
+            org["data"]["defaultPalletTemplateId"].clone(),
+            org["data"]["defaultDuplicateTemplateId"].clone()
+        ),
+        (
+            json!(id_of("Коробка 58×40")),
+            json!(id_of("Паллета 100×150")),
+            Value::Null
+        )
+    );
+}
+
+#[tokio::test]
+async fn stock_templates_are_checked_and_a_refused_wizard_creates_nothing() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let revision = host_revision(&app).await;
+    let audit = audit_rows(&app).await;
+    let template = |purpose: &str, org_default: bool| json!({ "name": "Коробка 58×40", "purpose": purpose, "spec": stock_spec(58), "orgDefault": org_default });
+    let too_many: Vec<Value> = (0..33).map(|_| template("box", false)).collect();
+    let mut blank = template("box", false);
+    blank["name"] = json!(" ");
+    let mut not_an_object = template("box", false);
+    not_an_object["spec"] = json!([]);
+    for (templates, field) in [
+        (json!(too_many), "templates"),
+        (json!([blank]), "templates.0.name"),
+        (json!([not_an_object]), "templates.0.spec"),
+        (
+            json!([
+                template("box", true),
+                template("pallet", true),
+                template("box", true)
+            ]),
+            "templates.2.orgDefault",
+        ),
+    ] {
+        let mut body = bootstrap_body();
+        body["templates"] = templates;
+        let (status, response) = app
+            .send(json_request(
+                with_device(request("POST", "/v1/bootstrap"), &key),
+                body,
+            ))
+            .await;
+        assert_eq!(
+            (status, response["error"]["details"]["field"].clone()),
+            (StatusCode::BAD_REQUEST, json!(field)),
+            "{field}"
+        );
+    }
+    let mut enabled = template("box", false);
+    enabled["enabled"] = json!(true);
+    for templates in [json!([template("label", false)]), json!([enabled])] {
+        let mut body = bootstrap_body();
+        body["templates"] = templates;
+        let (status, response) = app
+            .send(json_request(
+                with_device(request("POST", "/v1/bootstrap"), &key),
+                body,
+            ))
+            .await;
+        assert_eq!(
+            (status, response["error"]["code"].clone()),
+            (StatusCode::BAD_REQUEST, json!("validation_failed"))
+        );
+    }
+    let (status, hello) = app.send(empty(request("GET", "/v1/hello"))).await;
+    assert_eq!(status, StatusCode::OK, "{hello}");
+    assert_eq!(hello["initialized"], false);
+    let templates: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM label_templates")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(templates, 0);
+    // Not only the templates: no administrator, organization, line, counter
+    // or session, no revision and no audit row.
+    assert_untouched(&app, revision, audit, "refused").await;
+}
+
+/// The wizard checks a stock layout as every template's is
+/// (`validate::template_spec`), so one nested deeper than 64 levels
+/// (`MAX_SPEC_DEPTH`: a feed page could not carry it to the stations) refuses
+/// the whole wizard as `templates.{i}.spec`, and a refused wizard writes
+/// nothing. Exactly 64 levels are kept. (Literals, not the constant, so that
+/// this pins the bound itself.)
+#[tokio::test]
+async fn a_stock_layout_nested_64_levels_is_kept_and_one_level_more_refuses_the_wizard() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let revision = host_revision(&app).await;
+    let audit = audit_rows(&app).await;
+    let box_template =
+        |name: &str, spec: Value| json!({ "name": name, "purpose": "box", "spec": spec });
+
+    let (status, refused) = wizard_with(
+        &app,
+        &key,
+        json!([
+            box_template("Коробка 58×40", stock_spec(58)),
+            box_template("Коробка глубже", nested(65))
+        ]),
+    )
+    .await;
+    assert_eq!(
+        (
+            status,
+            refused["error"]["code"].clone(),
+            refused["error"]["details"]["field"].clone()
+        ),
+        (
+            StatusCode::BAD_REQUEST,
+            json!("validation_failed"),
+            json!("templates.1.spec")
+        )
+    );
+    assert_untouched(&app, revision, audit, "65 levels").await;
+
+    let (status, response) = wizard_with(
+        &app,
+        &key,
+        json!([
+            box_template("Коробка 58×40", stock_spec(58)),
+            box_template("Коробка на 64 уровня", nested(64))
+        ]),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    let stored: String =
+        sqlx::query_scalar("SELECT spec FROM label_templates WHERE name = 'Коробка на 64 уровня'")
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&stored).unwrap(), nested(64));
+}
+
+/// A wizard sends up to 32 stock templates (`MAX_STOCK_TEMPLATES`; the domain
+/// builds 20 today) and may flag one of each purpose, the duplicate's too, as
+/// the organization's default: each slot takes the flagged template of its own
+/// purpose, not the first or the last of them. (Literals, not the constant, so
+/// that this pins the bound itself.)
+#[tokio::test]
+async fn a_wizard_takes_32_stock_templates_and_a_default_of_every_purpose() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let revision = host_revision(&app).await;
+    let audit = audit_rows(&app).await;
+    let template = |name: &str, purpose: &str, org_default: bool| json!({ "name": name, "purpose": purpose, "spec": stock_spec(58), "orgDefault": org_default });
+    // A plain template of each purpose first, then the flagged one of each,
+    // then plain ones up to 32.
+    let mut templates = vec![
+        template("Коробка первая", "box", false),
+        template("Паллета первая", "pallet", false),
+        template("Дубликат первый", "product_duplicate", false),
+        template("Коробка по умолчанию", "box", true),
+        template("Паллета по умолчанию", "pallet", true),
+        template("Дубликат по умолчанию", "product_duplicate", true),
+    ];
+    for number in templates.len()..32 {
+        let purpose = ["box", "pallet", "product_duplicate"][number % 3];
+        templates.push(template(&format!("Типовой {number}"), purpose, false));
+    }
+    assert_eq!(templates.len(), 32);
+
+    // One more is refused, and the wizard writes nothing...
+    let mut one_too_many = templates.clone();
+    one_too_many.push(template("Лишний", "box", false));
+    let (status, refused) = wizard_with(&app, &key, json!(one_too_many)).await;
+    assert_eq!(
+        (status, refused["error"]["details"]["field"].clone()),
+        (StatusCode::BAD_REQUEST, json!("templates"))
+    );
+    assert_untouched(&app, revision, audit, "33 templates").await;
+
+    // ...and exactly 32 are kept.
+    let (status, response) = wizard_with(&app, &key, json!(templates)).await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    let kept: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM label_templates \
+         WHERE enabled = 1 AND stock = 1 AND category_codes IS NULL AND rev = 1",
+    )
+    .fetch_one(&app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(kept, 32);
+    let token = response["session"]["token"].as_str().unwrap();
+    let (status, defaults) = app
+        .send(empty(with_session(
+            request("GET", "/v1/office/template-defaults"),
+            &key,
+            token,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{defaults}");
+    assert_eq!(
+        defaults,
+        json!({
+            "defaultBoxTemplateId": template_id(&app, "Коробка по умолчанию").await,
+            "defaultPalletTemplateId": template_id(&app, "Паллета по умолчанию").await,
+            "defaultDuplicateTemplateId": template_id(&app, "Дубликат по умолчанию").await,
+            "categories": [],
+            "rev": 1
+        })
+    );
+    let details: String =
+        sqlx::query_scalar("SELECT details FROM audit_log WHERE action = 'host.bootstrap'")
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&details).unwrap()["templateCount"],
+        32
+    );
+}
+
+/// The wizard writes its stock templates in the one transaction of the rest,
+/// so a failure after they are written leaves nothing behind. A trigger
+/// refuses the wizard's audit row, the last thing it writes; the answer is an
+/// internal error, not one row stays, and the same request then runs from
+/// scratch once the trigger is gone.
+#[tokio::test]
+async fn a_wizard_that_fails_after_writing_the_templates_leaves_nothing() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    let revision = host_revision(&app).await;
+    let audit = audit_rows(&app).await;
+    let templates = json!([
+        { "name": "Коробка 58×40", "purpose": "box", "spec": stock_spec(58), "orgDefault": true },
+        { "name": "Паллета 100×150", "purpose": "pallet", "spec": stock_spec(100), "orgDefault": true },
+        { "name": "Дубликат 58×40", "purpose": "product_duplicate", "spec": stock_spec(58) }
+    ]);
+    sqlx::query(
+        "CREATE TRIGGER refuse_the_wizards_audit_row BEFORE INSERT ON audit_log \
+         WHEN NEW.action = 'host.bootstrap' \
+         BEGIN SELECT RAISE(ABORT, 'no audit row for the wizard'); END",
+    )
+    .execute(&app.state.pool)
+    .await
+    .unwrap();
+
+    let (status, failed) = wizard_with(&app, &key, templates.clone()).await;
+    assert_eq!(
+        (status, failed["error"]["code"].clone()),
+        (StatusCode::INTERNAL_SERVER_ERROR, json!("internal")),
+        "{failed}"
+    );
+    assert_untouched(&app, revision, audit, "failed after the templates").await;
+
+    sqlx::query("DROP TRIGGER refuse_the_wizards_audit_row")
+        .execute(&app.state.pool)
+        .await
+        .unwrap();
+    let (status, response) = wizard_with(&app, &key, templates).await;
+    assert_eq!(status, StatusCode::OK, "{response}");
+    assert_eq!(
+        rows_the_wizard_writes(&app).await,
+        [
+            ("office_users", 1),
+            ("office_sessions", 1),
+            ("org_profile", 1),
+            ("sscc_counters", 2),
+            ("lines", 2),
+            ("label_templates", 3)
+        ]
+    );
 }

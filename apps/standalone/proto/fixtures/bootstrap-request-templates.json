@@ -1,0 +1,31 @@
+{
+  "admin": { "login": "admin", "name": "Ирина Смирнова", "password": "correct horse battery" },
+  "org": {
+    "name": "ООО «Атолл»",
+    "inn": "7701234567",
+    "gln": "4600682000010",
+    "gs1Prefixes": ["4600682"],
+    "timeZone": "Europe/Moscow"
+  },
+  "sscc": { "boxNextSerial": 1, "palletNextSerial": 0 },
+  "lines": ["Линия 1"],
+  "templates": [
+    {
+      "name": "Коробка 58×40",
+      "purpose": "box",
+      "spec": { "widthMm": 58, "heightMm": 40, "dpi": 203, "language": "zpl", "elements": [] },
+      "orgDefault": true
+    },
+    {
+      "name": "Паллета 100×150",
+      "purpose": "pallet",
+      "spec": { "widthMm": 100, "heightMm": 150, "dpi": 203, "language": "zpl", "elements": [] },
+      "orgDefault": true
+    },
+    {
+      "name": "Дубликат Data Matrix 58×40 [Полное наименование]",
+      "purpose": "product_duplicate",
+      "spec": { "widthMm": 58, "heightMm": 40, "dpi": 203, "language": "zpl", "elements": [] }
+    }
+  ]
+}

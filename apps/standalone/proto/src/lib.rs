@@ -733,6 +733,23 @@ pub struct BootstrapRequest {
     pub sscc: SsccStart,
     /// Names of the first production lines (1-20).
     pub lines: Vec<String>,
+    /// The stock label templates the app built with `@markiro/domain` (plan
+    /// 1e3); a wizard from before then sends none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub templates: Vec<StockTemplate>,
+}
+
+/// A stock label template of the wizard: enabled, for every category, and
+/// kept as it came (`stock`). `orgDefault` makes it the organization's
+/// default of its purpose, so the request names no id it does not have yet.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StockTemplate {
+    pub name: String,
+    pub purpose: TemplatePurpose,
+    pub spec: serde_json::Value,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub org_default: bool,
 }
 
 /// Response of `POST /v1/bootstrap`: the administrator is signed in on the

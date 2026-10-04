@@ -1,8 +1,11 @@
 //! The first-run wizard: `POST /v1/bootstrap` (loopback, paired device, host
 //! not initialized). One transaction creates the administrator, the badge
-//! salt, the organization, the SSCC counters and the first lines and signs
-//! the admin in. Stock label templates join in plan 1e.
+//! salt, the stock label templates the app built with `@markiro/domain`, the
+//! organization with its defaults among them, the SSCC counters and the
+//! first lines, and signs the admin in; a refusal creates nothing. The
+//! templates are optional: a wizard from before plan 1e3 sends none.
 
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 
 use axum::extract::{ConnectInfo, State};
@@ -10,6 +13,7 @@ use axum::http::StatusCode;
 use axum::Json;
 use markiro_proto::{
     codes, BootstrapRequest, BootstrapResponse, OfficeRole, OfficeSession, OfficeUser,
+    TemplatePurpose,
 };
 use serde_json::json;
 
@@ -21,6 +25,11 @@ use crate::error::{ApiError, ApiJson};
 use crate::secrets::hash_password_blocking;
 use crate::server::AppState;
 use crate::validate;
+
+/// The most stock templates a wizard sends: the domain builds 20 today, and
+/// the bound leaves room to grow without letting a request ask for any
+/// amount.
+pub const MAX_STOCK_TEMPLATES: usize = 32;
 
 pub async fn bootstrap(
     State(state): State<AppState>,
@@ -58,6 +67,27 @@ pub async fn bootstrap(
             return Err(ApiError::validation(&field, "line names must be unique"));
         }
         lines.push((line_name, name_key));
+    }
+    if request.templates.len() > MAX_STOCK_TEMPLATES {
+        return Err(ApiError::validation(
+            "templates",
+            format!("at most {MAX_STOCK_TEMPLATES} stock templates"),
+        ));
+    }
+    let mut templates: Vec<(String, TemplatePurpose, String)> =
+        Vec::with_capacity(request.templates.len());
+    // The index of the organization's default of each purpose.
+    let mut defaults: BTreeMap<TemplatePurpose, usize> = BTreeMap::new();
+    for (index, template) in request.templates.iter().enumerate() {
+        let name = validate::template_name(&format!("templates.{index}.name"), &template.name)?;
+        let spec = validate::template_spec(&format!("templates.{index}.spec"), &template.spec)?;
+        if template.org_default && defaults.insert(template.purpose, index).is_some() {
+            return Err(ApiError::validation(
+                &format!("templates.{index}.orgDefault"),
+                "one organization default per purpose",
+            ));
+        }
+        templates.push((name, template.purpose, spec));
     }
 
     // Hash before taking the write lock: PBKDF2 takes a noticeable fraction
@@ -108,14 +138,42 @@ pub async fn bootstrap(
         .await
         .map_err(ApiError::internal)?;
 
+    // The templates first: the organization's defaults refer to them.
+    let mut template_ids: Vec<String> = Vec::with_capacity(templates.len());
+    for (name, purpose, spec) in &templates {
+        let id = uuid::Uuid::new_v4().to_string();
+        sqlx::query(
+            "INSERT INTO label_templates (id, name, purpose, enabled, category_codes, spec, stock, rev) \
+             VALUES (?, ?, ?, 1, NULL, ?, 1, ?)",
+        )
+        .bind(&id)
+        .bind(name)
+        .bind(purpose.as_str())
+        .bind(spec)
+        .bind(rev)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+        template_ids.push(id);
+    }
+    let default_of = |purpose: TemplatePurpose| {
+        defaults
+            .get(&purpose)
+            .and_then(|&index| template_ids.get(index).cloned())
+    };
     sqlx::query(
-        "INSERT INTO org_profile (id, name, inn, gln, gs1_prefixes, time_zone, rev) VALUES (1, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO org_profile (id, name, inn, gln, gs1_prefixes, time_zone, \
+         default_box_template_id, default_pallet_template_id, default_duplicate_template_id, rev) \
+         VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&org.name)
     .bind(&org.inn)
     .bind(&org.gln)
     .bind(serde_json::to_string(&org.gs1_prefixes).map_err(ApiError::internal)?)
     .bind(&org.time_zone)
+    .bind(default_of(TemplatePurpose::Box))
+    .bind(default_of(TemplatePurpose::Pallet))
+    .bind(default_of(TemplatePurpose::ProductDuplicate))
     .bind(rev)
     .execute(&mut *tx)
     .await
@@ -167,6 +225,7 @@ pub async fn bootstrap(
                 "lineCount": lines.len(),
                 "boxNextSerial": request.sscc.box_next_serial,
                 "palletNextSerial": request.sscc.pallet_next_serial,
+                "templateCount": templates.len(),
             }),
         },
     )

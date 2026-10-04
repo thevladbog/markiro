@@ -614,6 +614,34 @@ fn template_defaults_fixtures_round_trip_as_one_document() {
 }
 
 #[test]
+fn a_wizard_with_stock_templates_round_trips_and_an_older_one_still_reads() {
+    let request: BootstrapRequest = round_trip("bootstrap-request-templates.json");
+    assert_eq!(request.templates.len(), 3);
+    let defaults: Vec<TemplatePurpose> = request
+        .templates
+        .iter()
+        .filter(|template| template.org_default)
+        .map(|template| template.purpose)
+        .collect();
+    assert_eq!(
+        defaults,
+        vec![TemplatePurpose::Box, TemplatePurpose::Pallet]
+    );
+    // A wizard from before plan 1e3 sends no templates.
+    let older: BootstrapRequest = round_trip("bootstrap-request.json");
+    assert!(older.templates.is_empty());
+    // A stock template is enabled for every category: neither is a field.
+    for field in ["enabled", "chzProductGroupCodes"] {
+        let mut value = fixture("bootstrap-request-templates.json");
+        value["templates"][0][field] = Value::Null;
+        assert!(
+            serde_json::from_value::<BootstrapRequest>(value).is_err(),
+            "{field}"
+        );
+    }
+}
+
+#[test]
 fn the_error_code_fixture_lists_every_code() {
     let listed = fixture("error-codes.json");
     let mut listed: Vec<&str> = listed["codes"]

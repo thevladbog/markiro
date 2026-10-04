@@ -472,6 +472,17 @@ it again drops. An unchanged document writes nothing, and the audit row
 (`template_defaults.update`, target `template_defaults`/`1`) carries the
 changed parts with `{ from, to }`, `categories` as whole lists.
 
+The wizard (`POST /v1/bootstrap`) takes the stock templates the app builds
+with `@markiro/domain` (plan 1e3) as an optional `templates` list, so a
+wizard from before then still works: at most 32 (`MAX_STOCK_TEMPLATES`; the
+domain builds 20), each a name, a purpose and a layout checked as any
+template's, stored enabled, for every category and `stock`, in the
+wizard's one transaction, so a refusal creates nothing. `orgDefault: true`
+on one template of a purpose makes it the organization's default of that
+purpose, so the request names no id it does not have yet; a second of the
+same purpose is `validation_failed` on `templates.{i}.orgDefault`. The
+`host.bootstrap` row counts them (`templateCount`).
+
 ## Reference sync
 
 `src/local/reference-sync.ts` keeps the local copies in step with the host
@@ -993,7 +1004,10 @@ arbitrates but does not reimplement them.
 
 Never log device keys, session tokens, pairing codes, passwords, PINs, badge
 codes (a scan is one; plan 1f will handle them), any hash or the TLS private
-key.
+key. A label template's layout is no secret, but at up to 256 KB it stays
+out of the log as it stays out of audit details; `no_secrets_in_logs.rs`
+walks a stock and an office layout through the template routes, the
+defaults and the feed.
 
 ## Verification
 

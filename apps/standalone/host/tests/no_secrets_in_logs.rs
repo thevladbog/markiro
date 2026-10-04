@@ -1,7 +1,8 @@
 //! Spec §4.10: the process log never holds device keys, session tokens,
 //! passwords, password, PIN and badge hashes, pairing codes, the badge salt
-//! or the TLS private key. Its own binary, because it installs the global
-//! tracing subscriber.
+//! or the TLS private key. A label template's layout is no secret, but at
+//! up to 256 KB it stays out of the log too. Its own binary, because it
+//! installs the global tracing subscriber.
 
 mod support;
 
@@ -14,6 +15,14 @@ use serde_json::json;
 /// `pinPhc` of `proto/fixtures/phc-password.json`: the PIN 4821.
 const PIN_PHC: &str =
     "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=";
+
+/// A layout whose only text is `marker`, so the log can be searched for it.
+fn layout(marker: &str) -> serde_json::Value {
+    json!({
+        "widthMm": 58, "heightMm": 40, "dpi": 203, "language": "zpl",
+        "elements": [{ "kind": "text", "id": "t", "xMm": 2, "yMm": 2, "text": marker, "fontSizePt": 8 }]
+    })
+}
 
 #[tokio::test]
 async fn secrets_never_reach_the_process_log() {
@@ -44,7 +53,7 @@ async fn secrets_never_reach_the_process_log() {
         .await
         .unwrap();
     let key = pair["deviceKey"].as_str().unwrap().to_owned();
-    let session: serde_json::Value = client
+    let wizard = client
         .post(format!("{base}/v1/bootstrap"))
         .header(protocol.0, &protocol.1)
         .bearer_auth(&key)
@@ -52,14 +61,17 @@ async fn secrets_never_reach_the_process_log() {
             "admin": { "login": "admin", "name": "Ирина", "password": "correct horse battery" },
             "org": { "name": "ООО «Атолл»", "gln": "4600682000010", "gs1Prefixes": [], "timeZone": "Europe/Moscow" },
             "sscc": { "boxNextSerial": 1, "palletNextSerial": 0 },
-            "lines": ["Линия 1"]
+            "lines": ["Линия 1"],
+            "templates": [{
+                "name": "Коробка 58×40", "purpose": "box",
+                "spec": layout("layout-marker-stock"), "orgDefault": true
+            }]
         }))
         .send()
         .await
-        .unwrap()
-        .json()
-        .await
         .unwrap();
+    assert_eq!(wizard.status(), 200);
+    let session: serde_json::Value = wizard.json().await.unwrap();
     let token = session["session"]["token"].as_str().unwrap().to_owned();
     let wrong = client
         .post(format!("{base}/v1/office/login"))
@@ -309,6 +321,82 @@ async fn secrets_never_reach_the_process_log() {
         .unwrap();
     assert_eq!(revoked.status(), 204);
 
+    // The catalog: a template of the office's own and a new layout for it, a
+    // product that prefers it, the defaults that name it, a refused delete
+    // and the feed that carries every layout: none may reach the log.
+    let office_template = client
+        .post(format!("{base}/v1/office/templates"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({
+            "name": "Молоко 58×40", "purpose": "box", "enabled": true,
+            "spec": layout("layout-marker-office-1")
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(office_template.status(), 200);
+    let office_template: serde_json::Value = office_template.json().await.unwrap();
+    let template_id = office_template["id"].as_str().unwrap().to_owned();
+    let relaid = client
+        .put(format!("{base}/v1/office/templates/{template_id}"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({ "spec": layout("layout-marker-office-2"), "expectedRev": office_template["rev"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(relaid.status(), 200);
+    let product = client
+        .post(format!("{base}/v1/office/products"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({ "gtin14": "04600682000013", "name": "Молоко", "defaultBoxTemplateId": template_id }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(product.status(), 200);
+    let defaults = client
+        .get(format!("{base}/v1/office/template-defaults"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(defaults.status(), 200);
+    let defaults: serde_json::Value = defaults.json().await.unwrap();
+    let defaults_set = client
+        .put(format!("{base}/v1/office/template-defaults"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({ "defaultBoxTemplateId": template_id, "categories": [], "expectedRev": defaults["rev"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(defaults_set.status(), 200);
+    let refused_delete = client
+        .delete(format!("{base}/v1/office/templates/{template_id}"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(refused_delete.status(), 409);
+    let catalog_feed = client
+        .get(format!("{base}/v1/changes?since=0"))
+        .header(protocol.0, &protocol.1)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(catalog_feed.status(), 200);
+
     // A wrong device key and a wrong session token are both rejected...
     let wrong_device_key = "not-a-real-device-key";
     let wrong_device = client
@@ -349,6 +437,14 @@ async fn secrets_never_reach_the_process_log() {
             .unwrap();
     let salt: Vec<u8> = sqlx::query_scalar("SELECT badge_salt FROM site WHERE id = 1")
         .fetch_one(&pool)
+        .await
+        .unwrap();
+    // The layouts the host kept: the stock one and the office's current one.
+    // (The first office layout was replaced; the flows above were checked by
+    // their statuses, this shows the markers really reached the host, or
+    // their absence from the log would prove nothing.)
+    let layouts: Vec<String> = sqlx::query_scalar("SELECT spec FROM label_templates")
+        .fetch_all(&pool)
         .await
         .unwrap();
     let key_der = std::fs::read(paths.tls_dir().join("key.der")).unwrap();
@@ -418,5 +514,18 @@ async fn secrets_never_reach_the_process_log() {
     secrets.extend(pairing_code_hashes);
     for secret in secrets {
         assert!(!log.contains(&secret), "the process log contains a secret");
+    }
+    for layout in [
+        "layout-marker-stock",
+        "layout-marker-office-1",
+        "layout-marker-office-2",
+    ] {
+        assert!(!log.contains(layout), "the process log contains {layout}");
+    }
+    for kept in ["layout-marker-stock", "layout-marker-office-2"] {
+        assert!(
+            layouts.iter().any(|spec| spec.contains(kept)),
+            "the host never kept {kept}"
+        );
     }
 }
