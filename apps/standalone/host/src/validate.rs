@@ -1179,6 +1179,64 @@ mod tests {
         }
     }
 
+    /// An object of `levels` levels in all whose one deep branch is an object
+    /// chain (`levels - 1` levels, the innermost empty) beside a scalar, which
+    /// is no level. The keys fix the order the object keeps them in, so the
+    /// deep branch comes first or last.
+    fn deep_object_beside_a_scalar(levels: usize, deep_first: bool) -> serde_json::Value {
+        let deep = nested_objects(levels - 1);
+        if deep_first {
+            serde_json::json!({ "a": deep, "b": 1 })
+        } else {
+            serde_json::json!({ "a": 1, "b": deep })
+        }
+    }
+
+    /// An object around an array of `levels` levels in all: the array holds
+    /// a deep object chain (`levels - 2` levels, the innermost empty) and a
+    /// scalar, in the given order.
+    fn deep_array_beside_a_scalar(levels: usize, deep_first: bool) -> serde_json::Value {
+        let deep = nested_objects(levels - 2);
+        let items = if deep_first {
+            serde_json::json!([deep, 1])
+        } else {
+            serde_json::json!([1, deep])
+        };
+        serde_json::json!({ "a": items })
+    }
+
+    /// The depth of a layout is that of its DEEPEST branch, whatever stands
+    /// beside it: a real layout has shallow keys (`widthMm`, `language`)
+    /// around the `elements` that nest, and an array holds shallow items
+    /// next to deep ones. Both orders, so that a measure that follows only the
+    /// first child, or only the last, or the shallowest, fails too. (The
+    /// single-chain cases above cannot tell any of them from the right one.)
+    #[test]
+    fn the_deepest_branch_sets_the_depth_whatever_stands_beside_it() {
+        let builders: [(&str, fn(usize, bool) -> serde_json::Value); 2] = [
+            ("an object", deep_object_beside_a_scalar),
+            ("an array", deep_array_beside_a_scalar),
+        ];
+        for (kind, build) in builders {
+            for deep_first in [true, false] {
+                let order = if deep_first {
+                    "deep first"
+                } else {
+                    "deep last"
+                };
+                assert!(
+                    template_spec("spec", &build(64, deep_first)).is_ok(),
+                    "{kind}, {order}: 64 levels"
+                );
+                assert_eq!(
+                    field(template_spec("spec", &build(65, deep_first))),
+                    "spec",
+                    "{kind}, {order}: 65 levels"
+                );
+            }
+        }
+    }
+
     /// Depth is not size: a deep layout is refused however small, a flat one
     /// kept up to the size bound.
     #[test]

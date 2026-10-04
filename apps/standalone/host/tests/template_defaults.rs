@@ -613,6 +613,56 @@ async fn an_edit_of_the_organization_profile_raises_the_documents_revision() {
     assert_eq!(cleared["categories"], json!([]));
 }
 
+/// Only the tombstones of cleared category defaults count toward the
+/// document's revision. A template that is no default, deleted, leaves a
+/// tombstone of its own at a newer revision, and the document stays at the
+/// revision a form read: the read says so, and a `PUT` over it is accepted,
+/// where a revision that moved with every tombstone (an operator turned off,
+/// a badge revoked, any template deleted) would make an open form stale for
+/// a change nobody made to the defaults.
+#[tokio::test]
+async fn an_unrelated_tombstone_does_not_move_the_documents_revision() {
+    let admin = admin().await;
+    let t = templates(&admin).await;
+    let (status, set) = put(
+        &admin,
+        json!({
+            "defaultBoxTemplateId": t.universal,
+            "categories": [slot(8, "box", &t.milk)],
+            "expectedRev": 1
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{set}");
+    let opened = set["rev"].as_i64().unwrap();
+
+    // The disabled template is no default of any slot.
+    let (status, _) = admin
+        .call(
+            "DELETE",
+            &format!("/v1/office/templates/{}", t.disabled),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        tombstones(&admin.app).await,
+        vec![("label_templates".to_owned(), t.disabled.clone(), opened + 1)],
+        "the delete left a tombstone newer than the document"
+    );
+    assert_eq!(document(&admin).await, set);
+
+    let revision = host_revision(&admin.app).await;
+    let (status, cleared) = put(
+        &admin,
+        json!({ "defaultBoxTemplateId": t.universal, "categories": [], "expectedRev": opened }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{cleared}");
+    assert_eq!(cleared["rev"], json!(revision + 1));
+    assert_eq!(cleared["categories"], json!([]));
+}
+
 /// The duplicate slot takes a duplicate template, for the organization and for
 /// a category, as the others take theirs (the plan's tests set the box and
 /// pallet defaults and refuse a wrong template for the duplicate slot, but

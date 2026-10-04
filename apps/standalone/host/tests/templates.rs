@@ -996,7 +996,10 @@ async fn null_widens_a_template_to_every_category_and_a_missing_field_keeps_them
         ),
         (Value::Null, json!(false))
     );
-    let (_, list) = admin.call("GET", "/v1/office/templates", None).await;
+    // The list is read as itself: an error body indexes to `null` too.
+    let (status, list) = admin.call("GET", "/v1/office/templates", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list[0]["id"], json!(id));
     assert_eq!(list[0]["chzProductGroupCodes"], Value::Null);
     assert_eq!(
         audit_trail(&admin.app, "template.update").await,
@@ -1496,6 +1499,63 @@ async fn a_layout_nested_64_levels_is_kept_and_one_level_more_is_refused() {
         .await;
     assert_eq!(status, StatusCode::OK, "{updated}");
     assert_eq!(updated["spec"], nested(64));
+}
+
+/// A real layout's shape: shallow keys (`widthMm`, `dpi`, `language`) on both
+/// sides of the one branch that nests, `elements`; `levels` levels in all.
+fn layout_nested(levels: usize) -> Value {
+    let mut spec = layout();
+    spec["elements"] = json!([nested(levels - 2)]);
+    spec
+}
+
+/// The depth of a layout is its deepest branch's, not the shallowest
+/// sibling's: a layout with its usual shallow keys beside a branch that nests
+/// is kept at 64 levels, by a `POST` and a `PUT` alike, and refused at 65. (The
+/// single-chain case above cannot tell the two measures apart.)
+#[tokio::test]
+async fn a_deep_branch_beside_shallow_keys_counts_by_its_own_depth() {
+    let admin = admin().await;
+    let mut body = box_template("Коробка 58×40");
+    body["spec"] = layout_nested(64);
+    let created = create(&admin, body).await;
+    assert_eq!(created["spec"], layout_nested(64));
+    let other = create(&admin, box_template("Коробка 58×40 (другая)")).await;
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+
+    let mut body = box_template("Коробка 58×40 (глубже)");
+    body["spec"] = layout_nested(65);
+    let (status, refused) = admin.call("POST", "/v1/office/templates", Some(body)).await;
+    assert_eq!(
+        (status, refused["error"]["details"]["field"].clone()),
+        (StatusCode::BAD_REQUEST, json!("spec")),
+        "POST"
+    );
+    let (status, refused) = admin
+        .call(
+            "PUT",
+            &path(&other),
+            Some(json!({ "spec": layout_nested(65), "expectedRev": other["rev"] })),
+        )
+        .await;
+    assert_eq!(
+        (status, refused["error"]["details"]["field"].clone()),
+        (StatusCode::BAD_REQUEST, json!("spec")),
+        "PUT"
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+
+    let (status, updated) = admin
+        .call(
+            "PUT",
+            &path(&other),
+            Some(json!({ "spec": layout_nested(64), "expectedRev": other["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["spec"], layout_nested(64));
 }
 
 /// The feed page that carries a layout at the bound parses back as the

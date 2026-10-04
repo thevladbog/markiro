@@ -4,8 +4,8 @@ use axum::http::StatusCode;
 use markiro_host::secrets::verify_password;
 use serde_json::{json, Value};
 use support::app::{
-    audit_rows, bootstrap, bootstrap_body, empty, host_revision, json as json_request, login,
-    nested, pair_device, request, seed_office_user, with_device, with_session, TestApp, LAN,
+    audit_rows, audit_trail, bootstrap, bootstrap_body, empty, host_revision, json as json_request,
+    login, nested, pair_device, request, seed_office_user, with_device, with_session, TestApp, LAN,
 };
 
 #[tokio::test]
@@ -585,7 +585,7 @@ async fn assert_untouched(app: &TestApp, revision: i64, audit: i64, case: &str) 
 #[tokio::test]
 async fn the_wizard_keeps_the_stock_templates_and_the_organizations_defaults() {
     let app = TestApp::new().await;
-    let (_, key) = pair_device(&app, "station").await;
+    let (device_id, key) = pair_device(&app, "station").await;
     let mut body = bootstrap_body();
     body["templates"] = json!([
         { "name": " Коробка 58×40 ", "purpose": "box", "spec": stock_spec(58), "orgDefault": true },
@@ -658,14 +658,33 @@ async fn the_wizard_keeps_the_stock_templates_and_the_organizations_defaults() {
             "rev": 1
         })
     );
-    let details: String =
-        sqlx::query_scalar("SELECT details FROM audit_log WHERE action = 'host.bootstrap'")
-            .fetch_one(&app.state.pool)
-            .await
-            .unwrap();
+    // The whole audit row, as the wizard without templates leaves one
+    // (`the_wizard_initializes_the_host_and_signs_the_admin_in`), with the
+    // templates counted and nothing else added.
     assert_eq!(
-        serde_json::from_str::<Value>(&details).unwrap()["templateCount"],
-        4
+        audit_trail(&app, "host.bootstrap").await,
+        vec![(
+            "device".to_owned(),
+            Some(device_id),
+            "host.bootstrap".to_owned(),
+            Some("office_user".to_owned()),
+            Some(
+                response["session"]["user"]["id"]
+                    .as_str()
+                    .unwrap()
+                    .to_owned()
+            ),
+            "ok".to_owned(),
+            json!({
+                "adminLogin": "admin",
+                "orgName": "ООО «Атолл»",
+                "issuerPrefix": "460068200",
+                "lineCount": 2,
+                "boxNextSerial": 1500,
+                "palletNextSerial": 40,
+                "templateCount": 4
+            })
+        )]
     );
     // Stations get the templates with the wizard's revision, layouts included.
     let (status, feed) = app

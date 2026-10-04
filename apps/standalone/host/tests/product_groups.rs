@@ -100,22 +100,28 @@ fn writes_groups(sql: &str) -> bool {
     false
 }
 
-/// Names of the `.sql` files in `dir` (sorted), other than `except`, that write
-/// the `chz_product_groups` table: INSERT INTO, UPDATE, DELETE FROM, TRUNCATE,
-/// ALTER/CREATE/DROP TABLE. Comments are ignored, quotes and a `public.` prefix
-/// do not matter, and a mere REFERENCES from another table is not a write.
-fn migrations_writing_groups(dir: &std::path::Path, except: &str) -> Vec<String> {
+/// Names of the `.sql` files in `dir`, sorted: the migrations the guard reads.
+fn sql_files(dir: &std::path::Path) -> Vec<String> {
     let mut names: Vec<String> = std::fs::read_dir(dir)
         .unwrap_or_else(|error| panic!("read {}: {error}", dir.display()))
         .map(|entry| {
             let entry = entry.unwrap_or_else(|error| panic!("list {}: {error}", dir.display()));
             entry.file_name().to_string_lossy().into_owned()
         })
-        .filter(|name| name.ends_with(".sql") && name != except)
+        .filter(|name| name.ends_with(".sql"))
         .collect();
     names.sort();
     names
+}
+
+/// Names of the `.sql` files in `dir` (sorted), other than `except`, that write
+/// the `chz_product_groups` table: INSERT INTO, UPDATE, DELETE FROM, TRUNCATE,
+/// ALTER/CREATE/DROP TABLE. Comments are ignored, quotes and a `public.` prefix
+/// do not matter, and a mere REFERENCES from another table is not a write.
+fn migrations_writing_groups(dir: &std::path::Path, except: &str) -> Vec<String> {
+    sql_files(dir)
         .into_iter()
+        .filter(|name| name != except)
         .filter(|name| {
             let path = dir.join(name);
             let sql = std::fs::read_to_string(&path)
@@ -317,6 +323,37 @@ fn no_other_cloud_migration_writes_the_product_groups() {
         env!("CARGO_MANIFEST_DIR"),
         "/../../../packages/db/migrations"
     ));
+    // The scan must not pass for want of files to read: a directory without
+    // the migrations (moved, renamed, or pointed at the wrong place) finds no
+    // writer. Every entry of the cloud's own journal is a file the scan reads.
+    let journal_path = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../packages/db/migrations/meta/_journal.json"
+    );
+    let journal: Value = serde_json::from_str(
+        &std::fs::read_to_string(journal_path)
+            .unwrap_or_else(|error| panic!("read {journal_path}: {error}")),
+    )
+    .unwrap_or_else(|error| panic!("parse {journal_path}: {error}"));
+    let tags: Vec<&str> = journal["entries"]
+        .as_array()
+        .expect("the journal's entries")
+        .iter()
+        .map(|entry| entry["tag"].as_str().expect("an entry's tag"))
+        .collect();
+    assert!(!tags.is_empty(), "the journal lists no migration");
+    let scanned = sql_files(dir);
+    let unread: Vec<&str> = tags
+        .iter()
+        .copied()
+        .filter(|tag| !scanned.contains(&format!("{tag}.sql")))
+        .collect();
+    assert!(
+        unread.is_empty(),
+        "the journal lists migration(s) {unread:?} that the scan of {} does not read ({} files)",
+        dir.display(),
+        scanned.len()
+    );
     let list = migrations_writing_groups(dir, "0099_chz_product_groups.sql");
     assert!(
         list.is_empty(),

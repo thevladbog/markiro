@@ -321,9 +321,10 @@ async fn secrets_never_reach_the_process_log() {
         .unwrap();
     assert_eq!(revoked.status(), 204);
 
-    // The catalog: a template of the office's own and a new layout for it, a
-    // product that prefers it, the defaults that name it, a refused delete
-    // and the feed that carries every layout: none may reach the log.
+    // The catalog: a template of the office's own and a new layout for it,
+    // both read back (the list and the template), a product that prefers it,
+    // the defaults that name it, a refused delete and the feed that carries
+    // every layout: none may reach the log.
     let office_template = client
         .post(format!("{base}/v1/office/templates"))
         .header(protocol.0, &protocol.1)
@@ -349,6 +350,32 @@ async fn secrets_never_reach_the_process_log() {
         .await
         .unwrap();
     assert_eq!(relaid.status(), 200);
+    // The routes that read templates back: the list holds summaries, one
+    // template its layout (the office's second one by now), and a read could
+    // log what it serves as well as a write.
+    let template_list = client
+        .get(format!("{base}/v1/office/templates"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(template_list.status(), 200);
+    let template_read = client
+        .get(format!("{base}/v1/office/templates/{template_id}"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(template_read.status(), 200);
+    let template_read = template_read.text().await.unwrap();
+    assert!(
+        template_read.contains("layout-marker-office-2"),
+        "the read route serves the layout it keeps"
+    );
     let product = client
         .post(format!("{base}/v1/office/products"))
         .header(protocol.0, &protocol.1)

@@ -4,8 +4,8 @@ use axum::http::StatusCode;
 use markiro_host::auth::OfficeContext;
 use serde_json::{json, Value};
 use support::app::{
-    admin, audit_row, audit_rows, audit_trail, host_revision,
-    turn_the_user_off_at_the_next_activity, Admin, TestApp,
+    admin, audit_row, audit_rows, audit_trail, empty, host_revision, request,
+    turn_the_user_off_at_the_next_activity, with_device, Admin, TestApp,
 };
 
 /// A new product as the office's form sends it, with blanks to trim.
@@ -442,6 +442,120 @@ async fn an_unknown_product_is_not_found_once_its_body_is_valid() {
     assert_eq!(audit_rows(&admin.app).await, rows);
 }
 
+/// A `PUT` over a revision that is not the product's is stale whichever side
+/// it errs on: one older than the record (it changed since it was read) and
+/// one ahead of it (a client that never read it). Each answers the record's
+/// own revision and writes nothing; the same body over the right revision is
+/// accepted, so the revision is the only thing wrong with it.
+#[tokio::test]
+async fn a_put_over_a_revision_older_or_ahead_of_the_product_is_stale() {
+    let admin = admin().await;
+    let created = create(&admin, milk()).await;
+    let mut first = full(&created, created["rev"].as_i64().unwrap());
+    first["shelfLifeDays"] = json!(14);
+    let (status, changed) = admin.call("PUT", &path(&created), Some(first)).await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let rev = changed["rev"].as_i64().unwrap();
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    for (side, expected_rev) in [("older", rev - 1), ("ahead", rev + 1)] {
+        let mut body = full(&changed, expected_rev);
+        body["shelfLifeDays"] = json!(21);
+        let (status, refused) = admin.call("PUT", &path(&created), Some(body)).await;
+        assert_eq!(
+            (
+                status,
+                refused["error"]["code"].clone(),
+                refused["error"]["details"]["currentRev"].clone()
+            ),
+            (StatusCode::CONFLICT, json!("stale_revision"), json!(rev)),
+            "{side}"
+        );
+        assert_eq!(host_revision(&admin.app).await, revision, "{side}");
+        assert_eq!(audit_rows(&admin.app).await, rows, "{side}");
+        let (_, list) = admin.call("GET", "/v1/office/products", None).await;
+        assert_eq!(list, json!([changed.clone()]), "{side}");
+    }
+    let mut body = full(&changed, rev);
+    body["shelfLifeDays"] = json!(21);
+    let (status, accepted) = admin.call("PUT", &path(&created), Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(
+        (accepted["shelfLifeDays"].clone(), accepted["rev"].clone()),
+        (json!(21), json!(revision + 1))
+    );
+}
+
+/// The body is checked before the revision is compared, whichever side of the
+/// record's revision the request errs on: a product group or a template that
+/// is not there is `validation_failed` on that field (400), never
+/// `stale_revision` (409), over a revision older than the record's and over
+/// one ahead of it. The templates' and the defaults' routes check in this
+/// order too.
+#[tokio::test]
+async fn a_bad_reference_is_refused_before_the_revision_is_compared() {
+    let admin = admin().await;
+    let created = create(&admin, milk()).await;
+    let rev = created["rev"].as_i64().unwrap();
+    let unknown = "9b2e4a6c-0000-4000-8000-000000000000";
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    for expected_rev in [rev - 1, rev + 1] {
+        for (field, value) in [
+            // 18 is not a ЧЗ product group.
+            ("chzProductGroupCode", json!(18)),
+            ("defaultBoxTemplateId", json!(unknown)),
+        ] {
+            let mut body = full(&created, expected_rev);
+            body[field] = value;
+            let (status, refused) = admin.call("PUT", &path(&created), Some(body)).await;
+            assert_eq!(
+                (
+                    status,
+                    refused["error"]["code"].clone(),
+                    refused["error"]["details"]["field"].clone()
+                ),
+                (
+                    StatusCode::BAD_REQUEST,
+                    json!("validation_failed"),
+                    json!(field)
+                ),
+                "{field} over {expected_rev}"
+            );
+        }
+    }
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+/// Products are read only with an office session: a device key alone (a
+/// station or a handheld, which are not the office) is refused naming the
+/// session, and no credential at all names the device.
+#[tokio::test]
+async fn products_are_read_only_with_an_office_session() {
+    let admin = admin().await;
+    create(&admin, milk()).await;
+    let (status, refused) = admin
+        .app
+        .send(empty(with_device(
+            request("GET", "/v1/office/products"),
+            &admin.key,
+        )))
+        .await;
+    assert_eq!(
+        (status, refused["error"]["details"]["credential"].clone()),
+        (StatusCode::UNAUTHORIZED, json!("session"))
+    );
+    let (status, refused) = admin
+        .app
+        .send(empty(request("GET", "/v1/office/products")))
+        .await;
+    assert_eq!(
+        (status, refused["error"]["details"]["credential"].clone()),
+        (StatusCode::UNAUTHORIZED, json!("device"))
+    );
+}
+
 // Beyond the plan. The review of the product table asked for the GTIN
 // coverage, and each mutant of a rule below survived the plan's own tests.
 
@@ -622,11 +736,18 @@ async fn product_fields_accept_their_bounds() {
 /// active and before the write transaction begins. A trigger does it at the
 /// moment the extractor records the session's activity (it does once a
 /// minute), so the order is the same on every run. The write is refused as an
-/// ended session and leaves no trace.
+/// ended session and leaves no trace. The session is still there afterwards,
+/// which the extractor would not leave behind a user it found turned off, so
+/// the refusal is the route's own.
 #[tokio::test]
 async fn product_writes_stop_a_user_turned_off_after_the_extractor_passed() {
     let admin = admin().await;
     let (tech, tech_id) = admin.technologist_session().await;
+    let session_id: String = sqlx::query_scalar("SELECT id FROM office_sessions WHERE user_id = ?")
+        .bind(&tech_id)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
     let product = create(&admin, milk()).await;
     let revision = host_revision(&admin.app).await;
     let rows = audit_rows(&admin.app).await;
@@ -668,6 +789,15 @@ async fn product_writes_stop_a_user_turned_off_after_the_extractor_passed() {
             .await
             .unwrap();
         assert_eq!(active, 0, "the trigger ran after the extractor: {method}");
+        let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM office_sessions WHERE id = ?")
+            .bind(&session_id)
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            sessions, 1,
+            "the refusal is the route's, not the extractor's: {method}"
+        );
         assert_eq!(host_revision(&admin.app).await, revision, "{method}");
         assert_eq!(audit_rows(&admin.app).await, rows, "{method}");
     }

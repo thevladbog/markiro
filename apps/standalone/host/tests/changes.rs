@@ -829,6 +829,42 @@ async fn a_page_ends_before_the_revision_that_would_pass_the_byte_budget() {
     );
 }
 
+/// A page can be cut twice, by the count and then by the byte budget: six
+/// templates of 250 000 bytes, one revision apiece (revisions 2-7), read with
+/// `limit=5`. The count cut would end the page after revision 6; the budget
+/// holds four of them, so the page ends after revision 5, and its `rev` has to
+/// say so. A page that took the count cut's revision would tell the station it
+/// holds revision 6, which it never got, and the station would not ask again.
+#[tokio::test]
+async fn a_byte_cut_inside_a_count_cut_ends_the_page_at_the_last_revision_it_holds() {
+    let app = TestApp::new().await;
+    let (_, key) = pair_device(&app, "station").await;
+    bootstrap(&app, &key).await;
+    let mut added = Vec::new();
+    for _ in 0..6 {
+        let (ids, rev) = add_templates(&app, &[spec_of(250_000)]).await;
+        added.push(("label_templates".to_owned(), ids[0].clone(), rev));
+    }
+    assert_eq!(
+        added.iter().map(|key| key.2).collect::<Vec<_>>(),
+        [2, 3, 4, 5, 6, 7]
+    );
+
+    let (status, body) = changes(&app, &key, "?since=1&limit=5").await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(keys(&body), added[..4].to_vec());
+    assert_eq!(
+        (body["rev"].clone(), body["hasMore"].clone()),
+        (json!(5), json!(true))
+    );
+    let (_, body) = changes(&app, &key, "?since=5&limit=5").await;
+    assert_eq!(keys(&body), added[4..].to_vec());
+    assert_eq!(
+        (body["rev"].clone(), body["hasMore"].clone()),
+        (json!(7), json!(false))
+    );
+}
+
 /// A revision larger than the budget is never split: it waits behind a
 /// smaller one, then comes whole as a page of its own.
 #[tokio::test]
@@ -1000,6 +1036,15 @@ async fn each_purpose_rides_the_feed_in_its_own_place() {
     };
     for (id, purpose) in ids.iter().zip(purposes) {
         assert_eq!(data("label_templates", id)["purpose"], purpose);
+    }
+    // These templates are enabled and not stock: the two flags are not the
+    // same column read twice, nor each other's.
+    for id in &ids {
+        let template = data("label_templates", id);
+        assert_eq!(
+            (template["enabled"].clone(), template["stock"].clone()),
+            (json!(true), json!(false))
+        );
     }
     let org = data("org_profile", "1");
     assert_eq!(org["defaultBoxTemplateId"], json!(ids[0]));
