@@ -3,7 +3,9 @@ mod support;
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{admin, audit_row, audit_rows, audit_trail, host_revision, tombstones, Admin};
-use support::app::{login, pair_device, seed_office_user, TestApp};
+use support::app::{
+    login, pair_device, seed_office_user, turn_the_user_off_at_the_next_activity, TestApp,
+};
 
 const DEFAULTS: &str = "/v1/office/template-defaults";
 
@@ -419,14 +421,7 @@ async fn template_defaults_writes_stop_a_user_turned_off_after_the_extractor_pas
     let read = document(&admin).await;
     let revision = host_revision(&admin.app).await;
     let rows = audit_rows(&admin.app).await;
-    sqlx::query(&format!(
-        "CREATE TRIGGER turn_the_technologist_off AFTER UPDATE OF last_seen_at ON office_sessions \
-         WHEN NEW.user_id = '{tech_id}' \
-         BEGIN UPDATE office_users SET active = 0 WHERE id = NEW.user_id; END"
-    ))
-    .execute(&admin.app.state.pool)
-    .await
-    .unwrap();
+    turn_the_user_off_at_the_next_activity(&admin.app, &tech_id).await;
 
     for (round, body) in [
         (

@@ -3,7 +3,10 @@ mod support;
 use axum::http::StatusCode;
 use markiro_host::auth::OfficeContext;
 use serde_json::{json, Value};
-use support::app::{admin, audit_row, audit_rows, audit_trail, host_revision, Admin, TestApp};
+use support::app::{
+    admin, audit_row, audit_rows, audit_trail, host_revision,
+    turn_the_user_off_at_the_next_activity, Admin, TestApp,
+};
 
 /// A new product as the office's form sends it, with blanks to trim.
 fn milk() -> Value {
@@ -627,14 +630,7 @@ async fn product_writes_stop_a_user_turned_off_after_the_extractor_passed() {
     let product = create(&admin, milk()).await;
     let revision = host_revision(&admin.app).await;
     let rows = audit_rows(&admin.app).await;
-    sqlx::query(&format!(
-        "CREATE TRIGGER turn_the_technologist_off AFTER UPDATE OF last_seen_at ON office_sessions \
-         WHEN NEW.user_id = '{tech_id}' \
-         BEGIN UPDATE office_users SET active = 0 WHERE id = NEW.user_id; END"
-    ))
-    .execute(&admin.app.state.pool)
-    .await
-    .unwrap();
+    turn_the_user_off_at_the_next_activity(&admin.app, &tech_id).await;
 
     let mut another = milk();
     another["gtin14"] = json!("04600682000020");

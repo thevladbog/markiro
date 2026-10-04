@@ -4,7 +4,10 @@ use axum::http::StatusCode;
 use markiro_host::templates::{fits, Scope};
 use markiro_proto::TemplatePurpose;
 use serde_json::{json, Value};
-use support::app::{admin, audit_row, audit_rows, audit_trail, host_revision, Admin, TestApp};
+use support::app::{
+    admin, audit_row, audit_rows, audit_trail, host_revision, nested,
+    turn_the_user_off_at_the_next_activity, Admin, TestApp,
+};
 
 /// `proto/fixtures/template-eligibility.json` holds the cases the host's
 /// rule and the domain's must answer alike; plan 1e2 reads it in Vitest.
@@ -789,14 +792,7 @@ async fn template_writes_stop_a_user_turned_off_after_the_extractor_passed() {
         .unwrap();
     let revision = host_revision(&admin.app).await;
     let rows = audit_rows(&admin.app).await;
-    sqlx::query(&format!(
-        "CREATE TRIGGER turn_the_technologist_off AFTER UPDATE OF last_seen_at ON office_sessions \
-         WHEN NEW.user_id = '{tech_id}' \
-         BEGIN UPDATE office_users SET active = 0 WHERE id = NEW.user_id; END"
-    ))
-    .execute(&admin.app.state.pool)
-    .await
-    .unwrap();
+    turn_the_user_off_at_the_next_activity(&admin.app, &tech_id).await;
 
     for (method, route, body) in [
         (
@@ -1433,15 +1429,6 @@ async fn a_layout_of_exactly_256_kib_is_kept_and_one_byte_more_is_refused() {
 
 use http_body_util::BodyExt;
 use tower::ServiceExt;
-
-/// A layout `levels` objects deep, the innermost one empty.
-fn nested(levels: usize) -> Value {
-    let mut spec = json!({});
-    for _ in 1..levels {
-        spec = json!({ "elements": spec });
-    }
-    spec
-}
 
 /// A layout nests at most 64 levels (`MAX_SPEC_DEPTH`; an object or an array
 /// is a level, a scalar none): a feed page wraps it in four more, and the

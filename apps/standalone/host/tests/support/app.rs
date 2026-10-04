@@ -325,6 +325,32 @@ pub async fn add_operator(admin: &Admin, login: &str) -> (String, i64) {
     )
 }
 
+/// A layout `levels` objects deep, the innermost one empty.
+pub fn nested(levels: usize) -> Value {
+    let mut spec = serde_json::json!({});
+    for _ in 1..levels {
+        spec = serde_json::json!({ "elements": spec });
+    }
+    spec
+}
+
+/// Turn the office user `user_id` off at the moment the extractor records
+/// the activity of one of their sessions (it does so at most once a minute,
+/// so a test moves the manual clock on first). A route that read the user as
+/// active before then finds them turned off only if it reads them again
+/// itself, inside its own write transaction: the trigger fires after the
+/// extractor passed, so the order is the same on every run.
+pub async fn turn_the_user_off_at_the_next_activity(app: &TestApp, user_id: &str) {
+    sqlx::query(&format!(
+        "CREATE TRIGGER turn_the_user_off AFTER UPDATE OF last_seen_at ON office_sessions \
+         WHEN NEW.user_id = '{user_id}' \
+         BEGIN UPDATE office_users SET active = 0 WHERE id = NEW.user_id; END"
+    ))
+    .execute(&app.state.pool)
+    .await
+    .unwrap();
+}
+
 /// The host's current revision (`host_revision.rev`).
 pub async fn host_revision(app: &TestApp) -> i64 {
     sqlx::query_scalar("SELECT rev FROM host_revision WHERE id = 1")

@@ -5,7 +5,7 @@ use markiro_host::secrets::verify_password;
 use serde_json::{json, Value};
 use support::app::{
     audit_rows, bootstrap, bootstrap_body, empty, host_revision, json as json_request, login,
-    pair_device, request, seed_office_user, with_device, with_session, TestApp, LAN,
+    nested, pair_device, request, seed_office_user, with_device, with_session, TestApp, LAN,
 };
 
 #[tokio::test]
@@ -517,15 +517,6 @@ async fn putting_the_org_profile_unchanged_is_a_no_op() {
 /// A layout of the given width, as the domain's stock builders make one.
 fn stock_spec(width: u32) -> Value {
     json!({ "widthMm": width, "heightMm": 40, "dpi": 203, "language": "zpl", "elements": [] })
-}
-
-/// A layout `levels` objects deep, the innermost one empty.
-fn nested(levels: usize) -> Value {
-    let mut spec = json!({});
-    for _ in 1..levels {
-        spec = json!({ "elements": spec });
-    }
-    spec
 }
 
 /// Run the wizard from loopback with `templates` added to the valid request.
