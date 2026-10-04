@@ -220,10 +220,30 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
   входят.
 - `label_templates(id, name, purpose CHECK(purpose IN ('box','pallet','product_duplicate')), enabled, category_codes JSON, spec JSON, stock, rev)`;
   `spec` хранится как текст JSON до 256 КБ, его схему проверяет интерфейс
-  (`labelTemplateSpecSchema`).
+  (`labelTemplateSpecSchema`). Правила плана 1e1: хост держит `spec` объектом
+  JSON не больше 256 КБ в компактной записи (ключи — в порядке байтов) и макет
+  не проверяет; список (`GET /v1/office/templates`) отдаёт сводки без макета —
+  размер, разрешение и язык читаются из сохранённого `spec` как есть, `null`, где
+  значения нужного типа нет; `GET …/{id}` отдаёт шаблон целиком. Имя — 1–200
+  символов, `category_codes` — `null` (все категории) или 1–100 кодов без
+  повторов, каждый — товарная группа. Назначение не меняется: у `PUT` нет поля
+  `purpose`. `PUT` меняет только присланное, с `expectedRev`. Типовой шаблон
+  (`stock`, его создаёт мастер) не меняет имени, назначения и макета и не
+  удаляется (`conflict` с `constraint: stock_template`); выключить и сузить его
+  можно, а копия — обычный `POST` его макета. Удаление шаблона снимает его со
+  всех товаров (ревизия удаления, товары едут по ленте) и пишет надгробие;
+  повторное удаление после потерянного ответа находит надгробие и снова отвечает
+  204, а неизвестный идентификатор — `not_found`.
 - `category_template_defaults(chz_group_code, purpose, template_id, rev, PRIMARY KEY(chz_group_code, purpose))`.
   Хост не даёт удалить или выключить шаблон, который стоит по умолчанию у
-  организации или категории (`template_is_default`).
+  организации или категории (`template_is_default`). Уточнение плана 1e1:
+  умолчание организации — включённый шаблон своего назначения для всех
+  категорий, умолчание категории — включённый шаблон своего назначения,
+  покрывающий эту категорию (`templates::fits`, правило `@markiro/domain` с общей
+  фикстурой `proto/fixtures/template-eligibility.json`). Выключение, сужение,
+  которое ломает одно из умолчаний, и любое удаление шаблона-умолчания —
+  `conflict` с `constraint: template_is_default`, `organizationDefault` и
+  `categoryDefaults` (коды), как облачный `LABEL_TEMPLATE_IS_DEFAULT`.
 - `audit_log(id, at, actor_kind CHECK(actor_kind IN ('office_user','device','system')), actor_id, action, target_type, target_id, result, details JSON)`.
 
 ### 4.4. Ревизии и лента изменений
@@ -338,10 +358,12 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
 `session` — войти в офис заново, `password` — показывает текст под неверный
 логин или пароль), `forbidden`, `not_found`, `method_not_allowed`, `validation_failed` (с полями
 в `details`), `stale_revision`, `conflict` (с `details.constraint`: `gtin14`, `login`,
-`badge`, `line_name`; у `badge` ещё `details.operatorId` — оператор, у которого этот
-бейдж уже есть, когда хост нашёл владельца (иначе ключа нет): маршрут только для
-администраторов, а они видят всех операторов),
-`template_is_default`, `last_admin`, `sscc_below_floor`,
+`badge`, `line_name`, `stock_template`, `template_is_default`; у `badge` ещё
+`details.operatorId` — оператор, у которого этот бейдж уже есть, когда хост нашёл
+владельца (иначе ключа нет): маршрут только для администраторов, а они видят всех
+операторов; у `template_is_default` ещё `organizationDefault` и `categoryDefaults` —
+план 1e1 сделал его ограничением `conflict`, а не отдельным кодом),
+`last_admin`, `sscc_below_floor`,
 `pairing_code_invalid`, `pairing_code_expired`, `already_initialized`,
 `loopback_only`, `protocol_unsupported`, `rate_limited`, `internal`.
 

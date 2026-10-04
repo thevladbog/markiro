@@ -622,7 +622,8 @@ pub struct LabelTemplateRecord {
     pub enabled: bool,
     /// `null` for every category, otherwise the product-group codes.
     pub chz_product_group_codes: Option<Vec<u32>>,
-    /// A stock template: the wizard created it, and it never changes.
+    /// From the wizard: its name, purpose and spec never change and it is
+    /// never deleted; it may be disabled or narrowed.
     pub stock: bool,
     pub spec: serde_json::Value,
 }
@@ -1084,6 +1085,79 @@ pub struct ProductUpdate {
     #[serde(default)]
     pub default_pallet_template_id: Option<String>,
     pub archived: bool,
+    pub expected_rev: i64,
+}
+
+/// A label template without its layout (`GET /v1/office/templates`), as
+/// the cloud's `LabelTemplateSummaryDto`. The size, the resolution and the
+/// language are read from the stored `spec` as they stand, `null` where it
+/// has none of the right type: the host does not check a layout.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelTemplateSummary {
+    pub id: String,
+    pub name: String,
+    pub purpose: TemplatePurpose,
+    pub enabled: bool,
+    /// `null` for every category, otherwise the product-group codes.
+    pub chz_product_group_codes: Option<Vec<u32>>,
+    pub stock: bool,
+    pub width_mm: Option<serde_json::Number>,
+    pub height_mm: Option<serde_json::Number>,
+    pub dpi: Option<u32>,
+    pub language: Option<String>,
+    pub rev: i64,
+}
+
+/// A label template with its layout (`GET /v1/office/templates/{id}`, and
+/// the answer of `POST` and `PUT`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LabelTemplate {
+    pub id: String,
+    pub name: String,
+    pub purpose: TemplatePurpose,
+    pub enabled: bool,
+    pub chz_product_group_codes: Option<Vec<u32>>,
+    /// From the wizard: its name, purpose and layout never change, and it is
+    /// never deleted.
+    pub stock: bool,
+    /// The layout as the host stores it; the UI checked it with
+    /// `labelTemplateSpecSchema`.
+    pub spec: serde_json::Value,
+    pub rev: i64,
+}
+
+/// `POST /v1/office/templates`: a template of the office's own, never a
+/// stock one; a copy of a stock template is a `POST` of its layout.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LabelTemplateCreate {
+    pub name: String,
+    pub purpose: TemplatePurpose,
+    pub enabled: bool,
+    /// Left out or `null`: every category.
+    #[serde(default)]
+    pub chz_product_group_codes: Option<Vec<u32>>,
+    pub spec: serde_json::Value,
+}
+
+/// `PUT /v1/office/templates/{id}`: only the fields sent change;
+/// `chzProductGroupCodes: null` widens the template to every category, and
+/// leaving it out keeps its categories. A purpose never changes, so it is no
+/// field here; a stock template takes only `enabled` and its categories (or
+/// its own name and layout, unchanged).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LabelTemplateUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
+    pub chz_product_group_codes: Option<Option<Vec<u32>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spec: Option<serde_json::Value>,
     pub expected_rev: i64,
 }
 

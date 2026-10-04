@@ -1,0 +1,25 @@
+{
+  "id": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+  "name": "Молоко 58×40",
+  "purpose": "box",
+  "enabled": true,
+  "chzProductGroupCodes": [8],
+  "stock": false,
+  "spec": {
+    "widthMm": 58,
+    "heightMm": 40,
+    "dpi": 203,
+    "language": "tspl",
+    "elements": [
+      {
+        "kind": "field",
+        "id": "name",
+        "xMm": 2,
+        "yMm": 2,
+        "field": "product.printName",
+        "fontSizePt": 10
+      }
+    ]
+  },
+  "rev": 62
+}

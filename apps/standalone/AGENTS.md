@@ -86,8 +86,10 @@ Every office change, login outcome, pairing and initialization writes one
 `audit_log` row. Action names come only from `audit::actions`; a new writer
 adds its name there. Every `denied` row carries `details.reason` from
 `audit::reasons`. An update row carries `details.changed` (field names) and
-`{ from, to }` for each changed field (`audit::update_details`), except `pinPhc`:
-it is named in `changed` without a value (`audit::update_details_hiding`).
+`{ from, to }` for each changed field (`audit::update_details`), except `pinPhc`
+and a template's `spec`: they are named in `changed` without a value
+(`audit::update_details_hiding`), a hash because it is a secret and a layout
+because it may be 256 KB.
 Details never hold pairing codes, keys, tokens, passwords, salts or hashes, and
 a refused login never records the typed login. An attempt refused by a rate
 limiter writes no row, so a flood cannot fill the log. An office write the host
@@ -410,6 +412,34 @@ product. (The cloud has no per-product template since its 2026-09-02 spec;
 these follow the stage-1 spec.) National-catalog links, photos, EGAIS
 codes, prices and default counterparties are not part of the standalone
 catalog yet.
+
+Label templates (`GET/POST/PUT/DELETE /v1/office/templates`): every office
+role reads them — the list as summaries without the layout, whose size,
+resolution and language come from the stored `spec` as they stand (`null`
+where it has nothing of the right type), and `GET …/{id}` with it;
+administrators and technologists write them. The host keeps `spec` a JSON
+object of at most 256 KB written compactly (`validate::template_spec`), its
+object keys in byte order, and never checks the layout: that is
+`labelTemplateSpecSchema` in the UI. A name is 1–200 characters;
+`chzProductGroupCodes` is `null` (every category) or 1–100 codes without
+repeats, each a product group. A purpose never changes: `PUT` has no
+`purpose` field, so one sent is `validation_failed`. `PUT` changes only what
+it sends, with `expectedRev`, and `chzProductGroupCodes: null` widens a
+template to every category. A stock template (the wizard's) keeps its name,
+purpose and layout and is never deleted (`conflict` on `stock_template`);
+it may be disabled or narrowed, and a copy is an ordinary `POST` of its
+layout. The organization's default of a purpose stays an enabled template
+for every category, and a category's default an enabled template covering
+that category: a change that would break either, and any delete of a
+default, is `conflict` on `template_is_default` with `organizationDefault`
+and `categoryDefaults` (codes), as the cloud's `LABEL_TEMPLATE_IS_DEFAULT`.
+The rule for a slot is `templates::fits`, the domain's
+`isBoxLabelTemplateEligible` rewritten: `proto/fixtures/template-eligibility.json`
+holds the cases both sides answer alike. Deleting a template clears every
+product preference that names it at the delete's revision, so those
+products ride the feed again, and leaves a tombstone; a delete repeated
+after a lost answer finds the tombstone and answers 204 again, and an id
+that never existed is `not_found`.
 
 ## Reference sync
 

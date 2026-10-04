@@ -387,6 +387,62 @@ pub fn count(field: &str, value: Option<u32>, max: u32) -> Result<(), ApiError> 
     }
 }
 
+/// A label template's name: trimmed, 1-200 characters, as the cloud's.
+pub fn template_name(field: &str, name: &str) -> Result<String, ApiError> {
+    clean_text(field, name, 200, "the name").map(str::to_owned)
+}
+
+/// The largest layout the host keeps: 256 KB of compact JSON.
+pub const MAX_SPEC_BYTES: usize = 256 * 1024;
+
+/// A template's layout: a JSON object of at most [`MAX_SPEC_BYTES`] once
+/// written compactly, which is how the host stores it (object keys in byte
+/// order). Returns that text. Whether it is a label is the UI's check
+/// (`labelTemplateSpecSchema`).
+pub fn template_spec(field: &str, spec: &serde_json::Value) -> Result<String, ApiError> {
+    if !spec.is_object() {
+        return Err(ApiError::validation(
+            field,
+            "the spec must be a JSON object",
+        ));
+    }
+    let text = serde_json::to_string(spec).map_err(ApiError::internal)?;
+    if text.len() > MAX_SPEC_BYTES {
+        return Err(ApiError::validation(
+            field,
+            format!("the spec must be at most {MAX_SPEC_BYTES} bytes"),
+        ));
+    }
+    Ok(text)
+}
+
+/// The most codes a template lists: more than there are product groups, so
+/// the bound only caps the work one request can ask for.
+pub const MAX_CATEGORY_CODES: usize = 100;
+
+/// A template's categories: `None` for every category, or a non-empty list
+/// of at most [`MAX_CATEGORY_CODES`] codes without repeats. That each code is
+/// a product group is checked against the table (`templates::check_groups`).
+pub fn category_codes(field: &str, codes: Option<&[u32]>) -> Result<(), ApiError> {
+    let Some(codes) = codes else {
+        return Ok(());
+    };
+    if codes.is_empty() || codes.len() > MAX_CATEGORY_CODES {
+        return Err(ApiError::validation(
+            field,
+            format!("1-{MAX_CATEGORY_CODES} product-group codes, or null for every category"),
+        ));
+    }
+    let mut seen = std::collections::HashSet::new();
+    if !codes.iter().all(|code| seen.insert(code)) {
+        return Err(ApiError::validation(
+            field,
+            "a product-group code is repeated",
+        ));
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -651,10 +707,11 @@ mod tests {
 
     /// The free-text validators that trim their input, each with the
     /// `details.field` it names.
-    fn text_validators() -> [(&'static str, TextCheck); 10] {
+    fn text_validators() -> [(&'static str, TextCheck); 11] {
         [
             ("name", |text| person_name("name", text).map(drop)),
             ("name", |text| product_name("name", text).map(drop)),
+            ("name", |text| template_name("name", text).map(drop)),
             ("printName", |text| {
                 print_name("printName", Some(text)).map(drop)
             }),
@@ -940,6 +997,73 @@ mod tests {
                 MAX_SHELF_LIFE_DAYS
             )),
             "shelfLifeDays"
+        );
+    }
+
+    #[test]
+    fn a_spec_is_an_object_of_at_most_256_kb_once_written_compactly() {
+        let spec = serde_json::json!({ "widthMm": 58, "dpi": 203 });
+        // Stored compactly, its keys in byte order.
+        assert_eq!(
+            template_spec("spec", &spec).unwrap(),
+            r#"{"dpi":203,"widthMm":58}"#
+        );
+        let filler = |bytes: usize| serde_json::json!({ "f": "x".repeat(bytes - 8) });
+        assert_eq!(
+            template_spec("spec", &filler(MAX_SPEC_BYTES))
+                .unwrap()
+                .len(),
+            MAX_SPEC_BYTES
+        );
+        assert_eq!(
+            field(template_spec("spec", &filler(MAX_SPEC_BYTES + 1))),
+            "spec"
+        );
+        for not_an_object in [
+            serde_json::json!([]),
+            serde_json::json!("{}"),
+            serde_json::Value::Null,
+        ] {
+            assert_eq!(
+                field(template_spec("spec", &not_an_object)),
+                "spec",
+                "{not_an_object}"
+            );
+        }
+    }
+
+    #[test]
+    fn category_codes_are_every_category_or_a_short_list_without_repeats() {
+        assert!(category_codes("codes", None).is_ok());
+        assert!(category_codes("codes", Some(&[8, 15])).is_ok());
+        let longest: Vec<u32> = (1..=100).collect();
+        assert!(category_codes("codes", Some(&longest)).is_ok());
+        let too_long: Vec<u32> = (1..=101).collect();
+        for bad in [&[][..], &[8, 15, 8][..], &too_long[..]] {
+            assert_eq!(
+                field(category_codes("codes", Some(bad))),
+                "codes",
+                "{bad:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_template_name_counts_characters_not_bytes_and_is_trimmed() {
+        // 200 Cyrillic letters are 400 bytes: the limit counts characters, and
+        // after trimming.
+        let longest = "ш".repeat(200);
+        assert_eq!(
+            template_name("name", &format!("  {longest} ")).unwrap(),
+            longest
+        );
+        assert_eq!(field(template_name("name", &"ш".repeat(201))), "name");
+        assert_eq!(field(template_name("name", " ")), "name");
+        // The error names the field the caller gives, as the wizard's
+        // `templates.0.name` will.
+        assert_eq!(
+            field(template_name("templates.0.name", "")),
+            "templates.0.name"
         );
     }
 }

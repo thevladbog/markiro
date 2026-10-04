@@ -222,6 +222,17 @@ fn protected_routes() -> Router<AppState> {
             put(crate::routes::products::update_product),
         )
         .route(
+            "/v1/office/templates",
+            get(crate::routes::templates::list_templates)
+                .post(crate::routes::templates::create_template),
+        )
+        .route(
+            "/v1/office/templates/{id}",
+            get(crate::routes::templates::get_template)
+                .put(crate::routes::templates::update_template)
+                .delete(crate::routes::templates::delete_template),
+        )
+        .route(
             "/v1/office/users",
             get(crate::routes::office_users::list_users)
                 .post(crate::routes::office_users::create_user),

@@ -3,14 +3,15 @@ use markiro_proto::{
     credentials, display_fingerprint, BadgeCreate, BadgeSalt, BlockSizesUpdate, BootstrapRequest,
     BootstrapResponse, CategoryTemplateDefault, ChangesResponse, ClaimRequest, Compatibility,
     CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind,
-    DeviceLineRequest, DeviceRecord, DeviceUpdate, ErrorBody, Hello, HelloEnvelope,
-    LabelTemplateRecord, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine,
-    OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeUser,
-    OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord, OperatorCreate,
-    OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse,
-    PairingCode, PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate, ProductGroup,
-    ProductRecord, ProductStatus, ProductUpdate, SiteRecord, SsccCounterUpdate, SsccState,
-    TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
+    DeviceLineRequest, DeviceRecord, DeviceUpdate, ErrorBody, Hello, HelloEnvelope, LabelTemplate,
+    LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary, LabelTemplateUpdate,
+    LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine, OfficeLoginRequest,
+    OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate,
+    OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord, OperatorCreate, OperatorRecord,
+    OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode,
+    PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate, ProductGroup, ProductRecord,
+    ProductStatus, ProductUpdate, SiteRecord, SsccCounterUpdate, SsccState, TemplatePurpose,
+    HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -531,6 +532,52 @@ fn product_fixtures_round_trip_and_requests_reject_unknown_fields() {
     let mut value = fixture("product-update.json");
     value["status"] = Value::String("active".into());
     assert!(serde_json::from_value::<ProductUpdate>(value).is_err());
+}
+
+#[test]
+fn template_fixtures_round_trip_and_a_purpose_is_never_an_update_field() {
+    let summary: LabelTemplateSummary = round_trip("template-summary.json");
+    assert_eq!(
+        (summary.dpi, summary.language.as_deref()),
+        (Some(203), Some("tspl"))
+    );
+    let template: LabelTemplate = round_trip("label-template.json");
+    assert_eq!(template.id, summary.id);
+    assert_eq!(
+        template.spec["widthMm"],
+        serde_json::to_value(&summary.width_mm).unwrap()
+    );
+    let create: LabelTemplateCreate = round_trip("template-create.json");
+    assert_eq!(create.chz_product_group_codes, None);
+    let update: LabelTemplateUpdate = round_trip("template-update.json");
+    assert_eq!(update.chz_product_group_codes, Some(Some(vec![8, 15])));
+    // `null` widens a template to every category; leaving the field out keeps
+    // its categories.
+    let widen: LabelTemplateUpdate = serde_json::from_value(
+        serde_json::json!({ "chzProductGroupCodes": null, "expectedRev": 62 }),
+    )
+    .unwrap();
+    assert_eq!(widen.chz_product_group_codes, Some(None));
+    let keep: LabelTemplateUpdate =
+        serde_json::from_value(serde_json::json!({ "enabled": false, "expectedRev": 62 })).unwrap();
+    assert_eq!(keep.chz_product_group_codes, None);
+    // A purpose never changes, and no request makes a stock template.
+    let mut value = fixture("template-update.json");
+    value["purpose"] = Value::String("pallet".into());
+    assert!(serde_json::from_value::<LabelTemplateUpdate>(value).is_err());
+    let mut value = fixture("template-create.json");
+    value["stock"] = Value::Bool(true);
+    assert!(serde_json::from_value::<LabelTemplateCreate>(value).is_err());
+    // A refusal names the defaults that stand in the way.
+    let refused: ErrorBody = round_trip("error-template-is-default.json");
+    let details = refused.error.details.expect("details");
+    assert_eq!(
+        (
+            details["constraint"].as_str(),
+            details["organizationDefault"].as_bool()
+        ),
+        (Some("template_is_default"), Some(true))
+    );
 }
 
 #[test]

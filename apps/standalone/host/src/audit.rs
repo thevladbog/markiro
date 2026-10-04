@@ -34,6 +34,9 @@ pub mod actions {
     pub const DEVICE_REVOKE: &str = "device.revoke";
     pub const PRODUCT_CREATE: &str = "product.create";
     pub const PRODUCT_UPDATE: &str = "product.update";
+    pub const TEMPLATE_CREATE: &str = "template.create";
+    pub const TEMPLATE_UPDATE: &str = "template.update";
+    pub const TEMPLATE_DELETE: &str = "template.delete";
 }
 
 /// `details.reason` of a denied row: every denial names one.
