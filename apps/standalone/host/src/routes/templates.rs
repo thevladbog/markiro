@@ -1,9 +1,10 @@
 //! Label templates (spec §4.3): `GET /v1/office/templates` (every role;
 //! summaries without the layout), `GET …/{id}` (with it), `POST`, `PUT
 //! …/{id}` and `DELETE …/{id}` (administrators and technologists; `PUT`
-//! with `expectedRev`). The host keeps `spec` an object of at most 256 KB;
-//! the UI checks the layout. A purpose never changes. A stock template, from
-//! the wizard, keeps its name, purpose and layout and is never deleted
+//! with `expectedRev`). The host keeps `spec` an object of at most 256 KB and
+//! 64 levels (`validate::template_spec`); the UI checks the layout. A purpose
+//! never changes. A stock template, from the wizard, keeps its name, purpose
+//! and layout and is never deleted
 //! (`stock_template`): it may be disabled or narrowed, and copied by a
 //! `POST`. A template is never disabled, narrowed out of a category it is
 //! the default of, or deleted while it is a default (`template_is_default`).
@@ -29,13 +30,16 @@ use crate::templates::{self, Scope};
 use crate::validate;
 
 /// The summary columns: the size, resolution and language as the stored
-/// spec has them, `NULL` where it has none of the right JSON type.
+/// spec has them, `NULL` where it has none of the right JSON type. The
+/// numbers are read as JSON text and parsed here, never as SQLite values: an
+/// integer above `i64::MAX` comes back from `json_extract` as a REAL that
+/// sqlx cannot decode, and one stored layout would make the whole list fail.
 const SUMMARY: &str = "SELECT id, name, purpose, enabled, category_codes, stock, rev, \
      CASE WHEN json_type(spec, '$.widthMm') IN ('integer', 'real') \
          THEN spec -> '$.widthMm' END AS width_mm, \
      CASE WHEN json_type(spec, '$.heightMm') IN ('integer', 'real') \
          THEN spec -> '$.heightMm' END AS height_mm, \
-     CASE WHEN json_type(spec, '$.dpi') = 'integer' THEN json_extract(spec, '$.dpi') END AS dpi, \
+     CASE WHEN json_type(spec, '$.dpi') = 'integer' THEN spec -> '$.dpi' END AS dpi, \
      CASE WHEN json_type(spec, '$.language') = 'text' \
          THEN json_extract(spec, '$.language') END AS language \
      FROM label_templates";
@@ -54,7 +58,7 @@ struct SummaryRow {
     rev: i64,
     width_mm: Option<String>,
     height_mm: Option<String>,
-    dpi: Option<i64>,
+    dpi: Option<String>,
     language: Option<String>,
 }
 
@@ -91,7 +95,9 @@ fn summary(row: SummaryRow) -> Result<LabelTemplateSummary, ApiError> {
         stock: row.stock,
         width_mm: spec_number(row.width_mm),
         height_mm: spec_number(row.height_mm),
-        dpi: row.dpi.and_then(|dpi| u32::try_from(dpi).ok()),
+        // An integer that fits a `u32`: a negative one, or one above the
+        // range, is `null` like any other value of the wrong kind.
+        dpi: row.dpi.and_then(|text| text.parse::<u32>().ok()),
         language: row.language,
         rev: row.rev,
     })

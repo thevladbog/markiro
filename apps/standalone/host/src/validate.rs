@@ -395,15 +395,51 @@ pub fn template_name(field: &str, name: &str) -> Result<String, ApiError> {
 /// The largest layout the host keeps: 256 KB of compact JSON.
 pub const MAX_SPEC_BYTES: usize = 256 * 1024;
 
+/// The deepest layout the host keeps: 64 levels, where an object or an array
+/// is a level and a scalar none (`{"a": 1}` is one level deep, `{"a": [{}]}`
+/// three). A feed page wraps a layout in four more levels (`items`, the item,
+/// `data`, then the layout), and the station shell parses every host answer
+/// with `serde_json`, which stops at 127: a layout 124 levels deep would be
+/// stored and served by `GET …/{id}`, but the page that carries it would not
+/// parse, and no later change would reach any station. A real layout nests a
+/// handful of levels, so the bound only keeps a broken client out; it stays
+/// well under the 123 a page leaves.
+pub const MAX_SPEC_DEPTH: usize = 64;
+
+/// Whether `value` nests more than `levels` levels deep (see
+/// [`MAX_SPEC_DEPTH`]). It descends at most `levels + 1` levels into any
+/// value, so no input makes it recurse deeply.
+fn nests_deeper_than(value: &serde_json::Value, levels: usize) -> bool {
+    use serde_json::Value;
+    match value {
+        Value::Array(items) => {
+            levels == 0 || items.iter().any(|item| nests_deeper_than(item, levels - 1))
+        }
+        Value::Object(fields) => {
+            levels == 0
+                || fields
+                    .values()
+                    .any(|field| nests_deeper_than(field, levels - 1))
+        }
+        _ => false,
+    }
+}
+
 /// A template's layout: a JSON object of at most [`MAX_SPEC_BYTES`] once
 /// written compactly, which is how the host stores it (object keys in byte
-/// order). Returns that text. Whether it is a label is the UI's check
-/// (`labelTemplateSpecSchema`).
+/// order), and at most [`MAX_SPEC_DEPTH`] levels deep. Returns that text.
+/// Whether it is a label is the UI's check (`labelTemplateSpecSchema`).
 pub fn template_spec(field: &str, spec: &serde_json::Value) -> Result<String, ApiError> {
     if !spec.is_object() {
         return Err(ApiError::validation(
             field,
             "the spec must be a JSON object",
+        ));
+    }
+    if nests_deeper_than(spec, MAX_SPEC_DEPTH) {
+        return Err(ApiError::validation(
+            field,
+            format!("the spec must be at most {MAX_SPEC_DEPTH} levels deep"),
         ));
     }
     let text = serde_json::to_string(spec).map_err(ApiError::internal)?;
@@ -1065,5 +1101,123 @@ mod tests {
             field(template_name("templates.0.name", "")),
             "templates.0.name"
         );
+    }
+
+    /// `levels` objects nested one in another, the innermost empty.
+    fn nested_objects(levels: usize) -> serde_json::Value {
+        let mut spec = serde_json::json!({});
+        for _ in 1..levels {
+            spec = serde_json::json!({ "a": spec });
+        }
+        spec
+    }
+
+    /// An object around `levels - 1` arrays nested one in another, the
+    /// innermost empty: `levels` levels in all.
+    fn nested_arrays(levels: usize) -> serde_json::Value {
+        let mut spec = serde_json::json!([]);
+        for _ in 2..levels {
+            spec = serde_json::json!([spec]);
+        }
+        serde_json::json!({ "a": spec })
+    }
+
+    /// Objects and arrays one in another, an object outermost and the
+    /// innermost empty: `levels` levels in all.
+    fn nested_alternately(levels: usize) -> serde_json::Value {
+        let mut spec = serde_json::json!({});
+        for level in 2..levels {
+            spec = if level % 2 == 0 {
+                serde_json::json!([spec])
+            } else {
+                serde_json::json!({ "a": spec })
+            };
+        }
+        serde_json::json!({ "a": spec })
+    }
+
+    /// `levels` objects nested one in another around a scalar: the scalar is
+    /// no level of its own.
+    fn nested_around_a_scalar(levels: usize) -> serde_json::Value {
+        let mut spec = serde_json::json!({ "a": 1 });
+        for _ in 1..levels {
+            spec = serde_json::json!({ "a": spec });
+        }
+        spec
+    }
+
+    /// An object or an array is a level, a scalar none: 64 levels are kept and
+    /// 65 refused however they nest. (Literals, not `MAX_SPEC_DEPTH`, so that
+    /// the test pins the bound itself.)
+    #[test]
+    fn a_spec_is_at_most_64_levels_deep_whichever_way_it_nests() {
+        let builders: [(&str, fn(usize) -> serde_json::Value); 4] = [
+            ("objects", nested_objects),
+            ("an object around arrays", nested_arrays),
+            ("objects and arrays", nested_alternately),
+            ("objects around a scalar", nested_around_a_scalar),
+        ];
+        for (kind, nested) in builders {
+            assert!(
+                template_spec("spec", &nested(64)).is_ok(),
+                "{kind}: 64 levels"
+            );
+            assert_eq!(
+                field(template_spec("spec", &nested(65))),
+                "spec",
+                "{kind}: 65 levels"
+            );
+        }
+        // The first levels and the flat cases.
+        for spec in [
+            serde_json::json!({}),
+            serde_json::json!({ "a": 1 }),
+            serde_json::json!({ "a": [1, 2, { "b": null }] }),
+            nested_objects(2),
+        ] {
+            assert!(template_spec("spec", &spec).is_ok(), "{spec}");
+        }
+    }
+
+    /// Depth is not size: a deep layout is refused however small, a flat one
+    /// kept up to the size bound.
+    #[test]
+    fn a_deep_spec_is_refused_however_small_and_a_flat_one_kept_however_large() {
+        let deep = nested_objects(65);
+        let text = serde_json::to_string(&deep).unwrap();
+        assert!(text.len() < 1_000, "{} bytes", text.len());
+        assert_eq!(field(template_spec("spec", &deep)), "spec");
+        // Two levels and some 260 KB: 130 000 numbers in one array.
+        let flat = serde_json::json!({ "elements": vec![1; 130_000] });
+        let kept = template_spec("spec", &flat).unwrap();
+        assert!(
+            (250_000..=MAX_SPEC_BYTES).contains(&kept.len()),
+            "{} bytes",
+            kept.len()
+        );
+    }
+
+    #[test]
+    fn the_depth_refusal_names_the_bound() {
+        let refused = template_spec("spec", &nested_objects(65)).unwrap_err();
+        assert!(refused.message().contains("64"), "{}", refused.message());
+    }
+
+    /// A feed page wraps a layout in four levels (`items`, the item, `data`,
+    /// `spec`), and serde_json, which the station shell parses every host
+    /// answer with, stops at 127: 123 levels of layout travel in a page and
+    /// 124 do not. The bound stays well under that.
+    #[test]
+    fn a_layout_at_the_bound_fits_a_feed_page_the_station_can_parse() {
+        let page = |layout: serde_json::Value| {
+            serde_json::json!({ "items": [{ "data": { "spec": layout } }] }).to_string()
+        };
+        let parses = |layout: serde_json::Value| {
+            serde_json::from_str::<serde_json::Value>(&page(layout)).is_ok()
+        };
+        assert!(parses(nested_objects(123)));
+        assert!(!parses(nested_objects(124)));
+        assert!(parses(nested_objects(MAX_SPEC_DEPTH)));
+        assert!(MAX_SPEC_DEPTH <= 123);
     }
 }

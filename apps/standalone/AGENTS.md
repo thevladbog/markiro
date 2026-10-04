@@ -416,11 +416,21 @@ catalog yet.
 Label templates (`GET/POST/PUT/DELETE /v1/office/templates`): every office
 role reads them — the list as summaries without the layout, whose size,
 resolution and language come from the stored `spec` as they stand (`null`
-where it has nothing of the right type), and `GET …/{id}` with it;
-administrators and technologists write them. The host keeps `spec` a JSON
-object of at most 256 KB written compactly (`validate::template_spec`), its
+where it has nothing of the right type: a resolution counts only as an
+integer that fits a `u32`, and the numbers are read as JSON text, never as
+SQLite values, so one stored layout cannot make the list fail for everybody),
+and `GET …/{id}` with it; administrators and technologists write them. The
+host keeps `spec` a JSON object of at most 256 KB written compactly and at
+most 64 levels deep (`validate::template_spec`, `MAX_SPEC_BYTES` and
+`MAX_SPEC_DEPTH`; an object or an array is a level, a scalar none), its
 object keys in byte order, and never checks the layout: that is
-`labelTemplateSpecSchema` in the UI. A name is 1–200 characters;
+`labelTemplateSpecSchema` in the UI. The depth bound exists for the feed: a
+page wraps a layout in four more levels (`items`, the item, `data`) and the
+station shell parses every host answer with `serde_json::from_slice`, which
+stops at 127 levels, so a layout nested 124 deep would be stored and served
+by `GET …/{id}` while the page that carries it failed as `invalid_response`
+and was refetched from the same revision for ever, and no later reference
+change would reach any station. A name is 1–200 characters;
 `chzProductGroupCodes` is `null` (every category) or 1–100 codes without
 repeats, each a product group. A purpose never changes: `PUT` has no
 `purpose` field, so one sent is `validation_failed`. `PUT` changes only what

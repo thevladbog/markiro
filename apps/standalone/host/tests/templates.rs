@@ -231,7 +231,8 @@ async fn a_summary_reads_the_layout_as_it_stands() {
         }),
     )
     .await;
-    let (_, list) = admin.call("GET", "/v1/office/templates", None).await;
+    let (status, list) = admin.call("GET", "/v1/office/templates", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
     assert_eq!(
         (
             list[0]["widthMm"].clone(),
@@ -240,6 +241,61 @@ async fn a_summary_reads_the_layout_as_it_stands() {
             list[0]["language"].clone()
         ),
         (json!(58.5), Value::Null, Value::Null, Value::Null)
+    );
+
+    // A resolution is read only as an integer that fits a `u32`: any other
+    // number (one above `i64::MAX`, a negative one, a fraction, one above
+    // `u32::MAX`) is `null`. One such layout never breaks the list for
+    // everybody, so the list is read, and its status asserted, after each.
+    for (n, (dpi, expected)) in [
+        (json!(10_000_000_000_000_000_000_u64), Value::Null),
+        (json!(-203), Value::Null),
+        (json!(203.5), Value::Null),
+        (json!(4_294_967_296_u64), Value::Null),
+        (json!(4_294_967_295_u64), json!(4_294_967_295_u64)),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let created = create(
+            &admin,
+            json!({
+                "name": format!("Разрешение {n}"), "purpose": "box", "enabled": true,
+                "spec": { "dpi": dpi }
+            }),
+        )
+        .await;
+        let (status, list) = admin.call("GET", "/v1/office/templates", None).await;
+        assert_eq!(status, StatusCode::OK, "dpi {dpi}: {list}");
+        let summary = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|summary| summary["id"] == created["id"])
+            .expect("the template is listed");
+        assert_eq!(summary["dpi"], expected, "dpi {dpi}");
+    }
+    // A size is read as the number it is, however large: no layout the host
+    // accepts makes the list answer 500.
+    let created = create(
+        &admin,
+        json!({
+            "name": "Огромный", "purpose": "box", "enabled": true,
+            "spec": { "widthMm": 10_000_000_000_000_000_000_u64, "heightMm": 1e23 }
+        }),
+    )
+    .await;
+    let (status, list) = admin.call("GET", "/v1/office/templates", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let summary = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|summary| summary["id"] == created["id"])
+        .expect("the template is listed");
+    assert_eq!(
+        (summary["widthMm"].clone(), summary["heightMm"].clone()),
+        (json!(10_000_000_000_000_000_000_u64), json!(1e23))
     );
 }
 
@@ -1304,18 +1360,20 @@ async fn template_writes_wake_the_streams_with_their_revision() {
         .await;
     assert_eq!(status, StatusCode::OK, "{updated}");
     assert_eq!(latest(), updated["rev"].as_i64().unwrap(), "update");
-    // A no-op and a stale update take no revision and wake nobody.
-    for expected_rev in [
-        updated["rev"].as_i64().unwrap(),
-        created["rev"].as_i64().unwrap(),
+    // A no-op and a stale update take no revision and wake nobody; each is
+    // answered as it should be (a 500 would wake nobody either).
+    for (expected_rev, expected_status) in [
+        (updated["rev"].as_i64().unwrap(), StatusCode::OK),
+        (created["rev"].as_i64().unwrap(), StatusCode::CONFLICT),
     ] {
-        let (_, _) = admin
+        let (status, body) = admin
             .call(
                 "PUT",
                 &path(&created),
                 Some(json!({ "enabled": false, "expectedRev": expected_rev })),
             )
             .await;
+        assert_eq!(status, expected_status, "{expected_rev}: {body}");
         assert_eq!(latest(), updated["rev"].as_i64().unwrap(), "{expected_rev}");
     }
     let (status, _) = admin.call("DELETE", &path(&created), None).await;
@@ -1366,4 +1424,120 @@ async fn a_layout_of_exactly_256_kib_is_kept_and_one_byte_more_is_refused() {
     );
     assert_eq!(host_revision(&admin.app).await, revision);
     assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+// Fix round 1, from the review of this task: a layout the host accepts must
+// not break what reads it back, the list for everybody (a resolution above
+// `i64::MAX`, the summary test above) and every station's feed (a layout
+// nested too deeply, below).
+
+use http_body_util::BodyExt;
+use tower::ServiceExt;
+
+/// A layout `levels` objects deep, the innermost one empty.
+fn nested(levels: usize) -> Value {
+    let mut spec = json!({});
+    for _ in 1..levels {
+        spec = json!({ "elements": spec });
+    }
+    spec
+}
+
+/// A layout nests at most 64 levels (`MAX_SPEC_DEPTH`; an object or an array
+/// is a level, a scalar none): a feed page wraps it in four more, and the
+/// station reads every host answer with `serde_json::from_slice`, which stops
+/// at 127. Exactly 64 levels are kept, by a `POST` and a `PUT` alike; one level
+/// more is refused as `spec` and writes nothing. (Literals, not the constant,
+/// so that this pins the bound itself.)
+#[tokio::test]
+async fn a_layout_nested_64_levels_is_kept_and_one_level_more_is_refused() {
+    let admin = admin().await;
+    let mut body = box_template("Коробка 58×40");
+    body["spec"] = nested(64);
+    let created = create(&admin, body).await;
+    assert_eq!(created["spec"], nested(64));
+    let (status, read) = admin.call("GET", &path(&created), None).await;
+    assert_eq!((status, read["spec"].clone()), (StatusCode::OK, nested(64)));
+    let other = create(&admin, box_template("Коробка 58×40 (другая)")).await;
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+
+    let refused_as_spec = |status: StatusCode, body: &Value| {
+        (
+            status,
+            body["error"]["code"].clone(),
+            body["error"]["details"]["field"].clone(),
+        )
+    };
+    let mut body = box_template("Коробка 58×40 (глубже)");
+    body["spec"] = nested(65);
+    let (status, refused) = admin.call("POST", "/v1/office/templates", Some(body)).await;
+    assert_eq!(
+        refused_as_spec(status, &refused),
+        (
+            StatusCode::BAD_REQUEST,
+            json!("validation_failed"),
+            json!("spec")
+        ),
+        "POST"
+    );
+    let (status, refused) = admin
+        .call(
+            "PUT",
+            &path(&other),
+            Some(json!({ "spec": nested(65), "expectedRev": other["rev"] })),
+        )
+        .await;
+    assert_eq!(
+        refused_as_spec(status, &refused),
+        (
+            StatusCode::BAD_REQUEST,
+            json!("validation_failed"),
+            json!("spec")
+        ),
+        "PUT"
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+
+    let (status, updated) = admin
+        .call(
+            "PUT",
+            &path(&other),
+            Some(json!({ "spec": nested(64), "expectedRev": other["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["spec"], nested(64));
+}
+
+/// The feed page that carries a layout at the bound parses back as the
+/// station shell parses every host answer, with `serde_json::from_slice` (127
+/// levels at most): the page wraps the layout in four more levels, which the
+/// bound leaves room for. A layout the page could not carry would be refetched
+/// from the same revision for ever, and no later change would reach any
+/// station.
+#[tokio::test]
+async fn a_layout_at_the_depth_bound_travels_in_a_feed_page_the_station_can_parse() {
+    let admin = admin().await;
+    let mut body = box_template("Коробка 58×40");
+    body["spec"] = nested(markiro_host::validate::MAX_SPEC_DEPTH);
+    let created = create(&admin, body).await;
+    let request = support::app::empty(support::app::with_device(
+        support::app::request("GET", "/v1/changes?since=1"),
+        &admin.key,
+    ));
+    let response = markiro_host::server::router(admin.app.state.clone())
+        .oneshot(request)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let page: Value =
+        serde_json::from_slice(&bytes).expect("a page the station shell can parse back");
+    assert_eq!(page["items"][0]["id"], created["id"]);
+    assert_eq!(
+        page["items"][0]["data"]["spec"],
+        nested(markiro_host::validate::MAX_SPEC_DEPTH)
+    );
 }
