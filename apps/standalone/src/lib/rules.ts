@@ -1,4 +1,4 @@
-import { hasValidCheckDigit } from "@markiro/domain";
+import { hasValidCheckDigit, isValidGtin, normalizeToGtin14 } from "@markiro/domain";
 import { z } from "zod";
 
 import { hasCyrillic } from "../host/pairing-code.js";
@@ -209,3 +209,92 @@ export const ORG_HOST_FIELDS: Readonly<Record<string, keyof OrgFields>> = {
   gs1Prefixes: "gs1Prefixes",
   timeZone: "timeZone",
 };
+
+// --- Products (plan 1e1's `validate.rs`, and the domain's GTIN rule) ---
+
+/**
+ * The host's caps (`validate::MAX_BOX_CAPACITY`, `MAX_PALLET_BOX_CAPACITY`):
+ * the cloud bounds neither capacity, so these only keep a typing slip out of
+ * production.
+ */
+export const MAX_BOX_CAPACITY = 100_000;
+export const MAX_PALLET_BOX_CAPACITY = 10_000;
+/** The longest shelf life in days: the cloud's bound, `validate::MAX_SHELF_LIFE_DAYS`. */
+export const MAX_SHELF_LIFE_DAYS = 3_650;
+/** The longest product name and print name, in characters (`validate::product_name`). */
+export const MAX_PRODUCT_NAME = 200;
+
+/**
+ * What `normalizeToGtin14` takes before it checks the digit: 8, 12, 13 or 14
+ * ASCII digits. The domain throws one `GTIN_INVALID` for a wrong length and a
+ * wrong check digit alike, so the rule checks the length itself first and
+ * says each in its own words.
+ */
+const GTIN_DIGITS = /^(?:[0-9]{8}|[0-9]{12,14})$/;
+
+/**
+ * A product's GTIN as typed: trimmed, 8, 12, 13 or 14 ASCII digits
+ * (`rules.gtin`) with a valid GS1 check digit (`rules.gtinCheckDigit`). The
+ * host checks only that 14 digits arrive (`validate::gtin14`); the form sends
+ * `toGtin14` of the value.
+ */
+export const gtinRule = z
+  .string()
+  .trim()
+  .regex(GTIN_DIGITS, "rules.gtin")
+  .refine((gtin) => !GTIN_DIGITS.test(gtin) || isValidGtin(gtin), "rules.gtinCheckDigit");
+
+/** The 14 digits a GTIN `gtinRule` accepted is saved as: zero-padded by `normalizeToGtin14`. */
+export function toGtin14(gtin: string): string {
+  return normalizeToGtin14(gtin.trim());
+}
+
+/** A product's name (`validate::product_name`): 1 to 200 characters. */
+export const productNameRule = plainTextRule(MAX_PRODUCT_NAME, "rules.productName");
+
+/** A product's print name (`validate::print_name`): up to 200 characters, blank for none. */
+export const printNameRule = optionalTextRule(MAX_PRODUCT_NAME, "rules.printName");
+
+/** A whole number as typed: ASCII digits with no sign, leading zero, point, comma or exponent. */
+const WHOLE_NUMBER = /^[1-9][0-9]*$/;
+
+/**
+ * An optional count as typed (`validate::count`): blank for none, otherwise a
+ * whole number from 1 to `max`. The text is checked as text before it becomes
+ * a number: `Number` takes `1e3`, `0x10` and `12.0`, which the host's integer
+ * does not. `toCount` turns an accepted value into the number.
+ */
+export function countRule(max: number, message: string): z.ZodString {
+  return z
+    .string()
+    .trim()
+    .refine((text) => text === "" || (WHOLE_NUMBER.test(text) && Number(text) <= max), message);
+}
+
+/** An optional count `countRule` accepted, as the host takes it: `null` when blank. */
+export function toCount(text: string): number | null {
+  const trimmed = text.trim();
+  return trimmed === "" ? null : Number(trimmed);
+}
+
+/** Units in a box: 1 to `MAX_BOX_CAPACITY`, or none. */
+export const boxCapacityRule = countRule(MAX_BOX_CAPACITY, "rules.boxCapacity");
+
+/** Boxes on a pallet: 1 to `MAX_PALLET_BOX_CAPACITY`, or none. */
+export const palletBoxCapacityRule = countRule(MAX_PALLET_BOX_CAPACITY, "rules.palletBoxCapacity");
+
+/** A shelf life in days: 1 to `MAX_SHELF_LIFE_DAYS`, or none. */
+export const shelfLifeDaysRule = countRule(MAX_SHELF_LIFE_DAYS, "rules.shelfLifeDays");
+
+/**
+ * A product group as the form's select holds it: `""` for none, or a group's
+ * code. The select offers only the host's groups and the product's own code,
+ * and the host refuses a code it does not know (`validation_failed` on
+ * `chzProductGroupCode`).
+ */
+export const productGroupRule = z.string().regex(/^(?:[1-9][0-9]*)?$/, "rules.productGroup");
+
+/** A product group `productGroupRule` accepted, as the host takes it: `null` for none. */
+export function toGroupCode(value: string): number | null {
+  return value === "" ? null : Number(value);
+}

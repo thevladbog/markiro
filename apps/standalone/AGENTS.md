@@ -405,6 +405,13 @@ print name up to 200 or none, a box holds 1–100 000 units and a pallet
 1–10 000 boxes (`MAX_BOX_CAPACITY`, `MAX_PALLET_BOX_CAPACITY`: the cloud caps
 neither, so these only keep a typing slip out of production), a shelf life
 is 1–3650 days (the cloud's bound), and a product group must exist. The
+office checks the same before it sends (`src/lib/rules.ts`, the limits as
+constants of the same names): a GTIN of 8, 12, 13 or 14 ASCII digits with a
+valid check digit (`gtinRule`; the domain throws one `GTIN_INVALID` for a
+wrong length and a wrong check digit, so the rule checks the length itself
+and says each in its own words), sent as its 14 digits (`toGtin14`), and
+counts typed as text and taken only as whole numbers without a sign, a
+leading zero, a point or an exponent (`countRule`), blank for none. The
 default box and pallet templates are preferences: the host checks that each
 names a template of the slot's purpose; whether that template is enabled
 and covers the product's group is the domain's rule, which the office
@@ -457,9 +464,12 @@ that category: a change that would break either, and any delete of a
 default, is `conflict` on `template_is_default` with `organizationDefault`
 and `categoryDefaults` (codes), as the cloud's `LABEL_TEMPLATE_IS_DEFAULT`.
 The rule for a slot is `templates::fits`, the domain's
-`isBoxLabelTemplateEligible` rewritten: `proto/fixtures/template-eligibility.json`
-holds the cases the two rules must answer alike; only the host reads it
-today (`host/tests/templates.rs`), and plan 1e2 adds the Vitest side.
+`isBoxLabelTemplateEligible` rewritten. The webview's `templateFitsSlot`
+(`src/lib/template-eligibility.ts`) asks the domain for a box or a pallet
+slot and checks a product duplicate, for which the domain has no rule, the
+same way. `proto/fixtures/template-eligibility.json` holds the cases the
+rules must answer alike, and `host/tests/templates.rs` and
+`test/template-eligibility.test.ts` both read every one.
 Deleting a template clears every product preference that names it at the
 delete's revision, so those products ride the feed again, and leaves a
 tombstone; a delete repeated after a lost answer finds the tombstone and

@@ -1,25 +1,41 @@
+import { isValidGtin } from "@markiro/domain";
 import { describe, expect, it } from "vitest";
+import type { z } from "zod";
 
 import {
   badgeCodeRule,
   badgeLabelRule,
+  boxCapacityRule,
   companyNameRule,
   deviceNameRule,
   glnRule,
   gs1PrefixesRule,
+  gtinRule,
   innRule,
   isPlainText,
   isTransferable,
   lineNameRule,
   loginRule,
+  MAX_BOX_CAPACITY,
+  MAX_PALLET_BOX_CAPACITY,
+  MAX_PRODUCT_NAME,
+  MAX_SHELF_LIFE_DAYS,
   operatorLoginRule,
   operatorRoleRule,
   ORG_HOST_FIELDS,
   orgFieldsSchema,
+  palletBoxCapacityRule,
   parsePrefixList,
   passwordRule,
   personNameRule,
   pinRule,
+  printNameRule,
+  productGroupRule,
+  productNameRule,
+  shelfLifeDaysRule,
+  toCount,
+  toGroupCode,
+  toGtin14,
   toOptionalText,
   toOrgInput,
   type OrgFields,
@@ -358,6 +374,141 @@ describe("operator rules", () => {
     expect(badgeCodeRule.safeParse("ЬКЛ-000742").error?.issues[0]?.message).toBe(
       "rules.badgeCodeLayout",
     );
+  });
+});
+
+/** The first message `rule` gives for `text`; `undefined` when it accepts the text. */
+function message(rule: z.ZodString, text: string): string | undefined {
+  return rule.safeParse(text).error?.issues[0]?.message;
+}
+
+describe("product rules", () => {
+  it("pins the host's caps: 100 000 units a box, 10 000 boxes a pallet, 3650 days, 200 characters", () => {
+    expect(MAX_BOX_CAPACITY).toBe(100_000);
+    expect(MAX_PALLET_BOX_CAPACITY).toBe(10_000);
+    expect(MAX_SHELF_LIFE_DAYS).toBe(3_650);
+    expect(MAX_PRODUCT_NAME).toBe(200);
+  });
+
+  it("takes a GTIN of 8, 12, 13 or 14 ASCII digits with a valid check digit, trimmed", () => {
+    for (const gtin of ["96385074", "036000291452", "4600682000013", "04600682000013"]) {
+      expect(message(gtinRule, gtin), gtin).toBeUndefined();
+    }
+    expect(gtinRule.safeParse(" 4600682000013 ").data).toBe("4600682000013");
+  });
+
+  it("says a wrong length or a character that is no ASCII digit in one message", () => {
+    // 9, 10 and 11 digits are no GTIN length; 7 and 15 lie outside them.
+    for (const gtin of [
+      "",
+      "4600682",
+      "460068200",
+      "4600682000",
+      "46006820000",
+      "460068200001304",
+      "460068200001A",
+      "4600682 000013",
+      "+4600682000013",
+      "４６００６８２００００１３",
+      "٤٦٠٠٦٨٢٠٠٠٠١٣",
+    ]) {
+      expect(message(gtinRule, gtin), gtin).toBe("rules.gtin");
+      // One message: a text that is no GTIN has no check digit to be wrong.
+      expect(gtinRule.safeParse(gtin).error?.issues, gtin).toHaveLength(1);
+    }
+  });
+
+  it("says a wrong check digit in its own message", () => {
+    for (const gtin of ["4600682000010", "04600682000010", "96385075", "036000291453"]) {
+      expect(message(gtinRule, gtin), gtin).toBe("rules.gtinCheckDigit");
+    }
+  });
+
+  it("accepts exactly what the domain's normalizeToGtin14 accepts", () => {
+    for (const gtin of [
+      "96385074",
+      "96385070",
+      "036000291452",
+      "4600682000013",
+      "4600682000020",
+      "04600682000020",
+      "00000096385074",
+      "1234567",
+      "4600682000013 ",
+    ]) {
+      expect(gtinRule.safeParse(gtin).success, gtin).toBe(isValidGtin(gtin.trim()));
+    }
+  });
+
+  it("saves a GTIN as its 14 digits, zero-padded", () => {
+    expect(toGtin14("4600682000013")).toBe("04600682000013");
+    expect(toGtin14(" 96385074 ")).toBe("00000096385074");
+    expect(toGtin14("036000291452")).toBe("00036000291452");
+    expect(toGtin14("04600682000013")).toBe("04600682000013");
+  });
+
+  it("takes a name of 1 to 200 characters and a print name of up to 200, blank as none", () => {
+    expect(message(productNameRule, "я".repeat(200))).toBeUndefined();
+    expect(message(productNameRule, "😀".repeat(200))).toBeUndefined();
+    expect(message(productNameRule, "я".repeat(201))).toBe("rules.productName");
+    expect(message(productNameRule, "  ")).toBe("rules.productName");
+    expect(message(productNameRule, "Молоко\t3,2%")).toBe("rules.controlCharacter");
+    expect(printNameRule.safeParse("   ").data).toBe("");
+    expect(toOptionalText("   ")).toBeNull();
+    expect(message(printNameRule, "я".repeat(200))).toBeUndefined();
+    expect(message(printNameRule, "я".repeat(201))).toBe("rules.printName");
+    expect(message(printNameRule, "Молоко\u0000")).toBe("rules.controlCharacter");
+  });
+
+  it.each([
+    ["boxCapacityRule", boxCapacityRule, MAX_BOX_CAPACITY, "rules.boxCapacity"],
+    [
+      "palletBoxCapacityRule",
+      palletBoxCapacityRule,
+      MAX_PALLET_BOX_CAPACITY,
+      "rules.palletBoxCapacity",
+    ],
+    ["shelfLifeDaysRule", shelfLifeDaysRule, MAX_SHELF_LIFE_DAYS, "rules.shelfLifeDays"],
+  ] as const)("%s takes a whole number from 1 to its cap, or nothing", (_name, rule, max, key) => {
+    for (const text of ["", "   ", "1", " 12 ", String(max)]) {
+      expect(message(rule, text), text).toBeUndefined();
+    }
+    // `Number` would take most of these; the host's integer takes none.
+    for (const text of [
+      "0",
+      String(max + 1),
+      "012",
+      "+12",
+      "-1",
+      "1e3",
+      "0x10",
+      "12.0",
+      "1,5",
+      "1 2",
+      "１２",
+      "١٢",
+      "9".repeat(400),
+    ]) {
+      expect(message(rule, text), text).toBe(key);
+    }
+  });
+
+  it("turns an accepted count into the number the host takes, and blank into none", () => {
+    expect(toCount("")).toBeNull();
+    expect(toCount("  ")).toBeNull();
+    expect(toCount(" 12 ")).toBe(12);
+    expect(toCount("100000")).toBe(100_000);
+  });
+
+  it("takes no product group, or a group's code from the select", () => {
+    for (const value of ["", "8", "59"]) {
+      expect(message(productGroupRule, value), value).toBeUndefined();
+    }
+    for (const value of ["0", "08", "8a", " 8", "-1"]) {
+      expect(message(productGroupRule, value), value).toBe("rules.productGroup");
+    }
+    expect(toGroupCode("")).toBeNull();
+    expect(toGroupCode("15")).toBe(15);
   });
 });
 

@@ -394,8 +394,9 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
   организации в её записи, надгробия);
 - мастер — `bootstrap-request-templates.json` (типовые шаблоны с `orgDefault`);
 - правило слота — `template-eligibility.json`: случаи, на которые `templates::fits`
-  хоста и правило `@markiro/domain` должны отвечать одинаково (сегодня фикстуру
-  читает только хост, сторону Vitest добавит план 1e2).
+  хоста и `templateFitsSlot` вебвью (правило `@markiro/domain` для короба и
+  паллеты, то же правило для дубликата) должны отвечать одинаково; фикстуру
+  читают и тест хоста, и Vitest (план 1e2).
 
 ### 4.6. Ошибки
 
