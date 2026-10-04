@@ -150,6 +150,37 @@ impl OfficeContext {
             Err(ApiError::forbidden("the administrator role is required"))
         }
     }
+
+    /// The early check of a catalog write: products, label templates and
+    /// their defaults (spec §4.8, `editCatalog`).
+    pub fn require_catalog(&self) -> Result<(), ApiError> {
+        if edits_catalog(self.user.role) {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden("a catalog role is required"))
+        }
+    }
+
+    /// Re-check catalog rights inside the caller's write transaction, as
+    /// [`Self::require_admin_in`] does for administrator writes: a session that
+    /// ended, a user turned off or a role taken away since the extractor
+    /// read them stops the write.
+    pub async fn require_catalog_in(&self, conn: &mut SqliteConnection) -> Result<(), ApiError> {
+        if edits_catalog(self.live_role_in(conn).await?) {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden("a catalog role is required"))
+        }
+    }
+}
+
+/// Whether a role changes the catalog, label templates and their defaults
+/// (spec §4.8: administrators and technologists). No wildcard arm: a new
+/// role does not compile until it is placed here.
+pub fn edits_catalog(role: OfficeRole) -> bool {
+    match role {
+        OfficeRole::Admin | OfficeRole::Technologist => true,
+    }
 }
 
 type SessionRow = (String, String, String, String, String, String, String, i64);

@@ -230,7 +230,11 @@ with `storage` and the pairing stays for another try.
   deactivation ended in that window. Self-service writes any office user may
   make on their own record (their own password) re-check the same way with
   `OfficeContext::require_session_in` instead; admin writes keep using
-  `require_admin_in`.
+  `require_admin_in`. Catalog writes — products, label templates and their
+  defaults, which administrators and technologists make (spec §4.8,
+  `editCatalog`) — check `require_catalog` early and `require_catalog_in`
+  inside the transaction; `auth::edits_catalog` names the roles, with no
+  wildcard arm, so a new role does not compile until it is placed.
 
 ## Change feed
 
@@ -375,10 +379,37 @@ fails when any other cloud migration writes the table, so a cloud migration
 that changes the lookup cannot go unnoticed once the standalone jobs run.
 Those jobs run when standalone files or the shared domain or ui packages
 change; a cloud-only change does not schedule them (`tools/ci/affected.mjs`
-maps `packages/db/**` to the station jobs), so the guard fires at the next
-standalone run. Every office role reads them
-(`GET /v1/office/product-groups`, by code); nothing writes them, and they
-are not in the station feed.
+sends `packages/db/**` to the station and cloud jobs, not to the standalone
+ones), so the guard fires at the next standalone run. Every office role reads
+the groups (`GET /v1/office/product-groups`, by code); nothing writes them,
+and they are not in the station feed.
+
+Products (`GET/POST/PUT /v1/office/products`): every office role reads
+them, archived ones included (by `archived, name, id`, bytewise as lines);
+administrators and technologists write them. `PUT` takes every field with
+`expectedRev`, as a counterparty's, so a field left out is cleared;
+archiving is `archived: true`, and a product is never deleted. The host
+checks `gtin14` for its shape only — 14 ASCII digits after trimming; the
+check digit and the prefix are the UI's (`normalizeToGtin14`,
+`gtinMatchesPrefix`) — and keeps it unique among products in use
+(`products_active_gtin14`: `conflict` on `gtin14` when a product is
+created, its GTIN changed or it comes back from the archive); an archived
+product keeps its GTIN without reserving it. `status` is a generated column
+(`active` with a product group and both capacities, `draft` before, as the
+cloud's `computeStatus`) that nobody sends. A name is 1–200 characters, a
+print name up to 200 or none, a box holds 1–100 000 units and a pallet
+1–10 000 boxes (`MAX_BOX_CAPACITY`, `MAX_PALLET_BOX_CAPACITY`: the cloud caps
+neither, so these only keep a typing slip out of production), a shelf life
+is 1–3650 days (the cloud's bound), and a product group must exist. The
+default box and pallet templates are preferences: the host checks that each
+names a template of the slot's purpose; whether that template is enabled
+and covers the product's group is the domain's rule, which the office
+applies when it offers templates and the station before it uses one, so a
+template disabled or narrowed later never blocks editing or archiving the
+product. (The cloud has no per-product template since its 2026-09-02 spec;
+these follow the stage-1 spec.) National-catalog links, photos, EGAIS
+codes, prices and default counterparties are not part of the standalone
+catalog yet.
 
 ## Reference sync
 

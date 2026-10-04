@@ -193,14 +193,31 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
 - `chz_product_groups(code PRIMARY KEY, alias UNIQUE, name)` — 51 строка из облачной
   миграции `0099`, перенесённая миграцией хоста `0008` строка в строку; тест
   `host/tests/product_groups.rs` читает облачный файл и сверяет строки, а ещё падает,
-  если другая облачная миграция пишет в таблицу. Тест идёт в заданиях standalone,
-  которые правка одного облака не запускает (`tools/ci/affected.mjs` отправляет
-  `packages/db/**` только в станционные задания), поэтому такую миграцию поймает
-  следующий запуск этих заданий. Читают все роли (`GET /v1/office/product-groups`, по коду),
+  если другая облачная миграция пишет в таблицу. Тест идёт в заданиях standalone;
+  правка одного облака их не запускает (`tools/ci/affected.mjs` не отправляет
+  `packages/db/**` в задания standalone), поэтому такую миграцию поймает следующий
+  запуск этих заданий. Читают все роли (`GET /v1/office/product-groups`, по коду),
   не пишет никто; в ленту станций справочник не входит.
 - `products(id, gtin14 CHECK(length=14 AND цифры), name, print_name, chz_group_code REFERENCES chz_product_groups, box_capacity, pallet_box_capacity, shelf_life_days, default_box_template_id, default_pallet_template_id, archived, status GENERATED ALWAYS AS (CASE WHEN chz_group_code IS NOT NULL AND box_capacity IS NOT NULL AND pallet_box_capacity IS NOT NULL THEN 'active' ELSE 'draft' END) VIRTUAL, rev)`;
   частичный уникальный индекс `gtin14` среди неархивных (как `products_tenant_gtin_unarchived_uq`).
-  Ссылки на шаблоны — `ON DELETE SET NULL`.
+  Ссылки на шаблоны — `ON DELETE SET NULL`. Правила плана 1e1: хост проверяет у
+  `gtin14` только вид — 14 цифр ASCII после обрезки (контрольную цифру и префикс
+  проверяет интерфейс: `normalizeToGtin14`, `gtinMatchesPrefix`); повтор среди
+  неархивных — `conflict` с `constraint: gtin14` при создании, смене GTIN и
+  возврате из архива. Имя — 1–200 символов, имя для печати — до 200 или пусто,
+  в коробе 1–100 000 штук, на паллете 1–10 000 коробов (в облаке потолка нет,
+  этот лишь не пускает опечатку), срок годности 1–3650 дней (граница облака),
+  товарная группа должна существовать. `PUT` несёт все поля и `expectedRev`, как
+  у контрагента; архив — `archived: true`, удаления нет. Шаблоны товара по
+  умолчанию — пожелания: хост проверяет только, что шаблон есть и его назначение
+  совпадает со слотом; включён ли он и покрывает ли группу товара, проверяют
+  интерфейс при выборе и станция перед печатью, поэтому шаблон, выключенный или
+  суженный позже, не мешает править и архивировать товар. Удаление шаблона
+  снимает ссылки сам хост (товар получает новую ревизию и едет по ленте), а
+  `ON DELETE SET NULL` остаётся страховкой. В облаке шаблона на товар нет со
+  спецификации 2026-09-02; эти ссылки — решение этапа 1. Поля Нацкаталога, фото,
+  ЕГАИС, цены и контрагент по умолчанию в каталог автономного продукта пока не
+  входят.
 - `label_templates(id, name, purpose CHECK(purpose IN ('box','pallet','product_duplicate')), enabled, category_codes JSON, spec JSON, stock, rev)`;
   `spec` хранится как текст JSON до 256 КБ, его схему проверяет интерфейс
   (`labelTemplateSpecSchema`).
@@ -320,7 +337,7 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
 проверку: `device` — приложение предлагает переподключить это устройство,
 `session` — войти в офис заново, `password` — показывает текст под неверный
 логин или пароль), `forbidden`, `not_found`, `method_not_allowed`, `validation_failed` (с полями
-в `details`), `stale_revision`, `conflict` (с `details.constraint`: `gtin`, `login`,
+в `details`), `stale_revision`, `conflict` (с `details.constraint`: `gtin14`, `login`,
 `badge`, `line_name`; у `badge` ещё `details.operatorId` — оператор, у которого этот
 бейдж уже есть, когда хост нашёл владельца (иначе ключа нет): маршрут только для
 администраторов, а они видят всех операторов),

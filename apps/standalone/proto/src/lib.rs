@@ -1018,6 +1018,75 @@ pub struct ProductGroup {
     pub name: String,
 }
 
+/// A product as the office sees it (`GET /v1/office/products`, archived
+/// products included). `status` is computed: `active` with a product group
+/// and both capacities, `draft` before.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeProduct {
+    pub id: String,
+    pub gtin14: String,
+    pub name: String,
+    pub print_name: Option<String>,
+    pub chz_product_group_code: Option<u32>,
+    pub box_capacity: Option<u32>,
+    pub pallet_box_capacity: Option<u32>,
+    pub shelf_life_days: Option<u32>,
+    pub default_box_template_id: Option<String>,
+    pub default_pallet_template_id: Option<String>,
+    pub archived: bool,
+    pub status: ProductStatus,
+    pub rev: i64,
+}
+
+/// `POST /v1/office/products`: a product in use. The office normalized the
+/// GTIN with `normalizeToGtin14`; every field after `name` may be left out.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProductCreate {
+    pub gtin14: String,
+    pub name: String,
+    #[serde(default)]
+    pub print_name: Option<String>,
+    #[serde(default)]
+    pub chz_product_group_code: Option<u32>,
+    #[serde(default)]
+    pub box_capacity: Option<u32>,
+    #[serde(default)]
+    pub pallet_box_capacity: Option<u32>,
+    #[serde(default)]
+    pub shelf_life_days: Option<u32>,
+    #[serde(default)]
+    pub default_box_template_id: Option<String>,
+    #[serde(default)]
+    pub default_pallet_template_id: Option<String>,
+}
+
+/// `PUT /v1/office/products/{id}`: every field, like a counterparty, so a
+/// field left out or `null` is cleared; `archived: true` archives.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ProductUpdate {
+    pub gtin14: String,
+    pub name: String,
+    #[serde(default)]
+    pub print_name: Option<String>,
+    #[serde(default)]
+    pub chz_product_group_code: Option<u32>,
+    #[serde(default)]
+    pub box_capacity: Option<u32>,
+    #[serde(default)]
+    pub pallet_box_capacity: Option<u32>,
+    #[serde(default)]
+    pub shelf_life_days: Option<u32>,
+    #[serde(default)]
+    pub default_box_template_id: Option<String>,
+    #[serde(default)]
+    pub default_pallet_template_id: Option<String>,
+    pub archived: bool,
+    pub expected_rev: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

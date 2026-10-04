@@ -346,6 +346,47 @@ pub fn sscc_serial(field: &str, extension: u8, prefix: &str, serial: u64) -> Res
     }
 }
 
+/// A GTIN-14 the office normalized with `normalizeToGtin14`: trimmed,
+/// exactly 14 ASCII digits. The check digit and the GS1 prefix are the UI's
+/// rules (`@markiro/domain`); the host checks the shape only.
+pub fn gtin14(field: &str, gtin14: &str) -> Result<String, ApiError> {
+    let gtin14 = gtin14.trim();
+    if digits(gtin14, 14..=14) {
+        Ok(gtin14.to_owned())
+    } else {
+        Err(ApiError::validation(field, "the GTIN must be 14 digits"))
+    }
+}
+
+/// A product's name: trimmed, 1-200 characters, as the cloud's.
+pub fn product_name(field: &str, name: &str) -> Result<String, ApiError> {
+    clean_text(field, name, 200, "the name").map(str::to_owned)
+}
+
+/// A product's short print name (the cloud's `printName`): free text of at
+/// most 200 characters, or none.
+pub fn print_name(field: &str, name: Option<&str>) -> Result<Option<String>, ApiError> {
+    optional_text(field, name, 200, "the print name")
+}
+
+/// The most units a box holds. The cloud bounds none; this cap only keeps a
+/// typing slip out of production.
+pub const MAX_BOX_CAPACITY: u32 = 100_000;
+/// The most boxes a pallet holds, for the same reason.
+pub const MAX_PALLET_BOX_CAPACITY: u32 = 10_000;
+/// The longest shelf life in days, the cloud's `shelfLifeDays` bound.
+pub const MAX_SHELF_LIFE_DAYS: u32 = 3_650;
+
+/// An optional count: none, or 1 to `max`.
+pub fn count(field: &str, value: Option<u32>, max: u32) -> Result<(), ApiError> {
+    match value {
+        Some(value) if !(1..=max).contains(&value) => {
+            Err(ApiError::validation(field, format!("1-{max}, or none")))
+        }
+        _ => Ok(()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -610,9 +651,13 @@ mod tests {
 
     /// The free-text validators that trim their input, each with the
     /// `details.field` it names.
-    fn text_validators() -> [(&'static str, TextCheck); 8] {
+    fn text_validators() -> [(&'static str, TextCheck); 10] {
         [
             ("name", |text| person_name("name", text).map(drop)),
+            ("name", |text| product_name("name", text).map(drop)),
+            ("printName", |text| {
+                print_name("printName", Some(text)).map(drop)
+            }),
             ("org.name", |text| {
                 company("org", text, None, GLN, &[]).map(drop)
             }),
@@ -841,5 +886,60 @@ mod tests {
         for bad in [phc(9_999), phc(1_000_001), "4821".to_owned(), String::new()] {
             assert_eq!(field(pin_phc("pinPhc", &bad)), "pinPhc", "{bad}");
         }
+    }
+
+    #[test]
+    fn a_gtin14_is_fourteen_ascii_digits_and_nothing_else() {
+        assert_eq!(
+            gtin14("gtin14", " 04600682000013 ").unwrap(),
+            "04600682000013"
+        );
+        for bad in [
+            "4600682000013",
+            "046006820000131",
+            "0460068200001X",
+            "٠٤٦٠٠٦٨٢٠٠٠٠١٣",
+            "",
+        ] {
+            assert_eq!(field(gtin14("gtin14", bad)), "gtin14", "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn product_names_count_characters_and_a_print_name_may_be_blank() {
+        assert!(product_name("name", &"м".repeat(200)).is_ok());
+        assert_eq!(field(product_name("name", &"м".repeat(201))), "name");
+        assert_eq!(field(product_name("name", " ")), "name");
+        assert_eq!(print_name("printName", Some("  ")).unwrap(), None);
+        assert_eq!(print_name("printName", None).unwrap(), None);
+        assert_eq!(
+            print_name("printName", Some(" Молоко "))
+                .unwrap()
+                .as_deref(),
+            Some("Молоко")
+        );
+        assert_eq!(
+            field(print_name("printName", Some(&"м".repeat(201)))),
+            "printName"
+        );
+    }
+
+    #[test]
+    fn a_count_is_none_or_one_to_its_bound() {
+        assert!(count("boxCapacity", None, MAX_BOX_CAPACITY).is_ok());
+        assert!(count("boxCapacity", Some(1), MAX_BOX_CAPACITY).is_ok());
+        assert!(count("boxCapacity", Some(MAX_BOX_CAPACITY), MAX_BOX_CAPACITY).is_ok());
+        assert_eq!(
+            field(count("boxCapacity", Some(0), MAX_BOX_CAPACITY)),
+            "boxCapacity"
+        );
+        assert_eq!(
+            field(count(
+                "shelfLifeDays",
+                Some(MAX_SHELF_LIFE_DAYS + 1),
+                MAX_SHELF_LIFE_DAYS
+            )),
+            "shelfLifeDays"
+        );
     }
 }

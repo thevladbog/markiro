@@ -32,6 +32,8 @@ pub mod actions {
     pub const OPERATOR_BADGE_REVOKE: &str = "operator_badge.revoke";
     pub const DEVICE_UPDATE: &str = "device.update";
     pub const DEVICE_REVOKE: &str = "device.revoke";
+    pub const PRODUCT_CREATE: &str = "product.create";
+    pub const PRODUCT_UPDATE: &str = "product.update";
 }
 
 /// `details.reason` of a denied row: every denial names one.

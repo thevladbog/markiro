@@ -1,0 +1,13 @@
+{
+  "gtin14": "04600682000013",
+  "name": "Молоко 3,2% 0,9 л",
+  "printName": null,
+  "chzProductGroupCode": 8,
+  "boxCapacity": 12,
+  "palletBoxCapacity": 48,
+  "shelfLifeDays": 10,
+  "defaultBoxTemplateId": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+  "defaultPalletTemplateId": null,
+  "archived": true,
+  "expectedRev": 65
+}

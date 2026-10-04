@@ -244,10 +244,30 @@ impl Admin {
         }
     }
 
+    /// The feed items a station gets after `since`, with this station's key.
+    pub async fn feed(&self, since: i64) -> Value {
+        let (status, body) = self
+            .app
+            .send(empty(with_device(
+                request("GET", &format!("/v1/changes?since={since}")),
+                &self.key,
+            )))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        body["items"].clone()
+    }
+
     /// A technologist signed in on the same station; returns the token.
     pub async fn technologist(&self) -> String {
-        seed_office_user(&self.app, "tech", "technologist", "technologist password").await;
-        login(&self.app, &self.key, "tech", "technologist password").await
+        self.technologist_session().await.0
+    }
+
+    /// A technologist signed in on the same station; returns the token and
+    /// the technologist's id.
+    pub async fn technologist_session(&self) -> (String, String) {
+        let id = seed_office_user(&self.app, "tech", "technologist", "technologist password").await;
+        let token = login(&self.app, &self.key, "tech", "technologist password").await;
+        (token, id)
     }
 
     /// The `ok` audit row a change by this administrator writes.
@@ -258,16 +278,27 @@ impl Admin {
         target_id: &str,
         details: Value,
     ) -> AuditRow {
-        (
-            "office_user".to_owned(),
-            Some(self.id.clone()),
-            action.to_owned(),
-            Some(target_type.to_owned()),
-            Some(target_id.to_owned()),
-            "ok".to_owned(),
-            details,
-        )
+        audit_row(&self.id, action, target_type, target_id, details)
     }
+}
+
+/// The `ok` audit row a change by the office user `actor_id` writes.
+pub fn audit_row(
+    actor_id: &str,
+    action: &str,
+    target_type: &str,
+    target_id: &str,
+    details: Value,
+) -> AuditRow {
+    (
+        "office_user".to_owned(),
+        Some(actor_id.to_owned()),
+        action.to_owned(),
+        Some(target_type.to_owned()),
+        Some(target_id.to_owned()),
+        "ok".to_owned(),
+        details,
+    )
 }
 
 /// `pinPhc` of `proto/fixtures/phc-password.json`: the PIN 4821. The host

@@ -5,11 +5,12 @@ use markiro_proto::{
     CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind,
     DeviceLineRequest, DeviceRecord, DeviceUpdate, ErrorBody, Hello, HelloEnvelope,
     LabelTemplateRecord, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine,
-    OfficeLoginRequest, OfficeOperator, OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate,
-    OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord, OperatorCreate, OperatorRecord,
-    OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode,
-    PairingCodeRequest, PasswordChange, PasswordSet, ProductGroup, ProductRecord, ProductStatus,
-    SiteRecord, SsccCounterUpdate, SsccState, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
+    OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeUser,
+    OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord, OperatorCreate,
+    OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse,
+    PairingCode, PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate, ProductGroup,
+    ProductRecord, ProductStatus, ProductUpdate, SiteRecord, SsccCounterUpdate, SsccState,
+    TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -501,6 +502,35 @@ fn the_catalog_feed_fixture_round_trips_with_typed_records() {
 fn a_product_group_fixture_round_trips() {
     let group: ProductGroup = round_trip("product-group.json");
     assert_eq!((group.code, group.alias.as_str()), (8, "milk"));
+}
+
+#[test]
+fn product_fixtures_round_trip_and_requests_reject_unknown_fields() {
+    let product: OfficeProduct = round_trip("office-product.json");
+    assert_eq!(product.status, ProductStatus::Active);
+    let create: ProductCreate = round_trip("product-create.json");
+    assert_eq!(create.gtin14, product.gtin14);
+    let update: ProductUpdate = round_trip("product-update.json");
+    assert_eq!((update.archived, update.print_name), (true, None));
+    // Left out, an optional field reads as none.
+    let bare: ProductCreate =
+        serde_json::from_value(serde_json::json!({ "gtin14": "04600682000013", "name": "Молоко" }))
+            .unwrap();
+    assert_eq!(
+        (
+            bare.print_name,
+            bare.chz_product_group_code,
+            bare.box_capacity
+        ),
+        (None, None, None)
+    );
+    // A product is created in use, and nobody sends its status.
+    let mut value = fixture("product-create.json");
+    value["archived"] = Value::Bool(false);
+    assert!(serde_json::from_value::<ProductCreate>(value).is_err());
+    let mut value = fixture("product-update.json");
+    value["status"] = Value::String("active".into());
+    assert!(serde_json::from_value::<ProductUpdate>(value).is_err());
 }
 
 #[test]
