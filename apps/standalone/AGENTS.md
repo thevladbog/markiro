@@ -414,14 +414,14 @@ product. A product form opened before its preferred template was deleted
 sends the old id with the older `expectedRev`, and the answer is
 `validation_failed` on `defaultBoxTemplateId` or `defaultPalletTemplateId`
 (the references are checked before the revision), not `stale_revision`:
-nothing is written, and the office re-reads the product and the template
-list on that error. The station will choose a template by the product's
-preference if it still fits, then the category's default, then the
-organization's, then the operator's choice (plan 2a); the comment in
-migration `0008_catalog.sql` that names only the category's default and the
-organization's predates the product preferences, and an applied migration is
-never edited. (The cloud has no per-product template since its 2026-09-02
-spec; these follow the stage-1 spec.) National-catalog links, photos, EGAIS
+nothing is written, and the office (plan 1e2) re-reads the product and the
+template list on that error. The station will choose a template by the
+product's preference if it still fits, then the category's default, then the
+organization's, then the operator's choice (plan 2a); the comment in migration
+`0008_catalog.sql` names only the category's default and the organization's and
+omits the product's preference, and an applied migration is never edited. (The
+cloud has no per-product template since its 2026-09-02 spec; these follow the
+stage-1 spec.) National-catalog links, photos, EGAIS
 codes, prices and default counterparties are not part of the standalone
 catalog yet.
 
