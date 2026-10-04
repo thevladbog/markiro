@@ -4,8 +4,9 @@ use axum::http::StatusCode;
 use markiro_host::secrets::verify_password;
 use serde_json::{json, Value};
 use support::app::{
-    audit_rows, audit_trail, bootstrap, bootstrap_body, empty, host_revision, json as json_request,
-    login, nested, pair_device, request, seed_office_user, with_device, with_session, TestApp, LAN,
+    admin, audit_rows, audit_trail, bootstrap, bootstrap_body, empty, host_revision,
+    json as json_request, login, nested, pair_device, request, seed_office_user, with_device,
+    with_session, TestApp, LAN,
 };
 
 #[tokio::test]
@@ -512,6 +513,70 @@ async fn putting_the_org_profile_unchanged_is_a_no_op() {
             .await
             .unwrap();
     assert_eq!(audit_count_after, audit_count_before);
+}
+
+/// A `PUT` over a revision that is not the profile's is stale whichever side
+/// it errs on: one older than the record (it changed since it was read) and
+/// one ahead of it (a client that never read it). Each answers the record's
+/// own revision and writes nothing; the same body over the right revision is
+/// accepted, so the revision is the only thing wrong with it.
+#[tokio::test]
+async fn a_put_over_a_revision_older_or_ahead_of_the_org_profile_is_stale() {
+    let admin = admin().await;
+    let (status, org) = admin.call("GET", "/v1/office/org", None).await;
+    assert_eq!(status, StatusCode::OK, "{org}");
+    let update = |name: &str, expected_rev: i64| {
+        json!({
+            "name": name, "inn": org["inn"], "gln": org["gln"],
+            "gs1Prefixes": org["gs1Prefixes"], "timeZone": org["timeZone"],
+            "expectedRev": expected_rev
+        })
+    };
+    let (status, renamed) = admin
+        .call(
+            "PUT",
+            "/v1/office/org",
+            Some(update("ООО «Атолл-Юг»", org["rev"].as_i64().unwrap())),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    let rev = renamed["rev"].as_i64().unwrap();
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    for (side, expected_rev) in [("older", rev - 1), ("ahead", rev + 1)] {
+        let (status, refused) = admin
+            .call(
+                "PUT",
+                "/v1/office/org",
+                Some(update("ООО «Атолл-Север»", expected_rev)),
+            )
+            .await;
+        assert_eq!(
+            (
+                status,
+                refused["error"]["code"].clone(),
+                refused["error"]["details"]["currentRev"].clone()
+            ),
+            (StatusCode::CONFLICT, json!("stale_revision"), json!(rev)),
+            "{side}"
+        );
+        assert_eq!(host_revision(&admin.app).await, revision, "{side}");
+        assert_eq!(audit_rows(&admin.app).await, rows, "{side}");
+        let (_, read) = admin.call("GET", "/v1/office/org", None).await;
+        assert_eq!(read, renamed, "{side}");
+    }
+    let (status, accepted) = admin
+        .call(
+            "PUT",
+            "/v1/office/org",
+            Some(update("ООО «Атолл-Север»", rev)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(
+        (accepted["name"].clone(), accepted["rev"].clone()),
+        (json!("ООО «Атолл-Север»"), json!(revision + 1))
+    );
 }
 
 /// A layout of the given width, as the domain's stock builders make one.

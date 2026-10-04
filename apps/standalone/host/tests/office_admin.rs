@@ -6,8 +6,8 @@ use axum::http::StatusCode;
 use markiro_host::secrets::{key_hash, verify_password};
 use serde_json::{json, Value};
 use support::app::{
-    admin, empty, host_revision, json as json_request, login, pair_device, request, with_session,
-    Admin,
+    admin, audit_rows, empty, host_revision, json as json_request, login, pair_device, request,
+    with_session, Admin,
 };
 
 /// How many audit rows exist for `action`/`target_id`; used to prove a no-op
@@ -296,6 +296,134 @@ async fn block_sizes_are_validated_and_versioned() {
         audit_count(&admin, "sscc.block_sizes.update", "1").await,
         audit_rows_before_noop,
         "a no-op must not write a new audit row"
+    );
+}
+
+/// A `PUT` over a revision that is not the counter's is stale whichever side
+/// it errs on: one older than the counter (it moved since it was read) and one
+/// ahead of it (a client that never read it). Each answers the counter's own
+/// revision and writes nothing; the same body over the right revision is
+/// accepted, so the revision is the only thing wrong with it.
+#[tokio::test]
+async fn a_counter_put_over_a_revision_older_or_ahead_of_the_counter_is_stale() {
+    let admin = admin().await;
+    let path = "/v1/office/sscc/counters/460068200/0";
+    let (_, state) = admin.call("GET", "/v1/office/sscc", None).await;
+    let first = state["counters"][0]["rev"].as_i64().unwrap();
+    let (status, moved) = admin
+        .call(
+            "PUT",
+            path,
+            Some(json!({ "nextSerial": 1600, "expectedRev": first })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    let rev = moved["rev"].as_i64().unwrap();
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    for (side, expected_rev) in [("older", rev - 1), ("ahead", rev + 1)] {
+        let (status, refused) = admin
+            .call(
+                "PUT",
+                path,
+                Some(json!({ "nextSerial": 1700, "expectedRev": expected_rev })),
+            )
+            .await;
+        assert_eq!(
+            (
+                status,
+                refused["error"]["code"].clone(),
+                refused["error"]["details"]["currentRev"].clone()
+            ),
+            (StatusCode::CONFLICT, json!("stale_revision"), json!(rev)),
+            "{side}"
+        );
+        assert_eq!(host_revision(&admin.app).await, revision, "{side}");
+        assert_eq!(audit_rows(&admin.app).await, rows, "{side}");
+        let (_, read) = admin.call("GET", "/v1/office/sscc", None).await;
+        assert_eq!(read["counters"][0]["nextSerial"], json!(1600), "{side}");
+    }
+    let (status, accepted) = admin
+        .call(
+            "PUT",
+            path,
+            Some(json!({ "nextSerial": 1700, "expectedRev": rev })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(
+        (accepted["nextSerial"].clone(), accepted["rev"].clone()),
+        (json!(1700), json!(revision + 1))
+    );
+}
+
+/// A `PUT` over a revision that is not the block sizes' is stale whichever side
+/// it errs on: one older than the record (it changed since it was read) and
+/// one ahead of it (a client that never read it). Each answers the record's own
+/// revision and writes nothing; the same body over the right revision is
+/// accepted, so the revision is the only thing wrong with it.
+#[tokio::test]
+async fn a_block_sizes_put_over_a_revision_older_or_ahead_of_the_record_is_stale() {
+    let admin = admin().await;
+    let path = "/v1/office/sscc/block-sizes";
+    let (_, state) = admin.call("GET", "/v1/office/sscc", None).await;
+    let first = state["blockSizesRev"].as_i64().unwrap();
+    let (status, changed) = admin
+        .call(
+            "PUT",
+            path,
+            Some(json!({ "boxBlockSize": 5000, "palletBlockSize": 500, "expectedRev": first })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let rev = changed["blockSizesRev"].as_i64().unwrap();
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    for (side, expected_rev) in [("older", rev - 1), ("ahead", rev + 1)] {
+        let (status, refused) = admin
+            .call(
+                "PUT",
+                path,
+                Some(json!({
+                    "boxBlockSize": 3000, "palletBlockSize": 300, "expectedRev": expected_rev
+                })),
+            )
+            .await;
+        assert_eq!(
+            (
+                status,
+                refused["error"]["code"].clone(),
+                refused["error"]["details"]["currentRev"].clone()
+            ),
+            (StatusCode::CONFLICT, json!("stale_revision"), json!(rev)),
+            "{side}"
+        );
+        assert_eq!(host_revision(&admin.app).await, revision, "{side}");
+        assert_eq!(audit_rows(&admin.app).await, rows, "{side}");
+        let (_, read) = admin.call("GET", "/v1/office/sscc", None).await;
+        assert_eq!(
+            (
+                read["boxBlockSize"].clone(),
+                read["palletBlockSize"].clone()
+            ),
+            (json!(5000), json!(500)),
+            "{side}"
+        );
+    }
+    let (status, accepted) = admin
+        .call(
+            "PUT",
+            path,
+            Some(json!({ "boxBlockSize": 3000, "palletBlockSize": 300, "expectedRev": rev })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(
+        (
+            accepted["boxBlockSize"].clone(),
+            accepted["blockSizesRev"].clone()
+        ),
+        (json!(3000), json!(revision + 1))
     );
 }
 
@@ -600,6 +728,71 @@ async fn users_are_created_updated_and_the_last_admin_is_protected() {
         )
         .await;
     assert_eq!(status, StatusCode::OK);
+}
+
+/// A `PUT` over a revision that is not the user's is stale whichever side it
+/// errs on: one older than the record (it changed since it was read) and one
+/// ahead of it (a client that never read it). Each answers the record's own
+/// revision and writes nothing; the same body over the right revision is
+/// accepted, so the revision is the only thing wrong with it.
+#[tokio::test]
+async fn a_user_put_over_a_revision_older_or_ahead_of_the_user_is_stale() {
+    let admin = admin().await;
+    let (status, created) = admin
+        .call(
+            "POST",
+            "/v1/office/users",
+            Some(
+                json!({ "login": "tech", "name": "Павел", "role": "technologist", "password": "correct horse battery" }),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let path = format!("/v1/office/users/{}", created["id"].as_str().unwrap());
+    let body = |name: &str, expected_rev: i64| json!({ "name": name, "role": "technologist", "active": true, "expectedRev": expected_rev });
+    let (status, changed) = admin
+        .call(
+            "PUT",
+            &path,
+            Some(body("Павел Орлов", created["rev"].as_i64().unwrap())),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let rev = changed["rev"].as_i64().unwrap();
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    for (side, expected_rev) in [("older", rev - 1), ("ahead", rev + 1)] {
+        let (status, refused) = admin
+            .call("PUT", &path, Some(body("Павел Иванов", expected_rev)))
+            .await;
+        assert_eq!(
+            (
+                status,
+                refused["error"]["code"].clone(),
+                refused["error"]["details"]["currentRev"].clone()
+            ),
+            (StatusCode::CONFLICT, json!("stale_revision"), json!(rev)),
+            "{side}"
+        );
+        assert_eq!(host_revision(&admin.app).await, revision, "{side}");
+        assert_eq!(audit_rows(&admin.app).await, rows, "{side}");
+        let (_, list) = admin.call("GET", "/v1/office/users", None).await;
+        let names: Vec<&str> = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|user| user["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"Павел Орлов"), "{side}: {names:?}");
+    }
+    let (status, accepted) = admin
+        .call("PUT", &path, Some(body("Павел Иванов", rev)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(
+        (accepted["name"].clone(), accepted["rev"].clone()),
+        (json!("Павел Иванов"), json!(revision + 1))
+    );
 }
 
 #[tokio::test]

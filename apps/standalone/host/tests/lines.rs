@@ -151,6 +151,63 @@ async fn an_administrator_creates_renames_and_archives_lines() {
     assert_eq!(audit_rows(&admin.app).await, rows);
 }
 
+/// A `PUT` over a revision that is not the line's is stale whichever side it
+/// errs on: one older than the record (it changed since it was read) and one
+/// ahead of it (a client that never read it). Each answers the record's own
+/// revision and writes nothing; the same body over the right revision is
+/// accepted, so the revision is the only thing wrong with it.
+#[tokio::test]
+async fn a_put_over_a_revision_older_or_ahead_of_the_line_is_stale() {
+    let admin = admin().await;
+    let first = lines(&admin).await[0].clone();
+    let path = format!("/v1/office/lines/{}", first["id"].as_str().unwrap());
+    let (status, renamed) = admin
+        .call(
+            "PUT",
+            &path,
+            Some(json!({ "name": "Упаковка", "expectedRev": first["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    let rev = renamed["rev"].as_i64().unwrap();
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let before = lines(&admin).await;
+    for (side, expected_rev) in [("older", rev - 1), ("ahead", rev + 1)] {
+        let (status, refused) = admin
+            .call(
+                "PUT",
+                &path,
+                Some(json!({ "name": "Фасовка", "expectedRev": expected_rev })),
+            )
+            .await;
+        assert_eq!(
+            (
+                status,
+                refused["error"]["code"].clone(),
+                refused["error"]["details"]["currentRev"].clone()
+            ),
+            (StatusCode::CONFLICT, json!("stale_revision"), json!(rev)),
+            "{side}"
+        );
+        assert_eq!(host_revision(&admin.app).await, revision, "{side}");
+        assert_eq!(audit_rows(&admin.app).await, rows, "{side}");
+        assert_eq!(lines(&admin).await, before, "{side}");
+    }
+    let (status, accepted) = admin
+        .call(
+            "PUT",
+            &path,
+            Some(json!({ "name": "Фасовка", "expectedRev": rev })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(
+        (accepted["name"].clone(), accepted["rev"].clone()),
+        (json!("Фасовка"), json!(revision + 1))
+    );
+}
+
 /// A rename to a spelling that differs only in case keeps the uniqueness key,
 /// and the line does not clash with itself.
 #[tokio::test]

@@ -115,6 +115,65 @@ async fn an_administrator_creates_lists_and_updates_counterparties() {
     assert_eq!(audit_rows(&admin.app).await, rows);
 }
 
+/// A `PUT` over a revision that is not the counterparty's is stale whichever
+/// side it errs on: one older than the record (it changed since it was read)
+/// and one ahead of it (a client that never read it). Each answers the
+/// record's own revision and writes nothing; the same body over the right
+/// revision is accepted, so the revision is the only thing wrong with it.
+#[tokio::test]
+async fn a_put_over_a_revision_older_or_ahead_of_the_counterparty_is_stale() {
+    let admin = admin().await;
+    let (status, created) = admin
+        .call(
+            "POST",
+            "/v1/office/counterparties",
+            Some(new_counterparty()),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let path = format!(
+        "/v1/office/counterparties/{}",
+        created["id"].as_str().unwrap()
+    );
+    let (status, changed) = admin
+        .call("PUT", &path, Some(full(json!("7812345678"), false, 2)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let rev = changed["rev"].as_i64().unwrap();
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    for (side, expected_rev) in [("older", rev - 1), ("ahead", rev + 1)] {
+        let (status, refused) = admin
+            .call(
+                "PUT",
+                &path,
+                Some(full(json!("7812345678"), true, expected_rev)),
+            )
+            .await;
+        assert_eq!(
+            (
+                status,
+                refused["error"]["code"].clone(),
+                refused["error"]["details"]["currentRev"].clone()
+            ),
+            (StatusCode::CONFLICT, json!("stale_revision"), json!(rev)),
+            "{side}"
+        );
+        assert_eq!(host_revision(&admin.app).await, revision, "{side}");
+        assert_eq!(audit_rows(&admin.app).await, rows, "{side}");
+        let (_, list) = admin.call("GET", "/v1/office/counterparties", None).await;
+        assert_eq!(list, json!([changed.clone()]), "{side}");
+    }
+    let (status, accepted) = admin
+        .call("PUT", &path, Some(full(json!("7812345678"), true, rev)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(
+        (accepted["archived"].clone(), accepted["rev"].clone()),
+        (json!(true), json!(revision + 1))
+    );
+}
+
 /// `inn` is part of the whole record a `PUT` carries, so leaving it out clears
 /// it exactly as `null` does.
 #[tokio::test]

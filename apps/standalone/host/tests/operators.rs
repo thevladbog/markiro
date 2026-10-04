@@ -276,6 +276,63 @@ async fn an_update_names_the_changed_fields_and_never_the_pin_hash() {
     assert_eq!(audit_rows(&admin.app).await, rows);
 }
 
+/// A `PUT` over a revision that is not the operator's is stale whichever side
+/// it errs on: one older than the record (it changed since it was read) and
+/// one ahead of it (a client that never read it). Each answers the record's
+/// own revision and writes nothing, the feed included; the same body over the
+/// right revision is accepted, so the revision is the only thing wrong with it.
+#[tokio::test]
+async fn a_put_over_a_revision_older_or_ahead_of_the_operator_is_stale() {
+    let admin = admin().await;
+    let id = create(&admin).await;
+    let path = format!("/v1/office/operators/{id}");
+    let (status, changed) = admin
+        .call(
+            "PUT",
+            &path,
+            Some(json!({ "name": "Анна Петрова", "expectedRev": 2 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let rev = changed["rev"].as_i64().unwrap();
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let on_the_feed = feed(&admin, 1).await;
+    for (side, expected_rev) in [("older", rev - 1), ("ahead", rev + 1)] {
+        let (status, refused) = admin
+            .call(
+                "PUT",
+                &path,
+                Some(json!({ "role": "Мастер", "expectedRev": expected_rev })),
+            )
+            .await;
+        assert_eq!(
+            (
+                status,
+                refused["error"]["code"].clone(),
+                refused["error"]["details"]["currentRev"].clone()
+            ),
+            (StatusCode::CONFLICT, json!("stale_revision"), json!(rev)),
+            "{side}"
+        );
+        assert_eq!(host_revision(&admin.app).await, revision, "{side}");
+        assert_eq!(audit_rows(&admin.app).await, rows, "{side}");
+        assert_eq!(feed(&admin, 1).await, on_the_feed, "{side}");
+    }
+    let (status, accepted) = admin
+        .call(
+            "PUT",
+            &path,
+            Some(json!({ "role": "Мастер", "expectedRev": rev })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{accepted}");
+    assert_eq!(
+        (accepted["role"].clone(), accepted["rev"].clone()),
+        (json!("Мастер"), json!(revision + 1))
+    );
+}
+
 /// `PUT { active }` on the operator at `path`, which is at `expected_rev`;
 /// returns the record.
 async fn set_active(admin: &Admin, path: &str, active: bool, expected_rev: i64) -> Value {
