@@ -12,4 +12,5 @@ pub mod org;
 pub mod pairing;
 pub mod products;
 pub mod sscc;
+pub mod template_defaults;
 pub mod templates;

@@ -250,6 +250,14 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
   которое ломает одно из умолчаний, и любое удаление шаблона-умолчания —
   `conflict` с `constraint: template_is_default`, `organizationDefault` и
   `categoryDefaults` (коды), как облачный `LABEL_TEMPLATE_IS_DEFAULT`.
+  Умолчания читаются и пишутся одним документом
+  (`GET/PUT /v1/office/template-defaults`): три умолчания организации и все
+  умолчания категорий; `PUT` заменяет документ целиком (не присланное умолчание
+  организации — пусто, не присланное умолчание категории снимается) и несёт
+  `expectedRev` документа — самую новую ревизию из записи организации, умолчаний
+  категорий и надгробий снятых умолчаний, поэтому и правка профиля организации
+  делает старую запись устаревшей. Неподходящий слоту шаблон — `validation_failed`
+  с полем (`defaultBoxTemplateId`, `categories.{i}.templateId`, …).
 - `audit_log(id, at, actor_kind CHECK(actor_kind IN ('office_user','device','system')), actor_id, action, target_type, target_id, result, details JSON)`.
 
 ### 4.4. Ревизии и лента изменений
@@ -329,7 +337,7 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
 | `GET /v1/office/devices`, `PUT …/{id}` (имя, линия), `POST …/{id}/revoke`, `POST /v1/office/pairing-codes`    | администратор                                   | Устройства и коды подключения                                                                                                                                                                                                                                                                                                                                                            |
 | `GET /v1/office/product-groups`                                                                               | все                                             | Справочник товарных групп                                                                                                                                                                                                                                                                                                                                                                |
 | `GET/POST/PUT /v1/office/products…`                                                                           | чтение — все, запись — администратор и технолог | Каталог (архивирование вместо удаления)                                                                                                                                                                                                                                                                                                                                                  |
-| `GET/POST/PUT/DELETE /v1/office/templates…`, `PUT /v1/office/template-defaults`                               | чтение — все, запись — администратор и технолог | Шаблоны и умолчания                                                                                                                                                                                                                                                                                                                                                                      |
+| `GET/POST/PUT/DELETE /v1/office/templates…`, `GET/PUT /v1/office/template-defaults`                           | чтение — все, запись — администратор и технолог | Шаблоны и умолчания (умолчания — один документ с `expectedRev`)                                                                                                                                                                                                                                                                                                                          |
 
 Офисные маршруты требуют и ключ устройства, и токен сессии этого же устройства
 (заголовок `X-Office-Session`).

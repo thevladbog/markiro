@@ -1161,6 +1161,47 @@ pub struct LabelTemplateUpdate {
     pub expected_rev: i64,
 }
 
+/// The templates' defaults as one document (`GET
+/// /v1/office/template-defaults`, and the answer of its `PUT`): the
+/// organization's default of each purpose and every category default, by
+/// code then purpose. `rev` is the document's revision: the newest of the
+/// organization's record, a category default and a cleared category
+/// default's tombstone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TemplateDefaults {
+    pub default_box_template_id: Option<String>,
+    pub default_pallet_template_id: Option<String>,
+    pub default_duplicate_template_id: Option<String>,
+    pub categories: Vec<CategoryTemplateDefault>,
+    pub rev: i64,
+}
+
+/// A category default in `PUT /v1/office/template-defaults`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct CategoryTemplateDefaultInput {
+    pub chz_product_group_code: u32,
+    pub purpose: TemplatePurpose,
+    pub template_id: String,
+}
+
+/// `PUT /v1/office/template-defaults`: the whole document over its `rev`.
+/// An organization default left out or `null` is none, and a category
+/// default left out of `categories` is cleared.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TemplateDefaultsUpdate {
+    #[serde(default)]
+    pub default_box_template_id: Option<String>,
+    #[serde(default)]
+    pub default_pallet_template_id: Option<String>,
+    #[serde(default)]
+    pub default_duplicate_template_id: Option<String>,
+    pub categories: Vec<CategoryTemplateDefaultInput>,
+    pub expected_rev: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

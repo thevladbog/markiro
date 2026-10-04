@@ -10,8 +10,8 @@ use markiro_proto::{
     OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord, OperatorCreate, OperatorRecord,
     OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode,
     PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate, ProductGroup, ProductRecord,
-    ProductStatus, ProductUpdate, SiteRecord, SsccCounterUpdate, SsccState, TemplatePurpose,
-    HOST_PRODUCT, PROTOCOL_VERSION,
+    ProductStatus, ProductUpdate, SiteRecord, SsccCounterUpdate, SsccState, TemplateDefaults,
+    TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -578,6 +578,39 @@ fn template_fixtures_round_trip_and_a_purpose_is_never_an_update_field() {
         ),
         (Some("template_is_default"), Some(true))
     );
+}
+
+#[test]
+fn template_defaults_fixtures_round_trip_as_one_document() {
+    let document: TemplateDefaults = round_trip("template-defaults.json");
+    let update: TemplateDefaultsUpdate = round_trip("template-defaults-update.json");
+    assert_eq!(update.categories.len(), document.categories.len());
+    let entry = &update.categories[0];
+    assert_eq!(
+        (
+            entry.chz_product_group_code,
+            entry.purpose,
+            &entry.template_id
+        ),
+        (
+            document.categories[0].chz_product_group_code,
+            document.categories[0].purpose,
+            &document.categories[0].template_id
+        )
+    );
+    // A slot is the category and the purpose; nothing else is sent.
+    let mut value = fixture("template-defaults-update.json");
+    value["categories"][0]["rev"] = Value::from(64);
+    assert!(serde_json::from_value::<TemplateDefaultsUpdate>(value).is_err());
+    // The organization's defaults left out are none; the categories are
+    // always the whole list.
+    let bare: TemplateDefaultsUpdate =
+        serde_json::from_value(serde_json::json!({ "categories": [], "expectedRev": 1 })).unwrap();
+    assert_eq!(bare.default_box_template_id, None);
+    assert!(serde_json::from_value::<TemplateDefaultsUpdate>(
+        serde_json::json!({ "expectedRev": 1 })
+    )
+    .is_err());
 }
 
 #[test]

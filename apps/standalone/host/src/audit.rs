@@ -37,6 +37,7 @@ pub mod actions {
     pub const TEMPLATE_CREATE: &str = "template.create";
     pub const TEMPLATE_UPDATE: &str = "template.update";
     pub const TEMPLATE_DELETE: &str = "template.delete";
+    pub const TEMPLATE_DEFAULTS_UPDATE: &str = "template_defaults.update";
 }
 
 /// `details.reason` of a denied row: every denial names one.

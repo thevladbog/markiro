@@ -35,6 +35,46 @@ pub fn fits(scope: &Scope, purpose: TemplatePurpose, category: Option<u32>) -> b
         }
 }
 
+/// A template's scope, or `None` when there is no such template.
+pub async fn scope(conn: &mut SqliteConnection, id: &str) -> Result<Option<Scope>, ApiError> {
+    let row: Option<(String, bool, Option<String>)> =
+        sqlx::query_as("SELECT purpose, enabled, category_codes FROM label_templates WHERE id = ?")
+            .bind(id)
+            .fetch_optional(conn)
+            .await
+            .map_err(ApiError::internal)?;
+    row.map(|(purpose, enabled, codes)| {
+        Ok(Scope {
+            purpose: purpose.parse().map_err(ApiError::internal)?,
+            enabled,
+            codes: codes
+                .map(|codes| serde_json::from_str(&codes))
+                .transpose()
+                .map_err(ApiError::internal)?,
+        })
+    })
+    .transpose()
+}
+
+/// `validation_failed` on `field` unless `id` names a template that fits the
+/// default slot of `purpose` for `category` (`None`: the organization's).
+pub async fn check_slot(
+    conn: &mut SqliteConnection,
+    field: &str,
+    id: &str,
+    purpose: TemplatePurpose,
+    category: Option<u32>,
+) -> Result<(), ApiError> {
+    match scope(conn, id).await? {
+        Some(scope) if fits(&scope, purpose, category) => Ok(()),
+        Some(_) => Err(ApiError::validation(
+            field,
+            "the template does not fit this default: another purpose, disabled, or not covering the category",
+        )),
+        None => Err(ApiError::validation(field, "no such template")),
+    }
+}
+
 /// `validation_failed` on `field` unless every code is a ЧЗ product group.
 /// The codes are distinct (`validate::category_codes`).
 pub async fn check_groups(

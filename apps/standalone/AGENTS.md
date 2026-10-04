@@ -451,6 +451,27 @@ products ride the feed again, and leaves a tombstone; a delete repeated
 after a lost answer finds the tombstone and answers 204 again, and an id
 that never existed is `not_found`.
 
+The defaults are one document (`GET/PUT /v1/office/template-defaults`): the
+organization's default of each purpose (`defaultBoxTemplateId`,
+`defaultPalletTemplateId`, `defaultDuplicateTemplateId`) and every
+category's (`categories`, by code then purpose). Every role reads it;
+administrators and technologists replace it whole, so an organization
+default left out is none and a category default left out of `categories` is
+cleared. Its `rev` is the newest revision of the organization's record, a
+category default and a cleared category default's tombstone: any change of
+the defaults, and any change of the organization's record, through
+`PUT /v1/office/org` too, makes a write over an older `rev`
+`stale_revision`. Every default must fit its slot (`templates::fits`):
+`validation_failed` on `defaultBoxTemplateId` and its siblings, on
+`categories.{i}.templateId`, on `categories.{i}.chzProductGroupCode` for an
+unknown group, and on `categories.{i}` for a slot given twice. A change of
+the organization's defaults rewrites its record at the new revision, so it
+rides the feed; a category default set, changed or cleared rides the feed
+under its `<code>:<purpose>` key, a cleared one as a tombstone that setting
+it again drops. An unchanged document writes nothing, and the audit row
+(`template_defaults.update`, target `template_defaults`/`1`) carries the
+changed parts with `{ from, to }`, `categories` as whole lists.
+
 ## Reference sync
 
 `src/local/reference-sync.ts` keeps the local copies in step with the host

@@ -233,6 +233,11 @@ fn protected_routes() -> Router<AppState> {
                 .delete(crate::routes::templates::delete_template),
         )
         .route(
+            "/v1/office/template-defaults",
+            get(crate::routes::template_defaults::get_template_defaults)
+                .put(crate::routes::template_defaults::put_template_defaults),
+        )
+        .route(
             "/v1/office/users",
             get(crate::routes::office_users::list_users)
                 .post(crate::routes::office_users::create_user),
