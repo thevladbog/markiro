@@ -397,8 +397,8 @@ pub const MAX_SPEC_BYTES: usize = 256 * 1024;
 
 /// The deepest layout the host keeps: 64 levels, where an object or an array
 /// is a level and a scalar none (`{"a": 1}` is one level deep, `{"a": [{}]}`
-/// three). A feed page wraps a layout in four more levels (`items`, the item,
-/// `data`, then the layout), and the station shell parses every host answer
+/// three). A feed page wraps a layout in four more levels (the page object,
+/// `items`, the item, `data`), and the station shell parses every host answer
 /// with `serde_json`, which stops at 127: a layout 124 levels deep would be
 /// stored and served by `GET …/{id}`, but the page that carries it would not
 /// parse, and no later change would reach any station. A real layout nests a
@@ -1261,10 +1261,10 @@ mod tests {
         assert!(refused.message().contains("64"), "{}", refused.message());
     }
 
-    /// A feed page wraps a layout in four levels (`items`, the item, `data`,
-    /// `spec`), and serde_json, which the station shell parses every host
-    /// answer with, stops at 127: 123 levels of layout travel in a page and
-    /// 124 do not. The bound stays well under that.
+    /// A feed page wraps a layout in four levels (the page object, `items`,
+    /// the item, `data`), and serde_json, which the station shell parses every
+    /// host answer with, stops at 127: 123 levels of layout travel in a page
+    /// and 124 do not. The bound stays well under that.
     #[test]
     fn a_layout_at_the_bound_fits_a_feed_page_the_station_can_parse() {
         let page = |layout: serde_json::Value| {

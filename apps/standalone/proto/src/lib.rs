@@ -1080,8 +1080,9 @@ pub struct ProductCreate {
     pub default_pallet_template_id: Option<String>,
 }
 
-/// `PUT /v1/office/products/{id}`: every field, like a counterparty, so a
-/// field left out or `null` is cleared; `archived: true` archives.
+/// `PUT /v1/office/products/{id}`: every field, like a counterparty, so an
+/// optional field left out or `null` is cleared (a missing `gtin14`, `name`,
+/// `archived` or `expectedRev` is refused); `archived: true` archives.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProductUpdate {

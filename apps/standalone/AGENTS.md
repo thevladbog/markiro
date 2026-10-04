@@ -387,10 +387,12 @@ the groups (`GET /v1/office/product-groups`, by code); nothing writes them,
 and they are not in the station feed.
 
 Products (`GET/POST/PUT /v1/office/products`): every office role reads
-them, archived ones included (by `archived, name, id`, bytewise as lines);
-administrators and technologists write them. `PUT` takes every field with
-`expectedRev`, as a counterparty's, so a field left out is cleared;
-archiving is `archived: true`, and a product is never deleted. The host
+them, archived ones included (by `archived, name, id`, bytewise on the name
+itself; lines sort by a lowercased key); administrators and technologists
+write them. `PUT` takes every field with `expectedRev`, as a counterparty's,
+so an optional field left out is cleared (a missing `gtin14`, `name`,
+`archived` or `expectedRev` is refused); archiving is `archived: true`, and a
+product is never deleted. The host
 checks `gtin14` for its shape only — 14 ASCII digits after trimming; the
 check digit and the prefix are the UI's (`normalizeToGtin14`,
 `gtinMatchesPrefix`) — and keeps it unique among products in use
@@ -408,8 +410,18 @@ names a template of the slot's purpose; whether that template is enabled
 and covers the product's group is the domain's rule, which the office
 applies when it offers templates and the station before it uses one, so a
 template disabled or narrowed later never blocks editing or archiving the
-product. (The cloud has no per-product template since its 2026-09-02 spec;
-these follow the stage-1 spec.) National-catalog links, photos, EGAIS
+product. A product form opened before its preferred template was deleted
+sends the old id with the older `expectedRev`, and the answer is
+`validation_failed` on `defaultBoxTemplateId` or `defaultPalletTemplateId`
+(the references are checked before the revision), not `stale_revision`:
+nothing is written, and the office re-reads the product and the template
+list on that error. The station will choose a template by the product's
+preference if it still fits, then the category's default, then the
+organization's, then the operator's choice (plan 2a); the comment in
+migration `0008_catalog.sql` that names only the category's default and the
+organization's predates the product preferences, and an applied migration is
+never edited. (The cloud has no per-product template since its 2026-09-02
+spec; these follow the stage-1 spec.) National-catalog links, photos, EGAIS
 codes, prices and default counterparties are not part of the standalone
 catalog yet.
 
@@ -425,10 +437,11 @@ most 64 levels deep (`validate::template_spec`, `MAX_SPEC_BYTES` and
 `MAX_SPEC_DEPTH`; an object or an array is a level, a scalar none), its
 object keys in byte order, and never checks the layout: that is
 `labelTemplateSpecSchema` in the UI. The depth bound exists for the feed: a
-page wraps a layout in four more levels (`items`, the item, `data`) and the
-station shell parses every host answer with `serde_json::from_slice`, which
-stops at 127 levels, so a layout nested 124 deep would be stored and served
-by `GET …/{id}` while the page that carries it failed as `invalid_response`
+page wraps a layout in four more levels (the page object, `items`, the item,
+`data`) and the station shell parses every host answer with
+`serde_json::from_slice`, which stops at 127 levels, so a layout nested 124
+deep would be stored and served by `GET …/{id}` while the page that carries
+it failed as `invalid_response`
 and was refetched from the same revision for ever, and no later reference
 change would reach any station. A name is 1–200 characters;
 `chzProductGroupCodes` is `null` (every category) or 1–100 codes without
@@ -445,11 +458,12 @@ default, is `conflict` on `template_is_default` with `organizationDefault`
 and `categoryDefaults` (codes), as the cloud's `LABEL_TEMPLATE_IS_DEFAULT`.
 The rule for a slot is `templates::fits`, the domain's
 `isBoxLabelTemplateEligible` rewritten: `proto/fixtures/template-eligibility.json`
-holds the cases both sides answer alike. Deleting a template clears every
-product preference that names it at the delete's revision, so those
-products ride the feed again, and leaves a tombstone; a delete repeated
-after a lost answer finds the tombstone and answers 204 again, and an id
-that never existed is `not_found`.
+holds the cases the two rules must answer alike; only the host reads it
+today (`host/tests/templates.rs`), and plan 1e2 adds the Vitest side.
+Deleting a template clears every product preference that names it at the
+delete's revision, so those products ride the feed again, and leaves a
+tombstone; a delete repeated after a lost answer finds the tombstone and
+answers 204 again, and an id that never existed is `not_found`.
 
 The defaults are one document (`GET/PUT /v1/office/template-defaults`): the
 organization's default of each purpose (`defaultBoxTemplateId`,
@@ -466,9 +480,12 @@ the defaults, and any change of the organization's record, through
 `categories.{i}.templateId`, on `categories.{i}.chzProductGroupCode` for an
 unknown group, and on `categories.{i}` for a slot given twice. A change of
 the organization's defaults rewrites its record at the new revision, so it
-rides the feed; a category default set, changed or cleared rides the feed
-under its `<code>:<purpose>` key, a cleared one as a tombstone that setting
-it again drops. An unchanged document writes nothing, and the audit row
+rides the feed, and a profile form's `PUT /v1/office/org` over the record's
+older `rev` is `stale_revision` too (after a reload nothing visible has
+changed, because `GET /v1/office/org` does not show the defaults); a
+category default set, changed or cleared rides the feed under its
+`<code>:<purpose>` key, a cleared one as a tombstone that setting it again
+drops. An unchanged document writes nothing, and the audit row
 (`template_defaults.update`, target `template_defaults`/`1`) carries the
 changed parts with `{ from, to }`, `categories` as whole lists.
 
@@ -477,11 +494,20 @@ with `@markiro/domain` (plan 1e3) as an optional `templates` list, so a
 wizard from before then still works: at most 32 (`MAX_STOCK_TEMPLATES`; the
 domain builds 20), each a name, a purpose and a layout checked as any
 template's, stored enabled, for every category and `stock`, in the
-wizard's one transaction, so a refusal creates nothing. `orgDefault: true`
-on one template of a purpose makes it the organization's default of that
-purpose, so the request names no id it does not have yet; a second of the
-same purpose is `validation_failed` on `templates.{i}.orgDefault`. The
-`host.bootstrap` row counts them (`templateCount`).
+wizard's one transaction, so a refusal creates nothing. The whole request
+must stay under axum's default 2 MiB body limit (about eight maximum-size
+layouts, where the domain's real 20-template set is about 31 KB): a larger
+body is `validation_failed` without `details.field`. No route-level
+`DefaultBodyLimit` is set, and raising it is an owner or plan 1e3 decision.
+`orgDefault: true` on one template of a purpose makes it the organization's
+default of that purpose, so the request names no id it does not have yet; a
+second of the same purpose is `validation_failed` on
+`templates.{i}.orgDefault`. The `host.bootstrap` row counts them
+(`templateCount`).
+
+Plan 1e1 is host-only: these shapes have Rust types and fixtures; their Zod
+schemas, `ENTITIES` entries and station copies come with plan 1e2, and the
+wizard's `templates` with plan 1e3 (spec §4.5).
 
 ## Reference sync
 

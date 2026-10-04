@@ -107,7 +107,7 @@ impl ApiError {
         Self::new(StatusCode::FORBIDDEN, codes::FORBIDDEN, message)
     }
 
-    /// A uniqueness conflict; `constraint` names it (`login`, `gtin`, …).
+    /// A uniqueness conflict; `constraint` names it (`login`, `gtin14`, …).
     pub fn conflict(constraint: &str, message: impl Into<String>) -> Self {
         Self::new(StatusCode::CONFLICT, codes::CONFLICT, message)
             .with_details(json!({ "constraint": constraint }))

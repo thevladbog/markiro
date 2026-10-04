@@ -6,9 +6,11 @@ use support::app::{admin, empty, request, with_device, TestApp};
 
 /// `(code, alias, name)` of every row the cloud's migration `0099` inserts: the
 /// one source of the lookup, read here and not copied into a fixture, which
-/// would be a third copy. `0099` is applied and frozen, so a later change of
-/// the cloud's lookup can only arrive as a NEW migration;
-/// `no_other_cloud_migration_writes_the_product_groups` fails when one does.
+/// would be a third copy. `0099` is applied and frozen, so a later cloud change
+/// can only arrive as a NEW migration, as long as no cloud runtime code writes
+/// the table (none does today: checked in `apps/api/src` and `packages`);
+/// `no_other_cloud_migration_writes_the_product_groups` fails when a migration
+/// does.
 fn cloud_groups() -> Vec<(i64, String, String)> {
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
