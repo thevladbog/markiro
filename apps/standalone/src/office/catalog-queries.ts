@@ -19,3 +19,14 @@ export function useProductGroups() {
 export function useTemplates() {
   return useOfficeQuery(officeKeys.templates, (api, token) => api.listTemplates(token));
 }
+
+/**
+ * The templates' defaults (`GET /v1/office/template-defaults`): one document,
+ * read again whenever the page opens (`staleTime` 0), since a change of the
+ * organization's profile moves its revision too.
+ */
+export function useTemplateDefaults() {
+  return useOfficeQuery(officeKeys.templateDefaults, (api, token) =>
+    api.getTemplateDefaults(token),
+  );
+}

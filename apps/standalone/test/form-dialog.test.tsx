@@ -146,6 +146,27 @@ describe("WriteFailureAlert", () => {
     expect(onReload).toHaveBeenCalledTimes(1);
   });
 
+  it("says a stale write in the form's own words when the form names them", () => {
+    const onReload = vi.fn();
+    render(
+      <WriteFailureAlert
+        failure={{ kind: "stale" }}
+        onReload={onReload}
+        staleMessage="office.templateDefaults.stale"
+      />,
+    );
+    expect(
+      screen.getByText(
+        "Умолчания или профиль организации изменились, пока вы их правили. Загрузите умолчания заново — ваши правки пропадут.",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.queryByText("Данные изменились, пока вы их редактировали. Обновите их и повторите."),
+    ).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить заново" }));
+    expect(onReload).toHaveBeenCalledTimes(1);
+  });
+
   it("explains a stale write without a reload button when the form cannot reload", () => {
     render(<WriteFailureAlert failure={{ kind: "stale" }} />);
     expect(

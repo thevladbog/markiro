@@ -35,10 +35,12 @@ export function LoadError({ error, onRetry }: LoadErrorProps) {
 
 export interface StaleAlertProps {
   onReload: () => void;
+  /** The i18n key of the text, when the form knows what else moves its revision. */
+  message?: string;
 }
 
 /** A write the host refused as stale: reloading shows the new data and drops this form's edits. */
-export function StaleAlert({ onReload }: StaleAlertProps) {
+export function StaleAlert({ onReload, message = "errors.api.stale_revision" }: StaleAlertProps) {
   const { t } = useTranslation();
   return (
     <Alert
@@ -49,7 +51,7 @@ export function StaleAlert({ onReload }: StaleAlertProps) {
         </Button>
       }
     >
-      {t("errors.api.stale_revision")}
+      {t(message)}
     </Alert>
   );
 }
@@ -59,12 +61,21 @@ export interface WriteFailureAlertProps {
   failure: AlertFailure | null;
   /** Loads the data again after a stale write; without it a stale write is only explained. */
   onReload?: () => void;
+  /** The i18n key of the reload's text (`StaleAlert`'s `message`); the general one without it. */
+  staleMessage?: string;
 }
 
 /** A failed write above a form: a stale one offers to reload when the form can, the rest are explained. */
-export function WriteFailureAlert({ failure, onReload }: WriteFailureAlertProps) {
+export function WriteFailureAlert({ failure, onReload, staleMessage }: WriteFailureAlertProps) {
   const { t } = useTranslation();
   if (failure === null) return null;
-  if (failure.kind === "stale" && onReload !== undefined) return <StaleAlert onReload={onReload} />;
+  if (failure.kind === "stale" && onReload !== undefined) {
+    return (
+      <StaleAlert
+        onReload={onReload}
+        {...(staleMessage === undefined ? {} : { message: staleMessage })}
+      />
+    );
+  }
   return <Alert tone="error">{t(failureMessage(failure))}</Alert>;
 }

@@ -23,6 +23,7 @@ export const officeKeys = {
   productGroups: ["office", "product-groups"],
   products: ["office", "products"],
   templates: ["office", "templates"],
+  templateDefaults: ["office", "template-defaults"],
 } as const;
 
 /**

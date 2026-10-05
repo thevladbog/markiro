@@ -1178,6 +1178,28 @@ requests and offer a retry.
   template out of a category whose default it is, or narrowing the
   organization's default at all, is refused as switching it off is, in the same
   words; a saved answer goes into the row in place.
+- «Умолчания шаблонов» (section «Каталог») edits the one defaults document
+  (`GET/PUT /v1/office/template-defaults`): the page reads it whenever it opens
+  (`useTemplateDefaults`, `staleTime` 0), with the template list, which the page
+  reads once per visit and passes to the form, since the form remounts on every
+  new revision. Both roles change it (`useCan("editCatalog")`), so there is no
+  read-only view. The organization's three defaults are selects of «Не выбран»
+  and the enabled templates of their purpose for every category
+  (`templateOptions` with category `null`), by name; a default the list does not
+  offer stays a marked choice («— не подходит», «— нет в списке»). Edits stay in
+  the page: a live note says there are unsaved changes, «Отменить изменения»
+  brings back the loaded document, and «Сохранить», off until something changed,
+  sends the whole document with the loaded revision (`templateDefaultsUpdate`:
+  `null` for «Не выбран», the category defaults as they are), drops a second
+  click while the save is on its way and puts the answer in the cache, which
+  starts the form afresh. A `validation_failed` on `defaultBoxTemplateId` or a
+  sibling goes under that select as a template that no longer fits (disabled,
+  narrowed or deleted while the page was open: the host checks the defaults
+  before the revision), and the template list is read again so the choice shows
+  as marked; a change of that select takes the message away. `stale_revision`
+  offers «Загрузить заново» in words of its own, since a change of the
+  organization's profile moves the document's revision too, and the reload drops
+  the edits.
 
 ## Marking rules
 
