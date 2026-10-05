@@ -180,6 +180,13 @@
   padding: 12px 0 0;
 }
 
+/* The GTIN field, and under it what the dialog says about a valid GTIN. */
+.product-gtin,
+.product-gtin__notes {
+  display: grid;
+  gap: 4px;
+}
+
 /* An operator's badges: revoked ones stay listed, dimmed, as the record of what was issued. */
 .badge-list {
   display: grid;

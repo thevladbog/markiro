@@ -879,8 +879,8 @@ requests and offer a retry.
   until its promise settles it cannot be closed and a second submit is
   dropped, so a double click sends nothing twice. `writeFailure` (`src/office/form-errors.ts`)
   sorts a refused write: a `validation_failed` field or a `conflict`
-  constraint the form names (`line_name`, `login`, `badge`) goes under that field,
-  `stale_revision` offers to reload, anything else is an alert
+  constraint the form names (`line_name`, `login`, `badge`, `gtin14`) goes under
+  that field, `stale_revision` offers to reload, anything else is an alert
   (`WriteFailureAlert`). A `FormDialog`'s `onSubmit` must never reject: it
   sorts every failure itself, and a rejection would only surface as an
   unhandled one, so a caller's bug is not hidden. Only the awaited write sits
@@ -1083,7 +1083,22 @@ requests and offer a retry.
   without case, a GTIN's spaces ignored), the state filter and the pages of
   25 work in the page, and a new search or filter goes back to the first
   page. The groups are a static lookup, not read again while cached
-  (`staleTime: Infinity`).
+  (`staleTime: Infinity`). Both roles add and change products
+  (`useCan("editCatalog")`; no role lacks it, so the page has no read-only
+  view). One dialog adds and changes a product: an edit sends the whole
+  record with the loaded revision, archiving is its «В архиве» box, and
+  there is no delete. The GTIN may change: a GTIN another product in use
+  holds is `conflict` on `gtin14` under the GTIN, on adding, on a change and
+  on coming back from the archive. Once the GTIN is valid the dialog shows
+  the 14 digits it is saved as when they differ from what was typed, and
+  whose GS1 prefix it has: the organization's, else the first counterparty's
+  (active ones first, by name), else nobody's, as the cloud's
+  `checkGtinOwner`. That never blocks a save and is left out while the
+  organization or the counterparties do not load. A product without a group
+  or both capacities gets a note that it stays a draft. The group select
+  offers the lookup by name and keeps the product's own group when the
+  lookup lacks it; while the lookup does not load it is off and the group
+  goes out unchanged.
 
 ## Marking rules
 

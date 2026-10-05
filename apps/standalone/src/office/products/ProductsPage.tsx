@@ -16,9 +16,11 @@ import {
 } from "@markiro/ui";
 
 import type { OfficeProduct } from "../../host/protocol.js";
+import { useCan } from "../access.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
-import { activeFirstByName } from "../records.js";
+import { activeFirstByName, useStoreRecord } from "../records.js";
+import { ProductDialog } from "./ProductDialog.js";
 import {
   findProducts,
   groupLabel,
@@ -37,6 +39,8 @@ const STATE_PHASE = {
 } as const satisfies Record<ProductState, TagPhase>;
 
 const FILTERS: readonly ProductFilter[] = ["all", "draft", "active", "archived"];
+
+type ProductsDialog = { kind: "create" } | { kind: "edit"; product: OfficeProduct };
 
 interface ProductsPagerProps {
   page: number;
@@ -74,15 +78,25 @@ function ProductsPager({ page, pageCount, onPage }: ProductsPagerProps) {
  * The catalog's products (spec §4.3, §5.5), archived ones included. The host
  * sends the whole list, so the search, the state filter and the pages work
  * here. A product group's name comes from the host's lookup; when it does not
- * load, the list stays and shows the codes.
+ * load, the list stays and shows the codes. Both office roles add and change
+ * products (`editCatalog`); there is no delete, a product is archived instead.
  */
 export function ProductsPage() {
   const { t } = useTranslation();
+  const canEdit = useCan("editCatalog");
   const products = useOfficeQuery(officeKeys.products, (api, token) => api.listProducts(token));
   const groups = useProductGroups();
+  const store = useStoreRecord<OfficeProduct>(officeKeys.products);
   const [search, setSearch] = useState("");
   const [filter, setFilter] = useState<ProductFilter>("all");
   const [page, setPage] = useState(1);
+  const [dialog, setDialog] = useState<ProductsDialog | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const open = (next: ProductsDialog) => {
+    setNotice(null);
+    setDialog(next);
+  };
 
   const columns: TableColumn<OfficeProduct>[] = [
     {
@@ -130,6 +144,22 @@ export function ProductsPage() {
       },
     },
   ];
+  if (canEdit) {
+    columns.push({
+      key: "actions",
+      title: t("office.products.table.actions"),
+      render: (product) => (
+        <Button
+          variant="secondary"
+          size="compact"
+          aria-label={t("office.products.editNamed", { name: product.name })}
+          onClick={() => open({ kind: "edit", product })}
+        >
+          {t("office.products.edit")}
+        </Button>
+      ),
+    });
+  }
 
   const content = () => {
     if (products.isPending) return <PageLoading />;
@@ -190,7 +220,15 @@ export function ProductsPage() {
 
   return (
     <>
-      <PageHeader title={t("office.products.title")} />
+      <PageHeader
+        title={t("office.products.title")}
+        actions={
+          canEdit ? (
+            <Button onClick={() => open({ kind: "create" })}>{t("office.products.add")}</Button>
+          ) : null
+        }
+      />
+      {notice && <Alert tone="ok">{notice}</Alert>}
       {groups.isError && (
         <Alert
           tone="warn"
@@ -204,6 +242,25 @@ export function ProductsPage() {
         </Alert>
       )}
       {content()}
+      {canEdit && dialog !== null && (
+        <ProductDialog
+          product={dialog.kind === "edit" ? dialog.product : null}
+          onClose={() => setDialog(null)}
+          onSaved={(product) => {
+            store(product);
+            setDialog(null);
+            setNotice(
+              dialog.kind === "create"
+                ? t("office.products.created", { name: product.name })
+                : t("office.common.saved"),
+            );
+          }}
+          onReload={() => {
+            setDialog(null);
+            void products.refetch();
+          }}
+        />
+      )}
     </>
   );
 }
