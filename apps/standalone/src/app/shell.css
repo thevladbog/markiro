@@ -163,6 +163,23 @@
   color: var(--fg-2);
 }
 
+/* A product's name, and its print name on a quieter second line when it differs. */
+.product-name {
+  display: grid;
+}
+
+.product-name__print {
+  color: var(--fg-2);
+}
+
+.office-pager {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 0 0;
+}
+
 /* An operator's badges: revoked ones stay listed, dimmed, as the record of what was issued. */
 .badge-list {
   display: grid;

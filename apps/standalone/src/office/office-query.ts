@@ -20,6 +20,8 @@ export const officeKeys = {
   lines: ["office", "lines"],
   operators: ["office", "operators"],
   badgeSalt: ["office", "badge-salt"],
+  productGroups: ["office", "product-groups"],
+  products: ["office", "products"],
 } as const;
 
 /**

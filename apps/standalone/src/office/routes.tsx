@@ -7,6 +7,7 @@ import { OfficeOverview } from "./OfficeOverview.js";
 import { OfficeShell } from "./OfficeShell.js";
 import { OperatorsPage } from "./operators/OperatorsPage.js";
 import { OrgProfilePage } from "./org/OrgProfilePage.js";
+import { ProductsPage } from "./products/ProductsPage.js";
 import { RequireRole } from "./RequireRole.js";
 import { SsccPage } from "./sscc/SsccPage.js";
 import { OfficeUsersPage } from "./users/OfficeUsersPage.js";
@@ -38,6 +39,7 @@ export const officeRoutes: RouteObject[] = [
           </RequireRole>
         ),
       },
+      { path: "products", element: <ProductsPage /> },
       {
         path: "users",
         element: (

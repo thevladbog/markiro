@@ -825,9 +825,9 @@ rather than resetting it — only a number replaces it. A link `lastError` of
 same answer to an office call. A new revision re-reads the signed-in user
 (`Office`, `hostRevision`); it does not reload an open page, so a form keeps
 what was typed and a save over a newer record meets `stale_revision`. Pages read
-fresh data whenever they open (`staleTime` 0), except the site's badge salt,
-which never changes and is not read again while it is cached (`staleTime:
-Infinity`, see «Office pages»).
+fresh data whenever they open (`staleTime` 0), except the site's badge salt and
+the ЧЗ product groups, which never change and are not read again while they are
+cached (`staleTime: Infinity`, see «Office pages»).
 
 A paired station without a line chooses one (`LineSelect`) among the active
 lines of the local copies (a line the office clears brings the station back
@@ -897,9 +897,9 @@ requests and offer a retry.
 - Request bodies are built field by field, never spread from form values, so
   nothing the form holds reaches the host by accident; ids go into the path
   only.
-- Lists of archivable records (counterparties, lines) show active records
-  before archived ones, each by name in Russian order with numbers by value
-  (`activeFirstByName` in `src/office/records.tsx`, with
+- Lists of archivable records (counterparties, lines, products) show active
+  records before archived ones, each by name in Russian order with numbers by
+  value (`activeFirstByName` in `src/office/records.tsx`, with
   `Intl.Collator("ru", { numeric: true })`); the host sorts bytewise, which
   puts «Линия 10» before «Линия 2».
 - «Контрагенты» is read by every role and changed by administrators. An edit
@@ -1072,6 +1072,18 @@ requests and offer a retry.
   host and the office PCs on a cloud-less LAN are not promised to agree on
   the time, so no host timestamp is compared with this PC's clock, and join
   detection compares host timestamps only.
+- «Товары» (section «Каталог») lists every product, archived ones included,
+  and every role reads it: active ones before archived ones, each by name
+  (`activeFirstByName`), with the GTIN, the print name as a second line when
+  it differs from the name, the product group's name from
+  `GET /v1/office/product-groups` (its code when the lookup lacks it or did
+  not load; a failed lookup leaves the list in place and offers to read it
+  again), the box capacity and the state in words (draft, active, archived).
+  The host sends the whole list, so the search (name, print name or GTIN,
+  without case, a GTIN's spaces ignored), the state filter and the pages of
+  25 work in the page, and a new search or filter goes back to the first
+  page. The groups are a static lookup, not read again while cached
+  (`staleTime: Infinity`).
 
 ## Marking rules
 
