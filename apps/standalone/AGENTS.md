@@ -126,9 +126,10 @@ or the schema (`BEGIN`, `END`, `PRAGMA`, `ATTACH`, `CREATE`, `DROP`, `ALTER`,
 as `COMMIT`, but `CASE … END` mid-statement is unaffected) and never read
 BLOBs. A large reference page goes in as one JSON parameter per entity
 through `json_each`, so the limits bound SQL, not rows, and never the size
-of one value: a feed revision larger than a page's 1 MiB (the wizard's
-templates, a template delete that clears thousands of products) comes as a
-parameter of several MiB and passes whole (`tests/local_db.rs` pins it).
+of one value: a feed revision larger than a page's 1 MiB (a template delete
+that clears thousands of products, or a wizard request near axum's default
+2 MiB body limit; the app's own stock templates take about 31 KB) comes as a
+parameter of up to several MiB and passes whole (`tests/local_db.rs` pins it).
 Rejections are bare codes: `local_db_unavailable` (the database did not
 open; the app starts anyway), `invalid_statement`, `unsupported_value`,
 `statement_failed`, `changes_mismatch`.
@@ -552,10 +553,14 @@ every catalog shape and a builder for every office request body of the catalog
 (`test/protocol.test.ts` reads every fixture of plan 1e1,
 `test/template-eligibility.test.ts` the slot rule's), the station's copies of
 products, templates and category defaults («Reference sync», «Local
-database») and the office's «Товары» page («Office pages»). The template
-screens and the defaults screen come with plan 1e3, whose wizard already
-sends the stock templates (above); the `HostApi` methods and the builders
-they call are in place.
+database») and the office's «Товары» page («Office pages»). Plan 1e3 added
+the wizard's stock templates (above) and the office's «Шаблоны» and
+«Умолчания шаблонов» pages («Office pages»), which call `listTemplates`,
+`updateTemplate`, `getTemplateDefaults` and `updateTemplateDefaults`. The
+template editor (creating, copying and renaming a template, importing
+ZPL/TSPL/JSON, the size form, the preview, downloads and deleting) is plan
+1e4's, with `getTemplate`, `createTemplate` and `deleteTemplate`, whose
+methods and builders are in place.
 
 ## Reference sync
 
@@ -666,8 +671,10 @@ parses every fixture whose shape crosses the IPC boundary. An office request
 body the webview has built since plan 1d3 has one builder in
 `src/host/requests.ts`, which names every field it sends;
 `test/protocol.test.ts` checks that each builder produces its fixture exactly.
-The catalog's builders (plan 1e2) cover the template routes too, which only
-plan 1e3's screens will call: `productCreate` and `productUpdate` send every
+The catalog's builders (plan 1e2) cover the template routes too, which plan
+1e3's pages call (`templateUpdate` for a flag or categories,
+`templateDefaultsUpdate`) and plan 1e4's editor will (`templateCreate`, a
+layout through `templateUpdate`): `productCreate` and `productUpdate` send every
 field, `null` for a blank one; `templateCreate` sends the name, the purpose,
 the flag, the categories (`null` for every category) and the layout;
 `templateUpdate` sends the name, the flag and the categories that differ from
@@ -1144,15 +1151,17 @@ requests and offer a retry.
   them, «—» where it has none, the categories (every category, one group's name,
   or «Категорий: N» with the names in a `title`; a code where the lookup lacks
   the group or did not load, and a failed lookup leaves the list in place and
-  offers to read it again), the state in words («Включён», or «Выключен» as
-  `retired`) and a «Типовой» tag on a stock template. The host sends the whole
-  list, so the search (by name, without case), the purpose filter and the state
-  filter work in the page; there are no pages, since a site keeps tens of
-  templates. The templates are read whenever the page opens. Both roles switch a
-  template on and off and change its categories (`useCan("editCatalog")`; no
-  role lacks it, so there is no read-only view). «Выключить» asks first, with
-  the `destructive` submit, and says the template is no longer offered for
-  products and defaults and the
+  offers to read it again, but when the templates fail too, only their error
+  shows, and its «Повторить» reads both again), the state in words («Включён»,
+  or «Выключен» as `retired`) and a «Типовой» tag on a stock template. The host
+  sends the whole list, so the search (by name, without case), the purpose
+  filter and the state filter work in the page; there are no pages, since a site
+  keeps tens of templates. The templates are read whenever the page opens; the
+  groups are a static lookup, not read again while cached
+  (`staleTime: Infinity`). Both roles switch a template on and off and change
+  its categories (`useCan("editCatalog")`; no role lacks it, so there is no
+  read-only view). «Выключить» asks first, with the `destructive` submit, and
+  says the template is no longer offered for products and defaults and the
   stations get the change; «Включить» asks lightly. Only the flag goes, with the
   opened row's revision (`templateUpdate`), and the answer goes into the cached
   row in place (`withTemplateChange`: the name, the flag, the categories,
@@ -1160,19 +1169,20 @@ requests and offer a retry.
   the layout stays out of the cache), without reading the list again. Switching
   off a default is refused (`template_is_default`), and the dialog says whose
   default the template is (the organization's, the categories by name, a code
-  where the lookup lacks the group) and that another template must be chosen on
-  «Умолчания шаблонов» first; `stale_revision` offers «Загрузить заново», which
-  closes the dialog and reads the list again. «Категории» opens a dialog on
-  `CategoryScopeField` (`src/office/templates/CategoryScopeField.tsx`, which the
-  editor of plan 1e4 is to reuse): «Все категории» or «Только выбранные», the
-  product groups by name with a search and a live count of the chosen ones; the
-  chosen codes stay while «Все категории» is picked, so switching back brings
-  them back, and while the lookup loads or fails the field keeps them and says
-  why it lists nothing. The search box cancels Enter: the field sits inside form
-  dialogs, and the browser would otherwise submit the form and save a half-made
-  choice. The dialog sends `null` for every category or the chosen codes
-  ascending (`scopeCodes`: `templateUpdate` takes a reordered list as a change,
-  a new revision and the layout to every station again), with the opened row's
+  where the lookup lacks the group or did not load) and that another template
+  must be chosen on «Умолчания шаблонов» first; `stale_revision` offers
+  «Загрузить заново», which closes the dialog and reads the list again.
+  «Категории» opens a dialog on `CategoryScopeField`
+  (`src/office/templates/CategoryScopeField.tsx`, which the editor of plan 1e4
+  is to reuse): «Все категории» or «Только выбранные», the product groups by
+  name with a search and a live count of the chosen ones; the chosen codes stay
+  while «Все категории» is picked, so switching back brings them back, and while
+  the lookup loads or fails the field keeps them and says why it lists nothing.
+  The search box cancels Enter: the field sits inside form dialogs, and the
+  browser would otherwise submit the form and save a half-made choice. The
+  dialog sends `null` for every category or the chosen codes ascending
+  (`scopeCodes`: `templateUpdate` takes a reordered list as a change, a new
+  revision and the layout to every station again), with the opened row's
   revision; «Сохранить» stays off while the categories are the row's in any
   order, and «Только выбранные» needs at least one category. Narrowing a
   template out of a category whose default it is, or narrowing the
@@ -1180,38 +1190,45 @@ requests and offer a retry.
   words; a saved answer goes into the row in place.
 - «Умолчания шаблонов» (section «Каталог») edits the one defaults document
   (`GET/PUT /v1/office/template-defaults`): the page reads it whenever it opens
-  (`useTemplateDefaults`, `staleTime` 0), with the template list and the product
-  groups, which the page reads once per visit and passes to the form, since the
-  form remounts on every new revision. Both roles change it
-  (`useCan("editCatalog")`), so there is no read-only view. The organization's
-  three defaults are selects of «Не выбран» and the enabled templates of their
-  purpose for every category (`templateOptions` with category `null`), by name;
-  a default the list does not offer stays a marked choice («— не подходит», «—
-  нет в списке»). The category defaults are rows by category name, then purpose
-  (the page sorts what it shows and sends its own order): the group's name (its
-  code where the lookup lacks it or did not load), the purpose on its tag and a
-  select of the templates that fit that category and purpose, without «Не
-  выбран», since «Убрать» clears a category default. «Добавить умолчание
-  категории» (off while the groups or the templates do not load) asks for a
-  category that still has a purpose without a default, a purpose that category
-  has no default of yet and a template that fits both (`CategoryDefaultDialog`),
-  and adds the row to the page's document. Edits stay in the page: a live note
-  says there are unsaved changes, «Отменить изменения» brings back the loaded
-  document, and «Сохранить», off until something changed, sends the whole
-  document with the loaded revision (`templateDefaultsUpdate`: `null` for «Не
-  выбран», every category default the page holds), drops a second click while
-  the save is on its way and puts the answer in the cache, which starts the form
-  afresh. A `validation_failed` goes under the control it names
-  (`defaultsFailure`): an organization default's select, or the row of the
-  category default the page sent at that index (`categories.{i}`, `.templateId`,
-  `.chzProductGroupCode`), in words for each: a template that no longer fits
-  (disabled, narrowed or deleted while the page was open: the host checks the
-  defaults before the revision), a category the host did not take, a default
-  given twice. The template list is then read again so a refused choice shows as
-  marked, and a change of that control, or the removal of that row, takes the
-  message away. `stale_revision` offers «Загрузить заново» in words of its own,
-  since a change of the organization's profile moves the document's revision
-  too, and the reload drops the edits.
+  (`useTemplateDefaults`, `staleTime` 0), with the template list, which it reads
+  once per visit, and the product groups, a static lookup read once while cached
+  (`staleTime: Infinity`), and passes both to the form, since the form remounts
+  on every new revision. Both roles change it (`useCan("editCatalog")`), so
+  there is no read-only view. The organization's three defaults are selects of
+  «Не выбран» and the enabled templates of their purpose for every category
+  (`templateOptions` with category `null`), by name; a default the list does not
+  offer, the loaded one or the current one, stays a marked choice («— не
+  подходит», «— нет в списке»). The category defaults are rows by category name,
+  then purpose (the page sorts what it shows and sends its own order): the
+  group's name (its code, «Код N», where the lookup lacks it or did not load),
+  the purpose on its tag and a select of the templates that fit that category
+  and purpose, which keeps a template the list does not offer as a marked choice
+  in the same way and has no «Не выбран», since «Убрать» clears a category
+  default. «Добавить умолчание категории» (off while the groups or the templates
+  do not load) asks for a category that still has a purpose without a default, a
+  purpose that category has no default of yet and a template that fits both
+  (`CategoryDefaultDialog`), and adds the row to the page's document. While the
+  template list loads or has failed, the selects (the organization's and the
+  rows') are off and the defaults go out as stored; a template the list does not
+  show appears by the first eight characters of its id («Шаблон a3b4c5d6…»; «—
+  нет в списке» follows once the list is loaded without it). A failed list shows
+  a warning with «Повторить», and a failed group lookup one of its own. Edits
+  stay in the page: a live note says there are unsaved changes, «Отменить
+  изменения» brings back the loaded document, and «Сохранить», off until
+  something changed, sends the whole document with the loaded revision
+  (`templateDefaultsUpdate`: `null` for «Не выбран», every category default the
+  page holds), drops a second click while the save is on its way and puts the
+  answer in the cache, which starts the form afresh. A `validation_failed` goes
+  under the control it names (`defaultsFailure`): an organization default's
+  select, or the row of the category default the page sent at that index
+  (`categories.{i}`, `.templateId`, `.chzProductGroupCode`), in words for each:
+  a template that no longer fits (disabled, narrowed or deleted while the page
+  was open: the host checks the defaults before the revision), a category the
+  host did not take, a default given twice. The template list is then read again
+  so a refused choice shows as marked, and a change of that control, or the
+  removal of that row, takes the message away. `stale_revision` offers
+  «Загрузить заново» in words of its own, since a change of the organization's
+  profile moves the document's revision too, and the reload drops the edits.
 
 ## Marking rules
 
