@@ -67,6 +67,18 @@ describe("template eligibility of a product duplicate, which the domain has no r
     expect(templateFitsSlot(SCOPED, { purpose: "product_duplicate", chzProductGroupCode: 8 })).toBe(
       false,
     );
+    expect(
+      templateFitsSlot(
+        { ...SCOPED, chzProductGroupCodes: null },
+        { purpose: "product_duplicate", chzProductGroupCode: 8 },
+      ),
+    ).toBe(true);
+    expect(
+      templateFitsSlot(
+        { ...SCOPED, chzProductGroupCodes: [8, 15] },
+        { purpose: "product_duplicate", chzProductGroupCode: 15 },
+      ),
+    ).toBe(true);
   });
 
   it("needs a template for every category in the organization's slot", () => {

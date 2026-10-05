@@ -163,7 +163,7 @@ describe("office product dialog", () => {
     }
   });
 
-  it("adds a product, sending the GTIN as its 14 digits and every field by name", async () => {
+  it("adds a product, sending the GTIN as its 14 digits and every field by name; a new product has no archive box, and its form submits while still pristine", async () => {
     const fake = session();
     const created: OfficeProduct = {
       ...MILK,
@@ -293,13 +293,20 @@ describe("office product dialog", () => {
     ).toBeTruthy();
   });
 
-  it("finds a GTIN's owner the cloud's way: the organization first, then active counterparties by name", () => {
-    const second = { ...NORTH, id: "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d", name: "Альфа-2" };
+  it("finds a GTIN's owner like the cloud's `checkGtinOwner`, except that counterparties go active first, by name; one matching prefix of several is enough", () => {
+    // The matching prefix comes last: `every`, or only the first prefix, would miss it.
+    const second = {
+      ...NORTH,
+      id: "9a8b7c6d-5e4f-4a3b-9c2d-1e0f9a8b7c6d",
+      name: "Альфа-2",
+      gs1Prefixes: ["4609999", "4601234"],
+    };
     expect(gtinOwner("04601234000017", ["4600682"], [NORTH, second])).toEqual({
       kind: "counterparty",
       counterparty: second,
     });
     expect(gtinOwner("04601234000017", ["4601234"], [NORTH])).toEqual({ kind: "own" });
+    expect(gtinOwner("04601234000017", ["4609999", "4601234"], [])).toEqual({ kind: "own" });
     expect(gtinOwner("04601234000017", [], [{ ...second, archived: true }, NORTH])).toEqual({
       kind: "counterparty",
       counterparty: NORTH,
@@ -357,15 +364,11 @@ describe("office product dialog", () => {
     expect(screen.getByText(hint)).toBeTruthy();
   });
 
-  it("saves a change as the whole record with the loaded revision, archive included", async () => {
+  it("saves a change as the whole record with the loaded revision, archive included, puts the returned record in the old row's place, and drops the notice when the next dialog opens", async () => {
     const fake = session();
     // Both default templates travel with the record: the box one comes with `MILK`,
     // the pallet one is added here.
-    const palletTemplate = "0f4b7e5d-2a6c-4b8d-9e9f-4a5b6c7d8e9f";
-    fake.api.listProducts.mockResolvedValue([
-      { ...MILK, defaultPalletTemplateId: palletTemplate },
-      AYRAN,
-    ]);
+    fake.api.listProducts.mockResolvedValue([{ ...MILK, defaultPalletTemplateId: PALLET }, AYRAN]);
     fake.api.updateProduct.mockResolvedValue({
       ...MILK,
       name: "Молоко 3,2% 1 л",
@@ -394,7 +397,7 @@ describe("office product dialog", () => {
           palletBoxCapacity: 40,
           shelfLifeDays: 10,
           defaultBoxTemplateId: MILK_58,
-          defaultPalletTemplateId: palletTemplate,
+          defaultPalletTemplateId: PALLET,
           archived: true,
           expectedRev: 65,
         },
@@ -433,15 +436,20 @@ describe("office product dialog", () => {
     ]);
   });
 
-  it("puts the host's refusal of a field under that field", async () => {
+  it("puts the host's refusal of a field under that field, and takes an earlier alert away", async () => {
     const fake = session();
+    // The first save fails as a whole and shows an alert; its retry is refused on a field.
+    fake.api.createProduct.mockRejectedValueOnce(hostError("internal", 500));
     fake.api.createProduct.mockRejectedValueOnce(VALIDATION("shelfLifeDays"));
     await openCreate(fake);
     type("GTIN", "4600682000013");
     type("Название", "Молоко");
     type("Срок годности, дней", "10");
     fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
+    expect(await screen.findByText("На хосте произошла ошибка. Повторите попытку.")).toBeTruthy();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
     const message = await screen.findByText("Хост не принял это значение. Проверьте его.");
+    expect(screen.queryByText("На хосте произошла ошибка. Повторите попытку.")).toBeNull();
     expect(screen.getByLabelText("Срок годности, дней").getAttribute("aria-describedby")).toBe(
       message.id,
     );
@@ -479,7 +487,7 @@ describe("office product dialog", () => {
     await waitFor(() => expect(fake.api.listProducts).toHaveBeenCalledTimes(2));
   });
 
-  it("sends one request for a double click, and none while it is on its way", async () => {
+  it("sends one request for a double click, and none while it is on its way; the request is a draft, with a blank group, capacities and shelf life sent as `null`", async () => {
     const fake = session();
     let answer: (product: OfficeProduct) => void = () => undefined;
     fake.api.createProduct.mockImplementation(
@@ -520,7 +528,7 @@ describe("office product dialog", () => {
     });
   });
 
-  it("offers the groups by name and keeps a product's group the lookup lacks", async () => {
+  it("offers the groups by name, keeps a product's group the lookup lacks, and does not offer a group the lookup has twice; «Отмена» closes the dialog", async () => {
     const fake = session();
     fake.api.listProducts.mockResolvedValue([{ ...MILK, chzProductGroupCode: 99 }, AYRAN]);
     await openProducts(fake);
@@ -691,16 +699,30 @@ describe("office product dialog: default templates", () => {
     });
   });
 
-  it("names a preference the template list does not have", async () => {
+  it("names a preference the template list does not have, and clears it with «Не выбран»", async () => {
     const fake = session();
     const gone = "2b6d9a7f-4c8e-4d0f-9a1b-6c7d8e9f0a1b";
     fake.api.listProducts.mockResolvedValue([{ ...MILK, defaultPalletTemplateId: gone }]);
+    fake.api.updateProduct.mockResolvedValue({ ...MILK, rev: 81 });
     await openEdit(fake, "Молоко 3,2% 0,9 л");
     expect(choices("Шаблон паллеты")).toEqual([
       "Не выбран",
       "Паллета 100×150",
       "Шаблон 2b6d9a7f… — нет в списке",
     ]);
+    // «Не выбран» holds the empty value, and the choice is made through the option
+    // itself: typing "" into the select would pass whether or not the option held it.
+    const pallets = screen.getByLabelText("Шаблон паллеты");
+    const none = within(pallets).getByRole("option", { name: "Не выбран" });
+    expect(none).toHaveProperty("value", "");
+    fireEvent.change(pallets, { target: { value: none.getAttribute("value") } });
+    expect(pallets).toHaveProperty("value", "");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Изменения сохранены.");
+    expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
+      defaultBoxTemplateId: MILK_58,
+      defaultPalletTemplateId: null,
+    });
   });
 
   it("keeps the template choices off while the templates do not load, and sends the preferences unchanged", async () => {

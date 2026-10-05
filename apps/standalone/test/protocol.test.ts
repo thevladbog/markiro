@@ -913,7 +913,7 @@ describe("catalog shapes", () => {
     }
   });
 
-  it("refuse null where the host does not take it: a template's name, flag and layout, orgDefault, templates", () => {
+  it("refuse null that the host would ignore (a template's name, flag and layout) or refuse (orgDefault, templates)", () => {
     for (const field of ["name", "enabled", "spec"]) {
       expect(templateUpdateSchema.safeParse({ [field]: null, expectedRev: 62 }).success).toBe(
         false,
@@ -962,7 +962,7 @@ describe("catalog shapes", () => {
     }
   });
 
-  it("read a template for every category, and refuse an unknown purpose, an id that is no UUID or a group code that is no whole number", () => {
+  it("read a template for every category, and refuse an unknown purpose, an id that is no UUID, a group code that is no whole number or a negative resolution", () => {
     const template = labelTemplateSchema.parse(fixture("label-template.json"));
     const summary = labelTemplateSummarySchema.parse(fixture("template-summary.json"));
     // A stock template, the wizard's, is for every category: `null`, not a list.
@@ -1032,7 +1032,7 @@ describe("catalog shapes", () => {
       ["template-create.json", templateCreateSchema],
       ["template-defaults-update.json", templateDefaultsUpdateSchema],
     ] as const) {
-      const body = fixture(name) as Record<string, unknown>;
+      const body = schema.parse(fixture(name));
       for (const key of Object.keys(body)) {
         const without = Object.fromEntries(Object.entries(body).filter(([field]) => field !== key));
         expect(schema.safeParse(without).success, `${name} without ${key}`).toBe(false);

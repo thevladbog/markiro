@@ -2,6 +2,7 @@ import { isValidGtin } from "@markiro/domain";
 import { describe, expect, it } from "vitest";
 import type { z } from "zod";
 
+import i18n from "../src/i18n/index.js";
 import {
   badgeCodeRule,
   badgeLabelRule,
@@ -182,7 +183,14 @@ describe("free text", () => {
   });
 
   it("refuses an unpaired surrogate in every free-text field, as a control character", () => {
-    for (const rule of [personNameRule, deviceNameRule, lineNameRule, companyNameRule]) {
+    for (const rule of [
+      personNameRule,
+      deviceNameRule,
+      lineNameRule,
+      companyNameRule,
+      productNameRule,
+      printNameRule,
+    ]) {
       for (const text of ["Павел\ud800", "\udc00Станция", "Ли\ud800ния"]) {
         expect(rule.safeParse(text).error?.issues[0]?.message).toBe("rules.controlCharacter");
       }
@@ -507,6 +515,9 @@ describe("product rules", () => {
     for (const value of ["0", "08", "8a", " 8", "-1"]) {
       expect(message(productGroupRule, value), value).toBe("rules.productGroup");
     }
+    // The select offers only valid codes, so no screen renders this text: a
+    // typo in the key of `ru.json` would throw nowhere else.
+    expect(i18n.t("rules.productGroup")).toBe("Выберите группу из списка");
     expect(toGroupCode("")).toBeNull();
     expect(toGroupCode("15")).toBe(15);
   });

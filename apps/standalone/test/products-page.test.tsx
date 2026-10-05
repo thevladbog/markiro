@@ -59,13 +59,16 @@ const WATER_10: OfficeProduct = {
   boxCapacity: 6,
   rev: 71,
 };
+/** Archived and a draft: the list names it by the archive flag, not by the host's status. */
 const AYRAN: OfficeProduct = {
   ...MILK,
   id: "4d5e6f70-8192-4a34-9c5d-6e7f80910213",
   gtin14: "04605555000015",
   name: "Айран",
   printName: null,
+  boxCapacity: null,
   archived: true,
+  status: "draft",
   rev: 72,
 };
 
@@ -175,6 +178,7 @@ describe("office products", () => {
     for (const text of ["", "  ", "молоко", "МОЛОКО 3,2", "4600 682", "04600682000013", "0013"]) {
       expect(matchesSearch(product, text), text).toBe(true);
     }
+    expect(matchesSearch(product, "4 600682 000013"), "EAN-13 as printed").toBe(true);
     for (const text of ["кефир", "4601", "460 0x"]) {
       expect(matchesSearch(product, text), text).toBe(false);
     }
@@ -382,7 +386,10 @@ describe("office products", () => {
     await screen.findByText("Товар 1");
     fireEvent.click(within(pagerNav()).getByRole("button", { name: "Вперёд" }));
     expect(names()).toHaveLength(5);
-    // What a write that changes the cached list does to a page that is open.
+    // A write can shrink the FOUND list under an open page (a row archived under
+    // «Активен», or renamed out of a search); it never shortens the cached list, which
+    // it replaces in place or appends to. The test stands in for that shrinking by
+    // setting a shorter cached list with `setQueryData`.
     queryClient.setQueryData(officeKeys.products, many.slice(0, 20));
     await waitFor(() => expect(names()).toHaveLength(20));
     expect(screen.queryByRole("navigation", { name: "Страницы списка товаров" })).toBeNull();

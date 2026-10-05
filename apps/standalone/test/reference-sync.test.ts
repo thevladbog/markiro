@@ -2127,7 +2127,9 @@ describe("catalog copies", () => {
     });
     expect(layouts()).toEqual([JSON.stringify(layout(58))]);
 
-    // The next revision changes every field of every record.
+    // The next revision changes every field of every record. The purpose and stock
+    // changes are synthetic (the host cannot make them: an update has no `purpose`, and
+    // only the wizard sets `stock`): this pins only that every column is assigned.
     await syncReferences({
       changes: feed({
         10: page(20, [
