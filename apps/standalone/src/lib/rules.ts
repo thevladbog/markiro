@@ -244,7 +244,11 @@ export const gtinRule = z
   .regex(GTIN_DIGITS, "rules.gtin")
   .refine((gtin) => !GTIN_DIGITS.test(gtin) || isValidGtin(gtin), "rules.gtinCheckDigit");
 
-/** The 14 digits a GTIN `gtinRule` accepted is saved as: zero-padded by `normalizeToGtin14`. */
+/**
+ * The 14 digits a GTIN `gtinRule` accepted is saved as: zero-padded by
+ * `normalizeToGtin14`. Throws `DomainError` (`GTIN_INVALID`) for anything
+ * `gtinRule` refuses: call it on the rule's output.
+ */
 export function toGtin14(gtin: string): string {
   return normalizeToGtin14(gtin.trim());
 }

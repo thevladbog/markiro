@@ -120,10 +120,11 @@ export type GtinOwner =
   | { kind: "unknown" };
 
 /**
- * Whose prefix a GTIN of 14 digits has, as the cloud's `checkGtinOwner`
- * answers it: the organization's when one of its GS1 prefixes matches
- * (`gtinMatchesPrefix`), else the first counterparty's that matches, active
- * ones first, by name, else nobody's. It informs and never blocks a save.
+ * Whose prefix a GTIN of 14 digits has: the organization's when one of its GS1
+ * prefixes matches (`gtinMatchesPrefix`), else the first counterparty's that
+ * matches, else nobody's. It answers like the cloud's `checkGtinOwner`, except
+ * that counterparties go active first, by name (the host keeps no creation
+ * time). It informs and never blocks a save.
  */
 export function gtinOwner(
   gtin14: string,

@@ -147,11 +147,11 @@ JSON array, NULL for every category) and `ref_template_defaults` (keyed
 default templates as columns of `ref_org`. They keep the feed's flags
 (`archived`, `enabled`, `status`) and filter nothing: the station chooses
 among them later (plan 2a). They have no foreign key and no uniqueness
-besides the key, for the reasons the migration gives (an archived product
-keeps a GTIN that a product in use may hold too); `ref_products_gtin14` is a
-plain index for plan 2a's lookup of a scanned product. `0001`'s header still
-says products and templates «join with plans 1d and 1e», which `0004` did;
-an applied migration is never edited.
+besides the key, for the reasons the migration gives, and because an archived
+product keeps a GTIN that a product in use may hold too; `ref_products_gtin14`
+is a plain index for plan 2a's lookup of a scanned product. `0001`'s header
+still says products and templates «join with plans 1d and 1e», which `0004`
+did; an applied migration is never edited.
 
 `device_forget` clears the local copies before it removes `device.json`:
 `LocalDb::clear_copies` deletes every row of every table but
@@ -426,8 +426,9 @@ print name up to 200 or none, a box holds 1–100 000 units and a pallet
 1–10 000 boxes (`MAX_BOX_CAPACITY`, `MAX_PALLET_BOX_CAPACITY`: the cloud caps
 neither, so these only keep a typing slip out of production), a shelf life
 is 1–3650 days (the cloud's bound), and a product group must exist. The
-office checks the same before it sends (`src/lib/rules.ts`, the limits as
-constants of the same names): a GTIN of 8, 12, 13 or 14 ASCII digits with a
+office's rules in `src/lib/rules.ts` mirror these before it sends (the three
+caps are constants of the same names as the host's; that a product group
+exists stays the host's check): a GTIN of 8, 12, 13 or 14 ASCII digits with a
 valid check digit (`gtinRule`; the domain throws one `GTIN_INVALID` for a
 wrong length and a wrong check digit, so the rule checks the length itself
 and says each in its own words), sent as its 14 digits (`toGtin14`), and
@@ -436,10 +437,10 @@ leading zero, a point or an exponent (`countRule`), blank for none. The
 default box and pallet templates are preferences: the host checks that each
 names a template of the slot's purpose; whether that template is enabled
 and covers the product's group is the domain's rule, which the office
-applies when it offers templates and the station before it uses one, so a
-template disabled or narrowed later never blocks editing or archiving the
-product. A product form opened before its preferred template was deleted
-sends the old id with the older `expectedRev`, and the answer is
+applies when it offers templates and the station will before it uses one
+(plan 2a), so a template disabled or narrowed later never blocks editing or
+archiving the product. A product form opened before its preferred template
+was deleted sends the old id with the older `expectedRev`, and the answer is
 `validation_failed` on `defaultBoxTemplateId` or `defaultPalletTemplateId`
 (the references are checked before the revision), not `stale_revision`:
 nothing is written, and the office's product dialog takes it as a stale
@@ -538,14 +539,14 @@ second of the same purpose is `validation_failed` on
 `templates.{i}.orgDefault`. The `host.bootstrap` row counts them
 (`templateCount`).
 
-Plan 1e1 built the host's side and plan 1e2 the webview's: Zod schemas and
-request builders for every catalog shape (`test/protocol.test.ts` reads every
-fixture of plan 1e1, `test/template-eligibility.test.ts` the slot rule's),
-the station's copies of products, templates and category defaults
-(«Reference sync», «Local database») and the office's «Товары» page («Office
-pages»). The template screens, the defaults screen and the wizard's
-`templates` come with plan 1e3; the `HostApi` methods and the builders they
-call are in place.
+Plan 1e1 built the host's side and plan 1e2 the webview's: Zod schemas for
+every catalog shape and a builder for every office request body of the catalog
+(`test/protocol.test.ts` reads every fixture of plan 1e1,
+`test/template-eligibility.test.ts` the slot rule's), the station's copies of
+products, templates and category defaults («Reference sync», «Local
+database») and the office's «Товары» page («Office pages»). The template
+screens, the defaults screen and the wizard's `templates` come with plan 1e3;
+the `HostApi` methods and the builders they call are in place.
 
 ## Reference sync
 
@@ -605,7 +606,9 @@ pairing with the same host has stamped `host_id` again. `hostGuard` (below)
 stops such a page until that stamp, not after it. The same late page can
 still put back a record the new run deleted by tombstone, and it moves
 `last_rev` back to its own revision, so the next sync fetches that tombstone
-again and deletes the record anew.
+again and deletes the record anew (for one late page; two late pages of one
+station landing oldest first can keep the record for good, which only the
+pairing-scoped guard of plan 1f closes).
 The copies, and the quarantine with them, start from zero when `host_id`
 names another host, when
 `entity_set` is not this build's `ENTITY_SET`, or when the feed answers
@@ -667,21 +670,21 @@ the whole document.
 The older forms (users, the organization, SSCC, sign-in and the own-password
 change) build their bodies inline, field by field, as does the wizard; its
 optional `templates`, which plan 1e3 sends, are typed by the strict
-`bootstrapRequestSchema`, which reads `bootstrap-request-templates.json`. Raise
-`PROTOCOL_VERSION` for an incompatible change; the host keeps accepting the
-previous version. Response types, which devices of different versions read,
-tolerate unknown fields; request types, which the host parses, reject them
-with `deny_unknown_fields`. The feed records that grant access or carry the
-salt (`site`, `operators`, `operator_badges`) are the exception: a station
-reads them strictly, so an additive field on one is breaking for older
-stations, which quarantine the record and delete their copy (fail-closed): an
-operator edited after a host upgrade cannot sign in on a station that has not
-been updated, and `site` takes the badge salt and the block sizes with it. The
-policy (versioning, or lenient additive fields) is carried to plan 5, and the
-coupling of the block sizes to a fail-closed record to plan 2a and the owner.
-The `product`, `protocol` and `minProtocol` fields of `hello` never change
-shape: read `HelloEnvelope` first and decide compatibility (`host_too_old`,
-`app_too_old`) before parsing the rest.
+`bootstrapRequestSchema`, against which `test/protocol.test.ts` parses
+`bootstrap-request-templates.json`. Raise `PROTOCOL_VERSION` for an incompatible
+change; the host keeps accepting the previous version. Response types, which
+devices of different versions read, tolerate unknown fields; request types,
+which the host parses, reject them with `deny_unknown_fields`. The feed records
+that grant access or carry the salt (`site`, `operators`, `operator_badges`) are
+the exception: a station reads them strictly, so an additive field on one is
+breaking for older stations, which quarantine the record and delete their copy
+(fail-closed): an operator edited after a host upgrade cannot sign in on a
+station that has not been updated, and `site` takes the badge salt and the block
+sizes with it. The policy (versioning, or lenient additive fields) is carried to
+plan 5, and the coupling of the block sizes to a fail-closed record to plan 2a
+and the owner. The `product`, `protocol` and `minProtocol` fields of `hello`
+never change shape: read `HelloEnvelope` first and decide compatibility
+(`host_too_old`, `app_too_old`) before parsing the rest.
 
 ## Network and TLS
 
@@ -1100,24 +1103,27 @@ requests and offer a retry.
   holds is `conflict` on `gtin14` under the GTIN, on adding, on a change and
   on coming back from the archive. Once the GTIN is valid the dialog shows
   the 14 digits it is saved as when they differ from what was typed, and
-  whose GS1 prefix it has: the organization's, else the first counterparty's
-  (active ones first, by name), else nobody's, as the cloud's
-  `checkGtinOwner`. That never blocks a save and is left out while the
-  organization or the counterparties do not load. A product without a group
-  or both capacities gets a note that it stays a draft. The group select
-  offers the lookup by name and keeps the product's own group when the
-  lookup lacks it; while the lookup does not load it is off and the group
-  goes out unchanged. The two default templates offer what `templateFitsSlot`
-  accepts for the form's group and the slot, by name, and «Не выбран». A
-  preference that no longer fits (disabled, narrowed, or the group changed in
-  the form) stays a choice marked «не подходит» and goes out unless changed,
-  since the host takes it; a change of the group never resets a choice. While
-  the template list does not load both selects are off and the preferences
-  go out unchanged. A `validation_failed` on `defaultBoxTemplateId` or
-  `defaultPalletTemplateId` reads as a stale write (`PRODUCT_STALE_FIELDS`):
-  the form was opened before its template was deleted. «Загрузить заново»
-  closes the dialog and reads the products again; the templates are read
-  again whenever a dialog opens.
+  whose GS1 prefix it has: the organization's, else the first counterparty's,
+  else nobody's, like the cloud's `checkGtinOwner`, except that counterparties
+  go active first, by name (the host keeps no creation time). That never
+  blocks a save and is left out while the organization or the counterparties
+  do not load. While the form lacks the group or either capacity, a note says
+  the product stays a draft (the host makes it `active` only with all three).
+  The group select offers the lookup by name and keeps the product's own
+  group when the lookup lacks it; while the lookup does not load it is off
+  and the group goes out unchanged. The two default templates offer what
+  `templateFitsSlot` accepts for the form's group and the slot, by name, and
+  «Не выбран». A preference that no longer fits (disabled, narrowed, or the
+  group changed in the form) stays a choice marked «не подходит» and goes out
+  unless changed, since the host takes it; a change of the group never resets
+  a choice. An id the list lacks stays a choice, shown by its first eight
+  characters («Шаблон a3b4c5d6… — нет в списке»; without the suffix while the
+  list is not loaded). While the template list does not load both selects are
+  off and the preferences go out unchanged. A `validation_failed` on
+  `defaultBoxTemplateId` or `defaultPalletTemplateId` reads as a stale write
+  (`PRODUCT_STALE_FIELDS`): the form was opened before its template was
+  deleted. «Загрузить заново» closes the dialog and reads the products again;
+  the templates are read again whenever a dialog opens.
 
 ## Marking rules
 
