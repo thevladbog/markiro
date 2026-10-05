@@ -414,14 +414,14 @@ write them. `PUT` takes every field with `expectedRev`, as a counterparty's,
 so an optional field left out is cleared (a missing `gtin14`, `name`,
 `archived` or `expectedRev` is refused); archiving is `archived: true`, and a
 product is never deleted. The host
-checks `gtin14` for its shape only — 14 ASCII digits after trimming; the
-check digit and the prefix are the UI's (`normalizeToGtin14`,
-`gtinMatchesPrefix`) — and keeps it unique among products in use
-(`products_active_gtin14`: `conflict` on `gtin14` when a product is
-created, its GTIN changed or it comes back from the archive); an archived
-product keeps its GTIN without reserving it. `status` is a generated column
-(`active` with a product group and both capacities, `draft` before, as the
-cloud's `computeStatus`) that nobody sends. A name is 1–200 characters, a
+checks `gtin14` for its shape only — 14 ASCII digits after trimming; the check
+digit is the UI's (`normalizeToGtin14`), and the UI only compares the prefix,
+for the owner hint (`gtinMatchesPrefix`) — and keeps it unique among products in
+use (`products_active_gtin14`: `conflict` on `gtin14` when a product is created,
+its GTIN changed or it comes back from the archive); an archived product keeps
+its GTIN without reserving it. `status` is a generated column (`active` with a
+product group and both capacities, `draft` before, as the cloud's
+`computeStatus`) that nobody sends. A name is 1–200 characters, a
 print name up to 200 or none, a box holds 1–100 000 units and a pallet
 1–10 000 boxes (`MAX_BOX_CAPACITY`, `MAX_PALLET_BOX_CAPACITY`: the cloud caps
 neither, so these only keep a typing slip out of production), a shelf life
@@ -1088,9 +1088,11 @@ requests and offer a retry.
   and every role reads it: active ones before archived ones, each by name
   (`activeFirstByName`), with the GTIN, the print name as a second line when
   it differs from the name, the product group's name from
-  `GET /v1/office/product-groups` (its code when the lookup lacks it or did
-  not load; a failed lookup leaves the list in place and offers to read it
-  again), the box capacity and the state in words (draft, active, archived).
+  `GET /v1/office/product-groups` (its code when the lookup lacks it or did not
+  load; a failed lookup leaves the list in place and offers to read it again,
+  but when the products fail too, only their error shows, and its «Повторить»
+  reads both again), the box capacity and the state in words (draft, active,
+  archived).
   The host sends the whole list, so the search (name, print name or GTIN,
   without case, a GTIN's spaces ignored), the state filter and the pages of
   25 work in the page, and a new search or filter goes back to the first

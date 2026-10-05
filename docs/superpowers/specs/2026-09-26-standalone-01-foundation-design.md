@@ -201,10 +201,11 @@ default_box_template_id, default_pallet_template_id, default_duplicate_template_
 - `products(id, gtin14 CHECK(length=14 AND цифры), name, print_name, chz_group_code REFERENCES chz_product_groups, box_capacity, pallet_box_capacity, shelf_life_days, default_box_template_id, default_pallet_template_id, archived, status GENERATED ALWAYS AS (CASE WHEN chz_group_code IS NOT NULL AND box_capacity IS NOT NULL AND pallet_box_capacity IS NOT NULL THEN 'active' ELSE 'draft' END) VIRTUAL, rev)`;
   частичный уникальный индекс `gtin14` среди неархивных (как `products_tenant_gtin_unarchived_uq`).
   Ссылки на шаблоны — `ON DELETE SET NULL`. Правила плана 1e1: хост проверяет у
-  `gtin14` только вид — 14 цифр ASCII после обрезки (контрольную цифру и префикс
-  проверяет интерфейс: `normalizeToGtin14`, `gtinMatchesPrefix`); повтор среди
-  неархивных — `conflict` с `constraint: gtin14` при создании, смене GTIN и
-  возврате из архива. Имя — 1–200 символов, имя для печати — до 200 или пусто,
+  `gtin14` только вид — 14 цифр ASCII после обрезки (контрольную цифру проверяет
+  интерфейс: `normalizeToGtin14`, а префикс он только сверяет для подсказки о
+  владельце: `gtinMatchesPrefix`); повтор среди неархивных — `conflict` с
+  `constraint: gtin14` при создании, смене GTIN и возврате из архива. Имя — 1–200
+  символов, имя для печати — до 200 или пусто,
   в коробе 1–100 000 штук, на паллете 1–10 000 коробов (в облаке потолка нет,
   этот лишь не пускает опечатку), срок годности 1–3650 дней (граница облака),
   товарная группа должна существовать. `PUT` несёт все поля и `expectedRev`, как
