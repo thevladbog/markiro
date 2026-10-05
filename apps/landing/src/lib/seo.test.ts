@@ -166,7 +166,7 @@ describe("SEO generators", () => {
 
     expect(llms).toContain("## Коротко о продукте");
     expect(llms).toContain("единица → короб");
-    expect(llms).toContain("hello@v-b.tech");
+    expect(llms).toContain("hello@markiro.app");
     expect(llms).toContain("https://markiro.app/#demo");
     expect(llms).toContain("## Полные тексты");
     expect(llms).toContain("https://markiro.app/llms-full.txt");
@@ -449,14 +449,14 @@ describe("SEO generators", () => {
       "@id": "https://markiro.app/#organization",
       name: "Markiro",
       url: "https://markiro.app/",
-      email: "hello@v-b.tech",
+      email: "hello@markiro.app",
       logo: { "@type": "ImageObject", url: "https://markiro.app/brand/markiro-logo.svg" },
       areaServed: "RU",
       contactPoint: [
         {
           "@type": "ContactPoint",
           contactType: "sales",
-          email: "hello@v-b.tech",
+          email: "hello@markiro.app",
           availableLanguage: ["Russian", "English"],
         },
       ],

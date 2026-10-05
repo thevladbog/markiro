@@ -509,6 +509,31 @@ input:focus-visible {
   font: 500 0.6875rem / 1 var(--font-mono);
 }
 
+.landing-footer__contacts {
+  display: grid;
+  gap: var(--sp-2);
+  font-style: normal;
+}
+
+.landing-footer__contacts a {
+  width: fit-content;
+  color: var(--fg-1);
+  font: 500 0.875rem / 1.4 var(--font-ui);
+  text-decoration: none;
+}
+
+.landing-footer__contacts a:hover {
+  text-decoration: underline;
+  text-underline-offset: 0.2em;
+}
+
+.landing-footer__requisites {
+  max-width: 22rem;
+  margin: 0;
+  color: var(--fg-3);
+  font: 400 0.75rem / 1.5 var(--font-ui);
+}
+
 .landing-footer__column {
   display: grid;
   gap: var(--sp-3);
@@ -1994,6 +2019,12 @@ input:focus-visible {
   color: var(--fg-2);
   font-size: 1.125rem;
   line-height: 1.6;
+}
+.not-found-page__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4) var(--sp-6);
 }
 
 @media (max-width: 767px) {

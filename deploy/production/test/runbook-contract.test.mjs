@@ -362,7 +362,7 @@ test("landing publication runbook keeps demo email release gates observable", as
     "DKIM",
     "SPF",
     "DMARC",
-    "hello@v-b.tech",
+    "hello@markiro.app",
     "SmartCaptcha",
     "PUBLIC_DEMO_SUBMISSION_ENABLED",
     "LANDING_DEMO_SUBMISSION_ENABLED",

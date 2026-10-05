@@ -892,7 +892,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Как заказать демонстрацию?",
         answer:
-          "Через форму на главной странице или письмом на hello@v-b.tech. На демонстрации разбирается реальный сценарий вашей линии: продукция, упаковка, оборудование и обмен данными.",
+          "Через форму на главной странице или письмом на hello@markiro.app. На демонстрации разбирается реальный сценарий вашей линии: продукция, упаковка, оборудование и обмен данными.",
       },
     ],
   },
@@ -1733,7 +1733,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "How do I request a demonstration?",
         answer:
-          "Through the form on the home page or by e-mail to hello@v-b.tech. The demonstration walks through a real scenario of your line: product, packaging, equipment and data exchange.",
+          "Through the form on the home page or by e-mail to hello@markiro.app. The demonstration walks through a real scenario of your line: product, packaging, equipment and data exchange.",
       },
     ],
   },
