@@ -112,6 +112,21 @@ test("application changes select their documented jobs", () => {
   }
 });
 
+test("the demo-form source allow-list also runs the landing suite that renders the forms", () => {
+  assert.deepEqual(
+    enabledJobs(
+      classifyChangedFiles(["apps/api/src/modules/demo-requests/demo-request-routes.ts"]),
+    ),
+    [
+      "verify_static",
+      "verify_api_tests",
+      "verify_app_tests",
+      "tenant_team_infrastructure",
+      "production_bundle",
+    ],
+  );
+});
+
 test("shared packages fan out to their current consumers", () => {
   const cases = [
     [

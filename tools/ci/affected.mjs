@@ -138,6 +138,12 @@ function jobsForPath(path) {
     return [...sharedJobs.domain, "handheld_android"];
   }
 
+  // The landing render suite checks every page with a demo form against this
+  // allow-list, so editing it must also run the app suites.
+  if (path === "apps/api/src/modules/demo-requests/demo-request-routes.ts") {
+    return [...appJobs.api, "verify_app_tests"];
+  }
+
   if (path.startsWith("apps/signer/")) {
     if (
       path.startsWith("apps/signer/src-tauri/") ||

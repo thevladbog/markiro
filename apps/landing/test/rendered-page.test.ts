@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { DEMO_SOURCE_PATHS } from "../../api/src/modules/demo-requests/demo-request-routes";
 import { findFilmPage } from "../src/content/film";
 import { projectHomeMap } from "../src/scripts/film/world/home-map";
 
@@ -41,6 +42,10 @@ const SAMPLE_CLUSTER_ROUTES = [
   "/instruktsii/stantsiya-vkhod-i-start-smeny/",
 ] as const;
 const FILM_ROUTES = ["/kak-rabotaet/", "/en/how-it-works/"] as const;
+
+function isDemoSourcePath(route: string): boolean {
+  return DEMO_SOURCE_PATHS.some((sourcePath) => sourcePath === route);
+}
 
 beforeAll(() => {
   execFileSync(
@@ -1499,6 +1504,29 @@ describe("rendered landing page", () => {
         ),
       ).toBeNull();
     }
+  });
+
+  // The form posts `location.pathname`, and the API rejects any path outside its
+  // allow-list with 400. Browser specs stub the endpoint, so this is the only
+  // check that a page carrying the form can actually submit it.
+  it("renders the demo form only on pages whose path the API accepts", () => {
+    const formRoutes = readdirSync(enabledOutputDirectory, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith(".html"))
+      .map((entry) => path.join(entry.parentPath, entry.name))
+      .flatMap((file) => {
+        const html = readFileSync(file, "utf8");
+        if (!html.includes("data-demo-form")) return [];
+        const relative = path.relative(enabledOutputDirectory, file).split(path.sep).join("/");
+        const route = relative === "index.html" ? "/" : `/${relative.replace(/index\.html$/, "")}`;
+        const form = new JSDOM(html).window.document.querySelector<HTMLFormElement>(
+          "form[data-demo-form]",
+        );
+        expect(form?.dataset.sourcePath, file).toBe(route);
+        return [route];
+      });
+
+    expect(formRoutes).toEqual(expect.arrayContaining(["/", "/en/", ...FILM_ROUTES]));
+    expect(formRoutes.filter((route) => !isDemoSourcePath(route))).toEqual([]);
   });
 
   it("does not mention CRM or internal rollout dependencies in disabled builds", () => {
