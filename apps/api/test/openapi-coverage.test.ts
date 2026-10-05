@@ -1,7 +1,7 @@
 import "reflect-metadata";
 import { readdirSync } from "node:fs";
 import { join, relative } from "node:path";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
 /**
  * Static OpenAPI coverage gate: every Nest route must carry an
@@ -46,14 +46,15 @@ interface RouteProblem {
   problems: string[];
 }
 
-async function collectProblems(): Promise<RouteProblem[]> {
-  const files = findControllerFiles(SRC_DIR).sort();
-  expect(files.length).toBeGreaterThan(40); // guard against a silently-empty walk
+interface ControllerModule {
+  file: string;
+  moduleExports: Record<string, unknown>;
+}
 
+function collectProblems(modules: ControllerModule[]): RouteProblem[] {
   const failures: RouteProblem[] = [];
 
-  for (const file of files) {
-    const moduleExports: Record<string, unknown> = await import(file);
+  for (const { file, moduleExports } of modules) {
     for (const exported of Object.values(moduleExports)) {
       if (typeof exported !== "function") continue;
       const controllerPath: unknown = Reflect.getMetadata(PATH_METADATA, exported);
@@ -118,8 +119,22 @@ async function collectProblems(): Promise<RouteProblem[]> {
 }
 
 describe("OpenAPI documentation coverage", () => {
-  it("documents a summary and a success response for every route", async () => {
-    const failures = await collectProblems();
+  const modules: ControllerModule[] = [];
+
+  // Cold Vite transformation of every controller and its dependencies is setup,
+  // not route-validation latency. Give only this bounded preparation 20 seconds;
+  // keep the actual coverage assertion under the unchanged default test timeout.
+  beforeAll(async () => {
+    const files = findControllerFiles(SRC_DIR).sort();
+    expect(files.length).toBeGreaterThan(40); // guard against a silently-empty walk
+    for (const file of files) {
+      const moduleExports: Record<string, unknown> = await import(file);
+      modules.push({ file, moduleExports });
+    }
+  }, 20_000);
+
+  it("documents a summary and a success response for every route", () => {
+    const failures = collectProblems(modules);
     const report = failures
       .map(({ route, problems }) => `${route}\n  - ${problems.join("\n  - ")}`)
       .join("\n");
