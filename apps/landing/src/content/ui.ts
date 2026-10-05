@@ -240,8 +240,8 @@ const RU = {
       ],
       heading: "Всё описано до покупки.",
       kicker: "06 / ОТКРЫТЫЕ ДОКУМЕНТЫ",
-      lead: "Инструкции для станции и кабинета, договор и регламенты опубликованы на сайте. Их можно прочитать до разговора с нами.",
-      legal: "Договор и регламенты",
+      lead: "Инструкции для станции и кабинета, политика обработки персональных данных и поручение на обработку опубликованы на сайте. Их можно прочитать до разговора с нами.",
+      legal: "Юридические документы",
     },
     materials: {
       allArticles: "Все статьи",
@@ -500,8 +500,8 @@ const EN = {
       ],
       heading: "Everything is documented before you buy.",
       kicker: "06 / OPEN DOCUMENTS",
-      lead: "Station and admin panel instructions, the agreement and the regulations are published on the site. You can read them before you talk to us.",
-      legal: "Agreement and regulations",
+      lead: "Station and admin panel instructions, the personal data policy and the data processing agreement are published on the site. You can read them before you talk to us.",
+      legal: "Legal documents",
     },
     materials: {
       allArticles: "All articles",

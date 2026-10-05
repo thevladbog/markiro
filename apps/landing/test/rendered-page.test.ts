@@ -173,7 +173,7 @@ describe("rendered landing page", () => {
       articleDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
     ) as { "@graph": Array<Record<string, unknown>> };
     expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-      dateModified: "2026-09-27",
+      dateModified: "2026-10-05",
       datePublished: "2026-08-26",
       headline: "Агрегация пива в короба: как не остановить производственную линию",
       image: "https://markiro.app/og-beer-case-aggregation.jpg",
@@ -183,7 +183,7 @@ describe("rendered landing page", () => {
     const bodyText = articleDocument.body.textContent?.replace(/\s+/g, " ") ?? "";
     expect(bodyText).toContain("Текущий контур Markiro — «единица → короб → паллета»");
     expect(bodyText).toContain("У короба и у паллеты свой SSCC");
-    expect(bodyText).toContain("Новые товарные группы добавляются поэтапно");
+    expect(bodyText).toContain("Markiro работает на линиях пива и сидра");
     expect(bodyText).not.toContain("внедряется для производителей");
     expect(bodyText).not.toContain("относится к следующему этапу");
     expect(
@@ -230,7 +230,7 @@ describe("rendered landing page", () => {
       articleDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
     ) as { "@graph": Array<Record<string, unknown>> };
     expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-      dateModified: "2026-09-27",
+      dateModified: "2026-10-05",
       datePublished: "2026-08-26",
       headline: "Маркировка пива в 2026 году: что проверить производителю на линии",
       image: "https://markiro.app/og-beer-marking-2026.jpg",
@@ -385,7 +385,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-09-27",
+        dateModified: "2026-10-05",
         datePublished: "2026-08-26",
         inLanguage: article.lang,
       });
@@ -462,7 +462,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-09-27",
+        dateModified: "2026-10-05",
         datePublished: "2026-08-26",
         inLanguage: article.lang,
       });
@@ -545,7 +545,7 @@ describe("rendered landing page", () => {
         localizedDocument.querySelector('script[type="application/ld+json"]')?.textContent ?? "",
       ) as { "@graph": Array<Record<string, unknown>> };
       expect(graph["@graph"].find((entry) => entry["@type"] === "Article")).toMatchObject({
-        dateModified: "2026-09-27",
+        dateModified: "2026-10-05",
         datePublished: "2026-08-26",
         inLanguage: article.lang,
       });
@@ -1304,7 +1304,7 @@ describe("rendered landing page", () => {
     }
   });
 
-  it("states the product-group boundary on the home pages and keeps the SSCC pages' current one", () => {
+  it("states one product-group boundary: running on beer and cider, other groups checked before launch", () => {
     for (const [route, groups, check] of [
       ["/", "любой маркируемой продукции", "Особенности вашей товарной группы сверяем до запуска"],
       ["/en/", "any marked goods", "We check the rules of your product group before launch"],
@@ -1314,24 +1314,46 @@ describe("rendered landing page", () => {
       expect(text, route).toContain(check);
       expect(text, route).not.toContain("Сейчас — пиво, сидр");
       expect(text, route).not.toContain("Currently focused on beer");
-      expect(text, route).not.toContain("Новые товарные группы добавляются поэтапно");
-      expect(text, route).not.toContain("Additional product categories are being added gradually");
     }
 
-    const ruCategory = "Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки";
-    const enCategory = "Beer, beverages made from beer and low-alcohol beverages";
-    const ruSsccText =
-      documents.get("/sscc-i-agregatsiya/")?.body.textContent?.replace(/\s+/g, " ") ?? "";
-    expect(ruSsccText).toContain(ruCategory);
-    expect(ruSsccText.toLowerCase()).toContain("сидр");
-    expect(ruSsccText).toContain("Новые товарные группы добавляются поэтапно");
-    expect(ruSsccText).not.toContain("внедряется для производителей");
-    const enSsccText =
-      documents.get("/en/sscc-and-aggregation/")?.body.textContent?.replace(/\s+/g, " ") ?? "";
-    expect(enSsccText).toContain(enCategory);
-    expect(enSsccText.toLowerCase()).toContain("cider");
-    expect(enSsccText).toContain("Additional product categories are being added gradually");
-    expect(enSsccText).not.toContain("is currently deployed");
+    for (const [route, running, check] of [
+      [
+        "/markirovka-chestny-znak/",
+        "Markiro работает на линиях пива и сидра",
+        "сверяем до запуска",
+      ],
+      ["/sscc-i-agregatsiya/", "Markiro работает на линиях пива и сидра", "сверяем до запуска"],
+      ["/faq/", "Markiro работает на линиях пива и сидра", "сверяем до запуска"],
+      ["/en/chestny-znak-serialization/", "Markiro runs on beer and cider lines", "before launch"],
+      ["/en/sscc-and-aggregation/", "Markiro runs on beer and cider lines", "before launch"],
+      ["/en/faq/", "Markiro runs on beer and cider lines", "before launch"],
+    ] as const) {
+      const text = documents.get(route)?.body.textContent?.replace(/\s+/g, " ") ?? "";
+      expect(text, route).toContain(running);
+      expect(text, route).toContain(check);
+    }
+
+    // The beer-only boundary contradicted the home page; no built page may keep it.
+    const retiredClaims = [
+      "добавляются поэтапно",
+      "Сейчас поддерживается товарная группа",
+      "ориентирован на товарную группу",
+      "ориентирован на производственные сценарии",
+      "Сейчас — «Пиво",
+      "being added gradually",
+      "being introduced gradually",
+      "currently focuses on",
+      "The supported product group is currently",
+      "Currently “Beer",
+    ];
+    const builtTexts = readdirSync(outputDirectory, { recursive: true, withFileTypes: true })
+      .filter((entry) => entry.isFile() && /\.(?:html|txt|xml)$/u.test(entry.name))
+      .map((entry) => path.join(entry.parentPath, entry.name));
+    expect(builtTexts.length).toBeGreaterThan(50);
+    for (const file of builtTexts) {
+      const text = readFileSync(file, "utf8").replace(/\s+/g, " ");
+      for (const claim of retiredClaims) expect(text, `${file}: ${claim}`).not.toContain(claim);
+    }
 
     const ruSscc = documents.get("/sscc-i-agregatsiya/")?.body.textContent ?? "";
     expect(ruSscc).toContain("Поддерживается цепочка «единица → короб → паллета»");
@@ -1381,6 +1403,33 @@ describe("rendered landing page", () => {
     const en1c = documents.get("/en/1c-integration/")?.body.textContent ?? "";
     expect(en1c).toContain("Shipment export over CommerceML is planned as the next stage.");
     expect(en1c).not.toContain("after pallet aggregation");
+  });
+
+  // MKR-AGR-01 is still a draft, so the home pages list only what /legal/ publishes.
+  it("does not claim the agreement is published", () => {
+    for (const [route, lead, link, retired] of [
+      [
+        "/",
+        "Инструкции для станции и кабинета, политика обработки персональных данных и поручение на обработку опубликованы на сайте.",
+        "Юридические документы",
+        "договор и регламенты опубликованы",
+      ],
+      [
+        "/en/",
+        "Station and admin panel instructions, the personal data policy and the data processing agreement are published on the site.",
+        "Legal documents",
+        "the agreement and the regulations are published",
+      ],
+    ] as const) {
+      const page = documents.get(route);
+      const text = page?.body.textContent?.replace(/\s+/g, " ") ?? "";
+      expect(text, route).toContain(lead);
+      expect(text, route).not.toContain(retired);
+      const legalLink = [...(page?.querySelectorAll("a") ?? [])].find(
+        (anchor) => anchor.textContent?.replace("→", "").trim() === link,
+      );
+      expect(legalLink?.getAttribute("href"), route).toBe(route === "/" ? "/legal/" : "/en/legal/");
+    }
   });
 
   it("renders the rollout, documents, articles and demo sections", () => {

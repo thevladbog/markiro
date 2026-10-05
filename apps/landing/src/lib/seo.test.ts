@@ -66,10 +66,10 @@ describe("SEO generators", () => {
     );
     expect(sitemap).toContain("<loc>https://markiro.app/en/offline-production/</loc>");
     expect(sitemap).toMatch(
-      /<loc>https:\/\/markiro\.app\/stati\/agregatsiya-piva-v-koroba\/<\/loc>[\s\S]*?<lastmod>2026-09-27<\/lastmod>/,
+      /<loc>https:\/\/markiro\.app\/stati\/agregatsiya-piva-v-koroba\/<\/loc>(?:(?!<\/url>)[\s\S])*<lastmod>2026-10-05<\/lastmod>/,
     );
     expect(sitemap).toMatch(
-      /<loc>https:\/\/markiro\.app\/stati\/markirovka-piva-2026\/<\/loc>[\s\S]*?<lastmod>2026-09-27<\/lastmod>/,
+      /<loc>https:\/\/markiro\.app\/stati\/markirovka-piva-2026\/<\/loc>(?:(?!<\/url>)[\s\S])*<lastmod>2026-10-05<\/lastmod>/,
     );
     expect(sitemap).toContain("<loc>https://markiro.app/en/articles/beer-case-aggregation/</loc>");
     expect(sitemap).toContain("<loc>https://markiro.app/en/articles/beer-marking-2026/</loc>");
