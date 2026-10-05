@@ -1,14 +1,26 @@
-import { hasValidCheckDigit } from "@markiro/domain";
+import {
+  buildDefaultLabelTemplates,
+  buildDuplicateLabelTemplates,
+  buildPalletLabelTemplates,
+  DEFAULT_BOX_LABEL_TEMPLATE_NAME,
+  hasValidCheckDigit,
+  PALLET_LABEL_TEMPLATE_NAME,
+} from "@markiro/domain";
 import { describe, expect, it } from "vitest";
 
+import { bootstrapRequestSchema, type TemplatePurpose } from "../src/host/protocol.js";
 import {
   defaultWizardValues,
   fieldFromHost,
+  MAX_STOCK_TEMPLATES,
   stepOf,
+  stockTemplateCounts,
+  stockTemplates,
   toBootstrapRequest,
   validateStep,
   type WizardValues,
 } from "../src/wizard/wizard-form.js";
+import { EXPECTED_TEMPLATES } from "./support/wizard.js";
 
 function values(overrides: Partial<WizardValues> = {}): WizardValues {
   return {
@@ -124,6 +136,7 @@ describe("the wizard request", () => {
       },
       sscc: { boxNextSerial: 1, palletNextSerial: 0 },
       lines: ["Линия 1"],
+      templates: EXPECTED_TEMPLATES,
     });
   });
 
@@ -138,5 +151,59 @@ describe("the wizard request", () => {
     expect(stepOf("boxNextSerial")).toBe("sscc");
     expect(stepOf("lines.3.name")).toBe("lines");
     expect(stepOf("passwordConfirm")).toBe("admin");
+  });
+});
+
+describe("the wizard's stock templates", () => {
+  it("go with the request as the strict schema reads it: the domain's box, duplicate and pallet sets, each with its purpose and layout", () => {
+    const request = toBootstrapRequest(values());
+    expect(bootstrapRequestSchema.parse(request)).toStrictEqual(request);
+    expect(request.templates).toStrictEqual(EXPECTED_TEMPLATES);
+    expect(stockTemplates()).toStrictEqual(EXPECTED_TEMPLATES);
+  });
+
+  it("make exactly the dated box 58×40 and the pallet 100×150 the organization's defaults, leave `orgDefault` out everywhere else, and give a duplicate none", () => {
+    const templates = stockTemplates();
+    expect(
+      templates
+        .filter((template) => template.orgDefault === true)
+        .map(({ name, purpose }) => ({ name, purpose })),
+    ).toStrictEqual([
+      { name: DEFAULT_BOX_LABEL_TEMPLATE_NAME, purpose: "box" },
+      { name: PALLET_LABEL_TEMPLATE_NAME, purpose: "pallet" },
+    ]);
+    expect(templates.filter((template) => "orgDefault" in template)).toHaveLength(2);
+    expect(templates.some((template) => template.purpose === "product_duplicate")).toBe(true);
+  });
+
+  it("count each purpose as the domain builds it and stay within the host's cap of 32", () => {
+    const templates = stockTemplates();
+    expect(stockTemplateCounts(templates)).toStrictEqual({
+      box: buildDefaultLabelTemplates().length,
+      pallet: buildPalletLabelTemplates().length,
+      duplicate: buildDuplicateLabelTemplates().length,
+    });
+    expect(MAX_STOCK_TEMPLATES).toBe(32);
+    expect(templates.length).toBeLessThanOrEqual(MAX_STOCK_TEMPLATES);
+  });
+
+  it("keep the whole request under 256 KiB, an eighth of the host's 2 MiB body limit", () => {
+    const body = JSON.stringify(toBootstrapRequest(values()));
+    expect(new TextEncoder().encode(body).length).toBeLessThan(256 * 1024);
+  });
+
+  it("are counted by purpose", () => {
+    const of = (purpose: TemplatePurpose) => ({ purpose });
+    expect(
+      stockTemplateCounts([
+        of("box"),
+        of("product_duplicate"),
+        of("box"),
+        of("pallet"),
+        of("box"),
+        of("product_duplicate"),
+      ]),
+    ).toStrictEqual({ box: 3, pallet: 1, duplicate: 2 });
+    expect(stockTemplateCounts([])).toStrictEqual({ box: 0, pallet: 0, duplicate: 0 });
   });
 });

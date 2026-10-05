@@ -1,10 +1,16 @@
+import {
+  buildDefaultLabelTemplates,
+  buildDuplicateLabelTemplates,
+  buildPalletLabelTemplates,
+} from "@markiro/domain";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { HostError } from "../src/host/client.js";
 import { DeviceError } from "../src/host/device.js";
+import i18n from "../src/i18n/index.js";
 import { BootstrapWizard } from "../src/wizard/BootstrapWizard.js";
-import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
+import { completeWizard, EXPECTED_REQUEST, reachReview } from "./support/wizard.js";
 
 function type(label: string, value: string): void {
   fireEvent.change(screen.getByLabelText(label), { target: { value } });
@@ -16,6 +22,23 @@ describe("BootstrapWizard", () => {
     render(<BootstrapWizard onSubmit={onSubmit} />);
     await completeWizard();
     await waitFor(() => expect(onSubmit).toHaveBeenCalledWith(EXPECTED_REQUEST));
+  });
+
+  it("says on the review step how many stock templates of each purpose it creates, each count in its own place", async () => {
+    render(<BootstrapWizard onSubmit={vi.fn()} />);
+    await reachReview();
+    const box = buildDefaultLabelTemplates().length;
+    const pallet = buildPalletLabelTemplates().length;
+    const duplicate = buildDuplicateLabelTemplates().length;
+    expect(
+      screen.getByText(
+        `Мастер создаст типовые шаблоны этикеток: для коробов — ${box}, для паллет — ${pallet}, для дубликатов товара — ${duplicate}.`,
+      ),
+    ).toBeTruthy();
+    // The domain builds as many pallet templates as duplicates: distinct counts pin each place.
+    expect(i18n.t("wizard.review.templates", { box: 3, pallet: 1, duplicate: 2 })).toBe(
+      "Мастер создаст типовые шаблоны этикеток: для коробов — 3, для паллет — 1, для дубликатов товара — 2.",
+    );
   });
 
   it("stays on a step until its fields are right", async () => {

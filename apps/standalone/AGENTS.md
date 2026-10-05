@@ -523,21 +523,29 @@ drops. An unchanged document writes nothing, and the audit row
 (`template_defaults.update`, target `template_defaults`/`1`) carries the
 changed parts with `{ from, to }`, `categories` as whole lists.
 
-The wizard (`POST /v1/bootstrap`) takes the stock templates the app builds
-with `@markiro/domain` (plan 1e3) as an optional `templates` list, so a
-wizard from before then still works: at most 32 (`MAX_STOCK_TEMPLATES`; the
-domain builds 20), each a name, a purpose and a layout checked as any
-template's, stored enabled, for every category and `stock`, in the
-wizard's one transaction, so a refusal creates nothing. The whole request
-must stay under axum's default 2 MiB body limit (about eight maximum-size
-layouts, where the domain's real 20-template set is about 31 KB): a larger
+The wizard (`POST /v1/bootstrap`) takes the stock templates as an optional
+`templates` list, so a wizard from before plan 1e3 still works: at most 32
+(`MAX_STOCK_TEMPLATES`), each a name, a purpose and a layout checked as any
+template's, stored enabled, for every category and `stock`, in the wizard's
+one transaction, so a refusal creates nothing. The app's wizard sends them
+since plan 1e3: `stockTemplates` (`src/wizard/wizard-form.ts`) builds the
+domain's box, product-duplicate and pallet sets (20 templates today;
+`test/wizard-form.test.ts` reads the counts from the builders and keeps the
+total within `MAX_STOCK_TEMPLATES`, which `wizard-form.ts` mirrors), and the
+review step says how many of each purpose it creates. `orgDefault: true` on
+one template of a purpose makes it the organization's default of that purpose,
+so the request names no id it does not have yet; a second of the same purpose
+is `validation_failed` on `templates.{i}.orgDefault`. The wizard sets it on
+the dated box 58×40 (`DEFAULT_BOX_LABEL_TEMPLATE_NAME`) and the pallet 100×150
+(`PALLET_LABEL_TEMPLATE_NAME`), as the cloud seeds a new tenant, and leaves it
+out everywhere else: the cloud has no duplicate default, and whether the
+standalone sets one is an owner question. The whole request must stay under
+axum's default 2 MiB body limit (about eight maximum-size layouts): a larger
 body is `validation_failed` without `details.field`. No route-level
-`DefaultBodyLimit` is set, and raising it is an owner or plan 1e3 decision.
-`orgDefault: true` on one template of a purpose makes it the organization's
-default of that purpose, so the request names no id it does not have yet; a
-second of the same purpose is `validation_failed` on
-`templates.{i}.orgDefault`. The `host.bootstrap` row counts them
-(`templateCount`).
+`DefaultBodyLimit` is set, and plan 1e3 keeps it so: the wizard's body is
+about 31 KB, and `test/wizard-form.test.ts` holds it under 256 KiB, an eighth
+of the limit, so only a stock set that grows toward the limit reopens the
+question. The `host.bootstrap` row counts them (`templateCount`).
 
 Plan 1e1 built the host's side and plan 1e2 the webview's: Zod schemas for
 every catalog shape and a builder for every office request body of the catalog
@@ -545,8 +553,9 @@ every catalog shape and a builder for every office request body of the catalog
 `test/template-eligibility.test.ts` the slot rule's), the station's copies of
 products, templates and category defaults («Reference sync», «Local
 database») and the office's «Товары» page («Office pages»). The template
-screens, the defaults screen and the wizard's `templates` come with plan 1e3;
-the `HostApi` methods and the builders they call are in place.
+screens and the defaults screen come with plan 1e3, whose wizard already
+sends the stock templates (above); the `HostApi` methods and the builders
+they call are in place.
 
 ## Reference sync
 
@@ -669,7 +678,7 @@ layout, which the host would read as «keep»; `templateDefaultsUpdate` sends
 the whole document.
 The older forms (users, the organization, SSCC, sign-in and the own-password
 change) build their bodies inline, field by field, as does the wizard; its
-optional `templates`, which plan 1e3 sends, are typed by the strict
+`templates`, built by `stockTemplates` since plan 1e3, are typed by the strict
 `bootstrapRequestSchema`, against which `test/protocol.test.ts` parses
 `bootstrap-request-templates.json`. Raise `PROTOCOL_VERSION` for an incompatible
 change; the host keeps accepting the previous version. Response types, which

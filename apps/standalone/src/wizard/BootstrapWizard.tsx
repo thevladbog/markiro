@@ -16,6 +16,7 @@ import {
   fieldFromHost,
   MAX_LINES,
   stepOf,
+  stockTemplateCounts,
   toBootstrapRequest,
   validateStep,
   WIZARD_STEPS,
@@ -302,6 +303,9 @@ function WizardReview({ values }: { values: WizardValues }) {
           </div>
         ))}
       </dl>
+      <p className="standalone-wizard__note">
+        {t("wizard.review.templates", stockTemplateCounts(request.templates ?? []))}
+      </p>
     </>
   );
 }

@@ -1,7 +1,15 @@
-import { ssccSerialCapacity } from "@markiro/domain";
+import {
+  buildDefaultLabelTemplates,
+  buildDuplicateLabelTemplates,
+  buildPalletLabelTemplates,
+  DEFAULT_BOX_LABEL_TEMPLATE_NAME,
+  PALLET_LABEL_TEMPLATE_NAME,
+  ssccSerialCapacity,
+  type LabelTemplateSpec,
+} from "@markiro/domain";
 import { z } from "zod";
 
-import type { BootstrapRequest } from "../host/protocol.js";
+import type { BootstrapRequest, StockTemplate, TemplatePurpose } from "../host/protocol.js";
 import {
   isPlainText,
   issuerPrefix,
@@ -165,6 +173,52 @@ export function validateStep(step: WizardStep, values: WizardValues): FieldIssue
   }
 }
 
+/** The most stock templates the host takes (`bootstrap::MAX_STOCK_TEMPLATES`). */
+export const MAX_STOCK_TEMPLATES = 32;
+
+/** One family of the domain's stock templates with its purpose. */
+function family(
+  purpose: TemplatePurpose,
+  built: readonly { name: string; spec: LabelTemplateSpec }[],
+  defaultName: string | null,
+): StockTemplate[] {
+  return built.map(({ name, spec }) =>
+    name === defaultName ? { name, purpose, spec, orgDefault: true } : { name, purpose, spec },
+  );
+}
+
+/**
+ * The stock label templates the wizard sends: the domain's box,
+ * product-duplicate and pallet sets, in the order the cloud seeds a new
+ * tenant (`tenant-provisioning.service.ts`). The dated box 58×40
+ * (`DEFAULT_BOX_LABEL_TEMPLATE_NAME`) and the pallet 100×150
+ * (`PALLET_LABEL_TEMPLATE_NAME`) become the organization's defaults; a
+ * duplicate gets none, as in the cloud. Every other template leaves
+ * `orgDefault` out, which the host reads as `false`.
+ */
+export function stockTemplates(): StockTemplate[] {
+  return [
+    ...family("box", buildDefaultLabelTemplates(), DEFAULT_BOX_LABEL_TEMPLATE_NAME),
+    ...family("product_duplicate", buildDuplicateLabelTemplates(), null),
+    ...family("pallet", buildPalletLabelTemplates(), PALLET_LABEL_TEMPLATE_NAME),
+  ];
+}
+
+/**
+ * How many templates of each purpose a list holds, by the names the review's
+ * text uses. A type, not an interface: i18next takes it as interpolation
+ * values only with an implicit index signature.
+ */
+export type StockTemplateCounts = { box: number; pallet: number; duplicate: number };
+
+export function stockTemplateCounts(
+  templates: readonly Pick<StockTemplate, "purpose">[],
+): StockTemplateCounts {
+  const count = (purpose: TemplatePurpose) =>
+    templates.filter((template) => template.purpose === purpose).length;
+  return { box: count("box"), pallet: count("pallet"), duplicate: count("product_duplicate") };
+}
+
 export function toBootstrapRequest(values: WizardValues): BootstrapRequest {
   return {
     admin: {
@@ -175,6 +229,7 @@ export function toBootstrapRequest(values: WizardValues): BootstrapRequest {
     org: toOrgInput(values),
     sscc: { boxNextSerial: values.boxNextSerial, palletNextSerial: values.palletNextSerial },
     lines: values.lines.map((line) => line.name.trim()),
+    templates: stockTemplates(),
   };
 }
 
