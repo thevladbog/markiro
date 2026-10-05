@@ -743,7 +743,8 @@ describe("office label templates: switching on and off", () => {
       ["Коробка 58×40", "Выключить"],
       ["Вода и молоко", "Включить"],
     ] as const) {
-      const button = within(rowOf(name)).getByRole("button");
+      // The row has a second button, «Категории»: the state button is the one whose name starts with its text.
+      const button = within(rowOf(name)).getByRole("button", { name: new RegExp(`^${label}`) });
       expect(button.textContent).toBe(label);
       expect(button.getAttribute("aria-label")).toBe(`${label} шаблон «${name}»`);
       // A screen has one primary action, and a row's button is not it.
@@ -847,6 +848,267 @@ describe("office label templates: switching on and off", () => {
     expect(dialog().querySelector("b, i")).toBeNull();
     fireEvent.click(within(dialog()).getByRole("button", { name: "Выключить" }));
     const notice = await screen.findByText(`Шаблон «${name}» выключен.`);
+    expect(notice.closest(".mk-alert")?.querySelector("b, i")).toBeNull();
+  });
+});
+
+describe("office label templates: categories", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+  });
+
+  /** Opens a template's «Категории» and waits for the groups. */
+  async function openCategories(fake: FakeOfficeSession, name: string): Promise<void> {
+    await openTemplates(fake);
+    fireEvent.click(screen.getByRole("button", { name: `Категории шаблона «${name}»` }));
+    expect(screen.getByRole("dialog", { name: `Категории шаблона «${name}»` })).toBeTruthy();
+  }
+
+  function save(): HTMLElement {
+    return within(dialog()).getByRole("button", { name: "Сохранить" });
+  }
+
+  it("narrows a template to the chosen categories: the codes go ascending with the opened row's revision, and the row counts them", async () => {
+    const fake = session();
+    fake.api.updateTemplate.mockResolvedValue(answer(BOX_100, { chzProductGroupCodes: [8, 13] }));
+    await openCategories(fake, "Коробка 100×100");
+    expect(
+      within(dialog()).getByText(
+        "Шаблон будет предлагаться только товарам выбранных категорий. Умолчанием организации может быть только шаблон для всех категорий.",
+      ),
+    ).toBeTruthy();
+    expect(save()).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("radio", { name: "Только выбранные" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Упакованная вода" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Молочная продукция" }));
+    fireEvent.click(save());
+    expect(await screen.findByText("Категории шаблона «Коробка 100×100» сохранены.")).toBeTruthy();
+    expect(fake.api.updateTemplate.mock.calls).toStrictEqual([
+      ["office-session-token", BOX_100.id, { chzProductGroupCodes: [8, 13], expectedRev: 60 }],
+    ]);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    const scope = within(rowOf("Коробка 100×100")).getByText("Категорий: 2");
+    expect(scope.getAttribute("title")).toBe("Молочная продукция, Упакованная вода");
+    expect(cells("Коробка 100×100")[2]).toBe("100 × 100 мм");
+    await settle();
+    expect(fake.api.listTemplates).toHaveBeenCalledTimes(1);
+  });
+
+  it("widens a template to every category with null", async () => {
+    const fake = session();
+    fake.api.updateTemplate.mockResolvedValue(answer(MILK, { chzProductGroupCodes: null }));
+    await openCategories(fake, "Молоко 58×40");
+    fireEvent.click(screen.getByRole("radio", { name: "Все категории" }));
+    fireEvent.click(save());
+    expect(await screen.findByText("Категории шаблона «Молоко 58×40» сохранены.")).toBeTruthy();
+    expect(fake.api.updateTemplate.mock.calls).toStrictEqual([
+      ["office-session-token", MILK.id, { chzProductGroupCodes: null, expectedRev: 60 }],
+    ]);
+    expect(within(rowOf("Молоко 58×40")).getByText("Все категории")).toBeTruthy();
+  });
+
+  it("asks for at least one category before sending, and keeps «Сохранить» off while the categories are the row's in any order", async () => {
+    const reversed = summary("3c7e0b8a-5d9f-4e1a-8b2c-7d8e9f0a1b2c", "Обратный порядок", {
+      chzProductGroupCodes: [13, 8],
+    });
+    const fake = session([...TEMPLATES, reversed]);
+    fake.api.updateTemplate.mockResolvedValue(answer(reversed, { chzProductGroupCodes: [13] }));
+    await openCategories(fake, "Обратный порядок");
+    await screen.findByRole("checkbox", { name: "Молочная продукция" });
+    // The same categories in another order are no change: nothing would be sent.
+    expect(save()).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Молочная продукция" }));
+    fireEvent.click(screen.getByRole("checkbox", { name: "Упакованная вода" }));
+    expect(save()).toHaveProperty("disabled", false);
+    fireEvent.click(save());
+    const message = await screen.findByText(
+      "Выберите хотя бы одну категорию или переключитесь на «Все категории».",
+    );
+    expect(
+      screen.getByRole("radiogroup", { name: "Категории" }).getAttribute("aria-describedby"),
+    ).toBe(message.id);
+    expect(fake.api.updateTemplate).not.toHaveBeenCalled();
+    // A change of the categories takes the message away; the back-sorted list goes ascending.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Упакованная вода" }));
+    expect(
+      screen.queryByText("Выберите хотя бы одну категорию или переключитесь на «Все категории»."),
+    ).toBeNull();
+    fireEvent.click(save());
+    await waitFor(() => expect(fake.api.updateTemplate).toHaveBeenCalledTimes(1));
+    expect(fake.api.updateTemplate.mock.calls[0]?.[2]).toStrictEqual({
+      chzProductGroupCodes: [13],
+      expectedRev: 60,
+    });
+  });
+
+  it("explains a refused narrowing of a default: the categories by name, and where to choose another", async () => {
+    const fake = session();
+    fake.api.updateTemplate.mockRejectedValue(
+      hostError("conflict", 409, {
+        constraint: "template_is_default",
+        organizationDefault: false,
+        categoryDefaults: [8],
+      }),
+    );
+    await openCategories(fake, "Коробка 58×40");
+    fireEvent.click(screen.getByRole("radio", { name: "Только выбранные" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Упакованная вода" }));
+    fireEvent.click(save());
+    expect(
+      await within(dialog()).findByText(
+        "Шаблон выбран по умолчанию для категорий: Молочная продукция. Сначала выберите другой шаблон на странице «Умолчания шаблонов».",
+      ),
+    ).toBeTruthy();
+    expect(within(rowOf("Коробка 58×40")).getByText("Все категории")).toBeTruthy();
+  });
+
+  it("offers to load the templates again after a stale change of the categories, closing the dialog", async () => {
+    const fake = session();
+    fake.api.updateTemplate.mockRejectedValue(hostError("stale_revision", 409, { currentRev: 61 }));
+    await openCategories(fake, "Молоко 58×40");
+    fireEvent.click(screen.getByRole("radio", { name: "Все категории" }));
+    fireEvent.click(save());
+    fireEvent.click(await screen.findByRole("button", { name: "Загрузить заново" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(2));
+  });
+
+  // Beyond the plan: each test below kills a mutant the plan's tests let through.
+
+  it("lets both office roles change a template's categories, each button named after its template", async () => {
+    for (const user of [TECHNOLOGIST, { ...TECHNOLOGIST, role: "admin" as const }]) {
+      const view = renderOffice(session(TEMPLATES, user));
+      fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
+      fireEvent.click(
+        await screen.findByRole("button", { name: "Категории шаблона «Коробка 58×40»" }),
+      );
+      expect(
+        screen.getByRole("dialog", { name: "Категории шаблона «Коробка 58×40»" }),
+      ).toBeTruthy();
+      view.unmount();
+    }
+  });
+
+  it("puts a row's two actions in one box, the switch first and «Категории» second, each a compact secondary button named after its template", async () => {
+    await openTemplates(session());
+    for (const [name, label] of [
+      ["Коробка 58×40", "Выключить"],
+      ["Вода и молоко", "Включить"],
+    ] as const) {
+      const buttons = within(rowOf(name)).getAllByRole("button");
+      expect(buttons.map((button) => button.textContent)).toEqual([label, "Категории"]);
+      expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
+        `${label} шаблон «${name}»`,
+        `Категории шаблона «${name}»`,
+      ]);
+      expect(buttons[0]?.parentElement).toBe(buttons[1]?.parentElement);
+      for (const button of buttons) {
+        expect(button.parentElement?.classList.contains("mk-row-actions")).toBe(true);
+        expect(button.classList.contains("mk-btn--secondary")).toBe(true);
+        expect(button.classList.contains("mk-btn--compact")).toBe(true);
+      }
+    }
+  });
+
+  it("closes the dialog with «Отмена» without a request or a notice, and the next opening starts from the row's categories", async () => {
+    const fake = session();
+    await openCategories(fake, "Молоко 58×40");
+    fireEvent.click(screen.getByRole("radio", { name: "Все категории" }));
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Отмена" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(fake.api.updateTemplate).not.toHaveBeenCalled();
+    expect(screen.queryByText("Категории шаблона «Молоко 58×40» сохранены.")).toBeNull();
+    expect(within(rowOf("Молоко 58×40")).getByText("Молочная продукция")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Категории шаблона «Молоко 58×40»" }));
+    expect(
+      screen.getByRole("radio", { name: "Только выбранные" }).getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(save()).toHaveProperty("disabled", true);
+  });
+
+  it("sends the revision and compares the categories of the row as it was opened, even when the list is read again under the dialog", async () => {
+    const fake = session();
+    fake.api.updateTemplate.mockRejectedValue(hostError("stale_revision", 409, { currentRev: 61 }));
+    const queryClient = createOfficeQueryClient();
+    render(
+      <QueryClientProvider client={queryClient}>
+        <OfficeSessionProvider value={fake}>
+          <TemplatesPage />
+        </OfficeSessionProvider>
+      </QueryClientProvider>,
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Категории шаблона «Молоко 58×40»" }),
+    );
+    // Someone else narrowed the template to two categories (revision 61), and the list is read again while the dialog is open.
+    fake.api.listTemplates.mockResolvedValueOnce(
+      TEMPLATES.map((each) =>
+        each.id === MILK.id ? { ...MILK, chzProductGroupCodes: [8, 13], rev: 61 } : each,
+      ),
+    );
+    await act(async () => {
+      await queryClient.invalidateQueries({ queryKey: officeKeys.templates });
+    });
+    // The page has taken the new row in; the dialog keeps the one it was opened with.
+    expect(await screen.findByText("Категорий: 2")).toBeTruthy();
+    expect(fake.api.listTemplates).toHaveBeenCalledTimes(2);
+    expect(save()).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("radio", { name: "Все категории" }));
+    fireEvent.click(save());
+    expect(
+      await within(dialog()).findByText(
+        "Данные изменились, пока вы их редактировали. Обновите их и повторите.",
+      ),
+    ).toBeTruthy();
+    expect(fake.api.updateTemplate.mock.calls).toStrictEqual([
+      ["office-session-token", MILK.id, { chzProductGroupCodes: null, expectedRev: 60 }],
+    ]);
+  });
+
+  it("takes the explanation of a failed try away when the next try starts, and asks for a category instead", async () => {
+    const fake = session();
+    fake.api.updateTemplate.mockRejectedValueOnce(hostError("internal", 500));
+    await openCategories(fake, "Коробка 58×40");
+    fireEvent.click(screen.getByRole("radio", { name: "Только выбранные" }));
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Упакованная вода" }));
+    fireEvent.click(save());
+    expect(
+      await within(dialog()).findByText("На хосте произошла ошибка. Повторите попытку."),
+    ).toBeTruthy();
+    // The next try has no category: the host's failure goes, the dialog's own question stays, and nothing is sent.
+    fireEvent.click(screen.getByRole("checkbox", { name: "Упакованная вода" }));
+    fireEvent.click(save());
+    expect(
+      await within(dialog()).findByText(
+        "Выберите хотя бы одну категорию или переключитесь на «Все категории».",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("На хосте произошла ошибка. Повторите попытку.")).toBeNull();
+    expect(fake.api.updateTemplate).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a name with markup characters as plain text in the button's name, the dialog's title, the groups to choose from and the notice", async () => {
+    // `t()` does not escape what it interpolates (`escapeValue: false`): a name is shown as a React child or an attribute, never as HTML.
+    const name = '<b>Тест</b> & "кавычки"';
+    const group = '<i>Группа</i> & "x"';
+    const odd = summary("3c7e0b8a-5d9f-4e1a-8b2c-7d8e9f0a1b2c", name, {
+      chzProductGroupCodes: [21],
+    });
+    const fake = session([odd]);
+    fake.api.listProductGroups.mockResolvedValue([
+      ...GROUPS,
+      { code: 21, alias: "odd", name: group },
+    ]);
+    fake.api.updateTemplate.mockResolvedValue(answer(odd, { chzProductGroupCodes: [8, 21] }));
+    // `openCategories` finds the button, and the dialog, by the name as plain text.
+    await openCategories(fake, name);
+    expect(dialog().querySelector("b, i")).toBeNull();
+    expect(
+      within(dialog()).getByRole("checkbox", { name: group }).getAttribute("aria-checked"),
+    ).toBe("true");
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "Молочная продукция" }));
+    fireEvent.click(save());
+    const notice = await screen.findByText(`Категории шаблона «${name}» сохранены.`);
     expect(notice.closest(".mk-alert")?.querySelector("b, i")).toBeNull();
   });
 });

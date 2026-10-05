@@ -188,6 +188,19 @@
   gap: 8px;
 }
 
+/* A template's categories: the choice, the search and a list of groups that scrolls. */
+.category-scope {
+  display: grid;
+  gap: 12px;
+}
+
+.category-scope__list {
+  display: grid;
+  gap: 8px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
 /* The GTIN field, and under it what the dialog says about a valid GTIN. */
 .product-gtin,
 .product-gtin__notes {

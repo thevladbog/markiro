@@ -9,6 +9,7 @@ import {
   FilterBar,
   Input,
   PageHeader,
+  RowActions,
   Select,
   StatusChip,
   Table,
@@ -21,6 +22,7 @@ import { useProductGroups, useTemplates } from "../catalog-queries.js";
 import { officeKeys } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { useChangeList } from "../records.js";
+import { TemplateCategoriesDialog } from "./TemplateCategoriesDialog.js";
 import { TemplateStateDialog } from "./TemplateStateDialog.js";
 import {
   findTemplates,
@@ -34,7 +36,7 @@ import { describeScope, dpiText, PURPOSE_TONE, PURPOSES, sizeText } from "./temp
 const PURPOSE_FILTERS: readonly TemplatePurposeFilter[] = ["all", ...PURPOSES];
 const STATE_FILTERS: readonly TemplateStateFilter[] = ["all", "enabled", "disabled"];
 
-type TemplatesDialog = { kind: "state"; template: LabelTemplateSummary };
+type TemplatesDialog = { kind: "state" | "categories"; template: LabelTemplateSummary };
 
 /**
  * The label templates (spec §4.3, §5.5): a table, not the cloud's cards with
@@ -42,8 +44,9 @@ type TemplatesDialog = { kind: "state"; template: LabelTemplateSummary };
  * list, so the search and the filters work here, and the page sorts what it
  * shows by name. A product group's name comes from the host's lookup; when it
  * does not load, the list stays and shows the codes. Both office roles switch
- * templates on and off (`editCatalog`); a write's answer goes into the cached
- * row in place (`withTemplateChange`), and the list is not read again.
+ * templates on and off and change their categories (`editCatalog`); a write's
+ * answer goes into the cached row in place (`withTemplateChange`), and the
+ * list is not read again.
  */
 export function TemplatesPage() {
   const { t } = useTranslation();
@@ -133,17 +136,27 @@ export function TemplatesPage() {
       key: "actions",
       title: t("office.templates.table.actions"),
       render: (template) => (
-        <Button
-          variant="secondary"
-          size="compact"
-          aria-label={t(
-            template.enabled ? "office.templates.disableNamed" : "office.templates.enableNamed",
-            { name: template.name },
-          )}
-          onClick={() => open({ kind: "state", template })}
-        >
-          {t(template.enabled ? "office.templates.disable" : "office.templates.enable")}
-        </Button>
+        <RowActions>
+          <Button
+            variant="secondary"
+            size="compact"
+            aria-label={t(
+              template.enabled ? "office.templates.disableNamed" : "office.templates.enableNamed",
+              { name: template.name },
+            )}
+            onClick={() => open({ kind: "state", template })}
+          >
+            {t(template.enabled ? "office.templates.disable" : "office.templates.enable")}
+          </Button>
+          <Button
+            variant="secondary"
+            size="compact"
+            aria-label={t("office.templates.categoriesNamed", { name: template.name })}
+            onClick={() => open({ kind: "categories", template })}
+          >
+            {t("office.templates.categories")}
+          </Button>
+        </RowActions>
       ),
     });
   }
@@ -248,6 +261,16 @@ export function TemplatesPage() {
                 { name: template.name },
               ),
             )
+          }
+          onReload={reload}
+        />
+      )}
+      {canEdit && dialog?.kind === "categories" && (
+        <TemplateCategoriesDialog
+          template={dialog.template}
+          onClose={() => setDialog(null)}
+          onSaved={(template) =>
+            saved(template, t("office.templates.categoriesNotice", { name: template.name }))
           }
           onReload={reload}
         />

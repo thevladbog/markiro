@@ -1149,9 +1149,10 @@ requests and offer a retry.
   list, so the search (by name, without case), the purpose filter and the state
   filter work in the page; there are no pages, since a site keeps tens of
   templates. The templates are read whenever the page opens. Both roles switch a
-  template on and off (`useCan("editCatalog")`; no role lacks it, so there is no
-  read-only view). «Выключить» asks first, with the `destructive` submit, and
-  says the template is no longer offered for products and defaults and the
+  template on and off and change its categories (`useCan("editCatalog")`; no
+  role lacks it, so there is no read-only view). «Выключить» asks first, with
+  the `destructive` submit, and says the template is no longer offered for
+  products and defaults and the
   stations get the change; «Включить» asks lightly. Only the flag goes, with the
   opened row's revision (`templateUpdate`), and the answer goes into the cached
   row in place (`withTemplateChange`: the name, the flag, the categories,
@@ -1161,7 +1162,20 @@ requests and offer a retry.
   default the template is (the organization's, the categories by name, a code
   where the lookup lacks the group) and that another template must be chosen on
   «Умолчания шаблонов» first; `stale_revision` offers «Загрузить заново», which
-  closes the dialog and reads the list again.
+  closes the dialog and reads the list again. «Категории» opens a dialog on
+  `CategoryScopeField` (`src/office/templates/CategoryScopeField.tsx`, which the
+  editor of plan 1e4 is to reuse): «Все категории» or «Только выбранные», the
+  product groups by name with a search and a live count of the chosen ones; the
+  chosen codes stay while «Все категории» is picked, so switching back brings
+  them back, and while the lookup loads or fails the field keeps them and says
+  why it lists nothing. The dialog sends `null` for every category or the chosen
+  codes ascending (`scopeCodes`: `templateUpdate` takes a reordered list as a
+  change, a new revision and the layout to every station again), with the opened
+  row's revision; «Сохранить» stays off while the categories are the row's in
+  any order, and «Только выбранные» needs at least one category. Narrowing a
+  template out of a category whose default it is, or narrowing the
+  organization's default at all, is refused as switching it off is, in the same
+  words; a saved answer goes into the row in place.
 
 ## Marking rules
 
