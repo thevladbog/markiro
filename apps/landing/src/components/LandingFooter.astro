@@ -91,7 +91,7 @@ const consentSettingsLabel = page.locale === "ru" ? "Настройки cookies"
     <div class="landing-footer__meta" data-footer-meta>
       <a href={homePath} aria-label={copy.homeLabel}><BrandMark locale={page.locale} /></a>
       <address class="landing-footer__contacts" data-footer-contacts>
-        {phone && <a href={phone.href}>{phone.display}</a>}
+        {phone && <a href={phone.href} data-analytics="landing_phone_click" data-placement="footer">{phone.display}</a>}
         <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>
         <a href={SITE_CONTACTS.telegram.href}>Telegram @{SITE_CONTACTS.telegram.handle}</a>
       </address>

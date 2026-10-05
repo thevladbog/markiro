@@ -25,9 +25,11 @@ describe("landing footer contacts", () => {
     const document = await render("ru", PHONE);
     const contacts = document.querySelector("[data-footer-contacts]");
 
-    expect(contacts?.querySelector('a[href="tel:+79604954610"]')?.textContent).toBe(
-      "+7 960 495-46-10",
-    );
+    const phoneLink = contacts?.querySelector<HTMLAnchorElement>('a[href="tel:+79604954610"]');
+    expect(phoneLink?.textContent).toBe("+7 960 495-46-10");
+    // Phone clicks are a lead signal; the footer is counted like the header and hero.
+    expect(phoneLink?.dataset.analytics).toBe("landing_phone_click");
+    expect(phoneLink?.dataset.placement).toBe("footer");
     expect(contacts?.querySelector('a[href="mailto:hello@markiro.app"]')?.textContent).toBe(
       "hello@markiro.app",
     );
