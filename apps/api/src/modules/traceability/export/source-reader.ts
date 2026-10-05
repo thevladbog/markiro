@@ -39,6 +39,17 @@ const pinsSchema = z
 const unavailable = () => new ServiceUnavailableException({ code: "us_database_unavailable" });
 const sourceSchema = usExportInputV1Schema.shape.events.element;
 
+function parseSelection(pins: readonly EventPin[], mode: ExportMode) {
+  const selected = pinsSchema.safeParse(pins);
+  const parsedMode = usExportInputV1Schema.shape.mode.safeParse(mode);
+  if (!selected.success || !parsedMode.success)
+    throw new BadRequestException({ code: "invalid_us_export_sources" });
+  const ordered = selected.data.sort(
+    (a, b) => a.eventId.localeCompare(b.eventId) || a.revision - b.revision,
+  );
+  return { pins: ordered, mode: parsedMode.data };
+}
+
 /** Internal explicit selection only; authorization and all source reads share one DB snapshot. */
 export async function readUsExportSources(
   db: Db,
@@ -47,24 +58,26 @@ export async function readUsExportSources(
   pins: readonly EventPin[],
   mode: ExportMode,
 ): Promise<readonly ExportSourceRecord[]> {
-  const selected = pinsSchema.safeParse(pins);
-  const parsedMode = usExportInputV1Schema.shape.mode.safeParse(mode);
-  if (!selected.success || !parsedMode.success)
-    throw new BadRequestException({ code: "invalid_us_export_sources" });
-  const ordered = selected.data.sort(
-    (a, b) => a.eventId.localeCompare(b.eventId) || a.revision - b.revision,
+  // Preserve invalid-input rejection even when the database is unavailable.
+  const selected = parseSelection(pins, mode);
+  return transformationTransaction(db, (tx) =>
+    readUsExportSourcesInTransaction(tx, tenantId, actorUserId, selected.pins, selected.mode),
   );
-  return transformationTransaction(db, async (tx) => {
-    const profile = await authorizeUsMasterData(
-      tx,
-      tenantId,
-      actorUserId,
-      US_CAPABILITY.EXPORT_READ,
-    );
-    if (profile !== "US_FSMA204_PROCESSOR")
-      throw new ForbiddenException({ code: "traceability_profile_required" });
-    return resolvePinnedEvents(tx, tenantId, ordered, parsedMode.data);
-  });
+}
+
+/** Internal callers own the transaction; this function opens no independent snapshot. */
+export async function readUsExportSourcesInTransaction(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  pins: readonly EventPin[],
+  mode: ExportMode,
+): Promise<readonly ExportSourceRecord[]> {
+  const selected = parseSelection(pins, mode);
+  const profile = await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.EXPORT_READ);
+  if (profile !== "US_FSMA204_PROCESSOR")
+    throw new ForbiddenException({ code: "traceability_profile_required" });
+  return resolvePinnedEvents(tx, tenantId, selected.pins, selected.mode);
 }
 
 async function resolvePinnedEvents(

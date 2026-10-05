@@ -1,7 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
 import { createUsProfileTestDatabase } from "./support/us-profile-database.js";
 
 const url = process.env.US_TEST_DATABASE_URL;
@@ -148,7 +151,18 @@ describe.skipIf(!url)("US plan storage migration in owned disposable PostgreSQL"
     await expect(
       fixture.pool.query("SELECT approved_evidence FROM traceability_plan_versions"),
     ).rejects.toMatchObject({ code: "42703" });
-    await migrate(fixture.db, { migrationsFolder: resolve("migrations") });
+    const migrationsFolder = await mkdtemp(join(tmpdir(), "markiro-us-plan-migrations-"));
+    try {
+      await copyMigrationsThroughIndex({
+        sourceFolder: resolve("migrations"),
+        targetFolder: migrationsFolder,
+        lastIncludedIndex: 138,
+      });
+      await migrate(fixture.db, { migrationsFolder });
+    } finally {
+      // This exact directory was created by this invocation, never supplied externally.
+      await rm(migrationsFolder, { recursive: true, force: true });
+    }
   }, 60_000);
   afterAll(async () => {
     await fixture?.close();

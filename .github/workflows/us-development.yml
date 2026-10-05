@@ -83,10 +83,12 @@ jobs:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-readiness-evidence.e2e.test.ts test/us-readiness-assessment.e2e.test.ts test/us-readiness-http.e2e.test.ts --maxWorkers=1
       - name: Verify US frozen export contracts, mapping, workbook and XLSX adapter
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: |
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-export-core.test.ts
           pnpm --filter @markiro/domain exec vitest run test/us-export-registry.test.ts test/us-export-rows.test.ts test/us-export-workbook.test.ts
-          pnpm --filter @markiro/api exec vitest run test/us-export-xlsx-writer.test.ts test/us-export-adapter.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-export-xlsx-writer.test.ts test/us-export-adapter.test.ts --maxWorkers=1
       - name: Verify US Plan HTTP contracts and configured fact impact
         run: |
           corepack pnpm --filter @markiro/platform-contracts exec vitest run test/us-plans-http.test.ts
@@ -98,7 +100,28 @@ jobs:
       - name: Verify US pinned export source reader on disposable databases
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
-        run: pnpm --filter @markiro/api exec vitest run test/us-export-source-reader.e2e.test.ts
+        run: pnpm --filter @markiro/api exec vitest run test/us-export-source-reader.e2e.test.ts --maxWorkers=1
+      - name: Build durable request worker shared dependencies
+        run: |
+          pnpm --filter @markiro/db build
+          pnpm --filter @markiro/domain build
+          pnpm --filter @markiro/platform-contracts build
+      - name: Verify US request deadline rules and strict contracts
+        run: |
+          pnpm --filter @markiro/domain exec vitest run test/us-request-deadline.test.ts
+          pnpm --filter @markiro/platform-contracts exec vitest run test/us-requests.test.ts
+      - name: Verify US request schema and migration on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/db exec vitest run test/us-request-schema.test.ts test/us-request-migration.e2e.test.ts test/us-request-worker-schema.test.ts test/us-request-worker-migration.e2e.test.ts --maxWorkers=1
+      - name: Verify US request selection, storage, validation, freeze and internal payloads on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/us-request-selection.e2e.test.ts test/us-request-store.e2e.test.ts test/us-request-validation.e2e.test.ts test/us-request-prepare.e2e.test.ts test/us-request-run-evidence.e2e.test.ts test/us-request-payloads.e2e.test.ts test/us-request-tenant-origin.e2e.test.ts test/us-request-versions.e2e.test.ts test/us-request-plan-reader.e2e.test.ts test/us-request-package-inputs.e2e.test.ts test/us-request-report-pdf.e2e.test.ts test/us-request-package-manifest.e2e.test.ts test/us-request-package-zip.test.ts test/us-request-package.e2e.test.ts --maxWorkers=1
+      - name: Verify durable US request worker, private storage and recovery on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/us-request-worker-types.test.ts test/us-request-worker-failures.test.ts test/us-request-worker-execution.test.ts test/us-request-package-artifact-config.test.ts test/us-request-package-artifacts.test.ts test/us-request-worker-lifecycle.e2e.test.ts test/us-request-worker-checkpoint.e2e.test.ts test/us-request-worker-publication.e2e.test.ts test/us-request-worker-cleanup.e2e.test.ts test/us-request-worker.e2e.test.ts test/us-request-worker-recovery.e2e.test.ts --maxWorkers=1
       - name: Build shared browser components
         run: pnpm --filter @markiro/ui build
       - name: Verify US browser flow and contracts
@@ -148,10 +171,10 @@ jobs:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: |
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-case-bridge.test.ts test/us-plans-contracts.test.ts
-          pnpm --filter @markiro/db exec vitest run test/us-plan-schema.test.ts test/us-plan-migration.e2e.test.ts
-          pnpm --filter @markiro/api exec vitest run test/us-plan-configuration.e2e.test.ts test/us-plan-model.test.ts test/us-plan-store.e2e.test.ts
-          pnpm --filter @markiro/api exec vitest run test/us-plan-artifact-config.test.ts test/us-plan-artifacts.test.ts
-          pnpm --filter @markiro/api exec vitest run test/us-plan-pdf.test.ts test/us-plan-approval.e2e.test.ts
+          pnpm --filter @markiro/db exec vitest run test/us-plan-schema.test.ts test/us-plan-migration.e2e.test.ts --maxWorkers=1
+          pnpm --filter @markiro/api exec vitest run test/us-plan-configuration.e2e.test.ts test/us-plan-model.test.ts test/us-plan-store.e2e.test.ts --maxWorkers=1
+          pnpm --filter @markiro/api exec vitest run test/us-plan-artifact-config.test.ts test/us-plan-artifacts.test.ts --maxWorkers=1
+          pnpm --filter @markiro/api exec vitest run test/us-plan-pdf.test.ts test/us-plan-approval.e2e.test.ts --maxWorkers=1
           pnpm --filter @markiro/db exec vitest run test/us-case-bridge-schema.test.ts test/us-case-bridge-migration.e2e.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-case-commands.e2e.test.ts test/us-case-concurrency.e2e.test.ts test/us-case-reads.e2e.test.ts test/us-case-http.e2e.test.ts
           pnpm --filter @markiro/domain exec vitest run test/us-transformation-readiness.test.ts test/us-transformation-genealogy.test.ts

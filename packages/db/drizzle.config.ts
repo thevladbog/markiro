@@ -18,6 +18,8 @@ export default defineConfig({
     "./src/schema/traceability-receiving-csv.ts",
     "./src/schema/traceability-case-bridge.ts",
     "./src/schema/traceability-plans.ts",
+    "./src/schema/traceability-requests.ts",
+    "./src/schema/traceability-request-worker.ts",
     "./src/schema/us-auth.ts",
     "./src/schema/auth.ts",
     "./src/schema/platform.ts",

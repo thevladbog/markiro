@@ -261,6 +261,153 @@ test("US Shipping storage, finalization and HTTP suites stay in isolated check-o
   assert.doesNotMatch(readFileSync("apps/api/src/app.module.ts", "utf8"), /UsShippingController/);
 });
 
+test("US-09 request rules, contracts, storage and freeze suites run unconditionally in isolated CI", () => {
+  const workflow = workflows()["us-development.yml"];
+  const job = workflow.jobs.isolation;
+  const databaseUrl =
+    "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
+  const buildIndex = job.steps.findIndex(
+    (step) => step.run === "pnpm turbo build --filter '@markiro/api...'",
+  );
+  assert.ok(buildIndex >= 0, "US request gates require built API dependencies");
+  assert.equal(job.if, undefined);
+  assert.equal(job["continue-on-error"], undefined);
+  assert.equal(workflow.env?.DATABASE_URL, undefined);
+  assert.equal(job.env?.DATABASE_URL, undefined);
+  for (const [pkg, file] of [
+    ["domain", "us-request-deadline.test.ts"],
+    ["platform-contracts", "us-requests.test.ts"],
+    ["db", "us-request-schema.test.ts"],
+    ["db", "us-request-migration.e2e.test.ts"],
+    ["api", "us-request-selection.e2e.test.ts"],
+    ["api", "us-request-store.e2e.test.ts"],
+    ["api", "us-request-validation.e2e.test.ts"],
+    ["api", "us-request-prepare.e2e.test.ts"],
+    ["api", "us-request-run-evidence.e2e.test.ts"],
+    ["api", "us-request-payloads.e2e.test.ts"],
+    ["api", "us-request-tenant-origin.e2e.test.ts"],
+    ["api", "us-request-versions.e2e.test.ts"],
+    ["api", "us-request-plan-reader.e2e.test.ts"],
+    ["api", "us-request-package-inputs.e2e.test.ts"],
+    ["api", "us-request-report-pdf.e2e.test.ts"],
+    ["api", "us-request-package-manifest.e2e.test.ts"],
+    ["api", "us-request-package-zip.test.ts"],
+    ["api", "us-request-package.e2e.test.ts"],
+  ]) {
+    const stepIndex = job.steps.findIndex((candidate) =>
+      candidate.run
+        ?.split("\n")
+        .some(
+          (line) =>
+            line.startsWith(`pnpm --filter @markiro/${pkg} exec vitest run `) &&
+            line.split(/\s+/).includes(`test/${file}`),
+        ),
+    );
+    assert.ok(stepIndex >= 0, `Missing isolated US-09 request gate: ${pkg}/${file}`);
+    assert.ok(stepIndex > buildIndex, `${pkg}/${file} must run after dependency builds`);
+    const step = job.steps[stepIndex];
+    assert.equal(step.if, undefined);
+    assert.equal(step["continue-on-error"], undefined);
+    assert.equal(step.env?.DATABASE_URL, undefined);
+    const usesDatabase = pkg === "db" || pkg === "api";
+    assert.equal(step.env?.US_TEST_DATABASE_URL, usesDatabase ? databaseUrl : undefined);
+    for (const line of step.run.trim().split("\n")) {
+      assert.match(
+        line,
+        /^pnpm --filter @markiro\/(?:domain|platform-contracts|db|api) exec vitest run (?:test\/[\w.-]+(?:\s+|$))+(?:--maxWorkers=1)?$/,
+        "US request checks must be direct commands without conditional skips or ignored failures",
+      );
+      if (usesDatabase) assert.ok(line.split(/\s+/).includes("--maxWorkers=1"));
+    }
+  }
+});
+
+test("US durable request worker and package regressions have serial isolated check-only ownership", () => {
+  const workflow = workflows()["us-development.yml"];
+  const job = workflow.jobs.isolation;
+  const databaseUrl =
+    "postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev";
+  const builds = ["db", "domain", "platform-contracts"].map((pkg) =>
+    job.steps.findIndex((step) =>
+      step.run?.split("\n").includes(`pnpm --filter @markiro/${pkg} build`),
+    ),
+  );
+  for (const [pkg, file] of [
+    ["db", "us-request-worker-schema.test.ts"],
+    ["db", "us-request-worker-migration.e2e.test.ts"],
+    ["api", "us-request-worker-types.test.ts"],
+    ["api", "us-request-worker-failures.test.ts"],
+    ["api", "us-request-worker-execution.test.ts"],
+    ["api", "us-request-package-artifact-config.test.ts"],
+    ["api", "us-request-package-artifacts.test.ts"],
+    ["api", "us-request-worker-lifecycle.e2e.test.ts"],
+    ["api", "us-request-worker-checkpoint.e2e.test.ts"],
+    ["api", "us-request-worker-publication.e2e.test.ts"],
+    ["api", "us-request-worker-cleanup.e2e.test.ts"],
+    ["api", "us-request-worker.e2e.test.ts"],
+    ["api", "us-request-worker-recovery.e2e.test.ts"],
+  ]) {
+    const index = job.steps.findIndex((step) =>
+      step.run
+        ?.split("\n")
+        .some(
+          (line) =>
+            line.startsWith(`pnpm --filter @markiro/${pkg} exec vitest run `) &&
+            line.split(/\s+/).includes(`test/${file}`),
+        ),
+    );
+    assert.ok(index >= 0, `Missing durable worker gate: ${pkg}/${file}`);
+    assert.ok(
+      builds.every((build) => build >= 0),
+      "Missing explicit shared dependency build",
+    );
+    assert.ok(
+      builds.every((build) => build < index),
+      `${file} precedes a shared build`,
+    );
+  }
+  for (const index of builds) {
+    assert.equal(job.steps[index].if, undefined);
+    assert.equal(job.steps[index]["continue-on-error"], undefined);
+    for (const line of job.steps[index].run.trim().split("\n")) {
+      assert.match(line, /^pnpm --filter @markiro\/(?:db|domain|platform-contracts) build$/);
+    }
+  }
+  for (const step of job.steps) {
+    const lines = step.run?.trim().split("\n") ?? [];
+    if (
+      !lines.some(
+        (line) =>
+          /--filter @markiro\/(?:domain|platform-contracts|db|api) /.test(line) &&
+          /test\/us-(?:request|export|plan)[\w.-]+/.test(line),
+      )
+    )
+      continue;
+    assert.equal(step.if, undefined);
+    assert.equal(step["continue-on-error"], undefined);
+    assert.equal(step.env?.DATABASE_URL, undefined);
+    for (const line of lines) {
+      assert.match(
+        line,
+        /^(?:corepack )?pnpm --filter @markiro\/(?:domain|platform-contracts|db|api) exec vitest run (?:test\/[\w.-]+(?:\s+|$))+(?:--maxWorkers=1)?$/,
+        "request/export/Plan commands must not skip or ignore failures",
+      );
+      if (
+        /--filter @markiro\/(?:api|db) /.test(line) &&
+        /test\/us-(?:request|export|plan)[\w.-]+/.test(line)
+      ) {
+        assert.equal(step.env?.US_TEST_DATABASE_URL, databaseUrl);
+        assert.ok(line.split(/\s+/).includes("--maxWorkers=1"), `${line} is not serial`);
+      }
+    }
+  }
+  assert.equal(job.if, undefined);
+  assert.equal(job["continue-on-error"], undefined);
+  assert.equal(workflow.env?.DATABASE_URL, undefined);
+  assert.equal(job.env?.DATABASE_URL, undefined);
+  assert.doesNotMatch(JSON.stringify(workflow), /upload-artifact|secrets\./);
+});
+
 test("US dependency stack has private ports and independently named persistent data", () => {
   const stack = load(readFileSync("deploy/us-development/compose.yml", "utf8"));
   assert.equal(stack.name, "markiro-us-development");

@@ -104,7 +104,7 @@ export async function seedCompleteReceiving(
       stateOrRegion: "IL",
       zipOrPostalCode: "60601",
       countryCode: "US",
-      roles: ["receive_at"],
+      roles: ["receive_at", "tlc_source"],
     })
     .where(eq(schema.traceabilityLocations.id, context.location));
   await db.insert(schema.productTraceabilityProfiles).values({

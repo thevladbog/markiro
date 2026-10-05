@@ -130,6 +130,7 @@ export type {
   ReceivingExemptionAssessment,
 } from "./traceability/receiving-exemption.js";
 export { isTraceabilityCivilDate } from "./traceability/civil-date.js";
+export { resolveUsRequestDeadline } from "./traceability/requests/deadline.js";
 export type { TraceabilityUom } from "./traceability/uom.js";
 export { validateProductDescription } from "./traceability/products/description.js";
 export type {

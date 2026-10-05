@@ -834,3 +834,15 @@ export {
   type UsPlanDetailResponse,
   type UsPlanValidationResponse,
 } from "./traceability/plans-http.js";
+export {
+  usTraceRequestScopeV1Schema,
+  usTraceRequestCreateBodySchema,
+  usTraceRequestUpdateBodySchema,
+  usTraceRequestCloseBodySchema,
+  usTraceRequestPrepareBodySchema,
+  type UsTraceRequestScopeV1,
+  type UsTraceRequestCreateBody,
+  type UsTraceRequestUpdateBody,
+  type UsTraceRequestCloseBody,
+  type UsTraceRequestPrepareBody,
+} from "./traceability/requests.js";

@@ -64,7 +64,7 @@ const tlcList = z
   .optional()
   .transform((value) => value ?? null);
 
-function cTextOrder(left: string, right: string): number {
+export function cTextOrder(left: string, right: string): number {
   const first = new TextEncoder().encode(left);
   const second = new TextEncoder().encode(right);
   for (let index = 0; index < Math.min(first.length, second.length); index++) {

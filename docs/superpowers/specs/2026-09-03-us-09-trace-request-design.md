@@ -1,4 +1,6 @@
-# US-09 — Trace request and mock recall drill — Design Spec
+# US-09 — Trace request and mock recall drill — Historical Draft
+
+> Superseded for new work by the [2026-10-04 current US-09 design](2026-10-04-us-09-trace-request-current-design.md). This page preserves earlier reasoning and open questions; its service names, RU guard/queue/storage precedents, schema sketch and manifest ownership do not describe the current US implementation boundary.
 
 > Revised 2026-09-04: read the [shared MVP contract](../../us/mvp-contract.md) first. It resolves cross-slice scope and safety rules and supersedes conflicting draft recommendations below. Design only; implementation is not claimed.
 

@@ -13,9 +13,11 @@
 
 > US-08 implementation correction (2026-10-02): use the [owner-approved current plan design](../../superpowers/specs/2026-10-02-us-08-traceability-plan-current-design.md). The screen concepts below are target states, not the current route structure. Build them in `apps/admin/src/us/` with the US-only API. A processor profile alone does not establish farm-map non-applicability, and infrastructure statements require an attributed operator confirmation. Synthetic plans and PDFs need a persistent demo label.
 
+> US-09 correction (2026-10-04): use the [current request/package design](../../superpowers/specs/2026-10-04-us-09-trace-request-current-design.md) for new work. These screens are concepts for the existing US in-cabinet navigation, not RU page/routes or implementation evidence. US-07 supplies the frozen XLSX core; US-09 owns requests, complete scope, package and publication. Without configured private US storage, request editing and validation remain available but preparation/download do not.
+
 ## Purpose
 
-An FDA trace request gives a processor 24 hours to hand over its records. This brief makes that
+The request drill defaults to a 24-elapsed-hour deadline and records an agreed alternate time when applicable. This brief makes the response question
 answerable in one place: _do we have a current Traceability Plan, and if a request landed right now,
 could we prepare a complete package before the clock ran out — and prove how long it took?_
 
@@ -32,10 +34,14 @@ from; regenerating creates revision 2 and revision 1 stays downloadable byte-for
 shows a "current" document that could quietly change under an auditor's eyes — it shows versions and
 revisions, each with a date, an actor and a hash.
 
-The second half: **the clock is never blocked by tooling.** Validation can flag missing data and
-refuse the _export-ready_ badge, but the 24-hour countdown keeps running and the operator can always
-download a diagnostic validation report. Time is shown plainly — received, due, started, completed, elapsed — because
-the elapsed time _is_ the evidence (C-013, C-014).
+The second half: **the due clock continues through gaps and outages.** Validation can flag missing
+data and refuse the _export-ready_ badge. Draft/validation findings remain visible without artifact
+storage; actual downloadable reports and packages require the configured private US store. Time is
+shown plainly — received, due, preparation started, worker started, report data prepared,
+report-render completion and publication completion. The PDF labels its earlier boundary
+**Report data prepared at**; actual render/publication completion belongs to run detail, not
+retroactively inside that PDF. System/session elapsed is evidence for C-014; C-013 active human time needs
+a separately observed drill, not a subtraction of two server timestamps.
 
 Wording rule binding every string: the product **prepares** a package; it never "submits", "sends"
 or "uploads" anything to FDA (RQ-007). Buttons must not contain "FDA", "submit" or "upload". The
@@ -148,11 +154,15 @@ Download PDF); failure ("Approval rejected" with issue codes).
 
 ### 5. Trace request list
 
-Route `/traceability/requests`. Columns: **Request** (`REQ-2026-APPLE-001`), **Requester** (name,
+Conceptual `/traceability/requests` view inside the US cabinet. Columns: **Request** (`REQ-2026-APPLE-001`), **Requester** (name,
 organization), **Received** (`09/17/2026 9:02 AM PDT`), **Due** — date plus the **countdown chip**,
 **Status** (Open / Validated / Package ready / Export-ready / Closed), **Latest revision** (`r1`),
 **Export-ready** (yes/no with icon), actions. Filters: status, "due before". Primary action **New
 trace request**.
+
+Validated/package/export-ready labels are derived from the latest matching validation and run;
+they are not independent stored request statuses. Show the run mode and its separate result in
+the list rather than treating an incomplete package as export-ready.
 
 The countdown chip is the signature element of the section and must read without color:
 
@@ -188,13 +198,16 @@ reason** (free text in P0, OQ-US09-12). Due must be after received.
 **Step 2 — Scope.** Product (combobox), date range, TLC list (chips, paste several), locations.
 Opened from the search page ("Create trace request from results", owned by U.S. brief 04) the
 fields arrive prefilled and a banner says "Scope copied from search: 1 lot, 3 events". A live
-preview line shows matched counts ("2 lots · 3 events · 3 locations"). At least one selector.
+preview line shows matched counts ("2 lots · 3 events · 3 locations") and whether the server
+resolved the **complete** scope. Counts from a limited search page are not export proof. At least
+one selector is required for validation; step 1 may save a request shell without one.
 
 **Step 3 — Validation.** Screen 7. **Step 4 — Prepare package.** Screen 8.
 
 States to draw: step 1 default and with the alternate-deadline reason revealed; step 2 empty,
-prefilled-from-search, and "no records match this scope" (warning, not error — a drill may
-legitimately find nothing); saving between steps; ES step bar.
+prefilled-from-search, and "no records match this scope" (not an infrastructure error, but never
+Export-ready); saving between steps; ES step bar. A scope above the supported server bound shows
+a visible limit finding, never a silent partial count.
 
 ### 7. Dry-run validation results
 
@@ -204,53 +217,77 @@ field (data-dictionary grouping: Lot, Quantity, Product, Previous source, Receiv
 References), message, and a provenance link to the event or lot (`Receiving · rev 2 ·
 OSS-260914-A2`).
 
-Errors block **Prepare export-ready package** and the **Export-ready** badge. Keep a separate authorized **Download available records** action with an **Incomplete** label, findings, unavailable artifacts and the frozen request revision. Acknowledgement never waives errors; downloading does not fulfil the request. The diagnostic report remains available and the due clock continues. Both paths enforce tenant/export permissions.
+Errors block **Prepare export-ready package** and the **Export-ready** badge. Keep a separate
+authorized **Prepare available records — incomplete** action with an **Incomplete** label,
+findings, unavailable artifacts and the frozen request revision. Acknowledgement never waives
+errors; preparing or downloading does not fulfil the request. Findings remain readable while
+private storage is unavailable, but package preparation and downloads are disabled. The due
+clock continues. Both paths enforce tenant/export permissions.
 
-A changed input digest shows “Data changed since validation: run it again”. Revalidate a changed snapshot for either mode. For export-ready, resolve errors, obtain a nonempty complete scope and an effective plan; incomplete mode records these gaps without bypassing permissions or profile restrictions.
+A changed scoped-content digest shows “Data changed since validation: run it again”. Revalidate a
+changed snapshot for either mode. For export-ready, resolve errors, obtain a nonempty complete
+scope and an effective Plan; incomplete mode records these gaps without bypassing permissions or
+profile restrictions. The later full workbook-input digest includes the frozen generation time;
+it is not the stale-validation comparator.
 
 States: not validated; running; zero errors; errors with source links; warning acknowledgement; stale validation; incomplete traversal; no effective plan; successful empty retrieval with scope shown; failed retrieval/storage/rendering. Technical failures must never use the successful Incomplete state. Download initiation is not proof of human review.
 
 ### 8. Package generation
 
-Primary button **Prepare export-ready package** (never "Generate and submit", never "Send"). The secondary **Download available records** path generates a labelled incomplete revision, with available records, validation and manifest; absent plan/artifacts are explicit. Reuse the progress/history layout with mode and completeness shown in list, detail and downloads. See [CLAR-03](../../us/development-clarifications.md).
-Preconditions surface _before_ the click: no effective plan → blocked with "An effective
-Traceability Plan is required" and a link to the plan list; empty scope → blocked.
+Primary button **Prepare export-ready package** (never "Generate and submit", never "Send"). The
+secondary **Prepare available records — incomplete** action creates a separately labelled run,
+with available records, validation and manifest; absent Plan or artifacts are explicit. Once a
+run is ready, its downloads appear separately. Reuse the progress/history layout with mode and
+completeness shown in list, detail and downloads. See [CLAR-03](../../us/development-clarifications.md).
+Preconditions surface _before_ the click: no effective Plan → export-ready blocked with a link
+to the Plan list, while incomplete preparation may proceed; no selector or stale validation →
+both actions blocked; valid selector with zero matches → only a clearly empty incomplete response
+may proceed. Unconfigured private US storage blocks **both** preparation actions and downloads,
+but not editing or validation.
 
 While running: Queued → Processing with a **live elapsed timer** (`00:41`). On **Ready**:
 
-- **Timing panel** (`DefinitionGrid`): Started (operator pressed the button), Generation started,
-  Completed, **Elapsed 00:52**, Operator; and **Session elapsed** since the request was created
-  (`11 min 40 s`). Both numbers are evidence — plain, tabular numerals, never in a tooltip.
-- **Artifacts table**, keyed by kind, in this order: workbook `.xlsx` (FDA-aligned electronic
-  sortable spreadsheet), Traceability Plan PDF (v2, same hash as on the plan list), validation
-  report `.json`, request report `.pdf`, `manifest.json`, and the **package ZIP** (with
-  `SHA256SUMS` inside). Columns: name, size, **SHA-256** (mono, copy button, full hash on hover),
-  Download. P1 adds CSV ZIP and canonical JSON rows with no layout change.
-- **Download package (ZIP)** as the primary action; the link lives 300 s — "link expires in 4:59".
-- **Export-ready** chip (yes / no with the reason).
+- **Timing panel** (`DefinitionGrid`): Preparation started (operator pressed the button), worker
+  started, report data prepared, report rendered, publication completed, **System elapsed 00:52**, Operator; and
+  **Session age** since the request was created (`11 min 40 s`). These server durations are
+  visible evidence, but neither is labelled active human time. C-013 requires an observed drill.
+- **Artifacts table**, keyed by kind: workbook `.xlsx` when representable, exact pinned Plan PDF
+  when effective, validation report `.json`, request report `.pdf`, `manifest.json`, and the
+  **package ZIP** (with `SHA256SUMS` inside). In incomplete mode, absent workbook or Plan rows
+  show an explicit reason, not an invented file/hash. Columns: name, size, **SHA-256** (mono,
+  copy button, full hash on hover), Download. P1 CSV ZIP and canonical JSON are not P0 rows.
+- **Download package (ZIP)** after a ready run; use a bounded authenticated US download, not an
+  assumed RU presigned URL or a five-minute expiry countdown.
+- **Export-ready** or **Available records — incomplete** chip, never a generic success badge.
 - **Prepare new revision** with the explainer "Freezes current data as r2; r1 stays unchanged".
 
-States to draw: blocked (no effective plan); queued; processing with timer; ready and export-ready;
-ready and **not** export-ready; failed-retryable (error codes from the spec — `PLAN_NOT_EFFECTIVE`
-links to the plan, `STORAGE_FAILED` offers Retry); failed non-retryable; download link expired;
-revision history with r1 and r2 side by side.
+States to draw: export-ready blocked (no effective Plan or findings); storage unavailable for
+both actions; queued; processing with timer; ready and export-ready; ready and **incomplete**
+with absent-artifact reasons; failed-retryable (storage failure offers Retry of the frozen run);
+failed non-retryable (corrupt pinned data cannot be shown as incomplete); authorized download
+failure; revision history with r1 and r2 side by side.
 
 ### 9. Request detail
 
-Route `/traceability/requests/:id`. Header: request number, requester, received, due with the
+Conceptual `/traceability/requests/:id` detail inside the US cabinet. Header: request number, requester, received, due with the
 countdown chip, alternate-deadline note, status. Body: scope summary as chips, latest validation
-summary, **revision history** (per run: revision, status, export-ready, elapsed, operator, QA
-decision, downloads), Prepare new revision, Close request ("Runs stay downloadable after closing").
+summary, **revision history** (per run: revision, mode, result, elapsed, operator, downloads),
+Prepare new revision, Close request ("Runs stay downloadable after closing"). P1 QA decision is
+not shown as a required P0 field.
 
 States to draw: no runs yet; r1 ready; closed; auditor view (downloads only).
 
 ### 10. Request report
 
-A PDF inside the package; draw its first page like the plan: requester and scope, received and
-due in tenant timezone **and** UTC, timing (started, generation started, completed, elapsed),
-operator time, validation summary, artifact table with SHA-256, baseline ID, the allowed-wording
+A PDF inside the package; draw its first page like the Plan: requester and scope, received and
+due in tenant timezone **and** UTC, timing (preparation started, worker started when known,
+**Report data prepared at**), operator and **Elapsed to report data preparation**, validation summary, hashes of artifacts built
+before the report (not its own, the manifest's or the ZIP's hash), baseline ID, the allowed-wording
 disclaimer and the fixed sentence "Package prepared in the U.S. instance; delivery to the requester is performed
-by the covered entity". No logo other than the Markiro mark used on billing documents.
+by the covered entity". Publication completion appears later in run detail/audit, not
+retroactively inside this PDF; actual PDF-render completion is likewise a later run-detail field.
+Unknown worker timing is labelled unavailable, never invented. Synthetic reports show a visible non-operational mark. No logo
+other than the approved Markiro mark.
 
 ### 11. QA sign-off (P1 — must not block the P0 screens)
 
@@ -267,8 +304,9 @@ layout is complete without it.
 - **Countdown accessibility.** Text + icon + tone, never color alone; `aria-live="polite"` at most
   once per minute; tabular numerals so the width does not jitter; overdue is also readable in the
   Status column, so a user who cannot see the chip still reads "Overdue".
-- **Time-boxed evidence shown plainly.** Started / completed / elapsed are first-class fields in the
-  run detail and the report, tenant timezone with UTC beside.
+- **Time-boxed evidence shown plainly.** Preparation, worker, report-data, report-render and publication times
+  are first-class fields in the run detail, tenant timezone with UTC beside. The PDF stops at its
+  **Report data prepared at** boundary, before its own rendering; the observed human-time drill is recorded separately.
 - **Formats.** Dates `MM/DD/YYYY`, times `h:mm AM/PM TZ`; the workbook stores ISO dates
   (`yyyy-mm-dd` typed cells, US-07) but the UI never shows ISO. Quantities decimal + unit
   (`100 case`, `900 lb`). Hashes mono, lower-case hex, 64 chars, copy button wherever shown.
@@ -282,8 +320,8 @@ layout is complete without it.
 
 ## How this grows
 
-- **QA sign-off (RQ-008)** lands in the collapsed panel of screen 11; if preparer and reviewer become
-  different roles, only button visibility changes.
+- **QA sign-off (RQ-008)** lands in the collapsed panel of screen 11, with a separate permission,
+  decision audit and reviewer identity design when P1 is scheduled.
 - **Review reminders (PLN-009)** move from banner to email; the banner stays as the in-app half.
 - **Derived artifacts (EXP-009)** — CSV ZIP and canonical JSON — are extra rows in the artifacts
   table, which is keyed by kind for exactly this reason.
@@ -296,7 +334,8 @@ layout is complete without it.
 
 ## Questions for the designer
 
-1. Resolved by CLAR-03: diagnostic report and authorized available-records download remain visible beside blocked export-ready preparation. Errors cannot be waived.
+1. Resolved by CLAR-03 and the current US-09 design: validation stays visible; separately prepare
+   and download the incomplete package only with configured private US storage. Errors cannot be waived.
 2. Should the countdown chip change tone at 4 h or at a tenant-set threshold? The spec fixes none;
    propose one and note it on the mockup.
 3. Self-approval of the plan is allowed in P0 (OQ-US08-8): should the approve dialog show a soft

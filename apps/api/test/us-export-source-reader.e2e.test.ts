@@ -7,7 +7,11 @@ import {
 } from "@markiro/platform-contracts";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
-import { readUsExportSources } from "../src/modules/traceability/export/source-reader";
+import {
+  readUsExportSources,
+  readUsExportSourcesInTransaction,
+} from "../src/modules/traceability/export/source-reader";
+import { transformationTransaction } from "../src/modules/traceability/transformation/us-transformation-operations";
 import * as receivingHistory from "../src/modules/traceability/receiving/us-receiving-history";
 import { UsReceivingStore } from "../src/modules/traceability/receiving/us-receiving-store";
 import { createUsProfileTestDatabase } from "./support/us-profile-database";
@@ -90,6 +94,116 @@ describe.skipIf(!url)("authorized pinned export source reader", () => {
     );
     return { ...c, store, original };
   }
+
+  it("keeps caller-owned source reads on the original snapshot across a committed amendment", async () => {
+    const c = await receiving();
+    const pins = [{ eventId: c.original.id, revision: 1 }];
+    const observed = await transformationTransaction(f.db, async (tx) => {
+      const first = await readUsExportSourcesInTransaction(tx, c.tenant, c.actor, pins, candidate);
+      const amendmentId = await createStoredAmendment(f, c.tenant, c.original.id);
+      await finalizeStoredAmendment(f, c.tenant, amendmentId);
+      const second = await readUsExportSourcesInTransaction(tx, c.tenant, c.actor, pins, candidate);
+      return { first, second };
+    });
+    expect(observed.first).toEqual([
+      {
+        eventId: c.original.id,
+        revision: 1,
+        type: "receiving",
+        timeZone: "America/Chicago",
+        lifecycle: "current_finalized",
+        payload: { kind: "frozen", snapshot: c.original.snapshot },
+      },
+    ]);
+    expect(observed.second).toEqual(observed.first);
+    await expect(
+      readUsExportSources(f.db, c.tenant, c.actor, pins, candidate),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: { code: "us_export_source_not_current_finalized" },
+    });
+  });
+
+  it("enforces pin validation and foreign source isolation inside the caller transaction", async () => {
+    const a = await receiving();
+    const b = await receiving();
+    const pin = { eventId: a.original.id, revision: 1 };
+    for (const pins of [[], [{ ...pin, eventId: "bad" }], [pin, pin]]) {
+      await expect(
+        transformationTransaction(f.db, (tx) =>
+          readUsExportSourcesInTransaction(tx, a.tenant, a.actor, pins, incomplete),
+        ),
+      ).rejects.toMatchObject({ status: 400, response: { code: "invalid_us_export_sources" } });
+    }
+    await expect(
+      transformationTransaction(f.db, (tx) =>
+        readUsExportSourcesInTransaction(
+          tx,
+          a.tenant,
+          a.actor,
+          [{ eventId: b.original.id, revision: 1 }],
+          incomplete,
+        ),
+      ),
+    ).rejects.toMatchObject({ status: 404, response: { code: "us_export_source_not_found" } });
+  });
+
+  it("rejects historical candidate pins and corrupt stored snapshots inside the caller transaction", async () => {
+    const c = await receiving();
+    const pins = [{ eventId: c.original.id, revision: 1 }];
+    const amendmentId = await createStoredAmendment(f, c.tenant, c.original.id);
+    await finalizeStoredAmendment(f, c.tenant, amendmentId);
+    await expect(
+      transformationTransaction(f.db, (tx) =>
+        readUsExportSourcesInTransaction(tx, c.tenant, c.actor, pins, candidate),
+      ),
+    ).rejects.toMatchObject({
+      status: 409,
+      response: { code: "us_export_source_not_current_finalized" },
+    });
+    await f.db.transaction(async (tx) => {
+      await tx.execute(sql`ALTER TABLE traceability_events DISABLE TRIGGER USER`);
+      await tx
+        .update(schema.traceabilityEvents)
+        .set({ finalizationSnapshot: { ...c.original.snapshot, snapshotVersion: 999 } })
+        .where(
+          and(
+            eq(schema.traceabilityEvents.tenantId, c.tenant),
+            eq(schema.traceabilityEvents.id, c.original.id),
+          ),
+        );
+      await tx.execute(sql`ALTER TABLE traceability_events ENABLE TRIGGER USER`);
+    });
+    await expect(
+      transformationTransaction(f.db, (tx) =>
+        readUsExportSourcesInTransaction(tx, c.tenant, c.actor, pins, incomplete),
+      ),
+    ).rejects.toMatchObject({ status: 503, response: { code: "us_database_unavailable" } });
+  });
+
+  it("reloads export capability and processor profile inside the caller transaction", async () => {
+    const c = await receiving();
+    const pins = [{ eventId: c.original.id, revision: 1 }];
+    await f.db
+      .update(schema.member)
+      .set({ role: "traceability_receiving" })
+      .where(eq(schema.member.id, c.member));
+    await expect(
+      transformationTransaction(f.db, (tx) =>
+        readUsExportSourcesInTransaction(tx, c.tenant, c.actor, pins, incomplete),
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    await f.db.update(schema.member).set({ role: "owner" }).where(eq(schema.member.id, c.member));
+    await f.db
+      .update(schema.traceabilityProfiles)
+      .set({ code: "US_GENERIC_LOT_TRACEABILITY" })
+      .where(eq(schema.traceabilityProfiles.tenantId, c.tenant));
+    await expect(
+      transformationTransaction(f.db, (tx) =>
+        readUsExportSourcesInTransaction(tx, c.tenant, c.actor, pins, incomplete),
+      ),
+    ).rejects.toMatchObject({ status: 403, response: { code: "traceability_profile_required" } });
+  });
 
   it("binds exact historical Receiving bytes to server-owned event/revision and orders pins", async () => {
     const c = await receiving();
