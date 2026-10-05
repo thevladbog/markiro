@@ -1148,7 +1148,20 @@ requests and offer a retry.
   `retired`) and a «Типовой» tag on a stock template. The host sends the whole
   list, so the search (by name, without case), the purpose filter and the state
   filter work in the page; there are no pages, since a site keeps tens of
-  templates. The templates are read whenever the page opens.
+  templates. The templates are read whenever the page opens. Both roles switch a
+  template on and off (`useCan("editCatalog")`; no role lacks it, so there is no
+  read-only view). «Выключить» asks first, with the `destructive` submit, and
+  says the template is no longer offered for products and defaults and the
+  stations get the change; «Включить» asks lightly. Only the flag goes, with the
+  opened row's revision (`templateUpdate`), and the answer goes into the cached
+  row in place (`withTemplateChange`: the name, the flag, the categories,
+  `stock` and the revision; the size, the resolution and the language stay, and
+  the layout stays out of the cache), without reading the list again. Switching
+  off a default is refused (`template_is_default`), and the dialog says whose
+  default the template is (the organization's, the categories by name, a code
+  where the lookup lacks the group) and that another template must be chosen on
+  «Умолчания шаблонов» first; `stale_revision` offers «Загрузить заново», which
+  closes the dialog and reads the list again.
 
 ## Marking rules
 

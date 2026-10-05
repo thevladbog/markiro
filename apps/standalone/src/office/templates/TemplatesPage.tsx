@@ -15,12 +15,17 @@ import {
   type TableColumn,
 } from "@markiro/ui";
 
-import type { LabelTemplateSummary } from "../../host/protocol.js";
+import type { LabelTemplate, LabelTemplateSummary } from "../../host/protocol.js";
+import { useCan } from "../access.js";
 import { useProductGroups, useTemplates } from "../catalog-queries.js";
+import { officeKeys } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
+import { useChangeList } from "../records.js";
+import { TemplateStateDialog } from "./TemplateStateDialog.js";
 import {
   findTemplates,
   templatesByName,
+  withTemplateChange,
   type TemplatePurposeFilter,
   type TemplateStateFilter,
 } from "./template-list.js";
@@ -29,20 +34,42 @@ import { describeScope, dpiText, PURPOSE_TONE, PURPOSES, sizeText } from "./temp
 const PURPOSE_FILTERS: readonly TemplatePurposeFilter[] = ["all", ...PURPOSES];
 const STATE_FILTERS: readonly TemplateStateFilter[] = ["all", "enabled", "disabled"];
 
+type TemplatesDialog = { kind: "state"; template: LabelTemplateSummary };
+
 /**
  * The label templates (spec §4.3, §5.5): a table, not the cloud's cards with
  * thumbnails (no layout is drawn before plan 1e4). The host sends the whole
  * list, so the search and the filters work here, and the page sorts what it
  * shows by name. A product group's name comes from the host's lookup; when it
- * does not load, the list stays and shows the codes.
+ * does not load, the list stays and shows the codes. Both office roles switch
+ * templates on and off (`editCatalog`); a write's answer goes into the cached
+ * row in place (`withTemplateChange`), and the list is not read again.
  */
 export function TemplatesPage() {
   const { t } = useTranslation();
+  const canEdit = useCan("editCatalog");
   const templates = useTemplates();
   const groups = useProductGroups();
+  const changeList = useChangeList<LabelTemplateSummary>(officeKeys.templates);
   const [search, setSearch] = useState("");
   const [purpose, setPurpose] = useState<TemplatePurposeFilter>("all");
   const [state, setState] = useState<TemplateStateFilter>("all");
+  const [dialog, setDialog] = useState<TemplatesDialog | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const open = (next: TemplatesDialog) => {
+    setNotice(null);
+    setDialog(next);
+  };
+  const saved = (template: LabelTemplate, message: string) => {
+    changeList((list) => withTemplateChange(list, template));
+    setDialog(null);
+    setNotice(message);
+  };
+  const reload = () => {
+    setDialog(null);
+    void templates.refetch();
+  };
 
   const columns: TableColumn<LabelTemplateSummary>[] = [
     {
@@ -101,6 +128,25 @@ export function TemplatesPage() {
       ),
     },
   ];
+  if (canEdit) {
+    columns.push({
+      key: "actions",
+      title: t("office.templates.table.actions"),
+      render: (template) => (
+        <Button
+          variant="secondary"
+          size="compact"
+          aria-label={t(
+            template.enabled ? "office.templates.disableNamed" : "office.templates.enableNamed",
+            { name: template.name },
+          )}
+          onClick={() => open({ kind: "state", template })}
+        >
+          {t(template.enabled ? "office.templates.disable" : "office.templates.enable")}
+        </Button>
+      ),
+    });
+  }
 
   const content = () => {
     if (templates.isPending) return <PageLoading />;
@@ -173,6 +219,7 @@ export function TemplatesPage() {
   return (
     <>
       <PageHeader title={t("office.templates.title")} />
+      {notice && <Alert tone="ok">{notice}</Alert>}
       {/* About the categories column: with no list on screen the templates' error stands alone. */}
       {groups.isError && templates.isSuccess && (
         <Alert
@@ -187,6 +234,24 @@ export function TemplatesPage() {
         </Alert>
       )}
       {content()}
+      {canEdit && dialog?.kind === "state" && (
+        <TemplateStateDialog
+          template={dialog.template}
+          onClose={() => setDialog(null)}
+          onSaved={(template) =>
+            saved(
+              template,
+              t(
+                template.enabled
+                  ? "office.templates.enabledNotice"
+                  : "office.templates.disabledNotice",
+                { name: template.name },
+              ),
+            )
+          }
+          onReload={reload}
+        />
+      )}
     </>
   );
 }
