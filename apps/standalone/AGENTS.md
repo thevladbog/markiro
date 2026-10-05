@@ -1180,26 +1180,38 @@ requests and offer a retry.
   words; a saved answer goes into the row in place.
 - «Умолчания шаблонов» (section «Каталог») edits the one defaults document
   (`GET/PUT /v1/office/template-defaults`): the page reads it whenever it opens
-  (`useTemplateDefaults`, `staleTime` 0), with the template list, which the page
-  reads once per visit and passes to the form, since the form remounts on every
-  new revision. Both roles change it (`useCan("editCatalog")`), so there is no
-  read-only view. The organization's three defaults are selects of «Не выбран»
-  and the enabled templates of their purpose for every category
-  (`templateOptions` with category `null`), by name; a default the list does not
-  offer stays a marked choice («— не подходит», «— нет в списке»). Edits stay in
-  the page: a live note says there are unsaved changes, «Отменить изменения»
-  brings back the loaded document, and «Сохранить», off until something changed,
-  sends the whole document with the loaded revision (`templateDefaultsUpdate`:
-  `null` for «Не выбран», the category defaults as they are), drops a second
-  click while the save is on its way and puts the answer in the cache, which
-  starts the form afresh. A `validation_failed` on `defaultBoxTemplateId` or a
-  sibling goes under that select as a template that no longer fits (disabled,
-  narrowed or deleted while the page was open: the host checks the defaults
-  before the revision), and the template list is read again so the choice shows
-  as marked; a change of that select takes the message away. `stale_revision`
-  offers «Загрузить заново» in words of its own, since a change of the
-  organization's profile moves the document's revision too, and the reload drops
-  the edits.
+  (`useTemplateDefaults`, `staleTime` 0), with the template list and the product
+  groups, which the page reads once per visit and passes to the form, since the
+  form remounts on every new revision. Both roles change it
+  (`useCan("editCatalog")`), so there is no read-only view. The organization's
+  three defaults are selects of «Не выбран» and the enabled templates of their
+  purpose for every category (`templateOptions` with category `null`), by name;
+  a default the list does not offer stays a marked choice («— не подходит», «—
+  нет в списке»). The category defaults are rows by category name, then purpose
+  (the page sorts what it shows and sends its own order): the group's name (its
+  code where the lookup lacks it or did not load), the purpose on its tag and a
+  select of the templates that fit that category and purpose, without «Не
+  выбран», since «Убрать» clears a category default. «Добавить умолчание
+  категории» (off while the groups or the templates do not load) asks for a
+  category that still has a purpose without a default, a purpose that category
+  has no default of yet and a template that fits both (`CategoryDefaultDialog`),
+  and adds the row to the page's document. Edits stay in the page: a live note
+  says there are unsaved changes, «Отменить изменения» brings back the loaded
+  document, and «Сохранить», off until something changed, sends the whole
+  document with the loaded revision (`templateDefaultsUpdate`: `null` for «Не
+  выбран», every category default the page holds), drops a second click while
+  the save is on its way and puts the answer in the cache, which starts the form
+  afresh. A `validation_failed` goes under the control it names
+  (`defaultsFailure`): an organization default's select, or the row of the
+  category default the page sent at that index (`categories.{i}`, `.templateId`,
+  `.chzProductGroupCode`), in words for each: a template that no longer fits
+  (disabled, narrowed or deleted while the page was open: the host checks the
+  defaults before the revision), a category the host did not take, a default
+  given twice. The template list is then read again so a refused choice shows as
+  marked, and a change of that control, or the removal of that row, takes the
+  message away. `stale_revision` offers «Загрузить заново» in words of its own,
+  since a change of the organization's profile moves the document's revision
+  too, and the reload drops the edits.
 
 ## Marking rules
 

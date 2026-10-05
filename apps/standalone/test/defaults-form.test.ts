@@ -6,9 +6,12 @@ import {
   defaultsFailure,
   defaultsInput,
   draftOf,
+  freePurposes,
   sameDraft,
   slotKey,
+  withCategoryDefault,
   withOrgDefault,
+  withoutCategoryDefault,
 } from "../src/office/templates/defaults-form.js";
 
 const BOX = "7c1e4b2a-9d3f-4e5a-8b6c-1d2e3f4a5b6c";
@@ -122,5 +125,123 @@ describe("the defaults form", () => {
       kind: "alert",
       message: "errors.unknown",
     });
+  });
+});
+
+describe("the defaults form: category defaults", () => {
+  const draft = draftOf(DOCUMENT);
+
+  it("puts a category default in its slot in place, or adds it at the end, and removes one by its slot", () => {
+    const changed = withCategoryDefault(draft, {
+      chzProductGroupCode: 8,
+      purpose: "box",
+      templateId: WATER,
+    });
+    expect(changed.categories).toStrictEqual([
+      { chzProductGroupCode: 8, purpose: "box", templateId: WATER },
+      { chzProductGroupCode: 13, purpose: "box", templateId: WATER },
+    ]);
+    const added = withCategoryDefault(draft, {
+      chzProductGroupCode: 8,
+      purpose: "pallet",
+      templateId: BOX,
+    });
+    expect(added.categories).toStrictEqual([
+      ...DOCUMENT.categories,
+      { chzProductGroupCode: 8, purpose: "pallet", templateId: BOX },
+    ]);
+    expect(withoutCategoryDefault(draft, "13:box").categories).toStrictEqual([
+      { chzProductGroupCode: 8, purpose: "box", templateId: MILK },
+    ]);
+    expect(withoutCategoryDefault(draft, "13:pallet").categories).toStrictEqual(
+      DOCUMENT.categories,
+    );
+    expect(draft.categories).toBe(DOCUMENT.categories);
+  });
+
+  it("offers the purposes a category has no default of yet, box, pallet, duplicate", () => {
+    expect(freePurposes(DOCUMENT.categories, 8)).toStrictEqual(["pallet", "product_duplicate"]);
+    expect(freePurposes(DOCUMENT.categories, 3)).toStrictEqual([
+      "box",
+      "pallet",
+      "product_duplicate",
+    ]);
+    const full = [
+      ...DOCUMENT.categories,
+      { chzProductGroupCode: 8, purpose: "pallet", templateId: BOX },
+      { chzProductGroupCode: 8, purpose: "product_duplicate", templateId: BOX },
+    ] as const;
+    expect(freePurposes(full, 8)).toStrictEqual([]);
+  });
+
+  it("puts a refusal of a category default under the default it names by its index in what was sent", () => {
+    const sent = [
+      { chzProductGroupCode: 13, purpose: "box", templateId: WATER },
+      { chzProductGroupCode: 3, purpose: "pallet", templateId: BOX },
+    ] as const;
+    expect(defaultsFailure(rejected("categories.1.templateId"), sent)).toStrictEqual({
+      kind: "field",
+      key: "3:pallet",
+      message: "office.templateDefaults.errors.unfit",
+    });
+    expect(defaultsFailure(rejected("categories.0.chzProductGroupCode"), sent)).toStrictEqual({
+      kind: "field",
+      key: "13:box",
+      message: "office.templateDefaults.errors.category",
+    });
+    expect(defaultsFailure(rejected("categories.1"), sent)).toStrictEqual({
+      kind: "field",
+      key: "3:pallet",
+      message: "office.templateDefaults.errors.twice",
+    });
+    for (const field of [
+      "categories.2.templateId",
+      "categories.1.purpose",
+      "categories.x",
+      "xcategories.1",
+      "categories.1.templateIdx",
+    ]) {
+      expect(defaultsFailure(rejected(field), sent), field).toStrictEqual({
+        kind: "alert",
+        message: "errors.api.validation_failed",
+      });
+    }
+  });
+});
+
+// Beyond the plan: each test below kills a one-line mutant the plan's tests let live.
+describe("the defaults form: category defaults, beyond the plan", () => {
+  it("finds a category default by an index of more than one digit", () => {
+    const sent = Array.from({ length: 12 }, (_, index) => ({
+      chzProductGroupCode: 100 + index,
+      purpose: "box" as const,
+      templateId: BOX,
+    }));
+    expect(defaultsFailure(rejected("categories.11.templateId"), sent)).toStrictEqual({
+      kind: "field",
+      key: "111:box",
+      message: "office.templateDefaults.errors.unfit",
+    });
+    expect(defaultsFailure(rejected("categories.10"), sent)).toStrictEqual({
+      kind: "field",
+      key: "110:box",
+      message: "office.templateDefaults.errors.twice",
+    });
+  });
+
+  it("keeps the organization's defaults when a category default is put in or taken out", () => {
+    const draft = draftOf(DOCUMENT);
+    const entry = { chzProductGroupCode: 3, purpose: "box" as const, templateId: WATER };
+    for (const changed of [
+      withCategoryDefault(draft, entry),
+      withCategoryDefault(draft, { ...entry, chzProductGroupCode: 8 }),
+      withoutCategoryDefault(draft, "8:box"),
+    ]) {
+      expect(changed).toMatchObject({
+        defaultBoxTemplateId: BOX,
+        defaultPalletTemplateId: "",
+        defaultDuplicateTemplateId: "",
+      });
+    }
   });
 });

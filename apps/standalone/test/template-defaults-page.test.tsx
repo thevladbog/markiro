@@ -397,6 +397,294 @@ describe("office template defaults: the organization's", () => {
   });
 });
 
+describe("office template defaults: the categories'", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+  });
+
+  /**
+   * Four defaults of two categories, in an order unlike the one the page
+   * shows; code 13 has all three purposes, so nothing is left to add for it.
+   */
+  const FULL_WATER: TemplateDefaults = {
+    ...DEFAULTS,
+    categories: [
+      { chzProductGroupCode: 13, purpose: "product_duplicate", templateId: DUPLICATE.id },
+      { chzProductGroupCode: 8, purpose: "box", templateId: MILK.id },
+      { chzProductGroupCode: 13, purpose: "pallet", templateId: PALLET.id },
+      { chzProductGroupCode: 13, purpose: "box", templateId: BOX.id },
+    ],
+  };
+
+  function rows(): (string | null)[][] {
+    const table = within(screen.getByRole("region", { name: "Для категорий" }));
+    return table
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) =>
+        within(row)
+          .getAllByRole("cell")
+          .slice(0, 2)
+          .map((cell) => cell.textContent),
+      );
+  }
+
+  /** Opens «Добавить умолчание категории» and waits for its dialog. */
+  function openAdd(): HTMLElement {
+    fireEvent.click(screen.getByRole("button", { name: "Добавить умолчание категории" }));
+    return screen.getByRole("dialog", { name: "Умолчание категории" });
+  }
+
+  it("lists the category defaults by category name and purpose, each a choice of the templates that fit its category and purpose, with «Убрать»", async () => {
+    await openDefaults(session(FULL_WATER));
+    expect(screen.getByRole("heading", { name: "Для категорий" })).toBeTruthy();
+    expect(
+      screen.getByText("Станция возьмёт умолчание категории товара раньше умолчания организации."),
+    ).toBeTruthy();
+    expect(rows()).toEqual([
+      ["Молочная продукция", "Короб"],
+      ["Упакованная вода", "Короб"],
+      ["Упакованная вода", "Паллета"],
+      ["Упакованная вода", "Дубликат товара"],
+    ]);
+    // A category default always has a template: no «Не выбран» in its choice.
+    expect(choices("Шаблон: Молочная продукция, Короб")).toEqual([
+      "Коробка 58×40",
+      "Коробка 100×100",
+      "Молоко 58×40",
+    ]);
+    expect(screen.getByLabelText("Шаблон: Молочная продукция, Короб")).toHaveProperty(
+      "value",
+      MILK.id,
+    );
+    expect(choices("Шаблон: Упакованная вода, Короб")).toEqual([
+      "Коробка 58×40",
+      "Коробка 100×100",
+    ]);
+    expect(choices("Шаблон: Упакованная вода, Паллета")).toEqual([
+      "Паллета 58×40",
+      "Паллета 100×150",
+    ]);
+    expect(
+      screen.getByRole("button", { name: "Убрать умолчание: Упакованная вода, Паллета" }),
+    ).toBeTruthy();
+    const purpose = within(screen.getByRole("region", { name: "Для категорий" })).getByText(
+      "Дубликат товара",
+    );
+    expect(purpose.classList.contains("mk-badge--teal")).toBe(true);
+  });
+
+  it("says when there are no category defaults", async () => {
+    await openDefaults(session({ ...DEFAULTS, categories: [] }));
+    expect(screen.getByText("Умолчаний категорий нет.")).toBeTruthy();
+  });
+
+  it("changes a category default's template in its place and removes one; the save sends the categories as the page holds them", async () => {
+    const fake = session(FULL_WATER);
+    fake.api.updateTemplateDefaults.mockResolvedValue({ ...FULL_WATER, rev: 70 });
+    await openDefaults(fake);
+    choose("Шаблон: Молочная продукция, Короб", BOX_100.id);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Убрать умолчание: Упакованная вода, Паллета" }),
+    );
+    expect(rows()).toHaveLength(3);
+    expect(screen.getByText(DIRTY)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Изменения сохранены.");
+    expect(fake.api.updateTemplateDefaults.mock.calls[0]?.[1].categories).toStrictEqual([
+      { chzProductGroupCode: 13, purpose: "product_duplicate", templateId: DUPLICATE.id },
+      { chzProductGroupCode: 8, purpose: "box", templateId: BOX_100.id },
+      { chzProductGroupCode: 13, purpose: "box", templateId: BOX.id },
+    ]);
+  });
+
+  it("adds a category default: a category with a purpose left, a purpose it has no default of, then a template that fits both", async () => {
+    const fake = session(FULL_WATER);
+    const milkPallet = summary("3c7e0b8a-5d9f-4e1a-8b2c-7d8e9f0a1b2c", "Паллета молока", {
+      purpose: "pallet",
+      stock: false,
+      chzProductGroupCodes: [8],
+    });
+    fake.api.listTemplates.mockResolvedValue([...TEMPLATES, milkPallet]);
+    fake.api.updateTemplateDefaults.mockResolvedValue({ ...FULL_WATER, rev: 70 });
+    await openDefaults(fake);
+    const add = openAdd();
+    // «Упакованная вода» has a default of every purpose: it is not offered.
+    expect(choices("Категория")).toEqual([
+      "Не выбрана",
+      "Альтернативная табачная продукция",
+      "Молочная продукция",
+    ]);
+    expect(screen.getByLabelText("Назначение")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("Шаблон")).toHaveProperty("disabled", true);
+    choose("Категория", "8");
+    expect(choices("Назначение")).toEqual(["Не выбрано", "Паллета", "Дубликат товара"]);
+    choose("Назначение", "pallet");
+    // A template scoped to the category fits it too.
+    expect(choices("Шаблон")).toEqual([
+      "Не выбран",
+      "Паллета 58×40",
+      "Паллета 100×150",
+      "Паллета молока",
+    ]);
+    choose("Шаблон", PALLET_58.id);
+    // A new category starts the purpose and the template afresh.
+    choose("Категория", "3");
+    expect(screen.getByLabelText("Назначение")).toHaveProperty("value", "");
+    expect(screen.getByLabelText("Шаблон")).toHaveProperty("value", "");
+    choose("Назначение", "box");
+    choose("Шаблон", BOX_100.id);
+    fireEvent.click(within(add).getByRole("button", { name: "Добавить" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(rows()[0]).toEqual(["Альтернативная табачная продукция", "Короб"]);
+    expect(
+      screen.getByLabelText("Шаблон: Альтернативная табачная продукция, Короб"),
+    ).toHaveProperty("value", BOX_100.id);
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Изменения сохранены.");
+    expect(fake.api.updateTemplateDefaults.mock.calls[0]?.[1].categories).toStrictEqual([
+      ...FULL_WATER.categories,
+      { chzProductGroupCode: 3, purpose: "box", templateId: BOX_100.id },
+    ]);
+  });
+
+  it("asks for the category, the purpose and the template before adding, says when no template fits, and «Отмена» adds nothing", async () => {
+    await openDefaults(session());
+    const add = openAdd();
+    fireEvent.click(within(add).getByRole("button", { name: "Добавить" }));
+    expect(await within(add).findByText("Выберите категорию")).toBeTruthy();
+    expect(within(add).getByText("Выберите назначение")).toBeTruthy();
+    expect(within(add).getByText("Выберите шаблон")).toBeTruthy();
+    expect(screen.getByLabelText("Категория").getAttribute("aria-describedby")).toBe(
+      within(add).getByText("Выберите категорию").id,
+    );
+    choose("Категория", "3");
+    expect(within(add).queryByText("Выберите категорию")).toBeNull();
+    choose("Назначение", "product_duplicate");
+    expect(choices("Шаблон")).toEqual(["Не выбран", "Дубликат [Полное]"]);
+    // A category and a purpose without a template is not enough either.
+    fireEvent.click(within(add).getByRole("button", { name: "Добавить" }));
+    expect(await within(add).findByText("Выберите шаблон")).toBeTruthy();
+    expect(within(add).queryByText("Выберите назначение")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Умолчание категории" })).toBeTruthy();
+    expect(
+      within(add).queryByText("Нет включённых шаблонов этого назначения для этой категории."),
+    ).toBeNull();
+    fireEvent.click(within(add).getByRole("button", { name: "Отмена" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(rows()).toEqual([["Молочная продукция", "Короб"]]);
+    expect(screen.queryByText(DIRTY)).toBeNull();
+  });
+
+  it("says when no template fits the category and purpose chosen", async () => {
+    const fake = session();
+    fake.api.listTemplates.mockResolvedValue(
+      TEMPLATES.map((each) => (each.id === DUPLICATE.id ? { ...each, enabled: false } : each)),
+    );
+    await openDefaults(fake);
+    const add = openAdd();
+    choose("Категория", "3");
+    choose("Назначение", "product_duplicate");
+    expect(choices("Шаблон")).toEqual(["Не выбран"]);
+    expect(
+      within(add).getByText("Нет включённых шаблонов этого назначения для этой категории."),
+    ).toBeTruthy();
+  });
+
+  it("puts a refused category default under its row, found by the order the page sent and not the order it shows, and takes the message away when that row changes", async () => {
+    const fake = session();
+    await openDefaults(fake);
+    const add = openAdd();
+    choose("Категория", "3");
+    choose("Назначение", "box");
+    choose("Шаблон", BOX_100.id);
+    fireEvent.click(within(add).getByRole("button", { name: "Добавить" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // Sent: «Молочная продукция» first, then the added one; shown: the added one first.
+    expect(rows()).toEqual([
+      ["Альтернативная табачная продукция", "Короб"],
+      ["Молочная продукция", "Короб"],
+    ]);
+    const added = "Шаблон: Альтернативная табачная продукция, Короб";
+    for (const [field, message] of [
+      ["categories.1.templateId", UNFIT],
+      ["categories.1.chzProductGroupCode", "Хост не принял эту категорию."],
+      ["categories.1", "Это умолчание задано дважды."],
+    ] as const) {
+      fake.api.updateTemplateDefaults.mockRejectedValueOnce(
+        hostError("validation_failed", 400, { field }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+      const shown = await screen.findByText(message);
+      expect(screen.getByLabelText(added).getAttribute("aria-describedby")).toBe(shown.id);
+      expect(
+        screen.getByLabelText("Шаблон: Молочная продукция, Короб").hasAttribute("aria-describedby"),
+      ).toBe(false);
+    }
+    choose(added, BOX.id);
+    expect(screen.queryByText("Это умолчание задано дважды.")).toBeNull();
+    fake.api.updateTemplateDefaults.mockRejectedValueOnce(
+      hostError("validation_failed", 400, { field: "categories.0.templateId" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    const shown = await screen.findByText(UNFIT);
+    expect(
+      screen.getByLabelText("Шаблон: Молочная продукция, Короб").getAttribute("aria-describedby"),
+    ).toBe(shown.id);
+    // Another row's change or removal leaves the message; its own row's removal takes it away.
+    choose(added, BOX_100.id);
+    expect(screen.getByText(UNFIT)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Убрать умолчание: Альтернативная табачная продукция, Короб",
+      }),
+    );
+    expect(screen.getByText(UNFIT)).toBeTruthy();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Убрать умолчание: Молочная продукция, Короб" }),
+    );
+    expect(screen.queryByText(UNFIT)).toBeNull();
+  });
+
+  it("names the categories by their codes while the groups do not load, keeps adding off, and reads them again", async () => {
+    const fake = session();
+    fake.api.listProductGroups.mockRejectedValueOnce(
+      new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+    );
+    await openDefaults(fake);
+    expect(
+      await screen.findByText(
+        "Справочник товарных групп не загрузился: вместо названий категорий видны коды, а умолчание категории сейчас не добавить.",
+      ),
+    ).toBeTruthy();
+    expect(rows()).toEqual([["Код 8", "Короб"]]);
+    expect(screen.getByRole("button", { name: "Добавить умолчание категории" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    await waitFor(() => expect(rows()).toEqual([["Молочная продукция", "Короб"]]));
+    expect(screen.getByRole("button", { name: "Добавить умолчание категории" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+  });
+
+  it("keeps «Добавить умолчание категории» off while the templates do not load", async () => {
+    const fake = session();
+    fake.api.listTemplates.mockRejectedValueOnce(
+      new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+    );
+    renderOffice(fake);
+    fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+    await screen.findByText("Список шаблонов не загрузился: умолчания сейчас не изменить.");
+    const add = screen.getByRole("button", { name: "Добавить умолчание категории" });
+    expect(add).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    await waitFor(() => expect(add).toHaveProperty("disabled", false));
+  });
+});
+
 // Beyond the plan: each test below kills a one-line mutant the plan's tests let live.
 describe("office template defaults: the organization's, beyond the plan", () => {
   beforeEach(() => {
@@ -520,7 +808,7 @@ describe("office template defaults: the organization's, beyond the plan", () => 
     await openDefaults(session());
     const note = screen
       .getByRole("button", { name: "Сохранить" })
-      .closest("form")
+      .closest(".standalone-form__actions")
       ?.querySelector(".office-note");
     if (note === null || note === undefined) throw new Error("the note about unsaved changes");
     expect(note.getAttribute("aria-live")).toBe("polite");
@@ -661,5 +949,438 @@ describe("office template defaults: the organization's, beyond the plan", () => 
     await settle();
     expect(fake.api.getTemplateDefaults).toHaveBeenCalledTimes(1);
     expect(fake.api.listTemplates).toHaveBeenCalledTimes(1);
+  });
+});
+
+// Beyond the plan: each test below kills a one-line mutant the plan's tests let live.
+describe("office template defaults: the categories', beyond the plan", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+  });
+
+  const ADD = "Добавить умолчание категории";
+  const MILK_ROW = "Шаблон: Молочная продукция, Короб";
+  const NO_FIT = "Нет включённых шаблонов этого назначения для этой категории.";
+
+  /** The four defaults of the plan's list test, in an order unlike the one the page shows. */
+  const FOUR_DEFAULTS: TemplateDefaults = {
+    ...DEFAULTS,
+    categories: [
+      { chzProductGroupCode: 13, purpose: "product_duplicate", templateId: DUPLICATE.id },
+      { chzProductGroupCode: 8, purpose: "box", templateId: MILK.id },
+      { chzProductGroupCode: 13, purpose: "pallet", templateId: PALLET.id },
+      { chzProductGroupCode: 13, purpose: "box", templateId: BOX.id },
+    ],
+  };
+
+  /** The category and purpose of each row of the table, as it shows them. */
+  function shown(): (string | null)[][] {
+    return within(screen.getByRole("region", { name: "Для категорий" }))
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) =>
+        within(row)
+          .getAllByRole("cell")
+          .slice(0, 2)
+          .map((cell) => cell.textContent),
+      );
+  }
+
+  /** Opens the dialog of a new category default. */
+  function openDialog(): HTMLElement {
+    fireEvent.click(screen.getByRole("button", { name: ADD }));
+    return screen.getByRole("dialog", { name: "Умолчание категории" });
+  }
+
+  /** «Отмена» in the dialog, and the wait until it is gone. */
+  async function closeDialog(dialog: HTMLElement): Promise<void> {
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отмена" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  }
+
+  it("orders the rows, and the categories on offer for a new default, by name with numbers by value, and not by code or by the lookup's order", async () => {
+    const groups: ProductGroup[] = [
+      { code: 8, alias: "apples", name: "Яблоки" },
+      { code: 13, alias: "melons", name: "Арбузы" },
+      { code: 3, alias: "ten", name: "Группа 10" },
+      { code: 21, alias: "two", name: "Группа 2" },
+      { code: 5, alias: "quinces", name: "Дыни" },
+    ];
+    const fake = session({
+      ...DEFAULTS,
+      categories: [8, 13, 3, 21].map((code) => ({
+        chzProductGroupCode: code,
+        purpose: "box" as const,
+        templateId: BOX.id,
+      })),
+    });
+    fake.api.listProductGroups.mockResolvedValue(groups);
+    await openDefaults(fake);
+    await waitFor(() =>
+      expect(shown().map((row) => row[0])).toEqual(["Арбузы", "Группа 2", "Группа 10", "Яблоки"]),
+    );
+    openDialog();
+    expect(choices("Категория")).toEqual([
+      "Не выбрана",
+      "Арбузы",
+      "Группа 2",
+      "Группа 10",
+      "Дыни",
+      "Яблоки",
+    ]);
+  });
+
+  it("shows the card as a second-level heading over a table of four named columns, «Убрать» in its own words, a tag of its tone for each purpose, and no dialog until one is asked for", async () => {
+    await openDefaults(session(FOUR_DEFAULTS));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByRole("heading", { name: "Для категорий", level: 2 })).toBeTruthy();
+    const table = within(screen.getByRole("region", { name: "Для категорий" }));
+    expect(table.getAllByRole("columnheader").map((header) => header.textContent)).toEqual([
+      "Категория",
+      "Назначение",
+      "Шаблон",
+      "Действия",
+    ]);
+    const remove = await table.findByRole("button", {
+      name: "Убрать умолчание: Молочная продукция, Короб",
+    });
+    expect(remove.textContent).toBe("Убрать");
+    // A long category name wraps; the other cells stay on one line.
+    expect(table.getAllByRole("cell")[0]?.style.whiteSpace).toBe("normal");
+    for (const [purpose, tone, count] of [
+      ["Короб", "violet", 2],
+      ["Паллета", "magenta", 1],
+      ["Дубликат товара", "teal", 1],
+    ] as const) {
+      const tags = table.getAllByText(purpose);
+      expect(tags, purpose).toHaveLength(count);
+      for (const tag of tags)
+        expect(tag.classList.contains(`mk-badge--${tone}`), purpose).toBe(true);
+    }
+    expect(screen.getByRole("button", { name: ADD }).classList.contains("mk-btn--secondary")).toBe(
+      true,
+    );
+  });
+
+  it("lets both office roles add, change and remove category defaults", async () => {
+    for (const user of [TECHNOLOGIST, { ...TECHNOLOGIST, role: "admin" as const }]) {
+      const view = renderOffice(session(DEFAULTS, user));
+      fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+      const add = await screen.findByRole("button", { name: ADD });
+      await waitFor(() => expect(add).toHaveProperty("disabled", false));
+      expect(
+        await screen.findByRole("button", { name: "Убрать умолчание: Молочная продукция, Короб" }),
+      ).toBeTruthy();
+      expect(screen.getByLabelText(MILK_ROW)).toHaveProperty("disabled", false);
+      view.unmount();
+    }
+  });
+
+  it("keeps adding and the rows' choices off while the groups and the templates are loading, shows a row by its code and template id meanwhile, and turns them on as the lists arrive", async () => {
+    const fake = session();
+    let releaseTemplates: (templates: LabelTemplateSummary[]) => void = () => undefined;
+    let releaseGroups: (groups: ProductGroup[]) => void = () => undefined;
+    fake.api.listTemplates.mockReturnValue(
+      new Promise<LabelTemplateSummary[]>((resolve) => {
+        releaseTemplates = resolve;
+      }),
+    );
+    fake.api.listProductGroups.mockReturnValue(
+      new Promise<ProductGroup[]>((resolve) => {
+        releaseGroups = resolve;
+      }),
+    );
+    renderOffice(fake);
+    fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));
+    await screen.findByRole("heading", { name: "Для категорий" });
+    const add = screen.getByRole("button", { name: ADD });
+    expect(add).toHaveProperty("disabled", true);
+    expect(shown()).toEqual([["Код 8", "Короб"]]);
+    const stored = "Шаблон: Код 8, Короб";
+    expect(screen.getByLabelText(stored)).toHaveProperty("disabled", true);
+    expect(choices(stored)).toEqual([`Шаблон ${MILK.id.slice(0, 8)}…`]);
+    // Loading is not failing: neither lookup is reported as lost.
+    expect(screen.queryByText(/не загрузился/)).toBeNull();
+    await act(async () => {
+      releaseTemplates(TEMPLATES);
+    });
+    await waitFor(() => expect(screen.getByLabelText(stored)).toHaveProperty("disabled", false));
+    expect(add).toHaveProperty("disabled", true);
+    await act(async () => {
+      releaseGroups(GROUPS);
+    });
+    await waitFor(() => expect(add).toHaveProperty("disabled", false));
+    expect(shown()).toEqual([["Молочная продукция", "Короб"]]);
+  });
+
+  it("turns the purpose on once a category is chosen and the template once a purpose is, off again when the choice is taken back, and speaks of no fitting template only after one was looked for", async () => {
+    await openDefaults(session());
+    const dialog = openDialog();
+    expect(screen.getByLabelText("Назначение")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("Шаблон")).toHaveProperty("disabled", true);
+    expect(within(dialog).queryByText(NO_FIT)).toBeNull();
+    choose("Категория", "3");
+    expect(screen.getByLabelText("Назначение")).toHaveProperty("disabled", false);
+    expect(screen.getByLabelText("Шаблон")).toHaveProperty("disabled", true);
+    expect(within(dialog).queryByText(NO_FIT)).toBeNull();
+    choose("Назначение", "box");
+    expect(screen.getByLabelText("Шаблон")).toHaveProperty("disabled", false);
+    expect(within(dialog).queryByText(NO_FIT)).toBeNull();
+    // Taking a choice back turns the field after it off again.
+    choose("Назначение", "");
+    expect(screen.getByLabelText("Шаблон")).toHaveProperty("disabled", true);
+    choose("Категория", "");
+    expect(screen.getByLabelText("Назначение")).toHaveProperty("disabled", true);
+  });
+
+  it("takes an error away as soon as its field, or the field before it, changes, and not before", async () => {
+    await openDefaults(session());
+    const dialog = openDialog();
+    const submit = within(dialog).getByRole("button", { name: "Добавить" });
+    const asked = () =>
+      ["Выберите категорию", "Выберите назначение", "Выберите шаблон"].map(
+        (text) => within(dialog).queryByText(text) !== null,
+      );
+    fireEvent.click(submit);
+    await within(dialog).findByText("Выберите шаблон");
+    expect(asked()).toEqual([true, true, true]);
+    // A new category starts the purpose and the template afresh: the next «Добавить» asks again.
+    choose("Категория", "3");
+    expect(asked()).toEqual([false, false, false]);
+    fireEvent.click(submit);
+    await within(dialog).findByText("Выберите шаблон");
+    expect(asked()).toEqual([false, true, true]);
+    choose("Назначение", "box");
+    expect(asked()).toEqual([false, false, false]);
+    fireEvent.click(submit);
+    await within(dialog).findByText("Выберите шаблон");
+    expect(asked()).toEqual([false, false, true]);
+    choose("Шаблон", BOX_100.id);
+    expect(asked()).toEqual([false, false, false]);
+  });
+
+  it("drops the template when the purpose changes, and the purpose and the template when the category does, so nothing chosen for another slot is added", async () => {
+    await openDefaults(session());
+    const dialog = openDialog();
+    choose("Категория", "8");
+    choose("Назначение", "pallet");
+    choose("Шаблон", PALLET_58.id);
+    choose("Назначение", "product_duplicate");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Добавить" }));
+    expect(await within(dialog).findByText("Выберите шаблон")).toBeTruthy();
+    choose("Шаблон", DUPLICATE.id);
+    choose("Категория", "3");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Добавить" }));
+    expect(await within(dialog).findByText("Выберите назначение")).toBeTruthy();
+    expect(within(dialog).getByText("Выберите шаблон")).toBeTruthy();
+    await closeDialog(dialog);
+    expect(shown()).toEqual([["Молочная продукция", "Короб"]]);
+    expect(screen.queryByText(DIRTY)).toBeNull();
+  });
+
+  it("offers the slots the page holds now and not the loaded ones, keeps the other rows' elements when one is added, and «Отменить изменения» brings the loaded ones back", async () => {
+    await openDefaults(session());
+    const milk = await screen.findByLabelText(MILK_ROW);
+    let dialog = openDialog();
+    choose("Категория", "3");
+    choose("Назначение", "pallet");
+    choose("Шаблон", PALLET_58.id);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Добавить" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(shown()).toEqual([
+      ["Альтернативная табачная продукция", "Паллета"],
+      ["Молочная продукция", "Короб"],
+    ]);
+    // The row that was already there keeps its element, so the focus stays where the user left it.
+    expect(screen.getByLabelText(MILK_ROW)).toBe(milk);
+    // A default added here is no longer offered...
+    dialog = openDialog();
+    choose("Категория", "3");
+    expect(choices("Назначение")).toEqual(["Не выбрано", "Короб", "Дубликат товара"]);
+    await closeDialog(dialog);
+    // ...and one removed here is offered again.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Убрать умолчание: Молочная продукция, Короб" }),
+    );
+    dialog = openDialog();
+    choose("Категория", "8");
+    expect(choices("Назначение")).toEqual(["Не выбрано", "Короб", "Паллета", "Дубликат товара"]);
+    await closeDialog(dialog);
+    fireEvent.click(screen.getByRole("button", { name: "Отменить изменения" }));
+    expect(shown()).toEqual([["Молочная продукция", "Короб"]]);
+    expect(screen.queryByText(DIRTY)).toBeNull();
+    openDialog();
+    choose("Категория", "8");
+    expect(choices("Назначение")).toEqual(["Не выбрано", "Паллета", "Дубликат товара"]);
+    choose("Категория", "3");
+    expect(choices("Назначение")).toEqual(["Не выбрано", "Короб", "Паллета", "Дубликат товара"]);
+  });
+
+  it("sends an empty list when the last category default is removed, which clears it on the host, and says there are none", async () => {
+    const fake = session();
+    fake.api.updateTemplateDefaults.mockResolvedValue({ ...DEFAULTS, categories: [], rev: 70 });
+    await openDefaults(fake);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Убрать умолчание: Молочная продукция, Короб" }),
+    );
+    expect(screen.getByText("Умолчаний категорий нет.")).toBeTruthy();
+    expect(screen.getByText(DIRTY)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Изменения сохранены.");
+    expect(fake.api.updateTemplateDefaults.mock.calls).toStrictEqual([
+      [
+        "office-session-token",
+        {
+          defaultBoxTemplateId: BOX.id,
+          defaultPalletTemplateId: PALLET.id,
+          defaultDuplicateTemplateId: null,
+          categories: [],
+          expectedRev: 64,
+        },
+      ],
+    ]);
+    expect(screen.getByText("Умолчаний категорий нет.")).toBeTruthy();
+  });
+
+  it("keeps a loaded category default the list does not offer as a marked choice, also when another template is chosen, and lets the user take it back", async () => {
+    await openDefaults(
+      session({
+        ...DEFAULTS,
+        categories: [{ chzProductGroupCode: 8, purpose: "box", templateId: OLD.id }],
+      }),
+    );
+    await screen.findByLabelText(MILK_ROW);
+    expect(choices(MILK_ROW)).toEqual([
+      "Коробка 58×40",
+      "Коробка 100×100",
+      "Молоко 58×40",
+      "Старая коробка — не подходит",
+    ]);
+    expect(screen.getByLabelText(MILK_ROW)).toHaveProperty("value", OLD.id);
+    choose(MILK_ROW, BOX_100.id);
+    expect(choices(MILK_ROW)).toContain("Старая коробка — не подходит");
+    expect(screen.getByLabelText(MILK_ROW)).toHaveProperty("value", BOX_100.id);
+    choose(MILK_ROW, OLD.id);
+    expect(screen.getByLabelText(MILK_ROW)).toHaveProperty("value", OLD.id);
+    expect(screen.queryByText(DIRTY)).toBeNull();
+  });
+
+  it("marks the template a refused category default names as one that no longer fits once the list is read again, and keeps the choice under the message", async () => {
+    const fake = session();
+    fake.api.listTemplates
+      .mockResolvedValueOnce(TEMPLATES)
+      .mockResolvedValue(
+        TEMPLATES.map((template) =>
+          template.id === BOX_100.id ? { ...template, enabled: false } : template,
+        ),
+      );
+    fake.api.updateTemplateDefaults.mockRejectedValueOnce(
+      hostError("validation_failed", 400, { field: "categories.0.templateId" }),
+    );
+    await openDefaults(fake);
+    await screen.findByLabelText(MILK_ROW);
+    choose(MILK_ROW, BOX_100.id);
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    const message = await screen.findByText(UNFIT);
+    await waitFor(() =>
+      expect(choices(MILK_ROW)).toEqual([
+        "Коробка 58×40",
+        "Молоко 58×40",
+        "Коробка 100×100 — не подходит",
+      ]),
+    );
+    expect(screen.getByLabelText(MILK_ROW)).toHaveProperty("value", BOX_100.id);
+    expect(screen.getByLabelText(MILK_ROW).getAttribute("aria-describedby")).toBe(message.id);
+  });
+
+  it("shows group and template names with markup characters as plain text in the rows and in the dialog", async () => {
+    // `t()` does not escape what it interpolates (`escapeValue: false`): a name reaches the page
+    // only as a React child or an attribute value, never as HTML.
+    const category = '<b>Группа</b> & "x"';
+    const other = "<i>Вторая</i> & 'y'";
+    const template = '<u>Шаблон</u> & "z"';
+    const odd = summary("3c7e0b8a-5d9f-4e1a-8b2c-7d8e9f0a1b2c", template, { stock: false });
+    const fake = session({
+      ...DEFAULTS,
+      categories: [{ chzProductGroupCode: 8, purpose: "box", templateId: odd.id }],
+    });
+    fake.api.listProductGroups.mockResolvedValue([
+      { code: 8, alias: "milk", name: category },
+      { code: 13, alias: "water", name: other },
+    ]);
+    fake.api.listTemplates.mockResolvedValue([BOX, odd]);
+    await openDefaults(fake);
+    const row = await screen.findByLabelText(`Шаблон: ${category}, Короб`);
+    expect(choices(`Шаблон: ${category}, Короб`)).toContain(template);
+    expect(row.querySelector("u")).toBeNull();
+    const table = within(screen.getByRole("region", { name: "Для категорий" }));
+    const cell = table.getAllByRole("cell")[0];
+    expect(cell?.textContent).toBe(category);
+    expect(cell?.querySelector("b")).toBeNull();
+    expect(
+      table.getByRole("button", { name: `Убрать умолчание: ${category}, Короб` }),
+    ).toBeTruthy();
+    const dialog = openDialog();
+    expect(choices("Категория")).toContain(category);
+    expect(choices("Категория")).toContain(other);
+    choose("Категория", "13");
+    choose("Назначение", "box");
+    expect(choices("Шаблон")).toContain(template);
+    expect(dialog.querySelector("b, i, u")).toBeNull();
+  });
+
+  it("shows the warning about the group lookup as a warning, and its «Повторить» reads the groups and nothing else", async () => {
+    const fake = session();
+    fake.api.listProductGroups.mockRejectedValueOnce(
+      new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+    );
+    await openDefaults(fake);
+    const warning = await screen.findByText(
+      "Справочник товарных групп не загрузился: вместо названий категорий видны коды, а умолчание категории сейчас не добавить.",
+    );
+    expect(warning.closest(".mk-alert")?.classList.contains("mk-alert--warn")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    await waitFor(() => expect(shown()).toEqual([["Молочная продукция", "Короб"]]));
+    expect(screen.queryByText(/не загрузился/)).toBeNull();
+    await settle();
+    expect(fake.api.listProductGroups).toHaveBeenCalledTimes(2);
+    expect(fake.api.listTemplates).toHaveBeenCalledTimes(1);
+  });
+
+  it("saves one document: an organization default, a changed row, an added one and a removed one go together, the rows in the order the page holds them", async () => {
+    const fake = session(FOUR_DEFAULTS);
+    fake.api.updateTemplateDefaults.mockResolvedValue({ ...FOUR_DEFAULTS, rev: 70 });
+    await openDefaults(fake);
+    await screen.findByLabelText(MILK_ROW);
+    choose("Шаблон паллеты", PALLET_58.id);
+    choose(MILK_ROW, BOX.id);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Убрать умолчание: Упакованная вода, Дубликат товара" }),
+    );
+    const dialog = openDialog();
+    choose("Категория", "3");
+    choose("Назначение", "box");
+    choose("Шаблон", BOX_100.id);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Добавить" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Изменения сохранены.");
+    expect(fake.api.updateTemplateDefaults.mock.calls).toStrictEqual([
+      [
+        "office-session-token",
+        {
+          defaultBoxTemplateId: BOX.id,
+          defaultPalletTemplateId: PALLET_58.id,
+          defaultDuplicateTemplateId: null,
+          categories: [
+            { chzProductGroupCode: 8, purpose: "box", templateId: BOX.id },
+            { chzProductGroupCode: 13, purpose: "pallet", templateId: PALLET.id },
+            { chzProductGroupCode: 13, purpose: "box", templateId: BOX.id },
+            { chzProductGroupCode: 3, purpose: "box", templateId: BOX_100.id },
+          ],
+          expectedRev: 64,
+        },
+      ],
+    ]);
   });
 });

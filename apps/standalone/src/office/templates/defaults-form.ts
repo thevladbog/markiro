@@ -6,6 +6,7 @@ import type {
 } from "../../host/protocol.js";
 import type { TemplateDefaultsInput } from "../../host/requests.js";
 import { alertFailure, type AlertFailure } from "../form-errors.js";
+import { PURPOSES } from "./template-text.js";
 
 /** The organization's three defaults: each one's field in the document and its slot's purpose. */
 export const ORG_DEFAULTS = [
@@ -71,6 +72,36 @@ export function slotKey(
   return `${entry.chzProductGroupCode}:${entry.purpose}`;
 }
 
+/** `draft` with `entry` in its slot: in place of the slot's default, or added at the end. */
+export function withCategoryDefault(
+  draft: DefaultsDraft,
+  entry: CategoryTemplateDefault,
+): DefaultsDraft {
+  const slot = slotKey(entry);
+  return {
+    ...draft,
+    categories: draft.categories.some((each) => slotKey(each) === slot)
+      ? draft.categories.map((each) => (slotKey(each) === slot ? entry : each))
+      : [...draft.categories, entry],
+  };
+}
+
+/** `draft` without the category default of `slot`: saving it clears that default. */
+export function withoutCategoryDefault(draft: DefaultsDraft, slot: string): DefaultsDraft {
+  return { ...draft, categories: draft.categories.filter((each) => slotKey(each) !== slot) };
+}
+
+/** The purposes a category has no default of yet, in the order the office offers them. */
+export function freePurposes(
+  categories: readonly CategoryTemplateDefault[],
+  code: number,
+): TemplatePurpose[] {
+  return PURPOSES.filter(
+    (purpose) =>
+      !categories.some((each) => each.chzProductGroupCode === code && each.purpose === purpose),
+  );
+}
+
 /**
  * Whether two drafts hold the same defaults: the organization's three, and
  * the same template in the same category slots, in any order.
@@ -89,20 +120,40 @@ export function sameDraft(a: DefaultsDraft, b: DefaultsDraft): boolean {
   );
 }
 
+/** `categories.{i}`, `categories.{i}.templateId` or `categories.{i}.chzProductGroupCode`. */
+const CATEGORY_FIELD = /^categories\.(\d+)(?:\.(templateId|chzProductGroupCode))?$/;
+
 /**
- * A refused save: under the organization default the host names (a template
- * that no longer fits its slot, or no longer exists; `key` is that default's
- * field), else a stale write or an alert (`alertFailure`). The host checks the
- * defaults before the revision, so a template disabled, narrowed or deleted
- * while the page was open is refused on its field, not as `stale_revision`.
+ * A refused save: under the organization default the host names, or under
+ * the category default it names by its index in the categories the page sent
+ * (`sent`, which keeps the page's own order, not the order it shows), else a
+ * stale write or an alert (`alertFailure`). `key` is the organization
+ * default's field or the category default's slot (`slotKey`). The host checks
+ * the defaults before the revision, so a template disabled, narrowed or
+ * deleted while the page was open is refused on its field, not as
+ * `stale_revision`.
  */
 export type DefaultsFailure = { kind: "field"; key: string; message: string } | AlertFailure;
 
-export function defaultsFailure(error: unknown): DefaultsFailure {
+export function defaultsFailure(
+  error: unknown,
+  sent: readonly CategoryTemplateDefault[] = [],
+): DefaultsFailure {
   const path = error instanceof HostError ? error.field : null;
   const org = ORG_DEFAULTS.find((each) => each.field === path);
   if (org !== undefined) {
     return { kind: "field", key: org.field, message: "office.templateDefaults.errors.unfit" };
+  }
+  const category = path === null ? null : CATEGORY_FIELD.exec(path);
+  const entry = category === null ? undefined : sent[Number(category[1])];
+  if (category !== null && entry !== undefined) {
+    const message =
+      category[2] === "templateId"
+        ? "office.templateDefaults.errors.unfit"
+        : category[2] === "chzProductGroupCode"
+          ? "office.templateDefaults.errors.category"
+          : "office.templateDefaults.errors.twice";
+    return { kind: "field", key: slotKey(entry), message };
   }
   return alertFailure(error);
 }
