@@ -109,13 +109,13 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "Markiro объединяет операции с кодами маркировки в последовательный производственный поток: код проверяется, наносится, связывается с упаковкой и остаётся в журнале прослеживаемости.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT,
-    reviewedAt: "2026-09-27",
+    reviewedAt: "2026-10-05",
     summary: [
       "Код маркировки проверяется на станции в момент сканирования: структура GS1, контрольное число GTIN, разделитель GS, принадлежность товару смены и повторы.",
       "Markiro не заказывает коды. Коды получает производитель в системе «Честный знак», а Markiro фиксирует их проверку, нанесение и упаковку.",
       "Этикетка короба печатается из одного макета для предпросмотра и принтера: ZPL или TSPL, кириллица растеризуется на станции.",
       "Каждая смена оставляет журнал: кто, на каком терминале и когда принял код, закрыл короб, перепечатал этикетку или расформировал упаковку.",
-      "Результат смены выгружается файлами TXT, CSV и XML агрегации для ГИС МТ. Сейчас поддерживается товарная группа пива и слабоалкогольных напитков.",
+      "Результат смены выгружается файлами TXT, CSV и XML агрегации для ГИС МТ. Markiro работает на линиях пива и сидра, а особенности другой товарной группы сверяем до запуска.",
     ],
     relatedPaths: ["/rabochee-mesto-upakovki/", "/sscc-i-agregatsiya/", "/integratsiya-1c/"],
     relatedArticlePaths: [
@@ -190,7 +190,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         heading: "Граница ответственности",
         paragraphs: [
           "Markiro управляет производственным контуром и прослеживаемостью операций. Обмен с внешними системами настраивается по подтверждённому контракту; конкретный состав интеграции зависит от действующего процесса предприятия.",
-          "Сейчас Markiro ориентирован на товарную группу «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки», включая сидр. Поддерживаемые уровни агрегации — единица → короб → паллета.",
+          "Markiro работает на линиях пива и сидра. Коды, короба и паллеты устроены одинаково для любой маркируемой продукции, поэтому товарную группу, форм-фактор упаковки и правила учёта сверяем до запуска. Поддерживаемые уровни агрегации — единица → короб → паллета.",
         ],
       },
     ],
@@ -226,17 +226,17 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/sscc-i-agregatsiya/",
     alternatePath: "/en/sscc-and-aggregation/",
     locale: "ru",
-    title: "SSCC и агрегация коробов с пивной продукцией — Markiro",
+    title: "SSCC и агрегация коробов и паллет — Markiro",
     description:
-      "Markiro собирает маркированное пиво и слабоалкогольные напитки в короба, проверяет SSCC и сохраняет историю агрегации и восстановления.",
-    heading: "SSCC и агрегация коробов для пивной продукции",
+      "Markiro собирает маркированную продукцию в короба и паллеты, проверяет SSCC и сохраняет историю агрегации и восстановления.",
+    heading: "SSCC и агрегация коробов и паллет",
     navigationLabel: "SSCC и агрегация",
     eyebrow: "Единица → короб → паллета",
     introduction:
-      "Markiro сейчас ориентирован на производственные сценарии товарной группы «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки», включая сидр. Новые товарные группы добавляются поэтапно. Для конкретного товара применимость проверяется по кодам ТН ВЭД ЕАЭС и ОКПД 2 и фактическому процессу линии.",
+      "Markiro работает на линиях пива и сидра. Коды, короба и паллеты устроены одинаково для любой маркируемой продукции, поэтому товарную группу, форм-фактор упаковки и правила учёта сверяем до запуска. Для конкретного товара применимость проверяется по кодам ТН ВЭД ЕАЭС и ОКПД 2 и фактическому процессу линии.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT,
-    reviewedAt: "2026-09-27",
+    reviewedAt: "2026-10-05",
     summary: [
       "SSCC — 18-значный номер логистической единицы. Markiro присваивает его коробам и паллетам, а код маркировки идентифицирует потребительскую единицу внутри короба.",
       "Станция получает диапазон SSCC заранее и расходует номера последовательно; после расформирования короба его номер не используется повторно.",
@@ -805,10 +805,10 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "Здесь собраны ответы о границах продукта и основных производственных сценариях. Детали внедрения проверяются на данных и оборудовании конкретного предприятия.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT,
-    reviewedAt: "2026-09-27",
+    reviewedAt: "2026-10-05",
     summary: [
       "Markiro — производственная система маркировки: проверка кодов на линии, агрегация в короба и паллеты с SSCC, печать этикеток, журнал и выгрузки для ГИС МТ.",
-      "Сейчас поддерживается товарная группа пива, сидра и слабоалкогольных напитков и уровни агрегации единица → короб → паллета.",
+      "Markiro работает на линиях пива и сидра, а особенности другой товарной группы сверяем до запуска. Уровни агрегации — единица → короб → паллета.",
       "Станция работает на Windows без сети, кабинет — в браузере, киоск выбытия — на планшете или моноблоке.",
     ],
     relatedPaths: ["/markirovka-chestny-znak/", "/sscc-i-agregatsiya/", "/oflayn-rabota/"],
@@ -827,7 +827,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Какие товарные группы поддерживаются?",
         answer:
-          "Сейчас — «Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки», включая сидр. Принадлежность товара проверяется по ТН ВЭД ЕАЭС и ОКПД 2. Новые товарные группы добавляются поэтапно.",
+          "Markiro работает на линиях пива и сидра. Коды, короба и паллеты устроены одинаково для любой маркируемой продукции, поэтому товарную группу, форм-фактор упаковки и правила учёта сверяем до запуска. Принадлежность товара проверяется по ТН ВЭД ЕАЭС и ОКПД 2.",
       },
       {
         question: "Продолжит ли станция работу без интернета?",
@@ -934,13 +934,13 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "Markiro turns serialization operations into one production flow: codes are verified, applied, connected to packs, and retained in the traceability log.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: "2026-09-27",
+    reviewedAt: "2026-10-05",
     summary: [
       "A serialized code is validated at the station the moment it is scanned: GS1 structure, GTIN check digit, GS separator, membership in the shift's product, and duplicates.",
       "Markiro does not order codes. The manufacturer obtains them from Chestny ZNAK; Markiro records their verification, application and packing.",
       "Case labels print from one layout for preview and printer alike: ZPL or TSPL, with Cyrillic rasterized on the station.",
       "Every shift leaves a log: who accepted a code, closed a case, reprinted a label or disassembled a pack, on which terminal and when.",
-      "Shift results export as TXT, CSV and GIS MT aggregation XML. The supported product group is currently beer and low-alcohol beverages.",
+      "Shift results export as TXT, CSV and GIS MT aggregation XML. Markiro runs on beer and cider lines, and we check the rules of any other product group before launch.",
     ],
     relatedPaths: ["/en/packing-workstation/", "/en/sscc-and-aggregation/", "/en/1c-integration/"],
     relatedArticlePaths: [
@@ -1015,7 +1015,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
         heading: "Clear responsibility boundaries",
         paragraphs: [
           "Markiro controls the production workflow and its traceability. External exchanges follow an agreed contract, and the exact integration scope depends on the plant's operating process.",
-          "Markiro currently focuses on the product group “Beer, beverages made from beer and low-alcohol beverages”, including cider. The supported aggregation levels are item → case → pallet.",
+          "Markiro runs on beer and cider lines. Codes, cases and pallets work the same way for any marked goods, so we check your product group, packaging form factor and accounting rules before launch. The supported aggregation levels are item → case → pallet.",
         ],
       },
     ],
@@ -1051,17 +1051,17 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
     path: "/en/sscc-and-aggregation/",
     alternatePath: "/sscc-i-agregatsiya/",
     locale: "en",
-    title: "SSCC case aggregation for beer production — Markiro",
+    title: "SSCC case and pallet aggregation — Markiro",
     description:
-      "Markiro aggregates serialized beer and low-alcohol beverages into cases, validates SSCC relationships, and retains recovery history.",
-    heading: "SSCC case aggregation for beer production",
+      "Markiro aggregates serialized goods into cases and pallets, validates SSCC relationships, and retains recovery history.",
+    heading: "SSCC case and pallet aggregation",
     navigationLabel: "SSCC and aggregation",
     eyebrow: "Item → case → pallet",
     introduction:
-      "Markiro currently focuses on production workflows for the Chestny ZNAK product group “Beer, beverages made from beer and low-alcohol beverages”, including cider. Additional product categories are being added gradually. Applicability to a specific product is checked against its TN VED EAEU and OKPD 2 codes and the actual line process.",
+      "Markiro runs on beer and cider lines. Codes, cases and pallets work the same way for any marked goods, so we check your product group, packaging form factor and accounting rules before launch. Applicability to a specific product is checked against its TN VED EAEU and OKPD 2 codes and the actual line process.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: "2026-09-27",
+    reviewedAt: "2026-10-05",
     summary: [
       "An SSCC is the 18-digit number of a logistics unit. Markiro assigns it to cases and pallets, while a serialized code identifies the consumer unit inside a case.",
       "The station receives an SSCC range in advance and consumes numbers sequentially; after a case is disassembled its number is never reused.",
@@ -1642,10 +1642,10 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       "These answers define the product boundaries and core production workflows. Implementation details are validated against each plant's data and equipment.",
     socialImage: SHARED_IMAGE,
     socialImageAlt: SHARED_IMAGE_ALT_EN,
-    reviewedAt: "2026-09-27",
+    reviewedAt: "2026-10-05",
     summary: [
       "Markiro is a production serialization system: code validation on the line, case and pallet aggregation with SSCC, label printing, a journal and exports for GIS MT.",
-      "The supported product group is currently beer, cider and low-alcohol beverages, and the supported aggregation levels are item → case → pallet.",
+      "Markiro runs on beer and cider lines, and we check the rules of any other product group before launch. The supported aggregation levels are item → case → pallet.",
       "The station runs on Windows without a network, the cabinet runs in a browser, and the disposal kiosk runs on a tablet or an all-in-one.",
     ],
     relatedPaths: [
@@ -1668,7 +1668,7 @@ export const SEO_PAGES: readonly SeoPageDefinition[] = [
       {
         question: "Which product groups are supported?",
         answer:
-          "Currently “Beer, beverages made from beer and low-alcohol beverages”, including cider. Applicability is checked against the product's TN VED EAEU and OKPD 2 codes. Additional product groups are being added gradually.",
+          "Markiro runs on beer and cider lines. Codes, cases and pallets work the same way for any marked goods, so we check your product group, packaging form factor and accounting rules before launch. Applicability is checked against the product's TN VED EAEU and OKPD 2 codes.",
       },
       {
         question: "Will the station keep working without the internet?",
