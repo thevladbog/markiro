@@ -1135,6 +1135,20 @@ requests and offer a retry.
   (`PRODUCT_STALE_FIELDS`): the form was opened before its template was
   deleted. «Загрузить заново» closes the dialog and reads the products again;
   the templates are read again whenever a dialog opens.
+- «Шаблоны» (section «Каталог») lists every label template, disabled ones
+  included, and every role reads it: a table, not the cloud's cards with
+  thumbnails (nothing here renders a layout), by name with numbers by value
+  (`templatesByName`). A row shows the purpose as a word on a category tag (the
+  cloud's tones: box violet, pallet magenta, product duplicate teal), the size
+  («58 × 40 мм») and the layout's resolution («203 dpi») as the summary has
+  them, «—» where it has none, the categories (every category, one group's name,
+  or «Категорий: N» with the names in a `title`; a code where the lookup lacks
+  the group or did not load, and a failed lookup leaves the list in place and
+  offers to read it again), the state in words («Включён», or «Выключен» as
+  `retired`) and a «Типовой» tag on a stock template. The host sends the whole
+  list, so the search (by name, without case), the purpose filter and the state
+  filter work in the page; there are no pages, since a site keeps tens of
+  templates. The templates are read whenever the page opens.
 
 ## Marking rules
 

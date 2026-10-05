@@ -10,6 +10,7 @@ import { OrgProfilePage } from "./org/OrgProfilePage.js";
 import { ProductsPage } from "./products/ProductsPage.js";
 import { RequireRole } from "./RequireRole.js";
 import { SsccPage } from "./sscc/SsccPage.js";
+import { TemplatesPage } from "./templates/TemplatesPage.js";
 import { OfficeUsersPage } from "./users/OfficeUsersPage.js";
 
 /** Office routes; paths match `OFFICE_NAV`. */
@@ -40,6 +41,7 @@ export const officeRoutes: RouteObject[] = [
         ),
       },
       { path: "products", element: <ProductsPage /> },
+      { path: "templates", element: <TemplatesPage /> },
       {
         path: "users",
         element: (

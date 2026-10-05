@@ -1,4 +1,34 @@
-import type { LabelTemplate, LabelTemplateSummary } from "../../host/protocol.js";
+import type { LabelTemplate, LabelTemplateSummary, TemplatePurpose } from "../../host/protocol.js";
+
+/** What the purpose filter keeps. */
+export type TemplatePurposeFilter = "all" | TemplatePurpose;
+
+/** What the state filter keeps: every template, the enabled ones or the disabled ones. */
+export type TemplateStateFilter = "all" | "enabled" | "disabled";
+
+/** Whether a template's name holds the search, without case; a blank search matches every template. */
+export function matchesTemplateSearch(
+  template: Pick<LabelTemplateSummary, "name">,
+  search: string,
+): boolean {
+  const text = search.trim().toLocaleLowerCase("ru");
+  return text === "" || template.name.toLocaleLowerCase("ru").includes(text);
+}
+
+/** The templates the search and both filters keep, in the order given. */
+export function findTemplates<T extends LabelTemplateSummary>(
+  templates: readonly T[],
+  search: string,
+  purpose: TemplatePurposeFilter,
+  state: TemplateStateFilter,
+): T[] {
+  return templates.filter(
+    (template) =>
+      (purpose === "all" || template.purpose === purpose) &&
+      (state === "all" || template.enabled === (state === "enabled")) &&
+      matchesTemplateSearch(template, search),
+  );
+}
 
 /** Template names in Russian order, with numbers by value: «Коробка 58×40» before «Коробка 100×100». */
 const NAMES = new Intl.Collator("ru", { numeric: true });

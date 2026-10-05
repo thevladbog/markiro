@@ -234,6 +234,7 @@
       "operators": "Операторы",
       "devices": "Устройства",
       "products": "Товары",
+      "templates": "Шаблоны",
       "users": "Пользователи"
     },
     "common": {
@@ -625,6 +626,40 @@
       }
     },
     "templates": {
+      "title": "Шаблоны этикеток",
+      "empty": "Шаблонов пока нет.",
+      "nothingFound": "Ничего не найдено. Измените поиск или отбор.",
+      "filters": "Поиск и отбор шаблонов",
+      "search": "Поиск",
+      "searchHint": "Название шаблона",
+      "purposeFilter": "Назначение",
+      "stateFilter": "Состояние",
+      "found": "Найдено: {{shown}} из {{total}}",
+      "purposes": {
+        "all": "Все",
+        "box": "Короб",
+        "pallet": "Паллета",
+        "product_duplicate": "Дубликат товара"
+      },
+      "stateFilters": {
+        "all": "Все",
+        "enabled": "Включённые",
+        "disabled": "Выключенные"
+      },
+      "states": {
+        "enabled": "Включён",
+        "disabled": "Выключен"
+      },
+      "table": {
+        "name": "Название",
+        "purpose": "Назначение",
+        "size": "Размер",
+        "dpi": "Разрешение макета",
+        "scope": "Категории",
+        "state": "Состояние"
+      },
+      "stock": "Типовой",
+      "groupsFailed": "Справочник товарных групп не загрузился: вместо названий категорий видны коды.",
       "size": "{{width}} × {{height}} мм",
       "dpi": "{{dpi}} dpi",
       "groupCode": "Код {{code}}",
