@@ -442,12 +442,14 @@ product. A product form opened before its preferred template was deleted
 sends the old id with the older `expectedRev`, and the answer is
 `validation_failed` on `defaultBoxTemplateId` or `defaultPalletTemplateId`
 (the references are checked before the revision), not `stale_revision`:
-nothing is written, and the office (plan 1e2) re-reads the product and the
-template list on that error. The station will choose a template by the
-product's preference if it still fits, then the category's default, then the
-organization's, then the operator's choice (plan 2a); the comment in migration
-`0008_catalog.sql` names only the category's default and the organization's and
-omits the product's preference, and an applied migration is never edited. (The
+nothing is written, and the office's product dialog takes it as a stale
+write: «Загрузить заново» reads the products again at once, and the
+template list is read again whenever a dialog opens. The station will
+choose a template by the product's preference if it still fits, then the
+category's default, then the organization's, then the operator's choice
+(plan 2a); the comment in migration `0008_catalog.sql` names only the
+category's default and the organization's and omits the product's
+preference, and an applied migration is never edited. (The
 cloud has no per-product template since its 2026-09-02 spec; these follow the
 stage-1 spec.) National-catalog links, photos, EGAIS
 codes, prices and default counterparties are not part of the standalone
@@ -536,9 +538,14 @@ second of the same purpose is `validation_failed` on
 `templates.{i}.orgDefault`. The `host.bootstrap` row counts them
 (`templateCount`).
 
-Plan 1e1 is host-only: these shapes have Rust types and fixtures; their Zod
-schemas, `ENTITIES` entries and station copies come with plan 1e2, and the
-wizard's `templates` with plan 1e3 (spec §4.5).
+Plan 1e1 built the host's side and plan 1e2 the webview's: Zod schemas and
+request builders for every catalog shape (`test/protocol.test.ts` reads every
+fixture of plan 1e1, `test/template-eligibility.test.ts` the slot rule's),
+the station's copies of products, templates and category defaults
+(«Reference sync», «Local database») and the office's «Товары» page («Office
+pages»). The template screens, the defaults screen and the wizard's
+`templates` come with plan 1e3; the `HostApi` methods and the builders they
+call are in place.
 
 ## Reference sync
 
@@ -880,7 +887,9 @@ requests and offer a retry.
   dropped, so a double click sends nothing twice. `writeFailure` (`src/office/form-errors.ts`)
   sorts a refused write: a `validation_failed` field or a `conflict`
   constraint the form names (`line_name`, `login`, `badge`, `gtin14`) goes under
-  that field, `stale_revision` offers to reload, anything else is an alert
+  that field, `stale_revision` offers to reload, and so does a
+  `validation_failed` on a field the form names as out of date (`staleFields`:
+  a product's template preferences), anything else is an alert
   (`WriteFailureAlert`). A `FormDialog`'s `onSubmit` must never reject: it
   sorts every failure itself, and a rejection would only surface as an
   unhandled one, so a caller's bug is not hidden. Only the awaited write sits
@@ -1098,7 +1107,17 @@ requests and offer a retry.
   or both capacities gets a note that it stays a draft. The group select
   offers the lookup by name and keeps the product's own group when the
   lookup lacks it; while the lookup does not load it is off and the group
-  goes out unchanged.
+  goes out unchanged. The two default templates offer what `templateFitsSlot`
+  accepts for the form's group and the slot, by name, and «Не выбран». A
+  preference that no longer fits (disabled, narrowed, or the group changed in
+  the form) stays a choice marked «не подходит» and goes out unless changed,
+  since the host takes it; a change of the group never resets a choice. While
+  the template list does not load both selects are off and the preferences
+  go out unchanged. A `validation_failed` on `defaultBoxTemplateId` or
+  `defaultPalletTemplateId` reads as a stale write (`PRODUCT_STALE_FIELDS`):
+  the form was opened before its template was deleted. «Загрузить заново»
+  closes the dialog and reads the products again; the templates are read
+  again whenever a dialog opens.
 
 ## Marking rules
 

@@ -52,6 +52,13 @@ export const PRODUCT_CONFLICTS = {
   gtin14: { field: "gtin14", message: "office.products.errors.gtinTaken" },
 } as const;
 
+/**
+ * The template preferences: the host checks them before the revision, so a
+ * form opened before its template was deleted is refused on one of them, not
+ * as `stale_revision`. The dialog treats that as a stale write (`writeFailure`).
+ */
+export const PRODUCT_STALE_FIELDS = ["defaultBoxTemplateId", "defaultPalletTemplateId"] as const;
+
 /** A number as the form holds it: blank for none. */
 function numberText(value: number | null): string {
   return value === null ? "" : String(value);

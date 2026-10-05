@@ -10,3 +10,12 @@ export function useProductGroups() {
     staleTime: Infinity,
   });
 }
+
+/**
+ * The label templates without their layouts (`GET /v1/office/templates`):
+ * read again whenever a product dialog opens, since a template may have been
+ * disabled, narrowed or deleted since.
+ */
+export function useTemplates() {
+  return useOfficeQuery(officeKeys.templates, (api, token) => api.listTemplates(token));
+}

@@ -117,6 +117,31 @@ describe("writeFailure", () => {
     });
   });
 
+  it("reads a refusal of a field the form names as out of date like a stale write", () => {
+    const stale = ["defaultBoxTemplateId", "defaultPalletTemplateId"];
+    expect(writeFailure(rejected("defaultBoxTemplateId"), FIELDS, {}, stale)).toEqual({
+      kind: "stale",
+    });
+    expect(writeFailure(rejected("defaultPalletTemplateId"), FIELDS, {}, stale)).toEqual({
+      kind: "stale",
+    });
+    // Before the form names the field so, it has no place: an alert.
+    expect(writeFailure(rejected("defaultBoxTemplateId"), FIELDS)).toEqual({
+      kind: "alert",
+      message: "errors.api.validation_failed",
+    });
+    // Another field still goes under itself, and a conflict is still a conflict.
+    expect(writeFailure(rejected("gln"), FIELDS, {}, stale)).toEqual({
+      kind: "field",
+      field: "gln",
+      message: "rules.rejected",
+    });
+    expect(writeFailure(conflict("defaultBoxTemplateId"), FIELDS, {}, stale)).toEqual({
+      kind: "alert",
+      message: "errors.api.conflict",
+    });
+  });
+
   it("never takes an inherited object key for a field or a constraint", () => {
     expect(writeFailure(rejected("constructor"), FIELDS)).toEqual({
       kind: "alert",

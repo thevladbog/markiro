@@ -30,12 +30,16 @@ function own<T>(record: Readonly<Record<string, T>>, key: string): T | undefined
  * the rest is `alertFailure`. `fields` maps the host's field names to the
  * form's; a bare field name says `rules.rejected`, a `FieldMessage` its own
  * text. `conflicts` maps constraint names (`line_name`, `login`, `badge`)
- * the same way.
+ * the same way. `staleFields` names host fields whose `validation_failed`
+ * means the form is out of date, so it reads as `stale_revision`: a product's
+ * template preferences, which the host checks before the revision, so a form
+ * opened before its template was deleted is refused on the preference.
  */
 export function writeFailure<F extends string>(
   error: unknown,
   fields: Readonly<Record<string, F | FieldMessage<F>>>,
   conflicts: Readonly<Record<string, FieldMessage<F>>> = {},
+  staleFields: readonly string[] = [],
 ): WriteFailure<F> {
   if (error instanceof HostError) {
     const constraint = error.details.constraint;
@@ -46,6 +50,7 @@ export function writeFailure<F extends string>(
       }
     }
     const path = error.field;
+    if (path !== null && staleFields.includes(path)) return { kind: "stale" };
     const target = path === null ? undefined : own(fields, path);
     if (typeof target === "string") {
       return { kind: "field", field: target, message: "rules.rejected" };

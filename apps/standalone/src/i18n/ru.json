@@ -596,7 +596,10 @@
         "palletBoxCapacityHint": "Необязательно; число коробов, а не штук",
         "shelfLifeDays": "Срок годности, дней",
         "optional": "Необязательно",
-        "archived": "В архиве"
+        "archived": "В архиве",
+        "boxTemplate": "Шаблон короба",
+        "palletTemplate": "Шаблон паллеты",
+        "templateHint": "Необязательно: станция возьмёт этот шаблон первым, пока он подходит товару"
       },
       "gtinSavedAs": "Сохранится как {{gtin14}}.",
       "owner": {
@@ -607,6 +610,12 @@
       "draftHint": "Без группы и вместимостей товар остаётся черновиком.",
       "groupMissing": "Код {{code}} — нет в справочнике",
       "groupsUnavailable": "Справочник групп не загрузился: группу сейчас не изменить.",
+      "noTemplate": "Не выбран",
+      "templateUnfit": "{{name}} — не подходит",
+      "templateId": "Шаблон {{id}}…",
+      "templateMissing": "Шаблон {{id}}… — нет в списке",
+      "templatesLoading": "Загружаем шаблоны…",
+      "templatesUnavailable": "Список шаблонов не загрузился: шаблоны останутся как есть.",
       "created": "Товар «{{name}}» добавлен.",
       "errors": {
         "gtinTaken": "Этот GTIN уже у товара в работе"

@@ -7,7 +7,7 @@ import { Checkbox, Input, Select } from "@markiro/ui";
 
 import type { OfficeProduct } from "../../host/protocol.js";
 import { productCreate, productUpdate, type ProductInput } from "../../host/requests.js";
-import { gtinRule, toGtin14 } from "../../lib/rules.js";
+import { gtinRule, toGroupCode, toGtin14 } from "../../lib/rules.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
@@ -16,6 +16,7 @@ import {
   gtinOwner,
   PRODUCT_CONFLICTS,
   PRODUCT_FIELDS,
+  PRODUCT_STALE_FIELDS,
   productFields,
   productFieldsSchema,
   staysDraft,
@@ -23,7 +24,8 @@ import {
   type GtinOwner,
   type ProductFields,
 } from "./product-form.js";
-import { useProductGroups } from "./product-queries.js";
+import { useProductGroups, useTemplates } from "./product-queries.js";
+import { templateOptions } from "./template-options.js";
 
 /** Group names in Russian order, with numbers by value. */
 const GROUP_NAMES = new Intl.Collator("ru", { numeric: true });
@@ -39,7 +41,10 @@ export interface ProductDialogProps {
   product: OfficeProduct | null;
   onClose: () => void;
   onSaved: (product: OfficeProduct) => void;
-  /** The product changed on the host: close and load the list again. */
+  /**
+   * The product changed on the host, or a template it names was deleted:
+   * close and load the list again.
+   */
   onReload: () => void;
 }
 
@@ -47,13 +52,17 @@ export interface ProductDialogProps {
  * Adds a product, or changes one: the host takes the whole record with the
  * loaded revision, and archiving is its `archived` flag (no delete). The GTIN
  * may change too. Once it is valid, the dialog shows the 14 digits it is saved
- * as and whose GS1 prefix it has; neither blocks a save.
+ * as and whose GS1 prefix it has; neither blocks a save. The two default
+ * templates offer what fits the product's group, keep a preference that no
+ * longer fits as a marked choice, and are left as they are, never cleared,
+ * while the template list does not load.
  */
 export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDialogProps) {
   const { t } = useTranslation();
   const fieldError = useFieldError();
   const [failure, setFailure] = useState<AlertFailure | null>(null);
   const groups = useProductGroups();
+  const templates = useTemplates();
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
   const counterparties = useOfficeQuery(officeKeys.counterparties, (api, token) =>
     api.listCounterparties(token),
@@ -120,6 +129,12 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
     });
   }
 
+  const templatesHint = templates.isSuccess
+    ? t("office.products.fields.templateHint")
+    : templates.isError
+      ? t("office.products.templatesUnavailable")
+      : t("office.products.templatesLoading");
+
   const submit = handleSubmit(async (values) => {
     setFailure(null);
     const write: ProductWrite = { input: toProductInput(values), archived: values.archived };
@@ -127,7 +142,7 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
     try {
       saved = await save.mutateAsync(write);
     } catch (error) {
-      const outcome = writeFailure(error, PRODUCT_FIELDS, PRODUCT_CONFLICTS);
+      const outcome = writeFailure(error, PRODUCT_FIELDS, PRODUCT_CONFLICTS, PRODUCT_STALE_FIELDS);
       if (outcome.kind === "field") {
         setError(outcome.field, { type: "server", message: outcome.message });
       } else {
@@ -221,6 +236,35 @@ export function ProductDialog({ product, onClose, onSaved, onReload }: ProductDi
         {...fieldError(errors.shelfLifeDays?.message)}
         {...register("shelfLifeDays")}
       />
+      {(
+        [
+          ["defaultBoxTemplateId", "box", "office.products.fields.boxTemplate"],
+          ["defaultPalletTemplateId", "pallet", "office.products.fields.palletTemplate"],
+        ] as const
+      ).map(([name, purpose, label]) => (
+        <Controller
+          key={name}
+          control={control}
+          name={name}
+          render={({ field }) => (
+            <Select
+              native
+              label={t(label)}
+              hint={templatesHint}
+              options={templateOptions(
+                templates.data,
+                purpose,
+                toGroupCode(group),
+                [product?.[name] ?? "", field.value],
+                t,
+              )}
+              value={field.value}
+              onValueChange={field.onChange}
+              disabled={!templates.isSuccess}
+            />
+          )}
+        />
+      ))}
       {product !== null && (
         <Controller
           control={control}

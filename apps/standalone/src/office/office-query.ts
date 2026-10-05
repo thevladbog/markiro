@@ -22,6 +22,7 @@ export const officeKeys = {
   badgeSalt: ["office", "badge-salt"],
   productGroups: ["office", "product-groups"],
   products: ["office", "products"],
+  templates: ["office", "templates"],
 } as const;
 
 /**

@@ -2,7 +2,12 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { HostError } from "../src/host/client.js";
-import type { CounterpartyRecord, OfficeProduct, ProductGroup } from "../src/host/protocol.js";
+import type {
+  CounterpartyRecord,
+  LabelTemplateSummary,
+  OfficeProduct,
+  ProductGroup,
+} from "../src/host/protocol.js";
 import { gtinOwner } from "../src/office/products/product-form.js";
 import {
   fakeOfficeSession,
@@ -64,13 +69,52 @@ const AYRAN: OfficeProduct = {
   rev: 72,
 };
 
+/** A template summary: a box template for every category unless told otherwise. */
+function summary(id: string, name: string, data: Partial<LabelTemplateSummary> = {}) {
+  return {
+    id,
+    name,
+    purpose: "box",
+    enabled: true,
+    chzProductGroupCodes: null,
+    stock: false,
+    widthMm: 58,
+    heightMm: 40,
+    dpi: 203,
+    language: "zpl",
+    rev: 60,
+    ...data,
+  } satisfies LabelTemplateSummary;
+}
+
+const BOX_58 = "7c1e4b2a-9d3f-4e5a-8b6c-1d2e3f4a5b6c";
+const WATER_58 = "8d2f5c3b-0e4a-4f6b-9c7d-2e3f4a5b6c7d";
+const OLD_BOX = "9e3a6d4c-1f5b-4a7c-8d8e-3f4a5b6c7d8e";
+const PALLET = "0f4b7e5d-2a6c-4b8d-9e9f-4a5b6c7d8e9f";
+const TEMPLATES: LabelTemplateSummary[] = [
+  summary(MILK_58, "Молоко 58×40", { chzProductGroupCodes: [8] }),
+  summary(WATER_58, "Вода 58×40", { chzProductGroupCodes: [13] }),
+  summary(BOX_58, "Коробка 58×40"),
+  summary(OLD_BOX, "Старая коробка", { enabled: false }),
+  summary(PALLET, "Паллета 100×150", { purpose: "pallet" }),
+  summary("1a5c8f6e-3b7d-4c9e-8f0a-5b6c7d8e9f0a", "Дубликат", { purpose: "product_duplicate" }),
+];
+
 function session(user = TECHNOLOGIST): FakeOfficeSession {
   const fake = fakeOfficeSession({ user });
   fake.api.listProducts.mockResolvedValue([MILK, AYRAN]);
   fake.api.listProductGroups.mockResolvedValue(GROUPS);
+  fake.api.listTemplates.mockResolvedValue(TEMPLATES);
   fake.api.getOrg.mockResolvedValue(ORG_PROFILE);
   fake.api.listCounterparties.mockResolvedValue([NORTH, OLD]);
   return fake;
+}
+
+/** The labels a select offers, top to bottom. */
+function choices(label: string): (string | null)[] {
+  return within(screen.getByLabelText(label))
+    .getAllByRole("option")
+    .map((option) => option.textContent);
 }
 
 function type(label: string, value: string): void {
@@ -541,5 +585,183 @@ describe("office product dialog", () => {
     expect(
       screen.queryByText("Справочник групп не загрузился: группу сейчас не изменить."),
     ).toBeNull();
+  });
+});
+
+describe("office product dialog: default templates", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+  });
+
+  /** Opens a product's dialog and waits for the templates. */
+  async function openEdit(fake: FakeOfficeSession, name: string): Promise<void> {
+    await openProducts(fake);
+    fireEvent.click(screen.getByRole("button", { name: `Изменить товар «${name}»` }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("disabled", false),
+    );
+  }
+
+  it("offers in each slot the templates that fit the product's group, by name, and none", async () => {
+    const fake = session();
+    // By name counts numbers by value: 80 comes before 100.
+    fake.api.listTemplates.mockResolvedValue([
+      ...TEMPLATES,
+      summary("4d8e1c9b-6f0a-4b2c-9d3e-8f9a0b1c2d3e", "Паллета 80×120", { purpose: "pallet" }),
+    ]);
+    fake.api.createProduct.mockResolvedValue({
+      ...MILK,
+      id: "0f1e2d3c-4b5a-4968-8776-655443322110",
+    });
+    await openCreate(fake);
+    await waitFor(() =>
+      expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("disabled", false),
+    );
+    // Once the list is in, each select says what its choice is for.
+    expect(
+      screen.getAllByText(
+        "Необязательно: станция возьмёт этот шаблон первым, пока он подходит товару",
+      ),
+    ).toHaveLength(2);
+    // No group yet: only templates for every category fit.
+    expect(choices("Шаблон короба")).toEqual(["Не выбран", "Коробка 58×40"]);
+    expect(choices("Шаблон паллеты")).toEqual(["Не выбран", "Паллета 80×120", "Паллета 100×150"]);
+    type("Товарная группа", "8");
+    expect(choices("Шаблон короба")).toEqual(["Не выбран", "Коробка 58×40", "Молоко 58×40"]);
+    type("Шаблон короба", MILK_58);
+    type("Шаблон паллеты", PALLET);
+    // What the form chose stays a marked choice when the group stops admitting it.
+    type("Товарная группа", "13");
+    expect(choices("Шаблон короба")).toEqual([
+      "Не выбран",
+      "Вода 58×40",
+      "Коробка 58×40",
+      "Молоко 58×40 — не подходит",
+    ]);
+    expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("value", MILK_58);
+    type("Товарная группа", "8");
+    type("GTIN", "4600682000013");
+    type("Название", "Молоко");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
+    await waitFor(() => expect(fake.api.createProduct).toHaveBeenCalledTimes(1));
+    expect(fake.api.createProduct.mock.calls[0]?.[1]).toMatchObject({
+      chzProductGroupCode: 8,
+      defaultBoxTemplateId: MILK_58,
+      defaultPalletTemplateId: PALLET,
+    });
+  });
+
+  it("keeps a preference that no longer fits as a marked choice, and sends it unless it is changed", async () => {
+    const fake = session();
+    fake.api.listProducts.mockResolvedValue([{ ...MILK, defaultBoxTemplateId: OLD_BOX }]);
+    fake.api.updateProduct.mockResolvedValue({ ...MILK, name: "Молоко 3,2% 1 л", rev: 81 });
+    await openEdit(fake, "Молоко 3,2% 0,9 л");
+    const offered = ["Не выбран", "Коробка 58×40", "Молоко 58×40", "Старая коробка — не подходит"];
+    expect(choices("Шаблон короба")).toEqual(offered);
+    expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("value", OLD_BOX);
+    // Choosing another template does not take the old preference away: it can be chosen again.
+    type("Шаблон короба", BOX_58);
+    expect(choices("Шаблон короба")).toEqual(offered);
+    type("Шаблон короба", OLD_BOX);
+    expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("value", OLD_BOX);
+    type("Название", "Молоко 3,2% 1 л");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Изменения сохранены.");
+    expect(fake.api.updateProduct.mock.calls[0]?.[2].defaultBoxTemplateId).toBe(OLD_BOX);
+  });
+
+  it("keeps a chosen template as a marked choice when the group changes and it stops fitting", async () => {
+    const fake = session();
+    fake.api.updateProduct.mockResolvedValue({ ...MILK, chzProductGroupCode: 13, rev: 81 });
+    await openEdit(fake, "Молоко 3,2% 0,9 л");
+    expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("value", MILK_58);
+    type("Товарная группа", "13");
+    expect(choices("Шаблон короба")).toEqual([
+      "Не выбран",
+      "Вода 58×40",
+      "Коробка 58×40",
+      "Молоко 58×40 — не подходит",
+    ]);
+    expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("value", MILK_58);
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Изменения сохранены.");
+    expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
+      chzProductGroupCode: 13,
+      defaultBoxTemplateId: MILK_58,
+    });
+  });
+
+  it("names a preference the template list does not have", async () => {
+    const fake = session();
+    const gone = "2b6d9a7f-4c8e-4d0f-9a1b-6c7d8e9f0a1b";
+    fake.api.listProducts.mockResolvedValue([{ ...MILK, defaultPalletTemplateId: gone }]);
+    await openEdit(fake, "Молоко 3,2% 0,9 л");
+    expect(choices("Шаблон паллеты")).toEqual([
+      "Не выбран",
+      "Паллета 100×150",
+      "Шаблон 2b6d9a7f… — нет в списке",
+    ]);
+  });
+
+  it("keeps the template choices off while the templates do not load, and sends the preferences unchanged", async () => {
+    const fake = session();
+    fake.api.listTemplates.mockRejectedValue(hostError("internal", 500));
+    fake.api.updateProduct.mockResolvedValue({ ...MILK, name: "Молоко 3,2% 1 л", rev: 81 });
+    await openProducts(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить товар «Молоко 3,2% 0,9 л»" }));
+    expect(
+      await screen.findAllByText("Список шаблонов не загрузился: шаблоны останутся как есть."),
+    ).toHaveLength(2);
+    const box = screen.getByLabelText("Шаблон короба");
+    expect(box).toHaveProperty("disabled", true);
+    expect(choices("Шаблон короба")).toEqual(["Не выбран", "Шаблон a3b4c5d6…"]);
+    expect(box).toHaveProperty("value", MILK_58);
+    type("Название", "Молоко 3,2% 1 л");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("Изменения сохранены.");
+    expect(fake.api.updateProduct.mock.calls[0]?.[2]).toMatchObject({
+      defaultBoxTemplateId: MILK_58,
+      defaultPalletTemplateId: null,
+    });
+    // While the list is still on its way the choices are off too, but no failure is claimed.
+    cleanup();
+    const slow = session();
+    slow.api.listTemplates.mockReturnValue(new Promise(() => undefined));
+    await openProducts(slow);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить товар «Молоко 3,2% 0,9 л»" }));
+    expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("Шаблон паллеты")).toHaveProperty("disabled", true);
+    expect(screen.getAllByText("Загружаем шаблоны…")).toHaveLength(2);
+    expect(
+      screen.queryByText("Список шаблонов не загрузился: шаблоны останутся как есть."),
+    ).toBeNull();
+  });
+
+  it("reads a refused template preference, its template deleted meanwhile, as a stale change: the products again now, the templates when the dialog opens again", async () => {
+    const fake = session();
+    fake.api.updateProduct.mockRejectedValueOnce(VALIDATION("defaultBoxTemplateId"));
+    await openEdit(fake, "Молоко 3,2% 0,9 л");
+    type("Название", "Молоко 3,2% 1 л");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    expect(
+      await screen.findByText(
+        "Данные изменились, пока вы их редактировали. Обновите их и повторите.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Загрузить заново" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(fake.api.listProducts).toHaveBeenCalledTimes(2));
+    expect(fake.api.listTemplates).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить товар «Молоко 3,2% 0,9 л»" }));
+    await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(2));
+    // The pallet preference is refused, and read, the same way.
+    fake.api.updateProduct.mockRejectedValueOnce(VALIDATION("defaultPalletTemplateId"));
+    type("Название", "Молоко 3,2% 1 л");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    expect(
+      await screen.findByText(
+        "Данные изменились, пока вы их редактировали. Обновите их и повторите.",
+      ),
+    ).toBeTruthy();
   });
 });
