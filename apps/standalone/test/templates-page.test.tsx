@@ -467,4 +467,21 @@ describe("office label templates", () => {
     expect(await screen.findByText("Молоко 58×40")).toBeTruthy();
     expect(screen.queryByText("Загрузка…")).toBeNull();
   });
+
+  it("shows a template's name and a group's name with markup characters as plain text, in the cell and in the title", async () => {
+    // `t()` does not escape what it interpolates (`escapeValue: false`): a name is shown as a React child or an attribute, never as HTML.
+    const name = '<b>Тест</b> & "кавычки"';
+    const group = '<i>Группа</i> & "x"';
+    const fake = session([
+      summary("3c7e0b8a-5d9f-4e1a-8b2c-7d8e9f0a1b2c", name, { chzProductGroupCodes: [21] }),
+    ]);
+    fake.api.listProductGroups.mockResolvedValue([
+      ...GROUPS,
+      { code: 21, alias: "odd", name: group },
+    ]);
+    await openTemplates(fake);
+    const row = rowOf(name);
+    expect(row.querySelector("b, i")).toBeNull();
+    expect(within(row).getByText(group).getAttribute("title")).toBe(group);
+  });
 });
