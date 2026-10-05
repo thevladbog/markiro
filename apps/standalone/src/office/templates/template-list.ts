@@ -1,0 +1,43 @@
+import type { LabelTemplate, LabelTemplateSummary } from "../../host/protocol.js";
+
+/** Template names in Russian order, with numbers by value: «Коробка 58×40» before «Коробка 100×100». */
+const NAMES = new Intl.Collator("ru", { numeric: true });
+
+/**
+ * Templates by name (`NAMES`), then by id so equal names keep one order. The
+ * host sorts bytewise, and a write changes the cached list in place, so a page
+ * sorts what it shows itself.
+ */
+export function templatesByName<T extends Pick<LabelTemplateSummary, "id" | "name">>(
+  templates: readonly T[],
+): T[] {
+  return [...templates].sort(
+    (a, b) => NAMES.compare(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+}
+
+/**
+ * `list` with a template a write returned merged into its summary: the name,
+ * the flag, the categories, `stock` and the revision come from the template;
+ * the size, the resolution and the language stay, since switching a template
+ * or changing its categories never touches the layout, and the layout itself
+ * is no part of a summary. The summary keeps its position; a template the list
+ * lacks changes nothing. A new array; neither argument is changed.
+ */
+export function withTemplateChange(
+  list: readonly LabelTemplateSummary[],
+  template: LabelTemplate,
+): LabelTemplateSummary[] {
+  return list.map((summary) =>
+    summary.id === template.id
+      ? {
+          ...summary,
+          name: template.name,
+          enabled: template.enabled,
+          chzProductGroupCodes: template.chzProductGroupCodes,
+          stock: template.stock,
+          rev: template.rev,
+        }
+      : summary,
+  );
+}

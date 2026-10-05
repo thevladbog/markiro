@@ -17,6 +17,7 @@ import {
 
 import type { OfficeProduct } from "../../host/protocol.js";
 import { useCan } from "../access.js";
+import { useProductGroups } from "../catalog-queries.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { activeFirstByName, useStoreRecord } from "../records.js";
@@ -29,7 +30,6 @@ import {
   type ProductFilter,
   type ProductState,
 } from "./product-list.js";
-import { useProductGroups } from "./product-queries.js";
 
 /** A state in words and in its phase: archived is out of use, not an alarm. */
 const STATE_PHASE = {

@@ -8,10 +8,12 @@ import { Checkbox, Input, Select } from "@markiro/ui";
 import type { OfficeProduct } from "../../host/protocol.js";
 import { productCreate, productUpdate, type ProductInput } from "../../host/requests.js";
 import { gtinRule, toGroupCode, toGtin14 } from "../../lib/rules.js";
+import { useProductGroups, useTemplates } from "../catalog-queries.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
+import { templateOptions } from "../template-options.js";
 import {
   gtinOwner,
   PRODUCT_CONFLICTS,
@@ -24,8 +26,6 @@ import {
   type GtinOwner,
   type ProductFields,
 } from "./product-form.js";
-import { useProductGroups, useTemplates } from "./product-queries.js";
-import { templateOptions } from "./template-options.js";
 
 /** Group names in Russian order, with numbers by value. */
 const GROUP_NAMES = new Intl.Collator("ru", { numeric: true });
