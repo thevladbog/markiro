@@ -1168,11 +1168,13 @@ requests and offer a retry.
   product groups by name with a search and a live count of the chosen ones; the
   chosen codes stay while «Все категории» is picked, so switching back brings
   them back, and while the lookup loads or fails the field keeps them and says
-  why it lists nothing. The dialog sends `null` for every category or the chosen
-  codes ascending (`scopeCodes`: `templateUpdate` takes a reordered list as a
-  change, a new revision and the layout to every station again), with the opened
-  row's revision; «Сохранить» stays off while the categories are the row's in
-  any order, and «Только выбранные» needs at least one category. Narrowing a
+  why it lists nothing. The search box cancels Enter: the field sits inside form
+  dialogs, and the browser would otherwise submit the form and save a half-made
+  choice. The dialog sends `null` for every category or the chosen codes
+  ascending (`scopeCodes`: `templateUpdate` takes a reordered list as a change,
+  a new revision and the layout to every station again), with the opened row's
+  revision; «Сохранить» stays off while the categories are the row's in any
+  order, and «Только выбранные» needs at least one category. Narrowing a
   template out of a category whose default it is, or narrowing the
   organization's default at all, is refused as switching it off is, in the same
   words; a saved answer goes into the row in place.

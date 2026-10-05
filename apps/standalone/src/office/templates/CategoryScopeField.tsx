@@ -55,6 +55,11 @@ export function CategoryScopeField({ value, onChange, error }: CategoryScopeFiel
           label={t("office.categoryScope.search")}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
+          // The field sits in form dialogs: Enter would submit the form and save a
+          // half-made choice.
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.preventDefault();
+          }}
         />
         <div
           className="category-scope__list"

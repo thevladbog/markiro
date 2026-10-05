@@ -264,4 +264,15 @@ describe("the category scope of a template", () => {
     expect(field?.contains(screen.getByText("Выбрано: 1"))).toBe(true);
     expect(field?.contains(screen.getByLabelText("Поиск категории"))).toBe(true);
   });
+
+  it("cancels Enter in the search box so the form around the field is never submitted, and leaves other keys alone", async () => {
+    // A dialog's form has «Сохранить» for its only submit button, so the browser would take
+    // Enter in the search box as a click on it and save a half-made choice. jsdom does no
+    // implicit submission; `fireEvent` returns false when a handler cancelled the default.
+    renderField(session(), scopeOf([13]));
+    await screen.findByRole("group", { name: "Категории на выбор" });
+    const search = screen.getByLabelText("Поиск категории");
+    expect(fireEvent.keyDown(search, { key: "Enter" })).toBe(false);
+    expect(fireEvent.keyDown(search, { key: "a" })).toBe(true);
+  });
 });
