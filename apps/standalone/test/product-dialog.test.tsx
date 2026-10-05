@@ -342,9 +342,10 @@ describe("office product dialog", () => {
     expect(screen.queryByText(/^Префикс GTIN|^Владелец GTIN/)).toBeNull();
   });
 
-  it("says a product without a group or both capacities stays a draft", async () => {
+  it("shows the draft note while the group or either capacity is missing", async () => {
     await openCreate(session());
-    const hint = "Без группы и вместимостей товар остаётся черновиком.";
+    const hint =
+      "Товар остаётся черновиком, пока не указаны товарная группа, вместимость короба и число коробов на паллете.";
     expect(screen.getByText(hint)).toBeTruthy();
     type("Товарная группа", "8");
     type("В коробе, шт.", "12");

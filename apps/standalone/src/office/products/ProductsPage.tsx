@@ -48,7 +48,11 @@ interface ProductsPagerProps {
   onPage: (page: number) => void;
 }
 
-/** The list's pages, in the office's words. */
+/**
+ * The list's pages, in the office's words. The shared `@markiro/ui` `Pager` is not
+ * used: its buttons are floor-sized and full width with no size prop, and this plan
+ * leaves `packages/*` alone (the cloud's own catalog page has a compact pager too).
+ */
 function ProductsPager({ page, pageCount, onPage }: ProductsPagerProps) {
   const { t } = useTranslation();
   return (
@@ -61,7 +65,7 @@ function ProductsPager({ page, pageCount, onPage }: ProductsPagerProps) {
       >
         {t("office.products.pager.previous")}
       </Button>
-      <span>{t("office.products.pager.page", { page, pages: pageCount })}</span>
+      <span aria-live="polite">{t("office.products.pager.page", { page, pages: pageCount })}</span>
       <Button
         variant="secondary"
         size="compact"
@@ -164,7 +168,16 @@ export function ProductsPage() {
   const content = () => {
     if (products.isPending) return <PageLoading />;
     if (products.isError) {
-      return <LoadError error={products.error} onRetry={() => void products.refetch()} />;
+      return (
+        <LoadError
+          error={products.error}
+          onRetry={() => {
+            void products.refetch();
+            // One click recovers both reads when the group names failed too.
+            if (groups.isError) void groups.refetch();
+          }}
+        />
+      );
     }
     const found = findProducts(activeFirstByName(products.data), search, filter);
     const pageCount = Math.max(1, Math.ceil(found.length / PAGE_SIZE));
@@ -229,7 +242,8 @@ export function ProductsPage() {
         }
       />
       {notice && <Alert tone="ok">{notice}</Alert>}
-      {groups.isError && (
+      {/* About the list's group column: with no list on screen the products' error stands alone. */}
+      {groups.isError && products.isSuccess && (
         <Alert
           tone="warn"
           action={
