@@ -244,4 +244,31 @@ describe("the defaults form: category defaults, beyond the plan", () => {
       });
     }
   });
+
+  it("answers a refusal for a row that is no longer in the draft with the general alert, and one for a row still there with its field", () => {
+    const sent = [
+      { chzProductGroupCode: 8, purpose: "box" as const, templateId: MILK },
+      { chzProductGroupCode: 13, purpose: "box" as const, templateId: WATER },
+    ];
+    const current = [
+      sent[1] ?? { chzProductGroupCode: 13, purpose: "box" as const, templateId: WATER },
+    ];
+    // The host names `categories.0`, the row of slot 8:box, which the draft no longer holds:
+    // no control would show the message.
+    expect(defaultsFailure(rejected("categories.0.templateId"), sent, current)).toStrictEqual({
+      kind: "alert",
+      message: "errors.api.validation_failed",
+    });
+    expect(defaultsFailure(rejected("categories.1.templateId"), sent, current)).toStrictEqual({
+      kind: "field",
+      key: "13:box",
+      message: "office.templateDefaults.errors.unfit",
+    });
+    // An organization default is always on the page.
+    expect(defaultsFailure(rejected("defaultBoxTemplateId"), sent, [])).toStrictEqual({
+      kind: "field",
+      key: "defaultBoxTemplateId",
+      message: "office.templateDefaults.errors.unfit",
+    });
+  });
 });

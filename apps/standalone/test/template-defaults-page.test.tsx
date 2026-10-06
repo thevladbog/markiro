@@ -387,10 +387,17 @@ describe("office template defaults: the organization's", () => {
     ).toBeTruthy();
     expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("disabled", true);
     expect(choices("Шаблон короба")).toEqual(["Не выбран", "Шаблон 7c1e4b2a…"]);
+    // The warning says the defaults cannot change now: «Убрать» is no way round it.
+    expect(
+      await screen.findByRole("button", { name: "Убрать умолчание: Молочная продукция, Короб" }),
+    ).toHaveProperty("disabled", true);
     fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
     await waitFor(() =>
       expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("disabled", false),
     );
+    expect(
+      screen.getByRole("button", { name: "Убрать умолчание: Молочная продукция, Короб" }),
+    ).toHaveProperty("disabled", false);
     expect(
       screen.queryByText("Список шаблонов не загрузился: умолчания сейчас не изменить."),
     ).toBeNull();
@@ -838,6 +845,9 @@ describe("office template defaults: the organization's, beyond the plan", () => 
     expect(
       screen.queryByText("Список шаблонов не загрузился: умолчания сейчас не изменить."),
     ).toBeNull();
+    expect(
+      await screen.findByRole("button", { name: "Убрать умолчание: Молочная продукция, Короб" }),
+    ).toHaveProperty("disabled", true);
     await act(async () => {
       release(TEMPLATES);
     });
@@ -845,6 +855,9 @@ describe("office template defaults: the organization's, beyond the plan", () => 
       expect(screen.getByLabelText("Шаблон короба")).toHaveProperty("disabled", false),
     );
     expect(choices("Шаблон короба")).toEqual(["Не выбран", "Коробка 58×40", "Коробка 100×100"]);
+    expect(
+      screen.getByRole("button", { name: "Убрать умолчание: Молочная продукция, Короб" }),
+    ).toHaveProperty("disabled", false);
   });
 
   it("keeps a loaded default the list does not offer as a marked choice when another template is chosen, and lets the user take it back", async () => {
@@ -1383,5 +1396,180 @@ describe("office template defaults: the categories', beyond the plan", () => {
         },
       ],
     ]);
+  });
+});
+
+// The final fix wave: the lock while a save is on its way, and where focus goes.
+describe("office template defaults: the final fixes", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+  });
+
+  const ADD = "Добавить умолчание категории";
+  const MILK_ROW = "Шаблон: Молочная продукция, Короб";
+  const REMOVE_MILK = "Убрать умолчание: Молочная продукция, Короб";
+  const NO_FIT = "Нет включённых шаблонов этого назначения для этой категории.";
+
+  /** Four defaults in three rows' worth of neighbours: shown as milk box, water box, water pallet, water duplicate. */
+  const FOUR: TemplateDefaults = {
+    ...DEFAULTS,
+    categories: [
+      { chzProductGroupCode: 13, purpose: "product_duplicate", templateId: DUPLICATE.id },
+      { chzProductGroupCode: 8, purpose: "box", templateId: MILK.id },
+      { chzProductGroupCode: 13, purpose: "pallet", templateId: PALLET.id },
+      { chzProductGroupCode: 13, purpose: "box", templateId: BOX.id },
+    ],
+  };
+
+  const remove = (name: string) =>
+    screen.getByRole("button", { name: `Убрать умолчание: ${name}` });
+
+  /** Every control of the page that changes the document, except «Сохранить». */
+  function controls(): [string, HTMLElement][] {
+    return [
+      ["the box select", screen.getByLabelText("Шаблон короба")],
+      ["the pallet select", screen.getByLabelText("Шаблон паллеты")],
+      ["the duplicate select", screen.getByLabelText("Шаблон дубликата товара")],
+      ["the row's select", screen.getByLabelText(MILK_ROW)],
+      ["«Убрать»", screen.getByRole("button", { name: REMOVE_MILK })],
+      ["«Добавить умолчание категории»", screen.getByRole("button", { name: ADD })],
+      ["«Отменить изменения»", screen.getByRole("button", { name: "Отменить изменения" })],
+    ];
+  }
+
+  it("turns off every control of the page while a save is on its way, and turns them on again after a refusal and after the answer", async () => {
+    const fake = session();
+    let rejectSave: (error: Error) => void = () => undefined;
+    let release: (document: TemplateDefaults) => void = () => undefined;
+    fake.api.updateTemplateDefaults
+      .mockReturnValueOnce(
+        new Promise<TemplateDefaults>((_resolve, reject) => {
+          rejectSave = reject;
+        }),
+      )
+      .mockReturnValueOnce(
+        new Promise<TemplateDefaults>((resolve) => {
+          release = resolve;
+        }),
+      );
+    await openDefaults(fake);
+    choose("Шаблон короба", BOX_100.id);
+    for (const [name, control] of controls()) {
+      expect(control, name).toHaveProperty("disabled", false);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => {
+      for (const [name, control] of controls())
+        expect(control, name).toHaveProperty("disabled", true);
+    });
+    // A refusal that is no field's: the same form is back, every control on again.
+    await act(async () => {
+      rejectSave(hostError("internal", 500));
+    });
+    await screen.findByText("На хосте произошла ошибка. Повторите попытку.");
+    await waitFor(() => {
+      for (const [name, control] of controls()) {
+        expect(control, name).toHaveProperty("disabled", false);
+      }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => {
+      for (const [name, control] of controls())
+        expect(control, name).toHaveProperty("disabled", true);
+    });
+    await act(async () => {
+      release({ ...DEFAULTS, defaultBoxTemplateId: BOX_100.id, rev: 65 });
+    });
+    expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
+    await waitFor(() => {
+      for (const [name, control] of controls()) {
+        // Nothing to cancel after a save.
+        expect(control, name).toHaveProperty("disabled", name === "«Отменить изменения»");
+      }
+    });
+  });
+
+  it("moves focus to the next row's «Убрать» after a removal, else to the previous row's, else to «Добавить умолчание категории»", async () => {
+    await openDefaults(session(FOUR));
+    // Shown: milk box, water box, water pallet, water duplicate. The middle row goes: the next row's button.
+    fireEvent.click(remove("Упакованная вода, Короб"));
+    await waitFor(() => expect(document.activeElement).toBe(remove("Упакованная вода, Паллета")));
+    // The last row goes: the previous row's.
+    fireEvent.click(remove("Упакованная вода, Дубликат товара"));
+    await waitFor(() => expect(document.activeElement).toBe(remove("Упакованная вода, Паллета")));
+    fireEvent.click(remove("Упакованная вода, Паллета"));
+    await waitFor(() => expect(document.activeElement).toBe(remove("Молочная продукция, Короб")));
+    // The only row goes: nothing is left but the card's own button.
+    fireEvent.click(remove("Молочная продукция, Короб"));
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: ADD })),
+    );
+  });
+
+  it("moves focus to the first row's neighbour below when the first row is removed", async () => {
+    await openDefaults(session(FOUR));
+    fireEvent.click(remove("Молочная продукция, Короб"));
+    await waitFor(() => expect(document.activeElement).toBe(remove("Упакованная вода, Короб")));
+  });
+
+  it("moves focus to the organization select a refusal names, and to the row select it names, and nowhere after another failure", async () => {
+    const fake = session();
+    fake.api.updateTemplateDefaults
+      .mockRejectedValueOnce(hostError("internal", 500))
+      .mockRejectedValueOnce(
+        hostError("validation_failed", 400, { field: "defaultPalletTemplateId" }),
+      )
+      .mockRejectedValueOnce(
+        hostError("validation_failed", 400, { field: "categories.0.templateId" }),
+      );
+    await openDefaults(fake);
+    // The office shell keeps focus on its main area after the navigation.
+    const before = document.activeElement;
+    choose("Шаблон короба", BOX_100.id);
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await screen.findByText("На хосте произошла ошибка. Повторите попытку.");
+    await settle();
+    expect(document.activeElement).toBe(before);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Сохранить" })).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await screen.findByText(UNFIT);
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByLabelText("Шаблон паллеты")),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Сохранить" })).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText(MILK_ROW)));
+    expect(screen.getByLabelText(MILK_ROW).getAttribute("aria-describedby")).toBe(
+      screen.getByText(UNFIT).id,
+    );
+  });
+
+  it("keeps the no-fit text under «Шаблон» when «Добавить» is pressed with no template to choose, and adds no row", async () => {
+    const fake = session();
+    fake.api.listTemplates.mockResolvedValue(
+      TEMPLATES.map((each) => (each.id === DUPLICATE.id ? { ...each, enabled: false } : each)),
+    );
+    await openDefaults(fake);
+    fireEvent.click(screen.getByRole("button", { name: ADD }));
+    const add = screen.getByRole("dialog", { name: "Умолчание категории" });
+    choose("Категория", "3");
+    choose("Назначение", "product_duplicate");
+    expect(within(add).getByText(NO_FIT)).toBeTruthy();
+    fireEvent.click(within(add).getByRole("button", { name: "Добавить" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("Шаблон").getAttribute("aria-invalid")).toBe("true"),
+    );
+    expect(within(add).getAllByText(NO_FIT)).toHaveLength(1);
+    expect(within(add).queryByText("Выберите шаблон")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Умолчание категории" })).toBeTruthy();
+    expect(screen.queryByText(DIRTY)).toBeNull();
+    // Without a purpose the template still has to be chosen.
+    choose("Назначение", "");
+    fireEvent.click(within(add).getByRole("button", { name: "Добавить" }));
+    expect(await within(add).findByText("Выберите шаблон")).toBeTruthy();
   });
 });

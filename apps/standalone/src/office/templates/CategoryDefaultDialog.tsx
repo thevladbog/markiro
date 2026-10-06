@@ -57,12 +57,20 @@ export function CategoryDefaultDialog({
     category === null || purpose === ""
       ? [{ value: "", label: t("office.templateChoice.none") }]
       : templateOptions(templates, purpose, category, [], t);
+  // Only «Не выбран» is left: the hint says why, and stays the field's message.
+  const nothingFits = purpose !== "" && choices.length === 1;
 
   // Nothing goes to the host here: the row joins the page's document.
   const submit = (): Promise<void> => {
     setCodeError(category === null ? "office.templateDefaults.errors.chooseCategory" : null);
     setPurposeError(purpose === "" ? "office.templateDefaults.errors.choosePurpose" : null);
-    setTemplateError(templateId === "" ? "office.templateDefaults.errors.chooseTemplate" : null);
+    setTemplateError(
+      templateId === ""
+        ? nothingFits
+          ? "office.templateDefaults.noTemplateFits"
+          : "office.templateDefaults.errors.chooseTemplate"
+        : null,
+    );
     if (category !== null && purpose !== "" && templateId !== "") {
       onAdd({ chzProductGroupCode: category, purpose, templateId });
     }
@@ -125,9 +133,7 @@ export function CategoryDefaultDialog({
           setTemplateError(null);
         }}
         disabled={purpose === ""}
-        {...(purpose !== "" && choices.length === 1
-          ? { hint: t("office.templateDefaults.noTemplateFits") }
-          : {})}
+        {...(nothingFits ? { hint: t("office.templateDefaults.noTemplateFits") } : {})}
         {...errorProp(templateError === null ? undefined : t(templateError))}
       />
     </FormDialog>

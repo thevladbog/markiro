@@ -131,13 +131,16 @@ const CATEGORY_FIELD = /^categories\.(\d+)(?:\.(templateId|chzProductGroupCode))
  * default's field or the category default's slot (`slotKey`). The host checks
  * the defaults before the revision, so a template disabled, narrowed or
  * deleted while the page was open is refused on its field, not as
- * `stale_revision`.
+ * `stale_revision`. A refusal for a category default the page no longer holds
+ * (`current`, the page's draft now; `sent` unless given) has no control to
+ * show it, so it is the general alert.
  */
 export type DefaultsFailure = { kind: "field"; key: string; message: string } | AlertFailure;
 
 export function defaultsFailure(
   error: unknown,
   sent: readonly CategoryTemplateDefault[] = [],
+  current: readonly CategoryTemplateDefault[] = sent,
 ): DefaultsFailure {
   const path = error instanceof HostError ? error.field : null;
   const org = ORG_DEFAULTS.find((each) => each.field === path);
@@ -146,7 +149,11 @@ export function defaultsFailure(
   }
   const category = path === null ? null : CATEGORY_FIELD.exec(path);
   const entry = category === null ? undefined : sent[Number(category[1])];
-  if (category !== null && entry !== undefined) {
+  if (
+    category !== null &&
+    entry !== undefined &&
+    current.some((each) => slotKey(each) === slotKey(entry))
+  ) {
     const message =
       category[2] === "templateId"
         ? "office.templateDefaults.errors.unfit"

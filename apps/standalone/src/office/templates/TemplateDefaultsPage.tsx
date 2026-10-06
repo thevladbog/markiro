@@ -1,5 +1,5 @@
 import { useQueryClient, type UseQueryResult } from "@tanstack/react-query";
-import { useRef, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -170,6 +170,37 @@ function TemplateDefaultsForm({
     api.updateTemplateDefaults(token, body),
   );
   const dirty = !sameDraft(draft, loaded);
+  // The draft as it is now, for a refusal that arrives after the click that sent it.
+  const currentCategories = useRef(draft.categories);
+  const ids = useId();
+  const orgId = (field: OrgDefaultField) => `${ids}-org-${field}`;
+  const rowId = (key: string) => `${ids}-row-${key}`;
+  const removeId = (key: string) => `${ids}-remove-${key}`;
+  const addId = `${ids}-add`;
+  // Where focus goes once the page has been drawn again: a removed row's button
+  // leaves the page, and a refused control is to be read.
+  const focusAfterRender = useRef<string | null>(null);
+  // The page's own order is the order sent; the table sorts what it shows.
+  const rows = [...draft.categories].sort(
+    (a, b) =>
+      NAMES.compare(
+        groupName(groups.data, a.chzProductGroupCode, t),
+        groupName(groups.data, b.chzProductGroupCode, t),
+      ) || PURPOSES.indexOf(a.purpose) - PURPOSES.indexOf(b.purpose),
+  );
+
+  useEffect(() => {
+    currentCategories.current = draft.categories;
+  });
+  // After every render, once no save is on its way (the controls are off until
+  // then and cannot take focus).
+  useEffect(() => {
+    const target = focusAfterRender.current;
+    if (target === null || saving) return;
+    focusAfterRender.current = null;
+    // `document` is the page's loaded document here.
+    globalThis.document.getElementById(target)?.focus();
+  });
 
   const chooseOrg = (field: OrgDefaultField, id: string) => {
     setDraft((current) => withOrgDefault(current, field, id));
@@ -182,6 +213,10 @@ function TemplateDefaultsForm({
   };
 
   const removeCategory = (entry: CategoryTemplateDefault) => {
+    // The next row's «Убрать», else the previous row's, else the card's button.
+    const at = rows.findIndex((each) => slotKey(each) === slotKey(entry));
+    const neighbour = rows[at + 1] ?? rows[at - 1];
+    focusAfterRender.current = neighbour === undefined ? addId : removeId(slotKey(neighbour));
     setDraft((current) => withoutCategoryDefault(current, slotKey(entry)));
     if (fieldError?.key === slotKey(entry)) setFieldError(null);
   };
@@ -202,9 +237,11 @@ function TemplateDefaultsForm({
     try {
       saved = await save.mutateAsync(templateDefaultsUpdate(defaultsInput(draft), document.rev));
     } catch (error) {
-      const outcome = defaultsFailure(error, sent);
+      const outcome = defaultsFailure(error, sent, currentCategories.current);
       if (outcome.kind === "field") {
         setFieldError({ key: outcome.key, message: outcome.message });
+        const org = ORG_DEFAULTS.find((each) => each.field === outcome.key);
+        focusAfterRender.current = org === undefined ? rowId(outcome.key) : orgId(org.field);
         // The refused template is marked in the choices once the list is read again.
         void templates.refetch();
       } else {
@@ -230,14 +267,6 @@ function TemplateDefaultsForm({
     category: groupName(groups.data, entry.chzProductGroupCode, t),
     purpose: t(`office.templates.purposes.${entry.purpose}`),
   });
-  // The page's own order is the order sent; the table sorts what it shows.
-  const rows = [...draft.categories].sort(
-    (a, b) =>
-      NAMES.compare(
-        groupName(groups.data, a.chzProductGroupCode, t),
-        groupName(groups.data, b.chzProductGroupCode, t),
-      ) || PURPOSES.indexOf(a.purpose) - PURPOSES.indexOf(b.purpose),
-  );
   const loadedTemplate = (entry: CategoryTemplateDefault) =>
     loaded.categories.find((each) => slotKey(each) === slotKey(entry))?.templateId ?? "";
   const columns: TableColumn<CategoryTemplateDefault>[] = [
@@ -262,6 +291,7 @@ function TemplateDefaultsForm({
       render: (entry) => (
         <Select
           native
+          id={rowId(slotKey(entry))}
           aria-label={t("office.templateDefaults.templateNamed", named(entry))}
           // A category default always has a template: «Убрать» clears it, not «Не выбран».
           options={templateOptions(
@@ -273,7 +303,7 @@ function TemplateDefaultsForm({
           ).filter((option) => option.value !== "")}
           value={entry.templateId}
           onValueChange={(id) => chooseCategory({ ...entry, templateId: id })}
-          disabled={!canEdit || !templates.isSuccess}
+          disabled={!canEdit || !templates.isSuccess || saving}
           {...errorProp(fieldError?.key === slotKey(entry) ? t(fieldError.message) : undefined)}
         />
       ),
@@ -285,10 +315,14 @@ function TemplateDefaultsForm({
       title: t("office.templateDefaults.table.actions"),
       render: (entry) => (
         <Button
+          id={removeId(slotKey(entry))}
           variant="secondary"
           size="compact"
           aria-label={t("office.templateDefaults.removeNamed", named(entry))}
           onClick={() => removeCategory(entry)}
+          // «Умолчания сейчас не изменить» while the list is not there, and not
+          // while a save is on its way.
+          disabled={!templates.isSuccess || saving}
         >
           {t("office.templateDefaults.remove")}
         </Button>
@@ -310,6 +344,7 @@ function TemplateDefaultsForm({
               <Select
                 key={field}
                 native
+                id={orgId(field)}
                 label={t(`office.templateDefaults.fields.${field}`)}
                 hint={t("office.templateDefaults.orgHint")}
                 options={templateOptions(
@@ -321,7 +356,7 @@ function TemplateDefaultsForm({
                 )}
                 value={draft[field]}
                 onValueChange={(id) => chooseOrg(field, id)}
-                disabled={!canEdit || !templates.isSuccess}
+                disabled={!canEdit || !templates.isSuccess || saving}
                 {...errorProp(fieldError?.key === field ? t(fieldError.message) : undefined)}
               />
             ))}
@@ -334,10 +369,11 @@ function TemplateDefaultsForm({
             ? {
                 actions: (
                   <Button
+                    id={addId}
                     variant="secondary"
                     size="compact"
                     onClick={() => setAdding(true)}
-                    disabled={!groups.isSuccess || !templates.isSuccess}
+                    disabled={!groups.isSuccess || !templates.isSuccess || saving}
                   >
                     {t("office.templateDefaults.add")}
                   </Button>
