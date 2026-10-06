@@ -1,7 +1,7 @@
 /**
  * The domain's printing code, loaded on its own (`import("./label-print.js")`):
- * the GS1 DataMatrix raster brings the barcode encoder (bwip-js, about
- * 0.9 MB) with it, which the webview needs only once a duplicate's code is
- * drawn, not when it starts.
+ * the ZPL and TSPL generators and the GS1 DataMatrix raster bring the barcode
+ * encoder (bwip-js, about 0.9 MB) with them, which the webview needs only once
+ * a duplicate's code is drawn or a code file is saved, not when it starts.
  */
-export { rasterizeGs1DataMatrix } from "@markiro/domain";
+export { generateTspl, generateZpl, rasterizeGs1DataMatrix } from "@markiro/domain";

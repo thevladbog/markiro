@@ -19,7 +19,7 @@ import { officeKeys, useOfficeMutation } from "../office-query.js";
 import { scopeCodes } from "./category-scope.js";
 import { CategoryScopeField } from "./CategoryScopeField.js";
 import { DeleteTemplateDialog } from "./DeleteTemplateDialog.js";
-import { downloadFile } from "./download.js";
+import { downloadFile, tsplBlob, zplBlob } from "./download.js";
 import { editorFailure, type EditorFailure, type EditorField } from "./editor-failure.js";
 import {
   checkedSpec,
@@ -35,6 +35,8 @@ import {
 } from "./editor-model.js";
 import type { ImportAnalysis } from "./import-analysis.js";
 import { ImportCodeDialog } from "./ImportCodeDialog.js";
+import { useLabelRendering } from "./label-rendering.js";
+import { labelRenderOptions, labelSampleData } from "./label-samples.js";
 import { LabelSizeDialog } from "./LabelSizeDialog.js";
 import { PreviewPane } from "./PreviewPane.js";
 import { TemplateFailureAlert } from "./TemplateFailureAlert.js";
@@ -64,8 +66,8 @@ export interface TemplateEditorProps {
  * `LabelEditorPage`: the name, the purpose, the flag, the categories
  * (`CategoryScopeField`, with the cloud's EGAIS hint) and the layout, which
  * only an import puts on the label (`ImportCodeDialog`) and the preview
- * shows as it prints (`PreviewPane`); a layout downloads as JSON. Nothing
- * goes to the host before «Сохранить»: the name is trimmed
+ * shows as it prints (`PreviewPane`); a layout downloads as ZPL, TSPL or
+ * JSON. Nothing goes to the host before «Сохранить»: the name is trimmed
  * (`templateNameRule`), the layout is what `labelTemplateSpecSchema` makes
  * of it (`checkedSpec`), the categories go ascending (`scopeCodes`). A new
  * template is created (`templateCreate`); a template being changed keeps its
@@ -95,6 +97,9 @@ export function TemplateEditor({
   const [importing, setImporting] = useState(false);
   const [sizing, setSizing] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [preparing, setPreparing] = useState<"zpl" | "tspl" | null>(null);
+  const [codeFailed, setCodeFailed] = useState(false);
+  const { rasterizeText } = useLabelRendering();
   // Set at once, so a second submit in the same moment is dropped before
   // `saving` has re-rendered the button.
   const inFlight = useRef(false);
@@ -268,6 +273,30 @@ export function TemplateEditor({
       `${templateFileName(draft.name)}.json`,
     );
 
+  // A code file is the domain's document of the layout with the purpose's sample, its
+  // Cyrillic as the print's bitmaps: what a station would send to its printer.
+  const downloadCode = async (language: "zpl" | "tspl") => {
+    setPreparing(language);
+    setCodeFailed(false);
+    const data = labelSampleData(draft.purpose);
+    const deps = { rasterizeText, ...labelRenderOptions(draft.purpose) };
+    let blob: Blob;
+    try {
+      // The generators come with the barcode encoder, a chunk of its own.
+      const { generateTspl, generateZpl } = await import("./label-print.js");
+      blob =
+        language === "zpl"
+          ? zplBlob(await generateZpl(draft.spec, data, deps))
+          : tsplBlob(await generateTspl(draft.spec, data, deps));
+    } catch {
+      setCodeFailed(true);
+      return;
+    } finally {
+      setPreparing(null);
+    }
+    downloadFile(blob, `${templateFileName(draft.name)}.${language}`);
+  };
+
   const errorOf = (field: EditorField) =>
     errorProp(fieldError?.field === field ? t(fieldError.message) : undefined);
 
@@ -379,10 +408,28 @@ export function TemplateEditor({
                 <Button variant="secondary" onClick={() => setImporting(true)}>
                   {t("office.templateEditor.import")}
                 </Button>
+                {/* A broken duplicate has no code to print; its JSON can still be saved. */}
+                <Button
+                  variant="secondary"
+                  disabled={duplicateInvalid || preparing !== null}
+                  loading={preparing === "zpl"}
+                  onClick={() => void downloadCode("zpl")}
+                >
+                  {t("office.templateEditor.downloadZpl")}
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={duplicateInvalid || preparing !== null}
+                  loading={preparing === "tspl"}
+                  onClick={() => void downloadCode("tspl")}
+                >
+                  {t("office.templateEditor.downloadTspl")}
+                </Button>
                 <Button variant="secondary" onClick={downloadJson}>
                   {t("office.templateEditor.downloadJson")}
                 </Button>
               </div>
+              {codeFailed && <Alert tone="error">{t("office.templateEditor.codeFailed")}</Alert>}
               <p className="office-note">{t("office.templateEditor.languages")}</p>
             </div>
           </Card>
