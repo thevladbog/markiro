@@ -101,6 +101,17 @@ for (const width of [390, 768, 1280, 1600])
         });
         await page.route(`${origin}/api/**`, async (route) => {
           const path = new URL(route.request().url()).pathname;
+          // Support chat is disabled in these unrelated cabinet scenarios.
+          if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
+            return route.fulfill({
+              status: 503,
+              json: {
+                statusCode: 503,
+                message: "Support chat unavailable",
+                error: "Service Unavailable",
+              },
+            });
+          }
           if (/\/image[s]?\//.test(path)) {
             await route.fulfill({
               contentType: "image/webp",

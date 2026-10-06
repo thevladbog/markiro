@@ -80,6 +80,17 @@ async function setup(page: Page, language = "ru", theme = "light") {
   );
   await page.route(`${origin}/api/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
+    // Support chat is disabled in these unrelated cabinet scenarios.
+    if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
+      return route.fulfill({
+        status: 503,
+        json: {
+          statusCode: 503,
+          message: "Support chat unavailable",
+          error: "Service Unavailable",
+        },
+      });
+    }
     let body: unknown;
     if (path === "/api/profile")
       body = { firstName: "Мария", middleName: null, lastName: "Волкова", hasAvatar: false };
