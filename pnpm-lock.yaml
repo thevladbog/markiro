@@ -577,6 +577,9 @@ importers:
       i18next:
         specifier: 26.3.6
         version: 26.3.6(typescript@6.0.3)
+      opentype.js:
+        specifier: 2.0.0
+        version: 2.0.0
       react:
         specifier: 19.2.8
         version: 19.2.8

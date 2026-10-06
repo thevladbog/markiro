@@ -21,6 +21,7 @@
     "@tanstack/react-query": "5.101.4",
     "@tauri-apps/api": "2.11.1",
     "i18next": "26.3.6",
+    "opentype.js": "2.0.0",
     "react": "19.2.8",
     "react-dom": "19.2.8",
     "react-hook-form": "7.85.0",
