@@ -285,7 +285,6 @@
 
 .template-import__code {
   min-height: 240px;
-  font-family: var(--font-mono);
 }
 
 .template-import__warnings,

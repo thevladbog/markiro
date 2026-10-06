@@ -49,7 +49,9 @@ export function OfficeShell() {
         renderLink={(item, content) => (
           <NavLink
             to={item.to}
-            end
+            // No `end`: a section stays marked on its own pages («Шаблоны» on `/templates/new`)
+            // and not on a path that merely begins like it («Умолчания шаблонов»). «Обзор» (`/`)
+            // is marked only on `/` all the same: the router matches `/` by equality.
             className={({ isActive }) =>
               cn("mk-sidebar__link", isActive && "mk-sidebar__link--active")
             }

@@ -415,7 +415,7 @@ describe("a new label template", () => {
       screen.getByText("Хост не принял эти категории: справочник групп мог измениться."),
     ).toBeTruthy();
     await waitFor(() =>
-      expect(document.activeElement).toBe(document.querySelector("[id$='-scope']")),
+      expect(document.activeElement).toBe(screen.getByRole("group", { name: "Категории" })),
     );
   });
 
@@ -648,8 +648,9 @@ describe("a new label template", () => {
     type("Название", "Молоко");
     chooseCategories();
     await save();
-    const card = document.querySelector("[id$='-scope']");
-    expect(card?.getAttribute("tabindex")).toBe("-1");
+    const card = screen.getByRole("group", { name: "Категории" });
+    expect(card.getAttribute("tabindex")).toBe("-1");
+    expect(card.id.endsWith("-scope")).toBe(true);
     await waitFor(() => expect(document.activeElement).toBe(card));
   });
 
@@ -1718,6 +1719,33 @@ describe("changing a label template", () => {
       answer(milk({ name: "Молоко (со склада)", rev: 64 }));
     });
     expect(await screen.findByLabelText("Название")).toHaveProperty("value", "Молоко (со склада)");
+  });
+
+  it("marks «Шаблоны» in the menu on the editor's pages, never «Умолчания шаблонов» or «Обзор»", async () => {
+    const fake = editSession();
+    await openTemplates(fake);
+    const current = () =>
+      ["Обзор", "Шаблоны", "Умолчания шаблонов"].filter(
+        (name) => screen.getByRole("link", { name }).getAttribute("aria-current") === "page",
+      );
+    expect(current()).toEqual(["Шаблоны"]);
+    fireEvent.click(screen.getByRole("button", { name: "Создать шаблон" }));
+    await screen.findByRole("heading", { name: "Новый шаблон" });
+    expect(current()).toEqual(["Шаблоны"]);
+    fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Молоко 58×40»" }));
+    await screen.findByRole("heading", { name: "Шаблон «Молоко 58×40»" });
+    expect(current()).toEqual(["Шаблоны"]);
+    fireEvent.click(screen.getByRole("button", { name: "Копировать" }));
+    await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });
+    expect(current()).toEqual(["Шаблоны"]);
+    fireEvent.click(screen.getByRole("link", { name: "Умолчания шаблонов" }));
+    await screen.findByRole("heading", { name: "Умолчания шаблонов" });
+    expect(current()).toEqual(["Умолчания шаблонов"]);
+    fireEvent.click(screen.getByRole("link", { name: "Обзор" }));
+    await waitFor(() => expect(current()).toEqual(["Обзор"]));
   });
 
   it("reads each template under its own key, so a read still on its way for one is never taken for another", async () => {

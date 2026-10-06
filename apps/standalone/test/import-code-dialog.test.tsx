@@ -92,6 +92,25 @@ describe("the template import dialog", () => {
     expect(analysis?.result.spec.language).toBe("zpl");
   });
 
+  it("announces the check in a live region that is already on the page before there is a result", () => {
+    const { dialog } = open();
+    const regions = [...dialog.querySelectorAll("[aria-live='polite']")];
+    paste("Код ZPL", ZPL);
+    fireEvent.click(button("Проверить код"));
+    const holder = screen.getByText(/^Распознано элементов/).closest("[aria-live='polite']");
+    expect(holder).not.toBeNull();
+    // A region that mounts together with its text may go unannounced.
+    expect(regions).toContain(holder);
+    paste("Код ZPL", `${ZPL}\n`);
+    expect(screen.queryByText(/Распознано элементов/)).toBeNull();
+    expect(dialog.contains(holder)).toBe(true);
+  });
+
+  it("sets the code in the code font, which jsdom cannot show but the field's own style names", () => {
+    open();
+    expect(screen.getByLabelText("Код ZPL").style.font).toBe("var(--text-code)");
+  });
+
   it("drops the check when the code, the format or the resolution changes", () => {
     open();
     paste("Код ZPL", ZPL);

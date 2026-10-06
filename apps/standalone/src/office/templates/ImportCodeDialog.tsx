@@ -133,6 +133,8 @@ export function ImportCodeDialog({
                   })
             }
             className="template-import__code"
+            // The field's own `font` beats a class: it takes the code font here.
+            style={{ font: "var(--text-code)" }}
             spellCheck={false}
             value={source}
             onChange={(event) => {
@@ -147,47 +149,50 @@ export function ImportCodeDialog({
             </Button>
           </div>
           {error !== null && <ImportErrorAlert error={error} />}
-          {analysis !== null && (
-            <div className="template-import__analysis" aria-live="polite">
-              <strong>
-                {t("office.templateImport.summary", {
-                  n: analysis.result.spec.elements.length,
-                  width: MM.format(analysis.result.spec.widthMm),
-                  height: MM.format(analysis.result.spec.heightMm),
-                })}
-              </strong>
-              {warnings.length > 0 && (
-                <>
-                  <p>
-                    {t(
-                      isJson
-                        ? "office.templateImport.warningsTitle"
-                        : "office.templateImport.unsupportedTitle",
-                      { n: warnings.length },
-                    )}
-                  </p>
-                  <ul className="template-import__warnings">
-                    {warnings.map((warning, index) => (
-                      <WarningRow key={`${index}-${warning.source}`} warning={warning} />
-                    ))}
-                  </ul>
-                  <Checkbox
-                    label={t(
-                      isJson
-                        ? "office.templateImport.acknowledgeWarnings"
-                        : "office.templateImport.acknowledge",
-                      { n: warnings.length },
-                    )}
-                    checked={acknowledged}
-                    onCheckedChange={setAcknowledged}
-                  />
-                </>
-              )}
-              {analysis.adjustedIds.length > 0 && (
-                <p>{t("office.templateImport.adjusted", { n: analysis.adjustedIds.length })}</p>
-              )}
-            </div>
-          )}
+          {/* Always on the page, so a screen reader hears the result when it is put in. */}
+          <div className="template-import__analysis" aria-live="polite">
+            {analysis !== null && (
+              <>
+                <strong>
+                  {t("office.templateImport.summary", {
+                    n: analysis.result.spec.elements.length,
+                    width: MM.format(analysis.result.spec.widthMm),
+                    height: MM.format(analysis.result.spec.heightMm),
+                  })}
+                </strong>
+                {warnings.length > 0 && (
+                  <>
+                    <p>
+                      {t(
+                        isJson
+                          ? "office.templateImport.warningsTitle"
+                          : "office.templateImport.unsupportedTitle",
+                        { n: warnings.length },
+                      )}
+                    </p>
+                    <ul className="template-import__warnings">
+                      {warnings.map((warning, index) => (
+                        <WarningRow key={`${index}-${warning.source}`} warning={warning} />
+                      ))}
+                    </ul>
+                    <Checkbox
+                      label={t(
+                        isJson
+                          ? "office.templateImport.acknowledgeWarnings"
+                          : "office.templateImport.acknowledge",
+                        { n: warnings.length },
+                      )}
+                      checked={acknowledged}
+                      onCheckedChange={setAcknowledged}
+                    />
+                  </>
+                )}
+                {analysis.adjustedIds.length > 0 && (
+                  <p>{t("office.templateImport.adjusted", { n: analysis.adjustedIds.length })}</p>
+                )}
+              </>
+            )}
+          </div>
         </div>
         <ImportFieldsPanel syntax={isJson ? "json" : "placeholder"} />
       </div>

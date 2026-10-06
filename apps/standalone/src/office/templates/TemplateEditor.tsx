@@ -381,7 +381,15 @@ export function TemplateEditor({
             </div>
           </Card>
           <Card title={t("office.templateEditor.categories")} titleAs="h2">
-            <div id={scopeId} tabIndex={-1} className="standalone-form">
+            {/* The focus lands here after a refusal: a group named like its card, whose */}
+            {/* heading has no id to point at. */}
+            <div
+              id={scopeId}
+              tabIndex={-1}
+              role="group"
+              aria-label={t("office.templateEditor.categories")}
+              className="standalone-form"
+            >
               <CategoryScopeField
                 value={draft.scope}
                 onChange={(scope) => change({ scope }, "scope")}
