@@ -1,5 +1,7 @@
+import { readFile } from "node:fs/promises";
+
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   buildDuplicateLabelTemplate,
@@ -10,11 +12,13 @@ import {
 import { ThemeProvider } from "@markiro/ui";
 
 import type { LabelTemplateSummary, ProductGroup } from "../src/host/protocol.js";
-import type { LabelFontFamily } from "../src/labels/font-coverage.js";
+import { FONT_SUBSET_URLS, type LabelFontFamily } from "../src/labels/font-coverage.js";
 import { RasterUnavailableError } from "../src/labels/rasterizer.js";
 import { Office } from "../src/office/Office.js";
 import type { LabelCanvas } from "../src/office/templates/label-renderer.js";
 import {
+  BROWSER_LABEL_RENDERING,
+  forgetFontCoverageAnswers,
   LabelRenderingProvider,
   type LabelRendering,
 } from "../src/office/templates/label-rendering.js";
@@ -212,6 +216,34 @@ describe("the layout preview", () => {
     });
     expect(screen.getByRole("alert").textContent).toContain(CHECK_FAILED);
     expect(check).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows no warning of an earlier check for a layout whose own check has not answered", async () => {
+    const pending: ((covered: boolean) => void)[] = [];
+    const check = vi.fn(
+      (_family: LabelFontFamily) =>
+        new Promise<boolean>((resolve) => {
+          pending.push(resolve);
+        }),
+    );
+    const { tools } = drawingTools({ checkFamilyCoverage: check });
+    const view = render(preview(CYRILLIC, tools));
+    await act(async () => {
+      pending[0]?.(false);
+    });
+    expect(screen.getByRole("alert").textContent).toContain(MISSING);
+    // Another Cyrillic text is the same check: its answer still stands.
+    view.rerender(preview(OTHER_CYRILLIC, tools));
+    expect(screen.getByRole("alert").textContent).toContain(MISSING);
+    expect(check).toHaveBeenCalledTimes(1);
+    view.rerender(preview(ASCII, tools));
+    view.rerender(preview(CYRILLIC, tools));
+    expect(check).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    await act(async () => {
+      pending[1]?.(false);
+    });
+    expect(screen.getByRole("alert").textContent).toContain(MISSING);
   });
 
   it("says nothing about the font when it has Cyrillic", async () => {
@@ -420,6 +452,82 @@ describe("the office's own way of drawing labels", () => {
     const written = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
     expect(document.createElement("canvas").getContext("2d")).toBeNull();
     expect(written).not.toHaveBeenCalled();
+  });
+});
+
+describe("the webview's font check", () => {
+  /** The file behind a font's asset URL (Vite serves it as `/@fs/<absolute path>` in tests). */
+  async function bundledFile(url: string): Promise<ArrayBuffer> {
+    const bytes = await readFile(decodeURIComponent(url.replace(/^\/@fs/, "")));
+    return new Uint8Array(bytes).buffer;
+  }
+
+  function answerFonts() {
+    const fetchMock = vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      arrayBuffer: () => bundledFile(url),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    return fetchMock;
+  }
+
+  beforeEach(() => {
+    forgetFontCoverageAnswers();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    forgetFontCoverageAnswers();
+  });
+
+  it("reads a family's font files once, whatever the number of asks", async () => {
+    const fetchMock = answerFonts();
+    const { checkFamilyCoverage } = BROWSER_LABEL_RENDERING;
+    await expect(checkFamilyCoverage("IBM Plex Sans")).resolves.toBe(true);
+    await expect(checkFamilyCoverage("IBM Plex Sans")).resolves.toBe(true);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      ...FONT_SUBSET_URLS["IBM Plex Sans"],
+    ]);
+  });
+
+  it("keeps the answers apart by family", async () => {
+    const fetchMock = answerFonts();
+    const { checkFamilyCoverage } = BROWSER_LABEL_RENDERING;
+    await checkFamilyCoverage("IBM Plex Sans");
+    await checkFamilyCoverage("IBM Plex Mono");
+    await checkFamilyCoverage("IBM Plex Mono");
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      ...FONT_SUBSET_URLS["IBM Plex Sans"],
+      ...FONT_SUBSET_URLS["IBM Plex Mono"],
+    ]);
+  });
+
+  it("shares one check between asks made while it runs", async () => {
+    const fetchMock = answerFonts();
+    const { checkFamilyCoverage } = BROWSER_LABEL_RENDERING;
+    const answers = await Promise.all([
+      checkFamilyCoverage("IBM Plex Sans"),
+      checkFamilyCoverage("IBM Plex Sans"),
+    ]);
+    expect(answers).toEqual([true, true]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not keep a check that failed: the next ask reads the files again", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        throw new Error("no font file");
+      }),
+    );
+    const { checkFamilyCoverage } = BROWSER_LABEL_RENDERING;
+    await expect(checkFamilyCoverage("IBM Plex Sans")).rejects.toThrow("no font file");
+    const fetchMock = answerFonts();
+    await expect(checkFamilyCoverage("IBM Plex Sans")).resolves.toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await checkFamilyCoverage("IBM Plex Sans");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 

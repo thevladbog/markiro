@@ -45,17 +45,40 @@ function whenVisible(element: Element, onVisible: () => void): () => void {
 }
 
 /**
+ * The font check's answers, per family: the check reads and parses both font
+ * files, and the preview asks again each time the layout gets Cyrillic text
+ * back. Only an answer is kept (a check still running is shared); a check that
+ * failed is dropped, so the next ask reads the files again.
+ */
+const coverageAnswers = new Map<LabelFontFamily, Promise<boolean>>();
+
+/** Forgets the font check's answers (tests). */
+export function forgetFontCoverageAnswers(): void {
+  coverageAnswers.clear();
+}
+
+function checkFamilyCoverageOnce(family: LabelFontFamily): Promise<boolean> {
+  const known = coverageAnswers.get(family);
+  if (known !== undefined) return known;
+  const asked = import("../../labels/font-coverage.js").then(({ checkFamilyCoverage }) =>
+    checkFamilyCoverage(family),
+  );
+  coverageAnswers.set(family, asked);
+  asked.catch(() => {
+    if (coverageAnswers.get(family) === asked) coverageAnswers.delete(family);
+  });
+  return asked;
+}
+
+/**
  * The webview's canvas, the bundled-font rasterizer and the check of the
  * bundled fonts; the check, with opentype.js, is a chunk of its own, loaded
- * the first time a layout has Cyrillic text.
+ * the first time a layout has Cyrillic text, and answers once per family.
  */
 export const BROWSER_LABEL_RENDERING: LabelRendering = {
   context: (canvas) => canvas.getContext("2d"),
   rasterizeText,
-  checkFamilyCoverage: async (family) => {
-    const { checkFamilyCoverage } = await import("../../labels/font-coverage.js");
-    return checkFamilyCoverage(family);
-  },
+  checkFamilyCoverage: checkFamilyCoverageOnce,
   whenVisible,
 };
 

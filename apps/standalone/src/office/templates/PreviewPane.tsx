@@ -36,7 +36,9 @@ export interface PreviewPaneProps {
  * (`paintCodeRasters`) and the print's own bitmaps put over its Cyrillic text
  * (`compositeTextRasters`), and a warning when the font lacks Cyrillic or
  * could not be checked. The check runs only while the layout has such text;
- * it needs no canvas, so a webview without one still says it.
+ * it needs no canvas, so a webview without one still says it. A warning is
+ * the answer of the check that is running: it goes when that check ends, and
+ * a later check shows its own answer only once it has one.
  */
 export function PreviewPane({ spec, purpose }: PreviewPaneProps) {
   const { t } = useTranslation();
@@ -75,6 +77,10 @@ export function PreviewPane({ spec, purpose }: PreviewPaneProps) {
     );
     return () => {
       cancelled = true;
+      // The verdict belongs to the check that produced it: when that check
+      // ends (the layout lost its Cyrillic text), it is not shown again for a
+      // later one before that one answers.
+      setCoverage("ok");
     };
   }, [needsCheck, checkFamilyCoverage]);
 
