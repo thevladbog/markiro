@@ -35,8 +35,8 @@
   "devDependencies": {
     "@playwright/test": "1.62.0",
     "@types/node": "26.1.1",
-    "brace-expansion": "2.1.4",
-    "lighthouse": "13.4.0",
+    "brace-expansion": "2.1.7",
+    "lighthouse": "13.5.0",
     "typescript": "6.0.3"
   }
 }
