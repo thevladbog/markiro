@@ -2385,6 +2385,47 @@ describe("leaving a label template with unsaved changes", () => {
     expect(screen.queryByText("Молоко 58×40")).toBeNull();
   });
 
+  it.each([
+    ["the «К шаблонам» button", () => screen.getByRole("button", { name: "К шаблонам" })],
+    ["the menu's «Шаблоны»", () => screen.getByRole("link", { name: "Шаблоны" })],
+  ])(
+    "reads the list again when a save lands after the editor was left for the list itself through %s",
+    async (_name, target) => {
+      const fake = editSession();
+      let answer: (template: LabelTemplate) => void = () => undefined;
+      fake.api.updateTemplate.mockReturnValue(
+        new Promise<LabelTemplate>((resolve) => {
+          answer = resolve;
+        }),
+      );
+      await openEdit(fake);
+      type("Название", "Молоко 60×40");
+      await save();
+      fireEvent.click(target());
+      await act(async () => {
+        fireEvent.click(within(leaveDialog()).getByRole("button", { name: "Уйти без сохранения" }));
+      });
+      await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+      // The page shows the list as it was, read again on arrival.
+      expect(await screen.findByText("Молоко 58×40")).toBeTruthy();
+      await waitFor(() => expect(fake.api.listTemplates.mock.calls.length).toBeGreaterThan(1));
+      await settle();
+      const readBeforeSave = fake.api.listTemplates.mock.calls.length;
+      fake.api.listTemplates.mockResolvedValue([
+        BOX_58,
+        { ...MILK_ROW, name: "Молоко 60×40", rev: 62 },
+      ]);
+      await act(async () => {
+        answer(milk({ name: "Молоко 60×40", rev: 62 }));
+      });
+      // The save did land: the page on screen reads the list again and shows the new row.
+      expect(await screen.findByText("Молоко 60×40")).toBeTruthy();
+      expect(screen.queryByText("Молоко 58×40")).toBeNull();
+      expect(fake.api.listTemplates).toHaveBeenCalledTimes(readBeforeSave + 1);
+      expect(screen.queryByText("Шаблон «Молоко 60×40» сохранён.")).toBeNull();
+    },
+  );
+
   it("keeps «Копировать» and «Удалить» off while a save is on its way, and «К шаблонам» on", async () => {
     const fake = editSession();
     let refuse: (error: unknown) => void = () => undefined;

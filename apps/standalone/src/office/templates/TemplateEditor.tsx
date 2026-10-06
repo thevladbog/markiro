@@ -236,9 +236,12 @@ export function TemplateEditor({
   };
 
   // The list holds no layouts and is read again; nothing of this template is kept.
-  // It is dropped even when the user has gone elsewhere meanwhile: the write landed.
+  // It is reset even when the user has gone elsewhere meanwhile: the write landed.
+  // A reset (not a removal) also reads again a list page that is on screen by now,
+  // when the user left for the list itself during the save; an unobserved list is
+  // back to «not read yet», so its next visit shows «Загрузка…».
   const backToList = (notice: string) => {
-    queryClient.removeQueries({ queryKey: officeKeys.templates, exact: true });
+    void queryClient.resetQueries({ queryKey: officeKeys.templates, exact: true });
     if (!mounted.current) return;
     leaving.current = true;
     void navigate("/templates", { state: { notice } });

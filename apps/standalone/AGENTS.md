@@ -1250,7 +1250,8 @@ requests and offer a retry.
   elsewhere is said to be gone. The form is off while a save is on its way,
   and so are «Копировать» and «Удалить»; a save or a delete answered after
   the user left through the menu does not take them back to «Шаблоны» (the
-  cached list is dropped all the same). A refusal goes under the name or the
+  cached list is reset all the same, with `resetQueries`, so a list page the
+  user left for meanwhile reads it again). A refusal goes under the name or the
   categories, which then take focus, or above the form (`editorFailure`): a
   default the change would break says whose default it is, `stale_revision`
   offers «Загрузить заново», which reads the template again and starts the
