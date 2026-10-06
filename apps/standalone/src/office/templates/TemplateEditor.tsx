@@ -274,7 +274,8 @@ export function TemplateEditor({
     );
 
   // A code file is the domain's document of the layout with the purpose's sample, its
-  // Cyrillic as the print's bitmaps: what a station would send to its printer.
+  // Cyrillic as the print's bitmaps: what a station would send to a printer of the
+  // layout's own resolution (a station prints at its printer's).
   const downloadCode = async (language: "zpl" | "tspl") => {
     setPreparing(language);
     setCodeFailed(false);
@@ -404,6 +405,10 @@ export function TemplateEditor({
                   {t("office.templateEditor.duplicateInvalid")}
                 </Alert>
               )}
+              {/* Off for a broken duplicate: the code buttons are off, so «try again» is stale. */}
+              {codeFailed && !duplicateInvalid && (
+                <Alert tone="error">{t("office.templateEditor.codeFailed")}</Alert>
+              )}
               <div className="template-editor__actions">
                 <Button variant="secondary" onClick={() => setImporting(true)}>
                   {t("office.templateEditor.import")}
@@ -429,7 +434,6 @@ export function TemplateEditor({
                   {t("office.templateEditor.downloadJson")}
                 </Button>
               </div>
-              {codeFailed && <Alert tone="error">{t("office.templateEditor.codeFailed")}</Alert>}
               <p className="office-note">{t("office.templateEditor.languages")}</p>
             </div>
           </Card>

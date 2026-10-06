@@ -99,6 +99,13 @@ async function importZpl(): Promise<void> {
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 }
 
+const CODE_FAILED = "Файл не собран. Попробуйте ещё раз.";
+
+/** Whether `first` comes before `second` in the page. */
+function isBefore(first: Element, second: Element): boolean {
+  return (first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+}
+
 async function bytesOf(blob: Blob | undefined): Promise<number[]> {
   if (blob === undefined) throw new Error("nothing was saved");
   return [...new Uint8Array(await blob.arrayBuffer())];
@@ -154,14 +161,15 @@ describe("the template editor's code downloads", () => {
     expect(saved.blobs[0]?.type).toBe("application/octet-stream");
   });
 
-  it("says the file was not made when the text cannot be drawn, and saves nothing", async () => {
+  it("says the file was not made when the text cannot be drawn, above the buttons, and saves nothing", async () => {
     const saved = recordDownloads();
     await openNew(quietLabelRendering());
     await importZpl();
     fireEvent.click(screen.getByRole("button", { name: "Скачать ZPL" }));
-    expect((await screen.findByRole("alert")).textContent).toContain(
-      "Файл не собран: русский текст этикетки не удалось нарисовать. Попробуйте ещё раз.",
-    );
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(CODE_FAILED);
+    expect(isBefore(alert, screen.getByRole("button", { name: "Скачать ZPL" }))).toBe(true);
+    expect(isBefore(alert, screen.getByRole("button", { name: "Скачать JSON" }))).toBe(true);
     expect(saved.names).toEqual([]);
   });
 
@@ -239,7 +247,7 @@ describe("the template editor's code downloads, beyond the plan's cases", () => 
     ["Скачать ZPL", "Скачать TSPL (TSC)", "label.zpl"],
     ["Скачать TSPL (TSC)", "Скачать ZPL", "label.tspl"],
   ])(
-    "starts one file at a time after «%s», and marks only that button as busy",
+    "marks only «%s» as busy while its file is being made, and starts nothing when pressed again",
     async (pressedName, otherName, fileName) => {
       let finish: (raster: RasterResult) => void = () => undefined;
       const rasterize = vi.fn(
@@ -303,11 +311,28 @@ describe("the template editor's code downloads, beyond the plan's cases", () => 
       throw new Error("the chunk did not load");
     });
     fireEvent.click(screen.getByRole("button", { name: "Скачать ZPL" }));
-    expect((await screen.findByRole("alert")).textContent).toContain("Файл не собран");
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toContain(CODE_FAILED);
+    expect(isBefore(alert, screen.getByRole("button", { name: "Скачать ZPL" }))).toBe(true);
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Скачать ZPL" })).toHaveProperty("disabled", false),
     );
     expect(saved.names).toEqual([]);
+  });
+
+  it("leaves the failure notice out while the duplicate breaks its rule, when both code buttons are off", async () => {
+    recordDownloads();
+    await openNew(quietLabelRendering());
+    await importZpl();
+    fireEvent.click(screen.getByRole("button", { name: "Скачать ZPL" }));
+    await screen.findByText(CODE_FAILED);
+    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
+      target: { value: "product_duplicate" },
+    });
+    await importZpl();
+    expect(screen.getByRole("button", { name: "Скачать ZPL" })).toHaveProperty("disabled", true);
+    expect(screen.queryByText(CODE_FAILED)).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("Дубликату нужен один Data Matrix");
   });
 
   it("names the file after the template by text only, markup and path characters dropped", async () => {
