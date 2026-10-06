@@ -125,4 +125,23 @@ describe("fitting a layout inside its label", () => {
       ok: false,
     });
   });
+
+  it("refuses an element wider than the label even when it starts exactly at the label width minus its own width", () => {
+    // x = 15 - 20 = -5: the clamp gives a zero shift, so only the size check refuses it.
+    expect(fitElementWithinLabel(box("a", -5, 0), spec([], 15, 40), DATA, {})).toStrictEqual({
+      ok: false,
+    });
+  });
+
+  it("refuses an element taller than the label even when it starts exactly at the label height minus its own height", () => {
+    // y = 10 - 12 = -2: the clamp gives a zero shift, so only the size check refuses it.
+    expect(
+      fitElementWithinLabel(
+        box("a", 0, -2, { widthMm: 5, heightMm: 12 }),
+        spec([], 58, 10),
+        DATA,
+        {},
+      ),
+    ).toStrictEqual({ ok: false });
+  });
 });
