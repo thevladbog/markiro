@@ -13,6 +13,8 @@ export interface FormDialogProps {
   submitVariant?: "primary" | "destructive";
   /** `false` hides a dialog that stays mounted between openings; open by default. */
   open?: boolean;
+  /** The dialog's width (`Modal`'s); 480 px by default. */
+  width?: number | string;
   /**
    * Sends the form; the dialog waits until the promise settles. It sorts its
    * own failures into a field error or the `alert` and must not reject: a
@@ -41,6 +43,7 @@ export function FormDialog({
   submitDisabled = false,
   submitVariant = "primary",
   open = true,
+  width,
   onSubmit,
   onClose,
   alert,
@@ -73,6 +76,7 @@ export function FormDialog({
       title={title}
       onClose={close}
       closeLabel={t("office.common.close")}
+      {...(width === undefined ? {} : { width })}
       footer={
         <>
           <Button variant="secondary" onClick={close} disabled={sending}>
