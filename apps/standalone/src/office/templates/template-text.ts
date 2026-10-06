@@ -55,7 +55,8 @@ export function groupName(
 /**
  * A template's categories in words, after the cloud's `describeTemplateScope`:
  * every category; one group's name; or how many, since ЧЗ group names run
- * long. `title` carries the names whenever there is a list.
+ * long. `title` carries the names whenever there is a list; «Шаблоны» also
+ * puts a count's names in the cell for a screen reader.
  */
 export function describeScope(
   codes: readonly number[] | null,

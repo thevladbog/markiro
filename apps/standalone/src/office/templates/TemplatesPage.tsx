@@ -15,6 +15,7 @@ import {
   Select,
   StatusChip,
   Table,
+  VisuallyHidden,
   type TableColumn,
 } from "@markiro/ui";
 
@@ -128,7 +129,18 @@ export function TemplatesPage() {
       wrap: true,
       render: (template) => {
         const scope = describeScope(template.chzProductGroupCodes, groups.data, t);
-        return <span title={scope.title ?? undefined}>{scope.label}</span>;
+        return (
+          <>
+            <span title={scope.title ?? undefined}>{scope.label}</span>
+            {/* A count's names, for whoever cannot hover the title (a screen reader);
+                an empty list has no names to read. */}
+            {scope.title !== null && scope.title !== "" && scope.title !== scope.label && (
+              <VisuallyHidden>
+                {t("office.templates.scope.listed", { names: scope.title })}
+              </VisuallyHidden>
+            )}
+          </>
+        );
       },
     },
     {

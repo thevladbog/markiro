@@ -175,7 +175,7 @@ describe("office label templates", () => {
       "Короб",
       "58,5 × 40 мм",
       "—",
-      "Категорий: 3",
+      "Категорий: 3 (Молочная продукция, Упакованная вода, Код 99)",
       "✕Выключен",
     ]);
     expect(cells("Импорт без размера").slice(0, 6)).toEqual([
@@ -205,6 +205,68 @@ describe("office label templates", () => {
     expect(within(rowOf("Коробка 58×40")).getByText("Все категории").hasAttribute("title")).toBe(
       false,
     );
+  });
+
+  it("names the counted categories for a screen reader too, not only in the title a mouse shows", async () => {
+    await openTemplates(session());
+    const hidden = (name: string) =>
+      [...rowOf(name).querySelectorAll(".mk-visually-hidden")].map((each) => each.textContent);
+    expect(hidden("Вода и молоко")).toEqual([" (Молочная продукция, Упакованная вода, Код 99)"]);
+    // One category is named in the cell already; every category needs no list.
+    expect(hidden("Молоко 58×40")).toEqual([]);
+    expect(hidden("Коробка 58×40")).toEqual([]);
+  });
+
+  it("reads the count and its names as one phrase in the cell, the names in one span a screen reader can reach, and keeps the title", async () => {
+    await openTemplates(session());
+    const cell = within(rowOf("Вода и молоко")).getAllByRole("cell")[4];
+    expect(cell?.textContent).toBe("Категорий: 3 (Молочная продукция, Упакованная вода, Код 99)");
+    // The names are one hidden span next to the count, in the same cell, readable by a screen reader.
+    const hidden = cell?.querySelectorAll(".mk-visually-hidden");
+    expect(hidden).toHaveLength(1);
+    expect(hidden?.[0]?.closest("[aria-hidden]")).toBeNull();
+    expect(hidden?.[0]?.previousElementSibling?.textContent).toBe("Категорий: 3");
+    // The mouse's title stays on the count.
+    expect(hidden?.[0]?.previousElementSibling?.getAttribute("title")).toBe(
+      "Молочная продукция, Упакованная вода, Код 99",
+    );
+  });
+
+  it("lists no names for an empty list of categories: a count of nothing has nothing to name", async () => {
+    const empty = summary("3c7e0b8a-5d9f-4e1a-8b2c-7d8e9f0a1b2c", "Без категорий", {
+      chzProductGroupCodes: [],
+    });
+    await openTemplates(session([...TEMPLATES, empty]));
+    expect(cells("Без категорий")[4]).toBe("Категорий: 0");
+    expect(rowOf("Без категорий").querySelectorAll(".mk-visually-hidden")).toHaveLength(0);
+  });
+
+  it("names the codes in the hidden list while the product groups are not loaded", async () => {
+    const fake = session();
+    fake.api.listProductGroups.mockRejectedValueOnce(down());
+    await openTemplates(fake);
+    await screen.findByText(
+      "Справочник товарных групп не загрузился: вместо названий категорий видны коды.",
+    );
+    expect(
+      [...rowOf("Вода и молоко").querySelectorAll(".mk-visually-hidden")].map(
+        (each) => each.textContent,
+      ),
+    ).toEqual([" (Код 8, Код 13, Код 99)"]);
+  });
+
+  it("puts a group name with markup characters in the hidden list as plain text", async () => {
+    const fake = session();
+    fake.api.listProductGroups.mockResolvedValue([
+      { code: 8, alias: "milk", name: "<b>Молоко</b> & сливки" },
+      { code: 13, alias: "water", name: '"Вода" <i>' },
+    ]);
+    await openTemplates(fake);
+    const hidden = [...rowOf("Вода и молоко").querySelectorAll(".mk-visually-hidden")];
+    expect(hidden.map((each) => each.textContent)).toEqual([
+      ' (<b>Молоко</b> & сливки, "Вода" <i>, Код 99)',
+    ]);
+    expect(hidden[0]?.children).toHaveLength(0);
   });
 
   it("finds templates by name, without case and spaces around the search", async () => {
