@@ -1,11 +1,11 @@
-import { useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Checkbox, Input, RadioGroup } from "@markiro/ui";
 
 import { errorProp } from "../../lib/form-error.js";
 import { useProductGroups } from "../catalog-queries.js";
-import { visibleGroups, type CategoryScope } from "./category-scope.js";
+import { codesWithoutGroup, visibleGroups, type CategoryScope } from "./category-scope.js";
 
 export interface CategoryScopeFieldProps {
   value: CategoryScope;
@@ -19,13 +19,30 @@ export interface CategoryScopeFieldProps {
  * found by name (after the cloud editor's `scopeMode`, `scopeSearch` and
  * `visibleGroups`). The groups come from `useProductGroups`; while they load
  * or when they fail, «Только выбранные» keeps its codes and says why it lists
- * nothing. The template editor of plan 1e4 is to take this field as well.
+ * nothing. A chosen code the lookup lacks is listed after the groups as «Код N»,
+ * so it can be unchecked. The template editor of plan 1e4 is to take this field
+ * as well.
  */
 export function CategoryScopeField({ value, onChange, error }: CategoryScopeFieldProps) {
   const { t } = useTranslation();
   const groups = useProductGroups();
   const [search, setSearch] = useState("");
+  const searchId = useId();
+  // Set by «Повторить»: the retry button leaves the page once the list is back,
+  // and focus would fall to <body>, outside the dialog's Escape and Tab handling.
+  const focusSearchWhenListed = useRef(false);
+  const text = search.trim().toLocaleLowerCase("ru");
   const shown = groups.data === undefined ? [] : visibleGroups(groups.data, search);
+  const unnamed = (groups.data === undefined ? [] : codesWithoutGroup(groups.data, value.codes))
+    .map((code) => ({ code, label: t("office.templates.groupCode", { code }) }))
+    .filter(({ label }) => text === "" || label.toLocaleLowerCase("ru").includes(text));
+
+  useEffect(() => {
+    if (groups.isSuccess && focusSearchWhenListed.current) {
+      focusSearchWhenListed.current = false;
+      document.getElementById(searchId)?.focus();
+    }
+  }, [groups.isSuccess, searchId]);
 
   const toggle = (code: number, checked: boolean) =>
     onChange({
@@ -40,7 +57,14 @@ export function CategoryScopeField({ value, onChange, error }: CategoryScopeFiel
         <Alert
           tone="error"
           action={
-            <Button variant="secondary" size="compact" onClick={() => void groups.refetch()}>
+            <Button
+              variant="secondary"
+              size="compact"
+              onClick={() => {
+                focusSearchWhenListed.current = true;
+                void groups.refetch();
+              }}
+            >
               {t("office.common.retry")}
             </Button>
           }
@@ -52,6 +76,7 @@ export function CategoryScopeField({ value, onChange, error }: CategoryScopeFiel
     return (
       <>
         <Input
+          id={searchId}
           label={t("office.categoryScope.search")}
           value={search}
           onChange={(event) => setSearch(event.target.value)}
@@ -66,17 +91,27 @@ export function CategoryScopeField({ value, onChange, error }: CategoryScopeFiel
           role="group"
           aria-label={t("office.categoryScope.list")}
         >
-          {shown.length === 0 ? (
+          {shown.length === 0 && unnamed.length === 0 ? (
             <p className="office-note">{t("office.categoryScope.nothingFound")}</p>
           ) : (
-            shown.map((group) => (
-              <Checkbox
-                key={group.code}
-                label={group.name}
-                checked={value.codes.includes(group.code)}
-                onCheckedChange={(checked) => toggle(group.code, checked)}
-              />
-            ))
+            <>
+              {shown.map((group) => (
+                <Checkbox
+                  key={group.code}
+                  label={group.name}
+                  checked={value.codes.includes(group.code)}
+                  onCheckedChange={(checked) => toggle(group.code, checked)}
+                />
+              ))}
+              {unnamed.map(({ code, label }) => (
+                <Checkbox
+                  key={`code-${code}`}
+                  label={label}
+                  checked
+                  onCheckedChange={(checked) => toggle(code, checked)}
+                />
+              ))}
+            </>
           )}
         </div>
       </>

@@ -912,6 +912,26 @@ describe("office label templates: categories", () => {
     expect(within(rowOf("Молоко 58×40")).getByText("Все категории")).toBeTruthy();
   });
 
+  it("shows a category the lookup lacks as «Код 99» in the dialog, and takes it off the template when unticked", async () => {
+    const fake = session();
+    fake.api.updateTemplate.mockResolvedValue(answer(DRINKS, { chzProductGroupCodes: [8, 13] }));
+    await openCategories(fake, "Вода и молоко");
+    const unnamed = await screen.findByRole("checkbox", { name: "Код 99" });
+    expect(unnamed.getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByText("Выбрано: 3")).toBeTruthy();
+    fireEvent.click(unnamed);
+    expect(screen.queryByRole("checkbox", { name: "Код 99" })).toBeNull();
+    fireEvent.click(save());
+    expect(await screen.findByText("Категории шаблона «Вода и молоко» сохранены.")).toBeTruthy();
+    expect(fake.api.updateTemplate.mock.calls).toStrictEqual([
+      [
+        "office-session-token",
+        DRINKS.id,
+        { chzProductGroupCodes: [8, 13], expectedRev: DRINKS.rev },
+      ],
+    ]);
+  });
+
   it("asks for at least one category before sending, and keeps «Сохранить» off while the categories are the row's in any order", async () => {
     const reversed = summary("3c7e0b8a-5d9f-4e1a-8b2c-7d8e9f0a1b2c", "Обратный порядок", {
       chzProductGroupCodes: [13, 8],

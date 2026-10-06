@@ -40,3 +40,11 @@ export function visibleGroups(groups: readonly ProductGroup[], search: string): 
     .filter((group) => text === "" || group.name.toLocaleLowerCase("ru").includes(text))
     .sort((a, b) => NAMES.compare(a.name, b.name));
 }
+
+/** The codes among `codes` that the lookup has no group for, ascending. */
+export function codesWithoutGroup(
+  groups: readonly ProductGroup[],
+  codes: readonly number[],
+): number[] {
+  return codes.filter((code) => !groups.some((group) => group.code === code)).sort((a, b) => a - b);
+}

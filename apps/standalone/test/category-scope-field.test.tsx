@@ -1,5 +1,5 @@
 import { QueryClientProvider } from "@tanstack/react-query";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { describe, expect, it } from "vitest";
 
@@ -274,5 +274,67 @@ describe("the category scope of a template", () => {
     const search = screen.getByLabelText("Поиск категории");
     expect(fireEvent.keyDown(search, { key: "Enter" })).toBe(false);
     expect(fireEvent.keyDown(search, { key: "a" })).toBe(true);
+  });
+
+  it("lists a code the lookup lacks after the named groups, in code order, shows it with the search empty, finds it by its text, and takes it away when unchecked", async () => {
+    const changes = renderField(session(), scopeOf([120, 8, 99]));
+    await screen.findByRole("group", { name: "Категории на выбор" });
+    expect(offered()).toStrictEqual([
+      ["Альтернативная табачная продукция", "false"],
+      ["Молочная продукция", "true"],
+      ["Упакованная вода", "false"],
+      ["Код 99", "true"],
+      ["Код 120", "true"],
+    ]);
+    expect(screen.getByText("Выбрано: 3")).toBeTruthy();
+    const search = screen.getByLabelText("Поиск категории");
+    fireEvent.change(search, { target: { value: " КОД 9 " } });
+    expect(offered()).toStrictEqual([["Код 99", "true"]]);
+    fireEvent.change(search, { target: { value: "молоч" } });
+    expect(offered()).toStrictEqual([["Молочная продукция", "true"]]);
+    fireEvent.change(search, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: "Код 99" }));
+    expect(changes.at(-1)).toStrictEqual({ mode: "selected", codes: [120, 8] });
+    expect(screen.getByText("Выбрано: 2")).toBeTruthy();
+    expect(offered().map(([name]) => name)).toStrictEqual([
+      "Альтернативная табачная продукция",
+      "Молочная продукция",
+      "Упакованная вода",
+      "Код 120",
+    ]);
+  });
+
+  it("lists no code of its own when the lookup names every chosen group", async () => {
+    renderField(session(), scopeOf([8, 13]));
+    await screen.findByRole("group", { name: "Категории на выбор" });
+    expect(offered().map(([name]) => name)).toStrictEqual([
+      "Альтернативная табачная продукция",
+      "Молочная продукция",
+      "Упакованная вода",
+    ]);
+  });
+
+  it("moves focus to the search box when the retried lookup brings the list back, so Escape and Tab stay in the dialog", async () => {
+    const fake = session();
+    fake.api.listProductGroups.mockRejectedValueOnce(
+      new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+    );
+    renderField(fake, scopeOf([8]));
+    const retry = await screen.findByRole("button", { name: "Повторить" });
+    retry.focus();
+    expect(document.activeElement).toBe(retry);
+    fireEvent.click(retry);
+    await screen.findByRole("group", { name: "Категории на выбор" });
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByLabelText("Поиск категории")),
+    );
+  });
+
+  it("does not move focus when the list loads without a retry", async () => {
+    renderField(session(), scopeOf([8]));
+    await screen.findByRole("group", { name: "Категории на выбор" });
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(document.activeElement).toBe(document.body);
   });
 });
