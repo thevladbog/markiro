@@ -1202,23 +1202,24 @@ requests and offer a retry.
   the row.
 - The template editor (plan 1e4; `/templates/new`, `/templates/:id` and
   `/templates/:id/copy`, pages without a menu item of their own, so the
-  sidebar's «Шаблоны» is not highlighted there: `NavLink end`) follows the
-  cloud's `LabelEditorPage`, whose sources it ports into
-  `src/office/templates/` (`label-geometry.ts`, `label-samples.ts`,
-  `import-analysis.ts`, `ImportCodeDialog.tsx`, `ImportFieldsPanel.tsx`)
-  instead of importing them: the apps stay independent, and the label rules
-  themselves stay in `@markiro/domain`. Both roles use it. A template is a
-  name (trimmed, 1–200 characters, `templateNameRule`), a purpose, a flag,
-  its categories (`CategoryScopeField`, with the cloud's warning that the
-  EGAIS field prints empty on categories without beer) and a layout, which
-  only an import puts on the label. The import dialog takes ZPL or TSPL at a
-  chosen resolution or the model's own JSON (`{ name, purpose, spec }` or a
-  bare layout), checks it (`analyzeImport`: the domain's parsers, then every
-  element moved inside the label, measured with the purpose's sample data),
-  lists the lines or properties it drops for an acknowledgement and replaces
-  the layout; a JSON's name names a template that has none yet, and the field
-  list copies each field's token (`navigator.clipboard`; a failed copy says to
-  copy by hand). The parser's own messages are shown as they are, in English.
+  sidebar's «Шаблоны» stays highlighted there and «Умолчания шаблонов» does
+  not: the `NavLink` has no `end`) follows the cloud's `LabelEditorPage`,
+  whose sources it ports into `src/office/templates/` (`label-geometry.ts`,
+  `label-samples.ts`, `import-analysis.ts`, `ImportCodeDialog.tsx`,
+  `ImportFieldsPanel.tsx`) instead of importing them: the apps stay
+  independent, and the label rules themselves stay in `@markiro/domain`. Both
+  roles use it. A template is a name (trimmed, 1–200 characters,
+  `templateNameRule`), a purpose, a flag, its categories
+  (`CategoryScopeField`, with the cloud's warning that the EGAIS field prints
+  empty on categories without beer) and a layout, which only an import puts
+  on the label. The import dialog takes ZPL or TSPL at a chosen resolution or
+  the model's own JSON (`{ name, purpose, spec }` or a bare layout), checks
+  it (`analyzeImport`: the domain's parsers, then every element moved inside
+  the label, measured with the purpose's sample data), lists the lines or
+  properties it drops for an acknowledgement and replaces the layout; a
+  JSON's name names a template that has none yet, and the field list copies
+  each field's token (`navigator.clipboard`; a failed copy says to copy by
+  hand). The parser's own messages are shown as they are, in English.
   «Изменить размер» opens the size form: a preset or a typed size of 10–300
   mm with a comma or a point, and the layout's resolution; every element is
   moved inside the new label (`resizedSpec`), and a size an element does not
@@ -1227,38 +1228,46 @@ requests and offer a retry.
   text replaces it; «Свой размер» only leaves the fields to be typed over, so
   on a preset size choosing it changes nothing. A product duplicate's layout
   must keep the domain's duplicate rule (`assertDuplicateTemplate`): while it
-  does not, «Сохранить» is off and the editor offers the domain's duplicate
-  58×40 back. «Скачать JSON» saves `{ name, purpose, spec }` through a blob
-  URL and `<a download>` under a file name made of the template's name,
-  Cyrillic letters kept; only jsdom has run it, not the Tauri webview
-  (WebView2, WKWebView), so a webview that refuses the download would need a
-  save-file command of the shell. Nothing reaches the host before
-  «Сохранить»: the layout goes as `labelTemplateSpecSchema` makes it
-  (`checkedSpec`), the categories as `null` or ascending. A new template or a
-  copy is a create (`templateCreate`); a new blank template's untouched
-  starting layout follows its purpose (a box an empty 58×40, a duplicate the
-  domain's duplicate, a pallet the stock pallet 100×150), and a copy keeps
-  its layout under «<name> — копия». A template opened for a change is read
-  whenever the page opens and shown only once read on this visit; its purpose
-  is fixed, «Сохранить» is off until something changed, and the save sends
-  what differs and the layout with the opened revision (`templateUpdate`). A
-  stock template is not opened for a change (its row offers «Копировать», and
-  its address explains and offers a copy), nor is a layout the domain cannot
-  read; a template deleted elsewhere is said to be gone. The form is off
-  while a save is on its way. A refusal goes under the name or the
+  does not, «Сохранить» is off (a form submitted another way sends nothing)
+  and the editor offers the domain's duplicate 58×40 back. «Скачать JSON»
+  saves `{ name, purpose, spec }` through a blob URL and `<a download>` under
+  a file name made of the template's name, Cyrillic letters kept; only jsdom
+  has run it, not the Tauri webview (WebView2, WKWebView), so a webview that
+  refuses the download would need a save-file command of the shell. Nothing
+  reaches the host before «Сохранить»: the layout goes as
+  `labelTemplateSpecSchema` makes it (`checkedSpec`), the categories as
+  `null` or ascending. A new template or a copy is a create
+  (`templateCreate`); a new blank template's untouched starting layout
+  follows its purpose (a box an empty 58×40, a duplicate the domain's
+  duplicate, a pallet the stock pallet 100×150), and a copy keeps its layout
+  under «<name> — копия». A template opened for a change is read whenever the
+  page opens and shown only once read on this visit (until then «Загрузка…»,
+  never a failure of an earlier visit); its purpose is fixed, «Сохранить» is
+  off until something changed, and the save sends what differs and the layout
+  with the opened revision (`templateUpdate`). A stock template is not opened
+  for a change (its row offers «Копировать», and its address explains and
+  offers a copy), nor is a layout the domain cannot read; a template deleted
+  elsewhere is said to be gone. The form is off while a save is on its way,
+  and so are «Копировать» and «Удалить»; a save or a delete answered after
+  the user left through the menu does not take them back to «Шаблоны» (the
+  cached list is dropped all the same). A refusal goes under the name or the
   categories, which then take focus, or above the form (`editorFailure`): a
   default the change would break says whose default it is, `stale_revision`
   offers «Загрузить заново», which reads the template again and starts the
   editor afresh without the edits, and `not_found` says the template is gone.
-  A layout over 256 KB or 64 levels, which the host refuses with
-  `validation_failed` on `spec`, is worded above the form without a remedy;
-  the editor does not measure it first. «Удалить» asks first, with the
-  `destructive` submit, and says that the stations stop getting the template,
-  that the products preferring it lose the preference and that there is no
-  undo; a default or a stock template is refused in words (`deleteFailure`).
-  A save or a delete returns to «Шаблоны» with a notice and drops the cached
-  list, which holds no layouts, so it is read again. Leaving the page with
-  unsaved changes («К шаблонам», the menu, «Копировать») asks first
+  The editor measures the layout before it sends it (`specTooLarge`: the
+  bytes of its compact JSON in UTF-8, as the host counts them), and a layout
+  over 256 KB is refused above the form with a way out, «Сократите тексты или
+  импортируйте код поменьше»; one of exactly 256 KB goes. The host's own
+  `validation_failed` on `spec` stays the backstop and is worded the same
+  way. «Удалить» asks first, with the `destructive` submit, and says that the
+  stations stop getting the template, that the products preferring it lose
+  the preference and that there is no undo; a default or a stock template is
+  refused in words (`deleteFailure`). A save or a delete returns to «Шаблоны»
+  with a notice and drops the cached list, which holds no layouts, so it is
+  read again; a delete also drops the cached products, since the host cleared
+  the preference of every product that used the template. Leaving the page
+  with unsaved changes («К шаблонам», the menu, «Копировать») asks first
   (`useBlocker`), except right after a save or a delete; the end of the
   session unmounts the office without asking, and closing the window is not
   guarded either (that would be the shell's). The preview, the ZPL and TSPL
