@@ -29,4 +29,13 @@ if (typeof HTMLElement !== "undefined") {
     value: ResizeObserverMock,
     writable: true,
   });
+
+  // jsdom has no canvas: `getContext` logs «Not implemented» and returns null.
+  // Here it returns null quietly; a test that looks at a drawing passes a
+  // recording context of its own (`LabelRendering`).
+  Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
+    configurable: true,
+    writable: true,
+    value: () => null,
+  });
 }

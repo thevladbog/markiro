@@ -10,8 +10,10 @@ import type {
   OrgProfile,
   SsccState,
 } from "../../src/host/protocol.js";
+import { RasterUnavailableError } from "../../src/labels/rasterizer.js";
 import { Office, type OfficeProps } from "../../src/office/Office.js";
 import type { OfficeSessionValue } from "../../src/office/office-session.js";
+import type { LabelRendering } from "../../src/office/templates/label-rendering.js";
 import { SESSION } from "./fixtures.js";
 
 /** A `HostApi` of mocks. */
@@ -101,14 +103,30 @@ export function fakeOfficeSession(
   };
 }
 
-/** The office as the shell renders it, in the dark theme. */
+/**
+ * Label drawing that stays still in jsdom: no canvas, a rasterizer that
+ * refuses as the webview does without one, and a font check that never
+ * answers, so no warning arrives after a test has looked.
+ */
+export function quietLabelRendering(): LabelRendering {
+  return {
+    context: () => null,
+    rasterizeText: () => Promise.reject(new RasterUnavailableError()),
+    checkFamilyCoverage: () => new Promise<boolean>(() => undefined),
+  };
+}
+
+/**
+ * The office as the shell renders it, in the dark theme; it draws labels
+ * quietly (`quietLabelRendering`) unless `props.labels` says otherwise.
+ */
 export function renderOffice(
   session: OfficeSessionValue,
   props: Omit<OfficeProps, "session"> = {},
 ): RenderResult {
   return render(
     <ThemeProvider defaultTheme="dark">
-      <Office session={session} {...props} />
+      <Office session={session} labels={quietLabelRendering()} {...props} />
     </ThemeProvider>,
   );
 }

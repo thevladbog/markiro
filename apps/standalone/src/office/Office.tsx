@@ -8,6 +8,11 @@ import { OfficeLinkProvider } from "./office-link.js";
 import { createOfficeQueryClient } from "./office-query.js";
 import { OfficeSessionProvider, type OfficeSessionValue } from "./office-session.js";
 import { officeRoutes } from "./routes.js";
+import {
+  BROWSER_LABEL_RENDERING,
+  LabelRenderingProvider,
+  type LabelRendering,
+} from "./templates/label-rendering.js";
 import { ThisDeviceProvider } from "./this-device.js";
 
 export interface OfficeProps {
@@ -28,6 +33,11 @@ export interface OfficeProps {
    * the app.
    */
   deviceId?: string | null;
+  /**
+   * How the office draws labels (the template editor's preview): the
+   * webview's canvas and fonts by default; a test passes its own.
+   */
+  labels?: LabelRendering;
 }
 
 /**
@@ -41,6 +51,7 @@ export function Office({
   sync = null,
   hostRevision = null,
   deviceId = null,
+  labels = BROWSER_LABEL_RENDERING,
 }: OfficeProps) {
   const [router] = useState(() => createMemoryRouter(officeRoutes, { initialEntries: ["/"] }));
   const [queryClient] = useState(createOfficeQueryClient);
@@ -60,7 +71,9 @@ export function Office({
       <OfficeSessionProvider value={session}>
         <OfficeLinkProvider value={officeLink}>
           <ThisDeviceProvider deviceId={deviceId}>
-            <RouterProvider router={router} />
+            <LabelRenderingProvider value={labels}>
+              <RouterProvider router={router} />
+            </LabelRenderingProvider>
           </ThisDeviceProvider>
         </OfficeLinkProvider>
       </OfficeSessionProvider>

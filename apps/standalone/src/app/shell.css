@@ -337,6 +337,20 @@
   gap: 12px;
 }
 
+/* The layout's preview: the label as white stock at its own size, its notes under it. */
+.template-preview {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin: 0;
+}
+
+.template-preview__label {
+  max-width: 100%;
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+}
+
 /* The size dialog's width and height side by side. */
 .template-size {
   display: grid;

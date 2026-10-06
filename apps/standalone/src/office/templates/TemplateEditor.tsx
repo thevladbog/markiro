@@ -36,6 +36,7 @@ import {
 import type { ImportAnalysis } from "./import-analysis.js";
 import { ImportCodeDialog } from "./ImportCodeDialog.js";
 import { LabelSizeDialog } from "./LabelSizeDialog.js";
+import { PreviewPane } from "./PreviewPane.js";
 import { TemplateFailureAlert } from "./TemplateFailureAlert.js";
 import { dpiText, PURPOSES, sizeText } from "./template-text.js";
 
@@ -62,8 +63,9 @@ export interface TemplateEditorProps {
  * A label template's editor (spec §5.5), after the cloud's
  * `LabelEditorPage`: the name, the purpose, the flag, the categories
  * (`CategoryScopeField`, with the cloud's EGAIS hint) and the layout, which
- * only an import puts on the label (`ImportCodeDialog`); a layout downloads
- * as JSON. Nothing goes to the host before «Сохранить»: the name is trimmed
+ * only an import puts on the label (`ImportCodeDialog`) and the preview
+ * shows as it prints (`PreviewPane`); a layout downloads as JSON. Nothing
+ * goes to the host before «Сохранить»: the name is trimmed
  * (`templateNameRule`), the layout is what `labelTemplateSpecSchema` makes
  * of it (`checkedSpec`), the categories go ascending (`scopeCodes`). A new
  * template is created (`templateCreate`); a template being changed keeps its
@@ -356,6 +358,7 @@ export function TemplateEditor({
                   ? t("office.templateEditor.empty")
                   : t("office.templateEditor.elements", { n: draft.spec.elements.length })}
               </p>
+              <PreviewPane spec={draft.spec} purpose={draft.purpose} />
               {duplicateInvalid && (
                 <Alert
                   tone="error"
