@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, expect, it, vi } from "vitest";
 
@@ -50,6 +50,7 @@ const INTEGRATIONS_ONLY_ACCESS: AccessDocument = {
   roles: ["member"],
   capabilities: [CABINET_CAPABILITY.INTEGRATIONS_READ],
 };
+const MEMBER_SUPPORT_ACCESS: AccessDocument = { roles: ["member"], capabilities: [] };
 
 const JANE = {
   id: "1",
@@ -105,6 +106,7 @@ function renderAccessRoute(
     middleName: string | null;
     hasAvatar: boolean;
   } = { firstName: "Елена", lastName: "Ким", middleName: null, hasAvatar: false },
+  accessStatus = 200,
 ) {
   const requests: string[] = [];
   vi.stubGlobal(
@@ -112,10 +114,12 @@ function renderAccessRoute(
     vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input);
       if (path.endsWith("/api/profile")) return jsonResponse(200, profile);
-      if (path.endsWith("/api/access/me")) return jsonResponse(200, access);
+      if (path.endsWith("/api/access/me")) return jsonResponse(accessStatus, access);
 
       requests.push(path);
       if (path.includes("/api/pickup-orders")) return jsonResponse(200, { items: [] });
+      if (path.endsWith("/api/support-chat/episodes"))
+        return jsonResponse(200, { items: [], nextCursor: null });
       if (path.endsWith("/api/integrations")) return jsonResponse(200, { channels: [] });
       if (path.endsWith("/api/org/profile")) {
         return jsonResponse(200, { gln: null, gs1Prefixes: [], inn: null });
@@ -163,6 +167,50 @@ afterEach(async () => {
   cleanup();
   vi.unstubAllGlobals();
   await i18n.changeLanguage("ru");
+});
+
+it.each(["/support", "/support/"])(
+  "opens the real %s route for a current member with no cabinet capabilities",
+  async (path) => {
+    const { requests } = renderAccessRoute(path, MEMBER_SUPPORT_ACCESS);
+
+    expect(await screen.findByRole("heading", { name: "Поддержка" })).toBeDefined();
+    expect(screen.queryByText("Доступ к кабинету пока не открыт")).toBeNull();
+    await waitFor(() => expect(requests).toContain("/api/support-chat/episodes"));
+  },
+);
+
+it.each(["/", "/catalog", "/billing"])("keeps a zero-capability member out of %s", async (path) => {
+  const { requests } = renderAccessRoute(path, MEMBER_SUPPORT_ACCESS);
+
+  expect(await screen.findByText("Доступ к кабинету пока не открыт")).toBeDefined();
+  expect(screen.queryByRole("heading", { name: "Поддержка" })).toBeNull();
+  expect(requests).not.toContain("/api/support-chat/episodes");
+});
+
+it.each([{ roles: [] }, { roles: ["outsider"] }])(
+  "does not open support without a valid current membership role (%j)",
+  async ({ roles }) => {
+    // The second case exercises a malformed access response, not a CabinetRole.
+    const { requests } = renderAccessRoute("/support", {
+      roles,
+      capabilities: [],
+    } as unknown as AccessDocument);
+
+    expect(await screen.findByText("Доступ к кабинету пока не открыт")).toBeDefined();
+    expect(requests).not.toContain("/api/support-chat/episodes");
+  },
+);
+
+it("does not open support after access revocation or access-service failure", async () => {
+  const revoked = renderAccessRoute("/support", MEMBER_SUPPORT_ACCESS, undefined, 403);
+  expect(await screen.findByText("Доступ к кабинету пока не открыт")).toBeDefined();
+  expect(revoked.requests).not.toContain("/api/support-chat/episodes");
+  revoked.unmount();
+
+  const failed = renderAccessRoute("/support", MEMBER_SUPPORT_ACCESS, undefined, 503);
+  expect(await screen.findByText("Не удалось проверить доступ")).toBeDefined();
+  expect(failed.requests).not.toContain("/api/support-chat/episodes");
 });
 
 it("keeps operational navigation for managers while hiding integrations and settings", async () => {

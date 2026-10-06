@@ -130,6 +130,8 @@ jobs:
     env:
       DATABASE_URL: postgres://markiro:markiro@localhost:5432/markiro
       INVENTORY_TEST_DATABASE_URL: postgres://markiro:markiro@localhost:5432/markiro
+      SUPPORT_CHAT_ISOLATED_DB: "1"
+      SUPPORT_CHAT_TEST_MAINTENANCE_URL: postgres://markiro:markiro@localhost:5432/markiro
       BETTER_AUTH_SECRET: insecure-dummy-ci-placeholder-not-a-secret
       BETTER_AUTH_URL: http://localhost:3000
       ADMIN_ORIGIN: http://localhost:5173

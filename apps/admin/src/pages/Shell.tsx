@@ -74,6 +74,7 @@ function AccessGate({
   userId: string;
   activeOrganizationId: string;
 }) {
+  const { pathname } = useLocation();
   const access = useAccessDocument(userId, activeOrganizationId);
 
   if (access.isPending) return <CenteredSpinner />;
@@ -82,7 +83,12 @@ function AccessGate({
   }
   if (access.isError || !access.data)
     return <AccessLoadError onRetry={() => void access.refetch()} />;
-  if (access.data.capabilities.length === 0) return <NoCabinetAccess />;
+  const supportOnlyMember =
+    (pathname === "/support" || pathname === "/support/") &&
+    access.data.roles.some(
+      (role) => role === "owner" || role === "admin" || role === "manager" || role === "member",
+    );
+  if (access.data.capabilities.length === 0 && !supportOnlyMember) return <NoCabinetAccess />;
 
   return (
     <AccessProvider value={access.data}>

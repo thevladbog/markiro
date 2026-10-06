@@ -73,6 +73,7 @@ import { DashboardModule } from "./modules/dashboard/dashboard.module";
 import { ProductRegulatoryModule } from "./modules/product-regulatory/product-regulatory.module";
 import { NationalCatalogModule } from "./modules/national-catalog/national-catalog.module";
 import { PlatformServicePeriodsModule } from "./modules/service-periods/platform-service-periods.module";
+import { SupportChatModule } from "./modules/support-chat/support-chat.module";
 
 @Module({})
 export class AppModule {
@@ -95,6 +96,7 @@ export class AppModule {
     },
   ): DynamicModule {
     const env = setup.env ?? loadEnv();
+    const supportChatModule = SupportChatModule.forRoot(env);
     return {
       module: AppModule,
       imports: [
@@ -124,7 +126,8 @@ export class AppModule {
         AuthorizationModule,
         SubscriptionsModule.forRoot(env.SUBSCRIPTION_ENFORCEMENT_MODE),
         TenantBillingModule.forRoot(env.ADMIN_ORIGIN),
-        JobsModule.forRoot(setup.databaseUrl, env),
+        supportChatModule,
+        JobsModule.forRoot(setup.databaseUrl, env, supportChatModule),
         DemoRequestsModule.forRoot(env),
         OrgProfileModule,
         CounterpartiesModule,

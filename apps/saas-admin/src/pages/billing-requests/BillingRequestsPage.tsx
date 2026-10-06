@@ -23,6 +23,7 @@ import {
 
 import { ApiRequestError } from "../../api/client.js";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
+import { SupportTranscript } from "../support/SupportTranscript.js";
 import { reviseOffer } from "../offers/api.js";
 import {
   commentBillingRequest,
@@ -52,6 +53,7 @@ const requestTypes = [
   "additional_service",
   "documents",
   "other",
+  "support",
 ] as const;
 const linkTypes = ["offer", "invoice", "payment", "act", "ordered_service"] as const;
 
@@ -427,6 +429,7 @@ function RequestDetail({ requestId, writable }: { requestId: string; writable: b
           <dd>{t(`billingRequests.side.${request.responsibleSide}`)}</dd>
         </div>
       </dl>
+      {request.type === "support" ? <SupportTranscript requestId={request.id} /> : null}
       <section className="commerce-detail-panel" aria-labelledby="request-links-title">
         <header>
           <h2 id="request-links-title">{t("billingRequests.links.title")}</h2>

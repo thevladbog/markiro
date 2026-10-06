@@ -19,7 +19,7 @@ export const NAV_ITEMS: ReadonlyArray<{
   to: string;
   key: string;
   sectionKey: string;
-  capability: CabinetCapability;
+  capability: CabinetCapability | null;
 }> = [
   {
     to: "/",
@@ -121,6 +121,12 @@ export const NAV_ITEMS: ReadonlyArray<{
     capability: C.BILLING_READ,
   },
   {
+    to: "/support",
+    key: "nav.support",
+    sectionKey: "shell.sections.organization",
+    capability: null,
+  },
+  {
     to: "/settings",
     key: "nav.settings",
     sectionKey: "shell.sections.organization",
@@ -174,6 +180,7 @@ export function AppShell() {
     : null;
 
   const items: SidebarItem[] = NAV_ITEMS.filter(({ capability }) => {
+    if (capability === null) return true;
     if (capability === C.OPERATIONS_READ) return canReadOperations;
     if (capability === C.INTEGRATIONS_READ) return canReadIntegrations;
     if (capability === C.BILLING_READ) return canReadBilling;

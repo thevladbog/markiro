@@ -35,6 +35,15 @@ import { BillingActsController } from "../src/modules/billing-acts/billing-acts.
 import { BillingActsService } from "../src/modules/billing-acts/billing-acts.service";
 import { PlatformBillingRequestsController } from "../src/modules/platform-billing-requests/platform-billing-requests.controller";
 import { PlatformBillingRequestsService } from "../src/modules/platform-billing-requests/platform-billing-requests.service";
+import { PlatformSupportChatController } from "../src/modules/support-chat/platform-support-chat.controller";
+import { SupportChatService } from "../src/modules/support-chat/support-chat.service";
+import { SupportChatRepository } from "../src/modules/support-chat/support-chat.repository";
+import { SupportChatProposalsService } from "../src/modules/support-chat/support-chat-proposals.service";
+import { SupportChatJobsService } from "../src/modules/support-chat/support-chat-jobs.service";
+import {
+  PlatformSupportChatTranscriptController,
+  SupportChatTranscriptReader,
+} from "../src/modules/support-chat/support-chat-transcript.controller";
 import { PlatformDadataController } from "../src/modules/platform-dadata/platform-dadata.controller";
 import { PlatformDadataRateLimit } from "../src/modules/platform-dadata/platform-dadata-rate-limit";
 import { PlatformDadataService } from "../src/modules/platform-dadata/platform-dadata.service";
@@ -155,6 +164,11 @@ async function createPlatformDocument(): Promise<{
     BillingPaymentsService,
     BillingActsService,
     PlatformBillingRequestsService,
+    SupportChatService,
+    SupportChatRepository,
+    SupportChatProposalsService,
+    SupportChatJobsService,
+    SupportChatTranscriptReader,
     BillingAccountsService,
     PlatformDadataService,
     PlatformDadataRateLimit,
@@ -190,6 +204,8 @@ async function createPlatformDocument(): Promise<{
       BillingPaymentsController,
       BillingActsController,
       PlatformBillingRequestsController,
+      PlatformSupportChatController,
+      PlatformSupportChatTranscriptController,
       BillingAccountsController,
       PlatformDadataController,
       PlatformOperationsController,
@@ -224,7 +240,7 @@ async function createPlatformDocument(): Promise<{
 
 describe("current SaaS platform OpenAPI contracts", () => {
   it("converts all current shared schemas to OpenAPI 3.0-compatible wire schemas", () => {
-    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(237);
+    expect(CURRENT_SHARED_SCHEMAS).toHaveLength(247);
     for (const schema of CURRENT_SHARED_SCHEMAS) {
       expectOpenApi30Compatible(jsonSchema(schema));
     }

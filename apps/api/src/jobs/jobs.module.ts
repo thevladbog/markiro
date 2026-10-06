@@ -13,6 +13,8 @@ import { PgBoss, type JobWithMetadata } from "pg-boss";
 import { asc, eq, inArray, sql } from "drizzle-orm";
 import { ensurePartitions, schema, type Db } from "@markiro/db";
 import { DB } from "../auth/auth.module";
+import { SupportChatJobsService } from "../modules/support-chat/support-chat-jobs.service";
+import { SupportChatSyncService } from "../modules/support-chat/support-chat-sync.service";
 import { PlatformReportRunnerService } from "../platform-reports/platform-report-runner.service";
 import { PlatformReportSourceService } from "../platform-reports/report-source.service";
 import { PlatformAuditModule } from "../platform-auth/platform-audit.module";
@@ -382,6 +384,8 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
   private boss?: PgBoss;
   private started = false;
   private workerIds: string[] = [];
+  private supportChatTick: ReturnType<typeof setInterval> | undefined;
+  private supportChatRepairRunning = false;
   /**
    * Rotation state for `runRefreshChzCodeStatuses`'s tenant cap -- the
    * (sorted) tenant id this instance last processed, or `null` before the
@@ -415,6 +419,8 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     private readonly nationalCatalogSchemaSourceTenantId?: string,
     @Optional() private readonly nationalCatalogJobs?: NationalCatalogJobsService,
     @Optional() private readonly platformReports?: PlatformReportRunnerService,
+    @Optional() private readonly supportChatJobs?: SupportChatJobsService,
+    @Optional() private readonly supportChatSync?: SupportChatSyncService,
   ) {}
 
   async onModuleInit(): Promise<void> {
@@ -811,6 +817,15 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
         await boss.send("platform-report-repair", {});
       }
 
+      if (this.supportChatJobs && this.supportChatSync) {
+        await boss.createQueue("support-chat-import", { retryLimit: 0 });
+        this.workerIds.push(
+          await boss.work<{ jobId: string }>("support-chat-import", async (jobs) => {
+            for (const job of jobs) await this.supportChatJobs!.run(job.data.jobId);
+          }),
+        );
+      }
+
       // Also run all ten maintenance paths once immediately at boot rather
       // than waiting for the first tick of any schedule.
       await this.runEnsurePartitions();
@@ -824,6 +839,13 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       await this.subscriptionStatus.run();
       await this.signerScheduler.run();
       this.started = true;
+      if (this.supportChatJobs && this.supportChatSync) {
+        await this.runSupportChatRepair(boss);
+        this.supportChatTick = setInterval(() => {
+          void this.runSupportChatRepair(boss);
+        }, 30_000);
+        this.supportChatTick.unref();
+      }
     } catch (e) {
       // Bootstrap failed partway through: stop whatever pg-boss managed to
       // start so it doesn't leak a connection/maintenance loop, then
@@ -837,6 +859,8 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    if (this.supportChatTick) clearInterval(this.supportChatTick);
+    this.supportChatTick = undefined;
     this.started = false;
     this.workerIds = [];
     const boss = this.boss;
@@ -844,6 +868,20 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
     if (!boss) return;
     await boss.stop();
     this.logger.log("pg-boss stopped");
+  }
+
+  private async runSupportChatRepair(boss: PgBoss): Promise<void> {
+    if (!this.supportChatJobs || this.supportChatRepairRunning) return;
+    this.supportChatRepairRunning = true;
+    try {
+      await this.supportChatJobs.repairAndWake((jobId) =>
+        boss.send("support-chat-import", { jobId }, { singletonKey: jobId }),
+      );
+    } catch {
+      this.logger.warn("Support chat repair tick failed; PostgreSQL jobs remain recoverable");
+    } finally {
+      this.supportChatRepairRunning = false;
+    }
   }
 
   async enqueueShiftExport(exportId: string): Promise<string> {
@@ -1179,10 +1217,18 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
 @Module({})
 export class JobsModule {
   /** `connectionString`: raw Postgres URL pg-boss uses for its own pool (separate from the app's Drizzle `Db`, which is injected globally via `AUTH`/`DB`'s `AuthModule`). */
-  static forRoot(connectionString: string, env: Env): DynamicModule {
+  static forRoot(
+    connectionString: string,
+    env: Env,
+    supportChatModule?: DynamicModule,
+  ): DynamicModule {
     return {
       module: JobsModule,
-      imports: [MailModule.forRoot(env), PlatformAuditModule],
+      imports: [
+        MailModule.forRoot(env),
+        PlatformAuditModule,
+        ...(supportChatModule && env.SUPPORT_CHAT_ENABLED ? [supportChatModule] : []),
+      ],
       providers: [
         { provide: PG_CONNECTION_STRING, useValue: connectionString },
         PgBossService,

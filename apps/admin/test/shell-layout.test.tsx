@@ -261,6 +261,7 @@ describe("app shell layout", () => {
       ["Операторы и сотрудники", "/employees"],
       ["Этикетки", "/labels"],
       ["Выбытие", "/pickup"],
+      ["Поддержка", "/support"],
     ];
     for (const [label, href] of expectedLinks) {
       const link = within(desktopNav).getByRole("link", { name: label });
@@ -269,7 +270,7 @@ describe("app shell layout", () => {
     expect(within(desktopNav).getByText("Производство")).toBeDefined();
     expect(within(desktopNav).getByText("Справочники")).toBeDefined();
     expect(within(desktopNav).getByText("Оборудование и обмен")).toBeDefined();
-    expect(within(desktopNav).queryByText("Организация")).toBeNull();
+    expect(within(desktopNav).getByText("Организация")).toBeDefined();
     expect(within(desktopNav).queryByRole("link", { name: "Интеграции" })).toBeNull();
     expect(within(desktopNav).queryByRole("link", { name: "Настройки" })).toBeNull();
 

@@ -1,4 +1,27 @@
 export { platformErrorSchema } from "./errors.js";
+export {
+  platformSupportChatContracts,
+  supportChatContracts,
+  supportEpisodeViewSchema,
+  supportMessageSchema,
+  supportOwnerSchema,
+  supportProposalSchema,
+  supportRequestRefSchema,
+  supportSyncSchema,
+  supportTranscriptContracts,
+  supportTranscriptPageSchema,
+  supportTranscriptNotice,
+} from "./support-chat.js";
+export type {
+  SupportEpisodeView,
+  SupportMessage,
+  SupportOwner,
+  SupportProposal,
+  SupportRequestRef,
+  SupportTranscriptPage,
+  SupportTranscriptNoticeLocale,
+} from "./support-chat.js";
+export type { BillingRequestStatus } from "./commercial.js";
 export * from "./offer-draft.js";
 export type { PlatformError } from "./errors.js";
 export {

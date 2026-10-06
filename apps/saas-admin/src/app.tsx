@@ -97,6 +97,16 @@ const BillingRequestsPage = lazy(() =>
     default: module.BillingRequestsPage,
   })),
 );
+const SupportEpisodesPage = lazy(() =>
+  import("./pages/support/SupportEpisodesPage.js").then((module) => ({
+    default: module.SupportEpisodesPage,
+  })),
+);
+const SupportEpisodePage = lazy(() =>
+  import("./pages/support/SupportEpisodePage.js").then((module) => ({
+    default: module.SupportEpisodePage,
+  })),
+);
 const CreateBillingActPage = lazy(() =>
   import("./pages/billing-acts/CreateBillingActPage.js").then((module) => ({
     default: module.CreateBillingActPage,
@@ -198,6 +208,8 @@ export const appRoutes = createRoutesFromElements(
         <Route path="/payments" element={<PaymentsPage />} />
         <Route path="/billing-requests" element={<BillingRequestsPage />} />
         <Route path="/billing-requests/:requestId" element={<BillingRequestsPage />} />
+        <Route path="/support" element={<SupportEpisodesPage />} />
+        <Route path="/support/:episodeId" element={<SupportEpisodePage />} />
         <Route path="/billing-acts" element={<BillingActsPage />} />
         <Route path="/billing-acts/new" element={<CreateBillingActPage />} />
         <Route path="/billing-acts/:actId" element={<BillingActDetailPage />} />

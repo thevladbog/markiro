@@ -88,6 +88,7 @@ import { OfferDetailPage } from "./pages/billing/OfferDetailPage.js";
 import { RequestsPage } from "./pages/billing/RequestsPage.js";
 import { CreateRequestPage } from "./pages/billing/CreateRequestPage.js";
 import { RequestDetailPage } from "./pages/billing/RequestDetailPage.js";
+import { SupportChatPage } from "./pages/support/SupportChatPage.js";
 
 /**
  * The data router is used even though route data is fetched through React
@@ -536,6 +537,7 @@ function appRouteElements() {
           />
           <Route path="requests/:id" element={<RequestDetailPage />} />
         </Route>
+        <Route path="support" element={<SupportChatPage />} />
       </Route>
     </>
   );

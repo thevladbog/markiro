@@ -185,6 +185,15 @@ test("inventory database suites receive the migrated CI database through Turbo",
   assert.ok(apiTurbo.tasks.test.env.includes("INVENTORY_TEST_DATABASE_URL"));
 });
 
+test("isolated support chat tests retain explicit scratch database guards through Turbo", () => {
+  for (const file of ["turbo.json", "apps/api/turbo.json"]) {
+    const turbo = JSON.parse(readFileSync(file, "utf8"));
+    assert.ok(turbo.tasks.test.env.includes("SUPPORT_CHAT_ISOLATED_DB"), file);
+    assert.ok(turbo.tasks.test.env.includes("SUPPORT_CHAT_TEST_MAINTENANCE_URL"), file);
+    assert.ok(!turbo.tasks.test.env.includes("SUPPORT_CHAT_BROWSER_CONTROL_DIR"), file);
+  }
+});
+
 test("Signer Windows verification includes the stable release contract", () => {
   const job = workflow.jobs["signer-windows-build"];
   assert.ok(job.steps.some((step) => step.run === "pnpm test:signer-release:contract"));
