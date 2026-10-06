@@ -535,8 +535,7 @@ describe("the thumbnails' extra guards", () => {
     const view = renderOffice(fake, { labels: tools });
     await openTemplates();
     // The page goes away right after the layout is drawn, while the print code
-    // (a real import: the modules are reset) is still on its way.
-    vi.resetModules();
+    // is still on its way.
     const drawn = canvas.clearRect.bind(canvas);
     canvas.clearRect = (x, y, width, height) => {
       drawn(x, y, width, height);
@@ -545,39 +544,77 @@ describe("the thumbnails' extra guards", () => {
     show("Дубликат 58×40");
     await waitFor(() => expect(canvas.ops.length).toBeGreaterThan(0));
     await waitFor(() => expect(screen.queryByText("Дубликат 58×40")).toBeNull());
-    await new Promise((resolve) => setTimeout(resolve, 600));
+    // The same import the thumbnail awaits, then a turn of the event loop: whatever
+    // the thumbnail does with the print code has been done by now.
+    await act(async () => {
+      await import("../src/office/templates/label-print.js");
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     expect(canvas.ops.filter((op) => op[0] === "fillRect" && op[1] === "#000000")).toEqual([]);
   });
 });
 
 describe("the webview's way to tell a thumbnail is on screen", () => {
-  interface Watcher {
-    callback: IntersectionObserverCallback;
-    options: IntersectionObserverInit | undefined;
-    observed: Element[];
-    disconnected: number;
+  /** An observer that only records what the page asks of it. */
+  class FakeObserver implements IntersectionObserver {
+    readonly root = null;
+    readonly rootMargin: string;
+    readonly scrollMargin = "0px";
+    readonly thresholds: readonly number[] = [0];
+    readonly observed: Element[] = [];
+    disconnected = 0;
+
+    constructor(
+      readonly callback: IntersectionObserverCallback,
+      options?: IntersectionObserverInit,
+    ) {
+      this.rootMargin = options?.rootMargin ?? "0px";
+    }
+
+    observe(element: Element) {
+      this.observed.push(element);
+    }
+
+    unobserve() {
+      return undefined;
+    }
+
+    disconnect() {
+      this.disconnected += 1;
+    }
+
+    takeRecords(): IntersectionObserverEntry[] {
+      return [];
+    }
   }
 
-  function stubObserver(): Watcher[] {
-    const made: Watcher[] = [];
-    class FakeObserver {
-      readonly watcher: Watcher;
-      constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
-        this.watcher = { callback, options, observed: [], disconnected: 0 };
-        made.push(this.watcher);
-      }
-      observe(element: Element) {
-        this.watcher.observed.push(element);
-      }
-      disconnect() {
-        this.watcher.disconnected += 1;
-      }
-    }
-    vi.stubGlobal("IntersectionObserver", FakeObserver);
+  function stubObserver(): FakeObserver[] {
+    const made: FakeObserver[] = [];
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class extends FakeObserver {
+        constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+          super(callback, options);
+          made.push(this);
+        }
+      },
+    );
     return made;
   }
 
-  const entry = (isIntersecting: boolean) => ({ isIntersecting }) as IntersectionObserverEntry;
+  /** A full entry for `target`, as the browser makes one. */
+  function entry(isIntersecting: boolean, target: Element): IntersectionObserverEntry {
+    const box = target.getBoundingClientRect();
+    return {
+      target,
+      time: 0,
+      intersectionRatio: isIntersecting ? 1 : 0,
+      boundingClientRect: box,
+      intersectionRect: box,
+      rootBounds: null,
+      isIntersecting,
+    };
+  }
 
   it("shows a thumbnail at once where the webview has no observer", () => {
     vi.stubGlobal("IntersectionObserver", undefined);
@@ -596,14 +633,14 @@ describe("the webview's way to tell a thumbnail is on screen", () => {
     expect(made).toHaveLength(1);
     const [watcher] = made;
     if (watcher === undefined) throw new Error("no observer");
-    expect(watcher.options).toEqual({ rootMargin: "200px" });
+    expect(watcher.rootMargin).toBe("200px");
     expect(watcher.observed).toEqual([element]);
     expect(onVisible).not.toHaveBeenCalled();
-    watcher.callback([], {} as IntersectionObserver);
-    watcher.callback([entry(false)], {} as IntersectionObserver);
+    watcher.callback([], watcher);
+    watcher.callback([entry(false, element)], watcher);
     expect(onVisible).not.toHaveBeenCalled();
     expect(watcher.disconnected).toBe(0);
-    watcher.callback([entry(false), entry(true)], {} as IntersectionObserver);
+    watcher.callback([entry(false, element), entry(true, element)], watcher);
     expect(onVisible).toHaveBeenCalledTimes(1);
     expect(watcher.disconnected).toBe(1);
   });
