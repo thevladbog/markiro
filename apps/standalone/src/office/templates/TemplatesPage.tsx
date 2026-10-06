@@ -1,5 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useLocation, useNavigate } from "react-router";
+import { z } from "zod";
 
 import {
   Alert,
@@ -38,6 +40,9 @@ const STATE_FILTERS: readonly TemplateStateFilter[] = ["all", "enabled", "disabl
 
 type TemplatesDialog = { kind: "state" | "categories"; template: LabelTemplateSummary };
 
+/** What the editor leaves in the location when it comes back after a save. */
+const EDITOR_RETURN = z.object({ notice: z.string() });
+
 /**
  * The label templates (spec §4.3, §5.5): a table, not the cloud's cards with
  * thumbnails (no layout is drawn before plan 1e4). The host sends the whole
@@ -54,11 +59,16 @@ export function TemplatesPage() {
   const templates = useTemplates();
   const groups = useProductGroups();
   const changeList = useChangeList<LabelTemplateSummary>(officeKeys.templates);
+  const location = useLocation();
+  const navigate = useNavigate();
   const [search, setSearch] = useState("");
   const [purpose, setPurpose] = useState<TemplatePurposeFilter>("all");
   const [state, setState] = useState<TemplateStateFilter>("all");
   const [dialog, setDialog] = useState<TemplatesDialog | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(() => {
+    const back = EDITOR_RETURN.safeParse(location.state);
+    return back.success ? back.data.notice : null;
+  });
 
   const open = (next: TemplatesDialog) => {
     setNotice(null);
@@ -231,7 +241,16 @@ export function TemplatesPage() {
 
   return (
     <>
-      <PageHeader title={t("office.templates.title")} />
+      <PageHeader
+        title={t("office.templates.title")}
+        actions={
+          canEdit ? (
+            <Button onClick={() => void navigate("/templates/new")}>
+              {t("office.templates.create")}
+            </Button>
+          ) : undefined
+        }
+      />
       {notice && <Alert tone="ok">{notice}</Alert>}
       {/* About the categories column: with no list on screen the templates' error stands alone. */}
       {groups.isError && templates.isSuccess && (

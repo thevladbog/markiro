@@ -11,8 +11,8 @@ export interface TemplateFailureAlertProps {
   failure: TemplateFailure | null;
   /** The ЧЗ product groups, to name a category; `undefined` names it by its code. */
   groups: readonly ProductGroup[] | undefined;
-  /** Loads the templates again after a stale write. */
-  onReload: () => void;
+  /** Loads the template again after a stale write; without it a stale write is only explained. */
+  onReload?: () => void;
 }
 
 /**
@@ -25,5 +25,5 @@ export function TemplateFailureAlert({ failure, groups, onReload }: TemplateFail
   if (failure?.kind === "default") {
     return <Alert tone="error">{describeDefaultConflict(failure.conflict, groups, t)}</Alert>;
   }
-  return <WriteFailureAlert failure={failure} onReload={onReload} />;
+  return <WriteFailureAlert failure={failure} {...(onReload === undefined ? {} : { onReload })} />;
 }

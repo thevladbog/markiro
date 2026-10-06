@@ -314,3 +314,19 @@
 .template-import__field span {
   display: grid;
 }
+
+/* The template editor: its cards, off together while a save is on its way. */
+.template-editor__fields {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.template-editor__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
