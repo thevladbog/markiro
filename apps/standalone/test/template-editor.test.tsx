@@ -46,9 +46,9 @@ const ZPL = [
   "^XZ",
 ].join("\n");
 
-/** The layout the import makes of `ZPL`. */
-function importedSpec(source = ZPL) {
-  const outcome = analyzeImport({ source, format: "zpl", dpi: 203, purpose: "box" });
+/** The layout the import makes of `ZPL` (or of `source`) at `dpi`. */
+function importedSpec(source = ZPL, dpi: 203 | 300 = 203) {
+  const outcome = analyzeImport({ source, format: "zpl", dpi, purpose: "box" });
   if (!outcome.ok) throw new Error("the sample does not import");
   return outcome.analysis.result.spec;
 }
@@ -781,6 +781,71 @@ describe("the label's size", () => {
     expect(await savedSpec(fake)).toStrictEqual({
       ...importedSpec(),
       heightMm: 50,
+    });
+  });
+
+  /** 57.9967 × 39.96 mm at 300 dpi: the field shows «58», which is not 58 mm. */
+  const ZPL_300_DPI = [
+    "^XA",
+    "^PW685",
+    "^LL472",
+    "^FO40,40^A0N,34,34^FDПартия^FS",
+    "^FO40,100^A0N,34,34^FD{{qty}}^FS",
+    "^XZ",
+  ].join("\n");
+
+  it("sends exactly the preset's size when a stored width only shows as the preset's text", async () => {
+    const fake = session();
+    fake.api.createTemplate.mockResolvedValue(created("Молоко"));
+    await openNew(fake);
+    await importCode(ZPL_300_DPI, "zpl", 300);
+    const imported = importedSpec(ZPL_300_DPI, 300);
+    expect(imported.widthMm).not.toBe(58);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
+    const preset = () => within(sizeDialog()).getByRole("combobox", { name: "Размер" });
+    expect(within(sizeDialog()).getByLabelText("Ширина, мм")).toHaveProperty("value", "58");
+    expect(preset()).toHaveProperty("value", "custom");
+    fireEvent.change(preset(), { target: { value: "58x40" } });
+    expect(preset()).toHaveProperty("value", "58x40");
+    await applySize();
+    expect(screen.getByText("Размер: 58 × 40 мм · 300 dpi")).toBeTruthy();
+    expect(await savedSpec(fake)).toStrictEqual({ ...imported, widthMm: 58, heightMm: 40 });
+  });
+
+  it("keeps the exact width of an axis the user never touched while the other axis is typed over", async () => {
+    const fake = session();
+    fake.api.createTemplate.mockResolvedValue(created("Молоко"));
+    await openNew(fake);
+    await importCode(ZPL_300_DPI, "zpl", 300);
+    const imported = importedSpec(ZPL_300_DPI, 300);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
+    type("Высота, мм", "40");
+    expect(within(sizeDialog()).getByRole("combobox", { name: "Размер" })).toHaveProperty(
+      "value",
+      "custom",
+    );
+    await applySize();
+    expect(await savedSpec(fake)).toStrictEqual({ ...imported, heightMm: 40 });
+  });
+
+  it("takes the text of a field the user changed as its value, even when it is typed back to the text shown", async () => {
+    const fake = session();
+    fake.api.createTemplate.mockResolvedValue(created("Молоко"));
+    await openNew(fake);
+    await importCode(ZPL_300_DPI, "zpl", 300);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
+    type("Ширина, мм", "57");
+    type("Ширина, мм", "58");
+    type("Высота, мм", "40");
+    expect(within(sizeDialog()).getByRole("combobox", { name: "Размер" })).toHaveProperty(
+      "value",
+      "58x40",
+    );
+    await applySize();
+    expect(await savedSpec(fake)).toStrictEqual({
+      ...importedSpec(ZPL_300_DPI, 300),
+      widthMm: 58,
+      heightMm: 40,
     });
   });
 

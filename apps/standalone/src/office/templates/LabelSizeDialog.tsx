@@ -34,8 +34,9 @@ export interface LabelSizeDialogProps {
  * typed size (10–300 mm, a comma or a point) shows as «Свой размер» unless a
  * preset has it. «Применить» moves every element inside the new label
  * (`resizedSpec`) or, when an element is larger than it, keeps the layout
- * and says so. An axis left as it was keeps its exact value, which the field
- * shows rounded.
+ * and says so. An axis the user never touched (typed in, or set by a preset)
+ * keeps its exact value, which the field shows rounded; once touched, its
+ * text is its value, even when it is typed back to the text shown.
  */
 export function LabelSizeDialog({ spec, purpose, onClose, onResize }: LabelSizeDialogProps) {
   const { t } = useTranslation();
@@ -44,10 +45,11 @@ export function LabelSizeDialog({ spec, purpose, onClose, onResize }: LabelSizeD
   const [width, setWidth] = useState(shownWidth);
   const [height, setHeight] = useState(shownHeight);
   const [dpi, setDpi] = useState(String(spec.dpi));
+  const [touched, setTouched] = useState({ width: false, height: false });
   const [invalid, setInvalid] = useState({ width: false, height: false });
   const [tooLarge, setTooLarge] = useState(false);
-  const widthMm = width === shownWidth ? spec.widthMm : parseSizeMm(width);
-  const heightMm = height === shownHeight ? spec.heightMm : parseSizeMm(height);
+  const widthMm = touched.width ? parseSizeMm(width) : spec.widthMm;
+  const heightMm = touched.height ? parseSizeMm(height) : spec.heightMm;
   const preset = widthMm === null || heightMm === null ? null : presetOf(widthMm, heightMm);
 
   const choosePreset = (key: string) => {
@@ -56,6 +58,7 @@ export function LabelSizeDialog({ spec, purpose, onClose, onResize }: LabelSizeD
     if (chosen === undefined) return;
     setWidth(MM.format(chosen.widthMm));
     setHeight(MM.format(chosen.heightMm));
+    setTouched({ width: true, height: true });
     setInvalid({ width: false, height: false });
     setTooLarge(false);
   };
@@ -107,6 +110,7 @@ export function LabelSizeDialog({ spec, purpose, onClose, onResize }: LabelSizeD
           value={width}
           onChange={(event) => {
             setWidth(event.target.value);
+            setTouched((current) => ({ ...current, width: true }));
             setInvalid((current) => ({ ...current, width: false }));
             setTooLarge(false);
           }}
@@ -119,6 +123,7 @@ export function LabelSizeDialog({ spec, purpose, onClose, onResize }: LabelSizeD
           value={height}
           onChange={(event) => {
             setHeight(event.target.value);
+            setTouched((current) => ({ ...current, height: true }));
             setInvalid((current) => ({ ...current, height: false }));
             setTooLarge(false);
           }}
