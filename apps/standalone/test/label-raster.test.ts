@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 
 import { Font, Glyph } from "opentype.js";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   checkCyrillicCoverage,
@@ -67,7 +67,14 @@ interface FakeSurface {
   getImageData(x: number, y: number, width: number, height: number): { data: Uint8ClampedArray };
 }
 
-const realGetContext = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "getContext");
+/** The jsdom canvas's `getContext` as `test/setup.ts` left it, saved before each test. */
+let realGetContext: PropertyDescriptor = {};
+
+beforeEach(() => {
+  const saved = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "getContext");
+  if (saved === undefined) throw new Error("test/setup.ts defines no canvas getContext");
+  realGetContext = saved;
+});
 
 /**
  * jsdom has no canvas: every `<canvas>` the rasterizer makes gets a recording
@@ -134,8 +141,7 @@ function firstColumnHex(width: number, height: number): string {
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
-  if (realGetContext)
-    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", realGetContext);
+  Object.defineProperty(HTMLCanvasElement.prototype, "getContext", realGetContext);
 });
 
 describe("the text rasterizer", () => {
@@ -507,5 +513,18 @@ describe("the font coverage check", () => {
     await expect(checkFamilyCoverage("IBM Plex Sans")).rejects.toThrow(
       `failed to fetch font subset ${latin}: HTTP 503`,
     );
+  });
+});
+
+describe("the fake canvases of these tests", () => {
+  // The two tests run one after the other, in this order: the second looks at
+  // what the first left behind.
+  it("are installed by a test that needs them", () => {
+    fakeCanvases();
+    expect(document.createElement("canvas").getContext("2d")).not.toBeNull();
+  });
+
+  it("are gone again in the next test, which finds jsdom's own quiet canvas", () => {
+    expect(document.createElement("canvas").getContext("2d")).toBeNull();
   });
 });

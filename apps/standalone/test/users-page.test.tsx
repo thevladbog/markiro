@@ -11,6 +11,7 @@ import { RequireRole } from "../src/office/RequireRole.js";
 import {
   fakeOfficeSession,
   OFFICE_USERS,
+  quietLabelRendering,
   renderOffice,
   TECHNOLOGIST,
   type FakeOfficeSession,
@@ -74,7 +75,10 @@ describe("office users", () => {
     const view = await openUsers(session);
     view.rerender(
       <ThemeProvider defaultTheme="dark">
-        <Office session={{ ...session, user: { ...session.user, role: "technologist" } }} />
+        <Office
+          session={{ ...session, user: { ...session.user, role: "technologist" } }}
+          labels={quietLabelRendering()}
+        />
       </ThemeProvider>,
     );
     expect(await screen.findByText("Нет доступа")).toBeTruthy();

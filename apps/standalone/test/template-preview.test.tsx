@@ -99,6 +99,7 @@ const OTHER_CYRILLIC: LabelTemplateSpec = {
 /** Makes every `<canvas>` of the page give `canvas` as its 2D context; returns the restore. */
 function installWebviewCanvas(canvas: LabelCanvas, kinds: string[] = []): () => void {
   const real = Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype, "getContext");
+  if (real === undefined) throw new Error("test/setup.ts defines no canvas getContext");
   Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
     configurable: true,
     writable: true,
@@ -108,7 +109,7 @@ function installWebviewCanvas(canvas: LabelCanvas, kinds: string[] = []): () => 
     },
   });
   return () => {
-    if (real) Object.defineProperty(HTMLCanvasElement.prototype, "getContext", real);
+    Object.defineProperty(HTMLCanvasElement.prototype, "getContext", real);
   };
 }
 

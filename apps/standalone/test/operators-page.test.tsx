@@ -9,6 +9,7 @@ import type { OfficeOperator, OperatorCreate } from "../src/host/protocol.js";
 import { Office } from "../src/office/Office.js";
 import {
   fakeOfficeSession,
+  quietLabelRendering,
   renderOffice,
   TECHNOLOGIST,
   type FakeOfficeSession,
@@ -192,7 +193,10 @@ describe("office operators", () => {
     const view = await openOperators(session);
     view.rerender(
       <ThemeProvider defaultTheme="dark">
-        <Office session={{ ...session, user: { ...session.user, role: "technologist" } }} />
+        <Office
+          session={{ ...session, user: { ...session.user, role: "technologist" } }}
+          labels={quietLabelRendering()}
+        />
       </ThemeProvider>,
     );
     expect(await screen.findByText("Нет доступа")).toBeTruthy();

@@ -569,7 +569,7 @@ prints the same bitmap) and the font coverage check
 to take the rasterizer too. The domain's generators and the GS1 raster (which
 bring bwip-js, about 0.9 MB) and the font check (opentype.js, about 0.2 MB)
 load on demand as chunks of their own (`label-print.ts`,
-`BROWSER_LABEL_RENDERING`), so the main chunk stays near 873 kB.
+`BROWSER_LABEL_RENDERING`), so the main chunk stays near 876 kB.
 
 ## Reference sync
 
@@ -1239,14 +1239,20 @@ requests and offer a retry.
   (`compositeTextRasters`: the element's estimated box and the bitmap's own
   rectangle go white first, since the printer's bitmap is opaque, then its
   black dots, in whole printer dots); codes are schematic, except a product
-  duplicate's, which is the station's raster (`paintCodeRasters`). While the
+  duplicate's, which is the station's raster (`paintCodeRasters`). All of it
+  is at the layout's own resolution; the cloud station prints at its
+  printer's (`withPrinterDpi`, `apps/station/src/lib/print-label.ts`), so
+  the preview matches a printer of the layout's resolution. While the
   layout has such text the editor checks that the bundled font has Cyrillic
   (`checkFamilyCoverage`: opentype.js reads the app's own IBM Plex `.woff`
   files, the Latin and the Cyrillic subset, since 2.0.0 cannot read WOFF2; no
   network) and warns when it lacks it or could not be checked; the check does
-  not run again for every change of the layout, and a warning from an earlier
-  check may show again until the new answer arrives. The canvas is an image
-  named by the label's size. The office draws through `LabelRendering`
+  not run again for every change of the layout, a successful answer is kept
+  per family (a failed one is not, so the next ask reads the files again),
+  and a warning is the answer of the check that is running: it goes when that
+  check ends (the layout lost its Cyrillic text) and does not show again
+  before the next check answers. The canvas is an image named by the label's
+  size. The office draws through `LabelRendering`
   (`Office`'s `labels`: a canvas context, the rasterizer, the font check and
   the thumbnails' `whenVisible`), the webview's own by default; tests pass
   `quietLabelRendering` or a recording canvas, since jsdom has no canvas
@@ -1273,7 +1279,8 @@ requests and offer a retry.
   `<a download>` under a file name made of the template's name, Cyrillic
   letters kept. A code file is the domain's `generateZpl` or `generateTspl` of
   the layout, with the sample data, the render options and the rasterizer the
-  preview uses, so it is what a station would send to its printer, its Cyrillic
+  preview uses, so it is what a station would send to a printer of the
+  layout's own resolution (a station prints at its printer's), its Cyrillic
   as the print's bitmaps, written byte for byte (`latin1Bytes`, the station's
   `latin1ToBytes`: a `Blob` of the text would write each character from 0x80
   up, TSPL's bitmap bytes among them, as two). The domain's emitters do not
@@ -1282,9 +1289,11 @@ requests and offer a retry.
   makes it a control byte, as the station's does; that limit is the domain's
   (`packages/*`), not this app's. Both code downloads are off while a file is
   being made and while a duplicate breaks its rule; a file that could not be
-  made (any failure of the generators or the bitmaps) is not saved, and an
-  alert below the buttons says the Russian text could not be drawn. The JSON
-  is `{ name, purpose, spec }`. Only jsdom has run the downloads, not the
+  made (any failure of the generators, the bitmaps or the chunk's load) is not
+  saved, and an alert above the buttons says «Файл не собран. Попробуйте ещё
+  раз.» in those words for every failure. While a duplicate breaks its rule
+  and both buttons are off, that alert is not shown. The JSON is
+  `{ name, purpose, spec }`. Only jsdom has run the downloads, not the
   Tauri webview (WebView2, WKWebView), so a webview that refuses them would
   need a save-file command of the shell. Nothing reaches the host before
   «Сохранить»: the layout goes as `labelTemplateSpecSchema` makes it

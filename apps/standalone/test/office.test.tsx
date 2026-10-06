@@ -6,7 +6,13 @@ import { ThemeProvider } from "@markiro/ui";
 import { HostError } from "../src/host/client.js";
 import { Office } from "../src/office/Office.js";
 import { OfficeLogin } from "../src/office/OfficeLogin.js";
-import { fakeOfficeSession, ORG_PROFILE, renderOffice, TECHNOLOGIST } from "./support/office.js";
+import {
+  fakeOfficeSession,
+  ORG_PROFILE,
+  quietLabelRendering,
+  renderOffice,
+  TECHNOLOGIST,
+} from "./support/office.js";
 import { SESSION } from "./support/fixtures.js";
 
 function type(label: string, value: string): void {
@@ -150,7 +156,7 @@ describe("Office", () => {
 
     view.rerender(
       <ThemeProvider defaultTheme="dark">
-        <Office session={session} hostRevision={4} />
+        <Office session={session} hostRevision={4} labels={quietLabelRendering()} />
       </ThemeProvider>,
     );
     await waitFor(() => expect(session.refreshUser).toHaveBeenCalledTimes(1));
