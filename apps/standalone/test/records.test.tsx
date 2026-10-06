@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   activeFirstByName,
+  byNameThenId,
   useChangeList,
   useStoreRecord,
   withRecord,
@@ -65,6 +66,32 @@ describe("withRecord", () => {
     expect(records).toStrictEqual(before);
     expect(edited).toStrictEqual(row("b", "Вторая (правка)"));
     expect(added).toStrictEqual(row("c", "Третья"));
+  });
+});
+
+describe("byNameThenId", () => {
+  it("is zero for a record against itself and against one with the same name and id", () => {
+    const record = row("a", "Линия");
+    expect(byNameThenId(record, record)).toBe(0);
+    expect(byNameThenId(record, row("a", "Линия"))).toBe(0);
+  });
+
+  it("puts equal names in the order of their ids, and gives the opposite sign for the opposite order", () => {
+    const low = row("a", "Линия");
+    const high = row("b", "Линия");
+    expect(Math.sign(byNameThenId(low, high))).toBe(-1);
+    expect(Math.sign(byNameThenId(high, low))).toBe(1);
+  });
+
+  it("gives opposite signs for opposite orders of different names, and lets the name outrank the id", () => {
+    const early = row("z", "А");
+    const late = row("a", "Б");
+    expect(Math.sign(byNameThenId(early, late))).toBe(-1);
+    expect(Math.sign(byNameThenId(late, early))).toBe(1);
+    const two = row("b", "Линия 2");
+    const ten = row("a", "Линия 10");
+    expect(Math.sign(byNameThenId(two, ten))).toBe(-1);
+    expect(Math.sign(byNameThenId(ten, two))).toBe(1);
   });
 });
 

@@ -232,14 +232,17 @@ describe("the template import dialog", () => {
     );
     expect(dialog.querySelector("img, script, b")).toBeNull();
 
+    // The domain words an unknown placeholder with the text in it, so the markup reaches the message.
+    paste("Код ZPL", ZPL.replace("^XZ", "^FO40,160^A0N,34,34^FD{{<b>x</b>}}^FS\n^XZ"));
+    fireEvent.click(button("Проверить код"));
+    expect(screen.getByRole("alert").textContent).toContain(
+      'unknown label field placeholder "<b>x</b>"',
+    );
+    expect(dialog.querySelector("img, script, b")).toBeNull();
+
     fireEvent.change(screen.getByRole("combobox", { name: "Формат кода" }), {
       target: { value: "json" },
     });
-    // V8 quotes the start of the text it cannot parse, so the markup reaches the message.
-    paste("JSON шаблона", "<b>x</b>");
-    fireEvent.click(button("Проверить код"));
-    expect(screen.getByRole("alert").textContent).toContain("<b>x</b>");
-    expect(dialog.querySelector("img, script, b")).toBeNull();
 
     const twin = {
       kind: "line",

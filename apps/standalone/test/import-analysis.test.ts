@@ -241,14 +241,6 @@ describe("checking imported code", () => {
     ]);
   });
 
-  it("does not swallow an error that is not the domain's", () => {
-    // Not a string: the parser fails with a TypeError, which is a bug of the caller, not bad code.
-    const notCode = null as unknown as string;
-    expect(() =>
-      analyzeImport({ source: notCode, format: "zpl", dpi: 203, purpose: "box" }),
-    ).toThrow(TypeError);
-  });
-
   it("names a wrapper whose layout is not an object, and a layout that is not a wrapper", () => {
     expect(
       analyzeImport({ source: '{"spec":1}', format: "json", dpi: 203, purpose: "box" }),

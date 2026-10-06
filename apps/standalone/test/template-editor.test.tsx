@@ -89,6 +89,12 @@ function session(user = TECHNOLOGIST) {
   return fake;
 }
 
+/** Both roles of the office: each reads and writes templates. */
+const ROLES = [
+  { role: "administrator", user: SESSION.user },
+  { role: "technologist", user: TECHNOLOGIST },
+];
+
 async function settle(): Promise<void> {
   await new Promise((resolve) => setImmediate(resolve));
   await new Promise((resolve) => setImmediate(resolve));
@@ -110,10 +116,30 @@ async function openNew(fake: FakeOfficeSession): Promise<RenderResult> {
   return view;
 }
 
-/** Blob URLs, which jsdom lacks, recorded instead of made. */
+let restoreBlobUrls: (() => void) | null = null;
+
+// Whatever a test did, the stubbed `URL` methods never outlive it.
+afterEach(() => {
+  restoreBlobUrls?.();
+  restoreBlobUrls = null;
+});
+
+const NATIVE_BLOB_URLS = {
+  create: URL.createObjectURL,
+  revoke: URL.revokeObjectURL,
+};
+
+/** Blob URLs recorded instead of made; the `afterEach` above puts the ones that were there back. */
 function recordBlobUrls() {
+  // Whatever stands here is what the environment has: a stub left by an earlier test is a leak.
+  expect(URL.createObjectURL).toBe(NATIVE_BLOB_URLS.create);
+  expect(URL.revokeObjectURL).toBe(NATIVE_BLOB_URLS.revoke);
   const blobs: Blob[] = [];
   const revoked: string[] = [];
+  const own = {
+    create: Object.getOwnPropertyDescriptor(URL, "createObjectURL"),
+    revoke: Object.getOwnPropertyDescriptor(URL, "revokeObjectURL"),
+  };
   Object.defineProperty(URL, "createObjectURL", {
     configurable: true,
     value: (blob: Blob) => {
@@ -127,14 +153,16 @@ function recordBlobUrls() {
       revoked.push(url);
     },
   });
-  return {
-    blobs,
-    revoked,
-    restore: () => {
-      Reflect.deleteProperty(URL, "createObjectURL");
-      Reflect.deleteProperty(URL, "revokeObjectURL");
-    },
+  restoreBlobUrls = () => {
+    for (const [name, descriptor] of [
+      ["createObjectURL", own.create],
+      ["revokeObjectURL", own.revoke],
+    ] as const) {
+      if (descriptor === undefined) Reflect.deleteProperty(URL, name);
+      else Object.defineProperty(URL, name, descriptor);
+    }
   };
+  return { blobs, revoked };
 }
 
 function type(label: string, value: string): void {
@@ -199,9 +227,10 @@ describe("a new label template", () => {
     vi.restoreAllMocks();
   });
 
-  it("opens from «Создать шаблон» for both roles as an unnamed, enabled box template for every category with an empty 58×40 label", async () => {
-    for (const user of [SESSION.user, TECHNOLOGIST]) {
-      const view = await openNew(session(user));
+  it.each(ROLES)(
+    "opens from «Создать шаблон» for the $role as an unnamed, enabled box template for every category with an empty 58×40 label",
+    async ({ user }) => {
+      await openNew(session(user));
       expect(screen.getByLabelText("Название")).toHaveProperty("value", "");
       expect(screen.getByRole("combobox", { name: "Назначение" })).toHaveProperty("value", "box");
       expect(screen.getByRole("checkbox", { name: "Включён" }).getAttribute("aria-checked")).toBe(
@@ -217,9 +246,8 @@ describe("a new label template", () => {
       expect(saveButton()).toHaveProperty("disabled", false);
       fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
       await screen.findByRole("heading", { name: "Шаблоны этикеток" });
-      view.unmount();
-    }
-  });
+    },
+  );
 
   it("creates the template from the trimmed name, the imported layout and the categories ascending, then lists the templates again with a notice", async () => {
     const fake = session();
@@ -358,6 +386,28 @@ describe("a new label template", () => {
     expect(fake.api.createTemplate).toHaveBeenCalledTimes(4);
   });
 
+  it("moves the focus to the name or the categories the host refuses", async () => {
+    const fake = session();
+    const refusal = (field: string) =>
+      new HostError({ kind: "api", code: "validation_failed", message: field, details: { field } });
+    fake.api.createTemplate
+      .mockRejectedValueOnce(refusal("name"))
+      .mockRejectedValueOnce(refusal("chzProductGroupCodes"));
+    await openNew(fake);
+    type("Название", "Молоко");
+    expect(document.activeElement).not.toBe(screen.getByLabelText("Название"));
+    await save();
+    expect(nameError()).toBe("Хост не принял это значение. Проверьте его.");
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByLabelText("Название")));
+    await save();
+    expect(
+      screen.getByText("Хост не принял эти категории: справочник групп мог измениться."),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(document.querySelector("[id$='-scope']")),
+    );
+  });
+
   it("holds a product duplicate to the duplicate rule and offers the domain's duplicate layout back", async () => {
     const fake = session();
     await openNew(fake);
@@ -417,7 +467,6 @@ describe("a new label template", () => {
     type("Название", " Молоко 58×40 ");
     await importCode(ZPL);
     fireEvent.click(screen.getByRole("button", { name: "Скачать JSON" }));
-    urls.restore();
     expect(clicked).toEqual([{ download: "Молоко-58-40.json", href: "blob:template" }]);
     expect(urls.revoked).toEqual(["blob:template"]);
     expect(urls.blobs[0]?.type).toBe("application/json");
@@ -587,7 +636,6 @@ describe("a new label template", () => {
       target: { value: "pallet" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Скачать JSON" }));
-    urls.restore();
     expect(JSON.parse(await (urls.blobs[0]?.text() ?? Promise.resolve("")))).toStrictEqual({
       name: "",
       purpose: "pallet",
@@ -770,9 +818,11 @@ describe("the label's size", () => {
     type("Ширина, мм", "10");
     type("Высота, мм", "10");
     await applySize();
-    expect(within(sizeDialog()).getByRole("alert").textContent).toBe(
-      "✕Элемент макета больше этой этикетки. Увеличьте размер или импортируйте код заново.",
-    );
+    expect(
+      within(within(sizeDialog()).getByRole("alert")).getByText(
+        "Элемент макета больше этой этикетки. Увеличьте размер или импортируйте код заново.",
+      ),
+    ).toBeTruthy();
     fireEvent.change(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), {
       target: { value: "58x40" },
     });
@@ -1201,10 +1251,11 @@ describe("changing a label template", () => {
     localStorage.removeItem("markiro.theme");
   });
 
-  it("opens the template as the host has it, with its purpose fixed and «Сохранить» off until something changes", async () => {
-    for (const user of [SESSION.user, TECHNOLOGIST]) {
+  it.each(ROLES)(
+    "opens the template as the host has it for the $role, with its purpose fixed and «Сохранить» off until something changes",
+    async ({ user }) => {
       const fake = editSession(user);
-      const view = await openTemplates(fake);
+      await openTemplates(fake);
       expect(screen.queryByRole("button", { name: "Изменить шаблон «Коробка 58×40»" })).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Молоко 58×40»" }));
       await screen.findByRole("heading", { name: "Шаблон «Молоко 58×40»" });
@@ -1228,9 +1279,8 @@ describe("changing a label template", () => {
       expect(saveButton()).toHaveProperty("disabled", false);
       type("Название", "Молоко 58×40");
       expect(saveButton()).toHaveProperty("disabled", true);
-      view.unmount();
-    }
-  });
+    },
+  );
 
   it("sends what changed and the layout with the opened revision, then lists the templates again with a notice", async () => {
     const fake = editSession();
@@ -1373,36 +1423,47 @@ describe("changing a label template", () => {
     expect(await screen.findByLabelText("Название")).toHaveProperty("value", "Молоко 58×40");
   });
 
-  it("keeps the page's heading, and the way back where there is one, on every page that cannot show the editor", async () => {
-    const cases: [string, (api: FakeOfficeSession["api"]) => void, boolean][] = [
-      ["deleted", (api) => api.getTemplate.mockRejectedValue(hostError("not_found")), true],
-      ["stock", (api) => api.getTemplate.mockResolvedValue(milk({ stock: true })), true],
-      [
-        "unreadable",
-        (api) => api.getTemplate.mockResolvedValue(milk({ spec: { widthMm: 58 } })),
-        true,
-      ],
-      [
-        "unreachable",
-        (api) =>
-          api.getTemplate.mockRejectedValue(
-            new HostError({ kind: "transport", code: "unreachable", message: "down" }),
-          ),
-        false,
-      ],
-    ];
-    for (const [, arrange, back] of cases) {
+  it.each<{
+    case: string;
+    arrange: (api: FakeOfficeSession["api"]) => void;
+    back: boolean;
+  }>([
+    {
+      case: "deleted",
+      arrange: (api) => api.getTemplate.mockRejectedValue(hostError("not_found")),
+      back: true,
+    },
+    {
+      case: "stock",
+      arrange: (api) => api.getTemplate.mockResolvedValue(milk({ stock: true })),
+      back: true,
+    },
+    {
+      case: "unreadable",
+      arrange: (api) => api.getTemplate.mockResolvedValue(milk({ spec: { widthMm: 58 } })),
+      back: true,
+    },
+    {
+      case: "unreachable",
+      arrange: (api) =>
+        api.getTemplate.mockRejectedValue(
+          new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+        ),
+      back: false,
+    },
+  ])(
+    "keeps the page's heading, and the way back where there is one, on the page of a $case template",
+    async ({ arrange, back }) => {
       const fake = editSession();
       arrange(fake.api);
-      const view = await openTemplates(fake);
+      await openTemplates(fake);
       fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Молоко 58×40»" }));
       await screen.findByRole("alert");
       expect(screen.getByRole("heading", { name: "Шаблон" })).toBeTruthy();
       expect(screen.queryByLabelText("Название")).toBeNull();
       expect(screen.queryByRole("button", { name: "К шаблонам" }) !== null).toBe(back);
-      view.unmount();
-    }
-  });
+    },
+  );
 
   it("opens a disabled template for all categories with another purpose as the host has it, and sends only the flag that changed", async () => {
     const fake = editSession();
@@ -1746,11 +1807,12 @@ describe("copying and deleting a label template", () => {
     expect(screen.queryByText("Молоко 58×40")).toBeNull();
   });
 
-  it("offers a copy and a delete to either role: «Копировать» on a stock row, «Копировать» and «Удалить» in the editor", async () => {
-    for (const user of [SESSION.user, TECHNOLOGIST]) {
+  it.each(ROLES)(
+    "offers a copy and a delete to the $role: «Копировать» on a stock row, «Копировать» and «Удалить» in the editor",
+    async ({ user }) => {
       const fake = editSession(user);
       fake.api.deleteTemplate.mockResolvedValue(undefined);
-      const view = await openTemplates(fake);
+      await openTemplates(fake);
       expect(
         screen.getByRole("button", { name: "Копировать шаблон «Коробка 58×40»" }),
       ).toBeTruthy();
@@ -1766,33 +1828,40 @@ describe("copying and deleting a label template", () => {
       });
       expect(await screen.findByText("Шаблон «Молоко 58×40» удалён.")).toBeTruthy();
       expect(fake.api.deleteTemplate).toHaveBeenCalledTimes(1);
-      view.unmount();
-    }
-  });
+    },
+  );
 
-  it("explains a copy page that cannot open its source, with no copy of a copy on offer", async () => {
-    const cases: [(api: FakeOfficeSession["api"]) => void, string][] = [
-      [
-        (api) => api.getTemplate.mockRejectedValue(hostError("not_found")),
-        "⧉Шаблона нет на хосте: его удалили на другом рабочем месте.",
-      ],
-      [
-        (api) => api.getTemplate.mockResolvedValue({ ...stockBox(), spec: { widthMm: 58 } }),
-        "⧉Макет этого шаблона не читается этой версией приложения. Обновите приложение на этом ПК.",
-      ],
-    ];
-    for (const [arrange, text] of cases) {
+  it.each<{
+    case: string;
+    arrange: (api: FakeOfficeSession["api"]) => void;
+    text: string;
+  }>([
+    {
+      case: "deleted",
+      arrange: (api) => api.getTemplate.mockRejectedValue(hostError("not_found")),
+      text: "⧉Шаблона нет на хосте: его удалили на другом рабочем месте.",
+    },
+    {
+      case: "unreadable",
+      arrange: (api) => api.getTemplate.mockResolvedValue({ ...stockBox(), spec: { widthMm: 58 } }),
+      text: "⧉Макет этого шаблона не читается этой версией приложения. Обновите приложение на этом ПК.",
+    },
+  ])(
+    "explains a copy page whose source is $case, with no copy of a copy on offer",
+    async ({ arrange, text }) => {
       const fake = editSession();
       arrange(fake.api);
-      const view = await openTemplates(fake);
+      await openTemplates(fake);
       fireEvent.click(screen.getByRole("button", { name: "Копировать шаблон «Коробка 58×40»" }));
       expect((await screen.findByRole("alert")).textContent).toBe(text);
       expect(screen.getByRole("heading", { name: "Копия шаблона" })).toBeTruthy();
       expect(screen.queryByRole("button", { name: "Копировать" })).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
       await screen.findByRole("heading", { name: "Шаблоны этикеток" });
-      view.unmount();
-    }
+    },
+  );
+
+  it("explains a copy page whose source cannot be reached, and reads it again on «Повторить»", async () => {
     const down = editSession();
     down.api.getTemplate
       .mockRejectedValueOnce(
@@ -2080,7 +2149,7 @@ describe("a file saved from the webview", () => {
   });
 
   it("is clicked while its link is in the page, and its blob URL is revoked after the click", () => {
-    const urls = recordBlobUrls();
+    recordBlobUrls();
     const events: string[] = [];
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
       this: HTMLAnchorElement,
@@ -2096,7 +2165,6 @@ describe("a file saved from the webview", () => {
       },
     });
     downloadFile(new Blob(["{}"]), "шаблон.json");
-    urls.restore();
     expect(events).toEqual(["click in page: true", "revoke"]);
     expect(document.querySelector("a[download]")).toBeNull();
   });

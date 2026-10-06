@@ -14,11 +14,10 @@ export interface TemplateOption {
  * that fits the slot for the category (`templateFitsSlot`: enabled, of the
  * slot's purpose, covering the category; `null` is a product without a group
  * and the organization's slot), by name, then by id, as «Шаблоны» lists them
- * (`byNameThenId`). Each id in `kept` that does not fit
- * stays a choice of its own, marked: the loaded choice, which a template
- * disabled or narrowed since, or a category changed in the form, does not
- * take away, and the form's current choice. `templates` is `undefined` while
- * the list is not loaded.
+ * (`byNameThenId`). Each id in `kept` that does not fit stays a choice of its
+ * own, marked: the loaded choice, which a template disabled or narrowed since,
+ * or a category changed in the form, does not take away, and the form's
+ * current choice. `templates` is `undefined` while the list is not loaded.
  */
 export function templateOptions(
   templates: readonly LabelTemplateSummary[] | undefined,
