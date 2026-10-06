@@ -26,6 +26,7 @@ export default defineConfig({
     "./src/schema/device-retention.ts",
     "./src/schema/billing.ts",
     "./src/schema/tenant-billing.ts",
+    "./src/schema/support-chat.ts",
     "./src/schema/shift-exports.ts",
     "./src/schema/disaggregation.ts",
     "./src/schema/inventory.ts",

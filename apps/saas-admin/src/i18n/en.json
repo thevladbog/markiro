@@ -631,7 +631,8 @@
       "capacity_change": "Capacity change",
       "additional_service": "Additional service",
       "documents": "Documents",
-      "other": "Other"
+      "other": "Other",
+      "support": "Support"
     },
     "status": {
       "new": "New",
@@ -1170,6 +1171,7 @@
     "acts": "Acts",
     "payments": "Payments",
     "billingRequests": "Requests",
+    "supportEpisodes": "Support chats",
     "monitoring": "Monitoring",
     "nationalCatalog": "National Catalog",
     "team": "Team",
@@ -2388,6 +2390,41 @@
     "confirmUncertainRateLimit": "Too many requests. The previous confirmation’s outcome is still unknown. Wait and retry the same confirmation.",
     "retryConfirm": "Retry confirmation",
     "successRefreshError": "The prepared model was saved. Current access is unchanged. The displayed data could not be refreshed."
+  },
+  "support": {
+    "title": "Support chats",
+    "episode": "Support conversation",
+    "back": "Back to conversations",
+    "tenant": "Organization ID",
+    "filter": "Show",
+    "question": "Question",
+    "empty": "No conversations yet",
+    "more": "Next page",
+    "loading": "Loading conversation…",
+    "loadError": "Could not load conversation",
+    "retry": "Retry",
+    "forbidden": "No access to support chats",
+    "history": "Public conversation",
+    "older": "Earlier messages",
+    "olderError": "Could not load earlier messages.",
+    "retryOlder": "Retry loading",
+    "request": "Request",
+    "propose": "Propose a support request",
+    "proposalTitle": "Request title",
+    "proposalSummary": "Short description",
+    "actionError": "Could not complete the action. Check your connection.",
+    "syncPending": "History is syncing",
+    "syncError": "History sync failed",
+    "noticeReview": "This history lacks a confirmed access notice. An operator must review it; retrying sync cannot restore consent.",
+    "retrySync": "Retry sync",
+    "side": { "customer": "Customer", "operator": "Operator" },
+    "proposal": {
+      "pending": "Awaiting customer decision",
+      "accepted": "Customer accepted",
+      "declined": "Customer declined"
+    },
+    "transcript": "Request conversation",
+    "transcriptEmpty": "History has not synced yet"
   },
   "deviceReplacement": {
     "title": "Device replacement",

@@ -36,6 +36,8 @@ import {
   platformGrantActivationContracts,
   platformGrantRollbackContracts,
   platformServicePeriodContracts,
+  platformSupportChatContracts,
+  supportTranscriptContracts,
 } from "@markiro/platform-contracts";
 import type { ZodType } from "zod";
 
@@ -76,6 +78,41 @@ const route = (
 ): PlatformRouteContract => ({ method, path, status, response, ...options });
 
 export const CURRENT_SAAS_ROUTES = [
+  route(
+    "get",
+    "/platform/support-chat/episodes",
+    "200",
+    platformSupportChatContracts.episodeList.response,
+    { query: platformSupportChatContracts.episodeList.query },
+  ),
+  route(
+    "get",
+    "/platform/support-chat/episodes/{id}",
+    "200",
+    platformSupportChatContracts.episode.response,
+    { query: platformSupportChatContracts.episode.query },
+  ),
+  route(
+    "post",
+    "/platform/support-chat/episodes/{id}/proposals",
+    "201",
+    platformSupportChatContracts.proposal.response,
+    { body: platformSupportChatContracts.proposal.body },
+  ),
+  route(
+    "post",
+    "/platform/support-chat/episodes/{id}/retry-sync",
+    "200",
+    platformSupportChatContracts.retrySync.response,
+    { body: platformSupportChatContracts.retrySync.body },
+  ),
+  route(
+    "get",
+    "/platform/billing/requests/{id}/transcript",
+    "200",
+    supportTranscriptContracts.platform.response,
+    { query: supportTranscriptContracts.platform.query },
+  ),
   route(
     "post",
     "/platform/tenants/{tenantId}/device-licensing/replacements/{preparationId}/target/code",

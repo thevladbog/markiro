@@ -33,6 +33,17 @@ test("cabinet selects, reviews, applies and reopens the saved result with strict
   page.on("pageerror", (e) => errors.push(e.message));
   await page.route(`${origin}/api/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
+    // Support chat is disabled in these unrelated cabinet scenarios.
+    if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
+      return route.fulfill({
+        status: 503,
+        json: {
+          statusCode: 503,
+          message: "Support chat unavailable",
+          error: "Service Unavailable",
+        },
+      });
+    }
     let body: unknown;
     if (path.endsWith(`/images/${id(30)}`)) {
       await route.fulfill({
@@ -240,6 +251,17 @@ test("catalog discloses CHZ statuses and opens the saved link panel", async ({ p
   });
   await page.route(`${origin}/api/**`, async (route) => {
     const path = new URL(route.request().url()).pathname;
+    // Support chat is disabled in these unrelated cabinet scenarios.
+    if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
+      return route.fulfill({
+        status: 503,
+        json: {
+          statusCode: 503,
+          message: "Support chat unavailable",
+          error: "Service Unavailable",
+        },
+      });
+    }
     let body: unknown;
     if (route.request().method() !== "GET") {
       unexpected.push(`${route.request().method()} ${path}`);

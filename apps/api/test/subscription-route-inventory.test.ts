@@ -112,6 +112,12 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     contract: customerContract(CABINET_GUARDS, { mode: "read_only_allowed", reason: "read" }),
     routes: [
       "GET /access/entitlements (AccessController.entitlementSnapshot)",
+      "GET /support-chat/episodes (SupportChatController.list)",
+      "GET /billing/requests/:id/transcript (SupportChatTranscriptController.read)",
+      "POST /support-chat/episodes (SupportChatController.create)",
+      "GET /support-chat/episodes/:id (SupportChatController.detail)",
+      "POST /support-chat/episodes/:id/messages (SupportChatController.send)",
+      "POST /support-chat/episodes/:id/proposals/:proposalId/decision (SupportChatController.decide)",
       "GET /national-catalog/capabilities (NationalCatalogImportController.capabilitiesRead)",
       "GET /national-catalog/import-sessions/:sessionId (NationalCatalogImportController.read)",
       "GET /national-catalog/import-sessions/:sessionId/preparations/:preparationId (NationalCatalogImportController.preparation)",
@@ -590,6 +596,12 @@ const profile: RouteExemption = {
 };
 
 const EXEMPTIONS: Readonly<Record<string, RouteExemption>> = {
+  "PlatformSupportChatController.propose": platform(
+    "support escalation proposals require the current platform billing.write capability",
+  ),
+  "PlatformSupportChatController.retrySync": platform(
+    "support transcript retry requires current platform billing.write capability",
+  ),
   "PlatformServicePeriodsController.postUsage": platform(
     "cross-tenant service usage requires the dedicated platform services write capability",
   ),

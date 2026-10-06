@@ -1,0 +1,79 @@
+.mk-support-page {
+  display: grid;
+  gap: var(--sp-4);
+  width: min(100%, 900px);
+  margin: 0 auto;
+  padding: var(--sp-5);
+  box-sizing: border-box;
+}
+
+.mk-support-page > header p {
+  color: var(--fg-3);
+  margin: 0;
+}
+
+.mk-support-page > header h1 {
+  margin: 0 0 var(--sp-1);
+}
+
+.mk-support-page > nav ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.mk-support-page ol {
+  display: grid;
+  gap: var(--sp-3);
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.mk-support-page ol li {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: var(--sp-3);
+  min-width: 0;
+}
+
+.mk-support-page ol li:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.mk-support-page ol time {
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-support-page ol p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: var(--sp-1) 0 0;
+}
+
+.mk-support-page form {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.mk-support-page form > button,
+.mk-support-page > button {
+  justify-self: start;
+}
+
+.mk-support-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+@media (max-width: 640px) {
+  .mk-support-page {
+    padding: var(--sp-3);
+  }
+}

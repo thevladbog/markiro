@@ -10,6 +10,7 @@ import { useAuthClient } from "../auth/client.js";
 import { useBillingAttention } from "../pages/billing/api.js";
 import { usePendingOrderCount } from "../pages/pickup/api.js";
 import { useAvatarUrl, useProfile } from "../pages/profile/api.js";
+import { useSupportChatAvailability } from "../pages/support/api.js";
 import { Header } from "./Header.js";
 import { SubscriptionBanner } from "../subscription/SubscriptionBanner.js";
 
@@ -19,7 +20,7 @@ export const NAV_ITEMS: ReadonlyArray<{
   to: string;
   key: string;
   sectionKey: string;
-  capability: CabinetCapability;
+  capability: CabinetCapability | null;
 }> = [
   {
     to: "/",
@@ -121,6 +122,12 @@ export const NAV_ITEMS: ReadonlyArray<{
     capability: C.BILLING_READ,
   },
   {
+    to: "/support",
+    key: "nav.support",
+    sectionKey: "shell.sections.organization",
+    capability: null,
+  },
+  {
     to: "/settings",
     key: "nav.settings",
     sectionKey: "shell.sections.organization",
@@ -156,6 +163,10 @@ export function AppShell() {
   const location = useLocation();
   const authClient = useAuthClient();
   const { data: session } = authClient.useSession();
+  const supportChat = useSupportChatAvailability(
+    session?.user.id,
+    session?.session.activeOrganizationId,
+  );
   const canReadOperations = useCan(C.OPERATIONS_READ);
   const canReadIntegrations = useCan(C.INTEGRATIONS_READ);
   const canReadBilling = useCan(C.BILLING_READ);
@@ -173,7 +184,9 @@ export function AppShell() {
         .join(" ")
     : null;
 
-  const items: SidebarItem[] = NAV_ITEMS.filter(({ capability }) => {
+  const items: SidebarItem[] = NAV_ITEMS.filter(({ to, capability }) => {
+    if (to === "/support") return supportChat.isSuccess && supportChat.data === true;
+    if (capability === null) return true;
     if (capability === C.OPERATIONS_READ) return canReadOperations;
     if (capability === C.INTEGRATIONS_READ) return canReadIntegrations;
     if (capability === C.BILLING_READ) return canReadBilling;

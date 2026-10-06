@@ -257,6 +257,7 @@
     "integrations": "Integrations",
     "team": "Cabinet access",
     "billing": "Billing",
+    "support": "Support",
     "settings": "Settings"
   },
   "shell": {
@@ -1322,7 +1323,8 @@
           "capacity_change": "Limits or capacity change",
           "additional_service": "Additional service",
           "documents": "Document request",
-          "other": "Other"
+          "other": "Other",
+          "support": "Support"
         },
         "responsible": {
           "tenant": "Customer",
@@ -4180,6 +4182,41 @@
     "scheduled": "Scheduled",
     "ended": "Ended",
     "comparison": "Effects on the prepared model"
+  },
+  "support": {
+    "title": "Support",
+    "description": "Your private conversation with Markiro support in this organization.",
+    "loading": "Loading conversation…",
+    "newQuestion": "New question",
+    "episodes": "My questions",
+    "moreEpisodes": "Load more questions",
+    "question": "Question",
+    "empty": "No conversation yet. Start a new question.",
+    "history": "Conversation",
+    "message": "Message",
+    "send": "Send",
+    "retry": "Retry",
+    "older": "Show earlier messages",
+    "connectionError": "Support is unreachable. Please try again.",
+    "sendError": "The message was not confirmed. Retry uses the same request.",
+    "actionError": "Could not complete the action. Refresh the conversation and try again.",
+    "accessLost": "Access to this conversation was lost. Refresh the organization or sign in again.",
+    "uncertain": "Support is checking delivery. Do not resend this as a new question.",
+    "confirm": "Confirm sharing",
+    "decline": "Decline",
+    "requestStatus": "Request {{number}} · {{status}}",
+    "syncPending": "The request history is syncing.",
+    "syncError": "The history could not be synced. Support will investigate.",
+    "noticeReview": "This history lacks a confirmed access notice. Support must review the request.",
+    "side": { "customer": "You", "operator": "Markiro support" },
+    "delivery": {
+      "pending": "Sending",
+      "sent": "Delivered",
+      "uncertain": "Delivery uncertain",
+      "failed": "Not sent"
+    },
+    "transcript": "Request conversation",
+    "transcriptEmpty": "Messages have not synced yet."
   },
   "deviceReplacement": {
     "title": "Device replacement",

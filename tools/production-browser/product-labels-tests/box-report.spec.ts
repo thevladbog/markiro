@@ -68,6 +68,17 @@ for (const sample of [
       });
       await context.route(`${origin}/api/**`, async (route) => {
         const url = new URL(route.request().url());
+        // Support chat is disabled in these unrelated cabinet scenarios.
+        if (route.request().method() === "GET" && url.pathname === "/api/support-chat/episodes") {
+          return route.fulfill({
+            status: 503,
+            json: {
+              statusCode: 503,
+              message: "Support chat unavailable",
+              error: "Service Unavailable",
+            },
+          });
+        }
         if (route.request().method() !== "GET")
           throw new Error(`Unexpected mutation: ${url.pathname}`);
         if (url.pathname === `/api/code-search/boxes/${box.id}/report`) {

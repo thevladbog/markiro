@@ -8,6 +8,7 @@ import { ApiRequestError } from "../../api/client.js";
 import { BillingStatusChip } from "./BillingSections.js";
 import {
   type BillingRequestFilters,
+  type BillingRequestType,
   type BillingRequestStatus,
   type TenantBillingRequest,
   useBillingRequests,
@@ -25,6 +26,7 @@ const REQUEST_STATUSES: BillingRequestStatus[] = [
   "completed",
   "cancelled",
 ];
+const REQUEST_FILTER_TYPES: readonly BillingRequestType[] = [...BILLING_REQUEST_TYPES, "support"];
 
 function RequestFilters({
   filters,
@@ -70,7 +72,7 @@ function RequestFilters({
         }
         options={[
           { value: "", label: t("pages.billing.requests.filters.allTypes") },
-          ...BILLING_REQUEST_TYPES.map((type) => ({
+          ...REQUEST_FILTER_TYPES.map((type) => ({
             value: type,
             label: t(`pages.billing.requests.types.${type}`),
           })),
