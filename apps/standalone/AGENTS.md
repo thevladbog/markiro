@@ -559,10 +559,17 @@ the wizard's stock templates (above) and the office's «Шаблоны» and
 `updateTemplate`, `getTemplateDefaults` and `updateTemplateDefaults`. Plan
 1e4 added the template editor («Office pages»), which calls `getTemplate`,
 `createTemplate`, `updateTemplate` with a layout and `deleteTemplate`, and
-checks a layout against `labelTemplateSpecSchema` before it saves. Its first
-part draws no layout: the preview, the ZPL and TSPL downloads and the list's
-thumbnails come with its second part (1e4b), with the rasterizer and the
-`opentype.js` dependency.
+checks a layout against `labelTemplateSpecSchema` before it saves. Its second
+part (1e4b) draws layouts: the editor's preview, the ZPL and TSPL downloads
+and the list's thumbnails. The text rasterizer (`src/labels/rasterizer.ts`, a
+port of the cloud's that must behave as it does, so a previewed template
+prints the same bitmap) and the font coverage check
+(`src/labels/font-coverage.ts`, with `opentype.js` 2.0.0 and the hand-written
+`opentype.d.ts`) live outside the office: the station's printing (plan 2a) is
+to take the rasterizer too. The domain's generators and the GS1 raster (which
+bring bwip-js, about 0.9 MB) and the font check (opentype.js, about 0.2 MB)
+load on demand as chunks of their own (`label-print.ts`,
+`BROWSER_LABEL_RENDERING`), so the main chunk stays near 873 kB.
 
 ## Reference sync
 
@@ -1147,14 +1154,16 @@ requests and offer a retry.
   deleted. «Загрузить заново» closes the dialog and reads the products again;
   the templates are read again whenever a dialog opens.
 - «Шаблоны» (section «Каталог») lists every label template, disabled ones
-  included, and every role reads it: a table, not the cloud's cards with
-  thumbnails (no layout is drawn before 1e4b), by name with numbers by value
+  included, and every role reads it: a table, not the cloud's cards, with a
+  thumbnail beside each name (below), by name with numbers by value
   (`templatesByName`). A row shows the purpose as a word on a category tag (the
   cloud's tones: box violet, pallet magenta, product duplicate teal), the size
   («58 × 40 мм») and the layout's resolution («203 dpi») as the summary has
   them, «—» where it has none, the categories (every category, one group's name,
-  or «Категорий: N» with the names in a `title`; a code where the lookup lacks
-  the group or did not load, and a failed lookup leaves the list in place and
+  or «Категорий: N» with the names in a `title` and, for a screen reader, in
+  the cell (`VisuallyHidden`, « (names)»; only where the count has names to
+  give, so not for an empty list); a code where the lookup lacks the group or
+  did not load, and a failed lookup leaves the list in place and
   offers to read it again, but when the templates fail too, only their error
   shows, and its «Повторить» reads both again), the state in words («Включён»,
   or «Выключен» as `retired`) and a «Типовой» tag on a stock template. The host
@@ -1199,7 +1208,16 @@ requests and offer a retry.
   or, for a stock template, «Копировать» (a copy in the editor). Either dialog
   refused with `not_found` (the template was deleted on another workstation)
   says the template is gone, stays open and reads the list again, which drops
-  the row.
+  the row. The thumbnail (`TemplateThumb`, after the cloud's) draws the layout
+  with the purpose's sample data, fitted into a 64 × 48 px box: it is read with
+  `getTemplate` only once its row comes near the screen (`whenVisible`, an
+  `IntersectionObserver` 200 px ahead) and kept by id and revision
+  (`useTemplateLayout`, `officeKeys.templateLayout`, `staleTime: Infinity`:
+  any write gives a new revision), so the list's cache never holds a layout and
+  a layout read once is drawn again at once. Until then, and for a layout that
+  does not load or does not read, the box stays empty; a failed read is not
+  kept, so the row asks again the next time the page opens. It is decorative
+  (`aria-hidden`): the name beside it says what it is.
 - The template editor (plan 1e4; `/templates/new`, `/templates/:id` and
   `/templates/:id/copy`, pages without a menu item of their own, so the
   sidebar's «Шаблоны» stays highlighted there and «Умолчания шаблонов» does
@@ -1212,10 +1230,31 @@ requests and offer a retry.
   `templateNameRule`), a purpose, a flag, its categories
   (`CategoryScopeField`, with the cloud's warning that the EGAIS field prints
   empty on categories without beer) and a layout, which only an import puts
-  on the label. The import dialog takes ZPL or TSPL at a chosen resolution or
-  the model's own JSON (`{ name, purpose, spec }` or a bare layout), checks
-  it (`analyzeImport`: the domain's parsers, then every element moved inside
-  the label, measured with the purpose's sample data), lists the lines or
+  on the label and the preview shows as it prints (`PreviewPane`, after the
+  cloud's): drawn at 3 px per millimetre with the purpose's sample data and
+  again whenever the layout changes (`drawLabel`), every text the print
+  rasterizes (anything but printable ASCII, Cyrillic above all) covered with
+  the print's own bitmap, asked of the rasterizer with the options the
+  domain's generators give it and painted where the printer puts it
+  (`compositeTextRasters`: the element's estimated box and the bitmap's own
+  rectangle go white first, since the printer's bitmap is opaque, then its
+  black dots, in whole printer dots); codes are schematic, except a product
+  duplicate's, which is the station's raster (`paintCodeRasters`). While the
+  layout has such text the editor checks that the bundled font has Cyrillic
+  (`checkFamilyCoverage`: opentype.js reads the app's own IBM Plex `.woff`
+  files, the Latin and the Cyrillic subset, since 2.0.0 cannot read WOFF2; no
+  network) and warns when it lacks it or could not be checked; the check does
+  not run again for every change of the layout, and a warning from an earlier
+  check may show again until the new answer arrives. The canvas is an image
+  named by the label's size. The office draws through `LabelRendering`
+  (`Office`'s `labels`: a canvas context, the rasterizer, the font check and
+  the thumbnails' `whenVisible`), the webview's own by default; tests pass
+  `quietLabelRendering` or a recording canvas, since jsdom has no canvas
+  (`test/setup.ts` quiets its `getContext`) and fetches no font file. The
+  import dialog takes ZPL or TSPL at a chosen resolution or the model's own
+  JSON (`{ name, purpose, spec }` or a bare layout), checks it
+  (`analyzeImport`: the domain's parsers, then every element moved inside the
+  label, measured with the purpose's sample data), lists the lines or
   properties it drops for an acknowledgement and replaces the layout; a
   JSON's name names a template that has none yet, and the field list copies
   each field's token (`navigator.clipboard`; a failed copy says to copy by
@@ -1229,30 +1268,44 @@ requests and offer a retry.
   on a preset size choosing it changes nothing. A product duplicate's layout
   must keep the domain's duplicate rule (`assertDuplicateTemplate`): while it
   does not, «Сохранить» is off (a form submitted another way sends nothing)
-  and the editor offers the domain's duplicate 58×40 back. «Скачать JSON»
-  saves `{ name, purpose, spec }` through a blob URL and `<a download>` under
-  a file name made of the template's name, Cyrillic letters kept; only jsdom
-  has run it, not the Tauri webview (WebView2, WKWebView), so a webview that
-  refuses the download would need a save-file command of the shell. Nothing
-  reaches the host before «Сохранить»: the layout goes as
-  `labelTemplateSpecSchema` makes it (`checkedSpec`), the categories as
-  `null` or ascending. A new template or a copy is a create
-  (`templateCreate`); a new blank template's untouched starting layout
-  follows its purpose (a box an empty 58×40, a duplicate the domain's
-  duplicate, a pallet the stock pallet 100×150), and a copy keeps its layout
-  under «<name> — копия». A template opened for a change is read whenever the
-  page opens and shown only once read on this visit (until then «Загрузка…»,
-  never a failure of an earlier visit); its purpose is fixed, «Сохранить» is
-  off until something changed, and the save sends what differs and the layout
-  with the opened revision (`templateUpdate`). A stock template is not opened
-  for a change (its row offers «Копировать», and its address explains and
-  offers a copy), nor is a layout the domain cannot read; a template deleted
-  elsewhere is said to be gone. The form is off while a save is on its way,
-  and so are «Копировать» and «Удалить»; a save or a delete answered after
-  the user left through the menu does not take them back to «Шаблоны» (the
-  cached list is reset all the same, with `resetQueries`, so a list page the
-  user left for meanwhile reads it again). A refusal goes under the name or the
-  categories, which then take focus, or above the form (`editorFailure`): a
+  and the editor offers the domain's duplicate 58×40 back. «Скачать ZPL»,
+  «Скачать TSPL (TSC)» and «Скачать JSON» save through a blob URL and
+  `<a download>` under a file name made of the template's name, Cyrillic
+  letters kept. A code file is the domain's `generateZpl` or `generateTspl` of
+  the layout, with the sample data, the render options and the rasterizer the
+  preview uses, so it is what a station would send to its printer, its Cyrillic
+  as the print's bitmaps, written byte for byte (`latin1Bytes`, the station's
+  `latin1ToBytes`: a `Blob` of the text would write each character from 0x80
+  up, TSPL's bitmap bytes among them, as two). The domain's emitters do not
+  reject a character above U+00FF in a code's data (a `{ literal }`, or a
+  field bound to one, such as a QR of the product name) and `latin1Bytes`
+  makes it a control byte, as the station's does; that limit is the domain's
+  (`packages/*`), not this app's. Both code downloads are off while a file is
+  being made and while a duplicate breaks its rule; a file that could not be
+  made (any failure of the generators or the bitmaps) is not saved, and an
+  alert below the buttons says the Russian text could not be drawn. The JSON
+  is `{ name, purpose, spec }`. Only jsdom has run the downloads, not the
+  Tauri webview (WebView2, WKWebView), so a webview that refuses them would
+  need a save-file command of the shell. Nothing reaches the host before
+  «Сохранить»: the layout goes as `labelTemplateSpecSchema` makes it
+  (`checkedSpec`), the categories as `null` or ascending. A new template or a
+  copy is a create (`templateCreate`); a new blank template's untouched
+  starting layout follows its purpose (a box an empty 58×40, a duplicate the
+  domain's duplicate, a pallet the stock pallet 100×150), and a copy keeps its
+  layout under «<name> — копия». A template opened for a change is read
+  whenever the page opens and shown only once read on this visit (until then
+  «Загрузка…», never a failure of an earlier visit); its purpose is fixed,
+  «Сохранить» is off until something changed, and the save sends what differs
+  and the layout with the opened revision (`templateUpdate`). A stock
+  template is not opened for a change (its row offers «Копировать», and its
+  address explains and offers a copy), nor is a layout the domain cannot read;
+  a template deleted elsewhere is said to be gone. The form is off while a
+  save is on its way, and so are «Копировать» and «Удалить»; a save or a
+  delete answered after the user left through the menu does not take them back
+  to «Шаблоны» (the cached list is reset all the same, with `resetQueries`, so
+  a list page the user left for meanwhile reads it again). A refusal goes
+  under the name or the categories, which then take focus, or above the form
+  (`editorFailure`): a
   default the change would break says whose default it is, `stale_revision`
   offers «Загрузить заново», which reads the template again and starts the
   editor afresh without the edits, and `not_found` says the template is gone.
@@ -1271,8 +1324,14 @@ requests and offer a retry.
   with unsaved changes («К шаблонам», the menu, «Копировать») asks first
   (`useBlocker`), except right after a save or a delete; the end of the
   session unmounts the office without asking, and closing the window is not
-  guarded either (that would be the shell's). The preview, the ZPL and TSPL
-  downloads and the thumbnails come with plan 1e4b.
+  guarded either (that would be the shell's). Plan 1e4b's drawing has run only
+  under jsdom, where tests check a recording context's calls, not pixels, and
+  stand-ins replace the rasterizer, the font check and the observer; never run
+  in a real window are the canvas pixels and their sharpness at 3 px per
+  millimetre, `document.fonts.load` of Cyrillic and the rasterizer in WebView2
+  and WKWebView, fetching the `.woff` files and the on-demand chunks over
+  Tauri's protocol, `IntersectionObserver` there, `<a download>` for all three
+  downloads, and printing a downloaded file on a real Zebra or TSC printer.
 - «Умолчания шаблонов» (section «Каталог») edits the one defaults document
   (`GET/PUT /v1/office/template-defaults`): the page reads it whenever it opens
   (`useTemplateDefaults`, `staleTime` 0), with the template list, which it reads
