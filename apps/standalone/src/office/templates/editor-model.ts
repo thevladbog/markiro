@@ -109,6 +109,24 @@ export function checkedSpec(spec: LabelTemplateSpec): TemplateSpec | null {
   return parsed.success ? parsed.data : null;
 }
 
+/** The largest layout the host keeps: 256 KB of compact JSON (`validate::MAX_SPEC_BYTES`). */
+export const MAX_SPEC_BYTES = 256 * 1024;
+
+/**
+ * The bytes of a layout as the host measures them: its compact JSON in UTF-8
+ * (`serde_json::to_string(spec).len()`). `JSON.stringify` writes the same
+ * text for a layout the schema accepts, so a Cyrillic letter counts two
+ * bytes, an escaped quote two, as at the host.
+ */
+export function specBytes(spec: TemplateSpec): number {
+  return new TextEncoder().encode(JSON.stringify(spec)).length;
+}
+
+/** Whether the host would refuse the layout for its size: over 256 KB, the limit itself kept. */
+export function specTooLarge(spec: TemplateSpec): boolean {
+  return specBytes(spec) > MAX_SPEC_BYTES;
+}
+
 /**
  * The layout at a new size with every element moved inside it
  * (`fitSpecElements`, measured with the purpose's sample data), or `null`

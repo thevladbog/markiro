@@ -15,11 +15,14 @@ import {
   draftChanged,
   duplicateLayoutInvalid,
   egaisOutsideScope,
+  MAX_SPEC_BYTES,
   parseSizeMm,
   presetOf,
   readSpec,
   resizedSpec,
   SIZE_PRESETS,
+  specBytes,
+  specTooLarge,
   startingSpec,
   templateFileName,
   templateJson,
@@ -239,5 +242,71 @@ describe("the template editor's model", () => {
     expect(templateFileName(" Коробка 58×40 ")).toBe("Коробка-58-40");
     expect(templateFileName("Box_1 (copy)")).toBe("Box_1-copy");
     expect(templateFileName("«»…")).toBe("label");
+  });
+});
+
+/** A layout with one text element, which weighs what its text weighs. */
+function withText(text: string): LabelTemplateSpec {
+  return {
+    ...BLANK_SPEC,
+    elements: [{ kind: "text", id: "t", xMm: 1, yMm: 1, fontSizePt: 10, text }],
+  };
+}
+
+/**
+ * A layout of exactly `bytes` bytes of compact JSON, its text made of `filler`
+ * (a character of two bytes leaves an odd byte to a plain «x»).
+ */
+function layoutOfBytes(bytes: number, filler = "x"): LabelTemplateSpec {
+  const rest = bytes - specBytes(withText(""));
+  const width = new TextEncoder().encode(filler).length;
+  return withText(filler.repeat(Math.floor(rest / width)) + "x".repeat(rest % width));
+}
+
+describe("the size the host keeps a layout at", () => {
+  it("counts the bytes of the compact JSON the host measures", () => {
+    expect(specBytes(BLANK_SPEC)).toBe(
+      '{"widthMm":58,"heightMm":40,"dpi":203,"language":"zpl","elements":[]}'.length,
+    );
+    expect(MAX_SPEC_BYTES).toBe(262144);
+  });
+
+  it("counts a character by its bytes in UTF-8 and an escape as the two characters it is", () => {
+    const empty = specBytes(withText(""));
+    expect(specBytes(withText("x")) - empty).toBe(1);
+    expect(specBytes(withText("я")) - empty).toBe(2);
+    expect(specBytes(withText("€")) - empty).toBe(3);
+    expect(specBytes(withText("😀")) - empty).toBe(4);
+    expect(specBytes(withText('"')) - empty).toBe(2);
+    expect(specBytes(withText("\\")) - empty).toBe(2);
+  });
+
+  it("builds layouts of an exact size for the boundary tests below", () => {
+    for (const filler of ["x", "я", "€", "😀"]) {
+      expect(specBytes(layoutOfBytes(MAX_SPEC_BYTES, filler)), filler).toBe(MAX_SPEC_BYTES);
+      expect(specBytes(layoutOfBytes(MAX_SPEC_BYTES + 1, filler)), filler).toBe(MAX_SPEC_BYTES + 1);
+    }
+  });
+
+  it("finds a layout too large from one byte over 256 KB, and not at 256 KB", () => {
+    expect(specTooLarge(layoutOfBytes(MAX_SPEC_BYTES - 1))).toBe(false);
+    expect(specTooLarge(layoutOfBytes(MAX_SPEC_BYTES))).toBe(false);
+    expect(specTooLarge(layoutOfBytes(MAX_SPEC_BYTES + 1))).toBe(true);
+    expect(specTooLarge(BLANK_SPEC)).toBe(false);
+  });
+
+  it("weighs Cyrillic text by its bytes: fewer than 256 K characters can be too many bytes", () => {
+    const cyrillic = layoutOfBytes(MAX_SPEC_BYTES + 1, "я");
+    expect(JSON.stringify(cyrillic).length).toBeLessThan(MAX_SPEC_BYTES);
+    expect(specTooLarge(cyrillic)).toBe(true);
+    expect(specTooLarge(layoutOfBytes(MAX_SPEC_BYTES, "я"))).toBe(false);
+  });
+
+  it("measures what a save sends: the layout as the schema makes it", () => {
+    const layout = layoutOfBytes(MAX_SPEC_BYTES);
+    const sent = checkedSpec(layout);
+    expect(sent).not.toBeNull();
+    if (sent === null) return;
+    expect(specBytes(sent)).toBe(MAX_SPEC_BYTES);
   });
 });

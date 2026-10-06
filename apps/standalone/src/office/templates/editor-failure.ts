@@ -23,8 +23,9 @@ const EDITOR_FIELDS: Readonly<Record<string, EditorField | FieldMessage<EditorFi
  * Sorts a refused create or update of a template: a template that is a
  * default (`template_is_default`: switched off or narrowed out of its slot)
  * says whose; a stock template's name or layout (`stock_template`), a layout
- * the host would not keep (`spec`: over 256 KB or 64 levels) and a template
- * deleted since it was opened (`not_found`) are explained above the form; a
+ * the host would not keep (`spec`: over 256 KB, which the editor measures
+ * before it sends, so this answer is the backstop) and a template deleted
+ * since it was opened (`not_found`) are explained above the form; a
  * name or categories the host refused go under their control; the rest is
  * `writeFailure`'s (`stale_revision` offers to reload).
  */

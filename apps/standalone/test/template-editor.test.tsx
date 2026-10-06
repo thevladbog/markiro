@@ -24,7 +24,13 @@ import type {
 import { createOfficeQueryClient } from "../src/office/office-query.js";
 import { OfficeSessionProvider } from "../src/office/office-session.js";
 import { downloadFile } from "../src/office/templates/download.js";
-import { resizedSpec, startingSpec } from "../src/office/templates/editor-model.js";
+import {
+  BLANK_SPEC,
+  MAX_SPEC_BYTES,
+  resizedSpec,
+  specBytes,
+  startingSpec,
+} from "../src/office/templates/editor-model.js";
 import { analyzeImport } from "../src/office/templates/import-analysis.js";
 import { NewTemplatePage } from "../src/office/templates/TemplateEditorPage.js";
 import {
@@ -381,7 +387,7 @@ describe("a new label template", () => {
     ).toBeTruthy();
     await save();
     expect(screen.getByRole("alert").textContent).toBe(
-      "✕Хост не принял макет: он больше 256 КБ или вложен глубже 64 уровней.",
+      "✕Хост не принял макет: он больше 256 КБ. Сократите тексты или импортируйте код поменьше.",
     );
     await save();
     expect(screen.getByRole("alert").textContent).toBe(
@@ -1283,6 +1289,20 @@ async function openEdit(fake: FakeOfficeSession, name = "Молоко 58×40"): 
   await settle();
 }
 
+/**
+ * A layout of exactly `bytes` bytes of compact JSON: one text element, its
+ * text made of `filler` (a character of two bytes leaves an odd byte to «x»).
+ */
+function layoutOfBytes(bytes: number, filler = "x") {
+  const withText = (text: string) => ({
+    ...BLANK_SPEC,
+    elements: [{ kind: "text" as const, id: "t", xMm: 1, yMm: 1, fontSizePt: 10, text }],
+  });
+  const rest = bytes - specBytes(withText(""));
+  const width = new TextEncoder().encode(filler).length;
+  return withText(filler.repeat(Math.floor(rest / width)) + "x".repeat(rest % width));
+}
+
 function hostError(code: string, details: Record<string, unknown> = {}): HostError {
   return new HostError({ kind: "api", code, message: code, details });
 }
@@ -1567,6 +1587,58 @@ describe("changing a label template", () => {
     });
     expect(await screen.findByText("100 × 150 мм")).toBeTruthy();
     expect(screen.getByText("Шаблон «Молоко 58×40» сохранён.")).toBeTruthy();
+  });
+
+  describe("a layout the host would refuse for its size", () => {
+    const TOO_LARGE =
+      "Макет больше 256 КБ: хост его не примет. Сократите тексты или импортируйте код поменьше.";
+
+    it.each([
+      ["one byte over 256 KB", layoutOfBytes(MAX_SPEC_BYTES + 1)],
+      [
+        "Cyrillic, under 256 K characters but one byte over 256 KB",
+        layoutOfBytes(MAX_SPEC_BYTES + 1, "я"),
+      ],
+      ["Cyrillic, well over 256 KB", layoutOfBytes(MAX_SPEC_BYTES * 2, "я")],
+    ])("is explained with a remedy before a change is sent: %s", async (_name, spec) => {
+      const fake = editSession();
+      fake.api.getTemplate.mockResolvedValue(milk({ spec }));
+      await openEdit(fake);
+      type("Название", "Молоко 60×40");
+      await save();
+      await settle();
+      expect(screen.getByRole("alert").textContent).toContain(TOO_LARGE);
+      expect(fake.api.updateTemplate).not.toHaveBeenCalled();
+      expect(saveButton()).toHaveProperty("disabled", false);
+    });
+
+    it.each([
+      ["exactly 256 KB", layoutOfBytes(MAX_SPEC_BYTES)],
+      ["Cyrillic, exactly 256 KB", layoutOfBytes(MAX_SPEC_BYTES, "я")],
+    ])("is sent as it is: %s", async (_name, spec) => {
+      const fake = editSession();
+      fake.api.getTemplate.mockResolvedValue(milk({ spec }));
+      fake.api.updateTemplate.mockResolvedValue(milk({ spec, name: "Молоко 60×40", rev: 62 }));
+      await openEdit(fake);
+      type("Название", "Молоко 60×40");
+      await save();
+      expect(fake.api.updateTemplate).toHaveBeenCalledTimes(1);
+      expect(specBytes(fake.api.updateTemplate.mock.calls[0]?.[2].spec ?? {})).toBe(MAX_SPEC_BYTES);
+      await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    });
+
+    it("is explained when a copy of it is created, and nothing is sent", async () => {
+      const fake = editSession();
+      fake.api.getTemplate.mockResolvedValue(milk({ spec: layoutOfBytes(MAX_SPEC_BYTES + 1) }));
+      await openEdit(fake);
+      fireEvent.click(screen.getByRole("button", { name: "Копировать" }));
+      await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });
+      await settle();
+      await save();
+      await settle();
+      expect(screen.getByRole("alert").textContent).toContain(TOO_LARGE);
+      expect(fake.api.createTemplate).not.toHaveBeenCalled();
+    });
   });
 
   it("sends the opened revision again, never the current one the host reported, when the same page saves once more after a stale save", async () => {

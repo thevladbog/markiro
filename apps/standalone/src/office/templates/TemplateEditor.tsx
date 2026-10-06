@@ -26,6 +26,7 @@ import {
   draftChanged,
   duplicateLayoutInvalid,
   egaisOutsideScope,
+  specTooLarge,
   startingSpec,
   templateFileName,
   templateJson,
@@ -192,6 +193,11 @@ export function TemplateEditor({
     const spec = checkedSpec(draft.spec);
     if (spec === null) {
       setFailure({ kind: "alert", message: "office.templateEditor.errors.spec" });
+      return;
+    }
+    // The host refuses a layout over 256 KB; saying so here gives the way out.
+    if (specTooLarge(spec)) {
+      setFailure({ kind: "alert", message: "office.templateEditor.errors.specTooLarge" });
       return;
     }
     let saved: LabelTemplate;
