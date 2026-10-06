@@ -1108,6 +1108,18 @@ for (const locale of LOCALES) {
       const url = new URL(route.request().url());
       const path = url.pathname;
 
+      // Support chat is disabled in these unrelated screen scenarios.
+      if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            statusCode: 503,
+            message: "Support chat unavailable",
+            error: "Service Unavailable",
+          }),
+        });
+      }
       if (path === "/api/profile") return json(route, PROFILE);
       if (path === "/api/access/me") return json(route, ACCESS);
       if (path === "/api/pickup-orders") return json(route, PICKUP_ORDERS_EMPTY);
