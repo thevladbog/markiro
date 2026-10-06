@@ -358,9 +358,10 @@ export async function paintCodeRasters(
  * («предпросмотр = печать»): every text the print rasterizes
  * (`rasterTextElements`) goes to `rasterizeText` with the options the
  * domain's generators give it, its native drawing is covered with the label's
- * white, and the bitmap is painted where the printer puts it: at the
- * element's origin in whole dots plus the same alignment offset
- * (`rasterAlignOffsetDots`). An element whose bitmap fails
+ * white (the element's estimated bounds and the bitmap's own rectangle: the
+ * printer's bitmap is opaque), and the bitmap's black dots are painted where
+ * the printer puts it: at the element's origin in whole dots plus the same
+ * alignment offset (`rasterAlignOffsetDots`). An element whose bitmap fails
  * keeps its native drawing; nothing is painted once `cancelled()` says the
  * layout has changed.
  */
@@ -396,12 +397,12 @@ export async function compositeTextRasters(
     canvas.fillStyle = LABEL_BACKGROUND;
     canvas.fillRect(bounds.x * scale, bounds.y * scale, bounds.w * scale, bounds.h * scale);
     const offsetDots = rasterAlignOffsetDots(element.align, maxWidthDots, raster.width);
-    paintRaster(
-      canvas,
-      raster,
-      (mmToDots(element.xMm, spec.dpi) + offsetDots) * dotPx,
-      mmToDots(element.yMm, spec.dpi) * dotPx,
-      dotPx,
-    );
+    const xPx = (mmToDots(element.xMm, spec.dpi) + offsetDots) * dotPx;
+    const yPx = mmToDots(element.yMm, spec.dpi) * dotPx;
+    // The bitmap is opaque on the printer's side: its blank dots are white too, so the
+    // native text outside the heuristic bounds (centred, right-aligned, wider glyphs, more
+    // lines) must not show through its own rectangle.
+    canvas.fillRect(xPx, yPx, raster.width * dotPx, raster.height * dotPx);
+    paintRaster(canvas, raster, xPx, yPx, dotPx);
   }
 }

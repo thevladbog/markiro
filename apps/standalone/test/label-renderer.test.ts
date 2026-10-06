@@ -101,7 +101,7 @@ const LAYOUT: LabelTemplateSpec = {
   ],
 };
 
-/** A one-dot bitmap that answers every rasterize call, and the calls it got. */
+/** A bitmap that answers every rasterize call (by default a one-dot one), and the calls it got. */
 function recordingRasterizer(
   raster: RasterResult = { hex: "80", bytesPerRow: 1, totalBytes: 1, width: 1, height: 1 },
 ) {
@@ -249,11 +249,77 @@ describe("the print bitmaps over the drawing", () => {
     const bounds = elementBoundsMm(field, BOX_DATA);
     // At 203 dpi «Партия» starts at (32, 160) dots; the field at (32, 80), centred in
     // 70 mm (559 dots) as the printer centres a 1-dot bitmap: 279 dots further in.
-    expect(canvas.ops[1]).toEqual(["fillRect", "#000000", 32 * dotPx, 160 * dotPx, dotPx, dotPx]);
-    expect(canvas.ops.slice(2)).toEqual([
+    // Each bitmap is opaque like the printer's: its own rectangle is white before its dots.
+    expect(canvas.ops[1]).toEqual(["fillRect", "#ffffff", 32 * dotPx, 160 * dotPx, dotPx, dotPx]);
+    expect(canvas.ops[2]).toEqual(["fillRect", "#000000", 32 * dotPx, 160 * dotPx, dotPx, dotPx]);
+    expect(canvas.ops.slice(3)).toEqual([
       ["fillRect", "#ffffff", bounds.x * 2, bounds.y * 2, bounds.w * 2, bounds.h * 2],
+      ["fillRect", "#ffffff", (32 + 279) * dotPx, 80 * dotPx, dotPx, dotPx],
       ["fillRect", "#000000", (32 + 279) * dotPx, 80 * dotPx, dotPx, dotPx],
     ]);
+  });
+
+  it("whites out the native text of centred and right-aligned text before the bitmap's dots", async () => {
+    // A 484-dot bitmap is as wide as the native text («Пиво светлое», 12 characters of
+    // 10 px each) at scale 2, with a few dots to spare, and 40 dots high.
+    const wide: RasterResult = {
+      hex: `80${"00".repeat(61 * 40 - 1)}`,
+      bytesPerRow: 61,
+      totalBytes: 61 * 40,
+      width: 484,
+      height: 40,
+    };
+    const dotPx = (25.4 / 203) * 2;
+    for (const align of ["center", "right"] as const) {
+      const spec: LabelTemplateSpec = {
+        ...LAYOUT,
+        elements: [
+          {
+            kind: "field",
+            id: "name",
+            xMm: 4,
+            yMm: 10,
+            field: "product.printName",
+            fontSizePt: 12,
+            align,
+            maxWidthMm: 70,
+          },
+        ],
+      };
+      const native = recordingCanvas();
+      drawLabel(spec, native, 2, BOX_DATA, {});
+      const text = native.ops.find((op) => op[0] === "fillText");
+      if (text === undefined) throw new Error("no native text");
+      const [, content, x, y, boxPx] = text;
+      if (typeof content !== "string" || typeof x !== "number" || typeof y !== "number") {
+        throw new Error("a malformed text operation");
+      }
+      if (typeof boxPx !== "number") throw new Error("the text has no width");
+      const widthPx = Math.min(content.length * 10, boxPx);
+      const left = align === "center" ? x - widthPx / 2 : x - widthPx;
+      const painted = recordingCanvas();
+      const { rasterize } = recordingRasterizer(wide);
+      await compositeTextRasters(spec, painted, 2, BOX_DATA, {}, rasterize, () => false);
+      const firstInk = painted.ops.findIndex((op) => op[1] === "#000000");
+      expect(firstInk).toBeGreaterThan(0);
+      // Within one printer dot of the native extent: the fake canvas measures in round pixels.
+      const covers = painted.ops.slice(0, firstInk).some((op) => {
+        const [name, style, rectX, rectY, rectW, rectH] = op;
+        return (
+          name === "fillRect" &&
+          style === "#ffffff" &&
+          typeof rectX === "number" &&
+          typeof rectY === "number" &&
+          typeof rectW === "number" &&
+          typeof rectH === "number" &&
+          rectX <= left + dotPx &&
+          rectX + rectW >= left + widthPx - dotPx &&
+          rectY <= y + dotPx &&
+          rectY + rectH >= y + ptToMm(12) * 2
+        );
+      });
+      expect({ align, covers }).toEqual({ align, covers: true });
+    }
   });
 
   it("keeps the drawing of an element its bitmap failed for, and stops once cancelled", async () => {
@@ -264,7 +330,8 @@ describe("the print bitmaps over the drawing", () => {
       .mockResolvedValue({ hex: "80", bytesPerRow: 1, totalBytes: 1, width: 1, height: 1 });
     await compositeTextRasters(CYRILLIC, canvas, 2, BOX_DATA, {}, rasterize, () => false);
     expect(rasterize).toHaveBeenCalledTimes(2);
-    expect(canvas.ops).toHaveLength(2);
+    // Only the second element is painted: the drawing's cover, the bitmap's own white, its dots.
+    expect(canvas.ops).toHaveLength(3);
     const cancelled = recordingCanvas();
     await compositeTextRasters(CYRILLIC, cancelled, 2, BOX_DATA, {}, rasterize, () => true);
     expect(cancelled.ops).toEqual([]);
@@ -570,17 +637,29 @@ describe("which codes the station rasterizes", () => {
   });
 
   it.each([
-    ["a datamatrix of another field", "datamatrix", "sscc", { kmDataMatrix: "raster" }, true],
-    ["a qr of the marking code", "qr", "km.code", { kmDataMatrix: "raster" }, true],
-    ["a datamatrix of the marking code when drawn natively", "datamatrix", "km.code", {}, true],
     [
-      "a datamatrix of the marking code when raster",
+      "a datamatrix of another field as a schematic",
+      "datamatrix",
+      "sscc",
+      { kmDataMatrix: "raster" },
+      true,
+    ],
+    ["a qr of the marking code as a schematic", "qr", "km.code", { kmDataMatrix: "raster" }, true],
+    [
+      "a datamatrix of the marking code drawn natively as a schematic",
+      "datamatrix",
+      "km.code",
+      {},
+      true,
+    ],
+    [
+      "a datamatrix of the marking code that is a raster, not as a schematic",
       "datamatrix",
       "km.code",
       { kmDataMatrix: "raster" },
       false,
     ],
-  ] as const)("draws %s as a schematic: %s", (_name, format, data, options, schematic) => {
+  ] as const)("draws %s", (_name, format, data, options, schematic) => {
     const canvas = recordingCanvas();
     drawLabel(code(format, data), canvas, 3, BOX_DATA, options);
     expect(canvas.ops.length > 2).toBe(schematic);
@@ -814,16 +893,18 @@ describe("bitmaps and the print at other resolutions", () => {
       const element = SPEC_300.elements[index];
       if (element === undefined) throw new Error("no element");
       const bounds = elementBoundsMm(element, BOX_DATA);
+      const bitmap: Op = [
+        "fillRect",
+        "#000000",
+        (mmToDots(4, 300) + offset) * dotPx,
+        mmToDots(element.yMm, 300) * dotPx,
+        2 * dotPx,
+        dotPx,
+      ];
       expected.push(
         ["fillRect", "#ffffff", bounds.x * 3, bounds.y * 3, bounds.w * 3, bounds.h * 3],
-        [
-          "fillRect",
-          "#000000",
-          (mmToDots(4, 300) + offset) * dotPx,
-          mmToDots(element.yMm, 300) * dotPx,
-          2 * dotPx,
-          dotPx,
-        ],
+        ["fillRect", "#ffffff", ...bitmap.slice(2)],
+        bitmap,
       );
     }
     expect(near(canvas.ops)).toEqual(near(expected));
