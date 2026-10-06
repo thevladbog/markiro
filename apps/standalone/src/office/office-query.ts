@@ -26,6 +26,11 @@ export const officeKeys = {
   templateDefaults: ["office", "template-defaults"],
   /** One template with its layout (`GET /v1/office/templates/{id}`). */
   template: (id: string) => ["office", "template", id],
+  /**
+   * A template's layout for its thumbnail on «Шаблоны»: one revision of it,
+   * which no write changes (each write gives a new revision).
+   */
+  templateLayout: (id: string, rev: number) => ["office", "template-layout", id, rev],
 } as const;
 
 /**
@@ -60,6 +65,8 @@ export interface OfficeQueryOptions {
    * whenever it opens; `Infinity` for data that never changes in a session.
    */
   staleTime?: number;
+  /** Whether to read at all; `true` by default. A read held back keeps what is cached. */
+  enabled?: boolean;
 }
 
 /** Reads office data through `session.call`. */
@@ -74,6 +81,7 @@ export function useOfficeQuery<T>(
     queryFn: () => call((token) => read(api, token)),
     refetchInterval: options.refetchInterval ?? false,
     staleTime: options.staleTime ?? 0,
+    enabled: options.enabled ?? true,
   });
 }
 

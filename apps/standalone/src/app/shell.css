@@ -188,6 +188,23 @@
   gap: 8px;
 }
 
+/* A template's thumbnail: a fixed box on the panel tone, the label as white stock inside it. */
+.template-thumb {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 48px;
+  background: var(--surface-panel);
+  border-radius: var(--r-1);
+}
+
+.template-thumb__label {
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+}
+
 /* A template's categories: the choice, the search and a list of groups that scrolls. */
 .category-scope {
   display: grid;

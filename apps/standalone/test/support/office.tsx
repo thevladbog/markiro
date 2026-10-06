@@ -105,14 +105,16 @@ export function fakeOfficeSession(
 
 /**
  * Label drawing that stays still in jsdom: no canvas, a rasterizer that
- * refuses as the webview does without one, and a font check that never
- * answers, so no warning arrives after a test has looked.
+ * refuses as the webview does without one, a font check that never answers,
+ * so no warning arrives after a test has looked, and no thumbnail ever on
+ * screen, so «Шаблоны» reads no layout.
  */
 export function quietLabelRendering(): LabelRendering {
   return {
     context: () => null,
     rasterizeText: () => Promise.reject(new RasterUnavailableError()),
     checkFamilyCoverage: () => new Promise<boolean>(() => undefined),
+    whenVisible: () => () => undefined,
   };
 }
 

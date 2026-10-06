@@ -26,6 +26,7 @@ import { LoadError, PageLoading } from "../page-state.js";
 import { useChangeList } from "../records.js";
 import { TemplateCategoriesDialog } from "./TemplateCategoriesDialog.js";
 import { TemplateStateDialog } from "./TemplateStateDialog.js";
+import { TemplateThumb } from "./TemplateThumb.js";
 import {
   findTemplates,
   templatesByName,
@@ -44,8 +45,8 @@ type TemplatesDialog = { kind: "state" | "categories"; template: LabelTemplateSu
 const EDITOR_RETURN = z.object({ notice: z.string() });
 
 /**
- * The label templates (spec §4.3, §5.5): a table, not the cloud's cards with
- * thumbnails (no layout is drawn before plan 1e4b). The host sends the whole
+ * The label templates (spec §4.3, §5.5): a table, not the cloud's cards, with
+ * a thumbnail beside each name (`TemplateThumb`). The host sends the whole
  * list, so the search and the filters work here, and the page sorts what it
  * shows by name. A product group's name comes from the host's lookup; when it
  * does not load, the list stays and shows the codes. Both office roles switch
@@ -94,7 +95,8 @@ export function TemplatesPage() {
       wrap: true,
       render: (template) => (
         <span className="template-name">
-          <span>{template.name}</span>
+          <TemplateThumb template={template} />
+          <span className="template-name__text">{template.name}</span>
           {template.stock && <Badge tone="steel">{t("office.templates.stock")}</Badge>}
         </span>
       ),

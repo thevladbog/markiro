@@ -1,3 +1,4 @@
+import type { LabelTemplateSummary } from "../host/protocol.js";
 import { officeKeys, useOfficeQuery } from "./office-query.js";
 
 /**
@@ -18,6 +19,23 @@ export function useProductGroups() {
  */
 export function useTemplates() {
   return useOfficeQuery(officeKeys.templates, (api, token) => api.listTemplates(token));
+}
+
+/**
+ * A template with its layout for its thumbnail (`GET /v1/office/templates/{id}`),
+ * kept by id and revision and never read again while cached
+ * (`staleTime: Infinity`): any write gives a new revision, so the pair never
+ * goes stale. Read only once `enabled` (the row is on screen).
+ */
+export function useTemplateLayout(
+  template: Pick<LabelTemplateSummary, "id" | "rev">,
+  enabled: boolean,
+) {
+  return useOfficeQuery(
+    officeKeys.templateLayout(template.id, template.rev),
+    (api, token) => api.getTemplate(token, template.id),
+    { staleTime: Infinity, enabled },
+  );
 }
 
 /**

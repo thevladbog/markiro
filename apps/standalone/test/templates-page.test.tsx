@@ -96,10 +96,11 @@ function rows(): HTMLElement[] {
   return within(screen.getByRole("table")).getAllByRole("row").slice(1);
 }
 
-/** The names column, top to bottom, without the «Типовой» tag. */
+/** The names column, top to bottom, without the thumbnail and the «Типовой» tag. */
 function names(): (string | null | undefined)[] {
   return rows().map(
-    (row) => within(row).getAllByRole("cell")[0]?.firstElementChild?.firstElementChild?.textContent,
+    (row) =>
+      within(row).getAllByRole("cell")[0]?.querySelector(".template-name__text")?.textContent,
   );
 }
 
