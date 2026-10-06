@@ -6,6 +6,7 @@ import { createHostApi, type HostApi } from "../src/host/api.js";
 import type { HostClient, HttpMethod } from "../src/host/client.js";
 import {
   badgeCreateSchema,
+  bootstrapRequestSchema,
   counterpartyCreateSchema,
   counterpartyUpdateSchema,
   deviceUpdateSchema,
@@ -386,6 +387,18 @@ describe("HostApi office endpoints", () => {
   it("rejects a users answer that is not a list", async () => {
     const { api } = recording(fixture("office-user-record.json"));
     await expect(api.listUsers(TOKEN)).rejects.toThrow();
+  });
+});
+
+describe("HostApi bootstrap", () => {
+  it("forwards the stock templates of the request to the host unchanged", async () => {
+    const request = bootstrapRequestSchema.parse(fixture("bootstrap-request-templates.json"));
+    expect(request.templates?.length).toBeGreaterThan(0);
+    const { api, sent } = recording(fixture("bootstrap-response.json"));
+    await api.bootstrap(request);
+    expect(sent).toEqual([
+      { method: "POST", path: "/v1/bootstrap", body: request, officeToken: undefined },
+    ]);
   });
 });
 

@@ -741,7 +741,7 @@ describe("office template defaults: the organization's, beyond the plan", () => 
     expect(screen.getByLabelText("Шаблон паллеты")).toHaveProperty("value", PALLET.id);
   });
 
-  it("reads the templates again after a refused default only, not after a stale write or another failure", async () => {
+  it("does not read the templates again after a 500 or after a stale save", async () => {
     const fake = session();
     fake.api.updateTemplateDefaults
       .mockRejectedValueOnce(hostError("internal", 500))
@@ -1030,7 +1030,7 @@ describe("office template defaults: the categories', beyond the plan", () => {
     ]);
   });
 
-  it("shows the card as a second-level heading over a table of four named columns, «Убрать» in its own words, a tag of its tone for each purpose, and no dialog until one is asked for", async () => {
+  it("shows the card as a second-level heading over a table of four named columns, «Убрать» in its own words, a tag of its tone for each purpose, a wrapping category column, a secondary «Добавить умолчание категории» button, and no dialog until one is asked for", async () => {
     await openDefaults(session(FOUR_DEFAULTS));
     expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByRole("heading", { name: "Для категорий", level: 2 })).toBeTruthy();
@@ -1045,8 +1045,9 @@ describe("office template defaults: the categories', beyond the plan", () => {
       name: "Убрать умолчание: Молочная продукция, Короб",
     });
     expect(remove.textContent).toBe("Убрать");
-    // A long category name wraps; the other cells stay on one line.
+    // A long category name wraps; the purpose cell next to it stays on one line.
     expect(table.getAllByRole("cell")[0]?.style.whiteSpace).toBe("normal");
+    expect(table.getAllByRole("cell")[1]?.style.whiteSpace).toBe("nowrap");
     for (const [purpose, tone, count] of [
       ["Короб", "violet", 2],
       ["Паллета", "magenta", 1],
@@ -1062,7 +1063,7 @@ describe("office template defaults: the categories', beyond the plan", () => {
     );
   });
 
-  it("lets both office roles add, change and remove category defaults", async () => {
+  it("shows both office roles the enabled add button, row choice and «Убрать» of the category defaults", async () => {
     for (const user of [TECHNOLOGIST, { ...TECHNOLOGIST, role: "admin" as const }]) {
       const view = renderOffice(session(DEFAULTS, user));
       fireEvent.click(await screen.findByRole("link", { name: "Умолчания шаблонов" }));

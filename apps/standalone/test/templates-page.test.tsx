@@ -412,7 +412,7 @@ describe("office label templates", () => {
     expect(name.nextElementSibling?.textContent).toBe("Типовой");
   });
 
-  it("sets the size and the resolution in the mono face, and lets the name and the categories wrap; the button stays on one line", async () => {
+  it("sets the size and the resolution in the mono face, and lets the name and the categories wrap; the cell with the two action buttons stays on one line", async () => {
     await openTemplates(session());
     const row = within(rowOf("Коробка 58×40")).getAllByRole("cell");
     expect(row.map((cell) => cell.classList.contains("font-mono"))).toEqual([
@@ -857,7 +857,12 @@ describe("office label templates: categories", () => {
     localStorage.removeItem("markiro.theme");
   });
 
-  /** Opens a template's «Категории» and waits for the groups. */
+  /**
+   * Opens the templates page, then a template's «Категории» dialog, and asserts
+   * the dialog is there. It does not wait for the group lookup: a test that
+   * reads a group's checkbox right after relies on `openTemplates` having
+   * returned after the groups loaded.
+   */
   async function openCategories(fake: FakeOfficeSession, name: string): Promise<void> {
     await openTemplates(fake);
     fireEvent.click(screen.getByRole("button", { name: `Категории шаблона «${name}»` }));
@@ -975,7 +980,7 @@ describe("office label templates: categories", () => {
 
   // Beyond the plan: each test below kills a mutant the plan's tests let through.
 
-  it("lets both office roles change a template's categories, each button named after its template", async () => {
+  it("lets both office roles open «Категории» from the button named after the «Коробка 58×40» template", async () => {
     for (const user of [TECHNOLOGIST, { ...TECHNOLOGIST, role: "admin" as const }]) {
       const view = renderOffice(session(TEMPLATES, user));
       fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
