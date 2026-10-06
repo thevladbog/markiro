@@ -24,6 +24,8 @@ export const officeKeys = {
   products: ["office", "products"],
   templates: ["office", "templates"],
   templateDefaults: ["office", "template-defaults"],
+  /** One template with its layout (`GET /v1/office/templates/{id}`). */
+  template: (id: string) => ["office", "template", id],
 } as const;
 
 /**

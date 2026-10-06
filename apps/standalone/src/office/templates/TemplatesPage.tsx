@@ -166,6 +166,17 @@ export function TemplatesPage() {
           >
             {t("office.templates.categories")}
           </Button>
+          {/* A stock template keeps its name and layout (the host refuses a change). */}
+          {!template.stock && (
+            <Button
+              variant="secondary"
+              size="compact"
+              aria-label={t("office.templates.editNamed", { name: template.name })}
+              onClick={() => void navigate(`/templates/${template.id}`)}
+            >
+              {t("office.templates.edit")}
+            </Button>
+          )}
         </RowActions>
       ),
     });

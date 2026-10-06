@@ -5,8 +5,13 @@ import { useNavigate } from "react-router";
 
 import { Alert, Button, Card, Checkbox, Input, PageHeader, Select } from "@markiro/ui";
 
-import type { LabelTemplate, TemplateCreate, TemplatePurpose } from "../../host/protocol.js";
-import { templateCreate } from "../../host/requests.js";
+import type {
+  LabelTemplate,
+  TemplateCreate,
+  TemplatePurpose,
+  TemplateUpdate,
+} from "../../host/protocol.js";
+import { templateCreate, templateUpdate } from "../../host/requests.js";
 import { errorProp } from "../../lib/form-error.js";
 import { useProductGroups } from "../catalog-queries.js";
 import { officeKeys, useOfficeMutation } from "../office-query.js";
@@ -34,8 +39,15 @@ import { dpiText, PURPOSES, sizeText } from "./template-text.js";
 export interface TemplateEditorProps {
   /** The page's heading. */
   title: string;
+  /**
+   * The template being changed, as it was read when the page opened: its
+   * revision goes with the save. `null` for a new template.
+   */
+  template: LabelTemplate | null;
   /** What the editor opens with; a save sends the draft made of it. */
   opened: TemplateDraft;
+  /** Reads the template again after a stale save; the editor then starts afresh. */
+  onReload?: () => void;
 }
 
 /**
@@ -45,11 +57,14 @@ export interface TemplateEditorProps {
  * only an import puts on the label (`ImportCodeDialog`); a layout downloads
  * as JSON. Nothing goes to the host before «Сохранить»: the name is trimmed
  * (`templateNameRule`), the layout is what `labelTemplateSpecSchema` makes
- * of it (`checkedSpec`), the categories go ascending (`scopeCodes`). A saved
- * template takes the office back to «Шаблоны» with a notice, and the list,
- * which holds no layouts, is read again.
+ * of it (`checkedSpec`), the categories go ascending (`scopeCodes`). A new
+ * template is created (`templateCreate`); a template being changed keeps its
+ * purpose and sends what differs and its layout with the opened revision
+ * (`templateUpdate`), «Сохранить» staying off until something changed. A
+ * saved template takes the office back to «Шаблоны» with a notice, and the
+ * list, which holds no layouts, is read again.
  */
-export function TemplateEditor({ title, opened }: TemplateEditorProps) {
+export function TemplateEditor({ title, template, opened, onReload }: TemplateEditorProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -67,6 +82,10 @@ export function TemplateEditor({ title, opened }: TemplateEditorProps) {
   const [saving, setSaving] = useState(false);
   const create = useOfficeMutation((api, token, body: TemplateCreate) =>
     api.createTemplate(token, body),
+  );
+  const update = useOfficeMutation(
+    (api, token, { id, body }: { id: string; body: TemplateUpdate }) =>
+      api.updateTemplate(token, id, body),
   );
   const ids = useId();
   const nameId = `${ids}-name`;
@@ -136,15 +155,26 @@ export function TemplateEditor({ title, opened }: TemplateEditorProps) {
     }
     let saved: LabelTemplate;
     try {
-      saved = await create.mutateAsync(
-        templateCreate({
-          name: name.data,
-          purpose: draft.purpose,
-          enabled: draft.enabled,
-          chzProductGroupCodes: codes,
-          spec,
-        }),
-      );
+      saved =
+        template === null
+          ? await create.mutateAsync(
+              templateCreate({
+                name: name.data,
+                purpose: draft.purpose,
+                enabled: draft.enabled,
+                chzProductGroupCodes: codes,
+                spec,
+              }),
+            )
+          : await update.mutateAsync({
+              id: template.id,
+              body: templateUpdate(template, {
+                name: name.data,
+                enabled: draft.enabled,
+                chzProductGroupCodes: codes,
+                spec,
+              }),
+            });
     } catch (error) {
       const outcome = editorFailure(error);
       if (outcome.kind === "field") refuse(outcome.field, outcome.message);
@@ -154,7 +184,12 @@ export function TemplateEditor({ title, opened }: TemplateEditorProps) {
     // The list holds no layouts and is read again; nothing of this template is kept.
     queryClient.removeQueries({ queryKey: officeKeys.templates, exact: true });
     void navigate("/templates", {
-      state: { notice: t("office.templateEditor.created", { name: saved.name }) },
+      state: {
+        notice: t(
+          template === null ? "office.templateEditor.created" : "office.templateEditor.saved",
+          { name: saved.name },
+        ),
+      },
     });
   };
 
@@ -191,7 +226,11 @@ export function TemplateEditor({ title, opened }: TemplateEditorProps) {
         }
       />
       <form className="standalone-form" onSubmit={send} noValidate>
-        <TemplateFailureAlert failure={failure} groups={groups.data} />
+        <TemplateFailureAlert
+          failure={failure}
+          groups={groups.data}
+          {...(onReload === undefined ? {} : { onReload })}
+        />
         {/* Off while a save is on its way: an edit made then would be lost. */}
         <fieldset className="template-editor__fields" disabled={saving}>
           <Card title={t("office.templateEditor.general")} titleAs="h2">
@@ -206,6 +245,9 @@ export function TemplateEditor({ title, opened }: TemplateEditorProps) {
               <Select
                 native
                 label={t("office.templateEditor.purpose")}
+                // The host has no way to change a purpose.
+                disabled={template !== null}
+                {...(template === null ? {} : { hint: t("office.templateEditor.purposeFixed") })}
                 options={PURPOSES.map((value) => ({
                   value,
                   label: t(`office.templates.purposes.${value}`),
@@ -283,7 +325,11 @@ export function TemplateEditor({ title, opened }: TemplateEditorProps) {
           <p className="office-note" aria-live="polite">
             {dirty ? t("office.templateEditor.dirty") : ""}
           </p>
-          <Button type="submit" loading={saving} disabled={duplicateInvalid}>
+          <Button
+            type="submit"
+            loading={saving}
+            disabled={duplicateInvalid || (template !== null && !dirty)}
+          >
             {t("office.common.save")}
           </Button>
         </div>

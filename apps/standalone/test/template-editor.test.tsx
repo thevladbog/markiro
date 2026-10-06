@@ -1135,6 +1135,401 @@ describe("the label's size", () => {
   });
 });
 
+const MILK_ID = "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d";
+
+/** «Молоко 58×40» in the list: a template of the site's own, for milk. */
+const MILK_ROW: LabelTemplateSummary = {
+  ...BOX_58,
+  id: MILK_ID,
+  name: "Молоко 58×40",
+  stock: false,
+  chzProductGroupCodes: [8],
+  widthMm: 58.06,
+  heightMm: 40.04,
+  rev: 61,
+};
+
+/** «Молоко 58×40» as `GET /v1/office/templates/{id}` answers. */
+function milk(data: Partial<LabelTemplate> = {}): LabelTemplate {
+  return {
+    id: MILK_ID,
+    name: "Молоко 58×40",
+    purpose: "box",
+    enabled: true,
+    chzProductGroupCodes: [8],
+    stock: false,
+    spec: importedSpec(),
+    rev: 61,
+    ...data,
+  };
+}
+
+function editSession(user = TECHNOLOGIST) {
+  const fake = session(user);
+  fake.api.listTemplates.mockResolvedValue([BOX_58, MILK_ROW]);
+  fake.api.getTemplate.mockResolvedValue(milk());
+  return fake;
+}
+
+async function openEdit(fake: FakeOfficeSession, name = "Молоко 58×40"): Promise<void> {
+  await openTemplates(fake);
+  fireEvent.click(screen.getByRole("button", { name: `Изменить шаблон «${name}»` }));
+  await screen.findByRole("heading", { name: `Шаблон «${name}»` });
+  await settle();
+}
+
+function hostError(code: string, details: Record<string, unknown> = {}): HostError {
+  return new HostError({ kind: "api", code, message: code, details });
+}
+
+describe("changing a label template", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+  });
+
+  it("opens the template as the host has it, with its purpose fixed and «Сохранить» off until something changes", async () => {
+    for (const user of [SESSION.user, TECHNOLOGIST]) {
+      const fake = editSession(user);
+      const view = await openTemplates(fake);
+      expect(screen.queryByRole("button", { name: "Изменить шаблон «Коробка 58×40»" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Молоко 58×40»" }));
+      await screen.findByRole("heading", { name: "Шаблон «Молоко 58×40»" });
+      expect(fake.api.getTemplate).toHaveBeenCalledWith("office-session-token", MILK_ID);
+      expect(screen.getByLabelText("Название")).toHaveProperty("value", "Молоко 58×40");
+      const purpose = screen.getByRole("combobox", { name: "Назначение" });
+      expect(purpose).toHaveProperty("disabled", true);
+      expect(screen.getByText("Назначение не меняется после создания.")).toBeTruthy();
+      expect(
+        screen.getByRole("radio", { name: "Только выбранные" }).getAttribute("aria-checked"),
+      ).toBe("true");
+      expect(
+        (await screen.findByRole("checkbox", { name: "Молочная продукция" })).getAttribute(
+          "aria-checked",
+        ),
+      ).toBe("true");
+      expect(screen.getByText("Размер: 58,06 × 40,04 мм · 203 dpi")).toBeTruthy();
+      expect(screen.getByText("Элементов в макете: 2")).toBeTruthy();
+      expect(saveButton()).toHaveProperty("disabled", true);
+      type("Название", "Молоко 60×40");
+      expect(saveButton()).toHaveProperty("disabled", false);
+      type("Название", "Молоко 58×40");
+      expect(saveButton()).toHaveProperty("disabled", true);
+      view.unmount();
+    }
+  });
+
+  it("sends what changed and the layout with the opened revision, then lists the templates again with a notice", async () => {
+    const fake = editSession();
+    fake.api.updateTemplate.mockResolvedValue(
+      milk({ name: "Молоко 60×40", enabled: false, rev: 62 }),
+    );
+    await openEdit(fake);
+    type("Название", " Молоко 60×40 ");
+    fireEvent.click(screen.getByRole("checkbox", { name: "Включён" }));
+    await save();
+    expect(fake.api.updateTemplate).toHaveBeenCalledTimes(1);
+    expect(fake.api.updateTemplate.mock.calls[0]?.slice(1)).toStrictEqual([
+      MILK_ID,
+      { expectedRev: 61, name: "Молоко 60×40", enabled: false, spec: importedSpec() },
+    ]);
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    expect(screen.getByText("Шаблон «Молоко 60×40» сохранён.")).toBeTruthy();
+    await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(2));
+  });
+
+  it("offers to load the template again after a stale save, which drops the edits and sends the new revision", async () => {
+    const fake = editSession();
+    fake.api.updateTemplate
+      .mockRejectedValueOnce(hostError("stale_revision", { currentRev: 64 }))
+      .mockResolvedValueOnce(milk({ name: "Молоко 70×40", rev: 65 }));
+    await openEdit(fake);
+    type("Название", "Молоко 60×40");
+    await save();
+    const stale = screen.getByRole("alert");
+    expect(stale.textContent).toContain("Данные изменились");
+    fake.api.getTemplate.mockResolvedValue(milk({ name: "Молоко (со склада)", rev: 64 }));
+    fireEvent.click(within(stale).getByRole("button", { name: "Загрузить заново" }));
+    await screen.findByRole("heading", { name: "Шаблон «Молоко (со склада)»" });
+    expect(screen.getByLabelText("Название")).toHaveProperty("value", "Молоко (со склада)");
+    expect(screen.queryByRole("alert")).toBeNull();
+    type("Название", "Молоко 70×40");
+    await save();
+    expect(fake.api.updateTemplate.mock.calls[1]?.[2]).toMatchObject({ expectedRev: 64 });
+  });
+
+  it("says whose default a template is when switching it off is refused", async () => {
+    const fake = editSession();
+    fake.api.updateTemplate.mockRejectedValue(
+      hostError("conflict", {
+        constraint: "template_is_default",
+        organizationDefault: false,
+        categoryDefaults: [8],
+      }),
+    );
+    await openEdit(fake);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Включён" }));
+    await save();
+    expect(screen.getByRole("alert").textContent).toBe(
+      "✕Шаблон выбран по умолчанию для категорий: Молочная продукция. Сначала выберите другой шаблон на странице «Умолчания шаблонов».",
+    );
+  });
+
+  it("says the template is gone when it was deleted elsewhere, and the list is read again", async () => {
+    const fake = editSession();
+    fake.api.updateTemplate.mockRejectedValue(hostError("not_found"));
+    await openEdit(fake);
+    type("Название", "Молоко 60×40");
+    await save();
+    expect(screen.getByRole("alert").textContent).toBe(
+      "✕Шаблона больше нет на хосте: его удалили на другом рабочем месте.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(2));
+  });
+
+  it("reads the template again on every opening and shows the editor only with what this visit read", async () => {
+    const fake = editSession();
+    await openEdit(fake);
+    fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    let answer: (template: LabelTemplate) => void = () => undefined;
+    fake.api.getTemplate.mockReturnValue(
+      new Promise<LabelTemplate>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Молоко 58×40»" }));
+    await screen.findByText("Загрузка…");
+    expect(screen.queryByLabelText("Название")).toBeNull();
+    await act(async () => {
+      answer(milk({ name: "Молоко 2", rev: 63 }));
+    });
+    expect(await screen.findByLabelText("Название")).toHaveProperty("value", "Молоко 2");
+    expect(fake.api.getTemplate).toHaveBeenCalledTimes(2);
+  });
+
+  it("explains a template it cannot open: deleted, unreachable, stock or with a layout this version cannot read", async () => {
+    const opening = async (fake: FakeOfficeSession, text: string) => {
+      const view = await openTemplates(fake);
+      fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Молоко 58×40»" }));
+      expect((await screen.findByRole("alert")).textContent).toBe(text);
+      return view;
+    };
+    const gone = editSession();
+    gone.api.getTemplate.mockRejectedValue(hostError("not_found"));
+    let view = await opening(gone, "⧉Шаблона нет на хосте: его удалили на другом рабочем месте.");
+    fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    view.unmount();
+
+    const stock = editSession();
+    stock.api.getTemplate.mockResolvedValue(milk({ stock: true }));
+    view = await opening(
+      stock,
+      "⧉Типовой шаблон не переименовывается и не меняет макет. Включить, выключить и сузить его можно на странице «Шаблоны».",
+    );
+    view.unmount();
+
+    const unreadable = editSession();
+    unreadable.api.getTemplate.mockResolvedValue(milk({ spec: { widthMm: 58 } }));
+    view = await opening(
+      unreadable,
+      "⧉Макет этого шаблона не читается этой версией приложения. Обновите приложение на этом ПК.",
+    );
+    view.unmount();
+
+    const down = editSession();
+    down.api.getTemplate
+      .mockRejectedValueOnce(
+        new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+      )
+      .mockResolvedValueOnce(milk());
+    await opening(
+      down,
+      "✕Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.Повторить",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(await screen.findByLabelText("Название")).toHaveProperty("value", "Молоко 58×40");
+  });
+
+  it("keeps the page's heading, and the way back where there is one, on every page that cannot show the editor", async () => {
+    const cases: [string, (api: FakeOfficeSession["api"]) => void, boolean][] = [
+      ["deleted", (api) => api.getTemplate.mockRejectedValue(hostError("not_found")), true],
+      ["stock", (api) => api.getTemplate.mockResolvedValue(milk({ stock: true })), true],
+      [
+        "unreadable",
+        (api) => api.getTemplate.mockResolvedValue(milk({ spec: { widthMm: 58 } })),
+        true,
+      ],
+      [
+        "unreachable",
+        (api) =>
+          api.getTemplate.mockRejectedValue(
+            new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+          ),
+        false,
+      ],
+    ];
+    for (const [, arrange, back] of cases) {
+      const fake = editSession();
+      arrange(fake.api);
+      const view = await openTemplates(fake);
+      fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Молоко 58×40»" }));
+      await screen.findByRole("alert");
+      expect(screen.getByRole("heading", { name: "Шаблон" })).toBeTruthy();
+      expect(screen.queryByLabelText("Название")).toBeNull();
+      expect(screen.queryByRole("button", { name: "К шаблонам" }) !== null).toBe(back);
+      view.unmount();
+    }
+  });
+
+  it("opens a disabled template for all categories with another purpose as the host has it, and sends only the flag that changed", async () => {
+    const fake = editSession();
+    fake.api.getTemplate.mockResolvedValue(
+      milk({ purpose: "pallet", enabled: false, chzProductGroupCodes: null }),
+    );
+    fake.api.updateTemplate.mockResolvedValue(milk({ purpose: "pallet", rev: 62 }));
+    await openEdit(fake);
+    const purpose = screen.getByRole("combobox", { name: "Назначение" });
+    expect(purpose).toHaveProperty("value", "pallet");
+    expect(purpose).toHaveProperty("disabled", true);
+    expect(screen.getByRole("checkbox", { name: "Включён" }).getAttribute("aria-checked")).toBe(
+      "false",
+    );
+    expect(screen.getByRole("radio", { name: "Все категории" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(saveButton()).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Включён" }));
+    expect(saveButton()).toHaveProperty("disabled", false);
+    await save();
+    expect(fake.api.updateTemplate.mock.calls[0]?.slice(1)).toStrictEqual([
+      MILK_ID,
+      { expectedRev: 61, enabled: true, spec: importedSpec() },
+    ]);
+  });
+
+  it("sends the categories and the resized layout that were changed, not the ones that were read, and the list is not shown from before the save", async () => {
+    const fake = editSession();
+    fake.api.updateTemplate.mockResolvedValue(milk({ rev: 62 }));
+    await openEdit(fake);
+    expect(saveButton()).toHaveProperty("disabled", true);
+    fireEvent.click(await screen.findByRole("checkbox", { name: "Упакованная вода" }));
+    expect(saveButton()).toHaveProperty("disabled", false);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить размер" }));
+    fireEvent.change(within(sizeDialog()).getByRole("combobox", { name: "Размер" }), {
+      target: { value: "100x150" },
+    });
+    await applySize();
+    let answer: (rows: LabelTemplateSummary[]) => void = () => undefined;
+    fake.api.listTemplates.mockReturnValueOnce(
+      new Promise<LabelTemplateSummary[]>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    await save();
+    expect(fake.api.updateTemplate.mock.calls[0]?.slice(1)).toStrictEqual([
+      MILK_ID,
+      {
+        expectedRev: 61,
+        chzProductGroupCodes: [8, 13],
+        spec: resizedSpec(importedSpec(), 100, 150, "box"),
+      },
+    ]);
+    // The list from before the save is dropped, so no row of it is shown while the list is read.
+    await screen.findByText("Загрузка…");
+    expect(screen.queryByText("Молоко 58×40")).toBeNull();
+    await act(async () => {
+      answer([BOX_58, { ...MILK_ROW, chzProductGroupCodes: [8, 13], widthMm: 100, heightMm: 150 }]);
+    });
+    expect(await screen.findByText("100 × 150 мм")).toBeTruthy();
+    expect(screen.getByText("Шаблон «Молоко 58×40» сохранён.")).toBeTruthy();
+  });
+
+  it("sends the opened revision again, never the current one the host reported, when the same page saves once more after a stale save", async () => {
+    const fake = editSession();
+    fake.api.updateTemplate
+      .mockRejectedValueOnce(hostError("stale_revision", { currentRev: 64 }))
+      .mockRejectedValueOnce(hostError("stale_revision", { currentRev: 66 }));
+    await openEdit(fake);
+    type("Название", "Молоко 60×40");
+    await save();
+    await save();
+    expect(fake.api.updateTemplate.mock.calls.map((call) => call[2])).toMatchObject([
+      { expectedRev: 61 },
+      { expectedRev: 61 },
+    ]);
+    expect(fake.api.getTemplate).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows why a template cannot be read again after a stale save and starts afresh with the one a retry reads", async () => {
+    const fake = editSession();
+    fake.api.updateTemplate
+      .mockRejectedValueOnce(hostError("stale_revision", { currentRev: 64 }))
+      .mockResolvedValueOnce(milk({ rev: 65 }));
+    await openEdit(fake);
+    type("Название", "Молоко 60×40");
+    await save();
+    fake.api.getTemplate
+      .mockRejectedValueOnce(
+        new HostError({ kind: "transport", code: "unreachable", message: "x" }),
+      )
+      .mockResolvedValueOnce(milk({ name: "Молоко (со склада)", rev: 64 }));
+    fireEvent.click(
+      within(screen.getByRole("alert")).getByRole("button", { name: "Загрузить заново" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("Нет связи с хостом"),
+    );
+    expect(screen.queryByLabelText("Название")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(await screen.findByLabelText("Название")).toHaveProperty("value", "Молоко (со склада)");
+    await settle();
+    type("Название", "Молоко 70×40");
+    await save();
+    expect(fake.api.updateTemplate.mock.calls[1]?.[2]).toMatchObject({ expectedRev: 64 });
+  });
+
+  it("reads each template under its own key, so a read still on its way for one is never taken for another", async () => {
+    const WATER_ID = "b4c5d6e7-f8a9-4b0c-9d1e-2f3a4b5c6d7e";
+    const fake = editSession();
+    fake.api.listTemplates.mockResolvedValue([
+      BOX_58,
+      MILK_ROW,
+      { ...MILK_ROW, id: WATER_ID, name: "Вода 58×40", chzProductGroupCodes: [13] },
+    ]);
+    fake.api.getTemplate.mockImplementation((_token: string, id: string) =>
+      id === MILK_ID
+        ? new Promise<LabelTemplate>(() => undefined)
+        : Promise.resolve(milk({ id: WATER_ID, name: "Вода 58×40", chzProductGroupCodes: [13] })),
+    );
+    await openTemplates(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Молоко 58×40»" }));
+    await screen.findByText("Загрузка…");
+    fireEvent.click(screen.getByRole("link", { name: "Шаблоны" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Вода 58×40»" }));
+    expect(await screen.findByRole("heading", { name: "Шаблон «Вода 58×40»" })).toBeTruthy();
+    expect(fake.api.getTemplate.mock.calls.map((call) => call[1])).toEqual([MILK_ID, WATER_ID]);
+  });
+
+  it("shows a name with markup as text on the list, in the edit heading and in the notice", async () => {
+    const name = "<i>Молоко</i> &amp; <img src=x onerror=alert(1)>";
+    const fake = editSession();
+    fake.api.listTemplates.mockResolvedValue([BOX_58, { ...MILK_ROW, name }]);
+    fake.api.getTemplate.mockResolvedValue(milk({ name }));
+    fake.api.updateTemplate.mockResolvedValue(milk({ name, enabled: false, rev: 62 }));
+    await openEdit(fake, name);
+    expect(screen.getByLabelText("Название")).toHaveProperty("value", name);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Включён" }));
+    await save();
+    expect(await screen.findByText(`Шаблон «${name}» сохранён.`)).toBeTruthy();
+    expect(document.querySelector("img, i, b, script")).toBeNull();
+  });
+});
+
 describe("a file saved from the webview", () => {
   afterEach(() => {
     vi.restoreAllMocks();
