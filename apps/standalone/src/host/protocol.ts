@@ -84,7 +84,7 @@ const countSchema = z.number().int().nonnegative().nullable();
 /**
  * A label layout as the host keeps it: a JSON object, read as an opaque
  * value. Its own contract (the domain's `labelTemplateSpecSchema`) is checked
- * where a layout is used — by the template editor before it saves (plan 1e4)
+ * where a layout is used — by the template editor before it saves (`checkedSpec`)
  * and by the station before it prints (plan 2a) — never at sync time. A
  * dynamic-key `z.record` would put keys taken from the data into a quarantine
  * reason's paths (`AGENTS.md`, "Reference sync"); this check gives one

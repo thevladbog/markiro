@@ -20,8 +20,7 @@ export interface CategoryScopeFieldProps {
  * `visibleGroups`). The groups come from `useProductGroups`; while they load
  * or when they fail, «Только выбранные» keeps its codes and says why it lists
  * nothing. A chosen code the lookup lacks is listed after the groups as «Код N»,
- * so it can be unchecked. The template editor of plan 1e4 is to take this field
- * as well.
+ * so it can be unchecked. The template editor takes this field as well.
  */
 export function CategoryScopeField({ value, onChange, error }: CategoryScopeFieldProps) {
   const { t } = useTranslation();

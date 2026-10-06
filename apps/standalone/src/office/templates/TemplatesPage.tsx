@@ -45,13 +45,14 @@ const EDITOR_RETURN = z.object({ notice: z.string() });
 
 /**
  * The label templates (spec §4.3, §5.5): a table, not the cloud's cards with
- * thumbnails (no layout is drawn before plan 1e4). The host sends the whole
+ * thumbnails (no layout is drawn before plan 1e4b). The host sends the whole
  * list, so the search and the filters work here, and the page sorts what it
  * shows by name. A product group's name comes from the host's lookup; when it
  * does not load, the list stays and shows the codes. Both office roles switch
  * templates on and off and change their categories (`editCatalog`); a write's
  * answer goes into the cached row in place (`withTemplateChange`), and the
- * list is not read again.
+ * list is not read again. «Создать шаблон», «Изменить» and «Копировать» open
+ * the editor, which comes back here with a notice after a save or a delete.
  */
 export function TemplatesPage() {
   const { t } = useTranslation();
