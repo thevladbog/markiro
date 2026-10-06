@@ -1584,10 +1584,40 @@ describe("rendered landing page", () => {
       expect(body).not.toMatch(/CRM|подключени[ея] CRM|connection to the CRM/i);
       expect(body).toContain(
         route === "/"
-          ? "Онлайн-отправка временно недоступна. Напишите нам на hello@v-b.tech."
-          : "Online submission is temporarily unavailable. Email us at hello@v-b.tech.",
+          ? "Онлайн-отправка временно недоступна. Напишите нам на hello@markiro.app."
+          : "Online submission is temporarily unavailable. Email us at hello@markiro.app.",
       );
     }
+  });
+
+  // Sales contacts moved to the product domain; the published legal editions keep
+  // the operator profile's address until they are reissued.
+  it("publishes the site contact address on sales surfaces and in structured data", () => {
+    for (const route of ["/", "/en/", "/faq/", "/en/faq/"] as const) {
+      const routeDocument = documents.get(route);
+      const graph = JSON.parse(
+        routeDocument?.querySelector('script[type="application/ld+json"]')?.textContent ?? "{}",
+      ) as { "@graph"?: Array<Record<string, unknown>> };
+      const organization = graph["@graph"]?.find((entry) => entry["@type"] === "Organization");
+      expect(organization?.email, route).toBe("hello@markiro.app");
+      expect(routeDocument?.body.textContent, route).not.toContain("hello@v-b.tech");
+    }
+    expect(documents.get("/faq/")?.body.textContent).toContain("hello@markiro.app");
+    expect(documents.get("/en/faq/")?.body.textContent).toContain("hello@markiro.app");
+
+    const llms = readFileSync(path.join(outputDirectory, "llms.txt"), "utf8");
+    expect(llms).toContain("hello@markiro.app");
+    expect(llms).not.toContain("hello@v-b.tech");
+  });
+
+  it("offers the way home and to the demo form from the branded 404", () => {
+    const notFound = new JSDOM(readFileSync(path.join(outputDirectory, "404.html"), "utf8")).window
+      .document;
+    expect(notFound.querySelector("h1")?.textContent).toContain("Revision not found");
+    const hrefs = [...notFound.querySelectorAll("main a")].map((anchor) =>
+      anchor.getAttribute("href"),
+    );
+    expect(hrefs).toEqual(expect.arrayContaining(["/", "/#demo", "/legal/"]));
   });
 
   it("does not ship an admin screenshot or invented contact data", () => {

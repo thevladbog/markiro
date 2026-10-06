@@ -1,10 +1,19 @@
 ---
+import { operatorRequisites, SITE_CONTACTS } from "../content/contacts";
 import { getUiCopy } from "../content/ui";
 import type { PageMetadata } from "../lib/seo";
+import { readPublicSiteConfig, type PublicPhone } from "../lib/site-config";
 import BrandMark from "./BrandMark.astro";
 
-interface Props { page: Pick<PageMetadata, "locale"> }
-const { page } = Astro.props;
+interface Props {
+  page: Pick<PageMetadata, "locale">;
+  /** Defaults to the build's public phone, like the header. */
+  phone?: PublicPhone | null;
+}
+const {
+  page,
+  phone = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE }).phone,
+} = Astro.props;
 const copy = getUiCopy(page.locale).common;
 const homePath = page.locale === "ru" ? "/" : "/en/";
 const columns = page.locale === "ru"
@@ -81,6 +90,12 @@ const consentSettingsLabel = page.locale === "ru" ? "Настройки cookies"
   <div class="container landing-footer__inner">
     <div class="landing-footer__meta" data-footer-meta>
       <a href={homePath} aria-label={copy.homeLabel}><BrandMark locale={page.locale} /></a>
+      <address class="landing-footer__contacts" data-footer-contacts>
+        {phone && <a href={phone.href} data-analytics="landing_phone_click" data-placement="footer">{phone.display}</a>}
+        <a href={`mailto:${SITE_CONTACTS.email}`}>{SITE_CONTACTS.email}</a>
+        <a href={SITE_CONTACTS.telegram.href}>Telegram @{SITE_CONTACTS.telegram.handle}</a>
+      </address>
+      <p class="landing-footer__requisites" data-footer-requisites>{operatorRequisites(page.locale)}</p>
       <span data-footer-year>© 2026</span>
     </div>
     {columns.map((column) => (

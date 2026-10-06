@@ -419,17 +419,17 @@ for (const [route, wordmark, theme] of [
 for (const route of ["/", "/en/"] as const) {
   test(`${route} renders the public contact phone`, async ({ page }) => {
     await page.goto(route);
-    const expectedPhone = "+7 934 355-14-90";
-    const expectedHref = "tel:+79343551490";
+    const expectedPhone = "+7 960 495-46-10";
+    const expectedHref = "tel:+79604954610";
 
-    await expect(page.locator(`a[href="${expectedHref}"]`)).toHaveCount(3);
+    await expect(page.locator(`a[href="${expectedHref}"]`)).toHaveCount(4);
     expect(
       await page
         .locator(`a[href="${expectedHref}"][data-analytics="landing_phone_click"]`)
         .evaluateAll((links) =>
           links.map((link) => (link as HTMLElement).dataset.placement).sort(),
         ),
-    ).toEqual(["demo", "header", "hero"]);
+    ).toEqual(["demo", "footer", "header", "hero"]);
     for (const phone of [
       page.locator("#hero").getByRole("link", { name: expectedPhone, exact: true }),
       page.locator("#demo").getByRole("link", { name: expectedPhone, exact: true }),

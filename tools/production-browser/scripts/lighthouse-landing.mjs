@@ -37,7 +37,7 @@ export function lighthouseBuildEnvironment(environment) {
   return {
     PUBLIC_DEMO_SUBMISSION_ENABLED: "true",
     PUBLIC_SMARTCAPTCHA_CLIENT_KEY: "ysc1_lighthouse-gate-key",
-    PUBLIC_PHONE: "+7 934 355-14-90",
+    PUBLIC_PHONE: "+7 960 495-46-10",
     ...environment,
     ASTRO_TELEMETRY_DISABLED: "1",
   };

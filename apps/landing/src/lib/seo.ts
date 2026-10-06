@@ -1,5 +1,4 @@
-import { OPERATOR_PROFILES } from "@markiro/legal-documents";
-
+import { SITE_CONTACTS } from "../content/contacts";
 import { LEGAL_SEARCH_PAGES } from "../content/legal-pages";
 import { ARTICLE_SEARCH_PAGES, type ArticlePageDefinition } from "../content/articles";
 import { HUB_SEARCH_PAGES, findHubPage, hubPath, type HubPageDefinition } from "../content/hubs";
@@ -16,7 +15,7 @@ import {
 } from "../content/pages";
 
 const SITE_URL = "https://markiro.app";
-const ORGANIZATION_EMAIL = OPERATOR_PROFILES["operator-2026-08-15"].email;
+const ORGANIZATION_EMAIL = SITE_CONTACTS.email;
 const ORGANIZATION_LOGO_PATH = "/brand/markiro-logo.svg";
 const INDEXABLE_PAGES: readonly SearchPageRecord[] = [
   ...MARKETING_SEARCH_PAGES,
@@ -505,7 +504,7 @@ export function renderLlmsTxt(): string {
 - Офлайн: станция работает без сети с локальным журналом SQLite и отправляет очередь после восстановления связи с ключом идемпотентности.
 - Интеграции: обмен с 1С по CommerceML, публичный REST API с OpenAPI, выгрузки отчётов смены TXT, CSV и XML агрегации для ГИС МТ, чтение статусов кодов через True API «Честного знака».
 - Киоск выбытия: сотрудник сканирует бейдж и коды, заявка проводится в кабинете через кассу или списанием.
-- Контакт: hello@v-b.tech. Демонстрация на сценарии вашей линии: ${absoluteUrl("/#demo")}
+- Контакт: ${ORGANIZATION_EMAIL}. Демонстрация на сценарии вашей линии: ${absoluteUrl("/#demo")}
 
 ${links("ru", "/")}
 
@@ -523,7 +522,7 @@ ${links("ru", "/")}
 - Offline: the station works without a network with a local SQLite journal and submits its queue after reconnecting with an idempotency key.
 - Integrations: 1C exchange over CommerceML, a public REST API with OpenAPI, shift report exports as TXT, CSV and aggregation XML for GIS MT, code status reads through the Chestny ZNAK True API.
 - Disposal kiosk: an employee scans a badge and codes, and the request is processed in the cabinet through the register or as a write-off.
-- Contact: hello@v-b.tech. Demonstration on your line's workflow: ${absoluteUrl("/en/#demo")}
+- Contact: ${ORGANIZATION_EMAIL}. Demonstration on your line's workflow: ${absoluteUrl("/en/#demo")}
 
 ${links("en", "/en/")}
 
