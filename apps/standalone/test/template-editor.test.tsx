@@ -13,6 +13,7 @@ import {
   TECHNOLOGIST,
   type FakeOfficeSession,
 } from "./support/office.js";
+import { SESSION } from "./support/fixtures.js";
 
 const GROUPS: ProductGroup[] = [
   { code: 8, alias: "milk", name: "Молочная продукция" },
@@ -184,7 +185,7 @@ describe("a new label template", () => {
   });
 
   it("opens from «Создать шаблон» for both roles as an unnamed, enabled box template for every category with an empty 58×40 label", async () => {
-    for (const user of [undefined, TECHNOLOGIST]) {
+    for (const user of [SESSION.user, TECHNOLOGIST]) {
       const view = await openNew(session(user));
       expect(screen.getByLabelText("Название")).toHaveProperty("value", "");
       expect(screen.getByRole("combobox", { name: "Назначение" })).toHaveProperty("value", "box");
