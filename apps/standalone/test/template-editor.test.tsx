@@ -15,7 +15,12 @@ import { buildDuplicateLabelTemplate, buildPalletLabelTemplates } from "@markiro
 import { ThemeProvider } from "@markiro/ui";
 
 import { HostError } from "../src/host/client.js";
-import type { LabelTemplate, LabelTemplateSummary, ProductGroup } from "../src/host/protocol.js";
+import type {
+  LabelTemplate,
+  LabelTemplateSummary,
+  OfficeProduct,
+  ProductGroup,
+} from "../src/host/protocol.js";
 import { createOfficeQueryClient } from "../src/office/office-query.js";
 import { OfficeSessionProvider } from "../src/office/office-session.js";
 import { downloadFile } from "../src/office/templates/download.js";
@@ -426,6 +431,25 @@ describe("a new label template", () => {
     expect(
       screen.getByText(`Элементов в макете: ${buildDuplicateLabelTemplate().elements.length}`),
     ).toBeTruthy();
+  });
+
+  it("sends nothing for a product duplicate that breaks the duplicate rule, even when the form is submitted without its button", async () => {
+    const fake = session();
+    await openNew(fake);
+    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
+      target: { value: "product_duplicate" },
+    });
+    type("Название", "Дубликат");
+    await importCode(ZPL);
+    expect(saveButton()).toHaveProperty("disabled", true);
+    const form = screen.getByLabelText("Название").closest("form");
+    expect(form).not.toBeNull();
+    await act(async () => {
+      form?.requestSubmit();
+    });
+    await settle();
+    expect(fake.api.createTemplate).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Дубликату нужен один Data Matrix");
   });
 
   it("takes a JSON import's name for an unnamed template and never over a typed one", async () => {
@@ -1213,6 +1237,23 @@ const MILK_ROW: LabelTemplateSummary = {
   rev: 61,
 };
 
+/** A product the host lists: the one a template's deletion may change. */
+const PRODUCT: OfficeProduct = {
+  id: "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
+  gtin14: "04600682000013",
+  name: "Молоко 3,2% 0,9 л",
+  printName: "Молоко 3,2%",
+  chzProductGroupCode: 8,
+  boxCapacity: 12,
+  palletBoxCapacity: 40,
+  shelfLifeDays: 10,
+  defaultBoxTemplateId: MILK_ID,
+  defaultPalletTemplateId: null,
+  archived: false,
+  status: "active",
+  rev: 65,
+};
+
 /** «Молоко 58×40» as `GET /v1/office/templates/{id}` answers. */
 function milk(data: Partial<LabelTemplate> = {}): LabelTemplate {
   return {
@@ -1572,6 +1613,41 @@ describe("changing a label template", () => {
     expect(fake.api.updateTemplate.mock.calls[1]?.[2]).toMatchObject({ expectedRev: 64 });
   });
 
+  it("shows «Загрузка…», not the earlier failure, while a template is read again on reopening", async () => {
+    const fake = editSession();
+    fake.api.updateTemplate.mockRejectedValueOnce(hostError("stale_revision", { currentRev: 64 }));
+    await openEdit(fake);
+    type("Название", "Молоко 60×40");
+    await save();
+    fake.api.getTemplate.mockRejectedValueOnce(
+      new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+    );
+    fireEvent.click(
+      within(screen.getByRole("alert")).getByRole("button", { name: "Загрузить заново" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain("Нет связи с хостом"),
+    );
+    // The failed read stays in the cache with the template's old data.
+    fireEvent.click(screen.getByRole("link", { name: "Шаблоны" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
+    let answer: (template: LabelTemplate) => void = () => undefined;
+    fake.api.getTemplate.mockReturnValueOnce(
+      new Promise<LabelTemplate>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Молоко 58×40»" }));
+    await screen.findByText("Загрузка…");
+    expect(screen.queryByText(/Нет связи с хостом/)).toBeNull();
+    expect(screen.queryByLabelText("Название")).toBeNull();
+    await act(async () => {
+      answer(milk({ name: "Молоко (со склада)", rev: 64 }));
+    });
+    expect(await screen.findByLabelText("Название")).toHaveProperty("value", "Молоко (со склада)");
+  });
+
   it("reads each template under its own key, so a read still on its way for one is never taken for another", async () => {
     const WATER_ID = "b4c5d6e7-f8a9-4b0c-9d1e-2f3a4b5c6d7e";
     const fake = editSession();
@@ -1805,6 +1881,42 @@ describe("copying and deleting a label template", () => {
     });
     expect(await screen.findByText("Коробка 58×40")).toBeTruthy();
     expect(screen.queryByText("Молоко 58×40")).toBeNull();
+  });
+
+  it("reads the products again after a delete, so none is shown with the preference the host cleared", async () => {
+    const fake = editSession();
+    fake.api.listProducts.mockResolvedValue([PRODUCT]);
+    fake.api.deleteTemplate.mockResolvedValue(undefined);
+    await openTemplates(fake);
+    fireEvent.click(screen.getByRole("link", { name: "Товары" }));
+    expect(await screen.findByText(PRODUCT.name)).toBeTruthy();
+    fireEvent.click(screen.getByRole("link", { name: "Шаблоны" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Молоко 58×40»" }));
+    await screen.findByRole("heading", { name: "Шаблон «Молоко 58×40»" });
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+    await act(async () => {
+      fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Удалить" }));
+    });
+    await screen.findByText("Шаблон «Молоко 58×40» удалён.");
+    await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
+    let release: (rows: OfficeProduct[]) => void = () => {};
+    fake.api.listProducts.mockReturnValueOnce(
+      new Promise<OfficeProduct[]>((resolve) => {
+        release = resolve;
+      }),
+    );
+    fireEvent.click(screen.getByRole("link", { name: "Товары" }));
+    await screen.findByText("Загрузка…");
+    // The list from before the delete is dropped: no row of it stands in for the read.
+    expect(screen.queryByText(PRODUCT.name)).toBeNull();
+    await act(async () => {
+      release([{ ...PRODUCT, rev: PRODUCT.rev + 1 }]);
+    });
+    expect(await screen.findByText(PRODUCT.name)).toBeTruthy();
+    expect(fake.api.listProducts).toHaveBeenCalledTimes(2);
   });
 
   it.each(ROLES)(
@@ -2140,6 +2252,58 @@ describe("leaving a label template with unsaved changes", () => {
     fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
     await screen.findByRole("heading", { name: "Шаблоны этикеток" });
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("stays where the user went when a save lands after the editor was left through the menu, and still drops the list", async () => {
+    const fake = editSession();
+    fake.api.listProducts.mockResolvedValue([]);
+    let answer: (template: LabelTemplate) => void = () => undefined;
+    fake.api.updateTemplate.mockReturnValue(
+      new Promise<LabelTemplate>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    await openEdit(fake);
+    type("Название", "Молоко 60×40");
+    await save();
+    fireEvent.click(screen.getByRole("link", { name: "Товары" }));
+    await act(async () => {
+      fireEvent.click(within(leaveDialog()).getByRole("button", { name: "Уйти без сохранения" }));
+    });
+    await screen.findByRole("heading", { name: "Товары" });
+    await act(async () => {
+      answer(milk({ name: "Молоко 60×40", rev: 62 }));
+    });
+    await settle();
+    expect(screen.getByRole("heading", { name: "Товары" })).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Шаблоны этикеток" })).toBeNull();
+    expect(screen.queryByText("Шаблон «Молоко 60×40» сохранён.")).toBeNull();
+    // The save did land, so the list from before it is gone all the same.
+    fake.api.listTemplates.mockReturnValueOnce(new Promise<LabelTemplateSummary[]>(() => {}));
+    fireEvent.click(screen.getByRole("link", { name: "Шаблоны" }));
+    await screen.findByText("Загрузка…");
+    expect(screen.queryByText("Молоко 58×40")).toBeNull();
+  });
+
+  it("keeps «Копировать» and «Удалить» off while a save is on its way, and «К шаблонам» on", async () => {
+    const fake = editSession();
+    let refuse: (error: unknown) => void = () => undefined;
+    fake.api.updateTemplate.mockReturnValue(
+      new Promise<LabelTemplate>((_resolve, reject) => {
+        refuse = reject;
+      }),
+    );
+    await openEdit(fake);
+    type("Название", "Молоко 60×40");
+    await save();
+    expect(screen.getByRole("button", { name: "Копировать" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Удалить" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "К шаблонам" })).toHaveProperty("disabled", false);
+    await act(async () => {
+      refuse(new HostError({ kind: "transport", code: "unreachable", message: "down" }));
+    });
+    expect(screen.getByRole("button", { name: "Копировать" })).toHaveProperty("disabled", false);
+    expect(screen.getByRole("button", { name: "Удалить" })).toHaveProperty("disabled", false);
   });
 });
 

@@ -93,6 +93,8 @@ function OpenedTemplate({
   const template = useOfficeQuery(officeKeys.template(id), (api, token) =>
     api.getTemplate(token, id),
   );
+  // What an earlier visit left in the cache, error included, is not this visit's answer.
+  if (!template.isFetchedAfterMount) return <PageLoading />;
   if (template.isError) {
     if (template.error instanceof HostError && template.error.code === "not_found") {
       return <EditorUnavailable title={title} message={t("office.templateEditor.gone")} />;
@@ -104,7 +106,7 @@ function OpenedTemplate({
       </>
     );
   }
-  if (!template.isFetchedAfterMount || template.data === undefined) return <PageLoading />;
+  if (template.data === undefined) return <PageLoading />;
   const spec = readSpec(template.data.spec);
   if (spec === null) {
     return <EditorUnavailable title={title} message={t("office.templateEditor.unreadable")} />;

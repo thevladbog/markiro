@@ -112,6 +112,9 @@ export function TemplateEditor({
   const duplicateInvalid = duplicateLayoutInvalid(draft.spec, draft.purpose);
   // Set right before the editor leaves on its own, after a save or a delete.
   const leaving = useRef(false);
+  // Whether the editor is still on screen: a save or a delete that answers after
+  // the user left through the menu must not take them back to «Шаблоны».
+  const mounted = useRef(false);
   // Any navigation to another page with unsaved changes asks first: the
   // header's «К шаблонам», the menu, «Копировать». The end of the session
   // unmounts the office instead, and its edits are lost (`AGENTS.md`).
@@ -122,6 +125,13 @@ export function TemplateEditor({
       [dirty],
     ),
   );
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const target = focusAfterRender.current;
@@ -165,6 +175,8 @@ export function TemplateEditor({
   };
 
   const submit = async () => {
+    // The button is off for such a layout; a form submitted another way is too.
+    if (duplicateInvalid) return;
     setFailure(null);
     setFieldError(null);
     const name = templateNameRule.safeParse(draft.name);
@@ -218,8 +230,10 @@ export function TemplateEditor({
   };
 
   // The list holds no layouts and is read again; nothing of this template is kept.
+  // It is dropped even when the user has gone elsewhere meanwhile: the write landed.
   const backToList = (notice: string) => {
     queryClient.removeQueries({ queryKey: officeKeys.templates, exact: true });
+    if (!mounted.current) return;
     leaving.current = true;
     void navigate("/templates", { state: { notice } });
   };
@@ -254,13 +268,19 @@ export function TemplateEditor({
           <>
             {template !== null && (
               <>
+                {/* Off while a save is on its way: it would be a second write beside it. */}
                 <Button
                   variant="secondary"
+                  disabled={saving}
                   onClick={() => void navigate(`/templates/${template.id}/copy`)}
                 >
                   {t("office.templateEditor.copy")}
                 </Button>
-                <Button variant="destructive-outline" onClick={() => setDeleting(true)}>
+                <Button
+                  variant="destructive-outline"
+                  disabled={saving}
+                  onClick={() => setDeleting(true)}
+                >
                   {t("office.templateEditor.delete")}
                 </Button>
               </>
@@ -396,7 +416,11 @@ export function TemplateEditor({
         <DeleteTemplateDialog
           template={template}
           onClose={() => setDeleting(false)}
-          onDeleted={() => backToList(t("office.templateEditor.deleted", { name: template.name }))}
+          onDeleted={() => {
+            // The host cleared the preference of every product that used the template.
+            queryClient.removeQueries({ queryKey: officeKeys.products, exact: true });
+            backToList(t("office.templateEditor.deleted", { name: template.name }));
+          }}
         />
       )}
       {importing && (
