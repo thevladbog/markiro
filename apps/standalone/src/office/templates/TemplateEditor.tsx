@@ -27,6 +27,7 @@ import {
 } from "./editor-model.js";
 import type { ImportAnalysis } from "./import-analysis.js";
 import { ImportCodeDialog } from "./ImportCodeDialog.js";
+import { LabelSizeDialog } from "./LabelSizeDialog.js";
 import { TemplateFailureAlert } from "./TemplateFailureAlert.js";
 import { dpiText, PURPOSES, sizeText } from "./template-text.js";
 
@@ -59,6 +60,7 @@ export function TemplateEditor({ title, opened }: TemplateEditorProps) {
   );
   const [failure, setFailure] = useState<Exclude<EditorFailure, { kind: "field" }> | null>(null);
   const [importing, setImporting] = useState(false);
+  const [sizing, setSizing] = useState(false);
   // Set at once, so a second submit in the same moment is dropped before
   // `saving` has re-rendered the button.
   const inFlight = useRef(false);
@@ -221,12 +223,17 @@ export function TemplateEditor({ title, opened }: TemplateEditorProps) {
           </Card>
           <Card title={t("office.templateEditor.layout")} titleAs="h2">
             <div className="standalone-form">
-              <p>
-                {t("office.templateEditor.sizeValue", {
-                  size: sizeText(draft.spec, t),
-                  dpi: dpiText(draft.spec.dpi, t),
-                })}
-              </p>
+              <div className="template-editor__size">
+                <p>
+                  {t("office.templateEditor.sizeValue", {
+                    size: sizeText(draft.spec, t),
+                    dpi: dpiText(draft.spec.dpi, t),
+                  })}
+                </p>
+                <Button variant="secondary" size="compact" onClick={() => setSizing(true)}>
+                  {t("office.templateEditor.changeSize")}
+                </Button>
+              </div>
               <p>
                 {draft.spec.elements.length === 0
                   ? t("office.templateEditor.empty")
@@ -281,7 +288,18 @@ export function TemplateEditor({ title, opened }: TemplateEditorProps) {
           </Button>
         </div>
       </form>
-      {/* Outside the page's form: the dialog has a form of its own. */}
+      {/* Outside the page's form: each dialog has a form of its own. */}
+      {sizing && (
+        <LabelSizeDialog
+          spec={draft.spec}
+          purpose={draft.purpose}
+          onClose={() => setSizing(false)}
+          onResize={(spec) => {
+            change({ spec });
+            setSizing(false);
+          }}
+        />
+      )}
       {importing && (
         <ImportCodeDialog
           purpose={draft.purpose}
