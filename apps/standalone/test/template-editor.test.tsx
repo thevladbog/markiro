@@ -1,13 +1,27 @@
-import { act, fireEvent, screen, waitFor, within, type RenderResult } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+  type RenderResult,
+} from "@testing-library/react";
+import { createMemoryRouter, Link, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { buildDuplicateLabelTemplate, buildPalletLabelTemplates } from "@markiro/domain";
+import { ThemeProvider } from "@markiro/ui";
 
 import { HostError } from "../src/host/client.js";
 import type { LabelTemplate, LabelTemplateSummary, ProductGroup } from "../src/host/protocol.js";
+import { createOfficeQueryClient } from "../src/office/office-query.js";
+import { OfficeSessionProvider } from "../src/office/office-session.js";
 import { downloadFile } from "../src/office/templates/download.js";
 import { resizedSpec, startingSpec } from "../src/office/templates/editor-model.js";
 import { analyzeImport } from "../src/office/templates/import-analysis.js";
+import { NewTemplatePage } from "../src/office/templates/TemplateEditorPage.js";
 import {
   fakeOfficeSession,
   renderOffice,
@@ -1284,6 +1298,10 @@ describe("changing a label template", () => {
       "✕Шаблона больше нет на хосте: его удалили на другом рабочем месте.",
     );
     fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+    // The edits are still unsaved, so leaving asks first.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Уйти без сохранения" }));
+    });
     await screen.findByRole("heading", { name: "Шаблоны этикеток" });
     await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(2));
   });
@@ -1868,6 +1886,191 @@ describe("copying and deleting a label template", () => {
     });
     expect(await screen.findByText(`Шаблон «${name}» удалён.`)).toBeTruthy();
     expect(document.querySelector("img, i, b, script")).toBeNull();
+  });
+});
+
+function leaveDialog(): HTMLElement {
+  return screen.getByRole("dialog", { name: "Уйти со страницы?" });
+}
+
+describe("leaving a label template with unsaved changes", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+  });
+
+  it("asks before «К шаблонам» drops the changes, and «Отмена» keeps them", async () => {
+    const fake = editSession();
+    await openEdit(fake);
+    type("Название", "Молоко 60×40");
+    fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+    expect(
+      within(leaveDialog()).getByText("Изменения шаблона не сохранены и пропадут."),
+    ).toBeTruthy();
+    const leave = within(leaveDialog()).getByRole("button", { name: "Уйти без сохранения" });
+    expect(leave.classList.contains("mk-btn--destructive")).toBe(true);
+    fireEvent.click(within(leaveDialog()).getByRole("button", { name: "Отмена" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByLabelText("Название")).toHaveProperty("value", "Молоко 60×40");
+    fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+    await act(async () => {
+      fireEvent.click(within(leaveDialog()).getByRole("button", { name: "Уйти без сохранения" }));
+    });
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    expect(fake.api.updateTemplate).not.toHaveBeenCalled();
+  });
+
+  it("asks before the menu and «Копировать» leave a changed template too", async () => {
+    const fake = editSession();
+    await openEdit(fake);
+    fireEvent.click(screen.getByRole("checkbox", { name: "Включён" }));
+    fireEvent.click(screen.getByRole("link", { name: "Товары" }));
+    expect(leaveDialog()).toBeTruthy();
+    fireEvent.click(within(leaveDialog()).getByRole("button", { name: "Отмена" }));
+    fireEvent.click(screen.getByRole("button", { name: "Копировать" }));
+    expect(leaveDialog()).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(within(leaveDialog()).getByRole("button", { name: "Уйти без сохранения" }));
+    });
+    await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });
+  });
+
+  it("leaves without asking when nothing changed, a new template is untouched, or after a delete", async () => {
+    const fake = editSession();
+    fake.api.deleteTemplate.mockResolvedValue(undefined);
+    await openEdit(fake);
+    fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    fireEvent.click(screen.getByRole("button", { name: "Создать шаблон" }));
+    await screen.findByRole("heading", { name: "Новый шаблон" });
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Молоко 58×40»" }));
+    await screen.findByRole("heading", { name: "Шаблон «Молоко 58×40»" });
+    await settle();
+    type("Название", "Молоко 60×40");
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+    await act(async () => {
+      fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Удалить" }));
+    });
+    expect(await screen.findByText("Шаблон «Молоко 58×40» удалён.")).toBeTruthy();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("does not ask once the changes are typed back, and a save after «Отмена» leaves without asking", async () => {
+    const fake = editSession();
+    fake.api.updateTemplate.mockResolvedValue(milk({ name: "Молоко 60×40", rev: 62 }));
+    await openEdit(fake);
+    type("Название", "Молоко 60×40");
+    type("Название", "Молоко 58×40");
+    expect(saveButton()).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("link", { name: "Товары" }));
+    await screen.findByRole("heading", { name: "Товары" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Молоко 58×40»" }));
+    await screen.findByRole("heading", { name: "Шаблон «Молоко 58×40»" });
+    await settle();
+    type("Название", "Молоко 60×40");
+    fireEvent.click(screen.getByRole("link", { name: "Товары" }));
+    fireEvent.click(within(leaveDialog()).getByRole("button", { name: "Отмена" }));
+    await save();
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(fake.api.updateTemplate).toHaveBeenCalledTimes(1);
+  });
+
+  it("asks before a new template with a typed name and a changed copy are dropped, but not an untouched copy", async () => {
+    const fake = editSession();
+    await openNew(fake);
+    type("Название", "Новый");
+    fireEvent.click(screen.getByRole("link", { name: "Товары" }));
+    expect(leaveDialog()).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(within(leaveDialog()).getByRole("button", { name: "Уйти без сохранения" }));
+    });
+    await screen.findByRole("heading", { name: "Товары" });
+    fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Копировать шаблон «Коробка 58×40»" }));
+    await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
+    fireEvent.click(screen.getByRole("button", { name: "Копировать шаблон «Коробка 58×40»" }));
+    await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });
+    await settle();
+    fireEvent.click(screen.getByRole("checkbox", { name: "Включён" }));
+    fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+    expect(leaveDialog()).toBeTruthy();
+  });
+
+  it("does not ask for a navigation that stays on the page, such as a changed search, and asks for another page", async () => {
+    const fake = editSession();
+    const router = createMemoryRouter(
+      [
+        {
+          path: "/templates/new",
+          element: (
+            <>
+              <NewTemplatePage />
+              <Link to="/templates/new?x=1">Та же страница</Link>
+              <Link to="/other">Другая страница</Link>
+            </>
+          ),
+        },
+        { path: "/other", element: <p>Другая страница открыта</p> },
+      ],
+      { initialEntries: ["/templates/new"] },
+    );
+    render(
+      <ThemeProvider defaultTheme="dark">
+        <QueryClientProvider client={createOfficeQueryClient()}>
+          <OfficeSessionProvider value={fake}>
+            <RouterProvider router={router} />
+          </OfficeSessionProvider>
+        </QueryClientProvider>
+      </ThemeProvider>,
+    );
+    await screen.findByRole("heading", { name: "Новый шаблон" });
+    // No list page read the categories first, so they arrive during this wait.
+    await act(async () => {
+      await settle();
+    });
+    type("Название", "Новый");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("link", { name: "Та же страница" }));
+    });
+    expect(router.state.location.search).toBe("?x=1");
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByLabelText("Название")).toHaveProperty("value", "Новый");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("link", { name: "Другая страница" }));
+    });
+    expect(leaveDialog()).toBeTruthy();
+    expect(router.state.location.pathname).toBe("/templates/new");
+  });
+
+  it("does not ask after a stale save is loaded again: the new editor starts without edits", async () => {
+    const fake = editSession();
+    fake.api.updateTemplate.mockRejectedValueOnce(hostError("stale_revision", { currentRev: 64 }));
+    await openEdit(fake);
+    type("Название", "Молоко 60×40");
+    await save();
+    fake.api.getTemplate.mockResolvedValue(milk({ name: "Молоко (со склада)", rev: 64 }));
+    fireEvent.click(
+      within(screen.getByRole("alert")).getByRole("button", { name: "Загрузить заново" }),
+    );
+    await screen.findByRole("heading", { name: "Шаблон «Молоко (со склада)»" });
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 

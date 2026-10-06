@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router";
+import { useBlocker, useNavigate, type BlockerFunction } from "react-router";
 
 import { Alert, Button, Card, Checkbox, Input, PageHeader, Select } from "@markiro/ui";
 
@@ -14,6 +14,7 @@ import type {
 import { templateCreate, templateUpdate } from "../../host/requests.js";
 import { errorProp } from "../../lib/form-error.js";
 import { useProductGroups } from "../catalog-queries.js";
+import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation } from "../office-query.js";
 import { scopeCodes } from "./category-scope.js";
 import { CategoryScopeField } from "./CategoryScopeField.js";
@@ -109,6 +110,18 @@ export function TemplateEditor({
   const focusAfterRender = useRef<string | null>(null);
   const dirty = draftChanged(opened, draft);
   const duplicateInvalid = duplicateLayoutInvalid(draft.spec, draft.purpose);
+  // Set right before the editor leaves on its own, after a save or a delete.
+  const leaving = useRef(false);
+  // Any navigation to another page with unsaved changes asks first: the
+  // header's «К шаблонам», the menu, «Копировать». The end of the session
+  // unmounts the office instead, and its edits are lost (`AGENTS.md`).
+  const blocker = useBlocker(
+    useCallback<BlockerFunction>(
+      ({ currentLocation, nextLocation }) =>
+        dirty && !leaving.current && currentLocation.pathname !== nextLocation.pathname,
+      [dirty],
+    ),
+  );
 
   useEffect(() => {
     const target = focusAfterRender.current;
@@ -207,6 +220,7 @@ export function TemplateEditor({
   // The list holds no layouts and is read again; nothing of this template is kept.
   const backToList = (notice: string) => {
     queryClient.removeQueries({ queryKey: officeKeys.templates, exact: true });
+    leaving.current = true;
     void navigate("/templates", { state: { notice } });
   };
 
@@ -394,6 +408,20 @@ export function TemplateEditor({
           onClose={() => setImporting(false)}
           onReplace={replaceLayout}
         />
+      )}
+      {blocker.state === "blocked" && (
+        <FormDialog
+          title={t("office.templateEditor.leave.title")}
+          submitLabel={t("office.templateEditor.leave.submit")}
+          submitVariant="destructive"
+          onSubmit={() => {
+            blocker.proceed();
+            return Promise.resolve();
+          }}
+          onClose={() => blocker.reset()}
+        >
+          <p>{t("office.templateEditor.leave.body")}</p>
+        </FormDialog>
       )}
     </>
   );
