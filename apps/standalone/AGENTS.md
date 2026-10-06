@@ -1214,31 +1214,30 @@ requests and offer a retry.
   template field's error after «Добавить»), and adds the row to the page's
   document. While the template list loads or has failed, the selects (the
   organization's and the rows') and «Убрать» are off and the defaults go out as
-  stored; a template the list does not
-  show appears by the first eight characters of its id («Шаблон a3b4c5d6…»; «—
-  нет в списке» follows once the list is loaded without it). A failed list shows
-  a warning with «Повторить», and a failed group lookup one of its own. Edits
-  stay in the page: a live note says there are unsaved changes, «Отменить
-  изменения» brings back the loaded document, and «Сохранить», off until
-  something changed, sends the whole document with the loaded revision
-  (`templateDefaultsUpdate`: `null` for «Не выбран», every category default the
-  page holds), drops a second click while the save is on its way, with every
-  control of the page off until the answer, and puts the answer in the cache,
-  which starts the form afresh. A `validation_failed` goes
-  under the control it names (`defaultsFailure`): an organization default's
-  select, or the row of the category default the page sent at that index
-  (`categories.{i}`, `.templateId`, `.chzProductGroupCode`), in words for each:
-  a template that no longer fits (disabled, narrowed or deleted while the page
-  was open: the host checks the defaults before the revision), a category the
-  host did not take, a default given twice. The template list is then read again
-  so a refused choice shows as marked, and a change of that control, or the
-  removal of that row, takes the message away. Focus moves to the refused
-  select, so its error is read, and a refusal naming a row the page no longer
-  holds is the general alert; after «Убрать» focus moves to the next row's
-  «Убрать», else the previous row's, else «Добавить умолчание категории».
-  `stale_revision` offers
-  «Загрузить заново» in words of its own, since a change of the organization's
-  profile moves the document's revision too, and the reload drops the edits.
+  stored; a template the list does not show appears by the first eight
+  characters of its id («Шаблон a3b4c5d6…»; «— нет в списке» follows once the
+  list is loaded without it). A failed list shows a warning with «Повторить»,
+  and a failed group lookup one of its own. Edits stay in the page: a live note
+  says there are unsaved changes, «Отменить изменения» brings back the loaded
+  document, and «Сохранить», off until something changed, sends the whole
+  document with the loaded revision (`templateDefaultsUpdate`: `null` for «Не
+  выбран», every category default the page holds), drops a second click while
+  the save is on its way, with every control of the page off until the answer,
+  and puts the answer in the cache, which starts the form afresh. A
+  `validation_failed` goes under the control it names (`defaultsFailure`): an
+  organization default's select, or the row of the category default the page
+  sent at that index (`categories.{i}`, `.templateId`, `.chzProductGroupCode`),
+  in words for each: a template that no longer fits (disabled, narrowed or
+  deleted while the page was open: the host checks the defaults before the
+  revision), a category the host did not take, a default given twice. The
+  template list is then read again so a refused choice shows as marked, and a
+  change of that control, or the removal of that row, takes the message away.
+  Focus moves to the refused select, so its error is read, and a refusal naming
+  a row the page no longer holds is the general alert; after «Убрать» focus
+  moves to the next row's «Убрать», else the previous row's, else «Добавить
+  умолчание категории». `stale_revision` offers «Загрузить заново» in words of
+  its own, since a change of the organization's profile moves the document's
+  revision too, and the reload drops the edits.
 
 ## Marking rules
 

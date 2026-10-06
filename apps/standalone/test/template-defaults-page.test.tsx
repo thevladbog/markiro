@@ -1084,7 +1084,7 @@ describe("office template defaults: the categories', beyond the plan", () => {
       await waitFor(() => expect(add).toHaveProperty("disabled", false));
       expect(
         await screen.findByRole("button", { name: "Убрать умолчание: Молочная продукция, Короб" }),
-      ).toBeTruthy();
+      ).toHaveProperty("disabled", false);
       expect(screen.getByLabelText(MILK_ROW)).toHaveProperty("disabled", false);
       view.unmount();
     }
