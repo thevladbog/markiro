@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   supportChatContracts,
   supportTranscriptContracts,
@@ -9,6 +10,20 @@ import { apiFetch } from "../../api/client.js";
 
 const base = "/support-chat/episodes";
 export type EpisodeList = ReturnType<typeof supportChatContracts.episodeList.response.parse>;
+
+/** Fail closed until the active cabinet can reach the feature-gated episode list. */
+export function useSupportChatAvailability(userId?: string, tenantId?: string | null) {
+  return useQuery({
+    queryKey: ["support-chat-availability", userId, tenantId],
+    enabled: Boolean(userId && tenantId),
+    queryFn: async () => {
+      await listEpisodes();
+      return true;
+    },
+    retry: false,
+    staleTime: 30_000,
+  });
+}
 
 export async function listEpisodes(cursor?: string): Promise<EpisodeList> {
   const query = cursor ? `?cursor=${encodeURIComponent(cursor)}` : "";

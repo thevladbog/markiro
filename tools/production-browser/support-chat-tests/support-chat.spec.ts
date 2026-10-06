@@ -408,6 +408,9 @@ test("declining an operator proposal does not create a billing request", async (
       .getByRole("textbox", { name: "Сообщение" })
       .fill("Вопрос без переноса в обращение");
     await customerPage.getByRole("button", { name: "Отправить" }).click();
+    await expect(
+      customerPage.getByText("Вопрос без переноса в обращение", { exact: true }),
+    ).toBeVisible();
     const listed = await customer.request.get("/api/support-chat/episodes");
     expect(listed.status()).toBe(200);
     const episodeId = ((await listed.json()) as { items: Array<{ id: string }> }).items[0]!.id;
@@ -423,6 +426,7 @@ test("declining an operator proposal does not create a billing request", async (
       .getByRole("textbox", { name: "Краткое описание" })
       .fill("Не переносить историю");
     await operatorPage.getByRole("button", { name: "Предложить создание обращения" }).click();
+    await expect(operatorPage.getByText("Ожидает решения клиента", { exact: true })).toBeVisible();
     await customerPage.reload();
     await customerPage.getByRole("button", { name: "Отказаться" }).click();
     await expect(customerPage.getByRole("button", { name: "Подтвердить перенос" })).toHaveCount(0);

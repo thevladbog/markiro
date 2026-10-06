@@ -1063,7 +1063,10 @@ export class PgBossService implements OnModuleInit, OnModuleDestroy {
       throw new Error("pg-boss database probe failed");
     }
     if (
-      this.workerIds.length !== 23 + (this.platformReports ? 2 : 0) ||
+      this.workerIds.length !==
+        23 +
+          (this.platformReports ? 2 : 0) +
+          (this.supportChatJobs && this.supportChatSync ? 1 : 0) ||
       this.workerIds.some((id) => id.length === 0) ||
       new Set(this.workerIds).size !== this.workerIds.length
     ) {
