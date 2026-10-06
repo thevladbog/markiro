@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { HostError } from "../../host/client.js";
 import type { LabelTemplate, LabelTemplateSummary, TemplateUpdate } from "../../host/protocol.js";
 import { templateUpdate } from "../../host/requests.js";
 import { useProductGroups } from "../catalog-queries.js";
@@ -16,6 +17,8 @@ export interface TemplateStateDialogProps {
   onSaved: (template: LabelTemplate) => void;
   /** The template changed on the host: close and load the templates again. */
   onReload: () => void;
+  /** The host has no such template any more: the list is read again under the dialog. */
+  onMissing?: () => void;
 }
 
 /**
@@ -31,6 +34,7 @@ export function TemplateStateDialog({
   onClose,
   onSaved,
   onReload,
+  onMissing,
 }: TemplateStateDialogProps) {
   const { t } = useTranslation();
   const groups = useProductGroups();
@@ -47,6 +51,7 @@ export function TemplateStateDialog({
       saved = await change.mutateAsync(templateUpdate(template, { enabled: !turningOff }));
     } catch (error) {
       setFailure(templateFailure(error));
+      if (error instanceof HostError && error.code === "not_found") onMissing?.();
       return;
     }
     onSaved(saved);

@@ -122,7 +122,16 @@ export function describeDefaultConflict(
 /** A refused template write: the defaults in its way, or what `alertFailure` makes of it. */
 export type TemplateFailure = AlertFailure | { kind: "default"; conflict: DefaultConflict };
 
+/**
+ * A refused write of a row's template: the defaults in its way, a template
+ * deleted on another workstation since the list was read (`not_found`), or
+ * what `alertFailure` makes of it.
+ */
 export function templateFailure(error: unknown): TemplateFailure {
   const conflict = defaultConflict(error);
-  return conflict === null ? alertFailure(error) : { kind: "default", conflict };
+  if (conflict !== null) return { kind: "default", conflict };
+  if (error instanceof HostError && error.code === "not_found") {
+    return { kind: "alert", message: "office.templateEditor.errors.missing" };
+  }
+  return alertFailure(error);
 }

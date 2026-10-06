@@ -176,4 +176,12 @@ describe("a refused template write", () => {
       message: "errors.api.conflict",
     });
   });
+
+  it("says a template deleted on another workstation is gone", () => {
+    expect(
+      templateFailure(
+        new HostError({ kind: "api", code: "not_found", status: 404, message: "gone" }),
+      ),
+    ).toStrictEqual({ kind: "alert", message: "office.templateEditor.errors.missing" });
+  });
 });

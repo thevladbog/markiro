@@ -93,4 +93,17 @@ describe("template choices", () => {
       { value: gone, label: "Шаблон 6f0b3e1d…" },
     ]);
   });
+
+  it("put templates of the same name in the order of their ids, as «Шаблоны» lists them", () => {
+    const later = summary("9f0a1b2c-3d4e-4f5a-8b6c-7d8e9f0a1b2c", "Коробка 58×40");
+    const earlier = summary("0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", "Коробка 58×40");
+    for (const list of [
+      [later, earlier],
+      [earlier, later],
+    ]) {
+      expect(templateOptions(list, "box", null, [], t).map((option) => option.value)).toStrictEqual(
+        ["", earlier.id, later.id],
+      );
+    }
+  });
 });

@@ -14,17 +14,20 @@ export interface ArchivableRecord {
 }
 
 /**
- * Active records before archived ones, each group by name (`NAMES`), then by
- * id so equal names keep one order. The host sorts bytewise («Линия 10»
- * before «Линия 2»), so a page sorts what it shows itself.
+ * Records by name (`NAMES`), then by id so equal names keep one order: the
+ * one order of names in the office's lists and choices. The host sorts
+ * bytewise («Линия 10» before «Линия 2»), so a page sorts what it shows itself.
  */
+export function byNameThenId(
+  a: { id: string; name: string },
+  b: { id: string; name: string },
+): number {
+  return NAMES.compare(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+}
+
+/** Active records before archived ones, each group by name, then by id (`byNameThenId`). */
 export function activeFirstByName<T extends ArchivableRecord>(records: readonly T[]): T[] {
-  return [...records].sort(
-    (a, b) =>
-      Number(a.archived) - Number(b.archived) ||
-      NAMES.compare(a.name, b.name) ||
-      (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-  );
+  return [...records].sort((a, b) => Number(a.archived) - Number(b.archived) || byNameThenId(a, b));
 }
 
 /**

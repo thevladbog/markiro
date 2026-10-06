@@ -1,4 +1,5 @@
 import type { LabelTemplate, LabelTemplateSummary, TemplatePurpose } from "../../host/protocol.js";
+import { byNameThenId } from "../records.js";
 
 /** What the purpose filter keeps. */
 export type TemplatePurposeFilter = "all" | TemplatePurpose;
@@ -30,20 +31,16 @@ export function findTemplates<T extends LabelTemplateSummary>(
   );
 }
 
-/** Template names in Russian order, with numbers by value: «Коробка 58×40» before «Коробка 100×100». */
-const NAMES = new Intl.Collator("ru", { numeric: true });
-
 /**
- * Templates by name (`NAMES`), then by id so equal names keep one order. The
+ * Templates by name with numbers by value («Коробка 58×40» before «Коробка
+ * 100×100»), then by id so equal names keep one order (`byNameThenId`). The
  * host sorts bytewise, and a write changes the cached list in place, so a page
  * sorts what it shows itself.
  */
 export function templatesByName<T extends Pick<LabelTemplateSummary, "id" | "name">>(
   templates: readonly T[],
 ): T[] {
-  return [...templates].sort(
-    (a, b) => NAMES.compare(a.name, b.name) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-  );
+  return [...templates].sort(byNameThenId);
 }
 
 /**

@@ -83,6 +83,8 @@ export function TemplatesPage() {
     setDialog(null);
     void templates.refetch();
   };
+  // A template deleted elsewhere leaves the list; the dialog stays and says why.
+  const missing = () => void templates.refetch();
 
   const columns: TableColumn<LabelTemplateSummary>[] = [
     {
@@ -302,6 +304,7 @@ export function TemplatesPage() {
             )
           }
           onReload={reload}
+          onMissing={missing}
         />
       )}
       {canEdit && dialog?.kind === "categories" && (
@@ -312,6 +315,7 @@ export function TemplatesPage() {
             saved(template, t("office.templates.categoriesNotice", { name: template.name }))
           }
           onReload={reload}
+          onMissing={missing}
         />
       )}
     </>

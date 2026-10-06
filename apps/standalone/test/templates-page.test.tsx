@@ -1145,3 +1145,110 @@ describe("office label templates: categories", () => {
     expect(notice.closest(".mk-alert")?.querySelector("b, i")).toBeNull();
   });
 });
+
+describe("office label templates: a template deleted on another workstation", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+  });
+
+  it("says so in either dialog, keeps the dialog open and reads the list again, which drops the row", async () => {
+    for (const [action, title] of [
+      ["Выключить шаблон «Молоко 58×40»", "Выключить шаблон?"],
+      ["Категории шаблона «Молоко 58×40»", "Категории шаблона «Молоко 58×40»"],
+    ] as const) {
+      const fake = session();
+      fake.api.updateTemplate.mockRejectedValue(hostError("not_found", 404));
+      const view = renderOffice(fake);
+      fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
+      await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+      fireEvent.click(await screen.findByRole("button", { name: action }));
+      fake.api.listTemplates.mockResolvedValue(TEMPLATES.filter((each) => each.id !== MILK.id));
+      const submit = within(dialog()).getByRole("button", {
+        name: title === "Выключить шаблон?" ? "Выключить" : "Сохранить",
+      });
+      if (title !== "Выключить шаблон?") {
+        fireEvent.click(within(dialog()).getByRole("radio", { name: "Все категории" }));
+      }
+      await act(async () => {
+        fireEvent.click(submit);
+      });
+      expect(within(dialog()).getByRole("alert").textContent).toBe(
+        "✕Шаблона больше нет на хосте: его удалили на другом рабочем месте.",
+      );
+      expect(screen.getByRole("dialog", { name: title })).toBeTruthy();
+      await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(screen.queryByText("Молоко 58×40", { selector: "td span" })).toBeNull(),
+      );
+      view.unmount();
+    }
+  });
+
+  it("reads the list once, leaves the dialog open with its message and no notice behind it, and writes again on a second click", async () => {
+    const missing = "✕Шаблона больше нет на хосте: его удалили на другом рабочем месте.";
+    for (const [action, title, submitName] of [
+      ["Выключить шаблон «Молоко 58×40»", "Выключить шаблон?", "Выключить"],
+      ["Категории шаблона «Молоко 58×40»", "Категории шаблона «Молоко 58×40»", "Сохранить"],
+    ] as const) {
+      const fake = session();
+      fake.api.updateTemplate.mockRejectedValue(hostError("not_found", 404));
+      const view = renderOffice(fake);
+      fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
+      await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+      fireEvent.click(await screen.findByRole("button", { name: action }));
+      fake.api.listTemplates.mockResolvedValue(TEMPLATES.filter((each) => each.id !== MILK.id));
+      if (submitName === "Сохранить") {
+        fireEvent.click(within(dialog()).getByRole("radio", { name: "Все категории" }));
+      }
+      await act(async () => {
+        fireEvent.click(within(dialog()).getByRole("button", { name: submitName }));
+      });
+      await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(2));
+      await waitFor(() =>
+        expect(screen.queryByText("Молоко 58×40", { selector: "td span" })).toBeNull(),
+      );
+      await settle();
+      expect(fake.api.listTemplates).toHaveBeenCalledTimes(2);
+      expect(screen.getByRole("dialog", { name: title })).toBeTruthy();
+      expect(within(dialog()).getByRole("alert").textContent).toBe(missing);
+      // The dialog's message is the only one: the page shows no notice behind it.
+      expect(document.querySelectorAll(".mk-alert")).toHaveLength(1);
+
+      await act(async () => {
+        fireEvent.click(within(dialog()).getByRole("button", { name: submitName }));
+      });
+      expect(fake.api.updateTemplate).toHaveBeenCalledTimes(2);
+      await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(3));
+      await settle();
+      expect(fake.api.listTemplates).toHaveBeenCalledTimes(3);
+      expect(screen.getByRole("dialog", { name: title })).toBeTruthy();
+      expect(within(dialog()).getByRole("alert").textContent).toBe(missing);
+      view.unmount();
+    }
+  });
+
+  it("reads the list again only for a template that is gone, not for any other refusal", async () => {
+    for (const [action, submitName] of [
+      ["Выключить шаблон «Молоко 58×40»", "Выключить"],
+      ["Категории шаблона «Молоко 58×40»", "Сохранить"],
+    ] as const) {
+      const fake = session();
+      fake.api.updateTemplate.mockRejectedValue(hostError("validation_failed", 422));
+      const view = renderOffice(fake);
+      fireEvent.click(await screen.findByRole("link", { name: "Шаблоны" }));
+      await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+      fireEvent.click(await screen.findByRole("button", { name: action }));
+      if (submitName === "Сохранить") {
+        fireEvent.click(within(dialog()).getByRole("radio", { name: "Все категории" }));
+      }
+      await act(async () => {
+        fireEvent.click(within(dialog()).getByRole("button", { name: submitName }));
+      });
+      await settle();
+      expect(fake.api.updateTemplate).toHaveBeenCalledTimes(1);
+      expect(fake.api.listTemplates).toHaveBeenCalledTimes(1);
+      expect(within(dialog()).getByRole("alert").textContent).not.toContain("больше нет на хосте");
+      view.unmount();
+    }
+  });
+});
