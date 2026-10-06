@@ -1019,25 +1019,19 @@ describe("office label templates: categories", () => {
     }
   });
 
-  it("puts a row's actions in one box, the switch, «Категории» and, for a template that is not stock, «Изменить», each a compact secondary button named after its template", async () => {
+  it("puts a row's actions in one box, the switch, «Категории» and «Изменить», or «Копировать» for a stock template, each a compact secondary button named after its template", async () => {
     await openTemplates(session());
-    for (const [name, label, edit] of [
-      ["Коробка 58×40", "Выключить", false],
-      ["Вода и молоко", "Включить", true],
+    for (const [name, label, last] of [
+      ["Коробка 58×40", "Выключить", "Копировать"],
+      ["Вода и молоко", "Включить", "Изменить"],
     ] as const) {
       const buttons = within(rowOf(name)).getAllByRole("button");
-      expect(buttons.map((button) => button.textContent)).toEqual(
-        edit ? [label, "Категории", "Изменить"] : [label, "Категории"],
-      );
-      expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual(
-        edit
-          ? [
-              `${label} шаблон «${name}»`,
-              `Категории шаблона «${name}»`,
-              `Изменить шаблон «${name}»`,
-            ]
-          : [`${label} шаблон «${name}»`, `Категории шаблона «${name}»`],
-      );
+      expect(buttons.map((button) => button.textContent)).toEqual([label, "Категории", last]);
+      expect(buttons.map((button) => button.getAttribute("aria-label"))).toEqual([
+        `${label} шаблон «${name}»`,
+        `Категории шаблона «${name}»`,
+        `${last} шаблон «${name}»`,
+      ]);
       expect(new Set(buttons.map((button) => button.parentElement)).size).toBe(1);
       for (const button of buttons) {
         expect(button.parentElement?.classList.contains("mk-row-actions")).toBe(true);

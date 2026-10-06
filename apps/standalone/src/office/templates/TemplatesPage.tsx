@@ -166,8 +166,17 @@ export function TemplatesPage() {
           >
             {t("office.templates.categories")}
           </Button>
-          {/* A stock template keeps its name and layout (the host refuses a change). */}
-          {!template.stock && (
+          {/* A stock template keeps its name and layout (the host refuses a change): it is copied. */}
+          {template.stock ? (
+            <Button
+              variant="secondary"
+              size="compact"
+              aria-label={t("office.templates.copyNamed", { name: template.name })}
+              onClick={() => void navigate(`/templates/${template.id}/copy`)}
+            >
+              {t("office.templates.copy")}
+            </Button>
+          ) : (
             <Button
               variant="secondary"
               size="compact"

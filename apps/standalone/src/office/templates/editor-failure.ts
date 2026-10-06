@@ -1,6 +1,11 @@
 import { HostError } from "../../host/client.js";
-import { writeFailure, type FieldMessage, type WriteFailure } from "../form-errors.js";
-import { defaultConflict, type DefaultConflict } from "./template-text.js";
+import {
+  alertFailure,
+  writeFailure,
+  type FieldMessage,
+  type WriteFailure,
+} from "../form-errors.js";
+import { defaultConflict, type DefaultConflict, type TemplateFailure } from "./template-text.js";
 
 /** The editor's controls a refusal can go under. */
 export type EditorField = "name" | "scope";
@@ -38,4 +43,24 @@ export function editorFailure(error: unknown): EditorFailure {
     }
   }
   return writeFailure(error, EDITOR_FIELDS);
+}
+
+/**
+ * A refused delete, above the dialog: a default says whose (`template_is_default`),
+ * a stock template is never deleted (`stock_template`), a template deleted
+ * elsewhere is gone (`not_found`, which the host answers only for an id it
+ * never had, so this is defensive), the rest is explained by its code.
+ */
+export function deleteFailure(error: unknown): TemplateFailure {
+  const conflict = defaultConflict(error);
+  if (conflict !== null) return { kind: "default", conflict };
+  if (error instanceof HostError) {
+    if (error.code === "conflict" && error.details.constraint === "stock_template") {
+      return { kind: "alert", message: "office.templateEditor.errors.stockDelete" };
+    }
+    if (error.code === "not_found") {
+      return { kind: "alert", message: "office.templateEditor.errors.missing" };
+    }
+  }
+  return alertFailure(error);
 }

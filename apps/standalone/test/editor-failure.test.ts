@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { HostError } from "../src/host/client.js";
-import { editorFailure } from "../src/office/templates/editor-failure.js";
+import { deleteFailure, editorFailure } from "../src/office/templates/editor-failure.js";
 
 function api(code: string, details: Record<string, unknown> = {}): HostError {
   return new HostError({ kind: "api", code, message: code, details });
@@ -61,5 +61,31 @@ describe("a refused template save", () => {
     expect(
       editorFailure(new HostError({ kind: "transport", code: "unreachable", message: "down" })),
     ).toStrictEqual({ kind: "alert", message: "errors.transport.unreachable" });
+  });
+});
+
+describe("a refused template delete", () => {
+  it("says whose default it is, that a stock template stays, that the template is gone, and the rest by its code", () => {
+    expect(
+      deleteFailure(
+        api("conflict", {
+          constraint: "template_is_default",
+          organizationDefault: false,
+          categoryDefaults: [13, 8],
+        }),
+      ),
+    ).toStrictEqual({ kind: "default", conflict: { organization: false, categories: [13, 8] } });
+    expect(deleteFailure(api("conflict", { constraint: "stock_template" }))).toStrictEqual({
+      kind: "alert",
+      message: "office.templateEditor.errors.stockDelete",
+    });
+    expect(deleteFailure(api("not_found"))).toStrictEqual({
+      kind: "alert",
+      message: "office.templateEditor.errors.missing",
+    });
+    expect(deleteFailure(api("forbidden"))).toStrictEqual({
+      kind: "alert",
+      message: "errors.api.forbidden",
+    });
   });
 });

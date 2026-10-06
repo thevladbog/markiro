@@ -6,7 +6,7 @@ import { buildDuplicateLabelTemplate, buildPalletLabelTemplates } from "@markiro
 import { HostError } from "../src/host/client.js";
 import type { LabelTemplate, LabelTemplateSummary, ProductGroup } from "../src/host/protocol.js";
 import { downloadFile } from "../src/office/templates/download.js";
-import { resizedSpec } from "../src/office/templates/editor-model.js";
+import { resizedSpec, startingSpec } from "../src/office/templates/editor-model.js";
 import { analyzeImport } from "../src/office/templates/import-analysis.js";
 import {
   fakeOfficeSession,
@@ -1327,8 +1327,10 @@ describe("changing a label template", () => {
     stock.api.getTemplate.mockResolvedValue(milk({ stock: true }));
     view = await opening(
       stock,
-      "⧉Типовой шаблон не переименовывается и не меняет макет. Включить, выключить и сузить его можно на странице «Шаблоны».",
+      "⧉Типовой шаблон не переименовывается и не меняет макет. Включить, выключить и сузить его можно на странице «Шаблоны», а изменить — в копии.",
     );
+    fireEvent.click(screen.getByRole("button", { name: "Копировать" }));
+    await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });
     view.unmount();
 
     const unreadable = editSession();
@@ -1526,6 +1528,345 @@ describe("changing a label template", () => {
     fireEvent.click(screen.getByRole("checkbox", { name: "Включён" }));
     await save();
     expect(await screen.findByText(`Шаблон «${name}» сохранён.`)).toBeTruthy();
+    expect(document.querySelector("img, i, b, script")).toBeNull();
+  });
+});
+
+/** «Коробка 58×40» as the host has it: the stock box template. */
+function stockBox(): LabelTemplate {
+  return {
+    id: BOX_58.id,
+    name: "Коробка 58×40",
+    purpose: "box",
+    enabled: true,
+    chzProductGroupCodes: null,
+    stock: true,
+    spec: importedSpec(),
+    rev: 60,
+  };
+}
+
+function deleteDialog(): HTMLElement {
+  return screen.getByRole("dialog", { name: "Удалить шаблон?" });
+}
+
+describe("copying and deleting a label template", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+  });
+
+  it("copies a stock template from its row: a new template under «— копия» with the source's purpose, flag, categories and layout", async () => {
+    const fake = editSession();
+    fake.api.getTemplate.mockResolvedValue({
+      ...stockBox(),
+      chzProductGroupCodes: [13],
+      enabled: false,
+    });
+    fake.api.createTemplate.mockResolvedValue(created("Коробка 58×40 — копия"));
+    await openTemplates(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Копировать шаблон «Коробка 58×40»" }));
+    await screen.findByRole("heading", { name: "Копия шаблона «Коробка 58×40»" });
+    expect(fake.api.getTemplate).toHaveBeenCalledWith("office-session-token", BOX_58.id);
+    expect(screen.getByLabelText("Название")).toHaveProperty("value", "Коробка 58×40 — копия");
+    expect(screen.getByRole("combobox", { name: "Назначение" })).toHaveProperty("disabled", false);
+    expect(screen.queryByRole("button", { name: "Удалить" })).toBeNull();
+    await save();
+    expect(fake.api.createTemplate.mock.calls[0]?.[1]).toStrictEqual({
+      name: "Коробка 58×40 — копия",
+      purpose: "box",
+      enabled: false,
+      chzProductGroupCodes: [13],
+      spec: importedSpec(),
+    });
+    expect(await screen.findByText("Шаблон «Коробка 58×40 — копия» создан.")).toBeTruthy();
+  });
+
+  it("copies a template from its editor and keeps the layout when the copy's purpose changes", async () => {
+    const fake = editSession();
+    // An empty 58×40 box, a new box template's starting layout, which a copy keeps all the same.
+    fake.api.getTemplate.mockResolvedValue(milk({ spec: startingSpec("box") }));
+    fake.api.createTemplate.mockResolvedValue(created("Молоко 58×40 — копия"));
+    await openEdit(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Копировать" }));
+    await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });
+    await settle();
+    expect(fake.api.getTemplate).toHaveBeenCalledTimes(2);
+    fireEvent.change(screen.getByRole("combobox", { name: "Назначение" }), {
+      target: { value: "pallet" },
+    });
+    expect(screen.getByText("Размер: 58 × 40 мм · 203 dpi")).toBeTruthy();
+    await save();
+    expect(fake.api.createTemplate.mock.calls[0]?.[1]).toMatchObject({
+      purpose: "pallet",
+      spec: startingSpec("box"),
+    });
+  });
+
+  it("deletes a template after a destructive confirmation and lists the templates again with a notice", async () => {
+    const fake = editSession();
+    fake.api.deleteTemplate.mockResolvedValue(undefined);
+    await openEdit(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+    expect(
+      within(deleteDialog()).getByText(
+        "Шаблон «Молоко 58×40» будет удалён: станции его больше не получат, а товары, у которых он выбран, останутся без этого шаблона. Отменить удаление нельзя.",
+      ),
+    ).toBeTruthy();
+    const submit = within(deleteDialog()).getByRole("button", { name: "Удалить" });
+    expect(submit.classList.contains("mk-btn--destructive")).toBe(true);
+    await act(async () => {
+      fireEvent.click(submit);
+    });
+    expect(fake.api.deleteTemplate).toHaveBeenCalledWith("office-session-token", MILK_ID);
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    expect(screen.getByText("Шаблон «Молоко 58×40» удалён.")).toBeTruthy();
+    await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(2));
+  });
+
+  it("sends nothing when the deletion is cancelled", async () => {
+    const fake = editSession();
+    await openEdit(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+    fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Отмена" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(fake.api.deleteTemplate).not.toHaveBeenCalled();
+  });
+
+  it("says why a deletion is refused: a default, a stock template, a template already gone", async () => {
+    const fake = editSession();
+    fake.api.deleteTemplate
+      .mockRejectedValueOnce(
+        hostError("conflict", {
+          constraint: "template_is_default",
+          organizationDefault: true,
+          categoryDefaults: [],
+        }),
+      )
+      .mockRejectedValueOnce(hostError("conflict", { constraint: "stock_template" }))
+      .mockRejectedValueOnce(hostError("not_found"));
+    await openEdit(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+    const confirm = async () => {
+      await act(async () => {
+        fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Удалить" }));
+      });
+      return within(deleteDialog()).getByRole("alert").textContent;
+    };
+    expect(await confirm()).toBe(
+      "✕Шаблон выбран по умолчанию для организации. Сначала выберите другой шаблон на странице «Умолчания шаблонов».",
+    );
+    expect(await confirm()).toBe("✕Типовой шаблон не удаляется: его можно выключить.");
+    expect(await confirm()).toBe(
+      "✕Шаблона больше нет на хосте: его удалили на другом рабочем месте.",
+    );
+    fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Отмена" }));
+    fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    await waitFor(() => expect(fake.api.listTemplates).toHaveBeenCalledTimes(2));
+  });
+
+  it("copies the source's own purpose, flag, categories and layout, whatever they are, and drops the cached list", async () => {
+    const fake = editSession();
+    fake.api.getTemplate.mockResolvedValue(
+      milk({ purpose: "pallet", chzProductGroupCodes: null, spec: importedSpec(ZPL, 300) }),
+    );
+    fake.api.createTemplate.mockResolvedValue(created("Молоко 58×40 — копия"));
+    await openEdit(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Копировать" }));
+    await screen.findByRole("heading", { name: "Копия шаблона «Молоко 58×40»" });
+    await settle();
+    expect(screen.getByRole("combobox", { name: "Назначение" })).toHaveProperty("value", "pallet");
+    expect(screen.getByRole("radio", { name: "Все категории" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(screen.getByText(/^Размер: .* · 300 dpi$/)).toBeTruthy();
+    let release: (rows: LabelTemplateSummary[]) => void = () => {};
+    fake.api.listTemplates.mockReturnValueOnce(
+      new Promise<LabelTemplateSummary[]>((resolve) => {
+        release = resolve;
+      }),
+    );
+    await save();
+    expect(fake.api.createTemplate.mock.calls[0]?.[1]).toStrictEqual({
+      name: "Молоко 58×40 — копия",
+      purpose: "pallet",
+      enabled: true,
+      chzProductGroupCodes: null,
+      spec: importedSpec(ZPL, 300),
+    });
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    // The list is read again: no row of the old list stands in for it meanwhile.
+    expect(screen.getByText("Загрузка…")).toBeTruthy();
+    expect(screen.queryByText("Молоко 58×40")).toBeNull();
+    await act(async () => {
+      release([BOX_58]);
+    });
+    expect(await screen.findByText("Коробка 58×40")).toBeTruthy();
+  });
+
+  it("drops the cached list after a delete, so the deleted row is never shown again", async () => {
+    const fake = editSession();
+    fake.api.deleteTemplate.mockResolvedValue(undefined);
+    await openEdit(fake);
+    let release: (rows: LabelTemplateSummary[]) => void = () => {};
+    fake.api.listTemplates.mockReturnValueOnce(
+      new Promise<LabelTemplateSummary[]>((resolve) => {
+        release = resolve;
+      }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+    await act(async () => {
+      fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Удалить" }));
+    });
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    expect(screen.getByText("Загрузка…")).toBeTruthy();
+    expect(screen.queryByText("Молоко 58×40")).toBeNull();
+    await act(async () => {
+      release([BOX_58]);
+    });
+    expect(await screen.findByText("Коробка 58×40")).toBeTruthy();
+    expect(screen.queryByText("Молоко 58×40")).toBeNull();
+  });
+
+  it("offers a copy and a delete to either role: «Копировать» on a stock row, «Копировать» and «Удалить» in the editor", async () => {
+    for (const user of [SESSION.user, TECHNOLOGIST]) {
+      const fake = editSession(user);
+      fake.api.deleteTemplate.mockResolvedValue(undefined);
+      const view = await openTemplates(fake);
+      expect(
+        screen.getByRole("button", { name: "Копировать шаблон «Коробка 58×40»" }),
+      ).toBeTruthy();
+      fireEvent.click(screen.getByRole("button", { name: "Изменить шаблон «Молоко 58×40»" }));
+      await screen.findByRole("heading", { name: "Шаблон «Молоко 58×40»" });
+      await settle();
+      expect(screen.getByRole("button", { name: "Копировать" })).toBeTruthy();
+      const remove = screen.getByRole("button", { name: "Удалить" });
+      expect(remove.classList.contains("mk-btn--destructive-outline")).toBe(true);
+      fireEvent.click(remove);
+      await act(async () => {
+        fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Удалить" }));
+      });
+      expect(await screen.findByText("Шаблон «Молоко 58×40» удалён.")).toBeTruthy();
+      expect(fake.api.deleteTemplate).toHaveBeenCalledTimes(1);
+      view.unmount();
+    }
+  });
+
+  it("explains a copy page that cannot open its source, with no copy of a copy on offer", async () => {
+    const cases: [(api: FakeOfficeSession["api"]) => void, string][] = [
+      [
+        (api) => api.getTemplate.mockRejectedValue(hostError("not_found")),
+        "⧉Шаблона нет на хосте: его удалили на другом рабочем месте.",
+      ],
+      [
+        (api) => api.getTemplate.mockResolvedValue({ ...stockBox(), spec: { widthMm: 58 } }),
+        "⧉Макет этого шаблона не читается этой версией приложения. Обновите приложение на этом ПК.",
+      ],
+    ];
+    for (const [arrange, text] of cases) {
+      const fake = editSession();
+      arrange(fake.api);
+      const view = await openTemplates(fake);
+      fireEvent.click(screen.getByRole("button", { name: "Копировать шаблон «Коробка 58×40»" }));
+      expect((await screen.findByRole("alert")).textContent).toBe(text);
+      expect(screen.getByRole("heading", { name: "Копия шаблона" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Копировать" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "К шаблонам" }));
+      await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+      view.unmount();
+    }
+    const down = editSession();
+    down.api.getTemplate
+      .mockRejectedValueOnce(
+        new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+      )
+      .mockResolvedValueOnce(stockBox());
+    await openTemplates(down);
+    fireEvent.click(screen.getByRole("button", { name: "Копировать шаблон «Коробка 58×40»" }));
+    await screen.findByRole("button", { name: "Повторить" });
+    expect(screen.getByRole("heading", { name: "Копия шаблона" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Повторить" }));
+    expect(await screen.findByLabelText("Название")).toHaveProperty(
+      "value",
+      "Коробка 58×40 — копия",
+    );
+  });
+
+  it("clears an earlier refusal while the next delete is on its way, and names the categories of a default", async () => {
+    const fake = editSession();
+    fake.api.deleteTemplate
+      .mockRejectedValueOnce(
+        hostError("conflict", {
+          constraint: "template_is_default",
+          organizationDefault: false,
+          categoryDefaults: [13, 8],
+        }),
+      )
+      .mockReturnValueOnce(new Promise<void>(() => {}));
+    await openEdit(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+    await act(async () => {
+      fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Удалить" }));
+    });
+    expect(within(deleteDialog()).getByRole("alert").textContent).toBe(
+      "✕Шаблон выбран по умолчанию для категорий: Упакованная вода, Молочная продукция. Сначала выберите другой шаблон на странице «Умолчания шаблонов».",
+    );
+    await act(async () => {
+      fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Удалить" }));
+    });
+    expect(within(deleteDialog()).queryByRole("alert")).toBeNull();
+    expect(fake.api.deleteTemplate).toHaveBeenCalledTimes(2);
+  });
+
+  it("sends one delete for two clicks in the same moment", async () => {
+    const fake = editSession();
+    fake.api.deleteTemplate.mockResolvedValue(undefined);
+    await openEdit(fake);
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+    const submit = within(deleteDialog()).getByRole("button", { name: "Удалить" });
+    await act(async () => {
+      fireEvent.click(submit);
+      fireEvent.click(submit);
+    });
+    await screen.findByRole("heading", { name: "Шаблоны этикеток" });
+    expect(fake.api.deleteTemplate).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a name made of markup as text on the copy page, in the delete dialog and in the notice", async () => {
+    const name = "<i>Из файла</i><img src=x onerror=alert(1)>";
+    const markup = (fake: ReturnType<typeof editSession>) => {
+      fake.api.listTemplates.mockResolvedValue([BOX_58, { ...MILK_ROW, name }]);
+      fake.api.getTemplate.mockResolvedValue(milk({ name }));
+    };
+    const first = editSession();
+    markup(first);
+    const view = await openTemplates(first);
+    fireEvent.click(screen.getByRole("button", { name: `Изменить шаблон «${name}»` }));
+    await screen.findByRole("heading", { name: `Шаблон «${name}»` });
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+    expect(within(deleteDialog()).getByText(new RegExp("будет удалён: станции"))).toBeTruthy();
+    expect(deleteDialog().textContent).toContain(`Шаблон «${name}» будет удалён`);
+    expect(document.querySelector("img, i, b, script")).toBeNull();
+    fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Отмена" }));
+    fireEvent.click(screen.getByRole("button", { name: "Копировать" }));
+    await screen.findByRole("heading", { name: `Копия шаблона «${name}»` });
+    expect(screen.getByLabelText("Название")).toHaveProperty("value", `${name} — копия`);
+    expect(document.querySelector("img, i, b, script")).toBeNull();
+    view.unmount();
+
+    const second = editSession();
+    markup(second);
+    second.api.deleteTemplate.mockResolvedValue(undefined);
+    await openTemplates(second);
+    fireEvent.click(screen.getByRole("button", { name: `Изменить шаблон «${name}»` }));
+    await screen.findByRole("heading", { name: `Шаблон «${name}»` });
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Удалить" }));
+    await act(async () => {
+      fireEvent.click(within(deleteDialog()).getByRole("button", { name: "Удалить" }));
+    });
+    expect(await screen.findByText(`Шаблон «${name}» удалён.`)).toBeTruthy();
     expect(document.querySelector("img, i, b, script")).toBeNull();
   });
 });

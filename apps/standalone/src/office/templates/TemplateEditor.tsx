@@ -17,6 +17,7 @@ import { useProductGroups } from "../catalog-queries.js";
 import { officeKeys, useOfficeMutation } from "../office-query.js";
 import { scopeCodes } from "./category-scope.js";
 import { CategoryScopeField } from "./CategoryScopeField.js";
+import { DeleteTemplateDialog } from "./DeleteTemplateDialog.js";
 import { downloadFile } from "./download.js";
 import { editorFailure, type EditorFailure, type EditorField } from "./editor-failure.js";
 import {
@@ -46,6 +47,11 @@ export interface TemplateEditorProps {
   template: LabelTemplate | null;
   /** What the editor opens with; a save sends the draft made of it. */
   opened: TemplateDraft;
+  /**
+   * A new blank template: its untouched starting layout follows a change of
+   * the purpose. A copy keeps its layout whatever the purpose.
+   */
+  layoutFollowsPurpose?: boolean;
   /** Reads the template again after a stale save; the editor then starts afresh. */
   onReload?: () => void;
 }
@@ -60,11 +66,19 @@ export interface TemplateEditorProps {
  * of it (`checkedSpec`), the categories go ascending (`scopeCodes`). A new
  * template is created (`templateCreate`); a template being changed keeps its
  * purpose and sends what differs and its layout with the opened revision
- * (`templateUpdate`), «Сохранить» staying off until something changed. A
- * saved template takes the office back to «Шаблоны» with a notice, and the
- * list, which holds no layouts, is read again.
+ * (`templateUpdate`), «Сохранить» staying off until something changed; it
+ * can be copied («Копировать» opens a copy of the template as the host has
+ * it) or deleted. A saved or deleted template takes the office back to
+ * «Шаблоны» with a notice, and the list, which holds no layouts, is read
+ * again.
  */
-export function TemplateEditor({ title, template, opened, onReload }: TemplateEditorProps) {
+export function TemplateEditor({
+  title,
+  template,
+  opened,
+  layoutFollowsPurpose = false,
+  onReload,
+}: TemplateEditorProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -76,6 +90,7 @@ export function TemplateEditor({ title, template, opened, onReload }: TemplateEd
   const [failure, setFailure] = useState<Exclude<EditorFailure, { kind: "field" }> | null>(null);
   const [importing, setImporting] = useState(false);
   const [sizing, setSizing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   // Set at once, so a second submit in the same moment is dropped before
   // `saving` has re-rendered the button.
   const inFlight = useRef(false);
@@ -113,6 +128,7 @@ export function TemplateEditor({ title, template, opened, onReload }: TemplateEd
       purpose,
       // An untouched starting layout follows the purpose; anything imported stays.
       spec:
+        layoutFollowsPurpose &&
         JSON.stringify(current.spec) === JSON.stringify(startingSpec(current.purpose))
           ? startingSpec(purpose)
           : current.spec,
@@ -181,16 +197,17 @@ export function TemplateEditor({ title, template, opened, onReload }: TemplateEd
       else setFailure(outcome);
       return;
     }
-    // The list holds no layouts and is read again; nothing of this template is kept.
+    backToList(
+      t(template === null ? "office.templateEditor.created" : "office.templateEditor.saved", {
+        name: saved.name,
+      }),
+    );
+  };
+
+  // The list holds no layouts and is read again; nothing of this template is kept.
+  const backToList = (notice: string) => {
     queryClient.removeQueries({ queryKey: officeKeys.templates, exact: true });
-    void navigate("/templates", {
-      state: {
-        notice: t(
-          template === null ? "office.templateEditor.created" : "office.templateEditor.saved",
-          { name: saved.name },
-        ),
-      },
-    });
+    void navigate("/templates", { state: { notice } });
   };
 
   const send = (event: FormEvent<HTMLFormElement>) => {
@@ -220,9 +237,24 @@ export function TemplateEditor({ title, template, opened, onReload }: TemplateEd
       <PageHeader
         title={title}
         actions={
-          <Button variant="secondary" onClick={() => void navigate("/templates")}>
-            {t("office.templateEditor.back")}
-          </Button>
+          <>
+            {template !== null && (
+              <>
+                <Button
+                  variant="secondary"
+                  onClick={() => void navigate(`/templates/${template.id}/copy`)}
+                >
+                  {t("office.templateEditor.copy")}
+                </Button>
+                <Button variant="destructive-outline" onClick={() => setDeleting(true)}>
+                  {t("office.templateEditor.delete")}
+                </Button>
+              </>
+            )}
+            <Button variant="secondary" onClick={() => void navigate("/templates")}>
+              {t("office.templateEditor.back")}
+            </Button>
+          </>
         }
       />
       <form className="standalone-form" onSubmit={send} noValidate>
@@ -344,6 +376,13 @@ export function TemplateEditor({ title, template, opened, onReload }: TemplateEd
             change({ spec });
             setSizing(false);
           }}
+        />
+      )}
+      {template !== null && deleting && (
+        <DeleteTemplateDialog
+          template={template}
+          onClose={() => setDeleting(false)}
+          onDeleted={() => backToList(t("office.templateEditor.deleted", { name: template.name }))}
         />
       )}
       {importing && (

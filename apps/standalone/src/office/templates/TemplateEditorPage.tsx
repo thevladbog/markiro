@@ -1,9 +1,12 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams } from "react-router";
 
+import type { LabelTemplateSpec } from "@markiro/domain";
 import { Alert, Button, PageHeader } from "@markiro/ui";
 
 import { HostError } from "../../host/client.js";
+import type { LabelTemplate } from "../../host/protocol.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { scopeOf } from "./category-scope.js";
@@ -28,12 +31,22 @@ export function NewTemplatePage() {
         scope: { mode: "all", codes: [] },
         spec: startingSpec("box"),
       }}
+      layoutFollowsPurpose
     />
   );
 }
 
-/** A page that cannot show the editor: why, and the way back to the list. */
-function EditorUnavailable({ title, message }: { title: string; message: string }) {
+/** A page that cannot show the editor: why, a copy where one helps, and the way back. */
+function EditorUnavailable({
+  title,
+  message,
+  copyOf,
+}: {
+  title: string;
+  message: string;
+  /** The template to offer a copy of. */
+  copyOf?: string;
+}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   return (
@@ -41,9 +54,19 @@ function EditorUnavailable({ title, message }: { title: string; message: string 
       <PageHeader
         title={title}
         actions={
-          <Button variant="secondary" onClick={() => void navigate("/templates")}>
-            {t("office.templateEditor.back")}
-          </Button>
+          <>
+            {copyOf !== undefined && (
+              <Button
+                variant="secondary"
+                onClick={() => void navigate(`/templates/${copyOf}/copy`)}
+              >
+                {t("office.templateEditor.copy")}
+              </Button>
+            )}
+            <Button variant="secondary" onClick={() => void navigate("/templates")}>
+              {t("office.templateEditor.back")}
+            </Button>
+          </>
         }
       />
       <Alert tone="warn">{message}</Alert>
@@ -52,21 +75,24 @@ function EditorUnavailable({ title, message }: { title: string; message: string 
 }
 
 /**
- * A template opened for a change (`/templates/:id`): read with its layout
- * whenever the page opens, and shown only once read on this visit, so the
- * revision a save sends is the one on screen. A stock template keeps its
- * name and layout, a layout the domain cannot read is not shown, and a
- * template deleted elsewhere is said to be gone. After a stale save the
- * template is read again and the editor starts afresh with it (`key`).
+ * The template a page opens (`/templates/:id`, `/templates/:id/copy`), read
+ * with its layout whenever the page opens and passed on only once read on
+ * this visit, so a save works on what is on screen. A template deleted
+ * elsewhere is said to be gone and a layout the domain cannot read is not
+ * shown; `render` gets the template, its layout and a way to read it again.
  */
-export function EditTemplatePage() {
+function OpenedTemplate({
+  title,
+  render,
+}: {
+  title: string;
+  render: (template: LabelTemplate, spec: LabelTemplateSpec, reload: () => void) => ReactNode;
+}) {
   const { t } = useTranslation();
   const { id = "" } = useParams();
   const template = useOfficeQuery(officeKeys.template(id), (api, token) =>
     api.getTemplate(token, id),
   );
-  const title = t("office.templateEditor.editTitle");
-
   if (template.isError) {
     if (template.error instanceof HostError && template.error.code === "not_found") {
       return <EditorUnavailable title={title} message={t("office.templateEditor.gone")} />;
@@ -79,27 +105,75 @@ export function EditTemplatePage() {
     );
   }
   if (!template.isFetchedAfterMount || template.data === undefined) return <PageLoading />;
-  const opened = template.data;
-  if (opened.stock) {
-    return <EditorUnavailable title={title} message={t("office.templateEditor.stockLocked")} />;
-  }
-  const spec = readSpec(opened.spec);
+  const spec = readSpec(template.data.spec);
   if (spec === null) {
     return <EditorUnavailable title={title} message={t("office.templateEditor.unreadable")} />;
   }
+  return render(template.data, spec, () => void template.refetch());
+}
+
+/**
+ * A template opened for a change (`/templates/:id`). A stock template keeps
+ * its name and layout, so it offers a copy instead. After a stale save the
+ * template is read again and the editor starts afresh with it (`key`).
+ */
+export function EditTemplatePage() {
+  const { t } = useTranslation();
+  const title = t("office.templateEditor.editTitle");
   return (
-    <TemplateEditor
-      key={opened.rev}
-      title={t("office.templateEditor.namedTitle", { name: opened.name })}
-      template={opened}
-      opened={{
-        name: opened.name,
-        purpose: opened.purpose,
-        enabled: opened.enabled,
-        scope: scopeOf(opened.chzProductGroupCodes),
-        spec,
-      }}
-      onReload={() => void template.refetch()}
+    <OpenedTemplate
+      title={title}
+      render={(template, spec, reload) =>
+        template.stock ? (
+          <EditorUnavailable
+            title={title}
+            message={t("office.templateEditor.stockLocked")}
+            copyOf={template.id}
+          />
+        ) : (
+          <TemplateEditor
+            key={template.rev}
+            title={t("office.templateEditor.namedTitle", { name: template.name })}
+            template={template}
+            opened={{
+              name: template.name,
+              purpose: template.purpose,
+              enabled: template.enabled,
+              scope: scopeOf(template.chzProductGroupCodes),
+              spec,
+            }}
+            onReload={reload}
+          />
+        )
+      }
+    />
+  );
+}
+
+/**
+ * A copy of a template (`/templates/:id/copy`), stock ones included: a new
+ * template with the source's purpose, flag, categories and layout under
+ * «<name> — копия», saved as an ordinary create. The purpose may change and
+ * the layout stays.
+ */
+export function CopyTemplatePage() {
+  const { t } = useTranslation();
+  return (
+    <OpenedTemplate
+      title={t("office.templateEditor.copyTitle")}
+      render={(source, spec) => (
+        <TemplateEditor
+          title={t("office.templateEditor.copyNamedTitle", { name: source.name })}
+          template={null}
+          opened={{
+            name: t("office.templateEditor.copyName", { name: source.name }),
+            purpose: source.purpose,
+            enabled: source.enabled,
+            scope: scopeOf(source.chzProductGroupCodes),
+            spec,
+          }}
+        />
+      )}
     />
   );
 }
