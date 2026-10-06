@@ -112,9 +112,9 @@ export class OrgProfileController {
         fileSize: 5 * 1024 * 1024,
         files: 1,
         fields: 0,
-        // Busboy emits partsLimit at this count. Two is therefore the exclusive
-        // threshold that accepts one file and rejects every subsequent part.
-        parts: 2,
+        // multer >= 2.4 treats `parts` as the inclusive maximum (it hands busboy
+        // `parts + 1`), so 1 admits the file part and rejects any second part.
+        parts: 1,
       },
     }),
   )

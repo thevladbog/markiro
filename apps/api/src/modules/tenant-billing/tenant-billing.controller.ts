@@ -292,6 +292,8 @@ export class TenantBillingController {
   @UseInterceptors(
     FileInterceptor("file", {
       storage: memoryStorage(),
+      // multer >= 2.4 treats `parts` as the inclusive maximum: the
+      // idempotencyKey field plus the file. (multer 2.3 rejected that pair.)
       limits: { fileSize: 5 * 1024 * 1024, files: 1, fields: 1, parts: 2 },
     }),
   )

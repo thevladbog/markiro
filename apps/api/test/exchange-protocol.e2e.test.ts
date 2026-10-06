@@ -150,17 +150,27 @@ describe("1c_exchange", () => {
 
   it("принимает файл кусками и собирает их в исходный порядок", async () => {
     const auth = await checkauth();
+    const first = Buffer.from("<?xml version=", "utf8");
+    const second = Buffer.from('"1.0"?><КоммерческаяИнформация/>', "utf8");
     await request(app!.getHttpServer())
       .post("/1c_exchange?type=catalog&mode=file&filename=import.xml")
       .set("Cookie", auth.cookie)
-      .send(Buffer.from("<?xml version=", "utf8"))
+      .send(first)
       .expect(200);
     const res = await request(app!.getHttpServer())
       .post("/1c_exchange?type=catalog&mode=file&filename=import.xml")
       .set("Cookie", auth.cookie)
-      .send(Buffer.from('"1.0"?><КоммерческаяИнформация/>', "utf8"))
+      .send(second)
       .expect(200);
     expect(res.text).toBe("success");
+
+    // The journal counts bytes, not characters: the Cyrillic chunk is longer
+    // in UTF-8 than as a string.
+    const chunkSizes = (await journalEvents())
+      .filter((event) => event.message === "file: получен кусок «import.xml»")
+      .map((event) => event.details?.bytes)
+      .sort((a, b) => Number(a) - Number(b));
+    expect(chunkSizes).toEqual([first.length, second.length].sort((a, b) => a - b));
   });
 
   it("не пускает без cookie сеанса", async () => {
