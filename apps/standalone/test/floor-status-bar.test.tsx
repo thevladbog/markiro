@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -14,6 +14,7 @@ import { openLocalDb } from "./support/local-db.js";
 
 const PAIRING = { hostId: HOST_ID, deviceId: DEVICE_ID };
 const OTHER_DEVICE = "1d2e3f4a-5b6c-4d7e-8f90-a1b2c3d4e5f6";
+const OTHER_LINE_ID = "00000000-6a3e-4b9f-9d3c-2b1a0e8f7d61";
 const SYNCED: SyncState = { kind: "done", synced: 1, failure: null, quarantined: 0 };
 const ORG: ChangeItem = {
   entity: "org_profile",
@@ -29,8 +30,8 @@ const ORG: ChangeItem = {
   },
 };
 
-function line(name: string, archived = false): ChangeItem {
-  return { entity: "lines", id: LINE_ID, rev: 3, deleted: false, data: { name, archived } };
+function line(name: string, archived = false, id = LINE_ID): ChangeItem {
+  return { entity: "lines", id, rev: 3, deleted: false, data: { name, archived } };
 }
 
 async function synced(items: ChangeItem[], rev = 10): Promise<LocalExecutor> {
@@ -69,6 +70,17 @@ describe("where the floor's status bar says the station works", () => {
       organization: "ООО «Атолл»",
       line: null,
     });
+  });
+
+  it("names the line the station is assigned to, not another one of the copies", async () => {
+    // The other line sorts and is inserted first, so a read that ignores the id names it.
+    const local = await synced([
+      ORG,
+      line("Линия фасовки 1", false, OTHER_LINE_ID),
+      line("Линия розлива 2"),
+    ]);
+    expect((await readFloorPlace(local, PAIRING, LINE_ID)).line).toBe("Линия розлива 2");
+    expect((await readFloorPlace(local, PAIRING, OTHER_LINE_ID)).line).toBe("Линия фасовки 1");
   });
 
   it("names nothing from copies that are not this pairing's", async () => {
@@ -140,5 +152,64 @@ describe("the floor's status bar", () => {
     expect(screen.getByText("Никто не вошёл")).toBeTruthy();
     expect(screen.queryByText("ООО «Атолл»")).toBeNull();
     expect(screen.queryByText("Организация")).toBeNull();
+  });
+
+  it("forgets the names when the next read of the copies fails", async () => {
+    const real = await synced([ORG, line("Линия розлива 2")]);
+    let failing = false;
+    let reads = 0;
+    const local: LocalExecutor = {
+      query: (sql, params, row) => {
+        if (!failing) return real.query(sql, params, row);
+        reads += 1;
+        return Promise.reject(new Error("disk"));
+      },
+      transaction: (statements) => real.transaction(statements),
+    };
+    const { rerender } = render(bar({ local }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    expect(await screen.findByText("Линия розлива 2")).toBeTruthy();
+
+    failing = true;
+    rerender(bar({ local, sync: { ...SYNCED, synced: 2 } }));
+    await waitFor(() => expect(reads).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.queryByText("ООО «Атолл»")).toBeNull());
+    expect(screen.queryByText("Линия розлива 2")).toBeNull();
+    expect(screen.getByText("Никто не вошёл")).toBeTruthy();
+  });
+
+  it("keeps the names of the line it has now when a read for the line before it lands late", async () => {
+    const real = await synced([
+      ORG,
+      line("Линия фасовки 1", false, OTHER_LINE_ID),
+      line("Линия розлива 2"),
+    ]);
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let heldStarted = false;
+    const local: LocalExecutor = {
+      query: (sql, params, row) => {
+        const result = real.query(sql, params, row);
+        if (!sql.includes("ref_lines") || params[0] !== OTHER_LINE_ID) return result;
+        heldStarted = true;
+        return gate.then(() => result);
+      },
+      transaction: (statements) => real.transaction(statements),
+    };
+    const { rerender } = render(bar({ local, lineId: OTHER_LINE_ID }));
+    await waitFor(() => expect(heldStarted).toBe(true));
+
+    rerender(bar({ local, lineId: LINE_ID }));
+    expect(await screen.findByText("Линия розлива 2")).toBeTruthy();
+
+    await act(async () => {
+      release();
+      await gate;
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByText("Линия розлива 2")).toBeTruthy();
+    expect(screen.queryByText("Линия фасовки 1")).toBeNull();
   });
 });
