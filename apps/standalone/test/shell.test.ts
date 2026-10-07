@@ -705,27 +705,51 @@ describe("the operator session: every action and every late answer", () => {
   };
   const OTHER_LINE = "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21";
   const OTHER_DEVICE = "5d1c2b3a-4f6e-4a8b-9c0d-7e8f9a0b1c2d";
-  const signIn: ShellAction = {
+  const signIn: Extract<ShellAction, { type: "operator_signed_in" }> = {
     type: "operator_signed_in",
     deviceId: DEVICE_STATUS.deviceId,
     operator: ANNA,
   };
+  const OTHER_HOST = observation(true);
+  OTHER_HOST.hello.hostId = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
 
   function signedIn(overrides: Partial<ShellState> = {}): ShellState {
     return shellReducer(paired(overrides), signIn);
   }
 
-  // One entry per action type: the compiler rejects a table that misses a new
-  // action, so a transition nobody decided about cannot slip in. `survives`
-  // is whether Anna is still signed in after the action lands on her floor.
-  type Case = { action: ShellAction; survives: boolean };
-  const TABLE: Record<ShellAction["type"], Case[]> = {
+  // One non-empty list per action type, and every row filed under its own
+  // type: the compiler rejects a table that misses a new action, files a row
+  // under another key or leaves a key empty, so a transition nobody decided
+  // about cannot slip in. `survives` is whether Anna is still signed in after
+  // the action lands on her floor.
+  type Case<K extends ShellAction["type"]> = {
+    action: Extract<ShellAction, { type: K }>;
+    survives: boolean;
+  };
+  const TABLE: { [K in ShellAction["type"]]: [Case<K>, ...Case<K>[]] } = {
     // Dispatched once at mount, when nobody can be signed in yet.
     device_loaded: [{ action: { type: "device_loaded", status: DEVICE_STATUS }, survives: true }],
     device_unreadable: [{ action: { type: "device_unreadable" }, survives: true }],
-    // A probe only changes the screen (the pairing is checked by the view).
+    // A probe runs only at start-up, on a retry and after a forget, never on
+    // a working floor, and the screen it brings back must not resurrect a
+    // session: every answer signs the operator out (a lost link does not).
     host_probed: [
-      { action: { type: "host_probed", localHost: { kind: "probing" } }, survives: true },
+      { action: { type: "host_probed", localHost: { kind: "probing" } }, survives: false },
+      {
+        action: { type: "host_probed", localHost: { kind: "missing", reason: "host_too_old" } },
+        survives: false,
+      },
+      {
+        action: {
+          type: "host_probed",
+          localHost: { kind: "found", observation: observation(true) },
+        },
+        survives: false,
+      },
+      {
+        action: { type: "host_probed", localHost: { kind: "found", observation: OTHER_HOST } },
+        survives: false,
+      },
     ],
     pairing_started: [{ action: { type: "pairing_started" }, survives: true }],
     paired: [{ action: { type: "paired", status: DEVICE_STATUS }, survives: false }],
@@ -739,8 +763,9 @@ describe("the operator session: every action and every late answer", () => {
       { action: { type: "office_requested" }, survives: false },
       { action: { type: "office_requested", notice: "already_initialized" }, survives: false },
     ],
-    // Only ever follows `office_requested`, which already signed the operator out.
-    office_opened: [{ action: { type: "office_opened", session: SESSION }, survives: true }],
+    // The bootstrap wizard opens the office without `office_requested`, so the
+    // action itself ends the operator's session (D4).
+    office_opened: [{ action: { type: "office_opened", session: SESSION }, survives: false }],
     office_closed: [{ action: { type: "office_closed" }, survives: true }],
     // The office is not open on a floor with an operator: a late failure is ignored.
     session_ended: [{ action: { type: "session_ended", token: SESSION.token }, survives: true }],
@@ -925,6 +950,62 @@ describe("the operator session: every action and every late answer", () => {
     for (const [name, states] of late) {
       for (const state of states) expect(shellReducer(state, signIn), name).toBe(state);
     }
+  });
+
+  it("signs the operator out of the office the bootstrap wizard opens, and closing it shows the sign-in", () => {
+    // The operator signed in while the start-up probe was still running.
+    const floor = signedIn({ localHost: { kind: "probing" } });
+    expect(floor.operator).toEqual(ANNA);
+    const probed = shellReducer(floor, {
+      type: "host_probed",
+      localHost: { kind: "found", observation: observation(false) },
+    });
+    expect(probed.operator).toBeNull();
+    expect(nextShellView(probed, ADDRESS)).toEqual({ kind: "bootstrap" });
+    // Whatever way an operator is in the state on that screen (a sign-in that
+    // answers late), the wizard's office must end the session itself.
+    const withOperator = { ...probed, operator: ANNA };
+    const opened = shellReducer(shellReducer(withOperator, { type: "host_initialized" }), {
+      type: "office_opened",
+      session: SESSION,
+    });
+    expect(opened.operator).toBeNull();
+    const closed = shellReducer(opened, { type: "office_closed" });
+    expect(nextShellView(closed, ADDRESS)).toEqual({ kind: "floor" });
+  });
+
+  it("signs the operator out of the office opened without office_requested, whatever the notice was", () => {
+    const noticed = { ...signedIn(), floorNotice: "idle" as const };
+    const opened = shellReducer(noticed, { type: "office_opened", session: SESSION });
+    expect(opened.operator).toBeNull();
+    expect(opened.floorNotice).toBeNull();
+  });
+
+  it("does not bring the operator back when a blocked version screen is retried", () => {
+    const floor = signedIn({ localHost: { kind: "probing" } });
+    const blocked = shellReducer(floor, {
+      type: "host_probed",
+      localHost: { kind: "missing", reason: "host_too_old" },
+    });
+    expect(nextShellView(blocked, ADDRESS)).toEqual({
+      kind: "host_missing",
+      reason: "host_too_old",
+    });
+    const retried = shellReducer(blocked, { type: "host_probed", localHost: { kind: "probing" } });
+    expect(nextShellView(retried, ADDRESS)).toEqual({ kind: "floor" });
+  });
+
+  it("does not keep the operator for a host the probe found to be another one", () => {
+    const floor = signedIn({ localHost: { kind: "probing" } });
+    const replaced = shellReducer(floor, {
+      type: "host_probed",
+      localHost: { kind: "found", observation: OTHER_HOST },
+    });
+    expect(nextShellView(replaced, ADDRESS)).toEqual({
+      kind: "device_rejected",
+      reason: "host_changed",
+    });
+    expect(replaced.operator).toBeNull();
   });
 
   it("lets a sign-in through on a floor that came back after the office closed", () => {

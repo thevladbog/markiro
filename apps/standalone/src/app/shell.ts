@@ -232,7 +232,11 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
     case "device_unreadable":
       return { ...state, device: { kind: "unreadable" } };
     case "host_probed":
-      return { ...state, localHost: action.localHost };
+      // A probe runs only at start-up, on a retry and after a forget: a
+      // session must not outlive a screen that is not the floor, nor come back
+      // after it (a blocked version screen, another host). Losing the link
+      // is not a probe, and keeps the operator.
+      return { ...state, localHost: action.localHost, operator: null };
     case "pairing_started":
       return { ...state, pairing: { kind: "pairing" } };
     case "paired":
@@ -299,7 +303,14 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         floorNotice: null,
       };
     case "office_opened":
-      return { ...state, office: { kind: "open", session: action.session } };
+      // The bootstrap wizard opens the office without `office_requested`, so
+      // the action itself ends the operator's session (D4).
+      return {
+        ...state,
+        office: { kind: "open", session: action.session },
+        operator: null,
+        floorNotice: null,
+      };
     case "office_closed":
       return { ...state, office: CLOSED_OFFICE };
     case "session_ended": {
