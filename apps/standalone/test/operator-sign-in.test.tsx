@@ -264,6 +264,33 @@ describe("the floor's sign-in screen", () => {
     expect(screen.queryByText("Оператор вышел по бездействию. Войдите снова.")).toBeNull();
   });
 
+  it("does not bring the leave notice back on a step change or during a later check", async () => {
+    const gate = gatedExecutor(await synced([SITE, OPERATOR, BADGE]));
+    render(screenOf(propsOf(gate.local, { notice: "idle" })));
+    const IDLE = "Оператор вышел по бездействию. Войдите снова.";
+    expect(await screen.findByText(IDLE)).toBeTruthy();
+    // Moving between the steps without trying to sign in keeps it.
+    fireEvent.click(await screen.findByRole("button", { name: "Войти по табельному номеру" }));
+    expect(screen.getByText(IDLE)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(screen.getByText(IDLE)).toBeTruthy();
+    // The first attempt dismisses it for good, also while the check runs.
+    gate.hold();
+    try {
+      act(() => scan("MRK-000743"));
+      expect(await screen.findByText("Проверяем…")).toBeTruthy();
+      expect(screen.queryByText(IDLE)).toBeNull();
+    } finally {
+      gate.release();
+    }
+    expect(await screen.findByText(/^Бейдж не найден\./)).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Войти по табельному номеру" }));
+    expect(screen.queryByText(/^Бейдж не найден\./)).toBeNull();
+    expect(screen.queryByText(IDLE)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(screen.queryByText(IDLE)).toBeNull();
+  });
+
   it("stops listening to the scanner once it leaves the screen", async () => {
     const stop = vi.fn();
     const source: ScanSource = { start: vi.fn(() => stop), clearPendingInput: vi.fn() };
@@ -478,7 +505,7 @@ describe("a check that is still running when the screen changes", () => {
     expect(onSignedIn).toHaveBeenCalledTimes(1);
   });
 
-  it("says it is checking and holds the buttons until the answer", async () => {
+  it("says it is checking and holds the scan screen's buttons until the answer, but not the way into the office", async () => {
     const gate = gatedExecutor(await synced([SITE, OPERATOR, BADGE]));
     const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
     render(screenOf(propsOf(gate.local, { onSignedIn })));
@@ -491,7 +518,8 @@ describe("a check that is still running when the screen changes", () => {
       const login = screen.getByRole("button", {
         name: "Войти по табельному номеру",
       }) as HTMLButtonElement;
-      expect(office.disabled).toBe(true);
+      // A check that never settles must not trap the station on this screen.
+      expect(office.disabled).toBe(false);
       expect(login.disabled).toBe(true);
     } finally {
       gate.release();
@@ -499,6 +527,81 @@ describe("a check that is still running when the screen changes", () => {
     await waitFor(() => expect(onSignedIn).toHaveBeenCalledTimes(1));
     expect(screen.queryByText("Проверяем…")).toBeNull();
   });
+
+  it("lets the operator leave for the office while a check runs, and the check then signs nobody in", async () => {
+    const gate = gatedExecutor(await synced([SITE, OPERATOR, BADGE]));
+    const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
+    const onSync = vi.fn<() => void>();
+    // The shell leaves this screen for the office: the screen goes away.
+    const onOffice = vi.fn(() => {
+      view.unmount();
+    });
+    const view = render(screenOf(propsOf(gate.local, { onSignedIn, onSync, onOffice })));
+    await enterLogin("0042");
+    press("4", "8", "2", "1");
+    gate.hold();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+      expect(await screen.findByText("Проверяем…")).toBeTruthy();
+      // The keypad and the way back stay held; the office does not.
+      expect((screen.getByRole("button", { name: "Назад" }) as HTMLButtonElement).disabled).toBe(
+        true,
+      );
+      expect((screen.getByRole("button", { name: "1" }) as HTMLButtonElement).disabled).toBe(true);
+      const office = screen.getByRole("button", { name: "Офис" }) as HTMLButtonElement;
+      expect(office.disabled).toBe(false);
+      fireEvent.click(office);
+      expect(onOffice).toHaveBeenCalledTimes(1);
+    } finally {
+      gate.release();
+    }
+    await drained(gate.local);
+    expect(onSignedIn).not.toHaveBeenCalled();
+    expect(onSync).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["pairing's device", { pairing: { hostId: HOST_ID, deviceId: OTHER_DEVICE } }],
+    ["station's line", { lineId: OTHER_LINE }],
+  ] as const)(
+    "empties the typed PIN even when the %s changed during the check",
+    async (name, changed) => {
+      const real = await synced([SITE, OPERATOR]);
+      const gate = gatedExecutor(real);
+      const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
+      const first = propsOf(gate.local, { onSignedIn, lineId: LINE });
+      const { rerender } = render(screenOf(first));
+      await enterLogin("0042");
+      press("4", "8", "2", "1");
+      expect(screen.getByLabelText("Набранный PIN").textContent).toBe("••••");
+      gate.hold();
+      try {
+        fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+        expect(await screen.findByText("Проверяем…")).toBeTruthy();
+        // The other pairing has copies of its own, so the PIN step stays up
+        // under it and the typed PIN would be visible if it were kept.
+        if (name === "pairing's device") {
+          await syncReferences({
+            changes: async () => ({
+              hostId: HOST_ID,
+              rev: 10,
+              hasMore: false,
+              items: [SITE, OPERATOR],
+            }),
+            local: real,
+            hostId: HOST_ID,
+            deviceId: OTHER_DEVICE,
+          });
+        }
+        rerender(screenOf({ ...first, ...changed }));
+      } finally {
+        gate.release();
+      }
+      await drained(gate.local);
+      await waitFor(() => expect(screen.getByLabelText("Набранный PIN").textContent).toBe(""));
+      expect(onSignedIn).not.toHaveBeenCalled();
+    },
+  );
 
   it("reads under the pairing it was last given", async () => {
     const { executor } = openLocalDb();
@@ -624,7 +727,7 @@ describe("what the screen holds back", () => {
     expect(document.body.textContent).not.toContain("Кузнецова");
   });
 
-  it("counts a stray product barcode as an unknown badge: ten of them pause the station", async () => {
+  it("documents today's behaviour, owner decision pending: a stray product barcode counts as an unknown badge and ten of them pause the station", async () => {
     // Documents today's behaviour so the owner's decision stays visible
     // (Task 3 review): nothing tells an EAN-13 or a single-AI GS1-128 SSCC
     // from a badge somebody typed by hand, so each is a guess against the
@@ -842,7 +945,7 @@ describe("the rest of the screen", () => {
     await waitFor(() => expect(onSignedIn).toHaveBeenCalledTimes(1));
   });
 
-  it("holds the keypad and every button while a PIN is checked", async () => {
+  it("holds the keypad and every button but the office while a PIN is checked", async () => {
     const gate = gatedExecutor(await synced([SITE, OPERATOR]));
     const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
     render(screenOf(propsOf(gate.local, { onSignedIn })));
@@ -853,9 +956,12 @@ describe("the rest of the screen", () => {
     try {
       fireEvent.click(screen.getByRole("button", { name: "Войти" }));
       expect(await screen.findByText("Проверяем…")).toBeTruthy();
-      for (const name of ["1", "Стереть", "Очистить", "Назад", "Офис"]) {
+      for (const name of ["1", "Стереть", "Очистить", "Назад"]) {
         expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(true);
       }
+      expect((screen.getByRole("button", { name: "Офис" }) as HTMLButtonElement).disabled).toBe(
+        false,
+      );
       expect((screen.getByRole("button", { name: "Войти" }) as HTMLButtonElement).disabled).toBe(
         true,
       );

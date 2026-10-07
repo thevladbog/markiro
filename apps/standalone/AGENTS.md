@@ -465,7 +465,11 @@ whatever its revision (fail-closed).
   time (a scan during a check, or a second press, is dropped) and drops an
   answer that lands after it was unmounted or after the pairing or the line
   changed; `App` keys it by `hostId:deviceId:lineId`, so a number or PIN typed
-  under another pairing or line is not kept.
+  under another pairing or line is not kept. «Офис» stays enabled during a
+  check (the keypad and «Назад» do not), so a check that never settles does
+  not trap the station on the screen; leaving unmounts it, and its answer is
+  dropped. The leave notice (idle, removed, line changed) stays until the
+  first attempt, which dismisses it for good.
 - A refusal `wrong` (an unknown credential, a wrong PIN, a copy that changed
   under the check) or `not_ready` asks for a reference sync (the cloud
   station refreshes its roster before refusing); the next attempt reads what

@@ -122,6 +122,10 @@ export function OperatorSignIn({
   const [pin, setPin] = useState("");
   const [message, setMessage] = useState<Message | null>(null);
   const [busy, setBusy] = useState(false);
+  // The leave notice stays until somebody tries to sign in: the first attempt
+  // dismisses it for good, so a step change or a later check does not bring
+  // it back.
+  const [noticeDismissed, setNoticeDismissed] = useState(false);
   const inFlight = useRef(false);
   const alive = useRef(true);
   const { hostId, deviceId } = pairing;
@@ -160,6 +164,7 @@ export function OperatorSignIn({
       if (inFlight.current) return;
       inFlight.current = true;
       setBusy(true);
+      setNoticeDismissed(true);
       setMessage(null);
       let result: SignInResult | null;
       try {
@@ -337,7 +342,7 @@ export function OperatorSignIn({
             >
               {messageText(message)}
             </Alert>
-          ) : notice !== null ? (
+          ) : notice !== null && !noticeDismissed ? (
             <Alert tone="info">{t(NOTICE_KEY[notice])}</Alert>
           ) : null}
           {busy && <p>{t("floor.signIn.checking")}</p>}
@@ -345,7 +350,8 @@ export function OperatorSignIn({
         {body()}
         <HostStatusLine status={link} sync={sync} />
         <div className="standalone-form__actions">
-          <Button variant="secondary" disabled={busy} onClick={onOffice}>
+          {/* Never held by a check: one that never settles must not trap the station here. */}
+          <Button variant="secondary" onClick={onOffice}>
             {t("floor.office")}
           </Button>
         </div>
