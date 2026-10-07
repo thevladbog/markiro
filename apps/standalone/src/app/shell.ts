@@ -1,3 +1,4 @@
+import type { FloorOperator } from "../floor/sign-in.js";
 import { HostError } from "../host/client.js";
 import { DeviceError, type DeviceErrorCode } from "../host/device.js";
 import type { HelloObservation, HostProbeErrorCode } from "../host/probe.js";
@@ -61,6 +62,14 @@ export interface SyncState {
   quarantined: number;
 }
 
+/**
+ * Why the floor's sign-in screen says the last operator is no longer signed
+ * in: nobody touched the station for the idle timeout (`idle`), the host
+ * turned the operator off and the copies lost them (`removed`), or the office
+ * moved the station to another line or cleared it (`line_changed`).
+ */
+export type FloorNotice = "idle" | "removed" | "line_changed";
+
 export interface ShellState {
   device: DeviceState;
   localHost: LocalHostState;
@@ -72,6 +81,14 @@ export interface ShellState {
   sync: SyncState;
   /** The latest revision the host announced; the office re-reads the signed-in user when it changes. */
   hostRevision: number | null;
+  /**
+   * The operator signed in on the floor (plan 1f), kept only in memory: a
+   * restart, a new pairing, a rejected device, the office and a change of
+   * the line all sign the operator out. Never an office user (spec §4.8).
+   */
+  operator: FloorOperator | null;
+  /** Why the last operator was signed out, until the next one signs in. */
+  floorNotice: FloorNotice | null;
 }
 
 export type ShellView =
@@ -85,7 +102,10 @@ export type ShellView =
   | { kind: "device_rejected"; reason: RejectionReason }
   | { kind: "other_host"; hostAddress: string }
   | { kind: "line_select" }
+  /** The floor with nobody signed in: the operator sign-in and the way into the office. */
   | { kind: "floor" }
+  /** The floor with an operator signed in (stage 1's stub until the shifts of plan 2a). */
+  | { kind: "floor_operator"; operator: FloorOperator }
   | { kind: "office_login"; notice: OfficeLoginNotice | null }
   | { kind: "office"; session: OfficeSession };
 
@@ -115,7 +135,11 @@ export type ShellAction =
   | { type: "sync_finished"; result: SyncResult }
   | { type: "sync_failed"; failure: SyncFailure; quarantined: number | null }
   | { type: "line_selected"; status: DeviceStatus }
-  | { type: "device_refreshed"; status: DeviceStatus };
+  | { type: "device_refreshed"; status: DeviceStatus }
+  // `deviceId`: the pairing the sign-in read the copies of.
+  | { type: "operator_signed_in"; deviceId: string; operator: FloorOperator }
+  // `notice: null` is the operator's own «Сменить оператора».
+  | { type: "operator_signed_out"; operatorId: string; notice: FloorNotice | null };
 
 const CLOSED_OFFICE: OfficeState = { kind: "closed" };
 const IDLE_SYNC: SyncState = { kind: "idle", synced: 0, failure: null, quarantined: 0 };
@@ -129,6 +153,8 @@ export const initialShellState: ShellState = {
   link: null,
   sync: IDLE_SYNC,
   hostRevision: null,
+  operator: null,
+  floorNotice: null,
 };
 
 /**
@@ -190,6 +216,7 @@ export function nextShellView(state: ShellState, localAddress: string): ShellVie
     case "closed":
       // A station works on one line and chooses it before the floor.
       if (status.kind === "station" && status.lineId === null) return { kind: "line_select" };
+      if (state.operator !== null) return { kind: "floor_operator", operator: state.operator };
       return { kind: "floor" };
     case "signing_in":
       return { kind: "office_login", notice: state.office.notice };
@@ -226,6 +253,8 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         link: null,
         sync: IDLE_SYNC,
         hostRevision: null,
+        operator: null,
+        floorNotice: null,
       };
     case "pairing_failed":
       return { ...state, pairing: { kind: "failed", code: action.code } };
@@ -245,6 +274,8 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         link: null,
         sync: IDLE_SYNC,
         hostRevision: null,
+        operator: null,
+        floorNotice: null,
       };
     case "host_initialized":
       if (state.localHost.kind !== "found") return state;
@@ -259,7 +290,14 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         },
       };
     case "office_requested":
-      return { ...state, office: { kind: "signing_in", notice: action.notice ?? null } };
+      // The office and an operator never share the screen: the operator
+      // is signed out, and the office signs in with its own credentials.
+      return {
+        ...state,
+        office: { kind: "signing_in", notice: action.notice ?? null },
+        operator: null,
+        floorNotice: null,
+      };
     case "office_opened":
       return { ...state, office: { kind: "open", session: action.session } };
     case "office_closed":
@@ -284,7 +322,7 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       ) {
         return state;
       }
-      return { ...state, rejection: action.reason, office: CLOSED_OFFICE };
+      return { ...state, rejection: action.reason, office: CLOSED_OFFICE, operator: null };
     }
     case "office_user_refreshed":
       // Only the session the answer belongs to takes the new name and role.
@@ -298,7 +336,7 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
     case "link_status": {
       const rejection = linkRejection(action.status);
       if (rejection === null) return { ...state, link: action.status };
-      return { ...state, link: action.status, rejection, office: CLOSED_OFFICE };
+      return { ...state, link: action.status, rejection, office: CLOSED_OFFICE, operator: null };
     }
     case "host_revision":
       return { ...state, hostRevision: action.rev };
@@ -314,7 +352,12 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       if (state.sync.kind === "other_host") return state;
       if (action.result.kind === "other_host") {
         // Office requests would reach a host this device was never paired with.
-        return { ...state, sync: { ...state.sync, kind: "other_host" }, office: CLOSED_OFFICE };
+        return {
+          ...state,
+          sync: { ...state.sync, kind: "other_host" },
+          office: CLOSED_OFFICE,
+          operator: null,
+        };
       }
       return {
         ...state,
@@ -340,7 +383,7 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         },
       };
     case "line_selected":
-      return { ...state, device: { kind: "ready", status: action.status } };
+      return { ...state, device: { kind: "ready", status: action.status }, operator: null };
     case "device_refreshed": {
       // The line the office assigned (plan 1d3). Only the pairing the answer
       // belongs to takes it, so a late answer cannot bring back a pairing
@@ -355,8 +398,36 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       ) {
         return state;
       }
-      return { ...state, device: { kind: "ready", status: action.status } };
+      // An operator signed in for one line is not signed in for another.
+      return {
+        ...state,
+        device: { kind: "ready", status: action.status },
+        operator: null,
+        floorNotice: state.operator === null ? state.floorNotice : "line_changed",
+      };
     }
+    case "operator_signed_in": {
+      // Only onto the floor the sign-in started from: a late answer must not
+      // sign anybody in after the pairing changed or ended, the device was
+      // rejected, the office opened or the station lost its line meanwhile.
+      if (state.device.kind !== "ready" || state.device.status === null) return state;
+      const status = state.device.status;
+      if (
+        status.deviceId !== action.deviceId ||
+        state.rejection !== null ||
+        state.sync.kind === "other_host" ||
+        state.office.kind !== "closed" ||
+        (status.kind === "station" && status.lineId === null)
+      ) {
+        return state;
+      }
+      return { ...state, operator: action.operator, floorNotice: null };
+    }
+    case "operator_signed_out":
+      // A late sign-out (an idle timer, a check of the copies) for an
+      // operator who already left must not sign out the next one.
+      if (state.operator?.id !== action.operatorId) return state;
+      return { ...state, operator: null, floorNotice: action.notice };
   }
 }
 
