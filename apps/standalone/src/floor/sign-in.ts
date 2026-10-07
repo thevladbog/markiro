@@ -5,6 +5,14 @@ import { hasCyrillic } from "../host/pairing-code.js";
 import { hashBadge, isPinPhc } from "../lib/credentials.js";
 import type { LocalExecutor } from "../local/executor.js";
 import { copiesReady, type Pairing } from "../local/reference-sync.js";
+import {
+  clearFailures,
+  lockRemainingMs,
+  OPERATOR_LOCKOUT,
+  operatorKey,
+  recordFailure,
+  STATION_LOCKOUT,
+} from "./lockout.js";
 
 // The station's operator sign-in (stage 1 spec §5.6, plan 1f): offline, from
 // the local copies of operators and badges only, never a call to the host.
@@ -36,12 +44,20 @@ export type SignInRefusal =
   | "not_badge";
 
 export type SignInResult =
-  { kind: "signed_in"; operator: FloorOperator } | { kind: "refused"; reason: SignInRefusal };
+  | { kind: "signed_in"; operator: FloorOperator }
+  | { kind: "refused"; reason: SignInRefusal }
+  /**
+   * Too many failures: the whole station's sign-in, or one operator's PIN,
+   * is paused for `remainingMs` more (`src/floor/lockout.ts`).
+   */
+  | { kind: "locked"; scope: "station" | "operator"; remainingMs: number };
 
 export interface SignInContext {
   local: LocalExecutor;
   /** The pairing whose copies the station reads (`DeviceStatus`). */
   pairing: Pairing;
+  /** Unix milliseconds on this computer's clock, for the lockouts. */
+  now: () => number;
 }
 
 /** A personnel number as the host keeps it: 3–12 ASCII digits (`operatorLoginRule`). */
@@ -99,12 +115,54 @@ const revRow = z.object({ rev: z.number().int() });
 const saltRow = z.object({ badgeSalt: z.string() });
 const countRow = z.object({ n: z.number().int().nonnegative() });
 
+/**
+ * The attempts' turn. A lockout is read before an attempt hashes and written
+ * after it, so attempts that overlapped would all pass the same read and
+ * hash, however many failures the limit allows, and a failure written after
+ * the one that started a lockout would start the count over. One attempt at
+ * a time: a scanner that sends many codes at once gets no more tries than a
+ * keypad. A failed attempt (a database error) does not block the next one.
+ */
+let turn: Promise<unknown> = Promise.resolve();
+
+function oneAtATime(attempt: () => Promise<SignInResult>): Promise<SignInResult> {
+  const result = turn.then(attempt);
+  turn = result.catch(() => undefined);
+  return result;
+}
+
 function refused(reason: SignInRefusal): SignInResult {
   return { kind: "refused", reason };
 }
 
-function signedIn({ id, login, name, role }: FloorOperator): SignInResult {
+function locked(scope: "station" | "operator", remainingMs: number): SignInResult {
+  return { kind: "locked", scope, remainingMs };
+}
+
+/** A sign-in that went through forgets the station's failures and the operator's. */
+async function signedIn(
+  local: LocalExecutor,
+  { id, login, name, role }: FloorOperator,
+): Promise<SignInResult> {
+  await clearFailures(local, id);
   return { kind: "signed_in", operator: { id, login, name, role } };
+}
+
+/**
+ * Counts a wrong attempt: always against the station, and against the
+ * operator whose PIN it was, when one was found. A lockout the attempt
+ * started is the answer, the station's first; otherwise it is `wrong`.
+ */
+async function failed(context: SignInContext, operatorId: string | null): Promise<SignInResult> {
+  const now = context.now();
+  const station = await recordFailure(context.local, "station", STATION_LOCKOUT, now);
+  const operator =
+    operatorId === null
+      ? 0
+      : await recordFailure(context.local, operatorKey(operatorId), OPERATOR_LOCKOUT, now);
+  if (station > 0) return locked("station", station);
+  if (operator > 0) return locked("operator", operator);
+  return refused("wrong");
 }
 
 /**
@@ -127,8 +185,14 @@ export async function readFloorReadiness(context: SignInContext): Promise<FloorR
  * attempt with a well-formed number and PIN runs one full PBKDF2, the dummy
  * one for an unknown number. The operator's copy is read again after the
  * verification: a PIN change or a deactivation that landed meanwhile wins.
+ *
+ * A locked station, or a locked PIN of the operator with this number, is
+ * answered before any hashing. A wrong attempt counts against the station
+ * and, when the number names one operator, against that operator; a
+ * malformed number or PIN (the keypad does not send one), an ambiguous
+ * number and copies that are not ready count against nobody.
  */
-export async function signInWithPin(
+async function pinAttempt(
   context: SignInContext,
   login: string,
   pin: string,
@@ -136,16 +200,24 @@ export async function signInWithPin(
   if (!LOGIN.test(login) || !PIN.test(pin)) return refused("wrong");
   const { local, pairing } = context;
   if (!(await copiesReady(local, pairing))) return refused("not_ready");
+  const stationLock = await lockRemainingMs(local, "station", STATION_LOCKOUT, context.now());
+  if (stationLock > 0) return locked("station", stationLock);
   const rows = await local.query(OPERATOR_BY_LOGIN, [login], credentialRow);
   const [only] = rows;
-  const operator = rows.length === 1 && only !== undefined && isPinPhc(only.pinPhc) ? only : null;
+  const found = rows.length === 1 && only !== undefined ? only : null;
+  if (found !== null) {
+    const key = operatorKey(found.id);
+    const operatorLock = await lockRemainingMs(local, key, OPERATOR_LOCKOUT, context.now());
+    if (operatorLock > 0) return locked("operator", operatorLock);
+  }
+  const operator = found !== null && isPinPhc(found.pinPhc) ? found : null;
   const matched = await verifyPhc(pin, operator?.pinPhc ?? DUMMY_PIN_PHC);
   if (rows.length > 1) return refused("ambiguous");
-  if (!matched || operator === null) return refused("wrong");
+  if (!matched || operator === null) return failed(context, found?.id ?? null);
   if (!(await copiesReady(local, pairing))) return refused("not_ready");
   const [current] = await local.query(OPERATOR_REV, [operator.id], revRow);
   if (current?.rev !== operator.rev) return refused("wrong");
-  return signedIn(operator);
+  return signedIn(local, operator);
 }
 
 /**
@@ -173,12 +245,20 @@ export function readBadgeScan(raw: string): BadgeScan {
  * string compared with the badges' hashes. The badge signs in only with its
  * operator's copy, and a badge that matches more than one operator is
  * refused as ambiguous, never resolved to the first.
+ *
+ * A locked station is answered before any hashing; an unknown badge counts
+ * against the station (a code typed by hand is a guess like a PIN). A
+ * product's code, a Cyrillic scan, a non-badge and an ambiguous badge count
+ * against nobody: none of them is a guess at a badge. An operator whose PIN
+ * is locked still signs in with their badge, another credential.
  */
-export async function signInWithBadge(context: SignInContext, raw: string): Promise<SignInResult> {
+async function badgeAttempt(context: SignInContext, raw: string): Promise<SignInResult> {
   const scan = readBadgeScan(raw);
   if (scan.kind === "refused") return refused(scan.reason);
   const { local, pairing } = context;
   if (!(await copiesReady(local, pairing))) return refused("not_ready");
+  const stationLock = await lockRemainingMs(local, "station", STATION_LOCKOUT, context.now());
+  if (stationLock > 0) return locked("station", stationLock);
   const salts = await local.query(SITE_SALT, [], saltRow);
   const [site] = salts;
   if (salts.length !== 1 || site === undefined) return refused("not_ready");
@@ -187,6 +267,20 @@ export async function signInWithBadge(context: SignInContext, raw: string): Prom
   if (!(await copiesReady(local, pairing))) return refused("not_ready");
   if (holders.length > 1) return refused("ambiguous");
   const [holder] = holders;
-  if (holder === undefined) return refused("wrong");
-  return signedIn(holder);
+  if (holder === undefined) return failed(context, null);
+  return signedIn(local, holder);
+}
+
+/** A personnel number and a PIN, one attempt at a time (`pinAttempt`). */
+export function signInWithPin(
+  context: SignInContext,
+  login: string,
+  pin: string,
+): Promise<SignInResult> {
+  return oneAtATime(() => pinAttempt(context, login, pin));
+}
+
+/** A scanned badge, one attempt at a time (`badgeAttempt`). */
+export function signInWithBadge(context: SignInContext, raw: string): Promise<SignInResult> {
+  return oneAtATime(() => badgeAttempt(context, raw));
 }

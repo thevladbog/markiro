@@ -237,12 +237,13 @@ impl LocalDb {
     /// would do more for bytes a writer freed before it ran with
     /// `secure_delete`, which nothing here scrubs (see "Local database" in
     /// `apps/standalone/AGENTS.md`).
-    /// Every table here is treated as a disposable copy of the host's data;
-    /// the first plan that adds data this device owns instead of a copy —
-    /// the scan journal, boxes, the outbox (the station design's §6.2,
-    /// "Логическая модель") — must exclude those tables from this list and
-    /// block or confirm a forget while unsynced records exist, not extend
-    /// this silently.
+    /// Every table here is disposable: the copies of the host's data, and
+    /// `floor_sign_in_failures` (plan 1f), this device's own failed
+    /// sign-ins, which a new pairing must not inherit. The first plan that
+    /// adds data this device must keep — the scan journal, boxes, the
+    /// outbox (the station design's §6.2, "Логическая модель") — must
+    /// exclude those tables from this list and block or confirm a forget
+    /// while unsynced records exist, not extend this silently.
     /// The tables come from `pragma_table_list`, so one a later migration
     /// adds is covered without a change here; `type IN ('table', 'virtual')`
     /// excludes a virtual table's own shadow tables (FTS5, RTree), which

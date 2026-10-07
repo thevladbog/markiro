@@ -16,7 +16,7 @@ import {
 import type { ChangeItem } from "../src/host/protocol.js";
 import { hashBadge, hashPin, isPinPhc } from "../src/lib/credentials.js";
 import type * as Credentials from "../src/lib/credentials.js";
-import type { LocalExecutor } from "../src/local/executor.js";
+import { LocalDbError, type LocalExecutor } from "../src/local/executor.js";
 import { syncReferences } from "../src/local/reference-sync.js";
 import { DEVICE_ID, HOST_ID } from "./support/fixtures.js";
 import { openLocalDb } from "./support/local-db.js";
@@ -44,6 +44,8 @@ const BADGE_PHC =
   "pbkdf2$sha256$100000$AAECAwQFBgcICQoLDA0ODw==$LEcu0ewwRD5rBHrpCjvxni/q2cURiavbRlNRgDPb+n0=";
 const BADGE_CODE = "MRK-000742";
 const PAIRING = { hostId: HOST_ID, deviceId: DEVICE_ID };
+/** This computer's clock in the tests: the lockouts read it. */
+const NOW = 1_790_000_000_000;
 
 const SITE: ChangeItem = {
   entity: "site",
@@ -93,7 +95,7 @@ async function synced(
     local: executor,
     ...PAIRING,
   });
-  return { db, executor, context: { local: executor, pairing: PAIRING } };
+  return { db, executor, context: { local: executor, pairing: PAIRING, now: () => NOW } };
 }
 
 describe("the station's PIN sign-in", () => {
@@ -345,6 +347,202 @@ describe("the station's badge sign-in", () => {
   });
 });
 
+describe("the sign-in's lockouts", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  function failures(db: DatabaseSync) {
+    const sql = "SELECT key, failures, locked_at FROM floor_sign_in_failures ORDER BY key";
+    return Array.from(db.prepare(sql).all(), (row) => ({ ...row }));
+  }
+
+  it("locks an operator's PIN after five wrong ones, answers the sixth without hashing, and keeps the badge working", async () => {
+    const { db, context } = await synced([SITE, operator(ANNA, 5, "0042"), badge(PASS_7, 6, ANNA)]);
+    for (let attempt = 1; attempt < 5; attempt += 1) {
+      expect(await signInWithPin(context, "0042", "1111")).toEqual({
+        kind: "refused",
+        reason: "wrong",
+      });
+    }
+    expect(await signInWithPin(context, "0042", "1111")).toEqual({
+      kind: "locked",
+      scope: "operator",
+      remainingMs: 300_000,
+    });
+    const derive = vi.spyOn(crypto.subtle, "deriveBits");
+    expect(await signInWithPin(context, "0042", "4821")).toEqual({
+      kind: "locked",
+      scope: "operator",
+      remainingMs: 300_000,
+    });
+    expect(derive).not.toHaveBeenCalled();
+    // Another credential: the badge still signs Anna in, and forgets the count.
+    expect(await signInWithBadge(context, BADGE_CODE)).toEqual(ANNA_SIGNED_IN);
+    expect(failures(db)).toEqual([]);
+  });
+
+  it("pauses the whole station after ten failures of any kind, before hashing anything", async () => {
+    const { db, context } = await synced([SITE, operator(ANNA, 5, "0042"), badge(PASS_7, 6, ANNA)]);
+    let clock = NOW;
+    const ticking = { ...context, now: () => clock };
+    for (let attempt = 0; attempt < 9; attempt += 1) {
+      clock += 1;
+      const result =
+        attempt % 2 === 0
+          ? await signInWithPin(ticking, `00${50 + attempt}`, "4821")
+          : await signInWithBadge(ticking, `MRK-${attempt}`);
+      expect(result).toEqual({ kind: "refused", reason: "wrong" });
+    }
+    clock += 1;
+    expect(await signInWithBadge(ticking, "MRK-999")).toEqual({
+      kind: "locked",
+      scope: "station",
+      remainingMs: 60_000,
+    });
+    const derive = vi.spyOn(crypto.subtle, "deriveBits");
+    clock += 30_000;
+    expect(await signInWithPin(ticking, "0042", "4821")).toEqual({
+      kind: "locked",
+      scope: "station",
+      remainingMs: 30_000,
+    });
+    expect(await signInWithBadge(ticking, BADGE_CODE)).toEqual({
+      kind: "locked",
+      scope: "station",
+      remainingMs: 30_000,
+    });
+    expect(derive).not.toHaveBeenCalled();
+    derive.mockRestore();
+
+    clock += 30_000;
+    expect(await signInWithPin(ticking, "0042", "4821")).toEqual(ANNA_SIGNED_IN);
+    expect(failures(db)).toEqual([]);
+  });
+
+  it("counts only guesses: not a malformed entry, a product's code, a Cyrillic scan or an ambiguous badge", async () => {
+    const { db, context } = await synced([
+      SITE,
+      operator(ANNA, 5, "0042"),
+      operator(BORIS, 6, "0099", { name: "Борис Орлов" }),
+      badge(PASS_7, 7, ANNA),
+      badge(PASS_8, 8, BORIS),
+    ]);
+    await signInWithPin(context, "42", "4821");
+    await signInWithBadge(context, `${BADGE_CODE}`);
+    await signInWithBadge(context, "ЬКЛ-000742");
+    await signInWithBadge(context, "");
+    await signInWithBadge(context, BADGE_CODE);
+    expect(failures(db)).toEqual([]);
+  });
+
+  it("counts a wrong PIN against the station and the operator, an unknown number against the station only", async () => {
+    const { db, context } = await synced([SITE, operator(ANNA, 5, "0042")]);
+    await signInWithPin(context, "0042", "1111");
+    await signInWithPin(context, "0043", "1111");
+    expect(failures(db)).toEqual([
+      { key: `operator:${ANNA}`, failures: 1, locked_at: null },
+      { key: "station", failures: 2, locked_at: null },
+    ]);
+  });
+
+  it("does not count a personnel number two copies share", async () => {
+    const { db, context } = await synced([
+      SITE,
+      operator(ANNA, 5, "0042"),
+      operator(BORIS, 6, "0042", { name: "Борис Орлов" }),
+    ]);
+    expect(await signInWithPin(context, "0042", "4821")).toEqual({
+      kind: "refused",
+      reason: "ambiguous",
+    });
+    expect(failures(db)).toEqual([]);
+  });
+
+  it("answers the station's lockout first when one attempt starts both", async () => {
+    const { db, context } = await synced([SITE, operator(ANNA, 5, "0042")]);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await signInWithPin(context, "0042", "1111");
+    }
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await signInWithBadge(context, `MRK-${attempt}`);
+    }
+    expect(await signInWithPin(context, "0042", "1111")).toEqual({
+      kind: "locked",
+      scope: "station",
+      remainingMs: 60_000,
+    });
+    expect(failures(db)).toEqual([
+      { key: `operator:${ANNA}`, failures: 5, locked_at: NOW },
+      { key: "station", failures: 10, locked_at: NOW },
+    ]);
+  });
+
+  it("locks one operator's PIN only, and another operator's sign-in leaves that lockout and counts alone", async () => {
+    const { db, context } = await synced([
+      SITE,
+      operator(ANNA, 5, "0042"),
+      operator(BORIS, 6, "0099", { name: "Борис Орлов" }),
+    ]);
+    await signInWithPin(context, "0099", "1111");
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await signInWithPin(context, "0042", "1111");
+    }
+    expect(await signInWithPin(context, "0042", "4821")).toEqual({
+      kind: "locked",
+      scope: "operator",
+      remainingMs: 300_000,
+    });
+    expect(await signInWithPin(context, "0099", "4821")).toEqual({
+      kind: "signed_in",
+      operator: { id: BORIS, login: "0099", name: "Борис Орлов", role: "Упаковщик" },
+    });
+    expect(failures(db)).toEqual([{ key: `operator:${ANNA}`, failures: 5, locked_at: NOW }]);
+  });
+
+  it("answers a stack of simultaneous guesses one at a time: the lockout holds and later guesses are not hashed", async () => {
+    const { db, context } = await synced([SITE, operator(ANNA, 5, "0042")]);
+    const derive = vi.spyOn(crypto.subtle, "deriveBits");
+    const results = await Promise.all(
+      Array.from({ length: 12 }, (_, attempt) =>
+        signInWithPin(context, `00${50 + attempt}`, "4821"),
+      ),
+    );
+    expect(results).toEqual([
+      ...Array.from({ length: 9 }, () => ({ kind: "refused", reason: "wrong" })),
+      ...Array.from({ length: 3 }, () => ({
+        kind: "locked",
+        scope: "station",
+        remainingMs: 60_000,
+      })),
+    ]);
+    expect(derive).toHaveBeenCalledTimes(10);
+    expect(failures(db)).toEqual([{ key: "station", failures: 10, locked_at: NOW }]);
+  });
+
+  it("gives no verdict it could not record, and a database error does not block the next attempt", async () => {
+    const { db, executor } = await synced([SITE, operator(ANNA, 5, "0042")]);
+    let broken: string | null = "INSERT INTO floor_sign_in_failures";
+    const flaky: LocalExecutor = {
+      query: (sql, params, row) => executor.query(sql, params, row),
+      transaction: (statements) =>
+        broken !== null && statements.some(({ sql }) => sql.startsWith(broken ?? ""))
+          ? Promise.reject(new LocalDbError("statement_failed", "disk full"))
+          : executor.transaction(statements),
+    };
+    const context = { local: flaky, pairing: PAIRING, now: () => NOW };
+    // A wrong PIN whose failure cannot be counted is no "wrong": it throws.
+    await expect(signInWithPin(context, "0042", "1111")).rejects.toBeInstanceOf(LocalDbError);
+    expect(failures(db)).toEqual([]);
+    // The next attempt is not left waiting behind it; a sign-in whose
+    // forgetting of the failures cannot be written is no sign-in either.
+    broken = "DELETE FROM floor_sign_in_failures";
+    await expect(signInWithPin(context, "0042", "4821")).rejects.toBeInstanceOf(LocalDbError);
+    broken = null;
+    expect(await signInWithPin(context, "0042", "4821")).toEqual(ANNA_SIGNED_IN);
+  });
+});
+
 describe("the sign-in's secrets", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -366,9 +564,11 @@ describe("the sign-in's secrets", () => {
 describe("the sign-in screen's readiness", () => {
   it("offers nothing before this pairing's copies, then counts the operators who may sign in", async () => {
     const { executor } = openLocalDb();
-    expect(await readFloorReadiness({ local: executor, pairing: PAIRING })).toEqual({
-      kind: "not_ready",
-    });
+    expect(await readFloorReadiness({ local: executor, pairing: PAIRING, now: () => NOW })).toEqual(
+      {
+        kind: "not_ready",
+      },
+    );
     const { db, context } = await synced([
       SITE,
       operator(ANNA, 5, "0042"),
@@ -501,7 +701,7 @@ describe("the PIN sign-in's work and guards", () => {
   it("verifies nothing while this pairing's copies are not complete", async () => {
     const { context } = await synced([SITE, operator(ANNA, 5, "0042")]);
     const reads = counted(context.local);
-    const other = { local: reads.local, pairing: { hostId: HOST_ID, deviceId: BORIS } };
+    const other = { ...context, local: reads.local, pairing: { hostId: HOST_ID, deviceId: BORIS } };
     expect(await signInWithPin(other, "0042", "4821")).toEqual({
       kind: "refused",
       reason: "not_ready",

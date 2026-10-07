@@ -43,14 +43,15 @@ async fn lines(db: &LocalDb) -> Value {
     Value::Array(rows.into_iter().map(Value::Object).collect())
 }
 
-/// Pins today's user tables. `clear_copies` treats every one of them as a
-/// disposable copy of the host's data (see its doc comment); a new
-/// migration that adds a table makes this assertion fail, on purpose, so
-/// whoever adds it must decide whether it is another copy (extend the list
-/// here) or the first data this device owns instead — the scan journal,
-/// boxes, the outbox (the station design's §6.2, "Логическая модель") —
-/// which `clear_copies` and `device_forget` then need to treat deliberately,
-/// not silently wipe.
+/// Pins today's user tables. `clear_copies` treats every one of them as
+/// disposable (see its doc comment): the copies of the host's data, and
+/// `floor_sign_in_failures` (plan 1f), this device's own failed sign-ins,
+/// which a forget clears on purpose. A new migration that adds a table makes
+/// this assertion fail, on purpose, so whoever adds it must decide whether
+/// it is disposable too (extend the list here) or data this device must keep
+/// — the scan journal, boxes, the outbox (the station design's §6.2,
+/// "Логическая модель") — which `clear_copies` and `device_forget` then need
+/// to treat deliberately, not silently wipe.
 #[tokio::test]
 async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
     let (dir, db) = open().await;
@@ -68,6 +69,7 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
     assert_eq!(
         names,
         [
+            "floor_sign_in_failures",
             "ref_lines",
             "ref_operator_badges",
             "ref_operators",
@@ -424,6 +426,12 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
              VALUES ('8:box', 8, 'box', 'template-1', 7)",
             json!([]),
         ),
+        // This device's own failed sign-ins (plan 1f): cleared with the copies.
+        statement(
+            "INSERT INTO floor_sign_in_failures (key, failures, locked_at) \
+             VALUES ('station', 3, 1790000000000)",
+            json!([]),
+        ),
     ])
     .await
     .unwrap();
@@ -457,6 +465,7 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
              + (SELECT count(*) FROM ref_lines) + (SELECT count(*) FROM sync_state) \
              + (SELECT count(*) FROM sync_quarantine) + (SELECT count(*) FROM ref_products) \
              + (SELECT count(*) FROM ref_templates) + (SELECT count(*) FROM ref_template_defaults) \
+             + (SELECT count(*) FROM floor_sign_in_failures) \
              + (SELECT count(*) FROM extra_holder) + (SELECT count(*) FROM extra_item) AS n",
             vec![],
         )
