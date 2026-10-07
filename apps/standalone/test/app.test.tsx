@@ -1987,18 +1987,21 @@ describe("the operator on the floor", () => {
 
   it("starts the wait again on a touch of the screen, not only on a key", async () => {
     fakeRetryTimers();
-    await onTheFloor(2_000);
+    await onTheFloor(4_000);
     scan("MRK-000742");
     await screen.findByText(SIGNED_IN);
     await flush();
-    // The fake clock also runs with real time, so the margins are wide.
-    await elapse(1_500);
+    // The fake clock also runs with real time (`shouldAdvanceTime`), so the
+    // margins on both sides of the touch are 1 500 ms: the touch lands before
+    // the first wait would end (4 000), and the check lands before the
+    // restarted one would (2 500 + 4 000).
+    await elapse(2_500);
     act(() => {
       fireEvent.touchStart(window);
     });
-    await elapse(1_500);
+    await elapse(2_500);
     expect(screen.getByText(SIGNED_IN)).toBeTruthy();
-    await elapse(800);
+    await elapse(1_700);
     expect(screen.getByText("Оператор вышел по бездействию. Войдите снова.")).toBeTruthy();
   });
 
