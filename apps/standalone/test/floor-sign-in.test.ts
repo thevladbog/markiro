@@ -17,6 +17,7 @@ import {
 import type { ChangeItem } from "../src/host/protocol.js";
 import { hashBadge, hashPin, isPinPhc } from "../src/lib/credentials.js";
 import type * as Credentials from "../src/lib/credentials.js";
+import { badgeCodeRule, operatorLoginRule, pinRule } from "../src/lib/rules.js";
 import { LocalDbError, type LocalExecutor } from "../src/local/executor.js";
 import { syncReferences } from "../src/local/reference-sync.js";
 import { DEVICE_ID, HOST_ID } from "./support/fixtures.js";
@@ -722,6 +723,32 @@ describe("the PIN sign-in's work and guards", () => {
     expect(vi.mocked(verifyPhc).mock.calls).toEqual([["4821", DUMMY_PIN_PHC]]);
   });
 
+  it("does not take a hash the host would not write: more than 1 000 000 iterations, or a count in non-canonical digits", async () => {
+    // Both hashes verify the right PIN (`parsePhc` reads `0100000` as 100 000),
+    // so only `isPinPhc` stands between them and a sign-in; a refusal is the
+    // dummy-hash path and counts against the operator, as a wrong PIN does.
+    const tooMany = formatPhc(2_000_000, SALT, await deriveDigestB64("4821", SALT, 2_000_000));
+    const padded = PIN_PHC.replace("$100000$", "$0100000$");
+    expect(parsePhc(padded)?.iterations).toBe(PHC_ITERATIONS);
+    for (const phc of [tooMany, padded]) {
+      const { db, context } = await synced([SITE, operator(ANNA, 5, "0042")]);
+      db.prepare("UPDATE ref_operators SET pin_phc = ? WHERE id = ?").run(phc, ANNA);
+      vi.mocked(verifyPhc).mockClear();
+      expect(await signInWithPin(context, "0042", "4821")).toEqual({
+        kind: "refused",
+        reason: "wrong",
+      });
+      expect(vi.mocked(verifyPhc).mock.calls).toEqual([["4821", DUMMY_PIN_PHC]]);
+      const rows = db
+        .prepare("SELECT key, failures FROM floor_sign_in_failures ORDER BY key")
+        .all();
+      expect(rows.map((row) => ({ ...row }))).toEqual([
+        { key: `operator:${ANNA}`, failures: 1 },
+        { key: "station", failures: 1 },
+      ]);
+    }
+  }, 20_000);
+
   it("verifies exactly the personnel numbers of 3-12 digits and the PINs of 4-6", async () => {
     const { context } = await synced([SITE, operator(ANNA, 5, "0042")]);
     const cases: Array<[string, string, boolean]> = [
@@ -1007,5 +1034,91 @@ describe("the sign-in screen's readiness, beyond the count", () => {
   it("is ready with no operators at all", async () => {
     const { context } = await synced([SITE]);
     expect(await readFloorReadiness(context)).toEqual({ kind: "ready", operators: 0 });
+  });
+});
+
+describe("the sign-in's input patterns against the office's rules", () => {
+  // `sign-in.ts` keeps its own copies of the office's patterns (`rules.ts`);
+  // a drift would silently refuse (fail closed) what the office lets in. Each
+  // row: the input, whether the office rule takes it, whether the station
+  // does. A difference is intended and named in `why`.
+  const long = (char: string, count: number) => char.repeat(count);
+
+  const LOGINS: Array<[string, boolean, boolean, string?]> = [
+    ["42", false, false],
+    ["042", true, true],
+    ["123456789012", true, true],
+    ["1234567890123", false, false],
+    [long("1", 257), false, false],
+    ["００４２", false, false],
+    ["абв", false, false],
+    ["004\u001d2", false, false],
+    // The office form trims what the user typed; the keypad never sends spaces,
+    // so the station takes the number exactly as typed.
+    [" 0421 ", true, false, "the office trims, the station does not"],
+    ["\t0421", true, false, "the office trims, the station does not"],
+  ];
+
+  const PINS: Array<[string, boolean, boolean, string?]> = [
+    ["482", false, false],
+    ["4821", true, true],
+    ["482156", true, true],
+    ["4821567", false, false],
+    [long("4", 257), false, false],
+    ["４８２１", false, false],
+    ["абвг", false, false],
+    ["48\u001d21", false, false],
+    [" 4821 ", true, false, "the office trims, the station does not"],
+    ["\t4821", true, false, "the office trims, the station does not"],
+  ];
+
+  const BADGES: Array<[string, boolean, boolean]> = [
+    ["A", true, true],
+    ["", false, false],
+    [" ", false, false],
+    [long("x", 256), true, true],
+    [long("x", 257), false, false],
+    [" MRK-000742 ", true, true],
+    ["\tMRK-000742\t", true, true],
+    ["Кириллица", false, false],
+    ["MRK\u001d000742", false, false],
+    ["café", false, false],
+    ["MRK\n000742", false, false],
+  ];
+
+  it("takes personnel numbers as the office's rule does, apart from the trim the keypad never needs", async () => {
+    const { context } = await synced([SITE, operator(ANNA, 5, "0042")]);
+    for (const [input, office, station] of LOGINS) {
+      expect(operatorLoginRule.safeParse(input).success, `office ${JSON.stringify(input)}`).toBe(
+        office,
+      );
+      vi.mocked(verifyPhc).mockClear();
+      await signInWithPin(context, input, "4821");
+      expect(vi.mocked(verifyPhc).mock.calls.length === 1, `station ${JSON.stringify(input)}`).toBe(
+        station,
+      );
+    }
+  });
+
+  it("takes PINs as the office's rule does, apart from the trim the keypad never needs", async () => {
+    const { context } = await synced([SITE, operator(ANNA, 5, "0042")]);
+    for (const [input, office, station] of PINS) {
+      expect(pinRule.safeParse(input).success, `office ${JSON.stringify(input)}`).toBe(office);
+      vi.mocked(verifyPhc).mockClear();
+      await signInWithPin(context, "0042", input);
+      expect(vi.mocked(verifyPhc).mock.calls.length === 1, `station ${JSON.stringify(input)}`).toBe(
+        station,
+      );
+    }
+  });
+
+  it("takes badge codes as the office's rule does, with the same trimmed code", () => {
+    for (const [input, office, station] of BADGES) {
+      const parsed = badgeCodeRule.safeParse(input);
+      const scan = readBadgeScan(input);
+      expect(parsed.success, `office ${JSON.stringify(input)}`).toBe(office);
+      expect(scan.kind === "badge", `station ${JSON.stringify(input)}`).toBe(station);
+      if (parsed.success && scan.kind === "badge") expect(scan.code).toBe(parsed.data);
+    }
   });
 });
