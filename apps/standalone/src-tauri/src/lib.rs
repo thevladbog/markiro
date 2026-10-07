@@ -8,6 +8,7 @@ pub mod device_config;
 pub mod host_client;
 pub mod host_probe;
 pub mod local_db;
+pub mod lockdown;
 pub mod secret_store;
 pub mod tls;
 
@@ -186,7 +187,9 @@ pub fn invoke_handler<R: tauri::Runtime>(
         device_forget,
         local_query,
         local_transaction,
-        connection_status
+        connection_status,
+        lockdown::enter_lockdown,
+        lockdown::exit_lockdown
     ]
 }
 
@@ -215,6 +218,8 @@ pub fn run() {
             ));
             Ok(())
         })
+        .manage(lockdown::LockdownState::default())
+        .on_window_event(lockdown::refuse_close_while_locked)
         .invoke_handler(invoke_handler())
         .run(tauri::generate_context!())
         .expect("error while running the Markiro standalone app");
