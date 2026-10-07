@@ -27,7 +27,13 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: var(--space-4);
+  gap: 16px;
+}
+
+.floor-sign-in__results {
+  display: grid;
+  gap: 8px;
+  width: 100%;
 }
 
 .floor-sign-in__prompt {

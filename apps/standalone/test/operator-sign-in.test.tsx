@@ -293,7 +293,11 @@ describe("the floor's sign-in screen", () => {
 
   it("stops listening to the scanner once it leaves the screen", async () => {
     const stop = vi.fn();
-    const source: ScanSource = { start: vi.fn(() => stop), clearPendingInput: vi.fn() };
+    const source: ScanSource = {
+      start: vi.fn(() => stop),
+      clearPendingInput: vi.fn(),
+      setManualTextEntryActive: vi.fn(),
+    };
     const { unmount } = renderSignIn({ local: await synced([SITE]), source });
     await screen.findByText(/^В справочнике нет операторов\./);
     expect(source.start).toHaveBeenCalledTimes(1);
@@ -673,8 +677,16 @@ describe("a check that is still running when the screen changes", () => {
     const local = await synced([SITE, OPERATOR]);
     const stopFirst = vi.fn();
     const stopSecond = vi.fn();
-    const first: ScanSource = { start: vi.fn(() => stopFirst), clearPendingInput: vi.fn() };
-    const second: ScanSource = { start: vi.fn(() => stopSecond), clearPendingInput: vi.fn() };
+    const first: ScanSource = {
+      start: vi.fn(() => stopFirst),
+      clearPendingInput: vi.fn(),
+      setManualTextEntryActive: vi.fn(),
+    };
+    const second: ScanSource = {
+      start: vi.fn(() => stopSecond),
+      clearPendingInput: vi.fn(),
+      setManualTextEntryActive: vi.fn(),
+    };
     const props = propsOf(local, { source: first });
     const { rerender, unmount } = render(screenOf(props));
     await screen.findByText(BADGE_PROMPT);
@@ -1054,5 +1066,162 @@ describe("the rest of the screen", () => {
       await screen.findByText("Не удалось прочитать справочник операторов на этом компьютере."),
     ).toBeTruthy();
     expect(reads).toBeGreaterThan(before);
+  });
+});
+
+describe("text typed into a field, not scanned", () => {
+  it("hands nothing over while a text field takes the keys, and drops what came before", () => {
+    const source = createKeyboardWedgeSource(window);
+    const scans: string[] = [];
+    const stop = source.start((raw) => scans.push(raw));
+    fireEvent.keyDown(window, { key: "x" });
+    source.setManualTextEntryActive(true);
+    scan("Анна");
+    source.setManualTextEntryActive(false);
+    scan("MRK-1");
+    stop();
+    expect(scans).toEqual(["MRK-1"]);
+  });
+
+  it("leaves the field's own Enter alone", () => {
+    const source = createKeyboardWedgeSource(window);
+    const stop = source.start(() => undefined);
+    source.setManualTextEntryActive(true);
+    const enter = new KeyboardEvent("keydown", { key: "Enter", cancelable: true });
+    window.dispatchEvent(enter);
+    stop();
+    expect(enter.defaultPrevented).toBe(false);
+  });
+});
+
+describe("finding oneself by name", () => {
+  const BORIS_ITEM = operatorItem(BORIS, 6, "0077", "Борис Петров");
+
+  async function openSearch() {
+    fireEvent.click(await screen.findByRole("button", { name: "Найти себя по имени" }));
+    return screen.getByLabelText("Имя оператора") as HTMLInputElement;
+  }
+
+  function typeName(field: HTMLInputElement, value: string) {
+    fireEvent.change(field, { target: { value } });
+  }
+
+  it("finds an operator by name and signs them in with their PIN", async () => {
+    const { onSignedIn } = renderSignIn({ local: await synced([SITE, OPERATOR, BORIS_ITEM]) });
+    const field = await openSearch();
+    expect(screen.getByText("Наберите первые буквы имени или фамилии.")).toBeTruthy();
+    typeName(field, "кузн");
+    fireEvent.click(await screen.findByRole("button", { name: "Анна Кузнецова — 0042" }));
+    expect(screen.getByText("Анна Кузнецова, табельный номер 0042. Наберите PIN.")).toBeTruthy();
+    press("4", "8", "2", "1");
+    fireEvent.click(screen.getByRole("button", { name: "Войти" }));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
+  });
+
+  it("waits for two letters and says when nobody matches", async () => {
+    renderSignIn({ local: await synced([SITE, OPERATOR, BORIS_ITEM]) });
+    const field = await openSearch();
+    expect(await screen.findByText("Наберите хотя бы две буквы.")).toBeTruthy();
+    typeName(field, "а");
+    expect(screen.getByText("Наберите хотя бы две буквы.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /— 0042$/ })).toBeNull();
+    typeName(field, "яя");
+    expect(
+      screen.getByText("Никого не нашли. Проверьте имя или войдите по табельному номеру."),
+    ).toBeTruthy();
+  });
+
+  it("goes back from the PIN to the search as it was, and from the search to the badge", async () => {
+    renderSignIn({ local: await synced([SITE, OPERATOR, BORIS_ITEM]) });
+    typeName(await openSearch(), "бор");
+    fireEvent.click(await screen.findByRole("button", { name: "Борис Петров — 0077" }));
+    press("1");
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect((screen.getByLabelText("Имя оператора") as HTMLInputElement).value).toBe("бор");
+    expect(await screen.findByRole("button", { name: "Борис Петров — 0077" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(screen.getByText(BADGE_PROMPT)).toBeTruthy();
+    // The keypad's way afterwards names nobody.
+    await enterLogin("0077");
+    expect(screen.getByText("Табельный номер 0077. Наберите PIN.")).toBeTruthy();
+  });
+
+  it("does not take a name typed into the field for a badge scan", async () => {
+    const { onSignedIn, onSync } = renderSignIn({ local: await synced([SITE, OPERATOR, BADGE]) });
+    const field = await openSearch();
+    act(() => field.focus());
+    for (const key of "MRK-000743") fireEvent.keyDown(field, { key });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.queryByText(/^Бейдж не найден\./)).toBeNull();
+    expect(onSync).not.toHaveBeenCalled();
+    // Out of the field, the scanner signs in again.
+    act(() => field.blur());
+    act(() => scan("MRK-000742"));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
+  });
+
+  it("gives the scanner back when the screen goes while the field has the keys", async () => {
+    const source = createKeyboardWedgeSource(window);
+    const { unmount } = renderSignIn({ local: await synced([SITE, OPERATOR]), source });
+    const field = await openSearch();
+    act(() => field.focus());
+    unmount();
+    const scans: string[] = [];
+    const stop = source.start((raw) => scans.push(raw));
+    scan("MRK-000742");
+    stop();
+    expect(scans).toEqual(["MRK-000742"]);
+  });
+
+  it("offers no name while the copies cannot be read", async () => {
+    const real = await synced([SITE, OPERATOR]);
+    let failing = false;
+    const local: LocalExecutor = {
+      query: (sql, params, row) =>
+        failing ? Promise.reject(new Error("disk")) : real.query(sql, params, row),
+      transaction: (statements) => real.transaction(statements),
+    };
+    renderSignIn({ local });
+    await screen.findByText(BADGE_PROMPT);
+    failing = true;
+    typeName(await openSearch(), "ан");
+    expect(
+      await screen.findByText("Не удалось прочитать справочник операторов на этом компьютере."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Анна Кузнецова — 0042" })).toBeNull();
+  });
+});
+
+describe("the size of the screen's controls", () => {
+  /** Every button now on screen is a floor one (64 px, `size="floor"`). */
+  function allFloorSized() {
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.className).toContain("mk-btn--floor");
+    }
+  }
+
+  it("keeps every button at the floor's 64 px on every step", async () => {
+    renderSignIn({ local: await synced([SITE, OPERATOR]) });
+    await screen.findByText(BADGE_PROMPT);
+    allFloorSized();
+    fireEvent.click(screen.getByRole("button", { name: "Найти себя по имени" }));
+    fireEvent.change(screen.getByLabelText("Имя оператора"), { target: { value: "ан" } });
+    await screen.findByRole("button", { name: "Анна Кузнецова — 0042" });
+    allFloorSized();
+    fireEvent.click(screen.getByRole("button", { name: "Анна Кузнецова — 0042" }));
+    allFloorSized();
+  });
+
+  it("keeps «Повторить» at the floor's size too", async () => {
+    const local: LocalExecutor = {
+      query: () => Promise.reject(new Error("disk")),
+      transaction: () => Promise.reject(new Error("disk")),
+    };
+    renderSignIn({ local });
+    await screen.findByText("Не удалось прочитать справочник операторов на этом компьютере.");
+    allFloorSized();
   });
 });

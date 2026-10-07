@@ -13,6 +13,7 @@ import {
   recordFailure,
   STATION_LOCKOUT,
 } from "./lockout.js";
+import type { RosterEntry } from "./operator-search.js";
 
 // The station's operator sign-in (stage 1 spec §5.6, plan 1f): offline, from
 // the local copies of operators and badges only, never a call to the host.
@@ -104,6 +105,10 @@ const SITE_SALT = "SELECT badge_salt AS badgeSalt FROM ref_site";
 
 const OPERATOR_COUNT = `SELECT count(*) AS n FROM ref_operators AS o WHERE ${NOT_QUARANTINED_OPERATOR}`;
 
+const ROSTER = `SELECT o.id, o.login, o.name FROM ref_operators AS o WHERE ${NOT_QUARANTINED_OPERATOR}`;
+
+const rosterRow = z.object({ id: z.string(), login: z.string(), name: z.string() });
+
 const operatorRow = z.object({
   id: z.string(),
   login: z.string(),
@@ -182,6 +187,17 @@ export async function readFloorReadiness(context: SignInContext): Promise<FloorR
   if (!(await copiesReady(context.local, context.pairing))) return { kind: "not_ready" };
   const [count] = await context.local.query(OPERATOR_COUNT, [], countRow);
   return { kind: "ready", operators: count?.n ?? 0 };
+}
+
+/**
+ * The operators the name search may offer (`src/floor/operator-search.ts`):
+ * this pairing's copies once a sync has begun to fill them (`copiesReady`),
+ * none waiting in quarantine, identity only (never a hash); `null` while the
+ * copies are not ready.
+ */
+export async function readOperatorRoster(context: SignInContext): Promise<RosterEntry[] | null> {
+  if (!(await copiesReady(context.local, context.pairing))) return null;
+  return context.local.query(ROSTER, [], rosterRow);
 }
 
 /**

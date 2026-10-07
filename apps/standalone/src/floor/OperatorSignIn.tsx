@@ -1,16 +1,24 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 
-import { Alert, Button, Card, PinPad, Spinner } from "@markiro/ui";
+import { Alert, Button, Card, Input, PinPad, Spinner } from "@markiro/ui";
 
 import { HostStatusLine } from "../app/HostStatusLine.js";
 import type { FloorNotice, SyncState } from "../app/shell.js";
 import type { HostStatus } from "../host/protocol.js";
 import type { LocalExecutor } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
+import {
+  NAME_QUERY_MAX_LENGTH,
+  NAME_SEARCH_MIN_LETTERS,
+  nameQueryLetters,
+  searchOperatorsByName,
+  type RosterEntry,
+} from "./operator-search.js";
 import type { ScanSource } from "./scan-source.js";
 import {
   readFloorReadiness,
+  readOperatorRoster,
   signInWithBadge,
   signInWithPin,
   type FloorOperator,
@@ -48,7 +56,7 @@ export interface OperatorSignInProps {
   onOffice: () => void;
 }
 
-type Stage = "badge" | "login" | "pin";
+type Stage = "badge" | "login" | "search" | "pin";
 
 /** What the message slot says: a refusal of the last attempt, or a notice. */
 type Message =
@@ -90,8 +98,9 @@ function messageOf(result: Exclude<SignInResult, { kind: "signed_in" }>, via: "p
 }
 
 /**
- * The floor with nobody signed in (stage 1 spec §5.6, plan 1f): a badge scan
- * at any moment, or a personnel number and a PIN on the keypad, checked
+ * The floor with nobody signed in (stage 1 spec §5.6, plans 1f and 1f2): a
+ * badge scan at any moment, or a personnel number (typed on the keypad or
+ * found by name) and a PIN on the keypad, checked
  * offline against this pairing's copies (`src/floor/sign-in.ts`). Until a
  * sync has begun to fill the copies, and while they hold no operator, the screen says why
  * nobody can sign in and keeps the way into the office. One check runs at a
@@ -120,6 +129,12 @@ export function OperatorSignIn({
   const [stage, setStage] = useState<Stage>("badge");
   const [login, setLogin] = useState("");
   const [pin, setPin] = useState("");
+  // The name search: what is typed, the copies it searches (`null` while
+  // they are read), and where «Назад» on the PIN goes with whose name.
+  const [query, setQuery] = useState("");
+  const [roster, setRoster] = useState<RosterEntry[] | "not_ready" | "failed" | null>(null);
+  const [pinFrom, setPinFrom] = useState<"login" | "search">("login");
+  const [chosenName, setChosenName] = useState<string | null>(null);
   const [message, setMessage] = useState<Message | null>(null);
   const [busy, setBusy] = useState(false);
   // The leave notice stays until somebody tries to sign in: the first attempt
@@ -157,6 +172,28 @@ export function OperatorSignIn({
       cancelled = true;
     };
   }, [local, hostId, deviceId, now, sync.synced, readAttempt]);
+
+  // The copies the name search offers, read when it opens and after every sync.
+  const searching = stage === "search";
+  useEffect(() => {
+    if (!searching) return;
+    let cancelled = false;
+    readOperatorRoster({ local, pairing: { hostId, deviceId }, now }).then(
+      (next) => {
+        if (!cancelled) setRoster(next ?? "not_ready");
+      },
+      () => {
+        if (!cancelled) setRoster("failed");
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [searching, local, hostId, deviceId, now, sync.synced]);
+
+  // A field that held the keys when the screen went (no blur comes then)
+  // must not keep the scanner deaf on the next screen.
+  useEffect(() => () => source.setManualTextEntryActive(false), [source]);
 
   /** One check at a time; the answer either signs in or says why not. */
   const attempt = useCallback(
@@ -217,11 +254,21 @@ export function OperatorSignIn({
   );
 
   const toStage = (next: Stage) => {
-    source.clearPendingInput();
+    // Also drops the keys typed so far, as `clearPendingInput` does.
+    source.setManualTextEntryActive(false);
     setMessage(null);
     setPin("");
     if (next === "login") setLogin("");
+    if (next === "search") setRoster(null);
     setStage(next);
+  };
+
+  /** A name from the search: the PIN for that operator's number comes next. */
+  const choose = (entry: RosterEntry) => {
+    setLogin(entry.login);
+    setChosenName(entry.name);
+    setPinFrom("search");
+    toStage("pin");
   };
 
   const messageText = (shown: Message) => {
@@ -253,7 +300,7 @@ export function OperatorSignIn({
           action={
             <Button
               variant="secondary"
-              size="compact"
+              size="floor"
               onClick={() => {
                 setReadiness(null);
                 setReadAttempt((count) => count + 1);
@@ -277,6 +324,72 @@ export function OperatorSignIn({
             <Button size="floor" disabled={busy} onClick={() => toStage("login")}>
               {t("floor.signIn.useLogin")}
             </Button>
+            <Button
+              size="floor"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => {
+                setQuery("");
+                toStage("search");
+              }}
+            >
+              {t("floor.signIn.useName")}
+            </Button>
+          </div>
+        </div>
+      );
+    }
+    if (stage === "search") {
+      const matches = Array.isArray(roster) ? searchOperatorsByName(roster, query) : [];
+      let results: ReactNode;
+      if (roster === null) results = <p>{t("floor.signIn.loading")}</p>;
+      else if (roster === "failed") results = <p>{t("floor.signIn.readFailed")}</p>;
+      else if (roster === "not_ready") results = <p>{t("floor.signIn.errors.notReady")}</p>;
+      else if (nameQueryLetters(query) < NAME_SEARCH_MIN_LETTERS) {
+        results = <p>{t("floor.signIn.nameHint")}</p>;
+      } else if (matches.length === 0) results = <p>{t("floor.signIn.nameEmpty")}</p>;
+      else {
+        results = matches.map((entry) => (
+          <Button
+            key={entry.id}
+            size="floor"
+            variant="secondary"
+            fullWidth
+            disabled={busy}
+            onClick={() => choose(entry)}
+          >
+            {t("floor.signIn.nameResult", { name: entry.name, login: entry.login })}
+          </Button>
+        ));
+      }
+      return (
+        <div className="floor-sign-in">
+          <p className="floor-sign-in__prompt">{t("floor.signIn.namePrompt")}</p>
+          <Input
+            size="floor"
+            label={t("floor.signIn.nameLabel")}
+            value={query}
+            maxLength={NAME_QUERY_MAX_LENGTH}
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            disabled={busy}
+            onFocus={() => source.setManualTextEntryActive(true)}
+            onBlur={() => source.setManualTextEntryActive(false)}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+          />
+          <div className="floor-sign-in__results" aria-live="polite">
+            {results}
+          </div>
+          <div className="standalone-form__actions">
+            <Button
+              size="floor"
+              variant="secondary"
+              disabled={busy}
+              onClick={() => toStage("badge")}
+            >
+              {t("floor.signIn.back")}
+            </Button>
           </div>
         </div>
       );
@@ -285,7 +398,11 @@ export function OperatorSignIn({
     return (
       <div className="floor-sign-in">
         <p className="floor-sign-in__prompt">
-          {t(stage === "login" ? "floor.signIn.loginPrompt" : "floor.signIn.pinPrompt", { login })}
+          {stage === "login"
+            ? t("floor.signIn.loginPrompt")
+            : chosenName !== null
+              ? t("floor.signIn.pinPromptNamed", { name: chosenName, login })
+              : t("floor.signIn.pinPrompt", { login })}
         </p>
         <output className="floor-sign-in__readout" aria-label={t(`floor.signIn.${stage}Readout`)}>
           {stage === "login" ? login : "•".repeat(pin.length)}
@@ -305,7 +422,7 @@ export function OperatorSignIn({
             size="floor"
             variant="secondary"
             disabled={busy}
-            onClick={() => toStage(stage === "pin" ? "login" : "badge")}
+            onClick={() => toStage(stage === "pin" ? pinFrom : "badge")}
           >
             {t("floor.signIn.back")}
           </Button>
@@ -313,7 +430,11 @@ export function OperatorSignIn({
             <Button
               size="floor"
               disabled={busy || !LOGIN.test(login)}
-              onClick={() => toStage("pin")}
+              onClick={() => {
+                setPinFrom("login");
+                setChosenName(null);
+                toStage("pin");
+              }}
             >
               {t("floor.signIn.next")}
             </Button>
@@ -351,7 +472,7 @@ export function OperatorSignIn({
         <HostStatusLine status={link} sync={sync} />
         <div className="standalone-form__actions">
           {/* Never held by a check: one that never settles must not trap the station here. */}
-          <Button variant="secondary" onClick={onOffice}>
+          <Button variant="secondary" size="floor" onClick={onOffice}>
             {t("floor.office")}
           </Button>
         </div>

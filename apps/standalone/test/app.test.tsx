@@ -1898,6 +1898,7 @@ describe("the operator on the floor", () => {
         };
       },
       clearPendingInput: () => undefined,
+      setManualTextEntryActive: () => undefined,
     };
     return {
       source,

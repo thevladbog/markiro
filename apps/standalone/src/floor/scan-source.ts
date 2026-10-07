@@ -10,6 +10,12 @@ export interface ScanSource {
   start(listener: ScanListener): () => void;
   /** Drops the keys typed since the last Enter. */
   clearPendingInput(): void;
+  /**
+   * `true` while a text field takes typing (the name search): the keys are
+   * the field's, not a scan, and Enter hands nothing over. Either way the
+   * keys typed so far are dropped.
+   */
+  setManualTextEntryActive(active: boolean): void;
 }
 
 type KeyTarget = Pick<Window, "addEventListener" | "removeEventListener">;
@@ -31,6 +37,7 @@ const GROUP_SEPARATOR = "\u001d";
  */
 export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSource {
   const buffers = new Set<() => void>();
+  let manualTextEntry = false;
   return {
     start(listener) {
       let payload = "";
@@ -39,6 +46,8 @@ export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSourc
       };
       buffers.add(clear);
       const onKeyDown = (event: Event) => {
+        // Typing into a text field: no scan, and its Enter stays the field's.
+        if (manualTextEntry) return;
         const { key, ctrlKey, altKey, metaKey } = event as KeyboardEvent;
         if (key === "Enter") {
           // The scan's closing Enter lands on whatever holds the focus, and a
@@ -66,6 +75,10 @@ export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSourc
     },
     clearPendingInput() {
       for (const clear of buffers) clear();
+    },
+    setManualTextEntryActive(active) {
+      for (const clear of buffers) clear();
+      manualTextEntry = active;
     },
   };
 }
