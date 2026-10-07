@@ -76,11 +76,13 @@ export function App({
   const remoteAddress =
     pairedStatus !== null && pairedStatus.hostAddress !== address ? pairedStatus.hostAddress : null;
 
+  const linked =
+    pairedStatus !== null && state.rejection === null && state.sync.kind !== "other_host"
+      ? pairedStatus
+      : null;
   const requestSync = useHostLink({
-    hostId:
-      pairedStatus !== null && state.rejection === null && state.sync.kind !== "other_host"
-        ? pairedStatus.hostId
-        : null,
+    hostId: linked?.hostId ?? null,
+    deviceId: linked?.deviceId ?? null,
     connection: connectionApi,
     local: localDb,
     changes: hostApi.getChanges,

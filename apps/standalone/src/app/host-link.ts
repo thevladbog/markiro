@@ -44,6 +44,8 @@ export function syncFailureOf(error: unknown): SyncFailure {
 export interface HostLinkOptions {
   /** The paired host; `null` while unpaired, rejected or stopped at another host. */
   hostId: string | null;
+  /** The pairing's device id (`DeviceStatus.deviceId`); `null` exactly when `hostId` is. */
+  deviceId: string | null;
   connection: ConnectionApi;
   local: LocalExecutor;
   /** `HostApi.getChanges`. */
@@ -69,6 +71,7 @@ export interface HostLinkOptions {
  */
 export function useHostLink({
   hostId,
+  deviceId,
   connection,
   local,
   changes,
@@ -77,7 +80,7 @@ export function useHostLink({
 }: HostLinkOptions): () => void {
   const syncNow = useRef<() => void>(() => undefined);
   useEffect(() => {
-    if (hostId === null) return;
+    if (hostId === null || deviceId === null) return;
     // Nothing reaches the shell state after the pairing changed or ended.
     let active = true;
     // The link's latest status is `online`: only then is a retry worth it.
@@ -111,7 +114,7 @@ export function useHostLink({
       running = true;
       dispatch({ type: "sync_started" });
       try {
-        const result = await syncReferences({ changes, local, hostId });
+        const result = await syncReferences({ changes, local, hostId, deviceId });
         if (!active) return;
         failures = 0;
         if (result.kind === "other_host") {
@@ -261,6 +264,6 @@ export function useHostLink({
       cancelRefreshRetry();
       unwatch?.();
     };
-  }, [hostId, connection, local, changes, refresh, dispatch]);
+  }, [hostId, deviceId, connection, local, changes, refresh, dispatch]);
   return useCallback(() => syncNow.current(), []);
 }

@@ -12,15 +12,18 @@ import {
 import { hashPin } from "../src/lib/credentials.js";
 import { LocalDbError, type LocalExecutor, type LocalStatement } from "../src/local/executor.js";
 import {
+  copiesReady,
   createSyncScheduler,
   ENTITY_SET,
   SyncFeedError,
   syncReferences,
 } from "../src/local/reference-sync.js";
-import { HOST_ID } from "./support/fixtures.js";
+import { DEVICE_ID, HOST_ID } from "./support/fixtures.js";
 import { openLocalDb } from "./support/local-db.js";
 
 const OTHER_HOST = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
+/** The device id of another pairing: with `OTHER_HOST`, or a later one with `HOST_ID`. */
+const OTHER_DEVICE = "9b2d4f61-3a5c-4e7d-8f90-1a2b3c4d5e6f";
 const LINE_1 = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
 const LINE_2 = "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21";
 /** When a test's pages are applied, on this computer's clock. */
@@ -256,11 +259,20 @@ function quarantine(db: DatabaseSync) {
   return Array.from(db.prepare(sql).all(), (row) => ({ ...row }));
 }
 
-function state(lastRev: number, hostId = HOST_ID) {
+function state(lastRev: number, hostId = HOST_ID, deviceId = DEVICE_ID) {
   return [
+    { key: "device_id", value: deviceId },
     { key: "entity_set", value: ENTITY_SET },
     { key: "host_id", value: hostId },
     { key: "last_rev", value: String(lastRev) },
+  ];
+}
+
+/** The pairing stamp alone, as a wipe for another pairing leaves it: no `last_rev`. */
+function stamp(hostId = HOST_ID, deviceId = DEVICE_ID) {
+  return [
+    { key: "device_id", value: deviceId },
+    { key: "host_id", value: hostId },
   ];
 }
 
@@ -270,6 +282,7 @@ async function syncedTwoLines(executor: LocalExecutor): Promise<void> {
     changes: feed({ 0: page(20, [line(LINE_1, 10, "Линия 1"), line(LINE_2, 20, "Линия 2")]) }),
     local: executor,
     hostId: HOST_ID,
+    deviceId: DEVICE_ID,
   });
 }
 
@@ -350,13 +363,44 @@ describe("ENTITY_SET", () => {
   });
 });
 
+describe("copiesReady", () => {
+  it("answers yes only after this pairing's own run applied its last page", async () => {
+    const { db, executor } = openLocalDb();
+    const pairing = { hostId: HOST_ID, deviceId: DEVICE_ID };
+    expect(await copiesReady(executor, pairing)).toBe(false);
+    await syncedTwoLines(executor);
+    expect(await copiesReady(executor, pairing)).toBe(true);
+    expect(await copiesReady(executor, { hostId: HOST_ID, deviceId: OTHER_DEVICE })).toBe(false);
+    expect(await copiesReady(executor, { hostId: OTHER_HOST, deviceId: DEVICE_ID })).toBe(false);
+
+    // A build with another entity set has not applied its first page yet.
+    db.prepare("UPDATE sync_state SET value = 'org_profile,lines' WHERE key = 'entity_set'").run();
+    expect(await copiesReady(executor, pairing)).toBe(false);
+  });
+
+  it("answers no after a wipe for another pairing, which leaves the stamp alone", async () => {
+    const { executor } = openLocalDb();
+    await syncedTwoLines(executor);
+    const offline = vi.fn(async (): Promise<ChangesResponse> => {
+      throw new Error("host unreachable");
+    });
+    const next = { hostId: HOST_ID, deviceId: OTHER_DEVICE };
+    await expect(syncReferences({ changes: offline, local: executor, ...next })).rejects.toThrow(
+      "host unreachable",
+    );
+    expect(await copiesReady(executor, next)).toBe(false);
+  });
+});
+
 describe("reference sync", () => {
   it("copies every record of the first full sync", async () => {
     const { db, executor } = openLocalDb();
     const changes = feed({
       0: page(42, [line(LINE_2, 40, "Линия 2", true), ORG, SITE, line(LINE_1, 42, "Линия 1")]),
     });
-    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
+    await expect(
+      syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).resolves.toEqual({
       kind: "synced",
       rev: 42,
       quarantined: 0,
@@ -397,6 +441,7 @@ describe("reference sync", () => {
       changes: feed({ 0: page(41, [ORG]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     const changedOrg: ChangeItem = {
       entity: "org_profile",
@@ -415,6 +460,7 @@ describe("reference sync", () => {
       changes: feed({ 41: page(50, [changedOrg]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     expect(tables(db).org).toEqual([
       {
@@ -435,6 +481,7 @@ describe("reference sync", () => {
       changes: feed({ 0: page(41, [SITE]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     const changedSite: ChangeItem = {
       entity: "site",
@@ -447,6 +494,7 @@ describe("reference sync", () => {
       changes: feed({ 41: page(55, [changedSite]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     expect(tables(db).site).toEqual([
       {
@@ -465,7 +513,9 @@ describe("reference sync", () => {
       0: page(41, [ORG, SITE], true),
       41: page(42, [line(LINE_1, 42, "Линия 1")]),
     });
-    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
+    await expect(
+      syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).resolves.toEqual({
       kind: "synced",
       rev: 42,
       quarantined: 0,
@@ -476,7 +526,7 @@ describe("reference sync", () => {
 
     // The next sync asks only for what came after.
     const next = feed({ 42: page(43, [line(LINE_1, 43, "Линия 1 (упаковка)")]) });
-    await syncReferences({ changes: next, local: executor, hostId: HOST_ID });
+    await syncReferences({ changes: next, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID });
     expect(next.mock.calls).toEqual([[42]]);
     expect(tables(db).lines).toEqual([
       { id: LINE_1, name: "Линия 1 (упаковка)", archived: 0, rev: 43 },
@@ -486,24 +536,29 @@ describe("reference sync", () => {
   it("applies the same page again without changing a record", async () => {
     const { db, executor } = openLocalDb();
     const changes = feed({ 0: page(42, [ORG, SITE, line(LINE_1, 42, "Линия 1")]) });
-    await syncReferences({ changes, local: executor, hostId: HOST_ID });
+    await syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID });
     const before = tables(db);
     // As if the revision were lost: the same page arrives again.
     db.prepare("UPDATE sync_state SET value = '0' WHERE key = 'last_rev'").run();
     const recorded = counting(executor);
-    await syncReferences({ changes, local: recorded.executor, hostId: HOST_ID });
+    await syncReferences({
+      changes,
+      local: recorded.executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
     expect(tables(db)).toEqual(before);
-    // The guard passed (1: `host_id` still matched and was touched), the
-    // three upserts found nothing newer and nothing was quarantined to lift;
-    // only the sync state was written.
-    expect(recorded.batches).toEqual([[1, 0, 0, 0, 0, 3]]);
+    // The guard passed (2: `host_id` and `device_id` still matched and were
+    // touched), the three upserts found nothing newer and nothing was
+    // quarantined to lift; only the sync state was written.
+    expect(recorded.batches).toEqual([[2, 0, 0, 0, 0, 4]]);
   });
 
   it("deletes by tombstone, but never a record newer than the tombstone", async () => {
     const { db, executor } = openLocalDb();
     await syncedTwoLines(executor);
     const changes = feed({ 20: page(30, [tombstone(LINE_1, 25), tombstone(LINE_2, 15)]) });
-    await syncReferences({ changes, local: executor, hostId: HOST_ID });
+    await syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID });
     expect(tables(db).lines).toEqual([{ id: LINE_2, name: "Линия 2", archived: 0, rev: 20 }]);
     expect(tables(db).state).toEqual(state(30));
   });
@@ -516,7 +571,9 @@ describe("reference sync", () => {
       20: page(12, []),
       0: page(12, [line(LINE_1, 12, "Линия 1 (из копии)")]),
     });
-    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
+    await expect(
+      syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).resolves.toEqual({
       kind: "synced",
       rev: 12,
       quarantined: 0,
@@ -551,9 +608,9 @@ describe("reference sync", () => {
       if (since === 20) return page(12, []);
       throw new Error("host unreachable");
     });
-    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).rejects.toThrow(
-      "host unreachable",
-    );
+    await expect(
+      syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).rejects.toThrow("host unreachable");
     expect(changes.mock.calls).toEqual([[20], [0]]);
     // Spec §5.4: the copies stay until the first new page actually lands.
     expect(tables(db)).toEqual(before);
@@ -568,7 +625,7 @@ describe("reference sync", () => {
       0: page(8, [line(LINE_1, 8, "Линия 1")], true),
       8: page(5, []),
     });
-    const run = syncReferences({ changes, local: executor, hostId: HOST_ID });
+    const run = syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID });
     await expect(run).rejects.toThrow(/went back twice/);
     await expect(run).rejects.toBeInstanceOf(SyncFeedError);
     // The second rollback's page (empty, at rev 5) is caught before any
@@ -595,7 +652,7 @@ describe("reference sync", () => {
       if (calls > 5) throw new Error("the loop did not stop");
       return page(since, [], true);
     });
-    const run = syncReferences({ changes, local: executor, hostId: HOST_ID });
+    const run = syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID });
     await expect(run).rejects.toThrow(/no progress/);
     await expect(run).rejects.toBeInstanceOf(SyncFeedError);
     // The guard's own message, not the bound's: proves the guard stopped the
@@ -609,13 +666,14 @@ describe("reference sync", () => {
       changes: feed({ 0: page(20, [ORG, line(LINE_2, 20, "Чужая линия")], false, OTHER_HOST) }),
       local: executor,
       hostId: OTHER_HOST,
+      deviceId: OTHER_DEVICE,
     });
     // Paired with HOST_ID now, and the host is out of reach.
     const offline = vi.fn(async (): Promise<ChangesResponse> => {
       throw new Error("host unreachable");
     });
     await expect(
-      syncReferences({ changes: offline, local: executor, hostId: HOST_ID }),
+      syncReferences({ changes: offline, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
     ).rejects.toThrow("host unreachable");
     // The immediate wipe itself already committed, with no `last_rev`: the
     // copies still read as unsynced, and a stale in-flight run for the old
@@ -624,11 +682,11 @@ describe("reference sync", () => {
       org: [],
       site: [],
       lines: [],
-      state: [{ key: "host_id", value: HOST_ID }],
+      state: stamp(),
     });
 
     const changes = feed({ 0: page(5, [line(LINE_1, 5, "Линия 1")]) });
-    await syncReferences({ changes, local: executor, hostId: HOST_ID });
+    await syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID });
     expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 5 }]);
     expect(tables(db).state).toEqual(state(5));
   });
@@ -640,6 +698,7 @@ describe("reference sync", () => {
       changes: feed({ 0: page(10, []) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     // A's next sync starts a request that stays in flight until resolved below.
     let resolveA: ((value: ChangesResponse) => void) | undefined;
@@ -649,7 +708,12 @@ describe("reference sync", () => {
           resolveA = resolve;
         }),
     );
-    const runA = syncReferences({ changes: aChanges, local: executor, hostId: HOST_ID });
+    const runA = syncReferences({
+      changes: aChanges,
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
     await vi.waitFor(() => expect(aChanges).toHaveBeenCalledWith(10));
 
     // Meanwhile the device is re-paired to B, which wipes and takes over —
@@ -675,6 +739,7 @@ describe("reference sync", () => {
         changes: feed({ 0: page(20, [orgB], false, OTHER_HOST) }),
         local: executor,
         hostId: OTHER_HOST,
+        deviceId: OTHER_DEVICE,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 20, quarantined: 0 });
 
@@ -720,7 +785,7 @@ describe("reference sync", () => {
       ],
       site: [],
       lines: [],
-      state: state(20, OTHER_HOST),
+      state: state(20, OTHER_HOST, OTHER_DEVICE),
     });
   });
 
@@ -731,6 +796,7 @@ describe("reference sync", () => {
       changes: feed({ 0: page(10, []) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     // A's next sync starts a request that stays in flight.
     let resolveA: ((value: ChangesResponse) => void) | undefined;
@@ -740,7 +806,12 @@ describe("reference sync", () => {
           resolveA = resolve;
         }),
     );
-    const runA = syncReferences({ changes: aChanges, local: executor, hostId: HOST_ID });
+    const runA = syncReferences({
+      changes: aChanges,
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
     await vi.waitFor(() => expect(aChanges).toHaveBeenCalledWith(10));
 
     // B re-pairs; B's own fetch is held open too, but its preamble — the
@@ -753,7 +824,12 @@ describe("reference sync", () => {
           resolveB = resolve;
         }),
     );
-    const runB = syncReferences({ changes: bChanges, local: executor, hostId: OTHER_HOST });
+    const runB = syncReferences({
+      changes: bChanges,
+      local: executor,
+      hostId: OTHER_HOST,
+      deviceId: OTHER_DEVICE,
+    });
     await vi.waitFor(() => expect(bChanges).toHaveBeenCalledWith(0));
 
     // A's page lands first, while B's is still pending.
@@ -772,7 +848,7 @@ describe("reference sync", () => {
       org: [],
       site: [],
       lines: [],
-      state: [{ key: "host_id", value: OTHER_HOST }],
+      state: stamp(OTHER_HOST, OTHER_DEVICE),
     });
 
     // B's page lands second.
@@ -782,7 +858,7 @@ describe("reference sync", () => {
       org: [],
       site: [],
       lines: [{ id: LINE_2, name: "Линия B", archived: 0, rev: 20 }],
-      state: state(20, OTHER_HOST),
+      state: state(20, OTHER_HOST, OTHER_DEVICE),
     });
   });
 
@@ -802,7 +878,12 @@ describe("reference sync", () => {
           resolveOld = resolve;
         }),
     );
-    const runOld = syncReferences({ changes: oldChanges, local: held.executor, hostId: HOST_ID });
+    const runOld = syncReferences({
+      changes: oldChanges,
+      local: held.executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
     await vi.waitFor(() => expect(held.readCount()).toBe(1));
 
     let resolveNew: ((value: ChangesResponse) => void) | undefined;
@@ -816,6 +897,7 @@ describe("reference sync", () => {
       changes: newChanges,
       local: held.executor,
       hostId: OTHER_HOST,
+      deviceId: OTHER_DEVICE,
     });
     await vi.waitFor(() => expect(held.readCount()).toBe(2));
 
@@ -863,7 +945,7 @@ describe("reference sync", () => {
       org: [],
       site: [],
       lines: [{ id: LINE_2, name: "Линия нового хоста", archived: 0, rev: 20 }],
-      state: state(20, OTHER_HOST),
+      state: state(20, OTHER_HOST, OTHER_DEVICE),
     });
   });
 
@@ -883,7 +965,9 @@ describe("reference sync", () => {
       // state as already synced and fetch from here instead of zero.
       99: page(100, [line(LINE_1, 100, "Линия 1 (в потоке 99)")]),
     });
-    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
+    await expect(
+      syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).resolves.toEqual({
       kind: "synced",
       rev: 12,
       quarantined: 0,
@@ -899,6 +983,7 @@ describe("reference sync", () => {
       changes: feed({ 0: page(10, [line(LINE_1, 10, "Линия 1")]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     // The next sync's fetch is held open, as if `device_forget` ran while it
     // was still in flight.
@@ -909,7 +994,12 @@ describe("reference sync", () => {
           resolve = resolveFetch;
         }),
     );
-    const run = syncReferences({ changes: held, local: executor, hostId: HOST_ID });
+    const run = syncReferences({
+      changes: held,
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
     await vi.waitFor(() => expect(held).toHaveBeenCalledWith(10));
 
     // `clear_copies` (`device_forget`) deletes every row of every table,
@@ -929,6 +1019,197 @@ describe("reference sync", () => {
     expect(quarantine(db)).toEqual([]);
   });
 
+  it("fails a page of the previous pairing with the same host that lands after a forget and a new pairing", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({ 0: page(10, [line(LINE_1, 10, "Линия 1")]) }),
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
+    // The old pairing's next sync is still in flight...
+    let resolveOld: ((value: ChangesResponse) => void) | undefined;
+    const oldChanges = vi.fn(
+      () =>
+        new Promise<ChangesResponse>((resolve) => {
+          resolveOld = resolve;
+        }),
+    );
+    const runOld = syncReferences({
+      changes: oldChanges,
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
+    await vi.waitFor(() => expect(oldChanges).toHaveBeenCalledWith(10));
+
+    // ...when `device_forget` clears every table, and the device pairs with
+    // the same host again under a new device id and syncs in full.
+    for (const table of COPY_TABLES) db.prepare(`DELETE FROM ${table}`).run();
+    await expect(
+      syncReferences({
+        changes: feed({ 0: page(12, [line(LINE_2, 12, "Линия 2")]) }),
+        local: executor,
+        hostId: HOST_ID,
+        deviceId: OTHER_DEVICE,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
+
+    // The old pairing's page lands last: the same host, so a guard on the
+    // host alone would let it write a record and move `last_rev` back.
+    resolveOld?.(page(11, [line(LINE_1, 11, "Линия 1 (прежнее подключение)")]));
+    const error: unknown = await runOld.then(
+      () => {
+        throw new Error("expected the previous pairing's page to fail");
+      },
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(LocalDbError);
+    expect(error).toMatchObject({ code: "changes_mismatch" });
+    expect(tables(db)).toEqual({
+      org: [],
+      site: [],
+      lines: [{ id: LINE_2, name: "Линия 2", archived: 0, rev: 12 }],
+      state: state(12, HOST_ID, OTHER_DEVICE),
+    });
+  });
+
+  it("wipes the copies of an earlier pairing with the same host before anything else", async () => {
+    const { db, executor } = openLocalDb();
+    await syncedTwoLines(executor);
+    const offline = vi.fn(async (): Promise<ChangesResponse> => {
+      throw new Error("host unreachable");
+    });
+    await expect(
+      syncReferences({
+        changes: offline,
+        local: executor,
+        hostId: HOST_ID,
+        deviceId: OTHER_DEVICE,
+      }),
+    ).rejects.toThrow("host unreachable");
+    expect(offline).toHaveBeenCalledWith(0);
+    expect(tables(db)).toEqual({
+      org: [],
+      site: [],
+      lines: [],
+      state: stamp(HOST_ID, OTHER_DEVICE),
+    });
+  });
+
+  it("stamps device_id beside a host_id an older build left alone, and starts from zero keeping the copies until a page lands", async () => {
+    const { db, executor } = openLocalDb();
+    db.prepare("INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, 'Линия 1', 0, 10)").run(
+      LINE_1,
+    );
+    db.prepare(
+      "INSERT INTO sync_state (key, value) VALUES ('last_rev', '10'), ('host_id', ?), ('entity_set', ?)",
+    ).run(HOST_ID, ENTITY_SET);
+    const offline = vi.fn(async (): Promise<ChangesResponse> => {
+      throw new Error("host unreachable");
+    });
+    await expect(
+      syncReferences({ changes: offline, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).rejects.toThrow("host unreachable");
+    expect(offline).toHaveBeenCalledWith(0);
+    // The copies stay until a page lands, but nothing ties them to this
+    // pairing: without `last_rev` they read as unsynced.
+    expect(tables(db).lines).toHaveLength(1);
+    expect(tables(db).state).toEqual([
+      { key: "device_id", value: DEVICE_ID },
+      { key: "entity_set", value: ENTITY_SET },
+      { key: "host_id", value: HOST_ID },
+    ]);
+    expect(await copiesReady(executor, { hostId: HOST_ID, deviceId: DEVICE_ID })).toBe(false);
+
+    const changes = feed({ 0: page(12, [line(LINE_2, 12, "Линия 2")]) });
+    await syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID });
+    expect(tables(db).lines).toEqual([{ id: LINE_2, name: "Линия 2", archived: 0, rev: 12 }]);
+    expect(tables(db).state).toEqual(state(12));
+  });
+
+  it.each([
+    {
+      case: "the host alone was repointed",
+      sql: "UPDATE sync_state SET value = ? WHERE key = 'host_id'",
+      params: [OTHER_HOST],
+    },
+    {
+      case: "the device id alone was repointed",
+      sql: "UPDATE sync_state SET value = ? WHERE key = 'device_id'",
+      params: [OTHER_DEVICE],
+    },
+    {
+      case: "the device id row is gone",
+      sql: "DELETE FROM sync_state WHERE key = 'device_id'",
+      params: [],
+    },
+    {
+      case: "the host row is gone",
+      sql: "DELETE FROM sync_state WHERE key = 'host_id'",
+      params: [],
+    },
+  ])(
+    "fails a late page and rolls the whole batch back when only half the stamp still matches: $case",
+    async ({ sql, params }) => {
+      const { db, executor } = openLocalDb();
+      await syncedTwoLines(executor);
+      let resolveLate: ((value: ChangesResponse) => void) | undefined;
+      const lateChanges = vi.fn(
+        () =>
+          new Promise<ChangesResponse>((resolve) => {
+            resolveLate = resolve;
+          }),
+      );
+      const run = syncReferences({
+        changes: lateChanges,
+        local: executor,
+        hostId: HOST_ID,
+        deviceId: DEVICE_ID,
+      });
+      await vi.waitFor(() => expect(lateChanges).toHaveBeenCalledWith(20));
+      db.prepare(sql).run(...params);
+      const before = tables(db);
+
+      // The page would rewrite a copy and move `last_rev` on; the guard sits
+      // first in the batch, so nothing of it may stay.
+      resolveLate?.(page(30, [line(LINE_1, 30, "Линия 1 (поздняя)"), line(LINE_2, 30, "Линия 2")]));
+      const error: unknown = await run.then(
+        () => {
+          throw new Error("expected the late page to fail");
+        },
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(LocalDbError);
+      expect(error).toMatchObject({ code: "changes_mismatch" });
+      expect(tables(db)).toEqual(before);
+    },
+  );
+
+  it("stamps the pairing and starts from zero when only a matching device_id is left, keeping the copies until a page lands", async () => {
+    const { db, executor } = openLocalDb();
+    db.prepare("INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, 'Линия 1', 0, 10)").run(
+      LINE_1,
+    );
+    db.prepare(
+      "INSERT INTO sync_state (key, value) VALUES ('last_rev', '10'), ('device_id', ?), ('entity_set', ?)",
+    ).run(DEVICE_ID, ENTITY_SET);
+    const offline = vi.fn(async (): Promise<ChangesResponse> => {
+      throw new Error("host unreachable");
+    });
+    await expect(
+      syncReferences({ changes: offline, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).rejects.toThrow("host unreachable");
+    expect(offline).toHaveBeenCalledWith(0);
+    expect(tables(db).lines).toHaveLength(1);
+    expect(tables(db).state).toEqual([
+      { key: "device_id", value: DEVICE_ID },
+      { key: "entity_set", value: ENTITY_SET },
+      { key: "host_id", value: HOST_ID },
+    ]);
+    expect(await copiesReady(executor, { hostId: HOST_ID, deviceId: DEVICE_ID })).toBe(false);
+  });
+
   it("stops at a feed from another host without applying anything, even with a deferred wipe pending", async () => {
     const { db, executor } = openLocalDb();
     await syncedTwoLines(executor);
@@ -944,7 +1225,9 @@ describe("reference sync", () => {
     const quarantineBefore = quarantine(db);
     expect(quarantineBefore).toHaveLength(1);
     const changes = feed({ 0: page(42, [ORG, line(LINE_1, 42, "Линия 1")], false, OTHER_HOST) });
-    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
+    await expect(
+      syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).resolves.toEqual({
       kind: "other_host",
     });
     // The armed wipe never ran: `other_host` short-circuits before any transaction.
@@ -961,13 +1244,13 @@ describe("reference sync", () => {
       throw new Error("host unreachable");
     });
     await expect(
-      syncReferences({ changes: offline, local: executor, hostId: HOST_ID }),
+      syncReferences({ changes: offline, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
     ).rejects.toThrow("host unreachable");
     expect(offline).toHaveBeenCalledWith(0);
     expect(tables(db).lines).toHaveLength(2);
 
     const changes = feed({ 0: page(20, [SITE, line(LINE_1, 10, "Линия 1")]) });
-    await syncReferences({ changes, local: executor, hostId: HOST_ID });
+    await syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID });
     expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 10 }]);
     expect(tables(db).site).toHaveLength(1);
     expect(tables(db).state).toEqual(state(20));
@@ -984,7 +1267,9 @@ describe("reference sync", () => {
       data: { number: "0042" },
     };
     const changes = feed({ 0: page(42, [shift, line(LINE_1, 42, "Линия 1")]) });
-    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
+    await expect(
+      syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).resolves.toEqual({
       kind: "synced",
       rev: 42,
       quarantined: 0,
@@ -1007,7 +1292,7 @@ describe("reference sync", () => {
       transaction: (statements) => executor.transaction(statements),
     };
     const changes = feed({ 0: page(42, [line(LINE_1, 42, "Линия 1")]) });
-    const run = syncReferences({ changes, local, hostId: HOST_ID });
+    const run = syncReferences({ changes, local, hostId: HOST_ID, deviceId: DEVICE_ID });
     await expect(run).rejects.toBeInstanceOf(LocalDbError);
     await expect(run).rejects.toMatchObject({ code: "statement_failed" });
   });
@@ -1019,7 +1304,13 @@ describe("sync quarantine", () => {
     const broken: ChangeItem = { ...SITE, data: { badgeSalt: "short", boxBlockSize: 2000 } };
     const changes = feed({ 0: page(42, [ORG, broken, line(LINE_1, 42, "Линия 1")]) });
     await expect(
-      syncReferences({ changes, local: executor, hostId: HOST_ID, now: () => SEEN_AT }),
+      syncReferences({
+        changes,
+        local: executor,
+        hostId: HOST_ID,
+        deviceId: DEVICE_ID,
+        now: () => SEEN_AT,
+      }),
     ).resolves.toEqual({ kind: "synced", rev: 42, quarantined: 1 });
     expect(tables(db).org).toHaveLength(1);
     expect(tables(db).site).toEqual([]);
@@ -1045,7 +1336,13 @@ describe("sync quarantine", () => {
     // with a rev-15 poison in a forward-moving page.
     const changes = feed({ 20: page(30, [brokenLine(LINE_1, 25), brokenLine(LINE_2, 15)]) });
     await expect(
-      syncReferences({ changes, local: executor, hostId: HOST_ID, now: () => SEEN_AT }),
+      syncReferences({
+        changes,
+        local: executor,
+        hostId: HOST_ID,
+        deviceId: DEVICE_ID,
+        now: () => SEEN_AT,
+      }),
     ).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 2 });
     // LINE_1 was at revision 10, older than its unreadable 25: it goes.
     // LINE_2 was at 20, newer than its unreadable 15: it stays — quarantined
@@ -1065,6 +1362,7 @@ describe("sync quarantine", () => {
       changes: feed({ 0: page(42, [broken, brokenLine(LINE_1, 42)]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
       now: () => SEEN_AT,
     });
     expect(quarantine(db)).toHaveLength(2);
@@ -1078,6 +1376,7 @@ describe("sync quarantine", () => {
         changes: feed({ 42: page(50, [{ ...SITE, rev: 45 }, tombstone(LINE_1, 40)]) }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 50, quarantined: 1 });
     expect(tables(db).site).toEqual([
@@ -1099,6 +1398,7 @@ describe("sync quarantine", () => {
         changes: feed({ 50: page(60, [tombstone(LINE_1, 55)]) }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 60, quarantined: 0 });
     expect(quarantine(db)).toEqual([]);
@@ -1110,6 +1410,7 @@ describe("sync quarantine", () => {
       changes: feed({ 0: page(42, [brokenLine(LINE_1, 42)]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
       now: () => SEEN_AT,
     });
     expect(quarantine(db)).toHaveLength(1);
@@ -1121,6 +1422,7 @@ describe("sync quarantine", () => {
         changes: feed({ 42: page(42, [line(LINE_1, 42, "Линия 1")]) }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 42, quarantined: 0 });
     expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 42 }]);
@@ -1130,13 +1432,20 @@ describe("sync quarantine", () => {
   it("keeps one entry per record: a newer unreadable revision replaces it, the same page again does not", async () => {
     const { db, executor } = openLocalDb();
     const first = feed({ 0: page(42, [brokenLine(LINE_1, 42)]) });
-    await syncReferences({ changes: first, local: executor, hostId: HOST_ID, now: () => SEEN_AT });
+    await syncReferences({
+      changes: first,
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+      now: () => SEEN_AT,
+    });
     // As if the revision were lost: the same page arrives again, later.
     db.prepare("UPDATE sync_state SET value = '0' WHERE key = 'last_rev'").run();
     await syncReferences({
       changes: first,
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
       now: () => SEEN_AT + 1000,
     });
     expect(quarantine(db)).toEqual([
@@ -1154,6 +1463,7 @@ describe("sync quarantine", () => {
       changes: feed({ 42: page(50, [renamed]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
       now: () => SEEN_AT + 2000,
     });
     expect(quarantine(db)).toEqual([
@@ -1187,6 +1497,7 @@ describe("sync quarantine", () => {
       changes: feed({ 0: page(42, [leaky, empty]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
       now: () => SEEN_AT,
     });
     const [lineEntry, orgEntry] = quarantine(db);
@@ -1205,6 +1516,7 @@ describe("sync quarantine", () => {
       changes: feed({ 0: page(42, [brokenLine(LINE_1, 42)]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
       now: () => SEEN_AT,
     });
     // Written by the build before this one: the same entities, records of
@@ -1214,7 +1526,7 @@ describe("sync quarantine", () => {
     ).run();
     const again = feed({ 0: page(43, [line(LINE_1, 43, "Линия 1")]) });
     await expect(
-      syncReferences({ changes: again, local: executor, hostId: HOST_ID }),
+      syncReferences({ changes: again, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
     ).resolves.toEqual({ kind: "synced", rev: 43, quarantined: 0 });
     expect(again).toHaveBeenCalledWith(0);
     expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 43 }]);
@@ -1226,6 +1538,7 @@ describe("sync quarantine", () => {
       changes: feed({ 43: page(44, [brokenLine(LINE_2, 44)]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
       now: () => SEEN_AT,
     });
     expect(quarantine(db)).toHaveLength(1);
@@ -1233,7 +1546,12 @@ describe("sync quarantine", () => {
       throw new Error("host unreachable");
     });
     await expect(
-      syncReferences({ changes: offline, local: executor, hostId: OTHER_HOST }),
+      syncReferences({
+        changes: offline,
+        local: executor,
+        hostId: OTHER_HOST,
+        deviceId: OTHER_DEVICE,
+      }),
     ).rejects.toThrow("host unreachable");
     expect(quarantine(db)).toEqual([]);
   });
@@ -1244,6 +1562,7 @@ describe("sync quarantine", () => {
       changes: feed({ 0: page(20, [brokenLine(LINE_1, 20)]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
       now: () => SEEN_AT,
     });
     expect(quarantine(db)).toHaveLength(1);
@@ -1255,7 +1574,12 @@ describe("sync quarantine", () => {
       throw new Error("host unreachable");
     });
     await expect(
-      syncReferences({ changes: failingRefetch, local: executor, hostId: HOST_ID }),
+      syncReferences({
+        changes: failingRefetch,
+        local: executor,
+        hostId: HOST_ID,
+        deviceId: DEVICE_ID,
+      }),
     ).rejects.toThrow("host unreachable");
     // Deferred: the entry survives, since the wipe waits for the first new
     // page to actually land.
@@ -1267,7 +1591,9 @@ describe("sync quarantine", () => {
       20: page(12, []),
       0: page(12, [line(LINE_1, 12, "Линия 1 (из копии)")]),
     });
-    await expect(syncReferences({ changes, local: executor, hostId: HOST_ID })).resolves.toEqual({
+    await expect(
+      syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).resolves.toEqual({
       kind: "synced",
       rev: 12,
       quarantined: 0,
@@ -1314,14 +1640,16 @@ describe("sync quarantine", () => {
         changes: feed({ 0: page(42, items) }),
         local: recorded.executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
         now: () => SEEN_AT,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 42, quarantined: 8 });
-    // The `host_id` stamp, then the page: the guard, the wipe (8 copy
-    // tables, the quarantine, the sync state), per entity one delete and one
-    // upsert, the quarantine upsert, the quarantine lift and the sync state:
-    // 3 × 8 + 6 = 30, within the shell's 32. A ninth entity would make it 33.
-    expect(recorded.batches.map((batch) => batch.length)).toEqual([1, 30]);
+    // The pairing stamp (and the drop of a `last_rev` there is none of),
+    // then the page: the guard, the wipe (8 copy tables, the quarantine, the
+    // sync state), per entity one delete and one upsert, the quarantine
+    // upsert, the quarantine lift and the sync state: 3 × 8 + 6 = 30, within
+    // the shell's 32. A ninth entity would make it 33.
+    expect(recorded.batches.map((batch) => batch.length)).toEqual([2, 30]);
     expect(tables(db).lines).toEqual([{ id: LINE_1, name: "Линия 1", archived: 0, rev: 42 }]);
   });
 });
@@ -1335,11 +1663,17 @@ describe("operator and badge copies", () => {
       changes: feed({ 0: page(54, [operator(TURNED_OFF, 50, "0043"), badge(OLD_PASS, 52, ANNA)]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     expect(people(db).operators).toHaveLength(1);
     expect(people(db).badges).toHaveLength(1);
     await expect(
-      syncReferences({ changes: feed({ 54: PEOPLE }), local: executor, hostId: HOST_ID }),
+      syncReferences({
+        changes: feed({ 54: PEOPLE }),
+        local: executor,
+        hostId: HOST_ID,
+        deviceId: DEVICE_ID,
+      }),
     ).resolves.toEqual({ kind: "synced", rev: 57, quarantined: 0 });
     expect(people(db)).toEqual({
       operators: [
@@ -1364,6 +1698,7 @@ describe("operator and badge copies", () => {
       changes: feed({ 0: page(10, [operator(ANNA, 10, "0042", { role: "Упаковщик" })]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     // The office changes the PIN, renames the operator and clears the role: a
     // record with a newer revision, not a tombstone. The old PIN stops working.
@@ -1376,6 +1711,7 @@ describe("operator and badge copies", () => {
         }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 20, quarantined: 0 });
     const updated = {
@@ -1395,6 +1731,7 @@ describe("operator and badge copies", () => {
         changes: feed({ 20: page(30, [operator(ANNA, 15, "0042", { role: "Упаковщик" })]) }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 0 });
     expect(people(db).operators).toEqual([updated]);
@@ -1408,12 +1745,14 @@ describe("operator and badge copies", () => {
       changes: feed({ 0: page(10, [badge(PASS_7, 10, ANNA)]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     await expect(
       syncReferences({
         changes: feed({ 10: page(20, [badge(PASS_7, 20, ANNA, { label: "Пропуск №7" })]) }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 20, quarantined: 0 });
     const updated = {
@@ -1429,6 +1768,7 @@ describe("operator and badge copies", () => {
         changes: feed({ 20: page(30, [badge(PASS_7, 15, ANNA, { label: "Старая подпись" })]) }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 0 });
     expect(people(db).badges).toEqual([updated]);
@@ -1447,6 +1787,7 @@ describe("operator and badge copies", () => {
       }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     const changes = feed({
       20: page(30, [
@@ -1460,7 +1801,13 @@ describe("operator and badge copies", () => {
       ]),
     });
     await expect(
-      syncReferences({ changes, local: executor, hostId: HOST_ID, now: () => SEEN_AT }),
+      syncReferences({
+        changes,
+        local: executor,
+        hostId: HOST_ID,
+        deviceId: DEVICE_ID,
+        now: () => SEEN_AT,
+      }),
     ).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 3 });
     expect(people(db)).toEqual({
       operators: [],
@@ -1496,6 +1843,7 @@ describe("operator and badge copies", () => {
         changes: feed({ 0: page(12, [badge(PASS_7, 12, ANNA)]) }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
     expect(people(db).operators).toEqual([]);
@@ -1513,6 +1861,7 @@ describe("operator and badge copies", () => {
         changes: feed({ 0: page(12, [badge(PASS_7, 11, ANNA), badge(OLD_PASS, 12, ANNA)]) }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
     expect(people(db).badges).toHaveLength(2);
@@ -1527,6 +1876,7 @@ describe("operator and badge copies", () => {
         changes: feed({ 0: page(12, [operator(ANNA, 11, "0042"), operator(VERA, 12, "0042")]) }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
     expect(people(db).operators).toHaveLength(2);
@@ -1538,6 +1888,7 @@ describe("operator and badge copies", () => {
       changes: feed({ 0: page(20, [operator(ANNA, 20, "0042"), badge(PASS_7, 20, ANNA)]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     // The next sync's fetch stays in flight across `device_forget`.
     let resolve: ((value: ChangesResponse) => void) | undefined;
@@ -1547,7 +1898,12 @@ describe("operator and badge copies", () => {
           resolve = resolveFetch;
         }),
     );
-    const stale = syncReferences({ changes: held, local: executor, hostId: HOST_ID });
+    const stale = syncReferences({
+      changes: held,
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
     await vi.waitFor(() => expect(held).toHaveBeenCalledWith(20));
     // `device_forget` clears every table; the device pairs again with the
     // same host, whose first sync quarantines the newer revisions: fields
@@ -1563,11 +1919,14 @@ describe("operator and badge copies", () => {
         }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
         now: () => SEEN_AT,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 40, quarantined: 2 });
-    // The forgotten pairing's page lands last. `hostGuard` lets it through:
-    // the new pairing stamped the same `host_id`.
+    // The forgotten pairing's page lands last. Here the new pairing kept the
+    // same device id, so `pairingGuard` lets it through (a real re-pair gets
+    // a new one, and the guard stops the page): the quarantine's own guard
+    // is what keeps the older records out.
     resolve?.(page(30, [operator(ANNA, 25, "0042"), badge(PASS_7, 25, ANNA)]));
     await expect(stale).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 2 });
     expect(people(db)).toEqual({ operators: [], badges: [] });
@@ -1603,11 +1962,17 @@ describe("catalog copies", () => {
       }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     expect(catalog(db).templates).toHaveLength(1);
     expect(catalog(db).defaults).toHaveLength(1);
     await expect(
-      syncReferences({ changes: feed({ 60: CATALOG }), local: executor, hostId: HOST_ID }),
+      syncReferences({
+        changes: feed({ 60: CATALOG }),
+        local: executor,
+        hostId: HOST_ID,
+        deviceId: DEVICE_ID,
+      }),
     ).resolves.toEqual({ kind: "synced", rev: 67, quarantined: 0 });
     expect(catalog(db)).toEqual({
       products: [
@@ -1681,6 +2046,7 @@ describe("catalog copies", () => {
       changes: feed({ 0: page(67, [...CATALOG.items, template(MILK_58, 68, { spec })]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     const rows = Array.from(
       db
@@ -1707,7 +2073,12 @@ describe("catalog copies", () => {
   it("reads an organization record from a host before plan 1e1, without default templates, as none", async () => {
     const { db, executor } = openLocalDb();
     await expect(
-      syncReferences({ changes: feed({ 0: page(41, [ORG]) }), local: executor, hostId: HOST_ID }),
+      syncReferences({
+        changes: feed({ 0: page(41, [ORG]) }),
+        local: executor,
+        hostId: HOST_ID,
+        deviceId: DEVICE_ID,
+      }),
     ).resolves.toEqual({ kind: "synced", rev: 41, quarantined: 0 });
     expect(tables(db).org).toHaveLength(1);
     expect(orgDefaults(db)).toEqual([
@@ -1732,6 +2103,7 @@ describe("catalog copies", () => {
         }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
     const copies = catalog(db);
@@ -1754,6 +2126,7 @@ describe("catalog copies", () => {
       }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     const changes = feed({
       20: page(30, [
@@ -1768,7 +2141,13 @@ describe("catalog copies", () => {
       ]),
     });
     await expect(
-      syncReferences({ changes, local: executor, hostId: HOST_ID, now: () => SEEN_AT }),
+      syncReferences({
+        changes,
+        local: executor,
+        hostId: HOST_ID,
+        deviceId: DEVICE_ID,
+        now: () => SEEN_AT,
+      }),
     ).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 4 });
     expect(catalog(db).products.map((row) => [row.id, row.name, row.rev])).toEqual([
       [KEFIR, "Кефир 2,5% 0,9 л", 25],
@@ -1812,6 +2191,7 @@ describe("catalog copies", () => {
       }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     const copies = catalog(db);
     expect(copies.products.map((row) => [row.id, row.archived, row.status])).toEqual([
@@ -1824,7 +2204,12 @@ describe("catalog copies", () => {
 
   it("applies the catalog page again without changing a record", async () => {
     const { db, executor } = openLocalDb();
-    await syncReferences({ changes: feed({ 0: CATALOG }), local: executor, hostId: HOST_ID });
+    await syncReferences({
+      changes: feed({ 0: CATALOG }),
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
     const before = catalog(db);
     // As if the revision were lost: the same page arrives again.
     db.prepare("UPDATE sync_state SET value = '0' WHERE key = 'last_rev'").run();
@@ -1833,11 +2218,12 @@ describe("catalog copies", () => {
       changes: feed({ 0: CATALOG }),
       local: recorded.executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     expect(catalog(db)).toEqual(before);
     // The guard, then nothing newer to upsert and nothing older to delete,
     // nothing quarantined to lift; only the sync state is written.
-    expect(recorded.batches).toEqual([[1, 0, 0, 0, 0, 0, 0, 0, 3]]);
+    expect(recorded.batches).toEqual([[2, 0, 0, 0, 0, 0, 0, 0, 4]]);
   });
 
   it("takes a newer revision of a product, a template and a category default, and keeps each against an older one", async () => {
@@ -1848,6 +2234,7 @@ describe("catalog copies", () => {
       }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     await syncReferences({
       changes: feed({
@@ -1864,6 +2251,7 @@ describe("catalog copies", () => {
       }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     const updated = catalog(db);
     expect(
@@ -1886,6 +2274,7 @@ describe("catalog copies", () => {
       }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     expect(catalog(db)).toEqual(updated);
   });
@@ -1904,6 +2293,7 @@ describe("catalog copies", () => {
         }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
     expect(catalog(db).templates).toEqual([]);
@@ -1922,6 +2312,7 @@ describe("catalog copies", () => {
         }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 12, quarantined: 0 });
     expect(catalog(db).products.map((row) => row.gtin14)).toEqual([
@@ -1938,6 +2329,7 @@ describe("catalog copies", () => {
       }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     // The next sync's fetch stays in flight across `device_forget`.
     let resolve: ((value: ChangesResponse) => void) | undefined;
@@ -1947,7 +2339,12 @@ describe("catalog copies", () => {
           resolve = resolveFetch;
         }),
     );
-    const stale = syncReferences({ changes: held, local: executor, hostId: HOST_ID });
+    const stale = syncReferences({
+      changes: held,
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
     await vi.waitFor(() => expect(held).toHaveBeenCalledWith(20));
     // `device_forget` clears every table; the device pairs again with the
     // same host, whose first sync quarantines the newer revisions: values
@@ -1964,11 +2361,14 @@ describe("catalog copies", () => {
         }),
         local: executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
         now: () => SEEN_AT,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 40, quarantined: 3 });
-    // The forgotten pairing's page lands last. `hostGuard` lets it through:
-    // the new pairing stamped the same `host_id`.
+    // The forgotten pairing's page lands last. Here the new pairing kept the
+    // same device id, so `pairingGuard` lets it through (a real re-pair gets
+    // a new one, and the guard stops the page): the quarantine's own guard
+    // is what keeps the older records out.
     resolve?.(page(30, [product(MILK, 25), template(BOX_58, 25), categoryDefault(8, "box", 25)]));
     await expect(stale).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 3 });
     expect(catalog(db)).toEqual({ products: [], templates: [], defaults: [] });
@@ -1985,6 +2385,7 @@ describe("catalog copies", () => {
       changes: feed({ 0: page(60, [template(OLD_TEMPLATE, 60)]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     // Deleting a template at revision 70 cleared the preference of 5000
     // products: one revision, which the feed never splits.
@@ -2005,11 +2406,12 @@ describe("catalog copies", () => {
         changes: feed({ 60: page(70, items) }),
         local: recorded.executor,
         hostId: HOST_ID,
+        deviceId: DEVICE_ID,
       }),
     ).resolves.toEqual({ kind: "synced", rev: 70, quarantined: 0 });
     // The guard, the products' upsert, the templates' delete, the quarantine
     // lift and the sync state: one batch, one JSON parameter per entity.
-    expect(recorded.batches).toEqual([[1, 5000, 1, 0, 3]]);
+    expect(recorded.batches).toEqual([[2, 5000, 1, 0, 4]]);
     expect({ ...db.prepare("SELECT count(*) AS n FROM ref_products").get() }).toEqual({ n: 5000 });
   });
 
@@ -2031,6 +2433,7 @@ describe("catalog copies", () => {
       changes: feed({ 0: page(5, [template(BOX_58, 5, { spec })]) }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     expect({ ...db.prepare("SELECT spec FROM ref_templates").get() }).toEqual({ spec: text });
   });
@@ -2086,6 +2489,7 @@ describe("catalog copies", () => {
       }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     expect(orgDefaults(db)).toEqual([
       {
@@ -2160,6 +2564,7 @@ describe("catalog copies", () => {
       }),
       local: executor,
       hostId: HOST_ID,
+      deviceId: DEVICE_ID,
     });
     expect(orgDefaults(db)).toEqual([
       {

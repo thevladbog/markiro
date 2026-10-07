@@ -1,10 +1,19 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { StrictMode } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 
 import { App } from "../src/app/App.js";
+import { useHostLink } from "../src/app/host-link.js";
 import type { HostApi } from "../src/host/api.js";
 import { HostError } from "../src/host/client.js";
 import type { ConnectionApi, ConnectionHandlers } from "../src/host/connection.js";
@@ -19,6 +28,7 @@ import type {
 import type { LocalExecutor } from "../src/local/executor.js";
 import { ENTITY_SET } from "../src/local/reference-sync.js";
 import {
+  DEVICE_ID,
   DEVICE_STATUS,
   HOST_ID,
   LINE_ID,
@@ -707,6 +717,10 @@ describe("App", () => {
     });
     await waitFor(() => expect(lineNames()).toEqual(["Линия 1"]));
     expect(host.getChanges).toHaveBeenCalledWith(0);
+    // The copies are bound to this pairing, not only to its host.
+    expect({
+      ...db.prepare("SELECT value FROM sync_state WHERE key = 'device_id'").get(),
+    }).toEqual({ value: DEVICE_STATUS.deviceId });
 
     await link.revision(43);
     await waitFor(() => expect(lineNames()).toEqual(["Линия 1 (упаковка)"]));
@@ -1316,8 +1330,9 @@ describe("reference sync health on screen", () => {
       "INSERT INTO sync_quarantine (entity, id, rev, reason, seen_at) VALUES (?, ?, ?, ?, ?)",
     ).run("lines", LINE_ID, 10, "archived: invalid_type", 1_790_000_000_000);
     db.prepare(
-      "INSERT INTO sync_state (key, value) VALUES ('last_rev', '10'), ('host_id', ?), ('entity_set', ?)",
-    ).run(HOST_ID, ENTITY_SET);
+      "INSERT INTO sync_state (key, value) " +
+        "VALUES ('last_rev', '10'), ('host_id', ?), ('device_id', ?), ('entity_set', ?)",
+    ).run(HOST_ID, DEVICE_STATUS.deviceId, ENTITY_SET);
     const host = fakeHost();
     host.getChanges.mockRejectedValue(hostDown());
     const connection: ConnectionApi = {
@@ -1698,5 +1713,50 @@ describe("the office on this device", () => {
     if (!row) throw new Error("no row for this PC");
     expect(within(row).getByText("Этот ПК")).toBeTruthy();
     expect(screen.getAllByText("Этот ПК")).toHaveLength(1);
+  });
+});
+
+describe("useHostLink", () => {
+  it("starts the link and a sync over when the pairing changes its device id under the same host", async () => {
+    const { db, executor } = openLocalDb();
+    const link = fakeConnection();
+    const changes = vi.fn(async () => feedPage(10, [lineItem(10, "Линия 1")]));
+    const refresh = vi.fn(async () => DEVICE_STATUS);
+    // One function for every render: a new one would restart the link by itself.
+    const dispatch = vi.fn();
+    const otherDeviceId = "9b2d4f61-3a5c-4e7d-8f90-1a2b3c4d5e6f";
+    // `device_id` is stamped before the first fetch, `last_rev` only when the
+    // page lands: both there means a run finished for that pairing.
+    const syncState = () =>
+      Object.fromEntries(
+        db
+          .prepare("SELECT key, value FROM sync_state WHERE key IN ('device_id', 'last_rev')")
+          .all()
+          .map((row) => [row["key"], row["value"]]),
+      );
+    const { rerender, unmount } = renderHook(
+      ({ deviceId }) =>
+        useHostLink({
+          hostId: HOST_ID,
+          deviceId,
+          connection: link.connection,
+          local: executor,
+          changes,
+          refresh,
+          dispatch,
+        }),
+      { initialProps: { deviceId: DEVICE_ID } },
+    );
+    await waitFor(() => expect(syncState()).toEqual({ device_id: DEVICE_ID, last_rev: "10" }));
+    expect(link.connection.watch).toHaveBeenCalledTimes(1);
+
+    // A new pairing with the same host: the host gave it another device id,
+    // so the old run stops, the copies are wiped and read again in full.
+    rerender({ deviceId: otherDeviceId });
+    await waitFor(() => expect(syncState()).toEqual({ device_id: otherDeviceId, last_rev: "10" }));
+    expect(link.stop).toHaveBeenCalledTimes(1);
+    expect(link.connection.watch).toHaveBeenCalledTimes(2);
+    expect(changes.mock.calls).toEqual([[0], [0]]);
+    unmount();
   });
 });

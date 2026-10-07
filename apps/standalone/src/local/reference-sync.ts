@@ -27,6 +27,12 @@ export interface SyncOptions {
   local: LocalExecutor;
   /** The host this device is paired with (`DeviceStatus.hostId`). */
   hostId: string;
+  /**
+   * This pairing (`DeviceStatus.deviceId`): the host gives every pairing a new
+   * device id, a re-pair with the same host included, so the copies, and every
+   * page that may write them, are bound to it as well as to the host.
+   */
+  deviceId: string;
   /** Unix milliseconds for `sync_quarantine.seen_at`; this computer's clock unless a test pins it. */
   now?: () => number;
 }
@@ -89,9 +95,9 @@ function checked<T extends Record<string, unknown>>(
  * The `WHERE` of an upsert that keeps an older revision of a record out while
  * a newer one waits in quarantine: the insert would otherwise bring back what
  * the quarantine's fail-closed delete took away. The feed never sends an older
- * revision after a newer one, but a stale run can: a page fetched before
- * `device_forget` that lands only after a new pairing with the same host has
- * stamped `host_id` again, when `hostGuard` no longer stops it. Operators and
+ * revision after a newer one; a stale run's page could, before `pairingGuard`
+ * bound every page to its pairing (plan 1f), and this stays as a second line
+ * of defence for whatever else might write an older record. Operators and
  * their badges carry it, since an older record would bring back access, and
  * the catalog's copies too (products, templates, category defaults), since an
  * older layout or default must not take the place the delete emptied. Not
@@ -324,49 +330,62 @@ const WIPE: readonly LocalStatement[] = [
 ];
 
 const WRITE_STATE =
-  "INSERT INTO sync_state (key, value) VALUES ('last_rev', ?), ('host_id', ?), ('entity_set', ?) " +
+  "INSERT INTO sync_state (key, value) " +
+  "VALUES ('last_rev', ?), ('host_id', ?), ('device_id', ?), ('entity_set', ?) " +
   "ON CONFLICT (key) DO UPDATE SET value = excluded.value";
 
 /**
- * Stamps only `host_id`, with no `last_rev`: the immediate wipe for a new
- * host (`syncReferences`) must leave the copies looking unsynced, so
- * `readState` still starts the next page from zero and a stale in-flight
- * run for the old host is still caught by `hostGuard` below.
+ * Stamps only the pairing — `host_id` and `device_id` — with no `last_rev`:
+ * the immediate wipe for another pairing (`syncReferences`) must leave the
+ * copies looking unsynced, so `readState` still starts the next page from
+ * zero and a stale in-flight run for the old pairing is still caught by
+ * `pairingGuard` below.
  */
-const WRITE_HOST_ID =
-  "INSERT INTO sync_state (key, value) VALUES ('host_id', ?) " +
+const WRITE_PAIRING =
+  "INSERT INTO sync_state (key, value) VALUES ('host_id', ?), ('device_id', ?) " +
   "ON CONFLICT (key) DO UPDATE SET value = excluded.value";
 
+/** Makes the copies read as unsynced: `readState` then starts from zero. */
+const DROP_LAST_REV = "DELETE FROM sync_state WHERE key = 'last_rev'";
+
 /**
- * Aborts the batch (`changes_mismatch`) unless `sync_state.host_id` is still
- * stamped to `hostId`. Two things can make it not be, since a run's request
- * can stay in flight for up to 10 s after either happens:
+ * Aborts the batch (`changes_mismatch`) unless `sync_state` is still stamped
+ * to this run's pairing: `host_id` to `hostId` and `device_id` to `deviceId`,
+ * both rows touched. Three things can make it not be, since a run's request
+ * can stay in flight for up to 10 s after any of them happens:
  * - a re-pair repoints `host_id` to another host (`SyncScheduler.stop` does
  *   not cancel the old host's in-flight request), so its late page would
  *   otherwise commit under the old host's higher revisions and win
  *   `excluded.rev > rev` against the new host's rows — both hosts use the
  *   same ids (`'1'` for `ref_org`/`ref_site`), so it would resurrect the old
  *   host's org and site data;
- * - `device_forget`'s `clear_copies` deletes the `host_id` row along with
- *   every other row, so a page fetched before the forget and committed
- *   after the clear would otherwise find nothing to conflict with and
- *   rewrite the old pairing's copies into a device that was told to forget
- *   them.
+ * - `device_forget`'s `clear_copies` deletes the `host_id` and `device_id`
+ *   rows along with every other row, so a page fetched before the forget and
+ *   committed after the clear would otherwise find nothing to conflict with
+ *   and rewrite the old pairing's copies into a device that was told to
+ *   forget them;
+ * - a forget followed by a new pairing with the same host stamps `host_id`
+ *   to the same value again, but `device_id` to the new pairing's: the old
+ *   pairing's late page would otherwise pass, bring back a record a
+ *   tombstone of the new run deleted (a turned-off operator, a revoked
+ *   badge) and move `last_rev` back. The station's sign-in reads these
+ *   copies (plan 1f), so this guard is its precondition.
  *
- * Every run stamps `host_id` to its own `hostId` before its first fetch: two
- * of the three branches of `syncReferences` (below) write that stamp
- * themselves (a re-pair, or this device's very first sync); the third, the
- * continuing branch, writes nothing and instead requires the stamp a
- * previous run already left to still read `hostId`, so a well-behaved run
- * always satisfies this guard. Placed first in every batch: a `DELETE FROM
- * sync_state` later in the same batch would remove the `host_id` row this
- * statement reads.
+ * Every run stamps its pairing before its first fetch: two of the three
+ * branches of `syncReferences` (below) write that stamp themselves (another
+ * pairing, or no complete stamp yet); the third, the continuing branch,
+ * writes nothing and instead requires the stamp a previous run already left
+ * to still read this pairing, so a well-behaved run always satisfies this
+ * guard. Placed first in every batch: a `DELETE FROM sync_state` later in the
+ * same batch would remove the rows this statement reads.
  */
-function hostGuard(hostId: string): LocalStatement {
+function pairingGuard(hostId: string, deviceId: string): LocalStatement {
   return {
-    sql: "UPDATE sync_state SET value = value WHERE key = 'host_id' AND value = ?",
-    values: [hostId],
-    expectedChanges: 1,
+    sql:
+      "UPDATE sync_state SET value = value " +
+      "WHERE (key = 'host_id' AND value = ?) OR (key = 'device_id' AND value = ?)",
+    values: [hostId, deviceId],
+    expectedChanges: 2,
   };
 }
 
@@ -407,6 +426,7 @@ export async function readQuarantineCount(local: LocalExecutor): Promise<number 
 interface StoredState {
   lastRev: number | null;
   hostId: string | null;
+  deviceId: string | null;
   entitySet: string | null;
 }
 
@@ -417,8 +437,34 @@ async function readState(local: LocalExecutor): Promise<StoredState> {
   return {
     lastRev: rev !== null && /^\d+$/.test(rev) ? Number(rev) : null,
     hostId: value("host_id"),
+    deviceId: value("device_id"),
     entitySet: value("entity_set"),
   };
+}
+
+/** A pairing: the host and the device id it gave this device (`DeviceStatus`). */
+export interface Pairing {
+  hostId: string;
+  deviceId: string;
+}
+
+/**
+ * Whether the copies are this pairing's and complete: a run for this host
+ * and this device id, with this build's entity set, applied its last page.
+ * Not whether they are fresh — the host may have been away since — but the
+ * station reads nothing else (offline first). Before the first sync of a
+ * pairing, after a forget, after a wipe for another pairing and while a
+ * build with another entity set has not yet applied its first page, the
+ * answer is no.
+ */
+export async function copiesReady(local: LocalExecutor, pairing: Pairing): Promise<boolean> {
+  const stored = await readState(local);
+  return (
+    stored.hostId === pairing.hostId &&
+    stored.deviceId === pairing.deviceId &&
+    stored.entitySet === ENTITY_SET &&
+    stored.lastRev !== null
+  );
 }
 
 /**
@@ -429,14 +475,14 @@ async function readState(local: LocalExecutor): Promise<StoredState> {
  * an older copy of it goes as if deleted, and it waits in `sync_quarantine`.
  * Entities this build does not keep are skipped, not quarantined.
  *
- * `syncReferences` prepends `hostGuard` and, when starting over, `WIPE`: for
+ * `syncReferences` prepends `pairingGuard` and, when starting over, `WIPE`: for
  * E kept entities a batch holds at most 1 + (E + 2) + 2E + 3 = 3E + 6
  * statements — 30 for the eight kept today, the most within the shell's 32: a
  * ninth entity would need 33. A revision larger than a page's byte bound
  * still comes whole, as one JSON parameter per entity: the shell bounds SQL
  * text and the number of values, not a value's size.
  */
-function pageStatements(page: ChangesResponse, hostId: string, seenAt: number): LocalStatement[] {
+function pageStatements(page: ChangesResponse, pairing: Pairing, seenAt: number): LocalStatement[] {
   const statements: LocalStatement[] = [];
   const quarantined: Array<{ entity: string; id: string; rev: number; reason: string }> = [];
   const settled: Array<{ entity: string; id: string; rev: number }> = [];
@@ -471,7 +517,10 @@ function pageStatements(page: ChangesResponse, hostId: string, seenAt: number): 
   if (settled.length > 0) {
     statements.push({ sql: LIFT_QUARANTINE, values: [JSON.stringify(settled)] });
   }
-  statements.push({ sql: WRITE_STATE, values: [String(page.rev), hostId, ENTITY_SET] });
+  statements.push({
+    sql: WRITE_STATE,
+    values: [String(page.rev), pairing.hostId, pairing.deviceId, ENTITY_SET],
+  });
   return statements;
 }
 
@@ -487,36 +536,47 @@ export async function syncReferences({
   changes,
   local,
   hostId,
+  deviceId,
   now = () => Date.now(),
 }: SyncOptions): Promise<SyncResult> {
+  const pairing: Pairing = { hostId, deviceId };
+  const stamp: LocalStatement = { sql: WRITE_PAIRING, values: [hostId, deviceId] };
   const stored = await readState(local);
   let since = 0;
   let wipe = false;
-  if (stored.hostId !== null && stored.hostId !== hostId) {
-    // Copies from a pairing with another host must not stay usable while
-    // this host is out of reach. No `last_rev` is written, so the copies
-    // still read as unsynced afterwards (start from zero next time too),
-    // and a stale in-flight run for the old host is still caught below by
-    // `hostGuard`, bound to that old host's id, once it reaches its batch.
-    await local.transaction([...WIPE, { sql: WRITE_HOST_ID, values: [hostId] }]);
+  if (
+    (stored.hostId !== null && stored.hostId !== hostId) ||
+    (stored.deviceId !== null && stored.deviceId !== deviceId)
+  ) {
+    // Copies from another pairing — with another host, or an earlier one
+    // with this host — must not stay usable while this host is out of
+    // reach. No `last_rev` is written, so the copies still read as unsynced
+    // afterwards (start from zero next time too), and a stale in-flight run
+    // for the old pairing is still caught below by `pairingGuard`, bound to
+    // that pairing, once it reaches its batch.
+    await local.transaction([...WIPE, stamp]);
   } else if (
     stored.hostId === hostId &&
+    stored.deviceId === deviceId &&
     stored.entitySet === ENTITY_SET &&
     stored.lastRev !== null
   ) {
     since = stored.lastRev;
   } else {
-    if (stored.hostId === null) {
-      // No pairing recorded yet: there are never copies without a `host_id`,
-      // so there is nothing to wipe, but the stamp itself cannot wait for
-      // the first page. Without it, a concurrent first sync for a different
-      // host that also reads no `host_id` takes this same branch, and
-      // whichever of the two pages commits first passes `hostGuard` (it
-      // finds no row to compare against) while the other — even though it
-      // may be the pairing that is actually current — then fails its own
+    if (stored.hostId === null || stored.deviceId === null) {
+      // No complete stamp yet — this device's very first sync, or a state
+      // an older build left with `host_id` alone — and the stamp cannot
+      // wait for the first page. Without it, a concurrent first sync for a
+      // different pairing that also reads no stamp takes this same branch,
+      // and whichever of the two pages commits first passes `pairingGuard`
+      // (it finds no rows to compare against) while the other — even though
+      // it may be the pairing that is actually current — then fails its own
       // guard against the first one's stamp. Stamping up front means every
-      // ordering has a `host_id` row in place before either page can land.
-      await local.transaction([{ sql: WRITE_HOST_ID, values: [hostId] }]);
+      // ordering has both rows in place before either page can land. The
+      // older build's `last_rev` goes with it: copies nobody can tie to this
+      // pairing must read as unsynced (`copiesReady`) until the first page
+      // replaces them, and the next run must not continue from them.
+      await local.transaction([stamp, { sql: DROP_LAST_REV }]);
     }
     // Another build's entity set, or no sync yet: start from zero and drop
     // the old copies with the first page, so a failed fetch keeps them.
@@ -545,10 +605,9 @@ export async function syncReferences({
         `the feed made no progress at rev ${page.rev} while claiming more pages`,
       );
     }
-    const statements = pageStatements(page, hostId, now());
-    const batch = wipe
-      ? [hostGuard(hostId), ...WIPE, ...statements]
-      : [hostGuard(hostId), ...statements];
+    const statements = pageStatements(page, pairing, now());
+    const guard = pairingGuard(hostId, deviceId);
+    const batch = wipe ? [guard, ...WIPE, ...statements] : [guard, ...statements];
     await local.transaction(batch);
     wipe = false;
     since = page.rev;

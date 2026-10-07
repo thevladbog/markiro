@@ -3,13 +3,15 @@ import type { DeviceStatus, OfficeSession } from "../../src/host/protocol.js";
 
 export const HOST_ID = "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
 export const LINE_ID = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
+/** The device id `DEVICE_STATUS`'s pairing got from the host. */
+export const DEVICE_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 
 /** A station that already chose its line, so the app opens on the floor. */
 export const DEVICE_STATUS: DeviceStatus = {
   hostAddress: "https://127.0.0.1:45710",
   fingerprint: "ab".repeat(32),
   hostId: HOST_ID,
-  deviceId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  deviceId: DEVICE_ID,
   kind: "station",
   lineId: LINE_ID,
 };
