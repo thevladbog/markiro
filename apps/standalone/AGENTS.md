@@ -137,10 +137,10 @@ open; the app starts anyway), `invalid_statement`, `unsupported_value`,
 A forget (`clear_copies`) empties every table, `floor_sign_in_failures`
 included, so it resets every lockout counter of the station and of its
 operators, and a station on the host's PC re-pairs itself. Whoever can reach
-a «Переподключить» or «Сбросить» control (the device-rejected, other-host
-and config-error screens) therefore wipes the counts; those screens are not
-reachable from a working floor, and plan 1f2's way out of the kiosk must
-keep it in mind.
+a «Подключить заново» or «Сбросить подключение» control (the
+device-rejected, other-host and config-error screens) therefore wipes the
+counts; those screens are not reachable from a working floor, and plan 1f2's
+way out of the kiosk must keep it in mind.
 
 The webview reaches it only through `LocalExecutor` (`src/local/executor.ts`);
 Vitest runs the same migrations on node:sqlite behind the same interface
@@ -477,11 +477,11 @@ whatever its revision (fail-closed).
   2 s: the first at once, asks inside the wait fold into one more sync at its
   end), so a burst of stray scans does not hammer the host.
 - The signed-in operator lives only in the shell's memory
-  (`ShellState.operator`): identity, never a hash. Each sign-in dispatches a
-  fresh copy of the operator object, and the sign-out callbacks (the idle
-  timer, the check after a sync, «Сменить оператора») are bound to that
-  object, so a late timer of an earlier session of the same operator cannot
-  end the next one. The session ends when the office opens (any way in,
+  (`ShellState.operator`): identity, never a hash. The reducer stores a fresh
+  object per sign-in, and the sign-out callbacks (the idle timer, the check
+  after a sync, «Сменить оператора») are bound to that stored object, so a
+  late timer of an earlier session of the same operator cannot end the next
+  one. The session ends when the office opens (any way in,
   the bootstrap wizard's too), on a new pairing, a forget, a rejected device,
   another host, a change of the station's line, and on any host probe
   (`host_probed`, which runs only at start-up, on a retry and after a forget:

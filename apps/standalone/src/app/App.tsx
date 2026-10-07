@@ -329,9 +329,10 @@ export function App({
   const operatorSignedIn = useCallback(
     (operator: FloorOperator, lineId: string | null) => {
       if (pairedDeviceId !== null) {
-        // A copy, so that each sign-in is a session of its own: the sign-out
-        // below tells a session from the next one of the same operator by
-        // this object, never by the operator's id.
+        // A copy, and the reducer stores a fresh object of its own, so each
+        // sign-in is a session of its own: the sign-out below tells a session
+        // from the next one of the same operator by the STORED object, never
+        // by the operator's id.
         dispatch({
           type: "operator_signed_in",
           deviceId: pairedDeviceId,
