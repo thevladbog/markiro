@@ -135,9 +135,14 @@ fn close_requests(lock_first: bool) -> usize {
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
             if count == 1 {
                 lockdown::unlock(handle, &handle.state::<LockdownState>()).unwrap();
+            }
+            if count < 3 {
                 window.close().unwrap();
-            } else if count > 3 {
-                // A guard that never lets go would spin this loop forever.
+            } else {
+                // A refused close queues no new request of its own, so the
+                // loop keeps asking until this bound and then destroys the
+                // window: a guard that never lets go ends the run with a
+                // count of 3 and fails the assertion instead of hanging.
                 window.destroy().unwrap();
             }
         }
