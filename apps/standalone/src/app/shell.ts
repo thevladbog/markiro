@@ -449,7 +449,11 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       ) {
         return state;
       }
-      return { ...state, operator: action.operator, floorNotice: null };
+      // The four fields, copied: a hash that slipped into the action's object
+      // never reaches the state. A fresh object per sign-in, because `App`
+      // tells one session from the next by this object.
+      const { id, login, name, role } = action.operator;
+      return { ...state, operator: { id, login, name, role }, floorNotice: null };
     }
     case "operator_signed_out":
       // A late sign-out (an idle timer, a check of the copies) for an

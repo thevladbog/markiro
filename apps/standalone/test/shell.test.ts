@@ -614,6 +614,20 @@ describe("the operator on the floor", () => {
     expect(left.floorNotice).toBeNull();
   });
 
+  it("stores exactly the operator's four fields, in a fresh object, whatever the action carries", () => {
+    // The sign-in builds `{ id, login, name, role }` itself; the reducer does
+    // not rely on it, so a hash that slipped into the object never reaches the
+    // state (and with it the screen, the idle timer and the router).
+    const carrying = { ...ANNA, pinPhc: "pbkdf2$sha256$100000$c2FsdA==$ZGlnZXN0" };
+    const stored = shellReducer(paired(), { ...signIn, operator: carrying }).operator;
+    expect(stored).toEqual(ANNA);
+    expect(Object.keys(stored ?? {}).sort()).toEqual(["id", "login", "name", "role"]);
+    expect(stored).not.toBe(carrying);
+    // One fresh object per sign-in: the session token of `App` is the object.
+    const again = shellReducer(paired(), { ...signIn, operator: carrying }).operator;
+    expect(again).not.toBe(stored);
+  });
+
   it("says why the operator was signed out until the next one signs in", () => {
     const idle = shellReducer(signedIn(), {
       type: "operator_signed_out",
