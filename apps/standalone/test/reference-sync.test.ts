@@ -1097,6 +1097,35 @@ describe("reference sync", () => {
     });
   });
 
+  it("wipes the copies of another host at once when an older build left no device_id, so the old host's lines stop being usable", async () => {
+    const { db, executor } = openLocalDb();
+    // The shape an older build left: another host's copies, its `last_rev`,
+    // `host_id` and `entity_set`, but no `device_id` row — so the device-id
+    // clause of the wipe cannot fire and only the host clause can.
+    db.prepare(
+      "INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, 'Чужая линия', 0, 10)",
+    ).run(LINE_1);
+    db.prepare(
+      "INSERT INTO sync_state (key, value) VALUES ('last_rev', '10'), ('host_id', ?), ('entity_set', ?)",
+    ).run(OTHER_HOST, ENTITY_SET);
+    const offline = vi.fn(async (): Promise<ChangesResponse> => {
+      throw new Error("host unreachable");
+    });
+    await expect(
+      syncReferences({ changes: offline, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).rejects.toThrow("host unreachable");
+    expect(offline).toHaveBeenCalledWith(0);
+    // Wiped before the fetch and stamped for the new pairing, with no
+    // `last_rev` and no `entity_set`: nothing of the old host is left to read.
+    expect(tables(db)).toEqual({
+      org: [],
+      site: [],
+      lines: [],
+      state: stamp(),
+    });
+    expect(await copiesReady(executor, { hostId: HOST_ID, deviceId: DEVICE_ID })).toBe(false);
+  });
+
   it("stamps device_id beside a host_id an older build left alone, and starts from zero keeping the copies until a page lands", async () => {
     const { db, executor } = openLocalDb();
     db.prepare("INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, 'Линия 1', 0, 10)").run(
