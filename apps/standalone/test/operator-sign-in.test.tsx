@@ -1176,6 +1176,126 @@ describe("finding oneself by name", () => {
     expect(scans).toEqual(["MRK-000742"]);
   });
 
+  it("gives the scanner back when choosing a name takes the field away", async () => {
+    const { onSignedIn } = renderSignIn({ local: await synced([SITE, OPERATOR, BADGE]) });
+    const field = await openSearch();
+    act(() => field.focus());
+    typeName(field, "кузн");
+    // A click on a result does not blur the field in jsdom: only the step change can.
+    fireEvent.click(await screen.findByRole("button", { name: "Анна Кузнецова — 0042" }));
+    expect(screen.getByText("Анна Кузнецова, табельный номер 0042. Наберите PIN.")).toBeTruthy();
+    act(() => scan("MRK-000742"));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
+  });
+
+  describe("when a sync takes the field away while the screen stays", () => {
+    const READ_FAILED = /^Не удалось прочитать справочник операторов на этом компьютере\./;
+
+    function failingCopies(): LocalExecutor {
+      return {
+        query: () => Promise.reject(new Error("disk")),
+        transaction: () => Promise.reject(new Error("disk")),
+      };
+    }
+
+    /** The copies the screen reads, swappable between renders. */
+    async function swappable() {
+      const real = await synced([SITE, OPERATOR, BADGE]);
+      let backing: LocalExecutor = real;
+      const local: LocalExecutor = {
+        query: (sql, params, row) => backing.query(sql, params, row),
+        transaction: (statements) => backing.transaction(statements),
+      };
+      const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
+      const source = createKeyboardWedgeSource(window);
+      const element = (sync: SyncState) => (
+        <ThemeProvider>
+          <OperatorSignIn
+            local={local}
+            pairing={PAIRING}
+            lineId={null}
+            link={null}
+            sync={sync}
+            notice={null}
+            source={source}
+            now={CLOCK}
+            onSignedIn={onSignedIn}
+            onSync={() => undefined}
+            onOffice={() => undefined}
+          />
+        </ThemeProvider>
+      );
+      return {
+        ...render(element(SYNCED)),
+        element,
+        onSignedIn,
+        // What the next read finds, and what is there again afterwards.
+        swap: (next: LocalExecutor) => {
+          backing = next;
+        },
+        restore: () => {
+          backing = real;
+        },
+      };
+    }
+
+    it.each([
+      ["a failed read", failingCopies, READ_FAILED],
+      [
+        "copies that are not ready",
+        () => openLocalDb().executor,
+        /^Справочники ещё не загружены с хоста\./,
+      ],
+      ["no operators", () => synced([SITE]), /^В справочнике нет операторов\./],
+    ])("hears a badge again after %s", async (_name, copies, said) => {
+      const next = await copies();
+      const view = await swappable();
+      const field = await openSearch();
+      // The first reading of the copies has landed once the hint replaces «Читаем…».
+      await screen.findByText("Наберите хотя бы две буквы.");
+      act(() => field.focus());
+      view.swap(next);
+      view.rerender(view.element({ ...SYNCED, synced: 2 }));
+      expect(await screen.findByText(said)).toBeTruthy();
+      expect(screen.queryByLabelText("Имя оператора")).toBeNull();
+      // The search's own re-read answers too, to a screen that no longer shows it.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      view.restore();
+      act(() => scan("MRK-000742"));
+      await waitFor(() => expect(view.onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
+    });
+
+    it("hears a badge there without the field ever having the keys (the control)", async () => {
+      const view = await swappable();
+      await openSearch();
+      await screen.findByText("Наберите хотя бы две буквы.");
+      view.swap(failingCopies());
+      view.rerender(view.element({ ...SYNCED, synced: 2 }));
+      expect(await screen.findByText(READ_FAILED)).toBeTruthy();
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      view.restore();
+      act(() => scan("MRK-000742"));
+      await waitFor(() => expect(view.onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
+    });
+  });
+
+  it("shows no name from the previous reading while the search reads the copies again", async () => {
+    renderSignIn({ local: await synced([SITE, OPERATOR, BORIS_ITEM]) });
+    typeName(await openSearch(), "кузн");
+    expect(await screen.findByRole("button", { name: "Анна Кузнецова — 0042" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    fireEvent.click(screen.getByRole("button", { name: "Найти себя по имени" }));
+    typeName(screen.getByLabelText("Имя оператора"), "кузн");
+    // The list read before is gone at once; the new reading lands afterwards.
+    expect(screen.getByText("Читаем справочник операторов…")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Анна Кузнецова — 0042" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Анна Кузнецова — 0042" })).toBeTruthy();
+  });
+
   it("offers no name while the copies cannot be read", async () => {
     const real = await synced([SITE, OPERATOR]);
     let failing = false;

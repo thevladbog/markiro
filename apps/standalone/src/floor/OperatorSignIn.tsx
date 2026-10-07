@@ -191,9 +191,21 @@ export function OperatorSignIn({
     };
   }, [searching, local, hostId, deviceId, now, sync.synced]);
 
-  // A field that held the keys when the screen went (no blur comes then)
-  // must not keep the scanner deaf on the next screen.
-  useEffect(() => () => source.setManualTextEntryActive(false), [source]);
+  // The name field is on screen only on the search step with copies to
+  // search. When it goes (a sync turned the search into a notice, or the
+  // screen itself left) while it held the keys, no blur comes: giving the
+  // keys back here keeps the scanner from staying deaf. A layout effect, so
+  // that it is done in the commit that removed the field, before a scan.
+  const nameFieldShown =
+    stage === "search" &&
+    readiness !== null &&
+    readiness !== "failed" &&
+    readiness.kind === "ready" &&
+    readiness.operators > 0;
+  useLayoutEffect(() => {
+    if (!nameFieldShown) return;
+    return () => source.setManualTextEntryActive(false);
+  }, [nameFieldShown, source]);
 
   /** One check at a time; the answer either signs in or says why not. */
   const attempt = useCallback(
@@ -254,8 +266,8 @@ export function OperatorSignIn({
   );
 
   const toStage = (next: Stage) => {
-    // Also drops the keys typed so far, as `clearPendingInput` does.
-    source.setManualTextEntryActive(false);
+    // The name field gives the keys back itself when it goes (above).
+    source.clearPendingInput();
     setMessage(null);
     setPin("");
     if (next === "login") setLogin("");
