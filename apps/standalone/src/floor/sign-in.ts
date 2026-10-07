@@ -34,7 +34,7 @@ export type SignInRefusal =
   | "wrong"
   /** The badge, or the personnel number, matches more than one operator. */
   | "ambiguous"
-  /** The copies are not this pairing's complete copies, or have no badge salt. */
+  /** No sync has begun to fill this pairing's copies, or they have no badge salt. */
   | "not_ready"
   /** The scan holds a GS1 group separator: a product's code, not a badge. */
   | "product_code"
@@ -73,7 +73,7 @@ const GROUP_SEPARATOR = "\u001d";
  * A verifier no PIN is known to match, with the domain's 100 000 iterations:
  * an unknown personnel number still costs one full PBKDF2, as a known one
  * with a wrong PIN does, so the time of the answer does not tell them apart
- * (the cloud station's `DUMMY_PIN_PHC`).
+ * (the cloud station's `DUMMY_PHC`, `apps/station/src/lib/auth.ts`).
  */
 export const DUMMY_PIN_PHC =
   "pbkdf2$sha256$100000$fwGrIt01vwgBxxDlhqLVRQ==$PGnhdQA2lW09CcvuOhCmvp0z4HbztWXaYIq7+dqmLoQ=";
@@ -173,8 +173,8 @@ async function failed(context: SignInContext, operatorId: string | null): Promis
 }
 
 /**
- * What the sign-in screen can offer: nothing until this pairing's copies are
- * complete (`copiesReady`), then how many operators may sign in.
+ * What the sign-in screen can offer: nothing until a sync has begun to fill
+ * this pairing's copies (`copiesReady`), then how many operators may sign in.
  */
 export type FloorReadiness = { kind: "not_ready" } | { kind: "ready"; operators: number };
 
@@ -282,9 +282,10 @@ const OPERATOR_PRESENT = `SELECT o.id FROM ref_operators AS o WHERE o.id = ? AND
 
 /**
  * Whether the signed-in operator would still be let in, after a sync:
- * `false` only when this pairing's copies are complete and no longer hold
- * the operator (the host turned them off, or their record waits in
- * quarantine). Copies that are not complete say nothing either way.
+ * `false` only when this pairing's copies are ready (a sync has begun to fill
+ * them) and no longer hold the operator (the host turned them off, or their
+ * record waits in quarantine). Copies that are not ready say nothing either
+ * way.
  */
 export async function operatorStillAllowed(
   context: SignInContext,

@@ -92,8 +92,8 @@ function messageOf(result: Exclude<SignInResult, { kind: "signed_in" }>, via: "p
 /**
  * The floor with nobody signed in (stage 1 spec §5.6, plan 1f): a badge scan
  * at any moment, or a personnel number and a PIN on the keypad, checked
- * offline against this pairing's copies (`src/floor/sign-in.ts`). Until the
- * copies are complete, and while they hold no operator, the screen says why
+ * offline against this pairing's copies (`src/floor/sign-in.ts`). Until a
+ * sync has begun to fill the copies, and while they hold no operator, the screen says why
  * nobody can sign in and keeps the way into the office. One check runs at a
  * time: a scan during a check is dropped, and so is a second press. An
  * unknown credential asks for a sync, as the cloud station refreshes its

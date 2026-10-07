@@ -36,6 +36,11 @@ export const STATION_QUIET_MS = 10 * 60_000;
  * short because it stops the whole line. A success does not reset it, so the
  * bound holds against someone with a valid credential too; per-operator PIN
  * guessing is bounded by the operator's own row (`OPERATOR_LOCKOUT`).
+ *
+ * The sustained ceiling: when a lockout ends the count restarts at one with
+ * no escalation, so a patient guesser gets about ten guesses per 70 seconds
+ * (roughly 500–600 an hour from the station alone); escalation is an open
+ * owner question.
  */
 export const STATION_LOCKOUT: LockoutPolicy = {
   limit: 10,

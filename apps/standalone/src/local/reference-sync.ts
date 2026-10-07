@@ -449,10 +449,13 @@ export interface Pairing {
 }
 
 /**
- * Whether the copies are this pairing's and complete: a run for this host
- * and this device id, with this build's entity set, applied its last page.
- * Not whether they are fresh — the host may have been away since — but the
- * station reads nothing else (offline first). Before the first sync of a
+ * Whether the copies are this pairing's: a run for this host and this device
+ * id, with this build's entity set, has begun to fill them (a page has been
+ * applied: `last_rev` is written on every page). Not whether they are
+ * complete — an interrupted first sync of several pages reads ready with
+ * partial copies, and sign-in then fails closed on the records it does not
+ * find — and not whether they are fresh (the host may have been away since);
+ * the station reads nothing else (offline first). Before the first sync of a
  * pairing, after a forget, after a wipe for another pairing and while a
  * build with another entity set has not yet applied its first page, the
  * answer is no.

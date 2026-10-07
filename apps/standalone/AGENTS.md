@@ -134,6 +134,14 @@ Rejections are bare codes: `local_db_unavailable` (the database did not
 open; the app starts anyway), `invalid_statement`, `unsupported_value`,
 `statement_failed`, `changes_mismatch`.
 
+A forget (`clear_copies`) empties every table, `floor_sign_in_failures`
+included, so it resets every lockout counter of the station and of its
+operators, and a station on the host's PC re-pairs itself. Whoever can reach
+a «Переподключить» or «Сбросить» control (the device-rejected, other-host
+and config-error screens) therefore wipes the counts; those screens are not
+reachable from a working floor, and plan 1f2's way out of the kiosk must
+keep it in mind.
+
 The webview reaches it only through `LocalExecutor` (`src/local/executor.ts`);
 Vitest runs the same migrations on node:sqlite behind the same interface
 (`test/support/local-db.ts`), so SQL in tests never drifts from the schema.
@@ -435,7 +443,12 @@ whatever its revision (fail-closed).
   operator's row does not decay: it counts until that operator signs in or a
   lockout ends it. A lockout is answered before any hashing; after one runs
   out the next failure counts as the first; a failure recorded while one
-  runs is a no-op (neither the count nor the start moves). Time is this
+  runs is a no-op (neither the count nor the start moves). The sustained
+  ceiling follows: when a station lockout ends the count restarts at one,
+  with no escalation, so a patient guesser gets about ten guesses per 70
+  seconds, roughly 500–600 an hour from the station alone (per-operator PIN
+  guessing is further bounded at five per five minutes per operator);
+  escalation is an open owner question. Time is this
   computer's clock: moved back behind a lockout's start, it starts the
   lockout again from now, never longer than its duration; moved forward, it
   shortens a lockout, and ten minutes forward between two guesses resets the
@@ -480,7 +493,9 @@ whatever its revision (fail-closed).
   refuses it when the device or the line differs, the view is not a floor, an
   operator is signed in already, the device is rejected or on another host
   or the office is open, so a late answer signs nobody in. What an operator
-  may do on the line is plan 2a's; stage 1 shows a stub.
+  may do on the line is plan 2a's; stage 1 shows a stub, which shows the name
+  and role as of sign-in (a later sync that changes them is not reflected;
+  plan 2a refreshes them together with an explicit session counter).
 
 The precondition plan 1d4 named holds: the sync's guard is scoped to the
 pairing (`pairingGuard`, see «Reference sync»), so a page fetched before a
@@ -494,9 +509,10 @@ check. The wedge source (`src/floor/scan-source.ts`) calls `preventDefault`
 on every Enter, so a keyboard user cannot press Enter on a focused button
 (Space works), and it appends Ctrl- and Alt-modified single keys, so a GS
 sent as Ctrl+] arrives as `]` and counts as a badge guess; it has no timing
-threshold between a scan and typing. An owner decision is open: nothing tells
-a stray product barcode (an EAN-13, a single-AI SSCC) from a badge typed by
-hand, so ten of them pause the station for a minute
+threshold between a scan and typing; what `key` a real wedge scanner
+produces for GS (Ctrl+] in WebView2) is unverified. An owner decision is
+open: nothing tells a stray product barcode (an EAN-13, a single-AI SSCC)
+from a badge typed by hand, so ten of them pause the station for a minute
 (`test/operator-sign-in.test.tsx` documents it); the lockout numbers are the
 plan's proposal too. «Офис» and «Повторить» are below the station's 64 px
 convention. Part 1f2 is next: kiosk mode, the protected way out of it, the
