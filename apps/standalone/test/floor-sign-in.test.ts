@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { deriveDigestB64, formatPhc, parsePhc, PHC_ITERATIONS, verifyPhc } from "@markiro/domain";
 import type * as MarkiroDomain from "@markiro/domain";
 
+import { STATION_QUIET_MS } from "../src/floor/lockout.js";
 import {
   DUMMY_PIN_PHC,
   readBadgeScan,
@@ -377,9 +378,9 @@ describe("the sign-in's lockouts", () => {
       remainingMs: 300_000,
     });
     expect(derive).not.toHaveBeenCalled();
-    // Another credential: the badge still signs Anna in, and forgets the count.
+    // Another credential: the badge still signs Anna in, and forgets her count, not the station's.
     expect(await signInWithBadge(context, BADGE_CODE)).toEqual(ANNA_SIGNED_IN);
-    expect(failures(db)).toEqual([]);
+    expect(failures(db)).toEqual([{ key: "station", failures: 5, locked_at: null }]);
   });
 
   it("pauses the whole station after ten failures of any kind, before hashing anything", async () => {
@@ -417,7 +418,8 @@ describe("the sign-in's lockouts", () => {
 
     clock += 30_000;
     expect(await signInWithPin(ticking, "0042", "4821")).toEqual(ANNA_SIGNED_IN);
-    expect(failures(db)).toEqual([]);
+    // The sign-in does not reset the station's count: the row of the lockout that ran out stays.
+    expect(failures(db)).toEqual([{ key: "station", failures: 10, locked_at: NOW + 10 }]);
   });
 
   it("counts only guesses: not a malformed entry, a product's code, a Cyrillic scan or an ambiguous badge", async () => {
@@ -429,7 +431,7 @@ describe("the sign-in's lockouts", () => {
       badge(PASS_8, 8, BORIS),
     ]);
     await signInWithPin(context, "42", "4821");
-    await signInWithBadge(context, `${BADGE_CODE}`);
+    await signInWithBadge(context, `${BADGE_CODE}\u001d`);
     await signInWithBadge(context, "ЬКЛ-000742");
     await signInWithBadge(context, "");
     await signInWithBadge(context, BADGE_CODE);
@@ -497,7 +499,61 @@ describe("the sign-in's lockouts", () => {
       kind: "signed_in",
       operator: { id: BORIS, login: "0099", name: "Борис Орлов", role: "Упаковщик" },
     });
-    expect(failures(db)).toEqual([{ key: `operator:${ANNA}`, failures: 5, locked_at: NOW }]);
+    expect(failures(db)).toEqual([
+      { key: `operator:${ANNA}`, failures: 5, locked_at: NOW },
+      { key: "station", failures: 6, locked_at: null },
+    ]);
+  });
+
+  it("does not forget the station's failures at a sign-in, by PIN or by badge: an insider with a valid credential gains no guesses", async () => {
+    const { db, context } = await synced([SITE, operator(ANNA, 5, "0042"), badge(PASS_7, 6, ANNA)]);
+    let clock = NOW;
+    const ticking = { ...context, now: () => clock };
+    const wrong = async () => {
+      clock += 1;
+      return signInWithBadge(ticking, `MRK-${clock - NOW}`);
+    };
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      expect(await wrong()).toEqual({ kind: "refused", reason: "wrong" });
+    }
+    expect(await signInWithPin(ticking, "0042", "4821")).toEqual(ANNA_SIGNED_IN);
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      expect(await wrong()).toEqual({ kind: "refused", reason: "wrong" });
+    }
+    expect(await signInWithBadge(ticking, BADGE_CODE)).toEqual(ANNA_SIGNED_IN);
+    expect(failures(db)).toEqual([{ key: "station", failures: 9, locked_at: null }]);
+    // The tenth failure since the first, whatever signed in between, pauses the station.
+    expect(await wrong()).toEqual({ kind: "locked", scope: "station", remainingMs: 60_000 });
+  });
+
+  it("still counts a failure exactly one quiet interval after the last with the ones before it", async () => {
+    const { db, context } = await synced([SITE]);
+    let clock = NOW;
+    const ticking = { ...context, now: () => clock };
+    for (let attempt = 0; attempt < 9; attempt += 1) {
+      clock += 1;
+      await signInWithBadge(ticking, `MRK-${attempt}`);
+    }
+    clock += STATION_QUIET_MS;
+    expect(await signInWithBadge(ticking, "MRK-9")).toEqual({
+      kind: "locked",
+      scope: "station",
+      remainingMs: 60_000,
+    });
+    expect(failures(db)).toEqual([{ key: "station", failures: 10, locked_at: clock }]);
+  });
+
+  it("restarts the station's count when the last failure is older than the quiet interval", async () => {
+    const { db, context } = await synced([SITE]);
+    let clock = NOW;
+    const ticking = { ...context, now: () => clock };
+    for (let attempt = 0; attempt < 9; attempt += 1) {
+      clock += 1;
+      await signInWithBadge(ticking, `MRK-${attempt}`);
+    }
+    clock += STATION_QUIET_MS + 1;
+    expect(await signInWithBadge(ticking, "MRK-9")).toEqual({ kind: "refused", reason: "wrong" });
+    expect(failures(db)).toEqual([{ key: "station", failures: 1, locked_at: null }]);
   });
 
   it("answers a stack of simultaneous guesses one at a time: the lockout holds and later guesses are not hashed", async () => {

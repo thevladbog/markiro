@@ -87,7 +87,21 @@ export function isQuery(sql: string): boolean {
  * `isQuery` here too, so a statement the shell refuses fails in tests too.
  */
 export function openLocalDb(): { db: DatabaseSync; executor: LocalExecutor } {
-  const db = new DatabaseSync(":memory:");
+  return withMigrations(new DatabaseSync(":memory:"));
+}
+
+/**
+ * The same, over a database file: created with the migrations when it is
+ * new, and opened as it is when it already holds tables, as the application
+ * starts again over its file. The caller closes `db`.
+ */
+export function openLocalDbFile(path: string): { db: DatabaseSync; executor: LocalExecutor } {
+  const db = new DatabaseSync(path);
+  const row = db.prepare("SELECT count(*) AS n FROM sqlite_master WHERE type = 'table'").get();
+  return row?.["n"] === 0 ? withMigrations(db) : { db, executor: nodeExecutor(db) };
+}
+
+function withMigrations(db: DatabaseSync): { db: DatabaseSync; executor: LocalExecutor } {
   const files = readdirSync(MIGRATIONS)
     .filter((name) => name.endsWith(".sql"))
     .sort();

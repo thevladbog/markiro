@@ -82,6 +82,24 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "sync_state"
         ]
     );
+    // The sign-in lockouts' columns (plan 1f): `last_failure_at` is what the
+    // station's rolling count runs from, and is required.
+    let columns = db
+        .query(
+            "SELECT name, \"notnull\" AS required FROM pragma_table_info('floor_sign_in_failures')",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(columns.into_iter().map(Value::Object).collect()),
+        json!([
+            { "name": "key", "required": 0 },
+            { "name": "failures", "required": 1 },
+            { "name": "locked_at", "required": 0 },
+            { "name": "last_failure_at", "required": 1 }
+        ])
+    );
 
     let mut raw = SqliteConnectOptions::new()
         .filename(dir.path().join(FILE_NAME))
@@ -428,8 +446,8 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
         ),
         // This device's own failed sign-ins (plan 1f): cleared with the copies.
         statement(
-            "INSERT INTO floor_sign_in_failures (key, failures, locked_at) \
-             VALUES ('station', 3, 1790000000000)",
+            "INSERT INTO floor_sign_in_failures (key, failures, locked_at, last_failure_at) \
+             VALUES ('station', 3, 1790000000000, 1790000000000)",
             json!([]),
         ),
     ])

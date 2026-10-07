@@ -6,7 +6,7 @@ import { hashBadge, isPinPhc } from "../lib/credentials.js";
 import type { LocalExecutor } from "../local/executor.js";
 import { copiesReady, type Pairing } from "../local/reference-sync.js";
 import {
-  clearFailures,
+  clearOperatorFailures,
   lockRemainingMs,
   OPERATOR_LOCKOUT,
   operatorKey,
@@ -122,6 +122,13 @@ const countRow = z.object({ n: z.number().int().nonnegative() });
  * the one that started a lockout would start the count over. One attempt at
  * a time: a scanner that sends many codes at once gets no more tries than a
  * keypad. A failed attempt (a database error) does not block the next one.
+ *
+ * An attempt that never settles (a local database call whose IPC never
+ * answers) holds every later attempt until the application restarts, and the
+ * sign-in screen stays pending. That is deliberate: a timeout inside the
+ * queue that let the next attempt in would let it overlap the one still
+ * running, which is the very bypass the queue closes. The screen may show
+ * its own error after a wait, but must not release the queue.
  */
 let turn: Promise<unknown> = Promise.resolve();
 
@@ -139,12 +146,12 @@ function locked(scope: "station" | "operator", remainingMs: number): SignInResul
   return { kind: "locked", scope, remainingMs };
 }
 
-/** A sign-in that went through forgets the station's failures and the operator's. */
+/** A sign-in that went through forgets that operator's failures, not the station's. */
 async function signedIn(
   local: LocalExecutor,
   { id, login, name, role }: FloorOperator,
 ): Promise<SignInResult> {
-  await clearFailures(local, id);
+  await clearOperatorFailures(local, id);
   return { kind: "signed_in", operator: { id, login, name, role } };
 }
 

@@ -6,21 +6,48 @@ import type { LocalExecutor } from "../local/executor.js";
 // database so that restarting the app does not reset them. Time is this
 // computer's clock in Unix milliseconds, injected by the caller.
 
-/** How many failures in a row start a lockout, and how long it lasts. */
+/**
+ * How many failures in a row start a lockout, and how long it lasts. With
+ * `quietMs`, failures further apart than that (the latest older than
+ * `quietMs`) do not add up: the count starts again from one.
+ */
 export interface LockoutPolicy {
   limit: number;
   durationMs: number;
+  quietMs?: number;
 }
 
 /**
- * Every failure on this station, whoever it was for: ten in a row pause the
- * whole sign-in for a minute. It bounds guessing across personnel numbers
- * (one common PIN tried for many people) and badge codes typed by hand, and
- * stays short because it stops the whole line.
+ * How long the station's counter waits without a failure before it starts
+ * again from one. A successful sign-in does NOT reset the station's counter
+ * (a worker with any valid credential could otherwise interleave their own
+ * sign-in and guess badge codes without the bound), so the counter decays
+ * with time instead: ten minutes, long enough that a slow guesser (one
+ * failure a minute) still reaches the limit, short enough that an honest
+ * station is not paused by the stray failures of a whole shift.
  */
-export const STATION_LOCKOUT: LockoutPolicy = { limit: 10, durationMs: 60_000 };
+export const STATION_QUIET_MS = 10 * 60_000;
 
-/** A wrong PIN for one operator: five in a row lock that operator's PIN for five minutes. */
+/**
+ * Every failure on this station, whoever it was for: ten within a rolling
+ * quiet interval (`STATION_QUIET_MS` since the one before) pause the whole
+ * sign-in for a minute. It bounds guessing across personnel numbers (one
+ * common PIN tried for many people) and badge codes typed by hand, and stays
+ * short because it stops the whole line. A success does not reset it, so the
+ * bound holds against someone with a valid credential too; per-operator PIN
+ * guessing is bounded by the operator's own row (`OPERATOR_LOCKOUT`).
+ */
+export const STATION_LOCKOUT: LockoutPolicy = {
+  limit: 10,
+  durationMs: 60_000,
+  quietMs: STATION_QUIET_MS,
+};
+
+/**
+ * A wrong PIN for one operator: five in a row lock that operator's PIN for
+ * five minutes. Only that operator's own successful sign-in clears the row;
+ * time does not.
+ */
 export const OPERATOR_LOCKOUT: LockoutPolicy = { limit: 5, durationMs: 5 * 60_000 };
 
 /** The station's counter, or one operator's (by id, never by a typed number). */
@@ -33,20 +60,32 @@ export function operatorKey(operatorId: string): LockoutKey {
 const lockRow = z.object({ lockedAt: z.number().int().nullable() });
 
 /**
- * Counts one failure, in one statement. A lockout that has run out (the
- * caller records only while not locked) starts the count again from one, so
- * after every lockout the same number of tries is allowed before the next.
- * The failure that reaches the limit starts a lockout now. SQLite evaluates
- * every `SET` expression against the row as it was, so both read the old
- * `failures` and `locked_at`.
+ * Counts one failure, in one statement, and stamps its time. The count
+ * starts again from one when the lockout it was in has run out, or, for a
+ * policy with a quiet interval, when the previous failure is more than that
+ * interval older than this one (exactly the interval still counts; a clock
+ * moved back gives a negative age, which counts too). The failure that
+ * reaches the limit starts a lockout now. SQLite evaluates every `SET`
+ * expression against the row as it was, so all read the old `failures`,
+ * `locked_at` and `last_failure_at`. A policy without a quiet interval binds
+ * NULL, which makes the comparison NULL and the count never restart that way.
+ *
+ * The `WHERE` leaves a row whose lockout is still running as it is: a
+ * failure recorded then (by a caller that did not check first) must not end
+ * the lockout or move its start. A lockout counts as running while its start
+ * is less than its duration behind `now`, which includes a clock moved back
+ * behind it (`lockRemainingMs` starts that one again from now).
  */
 const RECORD_FAILURE =
-  "INSERT INTO floor_sign_in_failures (key, failures, locked_at) " +
-  "VALUES (?, 1, CASE WHEN 1 >= ? THEN ? END) " +
+  "INSERT INTO floor_sign_in_failures (key, failures, locked_at, last_failure_at) " +
+  "VALUES (?, 1, CASE WHEN 1 >= ? THEN ? END, ?) " +
   "ON CONFLICT (key) DO UPDATE SET " +
-  "failures = CASE WHEN locked_at IS NULL THEN failures + 1 ELSE 1 END, " +
-  "locked_at = CASE WHEN (CASE WHEN locked_at IS NULL THEN failures + 1 ELSE 1 END) >= ? " +
-  "THEN ? END";
+  "failures = CASE WHEN locked_at IS NOT NULL THEN 1 " +
+  "WHEN ? - last_failure_at > ? THEN 1 ELSE failures + 1 END, " +
+  "locked_at = CASE WHEN (CASE WHEN locked_at IS NOT NULL THEN 1 " +
+  "WHEN ? - last_failure_at > ? THEN 1 ELSE failures + 1 END) >= ? THEN ? END, " +
+  "last_failure_at = ? " +
+  "WHERE locked_at IS NULL OR ? - locked_at >= ?";
 
 /**
  * How long `key` stays locked, in milliseconds; 0 when it is not. When this
@@ -92,18 +131,29 @@ export async function recordFailure(
   policy: LockoutPolicy,
   now: number,
 ): Promise<number> {
+  const quiet = policy.quietMs ?? null;
   await local.transaction([
-    { sql: RECORD_FAILURE, values: [key, policy.limit, now, policy.limit, now] },
+    {
+      sql: RECORD_FAILURE,
+      values: [
+        ...[key, policy.limit, now, now],
+        ...[now, quiet, now, quiet, policy.limit, now, now],
+        ...[now, policy.durationMs],
+      ],
+    },
   ]);
   return lockRemainingMs(local, key, policy, now);
 }
 
-/** A successful sign-in forgets the station's failures and the operator's. */
-export async function clearFailures(local: LocalExecutor, operatorId: string): Promise<void> {
+/**
+ * A successful sign-in forgets that operator's failures, and only theirs:
+ * the station's counter is not reset by a success (see `STATION_QUIET_MS`).
+ */
+export async function clearOperatorFailures(
+  local: LocalExecutor,
+  operatorId: string,
+): Promise<void> {
   await local.transaction([
-    {
-      sql: "DELETE FROM floor_sign_in_failures WHERE key IN ('station', ?)",
-      values: [operatorKey(operatorId)],
-    },
+    { sql: "DELETE FROM floor_sign_in_failures WHERE key = ?", values: [operatorKey(operatorId)] },
   ]);
 }

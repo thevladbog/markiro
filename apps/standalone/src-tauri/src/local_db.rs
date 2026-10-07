@@ -239,8 +239,9 @@ impl LocalDb {
     /// `apps/standalone/AGENTS.md`).
     /// Every table here is disposable: the copies of the host's data, and
     /// `floor_sign_in_failures` (plan 1f), this device's own failed
-    /// sign-ins, which a new pairing must not inherit. The first plan that
-    /// adds data this device must keep — the scan journal, boxes, the
+    /// sign-ins, which a forget clears with the rest (the sync's wipe for
+    /// another pairing keeps them on purpose, see the migration). The first
+    /// plan that adds data this device must keep — the scan journal, boxes, the
     /// outbox (the station design's §6.2, "Логическая модель") — must
     /// exclude those tables from this list and block or confirm a forget
     /// while unsynced records exist, not extend this silently.
