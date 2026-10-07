@@ -2405,7 +2405,7 @@ describe("kiosk mode", () => {
   });
 
   it("offers no way out where the build does not lock the window at all", async () => {
-    // A lifecycle that never sends a command (development) but, as a fault
+    // A lifecycle that reports `enabled: false` (development) but, as a fault
     // would have it, calls the window locked: the guard is `enabled`, not the mode.
     const snapshot = { mode: "locked", pending: false, error: null } as const;
     const lockdown = {

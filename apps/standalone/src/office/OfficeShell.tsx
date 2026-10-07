@@ -75,7 +75,7 @@ export function OfficeShell() {
               aria-label={t(dark ? "office.header.lightTheme" : "office.header.darkTheme")}
               onClick={() => setTheme(dark ? "light" : "dark")}
             />
-            <WindowModeButton />
+            <WindowModeButton onLeft={() => mainRef.current?.focus()} />
             <Button
               variant="secondary"
               onClick={() => {

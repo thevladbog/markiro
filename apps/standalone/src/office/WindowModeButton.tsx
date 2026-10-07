@@ -16,9 +16,11 @@ import { useWindowMode } from "./window-mode.js";
  * administrator while the window is locked; the technologist and the floor
  * never see it. Before the window changes, the user is read again from the
  * host (`GET /v1/office/me`): a role taken away meanwhile does not open the
- * window. Leaving the office brings kiosk mode back (`App`).
+ * window. Leaving the office brings kiosk mode back (`App`). Once the window
+ * is an ordinary one this button is gone, and with it the focus it held:
+ * `onLeft` hands the focus to the office page.
  */
-export function WindowModeButton() {
+export function WindowModeButton({ onLeft }: { onLeft: () => void }) {
   const { t } = useTranslation();
   const session = useOfficeSession();
   const windowMode = useWindowMode();
@@ -46,6 +48,7 @@ export function WindowModeButton() {
       return;
     }
     if (await windowMode.leave()) {
+      onLeft();
       setOpen(false);
       return;
     }

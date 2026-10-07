@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { useMemo, useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -217,6 +218,38 @@ describe("«Оконный режим» in the office header", () => {
     await waitFor(() => expect(mode.leave).toHaveBeenCalledTimes(1));
     expect(session.api.officeMe).toHaveBeenCalledWith(SESSION.token);
     await waitFor(() => expect(screen.queryByText("Перейти в оконный режим?")).toBeNull());
+  });
+
+  it("moves focus to the office page when the window is an ordinary one and the button is gone", async () => {
+    const session = fakeOfficeSession();
+    session.api.officeMe.mockResolvedValue(SESSION.user);
+    // As `App` gives it: the button goes away once the shell has confirmed the new mode.
+    function Leaving() {
+      const [mode, setMode] = useState<WindowMode["mode"]>("locked");
+      const windowMode = useMemo<WindowMode>(
+        () => ({
+          mode,
+          leave: async () => {
+            setMode("windowed");
+            return true;
+          },
+        }),
+        [mode],
+      );
+      return <Office session={session} labels={quietLabelRendering()} windowMode={windowMode} />;
+    }
+    render(
+      <ThemeProvider defaultTheme="dark">
+        <Leaving />
+      </ThemeProvider>,
+    );
+    const open = await screen.findByRole("button", { name: "Оконный режим" });
+    open.focus();
+    fireEvent.click(open);
+    fireEvent.click(screen.getByRole("button", { name: "Перейти в оконный режим" }));
+    await waitFor(() => expect(screen.queryByText("Перейти в оконный режим?")).toBeNull());
+    expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("main")));
   });
 
   it("keeps the window locked when the host says the user is no longer an administrator", async () => {

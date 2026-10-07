@@ -1099,8 +1099,9 @@ administrator; if the role was taken away meanwhile, it says so, refreshes
 the user and does not open the window. After a demotion the dialog simply
 goes with the button once the refreshed role lands: the header shows the
 technologist role, and the message is on screen for one round trip only.
-After a successful exit the focus falls to the page body (the button that
-held it is gone). Leaving the office locks the window again; a role taken
+After a successful exit the focus moves to the office page (the button that
+held it is gone; `OfficeShell` hands `WindowModeButton` a callback that
+focuses its `main`). Leaving the office locks the window again; a role taken
 away after the window opened does not lock it before the session ends, as
 the window mode lives exactly as long as the administrator session that
 turned it on. Non-administrator office users (technologists) work in the
@@ -1686,7 +1687,7 @@ alone (`standalone: enter_lockdown failed`), never by what the shell answered.
     reachable only by making a window property fail);
   - «Оконный режим» is offered to an administrator and not to a technologist,
     asks first, and brings back the frame and the taskbar button; focus after
-    it falls to the page body; a restart locks again; leaving the office
+    it is on the office page; a restart locks again; leaving the office
     locks again; an administrator demoted on the host while the dialog is
     open sees the button go and the technologist role in the header;
   - Ctrl+Alt+Del: Task Manager may open underneath the topmost window, so
