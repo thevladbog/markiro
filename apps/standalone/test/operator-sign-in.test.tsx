@@ -318,6 +318,42 @@ describe("the keyboard-wedge scan source", () => {
     expect(scans).toEqual(["Ab-1", "2"]);
   });
 
+  describe("keys with a modifier", () => {
+    /** The keys of one scan, each with its modifiers, then Enter. */
+    function scanned(...keys: Array<[string, KeyboardEventInit?]>): string[] {
+      const source = createKeyboardWedgeSource(window);
+      const scans: string[] = [];
+      const stop = source.start((raw) => scans.push(raw));
+      for (const [key, init] of keys) fireEvent.keyDown(window, { key, ...init });
+      fireEvent.keyDown(window, { key: "Enter" });
+      stop();
+      return scans;
+    }
+
+    it("reads Ctrl+] as the GS1 group separator a scanner sends as a control character", () => {
+      expect(scanned(["a"], ["]", { ctrlKey: true }], ["b"])).toEqual(["a\u001db"]);
+    });
+
+    it("drops the other keys held with Ctrl, and every key held with Meta", () => {
+      expect(scanned(["a"], ["c", { ctrlKey: true }], ["b"])).toEqual(["ab"]);
+      expect(scanned(["a"], ["v", { ctrlKey: true, shiftKey: true }], ["b"])).toEqual(["ab"]);
+      expect(scanned(["a"], ["a", { metaKey: true }], ["b"])).toEqual(["ab"]);
+      expect(scanned(["a"], ["]", { metaKey: true }], ["b"])).toEqual(["ab"]);
+    });
+
+    it("keeps what AltGr types (Windows sends it as Ctrl+Alt), `]` included", () => {
+      expect(scanned(["a"], ["@", { ctrlKey: true, altKey: true }], ["b"])).toEqual(["a@b"]);
+      // AltGr+9 is `]` on some layouts: a character, not the separator.
+      expect(scanned(["a"], ["]", { ctrlKey: true, altKey: true }], ["b"])).toEqual(["a]b"]);
+    });
+
+    it("keeps a plain, shifted or Alt-held character", () => {
+      expect(
+        scanned(["a"], ["B", { shiftKey: true }], ["x", { altKey: true }], ["]"], ["-"]),
+      ).toEqual(["aBx]-"]);
+    });
+  });
+
   it("keeps the scan's Enter from also pressing the focused button", () => {
     const source = createKeyboardWedgeSource(window);
     const stop = source.start(() => undefined);

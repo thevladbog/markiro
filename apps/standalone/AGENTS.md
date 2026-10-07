@@ -511,9 +511,10 @@ WebView2/Tauri, a keyboard-wedge scanner under RU and EN layouts and Caps
 Lock, PBKDF2 time on a factory PC and the touch layout wait for a manual
 check. The wedge source (`src/floor/scan-source.ts`) calls `preventDefault`
 on every Enter, so a keyboard user cannot press Enter on a focused button
-(Space works), and it appends Ctrl- and Alt-modified single keys, so a GS
-sent as Ctrl+] arrives as `]` and counts as a badge guess; it has no timing
-threshold between a scan and typing; what `key` a real wedge scanner
+(Space works). It reads Ctrl+] as the GS separator (so a product's code is
+refused as one) and drops every other key held with Ctrl or Meta, but keeps
+what AltGr types, which Windows reports as Ctrl+Alt. It has no timing
+threshold between a scan and typing, and what `key` a real wedge scanner
 produces for GS (Ctrl+] in WebView2) is unverified. An owner decision is
 open: nothing tells a stray product barcode (an EAN-13, a single-AI SSCC)
 from a badge typed by hand, so ten of them pause the station for a minute

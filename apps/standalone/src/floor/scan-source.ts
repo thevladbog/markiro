@@ -14,12 +14,20 @@ export interface ScanSource {
 
 type KeyTarget = Pick<Window, "addEventListener" | "removeEventListener">;
 
+/** The GS1 group separator a product's DataMatrix carries between its fields. */
+const GROUP_SEPARATOR = "\u001d";
+
 /**
  * A HID scanner is a keyboard: it types the code and presses Enter. This
  * source gathers single-character keys and hands them over on Enter,
  * skipping modifiers and navigation keys (their `key` is a name such as
  * «Shift» or «ArrowLeft»). Ported from the cloud station's
- * `createKeyboardWedgeSource` (`apps/station/src/lib/scan-source.ts`).
+ * `createKeyboardWedgeSource` (`apps/station/src/lib/scan-source.ts`), with
+ * the handling of modified keys added here: a scanner sends the GS1 group
+ * separator as the control character Ctrl+], read as the separator itself
+ * (so a product's code is told from a badge); every other key held with Ctrl
+ * or Meta is a shortcut, not a scan, and is dropped; AltGr, which Windows
+ * reports as Ctrl+Alt, types a character and is kept.
  */
 export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSource {
   const buffers = new Set<() => void>();
@@ -31,7 +39,7 @@ export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSourc
       };
       buffers.add(clear);
       const onKeyDown = (event: Event) => {
-        const { key } = event as KeyboardEvent;
+        const { key, ctrlKey, altKey, metaKey } = event as KeyboardEvent;
         if (key === "Enter") {
           // The scan's closing Enter lands on whatever holds the focus, and a
           // focused button would also take it as a click. `preventDefault`
@@ -42,6 +50,11 @@ export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSourc
           payload = "";
           return;
         }
+        if (ctrlKey && !altKey && key === "]") {
+          payload += GROUP_SEPARATOR;
+          return;
+        }
+        if ((ctrlKey || metaKey) && !altKey) return;
         if (key.length === 1) payload += key;
       };
       target.addEventListener("keydown", onKeyDown);
