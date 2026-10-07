@@ -23,6 +23,27 @@
   gap: 16px;
 }
 
+.floor-sign-in {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-4);
+}
+
+.floor-sign-in__prompt {
+  font-size: 18px;
+}
+
+.floor-sign-in__readout {
+  min-height: 40px;
+  font-size: 28px;
+  letter-spacing: 0.2em;
+}
+
+.floor-sign-in__message {
+  min-height: 64px;
+}
+
 .line-select {
   display: grid;
   gap: 8px;
