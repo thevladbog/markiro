@@ -175,14 +175,21 @@ older snapshot keeps the checkpoint from finishing, and the call then fails;
 the delete stays committed and a retry repeats only the checkpoint. A local
 database that did not open is removed instead, with its `-wal`, `-shm` and
 `-journal` files (`LocalDbState::remove_unopened`), since it may still hold
-hashes. Every
-table here is treated as a disposable copy of the host's data: the first
-plan that adds data this device owns instead of copies — the scan journal,
-boxes, the outbox (the design's §6.2, "Логическая модель") — must exclude
-those tables from `clear_copies`, keep `remove_unopened` from deleting
-them, and block or confirm a forget while unsynced records exist, not
-extend this list silently. If clearing or removing fails, the command fails
-with `storage` and the pairing stays for another try.
+hashes. Every table here is disposable: the copies of the host's data, and
+`floor_sign_in_failures` (`src-tauri/migrations/0005_floor_sign_in_failures.sql`,
+plan 1f), this device's own failed sign-ins. A forget clears that table with
+the copies on purpose (a new pairing brings a new roster), and
+`tests/local_db.rs` pins it; the sync's wipe for another pairing leaves it
+alone on purpose, because it is no copy of the host's data and a wipe is no
+sign-in. That half holds by construction (`WIPE` in
+`src/local/reference-sync.ts` names only the copies, the quarantine and
+`sync_state`); no test pins it. The first plan that adds data this device
+must keep — the scan journal, boxes, the outbox (the design's §6.2,
+"Логическая модель") — must exclude those tables from `clear_copies`, keep
+`remove_unopened` from deleting them, and block or confirm a forget while
+unsynced records exist, not extend this list silently. If clearing or
+removing fails, the command fails with `storage` and the pairing stays for
+another try.
 
 ## Writes
 
@@ -303,8 +310,8 @@ not revoked: a revocation writes a
 tombstone, and a revoked badge never comes back — a new badge gets a new id.
 A PIN change is a record update carrying the new `pinPhc`, so the station
 replaces the hash and the old PIN stops working. A badge record never grants
-access on its own: the station's operator login (plan 1f) requires the record
-of its `operatorId`.
+access on its own: the station's sign-in (`src/floor/sign-in.ts`) requires the
+record of its `operatorId`.
 
 The catalog grants no access, so its flags stay flags: an archived product
 and a disabled template ride the feed with `archived` and `enabled`, since a
@@ -375,24 +382,126 @@ a badge to its operator — the feed keeps the badge of an operator who was
 turned off, and a badge can come in a page before its operator — and no
 uniqueness besides the key: the host keeps personnel numbers and active
 badges unique, and a copy that refused a row would abort its whole page and
-stop the sync for good. Rules for the station's sign-in (plan 1f): it reads
-these copies only on the floor screen of a paired device that is not
-rejected. The hashes already on disk stay when the host revokes the device
-or its certificate changes, and only a forget clears them, so such a device
-must keep showing no floor, as `nextShellView` does today: the
-rejected-device screen comes first. A scan is trimmed as `badgeCodeRule`
-trims a code, and a Cyrillic one is refused with the hint to switch the
-layout, never read by key position. A badge is found by hashing the trimmed
-scan with `ref_site.badge_salt` and comparing whole strings, and it signs in
-only with the record of its `operatorId`; a badge that matches more than one
-active operator is refused as ambiguous, never resolved to the first.
-Precondition: the sign-in must not read the copies until the sync's
-`hostGuard` is scoped to the pairing, not only to the host (the device id
-stored in `sync_state` next to `host_id` and checked with it). Today a stale
-page fetched before a `device_forget` passes the guard after a re-pair to the
-same host, brings back a record a tombstone deleted (a turned-off operator, a
-revoked badge) and rolls `last_rev` back until the next sync;
-`notQuarantinedNewer` covers only the quarantine case.
+stop the sync for good.
+
+The station's sign-in (plan 1f; `src/floor/sign-in.ts`, the screen
+`src/floor/OperatorSignIn.tsx`) never calls the host. It reads these copies
+only on the floor of a paired device that is not rejected, and only while
+they are this pairing's copies that a sync has begun to fill (`copiesReady`:
+`sync_state`'s `host_id` and `device_id` name this pairing, its `entity_set`
+is this build's and a `last_rev` is there). Every applied page writes that
+`last_rev`, so readiness is not completeness: a first sync interrupted after
+its first page leaves partial copies that read as ready until the next run
+finishes it. The hashes already on disk stay when the host revokes the
+device or its certificate changes, and only a forget clears them, so such a
+device keeps showing no floor: `nextShellView` puts the rejected-device
+screen first. A record waiting in `sync_quarantine` signs nobody in,
+whatever its revision (fail-closed).
+
+- A personnel number (3–12 digits, never padded) must name exactly one copy;
+  a number two copies share is refused as ambiguous, after the same one
+  verification against the dummy hash. The PIN (4–6 digits) is checked with
+  the domain's `verifyPhc`, which compares in constant time, at the count the
+  hash carries (the sync accepted 10 000–1 000 000). Every well-formed
+  attempt that is not answered by a lockout or by unready copies costs one
+  full PBKDF2: an unknown number is verified against `DUMMY_PIN_PHC` (the
+  domain's 100 000 iterations), so the answer's time does not tell numbers
+  apart — but only when the stored hash has exactly 100 000 iterations too,
+  which the office always writes; another count the host accepts takes
+  another time. An existing number can still be told from an unknown one, by
+  the operator's own lockout answer after five wrong PINs and by extra SQL
+  round-trips (a personnel number is no secret). The operator's copy is read
+  again after the verification, and a PIN change, a turn-off or a quarantine
+  that landed meanwhile wins.
+- A scan with a GS1 group separator (`\u001d`) is a product's code, not a
+  badge; a Cyrillic one is refused with the hint to switch the layout, never
+  read by key position; anything else that is not 1–256 printable ASCII
+  characters after trimming (as `badgeCodeRule` trims a code) is no badge.
+  None of these is hashed or counted. A badge is found by hashing the trimmed
+  scan once with `ref_site.badge_salt` at exactly `BADGE_ITERATIONS` and
+  comparing whole strings, and it signs in only with the record of its
+  `operatorId`; a badge that matches more than one operator is refused as
+  ambiguous, never resolved to the first.
+- Lockouts live in `floor_sign_in_failures` (`src/floor/lockout.ts`), so a
+  restart does not reset them. Ten failures on the station
+  (`STATION_LOCKOUT`; wrong PINs, unknown numbers and unknown badges alike)
+  pause every sign-in for one minute, and five wrong PINs for one operator
+  (`OPERATOR_LOCKOUT`) lock that operator's PIN for five minutes; the
+  operator's badge still signs them in. The station's count decays: it
+  starts again from one when the failure before is older than
+  `STATION_QUIET_MS` (ten minutes; exactly ten still counts), and a
+  successful sign-in does NOT clear it, so someone with a valid credential
+  gains no guesses; only the signed-in operator's own row is cleared. An
+  operator's row does not decay: it counts until that operator signs in or a
+  lockout ends it. A lockout is answered before any hashing; after one runs
+  out the next failure counts as the first; a failure recorded while one
+  runs is a no-op (neither the count nor the start moves). Time is this
+  computer's clock: moved back behind a lockout's start, it starts the
+  lockout again from now, never longer than its duration; moved forward, it
+  shortens a lockout, and ten minutes forward between two guesses resets the
+  station's count. The counter is keyed by operator id, never by a typed
+  number. The lockout message names its minutes as of the attempt and is not
+  refreshed until the next one.
+- Attempts are serialized (`oneAtATime`): a lockout is read before an
+  attempt hashes and written after it, so overlapping attempts would all pass
+  the same read, and a stack of scanner codes gets no more tries than a
+  keypad. An attempt that never settles (a local database call whose IPC
+  never answers) holds every later attempt until the app restarts, on
+  purpose: a timeout that let the next attempt in would overlap the running
+  one, the very bypass the queue closes. The screen also runs one check at a
+  time (a scan during a check, or a second press, is dropped) and drops an
+  answer that lands after it was unmounted or after the pairing or the line
+  changed; `App` keys it by `hostId:deviceId:lineId`, so a number or PIN typed
+  under another pairing or line is not kept.
+- A refusal `wrong` (an unknown credential, a wrong PIN, a copy that changed
+  under the check) or `not_ready` asks for a reference sync (the cloud
+  station refreshes its roster before refusing); the next attempt reads what
+  it brought. The asks go through a gate in `App` (`SIGN_IN_SYNC_GAP_MS`,
+  2 s: the first at once, asks inside the wait fold into one more sync at its
+  end), so a burst of stray scans does not hammer the host.
+- The signed-in operator lives only in the shell's memory
+  (`ShellState.operator`): identity, never a hash. Each sign-in dispatches a
+  fresh copy of the operator object, and the sign-out callbacks (the idle
+  timer, the check after a sync, «Сменить оператора») are bound to that
+  object, so a late timer of an earlier session of the same operator cannot
+  end the next one. The session ends when the office opens (any way in,
+  the bootstrap wizard's too), on a new pairing, a forget, a rejected device,
+  another host, a change of the station's line, and on any host probe
+  (`host_probed`, which runs only at start-up, on a retry and after a forget:
+  a blocked version screen never leaves a session behind); and by
+  «Сменить оператора», after ten minutes without a touch
+  (`OPERATOR_IDLE_TIMEOUT_MS`, the cloud station's) and after a sync that
+  leaves the operator out of the copies (the host turned them off, or their
+  record waits in quarantine). That check fails open: an unreadable or
+  unready copy signs nobody out, so a removed operator stays signed in until
+  the next successful sync reads the copies. The link going down signs
+  nobody out: the floor works offline. `operator_signed_in` carries the
+  device id, the line id the check began on and the address; the reducer
+  refuses it when the device or the line differs, the view is not a floor, an
+  operator is signed in already, the device is rejected or on another host
+  or the office is open, so a late answer signs nobody in. What an operator
+  may do on the line is plan 2a's; stage 1 shows a stub.
+
+The precondition plan 1d4 named holds: the sync's guard is scoped to the
+pairing (`pairingGuard`, see «Reference sync»), so a page fetched before a
+`device_forget` cannot land after a re-pair to the same host and bring back a
+record a tombstone deleted.
+
+Not verified, and open. No real window ran any of it: Windows,
+WebView2/Tauri, a keyboard-wedge scanner under RU and EN layouts and Caps
+Lock, PBKDF2 time on a factory PC and the touch layout wait for a manual
+check. The wedge source (`src/floor/scan-source.ts`) calls `preventDefault`
+on every Enter, so a keyboard user cannot press Enter on a focused button
+(Space works), and it appends Ctrl- and Alt-modified single keys, so a GS
+sent as Ctrl+] arrives as `]` and counts as a badge guess; it has no timing
+threshold between a scan and typing. An owner decision is open: nothing tells
+a stray product barcode (an EAN-13, a single-AI SSCC) from a badge typed by
+hand, so ten of them pause the station for a minute
+(`test/operator-sign-in.test.tsx` documents it); the lockout numbers are the
+plan's proposal too. «Офис» and «Повторить» are below the station's 64 px
+convention. Part 1f2 is next: kiosk mode, the protected way out of it, the
+name search, the floor status bar, the two extra `windows-sys` features as an
+owner step, and the Windows checks.
 
 ## Catalog and label templates
 
@@ -575,9 +684,10 @@ load on demand as chunks of their own (`label-print.ts`,
 
 `src/local/reference-sync.ts` keeps the local copies in step with the host
 (stage 1 spec §5.4). `syncReferences` reads `sync_state` (`last_rev`,
-`host_id`, `entity_set`) and fetches `GET /v1/changes?since=<last_rev>`
-(`HostApi.getChanges`, the device key only) until `hasMore` is false. Each
-page is one `local_transaction`: a `hostGuard` statement first (below),
+`host_id`, `device_id`, `entity_set`) and fetches
+`GET /v1/changes?since=<last_rev>` (`HostApi.getChanges`, the device key
+only) until `hasMore` is false. Each
+page is one `local_transaction`: a `pairingGuard` statement first (below),
 then per entity one conditional delete for its tombstones and quarantined
 records (only rows older than them) and one `json_each` upsert for its
 accepted records (only when the revision is newer), then one quarantine
@@ -623,49 +733,46 @@ waits in the quarantine (`notQuarantinedNewer`): the insert would otherwise
 bring back what the quarantine's fail-closed delete took away, an access
 for a person or an older layout or default for the catalog. The
 `org_profile`, `site` and `lines` upserts have no such guard (plan 2a).
-The feed never sends an older revision after a newer one, but a stale run
-can: a page fetched before `device_forget` that lands only after a new
-pairing with the same host has stamped `host_id` again. `hostGuard` (below)
-stops such a page until that stamp, not after it. The same late page can
-still put back a record the new run deleted by tombstone, and it moves
-`last_rev` back to its own revision, so the next sync fetches that tombstone
-again and deletes the record anew (for one late page; two late pages of one
-station landing oldest first can keep the record for good, which only the
-pairing-scoped guard of plan 1f closes).
-The copies, and the quarantine with them, start from zero when `host_id`
-names another host, when
+The feed never sends an older revision after a newer one; a stale run's
+page could (one fetched before `device_forget` that lands after a new
+pairing with the same host), and `pairingGuard` (below) stops it since plan
+1f: `notQuarantinedNewer` stays as a second line of defence.
+The copies, and the quarantine with them, start from zero when `sync_state`
+names another pairing (another `host_id`, or another `device_id` with the
+same host: the host gives every pairing a new device id), when
 `entity_set` is not this build's `ENTITY_SET`, or when the feed answers
 `rev < since` (the host went back to an older copy; once per run). The
 last two drop the old copies in the transaction of the first new page, so
-a failed fetch keeps them. The first — a re-pair, or this device's very
-first sync when no `host_id` is stored at all — stamps `sync_state.host_id`
-to this run's host before the first fetch (a re-pair wipes in the same
-transaction, since another host's records must not stay usable; a first
-sync has nothing to wipe, since there are never copies without a
-`host_id`), with no `last_rev`: the copies still read as unsynced. The
-continuing branch (this run's `hostId` already stored, with a matching
-`entity_set` and a `last_rev`) leaves that stamp alone, since a completed
-run always wrote it together with `last_rev` and `entity_set`, and is taken
-only when the stored `host_id` actually equals this run's — a state some
-other build left with `entity_set` and `last_rev` but no matching `host_id`
-falls through to the branch that stamps instead of failing forever.
-`hostGuard` (`UPDATE sync_state SET value = value WHERE key = 'host_id' AND
-value = ?` with `expectedChanges: 1`, first in every batch, before any
-statement that could touch the `host_id` row it reads) requires that stamp
-to still be there and still equal this run's `hostId`: it aborts a stale
-in-flight sync for the wrong host with `changes_mismatch` once its page
-finally arrives, in every ordering — including two first syncs racing each
-other before either has stamped anything. `SyncScheduler.stop` cannot
-cancel a request already sent, and without this guard a late page for the
-old host would win `excluded.rev > rev` against the new host's rows under
-the same ids (`ref_org`/`ref_site` are keyed `'1'` on every host). The same
-guard also catches a page that outlives `device_forget`'s `clear_copies`,
-until a new pairing with the same host stamps `host_id` again (as above):
-`clear_copies` deletes the `host_id` row along with everything else, and
-without the guard requiring the row to still match, a page fetched before
-the forget and committed after the clear would find nothing to conflict with
-and rewrite the old pairing's copies into a device that was told to forget
-them. A feed from another host than the paired one stops the sync with
+a failed fetch keeps them. Another pairing wipes at once, in the transaction
+that stamps this run's pairing (`host_id` and `device_id`) before the first
+fetch, since another pairing's records must not stay usable, with no
+`last_rev`: the copies still read as unsynced. A state without a complete
+stamp — this device's very first sync, or a state an older build left with
+`host_id` alone — gets the stamp before the first fetch as well, and loses
+its `last_rev` with it, so copies nobody can tie to this pairing read as
+unsynced (`copiesReady`) until the first page replaces them. The
+continuing branch (this run's `hostId` and `deviceId` already stored, with
+a matching `entity_set` and a `last_rev`) leaves the stamp alone, since
+every applied page writes it together with `last_rev` and `entity_set`.
+`pairingGuard` (`UPDATE sync_state SET value = value WHERE (key = 'host_id'
+AND value = ?) OR (key = 'device_id' AND value = ?)` with
+`expectedChanges: 2`, first in every batch, before any statement that could
+touch the rows it reads) requires that stamp to still be there and still
+name this run's pairing: it aborts a stale in-flight sync for the wrong
+pairing with `changes_mismatch` once its page finally arrives, in every
+ordering — including two first syncs racing each other before either has
+stamped anything. `SyncScheduler.stop` cannot cancel a request already
+sent, and without this guard a late page for the old host would win
+`excluded.rev > rev` against the new host's rows under the same ids
+(`ref_org`/`ref_site` are keyed `'1'` on every host). The same guard
+catches a page that outlives `device_forget`'s `clear_copies`
+(`clear_copies` deletes the stamp along with everything else), and a page
+of the old pairing that lands after a new pairing with the same host
+stamped `host_id` to the same value again: its `device_id` no longer
+matches, so it cannot bring back a record a tombstone of the new pairing
+deleted (a turned-off operator, a revoked badge) nor move `last_rev` back.
+The station's sign-in reads the copies, so this guard is its precondition.
+A feed from another host than the paired one stops the sync with
 `other_host` and applies nothing. `createSyncScheduler` runs one sync at a time: triggers during a
 run ask for exactly one more, and a failed run waits for the next trigger;
 `run` must report its own failure, since the scheduler swallows every
@@ -819,6 +926,9 @@ each revision and never opens the stream itself.
 `src/app/shell.ts` holds the screen state; `nextShellView` picks the screen
 in a fixed order: the device config, pairing, a rejected device, another
 host, the local host's version and identity, then the office or the floor.
+The floor is the operator sign-in (`floor`), or, with an operator signed in,
+stage 1's stub (`floor_operator`, `src/floor/FloorOperatorScreen.tsx`); see
+«Operators and badges» for both.
 While a host is paired, `useHostLink` (`src/app/host-link.ts`) follows the
 shell's link and syncs reference data at start and after every revision
 event; it stops when the pairing ends, is rejected or turns out to belong
@@ -994,7 +1104,7 @@ requests and offer a retry.
   empties and focuses the field inside the callback, while `readOnly` drops
   only when React renders `isSubmitting: false`). Nothing
   detects it: the badge then matches no station, and the remedy is to revoke
-  it and add it again (plan 1f's sign-in test is the first place it shows). It
+  it and add it again (the station's sign-in is the first place it shows). It
   is accepted, since a scan of about 0.1 s has to straddle a boundary. The
   answer is the new badge, not its operator, so the badge
   goes into the cached operator at once (`useChangeList` with `withBadge`,
@@ -1397,8 +1507,10 @@ arbitrates but does not reimplement them.
 ## Logs
 
 Never log device keys, session tokens, pairing codes, passwords, PINs, badge
-codes (a scan is one; plan 1f will handle them), any hash or the TLS private
-key. A label template's layout is no secret, but at up to 256 KB it stays
+codes (a scan is one: the sign-in neither logs nor keeps it, and
+`test/floor-sign-in.test.ts` and `test/operator-sign-in.test.tsx` check the
+console stays silent), any hash or the TLS private key. A label template's
+layout is no secret, but at up to 256 KB it stays
 out of the log as it stays out of audit details; `no_secrets_in_logs.rs`
 walks a stock and an office layout through the template routes, the
 defaults and the feed.
