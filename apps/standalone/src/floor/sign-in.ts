@@ -278,6 +278,27 @@ async function badgeAttempt(context: SignInContext, raw: string): Promise<SignIn
   return signedIn(local, holder);
 }
 
+const OPERATOR_PRESENT = `SELECT o.id FROM ref_operators AS o WHERE o.id = ? AND ${NOT_QUARANTINED_OPERATOR}`;
+
+/**
+ * Whether the signed-in operator would still be let in, after a sync:
+ * `false` only when this pairing's copies are complete and no longer hold
+ * the operator (the host turned them off, or their record waits in
+ * quarantine). Copies that are not complete say nothing either way.
+ */
+export async function operatorStillAllowed(
+  context: SignInContext,
+  operatorId: string,
+): Promise<boolean> {
+  if (!(await copiesReady(context.local, context.pairing))) return true;
+  const rows = await context.local.query(
+    OPERATOR_PRESENT,
+    [operatorId],
+    z.object({ id: z.string() }),
+  );
+  return rows.length > 0;
+}
+
 /** A personnel number and a PIN, one attempt at a time (`pinAttempt`). */
 export function signInWithPin(
   context: SignInContext,

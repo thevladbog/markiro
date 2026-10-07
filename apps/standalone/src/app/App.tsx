@@ -1,5 +1,18 @@
-import { useCallback, useEffect, useMemo, useReducer, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
+
+import { FloorOperatorScreen } from "../floor/FloorOperatorScreen.js";
+import { OperatorSignIn } from "../floor/OperatorSignIn.js";
+import { createKeyboardWedgeSource, type ScanSource } from "../floor/scan-source.js";
+import type { FloorOperator } from "../floor/sign-in.js";
 
 import { createHostApi, type HostApi } from "../host/api.js";
 import { createTauriHostClient, HostError } from "../host/client.js";
@@ -29,7 +42,6 @@ import { NetworkPairing } from "./NetworkPairing.js";
 import {
   ConfigErrorScreen,
   DeviceRejectedScreen,
-  FloorScreen,
   HostMissingScreen,
   OtherHostScreen,
   PairFailedScreen,
@@ -41,7 +53,59 @@ import {
   nextShellView,
   shellActionFor,
   shellReducer,
+  type FloorNotice,
 } from "./shell.js";
+
+/**
+ * The shortest wait between two syncs the floor's sign-in asks for. Each
+ * unknown badge or wrong PIN asks for one (a record the office has just
+ * added may be on its way); a burst of stray scans must not hammer the host
+ * with a sync each, so asks inside the wait become one more sync at its end.
+ */
+export const SIGN_IN_SYNC_GAP_MS = 2_000;
+
+interface RequestGate {
+  request: () => void;
+  cancel: () => void;
+}
+
+/**
+ * Runs `run` at once on the first request, then at most once per `gapMs`:
+ * requests that come while it waits are folded into a single run when the
+ * wait ends, so the last request is never lost.
+ */
+function createRequestGate(run: () => void, gapMs: number): RequestGate {
+  let cooling = false;
+  let pending = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const fire = () => {
+    run();
+    cooling = true;
+    timer = setTimeout(() => {
+      timer = null;
+      cooling = false;
+      if (pending) {
+        pending = false;
+        fire();
+      }
+    }, gapMs);
+  };
+  return {
+    request() {
+      if (cooling) {
+        pending = true;
+        return;
+      }
+      fire();
+    },
+    cancel() {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      cooling = false;
+      pending = false;
+    },
+  };
+}
 
 export interface AppProps {
   probe?: HostProbe;
@@ -50,6 +114,10 @@ export interface AppProps {
   connection?: ConnectionApi;
   local?: LocalExecutor;
   address?: string;
+  /** Where the floor's badge scans come from; the keyboard wedge on this window by default. */
+  scanSource?: ScanSource;
+  /** How long a signed-in operator may leave the station untouched; tests shorten it. */
+  idleTimeoutMs?: number;
 }
 
 export function App({
@@ -59,6 +127,8 @@ export function App({
   connection,
   local,
   address = LOCAL_HOST_ADDRESS,
+  scanSource,
+  idleTimeoutMs,
 }: AppProps) {
   const { t } = useTranslation();
   const hostProbe = useMemo(() => probe ?? createTauriHostProbe(), [probe]);
@@ -66,6 +136,7 @@ export function App({
   const hostApi = useMemo(() => host ?? createHostApi(createTauriHostClient()), [host]);
   const connectionApi = useMemo(() => connection ?? createTauriConnectionApi(), [connection]);
   const localDb = useMemo(() => local ?? createTauriLocalExecutor(), [local]);
+  const scanner = useMemo(() => scanSource ?? createKeyboardWedgeSource(), [scanSource]);
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
   const [probeAttempt, setProbeAttempt] = useState(0);
   const [repairState, setRepairState] = useState<"idle" | "busy" | DeviceErrorCode>("idle");
@@ -244,6 +315,48 @@ export function App({
     [hostApi],
   );
 
+  // The sign-in's asks for a sync are spaced out, whichever screen asks.
+  const signInSync = useMemo(
+    () => createRequestGate(requestSync, SIGN_IN_SYNC_GAP_MS),
+    [requestSync],
+  );
+  useEffect(() => () => signInSync.cancel(), [signInSync]);
+
+  const pairedDeviceId = pairedStatus?.deviceId ?? null;
+  const operatorSignedIn = useCallback(
+    (operator: FloorOperator) => {
+      if (pairedDeviceId !== null) {
+        // A copy, so that each sign-in is a session of its own: the sign-out
+        // below tells a session from the next one of the same operator by
+        // this object, never by the operator's id.
+        dispatch({
+          type: "operator_signed_in",
+          deviceId: pairedDeviceId,
+          operator: { ...operator },
+        });
+      }
+    },
+    [pairedDeviceId],
+  );
+  // The operator of the session on screen, as the last commit has it.
+  const signedIn = state.operator;
+  const currentOperator = useRef<FloorOperator | null>(null);
+  useLayoutEffect(() => {
+    currentOperator.current = signedIn;
+  }, [signedIn]);
+  // Bound to ONE session (`signedIn` is the object that session's sign-in
+  // made): a late idle timer or copy check of an earlier session of the same
+  // operator must not end the session that followed it. The callback changes
+  // only with the session, so the screen's idle timer is not restarted by
+  // every event of the link.
+  const operatorSignedOut = useCallback(
+    (notice: FloorNotice | null) => {
+      if (signedIn === null || currentOperator.current !== signedIn) return;
+      dispatch({ type: "operator_signed_out", operatorId: signedIn.id, notice });
+    },
+    [signedIn],
+  );
+
   const session = view.kind === "office" ? view.session : null;
   const officeSession = useMemo<OfficeSessionValue | null>(() => {
     if (!session) return null;
@@ -367,11 +480,31 @@ export function App({
           onOffice={() => dispatch({ type: "office_requested" })}
         />
       )}
-      {view.kind === "floor" && (
-        <FloorScreen
+      {view.kind === "floor" && pairedStatus !== null && (
+        <OperatorSignIn
+          // A number or PIN typed under another pairing or line is not kept.
+          key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${pairedStatus.lineId ?? ""}`}
+          local={localDb}
+          pairing={pairedStatus}
+          lineId={pairedStatus.lineId}
           link={state.link}
           sync={state.sync}
+          notice={state.floorNotice}
+          source={scanner}
+          onSignedIn={operatorSignedIn}
+          onSync={signInSync.request}
           onOffice={() => dispatch({ type: "office_requested" })}
+        />
+      )}
+      {view.kind === "floor_operator" && pairedStatus !== null && (
+        <FloorOperatorScreen
+          operator={view.operator}
+          local={localDb}
+          pairing={pairedStatus}
+          link={state.link}
+          sync={state.sync}
+          {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
+          onSignOut={operatorSignedOut}
         />
       )}
       {view.kind === "office_login" && (

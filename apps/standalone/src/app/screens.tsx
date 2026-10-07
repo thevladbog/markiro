@@ -4,9 +4,7 @@ import { Alert, Button, Card, Spinner } from "@markiro/ui";
 
 import type { DeviceErrorCode } from "../host/device.js";
 import type { HostProbeErrorCode } from "../host/probe.js";
-import type { HostStatus } from "../host/protocol.js";
-import { HostStatusLine } from "./HostStatusLine.js";
-import type { RejectionReason, SyncState } from "./shell.js";
+import type { RejectionReason } from "./shell.js";
 
 const PROBE_REASON_KEY = {
   unreachable: "shell.hostMissing.unreachable",
@@ -158,33 +156,6 @@ export function OtherHostScreen({
       <Button onClick={onRepair} loading={busy}>
         {t("shell.otherHost.repair")}
       </Button>
-    </Card>
-  );
-}
-
-/**
- * The floor placeholder until plan 1f: the link to the host, the health of
- * the local copies and the way into the office.
- */
-export function FloorScreen({
-  link,
-  sync,
-  onOffice,
-}: {
-  link: HostStatus | null;
-  sync: SyncState;
-  onOffice: () => void;
-}) {
-  const { t } = useTranslation();
-  return (
-    <Card className="standalone-card" title={t("floor.title")} titleAs="h2">
-      <div className="standalone-form">
-        <p>{t("floor.body")}</p>
-        <HostStatusLine status={link} sync={sync} />
-        <div className="standalone-form__actions">
-          <Button onClick={onOffice}>{t("floor.office")}</Button>
-        </div>
-      </div>
     </Card>
   );
 }

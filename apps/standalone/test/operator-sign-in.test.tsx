@@ -81,6 +81,7 @@ function renderSignIn({ local, sync = SYNCED, notice = null, source }: Options) 
       <OperatorSignIn
         local={local}
         pairing={PAIRING}
+        lineId={null}
         link={null}
         sync={sync}
         notice={notice}
@@ -223,6 +224,7 @@ describe("the floor's sign-in screen", () => {
         <OperatorSignIn
           local={executor}
           pairing={PAIRING}
+          lineId={null}
           link={null}
           sync={SYNCED}
           notice={null}
@@ -333,6 +335,7 @@ function propsOf(local: LocalExecutor, over: Partial<OperatorSignInProps> = {}) 
   return {
     local,
     pairing: PAIRING,
+    lineId: null,
     link: null,
     sync: SYNCED,
     notice: null,

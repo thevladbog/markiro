@@ -25,11 +25,10 @@ export interface OperatorSignInProps {
   /** The pairing whose copies the sign-in reads. */
   pairing: Pairing;
   /**
-   * The line the station works on. A check that started under another line
-   * (or pairing) is dropped when it answers, so pass it whenever the shell
-   * has it; `App` does (plan 1f task 6).
+   * The line the station works on (`null` before it has one). A check that
+   * started under another line (or pairing) is dropped when it answers.
    */
-  lineId?: string | null;
+  lineId: string | null;
   link: HostStatus | null;
   sync: SyncState;
   /** Why the last operator was signed out, if they were not the one who left. */
@@ -104,7 +103,7 @@ function messageOf(result: Exclude<SignInResult, { kind: "signed_in" }>, via: "p
 export function OperatorSignIn({
   local,
   pairing,
-  lineId = null,
+  lineId,
   link,
   sync,
   notice,

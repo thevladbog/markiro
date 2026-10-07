@@ -7,13 +7,16 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
-import { StrictMode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { StrictMode, type ComponentType } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 
-import { App } from "../src/app/App.js";
+import { App, SIGN_IN_SYNC_GAP_MS } from "../src/app/App.js";
 import { useHostLink } from "../src/app/host-link.js";
+import type { FloorNotice } from "../src/app/shell.js";
+import type { FloorOperatorScreenProps } from "../src/floor/FloorOperatorScreen.js";
+import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
 import type { HostApi } from "../src/host/api.js";
 import { HostError } from "../src/host/client.js";
 import type { ConnectionApi, ConnectionHandlers } from "../src/host/connection.js";
@@ -39,6 +42,26 @@ import {
 import { openLocalDb } from "./support/local-db.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
+
+/**
+ * What `onSignOut` each mount of the signed-in floor was given, in order, so
+ * a test can call an earlier session's callback late. The real screen is
+ * still rendered: this only watches its props.
+ */
+const signOutHandles = vi.hoisted(() => [] as Array<(notice: FloorNotice | null) => void>);
+
+vi.mock("../src/floor/FloorOperatorScreen.js", async (importOriginal) => {
+  const actual = await importOriginal<{
+    FloorOperatorScreen: ComponentType<FloorOperatorScreenProps>;
+  }>();
+  return {
+    ...actual,
+    FloorOperatorScreen: (props: FloorOperatorScreenProps) => {
+      if (signOutHandles.at(-1) !== props.onSignOut) signOutHandles.push(props.onSignOut);
+      return <actual.FloorOperatorScreen {...props} />;
+    },
+  };
+});
 
 const ADDRESS = "https://127.0.0.1:45710";
 const REMOTE_ADDRESS = "https://192.168.1.10:45710";
@@ -178,6 +201,8 @@ interface Services {
   host: HostApi;
   connection?: ConnectionApi;
   local?: LocalExecutor;
+  idleTimeoutMs?: number;
+  scanSource?: ScanSource;
 }
 
 /** The app with fakes; the link stays online and the local database is a fresh one. */
@@ -745,8 +770,11 @@ describe("App", () => {
     await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(1));
     // Exactly once: settle, then check again. React runs passive effects in
     // `setImmediate` tasks, which `waitFor`'s `setTimeout(0)` does not wait for.
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    // Inside `act`: the floor's sign-in reads the local copies meanwhile.
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+    });
     expect(host.getChanges).toHaveBeenCalledTimes(1);
   });
 
@@ -775,14 +803,18 @@ describe("App", () => {
     await waitFor(() => expect(connection.watch).toHaveBeenCalledTimes(1));
     // Flush pending microtasks: with `watch` still unresolved, no sync must
     // have started.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     expect(host.getChanges).not.toHaveBeenCalled();
 
     resolveWatch?.(() => undefined);
     await waitFor(() => expect(host.getChanges).toHaveBeenCalledTimes(1));
     // Exactly once: settle, then check again (see the test above).
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+    });
     expect(host.getChanges).toHaveBeenCalledTimes(1);
   });
 
@@ -1366,10 +1398,15 @@ describe("the line the office assigns", () => {
     vi.useRealTimers();
   });
 
-  /** Lets every pending effect and timer task settle. */
+  /**
+   * Lets every pending effect and timer task settle, inside `act`: the
+   * floor's sign-in reads the local copies after every sync.
+   */
   async function settle(): Promise<void> {
-    await new Promise((resolve) => setImmediate(resolve));
-    await new Promise((resolve) => setImmediate(resolve));
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+    });
   }
 
   it("goes back to choosing a line when the office clears it, and on when the office sets one", async () => {
@@ -1713,6 +1750,396 @@ describe("the office on this device", () => {
     if (!row) throw new Error("no row for this PC");
     expect(within(row).getByText("Этот ПК")).toBeTruthy();
     expect(screen.getAllByText("Этот ПК")).toHaveLength(1);
+  });
+});
+
+describe("the operator on the floor", () => {
+  const ANNA = "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b";
+  /** The PIN 4821 and the badge «MRK-000742» under the site's salt (`proto/fixtures`). */
+  const PIN_PHC =
+    "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=";
+  const BADGE_PHC =
+    "pbkdf2$sha256$100000$AAECAwQFBgcICQoLDA0ODw==$LEcu0ewwRD5rBHrpCjvxni/q2cURiavbRlNRgDPb+n0=";
+  const PEOPLE: ChangeItem[] = [
+    {
+      entity: "site",
+      id: "1",
+      rev: 40,
+      deleted: false,
+      data: { badgeSalt: "AAECAwQFBgcICQoLDA0ODw==", boxBlockSize: 2000, palletBlockSize: 200 },
+    },
+    {
+      entity: "operators",
+      id: ANNA,
+      rev: 41,
+      deleted: false,
+      data: { login: "0042", name: "Анна Кузнецова", role: null, pinPhc: PIN_PHC },
+    },
+    {
+      entity: "operator_badges",
+      id: "c4e2a1b3-5d6f-4a8b-9c0d-1e2f3a4b5c6d",
+      rev: 42,
+      deleted: false,
+      data: { operatorId: ANNA, badgePhc: BADGE_PHC, label: null },
+    },
+  ];
+  const SIGNED_IN = "Вошёл: Анна Кузнецова, табельный номер 0042.";
+
+  function scan(text: string) {
+    act(() => {
+      for (const key of text) fireEvent.keyDown(window, { key });
+      fireEvent.keyDown(window, { key: "Enter" });
+    });
+  }
+
+  /** The app on a station whose first sync brings the site, Anna and her badge. */
+  async function onTheFloor(idleTimeoutMs?: number) {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+      ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }),
+    });
+    await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру.");
+    return { link, host };
+  }
+
+  it("signs an operator in with a badge without asking the host, shows the floor's stub and signs out on request", async () => {
+    const { host } = await onTheFloor();
+    scan("MRK-000742");
+    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+    // The sign-in read the local copies only: the one feed request is the start's sync.
+    expect(host.getChanges).toHaveBeenCalledTimes(1);
+    expect(screen.queryByRole("button", { name: "Офис" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Сменить оператора" }));
+    expect(
+      await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру."),
+    ).toBeTruthy();
+    expect(screen.queryByText(/^Оператор вышел/)).toBeNull();
+  });
+
+  it("keeps the operator signed in while the host is away", async () => {
+    const { link } = await onTheFloor();
+    scan("MRK-000742");
+    await screen.findByText(SIGNED_IN);
+    await link.status({
+      state: "offline",
+      lastContactAt: 1_790_000_000_000,
+      lastError: "unreachable",
+      seq: 2,
+    });
+    expect(screen.getByText(SIGNED_IN)).toBeTruthy();
+  });
+
+  it("signs the operator out after the idle timeout and says so", async () => {
+    await onTheFloor(50);
+    scan("MRK-000742");
+    await screen.findByText(SIGNED_IN);
+    expect(await screen.findByText("Оператор вышел по бездействию. Войдите снова.")).toBeTruthy();
+    expect(screen.queryByText(SIGNED_IN)).toBeNull();
+  });
+
+  it("signs the operator out once a sync brings the host's tombstone for them", async () => {
+    const { link, host } = await onTheFloor();
+    scan("MRK-000742");
+    await screen.findByText(SIGNED_IN);
+    host.getChanges.mockResolvedValueOnce(
+      feedPage(43, [{ entity: "operators", id: ANNA, rev: 43, deleted: true }]),
+    );
+    await link.revision(43);
+    expect(
+      await screen.findByText(
+        "Оператор больше не может входить на станции. Обратитесь к администратору.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("comes back from the office to the sign-in, with nobody signed in", async () => {
+    await onTheFloor();
+    scan("MRK-000742");
+    await screen.findByText(SIGNED_IN);
+    fireEvent.click(screen.getByRole("button", { name: "Сменить оператора" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    await screen.findByText("Вы вошли как Ирина Смирнова.");
+    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    expect(
+      await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру."),
+    ).toBeTruthy();
+  });
+
+  const PROMPT = "Приложите бейдж к сканеру или войдите по табельному номеру.";
+  const WRONG_BADGE =
+    "Бейдж не найден. Если бейдж новый, дождитесь синхронизации или обратитесь к администратору.";
+
+  /** A scan that is not on the keyboard: the test hands over what the scanner read. */
+  function fakeScanSource() {
+    let listener: ScanListener | null = null;
+    const stop = vi.fn();
+    const source: ScanSource = {
+      start(next) {
+        listener = next;
+        return () => {
+          listener = null;
+          stop();
+        };
+      },
+      clearPendingInput: () => undefined,
+    };
+    return {
+      source,
+      stop,
+      read: (raw: string) =>
+        act(() => {
+          listener?.(raw);
+        }),
+    };
+  }
+
+  /**
+   * A local database whose next query waits for `release()`; `wrote()`
+   * resolves at the first write after that, which a finished sign-in makes
+   * last (it forgets the operator's failures).
+   */
+  function gatedLocal() {
+    const real = openLocalDb().executor;
+    let pending: Promise<void> | null = null;
+    let open: () => void = () => undefined;
+    let written: () => void = () => undefined;
+    let wrote = Promise.resolve();
+    const local: LocalExecutor = {
+      query: (sql, params, row) => {
+        const wait = pending;
+        pending = null;
+        return wait === null
+          ? real.query(sql, params, row)
+          : wait.then(() => real.query(sql, params, row));
+      },
+      transaction: (statements) => {
+        written();
+        return real.transaction(statements);
+      },
+    };
+    return {
+      local,
+      hold() {
+        pending = new Promise<void>((resolve) => {
+          open = resolve;
+        });
+        wrote = new Promise<void>((resolve) => {
+          written = resolve;
+        });
+      },
+      release() {
+        open();
+      },
+      wrote: () => wrote,
+    };
+  }
+
+  /** Two turns of React's effect scheduler, inside `act`: what an effect started has settled. */
+  async function flush(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+  }
+
+  /** Waits until the running check has finished (the «Проверяем…» line is gone). */
+  async function checked(): Promise<void> {
+    await waitFor(() => expect(screen.queryByText("Проверяем…")).toBeNull());
+  }
+
+  beforeEach(() => {
+    signOutHandles.length = 0;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("takes the scans of the scan source it is given, not the keyboard's", async () => {
+    const scanner = fakeScanSource();
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+      scanSource: scanner.source,
+    });
+    await screen.findByText(PROMPT);
+    scan("MRK-000742");
+    await checked();
+    expect(screen.queryByText(SIGNED_IN)).toBeNull();
+    scanner.read("MRK-000742");
+    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+  });
+
+  it("starts the wait again on a touch of the screen, not only on a key", async () => {
+    fakeRetryTimers();
+    await onTheFloor(2_000);
+    scan("MRK-000742");
+    await screen.findByText(SIGNED_IN);
+    await flush();
+    // The fake clock also runs with real time, so the margins are wide.
+    await elapse(1_500);
+    act(() => {
+      fireEvent.touchStart(window);
+    });
+    await elapse(1_500);
+    expect(screen.getByText(SIGNED_IN)).toBeTruthy();
+    await elapse(800);
+    expect(screen.getByText("Оператор вышел по бездействию. Войдите снова.")).toBeTruthy();
+  });
+
+  it("does not start the wait again on every event of the link", async () => {
+    fakeRetryTimers();
+    const { link } = await onTheFloor(2_000);
+    scan("MRK-000742");
+    await screen.findByText(SIGNED_IN);
+    await flush();
+    await elapse(800);
+    await link.status({ state: "offline", lastContactAt: 1, lastError: "unreachable", seq: 2 });
+    await elapse(800);
+    await link.status({ ...ONLINE, seq: 3 });
+    // 2 200 ms after the sign-in, 1 400 after the first event: only the
+    // wait the sign-in started can have run out by now.
+    await elapse(600);
+    expect(screen.getByText("Оператор вышел по бездействию. Войдите снова.")).toBeTruthy();
+  });
+
+  it("ends only its own session: an earlier session's late sign-out leaves the next one", async () => {
+    await onTheFloor();
+    scan("MRK-000742");
+    await screen.findByText(SIGNED_IN);
+    await flush();
+    const earlier = signOutHandles.at(-1);
+    fireEvent.click(screen.getByRole("button", { name: "Сменить оператора" }));
+    await screen.findByText(PROMPT);
+    scan("MRK-000742");
+    await screen.findByText(SIGNED_IN);
+    await flush();
+    expect(signOutHandles).toHaveLength(2);
+    expect(earlier).toBeDefined();
+    // Same operator, same id: only the session tells the two calls apart.
+    act(() => {
+      earlier?.("idle");
+    });
+    await flush();
+    expect(screen.getByText(SIGNED_IN)).toBeTruthy();
+    expect(screen.queryByText(/^Оператор вышел/)).toBeNull();
+    act(() => {
+      signOutHandles.at(-1)?.("idle");
+    });
+    expect(await screen.findByText("Оператор вышел по бездействию. Войдите снова.")).toBeTruthy();
+  });
+
+  it("asks the host for a sync at most once in a while, however many stray scans come", async () => {
+    fakeRetryTimers();
+    const { host } = await onTheFloor();
+    host.getChanges.mockResolvedValue(feedPage(42));
+    expect(host.getChanges).toHaveBeenCalledTimes(1);
+    for (const code of ["NOT-A-BADGE-1", "NOT-A-BADGE-2", "NOT-A-BADGE-3", "NOT-A-BADGE-4"]) {
+      scan(code);
+      await checked();
+    }
+    expect(screen.getByText(WRONG_BADGE)).toBeTruthy();
+    // The first asked at once; the other three became one more at the end of the wait.
+    expect(host.getChanges).toHaveBeenCalledTimes(2);
+    // The fake clock also runs with real time, so the margins are wide.
+    await elapse(SIGN_IN_SYNC_GAP_MS - 800);
+    expect(host.getChanges).toHaveBeenCalledTimes(2);
+    await elapse(1_600);
+    expect(host.getChanges).toHaveBeenCalledTimes(3);
+    await elapse(2 * SIGN_IN_SYNC_GAP_MS);
+    expect(host.getChanges).toHaveBeenCalledTimes(3);
+  });
+
+  it("leaves no wait behind when the app is gone", async () => {
+    fakeRetryTimers();
+    const view = renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host: fakeHost(),
+    });
+    await screen.findByText("Справочники ещё не загружены с хоста.", { exact: false });
+    scan("NOT-A-BADGE-1");
+    await checked();
+    scan("NOT-A-BADGE-2");
+    await checked();
+    view.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("does not keep a sign-in whose answer comes after the probe moved the screen off the floor and back", async () => {
+    const gate = gatedLocal();
+    let failProbe: (error: HostProbeError) => void = () => undefined;
+    const first = new Promise<never>((_, reject) => {
+      failProbe = reject;
+    });
+    const hello = vi
+      .fn<HostProbe["hello"]>()
+      .mockReturnValueOnce(first)
+      .mockResolvedValue(observation(true));
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    renderApp({
+      probe: { hello },
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+      local: gate.local,
+    });
+    await screen.findByText(PROMPT);
+    gate.hold();
+    scan("MRK-000742");
+    // The probe answers while the check waits: the host is too old for this app.
+    await act(async () => {
+      failProbe(new HostProbeError("host_too_old", "old"));
+    });
+    await screen.findByText("Служба «Markiro Хост» старее этого приложения.", { exact: false });
+    // The floor comes back with a sign-in screen of its own, and only then
+    // does the first screen's check finish: it ended with its screen.
+    fireEvent.click(screen.getByRole("button", { name: "Проверить снова" }));
+    await screen.findByText(PROMPT);
+    await act(async () => {
+      gate.release();
+      await gate.wrote();
+    });
+    await flush();
+    expect(screen.queryByText(SIGNED_IN)).toBeNull();
+    expect(screen.getByText(PROMPT)).toBeTruthy();
+  });
+
+  it("drops what was typed when the office moves the station to another line", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    const host = fakeHost();
+    host.getChanges.mockResolvedValue(feedPage(42, PEOPLE));
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host,
+      connection: link.connection,
+    });
+    await screen.findByText(PROMPT);
+    fireEvent.click(screen.getByRole("button", { name: "Войти по табельному номеру" }));
+    expect(await screen.findByText("Наберите табельный номер.")).toBeTruthy();
+    device.refresh.mockResolvedValueOnce({
+      ...DEVICE_STATUS,
+      lineId: "5d1f6a52-0b7e-4c0e-8f51-3a4b9c2d7e10",
+    });
+    await link.revision(43);
+    expect(await screen.findByText(PROMPT)).toBeTruthy();
+    expect(screen.queryByText("Наберите табельный номер.")).toBeNull();
   });
 });
 
