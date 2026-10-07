@@ -6,6 +6,7 @@ import { ThemeProvider } from "@markiro/ui";
 import { HostError } from "../src/host/client.js";
 import { Office } from "../src/office/Office.js";
 import { OfficeLogin } from "../src/office/OfficeLogin.js";
+import type { WindowMode } from "../src/office/window-mode.js";
 import {
   fakeOfficeSession,
   ORG_PROFILE,
@@ -171,6 +172,80 @@ describe("Office", () => {
     fireEvent.click(await screen.findByRole("link", { name: "Профиль" }));
     await screen.findByRole("heading", { name: "Профиль организации" });
     expect(document.activeElement).toBe(screen.getByRole("main"));
+  });
+});
+
+describe("«Оконный режим» in the office header", () => {
+  /** Kiosk mode as `App` gives an administrator; `leave` says the window left it. */
+  function windowMode(mode: WindowMode["mode"]) {
+    return { mode, leave: vi.fn<WindowMode["leave"]>(async () => true) };
+  }
+
+  it("is offered to an administrator only while the window is locked", async () => {
+    const { unmount } = renderOffice(fakeOfficeSession(), { windowMode: windowMode("locked") });
+    expect(await screen.findByRole("button", { name: "Оконный режим" })).toBeTruthy();
+    unmount();
+
+    for (const [user, mode] of [
+      [SESSION.user, windowMode("windowed")],
+      [TECHNOLOGIST, windowMode("locked")],
+      [SESSION.user, null],
+    ] as const) {
+      const view = renderOffice(fakeOfficeSession({ user }), { windowMode: mode });
+      expect(await screen.findByRole("button", { name: "Выйти в цех" })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
+      view.unmount();
+    }
+  });
+
+  it("asks first, reads the user from the host, then leaves kiosk mode", async () => {
+    const session = fakeOfficeSession();
+    session.api.officeMe.mockResolvedValue(SESSION.user);
+    const mode = windowMode("locked");
+    renderOffice(session, { windowMode: mode });
+    fireEvent.click(await screen.findByRole("button", { name: "Оконный режим" }));
+    expect(
+      screen.getByText(
+        "Окно станции получит рамку и кнопку на панели задач, его можно будет свернуть и закрыть. Киоск-режим вернётся, когда вы выйдете из офиса.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(mode.leave).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Оконный режим" }));
+    fireEvent.click(screen.getByRole("button", { name: "Перейти в оконный режим" }));
+    await waitFor(() => expect(mode.leave).toHaveBeenCalledTimes(1));
+    expect(session.api.officeMe).toHaveBeenCalledWith(SESSION.token);
+    await waitFor(() => expect(screen.queryByText("Перейти в оконный режим?")).toBeNull());
+  });
+
+  it("keeps the window locked when the host says the user is no longer an administrator", async () => {
+    const session = fakeOfficeSession();
+    session.api.officeMe.mockResolvedValue({ ...SESSION.user, role: "technologist" });
+    const mode = windowMode("locked");
+    renderOffice(session, { windowMode: mode });
+    fireEvent.click(await screen.findByRole("button", { name: "Оконный режим" }));
+    fireEvent.click(screen.getByRole("button", { name: "Перейти в оконный режим" }));
+    expect(await screen.findByText("Оконный режим доступен только администратору.")).toBeTruthy();
+    expect(mode.leave).not.toHaveBeenCalled();
+    expect(session.refreshUser).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the window locked when the host cannot be asked", async () => {
+    const session = fakeOfficeSession();
+    session.api.officeMe.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+    );
+    const mode = windowMode("locked");
+    renderOffice(session, { windowMode: mode });
+    fireEvent.click(await screen.findByRole("button", { name: "Оконный режим" }));
+    fireEvent.click(screen.getByRole("button", { name: "Перейти в оконный режим" }));
+    expect(
+      await screen.findByText(
+        "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.",
+      ),
+    ).toBeTruthy();
+    expect(mode.leave).not.toHaveBeenCalled();
   });
 });
 

@@ -9,6 +9,7 @@ import { ChangePasswordDialog } from "./ChangePasswordDialog.js";
 import { OFFICE_NAV } from "./nav.js";
 import { useOfficeLink } from "./office-link.js";
 import { useOfficeSession } from "./office-session.js";
+import { WindowModeButton } from "./WindowModeButton.js";
 
 /** Office layout after `apps/admin/src/layout/AppShell.tsx`: sidebar, header, page. */
 export function OfficeShell() {
@@ -74,6 +75,7 @@ export function OfficeShell() {
               aria-label={t(dark ? "office.header.lightTheme" : "office.header.darkTheme")}
               onClick={() => setTheme(dark ? "light" : "dark")}
             />
+            <WindowModeButton />
             <Button
               variant="secondary"
               onClick={() => {

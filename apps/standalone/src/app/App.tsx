@@ -6,6 +6,7 @@ import {
   useReducer,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -35,6 +36,7 @@ import { createTauriLocalExecutor, type LocalExecutor } from "../local/executor.
 import { Office } from "../office/Office.js";
 import { OfficeLogin } from "../office/OfficeLogin.js";
 import type { OfficeSessionValue } from "../office/office-session.js";
+import type { WindowMode } from "../office/window-mode.js";
 import { BootstrapWizard } from "../wizard/BootstrapWizard.js";
 import { useHostLink } from "./host-link.js";
 import { LineSelect } from "./LineSelect.js";
@@ -148,6 +150,7 @@ export function App({
     () => lockdown ?? createLockdownLifecycle({ dev: import.meta.env.DEV }),
     [lockdown],
   );
+  const kioskSnapshot = useSyncExternalStore(kiosk.subscribe, kiosk.getSnapshot);
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
   const [probeAttempt, setProbeAttempt] = useState(0);
   const [repairState, setRepairState] = useState<"idle" | "busy" | DeviceErrorCode>("idle");
@@ -380,6 +383,17 @@ export function App({
   useEffect(() => {
     if (!officeOpen) void kiosk.enter();
   }, [kiosk, officeOpen]);
+  const leaveKiosk = useCallback(async (): Promise<boolean> => {
+    await kiosk.exit();
+    const { mode, error } = kiosk.getSnapshot();
+    if (error !== null) kiosk.clearError();
+    return mode === "windowed";
+  }, [kiosk]);
+  const officeAdmin = session?.user.role === "admin";
+  const windowMode = useMemo<WindowMode | null>(
+    () => (kiosk.enabled && officeAdmin ? { mode: kioskSnapshot.mode, leave: leaveKiosk } : null),
+    [kiosk.enabled, officeAdmin, kioskSnapshot.mode, leaveKiosk],
+  );
   const officeSession = useMemo<OfficeSessionValue | null>(() => {
     if (!session) return null;
     // Scoped to this session's token: a late failure from a session the
@@ -434,6 +448,7 @@ export function App({
         sync={state.sync}
         hostRevision={state.hostRevision}
         deviceId={pairedStatus?.deviceId ?? null}
+        windowMode={windowMode}
       />
     );
   }

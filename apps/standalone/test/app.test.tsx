@@ -2225,6 +2225,13 @@ function recordingLockdown() {
   return { lockdown, commands, failing };
 }
 
+/** «Оконный режим» from the office header, confirmed in its dialog. */
+async function leaveKioskMode(): Promise<void> {
+  fireEvent.click(await screen.findByRole("button", { name: "Оконный режим" }));
+  expect(await screen.findByText("Перейти в оконный режим?")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Перейти в оконный режим" }));
+}
+
 describe("kiosk mode", () => {
   it("locks the window once at start, under StrictMode too, and keeps it locked through the office", async () => {
     const kiosk = recordingLockdown();
@@ -2290,6 +2297,138 @@ describe("kiosk mode", () => {
     fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
     expect(await screen.findByText("Цех")).toBeTruthy();
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("lets the administrator out in the office and locks the window again on leaving", async () => {
+    const kiosk = recordingLockdown();
+    const host = fakeHost();
+    host.officeMe.mockResolvedValue(SESSION.user);
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      lockdown: kiosk.lockdown,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    await leaveKioskMode();
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
+    expect(host.officeMe).toHaveBeenCalledWith("office-session-token");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    await waitFor(() =>
+      expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
+    );
+  });
+
+  it("locks the window again when the office session ends while it is windowed", async () => {
+    const kiosk = recordingLockdown();
+    const host = fakeHost();
+    host.officeMe.mockResolvedValue(SESSION.user);
+    host.officeChangePassword.mockRejectedValueOnce(
+      new HostError({
+        kind: "api",
+        code: "unauthorized",
+        status: 401,
+        message: "office session ended",
+        details: { credential: "session" },
+      }),
+    );
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      lockdown: kiosk.lockdown,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    await leaveKioskMode();
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown"]));
+
+    fireEvent.click(await screen.findByRole("button", { name: "Сменить пароль" }));
+    fireEvent.change(await screen.findByLabelText("Текущий пароль"), {
+      target: { value: "correct horse battery" },
+    });
+    fireEvent.change(screen.getByLabelText("Новый пароль"), {
+      target: { value: "another long password" },
+    });
+    fireEvent.change(screen.getByLabelText("Повторите новый пароль"), {
+      target: { value: "another long password" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Сменить" }));
+    expect(await screen.findByText("Сессия офиса закончилась. Войдите снова.")).toBeTruthy();
+    await waitFor(() =>
+      expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
+    );
+  });
+
+  it("offers no way out to a technologist", async () => {
+    const kiosk = recordingLockdown();
+    const host = fakeHost();
+    host.officeLogin.mockResolvedValue({
+      ...SESSION,
+      user: { ...SESSION.user, login: "tech", name: "Павел Орлов", role: "technologist" },
+    });
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      lockdown: kiosk.lockdown,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    expect(await screen.findByText("Вы вошли как Павел Орлов.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
+    expect(kiosk.commands).toEqual(["enter_lockdown"]);
+  });
+
+  it("offers no way out where the build does not lock the window at all", async () => {
+    // A lifecycle that never sends a command (development) but, as a fault
+    // would have it, calls the window locked: the guard is `enabled`, not the mode.
+    const snapshot = { mode: "locked", pending: false, error: null } as const;
+    const lockdown = {
+      ...recordingLockdown().lockdown,
+      enabled: false,
+      getSnapshot: () => snapshot,
+    };
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host: fakeHost(),
+      lockdown,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
+  });
+
+  it("keeps the dialog open and says so when the window does not leave kiosk mode", async () => {
+    const kiosk = recordingLockdown();
+    kiosk.failing.add("exit_lockdown");
+    const host = fakeHost();
+    host.officeMe.mockResolvedValue(SESSION.user);
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      lockdown: kiosk.lockdown,
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    await leaveKioskMode();
+    expect(
+      await screen.findByText("Окно не вышло из киоск-режима. Попробуйте ещё раз."),
+    ).toBeTruthy();
+    expect(screen.getByText("Перейти в оконный режим?")).toBeTruthy();
+    // The failed exit may have changed some properties: «Выйти в цех» locks again.
+    fireEvent.click(screen.getByRole("button", { name: "Отмена" }));
+    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    await waitFor(() =>
+      expect(kiosk.commands).toEqual(["enter_lockdown", "exit_lockdown", "enter_lockdown"]),
+    );
   });
 });
 

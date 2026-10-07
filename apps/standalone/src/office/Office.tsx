@@ -14,6 +14,7 @@ import {
   type LabelRendering,
 } from "./templates/label-rendering.js";
 import { ThisDeviceProvider } from "./this-device.js";
+import { WindowModeProvider, type WindowMode } from "./window-mode.js";
 
 export interface OfficeProps {
   session: OfficeSessionValue;
@@ -38,6 +39,11 @@ export interface OfficeProps {
    * webview's canvas and fonts by default; a test passes its own.
    */
   labels?: LabelRendering;
+  /**
+   * Kiosk mode, for the administrator's «Оконный режим» in the header;
+   * `null` (the default) shows no such control.
+   */
+  windowMode?: WindowMode | null;
 }
 
 /**
@@ -52,6 +58,7 @@ export function Office({
   hostRevision = null,
   deviceId = null,
   labels = BROWSER_LABEL_RENDERING,
+  windowMode = null,
 }: OfficeProps) {
   const [router] = useState(() => createMemoryRouter(officeRoutes, { initialEntries: ["/"] }));
   const [queryClient] = useState(createOfficeQueryClient);
@@ -72,7 +79,9 @@ export function Office({
         <OfficeLinkProvider value={officeLink}>
           <ThisDeviceProvider deviceId={deviceId}>
             <LabelRenderingProvider value={labels}>
-              <RouterProvider router={router} />
+              <WindowModeProvider value={windowMode}>
+                <RouterProvider router={router} />
+              </WindowModeProvider>
             </LabelRenderingProvider>
           </ThisDeviceProvider>
         </OfficeLinkProvider>
