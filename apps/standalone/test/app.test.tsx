@@ -14,6 +14,11 @@ import { ThemeProvider } from "@markiro/ui";
 
 import { App, SIGN_IN_SYNC_GAP_MS } from "../src/app/App.js";
 import { useHostLink } from "../src/app/host-link.js";
+import {
+  createLockdownLifecycle,
+  type LockdownCommand,
+  type LockdownLifecycle,
+} from "../src/app/lockdown.js";
 import type { FloorNotice } from "../src/app/shell.js";
 import type { FloorOperatorScreenProps } from "../src/floor/FloorOperatorScreen.js";
 import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
@@ -203,6 +208,7 @@ interface Services {
   local?: LocalExecutor;
   idleTimeoutMs?: number;
   scanSource?: ScanSource;
+  lockdown?: LockdownLifecycle;
 }
 
 /** The app with fakes; the link stays online and the local database is a fresh one. */
@@ -2198,6 +2204,92 @@ describe("the operator on the floor", () => {
     expect(screen.queryByText(SIGNED_IN)).toBeNull();
     expect(screen.queryByRole("button", { name: "Сменить оператора" })).toBeNull();
     expect(screen.getByText(PROMPT)).toBeTruthy();
+  });
+});
+
+/**
+ * Kiosk mode as a built app has it (`dev: false`), with the shell's commands
+ * recorded instead of sent; a command in `failing` refuses.
+ */
+function recordingLockdown() {
+  const commands: LockdownCommand[] = [];
+  const failing = new Set<LockdownCommand>();
+  const lockdown = createLockdownLifecycle({
+    dev: false,
+    invoke: async (command) => {
+      commands.push(command);
+      if (failing.has(command)) throw "window_failed";
+    },
+    logError: () => undefined,
+  });
+  return { lockdown, commands, failing };
+}
+
+describe("kiosk mode", () => {
+  it("locks the window once at start, under StrictMode too, and keeps it locked through the office", async () => {
+    const kiosk = recordingLockdown();
+    render(
+      <StrictMode>
+        <ThemeProvider defaultTheme="dark">
+          <App
+            probe={probeAnswering(true)}
+            device={fakeDevice(DEVICE_STATUS)}
+            host={fakeHost()}
+            connection={fakeConnection().connection}
+            local={openLocalDb().executor}
+            address={ADDRESS}
+            lockdown={kiosk.lockdown}
+          />
+        </ThemeProvider>
+      </StrictMode>,
+    );
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
+
+    fireEvent.click(screen.getByRole("button", { name: "Офис" }));
+    await signIn();
+    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    // Already locked: neither the office nor the way back sends anything.
+    expect(kiosk.commands).toEqual(["enter_lockdown"]);
+  });
+
+  it("tries a lock that failed again when the office closes", async () => {
+    const kiosk = recordingLockdown();
+    kiosk.failing.add("enter_lockdown");
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host: fakeHost(),
+      lockdown: kiosk.lockdown,
+    });
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
+    kiosk.failing.clear();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(kiosk.commands).toEqual(["enter_lockdown"]);
+    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown", "enter_lockdown"]));
+  });
+
+  it("sends no kiosk command in development, where the window stays ordinary", async () => {
+    const invoke = vi.fn(async () => undefined);
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host: fakeHost(),
+      lockdown: createLockdownLifecycle({ dev: true, invoke }),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    await signIn();
+    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Оконный режим" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти в цех" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(invoke).not.toHaveBeenCalled();
   });
 });
 

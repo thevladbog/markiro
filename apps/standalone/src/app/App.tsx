@@ -38,6 +38,7 @@ import type { OfficeSessionValue } from "../office/office-session.js";
 import { BootstrapWizard } from "../wizard/BootstrapWizard.js";
 import { useHostLink } from "./host-link.js";
 import { LineSelect } from "./LineSelect.js";
+import { createLockdownLifecycle, type LockdownLifecycle } from "./lockdown.js";
 import { NetworkPairing } from "./NetworkPairing.js";
 import {
   ConfigErrorScreen,
@@ -120,6 +121,8 @@ export interface AppProps {
   idleTimeoutMs?: number;
   /** The shortest wait between two syncs the sign-in asks for; tests lengthen it. */
   signInSyncGapMs?: number;
+  /** Kiosk mode of the window: the shell's commands outside development by default. */
+  lockdown?: LockdownLifecycle;
 }
 
 export function App({
@@ -132,6 +135,7 @@ export function App({
   scanSource,
   idleTimeoutMs,
   signInSyncGapMs = SIGN_IN_SYNC_GAP_MS,
+  lockdown,
 }: AppProps) {
   const { t } = useTranslation();
   const hostProbe = useMemo(() => probe ?? createTauriHostProbe(), [probe]);
@@ -140,6 +144,10 @@ export function App({
   const connectionApi = useMemo(() => connection ?? createTauriConnectionApi(), [connection]);
   const localDb = useMemo(() => local ?? createTauriLocalExecutor(), [local]);
   const scanner = useMemo(() => scanSource ?? createKeyboardWedgeSource(), [scanSource]);
+  const kiosk = useMemo(
+    () => lockdown ?? createLockdownLifecycle({ dev: import.meta.env.DEV }),
+    [lockdown],
+  );
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
   const [probeAttempt, setProbeAttempt] = useState(0);
   const [repairState, setRepairState] = useState<"idle" | "busy" | DeviceErrorCode>("idle");
@@ -364,6 +372,14 @@ export function App({
   );
 
   const session = view.kind === "office" ? view.session : null;
+
+  // Kiosk mode whenever no office session is open: at start, when the office
+  // closes and when its session ends. Only an open session's administrator
+  // turns it off («Оконный режим»), and only until that session ends.
+  const officeOpen = session !== null;
+  useEffect(() => {
+    if (!officeOpen) void kiosk.enter();
+  }, [kiosk, officeOpen]);
   const officeSession = useMemo<OfficeSessionValue | null>(() => {
     if (!session) return null;
     // Scoped to this session's token: a late failure from a session the
