@@ -1817,6 +1817,25 @@ describe("the operator on the floor", () => {
     return { link, host };
   }
 
+  it("shows the status bar above the sign-in and the stub, with the line and the operator", async () => {
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(
+      feedPage(43, [...PEOPLE, lineItem(43, "Линия розлива 2")]),
+    );
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host });
+    const bar = await screen.findByRole("region", { name: "Строка состояния цеха" });
+    expect(await within(bar).findByText("Линия розлива 2")).toBeTruthy();
+    expect(within(bar).getByText("Никто не вошёл")).toBeTruthy();
+    await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру.");
+    scan("MRK-000742");
+    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+    expect(
+      within(screen.getByRole("region", { name: "Строка состояния цеха" })).getByText(
+        "Анна Кузнецова, табельный номер 0042",
+      ),
+    ).toBeTruthy();
+  });
+
   it("signs an operator in with a badge without asking the host, shows the floor's stub and signs out on request", async () => {
     const { host } = await onTheFloor();
     scan("MRK-000742");

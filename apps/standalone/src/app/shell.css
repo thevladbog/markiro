@@ -23,6 +23,45 @@
   gap: 16px;
 }
 
+/* The floor: the status bar across the top, the screen centred below it. */
+.floor-frame {
+  align-self: stretch;
+  justify-self: stretch;
+  display: grid;
+  grid-template-rows: auto 1fr;
+  gap: 16px;
+}
+
+.floor-frame > .standalone-card {
+  place-self: center;
+}
+
+.floor-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--line);
+}
+
+.floor-status__identity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 24px;
+  margin: 0;
+}
+
+.floor-status__item dt {
+  color: var(--fg-2);
+}
+
+.floor-status__item dd {
+  margin: 0;
+  font: var(--floor-body-strong);
+}
+
 .floor-sign-in {
   display: flex;
   flex-direction: column;

@@ -11,6 +11,7 @@ import {
 import { useTranslation } from "react-i18next";
 
 import { FloorOperatorScreen } from "../floor/FloorOperatorScreen.js";
+import { FloorStatusBar } from "../floor/FloorStatusBar.js";
 import { OperatorSignIn } from "../floor/OperatorSignIn.js";
 import { createKeyboardWedgeSource, type ScanSource } from "../floor/scan-source.js";
 import type { FloorOperator } from "../floor/sign-in.js";
@@ -517,32 +518,41 @@ export function App({
           onOffice={() => dispatch({ type: "office_requested" })}
         />
       )}
-      {view.kind === "floor" && pairedStatus !== null && (
-        <OperatorSignIn
-          // A number or PIN typed under another pairing or line is not kept.
-          key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${pairedStatus.lineId ?? ""}`}
-          local={localDb}
-          pairing={pairedStatus}
-          lineId={pairedStatus.lineId}
-          link={state.link}
-          sync={state.sync}
-          notice={state.floorNotice}
-          source={scanner}
-          onSignedIn={operatorSignedIn}
-          onSync={signInSync.request}
-          onOffice={() => dispatch({ type: "office_requested" })}
-        />
-      )}
-      {view.kind === "floor_operator" && pairedStatus !== null && (
-        <FloorOperatorScreen
-          operator={view.operator}
-          local={localDb}
-          pairing={pairedStatus}
-          link={state.link}
-          sync={state.sync}
-          {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
-          onSignOut={operatorSignedOut}
-        />
+      {(view.kind === "floor" || view.kind === "floor_operator") && pairedStatus !== null && (
+        <div className="floor-frame">
+          <FloorStatusBar
+            local={localDb}
+            pairing={pairedStatus}
+            lineId={pairedStatus.lineId}
+            operator={view.kind === "floor_operator" ? view.operator : null}
+            link={state.link}
+            sync={state.sync}
+          />
+          {view.kind === "floor" ? (
+            <OperatorSignIn
+              // A number or PIN typed under another pairing or line is not kept.
+              key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${pairedStatus.lineId ?? ""}`}
+              local={localDb}
+              pairing={pairedStatus}
+              lineId={pairedStatus.lineId}
+              sync={state.sync}
+              notice={state.floorNotice}
+              source={scanner}
+              onSignedIn={operatorSignedIn}
+              onSync={signInSync.request}
+              onOffice={() => dispatch({ type: "office_requested" })}
+            />
+          ) : (
+            <FloorOperatorScreen
+              operator={view.operator}
+              local={localDb}
+              pairing={pairedStatus}
+              sync={state.sync}
+              {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
+              onSignOut={operatorSignedOut}
+            />
+          )}
+        </div>
       )}
       {view.kind === "office_login" && (
         <OfficeLogin

@@ -62,7 +62,6 @@ function floorOf(
         operator={operator}
         local={local}
         pairing={PAIRING}
-        link={null}
         sync={sync}
         {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
         onSignOut={onSignOut}

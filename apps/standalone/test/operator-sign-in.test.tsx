@@ -82,7 +82,6 @@ function renderSignIn({ local, sync = SYNCED, notice = null, source }: Options) 
         local={local}
         pairing={PAIRING}
         lineId={null}
-        link={null}
         sync={sync}
         notice={notice}
         source={source ?? createKeyboardWedgeSource(window)}
@@ -225,7 +224,6 @@ describe("the floor's sign-in screen", () => {
           local={executor}
           pairing={PAIRING}
           lineId={null}
-          link={null}
           sync={SYNCED}
           notice={null}
           source={source}
@@ -403,7 +401,6 @@ function propsOf(local: LocalExecutor, over: Partial<OperatorSignInProps> = {}) 
     local,
     pairing: PAIRING,
     lineId: null,
-    link: null,
     sync: SYNCED,
     notice: null,
     source: createKeyboardWedgeSource(window),
@@ -1035,18 +1032,6 @@ describe("the rest of the screen", () => {
     expect(screen.getByText(BADGE_PROMPT)).toBeTruthy();
   });
 
-  it("shows the link to the host", async () => {
-    render(
-      screenOf(
-        propsOf(await synced([SITE, OPERATOR]), {
-          link: { state: "offline", lastContactAt: null, lastError: "unreachable", seq: 1 },
-        }),
-      ),
-    );
-    expect(await screen.findByText("Нет связи с хостом")).toBeTruthy();
-    expect(screen.getByText("Хост не отвечает.")).toBeTruthy();
-  });
-
   it("reads the copies again when asked, and says it is reading", async () => {
     const real = await synced([SITE, OPERATOR]);
     let reads = 0;
@@ -1214,7 +1199,6 @@ describe("finding oneself by name", () => {
             local={local}
             pairing={PAIRING}
             lineId={null}
-            link={null}
             sync={sync}
             notice={null}
             source={source}

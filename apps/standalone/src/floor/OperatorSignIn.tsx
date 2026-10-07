@@ -3,9 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, Input, PinPad, Spinner } from "@markiro/ui";
 
-import { HostStatusLine } from "../app/HostStatusLine.js";
 import type { FloorNotice, SyncState } from "../app/shell.js";
-import type { HostStatus } from "../host/protocol.js";
 import type { LocalExecutor } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
 import {
@@ -37,7 +35,6 @@ export interface OperatorSignInProps {
    * started under another line (or pairing) is dropped when it answers.
    */
   lineId: string | null;
-  link: HostStatus | null;
   sync: SyncState;
   /** Why the last operator was signed out, if they were not the one who left. */
   notice: FloorNotice | null;
@@ -114,7 +111,6 @@ export function OperatorSignIn({
   local,
   pairing,
   lineId,
-  link,
   sync,
   notice,
   source,
@@ -481,7 +477,6 @@ export function OperatorSignIn({
           {busy && <p>{t("floor.signIn.checking")}</p>}
         </div>
         {body()}
-        <HostStatusLine status={link} sync={sync} />
         <div className="standalone-form__actions">
           {/* Never held by a check: one that never settles must not trap the station here. */}
           <Button variant="secondary" size="floor" onClick={onOffice}>

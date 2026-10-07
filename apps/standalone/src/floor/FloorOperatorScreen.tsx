@@ -3,9 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { Button, Card } from "@markiro/ui";
 
-import { HostStatusLine } from "../app/HostStatusLine.js";
 import type { FloorNotice, SyncState } from "../app/shell.js";
-import type { HostStatus } from "../host/protocol.js";
 import type { LocalExecutor } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
 import { createOperatorIdleLock, OPERATOR_IDLE_TIMEOUT_MS } from "./idle-lock.js";
@@ -15,7 +13,6 @@ export interface FloorOperatorScreenProps {
   operator: FloorOperator;
   local: LocalExecutor;
   pairing: Pairing;
-  link: HostStatus | null;
   sync: SyncState;
   /** Nobody touched the station this long: the operator is signed out. */
   idleTimeoutMs?: number;
@@ -35,7 +32,6 @@ export function FloorOperatorScreen({
   operator,
   local,
   pairing,
-  link,
   sync,
   idleTimeoutMs = OPERATOR_IDLE_TIMEOUT_MS,
   onSignOut,
@@ -75,7 +71,6 @@ export function FloorOperatorScreen({
         </p>
         {operator.role !== null && <p>{operator.role}</p>}
         <p>{t("floor.operator.stub")}</p>
-        <HostStatusLine status={link} sync={sync} />
         <div className="standalone-form__actions">
           <Button size="floor" variant="secondary" onClick={() => onSignOut(null)}>
             {t("floor.operator.signOut")}
