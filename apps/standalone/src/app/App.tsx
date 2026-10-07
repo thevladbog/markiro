@@ -118,6 +118,8 @@ export interface AppProps {
   scanSource?: ScanSource;
   /** How long a signed-in operator may leave the station untouched; tests shorten it. */
   idleTimeoutMs?: number;
+  /** The shortest wait between two syncs the sign-in asks for; tests lengthen it. */
+  signInSyncGapMs?: number;
 }
 
 export function App({
@@ -129,6 +131,7 @@ export function App({
   address = LOCAL_HOST_ADDRESS,
   scanSource,
   idleTimeoutMs,
+  signInSyncGapMs = SIGN_IN_SYNC_GAP_MS,
 }: AppProps) {
   const { t } = useTranslation();
   const hostProbe = useMemo(() => probe ?? createTauriHostProbe(), [probe]);
@@ -317,14 +320,14 @@ export function App({
 
   // The sign-in's asks for a sync are spaced out, whichever screen asks.
   const signInSync = useMemo(
-    () => createRequestGate(requestSync, SIGN_IN_SYNC_GAP_MS),
-    [requestSync],
+    () => createRequestGate(requestSync, signInSyncGapMs),
+    [requestSync, signInSyncGapMs],
   );
   useEffect(() => () => signInSync.cancel(), [signInSync]);
 
   const pairedDeviceId = pairedStatus?.deviceId ?? null;
   const operatorSignedIn = useCallback(
-    (operator: FloorOperator) => {
+    (operator: FloorOperator, lineId: string | null) => {
       if (pairedDeviceId !== null) {
         // A copy, so that each sign-in is a session of its own: the sign-out
         // below tells a session from the next one of the same operator by
@@ -332,11 +335,13 @@ export function App({
         dispatch({
           type: "operator_signed_in",
           deviceId: pairedDeviceId,
+          lineId,
+          address,
           operator: { ...operator },
         });
       }
     },
-    [pairedDeviceId],
+    [pairedDeviceId, address],
   );
   // The operator of the session on screen, as the last commit has it.
   const signedIn = state.operator;

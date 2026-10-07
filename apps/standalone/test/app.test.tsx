@@ -1784,6 +1784,8 @@ describe("the operator on the floor", () => {
     },
   ];
   const SIGNED_IN = "Вошёл: Анна Кузнецова, табельный номер 0042.";
+  /** A gap far longer than the burst test's real time, so that its boundaries are never close. */
+  const GAP_MS = 30_000;
 
   function scan(text: string) {
     act(() => {
@@ -1793,7 +1795,7 @@ describe("the operator on the floor", () => {
   }
 
   /** The app on a station whose first sync brings the site, Anna and her badge. */
-  async function onTheFloor(idleTimeoutMs?: number) {
+  async function onTheFloor(idleTimeoutMs?: number, signInSyncGapMs?: number) {
     const link = fakeConnection();
     const host = fakeHost();
     host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
@@ -1803,6 +1805,7 @@ describe("the operator on the floor", () => {
       host,
       connection: link.connection,
       ...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs }),
+      ...(signInSyncGapMs === undefined ? {} : { signInSyncGapMs }),
     });
     await screen.findByText("Приложите бейдж к сканеру или войдите по табельному номеру.");
     return { link, host };
@@ -2043,7 +2046,7 @@ describe("the operator on the floor", () => {
 
   it("asks the host for a sync at most once in a while, however many stray scans come", async () => {
     fakeRetryTimers();
-    const { host } = await onTheFloor();
+    const { host } = await onTheFloor(undefined, GAP_MS);
     host.getChanges.mockResolvedValue(feedPage(42));
     expect(host.getChanges).toHaveBeenCalledTimes(1);
     for (const code of ["NOT-A-BADGE-1", "NOT-A-BADGE-2", "NOT-A-BADGE-3", "NOT-A-BADGE-4"]) {
@@ -2053,13 +2056,26 @@ describe("the operator on the floor", () => {
     expect(screen.getByText(WRONG_BADGE)).toBeTruthy();
     // The first asked at once; the other three became one more at the end of the wait.
     expect(host.getChanges).toHaveBeenCalledTimes(2);
-    // The fake clock also runs with real time, so the margins are wide.
-    await elapse(SIGN_IN_SYNC_GAP_MS - 800);
+    // The fake clock also runs with real time: a long gap leaves the burst
+    // and each boundary seconds of slack, not the checks' own duration.
+    await elapse(GAP_MS - 5_000);
     expect(host.getChanges).toHaveBeenCalledTimes(2);
-    await elapse(1_600);
+    await elapse(10_000);
     expect(host.getChanges).toHaveBeenCalledTimes(3);
-    await elapse(2 * SIGN_IN_SYNC_GAP_MS);
+    await elapse(2 * GAP_MS);
     expect(host.getChanges).toHaveBeenCalledTimes(3);
+  });
+
+  it("waits two seconds between the sign-in's syncs unless it is told otherwise", async () => {
+    expect(SIGN_IN_SYNC_GAP_MS).toBe(2_000);
+    fakeRetryTimers();
+    const { host } = await onTheFloor();
+    host.getChanges.mockResolvedValue(feedPage(42));
+    const timers = vi.spyOn(globalThis, "setTimeout");
+    scan("NOT-A-BADGE-1");
+    await checked();
+    expect(timers).toHaveBeenCalledWith(expect.any(Function), SIGN_IN_SYNC_GAP_MS);
+    timers.mockRestore();
   });
 
   it("leaves no wait behind when the app is gone", async () => {
@@ -2140,6 +2156,45 @@ describe("the operator on the floor", () => {
     await link.revision(43);
     expect(await screen.findByText(PROMPT)).toBeTruthy();
     expect(screen.queryByText("Наберите табельный номер.")).toBeNull();
+  });
+
+  it("does not sign an operator in on the new line when the answer lands in the batch of the line change", async () => {
+    const gate = gatedLocal();
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    const host = fakeHost();
+    host.getChanges.mockResolvedValue(feedPage(42, PEOPLE));
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host,
+      connection: link.connection,
+      local: gate.local,
+    });
+    await screen.findByText(PROMPT);
+    gate.hold();
+    scan("MRK-000742");
+    await flush();
+    let moveStation: (status: DeviceStatus) => void = () => undefined;
+    device.refresh.mockReturnValueOnce(
+      new Promise<DeviceStatus>((resolve) => {
+        moveStation = resolve;
+      }),
+    );
+    await link.revision(43);
+    // One batch: the office's move reaches the shell first, and the check of
+    // the badge answers before React has rendered it, so neither the screen's
+    // own line nor its `key` have changed yet.
+    await act(async () => {
+      moveStation({ ...DEVICE_STATUS, lineId: "5d1f6a52-0b7e-4c0e-8f51-3a4b9c2d7e10" });
+      gate.release();
+      await gate.wrote();
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    await flush();
+    expect(screen.queryByText(SIGNED_IN)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Сменить оператора" })).toBeNull();
+    expect(screen.getByText(PROMPT)).toBeTruthy();
   });
 });
 

@@ -73,7 +73,7 @@ interface Options {
 }
 
 function renderSignIn({ local, sync = SYNCED, notice = null, source }: Options) {
-  const onSignedIn = vi.fn<(operator: FloorOperator) => void>();
+  const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
   const onSync = vi.fn<() => void>();
   const onOffice = vi.fn<() => void>();
   const view = render(
@@ -120,7 +120,7 @@ describe("the floor's sign-in screen", () => {
     press("4", "8", "2", "1");
     expect(screen.getByLabelText("Набранный PIN").textContent).toBe("••••");
     fireEvent.click(screen.getByRole("button", { name: "Войти" }));
-    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
     expect(onSignedIn).toHaveBeenCalledTimes(1);
   });
 
@@ -160,7 +160,7 @@ describe("the floor's sign-in screen", () => {
       scan("MRK-000742");
       scan("MRK-000742");
     });
-    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
@@ -417,7 +417,7 @@ function lockRow(key: string, failures: number, lockedAt: number) {
 describe("a check that is still running when the screen changes", () => {
   it("drops its answer when the screen has left", async () => {
     const gate = gatedExecutor(await synced([SITE, OPERATOR, BADGE]));
-    const onSignedIn = vi.fn<(operator: FloorOperator) => void>();
+    const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
     const onSync = vi.fn<() => void>();
     const { unmount } = render(screenOf(propsOf(gate.local, { onSignedIn, onSync })));
     await screen.findByText(BADGE_PROMPT);
@@ -440,7 +440,7 @@ describe("a check that is still running when the screen changes", () => {
     ["station's line", { lineId: OTHER_LINE }],
   ] as const)("drops its answer when the %s changed meanwhile", async (_name, changed) => {
     const gate = gatedExecutor(await synced([SITE, OPERATOR, BADGE]));
-    const onSignedIn = vi.fn<(operator: FloorOperator) => void>();
+    const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
     const onSync = vi.fn<() => void>();
     const first = propsOf(gate.local, { onSignedIn, onSync, lineId: LINE });
     const { rerender } = render(screenOf(first));
@@ -462,7 +462,7 @@ describe("a check that is still running when the screen changes", () => {
 
   it("still answers when only a callback changed meanwhile", async () => {
     const gate = gatedExecutor(await synced([SITE, OPERATOR, BADGE]));
-    const onSignedIn = vi.fn<(operator: FloorOperator) => void>();
+    const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
     const first = propsOf(gate.local, { onSignedIn, lineId: LINE });
     const { rerender } = render(screenOf(first));
     await screen.findByText(BADGE_PROMPT);
@@ -474,13 +474,13 @@ describe("a check that is still running when the screen changes", () => {
     } finally {
       gate.release();
     }
-    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, LINE));
     expect(onSignedIn).toHaveBeenCalledTimes(1);
   });
 
   it("says it is checking and holds the buttons until the answer", async () => {
     const gate = gatedExecutor(await synced([SITE, OPERATOR, BADGE]));
-    const onSignedIn = vi.fn<(operator: FloorOperator) => void>();
+    const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
     render(screenOf(propsOf(gate.local, { onSignedIn })));
     await screen.findByText(BADGE_PROMPT);
     gate.hold();
@@ -502,7 +502,7 @@ describe("a check that is still running when the screen changes", () => {
 
   it("reads under the pairing it was last given", async () => {
     const { executor } = openLocalDb();
-    const onSignedIn = vi.fn<(operator: FloorOperator) => void>();
+    const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
     const first = propsOf(executor, { sync: { ...SYNCED, synced: 0 } });
     const { rerender } = render(screenOf(first));
     await screen.findByText(/^Справочники ещё не загружены с хоста\./);
@@ -527,7 +527,7 @@ describe("a check that is still running when the screen changes", () => {
     );
     await screen.findByText(BADGE_PROMPT);
     act(() => scan("MRK-000742"));
-    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
   });
 
   it("listens to the source it is given now and stops the old one", async () => {
@@ -609,7 +609,7 @@ describe("what the screen holds back", () => {
     expect(onSync).not.toHaveBeenCalled();
     failing = false;
     act(() => scan("MRK-000742"));
-    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
     for (const spy of logs) expect(spy).not.toHaveBeenCalled();
   });
 
@@ -619,7 +619,7 @@ describe("what the screen holds back", () => {
     const { container, onSignedIn } = renderSignIn({ local });
     await screen.findByText(BADGE_PROMPT);
     act(() => scan("MRK-000742"));
-    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith({ ...ANNA_OPERATOR, name }));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith({ ...ANNA_OPERATOR, name }, null));
     expect(container.querySelector("b, img")).toBeNull();
     expect(document.body.textContent).not.toContain("Кузнецова");
   });
@@ -668,7 +668,7 @@ describe("the screen's answers", () => {
     expect(screen.getByLabelText("Набранный PIN").textContent).toBe("");
     expect(onSync).not.toHaveBeenCalled();
     act(() => scan("MRK-000742"));
-    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
   });
 
   it("asks for a sync after a wrong PIN, and counts a double press once", async () => {
@@ -772,7 +772,7 @@ describe("the keypad's limits and the scanner on every step", () => {
     expect(screen.getByText("Табельный номер 0042. Наберите PIN.")).toBeTruthy();
     expect(screen.getByLabelText("Набранный PIN").textContent).toBe("");
     act(() => scan("MRK-000742"));
-    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
   });
 
   it("drops the keys typed before a step changes, so they do not join the next scan", async () => {
@@ -781,7 +781,7 @@ describe("the keypad's limits and the scanner on every step", () => {
     for (const key of "abc") fireEvent.keyDown(window, { key });
     fireEvent.click(screen.getByRole("button", { name: "Войти по табельному номеру" }));
     act(() => scan("MRK-000742"));
-    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
   });
 });
 
@@ -826,7 +826,7 @@ describe("the keyboard-wedge scan source, further", () => {
 describe("the rest of the screen", () => {
   it("clears the last answer when the next check starts", async () => {
     const gate = gatedExecutor(await synced([SITE, OPERATOR, BADGE]));
-    const onSignedIn = vi.fn<(operator: FloorOperator) => void>();
+    const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
     render(screenOf(propsOf(gate.local, { onSignedIn })));
     await screen.findByText(BADGE_PROMPT);
     act(() => scan("MRK-000743"));
@@ -844,7 +844,7 @@ describe("the rest of the screen", () => {
 
   it("holds the keypad and every button while a PIN is checked", async () => {
     const gate = gatedExecutor(await synced([SITE, OPERATOR]));
-    const onSignedIn = vi.fn<(operator: FloorOperator) => void>();
+    const onSignedIn = vi.fn<(operator: FloorOperator, lineId: string | null) => void>();
     render(screenOf(propsOf(gate.local, { onSignedIn })));
     await screen.findByText(BADGE_PROMPT);
     await enterLogin("0042");
@@ -862,7 +862,7 @@ describe("the rest of the screen", () => {
     } finally {
       gate.release();
     }
-    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR));
+    await waitFor(() => expect(onSignedIn).toHaveBeenCalledWith(ANNA_OPERATOR, null));
   });
 
   it.each([

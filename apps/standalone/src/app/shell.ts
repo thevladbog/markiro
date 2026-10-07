@@ -136,8 +136,16 @@ export type ShellAction =
   | { type: "sync_failed"; failure: SyncFailure; quarantined: number | null }
   | { type: "line_selected"; status: DeviceStatus }
   | { type: "device_refreshed"; status: DeviceStatus }
-  // `deviceId`: the pairing the sign-in read the copies of.
-  | { type: "operator_signed_in"; deviceId: string; operator: FloorOperator }
+  // `deviceId` and `lineId`: the pairing and the line the sign-in began on, as
+  // the screen that asked had them (not what the shell has by now);
+  // `address`: the local host address the shell derives its screen with.
+  | {
+      type: "operator_signed_in";
+      deviceId: string;
+      lineId: string | null;
+      address: string;
+      operator: FloorOperator;
+    }
   // `notice: null` is the operator's own «Сменить оператора».
   | { type: "operator_signed_out"; operatorId: string; notice: FloorNotice | null };
 
@@ -421,8 +429,17 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       // Only onto the floor the sign-in started from: a late answer must not
       // sign anybody in after the pairing changed or ended, the device was
       // rejected, the office opened or the station lost its line meanwhile.
+      // The reducer sees the actions queued before this one, which the screen
+      // (whose line and `key` change only when React commits) does not.
       if (state.device.kind !== "ready" || state.device.status === null) return state;
       const status = state.device.status;
+      if (status.lineId !== action.lineId) return state;
+      // Only a floor screen (the bootstrap wizard, a version screen, the line
+      // choice, the office or a rejection are not one) ...
+      const view = nextShellView(state, action.address);
+      if (view.kind !== "floor" && view.kind !== "floor_operator") return state;
+      // ... and never onto a running session: it ends by its own sign-out.
+      if (state.operator !== null) return state;
       if (
         status.deviceId !== action.deviceId ||
         state.rejection !== null ||

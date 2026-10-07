@@ -590,9 +590,11 @@ describe("the operator on the floor", () => {
     name: "Борис",
     role: null,
   };
-  const signIn: ShellAction = {
+  const signIn: Extract<ShellAction, { type: "operator_signed_in" }> = {
     type: "operator_signed_in",
     deviceId: DEVICE_STATUS.deviceId,
+    lineId: DEVICE_STATUS.lineId,
+    address: ADDRESS,
     operator: ANNA,
   };
 
@@ -625,7 +627,13 @@ describe("the operator on the floor", () => {
   });
 
   it("ignores a late sign-out for an operator who already left", () => {
-    const boris = shellReducer(signedIn(), { ...signIn, operator: BORIS });
+    const left = shellReducer(signedIn(), {
+      type: "operator_signed_out",
+      operatorId: ANNA.id,
+      notice: null,
+    });
+    const boris = shellReducer(left, { ...signIn, operator: BORIS });
+    expect(boris.operator).toEqual(BORIS);
     expect(
       shellReducer(boris, { type: "operator_signed_out", operatorId: ANNA.id, notice: "idle" }),
     ).toBe(boris);
@@ -708,6 +716,8 @@ describe("the operator session: every action and every late answer", () => {
   const signIn: Extract<ShellAction, { type: "operator_signed_in" }> = {
     type: "operator_signed_in",
     deviceId: DEVICE_STATUS.deviceId,
+    lineId: DEVICE_STATUS.lineId,
+    address: ADDRESS,
     operator: ANNA,
   };
   const OTHER_HOST = observation(true);
@@ -843,8 +853,13 @@ describe("the operator session: every action and every late answer", () => {
         survives: true,
       },
     ],
-    // A sign-in while somebody is signed in replaces them, as a new sign-in does.
-    operator_signed_in: [{ action: { ...signIn, operator: BORIS }, survives: false }],
+    // A sign-in never replaces a session that is running: the answer of
+    // another check, or of the same operator again, is refused.
+    operator_signed_in: [
+      { action: { ...signIn, operator: BORIS }, survives: true },
+      { action: signIn, survives: true },
+      { action: { ...signIn, lineId: OTHER_LINE, operator: BORIS }, survives: true },
+    ],
     operator_signed_out: [
       {
         action: { type: "operator_signed_out", operatorId: ANNA.id, notice: null },
@@ -863,10 +878,6 @@ describe("the operator session: every action and every late answer", () => {
     "decides whether the operator survives: %s",
     (_name, { action, survives }) => {
       const after = shellReducer(signedIn(), action);
-      if (action.type === "operator_signed_in") {
-        expect(after.operator).toEqual(BORIS);
-        return;
-      }
       expect(after.operator).toEqual(survives ? ANNA : null);
     },
   );
@@ -952,6 +963,65 @@ describe("the operator session: every action and every late answer", () => {
     }
   });
 
+  it("refuses a sign-in that began on another line than the station has now", () => {
+    const nobody = paired();
+    for (const lineId of [OTHER_LINE, null]) {
+      expect(shellReducer(nobody, { ...signIn, lineId })).toBe(nobody);
+    }
+    // The office moved the station while the check ran, and the answer was
+    // queued behind that move: it is read against the line the move left.
+    const moved = shellReducer(nobody, {
+      type: "device_refreshed",
+      status: { ...DEVICE_STATUS, lineId: OTHER_LINE },
+    });
+    expect(shellReducer(moved, signIn)).toBe(moved);
+    expect(moved.operator).toBeNull();
+    // A sign-in that began on the new line is the one that counts.
+    const next = shellReducer(moved, { ...signIn, lineId: OTHER_LINE });
+    expect(next.operator).toEqual(ANNA);
+  });
+
+  it("never replaces a running session with another sign-in, not even the same operator's", () => {
+    const running = signedIn();
+    expect(shellReducer(running, { ...signIn, operator: BORIS })).toBe(running);
+    expect(shellReducer(running, { ...signIn, operator: { ...ANNA } })).toBe(running);
+    // Once the operator leaves, the next sign-in is a new session.
+    const left = shellReducer(running, {
+      type: "operator_signed_out",
+      operatorId: ANNA.id,
+      notice: null,
+    });
+    expect(shellReducer(left, { ...signIn, operator: BORIS }).operator).toEqual(BORIS);
+  });
+
+  it("refuses a sign-in whose floor is not on screen, whatever else is right", () => {
+    const wizard = paired({ localHost: { kind: "found", observation: observation(false) } });
+    const old = paired({ localHost: { kind: "missing", reason: "host_too_old" } });
+    const appOld = paired({ localHost: { kind: "missing", reason: "app_too_old" } });
+    const replaced = paired({ localHost: { kind: "found", observation: OTHER_HOST } });
+    for (const [name, state, view] of [
+      ["the wizard", wizard, "bootstrap"],
+      ["a host too old", old, "host_missing"],
+      ["an app too old", appOld, "host_missing"],
+      ["another host's certificate", replaced, "device_rejected"],
+    ] as const) {
+      expect(nextShellView(state, ADDRESS).kind, name).toBe(view);
+      expect(shellReducer(state, signIn), name).toBe(state);
+    }
+  });
+
+  it("signs in a station paired with a host in the network, whatever the local probe says", () => {
+    const remote = paired({
+      device: {
+        kind: "ready",
+        status: { ...DEVICE_STATUS, hostAddress: "https://192.168.1.10:45710" },
+      },
+      localHost: { kind: "missing", reason: "host_too_old" },
+    });
+    expect(nextShellView(remote, ADDRESS)).toEqual({ kind: "floor" });
+    expect(shellReducer(remote, signIn).operator).toEqual(ANNA);
+  });
+
   it("signs the operator out of the office the bootstrap wizard opens, and closing it shows the sign-in", () => {
     // The operator signed in while the start-up probe was still running.
     const floor = signedIn({ localHost: { kind: "probing" } });
@@ -1022,9 +1092,11 @@ describe("the operator session: every action and every late answer", () => {
       const state = paired({
         device: { kind: "ready", status: { ...DEVICE_STATUS, kind, lineId: null } },
       });
-      const floor = shellReducer(state, signIn);
+      const floor = shellReducer(state, { ...signIn, lineId: null });
       expect(floor.operator).toEqual(ANNA);
       expect(nextShellView(floor, ADDRESS)).toEqual({ kind: "floor_operator", operator: ANNA });
+      // An answer that began on a line is not this device's: it has none.
+      expect(shellReducer(state, signIn)).toBe(state);
     }
   });
 

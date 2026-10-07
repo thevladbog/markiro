@@ -37,7 +37,8 @@ export interface OperatorSignInProps {
   source: ScanSource;
   /** This computer's clock, for the lockouts; tests pin it. */
   now?: () => number;
-  onSignedIn: (operator: FloorOperator) => void;
+  /** `lineId` is the line this check began on, not the one the screen has when it answers. */
+  onSignedIn: (operator: FloorOperator, lineId: string | null) => void;
   /**
    * Asks for a reference sync now: after an unknown credential or copies
    * that are not ready, a record the office has just added may be on its
@@ -183,7 +184,7 @@ export function OperatorSignIn({
         return;
       }
       if (result.kind === "signed_in") {
-        onSignedIn(result.operator);
+        onSignedIn(result.operator, lineId);
         return;
       }
       setMessage(messageOf(result, via));
