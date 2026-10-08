@@ -1743,9 +1743,10 @@ is `conflict` on `shift_line`, and a line is no field of the request.
 `requestId`, a lower-case hyphenated UUID the station made up
 (`validate::client_uuid`), makes the create repeatable: the same request of
 the same station answers the shift it created, whatever its body says now,
-with no revision and no audit row. Every device route of stage 2a lives under
-`/v1/device/…`, which `host_request` already lets through, and none returns a
-secret.
+with no revision and no audit row, while that shift exists: shifts keep no
+tombstones, so a retry after the office deleted it plans a new shift. Every
+device route of stage 2a lives under `/v1/device/…`, which `host_request`
+already lets through, and none returns a secret.
 
 ## Marking rules
 

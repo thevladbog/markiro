@@ -4,7 +4,7 @@ use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
     admin, audit_rows, audit_trail, empty, host_revision, json as json_request, pair_device,
-    plan_shift, request, shift_body, shift_setup, with_device, Admin, AuditRow, ShiftSetup,
+    plan_shift, request, shift_body, shift_setup, with_device, Admin, AuditRow, ShiftSetup, LAN,
 };
 
 /// This station's own id, as the host has it.
@@ -102,7 +102,8 @@ async fn close_directly(admin: &Admin, shift: &Value, device: &str) {
 
 fn snapshot(product_name: &str, counterparty_name: Value) -> Value {
     json!({
-        "product": { "name": product_name, "gtin14": "04600682000013" },
+        // Not the record's GTIN: the shift keeps the one it opened with.
+        "product": { "name": product_name, "gtin14": "04600682000020" },
         "counterpartyName": counterparty_name
     })
 }
@@ -190,12 +191,14 @@ async fn a_station_sees_the_open_shifts_of_its_line_and_those_it_entered() {
         [
             busy_view["status"].clone(),
             busy_view["productName"].clone(),
+            busy_view["productGtin14"].clone(),
             busy_view["counterpartyName"].clone(),
             busy_view["ownerDeviceId"].clone()
         ],
         [
             json!("active"),
             json!("Молоко (снимок)"),
+            json!("04600682000020"),
             json!("ООО «Берег»"),
             json!(other)
         ]
@@ -220,25 +223,23 @@ async fn only_a_station_reads_and_creates_shifts() {
     plan_shift(&admin, shift_body(&setup)).await;
     // A station without a line sees no line's shifts.
     assert_eq!(listed(&admin, &unassigned).await, Vec::<Value>::new());
-    // A device of another kind (the office kind pairs from loopback too).
+    // A device of another kind (the office kind pairs from loopback, a
+    // handheld with a code).
     let (_, office_pc) = pair_device(&admin.app, "office").await;
+    let handheld = pair_handheld(&admin).await;
     for (method, body) in [
         ("GET", None),
         ("POST", Some(device_create(&setup, REQUEST))),
     ] {
-        let (status, refused) = device_call(
-            &admin,
-            &office_pc,
-            method,
-            "/v1/device/shifts",
-            body.clone(),
-        )
-        .await;
-        assert_eq!(
-            (status, refused["error"]["code"].clone()),
-            (StatusCode::FORBIDDEN, json!("forbidden")),
-            "{method}"
-        );
+        for (kind, key) in [("office", &office_pc), ("handheld", &handheld)] {
+            let (status, refused) =
+                device_call(&admin, key, method, "/v1/device/shifts", body.clone()).await;
+            assert_eq!(
+                (status, refused["error"]["code"].clone()),
+                (StatusCode::FORBIDDEN, json!("forbidden")),
+                "{kind} {method}"
+            );
+        }
         let builder = request(method, "/v1/device/shifts");
         let (status, refused) = match body {
             Some(body) => admin.app.send(json_request(builder, body)).await,
@@ -263,6 +264,27 @@ fn device_create(setup: &ShiftSetup, request_id: &str) -> Value {
 }
 
 const REQUEST: &str = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+const SECOND_REQUEST: &str = "1b2c3d4e-5f60-4a71-8b82-93a4b5c6d7e8";
+
+/// A handheld device paired with a code, as the office hands one out;
+/// returns its key.
+async fn pair_handheld(admin: &Admin) -> String {
+    let (status, code) = admin.call("POST", "/v1/office/pairing-codes", None).await;
+    assert_eq!(status, StatusCode::OK, "{code}");
+    let (status, paired) = admin
+        .app
+        .send_from(
+            LAN,
+            json_request(
+                request("POST", "/v1/pairing/claim"),
+                json!({ "code": code["code"], "kind": "handheld", "name": "ТСД 1",
+                    "appVersion": "1.2.0", "capabilities": ["scanner"] }),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{paired}");
+    paired["deviceKey"].as_str().unwrap().to_owned()
+}
 
 /// The `ok` audit row a station writes.
 fn device_row(device: &str, action: &str, target_id: &str, details: Value) -> AuditRow {
@@ -332,6 +354,21 @@ async fn a_station_creates_a_shift_on_its_line_once_per_request() {
     assert_eq!((status, repeated), (StatusCode::OK, created.clone()));
     assert_eq!(host_revision(&admin.app).await, 4);
     assert_eq!(audit_rows(&admin.app).await, rows);
+    // Another request of the same station is another shift.
+    let (status, second) = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/shifts",
+        Some(device_create(&setup, SECOND_REQUEST)),
+    )
+    .await;
+    assert_eq!(
+        (status, second["number"].clone()),
+        (StatusCode::OK, json!("OCT26-002/S"))
+    );
+    assert_ne!(second["id"], created["id"]);
+    assert_eq!(host_revision(&admin.app).await, 5);
     // Another station's request with the same id is its own.
     let (_, other_key) = pair_device(&admin.app, "station").await;
     select_line(&admin, &other_key, &setup.line).await;
@@ -345,7 +382,7 @@ async fn a_station_creates_a_shift_on_its_line_once_per_request() {
     .await;
     assert_eq!(
         (status, other["number"].clone()),
-        (StatusCode::OK, json!("OCT26-002/S"))
+        (StatusCode::OK, json!("OCT26-003/S"))
     );
 }
 
