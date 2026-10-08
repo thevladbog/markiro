@@ -695,6 +695,54 @@ async fn a_planned_shift_changes_what_is_sent_and_keeps_its_number() {
     );
 }
 
+/// Changing the template of a planned shift to one scoped to the product's own
+/// group is stored, read back and audited with the old and the new id; the
+/// fit check runs against the product's group, not another.
+#[tokio::test]
+async fn a_planned_shifts_template_change_is_stored_read_back_and_audited() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let (status, scoped) = admin
+        .call(
+            "POST",
+            "/v1/office/templates",
+            Some(json!({
+                "name": "Короб молока", "purpose": "box", "enabled": true,
+                "chzProductGroupCodes": [8], "spec": { "widthMm": 58 }
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{scoped}");
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    let (status, updated) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({ "boxTemplateId": scoped["id"], "expectedRev": shift["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    let mut expected = planned(&id, "OCT26-001", &setup, shift["rev"].as_i64().unwrap() + 1);
+    expected["boxTemplateId"] = scoped["id"].clone();
+    assert_eq!(updated, expected);
+    let (status, read_back) = admin.call("GET", &path(&shift), None).await;
+    assert_eq!(status, StatusCode::OK, "{read_back}");
+    assert_eq!(read_back, expected);
+    assert_eq!(
+        audit_trail(&admin.app, "shift.update").await,
+        vec![admin.row(
+            "shift.update",
+            "shift",
+            &id,
+            json!({
+                "changed": ["boxTemplateId"],
+                "boxTemplateId": { "from": setup.template, "to": scoped["id"] },
+            })
+        )]
+    );
+}
+
 #[tokio::test]
 async fn an_edit_checks_a_changed_line_template_or_counterparty_and_keeps_unchanged_ones() {
     let admin = admin().await;
@@ -826,6 +874,74 @@ async fn an_edit_checks_a_changed_line_template_or_counterparty_and_keeps_unchan
         (StatusCode::NOT_FOUND, json!("not_found"))
     );
     assert_eq!(audit_rows(&admin.app).await, rows);
+    // A changed template also needs the product still in use: once the
+    // product is archived, a template scoped to its group is refused, while
+    // an edit that keeps the template still goes through.
+    let (status, scoped) = admin
+        .call(
+            "POST",
+            "/v1/office/templates",
+            Some(
+                json!({ "name": "Короб молока", "purpose": "box", "enabled": true,
+                "chzProductGroupCodes": [8], "spec": { "widthMm": 58 } }),
+            ),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{scoped}");
+    let (status, list) = admin.call("GET", "/v1/office/products", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let mut archive = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|product| product["id"] == json!(setup.product))
+        .cloned()
+        .expect("the product is listed");
+    let product_rev = archive["rev"].clone();
+    for computed in ["id", "status", "rev"] {
+        archive.as_object_mut().unwrap().remove(computed);
+    }
+    archive["archived"] = json!(true);
+    archive["expectedRev"] = product_rev;
+    let (status, body) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/products/{}", setup.product),
+            Some(archive),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let rows = audit_rows(&admin.app).await;
+    let (status, refused) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({ "boxTemplateId": scoped["id"], "expectedRev": rev })),
+        )
+        .await;
+    assert_eq!(
+        (status, refusal(&refused)),
+        (
+            StatusCode::CONFLICT,
+            (
+                json!("conflict"),
+                json!({ "constraint": "product_inactive" })
+            )
+        )
+    );
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    let (status, kept) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({ "boxTemplateId": setup.template, "plannedQty": 7, "expectedRev": rev })),
+        )
+        .await;
+    assert_eq!(
+        (status, kept["plannedQty"].clone()),
+        (StatusCode::OK, json!(7)),
+        "{kept}"
+    );
 }
 
 #[tokio::test]
