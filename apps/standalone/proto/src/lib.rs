@@ -1220,10 +1220,40 @@ pub struct TemplateDefaultsUpdate {
     pub expected_rev: i64,
 }
 
+/// Where a shift was created (stage 2a spec §4.2): planned in the office, or
+/// at a station while the host answered. A station's shift number ends in
+/// `/S`. The cloud's name for the office is `admin`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShiftOrigin {
+    Office,
+    Station,
+}
+
+impl ShiftOrigin {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShiftOrigin::Office => "office",
+            ShiftOrigin::Station => "station",
+        }
+    }
+}
+
+impl std::str::FromStr for ShiftOrigin {
+    type Err = UnknownVariant;
+
+    /// The name [`ShiftOrigin::as_str`] gives, as `shifts.created_from`
+    /// stores it.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("shift origin", text)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        category_default_id, DeviceKind, OfficeRole, ProductStatus, TemplatePurpose, UnknownVariant,
+        category_default_id, DeviceKind, OfficeRole, ProductStatus, ShiftOrigin, TemplatePurpose,
+        UnknownVariant,
     };
 
     /// Every `TemplatePurpose`, listed like `device_kinds` below.
@@ -1311,6 +1341,17 @@ mod tests {
         roles
     }
 
+    /// Every `ShiftOrigin`, listed the same way.
+    fn shift_origins() -> Vec<ShiftOrigin> {
+        let origins = vec![ShiftOrigin::Office, ShiftOrigin::Station];
+        for origin in &origins {
+            match origin {
+                ShiftOrigin::Office | ShiftOrigin::Station => {}
+            }
+        }
+        origins
+    }
+
     /// The host stores `as_str` names and reads them back with `FromStr`;
     /// serde writes the same names on the wire.
     #[test]
@@ -1323,6 +1364,14 @@ mod tests {
             assert_eq!(role.as_str().parse::<OfficeRole>(), Ok(role));
             assert_eq!(serde_json::to_value(role).unwrap(), role.as_str());
         }
+        for origin in shift_origins() {
+            assert_eq!(origin.as_str().parse::<ShiftOrigin>(), Ok(origin));
+            assert_eq!(serde_json::to_value(origin).unwrap(), origin.as_str());
+        }
+        assert_eq!(
+            "admin".parse::<ShiftOrigin>().unwrap_err().to_string(),
+            "unknown shift origin \"admin\""
+        );
     }
 
     /// Names are exact: another case, padding or an unknown name is refused,

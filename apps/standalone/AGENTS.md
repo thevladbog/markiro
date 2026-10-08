@@ -1662,6 +1662,22 @@ kiosk mode shows them on the station.
   its own, since a change of the organization's profile moves the document's
   revision too, and the reload drops the edits.
 
+## Shifts
+
+Stage 2a (`docs/superpowers/specs/2026-10-08-standalone-2a-shift-and-boxes-design.md`;
+plan 2a1 built the host's side). The host numbers a shift: a counter per
+month of its production date (`shift_number_counters`), `MONYY-NNN`
+(`OCT26-004`), with `/S` for a shift a station created — the domain's
+`shiftMonthKey` and `formatShiftNumber` rewritten in `host/src/shifts.rs`.
+`proto/fixtures/shift-numbers.json` holds the cases both must answer alike;
+`host/tests/shift_numbers.rs` and `test/shift-numbers.test.ts` read every
+one, so changing either rule means changing the fixture. A production date is
+a civil date `YYYY-MM-DD` of the years 1–9999, as the cloud's
+`civilDateSchema`; the domain's month key alone also reads the year 0000 (its
+`Date.UTC` takes the years 0–99 as 1900–1999), so the fixture leaves that
+year out. A number is drawn once, when the shift is created: an edit of the
+production date keeps it, and a deleted shift's number is not drawn again.
+
 ## Marking rules
 
 GS1, KM, SSCC and label rules stay in `@markiro/domain`; the host stores and
