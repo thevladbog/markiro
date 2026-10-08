@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 /// Protocol version this build speaks.
-pub const PROTOCOL_VERSION: u32 = 1;
+pub const PROTOCOL_VERSION: u32 = 2;
 /// Oldest protocol version this build still accepts from a client.
 pub const MIN_PROTOCOL_VERSION: u32 = 1;
 /// Request header carrying the client's protocol version.
@@ -1391,6 +1391,63 @@ pub struct ShiftUpdate {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallets_enabled: Option<bool>,
     pub expected_rev: i64,
+}
+
+/// A shift as a station sees it (`GET /v1/device/shifts` and the answer of
+/// `POST /v1/device/shifts`). The product's name and GTIN and the
+/// counterparty's name are the snapshot's once the shift is open, so a
+/// change of the catalog does not show on a shift that runs; before that
+/// they are the records' own (the station keeps no copy of counterparties).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceShift {
+    pub id: String,
+    pub number: String,
+    pub status: ShiftStatus,
+    pub mode: ShiftMode,
+    pub pallets_enabled: bool,
+    pub created_from: ShiftOrigin,
+    pub line_id: String,
+    pub product_id: String,
+    pub product_name: String,
+    pub product_gtin14: String,
+    pub counterparty_name: Option<String>,
+    pub production_date: String,
+    pub planned_qty: Option<u32>,
+    pub box_capacity: u32,
+    pub box_template_id: String,
+    /// The station that opened the shift: another one's id means the shift
+    /// is busy (stage 2a puts one device on a shift).
+    pub owner_device_id: Option<String>,
+    pub opened_at: Option<String>,
+    pub closed_at: Option<String>,
+}
+
+/// `GET /v1/device/shifts`: the planned and active shifts of the station's
+/// line, and the shifts it entered that are active or closed within 30 days.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeviceShifts {
+    pub shifts: Vec<DeviceShift>,
+}
+
+/// `POST /v1/device/shifts`: a station creates a shift on its own line while
+/// the host answers. `requestId` (a lower-case hyphenated UUID the station
+/// made up) makes it repeatable: the same request of the same station
+/// answers the same shift.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct DeviceShiftCreate {
+    pub request_id: String,
+    pub product_id: String,
+    pub box_template_id: String,
+    pub production_date: String,
+    #[serde(default)]
+    pub box_capacity: Option<u32>,
+    #[serde(default)]
+    pub planned_qty: Option<u32>,
+    #[serde(default)]
+    pub counterparty_id: Option<String>,
 }
 
 #[cfg(test)]

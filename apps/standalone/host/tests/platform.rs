@@ -14,7 +14,8 @@ async fn hello_needs_no_protocol_header() {
         .unwrap();
     let (status, body) = app.send(request).await;
     assert_eq!(status, StatusCode::OK);
-    assert_eq!(body["protocol"], 1);
+    assert_eq!(body["protocol"], 2);
+    assert_eq!(body["minProtocol"], 1);
     assert_eq!(body["time"], format_timestamp(app.clock.now()));
 }
 

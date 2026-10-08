@@ -3,16 +3,17 @@ use markiro_proto::{
     credentials, display_fingerprint, BadgeCreate, BadgeSalt, BlockSizesUpdate, BootstrapRequest,
     BootstrapResponse, CategoryTemplateDefault, ChangesResponse, ClaimRequest, Compatibility,
     CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind,
-    DeviceLineRequest, DeviceRecord, DeviceUpdate, ErrorBody, Hello, HelloEnvelope, LabelTemplate,
-    LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary, LabelTemplateUpdate,
-    LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine, OfficeLoginRequest,
-    OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeShift, OfficeUser,
-    OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord, OperatorCreate,
-    OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse,
-    PairingCode, PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate, ProductGroup,
-    ProductRecord, ProductStatus, ProductUpdate, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus,
-    ShiftUpdate, SiteRecord, SsccCounterUpdate, SsccState, TemplateDefaults,
-    TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
+    DeviceLineRequest, DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts, DeviceUpdate,
+    ErrorBody, Hello, HelloEnvelope, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord,
+    LabelTemplateSummary, LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate,
+    LocalPairRequest, OfficeLine, OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole,
+    OfficeSession, OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
+    OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
+    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PasswordChange,
+    PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate,
+    ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord, SsccCounterUpdate,
+    SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT,
+    PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -733,4 +734,34 @@ fn a_shift_update_carries_only_what_changes_and_never_the_product() {
     let mut value = fixture("shift-update.json");
     value["productId"] = Value::String("f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b".into());
     assert!(serde_json::from_value::<ShiftUpdate>(value).is_err());
+}
+
+#[test]
+fn device_shift_fixtures_round_trip_and_a_station_names_no_line() {
+    let list: DeviceShifts = round_trip("device-shifts.json");
+    let office: OfficeShift = serde_json::from_value(fixture("office-shift.json")).unwrap();
+    // The station's view of the office's shift: the same number and owner.
+    let open: &DeviceShift = &list.shifts[0];
+    assert_eq!(
+        (&open.id, &open.number, &open.owner_device_id),
+        (&office.id, &office.number, &office.owner_device_id)
+    );
+    let planned = &list.shifts[1];
+    assert_eq!(
+        (
+            planned.status,
+            planned.created_from,
+            planned.number.ends_with("/S")
+        ),
+        (ShiftStatus::Planned, ShiftOrigin::Station, true)
+    );
+    let create: DeviceShiftCreate = round_trip("device-shift-create.json");
+    assert_eq!(create.production_date, planned.production_date);
+    // A station creates on its own line and never says which.
+    let mut value = fixture("device-shift-create.json");
+    value["lineId"] = Value::String(office.line_id);
+    assert!(serde_json::from_value::<DeviceShiftCreate>(value).is_err());
+    let mut value = fixture("device-shift-create.json");
+    value.as_object_mut().unwrap().remove("requestId");
+    assert!(serde_json::from_value::<DeviceShiftCreate>(value).is_err());
 }

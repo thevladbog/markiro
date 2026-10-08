@@ -3,6 +3,7 @@
 pub mod bootstrap;
 pub mod changes;
 pub mod counterparties;
+pub mod device_shifts;
 pub mod devices;
 pub mod lines;
 pub mod office_auth;

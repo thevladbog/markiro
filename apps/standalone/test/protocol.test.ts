@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
+  PROTOCOL_VERSION,
   badgeCreateSchema,
   badgeSaltSchema,
   blockSizesUpdateSchema,
@@ -92,7 +93,8 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
   it("hello", () => {
     expect(helloSchema.parse(fixture("hello.json"))).toMatchObject({
       product: "markiro-host",
-      protocol: 1,
+      protocol: PROTOCOL_VERSION,
+      minProtocol: 1,
       initialized: false,
     });
   });

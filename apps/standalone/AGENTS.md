@@ -855,7 +855,11 @@ change) build their bodies inline, field by field, as does the wizard; its
 `templates`, built by `stockTemplates` since plan 1e3, are typed by the strict
 `bootstrapRequestSchema`, against which `test/protocol.test.ts` parses
 `bootstrap-request-templates.json`. Raise `PROTOCOL_VERSION` for an incompatible
-change; the host keeps accepting the previous version. Response types, which
+change; the host keeps accepting the previous version. It is 2 since plan 2a1,
+with `MIN_PROTOCOL_VERSION` still 1: the host takes the stations of stage 1,
+and a station of stage 2a finds a host of stage 1 too old (`host_too_old` at
+the probe). `src/host/protocol.ts` mirrors it, and `test/protocol.test.ts`
+ties the mirror to `hello.json`. Response types, which
 devices of different versions read, tolerate unknown fields; request types,
 which the host parses, reject them with `deny_unknown_fields`. The feed records
 that grant access or carry the salt (`site`, `operators`, `operator_badges`) are
@@ -1721,6 +1725,27 @@ planned shift names is not deleted (`conflict` on `template_in_use`, with
 an open or closed shift has the layout in its snapshot. Disabling or narrowing
 such a template is not refused: the shift then does not open, and the office
 sees why.
+
+A station reads its shifts with the device key (`GET /v1/device/shifts`;
+the shift routes of a device are a station's, and another kind of device is
+`forbidden`): the planned and active shifts of its line, and the shifts it
+entered that are active or closed within 30 days, by production date; a
+station without a line sees only the latter. It reads them when it reads its
+device record (after it subscribes to the link and after every revision
+event), not through the feed: shifts are per line, and an open one carries a
+layout of up to 256 KB. A shift's product name and GTIN and its
+counterparty's name are the snapshot's once it is open and the records' before
+(the station keeps no copy of counterparties); `ownerDeviceId` names the
+station that opened it, and another station's id means the shift is busy. A
+station creates a shift on its own line while the host answers
+(`POST /v1/device/shifts`), under the office's rules; a station without a line
+is `conflict` on `shift_line`, and a line is no field of the request.
+`requestId`, a lower-case hyphenated UUID the station made up
+(`validate::client_uuid`), makes the create repeatable: the same request of
+the same station answers the shift it created, whatever its body says now,
+with no revision and no audit row. Every device route of stage 2a lives under
+`/v1/device/…`, which `host_request` already lets through, and none returns a
+secret.
 
 ## Marking rules
 

@@ -132,6 +132,11 @@ fn protected_routes() -> Router<AppState> {
         .route("/v1/local-pair", post(crate::routes::pairing::local_pair))
         .route("/v1/device", get(crate::routes::devices::device_info))
         .route("/v1/device/line", put(crate::routes::devices::select_line))
+        .route(
+            "/v1/device/shifts",
+            get(crate::routes::device_shifts::list_device_shifts)
+                .post(crate::routes::device_shifts::create_device_shift),
+        )
         .route("/v1/changes", get(crate::routes::changes::changes))
         .route("/v1/changes/stream", get(crate::routes::changes::stream))
         .route(
@@ -445,6 +450,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_supported_version_passes() {
+        // Protocol 2 (stage 2a) is this build's; 1 (stage 1) is still taken.
+        assert_eq!(call(Some("2")).await.0, StatusCode::OK);
         assert_eq!(call(Some("1")).await.0, StatusCode::OK);
     }
 
@@ -455,7 +462,7 @@ mod tests {
         assert_eq!(body["error"]["code"], "protocol_unsupported");
         assert_eq!(body["error"]["details"]["protocol"], Value::Null);
         assert_eq!(body["error"]["details"]["minProtocol"], 1);
-        assert_eq!(body["error"]["details"]["maxProtocol"], 1);
+        assert_eq!(body["error"]["details"]["maxProtocol"], 2);
     }
 
     #[tokio::test]
@@ -465,5 +472,6 @@ mod tests {
         assert_eq!(body["error"]["details"]["protocol"], 7);
         assert_eq!(call(Some("abc")).await.0, StatusCode::BAD_REQUEST);
         assert_eq!(call(Some("0")).await.0, StatusCode::BAD_REQUEST);
+        assert_eq!(call(Some("3")).await.0, StatusCode::BAD_REQUEST);
     }
 }
