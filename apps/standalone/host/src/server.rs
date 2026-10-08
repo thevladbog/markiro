@@ -244,7 +244,9 @@ fn protected_routes() -> Router<AppState> {
         )
         .route(
             "/v1/office/shifts/{id}",
-            get(crate::routes::office_shifts::get_shift),
+            get(crate::routes::office_shifts::get_shift)
+                .put(crate::routes::office_shifts::update_shift)
+                .delete(crate::routes::office_shifts::delete_shift),
         )
         .route(
             "/v1/office/users",

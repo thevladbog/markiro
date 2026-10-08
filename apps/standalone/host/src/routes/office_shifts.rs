@@ -1,12 +1,14 @@
 //! Shifts in the office (stage 2a spec §4.2, §4.7): `GET /v1/office/shifts`
-//! and `GET …/{id}` (every role); `POST` (administrators and technologists,
+//! and `GET …/{id}` (every role); `POST`, `PUT …/{id}` (with
+//! `expectedRev`) and `DELETE …/{id}` (administrators and technologists,
 //! `planShifts`). A shift is no feed record: every change still takes a host
 //! revision, so open streams wake and stations read their shifts again
 //! (`GET /v1/device/shifts`).
 
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::Json;
-use markiro_proto::{OfficeShift, ShiftCreate, ShiftMode};
+use markiro_proto::{OfficeShift, ShiftCreate, ShiftMode, ShiftStatus, ShiftUpdate};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -252,4 +254,194 @@ pub async fn create_shift(
         .await
         .map_err(ApiError::internal)?;
     Ok(Json(created))
+}
+
+/// `PUT /v1/office/shifts/{id}`: a planned shift changes every field it
+/// sends (its product never changes); an active one only its plan, which
+/// neither its label nor its snapshot shows; a closed one nothing. A line or
+/// a template that changes is checked as at planning; one that stays is
+/// kept even if it was archived, disabled or narrowed since (the station's
+/// open then refuses the template: `template_not_fit`).
+pub async fn update_shift(
+    State(state): State<AppState>,
+    context: OfficeContext,
+    ApiPath(id): ApiPath<String>,
+    ApiJson(update): ApiJson<ShiftUpdate>,
+) -> Result<Json<OfficeShift>, ApiError> {
+    context.require_shift_planning()?;
+    check_mode(
+        update.mode.unwrap_or_default(),
+        update.pallets_enabled.unwrap_or(false),
+    )?;
+    let production_date = update
+        .production_date
+        .as_deref()
+        .map(|date| validate::civil_date("productionDate", date))
+        .transpose()?;
+    if let Some(planned_qty) = update.planned_qty {
+        validate::count("plannedQty", planned_qty, validate::MAX_PLANNED_QTY)?;
+    }
+    validate::count(
+        "boxCapacity",
+        update.box_capacity,
+        validate::MAX_BOX_CAPACITY,
+    )?;
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_shift_planning_in(&mut tx).await?;
+    let current = read(&mut tx, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("no such shift"))?;
+    if current.rev != update.expected_rev {
+        return Err(ApiError::stale_revision(current.rev));
+    }
+    let line_id = update
+        .line_id
+        .clone()
+        .unwrap_or_else(|| current.line_id.clone());
+    let production_date =
+        production_date.map_or_else(|| current.production_date.clone(), shifts::civil_text);
+    let box_template_id = update
+        .box_template_id
+        .clone()
+        .unwrap_or_else(|| current.box_template_id.clone());
+    let box_capacity = update.box_capacity.unwrap_or(current.box_capacity);
+    let planned_qty = update.planned_qty.unwrap_or(current.planned_qty);
+    let counterparty_id = update
+        .counterparty_id
+        .clone()
+        .unwrap_or_else(|| current.counterparty_id.clone());
+    let fixed_changed = line_id != current.line_id
+        || production_date != current.production_date
+        || box_template_id != current.box_template_id
+        || box_capacity != current.box_capacity
+        || counterparty_id != current.counterparty_id;
+    match current.status {
+        ShiftStatus::Planned => {
+            if line_id != current.line_id {
+                require_active_line(&mut tx, &line_id).await?;
+            }
+            if box_template_id != current.box_template_id {
+                let product = shifts::shift_product(&mut tx, &current.product_id).await?;
+                shifts::check_box_template(&mut tx, &box_template_id, product.group).await?;
+            }
+            if let Some(counterparty_id) = &counterparty_id {
+                if current.counterparty_id.as_ref() != Some(counterparty_id) {
+                    shifts::check_counterparty(&mut tx, counterparty_id).await?;
+                }
+            }
+        }
+        ShiftStatus::Active if !fixed_changed => {}
+        status => return Err(shifts::status_conflict(status)),
+    }
+    let Some(details) = audit::update_details(&[
+        ("lineId", json!(current.line_id), json!(line_id)),
+        (
+            "productionDate",
+            json!(current.production_date),
+            json!(production_date),
+        ),
+        (
+            "boxTemplateId",
+            json!(current.box_template_id),
+            json!(box_template_id),
+        ),
+        (
+            "boxCapacity",
+            json!(current.box_capacity),
+            json!(box_capacity),
+        ),
+        ("plannedQty", json!(current.planned_qty), json!(planned_qty)),
+        (
+            "counterpartyId",
+            json!(current.counterparty_id),
+            json!(counterparty_id),
+        ),
+    ]) else {
+        // Nothing actually changed: report the shift as-is without bumping
+        // the revision, writing a row nobody changed, or auditing a no-op.
+        return Ok(Json(current));
+    };
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    sqlx::query(
+        "UPDATE shifts SET line_id = ?, production_date = ?, box_template_id = ?, \
+         box_capacity = ?, planned_qty = ?, counterparty_id = ?, rev = ? WHERE id = ?",
+    )
+    .bind(&line_id)
+    .bind(&production_date)
+    .bind(&box_template_id)
+    .bind(box_capacity)
+    .bind(planned_qty)
+    .bind(&counterparty_id)
+    .bind(rev)
+    .bind(&id)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::SHIFT_UPDATE,
+            target_type: Some("shift"),
+            target_id: Some(&id),
+            outcome: Outcome::Ok,
+            details,
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    let updated = read(&mut tx, &id)
+        .await?
+        .ok_or_else(|| ApiError::internal("shift vanished"))?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(updated))
+}
+
+/// `DELETE /v1/office/shifts/{id}` → 204: only a planned shift, which no
+/// station has entered (entering opens it). It takes a revision with no row
+/// left to stamp, so stations drop it from their lists; its number is not
+/// drawn again. A delete repeated after a lost answer is `not_found`.
+pub async fn delete_shift(
+    State(state): State<AppState>,
+    context: OfficeContext,
+    ApiPath(id): ApiPath<String>,
+) -> Result<StatusCode, ApiError> {
+    context.require_shift_planning()?;
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_shift_planning_in(&mut tx).await?;
+    let current = read(&mut tx, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("no such shift"))?;
+    if current.status != ShiftStatus::Planned {
+        return Err(shifts::status_conflict(current.status));
+    }
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    sqlx::query("DELETE FROM shifts WHERE id = ?")
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::SHIFT_DELETE,
+            target_type: Some("shift"),
+            target_id: Some(&id),
+            outcome: Outcome::Ok,
+            details: json!({ "number": current.number }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
 }

@@ -657,7 +657,8 @@ rules must answer alike, and `host/tests/templates.rs` and
 Deleting a template clears every product preference that names it at the
 delete's revision, so those products ride the feed again, and leaves a
 tombstone; a delete repeated after a lost answer finds the tombstone and
-answers 204 again, and an id that never existed is `not_found`.
+answers 204 again, and an id that never existed is `not_found`. A template a
+planned shift names is not deleted (`template_in_use`, see «Shifts»).
 
 The defaults are one document (`GET/PUT /v1/office/template-defaults`): the
 organization's default of each purpose (`defaultBoxTemplateId`,
@@ -1702,6 +1703,24 @@ change of one takes a host revision, stamped on its `rev`, with no feed item,
 so open streams wake and stations read their shifts again. `OfficeShift`
 carries ids, not names: the office names products, lines and counterparties
 from its own lists.
+
+An edit (`PUT …/{id}`, with `expectedRev`) changes only what it sends: a
+planned shift every field but its product, which is no field of the request;
+an active one only its plan, which neither its label nor its snapshot shows
+(another field sent with another value is `conflict` on `shift_status`, with
+`details.status`); a closed one nothing. A line, a template or a counterparty
+that changes is checked as at planning (a changed template also needs the
+product still in use); one that stays is kept even if it was archived,
+disabled or narrowed since, and the station's opening refuses it then
+(`template_not_fit`). `plannedQty: null` and `counterpartyId: null` clear
+them. Only a planned shift is deleted (`DELETE …/{id}`, 204; an open or a
+closed one is `shift_status`); the delete takes a revision with no row left to
+stamp, and a delete repeated after a lost answer is `not_found`. A template a
+planned shift names is not deleted (`conflict` on `template_in_use`, with
+`details.shiftIds`), since the shift prints with it once a station opens it;
+an open or closed shift has the layout in its snapshot. Disabling or narrowing
+such a template is not refused: the shift then does not open, and the office
+sees why.
 
 ## Marking rules
 

@@ -7,6 +7,7 @@
 //! `test/shift-numbers.test.ts` read every one.
 
 use markiro_proto::{ProductStatus, ShiftMode, ShiftOrigin, ShiftStatus, TemplatePurpose};
+use serde_json::json;
 use sqlx::SqliteConnection;
 
 use crate::error::ApiError;
@@ -78,6 +79,14 @@ pub fn product_inactive() -> ApiError {
         "product_inactive",
         "the product is a draft or archived: a shift needs a product in use",
     )
+}
+
+/// `conflict` on `shift_status`, with the shift's status in `details`: the
+/// request does not suit a shift in that status (an edit of a closed one, a
+/// delete of an open one).
+pub fn status_conflict(status: ShiftStatus) -> ApiError {
+    ApiError::conflict("shift_status", "the shift's status does not allow this")
+        .with_details(json!({ "constraint": "shift_status", "status": status.as_str() }))
 }
 
 /// The product a new shift is made of: an active product (a group and both

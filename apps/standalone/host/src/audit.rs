@@ -40,6 +40,8 @@ pub mod actions {
     pub const TEMPLATE_DEFAULTS_UPDATE: &str = "template_defaults.update";
     /// A shift planned in the office or created at a station.
     pub const SHIFT_CREATE: &str = "shift.create";
+    pub const SHIFT_UPDATE: &str = "shift.update";
+    pub const SHIFT_DELETE: &str = "shift.delete";
 }
 
 /// `details.reason` of a denied row: every denial names one.

@@ -7,7 +7,8 @@
 //! and layout and is never deleted
 //! (`stock_template`): it may be disabled or narrowed, and copied by a
 //! `POST`. A template is never disabled, narrowed out of a category it is
-//! the default of, or deleted while it is a default (`template_is_default`).
+//! the default of, or deleted while it is a default (`template_is_default`),
+//! nor deleted while a planned shift names it (`template_in_use`).
 //! Deleting a template clears the products' preferences that name it, each
 //! product at the delete's revision, and leaves a tombstone.
 
@@ -366,6 +367,22 @@ pub async fn delete_template(
     let usage = templates::usage(&mut tx, &id, current.purpose).await?;
     if usage.organization || !usage.categories.is_empty() {
         return Err(templates::is_default(usage.organization, usage.categories));
+    }
+    // A planned shift prints with this template once a station opens it;
+    // an open or closed shift has the layout in its snapshot.
+    let planned: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM shifts WHERE box_template_id = ? AND status = 'planned' ORDER BY id",
+    )
+    .bind(&id)
+    .fetch_all(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    if !planned.is_empty() {
+        return Err(ApiError::conflict(
+            "template_in_use",
+            "a planned shift prints with this template",
+        )
+        .with_details(json!({ "constraint": "template_in_use", "shiftIds": planned })));
     }
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     // The products' preferences go first and take the revision, so a

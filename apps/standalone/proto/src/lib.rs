@@ -1365,6 +1365,34 @@ pub struct ShiftCreate {
     pub pallets_enabled: bool,
 }
 
+/// `PUT /v1/office/shifts/{id}`: only the fields sent change, over
+/// `expectedRev`. A planned shift takes every field but its product, which
+/// is no field here; an active one only `plannedQty` (another field sent
+/// with another value is `conflict` on `shift_status`); a closed one
+/// nothing. `plannedQty: null` and `counterpartyId: null` clear them; `null`
+/// in another field reads as «not sent» (see [`LineUpdate`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShiftUpdate {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub line_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub production_date: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_template_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_capacity: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
+    pub planned_qty: Option<Option<u32>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "nullable")]
+    pub counterparty_id: Option<Option<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<ShiftMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallets_enabled: Option<bool>,
+    pub expected_rev: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

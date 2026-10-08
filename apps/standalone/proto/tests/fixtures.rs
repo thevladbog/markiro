@@ -11,8 +11,8 @@ use markiro_proto::{
     OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse,
     PairingCode, PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate, ProductGroup,
     ProductRecord, ProductStatus, ProductUpdate, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus,
-    SiteRecord, SsccCounterUpdate, SsccState, TemplateDefaults, TemplateDefaultsUpdate,
-    TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
+    ShiftUpdate, SiteRecord, SsccCounterUpdate, SsccState, TemplateDefaults,
+    TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -714,4 +714,23 @@ fn office_shift_fixtures_round_trip_and_a_plan_carries_no_number_or_status() {
             "{field}"
         );
     }
+}
+
+#[test]
+fn a_shift_update_carries_only_what_changes_and_never_the_product() {
+    let update: ShiftUpdate = round_trip("shift-update.json");
+    // `plannedQty: null` clears the plan; an absent counterparty stays.
+    assert_eq!(
+        (update.planned_qty, update.counterparty_id.clone()),
+        (Some(None), None)
+    );
+    let bare: ShiftUpdate =
+        serde_json::from_value(serde_json::json!({ "expectedRev": 71 })).unwrap();
+    assert_eq!(
+        serde_json::to_value(&bare).unwrap(),
+        serde_json::json!({ "expectedRev": 71 })
+    );
+    let mut value = fixture("shift-update.json");
+    value["productId"] = Value::String("f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b".into());
+    assert!(serde_json::from_value::<ShiftUpdate>(value).is_err());
 }
