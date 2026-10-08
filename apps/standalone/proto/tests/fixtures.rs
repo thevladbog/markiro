@@ -6,12 +6,13 @@ use markiro_proto::{
     DeviceLineRequest, DeviceRecord, DeviceUpdate, ErrorBody, Hello, HelloEnvelope, LabelTemplate,
     LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary, LabelTemplateUpdate,
     LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine, OfficeLoginRequest,
-    OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeUser, OfficeUserCreate,
-    OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord, OperatorCreate, OperatorRecord,
-    OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode,
-    PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate, ProductGroup, ProductRecord,
-    ProductStatus, ProductUpdate, SiteRecord, SsccCounterUpdate, SsccState, TemplateDefaults,
-    TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
+    OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeShift, OfficeUser,
+    OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord, OperatorCreate,
+    OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse,
+    PairingCode, PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate, ProductGroup,
+    ProductRecord, ProductStatus, ProductUpdate, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus,
+    SiteRecord, SsccCounterUpdate, SsccState, TemplateDefaults, TemplateDefaultsUpdate,
+    TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -667,6 +668,50 @@ fn the_pairing_code_fixture_matches_normalize() {
             markiro_proto::pairing::normalize(input).as_deref(),
             case["normalized"].as_str(),
             "{input:?}"
+        );
+    }
+}
+
+#[test]
+fn office_shift_fixtures_round_trip_and_a_plan_carries_no_number_or_status() {
+    let shift: OfficeShift = round_trip("office-shift.json");
+    assert_eq!(
+        (shift.status, shift.mode, shift.created_from),
+        (
+            ShiftStatus::Active,
+            ShiftMode::Aggregation,
+            ShiftOrigin::Office
+        )
+    );
+    let create: ShiftCreate = round_trip("shift-create.json");
+    assert_eq!(
+        (&create.product_id, &create.line_id, &create.box_template_id),
+        (&shift.product_id, &shift.line_id, &shift.box_template_id)
+    );
+    // Left out, the mode is aggregation, pallets are off and the optional
+    // fields are none.
+    let bare: ShiftCreate = serde_json::from_value(serde_json::json!({
+        "productId": create.product_id, "lineId": create.line_id,
+        "productionDate": "2026-10-08", "boxTemplateId": create.box_template_id
+    }))
+    .unwrap();
+    assert_eq!(
+        (
+            bare.mode,
+            bare.pallets_enabled,
+            bare.box_capacity,
+            bare.planned_qty,
+            bare.counterparty_id
+        ),
+        (ShiftMode::Aggregation, false, None, None, None)
+    );
+    // The host draws the number and owns the status.
+    for field in ["number", "status"] {
+        let mut value = fixture("shift-create.json");
+        value[field] = Value::String("planned".into());
+        assert!(
+            serde_json::from_value::<ShiftCreate>(value).is_err(),
+            "{field}"
         );
     }
 }

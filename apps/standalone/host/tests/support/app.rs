@@ -422,3 +422,83 @@ pub async fn audit_trail(app: &TestApp, action: &str) -> Vec<AuditRow> {
         )
         .collect()
 }
+
+/// What a shift is planned from: an active product of the milk group (8)
+/// that holds 12 units a box, a box template for every category, and the
+/// wizard's two lines.
+pub struct ShiftSetup {
+    pub product: String,
+    pub template: String,
+    pub line: String,
+    pub other_line: String,
+}
+
+/// Create the product and the template through the office API (revisions 2
+/// and 3 after the wizard's 1) and find the wizard's lines.
+pub async fn shift_setup(admin: &Admin) -> ShiftSetup {
+    let (status, template) = admin
+        .call(
+            "POST",
+            "/v1/office/templates",
+            Some(serde_json::json!({
+                "name": "Короб 58×40",
+                "purpose": "box",
+                "enabled": true,
+                "spec": { "widthMm": 58, "heightMm": 40, "dpi": 203, "language": "zpl", "elements": [] }
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{template}");
+    let (status, product) = admin
+        .call(
+            "POST",
+            "/v1/office/products",
+            Some(serde_json::json!({
+                "gtin14": "04600682000013",
+                "name": "Молоко 3,2% 0,9 л",
+                "printName": "Молоко 3,2%",
+                "chzProductGroupCode": 8,
+                "boxCapacity": 12,
+                "palletBoxCapacity": 40,
+                "shelfLifeDays": 10
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{product}");
+    let (status, lines) = admin.call("GET", "/v1/office/lines", None).await;
+    assert_eq!(status, StatusCode::OK, "{lines}");
+    let line = |name: &str| {
+        lines
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|line| line["name"] == name)
+            .and_then(|line| line["id"].as_str())
+            .unwrap_or_else(|| panic!("the wizard made {name}"))
+            .to_owned()
+    };
+    ShiftSetup {
+        product: product["id"].as_str().unwrap().to_owned(),
+        template: template["id"].as_str().unwrap().to_owned(),
+        line: line("Линия 1"),
+        other_line: line("Линия 2"),
+    }
+}
+
+/// The smallest plan of a shift: the product, the first line, the template
+/// and 8 October 2026.
+pub fn shift_body(setup: &ShiftSetup) -> Value {
+    serde_json::json!({
+        "productId": setup.product,
+        "lineId": setup.line,
+        "productionDate": "2026-10-08",
+        "boxTemplateId": setup.template
+    })
+}
+
+/// Plan a shift of `body` as the administrator; returns the record.
+pub async fn plan_shift(admin: &Admin, body: Value) -> Value {
+    let (status, shift) = admin.call("POST", "/v1/office/shifts", Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{shift}");
+    shift
+}

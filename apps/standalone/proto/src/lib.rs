@@ -1249,11 +1249,127 @@ impl std::str::FromStr for ShiftOrigin {
     }
 }
 
+/// A shift's status: planned in the office, active once a station opened it
+/// (and froze its snapshot), closed for good.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShiftStatus {
+    Planned,
+    Active,
+    Closed,
+}
+
+impl ShiftStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShiftStatus::Planned => "planned",
+            ShiftStatus::Active => "active",
+            ShiftStatus::Closed => "closed",
+        }
+    }
+}
+
+impl std::str::FromStr for ShiftStatus {
+    type Err = UnknownVariant;
+
+    /// The name [`ShiftStatus::as_str`] gives, as `shifts.status` stores it.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("shift status", text)
+    }
+}
+
+/// What a shift does, as the cloud's: aggregation into boxes, or validation
+/// of single codes. The host takes only aggregation in stage 2a; validation
+/// (stage 3) needs no new shape.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShiftMode {
+    #[default]
+    Aggregation,
+    Validation,
+}
+
+impl ShiftMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ShiftMode::Aggregation => "aggregation",
+            ShiftMode::Validation => "validation",
+        }
+    }
+}
+
+impl std::str::FromStr for ShiftMode {
+    type Err = UnknownVariant;
+
+    /// The name [`ShiftMode::as_str`] gives, as `shifts.mode` stores it.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("shift mode", text)
+    }
+}
+
+/// A shift as the office sees it (`GET /v1/office/shifts`, `GET …/{id}` and
+/// the answer of every office write). `number` is the host's
+/// (`OCT26-004`, `/S` for a station's). Names come from the office's own
+/// lists of products, lines and counterparties.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeShift {
+    pub id: String,
+    pub number: String,
+    pub status: ShiftStatus,
+    pub mode: ShiftMode,
+    pub pallets_enabled: bool,
+    pub created_from: ShiftOrigin,
+    pub product_id: String,
+    pub line_id: String,
+    pub counterparty_id: Option<String>,
+    /// The shift's civil date, `YYYY-MM-DD`; the number's month comes from it.
+    pub production_date: String,
+    pub planned_qty: Option<u32>,
+    pub box_capacity: u32,
+    pub box_template_id: String,
+    /// The station that opened the shift; `null` while it is planned.
+    pub owner_device_id: Option<String>,
+    pub opened_at: Option<String>,
+    pub closed_at: Option<String>,
+    /// One of the domain's six `SHIFT_CLOSE_REASON_CODES`, from a station's
+    /// close (plan 2a2).
+    pub close_reason_code: Option<String>,
+    /// The office's words when it closed the shift.
+    pub close_reason_text: Option<String>,
+    /// When facts first arrived after the shift was closed (plan 2a2).
+    pub late_data_at: Option<String>,
+    pub created_at: String,
+    pub rev: i64,
+}
+
+/// `POST /v1/office/shifts`: a planned shift. `boxCapacity` left out is the
+/// product's; `mode` left out is aggregation and `palletsEnabled` false,
+/// the only values stage 2a takes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShiftCreate {
+    pub product_id: String,
+    pub line_id: String,
+    pub production_date: String,
+    pub box_template_id: String,
+    #[serde(default)]
+    pub box_capacity: Option<u32>,
+    #[serde(default)]
+    pub planned_qty: Option<u32>,
+    #[serde(default)]
+    pub counterparty_id: Option<String>,
+    #[serde(default)]
+    pub mode: ShiftMode,
+    #[serde(default)]
+    pub pallets_enabled: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        category_default_id, DeviceKind, OfficeRole, ProductStatus, ShiftOrigin, TemplatePurpose,
-        UnknownVariant,
+        category_default_id, DeviceKind, OfficeRole, ProductStatus, ShiftMode, ShiftOrigin,
+        ShiftStatus, TemplatePurpose, UnknownVariant,
     };
 
     /// Every `TemplatePurpose`, listed like `device_kinds` below.
@@ -1352,6 +1468,32 @@ mod tests {
         origins
     }
 
+    /// Every `ShiftStatus`, listed the same way.
+    fn shift_statuses() -> Vec<ShiftStatus> {
+        let statuses = vec![
+            ShiftStatus::Planned,
+            ShiftStatus::Active,
+            ShiftStatus::Closed,
+        ];
+        for status in &statuses {
+            match status {
+                ShiftStatus::Planned | ShiftStatus::Active | ShiftStatus::Closed => {}
+            }
+        }
+        statuses
+    }
+
+    /// Every `ShiftMode`, listed the same way.
+    fn shift_modes() -> Vec<ShiftMode> {
+        let modes = vec![ShiftMode::Aggregation, ShiftMode::Validation];
+        for mode in &modes {
+            match mode {
+                ShiftMode::Aggregation | ShiftMode::Validation => {}
+            }
+        }
+        modes
+    }
+
     /// The host stores `as_str` names and reads them back with `FromStr`;
     /// serde writes the same names on the wire.
     #[test]
@@ -1368,6 +1510,15 @@ mod tests {
             assert_eq!(origin.as_str().parse::<ShiftOrigin>(), Ok(origin));
             assert_eq!(serde_json::to_value(origin).unwrap(), origin.as_str());
         }
+        for status in shift_statuses() {
+            assert_eq!(status.as_str().parse::<ShiftStatus>(), Ok(status));
+            assert_eq!(serde_json::to_value(status).unwrap(), status.as_str());
+        }
+        for mode in shift_modes() {
+            assert_eq!(mode.as_str().parse::<ShiftMode>(), Ok(mode));
+            assert_eq!(serde_json::to_value(mode).unwrap(), mode.as_str());
+        }
+        assert_eq!(ShiftMode::default(), ShiftMode::Aggregation);
         assert_eq!(
             "admin".parse::<ShiftOrigin>().unwrap_err().to_string(),
             "unknown shift origin \"admin\""

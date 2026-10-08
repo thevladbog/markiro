@@ -1,0 +1,440 @@
+mod support;
+
+use axum::http::StatusCode;
+use serde_json::{json, Value};
+use support::app::{
+    admin, audit_row, audit_rows, audit_trail, empty, host_revision, plan_shift, request,
+    shift_body, shift_setup, with_device, Admin, ShiftSetup,
+};
+
+/// The record of `shift_body(setup)` planned at `rev`: the product's box
+/// capacity, no plan and no counterparty.
+fn planned(id: &str, number: &str, setup: &ShiftSetup, rev: i64) -> Value {
+    json!({
+        "id": id, "number": number, "status": "planned", "mode": "aggregation",
+        "palletsEnabled": false, "createdFrom": "office", "productId": setup.product,
+        "lineId": setup.line, "counterpartyId": null, "productionDate": "2026-10-08",
+        "plannedQty": null, "boxCapacity": 12, "boxTemplateId": setup.template,
+        "ownerDeviceId": null, "openedAt": null, "closedAt": null, "closeReasonCode": null,
+        "closeReasonText": null, "lateDataAt": null, "createdAt": "2026-09-21T14:13:20Z",
+        "rev": rev
+    })
+}
+
+fn path(shift: &Value) -> String {
+    format!("/v1/office/shifts/{}", shift["id"].as_str().unwrap())
+}
+
+fn refusal(body: &Value) -> (Value, Value) {
+    (
+        body["error"]["code"].clone(),
+        body["error"]["details"].clone(),
+    )
+}
+
+/// This station's own id, as the host has it.
+async fn station_id(admin: &Admin) -> String {
+    let (status, device) = admin
+        .app
+        .send(empty(with_device(request("GET", "/v1/device"), &admin.key)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{device}");
+    device["id"].as_str().unwrap().to_owned()
+}
+
+/// Close a shift straight in its table, as if this station had opened and
+/// closed it (the close comes with the routes of later tasks).
+async fn close_directly(admin: &Admin, shift: &Value) {
+    let device = station_id(admin).await;
+    sqlx::query(
+        "UPDATE shifts SET status = 'closed', snapshot = '{}', opened_at = ?1, \
+         owner_device_id = ?2, closed_at = ?1, closed_by_kind = 'device', closed_by = ?2 \
+         WHERE id = ?3",
+    )
+    .bind(admin.app.state.timestamp())
+    .bind(&device)
+    .bind(shift["id"].as_str().unwrap())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn an_administrator_plans_a_shift_and_reads_it_back() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    // The wizard took revision 1, the template 2 and the product 3.
+    assert_eq!(shift, planned(&id, "OCT26-001", &setup, 4));
+    assert_eq!(host_revision(&admin.app).await, 4);
+    assert_eq!(
+        audit_trail(&admin.app, "shift.create").await,
+        vec![admin.row(
+            "shift.create",
+            "shift",
+            &id,
+            json!({
+                "number": "OCT26-001", "productId": setup.product, "lineId": setup.line,
+                "productionDate": "2026-10-08"
+            })
+        )]
+    );
+    let (status, one) = admin.call("GET", &path(&shift), None).await;
+    assert_eq!((status, one), (StatusCode::OK, shift.clone()));
+    let (status, list) = admin.call("GET", "/v1/office/shifts", None).await;
+    assert_eq!((status, list), (StatusCode::OK, json!([shift])));
+    let (status, missing) = admin
+        .call("GET", "/v1/office/shifts/no-such-shift", None)
+        .await;
+    assert_eq!(
+        (status, missing["error"]["code"].clone()),
+        (StatusCode::NOT_FOUND, json!("not_found"))
+    );
+}
+
+#[tokio::test]
+async fn numbers_count_per_month_of_the_production_date() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let mut body = shift_body(&setup);
+    let first = plan_shift(&admin, body.clone()).await;
+    let second = plan_shift(&admin, body.clone()).await;
+    body["productionDate"] = json!("2026-11-02");
+    let november = plan_shift(&admin, body.clone()).await;
+    body["productionDate"] = json!("2026-10-31");
+    let third = plan_shift(&admin, body).await;
+    assert_eq!(
+        [&first, &second, &november, &third].map(|shift| shift["number"].clone()),
+        [
+            json!("OCT26-001"),
+            json!("OCT26-002"),
+            json!("NOV26-001"),
+            json!("OCT26-003")
+        ]
+    );
+    let counters: Vec<(String, i64)> =
+        sqlx::query_as("SELECT month_key, last_seq FROM shift_number_counters ORDER BY month_key")
+            .fetch_all(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        counters,
+        vec![("NOV26".to_owned(), 1), ("OCT26".to_owned(), 3)]
+    );
+}
+
+#[tokio::test]
+async fn a_plan_takes_every_field_it_names() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let (status, counterparty) = admin
+        .call(
+            "POST",
+            "/v1/office/counterparties",
+            Some(json!({ "name": "ООО «Северный берег»", "gln": "4601234000017", "gs1Prefixes": [] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{counterparty}");
+    let mut body = shift_body(&setup);
+    body["lineId"] = json!(setup.other_line);
+    body["boxCapacity"] = json!(6);
+    body["plannedQty"] = json!(1200);
+    body["counterpartyId"] = counterparty["id"].clone();
+    body["mode"] = json!("aggregation");
+    body["palletsEnabled"] = json!(false);
+    let shift = plan_shift(&admin, body).await;
+    assert_eq!(
+        [
+            shift["lineId"].clone(),
+            shift["boxCapacity"].clone(),
+            shift["plannedQty"].clone(),
+            shift["counterpartyId"].clone()
+        ],
+        [
+            json!(setup.other_line),
+            json!(6),
+            json!(1200),
+            counterparty["id"].clone()
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_technologist_plans_shifts_too_and_a_device_alone_reads_none() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let (token, technologist) = admin.technologist_session().await;
+    let (status, shift) = admin
+        .call_as(
+            &token,
+            "POST",
+            "/v1/office/shifts",
+            Some(shift_body(&setup)),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{shift}");
+    let id = shift["id"].as_str().unwrap();
+    assert_eq!(
+        audit_trail(&admin.app, "shift.create").await,
+        vec![audit_row(
+            &technologist,
+            "shift.create",
+            "shift",
+            id,
+            json!({
+                "number": "OCT26-001", "productId": setup.product, "lineId": setup.line,
+                "productionDate": "2026-10-08"
+            })
+        )]
+    );
+    let (status, list) = admin
+        .call_as(&token, "GET", "/v1/office/shifts", None)
+        .await;
+    assert_eq!((status, list), (StatusCode::OK, json!([shift])));
+    // A device key opens no office route.
+    for (method, path) in [
+        ("GET", "/v1/office/shifts".to_owned()),
+        ("GET", format!("/v1/office/shifts/{id}")),
+        ("POST", "/v1/office/shifts".to_owned()),
+    ] {
+        let (status, body) = admin
+            .app
+            .send(empty(with_device(request(method, &path), &admin.key)))
+            .await;
+        assert_eq!(
+            (status, body["error"]["details"]["credential"].clone()),
+            (StatusCode::UNAUTHORIZED, json!("session")),
+            "{method} {path}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn a_plan_needs_an_active_product_an_active_line_and_a_fitting_template() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let template = |purpose: &str, enabled: bool, codes: Value| {
+        json!({
+            "name": "Другой", "purpose": purpose, "enabled": enabled,
+            "chzProductGroupCodes": codes, "spec": { "widthMm": 58 }
+        })
+    };
+    let mut ids = Vec::new();
+    for body in [
+        template("pallet", true, Value::Null),
+        template("box", false, Value::Null),
+        template("box", true, json!([15])),
+    ] {
+        let (status, created) = admin.call("POST", "/v1/office/templates", Some(body)).await;
+        assert_eq!(status, StatusCode::OK, "{created}");
+        ids.push(created["id"].clone());
+    }
+    let (status, draft) = admin
+        .call(
+            "POST",
+            "/v1/office/products",
+            Some(json!({ "gtin14": "04600682000020", "name": "Кефир" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{draft}");
+    let (status, archived) = admin
+        .call(
+            "POST",
+            "/v1/office/products",
+            Some(json!({
+                "gtin14": "04600682000037", "name": "Ряженка", "chzProductGroupCode": 8,
+                "boxCapacity": 12, "palletBoxCapacity": 40
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{archived}");
+    let mut archive = archived.clone();
+    for computed in ["id", "status", "rev"] {
+        archive.as_object_mut().unwrap().remove(computed);
+    }
+    archive["archived"] = json!(true);
+    archive["expectedRev"] = archived["rev"].clone();
+    let (status, body) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/products/{}", archived["id"].as_str().unwrap()),
+            Some(archive),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, line) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/lines/{}", setup.other_line),
+            Some(json!({ "archived": true, "expectedRev": 1 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{line}");
+    let (status, counterparty) = admin
+        .call(
+            "POST",
+            "/v1/office/counterparties",
+            Some(json!({ "name": "ООО «Берег»", "gln": "4601234000017", "gs1Prefixes": [] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{counterparty}");
+    let (status, body) = admin
+        .call(
+            "PUT",
+            &format!(
+                "/v1/office/counterparties/{}",
+                counterparty["id"].as_str().unwrap()
+            ),
+            Some(json!({
+                "name": "ООО «Берег»", "gln": "4601234000017", "gs1Prefixes": [],
+                "archived": true, "expectedRev": counterparty["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let field = |name: &str| (json!("validation_failed"), json!({ "field": name }));
+    let inactive = (
+        json!("conflict"),
+        json!({ "constraint": "product_inactive" }),
+    );
+    for (change, expected) in [
+        (
+            json!({ "productId": "no-such-product" }),
+            field("productId"),
+        ),
+        (json!({ "productId": draft["id"] }), inactive.clone()),
+        (json!({ "productId": archived["id"] }), inactive),
+        (json!({ "lineId": "no-such-line" }), field("lineId")),
+        (json!({ "lineId": setup.other_line }), field("lineId")),
+        (
+            json!({ "counterpartyId": "no-such-counterparty" }),
+            field("counterpartyId"),
+        ),
+        (
+            json!({ "counterpartyId": counterparty["id"] }),
+            field("counterpartyId"),
+        ),
+        (
+            json!({ "boxTemplateId": "no-such-template" }),
+            field("boxTemplateId"),
+        ),
+        (json!({ "boxTemplateId": ids[0] }), field("boxTemplateId")),
+        (json!({ "boxTemplateId": ids[1] }), field("boxTemplateId")),
+        (json!({ "boxTemplateId": ids[2] }), field("boxTemplateId")),
+        (
+            json!({ "productionDate": "2026-02-29" }),
+            field("productionDate"),
+        ),
+        (
+            json!({ "productionDate": " 2026-10-08" }),
+            field("productionDate"),
+        ),
+        (json!({ "plannedQty": 0 }), field("plannedQty")),
+        (json!({ "plannedQty": 10_000_001 }), field("plannedQty")),
+        (json!({ "boxCapacity": 0 }), field("boxCapacity")),
+        (json!({ "boxCapacity": 100_001 }), field("boxCapacity")),
+        (json!({ "mode": "validation" }), field("mode")),
+        (json!({ "palletsEnabled": true }), field("palletsEnabled")),
+    ] {
+        let mut body = shift_body(&setup);
+        for (key, value) in change.as_object().unwrap() {
+            body[key] = value.clone();
+        }
+        let (status, refused) = admin.call("POST", "/v1/office/shifts", Some(body)).await;
+        let expected_status = if expected.0 == "conflict" {
+            StatusCode::CONFLICT
+        } else {
+            StatusCode::BAD_REQUEST
+        };
+        assert_eq!(
+            (status, refusal(&refused)),
+            (expected_status, expected),
+            "{change}"
+        );
+    }
+    // A field the request may not carry, and a mode no build knows.
+    for change in [
+        json!({ "status": "active" }),
+        json!({ "number": "OCT26-001" }),
+        json!({ "mode": "pallets" }),
+        json!({ "plannedQty": -1 }),
+    ] {
+        let mut body = shift_body(&setup);
+        for (key, value) in change.as_object().unwrap() {
+            body[key] = value.clone();
+        }
+        let (status, refused) = admin.call("POST", "/v1/office/shifts", Some(body)).await;
+        assert_eq!(
+            (status, refused["error"]["code"].clone()),
+            (StatusCode::BAD_REQUEST, json!("validation_failed")),
+            "{change}"
+        );
+        assert!(refused["error"]["details"].is_null(), "{change}: {refused}");
+    }
+    // Nothing was written: no row, no revision, no number drawn.
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let (_, list) = admin.call("GET", "/v1/office/shifts", None).await;
+    assert_eq!(list, json!([]));
+    let counters: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM shift_number_counters")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(counters, 0);
+}
+
+#[tokio::test]
+async fn the_list_holds_open_shifts_and_recent_closed_ones_or_a_period() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    // The host's clock reads 2026-09-21, so the last 31 days start on
+    // 2026-08-21.
+    let mut shifts = Vec::new();
+    for date in ["2026-01-10", "2026-08-20", "2026-08-21", "2026-12-01"] {
+        let mut body = shift_body(&setup);
+        body["productionDate"] = json!(date);
+        shifts.push(plan_shift(&admin, body).await);
+    }
+    close_directly(&admin, &shifts[1]).await;
+    close_directly(&admin, &shifts[2]).await;
+    let read = |shift: &Value| shift["id"].clone();
+    let ids = |list: &Value| -> Vec<Value> { list.as_array().unwrap().iter().map(read).collect() };
+
+    let (status, list) = admin.call("GET", "/v1/office/shifts", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    // Newest production date first; the planned shift of January stays.
+    assert_eq!(
+        ids(&list),
+        vec![read(&shifts[3]), read(&shifts[2]), read(&shifts[0])]
+    );
+    let period = |query: &str| format!("/v1/office/shifts?{query}");
+    for (query, expected) in [
+        (
+            "from=2026-01-01&to=2026-08-20",
+            vec![read(&shifts[1]), read(&shifts[0])],
+        ),
+        ("from=2026-08-21", vec![read(&shifts[3]), read(&shifts[2])]),
+        ("to=2026-01-10", vec![read(&shifts[0])]),
+        ("from=2026-08-20&to=2026-08-20", vec![read(&shifts[1])]),
+    ] {
+        let (status, list) = admin.call("GET", &period(query), None).await;
+        assert_eq!((status, ids(&list)), (StatusCode::OK, expected), "{query}");
+    }
+    for (query, field) in [
+        ("from=2026-02-30", Some("from")),
+        ("to=26-01-01", Some("to")),
+        ("from=2026-09-02&to=2026-09-01", Some("to")),
+        ("status=closed", None),
+    ] {
+        let (status, refused) = admin.call("GET", &period(query), None).await;
+        assert_eq!(
+            (status, refused["error"]["details"]["field"].as_str()),
+            (StatusCode::BAD_REQUEST, field),
+            "{query}"
+        );
+    }
+}

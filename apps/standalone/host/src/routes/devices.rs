@@ -47,8 +47,12 @@ pub async fn device_info(
     read_info(&mut conn, &device).await.map(Json)
 }
 
-/// `line_id` names an existing, active line.
-async fn require_active_line(conn: &mut SqliteConnection, line_id: &str) -> Result<(), ApiError> {
+/// `line_id` names an existing, active line: `validation_failed` on
+/// `lineId` otherwise.
+pub async fn require_active_line(
+    conn: &mut SqliteConnection,
+    line_id: &str,
+) -> Result<(), ApiError> {
     let archived: Option<i64> = sqlx::query_scalar("SELECT archived FROM lines WHERE id = ?")
         .bind(line_id)
         .fetch_optional(conn)

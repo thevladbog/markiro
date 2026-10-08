@@ -172,6 +172,38 @@ impl OfficeContext {
             Err(ApiError::forbidden("a catalog role is required"))
         }
     }
+
+    /// The early check of a shift write: planning, editing, deleting and
+    /// closing a shift (stage 2a spec §4.9, `planShifts`).
+    pub fn require_shift_planning(&self) -> Result<(), ApiError> {
+        if plans_shifts(self.user.role) {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden("a shift planning role is required"))
+        }
+    }
+
+    /// Re-check shift planning rights inside the caller's write
+    /// transaction, as [`Self::require_catalog_in`] does for the catalog.
+    pub async fn require_shift_planning_in(
+        &self,
+        conn: &mut SqliteConnection,
+    ) -> Result<(), ApiError> {
+        if plans_shifts(self.live_role_in(conn).await?) {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden("a shift planning role is required"))
+        }
+    }
+}
+
+/// Whether a role plans, edits, deletes and closes shifts (stage 2a spec
+/// §4.9: administrators and technologists). No wildcard arm: a new role does
+/// not compile until it is placed here.
+pub fn plans_shifts(role: OfficeRole) -> bool {
+    match role {
+        OfficeRole::Admin | OfficeRole::Technologist => true,
+    }
 }
 
 /// Whether a role changes the catalog, label templates and their defaults

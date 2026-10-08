@@ -238,6 +238,15 @@ fn protected_routes() -> Router<AppState> {
                 .put(crate::routes::template_defaults::put_template_defaults),
         )
         .route(
+            "/v1/office/shifts",
+            get(crate::routes::office_shifts::list_shifts)
+                .post(crate::routes::office_shifts::create_shift),
+        )
+        .route(
+            "/v1/office/shifts/{id}",
+            get(crate::routes::office_shifts::get_shift),
+        )
+        .route(
             "/v1/office/users",
             get(crate::routes::office_users::list_users)
                 .post(crate::routes::office_users::create_user),

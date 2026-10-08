@@ -387,6 +387,31 @@ pub fn count(field: &str, value: Option<u32>, max: u32) -> Result<(), ApiError> 
     }
 }
 
+/// The largest plan of a shift. The cloud bounds none (`min(1)`); this cap
+/// only keeps a typing slip out of production.
+pub const MAX_PLANNED_QTY: u32 = 10_000_000;
+
+/// A civil date `YYYY-MM-DD` of the years 1-9999 (`shifts::civil_date`),
+/// not trimmed: a date is no free text, and the office sends what its date
+/// field holds.
+pub fn civil_date(field: &str, text: &str) -> Result<time::Date, ApiError> {
+    crate::shifts::civil_date(text)
+        .ok_or_else(|| ApiError::validation(field, "a real calendar date YYYY-MM-DD is required"))
+}
+
+/// An identifier the client makes up (a station's request id): a UUID in
+/// its canonical form, lower-case and hyphenated, as `crypto.randomUUID()`
+/// writes it, so one id never has two spellings.
+pub fn client_uuid(field: &str, text: &str) -> Result<(), ApiError> {
+    match uuid::Uuid::try_parse(text) {
+        Ok(parsed) if parsed.hyphenated().to_string() == text => Ok(()),
+        _ => Err(ApiError::validation(
+            field,
+            "a lower-case hyphenated UUID is required",
+        )),
+    }
+}
+
 /// A label template's name: trimmed, 1-200 characters, as the cloud's.
 pub fn template_name(field: &str, name: &str) -> Result<String, ApiError> {
     clean_text(field, name, 200, "the name").map(str::to_owned)

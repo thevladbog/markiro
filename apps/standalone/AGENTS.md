@@ -269,7 +269,11 @@ another try.
   defaults, which administrators and technologists make (spec §4.8,
   `editCatalog`) — check `require_catalog` early and `require_catalog_in`
   inside the transaction; `auth::edits_catalog` names the roles, with no
-  wildcard arm, so a new role does not compile until it is placed.
+  wildcard arm, so a new role does not compile until it is placed. Shift
+  writes — planning, editing, deleting and closing, which administrators and
+  technologists make (stage 2a spec §4.9, `planShifts`) — check
+  `require_shift_planning` and `require_shift_planning_in` the same way, and
+  `auth::plans_shifts` names their roles, also with no wildcard arm.
 
 ## Change feed
 
@@ -1677,6 +1681,27 @@ a civil date `YYYY-MM-DD` of the years 1–9999, as the cloud's
 `Date.UTC` takes the years 0–99 as 1900–1999), so the fixture leaves that
 year out. A number is drawn once, when the shift is created: an edit of the
 production date keeps it, and a deleted shift's number is not drawn again.
+
+The office plans a shift (`POST /v1/office/shifts`; migration
+`0009_shifts_sscc_blocks.sql`): an active product that is not archived (a
+draft or an archived one is `conflict` on `product_inactive`, an unknown one
+`validation_failed` on `productId`), an active line, a counterparty in use or
+none, a box template that fits the product (`templates::fits`: enabled, of
+the box purpose, covering the product's group), the production date, a box
+capacity (the product's when left out; at most `MAX_BOX_CAPACITY`) and a plan
+or none (at most `MAX_PLANNED_QTY`, 10 000 000). `mode` and `palletsEnabled`
+are the cloud's shape; stage 2a takes only `aggregation` and `false`
+(`validation_failed` on either otherwise), so stages 2b and 3 need no new
+shape. Every office role reads shifts (`GET /v1/office/shifts`, `GET …/{id}`);
+administrators and technologists write them (`planShifts`, «Writes»). The
+list without a period holds every planned and active shift and the closed
+ones produced in the last 31 days of the host's clock (UTC); `?from=&to=`
+(either may be left out) every shift produced in the period, both ends
+included; newest production date first. A shift is no feed record, but every
+change of one takes a host revision, stamped on its `rev`, with no feed item,
+so open streams wake and stations read their shifts again. `OfficeShift`
+carries ids, not names: the office names products, lines and counterparties
+from its own lists.
 
 ## Marking rules
 
