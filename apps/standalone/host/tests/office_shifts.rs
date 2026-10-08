@@ -4,7 +4,8 @@ use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
     admin, audit_row, audit_rows, audit_trail, empty, host_revision, plan_shift, request,
-    shift_body, shift_setup, with_device, Admin, ShiftSetup,
+    shift_body, shift_setup, turn_the_user_off_at_the_next_activity, with_device, Admin,
+    ShiftSetup,
 };
 
 /// The record of `shift_body(setup)` planned at `rev`: the product's box
@@ -122,6 +123,124 @@ async fn numbers_count_per_month_of_the_production_date() {
         counters,
         vec![("NOV26".to_owned(), 1), ("OCT26".to_owned(), 3)]
     );
+    // The list puts the newest production date first, and within one date
+    // (the clock is fixed, so `created_at` ties) the higher number first. The
+    // ids are random, so give the older shift the smaller id: only the number
+    // then puts the newer one first, on every run.
+    for (shift, id) in [
+        (&first, "00000000-0000-4000-8000-000000000001"),
+        (&second, "00000000-0000-4000-8000-000000000002"),
+    ] {
+        sqlx::query("UPDATE shifts SET id = ?1 WHERE id = ?2")
+            .bind(id)
+            .bind(shift["id"].as_str().unwrap())
+            .execute(&admin.app.state.pool)
+            .await
+            .unwrap();
+    }
+    let (status, list) = admin.call("GET", "/v1/office/shifts", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(
+        list.as_array()
+            .unwrap()
+            .iter()
+            .map(|shift| shift["number"].clone())
+            .collect::<Vec<_>>(),
+        [
+            json!("NOV26-001"),
+            json!("OCT26-003"),
+            json!("OCT26-002"),
+            json!("OCT26-001")
+        ]
+    );
+}
+
+/// A box template scoped to the product's own group fits it; the plan names
+/// the template and the shift keeps it.
+#[tokio::test]
+async fn a_box_template_scoped_to_the_products_group_fits_it() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    for codes in [json!([8]), json!([8, 15])] {
+        let (status, template) = admin
+            .call(
+                "POST",
+                "/v1/office/templates",
+                Some(json!({
+                    "name": "Короб молока", "purpose": "box", "enabled": true,
+                    "chzProductGroupCodes": codes, "spec": { "widthMm": 58 }
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{template}");
+        let mut body = shift_body(&setup);
+        body["boxTemplateId"] = template["id"].clone();
+        let shift = plan_shift(&admin, body).await;
+        assert_eq!(shift["boxTemplateId"], template["id"], "{codes}");
+    }
+}
+
+/// The planning route re-reads the user's session and role inside the write
+/// transaction, not only in the extractor: a user turned off after the
+/// extractor read them as active (a trigger does it at the moment the
+/// extractor records the session's activity) cannot plan a shift. The refusal
+/// is the route's own and leaves no shift, no audit row, no revision and no
+/// number drawn.
+#[tokio::test]
+async fn planning_stops_a_user_turned_off_after_the_extractor_passed() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let (tech, tech_id) = admin.technologist_session().await;
+    let session_id: String = sqlx::query_scalar("SELECT id FROM office_sessions WHERE user_id = ?")
+        .bind(&tech_id)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    turn_the_user_off_at_the_next_activity(&admin.app, &tech_id).await;
+    // Let a minute pass, so that the extractor records activity.
+    admin.app.clock.advance(time::Duration::minutes(2));
+    let (status, error) = admin
+        .call_as(&tech, "POST", "/v1/office/shifts", Some(shift_body(&setup)))
+        .await;
+    assert_eq!(
+        (
+            status,
+            error["error"]["code"].clone(),
+            error["error"]["details"]["credential"].clone()
+        ),
+        (
+            StatusCode::UNAUTHORIZED,
+            json!("unauthorized"),
+            json!("session")
+        ),
+        "{error}"
+    );
+    let active: i64 = sqlx::query_scalar("SELECT active FROM office_users WHERE id = ?")
+        .bind(&tech_id)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(active, 0, "the trigger ran after the extractor");
+    let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM office_sessions WHERE id = ?")
+        .bind(&session_id)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        sessions, 1,
+        "the refusal is the route's, not the extractor's"
+    );
+    let written: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM shifts) + (SELECT COUNT(*) FROM shift_number_counters)",
+    )
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(written, 0, "no shift and no number drawn");
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
 }
 
 #[tokio::test]
