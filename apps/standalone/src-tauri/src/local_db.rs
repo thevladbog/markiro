@@ -556,7 +556,10 @@ impl LocalDbState {
     /// set stays openable together. A file that cannot be moved puts back
     /// the ones already moved and fails the call; so does a name that is
     /// already taken (an earlier set-aside with the same stamp), which a
-    /// rename would silently replace. Whether this database may be set aside at
+    /// rename would silently replace; so does a set that an earlier failed
+    /// put-back left split (`set_is_split`), which another move would part for
+    /// good. Each failure leaves a trace on stderr (the error kind and the
+    /// part of the set, no path). Whether this database may be set aside at
     /// all is the caller's decision: `device_forget` calls it only for a
     /// corrupt one ([`OpenFailure::Corrupt`]), after the unsent-records
     /// guard. Answers where the database went, `None` when there was nothing
@@ -579,6 +582,12 @@ impl LocalDbState {
         if self.db.get().is_some() {
             return Ok(None);
         }
+        if set_is_split(dir)? {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "an earlier set-aside left the database files split",
+            ));
+        }
         let aside = format!("{FILE_NAME}.unreadable-{stamp}");
         let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
         let mut database = None;
@@ -597,9 +606,23 @@ impl LocalDbState {
                 std::fs::rename(&from, &to)
             };
             if let Err(error) = moving {
+                let part = if suffix.is_empty() {
+                    "database"
+                } else {
+                    suffix
+                };
+                eprintln!(
+                    "standalone: setting the local database aside failed at its {part} file: {:?}",
+                    error.kind()
+                );
                 for (back, place) in moved.iter().rev() {
                     // Best effort: a file left aside is still kept, not lost.
-                    let _ = std::fs::rename(place, back);
+                    if let Err(error) = std::fs::rename(place, back) {
+                        eprintln!(
+                            "standalone: a file of the local database could not be put back after a failed set-aside: {:?}",
+                            error.kind()
+                        );
+                    }
                 }
                 return Err(error);
             }
@@ -621,6 +644,42 @@ impl LocalDbState {
             .unwrap_or_else(std::sync::PoisonError::into_inner) = failure;
         Ok(database)
     }
+}
+
+/// Whether an earlier set-aside left the files of one database split: a side
+/// file (`-wal`, `-shm`, `-journal`) under an `.unreadable-<stamp>` name with
+/// no database file under that stamp, or side files at the original names
+/// with no database file there. A failed put-back does this; moving what is
+/// left under a new stamp would part the files for good.
+fn set_is_split(dir: &Path) -> std::io::Result<bool> {
+    let side_at_original = FILE_SUFFIXES[1..].iter().any(|suffix| {
+        dir.join(format!("{FILE_NAME}{suffix}"))
+            .symlink_metadata()
+            .is_ok()
+    });
+    if side_at_original && dir.join(FILE_NAME).symlink_metadata().is_err() {
+        return Ok(true);
+    }
+    let prefix = format!("{FILE_NAME}.unreadable-");
+    let mut databases = std::collections::HashSet::new();
+    let mut sides = std::collections::HashSet::new();
+    for entry in std::fs::read_dir(dir)? {
+        let name = entry?.file_name();
+        let Some(rest) = name.to_str().and_then(|name| name.strip_prefix(&prefix)) else {
+            continue;
+        };
+        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+        let (stamp, suffix) = rest.split_at(digits);
+        if stamp.is_empty() {
+            continue;
+        }
+        if suffix.is_empty() {
+            databases.insert(stamp.to_owned());
+        } else if FILE_SUFFIXES[1..].contains(&suffix) {
+            sides.insert(stamp.to_owned());
+        }
+    }
+    Ok(sides.iter().any(|stamp| !databases.contains(stamp)))
 }
 
 /// One statement within the size limits: no second statement, no comment,

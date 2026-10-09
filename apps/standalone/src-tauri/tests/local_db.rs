@@ -904,7 +904,8 @@ async fn a_file_that_cannot_be_set_aside_puts_the_others_back() {
 }
 
 /// What an earlier set-aside kept is never replaced by a later one that
-/// happens to carry the same time stamp: a rename would overwrite it on Unix.
+/// happens to carry the same time stamp: `std::fs::rename` replaces an
+/// existing file on Unix and on Windows alike.
 #[tokio::test]
 async fn an_earlier_set_aside_is_never_overwritten() {
     let dir = tempfile::tempdir().unwrap();
@@ -1236,4 +1237,65 @@ async fn two_set_asides_at_once_move_the_files_once() {
             "round {round}: the new database is the one in use"
         );
     }
+}
+
+/// A set-aside whose put-back failed leaves its files split: the database
+/// under an `.unreadable-` name and its `-wal` under the original one, or the
+/// reverse. Moving what is left under a new stamp would part them for good,
+/// so a later set-aside refuses until support has put them together.
+#[tokio::test]
+async fn a_split_set_aside_is_not_added_to() {
+    // The database is aside; its WAL is still at the original name.
+    let dir = tempfile::tempdir().unwrap();
+    let local = unopened(dir.path(), &["-wal"]).await;
+    std::fs::rename(
+        dir.path().join(FILE_NAME),
+        dir.path()
+            .join(format!("{FILE_NAME}.unreadable-1790000000000")),
+    )
+    .unwrap();
+    assert!(local
+        .set_aside_unopened_at(1_790_000_000_005)
+        .await
+        .is_err());
+    assert!(dir.path().join(format!("{FILE_NAME}-wal")).exists());
+    assert!(local.get().is_err(), "no new database over a split set");
+
+    // The WAL is aside; the database is still at the original name.
+    let dir = tempfile::tempdir().unwrap();
+    let local = unopened(dir.path(), &[]).await;
+    std::fs::write(
+        dir.path()
+            .join(format!("{FILE_NAME}.unreadable-1790000000000-wal")),
+        "its wal",
+    )
+    .unwrap();
+    assert!(local
+        .set_aside_unopened_at(1_790_000_000_005)
+        .await
+        .is_err());
+    assert!(dir.path().join(FILE_NAME).exists());
+    assert!(!dir
+        .path()
+        .join(format!("{FILE_NAME}.unreadable-1790000000005"))
+        .exists());
+
+    // A complete earlier set-aside, or one that kept only the database, is
+    // not a split.
+    let dir = tempfile::tempdir().unwrap();
+    let local = unopened(dir.path(), &[]).await;
+    std::fs::write(
+        dir.path()
+            .join(format!("{FILE_NAME}.unreadable-1790000000000")),
+        "the earlier one",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path()
+            .join(format!("{FILE_NAME}.unreadable-1790000000000-wal")),
+        "its wal",
+    )
+    .unwrap();
+    assert!(local.set_aside_unopened_at(1_790_000_000_005).await.is_ok());
+    assert!(local.get().is_ok());
 }
