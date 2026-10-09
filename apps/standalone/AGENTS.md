@@ -1905,10 +1905,15 @@ Any device asks whether a code is taken (`GET /v1/device/codes/{codeHash}`,
 with the same `CodeOwner` a `conflict` names. It reads the registry on a
 pooled connection outside any write transaction, so it never waits for a
 batch being written — a station asks within 300 ms (plan 2a6) — and it
-writes nothing. The device authentication in front of it writes
-`last_seen_at` only when a minute is up (even an `UPDATE` that matches no row
-takes SQLite's write lock), so a device seen in the last minute is answered
-while a writer holds the lock; one idle for longer waits for the writer once.
+writes nothing: it authenticates through `AskingDevice`, the read-only twin of
+`AuthDevice` (same key, revocation and kind checks, no `last_seen_at` update),
+so it never waits for a writer, the first request after an idle minute and a
+busy station's once-a-minute touch included. This is the ONLY writer-free
+device route. Every other device route authenticates through `AuthDevice`,
+which touches `last_seen_at` at most once a minute per device (even an
+`UPDATE` that matches no row takes SQLite's write lock, so it runs only when a
+minute is up): the first request after each full minute, a scanning station's
+too, takes the write lock and can wait behind a writer.
 
 Two timestamp formats live in the facts' tables and are never compared with
 each other: a device's instant (`scanned_at`, `opened_at`, `occurred_at`, …:

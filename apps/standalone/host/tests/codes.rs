@@ -4,7 +4,7 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use http_body_util::BodyExt;
-use markiro_host::auth::AuthDevice;
+use markiro_host::auth::{AskingDevice, AuthDevice};
 use markiro_host::error::ApiPath;
 use markiro_host::routes::codes::check_code;
 use markiro_proto::DeviceKind;
@@ -187,10 +187,10 @@ async fn a_check_never_waits_for_a_batch_being_written() {
         std::time::Duration::from_secs(1),
         check_code(
             State(admin.app.state.clone()),
-            AuthDevice {
+            AskingDevice(AuthDevice {
                 id: station.clone(),
                 kind: DeviceKind::Station,
-            },
+            }),
             ApiPath(code_hash(1)),
         ),
     )
@@ -242,6 +242,64 @@ async fn a_check_through_the_router_does_not_wait_for_a_writer_either() {
     .expect("the check waited for the writer");
     holder.commit().await.unwrap();
     assert_eq!(answer, (StatusCode::OK, json!({ "status": "free" })));
+}
+
+/// The check never takes the write lock, whatever `last_seen_at` says: a
+/// station that asked 30 s ago asks again when a full minute has passed
+/// since its last touch (the other device routes would write `last_seen_at`
+/// now) while a writer holds the lock. Deterministic: the test clock is
+/// advanced and the lock is held.
+#[tokio::test]
+async fn a_check_after_the_touch_minute_does_not_wait_for_a_writer() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let (_, office_pc) = pair_device(&admin.app, "office").await;
+    let seen = last_seen(&admin, &floor.station).await.unwrap();
+    admin.app.clock.advance(time::Duration::seconds(30));
+    assert_eq!(
+        check(&admin, &floor.key, &code_hash(1)).await,
+        (StatusCode::OK, json!({ "status": "free" }))
+    );
+    admin.app.clock.advance(time::Duration::seconds(30));
+    // A touch would be due now: the stored time is a full minute old.
+    assert_eq!(last_seen(&admin, &floor.station).await.unwrap(), seen);
+    let holder = markiro_host::db::begin_write(&admin.app.state.pool)
+        .await
+        .unwrap();
+    for key in [&floor.key, &office_pc] {
+        let answer = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            check(&admin, key, &code_hash(1)),
+        )
+        .await
+        .expect("the check waited for the writer");
+        assert_eq!(answer, (StatusCode::OK, json!({ "status": "free" })));
+    }
+    holder.commit().await.unwrap();
+    // A revoked key is refused without a write too.
+    let (status, done) = admin
+        .call(
+            "POST",
+            &format!("/v1/office/devices/{}/revoke", floor.station),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    let holder = markiro_host::db::begin_write(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, refused) = tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        check(&admin, &floor.key, &code_hash(1)),
+    )
+    .await
+    .expect("a refusal waited for the writer");
+    holder.commit().await.unwrap();
+    assert_eq!(
+        (status, refused["error"]["details"]["credential"].clone()),
+        (StatusCode::UNAUTHORIZED, json!("device"))
+    );
 }
 
 /// The sender's key decides who may ask, before the path is looked at: a
@@ -438,33 +496,34 @@ async fn only_an_accepted_scan_owns_a_code_and_the_check_names_the_winner() {
     );
 }
 
-/// The device authentication writes `last_seen_at` once a minute and not
-/// before: a check one second early leaves it, one at the minute moves it,
-/// and so does one of a device with no time stored.
+/// A check never writes `last_seen_at`, a stale time or none at all; any
+/// other device route still writes it once a minute and not before (a read
+/// of the device itself, `GET /v1/device`, stands for them).
 #[tokio::test]
-async fn a_check_moves_last_seen_once_the_minute_is_up_and_not_before() {
+async fn a_check_never_moves_last_seen_and_another_device_route_does_once_a_minute() {
     let admin = admin().await;
     let setup = shift_setup(&admin).await;
     let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let touch = |key: String| {
+        let admin = &admin;
+        async move {
+            admin
+                .app
+                .send(empty(with_device(request("GET", "/v1/device"), &key)))
+                .await
+                .0
+        }
+    };
     let seen = last_seen(&admin, &floor.station).await.unwrap();
     assert_eq!(seen, admin.app.state.timestamp());
-    admin.app.clock.advance(time::Duration::seconds(59));
+    // A check at +60 s (a touch would be due) leaves the stored time alone.
+    admin.app.clock.advance(time::Duration::seconds(60));
     assert_eq!(
         check(&admin, &floor.key, &code_hash(1)).await.0,
         StatusCode::OK
     );
     assert_eq!(last_seen(&admin, &floor.station).await.unwrap(), seen);
-    admin.app.clock.advance(time::Duration::seconds(1));
-    assert_eq!(
-        check(&admin, &floor.key, &code_hash(1)).await.0,
-        StatusCode::OK
-    );
-    assert_eq!(
-        last_seen(&admin, &floor.station).await.unwrap(),
-        admin.app.state.timestamp()
-    );
-    assert_ne!(admin.app.state.timestamp(), seen);
-    // A device never seen (no time stored) is touched at once.
+    // A device never seen (no time stored) stays unseen after a check.
     sqlx::query("UPDATE devices SET last_seen_at = NULL WHERE id = ?")
         .bind(&floor.station)
         .execute(&admin.app.state.pool)
@@ -474,6 +533,19 @@ async fn a_check_moves_last_seen_once_the_minute_is_up_and_not_before() {
         check(&admin, &floor.key, &code_hash(1)).await.0,
         StatusCode::OK
     );
+    assert_eq!(last_seen(&admin, &floor.station).await, None);
+    // Another device route touches it at once, then once a minute.
+    assert_eq!(touch(floor.key.clone()).await, StatusCode::OK);
+    let touched = admin.app.state.timestamp();
+    assert_eq!(
+        last_seen(&admin, &floor.station).await,
+        Some(touched.clone())
+    );
+    admin.app.clock.advance(time::Duration::seconds(59));
+    assert_eq!(touch(floor.key.clone()).await, StatusCode::OK);
+    assert_eq!(last_seen(&admin, &floor.station).await, Some(touched));
+    admin.app.clock.advance(time::Duration::seconds(1));
+    assert_eq!(touch(floor.key.clone()).await, StatusCode::OK);
     assert_eq!(
         last_seen(&admin, &floor.station).await,
         Some(admin.app.state.timestamp())

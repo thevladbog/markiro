@@ -34,32 +34,63 @@ impl FromRequestParts<AppState> for AuthDevice {
         parts: &mut Parts,
         state: &AppState,
     ) -> Result<Self, Self::Rejection> {
-        let key = parts
-            .headers
-            .get(AUTHORIZATION)
-            .and_then(|value| value.to_str().ok())
-            .and_then(|value| value.strip_prefix("Bearer "))
-            .filter(|key| !key.is_empty())
-            .ok_or_else(|| {
-                ApiError::unauthorized(credentials::DEVICE, "a device key is required")
-            })?;
-        let row: Option<(String, String, Option<String>)> = sqlx::query_as(
-            "SELECT id, kind, last_seen_at FROM devices WHERE key_hash = ? AND revoked_at IS NULL",
-        )
-        .bind(key_hash(key))
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(ApiError::internal)?;
-        let (id, kind, last_seen_at) = row.ok_or_else(|| {
-            ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
-        })?;
-        let kind: DeviceKind = kind.parse().map_err(ApiError::internal)?;
-        // Record activity at most once a minute to keep writes rare. Even an
-        // `UPDATE` that matches no row takes SQLite's write lock, so it runs
-        // only when the stored time is due: a request that otherwise only
-        // reads (the code check, answered within 300 ms) does not wait
-        // behind a writer. The `WHERE` stays as the guard against a request
-        // that touched the row first.
+        authenticate(parts, state, true).await
+    }
+}
+
+/// A paired, non-revoked device that WRITES NOTHING when it is
+/// authenticated: the same key, revocation and kind checks as
+/// [`AuthDevice`], but `last_seen_at` is never touched. Only the code check
+/// (`GET /v1/device/codes/{codeHash}`, answered by a station within 300 ms)
+/// uses it, so that route never waits for a writer, even for the first
+/// request after an idle minute. Every other device route takes
+/// [`AuthDevice`].
+#[derive(Debug, Clone)]
+pub struct AskingDevice(pub AuthDevice);
+
+impl FromRequestParts<AppState> for AskingDevice {
+    type Rejection = ApiError;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        authenticate(parts, state, false).await.map(Self)
+    }
+}
+
+async fn authenticate(
+    parts: &Parts,
+    state: &AppState,
+    touch: bool,
+) -> Result<AuthDevice, ApiError> {
+    let key = parts
+        .headers
+        .get(AUTHORIZATION)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .filter(|key| !key.is_empty())
+        .ok_or_else(|| ApiError::unauthorized(credentials::DEVICE, "a device key is required"))?;
+    let row: Option<(String, String, Option<String>)> = sqlx::query_as(
+        "SELECT id, kind, last_seen_at FROM devices WHERE key_hash = ? AND revoked_at IS NULL",
+    )
+    .bind(key_hash(key))
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(ApiError::internal)?;
+    let (id, kind, last_seen_at) = row.ok_or_else(|| {
+        ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
+    })?;
+    let kind: DeviceKind = kind.parse().map_err(ApiError::internal)?;
+    // Record activity at most once a minute per device to keep writes rare.
+    // Even an `UPDATE` that matches no row takes SQLite's write lock, so it
+    // runs only when the stored time is due. The request that finds it due
+    // (the first one after each full minute, a busy station's included) DOES
+    // take the write lock and can wait behind a writer. Only the code check
+    // is writer-free, because it does not touch (`touch` is false). The
+    // `WHERE` stays as the guard against a request that touched the row
+    // first.
+    if touch {
         let now = state.now();
         let due = format_timestamp(now - time::Duration::minutes(1));
         if last_seen_at.is_none_or(|seen| seen <= due) {
@@ -73,8 +104,8 @@ impl FromRequestParts<AppState> for AuthDevice {
             .await
             .map_err(ApiError::internal)?;
         }
-        Ok(Self { id, kind })
     }
+    Ok(AuthDevice { id, kind })
 }
 
 impl AuthDevice {
