@@ -1,7 +1,7 @@
 //! The Windows power request behind `set_system_awake`, ported from the
 //! cloud station (`apps/station/src-tauri/src/power/windows.rs`). This file
 //! uses `std` and `windows-sys` only, so a probe crate can type-check it for
-//! Windows on any computer (plan 2a4, task 8).
+//! Windows on any computer (plan 2a4, tasks 6 and 7).
 
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 

@@ -6,14 +6,16 @@
 //! them), and every connection change as `standalone://scanner-status`. A
 //! keyboard-wedge scanner needs none of this: it types into the window.
 //!
-//! A scan is production input, so it is never altered, merged or split here:
-//! a frame runs between terminators (CR, LF) and arrives whole or not at all
-//! (a frame cut off by an unplugged cable, or longer than 4096 bytes, is
-//! dropped, never sent as a fragment). A scanner must therefore be set to send
-//! a CR or LF suffix. Nothing a scanner sends reaches the process log or an
-//! error code. An event emitted while the webview is not listening (a window
-//! reloading) is not queued: the status is recovered by asking
-//! (`get_scanner_connections`), a scan is not.
+//! A scan is production input, so a frame is never altered or split here: it
+//! runs between terminators (CR, LF) and arrives whole, or not at all (a frame
+//! cut off by an unplugged cable, or longer than 4096 bytes, is dropped, never
+//! sent as a fragment). Noise on the line is not a frame of its own: bytes
+//! sent without a terminator join the next scan, and the first frame after a
+//! port opens may be the tail of one the scanner began earlier. A scanner
+//! must therefore be set to send a CR or LF suffix. Nothing a scanner sends
+//! reaches the process log or an error code. An event emitted while the
+//! webview is not listening (a window reloading) is not queued: the status is
+//! recovered by asking (`get_scanner_connections`), a scan is not.
 
 mod runtime;
 

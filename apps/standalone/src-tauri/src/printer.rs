@@ -5,8 +5,8 @@
 //! only — a spooler queue with datatype RAW (`printer/spooler.rs`).
 //!
 //! Refusals are bare codes that tell the webview what it may do next:
-//! `not_sent` — no byte left this computer (the address did not resolve, or
-//! the connection, the port or the queue did not open), so printing again
+//! `not_sent` — no byte left this computer (the address did not resolve in
+//! time, or the connection, the port or the queue did not open), so printing again
 //! cannot double a label; `outcome_unknown` — the failure came after the
 //! first write began, so the label may or may not exist, and only the
 //! operator decides (plan 2a7 never resends by itself); `invalid_target` and
@@ -21,7 +21,9 @@
 //! connection is not seen here.
 
 use std::io::Write;
-use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
+use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
+use std::sync::mpsc::{self, RecvTimeoutError};
+use std::thread;
 use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::STANDARD;
@@ -102,9 +104,17 @@ impl From<spooler::SpoolerError> for PrintFailure {
     }
 }
 
-/// How long a send may wait: for the connection (TCP, all addresses of the
-/// name together) and for each write (TCP and COM). A write that moves some
-/// bytes starts the wait afresh, so the limit is on a stalled printer, not on
+/// The most bytes one write is offered (`send_all`).
+const WRITE_CHUNK_BYTES: usize = 64 * 1024;
+
+/// How long a send may wait. `connect` is one budget for everything before
+/// the first byte of a network print: looking the name up (an address needs
+/// no lookup) and then connecting to its addresses, all of them together.
+/// `write` is the wait of each write (TCP and COM): the label goes out in
+/// chunks of at most 64 KiB, so the socket's send timeout or the port's write
+/// timeout bounds each chunk and not the label as a whole (Winsock may count
+/// its limit over one whole `send`, which would otherwise fail a healthy but
+/// slow printer on a large label). The limit is on a stalled printer, not on
 /// a long label. The cloud station's 5 s each; tests shorten them.
 #[derive(Debug, Clone, Copy)]
 pub struct Timeouts {
@@ -160,13 +170,46 @@ pub fn decode_payload(payload_base64: &str) -> Result<Vec<u8>, PrintError> {
     }
 }
 
-/// `host:port` to its socket addresses; a name that resolves to nothing is
-/// `not_sent` at once, instead of after the operating system's long wait.
-fn resolve(host: &str, port: u16) -> Result<Vec<SocketAddr>, PrintFailure> {
-    (host, port)
-        .to_socket_addrs()
-        .map(Iterator::collect)
-        .map_err(|error| PrintFailure::new(PrintError::NotSent, format!("resolve: {error}")))
+/// `host:port` to its socket addresses within `budget`. An address needs no
+/// lookup. A name that resolves to nothing, or that the operating system's
+/// resolver has not answered when the budget ends (an offline plant can keep
+/// it waiting for ten seconds or more), is `not_sent`.
+fn resolve(host: &str, port: u16, budget: Duration) -> Result<Vec<SocketAddr>, PrintFailure> {
+    if let Ok(address) = host.parse::<IpAddr>() {
+        return Ok(vec![SocketAddr::new(address, port)]);
+    }
+    let host = host.to_owned();
+    resolve_with(budget, move || {
+        (host.as_str(), port)
+            .to_socket_addrs()
+            .map(Iterator::collect)
+    })
+}
+
+/// [`resolve`] with the lookup as a parameter. The lookup runs on its own
+/// thread, because the system call cannot be given a time limit; when the
+/// budget ends first the thread is left to finish by itself and its answer is
+/// dropped. Nothing has been sent, so every failure here is `not_sent`.
+fn resolve_with<F>(budget: Duration, lookup: F) -> Result<Vec<SocketAddr>, PrintFailure>
+where
+    F: FnOnce() -> std::io::Result<Vec<SocketAddr>> + Send + 'static,
+{
+    let not_sent = |detail: String| PrintFailure::new(PrintError::NotSent, detail);
+    let (done, answer) = mpsc::channel();
+    thread::Builder::new()
+        .name("print-resolve".into())
+        .spawn(move || {
+            let _ = done.send(lookup());
+        })
+        .map_err(|error| not_sent(format!("resolve: {error}")))?;
+    match answer.recv_timeout(budget) {
+        Ok(Ok(addresses)) => Ok(addresses),
+        Ok(Err(error)) => Err(not_sent(format!("resolve: {error}"))),
+        Err(RecvTimeoutError::Timeout) => {
+            Err(not_sent(format!("resolve: no answer within {budget:?}")))
+        }
+        Err(RecvTimeoutError::Disconnected) => Err(not_sent("resolve: the lookup failed".into())),
+    }
 }
 
 /// Opens a connection to the first address that answers, within `timeout` for
@@ -205,6 +248,39 @@ fn connect_with<T>(
     Err(PrintFailure::new(PrintError::NotSent, detail))
 }
 
+/// The whole of a network print's connect budget: `resolve` gets all of
+/// `timeout`, and the attempts get what the lookup left of it, so a name that
+/// takes four seconds to resolve does not also get five to connect.
+fn reach_with<T>(
+    timeout: Duration,
+    resolve: impl FnOnce(Duration) -> Result<Vec<SocketAddr>, PrintFailure>,
+    attempt: impl FnMut(&SocketAddr, Duration) -> std::io::Result<T>,
+) -> Result<T, PrintFailure> {
+    let started = Instant::now();
+    let addresses = resolve(timeout)?;
+    connect_with(
+        &addresses,
+        timeout.saturating_sub(started.elapsed()),
+        attempt,
+    )
+}
+
+/// Writes `bytes` to an open connection or port in chunks of at most
+/// [`WRITE_CHUNK_BYTES`], then flushes. From the first write on, every failure
+/// is `outcome_unknown`: the label may exist, wholly or in part. An
+/// interrupted write is retried; a writer that takes no byte is a failure.
+fn send_all(writer: &mut impl Write, bytes: &[u8]) -> Result<(), PrintFailure> {
+    let unknown = |call: &str, error: std::io::Error| {
+        PrintFailure::new(PrintError::OutcomeUnknown, format!("{call}: {error}"))
+    };
+    for chunk in bytes.chunks(WRITE_CHUNK_BYTES) {
+        writer
+            .write_all(chunk)
+            .map_err(|error| unknown("write", error))?;
+    }
+    writer.flush().map_err(|error| unknown("flush", error))
+}
+
 /// Sends `bytes` to `target`, blocking. Everything up to and including
 /// opening the connection, the port or the queue is `not_sent`; from the
 /// first write on, a failure is `outcome_unknown`.
@@ -213,22 +289,19 @@ pub fn print_to(
     bytes: &[u8],
     timeouts: Timeouts,
 ) -> Result<(), PrintFailure> {
-    let unknown = |call: &str, error: std::io::Error| {
-        PrintFailure::new(PrintError::OutcomeUnknown, format!("{call}: {error}"))
-    };
     match target {
         PrintTarget::Tcp { host, port } => {
-            let addresses = resolve(host, *port)?;
-            let mut stream = connect(&addresses, timeouts.connect)?;
+            let mut stream = reach_with(
+                timeouts.connect,
+                |budget| resolve(host, *port, budget),
+                TcpStream::connect_timeout,
+            )?;
             stream
                 .set_write_timeout(Some(timeouts.write))
                 .map_err(|error| {
                     PrintFailure::new(PrintError::NotSent, format!("timeout: {error}"))
                 })?;
-            stream
-                .write_all(bytes)
-                .map_err(|error| unknown("write", error))?;
-            stream.flush().map_err(|error| unknown("flush", error))
+            send_all(&mut stream, bytes)
         }
         PrintTarget::Serial { port, baud } => {
             let mut handle = serialport::new(port, *baud)
@@ -237,10 +310,7 @@ pub fn print_to(
                 .map_err(|error| {
                     PrintFailure::new(PrintError::NotSent, format!("open: {error}"))
                 })?;
-            handle
-                .write_all(bytes)
-                .map_err(|error| unknown("write", error))?;
-            handle.flush().map_err(|error| unknown("flush", error))
+            send_all(&mut handle, bytes)
         }
         PrintTarget::Usb { printer } => print_usb(printer, bytes),
     }
@@ -361,8 +431,6 @@ fn installed_printers() -> Result<Vec<(String, String)>, String> {
 mod tests {
     use std::collections::VecDeque;
     use std::io::ErrorKind;
-    use std::sync::mpsc;
-    use std::thread;
 
     use super::*;
     use serde_json::json;
@@ -905,6 +973,50 @@ mod tests {
             resolve_with(Duration::from_secs(5), || panic!("the lookup dies")).unwrap_err();
         assert_eq!(failure.error, PrintError::NotSent);
         assert!(failure.detail.starts_with("resolve"), "{}", failure.detail);
+    }
+
+    /// The lookup and the attempts share one budget: the attempt is given what
+    /// the lookup left of it.
+    #[test]
+    fn the_connect_gets_what_the_lookup_left_of_the_budget() {
+        let address = SocketAddr::from(([192, 0, 2, 11], 9100));
+        let mut given = Vec::new();
+        let connected = reach_with(
+            Duration::from_millis(1500),
+            |budget| {
+                assert_eq!(budget, Duration::from_millis(1500));
+                resolve_with(budget, move || {
+                    thread::sleep(Duration::from_millis(500));
+                    Ok(vec![address])
+                })
+            },
+            |tried, left| {
+                given.push((*tried, left));
+                Ok(())
+            },
+        );
+        assert!(connected.is_ok());
+        assert_eq!(given.len(), 1, "{given:?}");
+        assert_eq!(given[0].0, address);
+        assert!(given[0].1 <= Duration::from_millis(1000), "{given:?}");
+        assert!(given[0].1 > Duration::from_millis(500), "{given:?}");
+    }
+
+    /// A lookup that fails ends the print before any attempt is made.
+    #[test]
+    fn a_lookup_that_fails_stops_before_any_attempt() {
+        let mut attempts = 0;
+        let failure = reach_with(
+            Duration::from_secs(5),
+            |budget| resolve_with(budget, || Err(std::io::Error::other("no such host"))),
+            |_, _| {
+                attempts += 1;
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert_eq!(failure.error, PrintError::NotSent);
+        assert_eq!(attempts, 0);
     }
 
     /// The operating system's resolver may wait ten seconds or more for a

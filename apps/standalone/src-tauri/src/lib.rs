@@ -15,13 +15,15 @@ pub mod scanner;
 pub mod secret_store;
 pub mod tls;
 
+use std::path::Path;
 use std::sync::Arc;
 
 use serde_json::{Map, Value};
 use tauri::{Emitter, Manager, Runtime};
+use tokio::sync::watch;
 
 use connection::{Backoff, ConnectionState, HostRevision, HostStatus, LinkEvents};
-use device::{DeviceError, DeviceState, DeviceStatus};
+use device::{DeviceError, DeviceState, DeviceStatus, HostLink};
 use host_client::HostResponse;
 use local_db::{LocalDbError, LocalDbState, LocalStatement, OpenFailure, UnsentGuard};
 
@@ -88,7 +90,10 @@ async fn host_claim(
 }
 
 /// `timeoutMs` (100–10 000) limits this one request instead of the client's
-/// 10 s; running past it answers `timeout` (stage 2a spec §5.2).
+/// 10 s. When that limit ends the request first — connecting and the TLS
+/// handshake count — the answer is `timeout`; a limit above the client's own
+/// 2 s to connect leaves a host that never connects to that 2 s, which reads
+/// as `unreachable`, and so does a refused connection (stage 2a spec §5.2).
 #[tauri::command]
 async fn host_request(
     state: tauri::State<'_, DeviceState>,
@@ -271,6 +276,29 @@ pub fn invoke_handler<R: tauri::Runtime>(
     ]
 }
 
+/// Manages every state the commands read: the device, the local database
+/// (opened here, before the window shows; when it cannot open, the app still
+/// starts and the local commands say so), the connection status, the scanner
+/// manager (it needs the app's handle for its events), kiosk mode and the
+/// awake lease. Returns the device's link, which the connection task watches.
+/// `run`'s `setup` calls it, and `tests/ipc.rs` calls it on a mock app (the
+/// mock builder does not run `setup`), so a state a command reads cannot go
+/// missing here with only a compile to notice.
+pub fn manage_state<R: Runtime>(
+    app: &tauri::AppHandle<R>,
+    dir: &Path,
+) -> watch::Receiver<Option<Arc<HostLink>>> {
+    let device = DeviceState::load(dir.to_path_buf());
+    let link = device.watch_link();
+    app.manage(device);
+    app.manage(tauri::async_runtime::block_on(LocalDbState::open(dir)));
+    app.manage(ConnectionState::default());
+    app.manage(scanner::manager(app.clone()));
+    app.manage(lockdown::LockdownState::default());
+    app.manage(power::SystemAwakeState::default());
+    link
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -280,15 +308,8 @@ pub fn run() {
             // config directory: the device identity must stay on this
             // computer and never follow a Windows user profile elsewhere.
             let dir = app.path().app_local_data_dir()?;
-            let device = DeviceState::load(dir.clone());
-            let link = device.watch_link();
-            app.manage(device);
-            // The local database opens before the window shows. When it
-            // cannot open, the app still starts and the local commands say so.
-            app.manage(tauri::async_runtime::block_on(LocalDbState::open(&dir)));
-            let status = ConnectionState::default();
-            app.manage(status.clone());
-            app.manage(scanner::manager(app.handle().clone()));
+            let link = manage_state(app.handle(), &dir);
+            let status = app.state::<ConnectionState>().inner().clone();
             tauri::async_runtime::spawn(connection::supervise(
                 link,
                 Arc::new(TauriLinkEvents(app.handle().clone())),
@@ -297,8 +318,6 @@ pub fn run() {
             ));
             Ok(())
         })
-        .manage(lockdown::LockdownState::default())
-        .manage(power::SystemAwakeState::default())
         .on_window_event(lockdown::refuse_close_while_locked)
         .invoke_handler(invoke_handler())
         .run(tauri::generate_context!())
