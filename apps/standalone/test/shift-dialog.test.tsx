@@ -644,4 +644,101 @@ describe("office shifts: planning a shift", () => {
     });
     expect(screen.queryByRole("dialog", { name: "Новая смена" })).toBeNull();
   });
+
+  it("reads the shifts again behind the dialog after a lost answer, since the shift may have been made", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "x" }),
+    );
+    await openCreate(session);
+    fillMilk();
+    submit();
+    expect(await within(dialog()).findByRole("alert")).toBeTruthy();
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not read the shifts again after an answer of the host that planned nothing", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(api("internal"));
+    await openCreate(session);
+    fillMilk();
+    submit();
+    expect(await within(dialog()).findByRole("alert")).toBeTruthy();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(session.api.listShifts).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      "a product no longer in use",
+      api("conflict", { constraint: "product_inactive" }),
+      "Товар",
+      "listProducts",
+      "Молоко",
+    ],
+    [
+      "a product the host does not find",
+      api("validation_failed", { field: "productId" }),
+      "Товар",
+      "listProducts",
+      "Молоко",
+    ],
+    [
+      "an archived line",
+      api("validation_failed", { field: "lineId" }),
+      "Линия",
+      "listLines",
+      "Линия 2",
+    ],
+    [
+      "a counterparty archived meanwhile",
+      api("validation_failed", { field: "counterpartyId" }),
+      "Контрагент",
+      "listCounterparties",
+      "ООО «Северный берег»",
+    ],
+  ] as const)(
+    "reads the list again after the host refused %s, so the record is no longer offered",
+    async (_what, refusal, label, list, name) => {
+      const session = shiftsSession();
+      session.api.createShift.mockRejectedValue(refusal);
+      await openCreate(session);
+      fillMilk();
+      expect(options(label).some((text) => text.startsWith(name))).toBe(true);
+      session.api.listProducts.mockResolvedValue([{ ...MILK, archived: true }, WATER]);
+      session.api.listLines.mockResolvedValue([LINE_10, { ...LINE_2, archived: true }]);
+      session.api.listCounterparties.mockResolvedValue([{ ...NORTH, archived: true }]);
+      const before = session.api[list].mock.calls.length;
+      submit();
+      await waitFor(() => expect(session.api[list]).toHaveBeenCalledTimes(before + 1));
+      await waitFor(() => expect(options(label).some((text) => text.startsWith(name))).toBe(false));
+    },
+  );
+
+  it.each([
+    ["a date", "productionDate"],
+    ["a plan", "plannedQty"],
+    ["a capacity", "boxCapacity"],
+  ])("reads no list again after the host refused %s", async (_what, name) => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(api("validation_failed", { field: name }));
+    await openCreate(session);
+    fillMilk();
+    const lists = [
+      session.api.listProducts,
+      session.api.listLines,
+      session.api.listCounterparties,
+      session.api.listTemplates,
+    ];
+    const before = lists.map((list) => list.mock.calls.length);
+    submit();
+    await waitFor(() => expect(session.api.createShift).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(lists.map((list) => list.mock.calls.length)).toEqual(before);
+  });
 });

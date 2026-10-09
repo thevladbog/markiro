@@ -1,10 +1,12 @@
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
 import { DatePicker, Input, Select } from "@markiro/ui";
 
+import { HostError } from "../../host/client.js";
 import type { OfficeShift } from "../../host/protocol.js";
 import { shiftCreate } from "../../host/requests.js";
 import { suggestBoxTemplate } from "../../lib/box-template-choice.js";
@@ -78,6 +80,7 @@ interface ShiftFormProps extends ShiftDialogProps {
 function ShiftForm({ onClose, onSaved, today, dateNote }: ShiftFormProps) {
   const { t } = useTranslation();
   const ids = useId();
+  const queryClient = useQueryClient();
   const fieldId = (name: (typeof SHIFT_FIELD_ORDER)[number]) => `${ids}-${name}`;
   // The refused field, focused once the form is on again after a submit.
   const focusAfterRender = useRef<(typeof SHIFT_FIELD_ORDER)[number] | null>(null);
@@ -162,10 +165,19 @@ function ShiftForm({ onClose, onSaved, today, dateNote }: ShiftFormProps) {
         if (outcome.kind === "field") {
           setError(outcome.field, { type: "server", message: outcome.message });
           focusAfterRender.current = outcome.field;
-          // A template switched off or narrowed meanwhile shows as marked once read again.
+          // A record the host refused (archived, switched off or narrowed meanwhile) is
+          // no longer offered, or shows as marked, once its list is read again.
+          if (outcome.field === "productId") void products.refetch();
+          if (outcome.field === "lineId") void lines.refetch();
           if (outcome.field === "boxTemplateId") void templates.refetch();
+          if (outcome.field === "counterpartyId") void counterparties.refetch();
         } else {
           setFailure(outcome);
+          // A lost answer: the host may have planned the shift (the create has no request id
+          // to make it repeatable), so the list behind the dialog must show whether it did.
+          if (error instanceof HostError && error.kind === "transport") {
+            void queryClient.invalidateQueries({ queryKey: officeKeys.shifts });
+          }
         }
         return;
       }
