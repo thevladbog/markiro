@@ -7,7 +7,7 @@ import { useTranslation } from "react-i18next";
 import { DatePicker, Input, Select } from "@markiro/ui";
 
 import { HostError } from "../../host/client.js";
-import type { OfficeShift } from "../../host/protocol.js";
+import type { OfficeShift, ShiftCreate, ShiftUpdate } from "../../host/protocol.js";
 import { shiftCreate, shiftUpdate } from "../../host/requests.js";
 import { suggestBoxTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
@@ -15,7 +15,7 @@ import { useTemplateDefaults, useTemplates } from "../catalog-queries.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
-import { PageLoading, WriteFailureAlert } from "../page-state.js";
+import { PageLoading, StaleAlert, WriteFailureAlert } from "../page-state.js";
 import { activeFirstByName } from "../records.js";
 import { templateOptions } from "../template-options.js";
 import {
@@ -110,6 +110,10 @@ function ShiftForm({
   const focusAfterRender = useRef<(typeof SHIFT_FIELD_ORDER)[number] | null>(null);
   const fieldError = useFieldError();
   const [failure, setFailure] = useState<AlertFailure | null>(null);
+  // The key of the text that says the shift was opened, closed or deleted meanwhile: a
+  // resend would be refused the same way, so «Сохранить» stays off and the alert offers
+  // to load the list again, as a stale save does.
+  const [outdatedMessage, setOutdatedMessage] = useState<string | null>(null);
   const products = useOfficeQuery(officeKeys.products, (api, token) => api.listProducts(token));
   const lines = useOfficeQuery(officeKeys.lines, (api, token) => api.listLines(token));
   const counterparties = useOfficeQuery(officeKeys.counterparties, (api, token) =>
@@ -117,10 +121,11 @@ function ShiftForm({
   );
   const templates = useTemplates();
   const defaults = useTemplateDefaults();
-  const save = useOfficeMutation((api, token, values: ShiftFields) =>
-    shift === null
-      ? api.createShift(token, shiftCreate(toShiftInput(values)))
-      : api.updateShift(token, shift.id, shiftUpdate(shift, toShiftChange(values))),
+  const save = useOfficeMutation(
+    (api, token, request: { create: ShiftCreate } | { id: string; update: ShiftUpdate }) =>
+      "create" in request
+        ? api.createShift(token, request.create)
+        : api.updateShift(token, request.id, request.update),
   );
   const {
     register,
@@ -216,9 +221,20 @@ function ShiftForm({
   const submit = handleSubmit(
     async (values) => {
       setFailure(null);
+      const update = shift === null ? null : shiftUpdate(shift, toShiftChange(values));
+      // The form is changed but the shift is not (blanks typed, a value written as it was):
+      // there is nothing to send, and nothing was saved.
+      if (update !== null && Object.keys(update).length === 1) {
+        onClose();
+        return;
+      }
       let saved: OfficeShift;
       try {
-        saved = await save.mutateAsync(values);
+        saved = await save.mutateAsync(
+          shift === null || update === null
+            ? { create: shiftCreate(toShiftInput(values)) }
+            : { id: shift.id, update },
+        );
       } catch (error) {
         // A shift opened, closed or deleted meanwhile is a change's refusal only; a new
         // shift's `not_found` (the host is not set up) is not "the shift is gone".
@@ -240,6 +256,8 @@ function ShiftForm({
           if (outcome.field === "lineId") void lines.refetch();
           if (outcome.field === "boxTemplateId") void templates.refetch();
           if (outcome.field === "counterpartyId") void counterparties.refetch();
+        } else if (outdated && outcome.kind === "alert") {
+          setOutdatedMessage(outcome.message);
         } else {
           setFailure(outcome);
           // A lost answer: the host may have planned the shift (the create has no request id
@@ -267,11 +285,17 @@ function ShiftForm({
           : t("office.shifts.editTitle", { number: shift.number })
       }
       submitLabel={shift === null ? t("office.shifts.create") : t("office.common.save")}
-      submitDisabled={shift !== null && !isDirty}
+      submitDisabled={shift !== null && (!isDirty || outdatedMessage !== null)}
       width={560}
       onSubmit={submit}
       onClose={onClose}
-      alert={<WriteFailureAlert failure={failure} onReload={onReload} />}
+      alert={
+        outdatedMessage !== null ? (
+          <StaleAlert onReload={onReload} message={outdatedMessage} />
+        ) : (
+          <WriteFailureAlert failure={failure} onReload={onReload} />
+        )
+      }
     >
       {shift !== null ? (
         // The product never changes: a changed shift names it.

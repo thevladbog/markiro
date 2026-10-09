@@ -6,13 +6,13 @@ import { z } from "zod";
 
 import { Input } from "@markiro/ui";
 
-import type { OfficeShift } from "../../host/protocol.js";
+import type { OfficeShift, ShiftUpdate } from "../../host/protocol.js";
 import { shiftUpdate } from "../../host/requests.js";
 import { plannedQtyRule, toCount } from "../../lib/rules.js";
 import { useFieldError, type AlertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
 import { useOfficeMutation } from "../office-query.js";
-import { WriteFailureAlert } from "../page-state.js";
+import { StaleAlert, WriteFailureAlert } from "../page-state.js";
 import { shiftWriteFailure } from "./shift-form.js";
 
 const planSchema = z.object({ plannedQty: plannedQtyRule });
@@ -40,8 +40,11 @@ export function ShiftPlanDialog({
   const { t } = useTranslation();
   const fieldError = useFieldError();
   const [failure, setFailure] = useState<AlertFailure | null>(null);
-  const save = useOfficeMutation((api, token, plannedQty: number | null) =>
-    api.updateShift(token, shift.id, shiftUpdate(shift, { plannedQty })),
+  // The key of the text that says the shift was closed or deleted meanwhile: a resend would
+  // be refused the same way, so «Сохранить» stays off and the alert offers to load the list.
+  const [outdatedMessage, setOutdatedMessage] = useState<string | null>(null);
+  const save = useOfficeMutation((api, token, update: ShiftUpdate) =>
+    api.updateShift(token, shift.id, update),
   );
   const {
     register,
@@ -55,9 +58,15 @@ export function ShiftPlanDialog({
 
   const submit = handleSubmit(async (values) => {
     setFailure(null);
+    const update = shiftUpdate(shift, { plannedQty: toCount(values.plannedQty) });
+    // The plan is typed again as it was (blanks around it): nothing to send, nothing saved.
+    if (Object.keys(update).length === 1) {
+      onClose();
+      return;
+    }
     let saved: OfficeShift;
     try {
-      saved = await save.mutateAsync(toCount(values.plannedQty));
+      saved = await save.mutateAsync(update);
     } catch (error) {
       const { failure: outcome, outdated } = shiftWriteFailure(error, {
         plannedQty: "plannedQty",
@@ -68,6 +77,8 @@ export function ShiftPlanDialog({
           { type: "server", message: outcome.message },
           { shouldFocus: true },
         );
+      } else if (outdated && outcome.kind === "alert") {
+        setOutdatedMessage(outcome.message);
       } else {
         setFailure(outcome);
       }
@@ -81,10 +92,16 @@ export function ShiftPlanDialog({
     <FormDialog
       title={t("office.shifts.planTitle", { number: shift.number })}
       submitLabel={t("office.common.save")}
-      submitDisabled={!isDirty}
+      submitDisabled={!isDirty || outdatedMessage !== null}
       onSubmit={submit}
       onClose={onClose}
-      alert={<WriteFailureAlert failure={failure} onReload={onReload} />}
+      alert={
+        outdatedMessage !== null ? (
+          <StaleAlert onReload={onReload} message={outdatedMessage} />
+        ) : (
+          <WriteFailureAlert failure={failure} onReload={onReload} />
+        )
+      }
     >
       <p>{t("office.shifts.planIntro")}</p>
       <Input

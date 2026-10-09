@@ -584,7 +584,7 @@ describe("office shifts: changing a shift, the edges", () => {
     });
   });
 
-  it("reads the shifts again behind the dialog after a lost answer, and keeps the opened revision", async () => {
+  it("reads the shifts again behind the dialog after a lost answer", async () => {
     const session = shiftsSession();
     session.api.updateShift.mockRejectedValue(
       new HostError({ kind: "transport", code: "unreachable", message: "x" }),
@@ -599,16 +599,14 @@ describe("office shifts: changing a shift, the edges", () => {
   it("keeps the revision it was opened with when the list behind it is read again", async () => {
     const session = shiftsSession();
     session.api.updateShift.mockRejectedValue(
-      api("conflict", { constraint: "shift_status", status: "active" }),
+      new HostError({ kind: "transport", code: "unreachable", message: "x" }),
     );
     const name = await openEdit(session, PLANNED);
-    // The list read after the refusal shows the shift opened, with a newer revision.
+    // The list read after the lost answer shows the shift opened, with a newer revision.
     session.api.listShifts.mockResolvedValue([OPENED, ACTIVE, CLOSED]);
     fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
     fireEvent.click(save(name));
-    await within(dialog(name)).findByText(
-      "Смену уже открыли на станции: теперь у неё можно изменить только план. Список смен обновлён.",
-    );
+    expect(await within(dialog(name)).findByRole("alert")).toBeTruthy();
     await waitFor(() =>
       expect(within(shiftRow(PLANNED.number)).getByText("Активна", { exact: false })).toBeTruthy(),
     );
@@ -620,6 +618,46 @@ describe("office shifts: changing a shift, the edges", () => {
       expectedRev: 72,
     });
   });
+
+  it("sends nothing and closes without a word when the form differs from the shift in blanks only", async () => {
+    const session = shiftsSession();
+    const name = await openEdit(session, PLANNED);
+    // A space in an empty plan: the form is changed, the shift is not.
+    fireEvent.change(field(name, "План, шт"), { target: { value: " " } });
+    await waitFor(() => expect(save(name).disabled).toBe(false));
+    fireEvent.click(save(name));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name })).toBeNull());
+    expect(session.api.updateShift).not.toHaveBeenCalled();
+    expect(screen.queryByText("Изменения сохранены.")).toBeNull();
+    expect(session.api.listShifts).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      "opened on a station meanwhile",
+      api("conflict", { constraint: "shift_status", status: "active" }),
+    ],
+    ["deleted meanwhile", api("not_found")],
+  ])(
+    "switches «Сохранить» off and offers to load the list again once a shift was %s",
+    async (_what, refusal) => {
+      const session = shiftsSession();
+      session.api.updateShift.mockRejectedValue(refusal);
+      const name = await openEdit(session, PLANNED);
+      fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+      fireEvent.click(save(name));
+      const reload = await within(dialog(name)).findByRole("button", {
+        name: "Загрузить заново",
+      });
+      await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+      expect(save(name).disabled).toBe(true);
+      // What was typed stays to be read; the way out is the alert's button.
+      expect(valueOf(name, "План, шт")).toBe("900");
+      fireEvent.click(reload);
+      await waitFor(() => expect(screen.queryByRole("dialog", { name })).toBeNull());
+      expect(session.api.updateShift).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it("does not take the answer of a new shift's missing record for a deleted shift", async () => {
     const session = shiftsSession();
@@ -737,5 +775,33 @@ describe("office shifts: changing an active shift's plan, the edges", () => {
       ),
     ).toBeTruthy();
     await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+  });
+
+  it("sends nothing and closes without a word when the plan differs from the shift in blanks only", async () => {
+    const session = shiftsSession();
+    const name = await openPlan(session, ACTIVE);
+    fireEvent.change(field(name, "План, шт"), { target: { value: " 1200 " } });
+    await waitFor(() => expect(save(name).disabled).toBe(false));
+    fireEvent.click(save(name));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name })).toBeNull());
+    expect(session.api.updateShift).not.toHaveBeenCalled();
+    expect(screen.queryByText("Изменения сохранены.")).toBeNull();
+    expect(session.api.listShifts).toHaveBeenCalledTimes(1);
+  });
+
+  it("switches «Сохранить» off and offers to load the list again once the shift was closed", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockRejectedValue(
+      api("conflict", { constraint: "shift_status", status: "closed" }),
+    );
+    const name = await openPlan(session, ACTIVE);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(save(name));
+    const reload = await within(dialog(name)).findByRole("button", { name: "Загрузить заново" });
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+    expect(save(name).disabled).toBe(true);
+    fireEvent.click(reload);
+    await waitFor(() => expect(screen.queryByRole("dialog", { name })).toBeNull());
+    expect(session.api.updateShift).toHaveBeenCalledTimes(1);
   });
 });
