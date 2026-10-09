@@ -1,6 +1,6 @@
 import { isShiftCloseReasonCode } from "@markiro/domain";
 import { useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -82,6 +82,7 @@ export function ShiftsPage() {
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<ShiftsDialog | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const noticeId = useId();
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [status, setStatus] = useState<ShiftStatusFilter>("all");
@@ -125,8 +126,18 @@ export function ShiftsPage() {
     readAgain();
   };
 
+  // After a write the dialog is gone and the button that opened it may be too (a deleted or
+  // closed shift's row): the notice takes the focus, so it is read and the keyboard is not lost.
+  useEffect(() => {
+    if (notice !== null) document.getElementById(noticeId)?.focus();
+  }, [notice, noticeId]);
+
   const productName = (shift: OfficeShift) =>
     recordLabel("product", products.data, shift.productId, t);
+  // What the search reads: the product's own name, not the id-start or the archive mark the list
+  // shows in its place.
+  const searchName = (shift: OfficeShift) =>
+    products.data?.find((each) => each.id === shift.productId)?.name ?? "";
   const filtersOn =
     from !== "" || to !== "" || status !== "all" || lineId !== "" || search.trim() !== "";
   const resetFilters = () => {
@@ -145,7 +156,7 @@ export function ShiftsPage() {
         : undefined;
   // The shifts the filters keep, in the host's order; none while the list is not loaded.
   const found = shifts.isSuccess
-    ? findShifts(shifts.data, { status, lineId, search }, productName)
+    ? findShifts(shifts.data, { status, lineId, search }, searchName)
     : [];
 
   const columns: TableColumn<OfficeShift>[] = [
@@ -337,7 +348,11 @@ export function ShiftsPage() {
           ) : null
         }
       />
-      {notice && <Alert tone="ok">{notice}</Alert>}
+      {notice && (
+        <Alert tone="ok" id={noticeId} tabIndex={-1}>
+          {notice}
+        </Alert>
+      )}
       {/* About the names and the marks: with no list on screen the shifts' error stands alone. */}
       {shifts.isSuccess && lookups.some((lookup) => lookup.isError) && (
         <Alert

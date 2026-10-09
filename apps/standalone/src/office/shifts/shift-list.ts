@@ -85,7 +85,8 @@ export interface ShiftFilters {
 /**
  * The shifts the filters keep, in the host's order: the status, the line, and
  * a search for the text in the number or the product's name, without case.
- * `productName` names a shift's product as the list shows it.
+ * `productName` is the product's own name for the search: not the start of
+ * its id or a mark that the list shows when the name is missing or archived.
  */
 export function findShifts(
   shifts: readonly OfficeShift[],
