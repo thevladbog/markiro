@@ -149,6 +149,10 @@ fn protected_routes() -> Router<AppState> {
             "/v1/device/facts",
             post(crate::routes::facts::receive_facts),
         )
+        .route(
+            "/v1/device/codes/{code_hash}",
+            get(crate::routes::codes::check_code),
+        )
         .route("/v1/changes", get(crate::routes::changes::changes))
         .route("/v1/changes/stream", get(crate::routes::changes::stream))
         .route(

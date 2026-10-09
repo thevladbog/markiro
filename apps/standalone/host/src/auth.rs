@@ -43,28 +43,36 @@ impl FromRequestParts<AppState> for AuthDevice {
             .ok_or_else(|| {
                 ApiError::unauthorized(credentials::DEVICE, "a device key is required")
             })?;
-        let row: Option<(String, String)> = sqlx::query_as(
-            "SELECT id, kind FROM devices WHERE key_hash = ? AND revoked_at IS NULL",
+        let row: Option<(String, String, Option<String>)> = sqlx::query_as(
+            "SELECT id, kind, last_seen_at FROM devices WHERE key_hash = ? AND revoked_at IS NULL",
         )
         .bind(key_hash(key))
         .fetch_optional(&state.pool)
         .await
         .map_err(ApiError::internal)?;
-        let (id, kind) = row.ok_or_else(|| {
+        let (id, kind, last_seen_at) = row.ok_or_else(|| {
             ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
         })?;
         let kind: DeviceKind = kind.parse().map_err(ApiError::internal)?;
-        // Record activity at most once a minute to keep writes rare.
+        // Record activity at most once a minute to keep writes rare. Even an
+        // `UPDATE` that matches no row takes SQLite's write lock, so it runs
+        // only when the stored time is due: a request that otherwise only
+        // reads (the code check, answered within 300 ms) does not wait
+        // behind a writer. The `WHERE` stays as the guard against a request
+        // that touched the row first.
         let now = state.now();
-        sqlx::query(
-            "UPDATE devices SET last_seen_at = ? WHERE id = ? AND (last_seen_at IS NULL OR last_seen_at <= ?)",
-        )
-        .bind(format_timestamp(now))
-        .bind(&id)
-        .bind(format_timestamp(now - time::Duration::minutes(1)))
-        .execute(&state.pool)
-        .await
-        .map_err(ApiError::internal)?;
+        let due = format_timestamp(now - time::Duration::minutes(1));
+        if last_seen_at.is_none_or(|seen| seen <= due) {
+            sqlx::query(
+                "UPDATE devices SET last_seen_at = ? WHERE id = ? AND (last_seen_at IS NULL OR last_seen_at <= ?)",
+            )
+            .bind(format_timestamp(now))
+            .bind(&id)
+            .bind(due)
+            .execute(&state.pool)
+            .await
+            .map_err(ApiError::internal)?;
+        }
         Ok(Self { id, kind })
     }
 }

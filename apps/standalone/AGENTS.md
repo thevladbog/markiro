@@ -1899,6 +1899,17 @@ box (`box_items.displaced_at`); a later one, or one at the same instant, is
 is the sender's own scan). Both write a `code_conflicts` row; telling the
 displaced device and the office's review come with plan 2b.
 
+Any device asks whether a code is taken (`GET /v1/device/codes/{codeHash}`,
+`routes/codes.rs`; 64 lower-case hex digits, `validation_failed` on
+`codeHash` otherwise): `{ status: "free" }` or `{ status: "taken", owner }`
+with the same `CodeOwner` a `conflict` names. It reads the registry on a
+pooled connection outside any write transaction, so it never waits for a
+batch being written — a station asks within 300 ms (plan 2a6) — and it
+writes nothing. The device authentication in front of it writes
+`last_seen_at` only when a minute is up (even an `UPDATE` that matches no row
+takes SQLite's write lock), so a device seen in the last minute is answered
+while a writer holds the lock; one idle for longer waits for the writer once.
+
 Two timestamp formats live in the facts' tables and are never compared with
 each other: a device's instant (`scanned_at`, `opened_at`, `occurred_at`, …:
 24 characters, `YYYY-MM-DDTHH:MM:SS.sssZ`, kept as sent) and the host's own

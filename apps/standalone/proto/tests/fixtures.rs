@@ -1,11 +1,11 @@
 use markiro_proto::{
     category_default_id, certificate_fingerprint, codes, compatibility, compatibility_for,
     credentials, display_fingerprint, BadgeCreate, BadgeSalt, BlockSizesUpdate, BootstrapRequest,
-    BootstrapResponse, CategoryTemplateDefault, ChangesResponse, ClaimRequest, CodeOwner,
-    Compatibility, CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate, DeviceInfo,
-    DeviceKind, DeviceLineRequest, DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts,
-    DeviceUpdate, ErrorBody, FactBatch, FactKind, FactOutcome, FactReceipts, Hello, HelloEnvelope,
-    LabelTemplate, LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary,
+    BootstrapResponse, CategoryTemplateDefault, ChangesResponse, ClaimRequest, CodeCheck,
+    CodeOwner, Compatibility, CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate,
+    DeviceInfo, DeviceKind, DeviceLineRequest, DeviceRecord, DeviceShift, DeviceShiftCreate,
+    DeviceShifts, DeviceUpdate, ErrorBody, FactBatch, FactKind, FactOutcome, FactReceipts, Hello,
+    HelloEnvelope, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary,
     LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine,
     OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeShift,
     OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord,
@@ -942,4 +942,17 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
     value["records"][0]["deviceId"] = Value::String("anything".into());
     assert!(serde_json::from_value::<FactBatch>(value).is_err());
     assert_eq!(receipts.receipts[3].id, None);
+}
+
+/// A code is free, or taken by its owner; the owner a `conflict` receipt
+/// names has the same shape.
+#[test]
+fn code_check_fixtures_round_trip_and_name_the_owner_as_a_conflict_does() {
+    let free: CodeCheck = round_trip("code-check-free.json");
+    assert_eq!(free, CodeCheck::Free);
+    let taken: CodeCheck = round_trip("code-check-taken.json");
+    let receipts: FactReceipts = serde_json::from_value(fixture("facts-response.json")).unwrap();
+    let winner: CodeOwner =
+        typed(&Value::Object(receipts.receipts[1].details.clone().unwrap())["winner"]);
+    assert_eq!(taken, CodeCheck::Taken { owner: winner });
 }

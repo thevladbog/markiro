@@ -1835,6 +1835,17 @@ pub struct CodeOwner {
     pub same_device: bool,
 }
 
+/// `GET /v1/device/codes/{codeHash}` (stage 2a spec §4.6): whether an
+/// accepted scan owns the code. A station asks while the link is `online`,
+/// within 300 ms; without an answer it accepts the scan on its own copy, and
+/// a duplicate shows later as a `conflict` receipt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CodeCheck {
+    Free,
+    Taken { owner: CodeOwner },
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
