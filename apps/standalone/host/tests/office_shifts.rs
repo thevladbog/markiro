@@ -1782,3 +1782,186 @@ async fn editing_and_deleting_stop_a_user_turned_off_after_the_extractor_passed(
         );
     }
 }
+
+/// Run `UPDATE shifts SET {set} WHERE id = ?` and answer the database's
+/// refusal; a statement the schema takes is a failure of the test.
+async fn schema_refuses(admin: &Admin, shift: &Value, set: &str) -> String {
+    let outcome = sqlx::query(&format!("UPDATE shifts SET {set} WHERE id = ?"))
+        .bind(shift["id"].as_str().unwrap())
+        .execute(&admin.app.state.pool)
+        .await;
+    outcome
+        .err()
+        .unwrap_or_else(|| panic!("the schema took {set:?}"))
+        .to_string()
+}
+
+/// The statuses of `0009` hold the whole lifecycle in the table itself, so no
+/// route, present or future, can leave a shift half open or half closed: a
+/// shift in the middle of its life is open, owned and snapshotted, and says
+/// who closed it exactly when it is closed.
+#[tokio::test]
+async fn a_shift_row_that_breaks_its_lifecycle_is_refused_by_the_schema() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let device = station_id(&admin).await;
+    let planned = plan_shift(&admin, shift_body(&setup)).await;
+    let active = plan_shift(&admin, shift_body(&setup)).await;
+    let closed = plan_shift(&admin, shift_body(&setup)).await;
+    open_directly(&admin, &active).await;
+    open_directly(&admin, &closed).await;
+    close_directly(&admin, &closed).await;
+    let at = admin.app.state.timestamp();
+    let owner = format!("owner_device_id = '{device}'");
+    let closing = format!("closed_at = '{at}', closed_by_kind = 'device', closed_by = '{device}'");
+
+    for (shift, label, set) in [
+        // A planned shift is unopened.
+        (
+            &planned,
+            "planned with a snapshot",
+            "snapshot = '{}'".to_owned(),
+        ),
+        (
+            &planned,
+            "planned with an opening",
+            format!("opened_at = '{at}'"),
+        ),
+        (&planned, "planned with an owner", owner.clone()),
+        // An active one is snapshotted, opened and owned.
+        (
+            &active,
+            "active without a snapshot",
+            "snapshot = NULL".to_owned(),
+        ),
+        (
+            &active,
+            "active without an opening",
+            "opened_at = NULL".to_owned(),
+        ),
+        (
+            &active,
+            "active without an owner",
+            "owner_device_id = NULL".to_owned(),
+        ),
+        (&active, "back to planned", "status = 'planned'".to_owned()),
+        // So is a closed one, which also says when and by whom.
+        (
+            &closed,
+            "closed without a snapshot",
+            "snapshot = NULL".to_owned(),
+        ),
+        (
+            &closed,
+            "closed without an opening",
+            "opened_at = NULL".to_owned(),
+        ),
+        (
+            &closed,
+            "closed without an owner",
+            "owner_device_id = NULL".to_owned(),
+        ),
+        (
+            &closed,
+            "closed without a time",
+            "closed_at = NULL".to_owned(),
+        ),
+        (
+            &closed,
+            "closed without a kind",
+            "closed_by_kind = NULL".to_owned(),
+        ),
+        (
+            &closed,
+            "closed without a closer",
+            "closed_by = NULL".to_owned(),
+        ),
+        (&closed, "closed, reopened", "status = 'active'".to_owned()),
+        // A shift that is not closed says nothing of a close.
+        (
+            &planned,
+            "planned with a closer",
+            "closed_by = 'x'".to_owned(),
+        ),
+        (
+            &active,
+            "active with a closer",
+            "closed_by = 'x'".to_owned(),
+        ),
+        (
+            &active,
+            "active with a close time",
+            format!("closed_at = '{at}'"),
+        ),
+        (
+            &active,
+            "active with a close kind",
+            "closed_by_kind = 'device'".to_owned(),
+        ),
+        // A close that misses one of its three columns.
+        (
+            &active,
+            "closed without a time",
+            format!("status = 'closed', closed_by_kind = 'device', closed_by = '{device}'"),
+        ),
+        (
+            &active,
+            "closed without a kind",
+            format!("status = 'closed', closed_at = '{at}', closed_by = '{device}'"),
+        ),
+        (
+            &active,
+            "closed without a closer",
+            format!("status = 'closed', closed_at = '{at}', closed_by_kind = 'device'"),
+        ),
+        (
+            &active,
+            "closed with nothing",
+            "status = 'closed'".to_owned(),
+        ),
+    ] {
+        let message = schema_refuses(&admin, shift, &set).await;
+        assert!(
+            message.contains("CHECK constraint failed"),
+            "{label}: {message}"
+        );
+    }
+
+    // Every refusal left its row as it was.
+    for (shift, status) in [
+        (&planned, "planned"),
+        (&active, "active"),
+        (&closed, "closed"),
+    ] {
+        let (status_now, has_closer): (String, bool) =
+            sqlx::query_as("SELECT status, closed_by IS NOT NULL FROM shifts WHERE id = ?")
+                .bind(shift["id"].as_str().unwrap())
+                .fetch_one(&admin.app.state.pool)
+                .await
+                .unwrap();
+        assert_eq!(
+            (status_now, has_closer),
+            (status.to_owned(), status == "closed")
+        );
+    }
+
+    // The lifecycle the routes write is what the schema takes: the opening
+    // fills the three columns together, the close the three of its own.
+    sqlx::query(
+        "UPDATE shifts SET status = 'active', snapshot = '{}', opened_at = ?1, \
+         owner_device_id = ?2 WHERE id = ?3",
+    )
+    .bind(&at)
+    .bind(&device)
+    .bind(planned["id"].as_str().unwrap())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    sqlx::query(&format!(
+        "UPDATE shifts SET status = 'closed', {closing} WHERE id = ?"
+    ))
+    .bind(planned["id"].as_str().unwrap())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+}
