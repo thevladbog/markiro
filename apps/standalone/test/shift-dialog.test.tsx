@@ -624,4 +624,24 @@ describe("office shifts: planning a shift", () => {
     ]);
     expect(dialog().querySelector("img")).toBeNull();
   });
+
+  it("closes only the calendar on Escape and keeps the dialog with what was typed", async () => {
+    const session = shiftsSession();
+    await openCreate(session);
+    fillMilk();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Дата производства" }));
+    const calendar = screen.getByRole("dialog", { name: "Календарь" });
+    fireEvent.keyDown(within(calendar).getByRole("button", { name: "9 октября 2026" }), {
+      key: "Escape",
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Календарь" })).toBeNull());
+    expect(dialog()).toBeTruthy();
+    expect(valueOf("Товар")).toBe(MILK.id);
+    expect(valueOf("План, шт")).toBe(" 1200 ");
+    // With the calendar shut, the same key on the date still closes the dialog.
+    fireEvent.keyDown(within(dialog()).getByRole("button", { name: "Дата производства" }), {
+      key: "Escape",
+    });
+    expect(screen.queryByRole("dialog", { name: "Новая смена" })).toBeNull();
+  });
 });

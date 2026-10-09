@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
@@ -62,6 +62,11 @@ export function ShiftDialog(props: ShiftDialogProps) {
       dateNote={zone !== null ? null : org.isSuccess ? "localDateZone" : "localDate"}
     />
   );
+}
+
+/** An Escape the open calendar has handled closes the calendar only, not the dialog around it. */
+function keepCalendarEscape(event: KeyboardEvent<HTMLElement>): void {
+  if (event.key === "Escape" && event.defaultPrevented) event.stopPropagation();
 }
 
 interface ShiftFormProps extends ShiftDialogProps {
@@ -222,16 +227,22 @@ function ShiftForm({ onClose, onSaved, today, dateNote }: ShiftFormProps) {
         control={control}
         name="productionDate"
         render={({ field }) => (
-          <DatePicker
-            label={t("office.shifts.fields.productionDate")}
-            {...datePickerTexts(t)}
-            {...(field.value === "" ? {} : { value: field.value })}
-            onValueChange={(value) => field.onChange(value ?? "")}
-            id={fieldId("productionDate")}
-            disabled={locked}
-            {...(dateNote === null ? {} : { hint: t(`office.shifts.fields.${dateNote}`) })}
-            {...fieldError(errors.productionDate?.message)}
-          />
+          // The calendar is portalled out of the dialog, but React still bubbles its keys
+          // through the dialog, whose `Modal` closes on any Escape that reaches it. The
+          // popover has already used (and `preventDefault`ed) the Escape that closes the
+          // calendar, so only that one is held back here.
+          <div onKeyDown={keepCalendarEscape}>
+            <DatePicker
+              label={t("office.shifts.fields.productionDate")}
+              {...datePickerTexts(t)}
+              {...(field.value === "" ? {} : { value: field.value })}
+              onValueChange={(value) => field.onChange(value ?? "")}
+              id={fieldId("productionDate")}
+              disabled={locked}
+              {...(dateNote === null ? {} : { hint: t(`office.shifts.fields.${dateNote}`) })}
+              {...fieldError(errors.productionDate?.message)}
+            />
+          </div>
         )}
       />
       <Input
