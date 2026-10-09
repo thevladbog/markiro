@@ -5,6 +5,7 @@ pub mod changes;
 pub mod counterparties;
 pub mod device_shifts;
 pub mod devices;
+pub mod facts;
 pub mod lines;
 pub mod office_auth;
 pub mod office_shifts;

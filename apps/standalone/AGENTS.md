@@ -276,6 +276,13 @@ another try.
   technologists make (stage 2a spec §4.9, `planShifts`) — check
   `require_shift_planning` and `require_shift_planning_in` the same way, and
   `auth::plans_shifts` names their roles, also with no wildcard arm.
+- Device writes re-check the device the same way, right after
+  `begin_write`, since the extractor read it before the request queued for
+  the write lock: a station's shift create and entry and an SSCC block call
+  `AuthDevice::require_station_in` (a revoked device is 401 with
+  `credential: device`, one that is no station 403), and a batch of facts
+  calls `AuthDevice::require_live_in` (401 for a revoked device; any kind may
+  send), which `require_station_in` builds on.
 
 ## Change feed
 
@@ -1854,6 +1861,57 @@ rejected receipt (`proto::receipt_codes`, `fact-receipt-codes.json`) and the
 reason codes of box exceptions (`proto::exception_reasons`,
 `exception-reasons.json`) are fixtures too; the webview reads them with the
 facts sender (plan 2a6) and the exception screens (plan 2a8).
+
+A device sends facts in batches (`POST /v1/device/facts`, `{ records }`,
+1–100 records, `validation_failed` on `records` otherwise; migration
+`0010_facts.sql`). Any device kind may send, but only a device that entered
+the shift — a station, in stage 2a — gets past `not_entered`. The batch is
+one `BEGIN IMMEDIATE` transaction, and each record is read from its own JSON
+value (`facts::receive`), so a record the host cannot read is answered
+`rejected` with `invalid_record` and the others are applied. The answer is a
+receipt per record, in their order: `accepted`, `conflict` (with
+`details.winner`) or `rejected` with a code of `receipt_codes`
+(`details.field` names the field an `invalid_record` broke). A record with a
+readable id (a canonical UUID the device made up) keeps its receipt for good
+in `fact_receipts`, keyed by the device and the id, with the SHA-256 of the
+record's compact JSON (`rules::record_digest`): the same record sent again
+gets the same receipt, and other content under the same id
+`payload_mismatch`, which is kept nowhere. A record without a readable id
+keeps nothing, and its receipt has `id: null`. Every record names a shift
+that exists (`unknown_shift`) and that the device entered (`not_entered`),
+and an operator by a UUID or `null`, kept as evidence without a foreign key.
+A record is checked whole before its first write, so a refusal leaves
+nothing but its receipt; a database error is no receipt, it fails the batch
+(500, `internal`), and the device sends the batch again. Facts are
+production data: they take no revision and write no audit row.
+
+A `scan` (`facts/scan.rs`) is a journal row (`scans`) whatever its verdict;
+an `invalid` one keeps no code, only what it looked like (`rawKind`) and its
+length, since it may have been a badge. An `ok` one carries the GTIN the
+snapshot froze (`gtin_mismatch` otherwise) and a box of this device in this
+shift: an unknown box id opens the box, another device's or another shift's
+is `box_unknown`, a closed one `box_closed`. Its code goes to the registry
+(`code_owners`, `facts/registry.rs`): the earliest accepted scan owns a code
+whatever order the scans arrive in, compared by their device instants. A
+scan earlier than the owner takes the code, and the owner's item leaves its
+box (`box_items.displaced_at`); a later one, or one at the same instant, is
+`conflict` with `details.winner` (`CodeOwner`, `sameDevice` when the owner
+is the sender's own scan). Both write a `code_conflicts` row; telling the
+displaced device and the office's review come with plan 2b.
+
+Two timestamp formats live in the facts' tables and are never compared with
+each other: a device's instant (`scanned_at`, `opened_at`, `occurred_at`, …:
+24 characters, `YYYY-MM-DDTHH:MM:SS.sssZ`, kept as sent) and the host's own
+(`received_at`, `detected_at`, `displaced_at`: 20 characters, whole seconds,
+`clock::format_timestamp`). Text order is instant order only inside one
+format, so the registry compares `scanned_at` with `scanned_at` and nothing
+else. The schema (`0010`) holds what no row may break: a journal row, a box
+exception and a close event per record (`UNIQUE (device_id, record_id)`), the
+fields of each scan verdict, the fields of each exception kind, a closed box
+whole, and a code live in a box once. A refusal of a record is permanent: its
+receipt is kept, and the same record sent again is not looked at again, so a
+fact refused for a reason that later changes (a scan of a shift the device had
+not entered yet, say) can only be sent again under a new id.
 
 ## Marking rules
 

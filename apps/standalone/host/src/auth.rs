@@ -70,29 +70,37 @@ impl FromRequestParts<AppState> for AuthDevice {
 }
 
 impl AuthDevice {
-    /// The device is still a paired, unrevoked station, read inside the
-    /// write transaction: a revocation committed after the extractor read the
-    /// key (the request waited for the write lock) must stop the write, since
-    /// a revoked station neither creates a shift, nor enters one, nor gets
-    /// serials. `forbidden` is the text for a device of another kind.
-    pub async fn require_station_in(
+    /// The device is still paired and not revoked, read inside the write
+    /// transaction, and its kind as stored: a revocation committed after the
+    /// extractor read the key (the request waited for the write lock) must
+    /// stop the write. A batch of facts calls it, whatever the device's kind.
+    pub async fn require_live_in(
         &self,
         conn: &mut SqliteConnection,
-        forbidden: &str,
-    ) -> Result<(), ApiError> {
+    ) -> Result<DeviceKind, ApiError> {
         let kind: Option<String> =
             sqlx::query_scalar("SELECT kind FROM devices WHERE id = ? AND revoked_at IS NULL")
                 .bind(&self.id)
                 .fetch_optional(conn)
                 .await
                 .map_err(ApiError::internal)?;
-        let kind: DeviceKind = kind
-            .ok_or_else(|| {
-                ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
-            })?
-            .parse()
-            .map_err(ApiError::internal)?;
-        if kind == DeviceKind::Station {
+        kind.ok_or_else(|| {
+            ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
+        })?
+        .parse()
+        .map_err(ApiError::internal)
+    }
+
+    /// The device is still a paired, unrevoked station, read inside the
+    /// write transaction ([`Self::require_live_in`]): a revoked station
+    /// neither creates a shift, nor enters one, nor gets serials. `forbidden`
+    /// is the text for a device of another kind.
+    pub async fn require_station_in(
+        &self,
+        conn: &mut SqliteConnection,
+        forbidden: &str,
+    ) -> Result<(), ApiError> {
+        if self.require_live_in(conn).await? == DeviceKind::Station {
             Ok(())
         } else {
             Err(ApiError::forbidden(forbidden))

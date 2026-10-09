@@ -1620,11 +1620,227 @@ pub struct DeviceShiftCreate {
     pub counterparty_id: Option<String>,
 }
 
+/// What a fact records (stage 2a spec §4.4): the kind tells the host how
+/// to read the record's `data`. A kind added later is a new variant; a host
+/// that does not know it answers the record `invalid_record`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactKind {
+    Scan,
+}
+
+impl FactKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FactKind::Scan => "scan",
+        }
+    }
+}
+
+impl std::str::FromStr for FactKind {
+    type Err = UnknownVariant;
+
+    /// The name [`FactKind::as_str`] gives, as `fact_receipts.kind` stores
+    /// it.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("fact kind", text)
+    }
+}
+
+/// One record of a device's outbox (`POST /v1/device/facts`): `id` is a
+/// lower-case hyphenated UUID the device made up, which keys the receipt;
+/// `data` is read by `kind` (`ScanFact`, …). `operatorId` names the
+/// operator signed in when it happened, or `null`; the host keeps it as
+/// evidence without checking that the operator exists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FactRecord {
+    pub id: String,
+    pub kind: FactKind,
+    pub shift_id: String,
+    #[serde(default)]
+    pub operator_id: Option<String>,
+    pub data: serde_json::Value,
+}
+
+/// `POST /v1/device/facts`: 1–100 records, applied in their order. The host
+/// reads each record on its own, so one it cannot read is answered
+/// `rejected` and the others are still applied.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FactBatch {
+    pub records: Vec<FactRecord>,
+}
+
+/// What a station decided about a scan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanVerdict {
+    /// Accepted into the box.
+    Ok,
+    /// A code already taken, by this station's own copy or by the host.
+    Duplicate,
+    /// A code of another product than the shift's.
+    WrongGtin,
+    /// No code of marking at all.
+    Invalid,
+}
+
+impl ScanVerdict {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScanVerdict::Ok => "ok",
+            ScanVerdict::Duplicate => "duplicate",
+            ScanVerdict::WrongGtin => "wrong_gtin",
+            ScanVerdict::Invalid => "invalid",
+        }
+    }
+}
+
+/// Who found a duplicate: the station's own copy of the shift, or the host
+/// asked with `GET /v1/device/codes/{codeHash}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DuplicateSource {
+    Local,
+    Host,
+}
+
+impl DuplicateSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DuplicateSource::Local => "local",
+            DuplicateSource::Host => "host",
+        }
+    }
+}
+
+/// What the domain's `classifyScan` read the scan as: a code of marking, or
+/// (for an `invalid` scan) a GTIN, an SSCC or nothing it knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanRawKind {
+    Km,
+    Gtin,
+    Sscc,
+    Unknown,
+}
+
+impl ScanRawKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScanRawKind::Km => "km",
+            ScanRawKind::Gtin => "gtin",
+            ScanRawKind::Sscc => "sscc",
+            ScanRawKind::Unknown => "unknown",
+        }
+    }
+}
+
+/// A code of marking as the domain read it: `codeHash` is `kmHash` (64
+/// lower-case hex digits), `canonical` the text `canonicalizeKm` kept (with
+/// its group separators, at most 1024 bytes). The host checks their shape,
+/// never the code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScannedCode {
+    pub code_hash: String,
+    pub gtin14: String,
+    pub serial: String,
+    pub canonical: String,
+}
+
+/// `data` of a `scan` fact: every scan of the work screen, accepted or not.
+/// An `invalid` scan carries no text, only its length and what it looked
+/// like (it may be a badge, whose code is a secret); an `ok` one names the
+/// box it went into.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScanFact {
+    pub scanned_at: String,
+    pub verdict: ScanVerdict,
+    pub duplicate_source: Option<DuplicateSource>,
+    pub raw_kind: ScanRawKind,
+    pub raw_length: u32,
+    pub code: Option<ScannedCode>,
+    pub box_id: Option<String>,
+}
+
+/// How the host answered a record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactOutcome {
+    /// Applied.
+    Accepted,
+    /// Kept, but the code belongs to an earlier scan (`details.winner`).
+    Conflict,
+    /// Not applied (`code`, one of [`receipt_codes`]).
+    Rejected,
+}
+
+impl FactOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FactOutcome::Accepted => "accepted",
+            FactOutcome::Conflict => "conflict",
+            FactOutcome::Rejected => "rejected",
+        }
+    }
+}
+
+impl std::str::FromStr for FactOutcome {
+    type Err = UnknownVariant;
+
+    /// The name [`FactOutcome::as_str`] gives, as `fact_receipts.outcome`
+    /// stores it.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("fact outcome", text)
+    }
+}
+
+/// The host's answer to one record. `id` is the record's, or `null` when the
+/// record had no readable id (then nothing was kept, and the device matches
+/// the receipt by its place in the batch). A `rejected` receipt names its
+/// `code`; `details` carries the field of an `invalid_record` and the winner
+/// of a `conflict`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FactReceipt {
+    pub id: Option<String>,
+    pub outcome: FactOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// The answer of `POST /v1/device/facts`: a receipt for each record, in the
+/// records' order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FactReceipts {
+    pub receipts: Vec<FactReceipt>,
+}
+
+/// The scan that owns a code (stage 2a spec §4.6): the earliest accepted
+/// scan of it. `sameDevice` tells the asking device that the scan is its
+/// own. It is a `conflict` receipt's `details.winner` too.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeOwner {
+    pub shift_id: String,
+    pub shift_number: String,
+    pub device_id: String,
+    pub scanned_at: String,
+    pub same_device: bool,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        category_default_id, DeviceKind, OfficeRole, ProductStatus, ShiftMode, ShiftOrigin,
-        ShiftStatus, TemplatePurpose, UnknownVariant,
+        category_default_id, DeviceKind, DuplicateSource, FactKind, FactOutcome, OfficeRole,
+        ProductStatus, ScanRawKind, ScanVerdict, ShiftMode, ShiftOrigin, ShiftStatus,
+        TemplatePurpose, UnknownVariant,
     };
 
     /// Every `TemplatePurpose`, listed like `device_kinds` below.
@@ -1749,6 +1965,32 @@ mod tests {
         modes
     }
 
+    /// Every `FactKind`, listed the same way.
+    fn fact_kinds() -> Vec<FactKind> {
+        let kinds = vec![FactKind::Scan];
+        for kind in &kinds {
+            match kind {
+                FactKind::Scan => {}
+            }
+        }
+        kinds
+    }
+
+    /// Every `FactOutcome`, listed the same way.
+    fn fact_outcomes() -> Vec<FactOutcome> {
+        let outcomes = vec![
+            FactOutcome::Accepted,
+            FactOutcome::Conflict,
+            FactOutcome::Rejected,
+        ];
+        for outcome in &outcomes {
+            match outcome {
+                FactOutcome::Accepted | FactOutcome::Conflict | FactOutcome::Rejected => {}
+            }
+        }
+        outcomes
+    }
+
     /// The host stores `as_str` names and reads them back with `FromStr`;
     /// serde writes the same names on the wire.
     #[test]
@@ -1774,6 +2016,33 @@ mod tests {
             assert_eq!(serde_json::to_value(mode).unwrap(), mode.as_str());
         }
         assert_eq!(ShiftMode::default(), ShiftMode::Aggregation);
+        for kind in fact_kinds() {
+            assert_eq!(kind.as_str().parse::<FactKind>(), Ok(kind));
+            assert_eq!(serde_json::to_value(kind).unwrap(), kind.as_str());
+        }
+        for outcome in fact_outcomes() {
+            assert_eq!(outcome.as_str().parse::<FactOutcome>(), Ok(outcome));
+            assert_eq!(serde_json::to_value(outcome).unwrap(), outcome.as_str());
+        }
+        for verdict in [
+            ScanVerdict::Ok,
+            ScanVerdict::Duplicate,
+            ScanVerdict::WrongGtin,
+            ScanVerdict::Invalid,
+        ] {
+            assert_eq!(serde_json::to_value(verdict).unwrap(), verdict.as_str());
+        }
+        for source in [DuplicateSource::Local, DuplicateSource::Host] {
+            assert_eq!(serde_json::to_value(source).unwrap(), source.as_str());
+        }
+        for raw_kind in [
+            ScanRawKind::Km,
+            ScanRawKind::Gtin,
+            ScanRawKind::Sscc,
+            ScanRawKind::Unknown,
+        ] {
+            assert_eq!(serde_json::to_value(raw_kind).unwrap(), raw_kind.as_str());
+        }
         assert_eq!(
             "admin".parse::<ShiftOrigin>().unwrap_err().to_string(),
             "unknown shift origin \"admin\""

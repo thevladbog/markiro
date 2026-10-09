@@ -1,16 +1,17 @@
 use markiro_proto::{
     category_default_id, certificate_fingerprint, codes, compatibility, compatibility_for,
     credentials, display_fingerprint, BadgeCreate, BadgeSalt, BlockSizesUpdate, BootstrapRequest,
-    BootstrapResponse, CategoryTemplateDefault, ChangesResponse, ClaimRequest, Compatibility,
-    CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind,
-    DeviceLineRequest, DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts, DeviceUpdate,
-    ErrorBody, Hello, HelloEnvelope, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord,
-    LabelTemplateSummary, LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate,
-    LocalPairRequest, OfficeLine, OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole,
-    OfficeSession, OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
-    OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
-    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PasswordChange,
-    PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate,
+    BootstrapResponse, CategoryTemplateDefault, ChangesResponse, ClaimRequest, CodeOwner,
+    Compatibility, CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate, DeviceInfo,
+    DeviceKind, DeviceLineRequest, DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts,
+    DeviceUpdate, ErrorBody, FactBatch, FactKind, FactOutcome, FactReceipts, Hello, HelloEnvelope,
+    LabelTemplate, LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary,
+    LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine,
+    OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeShift,
+    OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord,
+    OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord,
+    PairResponse, PairingCode, PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate,
+    ProductGroup, ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict,
     ShiftClose, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord,
     SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
     TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
@@ -890,4 +891,55 @@ fn the_fact_code_fixtures_list_every_receipt_and_reason_code() {
         serde_json::from_value::<Vec<String>>(close["codes"].clone()).unwrap(),
         markiro_proto::shift_close_reasons::ALL
     );
+}
+
+/// A batch of facts and its receipts. The records' `data` stays JSON in the
+/// envelope (the host reads it by kind, record by record); each one reads
+/// as its kind's type and writes back unchanged.
+#[test]
+fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
+    let batch: FactBatch = round_trip("facts-request.json");
+    let kinds: Vec<FactKind> = batch.records.iter().map(|record| record.kind).collect();
+    assert_eq!(kinds, vec![FactKind::Scan, FactKind::Scan]);
+    for record in &batch.records {
+        let typed = match record.kind {
+            FactKind::Scan => serde_json::to_value(typed::<ScanFact>(&record.data)).unwrap(),
+        };
+        assert_eq!(typed, record.data, "{}", record.id);
+    }
+    let accepted: ScanFact = typed(&batch.records[0].data);
+    assert_eq!(
+        (accepted.verdict, accepted.raw_kind),
+        (ScanVerdict::Ok, ScanRawKind::Km)
+    );
+    assert!(accepted.code.unwrap().canonical.contains('\u{1d}'));
+    let invalid: ScanFact = typed(&batch.records[1].data);
+    assert_eq!(
+        (invalid.verdict, invalid.code, invalid.box_id),
+        (ScanVerdict::Invalid, None, None)
+    );
+    let receipts: FactReceipts = round_trip("facts-response.json");
+    let outcomes: Vec<FactOutcome> = receipts.receipts.iter().map(|r| r.outcome).collect();
+    assert_eq!(
+        outcomes,
+        vec![
+            FactOutcome::Accepted,
+            FactOutcome::Conflict,
+            FactOutcome::Rejected,
+            FactOutcome::Rejected,
+            FactOutcome::Rejected
+        ]
+    );
+    let winner: CodeOwner =
+        typed(&Value::Object(receipts.receipts[1].details.clone().unwrap())["winner"]);
+    assert!(!winner.same_device);
+    for receipt in &receipts.receipts[2..] {
+        assert!(markiro_proto::receipt_codes::ALL.contains(&receipt.code.as_deref().unwrap()));
+    }
+    // A record names no field the host does not read, and a receipt of a
+    // record without a readable id has `id: null`.
+    let mut value = fixture("facts-request.json");
+    value["records"][0]["deviceId"] = Value::String("anything".into());
+    assert!(serde_json::from_value::<FactBatch>(value).is_err());
+    assert_eq!(receipts.receipts[3].id, None);
 }

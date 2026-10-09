@@ -1,0 +1,39 @@
+{
+  "receipts": [
+    {
+      "id": "5d2c8f0a-3b1e-4c7d-9a6f-0e2b4c6d8f10",
+      "outcome": "accepted"
+    },
+    {
+      "id": "9b6a2d4e-7f5c-4a1b-9e0d-4c6f8a0b2d54",
+      "outcome": "conflict",
+      "details": {
+        "winner": {
+          "shiftId": "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+          "shiftNumber": "OCT26-003",
+          "deviceId": "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+          "scannedAt": "2026-10-08T05:58:41.090Z",
+          "sameDevice": false
+        }
+      }
+    },
+    {
+      "id": "7f4e0b2c-5d3a-4e9f-9c8b-2a4d6e8f0b32",
+      "outcome": "rejected",
+      "code": "invalid_record",
+      "details": {
+        "field": "data.code.canonical"
+      }
+    },
+    {
+      "id": null,
+      "outcome": "rejected",
+      "code": "invalid_record"
+    },
+    {
+      "id": "8a5f1c3d-6e4b-4fa0-8d9c-3b5e7f9a1c43",
+      "outcome": "rejected",
+      "code": "not_entered"
+    }
+  ]
+}
