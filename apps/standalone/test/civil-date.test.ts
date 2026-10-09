@@ -3,7 +3,12 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
-import { civilDaysBetween, civilToday, isCivilDate } from "../src/lib/civil-date.js";
+import {
+  civilDaysBetween,
+  civilToday,
+  isCivilDate,
+  isKnownTimeZone,
+} from "../src/lib/civil-date.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
 const testModuleUrl = import.meta.url;
@@ -133,5 +138,12 @@ describe("civil dates", () => {
       if (zone === undefined) delete process.env.TZ;
       else process.env.TZ = zone;
     }
+  });
+
+  it("knows which zones this runtime has", () => {
+    expect(isKnownTimeZone("Europe/Moscow")).toBe(true);
+    expect(isKnownTimeZone("UTC")).toBe(true);
+    expect(isKnownTimeZone("Mars/Olympus_Mons")).toBe(false);
+    expect(isKnownTimeZone("")).toBe(false);
   });
 });

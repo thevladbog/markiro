@@ -57,6 +57,21 @@ function pad(value: number, width: number): string {
 }
 
 /**
+ * Whether this runtime knows `timeZone`: the host keeps any zone name that is
+ * syntactically valid, and `civilToday` falls back to this PC's date for one
+ * the runtime lacks, which a caller that names its day should say.
+ */
+export function isKnownTimeZone(timeZone: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone });
+    return true;
+  } catch (error) {
+    if (error instanceof RangeError) return false;
+    throw error;
+  }
+}
+
+/**
  * Today's civil date in `timeZone` (the organization's IANA zone) at `now`:
  * the office plans a shift for the site's day, not for this PC's. Without a
  * zone, or with one this runtime does not know, it is this PC's own date.

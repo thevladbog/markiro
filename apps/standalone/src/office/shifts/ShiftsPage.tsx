@@ -1,4 +1,5 @@
 import { isShiftCloseReasonCode } from "@markiro/domain";
+import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -20,6 +21,7 @@ import {
 } from "@markiro/ui";
 
 import type { OfficeShift, ShiftMode, ShiftStatus } from "../../host/protocol.js";
+import { useCan } from "../access.js";
 import { useTemplates } from "../catalog-queries.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { OfficePager } from "../OfficePager.js";
@@ -34,6 +36,7 @@ import {
   SHIFT_PAGE_SIZE,
   type ShiftStatusFilter,
 } from "./shift-list.js";
+import { ShiftDialog } from "./ShiftDialog.js";
 import { datePickerTexts } from "./shift-text.js";
 
 /** A status in its phase, after the cloud's `SHIFT_STATUS_TO_PHASE`. */
@@ -54,6 +57,8 @@ const STATUS_FILTERS: readonly ShiftStatusFilter[] = ["all", "planned", "active"
 /** Units with the thousands apart by a no-break space, as Russian writes counts: «1 200». */
 const UNITS = new Intl.NumberFormat("ru");
 
+type ShiftsDialog = { kind: "create" };
+
 /**
  * Shifts (stage 2a spec §5.6), in the section «Производство». The host sends
  * the planned and active shifts and the closed ones of the last 31 days, or
@@ -64,6 +69,10 @@ const UNITS = new Intl.NumberFormat("ru");
  */
 export function ShiftsPage() {
   const { t } = useTranslation();
+  const canPlan = useCan("planShifts");
+  const queryClient = useQueryClient();
+  const [dialog, setDialog] = useState<ShiftsDialog | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [status, setStatus] = useState<ShiftStatusFilter>("all");
@@ -90,6 +99,13 @@ export function ShiftsPage() {
   );
   const templates = useTemplates();
   const lookups = [products, lines, counterparties, templates];
+
+  const open = (next: ShiftsDialog) => {
+    setNotice(null);
+    setDialog(next);
+  };
+  /** After a write: every list of shifts is read again, whatever its period. */
+  const readAgain = () => void queryClient.invalidateQueries({ queryKey: officeKeys.shifts });
 
   const productName = (shift: OfficeShift) =>
     recordLabel("product", products.data, shift.productId, t);
@@ -244,7 +260,15 @@ export function ShiftsPage() {
 
   return (
     <>
-      <PageHeader title={t("office.shifts.title")} />
+      <PageHeader
+        title={t("office.shifts.title")}
+        actions={
+          canPlan ? (
+            <Button onClick={() => open({ kind: "create" })}>{t("office.shifts.add")}</Button>
+          ) : null
+        }
+      />
+      {notice && <Alert tone="ok">{notice}</Alert>}
       {/* About the names and the marks: with no list on screen the shifts' error stands alone. */}
       {shifts.isSuccess && lookups.some((lookup) => lookup.isError) && (
         <Alert
@@ -346,6 +370,16 @@ export function ShiftsPage() {
               })}
       </p>
       {content()}
+      {canPlan && dialog?.kind === "create" && (
+        <ShiftDialog
+          onClose={() => setDialog(null)}
+          onSaved={(shift) => {
+            setDialog(null);
+            setNotice(t("office.shifts.created", { number: shift.number }));
+            readAgain();
+          }}
+        />
+      )}
     </>
   );
 }

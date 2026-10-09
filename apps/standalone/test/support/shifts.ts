@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { fireEvent, screen, waitFor, within, type RenderResult } from "@testing-library/react";
 import { expect, vi } from "vitest";
 
 import type {
@@ -7,9 +7,10 @@ import type {
   OfficeLine,
   OfficeProduct,
   OfficeShift,
+  OfficeUser,
   TemplateDefaults,
 } from "../../src/host/protocol.js";
-import { fakeOfficeSession, renderOffice, type FakeOfficeSession } from "./office.js";
+import { fakeOfficeSession, ORG_PROFILE, renderOffice, type FakeOfficeSession } from "./office.js";
 
 export const LINE_2: OfficeLine = {
   id: "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
@@ -200,25 +201,32 @@ export const CLOSED: OfficeShift = {
   rev: 60,
 };
 
-/** The office's session with every list the shifts page and its dialogs read. */
+/**
+ * The office's session, the administrator's unless `user` says, with every
+ * list the shifts page and its dialogs read.
+ */
 export function shiftsSession(
   shifts: OfficeShift[] = [PLANNED, ACTIVE, CLOSED],
+  user?: OfficeUser,
 ): FakeOfficeSession {
-  const session = fakeOfficeSession();
+  const session = fakeOfficeSession(user === undefined ? {} : { user });
   session.api.listShifts.mockResolvedValue(shifts);
   session.api.listProducts.mockResolvedValue([MILK, WATER, KEFIR_DRAFT, AYRAN_ARCHIVED]);
   session.api.listLines.mockResolvedValue([LINE_10, LINE_2, OLD_LINE]);
   session.api.listCounterparties.mockResolvedValue([NORTH, SOUTH_ARCHIVED]);
   session.api.listTemplates.mockResolvedValue([BOX_58, MILK_BOX, OLD_BOX, PALLET]);
+  session.api.getOrg.mockResolvedValue(ORG_PROFILE);
+  session.api.getTemplateDefaults.mockResolvedValue(DEFAULTS);
   return session;
 }
 
 /** Opens «Смены» from the menu and waits for the list. */
-export async function openShifts(session: FakeOfficeSession): Promise<void> {
-  renderOffice(session);
+export async function openShifts(session: FakeOfficeSession): Promise<RenderResult> {
+  const view = renderOffice(session);
   fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
   await screen.findByRole("heading", { name: "Смены" });
   await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
+  return view;
 }
 
 /** The rows of the list, without the header. */
