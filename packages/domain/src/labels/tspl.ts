@@ -394,16 +394,13 @@ function renderBarcodeElement(
   switch (element.format) {
     case "code128": {
       const heightDots = mmToDots(element.sizeMm, dpi);
-      // A code128 bound to `sscc` is a GS1-128, not a plain Code 128: TSPL's
-      // `"128"` barcode type takes FNC1 as the two literal characters `!1`
-      // inside the data (per TSC's TSPL2 manual, code-page permitting) —
-      // the TSPL equivalent of `zpl.ts`'s `>;>8` (subset-C-select + FNC1)
-      // in its own `code128` case; see that comment for the full
-      // rationale. The AI (`00`) is added HERE and nowhere else — storage
-      // and transport carry the bare 18 digits.
-      const payload = field === "sscc" ? `!100${value}` : value;
+      // TSC's native EAN128 type supplies the leading FNC1. Plain "128"
+      // encodes "!1" literally, corrupting the scanned SSCC. Add only AI 00;
+      // storage and transport continue to carry the bare 18 digits.
+      const barcodeType = field === "sscc" ? "EAN128" : "128";
+      const payload = field === "sscc" ? `00${value}` : value;
       const bars = barWidthParams(element, dpi);
-      return `BARCODE ${x},${y},"128",${heightDots},0,0,${bars},"${escapeTsplString(payload)}"`;
+      return `BARCODE ${x},${y},"${barcodeType}",${heightDots},0,0,${bars},"${escapeTsplString(payload)}"`;
     }
     case "ean13": {
       const heightDots = mmToDots(element.sizeMm, dpi);

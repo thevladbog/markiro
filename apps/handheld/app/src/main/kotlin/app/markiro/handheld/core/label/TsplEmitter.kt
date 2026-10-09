@@ -152,12 +152,13 @@ private fun barcode(
         is BarcodeSource.Literal -> source.value
     }
     val gs1 = source is BarcodeSource.Field && source.field == LabelField.SSCC
-    // `!1` is this language's GS1 flag and `00` is the application identifier, added here and
-    // nowhere else.
-    val payload = if (gs1) "!100$value" else value
+    // EAN128 supplies FNC1; plain 128 encodes "!1" literally. Only AI 00 is
+    // added to the bare SSCC, matching the shared TypeScript emitter.
+    val barcodeType = if (gs1) "EAN128" else "128"
+    val payload = if (gs1) "00$value" else value
     val narrow = element.moduleWidthMm?.let { max(1, mmToDots(it, spec.dpi)) } ?: DEFAULT_NARROW_DOTS
     // The interpretation line is off, matching the other language.
-    line("BARCODE $x,$y,\"128\",${mmToDots(element.sizeMm, spec.dpi)},0,0,$narrow,$narrow,\"${escape(payload)}\"")
+    line("BARCODE $x,$y,\"$barcodeType\",${mmToDots(element.sizeMm, spec.dpi)},0,0,$narrow,$narrow,\"${escape(payload)}\"")
 }
 
 private fun bar(spec: LabelSpec, element: LabelElement.Line): String {

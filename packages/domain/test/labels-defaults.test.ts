@@ -517,7 +517,7 @@ describe("buildDefaultLabelTemplates", () => {
       // line, which is what used to differ by brand.
       expect(zpl, `${name}: ZPL HRI`).toContain("^BCN,");
       expect(zpl, `${name}: ZPL HRI`).toMatch(/\^BCN,\d+,N,N,N/);
-      expect(tspl, `${name}: TSPL HRI`).toMatch(/BARCODE \d+,\d+,"128",\d+,0,0,\d+,\d+,/);
+      expect(tspl, `${name}: TSPL HRI`).toMatch(/BARCODE \d+,\d+,"EAN128",\d+,0,0,\d+,\d+,/);
     }
   });
 
