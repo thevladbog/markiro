@@ -11,6 +11,7 @@ import {
   CLOSED,
   freezeToday,
   KEFIR_DRAFT,
+  LINE_10,
   LINE_2,
   NORTH,
   OLD_BOX,
@@ -185,6 +186,35 @@ describe("office shifts: changing a shift", () => {
       boxCapacity: 30,
       expectedRev: 72,
     });
+  });
+
+  it("keeps a line and a counterparty the person chose and the host then refused as marked choices the selects show", async () => {
+    const session = shiftsSession();
+    session.api.updateShift
+      .mockRejectedValueOnce(api("validation_failed", { field: "lineId" }))
+      .mockRejectedValueOnce(api("validation_failed", { field: "counterpartyId" }));
+    const name = await openEdit(session, PLANNED);
+    fireEvent.change(field(name, "Линия"), { target: { value: LINE_2.id } });
+    session.api.listLines.mockResolvedValue([LINE_10, { ...LINE_2, archived: true }]);
+    fireEvent.click(save(name));
+    await waitFor(() => expect(options(name, "Линия")).toContain("Линия 2 (в архиве)"));
+    expect((field(name, "Линия") as HTMLSelectElement).selectedOptions[0]?.textContent).toBe(
+      "Линия 2 (в архиве)",
+    );
+    expect(valueOf(name, "Линия")).toBe(LINE_2.id);
+    // Back to the shift's own line, and a counterparty the host then refuses.
+    await waitFor(() => expect(isDisabled(field(name, "Линия"))).toBe(false));
+    fireEvent.change(field(name, "Линия"), { target: { value: PLANNED.lineId } });
+    fireEvent.change(field(name, "Контрагент"), { target: { value: NORTH.id } });
+    session.api.listCounterparties.mockResolvedValue([{ ...NORTH, archived: true }]);
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(options(name, "Контрагент")).toContain("ООО «Северный берег» (в архиве)"),
+    );
+    expect((field(name, "Контрагент") as HTMLSelectElement).selectedOptions[0]?.textContent).toBe(
+      "ООО «Северный берег» (в архиве)",
+    );
+    expect(valueOf(name, "Контрагент")).toBe(NORTH.id);
   });
 
   it("clears the plan and the counterparty with null", async () => {

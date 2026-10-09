@@ -354,6 +354,28 @@ describe("office shifts: planning a shift", () => {
     ).toBeTruthy();
   });
 
+  it("says under the template that the defaults did not load and that it comes from the product alone", async () => {
+    const session = shiftsSession();
+    session.api.getTemplateDefaults.mockRejectedValue(api("internal"));
+    await openCreate(session);
+    const words =
+      "Умолчания шаблонов не загрузились: шаблон берётся только из товара — проверьте выбор.";
+    // Water has no preference of its own and its group's default is out of reach: no template.
+    set("Товар", WATER.id);
+    expect(valueOf("Шаблон этикетки короба")).toBe("");
+    expect(messageOf("Шаблон этикетки короба")).toBe(words);
+    // Milk has: the template is chosen, and the note still says where it came from.
+    set("Товар", MILK.id);
+    expect(valueOf("Шаблон этикетки короба")).toBe(MILK_BOX.id);
+    expect(messageOf("Шаблон этикетки короба")).toBe(words);
+  });
+
+  it("says nothing of the defaults when they loaded", async () => {
+    await openCreate(shiftsSession());
+    set("Товар", WATER.id);
+    expect(messageOf("Шаблон этикетки короба")).toBeUndefined();
+  });
+
   it("waits for the organization's profile behind a loading dialog whose button is off", async () => {
     const session = shiftsSession();
     let answer: (org: typeof ORG_PROFILE) => void = () => undefined;
@@ -676,14 +698,27 @@ describe("office shifts: planning a shift", () => {
       api("conflict", { constraint: "product_inactive" }),
       "Товар",
       "listProducts",
-      "Молоко",
+      "Молоко 3,2% 0,9 л",
+      MILK.id,
+      "Молоко 3,2% 0,9 л (в архиве)",
     ],
     [
       "a product the host does not find",
       api("validation_failed", { field: "productId" }),
       "Товар",
       "listProducts",
-      "Молоко",
+      "Молоко 3,2% 0,9 л",
+      MILK.id,
+      "Молоко 3,2% 0,9 л (в архиве)",
+    ],
+    [
+      "a product that became a draft",
+      api("conflict", { constraint: "product_inactive" }),
+      "Товар",
+      "listProducts",
+      "Молоко 3,2% 0,9 л",
+      MILK.id,
+      "Молоко 3,2% 0,9 л (черновик)",
     ],
     [
       "an archived line",
@@ -691,6 +726,8 @@ describe("office shifts: planning a shift", () => {
       "Линия",
       "listLines",
       "Линия 2",
+      LINE_2.id,
+      "Линия 2 (в архиве)",
     ],
     [
       "a counterparty archived meanwhile",
@@ -698,24 +735,69 @@ describe("office shifts: planning a shift", () => {
       "Контрагент",
       "listCounterparties",
       "ООО «Северный берег»",
+      NORTH.id,
+      "ООО «Северный берег» (в архиве)",
     ],
   ] as const)(
-    "reads the list again after the host refused %s, so the record is no longer offered",
-    async (_what, refusal, label, list, name) => {
+    "reads the list again after the host refused %s, and keeps the record as a marked choice the select shows",
+    async (_what, refusal, label, list, name, id, marked) => {
       const session = shiftsSession();
       session.api.createShift.mockRejectedValue(refusal);
       await openCreate(session);
       fillMilk();
       expect(options(label).some((text) => text.startsWith(name))).toBe(true);
-      session.api.listProducts.mockResolvedValue([{ ...MILK, archived: true }, WATER]);
+      session.api.listProducts.mockResolvedValue([
+        marked.endsWith("(черновик)") ? { ...MILK, status: "draft" } : { ...MILK, archived: true },
+        WATER,
+      ]);
       session.api.listLines.mockResolvedValue([LINE_10, { ...LINE_2, archived: true }]);
       session.api.listCounterparties.mockResolvedValue([{ ...NORTH, archived: true }]);
       const before = session.api[list].mock.calls.length;
       submit();
       await waitFor(() => expect(session.api[list]).toHaveBeenCalledTimes(before + 1));
-      await waitFor(() => expect(options(label).some((text) => text.startsWith(name))).toBe(false));
+      // The refused record is no longer offered as a normal choice, but the form still holds it,
+      // so the select shows it - marked - rather than another record or «Не выбран».
+      await waitFor(() => expect(options(label)).toContain(marked));
+      expect(options(label).filter((text) => text.startsWith(name))).toEqual([marked]);
+      const control = field(label) as HTMLSelectElement;
+      expect(control.value).toBe(id);
+      expect(control.selectedOptions[0]?.textContent).toBe(marked);
+      // The refusal stays under the field, and the person picks another record.
+      expect(messageOf(label)).not.toBeUndefined();
     },
   );
+
+  it("never clears a refused counterparty: a resend after the re-read still names it and is refused again", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(
+      api("validation_failed", { field: "counterpartyId" }),
+    );
+    await openCreate(session);
+    fillMilk();
+    session.api.listCounterparties.mockResolvedValue([{ ...NORTH, archived: true }]);
+    submit();
+    await waitFor(() =>
+      expect(messageOf("Контрагент")).toBe("Контрагент в архиве. Выберите другого."),
+    );
+    await waitFor(() => expect(options("Контрагент")).toContain("ООО «Северный берег» (в архиве)"));
+    await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
+    submit();
+    await waitFor(() => expect(session.api.createShift).toHaveBeenCalledTimes(2));
+    expect(session.api.createShift).toHaveBeenLastCalledWith(
+      TOKEN,
+      expect.objectContaining({ counterpartyId: NORTH.id }),
+    );
+    // The person picks «Не выбран» on purpose: that, and only that, sends no counterparty.
+    await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
+    session.api.createShift.mockResolvedValueOnce(CREATED);
+    set("Контрагент", "");
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    expect(session.api.createShift).toHaveBeenLastCalledWith(
+      TOKEN,
+      expect.objectContaining({ counterpartyId: null }),
+    );
+  });
 
   it.each([
     ["a date", "productionDate"],
