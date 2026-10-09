@@ -11,8 +11,8 @@ export const SITE_CONTACTS = {
 } as const;
 
 const OPERATOR_REQUISITES: Readonly<Record<Locale, string>> = {
-  ru: "ИП Богатырев Владислав Сергеевич · ИНН 234106228141 · ОГРНИП 321237500100358",
-  en: "Sole proprietor Vladislav Bogatyrev · INN 234106228141 · OGRNIP 321237500100358",
+  ru: "ИП Богатырев Владислав Сергеевич · ИНН 234106228141 · ОГРНИП 326237500395950",
+  en: "Sole proprietor Vladislav Bogatyrev · INN 234106228141 · OGRNIP 326237500395950",
 };
 
 export function operatorRequisites(locale: Locale): string {

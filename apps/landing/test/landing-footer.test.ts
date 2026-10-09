@@ -37,7 +37,7 @@ describe("landing footer contacts", () => {
       "Telegram @thevladbog",
     );
     expect(document.querySelector("[data-footer-requisites]")?.textContent).toBe(
-      "ИП Богатырев Владислав Сергеевич · ИНН 234106228141 · ОГРНИП 321237500100358",
+      "ИП Богатырев Владислав Сергеевич · ИНН 234106228141 · ОГРНИП 326237500395950",
     );
   });
 
@@ -45,7 +45,7 @@ describe("landing footer contacts", () => {
     const document = await render("en", PHONE);
 
     expect(document.querySelector("[data-footer-requisites]")?.textContent).toBe(
-      "Sole proprietor Vladislav Bogatyrev · INN 234106228141 · OGRNIP 321237500100358",
+      "Sole proprietor Vladislav Bogatyrev · INN 234106228141 · OGRNIP 326237500395950",
     );
   });
 
