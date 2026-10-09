@@ -18,6 +18,7 @@ use markiro_standalone_lib::device_config::{self, DeviceConfig};
 use markiro_standalone_lib::local_db::{
     LocalDbState, TableClass, FILE_NAME, MIGRATOR, TABLE_CLASSES,
 };
+use markiro_standalone_lib::power::SystemAwakeState;
 use markiro_standalone_lib::secret_store::{ProtectedSecret, Scheme};
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
@@ -26,7 +27,7 @@ use tauri::test::{
     get_ipc_response, mock_builder, mock_context, noop_assets, MockRuntime, INVOKE_KEY,
 };
 use tauri::webview::InvokeRequest;
-use tauri::{App, WebviewWindow};
+use tauri::{App, Manager, WebviewWindow};
 
 const NAME: &str = "Рабочее место хоста";
 const BOOTSTRAP: &str = include_str!("../../proto/fixtures/bootstrap-request.json");
@@ -79,6 +80,7 @@ fn mock_app_with(
         .manage(device)
         .manage(local)
         .manage(ConnectionState::default())
+        .manage(SystemAwakeState::default())
         .invoke_handler(markiro_standalone_lib::invoke_handler())
         .build(mock_context(noop_assets()))
         .unwrap();
@@ -1191,6 +1193,34 @@ fn an_unpaired_device_has_nothing_to_refresh() {
         invoke(&webview, "device_refresh", json!({})),
         Err(json!("not_paired"))
     );
+}
+
+/// `set_system_awake` takes `awake` (`src/hardware/hardware.ts`) and answers
+/// `null`, asked twice or not; letting go never fails. Off Windows it holds
+/// nothing. On Windows this test asks for a real power request, which a CI
+/// runner's session may refuse: then the answer must be the bare
+/// `power_request_failed`, and letting go must still succeed.
+#[test]
+fn keeping_the_computer_awake_answers_through_the_ipc_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let (app, webview) = mock_app(DeviceState::load(dir.path().to_path_buf()));
+    let awake = |awake: bool| invoke(&webview, "set_system_awake", json!({ "awake": awake }));
+    let held = || app.state::<SystemAwakeState>().is_awake();
+    assert!(!held());
+    for _ in 0..2 {
+        let answer = awake(true);
+        if cfg!(windows) && answer.is_err() {
+            assert_eq!(answer, Err(json!("power_request_failed")));
+            assert!(!held(), "a refused request holds nothing");
+        } else {
+            assert_eq!(answer, Ok(Value::Null));
+            assert!(held(), "the argument reached the state: awake is held");
+        }
+    }
+    assert_eq!(awake(false), Ok(Value::Null));
+    assert!(!held(), "false lets go");
+    assert_eq!(awake(false), Ok(Value::Null));
+    assert!(!held());
 }
 
 /// `src/host/connection.ts` reads this snapshot before the first event.

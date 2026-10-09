@@ -9,6 +9,7 @@ pub mod host_client;
 pub mod host_probe;
 pub mod local_db;
 pub mod lockdown;
+pub mod power;
 pub mod secret_store;
 pub mod tls;
 
@@ -257,7 +258,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         local_transaction,
         connection_status,
         lockdown::enter_lockdown,
-        lockdown::exit_lockdown
+        lockdown::exit_lockdown,
+        power::set_system_awake
     ]
 }
 
@@ -287,6 +289,7 @@ pub fn run() {
             Ok(())
         })
         .manage(lockdown::LockdownState::default())
+        .manage(power::SystemAwakeState::default())
         .on_window_event(lockdown::refuse_close_while_locked)
         .invoke_handler(invoke_handler())
         .run(tauri::generate_context!())
