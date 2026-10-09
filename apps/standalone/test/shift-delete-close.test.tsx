@@ -355,7 +355,7 @@ describe("office shifts: closing an active shift", () => {
     const confirm = await openClose(session);
     expect(within(confirm).getByText(/только если станция её уже не закончит/)).toBeTruthy();
     expect(reasonNote()).toBe(
-      "От 3 до 500 символов. Её увидят в списке смен и в журнале действий.",
+      "От 3 до 500 символов, одной строкой. Её увидят в списке смен и в журнале действий.",
     );
     expect(reason().getAttribute("aria-invalid")).toBeNull();
     expect(reasonNoteElement().className).toBe("shift-note");
@@ -429,6 +429,22 @@ describe("office shifts: closing an active shift", () => {
         expectedRev: 71,
       });
     }
+  });
+
+  it("lets Enter and Shift+Enter put no line break in the reason, and every other key through", async () => {
+    const session = shiftsSession();
+    await openClose(session);
+    fireEvent.change(reason(), { target: { value: "Станция сломалась" } });
+    // `fireEvent` answers `false` when the default of the key was prevented.
+    expect(fireEvent.keyDown(reason(), { key: "Enter" })).toBe(false);
+    expect(fireEvent.keyDown(reason(), { key: "Enter", shiftKey: true })).toBe(false);
+    expect(fireEvent.keyDown(reason(), { key: "a" })).toBe(true);
+    expect(fireEvent.keyDown(reason(), { key: "Tab" })).toBe(true);
+    // An Enter that confirms a word of an input method is the method's, not a line break.
+    expect(fireEvent.keyDown(reason(), { key: "Enter", isComposing: true })).toBe(true);
+    // Enter writes nothing and sends nothing.
+    expect(reason().value).toBe("Станция сломалась");
+    expect(session.api.closeShift).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -643,7 +659,7 @@ describe("office shifts: closing an active shift", () => {
     await screen.findByRole("dialog", { name: "Закрыть смену OCT26-004" });
     expect(reason().value).toBe("");
     expect(reasonNote()).toBe(
-      "От 3 до 500 символов. Её увидят в списке смен и в журнале действий.",
+      "От 3 до 500 символов, одной строкой. Её увидят в списке смен и в журнале действий.",
     );
   });
 
