@@ -8,7 +8,7 @@ import { DatePicker, Input, Select } from "@markiro/ui";
 
 import { HostError } from "../../host/client.js";
 import type { OfficeShift } from "../../host/protocol.js";
-import { shiftCreate } from "../../host/requests.js";
+import { shiftCreate, shiftUpdate } from "../../host/requests.js";
 import { suggestBoxTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
 import { useTemplateDefaults, useTemplates } from "../catalog-queries.js";
@@ -23,26 +23,42 @@ import {
   SHIFT_CONFLICTS,
   SHIFT_FIELD_ORDER,
   SHIFT_FIELDS,
+  shiftFields,
   shiftFieldsSchema,
+  shiftWriteFailure,
+  toShiftChange,
   toShiftInput,
   type ShiftFields,
 } from "./shift-form.js";
+import { recordLabel } from "./shift-list.js";
 import { datePickerTexts } from "./shift-text.js";
 
 export interface ShiftDialogProps {
+  /** `null` plans a new shift; a planned shift is changed. */
+  shift: OfficeShift | null;
   onClose: () => void;
   onSaved: (shift: OfficeShift) => void;
+  /** The shift changed on the host: close and load the list again. */
+  onReload: () => void;
+  /** The shift was opened, closed or deleted meanwhile: the page reads the list again. */
+  onOutdated: () => void;
 }
 
 /**
- * Plans a shift (stage 2a spec §5.6). The production date starts as today in
- * the organization's time zone, so the dialog waits for the organization's
- * profile; when the profile does not load, or names a zone this PC does not
- * know, it starts as this PC's date and says so.
+ * Plans a shift, or changes a planned one (stage 2a spec §5.6). A new shift's
+ * production date starts as today in the organization's time zone, so the
+ * dialog waits for the organization's profile; when the profile does not
+ * load, or names a zone this PC does not know, it starts as this PC's date
+ * and says so. A changed shift needs no "today": it starts on its own values.
  */
 export function ShiftDialog(props: ShiftDialogProps) {
   const { t } = useTranslation();
-  const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
+  const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token), {
+    enabled: props.shift === null,
+  });
+  if (props.shift !== null) {
+    return <ShiftForm {...props} today={props.shift.productionDate} dateNote={null} />;
+  }
   if (org.isPending) {
     return (
       <FormDialog
@@ -77,7 +93,15 @@ interface ShiftFormProps extends ShiftDialogProps {
   dateNote: "localDate" | "localDateZone" | null;
 }
 
-function ShiftForm({ onClose, onSaved, today, dateNote }: ShiftFormProps) {
+function ShiftForm({
+  shift,
+  onClose,
+  onSaved,
+  onReload,
+  onOutdated,
+  today,
+  dateNote,
+}: ShiftFormProps) {
   const { t } = useTranslation();
   const ids = useId();
   const queryClient = useQueryClient();
@@ -94,7 +118,9 @@ function ShiftForm({ onClose, onSaved, today, dateNote }: ShiftFormProps) {
   const templates = useTemplates();
   const defaults = useTemplateDefaults();
   const save = useOfficeMutation((api, token, values: ShiftFields) =>
-    api.createShift(token, shiftCreate(toShiftInput(values))),
+    shift === null
+      ? api.createShift(token, shiftCreate(toShiftInput(values)))
+      : api.updateShift(token, shift.id, shiftUpdate(shift, toShiftChange(values))),
   );
   const {
     register,
@@ -104,10 +130,10 @@ function ShiftForm({ onClose, onSaved, today, dateNote }: ShiftFormProps) {
     setValue,
     clearErrors,
     watch,
-    formState: { errors, isSubmitting },
+    formState: { errors, isDirty, isSubmitting },
   } = useForm<ShiftFields>({
     resolver: zodResolver(shiftFieldsSchema),
-    defaultValues: newShiftFields(today),
+    defaultValues: shift === null ? newShiftFields(today) : shiftFields(shift),
     // The first refused field in the form's order takes the focus, selects and the date included.
     shouldFocusError: false,
   });
@@ -139,6 +165,37 @@ function ShiftForm({ onClose, onSaved, today, dateNote }: ShiftFormProps) {
       .filter((each) => !each.archived)
       .map((each) => ({ value: each.id, label: each.name })),
   ];
+  // A changed shift keeps its own line and counterparty as choices, marked when
+  // archived or missing from the list: the host keeps one that does not change.
+  if (shift !== null) {
+    if (!lineOptions.some((option) => option.value === shift.lineId)) {
+      lineOptions.push({
+        value: shift.lineId,
+        label: recordLabel("line", lines.data, shift.lineId, t),
+      });
+    }
+    const own = shift.counterpartyId;
+    if (own !== null && !counterpartyOptions.some((option) => option.value === own)) {
+      counterpartyOptions.push({
+        value: own,
+        label: recordLabel("counterparty", counterparties.data, own, t),
+      });
+    }
+  }
+
+  // Without the product's record (its list did not load) a changed shift can name only its
+  // own template, and cannot say whether it fits.
+  const ownTemplate =
+    shift === null
+      ? []
+      : [
+          {
+            value: shift.boxTemplateId,
+            label:
+              templates.data?.find((each) => each.id === shift.boxTemplateId)?.name ??
+              t("office.templateChoice.id", { id: shift.boxTemplateId.slice(0, 8) }),
+          },
+        ];
 
   const chooseProduct = (id: string, onChange: (id: string) => void) => {
     onChange(id);
@@ -161,7 +218,12 @@ function ShiftForm({ onClose, onSaved, today, dateNote }: ShiftFormProps) {
       try {
         saved = await save.mutateAsync(values);
       } catch (error) {
-        const outcome = writeFailure(error, SHIFT_FIELDS, SHIFT_CONFLICTS);
+        // A shift opened, closed or deleted meanwhile is a change's refusal only; a new
+        // shift's `not_found` (the host is not set up) is not "the shift is gone".
+        const { failure: outcome, outdated } =
+          shift === null
+            ? { failure: writeFailure(error, SHIFT_FIELDS, SHIFT_CONFLICTS), outdated: false }
+            : shiftWriteFailure(error, SHIFT_FIELDS, SHIFT_CONFLICTS);
         if (outcome.kind === "field") {
           setError(outcome.field, { type: "server", message: outcome.message });
           focusAfterRender.current = outcome.field;
@@ -179,6 +241,7 @@ function ShiftForm({ onClose, onSaved, today, dateNote }: ShiftFormProps) {
             void queryClient.invalidateQueries({ queryKey: officeKeys.shifts });
           }
         }
+        if (outdated) onOutdated();
         return;
       }
       onSaved(saved);
@@ -191,32 +254,46 @@ function ShiftForm({ onClose, onSaved, today, dateNote }: ShiftFormProps) {
 
   return (
     <FormDialog
-      title={t("office.shifts.createTitle")}
-      submitLabel={t("office.shifts.create")}
+      title={
+        shift === null
+          ? t("office.shifts.createTitle")
+          : t("office.shifts.editTitle", { number: shift.number })
+      }
+      submitLabel={shift === null ? t("office.shifts.create") : t("office.common.save")}
+      submitDisabled={shift !== null && !isDirty}
       width={560}
       onSubmit={submit}
       onClose={onClose}
-      alert={<WriteFailureAlert failure={failure} />}
+      alert={<WriteFailureAlert failure={failure} onReload={onReload} />}
     >
-      <Controller
-        control={control}
-        name="productId"
-        render={({ field }) => (
-          <Select
-            native
-            label={t("office.shifts.fields.product")}
-            placeholder={t("office.shifts.fields.productPlaceholder")}
-            options={productOptions}
-            value={field.value}
-            onValueChange={(id) => chooseProduct(id, field.onChange)}
-            // The template follows the product, so the product waits for the templates and the defaults.
-            id={fieldId("productId")}
-            disabled={locked || !products.isSuccess || templates.isPending || defaults.isPending}
-            {...(products.isError ? { hint: t("office.shifts.fields.productsUnavailable") } : {})}
-            {...fieldError(errors.productId?.message)}
-          />
-        )}
-      />
+      {shift !== null ? (
+        // The product never changes: a changed shift names it.
+        <p>
+          {t("office.shifts.fields.productFixed", {
+            name: recordLabel("product", products.data, shift.productId, t),
+          })}
+        </p>
+      ) : (
+        <Controller
+          control={control}
+          name="productId"
+          render={({ field }) => (
+            <Select
+              native
+              label={t("office.shifts.fields.product")}
+              placeholder={t("office.shifts.fields.productPlaceholder")}
+              options={productOptions}
+              value={field.value}
+              onValueChange={(id) => chooseProduct(id, field.onChange)}
+              // The template follows the product, so the product waits for the templates and the defaults.
+              id={fieldId("productId")}
+              disabled={locked || !products.isSuccess || templates.isPending || defaults.isPending}
+              {...(products.isError ? { hint: t("office.shifts.fields.productsUnavailable") } : {})}
+              {...fieldError(errors.productId?.message)}
+            />
+          )}
+        />
+      )}
       <Controller
         control={control}
         name="lineId"
@@ -285,20 +362,21 @@ function ShiftForm({ onClose, onSaved, today, dateNote }: ShiftFormProps) {
             native
             label={t("office.shifts.fields.boxTemplate")}
             placeholder={t(
-              product === undefined
+              product === undefined && shift === null
                 ? "office.shifts.fields.templateAfterProduct"
                 : "office.shifts.fields.templatePlaceholder",
             )}
             // «Не выбран» is no choice here: a shift prints with a template. Before a
-            // product is chosen there is nothing to fit.
+            // product is chosen there is nothing to fit; a changed shift's own template
+            // stays a choice, marked when it no longer fits (the host keeps it unchanged).
             options={
               product === undefined
-                ? []
+                ? ownTemplate
                 : templateOptions(
                     templates.data,
                     "box",
                     product.chzProductGroupCode,
-                    [field.value],
+                    [shift?.boxTemplateId ?? "", field.value],
                     t,
                   ).filter((option) => option.value !== "")
             }
@@ -306,7 +384,11 @@ function ShiftForm({ onClose, onSaved, today, dateNote }: ShiftFormProps) {
             onValueChange={field.onChange}
             id={fieldId("boxTemplateId")}
             disabled={locked || !templates.isSuccess || product === undefined}
-            {...(templates.isError ? { hint: t("office.shifts.fields.templatesUnavailable") } : {})}
+            {...(templates.isError
+              ? { hint: t("office.shifts.fields.templatesUnavailable") }
+              : shift !== null && product === undefined && products.isError
+                ? { hint: t("office.shifts.fields.productsUnavailable") }
+                : {})}
             {...fieldError(errors.boxTemplateId?.message)}
           />
         )}
@@ -320,7 +402,9 @@ function ShiftForm({ onClose, onSaved, today, dateNote }: ShiftFormProps) {
             label={t("office.shifts.fields.counterparty")}
             hint={t(
               counterparties.isError
-                ? "office.shifts.fields.counterpartiesUnavailable"
+                ? shift === null
+                  ? "office.shifts.fields.counterpartiesUnavailable"
+                  : "office.shifts.fields.counterpartiesUnavailableEdit"
                 : "office.shifts.fields.counterpartyHint",
             )}
             options={counterpartyOptions}

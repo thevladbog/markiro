@@ -77,7 +77,8 @@ describe("office shifts: the list", () => {
       "OCT26-004",
       "OCT26-001/S",
     ]);
-    expect(cells("OCT26-005")).toEqual([
+    // The actions, for those who may plan, follow in the last column.
+    expect(cells("OCT26-005").slice(0, 7)).toEqual([
       "OCT26-005",
       "09.10.2026",
       "Линия 10",
@@ -86,7 +87,7 @@ describe("office shifts: the list", () => {
       "—",
       "◷Запланирована",
     ]);
-    expect(cells("OCT26-004")).toEqual([
+    expect(cells("OCT26-004").slice(0, 7)).toEqual([
       "OCT26-004",
       "08.10.2026",
       "Линия 2",

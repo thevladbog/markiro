@@ -1,0 +1,698 @@
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { HostError } from "../src/host/client.js";
+import type { OfficeShift } from "../src/host/protocol.js";
+import { TECHNOLOGIST, type FakeOfficeSession } from "./support/office.js";
+import {
+  ACTIVE,
+  AYRAN_ARCHIVED,
+  BOX_58,
+  CLOSED,
+  freezeToday,
+  LINE_2,
+  NORTH,
+  OLD_BOX,
+  OLD_LINE,
+  openShifts,
+  pickDate,
+  PLANNED,
+  shiftRow,
+  shiftsSession,
+  SOUTH_ARCHIVED,
+  WATER,
+} from "./support/shifts.js";
+
+const TOKEN = "office-session-token";
+
+function api(code: string, details: Record<string, unknown> = {}): HostError {
+  return new HostError({ kind: "api", code, status: 409, message: code, details });
+}
+
+function dialog(name: string): HTMLElement {
+  return screen.getByRole("dialog", { name });
+}
+
+function field(name: string, label: string): HTMLElement {
+  return within(dialog(name)).getByLabelText(label);
+}
+
+function options(name: string, label: string): string[] {
+  return within(field(name, label))
+    .getAllByRole("option")
+    .map((option) => option.textContent ?? "");
+}
+
+function valueOf(name: string, label: string): string {
+  const control = field(name, label);
+  if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement)) {
+    throw new Error(`${label} holds no value`);
+  }
+  return control.value;
+}
+
+/** The message under the control labelled `label`, by its `aria-describedby`. */
+function messageOf(name: string, label: string): string | null | undefined {
+  const id = field(name, label).getAttribute("aria-describedby");
+  return id === null ? undefined : document.getElementById(id)?.textContent;
+}
+
+function isDisabled(control: HTMLElement): boolean {
+  return (control as HTMLInputElement | HTMLSelectElement | HTMLButtonElement).disabled;
+}
+
+function save(name: string): HTMLButtonElement {
+  const button = within(dialog(name)).getByRole("button", { name: "Сохранить" });
+  if (!(button instanceof HTMLButtonElement)) throw new Error("no button");
+  return button;
+}
+
+async function openEdit(session: FakeOfficeSession, shift: OfficeShift): Promise<string> {
+  await openShifts(session);
+  fireEvent.click(screen.getByRole("button", { name: `Изменить смену ${shift.number}` }));
+  const name = `Смена ${shift.number}`;
+  await screen.findByRole("dialog", { name });
+  // The template choice waits for the product's record.
+  await waitFor(() =>
+    expect((field(name, "Шаблон этикетки короба") as HTMLSelectElement).disabled).toBe(false),
+  );
+  return name;
+}
+
+async function openPlan(session: FakeOfficeSession, shift: OfficeShift): Promise<string> {
+  await openShifts(session);
+  fireEvent.click(screen.getByRole("button", { name: `Изменить план смены ${shift.number}` }));
+  const name = `План смены ${shift.number}`;
+  await screen.findByRole("dialog", { name });
+  return name;
+}
+
+describe("office shifts: changing a shift", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+    freezeToday();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("offers a planned shift's change, an active one's plan and nothing for a closed one, to both roles", async () => {
+    for (const user of [undefined, TECHNOLOGIST]) {
+      const view = await openShifts(shiftsSession(undefined, user));
+      expect(
+        within(shiftRow("OCT26-005"))
+          .getAllByRole("button")
+          .map((button) => button.getAttribute("aria-label")),
+      ).toEqual(["Изменить смену OCT26-005"]);
+      expect(
+        within(shiftRow("OCT26-004"))
+          .getAllByRole("button")
+          .map((button) => button.getAttribute("aria-label")),
+      ).toEqual(["Изменить план смены OCT26-004"]);
+      expect(within(shiftRow(CLOSED.number)).queryAllByRole("button")).toEqual([]);
+      view.unmount();
+    }
+  });
+
+  it("opens a planned shift with its own values and its product named, and saves only after a change", async () => {
+    const session = shiftsSession();
+    const name = await openEdit(session, PLANNED);
+    expect(
+      within(dialog(name)).getByText("Товар: Вода 0,5 л. Товар смены не меняется."),
+    ).toBeTruthy();
+    expect(within(dialog(name)).queryByLabelText("Товар")).toBeNull();
+    expect(valueOf(name, "Линия")).toBe(PLANNED.lineId);
+    expect(valueOf(name, "План, шт")).toBe("");
+    expect(valueOf(name, "Вместимость короба, шт")).toBe("24");
+    expect(valueOf(name, "Шаблон этикетки короба")).toBe(BOX_58.id);
+    expect(valueOf(name, "Контрагент")).toBe("");
+    expect(
+      within(dialog(name)).getByRole("button", { name: "Дата производства" }).textContent,
+    ).toBe("9 октября 2026");
+    expect(save(name).disabled).toBe(true);
+  });
+
+  it("sends only what changed with the loaded revision, then says so and reads the list again", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockResolvedValue({ ...PLANNED, lineId: LINE_2.id, rev: 90 });
+    const name = await openEdit(session, PLANNED);
+    fireEvent.change(field(name, "Линия"), { target: { value: LINE_2.id } });
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    pickDate("Дата производства", "10 октября 2026");
+    fireEvent.click(save(name));
+    await screen.findByText("Изменения сохранены.");
+    expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, PLANNED.id, {
+      lineId: LINE_2.id,
+      productionDate: "2026-10-10",
+      plannedQty: 900,
+      expectedRev: 72,
+    });
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps an archived line and counterparty and an unfit template as marked choices, and does not send them back", async () => {
+    const shift: OfficeShift = {
+      ...PLANNED,
+      lineId: OLD_LINE.id,
+      counterpartyId: SOUTH_ARCHIVED.id,
+      boxTemplateId: OLD_BOX.id,
+    };
+    const session = shiftsSession([shift]);
+    session.api.updateShift.mockResolvedValue({ ...shift, boxCapacity: 30, rev: 91 });
+    const name = await openEdit(session, shift);
+    expect(options(name, "Линия")).toEqual([
+      "Выберите линию",
+      "Линия 2",
+      "Линия 10",
+      "Линия 1 (в архиве)",
+    ]);
+    expect(options(name, "Контрагент")).toEqual([
+      "Не выбран",
+      "ООО «Северный берег»",
+      "ООО «Юг» (в архиве)",
+    ]);
+    expect(options(name, "Шаблон этикетки короба")).toEqual([
+      "Выберите шаблон",
+      "Коробка 58×40",
+      "Старая коробка — не подходит",
+    ]);
+    fireEvent.change(field(name, "Вместимость короба, шт"), { target: { value: "30" } });
+    fireEvent.click(save(name));
+    await screen.findByText("Изменения сохранены.");
+    expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, shift.id, {
+      boxCapacity: 30,
+      expectedRev: 72,
+    });
+  });
+
+  it("clears the plan and the counterparty with null", async () => {
+    const session = shiftsSession();
+    const shift: OfficeShift = {
+      ...PLANNED,
+      plannedQty: 800,
+      counterpartyId: ACTIVE.counterpartyId,
+    };
+    session.api.listShifts.mockResolvedValue([shift]);
+    session.api.updateShift.mockResolvedValue({ ...shift, plannedQty: null, counterpartyId: null });
+    const name = await openEdit(session, shift);
+    fireEvent.change(field(name, "План, шт"), { target: { value: " " } });
+    fireEvent.change(field(name, "Контрагент"), { target: { value: "" } });
+    fireEvent.click(save(name));
+    await screen.findByText("Изменения сохранены.");
+    expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, shift.id, {
+      plannedQty: null,
+      counterpartyId: null,
+      expectedRev: 72,
+    });
+  });
+
+  it("offers to load the list again after a stale save, which closes the dialog and drops the edits", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockRejectedValue(api("stale_revision", { currentRev: 95 }));
+    const name = await openEdit(session, PLANNED);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(save(name));
+    fireEvent.click(await within(dialog(name)).findByRole("button", { name: "Загрузить заново" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name })).toBeNull());
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+    expect(session.api.updateShift).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      "opened on a station meanwhile",
+      api("conflict", { constraint: "shift_status", status: "active" }),
+      "Смену уже открыли на станции: теперь у неё можно изменить только план. Список смен обновлён.",
+    ],
+    [
+      "deleted meanwhile",
+      api("not_found"),
+      "Этой смены больше нет: её удалили. Список смен обновлён.",
+    ],
+  ])(
+    "says a shift was %s, keeps the dialog and reads the list again",
+    async (_what, refusal, text) => {
+      const session = shiftsSession();
+      session.api.updateShift.mockRejectedValue(refusal);
+      const name = await openEdit(session, PLANNED);
+      fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+      fireEvent.click(save(name));
+      expect(await within(dialog(name)).findByText(text)).toBeTruthy();
+      await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+    },
+  );
+
+  it("changes an active shift's plan alone, and clears it with null", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockResolvedValue({ ...ACTIVE, plannedQty: 1500, rev: 92 });
+    const name = await openPlan(session, ACTIVE);
+    expect(
+      within(dialog(name)).getByText(
+        "Смена уже идёт на станции: у неё меняется только план. На этикетку план не попадает.",
+      ),
+    ).toBeTruthy();
+    expect(valueOf(name, "План, шт")).toBe("1200");
+    expect(save(name).disabled).toBe(true);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "1500" } });
+    fireEvent.click(save(name));
+    await screen.findByText("Изменения сохранены.");
+    expect(session.api.updateShift).toHaveBeenLastCalledWith(TOKEN, ACTIVE.id, {
+      plannedQty: 1500,
+      expectedRev: 71,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Изменить план смены OCT26-004" }));
+    fireEvent.change(field(name, "План, шт"), { target: { value: "" } });
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(session.api.updateShift).toHaveBeenLastCalledWith(TOKEN, ACTIVE.id, {
+        plannedQty: null,
+        expectedRev: 71,
+      }),
+    );
+  });
+
+  it("refuses a plan that is no whole number from 1 to 10 000 000, and says a shift closed meanwhile", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockRejectedValue(
+      api("conflict", { constraint: "shift_status", status: "closed" }),
+    );
+    const name = await openPlan(session, ACTIVE);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "1,5" } });
+    fireEvent.click(save(name));
+    expect(
+      await within(dialog(name)).findByText(
+        "Укажите целое число от 1 до 10 000 000 или оставьте пустым",
+      ),
+    ).toBeTruthy();
+    expect(session.api.updateShift).not.toHaveBeenCalled();
+    // The button is busy until the refused submit has settled.
+    await waitFor(() => expect(save(name).disabled).toBe(false));
+    fireEvent.change(field(name, "План, шт"), { target: { value: "1300" } });
+    fireEvent.click(save(name));
+    expect(
+      await within(dialog(name)).findByText("Смена уже закрыта. Список смен обновлён."),
+    ).toBeTruthy();
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+  });
+});
+
+/** A shift the list shows after a station opened it: the planned one, active and newer. */
+const OPENED: OfficeShift = {
+  ...PLANNED,
+  status: "active",
+  ownerDeviceId: ACTIVE.ownerDeviceId,
+  openedAt: ACTIVE.openedAt,
+  rev: 99,
+};
+
+/** A second box template that fits every category. */
+const BOX_70: typeof BOX_58 = {
+  ...BOX_58,
+  id: "b4c5d6e7-f8a9-4bac-9d1e-2f3a4b5c6d7e",
+  name: "Коробка 70×50",
+  widthMm: 70,
+  heightMm: 50,
+  rev: 66,
+};
+
+describe("office shifts: changing a shift, the edges", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+    freezeToday();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("sends every field it can change when all of them changed, trimmed, and never the product", async () => {
+    const session = shiftsSession();
+    session.api.listTemplates.mockResolvedValue([BOX_58, BOX_70]);
+    session.api.updateShift.mockResolvedValue({ ...PLANNED, rev: 90 });
+    const name = await openEdit(session, PLANNED);
+    fireEvent.change(field(name, "Линия"), { target: { value: LINE_2.id } });
+    pickDate("Дата производства", "10 октября 2026");
+    fireEvent.change(field(name, "План, шт"), { target: { value: " 900 " } });
+    fireEvent.change(field(name, "Вместимость короба, шт"), { target: { value: " 20 " } });
+    fireEvent.change(field(name, "Шаблон этикетки короба"), { target: { value: BOX_70.id } });
+    fireEvent.change(field(name, "Контрагент"), { target: { value: NORTH.id } });
+    fireEvent.click(save(name));
+    await screen.findByText("Изменения сохранены.");
+    expect(session.api.updateShift).toHaveBeenCalledTimes(1);
+    expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, PLANNED.id, {
+      lineId: LINE_2.id,
+      productionDate: "2026-10-10",
+      boxTemplateId: BOX_70.id,
+      boxCapacity: 20,
+      plannedQty: 900,
+      counterpartyId: NORTH.id,
+      expectedRev: 72,
+    });
+  });
+
+  it("switches «Сохранить» off again when an edit is undone", async () => {
+    const session = shiftsSession();
+    const name = await openEdit(session, PLANNED);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    expect(save(name).disabled).toBe(false);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "" } });
+    await waitFor(() => expect(save(name).disabled).toBe(true));
+  });
+
+  it("opens without the organization's profile, which a new shift's «today» alone needs", async () => {
+    const session = shiftsSession();
+    session.api.getOrg.mockReturnValue(new Promise(() => undefined));
+    const name = await openEdit(session, PLANNED);
+    expect(valueOf(name, "План, шт")).toBe("");
+    // Not even asked for: a changed shift has no use for «today».
+    expect(session.api.getOrg).not.toHaveBeenCalled();
+  });
+
+  it("lets the person go back to the shift's own marked choices after leaving them", async () => {
+    const shift: OfficeShift = {
+      ...PLANNED,
+      lineId: OLD_LINE.id,
+      counterpartyId: SOUTH_ARCHIVED.id,
+      boxTemplateId: OLD_BOX.id,
+    };
+    const session = shiftsSession([shift]);
+    session.api.updateShift.mockResolvedValue({ ...shift, rev: 91 });
+    const name = await openEdit(session, shift);
+    fireEvent.change(field(name, "Линия"), { target: { value: LINE_2.id } });
+    fireEvent.change(field(name, "Контрагент"), { target: { value: NORTH.id } });
+    fireEvent.change(field(name, "Шаблон этикетки короба"), { target: { value: BOX_58.id } });
+    expect(options(name, "Линия")).toContain("Линия 1 (в архиве)");
+    expect(options(name, "Контрагент")).toContain("ООО «Юг» (в архиве)");
+    expect(options(name, "Шаблон этикетки короба")).toContain("Старая коробка — не подходит");
+    fireEvent.change(field(name, "Линия"), { target: { value: OLD_LINE.id } });
+    fireEvent.change(field(name, "Контрагент"), { target: { value: SOUTH_ARCHIVED.id } });
+    fireEvent.change(field(name, "Шаблон этикетки короба"), { target: { value: OLD_BOX.id } });
+    // Back where it began: nothing to save.
+    await waitFor(() => expect(save(name).disabled).toBe(true));
+  });
+
+  it("names an archived product, and still changes the shift", async () => {
+    const shift: OfficeShift = { ...PLANNED, productId: AYRAN_ARCHIVED.id };
+    const session = shiftsSession([shift]);
+    session.api.updateShift.mockResolvedValue({ ...shift, plannedQty: 700, rev: 90 });
+    const name = await openEdit(session, shift);
+    expect(
+      within(dialog(name)).getByText("Товар: Айран (в архиве). Товар смены не меняется."),
+    ).toBeTruthy();
+    fireEvent.change(field(name, "План, шт"), { target: { value: "700" } });
+    fireEvent.click(save(name));
+    await screen.findByText("Изменения сохранены.");
+    expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, shift.id, {
+      plannedQty: 700,
+      expectedRev: 72,
+    });
+  });
+
+  it("names a line, counterparty and template the lists lack by their ids, as choices", async () => {
+    const shift: OfficeShift = {
+      ...PLANNED,
+      lineId: "11111111-2222-4333-8444-555555555555",
+      counterpartyId: "22222222-3333-4444-8555-666666666666",
+      boxTemplateId: "33333333-4444-4555-8666-777777777777",
+    };
+    const session = shiftsSession([shift]);
+    const name = await openEdit(session, shift);
+    expect(options(name, "Линия")).toEqual([
+      "Выберите линию",
+      "Линия 2",
+      "Линия 10",
+      "Линия 11111111…",
+    ]);
+    expect(options(name, "Контрагент")).toEqual([
+      "Не выбран",
+      "ООО «Северный берег»",
+      "Контрагент 22222222…",
+    ]);
+    expect(options(name, "Шаблон этикетки короба")).toEqual([
+      "Выберите шаблон",
+      "Коробка 58×40",
+      "Шаблон 33333333… — нет в списке",
+    ]);
+    expect(valueOf(name, "Линия")).toBe(shift.lineId);
+    expect(valueOf(name, "Контрагент")).toBe(shift.counterpartyId);
+    expect(valueOf(name, "Шаблон этикетки короба")).toBe(shift.boxTemplateId);
+  });
+
+  it("keeps the shift's own choices, off, and says so when the lists do not load", async () => {
+    const shift: OfficeShift = { ...PLANNED, counterpartyId: NORTH.id };
+    const session = shiftsSession([shift]);
+    session.api.listProducts.mockRejectedValue(api("internal"));
+    session.api.listLines.mockRejectedValue(api("internal"));
+    session.api.listCounterparties.mockRejectedValue(api("internal"));
+    await openShifts(session);
+    fireEvent.click(screen.getByRole("button", { name: `Изменить смену ${shift.number}` }));
+    const name = `Смена ${shift.number}`;
+    await screen.findByRole("dialog", { name });
+    await waitFor(() =>
+      expect(messageOf(name, "Контрагент")).toBe(
+        "Список контрагентов не загрузился: контрагент смены не меняется.",
+      ),
+    );
+    await waitFor(() =>
+      expect(messageOf(name, "Шаблон этикетки короба")).toBe(
+        "Список товаров не загрузился. Закройте окно и откройте его снова.",
+      ),
+    );
+    await waitFor(() =>
+      expect(messageOf(name, "Линия")).toBe(
+        "Список линий не загрузился. Закройте окно и откройте его снова.",
+      ),
+    );
+    expect(
+      within(dialog(name)).getByText("Товар: Товар 2b3c4d5e…. Товар смены не меняется."),
+    ).toBeTruthy();
+    expect(options(name, "Линия")).toEqual(["Выберите линию", "Линия 0b7e7dcb…"]);
+    expect(options(name, "Контрагент")).toEqual(["Не выбран", "Контрагент d2b7c9e1…"]);
+    expect(options(name, "Шаблон этикетки короба")).toEqual(["Выберите шаблон", "Коробка 58×40"]);
+    for (const label of ["Линия", "Шаблон этикетки короба", "Контрагент"]) {
+      expect(isDisabled(field(name, label))).toBe(true);
+      expect((field(name, label) as HTMLSelectElement).value).not.toBe("");
+    }
+    expect(valueOf(name, "Контрагент")).toBe(NORTH.id);
+  });
+
+  it("drops what was typed when the dialog is closed, sends nothing and opens on the shift's own values", async () => {
+    const session = shiftsSession();
+    const name = await openEdit(session, PLANNED);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(within(dialog(name)).getByRole("button", { name: "Отмена" }));
+    expect(screen.queryByRole("dialog", { name })).toBeNull();
+    expect(session.api.updateShift).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: `Изменить смену ${PLANNED.number}` }));
+    await screen.findByRole("dialog", { name });
+    expect(valueOf(name, "План, шт")).toBe("");
+    expect(save(name).disabled).toBe(true);
+  });
+
+  it("puts a line the host refused under the line, with the focus, and reads the lines again", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockRejectedValue(api("validation_failed", { field: "lineId" }));
+    const name = await openEdit(session, PLANNED);
+    const linesRead = session.api.listLines.mock.calls.length;
+    fireEvent.change(field(name, "Линия"), { target: { value: LINE_2.id } });
+    fireEvent.click(save(name));
+    await waitFor(() => expect(messageOf(name, "Линия")).toBe("Линия в архиве. Выберите другую."));
+    await waitFor(() => expect(document.activeElement).toBe(field(name, "Линия")));
+    await waitFor(() => expect(session.api.listLines.mock.calls.length).toBeGreaterThan(linesRead));
+  });
+
+  it("holds every control while the change is on its way, frees them after a refusal and sends again", async () => {
+    const session = shiftsSession();
+    let fail: (error: unknown) => void = () => undefined;
+    session.api.updateShift.mockReturnValueOnce(
+      new Promise<OfficeShift>((_resolve, reject) => {
+        fail = reject;
+      }),
+    );
+    const name = await openEdit(session, PLANNED);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(save(name));
+    await waitFor(() => expect(session.api.updateShift).toHaveBeenCalledTimes(1));
+    const controls = (): HTMLElement[] => [
+      field(name, "Линия"),
+      within(dialog(name)).getByRole("button", { name: "Дата производства" }),
+      field(name, "План, шт"),
+      field(name, "Вместимость короба, шт"),
+      field(name, "Шаблон этикетки короба"),
+      field(name, "Контрагент"),
+    ];
+    await waitFor(() => expect(controls().map(isDisabled)).toEqual(Array(6).fill(true)));
+    expect(isDisabled(within(dialog(name)).getByRole("button", { name: "Отмена" }))).toBe(true);
+    await act(async () => {
+      fail(api("internal"));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(controls().map(isDisabled)).toEqual(Array(6).fill(false)));
+    expect(await within(dialog(name)).findByRole("alert")).toBeTruthy();
+    // What was typed stays, and a second try goes out with the same revision.
+    expect(valueOf(name, "План, шт")).toBe("900");
+    session.api.updateShift.mockResolvedValueOnce({ ...PLANNED, plannedQty: 900, rev: 90 });
+    fireEvent.click(save(name));
+    await screen.findByText("Изменения сохранены.");
+    expect(session.api.updateShift).toHaveBeenNthCalledWith(2, TOKEN, PLANNED.id, {
+      plannedQty: 900,
+      expectedRev: 72,
+    });
+  });
+
+  it("reads the shifts again behind the dialog after a lost answer, and keeps the opened revision", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "x" }),
+    );
+    const name = await openEdit(session, PLANNED);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(save(name));
+    expect(await within(dialog(name)).findByRole("alert")).toBeTruthy();
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+  });
+
+  it("keeps the revision it was opened with when the list behind it is read again", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockRejectedValue(
+      api("conflict", { constraint: "shift_status", status: "active" }),
+    );
+    const name = await openEdit(session, PLANNED);
+    // The list read after the refusal shows the shift opened, with a newer revision.
+    session.api.listShifts.mockResolvedValue([OPENED, ACTIVE, CLOSED]);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(save(name));
+    await within(dialog(name)).findByText(
+      "Смену уже открыли на станции: теперь у неё можно изменить только план. Список смен обновлён.",
+    );
+    await waitFor(() =>
+      expect(within(shiftRow(PLANNED.number)).getByText("Активна", { exact: false })).toBeTruthy(),
+    );
+    await waitFor(() => expect(save(name).disabled).toBe(false));
+    fireEvent.click(save(name));
+    await waitFor(() => expect(session.api.updateShift).toHaveBeenCalledTimes(2));
+    expect(session.api.updateShift).toHaveBeenNthCalledWith(2, TOKEN, PLANNED.id, {
+      plannedQty: 900,
+      expectedRev: 72,
+    });
+  });
+
+  it("does not take the answer of a new shift's missing record for a deleted shift", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(api("not_found"));
+    await openShifts(session);
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
+    const name = "Новая смена";
+    await screen.findByRole("dialog", { name });
+    await waitFor(() => expect(isDisabled(field(name, "Товар"))).toBe(false));
+    fireEvent.change(field(name, "Товар"), { target: { value: WATER.id } });
+    fireEvent.change(field(name, "Линия"), { target: { value: LINE_2.id } });
+    fireEvent.click(within(dialog(name)).getByRole("button", { name: "Запланировать" }));
+    expect(await within(dialog(name)).findByRole("alert")).toBeTruthy();
+    expect(within(dialog(name)).queryByText(/Этой смены больше нет/)).toBeNull();
+    // The shifts were read once, on opening: a new shift's refusal leaves the list alone.
+    expect(session.api.listShifts).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("office shifts: changing an active shift's plan, the edges", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+    freezeToday();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("starts empty for a shift without a plan and sends the first plan alone", async () => {
+    const shift: OfficeShift = { ...ACTIVE, plannedQty: null };
+    const session = shiftsSession([shift]);
+    session.api.updateShift.mockResolvedValue({ ...shift, plannedQty: 700, rev: 92 });
+    const name = await openPlan(session, shift);
+    expect(valueOf(name, "План, шт")).toBe("");
+    expect(messageOf(name, "План, шт")).toBe("Пусто — без плана");
+    expect(save(name).disabled).toBe(true);
+    fireEvent.change(field(name, "План, шт"), { target: { value: " 700 " } });
+    fireEvent.click(save(name));
+    await screen.findByText("Изменения сохранены.");
+    expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, shift.id, {
+      plannedQty: 700,
+      expectedRev: 71,
+    });
+  });
+
+  it("puts the focus on a plan it refuses, and sends nothing", async () => {
+    const session = shiftsSession();
+    const name = await openPlan(session, ACTIVE);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "0" } });
+    fireEvent.click(save(name));
+    await within(dialog(name)).findByText(
+      "Укажите целое число от 1 до 10 000 000 или оставьте пустым",
+    );
+    await waitFor(() => expect(document.activeElement).toBe(field(name, "План, шт")));
+    expect(session.api.updateShift).not.toHaveBeenCalled();
+  });
+
+  it("puts a plan the host refused under the field, with the focus", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockRejectedValue(api("validation_failed", { field: "plannedQty" }));
+    const name = await openPlan(session, ACTIVE);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(messageOf(name, "План, шт")).toBe("Хост не принял это значение. Проверьте его."),
+    );
+    await waitFor(() => expect(document.activeElement).toBe(field(name, "План, шт")));
+  });
+
+  it("holds the plan and «Отмена» while the change is on its way, then gives the plan back", async () => {
+    const session = shiftsSession();
+    let fail: (error: unknown) => void = () => undefined;
+    session.api.updateShift.mockReturnValueOnce(
+      new Promise<OfficeShift>((_resolve, reject) => {
+        fail = reject;
+      }),
+    );
+    const name = await openPlan(session, ACTIVE);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(save(name));
+    await waitFor(() => expect(session.api.updateShift).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect((field(name, "План, шт") as HTMLInputElement).readOnly).toBe(true));
+    expect(isDisabled(within(dialog(name)).getByRole("button", { name: "Отмена" }))).toBe(true);
+    await act(async () => {
+      fail(api("internal"));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect((field(name, "План, шт") as HTMLInputElement).readOnly).toBe(false));
+    expect(await within(dialog(name)).findByRole("alert")).toBeTruthy();
+    expect(valueOf(name, "План, шт")).toBe("900");
+  });
+
+  it("offers to load the list again after a stale change, which closes the dialog and drops the edit", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockRejectedValue(api("stale_revision", { currentRev: 95 }));
+    const name = await openPlan(session, ACTIVE);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(save(name));
+    fireEvent.click(await within(dialog(name)).findByRole("button", { name: "Загрузить заново" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name })).toBeNull());
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+    expect(session.api.updateShift).toHaveBeenCalledTimes(1);
+  });
+
+  it("says a shift was deleted meanwhile, keeps the dialog and reads the list again", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockRejectedValue(api("not_found"));
+    const name = await openPlan(session, ACTIVE);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(save(name));
+    expect(
+      await within(dialog(name)).findByText(
+        "Этой смены больше нет: её удалили. Список смен обновлён.",
+      ),
+    ).toBeTruthy();
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+  });
+});

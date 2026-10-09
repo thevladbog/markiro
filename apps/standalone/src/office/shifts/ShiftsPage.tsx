@@ -12,6 +12,7 @@ import {
   FilterBar,
   Input,
   PageHeader,
+  RowActions,
   Select,
   StatusChip,
   Table,
@@ -37,6 +38,7 @@ import {
   type ShiftStatusFilter,
 } from "./shift-list.js";
 import { ShiftDialog } from "./ShiftDialog.js";
+import { ShiftPlanDialog } from "./ShiftPlanDialog.js";
 import { datePickerTexts } from "./shift-text.js";
 
 /** A status in its phase, after the cloud's `SHIFT_STATUS_TO_PHASE`. */
@@ -57,7 +59,8 @@ const STATUS_FILTERS: readonly ShiftStatusFilter[] = ["all", "planned", "active"
 /** Units with the thousands apart by a no-break space, as Russian writes counts: «1 200». */
 const UNITS = new Intl.NumberFormat("ru");
 
-type ShiftsDialog = { kind: "create" };
+type ShiftsDialog =
+  { kind: "create" } | { kind: "edit"; shift: OfficeShift } | { kind: "plan"; shift: OfficeShift };
 
 /**
  * Shifts (stage 2a spec §5.6), in the section «Производство». The host sends
@@ -106,6 +109,15 @@ export function ShiftsPage() {
   };
   /** After a write: every list of shifts is read again, whatever its period. */
   const readAgain = () => void queryClient.invalidateQueries({ queryKey: officeKeys.shifts });
+  const saved = (message: string) => {
+    setDialog(null);
+    setNotice(message);
+    readAgain();
+  };
+  const reload = () => {
+    setDialog(null);
+    readAgain();
+  };
 
   const productName = (shift: OfficeShift) =>
     recordLabel("product", products.data, shift.productId, t);
@@ -219,6 +231,37 @@ export function ShiftsPage() {
       },
     },
   ];
+
+  if (canPlan) {
+    columns.push({
+      key: "actions",
+      title: t("office.shifts.table.actions"),
+      render: (shift) => (
+        <RowActions>
+          {shift.status === "planned" && (
+            <Button
+              variant="secondary"
+              size="compact"
+              aria-label={t("office.shifts.editNamed", { number: shift.number })}
+              onClick={() => open({ kind: "edit", shift })}
+            >
+              {t("office.shifts.edit")}
+            </Button>
+          )}
+          {shift.status === "active" && (
+            <Button
+              variant="secondary"
+              size="compact"
+              aria-label={t("office.shifts.planNamed", { number: shift.number })}
+              onClick={() => open({ kind: "plan", shift })}
+            >
+              {t("office.shifts.plan")}
+            </Button>
+          )}
+        </RowActions>
+      ),
+    });
+  }
 
   const content = () => {
     if (shifts.isPending) return <PageLoading />;
@@ -370,14 +413,28 @@ export function ShiftsPage() {
               })}
       </p>
       {content()}
-      {canPlan && dialog?.kind === "create" && (
+      {canPlan && (dialog?.kind === "create" || dialog?.kind === "edit") && (
         <ShiftDialog
+          shift={dialog.kind === "edit" ? dialog.shift : null}
           onClose={() => setDialog(null)}
-          onSaved={(shift) => {
-            setDialog(null);
-            setNotice(t("office.shifts.created", { number: shift.number }));
-            readAgain();
-          }}
+          onSaved={(shift) =>
+            saved(
+              dialog.kind === "create"
+                ? t("office.shifts.created", { number: shift.number })
+                : t("office.common.saved"),
+            )
+          }
+          onReload={reload}
+          onOutdated={readAgain}
+        />
+      )}
+      {canPlan && dialog?.kind === "plan" && (
+        <ShiftPlanDialog
+          shift={dialog.shift}
+          onClose={() => setDialog(null)}
+          onSaved={() => saved(t("office.common.saved"))}
+          onReload={reload}
+          onOutdated={readAgain}
         />
       )}
     </>
