@@ -1746,15 +1746,7 @@ async fn editing_and_deleting_stop_a_user_turned_off_after_the_extractor_passed(
         ),
         ("DELETE", None),
     ]) {
-        // As `turn_the_user_off_at_the_next_activity`, one trigger per user.
-        sqlx::query(&format!(
-            "CREATE TRIGGER turn_{method}_user_off AFTER UPDATE OF last_seen_at ON office_sessions \
-             WHEN NEW.user_id = '{user}' \
-             BEGIN UPDATE office_users SET active = 0 WHERE id = NEW.user_id; END"
-        ))
-        .execute(&admin.app.state.pool)
-        .await
-        .unwrap();
+        turn_the_user_off_at_the_next_activity(&admin.app, user).await;
         admin.app.clock.advance(time::Duration::minutes(2));
         let (status, error) = admin.call_as(token, method, &path(&shift), body).await;
         assert_eq!(

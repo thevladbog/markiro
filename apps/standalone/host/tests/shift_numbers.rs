@@ -68,6 +68,8 @@ fn only_digits_and_dashes_make_a_date() {
         "2026/10-08",
         "2026 10 08",
         "20x6-10-08",
+        // `a` is a hex digit, not a decimal one: it must not read as 49.
+        "202a-10-08",
         "2026-1a-08",
         "2026-10-0x",
         "+026-10-08",

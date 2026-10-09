@@ -189,6 +189,37 @@ async fn a_block_is_cut_short_at_the_end_of_the_prefix_and_then_exhausted() {
 }
 
 #[tokio::test]
+async fn the_last_serial_of_a_prefix_is_a_block_of_one_and_then_none_is_left() {
+    let admin = admin().await;
+    let (status, moved) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/sscc/counters/{PREFIX}/0"),
+            Some(json!({ "nextSerial": 9_999_999, "expectedRev": 1 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    // Serial 9 999 999 is still free: a counter on it is not exhausted.
+    let (status, block) = ask(&admin, &admin.key, block_request(FIRST)).await;
+    assert_eq!(
+        (
+            status,
+            block["fromSerial"].clone(),
+            block["toSerial"].clone()
+        ),
+        (StatusCode::OK, json!(9_999_999), json!(9_999_999)),
+        "{block}"
+    );
+    assert_eq!(box_counter(&admin).await["nextSerial"], json!(10_000_000));
+    let (status, refused) = ask(&admin, &admin.key, block_request(SECOND)).await;
+    assert_eq!(
+        (status, refused["error"]["code"].clone()),
+        (StatusCode::CONFLICT, json!("sscc_exhausted"))
+    );
+    assert_eq!(block_rows(&admin).await.len(), 1);
+}
+
+#[tokio::test]
 async fn a_block_takes_the_sites_block_size() {
     let admin = admin().await;
     let (status, sizes) = admin

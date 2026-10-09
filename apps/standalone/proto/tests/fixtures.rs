@@ -725,6 +725,16 @@ fn a_shift_update_carries_only_what_changes_and_never_the_product() {
         (update.planned_qty, update.counterparty_id.clone()),
         (Some(None), None)
     );
+    // `counterpartyId: null` clears the counterparty, which is not leaving it
+    // out, and it goes back out as `null`.
+    let cleared: ShiftUpdate =
+        serde_json::from_value(serde_json::json!({ "counterpartyId": null, "expectedRev": 1 }))
+            .unwrap();
+    assert_eq!(cleared.counterparty_id, Some(None));
+    assert_eq!(
+        serde_json::to_value(&cleared).unwrap(),
+        serde_json::json!({ "counterpartyId": null, "expectedRev": 1 })
+    );
     let bare: ShiftUpdate =
         serde_json::from_value(serde_json::json!({ "expectedRev": 71 })).unwrap();
     assert_eq!(

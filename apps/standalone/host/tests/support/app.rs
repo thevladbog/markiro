@@ -339,10 +339,11 @@ pub fn nested(levels: usize) -> Value {
 /// so a test moves the manual clock on first). A route that read the user as
 /// active before then finds them turned off only if it reads them again
 /// itself, inside its own write transaction: the trigger fires after the
-/// extractor passed, so the order is the same on every run.
+/// extractor passed, so the order is the same on every run. The trigger is
+/// named after the user, so one database can hold one per user.
 pub async fn turn_the_user_off_at_the_next_activity(app: &TestApp, user_id: &str) {
     sqlx::query(&format!(
-        "CREATE TRIGGER turn_the_user_off AFTER UPDATE OF last_seen_at ON office_sessions \
+        "CREATE TRIGGER \"turn_off_{user_id}\" AFTER UPDATE OF last_seen_at ON office_sessions \
          WHEN NEW.user_id = '{user_id}' \
          BEGIN UPDATE office_users SET active = 0 WHERE id = NEW.user_id; END"
     ))
