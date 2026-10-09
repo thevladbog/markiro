@@ -394,6 +394,40 @@ async fn a_station_creates_a_shift_on_its_line_once_per_request() {
 }
 
 #[tokio::test]
+async fn a_station_creating_a_shift_wakes_the_streams_with_its_revision_and_a_repeat_does_not() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let before = host_revision(&admin.app).await;
+    let mut wake = admin.app.state.revisions.subscribe();
+    assert!(!wake.has_changed().unwrap());
+    let (status, created) = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/shifts",
+        Some(device_create(&setup, REQUEST)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    // The line's other stations read the new plan on this event.
+    assert!(wake.has_changed().unwrap(), "the create wakes the streams");
+    assert_eq!(*wake.borrow_and_update(), before + 1);
+    assert_eq!(host_revision(&admin.app).await, before + 1);
+    // The same request again writes nothing and wakes nobody.
+    let (status, repeated) = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/shifts",
+        Some(device_create(&setup, REQUEST)),
+    )
+    .await;
+    assert_eq!((status, repeated), (StatusCode::OK, created));
+    assert!(!wake.has_changed().unwrap());
+}
+
+#[tokio::test]
 async fn a_station_create_follows_the_plan_rules_on_its_own_line() {
     let admin = admin().await;
     let setup = shift_setup(&admin).await;

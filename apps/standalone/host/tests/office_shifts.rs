@@ -1071,6 +1071,52 @@ async fn only_a_planned_shift_is_deleted() {
 }
 
 #[tokio::test]
+async fn office_create_edit_and_delete_each_wake_the_streams_with_their_revision() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    // A station reads its shifts only after a revision event, so a write that
+    // takes a revision without waking the streams hides the shift (or its
+    // deletion) from the line until some other write comes.
+    let mut wake = admin.app.state.revisions.subscribe();
+    assert!(!wake.has_changed().unwrap());
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let created = host_revision(&admin.app).await;
+    assert_eq!(shift["rev"], json!(created));
+    assert!(wake.has_changed().unwrap(), "the create wakes the streams");
+    assert_eq!(*wake.borrow_and_update(), created);
+
+    // A change that changes nothing takes no revision and wakes nobody.
+    let (status, same) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({ "boxCapacity": 12, "expectedRev": created })),
+        )
+        .await;
+    assert_eq!((status, same), (StatusCode::OK, shift.clone()));
+    assert!(!wake.has_changed().unwrap());
+
+    let (status, updated) = admin
+        .call(
+            "PUT",
+            &path(&shift),
+            Some(json!({ "plannedQty": 600, "expectedRev": created })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(updated["rev"], json!(created + 1));
+    assert!(wake.has_changed().unwrap(), "the edit wakes the streams");
+    assert_eq!(*wake.borrow_and_update(), created + 1);
+    assert_eq!(host_revision(&admin.app).await, created + 1);
+
+    let (status, _) = admin.call("DELETE", &path(&shift), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert!(wake.has_changed().unwrap(), "the delete wakes the streams");
+    assert_eq!(*wake.borrow_and_update(), created + 2);
+    assert_eq!(host_revision(&admin.app).await, created + 2);
+}
+
+#[tokio::test]
 async fn a_template_that_a_planned_shift_names_is_not_deleted() {
     let admin = admin().await;
     let setup = shift_setup(&admin).await;
