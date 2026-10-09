@@ -5,8 +5,10 @@ import { renderLiteralDataMatrixSvg } from "@markiro/domain";
 import type * as MarkiroDomain from "@markiro/domain";
 
 import { HostError } from "../src/host/client.js";
+import { stationShift } from "../src/office/devices/station-shift.js";
 import type { DeviceRecord, OfficeLine, PairingCode } from "../src/host/protocol.js";
 import { LINE_ID } from "./support/fixtures.js";
+import { ACTIVE, CLOSED, PLANNED } from "./support/shifts.js";
 import {
   fakeOfficeSession,
   renderOffice,
@@ -200,6 +202,87 @@ describe("office devices", () => {
     // The saved record keeps its row: the table shows the host's order, and an
     // edit does not send the device to the bottom.
     expect(names()).toEqual(["Станция 1", "Станция упаковки", "Офис бухгалтерии", "Старый ТСД"]);
+  });
+
+  it("says what happens to a station's active shift once another line is chosen, and still moves it", async () => {
+    const session = adminSession();
+    const other = LINES[2];
+    if (!other) throw new Error("no second line");
+    session.api.listShifts.mockResolvedValue([{ ...ACTIVE, ownerDeviceId: HOST_PC.id }]);
+    session.api.updateDevice.mockResolvedValue({ ...HOST_PC, lineId: other.id });
+    await openDevices(session);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Изменить устройство «Рабочее место хоста»" }),
+    );
+    const warning =
+      "На станции идёт смена OCT26-004. После перевода станция доделает начатую работу, выведет оператора и покажет смены новой линии; смена останется открытой, закрыть её можно на странице «Смены».";
+    await waitFor(() =>
+      expect(session.api.listShifts).toHaveBeenCalledWith("office-session-token"),
+    );
+    expect(within(dialog()).queryByText(warning)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: other.id } });
+    expect(await within(dialog()).findByText(warning)).toBeTruthy();
+    // Back on its own line: nothing happens to the shift.
+    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: LINE_ID } });
+    expect(within(dialog()).queryByText(warning)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: other.id } });
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
+  });
+
+  it("warns about the shift of the station whose dialog is open, not about another station's, a closed one or a planned one", async () => {
+    const session = adminSession();
+    // Station «Станция упаковки» works OCT26-004; the host PC has only a closed shift.
+    session.api.listShifts.mockResolvedValue([
+      { ...PLANNED, ownerDeviceId: null },
+      { ...ACTIVE, ownerDeviceId: PACKING.id },
+      { ...CLOSED, ownerDeviceId: HOST_PC.id },
+    ]);
+    await openDevices(session);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить устройство «Станция упаковки»" }));
+    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: LINE_ID } });
+    // The packing station's own shift: the control that the list has been read.
+    const warning = await within(dialog()).findByText(/^На станции идёт смена OCT26-004\./);
+    // Said in a live region, so a screen reader hears it appear.
+    expect(warning.parentElement?.getAttribute("aria-live")).toBe("polite");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Отмена" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // The host PC, with the same list at hand: its own shift is closed.
+    fireEvent.click(
+      screen.getByRole("button", { name: "Изменить устройство «Рабочее место хоста»" }),
+    );
+    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: LINES[2]?.id ?? "" } });
+    expect(within(dialog()).queryByText(/^На станции идёт смена/)).toBeNull();
+  });
+
+  it("reads the shifts for a station only", async () => {
+    const session = adminSession();
+    session.api.updateDevice.mockResolvedValue({ ...OFFICE_PC, name: "Бухгалтерия" });
+    await openDevices(session);
+    fireEvent.click(screen.getByRole("button", { name: "Изменить устройство «Офис бухгалтерии»" }));
+    fireEvent.change(screen.getByLabelText("Имя"), { target: { value: "Бухгалтерия" } });
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
+    expect(session.api.listShifts).not.toHaveBeenCalled();
+  });
+
+  it("moves a station all the same when the shifts did not load, and says nothing of one", async () => {
+    const session = adminSession();
+    const other = LINES[2];
+    if (!other) throw new Error("no second line");
+    // `listShifts` is not stubbed: the fake host refuses it.
+    session.api.updateDevice.mockResolvedValue({ ...HOST_PC, lineId: other.id });
+    await openDevices(session);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Изменить устройство «Рабочее место хоста»" }),
+    );
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(1));
+    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: other.id } });
+    expect(within(dialog()).queryByText(/^На станции идёт смена/)).toBeNull();
+    expect(within(dialog()).queryByRole("alert")).toBeNull();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Сохранить" }));
+    expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
+    expect(session.api.updateDevice).toHaveBeenCalledTimes(1);
   });
 
   it("takes a station off its line with null", async () => {
@@ -801,5 +884,39 @@ describe("office devices", () => {
     fireEvent.click(screen.getByRole("button", { name: "Подключить устройство" }));
     expect(await screen.findByText("Недостаточно прав для этого действия.")).toBeTruthy();
     expect(screen.queryByRole("dialog")).toBeNull();
+  });
+});
+
+describe("a station's shift", () => {
+  it("is the active shift it opened, never a planned one, a closed one or another station's", () => {
+    const station = HOST_PC.id;
+    const elsewhere = "5e1a7c3b-9d2f-4b6a-8c4e-0f3d5b7a9c1e";
+    const running = { ...ACTIVE, ownerDeviceId: station };
+    expect(stationShift([running], station)).toBe(running);
+    expect(
+      stationShift(
+        [
+          { ...ACTIVE, ownerDeviceId: elsewhere },
+          { ...CLOSED, ownerDeviceId: station },
+          { ...PLANNED, ownerDeviceId: null },
+        ],
+        station,
+      ),
+    ).toBeUndefined();
+    expect(stationShift(undefined, station)).toBeUndefined();
+  });
+
+  it("is the station's own among several active ones", () => {
+    const station = HOST_PC.id;
+    const own = { ...ACTIVE, id: "3e1b7d5f-9a2c-4e6b-8d0f-5a7c9e1b3d5f", ownerDeviceId: station };
+    expect(
+      stationShift(
+        [{ ...ACTIVE, ownerDeviceId: PACKING.id }, own, { ...ACTIVE, ownerDeviceId: null }],
+        station,
+      ),
+    ).toBe(own);
+    expect(stationShift([], station)).toBeUndefined();
+    // Whoever the host calls its owner, a planned shift is not one a station works on.
+    expect(stationShift([{ ...PLANNED, ownerDeviceId: station }], station)).toBeUndefined();
   });
 });

@@ -7,6 +7,7 @@ import { ThemeProvider } from "@markiro/ui";
 import { HostError } from "../src/host/client.js";
 import type { OfficeOperator, OperatorCreate } from "../src/host/protocol.js";
 import { Office } from "../src/office/Office.js";
+import { similarLogin } from "../src/office/operators/operator-forms.js";
 import {
   fakeOfficeSession,
   quietLabelRendering,
@@ -297,6 +298,108 @@ describe("office operators", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
+  it("names the number in the way when the host refuses one that differs from it only by leading zeros", async () => {
+    const session = adminSession();
+    session.api.createOperator.mockRejectedValueOnce(
+      refusal("conflict", { constraint: "login", similarLogin: "0042" }),
+    );
+    await openOperators(session);
+    fireEvent.click(screen.getByRole("button", { name: "Добавить оператора" }));
+    fillNewOperator();
+    type("Табельный номер", " 042 ");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
+    const message = await screen.findByText(
+      "Похож на занятый табельный номер 0042: номера, которые отличаются только нулями в начале, легко перепутать",
+    );
+    expect(screen.getByLabelText("Табельный номер").getAttribute("aria-describedby")).toBe(
+      message.id,
+    );
+    expect(screen.getByRole("dialog")).toBeTruthy();
+  });
+
+  it("says a number is taken when the number the host names is the one typed", async () => {
+    const session = adminSession();
+    session.api.createOperator.mockRejectedValueOnce(
+      refusal("conflict", { constraint: "login", similarLogin: "0043" }),
+    );
+    await openOperators(session);
+    fireEvent.click(screen.getByRole("button", { name: "Добавить оператора" }));
+    fillNewOperator();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
+    expect(await screen.findByText("Этот табельный номер уже занят")).toBeTruthy();
+  });
+
+  it("puts the cursor on the personnel number whichever way the host refused it", async () => {
+    const session = adminSession();
+    session.api.createOperator
+      .mockRejectedValueOnce(refusal("conflict", { constraint: "login", similarLogin: "0042" }))
+      .mockRejectedValueOnce(refusal("conflict", { constraint: "login" }));
+    await openOperators(session);
+    fireEvent.click(screen.getByRole("button", { name: "Добавить оператора" }));
+    fillNewOperator();
+    type("Табельный номер", "042");
+    const login = screen.getByLabelText("Табельный номер");
+    const name = screen.getByLabelText("Имя");
+    act(() => name.focus());
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
+    await screen.findByText(/^Похож на занятый табельный номер 0042/);
+    expect(document.activeElement).toBe(login);
+    act(() => name.focus());
+    await submitAgain("Добавить");
+    await screen.findByText("Этот табельный номер уже занят");
+    expect(document.activeElement).toBe(login);
+  });
+
+  it("names the number the host names after a number it called taken, and takes the name away when it is the one typed", async () => {
+    const session = adminSession();
+    session.api.createOperator
+      .mockRejectedValueOnce(refusal("conflict", { constraint: "login", similarLogin: "0042" }))
+      .mockRejectedValueOnce(refusal("conflict", { constraint: "login", similarLogin: "00042" }))
+      .mockRejectedValueOnce(refusal("conflict", { constraint: "login", similarLogin: "042" }));
+    await openOperators(session);
+    fireEvent.click(screen.getByRole("button", { name: "Добавить оператора" }));
+    fillNewOperator();
+    type("Табельный номер", "42000");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
+    await screen.findByText(/^Похож на занятый табельный номер 0042:/);
+    await submitAgain("Добавить");
+    await screen.findByText(/^Похож на занятый табельный номер 00042:/);
+    expect(screen.queryByText(/номер 0042:/)).toBeNull();
+    type("Табельный номер", "042");
+    await submitAgain("Добавить");
+    expect(await screen.findByText("Этот табельный номер уже занят")).toBeTruthy();
+    expect(screen.queryByText(/^Похож на занятый/)).toBeNull();
+    expect(session.api.createOperator).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    [
+      "another constraint",
+      refusal("conflict", { constraint: "badge", similarLogin: "0042" }),
+      "Такая запись уже есть.",
+    ],
+    ["another code", validationFailed("login"), "Хост не принял это значение. Проверьте его."],
+    [
+      "a number that is no text",
+      refusal("conflict", { constraint: "login", similarLogin: 42 }),
+      "Этот табельный номер уже занят",
+    ],
+    [
+      "no number",
+      refusal("conflict", { constraint: "login", similarLogin: null }),
+      "Этот табельный номер уже занят",
+    ],
+  ])("does not call a number similar on %s", async (_name, error, shown) => {
+    const session = adminSession();
+    session.api.createOperator.mockRejectedValueOnce(error);
+    await openOperators(session);
+    fireEvent.click(screen.getByRole("button", { name: "Добавить оператора" }));
+    fillNewOperator();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Добавить" }));
+    expect(await screen.findByText(shown)).toBeTruthy();
+    expect(screen.queryByText(/^Похож на занятый/)).toBeNull();
+  });
+
   it("says under the PIN when the host refuses its hash in a new operator", async () => {
     const session = adminSession();
     session.api.createOperator.mockRejectedValueOnce(validationFailed("pinPhc"));
@@ -485,5 +588,35 @@ describe("office operators", () => {
       ["office-session-token", GLEB.id, { active: true, expectedRev: 30 }],
     ]);
     expect(logins()).toEqual(["0042", "042", "100", "99"]);
+  });
+});
+
+describe("similarLogin", () => {
+  const taken = (details: Record<string, unknown>) => refusal("conflict", details);
+
+  it("is the number the host names when it differs from the one typed", () => {
+    expect(similarLogin(taken({ constraint: "login", similarLogin: "0042" }), "042")).toBe("0042");
+  });
+
+  it("is nothing for the number typed, however it was padded when typed", () => {
+    expect(similarLogin(taken({ constraint: "login", similarLogin: "0043" }), "0043")).toBeNull();
+    expect(similarLogin(taken({ constraint: "login", similarLogin: "0043" }), " 0043 ")).toBeNull();
+  });
+
+  it("is nothing for a refusal that is not a conflict on the number or names no text", () => {
+    expect(similarLogin(taken({ constraint: "login" }), "042")).toBeNull();
+    expect(similarLogin(taken({ constraint: "login", similarLogin: 42 }), "042")).toBeNull();
+    expect(similarLogin(taken({ constraint: "badge", similarLogin: "0042" }), "042")).toBeNull();
+    expect(similarLogin(validationFailed("login"), "042")).toBeNull();
+    const notAConflict = new HostError({
+      kind: "api",
+      code: "validation_failed",
+      status: 422,
+      message: "the value is not valid",
+      details: { constraint: "login", similarLogin: "0042" },
+    });
+    expect(similarLogin(notAConflict, "042")).toBeNull();
+    expect(similarLogin(new Error("0042"), "042")).toBeNull();
+    expect(similarLogin(undefined, "042")).toBeNull();
   });
 });

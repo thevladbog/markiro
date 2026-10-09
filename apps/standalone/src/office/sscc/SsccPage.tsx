@@ -9,6 +9,7 @@ import {
   Card,
   DefinitionGrid,
   PageHeader,
+  StatusChip,
   Table,
   type TableColumn,
 } from "@markiro/ui";
@@ -19,7 +20,7 @@ import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { BlockSizesForm } from "./BlockSizesForm.js";
 import { CounterDialog } from "./CounterDialog.js";
-import { counterKindKey } from "./counter-kind.js";
+import { counterKindKey, isExhausted } from "./counter-kind.js";
 
 /** The current GLN's counters first; the host already orders by prefix and extension. */
 function orderedCounters(state: SsccState): SsccCounter[] {
@@ -87,7 +88,14 @@ function SsccContent() {
       title: t("office.sscc.table.next"),
       mono: true,
       align: "right",
-      render: (counter) => String(counter.nextSerial),
+      // A counter past its last serial (`sscc_exhausted` once a block is asked for)
+      // has no next number to show or to set.
+      render: (counter) =>
+        isExhausted(counter) ? (
+          <StatusChip phase="attention" label={t("office.sscc.exhausted")} />
+        ) : (
+          String(counter.nextSerial)
+        ),
     },
     {
       key: "max",
@@ -101,22 +109,23 @@ function SsccContent() {
     columns.push({
       key: "actions",
       title: t("office.sscc.table.actions"),
-      render: (counter) => (
-        <Button
-          variant="secondary"
-          size="compact"
-          aria-label={t("office.sscc.editNamed", {
-            kind: kindOf(counter),
-            prefix: counter.issuerPrefix,
-          })}
-          onClick={() => {
-            setSaved(null);
-            setEditing(counter);
-          }}
-        >
-          {t("office.sscc.edit")}
-        </Button>
-      ),
+      render: (counter) =>
+        isExhausted(counter) ? null : (
+          <Button
+            variant="secondary"
+            size="compact"
+            aria-label={t("office.sscc.editNamed", {
+              kind: kindOf(counter),
+              prefix: counter.issuerPrefix,
+            })}
+            onClick={() => {
+              setSaved(null);
+              setEditing(counter);
+            }}
+          >
+            {t("office.sscc.edit")}
+          </Button>
+        ),
     });
   }
 

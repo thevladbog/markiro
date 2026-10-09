@@ -13,7 +13,7 @@ import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.j
 import { FormDialog } from "../FormDialog.js";
 import { useOfficeMutation } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
-import { newOperatorSchema, type NewOperatorValues } from "./operator-forms.js";
+import { newOperatorSchema, similarLogin, type NewOperatorValues } from "./operator-forms.js";
 
 const CREATE_FIELDS = { login: "login", name: "name", role: "role", pinPhc: "pin" } as const;
 /** Personnel numbers are unique on the host (`operators.login UNIQUE`). */
@@ -35,6 +35,8 @@ export function CreateOperatorDialog({ onClose, onCreated }: CreateOperatorDialo
   const { t } = useTranslation();
   const fieldError = useFieldError();
   const [failure, setFailure] = useState<AlertFailure | null>(null);
+  // The number in the way when the host refused one that differs only by leading zeros.
+  const [similar, setSimilar] = useState<string | null>(null);
   const create = useOfficeMutation((api, token, body: OperatorCreate) =>
     api.createOperator(token, body),
   );
@@ -62,9 +64,23 @@ export function CreateOperatorDialog({ onClose, onCreated }: CreateOperatorDialo
         }),
       );
     } catch (error) {
+      const near = similarLogin(error, values.login);
+      if (near !== null) {
+        setSimilar(near);
+        setError(
+          "login",
+          { type: "server", message: "office.operators.errors.loginSimilar" },
+          { shouldFocus: true },
+        );
+        return;
+      }
       const outcome = writeFailure(error, CREATE_FIELDS, CREATE_CONFLICTS);
       if (outcome.kind === "field") {
-        setError(outcome.field, { type: "server", message: outcome.message });
+        setError(
+          outcome.field,
+          { type: "server", message: outcome.message },
+          { shouldFocus: true },
+        );
       } else {
         setFailure(outcome);
       }
@@ -86,7 +102,7 @@ export function CreateOperatorDialog({ onClose, onCreated }: CreateOperatorDialo
         hint={t("office.operators.fields.loginHint")}
         inputMode="numeric"
         mono
-        {...fieldError(errors.login?.message)}
+        {...fieldError(errors.login?.message, similar === null ? undefined : { similar })}
         {...register("login")}
       />
       <Input
