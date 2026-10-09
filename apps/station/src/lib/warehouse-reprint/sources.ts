@@ -12,6 +12,7 @@ import {
 import { StationApiError, type StationClient } from "../api-client.js";
 import type { SqlExecutor } from "../mirror.js";
 import { readProductLabelJob } from "../product-labels/store.js";
+import { purgeWarehouseLookupCache, warehouseLookupCacheBefore } from "./retention.js";
 export function warehouseNetworkUnavailable(error: unknown): boolean {
   return (
     error instanceof TypeError ||
@@ -26,9 +27,10 @@ export async function cacheWarehouseSource(
 ) {
   const source = warehouseSourceSchema.parse(value);
   await exec.run(
-    "INSERT INTO warehouse_reprint_cache(owner,kind,identity,value_json) VALUES(?,?,?,?) ON CONFLICT(owner,kind,identity) DO UPDATE SET value_json=excluded.value_json",
-    [owner, source.kind, source.identity, JSON.stringify(source)],
+    "INSERT INTO warehouse_reprint_cache(owner,kind,identity,value_json,cached_at) VALUES(?,?,?,?,?) ON CONFLICT(owner,kind,identity) DO UPDATE SET value_json=excluded.value_json,cached_at=excluded.cached_at",
+    [owner, source.kind, source.identity, JSON.stringify(source), new Date().toISOString()],
   );
+  await purgeWarehouseLookupCache(exec, owner, warehouseLookupCacheBefore());
 }
 export async function findWarehouseSource(
   exec: SqlExecutor,
@@ -45,19 +47,10 @@ export async function findWarehouseSource(
     );
     if (retired) throw new Error("WAREHOUSE_SOURCE_NOT_PRINTABLE");
   }
-  const [cached] = await exec.all<{ value_json: string }>(
-    `SELECT value_json FROM warehouse_reprint_cache WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND kind=? AND identity=? ORDER BY rowid DESC LIMIT 1`,
-    [owner, scan.kind, identity],
-  );
-  if (cached) {
-    const source = warehouseSourceSchema.parse(JSON.parse(cached.value_json));
-    if (source.identity !== identity || source.kind !== scan.kind)
-      throw new Error("WAREHOUSE_SOURCE_CORRUPT");
-    if (source.chzProductGroupCode === null && source.sourceShiftId !== null) {
-      const group = await localProductGroup(exec, source.sourceShiftId);
-      if (group !== null) return withSourceGroup(source, group);
-    }
-    return source;
+  const local = await readLocalClosedBox(exec, owner, scan);
+  if (local) {
+    if (local.denied) throw new Error("WAREHOUSE_SOURCE_ELIGIBILITY_DENIED");
+    return local.source;
   }
   if (scan.kind === "unit") {
     const [row] = await exec.all<{ job_id: string }>(
@@ -81,7 +74,11 @@ export async function findWarehouseSource(
       return warehouseSourceSchema.parse({ ...value, revision: productLabelValueDigest(value) });
     }
   }
-  return null;
+  const [cached] = await exec.all<{ value_json: string }>(
+    `SELECT value_json FROM warehouse_reprint_cache WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND kind=? AND identity=? AND cached_at>=? ORDER BY cached_at DESC,rowid DESC LIMIT 1`,
+    [owner, scan.kind, identity, warehouseLookupCacheBefore()],
+  );
+  return cached ? parseSource(cached.value_json, scan) : null;
 }
 export async function resolveWarehouseSource(
   client: StationClient,
@@ -92,23 +89,30 @@ export async function resolveWarehouseSource(
 ) {
   const scan = resolveWarehouseReprintScan(raw);
   if (scan.kind === "invalid") throw new Error("WAREHOUSE_SCAN_INVALID");
-  let local: WarehouseReprintSource | null;
+  let local: WarehouseReprintSource | null = null;
+  let eligibilityDenied = false;
   try {
     local = await findWarehouseSource(exec, owner, scan);
   } catch (error) {
     if (error instanceof Error && error.message === "WAREHOUSE_SOURCE_NOT_PRINTABLE")
       return { status: "unavailable" as const, code: "source_not_printable" as const };
-    throw error;
+    if (error instanceof Error && error.message === "WAREHOUSE_SOURCE_ELIGIBILITY_DENIED") {
+      eligibilityDenied = true;
+      local = (await readLocalClosedBox(exec, owner, scan))?.source ?? null;
+    } else throw error;
   }
+  const offline = () =>
+    eligibilityDenied
+      ? { status: "unavailable" as const, code: "source_not_printable" as const }
+      : local
+        ? {
+            status: "found" as const,
+            source: local,
+            repair: scan.kind === "box" ? scan.repair : null,
+          }
+        : { status: "network_required" as const };
   let response: unknown;
-  if (typeof navigator !== "undefined" && !navigator.onLine)
-    return local
-      ? {
-          status: "found" as const,
-          source: local,
-          repair: scan.kind === "box" ? scan.repair : null,
-        }
-      : { status: "network_required" as const };
+  if (typeof navigator !== "undefined" && !navigator.onLine) return offline();
   try {
     response = await client.post("/station/warehouse-reprint/lookup", {
       protocol: WAREHOUSE_REPRINT_PROTOCOL,
@@ -116,16 +120,18 @@ export async function resolveWarehouseSource(
       operatorId,
     });
   } catch (error) {
-    if (warehouseNetworkUnavailable(error))
-      return local
-        ? {
-            status: "found" as const,
-            source: local,
-            repair: scan.kind === "box" ? scan.repair : null,
-          }
-        : { status: "network_required" as const };
+    if (warehouseNetworkUnavailable(error)) return offline();
     throw error;
   }
+  const originalLocal =
+    scan.kind === "box"
+      ? await readLocalClosedBox(exec, owner, scan)
+      : (
+          await exec.all(
+            `SELECT 1 FROM product_label_accept_commands WHERE credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND code_hash=? LIMIT 1`,
+            [owner, scan.codeHash],
+          )
+        ).length > 0;
   const result = warehouseLookupResultSchema.parse(response);
   if (result.status === "found") {
     if (
@@ -139,9 +145,15 @@ export async function resolveWarehouseSource(
         "UPDATE product_mirror SET chz_product_group_code=? WHERE id IN (SELECT product_id FROM shift_mirror WHERE id=?)",
         [result.source.chzProductGroupCode, result.source.sourceShiftId],
       );
+    if (scan.kind === "box")
+      await exec.run(
+        `UPDATE warehouse_reprint_local_boxes SET eligibility_denied=0,group_override_json=? WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND identity=?`,
+        [JSON.stringify(result.source.chzProductGroupCode), owner, scan.sscc],
+      );
     // A local print snapshot retains its historical fields; the online read validates
     // current eligibility and supplies the current group, never recalculates its dates.
     if (
+      originalLocal &&
       local &&
       local.unavailableFields.length === 0 &&
       local.sourceShiftId === result.source.sourceShiftId
@@ -151,11 +163,17 @@ export async function resolveWarehouseSource(
       return { ...result, source };
     }
     await cacheWarehouseSource(exec, owner, result.source);
-  } else if (scan.kind === "box") {
+  } else {
+    if (scan.kind === "box" && result.status === "unavailable")
+      await exec.run(
+        `UPDATE warehouse_reprint_local_boxes SET eligibility_denied=1 WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND identity=?`,
+        [owner, scan.sscc],
+      );
     await exec.run(
-      `DELETE FROM warehouse_reprint_cache WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND kind='box' AND identity=?`,
-      [owner, scan.sscc],
+      `DELETE FROM warehouse_reprint_cache WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND kind=? AND identity=?`,
+      [owner, scan.kind, scan.kind === "box" ? scan.sscc : scan.codeHash],
     );
+    if (result.status === "not_found" && originalLocal) return offline();
   }
   return result;
 }
@@ -191,7 +209,7 @@ export async function cacheWarehouseClosedBox(
     revision: productLabelValueDigest(value),
   });
   await exec.run(
-    "INSERT INTO warehouse_reprint_cache(owner,kind,identity,value_json) VALUES(?,'box',?,?) ON CONFLICT(owner,kind,identity) DO NOTHING",
+    "INSERT INTO warehouse_reprint_local_boxes(owner,identity,value_json) VALUES(?,?,?) ON CONFLICT(owner,identity) DO NOTHING",
     [owner, source.identity, JSON.stringify(source)],
   );
 }
@@ -211,4 +229,38 @@ function withSourceGroup(
   void revision;
   const value = { ...snapshot, chzProductGroupCode };
   return warehouseSourceSchema.parse({ ...value, revision: productLabelValueDigest(value) });
+}
+
+function parseSource(value: string, scan: WarehouseReprintScan): WarehouseReprintSource {
+  if (scan.kind === "invalid") throw new Error("WAREHOUSE_SCAN_INVALID");
+  const source = warehouseSourceSchema.parse(JSON.parse(value));
+  if (
+    source.kind !== scan.kind ||
+    source.identity !== (scan.kind === "box" ? scan.sscc : scan.codeHash)
+  )
+    throw new Error("WAREHOUSE_SOURCE_CORRUPT");
+  return source;
+}
+async function readLocalClosedBox(exec: SqlExecutor, owner: string, scan: WarehouseReprintScan) {
+  if (scan.kind !== "box") return null;
+  const [row] = await exec.all<{
+    value_json: string;
+    eligibility_denied: number;
+    group_override_json: string | null;
+  }>(
+    `SELECT value_json,eligibility_denied,group_override_json FROM warehouse_reprint_local_boxes WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND identity=? ORDER BY rowid ASC LIMIT 1`,
+    [owner, scan.sscc],
+  );
+  if (!row) return null;
+  let source = parseSource(row.value_json, scan);
+  if (row.group_override_json !== null) {
+    const group = warehouseSourceSchema.shape.chzProductGroupCode.parse(
+      JSON.parse(row.group_override_json),
+    );
+    source = withSourceGroup(source, group);
+  } else if (source.chzProductGroupCode === null && source.sourceShiftId !== null) {
+    const group = await localProductGroup(exec, source.sourceShiftId);
+    if (group !== null) source = withSourceGroup(source, group);
+  }
+  return { source, denied: row.eligibility_denied !== 0 };
 }

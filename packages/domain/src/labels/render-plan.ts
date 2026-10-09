@@ -19,6 +19,13 @@ import {
   type RasterResult,
   type RasterizeTextFn,
 } from "./raster-types.js";
+import {
+  buildTsplBar,
+  buildTsplBox,
+  buildTsplDocument,
+  buildZplBox,
+  buildZplDocument,
+} from "./printer-commands.js";
 import { renderTsplBarcodeElement } from "./tspl.js";
 import { renderZplBarcodeElement } from "./zpl.js";
 
@@ -220,9 +227,7 @@ export async function createLabelRenderPlan(
 /** Serialize the resolved geometry; never resolve fields, wrap, or rasterize again. */
 export function emitLabelRenderPlan(plan: LabelRenderPlan): string {
   const zpl = plan.language === "zpl";
-  const lines = zpl
-    ? ["^XA", `^PW${plan.widthDots}`, `^LL${plan.heightDots}`]
-    : [`SIZE ${plan.widthMm} mm, ${plan.heightMm} mm`, "GAP 2 mm, 0 mm", "DIRECTION 1", "CLS"];
+  const lines: string[] = [];
   for (const e of plan.elements) {
     if (e.kind === "raster")
       lines.push(
@@ -239,14 +244,21 @@ export function emitLabelRenderPlan(plan: LabelRenderPlan): string {
     else
       lines.push(
         zpl
-          ? `^FO${e.xDots},${e.yDots}^GB${e.widthDots},${e.heightDots},${e.filled ? Math.min(e.widthDots, e.heightDots) : e.thicknessDots}^FS`
+          ? buildZplBox(
+              e.xDots,
+              e.yDots,
+              e.widthDots,
+              e.heightDots,
+              e.filled ? Math.min(e.widthDots, e.heightDots) : e.thicknessDots,
+            )
           : e.filled
-            ? `BAR ${e.xDots},${e.yDots},${e.widthDots},${e.heightDots}`
-            : `BOX ${e.xDots},${e.yDots},${e.xDots + e.widthDots},${e.yDots + e.heightDots},${e.thicknessDots}`,
+            ? buildTsplBar(e.xDots, e.yDots, e.widthDots, e.heightDots)
+            : buildTsplBox(e.xDots, e.yDots, e.widthDots, e.heightDots, e.thicknessDots),
       );
   }
-  lines.push(zpl ? "^XZ" : "PRINT 1");
-  return lines.join("\n") + "\n";
+  return zpl
+    ? buildZplDocument(plan.widthDots, plan.heightDots, lines)
+    : buildTsplDocument(plan.widthMm, plan.heightMm, lines);
 }
 
 /** Same padded, MSB-first pixels supplied to both print serializers. */

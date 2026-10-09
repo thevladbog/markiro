@@ -42,12 +42,19 @@ test("required verification blocks the next unit; full tail and restart use the 
   await page.waitForFunction(() => window.__productLabels?.ready());
   await expect(dialog).toBeVisible();
   expect((await page.evaluate(() => window.__productLabels.inspect())).prints).toBe(1);
+  // The success signal lasts 650 ms and can overlap the instrument readout.
+  // Hold its timer and assert the unique signal rather than a transient global count.
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
   await page.evaluate(() => window.__productLabels.scan());
-  await expect(page.getByText("Этикетка подтверждена", { exact: true })).toHaveCount(1);
+  await expect(
+    page.getByRole("alert").getByText("Этикетка подтверждена", { exact: true }),
+  ).toHaveCount(1);
   await expect(dialog).toHaveCount(0);
   const state = await page.evaluate(() => window.__productLabels.inspect());
   expect(state.accepted).toBe(1);
   expect(state.events.at(-1)).toBe("verified");
+  await page.clock.runFor(650);
   await page.screenshot({ path: info.outputPath("station-verified.png") });
 });
 

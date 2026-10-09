@@ -69,6 +69,13 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
   let accepting = true;
   let pending: Promise<void> | null = null;
   let owner = "";
+  let refreshVersion = 0;
+  let historyProblem: {
+    owner: string;
+    event_id: string;
+    digest: string;
+    rejection_code: string;
+  } | null = null;
   const subscribers = new Set<() => void>();
   const current = () => accepting && !o.generation.sealed;
   const publish = (patch: Partial<WarehouseWorkState>) => {
@@ -89,16 +96,23 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
     },
   };
   const refresh = async (jobId?: string) => {
+    const version = ++refreshVersion;
     const session = await resumeWarehouseSession(o.exec, owner);
     const job = await findWarehouseJobView(
       o.exec,
       owner,
       jobId ? { jobId } : session ? { sessionId: session.sessionId } : {},
     );
-    const [problem] = await o.exec.all<{ rejection_code: string }>(
-      `SELECT rejection_code FROM warehouse_reprint_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='quarantined' ORDER BY rowid DESC LIMIT 1`,
+    const [problem] = await o.exec.all<NonNullable<typeof historyProblem>>(
+      `SELECT e.owner,e.event_id,e.digest,e.rejection_code FROM warehouse_reprint_events e
+       WHERE e.owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND e.receive_status='quarantined'
+       AND NOT EXISTS(SELECT 1 FROM warehouse_reprint_history_acknowledgements a
+         WHERE a.owner=e.owner AND a.event_id=e.event_id AND a.digest=e.digest AND a.rejection_code=e.rejection_code)
+       ORDER BY e.rowid DESC LIMIT 1`,
       [owner],
     );
+    if (version !== refreshVersion) return;
+    historyProblem = problem ?? null;
     publish({
       session,
       job,
@@ -163,6 +177,30 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
       return () => subscribers.delete(fn);
     },
     getSnapshot: () => state,
+    acknowledgeHistory: () =>
+      operation(async () => {
+        const problem = historyProblem;
+        if (!problem) return;
+        await assertOperator();
+        if (!(await deviceRecoveryAllowsWork(o.exec, o.generation)))
+          throw new Error("WAREHOUSE_OWNER_CHANGED");
+        await guarded.run(
+          `INSERT INTO warehouse_reprint_history_acknowledgements(owner,event_id,digest,rejection_code,operator_id,acknowledged_at)
+           SELECT owner,event_id,digest,rejection_code,?,? FROM warehouse_reprint_events
+           WHERE owner=? AND event_id=? AND digest=? AND rejection_code=? AND receive_status='quarantined'
+           ON CONFLICT(owner,event_id) DO UPDATE SET digest=excluded.digest,rejection_code=excluded.rejection_code,
+             operator_id=excluded.operator_id,acknowledged_at=excluded.acknowledged_at`,
+          [
+            o.operatorId,
+            new Date().toISOString(),
+            problem.owner,
+            problem.event_id,
+            problem.digest,
+            problem.rejection_code,
+          ],
+        );
+        await refresh();
+      }),
     // Effect setup can reopen this same controller after StrictMode's simulated cleanup.
     open: () => {
       if (!o.generation.sealed) accepting = true;

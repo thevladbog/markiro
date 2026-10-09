@@ -7,6 +7,7 @@ import {
   sampleLabelData,
   rasterizeGs1DataMatrix,
   generateZpl,
+  generateTspl,
   type LabelTemplateSpec,
 } from "../src/index.js";
 
@@ -220,3 +221,113 @@ it("uses the destination QR error correction and dot module size in SVG and nati
     );
   }
 });
+
+it.each([
+  {
+    dpi: 203,
+    zpl: "^XA\n^PW203\n^LL102\n^FO20,10^GB81,2,2^FS\n^FO10,20^GB41,30,2^FS\n^FO162,41^GB2,41,2^FS\n^XZ\n",
+    tspl: "SIZE 25.4 mm, 12.7 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBAR 20,10,81,2\nBOX 10,20,51,50,2\nBAR 162,41,2,41\nPRINT 1\n",
+  },
+  {
+    dpi: 300,
+    zpl: "^XA\n^PW300\n^LL150\n^FO30,15^GB120,3,3^FS\n^FO15,30^GB60,45,3^FS\n^FO240,60^GB3,60,3^FS\n^XZ\n",
+    tspl: "SIZE 25.4 mm, 12.7 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBAR 30,15,120,3\nBOX 15,30,75,75,3\nBAR 240,60,3,60\nPRINT 1\n",
+  },
+] as const)(
+  "preserves document framing and reverse line/box dot geometry at $dpi DPI",
+  async ({ dpi, zpl, tspl }) => {
+    const geometrySpec: LabelTemplateSpec = {
+      language: "zpl",
+      dpi,
+      widthMm: 25.4,
+      heightMm: 12.7,
+      elements: [
+        {
+          id: "horizontal",
+          kind: "line",
+          xMm: 12.7,
+          yMm: 1.27,
+          x2Mm: 2.54,
+          y2Mm: 1.27,
+          thicknessMm: 0.254,
+        },
+        {
+          id: "box",
+          kind: "box",
+          xMm: 1.27,
+          yMm: 2.54,
+          widthMm: 5.08,
+          heightMm: 3.81,
+          thicknessMm: 0.254,
+        },
+        {
+          id: "vertical",
+          kind: "line",
+          xMm: 20.32,
+          yMm: 10.16,
+          x2Mm: 20.32,
+          y2Mm: 5.08,
+          thicknessMm: 0.254,
+        },
+      ],
+    };
+    const fields = sampleLabelData();
+    expect(await generateZpl(geometrySpec, fields)).toBe(zpl);
+    expect(await generateTspl(geometrySpec, fields)).toBe(tspl);
+    for (const language of ["zpl", "tspl"] as const) {
+      const plan = await createLabelRenderPlan(geometrySpec, fields, {
+        language,
+        dpi,
+        rasterizeText: async () => bitmap,
+      });
+      expect(emitLabelRenderPlan(plan)).toBe(language === "zpl" ? zpl : tspl);
+    }
+  },
+);
+
+it.each([
+  {
+    dpi: 203,
+    legacy: "^FO10,20^GB41,20,2^FS",
+    warehouse: "^FO10,20^GB41,20,20^FS",
+    tspl: "BAR 10,20,41,20",
+  },
+  {
+    dpi: 300,
+    legacy: "^FO15,30^GB60,30,3^FS",
+    warehouse: "^FO15,30^GB60,30,30^FS",
+    tspl: "BAR 15,30,60,30",
+  },
+] as const)(
+  "preserves each path's existing diagonal line contract at $dpi DPI",
+  async ({ dpi, legacy, warehouse, tspl }) => {
+    const diagonalSpec: LabelTemplateSpec = {
+      language: "zpl",
+      dpi,
+      widthMm: 25.4,
+      heightMm: 12.7,
+      elements: [
+        {
+          id: "diagonal",
+          kind: "line",
+          xMm: 1.27,
+          yMm: 2.54,
+          x2Mm: 6.35,
+          y2Mm: 5.08,
+          thicknessMm: 0.254,
+        },
+      ],
+    };
+    const fields = sampleLabelData();
+    expect(await generateZpl(diagonalSpec, fields)).toContain(legacy);
+    expect(await generateTspl(diagonalSpec, fields)).toContain(tspl);
+    for (const language of ["zpl", "tspl"] as const) {
+      const plan = await createLabelRenderPlan(diagonalSpec, fields, {
+        language,
+        dpi,
+        rasterizeText: async () => bitmap,
+      });
+      expect(emitLabelRenderPlan(plan)).toContain(language === "zpl" ? warehouse : tspl);
+    }
+  },
+);

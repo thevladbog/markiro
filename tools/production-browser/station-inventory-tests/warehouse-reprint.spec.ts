@@ -76,3 +76,23 @@ test("unknown recovery remains explicit in English", async ({ page }) => {
     page.locator("header").getByRole("button", { name: "Enter code manually" }),
   ).toBeDisabled();
 });
+
+for (const locale of ["ru", "en"])
+  test(`quarantine acknowledgment stays visible at 1024 ${locale}`, async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 });
+    await page.goto(`/?gallery=1&state=warehouse-reprint-history-warning&locale=${locale}`);
+    const warning = page.getByRole("alert");
+    await expect(warning).toBeVisible();
+    const acknowledge = warning.getByRole("button", {
+      name: locale === "ru" ? "Понятно" : "Mark as reviewed",
+    });
+    await expect(acknowledge).toBeInViewport({ ratio: 1 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+      true,
+    );
+    expect(await acknowledge.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    expect(await acknowledge.evaluate((el) => el.scrollHeight <= el.clientHeight)).toBe(true);
+    await page.screenshot({ path: `/tmp/warehouse-history-warning-${locale}.png` });
+    await acknowledge.click();
+    await expect(warning).toHaveCount(0);
+  });

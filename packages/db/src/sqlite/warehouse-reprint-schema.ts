@@ -1,6 +1,8 @@
 import { sql } from "drizzle-orm";
 import {
   check,
+  foreignKey,
+  index,
   integer,
   primaryKey,
   sqliteTable,
@@ -41,6 +43,7 @@ export const warehouseReprintJobs = sqliteTable(
   (t) => [
     primaryKey({ columns: [t.owner, t.jobId] }),
     uniqueIndex("warehouse_session_identity").on(t.owner, t.sessionId, t.sourceKind, t.identity),
+    index("warehouse_reprint_jobs_source_idx").on(t.owner, t.sourceKind, t.identity),
   ],
 );
 export const warehouseReprintAttempts = sqliteTable(
@@ -82,8 +85,27 @@ export const warehouseReprintCache = sqliteTable(
     kind: text("kind").notNull(),
     identity: text("identity").notNull(),
     valueJson: text("value_json").notNull(),
+    cachedAt: text("cached_at").notNull().default(""),
   },
   (t) => [primaryKey({ columns: [t.owner, t.kind, t.identity] })],
+);
+export const warehouseReprintHistoryAcknowledgements = sqliteTable(
+  "warehouse_reprint_history_acknowledgements",
+  {
+    owner: text("owner").notNull(),
+    eventId: text("event_id").notNull(),
+    digest: text("digest").notNull(),
+    rejectionCode: text("rejection_code").notNull(),
+    operatorId: text("operator_id").notNull(),
+    acknowledgedAt: text("acknowledged_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.owner, t.eventId] }),
+    foreignKey({
+      columns: [t.owner, t.eventId],
+      foreignColumns: [warehouseReprintEvents.owner, warehouseReprintEvents.eventId],
+    }).onDelete("cascade"),
+  ],
 );
 export const warehouseReprintCommands = sqliteTable(
   "warehouse_reprint_commands",
@@ -95,4 +117,21 @@ export const warehouseReprintCommands = sqliteTable(
     payloadJson: text("payload_json").notNull(),
   },
   (t) => [primaryKey({ columns: [t.owner, t.commandId] })],
+);
+
+/** Original local print fields survive server eligibility changes and lookup-cache eviction. */
+export const warehouseReprintLocalBoxes = sqliteTable(
+  "warehouse_reprint_local_boxes",
+  {
+    owner: text("owner").notNull(),
+    identity: text("identity").notNull(),
+    valueJson: text("value_json").notNull(),
+    eligibilityDenied: integer("eligibility_denied", { mode: "boolean" }).notNull().default(false),
+    groupOverrideJson: text("group_override_json"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.owner, t.identity] }),
+    check("warehouse_local_box_json", sql`json_valid(${t.valueJson})`),
+    check("warehouse_local_box_denied", sql`${t.eligibilityDenied} IN (0,1)`),
+  ],
 );

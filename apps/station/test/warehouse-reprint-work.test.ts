@@ -368,3 +368,116 @@ it("restores retained warehouse work under a replacement key of the same device"
     db.close();
   }
 });
+
+it("keeps quarantine acknowledgments scoped and shows later rejections while denying inactive operators", async () => {
+  const { credentialGenerationOwnership } = await import("../src/lib/credential-recovery");
+  const { saveWarehouseSession, prepareWarehouseJob, appendWarehouseEvent } =
+    await import("../src/lib/warehouse-reprint/store");
+  const db = new DatabaseSync(":memory:");
+  const exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  await applyMigrations(exec);
+  const i = warehousePreparedJobInput();
+  await seedWarehouseOperator(exec, i.operatorId);
+  const generation = createCredentialGeneration("history-owner-test-key");
+  const owner = await credentialGenerationOwnership(generation);
+  if (!owner) throw new Error("fixture owner");
+  const options = {
+    exec,
+    client: {
+      get: vi.fn().mockRejectedValue(new TypeError("offline")),
+    } as unknown as StationClient,
+    generation,
+    deviceId: i.deviceId,
+    operatorId: i.operatorId,
+    hardware: () => ({
+      scanner: null,
+      printer: i.printer.target,
+      printerLanguage: "tspl" as const,
+      printerDpi: 203 as const,
+      verifyPrintedLabel: false,
+    }),
+    print: vi.fn(),
+  };
+  const work = createWarehouseWork(options);
+  try {
+    for (const scopedOwner of [owner, "foreign-owner"]) {
+      await saveWarehouseSession(exec, {
+        owner: scopedOwner,
+        sessionId: i.sessionId,
+        operatorId: i.operatorId,
+        reason: i.reason,
+        status: "active",
+        unitTemplate: null,
+        boxTemplate: i.template,
+      });
+      await prepareWarehouseJob(exec, { ...i, owner: scopedOwner });
+    }
+    await exec.run(
+      "UPDATE warehouse_reprint_events SET receive_status='quarantined',rejection_code='template_mismatch'",
+    );
+    await work.initialize();
+    expect(work.getSnapshot().historyIssue).toBe("template_mismatch");
+    const originalAll = exec.all.bind(exec);
+    let holdPoll = true;
+    let pollRead: () => void = () => {};
+    let releasePoll: () => void = () => {};
+    const read = new Promise<void>((resolve) => {
+      pollRead = resolve;
+    });
+    const held = new Promise<void>((resolve) => {
+      releasePoll = resolve;
+    });
+    exec.all = async <T>(sql: string, params?: unknown[]) => {
+      const rows = await originalAll<T>(sql, params);
+      if (holdPoll && sql.startsWith("SELECT e.owner")) {
+        holdPoll = false;
+        pollRead();
+        await held;
+      }
+      return rows;
+    };
+    const stalePoll = work.poll();
+    await read;
+    await work.acknowledgeHistory();
+    expect(work.getSnapshot().historyIssue).toBeNull();
+    releasePoll();
+    await stalePoll;
+    expect(work.getSnapshot().historyIssue).toBeNull();
+    expect(await exec.all("SELECT owner FROM warehouse_reprint_history_acknowledgements")).toEqual([
+      { owner },
+    ]);
+    await appendWarehouseEvent(exec, owner, {
+      jobId: i.jobId,
+      sessionId: i.sessionId,
+      attemptId: i.preparedEvent.attemptId,
+      operatorId: i.operatorId,
+      occurredAt: i.preparedEvent.occurredAt,
+      kind: "sending",
+      sequence: 2,
+      eventId: crypto.randomUUID(),
+    });
+    await exec.run(
+      "UPDATE warehouse_reprint_events SET receive_status='quarantined',rejection_code='parent_missing' WHERE owner=? AND sequence=2",
+      [owner],
+    );
+    await work.poll();
+    expect(work.getSnapshot().historyIssue).toBe("parent_missing");
+    await exec.run("UPDATE operators_mirror SET active=0 WHERE operator_id=?", [i.operatorId]);
+    await work.acknowledgeHistory();
+    expect(work.getSnapshot().error).toBe("WAREHOUSE_OPERATOR_DENIED");
+    expect(work.getSnapshot().historyIssue).toBe("parent_missing");
+    expect(
+      await exec.all("SELECT event_id FROM warehouse_reprint_history_acknowledgements"),
+    ).toEqual([{ event_id: i.preparedEvent.eventId }]);
+    expect(await exec.all("SELECT receive_status FROM warehouse_reprint_events")).toEqual([
+      { receive_status: "quarantined" },
+      { receive_status: "quarantined" },
+      { receive_status: "quarantined" },
+    ]);
+    expect(options.print).not.toHaveBeenCalled();
+  } finally {
+    await work.close();
+    db.close();
+  }
+});

@@ -250,3 +250,93 @@ it("prints a manually entered SSCC once, pauses scanner intake and rejects inval
     db.close();
   }
 });
+
+it("acknowledges the visible quarantine warning durably without accepting or deleting its history", async () => {
+  const { credentialGenerationOwnership } = await import("../src/lib/credential-recovery");
+  const { saveWarehouseSession, prepareWarehouseJob } =
+    await import("../src/lib/warehouse-reprint/store");
+  await i18n.changeLanguage("ru");
+  const db = new DatabaseSync(":memory:");
+  const exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  const i = warehousePreparedJobInput();
+  await seedWarehouseOperator(exec, i.operatorId);
+  const generation = createCredentialGeneration("quarantine-screen-test-key");
+  const owner = await credentialGenerationOwnership(generation);
+  if (!owner) throw new Error("fixture owner");
+  await saveWarehouseSession(exec, {
+    owner,
+    sessionId: i.sessionId,
+    operatorId: i.operatorId,
+    reason: i.reason,
+    status: "active",
+    unitTemplate: null,
+    boxTemplate: i.template,
+  });
+  await prepareWarehouseJob(exec, { ...i, owner });
+  await exec.run(
+    "UPDATE warehouse_reprint_events SET receive_status='quarantined',rejection_code='template_mismatch' WHERE owner=? AND event_id=?",
+    [owner, i.preparedEvent.eventId],
+  );
+  const props = {
+    exec,
+    client: {
+      get: vi.fn().mockResolvedValue(warehouseTestCatalog()),
+      post: vi.fn(),
+    } as unknown as StationClient,
+    deviceId: i.deviceId,
+    operatorId: i.operatorId,
+    credentialGeneration: generation,
+    source: { start: () => () => {} },
+    hardwareConfig: {
+      scanner: null,
+      printer: i.printer.target,
+      printerLanguage: "tspl" as const,
+      printerDpi: 203 as const,
+      verifyPrintedLabel: false,
+    },
+    print: vi.fn(),
+    onExit: () => {},
+  };
+  let view = render(<WarehouseReprint {...props} />);
+  try {
+    await screen.findByText(/История перепечатки требует разбора/);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Понятно" }));
+    });
+    await waitFor(() =>
+      expect(screen.queryByText(/История перепечатки требует разбора/)).toBeNull(),
+    );
+    const [event] = await exec.all<{ digest: string; receive_status: string }>(
+      "SELECT digest,receive_status FROM warehouse_reprint_events WHERE owner=? AND event_id=?",
+      [owner, i.preparedEvent.eventId],
+    );
+    expect(event?.receive_status).toBe("quarantined");
+    expect(await exec.all("SELECT job_id FROM warehouse_reprint_jobs")).toHaveLength(1);
+    expect(await exec.all("SELECT * FROM warehouse_reprint_history_acknowledgements")).toEqual([
+      {
+        owner,
+        event_id: i.preparedEvent.eventId,
+        digest: event?.digest,
+        rejection_code: "template_mismatch",
+        operator_id: i.operatorId,
+        acknowledged_at: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+      },
+    ]);
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    view = render(<WarehouseReprint {...props} />);
+    await waitFor(() =>
+      expect(
+        screen.getByRole<HTMLButtonElement>("button", { name: "Отправить подготовленную этикетку" })
+          .disabled,
+      ).toBe(false),
+    );
+    expect(screen.queryByText(/История перепечатки требует разбора/)).toBeNull();
+    expect(props.print).not.toHaveBeenCalled();
+  } finally {
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    db.close();
+  }
+});

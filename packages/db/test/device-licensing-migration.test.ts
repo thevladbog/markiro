@@ -19,6 +19,17 @@ describe.skipIf(!databaseUrl)("working device forward migration", () => {
   url.search = "";
   const maintenance = new pg.Pool({ connectionString: databaseUrl });
   const pool = new pg.Pool({ connectionString: url.toString() });
+  const connections: { ended: boolean; closed: Promise<void> }[] = [];
+  pool.on("connect", (client) => {
+    const connection = { ended: false, closed: Promise.resolve() };
+    connection.closed = new Promise<void>((resolve) => {
+      client.once("end", () => {
+        connection.ended = true;
+        resolve();
+      });
+    });
+    connections.push(connection);
+  });
   let temporaryRoot = "";
   let created = false;
   let beforeDevices: unknown;
@@ -87,7 +98,10 @@ describe.skipIf(!databaseUrl)("working device forward migration", () => {
   }, 120_000);
   afterAll(async () => {
     await pool.end();
-    if (created) await maintenance.query(`DROP DATABASE "${name}" WITH (FORCE)`);
+    // pg-pool removes idle clients before their sockets finish closing.
+    await Promise.all(connections.map((connection) => connection.closed));
+    expect(connections.every((connection) => connection.ended)).toBe(true);
+    if (created) await maintenance.query(`DROP DATABASE "${name}"`);
     await maintenance.end();
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   });

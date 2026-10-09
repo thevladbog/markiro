@@ -32,6 +32,7 @@ export const WAREHOUSE_GALLERY_STATE_IDS = [
   "warehouse-reprint-lookup",
   "warehouse-reprint-unknown",
   "warehouse-reprint-legacy-sent",
+  "warehouse-reprint-history-warning",
 ] as const;
 
 export const INVENTORY_GALLERY_STATE_IDS = [

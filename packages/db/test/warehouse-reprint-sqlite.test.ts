@@ -25,7 +25,9 @@ describe("warehouse reprint runtime SQLite", () => {
         "warehouse_reprint_cache",
         "warehouse_reprint_commands",
         "warehouse_reprint_events",
+        "warehouse_reprint_history_acknowledgements",
         "warehouse_reprint_jobs",
+        "warehouse_reprint_local_boxes",
         "warehouse_reprint_sessions",
       ]);
       expect(() =>
@@ -42,7 +44,10 @@ describe("warehouse reprint runtime SQLite", () => {
   it("upgrades an old cleanup trigger and adds the numeric product group without rebuilding jobs", () => {
     const db = new DatabaseSync(":memory:");
     try {
-      for (const statement of STATION_MIGRATIONS.slice(0, -3)) {
+      const upgrade = STATION_MIGRATIONS.findIndex((sql) =>
+        sql.startsWith("ALTER TABLE product_mirror ADD COLUMN chz_product_group_code"),
+      );
+      for (const statement of STATION_MIGRATIONS.slice(0, upgrade)) {
         try {
           db.exec(statement);
         } catch (error) {
@@ -53,7 +58,7 @@ describe("warehouse reprint runtime SQLite", () => {
       db.exec(
         "INSERT INTO warehouse_reprint_sessions(owner,session_id,operator_id,status,session_json) VALUES('owner','session','operator','paused','{}')",
       );
-      for (const statement of STATION_MIGRATIONS.slice(-3)) db.exec(statement);
+      for (const statement of STATION_MIGRATIONS.slice(upgrade)) db.exec(statement);
       expect(db.prepare("SELECT session_id FROM warehouse_reprint_sessions").all()).toEqual([
         { session_id: "session" },
       ]);

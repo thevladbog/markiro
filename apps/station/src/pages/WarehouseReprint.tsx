@@ -59,6 +59,7 @@ export function WarehouseReprintView(
       | "cancelVerification"
       | "reprint"
       | "sendPrepared"
+      | "acknowledgeHistory"
     >;
   },
 ) {
@@ -254,6 +255,14 @@ export function WarehouseReprintView(
                   defaultValue: state.historyIssue,
                 }),
               })}
+              <Button
+                size="floor"
+                variant="secondary"
+                disabled={state.busy}
+                onClick={() => void work.acknowledgeHistory()}
+              >
+                {t("warehouse.historyAcknowledge")}
+              </Button>
             </Alert>
           ) : null}
           <p>

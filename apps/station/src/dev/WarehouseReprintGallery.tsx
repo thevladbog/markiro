@@ -68,7 +68,7 @@ export function WarehouseReprintGallery({ variant }: { variant: string }) {
       duplicate: false,
       error: null,
       verification: false,
-      historyIssue: null,
+      historyIssue: variant === "history-warning" ? "template_mismatch" : null,
     };
     return state;
   }, [variant]);
@@ -92,6 +92,10 @@ export function WarehouseReprintGallery({ variant }: { variant: string }) {
     cancelVerification: () => setState((s) => ({ ...s, verification: false })),
     reprint: async () => {},
     sendPrepared: async () => {},
+    acknowledgeHistory: () => {
+      setState((s) => ({ ...s, historyIssue: null }));
+      return Promise.resolve();
+    },
   } satisfies Parameters<typeof WarehouseReprintView>[0]["work"];
   const generation = useMemo(() => createCredentialGeneration("synthetic-gallery-key"), []);
   return (

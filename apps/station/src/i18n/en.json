@@ -1091,6 +1091,7 @@
     "entryUnavailable": "Label reprinting is unavailable. Check the station connection in setup.",
     "entryButton": "Reprint labels",
     "historyProblem": "Print history needs attention: {{reason}}. Records remain on this station.",
+    "historyAcknowledge": "Mark as reviewed",
     "historyReasons": {
       "parent_missing": "Missing parent job",
       "source_not_printable": "Source is unavailable",

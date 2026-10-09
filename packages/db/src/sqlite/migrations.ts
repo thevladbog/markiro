@@ -5,6 +5,7 @@
  * (test/sqlite-schema.test.ts) applies these and round-trips a row to catch
  * drift. `drizzle.sqlite.config.ts` exists for regeneration parity only.
  */
+import { WAREHOUSE_REPRINT_SOURCE_MIGRATIONS } from "./warehouse-reprint-source-migrations.js";
 import { WAREHOUSE_REPRINT_MIGRATIONS } from "./warehouse-reprint-migrations.js";
 export const STATION_MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS station_meta (
@@ -4824,6 +4825,14 @@ export const STATION_MIGRATIONS: string[] = [
     DELETE FROM warehouse_reprint_attempts WHERE owner=OLD.owner AND job_id=OLD.job_id;
     DELETE FROM printer_destinations WHERE scope=OLD.owner AND job_id=OLD.job_id AND purpose=CASE OLD.source_kind WHEN 'box' THEN 'box' ELSE 'duplicate' END;
   END;`,
+  ...WAREHOUSE_REPRINT_SOURCE_MIGRATIONS,
+  `CREATE TABLE IF NOT EXISTS warehouse_reprint_history_acknowledgements (
+    owner TEXT NOT NULL, event_id TEXT NOT NULL, digest TEXT NOT NULL,
+    rejection_code TEXT NOT NULL, operator_id TEXT NOT NULL, acknowledged_at TEXT NOT NULL,
+    PRIMARY KEY(owner,event_id),
+    FOREIGN KEY(owner,event_id) REFERENCES warehouse_reprint_events(owner,event_id) ON DELETE CASCADE);`,
+  `ALTER TABLE warehouse_reprint_local_boxes ADD COLUMN group_override_json TEXT;`,
+  `CREATE INDEX IF NOT EXISTS warehouse_reprint_jobs_source_idx ON warehouse_reprint_jobs(owner,source_kind,identity);`,
 ];
 
 export interface StationMigrationEntry {
