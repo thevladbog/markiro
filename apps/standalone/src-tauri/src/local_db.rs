@@ -37,6 +37,50 @@ pub const MAX_VALUES: usize = 256;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// What a forget (`device_forget`, [`LocalDb::clear_copies`]) does with a
+/// table (stage 2a spec §5.2, decision 30).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableClass {
+    /// Copies of the host's data and this pairing's own bookkeeping: the
+    /// forget empties them, PIN and badge hashes included.
+    Disposable,
+    /// What this device recorded itself — shifts, boxes, scans, the outbox
+    /// (plans 2a5–2a8): the forget keeps them, each row tagged with the
+    /// pairing that wrote it.
+    DeviceData,
+    /// This computer's workstation settings — printers, scanners, sound
+    /// (plan 2a7): they belong to the PC, not to a pairing, and outlive it.
+    Workstation,
+}
+
+/// Every table `src-tauri/migrations` creates, with its class, in the order
+/// [`LocalDb::clear_copies`] empties the disposable ones. A migration that
+/// adds a table adds it here in the same change: `tests/local_db.rs` fails on
+/// a table without a class, and on a name here that no migration creates. No
+/// table has a foreign key; one between tables of different classes would
+/// make a forget fail at its commit, so add none.
+pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
+    ("floor_sign_in_failures", TableClass::Disposable),
+    ("ref_lines", TableClass::Disposable),
+    ("ref_operator_badges", TableClass::Disposable),
+    ("ref_operators", TableClass::Disposable),
+    ("ref_org", TableClass::Disposable),
+    ("ref_products", TableClass::Disposable),
+    ("ref_site", TableClass::Disposable),
+    ("ref_template_defaults", TableClass::Disposable),
+    ("ref_templates", TableClass::Disposable),
+    ("sync_quarantine", TableClass::Disposable),
+    ("sync_state", TableClass::Disposable),
+];
+
+/// The class of `table`, `None` for a table [`TABLE_CLASSES`] does not name.
+pub fn table_class(table: &str) -> Option<TableClass> {
+    TABLE_CLASSES
+        .iter()
+        .find(|(name, _)| *name == table)
+        .map(|(_, class)| *class)
+}
+
 /// `src-tauri/migrations`, embedded at compile time. Applied migrations are
 /// never edited: sqlx refuses to open a database whose checksums changed.
 pub static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
@@ -224,55 +268,41 @@ impl LocalDb {
         Ok(changes)
     }
 
-    /// Delete every row of every table but sqlx's migration journal, in one
-    /// writer transaction: forgetting the device must not leave another
-    /// pairing's copies behind, PIN and badge hashes included. The writer
-    /// zeroes deleted rows (`secure_delete`), and a checkpoint that truncates
-    /// the WAL follows the commit: it moves the zeroed pages into the file
-    /// and empties the WAL, which still held the frames written before the
-    /// delete. A reader holding an older snapshot keeps it from finishing
-    /// within the busy timeout, and the call then fails; the delete stays
-    /// committed and a retry repeats only the checkpoint. `VACUUM` is not
-    /// needed for the rows deleted here: it would only shrink the file. It
-    /// would do more for bytes a writer freed before it ran with
-    /// `secure_delete`, which nothing here scrubs (see "Local database" in
-    /// `apps/standalone/AGENTS.md`).
-    /// Every table here is disposable: the copies of the host's data, and
-    /// `floor_sign_in_failures` (plan 1f), this device's own failed
-    /// sign-ins, which a forget clears with the rest (the sync's wipe for
-    /// another pairing keeps them on purpose, see the migration). The first
-    /// plan that adds data this device must keep — the scan journal, boxes, the
-    /// outbox (the station design's §6.2, "Логическая модель") — must
-    /// exclude those tables from this list and block or confirm a forget
-    /// while unsynced records exist, not extend this silently.
-    /// The tables come from `pragma_table_list`, so one a later migration
-    /// adds is covered without a change here; `type IN ('table', 'virtual')`
-    /// excludes a virtual table's own shadow tables (FTS5, RTree), which
-    /// `sqlite_master` lists as ordinary tables but a bare `DELETE` would
-    /// corrupt instead of clearing through the virtual table itself. Foreign
-    /// keys are checked at the commit, when every table is empty, so the
-    /// order of the deletes does not matter.
+    /// Delete every row of the disposable tables ([`TableClass::Disposable`]
+    /// in [`TABLE_CLASSES`]), in one writer transaction: forgetting the device
+    /// must not leave another pairing's copies behind, PIN and badge hashes
+    /// included. The tables of this device's own records and of the
+    /// workstation's settings keep their rows (stage 2a spec §5.2, decision
+    /// 30); `device_forget` decides first whether unsent records allow a
+    /// forget at all. The writer zeroes deleted rows (`secure_delete`), and a
+    /// checkpoint that truncates the WAL follows the commit: it moves the
+    /// zeroed pages into the file and empties the WAL, which still held the
+    /// frames written before the delete. A reader holding an older snapshot
+    /// keeps it from finishing within the busy timeout, and the call then
+    /// fails; the delete stays committed and a retry repeats only the
+    /// checkpoint. `VACUUM` is not needed for the rows deleted here: it would
+    /// only shrink the file. It would do more for bytes a writer freed before
+    /// it ran with `secure_delete`, which nothing here scrubs (see "Local
+    /// database" in `apps/standalone/AGENTS.md`). The list is named, not read
+    /// from `pragma_table_list`: a table a later migration adds is emptied
+    /// only once that migration's plan classes it disposable.
     pub async fn clear_copies(&self) -> Result<(), LocalDbError> {
+        self.clear_classed(TABLE_CLASSES).await
+    }
+
+    /// [`LocalDb::clear_copies`] over `classes`, so a unit test can give it
+    /// tables of every class while [`TABLE_CLASSES`] holds only disposable ones.
+    async fn clear_classed(&self, classes: &[(&str, TableClass)]) -> Result<(), LocalDbError> {
         let mut tx = self
             .writer
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(|_| LocalDbError::StatementFailed)?;
-        sqlx::query("PRAGMA defer_foreign_keys = ON")
-            .execute(&mut *tx)
-            .await
-            .map_err(|_| LocalDbError::StatementFailed)?;
-        let tables: Vec<String> = sqlx::query_scalar(
-            "SELECT name FROM pragma_table_list WHERE schema = 'main' \
-             AND type IN ('table', 'virtual') AND name <> '_sqlx_migrations' \
-             AND name NOT GLOB 'sqlite_*' ORDER BY name",
-        )
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(|_| LocalDbError::StatementFailed)?;
-        for table in tables {
-            let delete = format!("DELETE FROM \"{}\"", table.replace('"', "\"\""));
-            sqlx::query(&delete)
+        let disposable = classes
+            .iter()
+            .filter(|(_, class)| *class == TableClass::Disposable);
+        for (table, _) in disposable {
+            sqlx::query(&format!("DELETE FROM {table}"))
                 .execute(&mut *tx)
                 .await
                 .map_err(|_| LocalDbError::StatementFailed)?;
@@ -544,6 +574,48 @@ mod tests {
             "(SELECT 1)",
         ] {
             assert!(!is_query(sql), "{sql}");
+        }
+    }
+
+    /// `TABLE_CLASSES` holds only disposable tables until plan 2a5, so the
+    /// class filter itself is pinned here, on tables of all three classes.
+    #[tokio::test]
+    async fn a_forget_empties_the_disposable_tables_and_keeps_the_other_classes() {
+        use sqlx::{ConnectOptions, Connection};
+        let dir = tempfile::tempdir().unwrap();
+        let db = LocalDb::open(dir.path()).await.unwrap();
+        let mut raw = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(dir.path().join(FILE_NAME))
+            .connect()
+            .await
+            .unwrap();
+        for table in ["probe_disposable", "probe_device", "probe_workstation"] {
+            for sql in [
+                format!("CREATE TABLE {table} (id TEXT PRIMARY KEY)"),
+                format!("INSERT INTO {table} (id) VALUES ('row')"),
+            ] {
+                sqlx::query(&sql).execute(&mut raw).await.unwrap();
+            }
+        }
+        raw.close().await.unwrap();
+
+        let classes = [
+            ("probe_device", TableClass::DeviceData),
+            ("probe_disposable", TableClass::Disposable),
+            ("probe_workstation", TableClass::Workstation),
+        ];
+        assert_eq!(db.clear_classed(&classes).await, Ok(()));
+
+        for (table, left) in [
+            ("probe_disposable", 0),
+            ("probe_device", 1),
+            ("probe_workstation", 1),
+        ] {
+            let rows = db
+                .query(&format!("SELECT count(*) AS n FROM {table}"), vec![])
+                .await
+                .unwrap();
+            assert_eq!(rows[0]["n"], serde_json::json!(left), "{table}");
         }
     }
 

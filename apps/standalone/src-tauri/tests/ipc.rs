@@ -15,7 +15,7 @@ use markiro_proto::DeviceKind;
 use markiro_standalone_lib::connection::ConnectionState;
 use markiro_standalone_lib::device::DeviceState;
 use markiro_standalone_lib::device_config::{self, DeviceConfig};
-use markiro_standalone_lib::local_db::{LocalDbState, FILE_NAME};
+use markiro_standalone_lib::local_db::{LocalDbState, TableClass, FILE_NAME, TABLE_CLASSES};
 use markiro_standalone_lib::secret_store::{ProtectedSecret, Scheme};
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
@@ -336,6 +336,10 @@ fn run_raw(dir: &std::path::Path, statements: &[&str]) {
     });
 }
 
+/// A trigger that refuses every delete from `sync_state`.
+const STUCK_SYNC_STATE: &str = "CREATE TRIGGER sync_state_stays BEFORE DELETE ON sync_state \
+    BEGIN SELECT RAISE(ABORT, 'kept'); END";
+
 /// `device_forget` clears the local copies before it removes `device.json`:
 /// when clearing fails, the command answers `storage` and the pairing stays,
 /// so the user can try again.
@@ -361,28 +365,22 @@ fn forgetting_the_device_clears_the_local_copies_first() {
         ] }),
     )
     .unwrap();
-    // A table whose rows refuse to go. Named to sort last (after ref_lines,
-    // ref_org, ref_site, sync_quarantine and sync_state), so every other
-    // table's delete has already run by the time this one aborts: an
-    // implementation that committed each delete on its own, instead of one
-    // transaction, would still show `n = 3` if the refusing table sorted
-    // first, since nothing else would have been touched yet either way.
-    run_raw(
-        app_dir.path(),
-        &[
-            "CREATE TABLE zz_kept (id TEXT PRIMARY KEY)",
-            "CREATE TRIGGER zz_kept_stays BEFORE DELETE ON zz_kept \
-             BEGIN SELECT RAISE(ABORT, 'kept'); END",
-            "INSERT INTO zz_kept (id) VALUES ('k')",
-        ],
+    // Rows of `sync_state` refuse to go. It is the last disposable table
+    // `clear_copies` empties, so every other table's delete has already run
+    // by the time this one aborts: an implementation that committed each
+    // delete on its own, instead of one transaction, would leave
+    // `ref_lines` empty here.
+    assert_eq!(
+        TABLE_CLASSES.last(),
+        Some(&("sync_state", TableClass::Disposable))
     );
+    run_raw(app_dir.path(), &[STUCK_SYNC_STATE]);
     let copies = || {
         invoke(
             &webview,
             "local_query",
             json!({
-                "sql": "SELECT (SELECT count(*) FROM ref_lines) + (SELECT count(*) FROM sync_state) \
-                        + (SELECT count(*) FROM zz_kept) AS n",
+                "sql": "SELECT (SELECT count(*) FROM ref_lines) + (SELECT count(*) FROM sync_state) AS n",
                 "params": []
             }),
         )
@@ -396,11 +394,11 @@ fn forgetting_the_device_clears_the_local_copies_first() {
     assert!(config.exists(), "the pairing stays for another try");
     assert_eq!(
         copies(),
-        json!([{ "n": 3 }]),
+        json!([{ "n": 2 }]),
         "the clearing rolled back whole"
     );
 
-    run_raw(app_dir.path(), &["DROP TRIGGER zz_kept_stays"]);
+    run_raw(app_dir.path(), &["DROP TRIGGER sync_state_stays"]);
     assert_eq!(
         invoke(&webview, "device_forget", json!({})),
         Ok(Value::Null)

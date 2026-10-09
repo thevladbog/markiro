@@ -1,7 +1,9 @@
 //! The station's local database on a real file: migrations, the read-only
 //! query path and the one-transaction batch path (stage 1 spec §5.2).
 
-use markiro_standalone_lib::local_db::{LocalDb, LocalDbError, LocalStatement, FILE_NAME};
+use markiro_standalone_lib::local_db::{
+    table_class, LocalDb, LocalDbError, LocalStatement, TableClass, FILE_NAME, TABLE_CLASSES,
+};
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection};
@@ -43,15 +45,9 @@ async fn lines(db: &LocalDb) -> Value {
     Value::Array(rows.into_iter().map(Value::Object).collect())
 }
 
-/// Pins today's user tables. `clear_copies` treats every one of them as
-/// disposable (see its doc comment): the copies of the host's data, and
-/// `floor_sign_in_failures` (plan 1f), this device's own failed sign-ins,
-/// which a forget clears on purpose. A new migration that adds a table makes
-/// this assertion fail, on purpose, so whoever adds it must decide whether
-/// it is disposable too (extend the list here) or data this device must keep
-/// — the scan journal, boxes, the outbox (the station design's §6.2,
-/// "Логическая модель") — which `clear_copies` and `device_forget` then need
-/// to treat deliberately, not silently wipe.
+/// Pins today's user tables. What a forget does with each is
+/// `TABLE_CLASSES`'s business (`every_table_has_a_forget_class` below); this
+/// list changes with every migration that adds a table.
 #[tokio::test]
 async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
     let (dir, db) = open().await;
@@ -412,13 +408,66 @@ async fn one_value_of_a_few_mebibytes_passes_the_limits() {
     );
 }
 
-/// Forgetting the device (`device_forget`) clears every table but sqlx's
-/// migration journal: tables a later migration adds too, since the list
-/// comes from `pragma_table_list`, and in any order despite foreign keys.
+/// Every table the migrations create has exactly one forget class
+/// (stage 2a spec §5.2, decision 30), and the class list names nothing else:
+/// a plan that adds a table must say whether a forget empties it, keeps it as
+/// this device's own record, or keeps it as the workstation's setting.
 #[tokio::test]
-async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
+async fn every_table_has_a_forget_class() {
+    let (_dir, db) = open().await;
+    let rows = db
+        .query(
+            "SELECT name FROM pragma_table_list WHERE schema = 'main' \
+             AND type IN ('table', 'virtual') AND name <> '_sqlx_migrations' \
+             AND name NOT GLOB 'sqlite_*' ORDER BY name",
+            vec![],
+        )
+        .await
+        .unwrap();
+    let tables: Vec<&str> = rows
+        .iter()
+        .map(|row| row["name"].as_str().unwrap())
+        .collect();
+    let unclassified: Vec<&str> = tables
+        .iter()
+        .copied()
+        .filter(|table| table_class(table).is_none())
+        .collect();
+    assert!(
+        unclassified.is_empty(),
+        "tables without a forget class: {unclassified:?}; add each to TABLE_CLASSES in local_db.rs"
+    );
+    let mut listed: Vec<&str> = TABLE_CLASSES.iter().map(|(table, _)| *table).collect();
+    listed.sort_unstable();
+    assert_eq!(
+        listed, tables,
+        "TABLE_CLASSES names each table of the migrations once, and nothing else"
+    );
+    // Until plan 2a5 brings the first records of the device's own, every
+    // table is a copy or this pairing's bookkeeping.
+    assert!(TABLE_CLASSES
+        .iter()
+        .all(|(_, class)| *class == TableClass::Disposable));
+}
+
+/// Forgetting the device (`device_forget`) empties every disposable table and
+/// nothing else: a table outside that class (here two a later migration might
+/// add, one of this device's records and one of the workstation's settings)
+/// keeps its rows, and so does sqlx's migration journal.
+#[tokio::test]
+async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
     let (dir, db) = open().await;
     db.transaction(vec![
+        statement(
+            "INSERT INTO ref_org (id, name, inn, gln, gs1_prefixes, time_zone, rev) \
+             VALUES ('org-1', 'Завод', NULL, '4600682000006', '[]', 'Europe/Moscow', 1)",
+            json!([]),
+        ),
+        statement(
+            "INSERT INTO ref_site (id, badge_salt, box_block_size, pallet_block_size, rev) \
+             VALUES ('site-1', 'c2FsdA==', 100, 10, 2)",
+            json!([]),
+        ),
         statement(INSERT_LINE, json!([LINE_1, "Линия 1", 0, 3])),
         statement(
             "INSERT INTO sync_state (key, value) VALUES ('last_rev', '3')",
@@ -444,6 +493,16 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
              VALUES ('8:box', 8, 'box', 'template-1', 7)",
             json!([]),
         ),
+        statement(
+            "INSERT INTO ref_operators (id, login, name, pin_phc, rev) \
+             VALUES ('operator-1', '0001', 'Анна', 'pbkdf2$pin', 8)",
+            json!([]),
+        ),
+        statement(
+            "INSERT INTO ref_operator_badges (id, operator_id, badge_phc, label, rev) \
+             VALUES ('badge-1', 'operator-1', 'pbkdf2$badge', NULL, 9)",
+            json!([]),
+        ),
         // This device's own failed sign-ins (plan 1f): cleared with the copies.
         statement(
             "INSERT INTO floor_sign_in_failures (key, failures, locked_at, last_failure_at) \
@@ -453,21 +512,18 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
     ])
     .await
     .unwrap();
-    // Tables as a later migration might add them, the second referring to
-    // the first; the webview may not create tables, so a raw connection
-    // does. `extra_holder` sorts first, so its delete runs while
-    // `extra_item` still refers to it.
+    // Tables as a later migration might add them; the webview may not create
+    // tables, so a raw connection does.
     let mut raw = SqliteConnectOptions::new()
         .filename(dir.path().join(FILE_NAME))
         .connect()
         .await
         .unwrap();
     for sql in [
-        "CREATE TABLE extra_holder (id TEXT PRIMARY KEY)",
-        "CREATE TABLE extra_item (id TEXT PRIMARY KEY, \
-         holder_id TEXT NOT NULL REFERENCES extra_holder (id))",
-        "INSERT INTO extra_holder (id) VALUES ('h')",
-        "INSERT INTO extra_item (id, holder_id) VALUES ('i', 'h')",
+        "CREATE TABLE kept_device_records (id TEXT PRIMARY KEY)",
+        "CREATE TABLE kept_workstation_settings (key TEXT PRIMARY KEY)",
+        "INSERT INTO kept_device_records (id) VALUES ('scan-1')",
+        "INSERT INTO kept_workstation_settings (key) VALUES ('printers')",
     ] {
         sqlx::query(sql).execute(&mut raw).await.unwrap();
     }
@@ -477,19 +533,22 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
 
     assert_eq!(db.clear_copies().await, Ok(()));
 
-    let left = db
+    for (table, _) in TABLE_CLASSES {
+        let left = db
+            .query(&format!("SELECT count(*) AS n FROM {table}"), vec![])
+            .await
+            .unwrap();
+        assert_eq!(Value::Object(left[0].clone()), json!({ "n": 0 }), "{table}");
+    }
+    let kept = db
         .query(
-            "SELECT (SELECT count(*) FROM ref_org) + (SELECT count(*) FROM ref_site) \
-             + (SELECT count(*) FROM ref_lines) + (SELECT count(*) FROM sync_state) \
-             + (SELECT count(*) FROM sync_quarantine) + (SELECT count(*) FROM ref_products) \
-             + (SELECT count(*) FROM ref_templates) + (SELECT count(*) FROM ref_template_defaults) \
-             + (SELECT count(*) FROM floor_sign_in_failures) \
-             + (SELECT count(*) FROM extra_holder) + (SELECT count(*) FROM extra_item) AS n",
+            "SELECT (SELECT count(*) FROM kept_device_records) \
+             + (SELECT count(*) FROM kept_workstation_settings) AS n",
             vec![],
         )
         .await
         .unwrap();
-    assert_eq!(Value::Object(left[0].clone()), json!({ "n": 0 }));
+    assert_eq!(Value::Object(kept[0].clone()), json!({ "n": 2 }));
     assert_eq!(db.query(journal, vec![]).await.unwrap(), migrations);
     // The database takes writes afterwards as before.
     assert_eq!(
@@ -553,53 +612,4 @@ async fn clearing_the_copies_leaves_no_deleted_hash_in_the_file_or_its_wal() {
         assert!(!file_holds(&file, marker), "{marker} stayed in the file");
         assert!(!file_holds(&wal, marker), "{marker} stayed in the WAL");
     }
-}
-
-/// An FTS5 virtual table's shadow tables (`search_data`, `search_idx`, …)
-/// hold its index; `sqlite_master` lists them as ordinary tables, but
-/// deleting their rows directly — instead of through the virtual table —
-/// corrupts the index. `clear_copies` must clear through the virtual table
-/// and leave it fully usable afterwards.
-#[tokio::test]
-async fn clearing_the_copies_leaves_a_virtual_table_usable() {
-    let (dir, db) = open().await;
-    let mut raw = SqliteConnectOptions::new()
-        .filename(dir.path().join(FILE_NAME))
-        .connect()
-        .await
-        .unwrap();
-    sqlx::query("CREATE VIRTUAL TABLE search USING fts5(body)")
-        .execute(&mut raw)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO search (rowid, body) VALUES (1, 'первая строка')")
-        .execute(&mut raw)
-        .await
-        .unwrap();
-    raw.close().await.unwrap();
-
-    assert_eq!(db.clear_copies().await, Ok(()));
-
-    let empty = db
-        .query("SELECT count(*) AS n FROM search", vec![])
-        .await
-        .unwrap();
-    assert_eq!(Value::Object(empty[0].clone()), json!({ "n": 0 }));
-    db.transaction(vec![statement(
-        "INSERT INTO search (rowid, body) VALUES (1, ?)",
-        json!(["вторая строка"]),
-    )])
-    .await
-    .unwrap();
-    let found = db
-        .query(
-            "SELECT body FROM search WHERE search MATCH 'вторая' ORDER BY rowid",
-            vec![],
-        )
-        .await
-        .unwrap();
-    assert_eq!(
-        Value::Object(found[0].clone()),
-        json!({ "body": "вторая строка" })
-    );
 }
