@@ -34,6 +34,22 @@
         "code": null,
         "boxId": null
       }
+    },
+    {
+      "id": "7a4f0c2d-5e3b-4f9a-8c6d-2e4f6a8b0c32",
+      "kind": "box_closed",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "boxId": "8e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
+        "sscc": "046006820000015000",
+        "blockId": "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+        "serial": 1500,
+        "openedAt": "2026-10-08T06:15:02.418Z",
+        "closedAt": "2026-10-08T06:21:47.302Z",
+        "itemCount": 12,
+        "membershipDigest": "39e3dbefdfff2c243c8fad25abe0b1e435fcab76ff4d6041b8caa9b2afb8402e"
+      }
     }
   ]
 }

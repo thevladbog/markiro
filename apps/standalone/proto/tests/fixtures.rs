@@ -1,20 +1,21 @@
 use markiro_proto::{
     category_default_id, certificate_fingerprint, codes, compatibility, compatibility_for,
     credentials, display_fingerprint, BadgeCreate, BadgeSalt, BlockSizesUpdate, BootstrapRequest,
-    BootstrapResponse, CategoryTemplateDefault, ChangesResponse, ClaimRequest, CodeCheck,
-    CodeOwner, Compatibility, CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate,
-    DeviceInfo, DeviceKind, DeviceLineRequest, DeviceRecord, DeviceShift, DeviceShiftCreate,
-    DeviceShifts, DeviceUpdate, ErrorBody, FactBatch, FactKind, FactOutcome, FactReceipts, Hello,
-    HelloEnvelope, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary,
-    LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine,
-    OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeShift,
-    OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord,
-    OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord,
-    PairResponse, PairingCode, PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate,
-    ProductGroup, ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict,
-    ShiftClose, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord,
-    SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
-    TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
+    BootstrapResponse, BoxClosedFact, CategoryTemplateDefault, ChangesResponse, ClaimRequest,
+    CodeCheck, CodeOwner, Compatibility, CounterpartyCreate, CounterpartyRecord,
+    CounterpartyUpdate, DeviceInfo, DeviceKind, DeviceLineRequest, DeviceRecord, DeviceShift,
+    DeviceShiftCreate, DeviceShifts, DeviceUpdate, ErrorBody, FactBatch, FactKind, FactOutcome,
+    FactReceipts, Hello, HelloEnvelope, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord,
+    LabelTemplateSummary, LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate,
+    LocalPairRequest, OfficeLine, OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole,
+    OfficeSession, OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
+    OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
+    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PasswordChange,
+    PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate,
+    ScanFact, ScanRawKind, ScanVerdict, ShiftClose, ShiftCreate, ShiftMode, ShiftOrigin,
+    ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate,
+    SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT,
+    PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -900,14 +901,21 @@ fn the_fact_code_fixtures_list_every_receipt_and_reason_code() {
 fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
     let batch: FactBatch = round_trip("facts-request.json");
     let kinds: Vec<FactKind> = batch.records.iter().map(|record| record.kind).collect();
-    assert_eq!(kinds, vec![FactKind::Scan, FactKind::Scan]);
+    assert_eq!(
+        kinds,
+        vec![FactKind::Scan, FactKind::Scan, FactKind::BoxClosed]
+    );
     for record in &batch.records {
         let typed = match record.kind {
             FactKind::Scan => serde_json::to_value(typed::<ScanFact>(&record.data)).unwrap(),
+            FactKind::BoxClosed => {
+                serde_json::to_value(typed::<BoxClosedFact>(&record.data)).unwrap()
+            }
         };
         assert_eq!(typed, record.data, "{}", record.id);
     }
     let accepted: ScanFact = typed(&batch.records[0].data);
+    let accepted_box = accepted.box_id.clone().unwrap();
     assert_eq!(
         (accepted.verdict, accepted.raw_kind),
         (ScanVerdict::Ok, ScanRawKind::Km)
@@ -918,6 +926,17 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
         (invalid.verdict, invalid.code, invalid.box_id),
         (ScanVerdict::Invalid, None, None)
     );
+    // The box the accepted scan went into, closed with the SSCC of the
+    // first serial of `sscc-block.json`'s block.
+    let closed: BoxClosedFact = typed(&batch.records[2].data);
+    let block: SsccBlock = serde_json::from_value(fixture("sscc-block.json")).unwrap();
+    assert_eq!(
+        (&closed.box_id, &closed.block_id, closed.serial),
+        (&accepted_box, &block.id, block.from_serial)
+    );
+    assert!(closed
+        .sscc
+        .starts_with(&format!("0{}", block.issuer_prefix)));
     let receipts: FactReceipts = round_trip("facts-response.json");
     let outcomes: Vec<FactOutcome> = receipts.receipts.iter().map(|r| r.outcome).collect();
     assert_eq!(

@@ -1899,6 +1899,22 @@ box (`box_items.displaced_at`); a later one, or one at the same instant, is
 is the sender's own scan). Both write a `code_conflicts` row; telling the
 displaced device and the office's review come with plan 2b.
 
+A `box_closed` (`facts/box_closed.rs`) closes a box of this device in this
+shift (`box_unknown` otherwise) with an SSCC of 18 digits whose first 17 are
+the box extension `0`, the snapshot's issuer prefix and `serial` (the check
+digit is the domain's, never checked here), where `serial` lies in the block
+`blockId` that the host issued to this device for that prefix and did not
+revoke (`sscc_not_issued`), and no other box carries the SSCC
+(`sscc_taken`, backed by the unique index). A box already closed with the
+same SSCC is the same close sent again (accepted, nothing written); with
+another, `box_already_closed`. The close keeps the station's `openedAt`,
+`closedAt`, count, digest and operator, raises the block's
+`consumed_through` to the highest serial closed (boxes may close out of
+order), and compares the station's `membershipDigest` with the digest of
+the box's live items (neither removed nor displaced), keeping the result in
+`digest_matches` for the shift's card (stage 4): a mismatch refuses
+nothing.
+
 Any device asks whether a code is taken (`GET /v1/device/codes/{codeHash}`,
 `routes/codes.rs`; 64 lower-case hex digits, `validation_failed` on
 `codeHash` otherwise): `{ status: "free" }` or `{ status: "taken", owner }`

@@ -655,3 +655,62 @@ pub async fn fact_rows(app: &TestApp) -> Value {
     }
     Value::Object(counts)
 }
+
+/// A block of SSCC serials the station of `key` gets for request
+/// `request_id` (a canonical UUID); the wizard's box counter starts at 1500
+/// and a block is 2000 serials, so the first block is 1500–3499.
+pub async fn issue_block(app: &TestApp, key: &str, request_id: &str) -> Value {
+    let (status, block) = app
+        .send(json(
+            with_device(request("POST", "/v1/device/sscc/blocks"), key),
+            serde_json::json!({
+                "requestId": request_id, "issuerPrefix": "460068200", "extension": 0
+            }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{block}");
+    block
+}
+
+/// The SSCC of box serial `serial` under the wizard's prefix, with its GS1
+/// check digit (the host never checks it; the domain's `buildSscc` writes
+/// it).
+pub fn sscc(serial: u64) -> String {
+    sscc_under("460068200", serial)
+}
+
+/// The SSCC of a box of `serial` under `prefix` (9 digits), with its check
+/// digit.
+pub fn sscc_under(prefix: &str, serial: u64) -> String {
+    let body = format!("0{prefix}{serial:07}");
+    let sum: u32 = body
+        .bytes()
+        .rev()
+        .enumerate()
+        .map(|(place, digit)| u32::from(digit - b'0') * if place % 2 == 0 { 3 } else { 1 })
+        .sum();
+    format!("{body}{}", (10 - sum % 10) % 10)
+}
+
+/// The domain's digest of the codes `members` (`code_hash(n)` each).
+pub fn members_digest(members: &[u32]) -> String {
+    let hashes: Vec<String> = members.iter().map(|n| code_hash(*n)).collect();
+    markiro_host::facts::rules::box_membership_digest(&hashes)
+}
+
+/// The `data` of a box closed at `closed_at` with serial `serial` of
+/// `block`, holding the codes `members` as the station saw them.
+pub fn box_closed(
+    box_id: &str,
+    block: &Value,
+    serial: u64,
+    members: &[u32],
+    opened_at: &str,
+    closed_at: &str,
+) -> Value {
+    serde_json::json!({
+        "boxId": box_id, "sscc": sscc(serial), "blockId": block["id"], "serial": serial,
+        "openedAt": opened_at, "closedAt": closed_at, "itemCount": members.len(),
+        "membershipDigest": members_digest(members)
+    })
+}

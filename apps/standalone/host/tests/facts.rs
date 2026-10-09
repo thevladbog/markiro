@@ -13,9 +13,10 @@ use markiro_host::routes::facts::{receive_facts, IncomingFacts};
 use markiro_proto::DeviceKind;
 use serde_json::{json, Value};
 use support::app::{
-    accepted, admin, audit_rows, box_id, code, code_hash, fact, fact_rows, host_revision, instant,
-    ok_scan, open_floor, pair_device, plan_shift, receipts, record_id, rejected, request,
-    send_facts, shift_body, shift_setup, with_device, Admin, Floor,
+    accepted, admin, audit_rows, box_closed, box_id, code, code_hash, fact, fact_rows,
+    host_revision, instant, issue_block, members_digest, ok_scan, open_floor, pair_device,
+    plan_shift, receipts, record_id, rejected, request, send_facts, shift_body, shift_setup, sscc,
+    sscc_under, with_device, Admin, Floor,
 };
 
 /// A scan of `verdict` at `at`, with no box; `code` and `source` as given.
@@ -1224,6 +1225,423 @@ async fn a_device_revoked_meanwhile_keeps_nothing() {
     assert_eq!(fact_rows(&admin.app).await, kept);
 }
 
+/// A box as the host keeps it: `(opened, closed, SSCC, block, serial, count
+/// reported, digest reported, digest matches, operator)`.
+async fn box_row(admin: &Admin, id: &str) -> Value {
+    type BoxRow = (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<i64>,
+        Option<i64>,
+        Option<String>,
+        Option<bool>,
+        Option<String>,
+    );
+    let row: BoxRow = sqlx::query_as(
+        "SELECT opened_at, closed_at, sscc, block_id, serial, item_count_reported, \
+         membership_digest, digest_matches, operator_id FROM boxes WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    json!([row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8])
+}
+
+/// How far the station used its block, as the host knows it.
+async fn consumed_through(admin: &Admin, block: &Value) -> Option<i64> {
+    sqlx::query_scalar("SELECT consumed_through FROM sscc_blocks WHERE id = ?")
+        .bind(block["id"].as_str().unwrap())
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+}
+
+const BLOCK_REQUEST: &str = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a";
+const OPERATOR: &str = "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d";
+
+#[tokio::test]
+async fn a_box_closes_with_an_sscc_of_its_devices_block_and_its_members_are_compared() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let colleague = open_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let shift = floor.shift.as_str();
+    // Box 1 holds codes 1 and 2, box 2 code 3, box 3 codes 5 and 6.
+    let scans: Vec<Value> = [(1, 1), (2, 1), (3, 2), (5, 3), (6, 3)]
+        .into_iter()
+        .map(|(n, box_n)| {
+            fact(
+                &record_id(n),
+                "scan",
+                shift,
+                ok_scan(n, &box_id(box_n), &instant(n, 0)),
+            )
+        })
+        .collect();
+    receipts(&admin.app, &floor.key, &scans).await;
+    // The colleague scanned code 6 earlier: it leaves box 3.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &colleague.key,
+            &[fact(
+                &record_id(9),
+                "scan",
+                &colleague.shift,
+                ok_scan(6, &box_id(9), &instant(0, 0))
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(9))]
+    );
+    let mut first = fact(
+        &record_id(11),
+        "box_closed",
+        shift,
+        box_closed(
+            &box_id(1),
+            &block,
+            1500,
+            &[1, 2],
+            &instant(0, 500),
+            &instant(20, 0),
+        ),
+    );
+    first["operatorId"] = json!(OPERATOR);
+    let batch = vec![
+        first,
+        // Closed later, but with the next serial but one.
+        fact(
+            &record_id(12),
+            "box_closed",
+            shift,
+            box_closed(
+                &box_id(2),
+                &block,
+                1502,
+                &[3],
+                &instant(3, 0),
+                &instant(21, 0),
+            ),
+        ),
+        // The station still counts code 6 in box 3: the digests differ.
+        fact(
+            &record_id(13),
+            "box_closed",
+            shift,
+            box_closed(
+                &box_id(3),
+                &block,
+                1501,
+                &[5, 6],
+                &instant(5, 0),
+                &instant(22, 0),
+            ),
+        ),
+    ];
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        vec![
+            accepted(&record_id(11)),
+            accepted(&record_id(12)),
+            accepted(&record_id(13))
+        ]
+    );
+    let block_id = block["id"].clone();
+    assert_eq!(
+        box_row(&admin, &box_id(1)).await,
+        json!([
+            instant(0, 500),
+            instant(20, 0),
+            sscc(1500),
+            block_id,
+            1500,
+            2,
+            members_digest(&[1, 2]),
+            true,
+            OPERATOR
+        ])
+    );
+    assert_eq!(
+        box_row(&admin, &box_id(2)).await,
+        json!([
+            instant(3, 0),
+            instant(21, 0),
+            sscc(1502),
+            block_id,
+            1502,
+            1,
+            members_digest(&[3]),
+            true,
+            null
+        ])
+    );
+    assert_eq!(
+        box_row(&admin, &box_id(3)).await,
+        json!([
+            instant(5, 0),
+            instant(22, 0),
+            sscc(1501),
+            block_id,
+            1501,
+            2,
+            members_digest(&[5, 6]),
+            false,
+            null
+        ])
+    );
+    // The block is used as far as its highest closed serial, whatever order
+    // the boxes closed in.
+    assert_eq!(consumed_through(&admin, &block).await, Some(1502));
+    // A close takes no revision and writes no audit row.
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+
+    // The same close under another id changes nothing; another SSCC for a
+    // closed box is refused.
+    let kept = fact_rows(&admin.app).await;
+    let again = fact(
+        &record_id(14),
+        "box_closed",
+        shift,
+        box_closed(
+            &box_id(1),
+            &block,
+            1500,
+            &[1, 2],
+            &instant(0, 500),
+            &instant(20, 0),
+        ),
+    );
+    let other = fact(
+        &record_id(15),
+        "box_closed",
+        shift,
+        box_closed(
+            &box_id(1),
+            &block,
+            1503,
+            &[1, 2],
+            &instant(0, 500),
+            &instant(23, 0),
+        ),
+    );
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[again, other]).await,
+        vec![
+            accepted(&record_id(14)),
+            rejected(Some(&record_id(15)), "box_already_closed", None)
+        ]
+    );
+    let mut grown = kept.clone();
+    grown["fact_receipts"] = json!(kept["fact_receipts"].as_i64().unwrap() + 2);
+    assert_eq!(fact_rows(&admin.app).await, grown);
+    assert_eq!(box_row(&admin, &box_id(1)).await[1], json!(instant(20, 0)));
+    assert_eq!(consumed_through(&admin, &block).await, Some(1502));
+}
+
+#[tokio::test]
+async fn a_box_closes_only_with_an_sscc_issued_to_its_device_for_its_shift() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let colleague = open_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let theirs = issue_block(&admin.app, &colleague.key, BLOCK_REQUEST).await;
+    let revoked = issue_block(
+        &admin.app,
+        &floor.key,
+        "8d7c6b5a-4e3f-4a2b-9c1d-0e9f8a7b6c5d",
+    )
+    .await;
+    sqlx::query("UPDATE sscc_blocks SET revoked_at = ? WHERE id = ?")
+        .bind(admin.app.state.timestamp())
+        .bind(revoked["id"].as_str().unwrap())
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let shift = floor.shift.as_str();
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[
+            fact(
+                &record_id(1),
+                "scan",
+                shift,
+                ok_scan(1, &box_id(1), &instant(1, 0)),
+            ),
+            fact(
+                &record_id(2),
+                "scan",
+                shift,
+                ok_scan(2, &box_id(2), &instant(2, 0)),
+            ),
+        ],
+    )
+    .await;
+    let close = |n: u32, data: Value| fact(&record_id(n), "box_closed", shift, data);
+    let data = |serial: u64| {
+        box_closed(
+            &box_id(1),
+            &block,
+            serial,
+            &[1],
+            &instant(1, 0),
+            &instant(30, 0),
+        )
+    };
+    let with = |field: &str, value: Value| {
+        let mut data = data(1500);
+        data[field] = value;
+        data
+    };
+    let mut other_prefix = data(1500);
+    other_prefix["sscc"] = json!("046012340000015004");
+    let mut pallet = data(1500);
+    pallet["sscc"] = json!("146006820000015007");
+    let mut wrong_serial = data(1500);
+    wrong_serial["serial"] = json!(1501);
+    // A serial of the colleague's block (3500–5499) and of the revoked one
+    // (5500–7499).
+    let mut colleagues_block = data(3500);
+    colleagues_block["blockId"] = theirs["id"].clone();
+    let mut unknown_block = data(1500);
+    unknown_block["blockId"] = json!("6f5e4d3c-2b1a-4098-8765-43210fedcba9");
+    let mut revoked_block = data(5500);
+    revoked_block["blockId"] = revoked["id"].clone();
+    let batch = vec![
+        close(
+            10,
+            box_closed(
+                &box_id(7),
+                &block,
+                1500,
+                &[1],
+                &instant(1, 0),
+                &instant(30, 0),
+            ),
+        ),
+        close(11, with("sscc", json!("04600682000001500"))),
+        close(12, with("sscc", json!("04600682000001500A"))),
+        close(13, with("blockId", json!("block"))),
+        close(14, with("openedAt", json!("2026-10-08T06:00:01Z"))),
+        close(15, with("closedAt", json!("today"))),
+        close(16, with("itemCount", json!(0))),
+        close(17, with("membershipDigest", json!("digest"))),
+        close(18, with("serial", json!(-1))),
+        close(19, other_prefix),
+        close(20, pallet),
+        close(21, wrong_serial),
+        close(22, data(1499)),
+        close(23, data(3500)),
+        close(24, colleagues_block),
+        close(25, unknown_block),
+        close(26, revoked_block),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        vec![
+            rejected(Some(&record_id(10)), "box_unknown", None),
+            rejected(Some(&record_id(11)), "invalid_record", Some("data.sscc")),
+            rejected(Some(&record_id(12)), "invalid_record", Some("data.sscc")),
+            rejected(Some(&record_id(13)), "invalid_record", Some("data.blockId")),
+            rejected(
+                Some(&record_id(14)),
+                "invalid_record",
+                Some("data.openedAt")
+            ),
+            rejected(
+                Some(&record_id(15)),
+                "invalid_record",
+                Some("data.closedAt")
+            ),
+            rejected(
+                Some(&record_id(16)),
+                "invalid_record",
+                Some("data.itemCount")
+            ),
+            rejected(
+                Some(&record_id(17)),
+                "invalid_record",
+                Some("data.membershipDigest")
+            ),
+            rejected(Some(&record_id(18)), "invalid_record", Some("data")),
+            rejected(Some(&record_id(19)), "sscc_not_issued", None),
+            rejected(Some(&record_id(20)), "sscc_not_issued", None),
+            rejected(Some(&record_id(21)), "sscc_not_issued", None),
+            rejected(Some(&record_id(22)), "sscc_not_issued", None),
+            rejected(Some(&record_id(23)), "sscc_not_issued", None),
+            rejected(Some(&record_id(24)), "sscc_not_issued", None),
+            rejected(Some(&record_id(25)), "sscc_not_issued", None),
+            rejected(Some(&record_id(26)), "sscc_not_issued", None),
+        ]
+    );
+    // Nothing was closed and no block moved.
+    assert_eq!(box_row(&admin, &box_id(1)).await[1], Value::Null);
+    assert_eq!(consumed_through(&admin, &block).await, None);
+    assert_eq!(consumed_through(&admin, &revoked).await, None);
+    // The block's first and last serials close boxes; a serial another box
+    // carries is taken.
+    let last = box_closed(
+        &box_id(2),
+        &block,
+        3499,
+        &[2],
+        &instant(2, 0),
+        &instant(31, 0),
+    );
+    let mut taken = last.clone();
+    taken["boxId"] = json!(box_id(1));
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[close(30, data(1500)), close(31, last), close(32, taken)]
+        )
+        .await,
+        vec![
+            accepted(&record_id(30)),
+            accepted(&record_id(31)),
+            rejected(Some(&record_id(32)), "box_already_closed", None),
+        ]
+    );
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[fact(
+            &record_id(3),
+            "scan",
+            shift,
+            ok_scan(3, &box_id(3), &instant(3, 0)),
+        )],
+    )
+    .await;
+    let mut taken = box_closed(
+        &box_id(3),
+        &block,
+        3499,
+        &[3],
+        &instant(3, 0),
+        &instant(32, 0),
+    );
+    taken["sscc"] = json!(sscc(3499));
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[close(33, taken)]).await,
+        vec![rejected(Some(&record_id(33)), "sscc_taken", None)]
+    );
+    assert_eq!(consumed_through(&admin, &block).await, Some(3499));
+    assert_eq!(box_row(&admin, &box_id(3)).await[1], Value::Null);
+}
+
 // Tests added beyond the plan's: each pins what a one-line mutant of the
 // plan's code got away with.
 
@@ -2391,4 +2809,517 @@ async fn the_schema_refuses_the_rows_no_fact_may_leave() {
     ] {
         refused_by(&admin, what, &sql, fragment).await;
     }
+}
+
+/// Scans of codes into boxes: `(code, box)` pairs, each its own record
+/// (`record_id(code)`) one second apart.
+async fn scan_into(admin: &Admin, floor: &Floor, pairs: &[(u32, u32)]) {
+    let scans: Vec<Value> = pairs
+        .iter()
+        .map(|(n, box_n)| {
+            fact(
+                &record_id(*n),
+                "scan",
+                &floor.shift,
+                ok_scan(*n, &box_id(*box_n), &instant(*n, 0)),
+            )
+        })
+        .collect();
+    let answered = receipts(&admin.app, &floor.key, &scans).await;
+    assert!(
+        answered
+            .iter()
+            .all(|receipt| receipt["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+}
+
+/// A `box_closed` record `n` of `data` in the floor's shift.
+fn close_in(floor: &Floor, n: u32, data: Value) -> Value {
+    fact(&record_id(n), "box_closed", &floor.shift, data)
+}
+
+const SECOND_REQUEST: &str = "8d7c6b5a-4e3f-4a2b-9c1d-0e9f8a7b6c5d";
+
+#[tokio::test]
+async fn a_serial_must_lie_in_the_block_the_record_names_and_in_a_box_block_of_the_shifts_prefix() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    // Two live blocks of one station: 1500–3499 and 3500–5499.
+    let first = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let second = issue_block(&admin.app, &floor.key, SECOND_REQUEST).await;
+    assert_eq!(
+        (first["fromSerial"].clone(), second["fromSerial"].clone()),
+        (json!(1500), json!(3500))
+    );
+    // A pallet block of the same station (the host does not issue them yet)
+    // that covers 5500–5999: no box takes its serials.
+    sqlx::query(
+        "INSERT INTO sscc_blocks (id, issuer_prefix, extension, device_id, request_id, \
+         from_serial, to_serial, issued_at) VALUES (?, '460068200', 1, ?, ?, 5500, 5999, ?)",
+    )
+    .bind("0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d")
+    .bind(&floor.station)
+    .bind("1b2c3d4e-5f6a-4b7c-9d8e-0f1a2b3c4d5e")
+    .bind(admin.app.state.timestamp())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let pallets = json!({ "id": "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d" });
+    scan_into(&admin, &floor, &[(1, 1), (2, 2), (3, 3)]).await;
+    let on = |box_n: u32, block: &Value, serial: u64| {
+        box_closed(
+            &box_id(box_n),
+            block,
+            serial,
+            &[box_n],
+            &instant(box_n, 0),
+            &instant(40, 0),
+        )
+    };
+    // A serial of the other live block, the block's own one, and a pallet
+    // block's serial are all refused.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                close_in(&floor, 10, on(1, &second, 1500)),
+                close_in(&floor, 11, on(1, &first, 3500)),
+                close_in(&floor, 12, on(1, &pallets, 5500)),
+            ]
+        )
+        .await,
+        vec![
+            rejected(Some(&record_id(10)), "sscc_not_issued", None),
+            rejected(Some(&record_id(11)), "sscc_not_issued", None),
+            rejected(Some(&record_id(12)), "sscc_not_issued", None),
+        ]
+    );
+    assert_eq!(box_row(&admin, &box_id(1)).await[1], Value::Null);
+    // Each block is used up to its own highest serial, and only by the
+    // close that named it.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                close_in(&floor, 13, on(1, &second, 3500)),
+                close_in(&floor, 14, on(2, &first, 3499)),
+            ]
+        )
+        .await,
+        vec![accepted(&record_id(13)), accepted(&record_id(14))]
+    );
+    assert_eq!(consumed_through(&admin, &first).await, Some(3499));
+    assert_eq!(consumed_through(&admin, &second).await, Some(3500));
+    assert_eq!(consumed_through(&admin, &pallets).await, None);
+    // The shift's snapshot froze another prefix than the block was issued
+    // for: an SSCC of that prefix does not fall in the block.
+    sqlx::query("UPDATE shifts SET snapshot = json_set(snapshot, '$.issuerPrefix', '460123400')")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let mut elsewhere = on(3, &first, 1501);
+    elsewhere["sscc"] = json!(sscc_under("460123400", 1501));
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[close_in(&floor, 15, elsewhere)]).await,
+        vec![rejected(Some(&record_id(15)), "sscc_not_issued", None)]
+    );
+    assert_eq!(box_row(&admin, &box_id(3)).await[1], Value::Null);
+    assert_eq!(consumed_through(&admin, &first).await, Some(3499));
+}
+
+#[tokio::test]
+async fn every_field_of_a_close_is_checked_before_anything_is_written() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    scan_into(&admin, &floor, &[(1, 1)]).await;
+    let data = |change: &dyn Fn(&mut Value)| {
+        let mut data = box_closed(
+            &box_id(1),
+            &block,
+            1500,
+            &[1],
+            &instant(1, 0),
+            &instant(30, 0),
+        );
+        change(&mut data);
+        data
+    };
+    let cases: Vec<(&str, Value)> = vec![
+        ("data.boxId", data(&|d| d["boxId"] = json!("box"))),
+        (
+            "data.sscc",
+            data(&|d| d["sscc"] = json!(format!("{}0", sscc(1500)))),
+        ),
+        (
+            "data.openedAt",
+            data(&|d| d["openedAt"] = json!("2026-10-08T06:00:01.000+00:00")),
+        ),
+        (
+            "data.closedAt",
+            data(&|d| d["closedAt"] = json!("2026-10-08T06:00:30Z")),
+        ),
+        (
+            "data.membershipDigest",
+            data(&|d| d["membershipDigest"] = json!(members_digest(&[1]).to_uppercase())),
+        ),
+        // Too large for the database's integer: never read as a serial.
+        (
+            "data.serial",
+            data(&|d| d["serial"] = json!(9_223_372_036_854_775_808_u64)),
+        ),
+        // Not the shape of the fact at all.
+        ("data", data(&|d| d["extra"] = json!(1))),
+        ("data", data(&|d| d["itemCount"] = json!(4_294_967_296_u64))),
+        ("data", data(&|d| d["itemCount"] = json!(-1))),
+        ("data", data(&|d| d["serial"] = json!(1500.5))),
+        (
+            "data",
+            data(&|d| {
+                d.as_object_mut()
+                    .unwrap()
+                    .remove("serial")
+                    .map(drop)
+                    .unwrap()
+            }),
+        ),
+        ("data", data(&|d| d["blockId"] = Value::Null)),
+    ];
+    let batch: Vec<Value> = cases
+        .iter()
+        .enumerate()
+        .map(|(n, (_, data))| close_in(&floor, 10 + n as u32, data.clone()))
+        .collect();
+    let expected: Vec<Value> = cases
+        .iter()
+        .enumerate()
+        .map(|(n, (field, _))| {
+            rejected(
+                Some(&record_id(10 + n as u32)),
+                "invalid_record",
+                Some(field),
+            )
+        })
+        .collect();
+    assert_eq!(receipts(&admin.app, &floor.key, &batch).await, expected);
+    assert_eq!(box_row(&admin, &box_id(1)).await[1], Value::Null);
+    assert_eq!(consumed_through(&admin, &block).await, None);
+}
+
+#[tokio::test]
+async fn the_host_never_counts_the_check_digit_of_an_sscc() {
+    // Plan 2a2 decision 13: the check digit is a marking rule, the domain's
+    // `buildSscc` writes it; the host checks the form, the prefix and the
+    // serial. A change of that decision must be deliberate, so it is pinned.
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    scan_into(&admin, &floor, &[(1, 1)]).await;
+    let right = sscc(1500);
+    let last = right.as_bytes()[17] - b'0';
+    let wrong = format!("{}{}", &right[..17], (last + 1) % 10);
+    let mut data = box_closed(
+        &box_id(1),
+        &block,
+        1500,
+        &[1],
+        &instant(1, 0),
+        &instant(30, 0),
+    );
+    data["sscc"] = json!(wrong);
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[close_in(&floor, 10, data)]).await,
+        vec![accepted(&record_id(10))]
+    );
+    assert_eq!(box_row(&admin, &box_id(1)).await[2], json!(wrong));
+}
+
+#[tokio::test]
+async fn one_sscc_closes_one_box_whichever_arrives_first_and_the_same_close_again_changes_nothing()
+{
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    scan_into(&admin, &floor, &[(1, 1), (2, 2), (3, 3), (4, 4)]).await;
+    let on = |box_n: u32, serial: u64| {
+        box_closed(
+            &box_id(box_n),
+            &block,
+            serial,
+            &[box_n],
+            &instant(box_n, 0),
+            &instant(40, 0),
+        )
+    };
+    // One SSCC for two boxes in one batch: the first one in the batch has
+    // it, in either order.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                close_in(&floor, 10, on(1, 1500)),
+                close_in(&floor, 11, on(2, 1500)),
+                close_in(&floor, 12, on(4, 1502)),
+                close_in(&floor, 13, on(3, 1502)),
+            ]
+        )
+        .await,
+        vec![
+            accepted(&record_id(10)),
+            rejected(Some(&record_id(11)), "sscc_taken", None),
+            accepted(&record_id(12)),
+            rejected(Some(&record_id(13)), "sscc_taken", None),
+        ]
+    );
+    // A receipt keeps the kind of the record, a refused one's too.
+    for n in [10, 11] {
+        let kind: Option<String> =
+            sqlx::query_scalar("SELECT kind FROM fact_receipts WHERE record_id = ?")
+                .bind(record_id(n))
+                .fetch_one(&admin.app.state.pool)
+                .await
+                .unwrap();
+        assert_eq!(kind.as_deref(), Some("box_closed"), "record {n}");
+    }
+    for (box_n, closes) in [(1, true), (2, false), (4, true), (3, false)] {
+        let closed_at = box_row(&admin, &box_id(box_n)).await[1].clone();
+        assert_eq!(closed_at != Value::Null, closes, "box {box_n}");
+    }
+    assert_eq!(consumed_through(&admin, &block).await, Some(1502));
+    // A lower serial closing later does not take `consumed_through` back.
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[close_in(&floor, 14, on(2, 1501))]).await,
+        vec![accepted(&record_id(14))]
+    );
+    assert_eq!(consumed_through(&admin, &block).await, Some(1502));
+    // The same record again: its receipt, no second write.
+    let kept = fact_rows(&admin.app).await;
+    let before = box_row(&admin, &box_id(1)).await;
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[close_in(&floor, 10, on(1, 1500))]).await,
+        vec![accepted(&record_id(10))]
+    );
+    assert_eq!(fact_rows(&admin.app).await, kept);
+    // The same close under a new id, with other times, count and digest
+    // (what a station that lost the receipt would send): accepted, and the
+    // box keeps what it was closed with.
+    let mut again = on(1, 1500);
+    again["openedAt"] = json!(instant(0, 1));
+    again["closedAt"] = json!(instant(50, 0));
+    again["itemCount"] = json!(7);
+    again["membershipDigest"] = json!(members_digest(&[1, 2]));
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[close_in(&floor, 15, again)]).await,
+        vec![accepted(&record_id(15))]
+    );
+    assert_eq!(box_row(&admin, &box_id(1)).await, before);
+    assert_eq!(consumed_through(&admin, &block).await, Some(1502));
+}
+
+#[tokio::test]
+async fn a_close_of_a_box_of_another_device_or_another_shift_is_a_box_unknown() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let colleague = open_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    // Box 9 is the colleague's; box 8 is the floor's own device's but in the
+    // colleague's shift.
+    receipts(
+        &admin.app,
+        &colleague.key,
+        &[fact(
+            &record_id(9),
+            "scan",
+            &colleague.shift,
+            ok_scan(9, &box_id(9), &instant(9, 0)),
+        )],
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO boxes (id, shift_id, device_id, opened_at, received_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(box_id(8))
+    .bind(&colleague.shift)
+    .bind(&floor.station)
+    .bind(instant(8, 0))
+    .bind(admin.app.state.timestamp())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let data = |box_n: u32| {
+        box_closed(
+            &box_id(box_n),
+            &block,
+            1500,
+            &[box_n],
+            &instant(box_n, 0),
+            &instant(40, 0),
+        )
+    };
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[close_in(&floor, 10, data(9)), close_in(&floor, 11, data(8))]
+        )
+        .await,
+        vec![
+            rejected(Some(&record_id(10)), "box_unknown", None),
+            rejected(Some(&record_id(11)), "box_unknown", None),
+        ]
+    );
+    for box_n in [8, 9] {
+        assert_eq!(box_row(&admin, &box_id(box_n)).await[1], Value::Null);
+    }
+    assert_eq!(consumed_through(&admin, &block).await, None);
+}
+
+#[tokio::test]
+async fn a_close_compares_the_boxs_live_items_and_keeps_what_the_station_reported() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    scan_into(
+        &admin,
+        &floor,
+        &[(1, 1), (2, 1), (3, 1), (4, 2), (5, 2), (7, 3)],
+    )
+    .await;
+    // An exception took code 3 out of box 1, code 5 out of box 2 and code 7
+    // out of box 3.
+    for n in [3, 5, 7] {
+        sqlx::query("UPDATE box_items SET removed_at = ? WHERE code_hash = ?")
+            .bind(admin.app.state.timestamp())
+            .bind(code_hash(n))
+            .execute(&admin.app.state.pool)
+            .await
+            .unwrap();
+    }
+    // The members are given in any order; the digest does not depend on it.
+    let mut reordered = box_closed(
+        &box_id(1),
+        &block,
+        1500,
+        &[2, 1],
+        &instant(1, 0),
+        &instant(40, 0),
+    );
+    // The count is the station's, whatever the digest says.
+    reordered["itemCount"] = json!(9);
+    let stale = box_closed(
+        &box_id(2),
+        &block,
+        1501,
+        &[4, 5],
+        &instant(4, 0),
+        &instant(41, 0),
+    );
+    let emptied = box_closed(
+        &box_id(3),
+        &block,
+        1502,
+        &[7],
+        &instant(7, 0),
+        &instant(42, 0),
+    );
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                close_in(&floor, 10, reordered),
+                close_in(&floor, 11, stale),
+                close_in(&floor, 12, emptied)
+            ]
+        )
+        .await,
+        vec![
+            accepted(&record_id(10)),
+            accepted(&record_id(11)),
+            accepted(&record_id(12))
+        ]
+    );
+    let block_id = block["id"].clone();
+    assert_eq!(
+        box_row(&admin, &box_id(1)).await,
+        json!([
+            instant(1, 0),
+            instant(40, 0),
+            sscc(1500),
+            block_id,
+            1500,
+            9,
+            members_digest(&[1, 2]),
+            true,
+            null
+        ])
+    );
+    assert_eq!(box_row(&admin, &box_id(2)).await[7], json!(false));
+    assert_eq!(box_row(&admin, &box_id(2)).await[5], json!(2));
+    assert_eq!(box_row(&admin, &box_id(3)).await[7], json!(false));
+}
+
+#[tokio::test]
+async fn a_close_is_written_with_its_batch_or_not_at_all() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    scan_into(&admin, &floor, &[(1, 1), (2, 2)]).await;
+    let on = |box_n: u32, serial: u64| {
+        close_in(
+            &floor,
+            10 + box_n,
+            box_closed(
+                &box_id(box_n),
+                &block,
+                serial,
+                &[box_n],
+                &instant(box_n, 0),
+                &instant(40, 0),
+            ),
+        )
+    };
+    // The block row refuses its update after the box row has been written.
+    sqlx::query(
+        "CREATE TRIGGER break_the_block BEFORE UPDATE ON sscc_blocks WHEN NEW.consumed_through = 1501 \
+         BEGIN SELECT RAISE(ABORT, 'broken'); END",
+    )
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let batch = vec![on(1, 1500), on(2, 1501)];
+    let empty = fact_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let (status, failed) = send_facts(&admin.app, &floor.key, &batch).await;
+    assert_eq!(
+        (status, failed["error"]["code"].clone()),
+        (StatusCode::INTERNAL_SERVER_ERROR, json!("internal"))
+    );
+    assert_eq!(fact_rows(&admin.app).await, empty);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    for box_n in [1, 2] {
+        assert_eq!(box_row(&admin, &box_id(box_n)).await[1], Value::Null);
+    }
+    assert_eq!(consumed_through(&admin, &block).await, None);
+    sqlx::query("DROP TRIGGER break_the_block")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        vec![accepted(&record_id(11)), accepted(&record_id(12))]
+    );
+    assert_eq!(consumed_through(&admin, &block).await, Some(1501));
 }

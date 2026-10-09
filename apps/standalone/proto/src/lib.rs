@@ -1627,12 +1627,14 @@ pub struct DeviceShiftCreate {
 #[serde(rename_all = "snake_case")]
 pub enum FactKind {
     Scan,
+    BoxClosed,
 }
 
 impl FactKind {
     pub fn as_str(self) -> &'static str {
         match self {
             FactKind::Scan => "scan",
+            FactKind::BoxClosed => "box_closed",
         }
     }
 }
@@ -1764,6 +1766,24 @@ pub struct ScanFact {
     pub raw_length: u32,
     pub code: Option<ScannedCode>,
     pub box_id: Option<String>,
+}
+
+/// `data` of a `box_closed` fact: a box closed with the SSCC of serial
+/// `serial` from block `blockId`, which the host issued to this station.
+/// `itemCount` and `membershipDigest` (the domain's `boxMembershipDigestV1`
+/// of the box's code hashes) are what the station saw; the host compares the
+/// digest with its own items and keeps the result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BoxClosedFact {
+    pub box_id: String,
+    pub sscc: String,
+    pub block_id: String,
+    pub serial: u64,
+    pub opened_at: String,
+    pub closed_at: String,
+    pub item_count: u32,
+    pub membership_digest: String,
 }
 
 /// How the host answered a record.
@@ -1978,10 +1998,10 @@ mod tests {
 
     /// Every `FactKind`, listed the same way.
     fn fact_kinds() -> Vec<FactKind> {
-        let kinds = vec![FactKind::Scan];
+        let kinds = vec![FactKind::Scan, FactKind::BoxClosed];
         for kind in &kinds {
             match kind {
-                FactKind::Scan => {}
+                FactKind::Scan | FactKind::BoxClosed => {}
             }
         }
         kinds

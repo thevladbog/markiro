@@ -11,6 +11,7 @@
 //! database error is no receipt: it fails the whole batch, and the device
 //! sends it again.
 
+pub mod box_closed;
 pub mod boxes;
 pub mod registry;
 pub mod rules;
@@ -303,6 +304,7 @@ async fn apply(
     };
     let answer = match record.kind {
         FactKind::Scan => scan::apply(conn, &context, &record.data).await,
+        FactKind::BoxClosed => box_closed::apply(conn, &context, &record.data).await,
     };
     let answer = match answer {
         Ok(applied) => Ok(applied),
