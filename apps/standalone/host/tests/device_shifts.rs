@@ -1,6 +1,13 @@
 mod support;
 
+use axum::extract::State;
 use axum::http::StatusCode;
+use axum::response::IntoResponse;
+use http_body_util::BodyExt;
+use markiro_host::auth::AuthDevice;
+use markiro_host::error::ApiPath;
+use markiro_host::routes::device_shifts::enter_shift;
+use markiro_proto::DeviceKind;
 use serde_json::{json, Value};
 use support::app::{
     admin, audit_rows, audit_trail, empty, host_revision, json as json_request, pair_device,
@@ -538,6 +545,7 @@ async fn entering_a_planned_shift_opens_it_and_freezes_its_snapshot() {
     let shift = plan_shift(&admin, body).await;
     let id = shift["id"].as_str().unwrap().to_owned();
     let opened_at = admin.app.state.timestamp();
+    let mut wake = admin.app.state.revisions.subscribe();
     let (status, entered) = enter(&admin, &admin.key, &shift).await;
     assert_eq!(status, StatusCode::OK, "{entered}");
     let snapshot = json!({
@@ -566,6 +574,11 @@ async fn entering_a_planned_shift_opens_it_and_freezes_its_snapshot() {
     // The wizard, the template, the product, the counterparty, the plan and
     // the opening each took a revision.
     assert_eq!(host_revision(&admin.app).await, 6);
+    // The opening wakes the streams with its revision, so the line's other
+    // stations read the shift as busy without waiting for another write.
+    assert!(wake.has_changed().unwrap());
+    assert_eq!(*wake.borrow_and_update(), 6);
+    assert_eq!(*admin.app.state.revisions.borrow(), 6);
     assert_eq!(
         audit_trail(&admin.app, "shift.open").await,
         vec![device_row(
@@ -636,6 +649,8 @@ async fn entering_a_planned_shift_opens_it_and_freezes_its_snapshot() {
     assert_eq!(status, StatusCode::OK, "{moved}");
     admin.app.clock.advance(time::Duration::minutes(5));
     let revision = host_revision(&admin.app).await;
+    // The edits above woke the streams; entering again must not.
+    wake.borrow_and_update();
     let rows = audit_rows(&admin.app).await;
     let (status, again) = enter(&admin, &admin.key, &shift).await;
     assert_eq!(
@@ -646,6 +661,8 @@ async fn entering_a_planned_shift_opens_it_and_freezes_its_snapshot() {
     // Entering again takes no revision and writes no row; it marks the
     // entry.
     assert_eq!(host_revision(&admin.app).await, revision);
+    assert!(!wake.has_changed().unwrap());
+    assert_eq!(*admin.app.state.revisions.borrow(), revision);
     assert_eq!(audit_rows(&admin.app).await, rows);
     assert_eq!(
         participants(&admin, &shift).await,
@@ -1124,4 +1141,89 @@ async fn two_stations_entering_together_leave_one_owner() {
     assert_eq!(loser.1["error"]["details"]["constraint"], "shift_busy");
     assert_eq!(participants(&admin, &shift).await.len(), 1);
     assert_eq!(audit_trail(&admin.app, "shift.open").await.len(), 1);
+}
+
+/// The entry reads the shift only after it holds the write lock. A colleague's
+/// entry that is still being written when this station's request arrives is
+/// therefore seen, and the loser answers `shift_busy`; with a deferred
+/// transaction the stale `planned` row would be read first and the write
+/// would fail with a database error.
+#[tokio::test]
+async fn an_entry_waiting_for_the_write_lock_sees_the_entry_that_held_it() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let (colleague, colleague_key) = pair_device(&admin.app, "station").await;
+    select_line(&admin, &colleague_key, &setup.line).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    // Read before the lock is taken: a request through the router writes.
+    let station = device_id(&admin, &admin.key).await;
+
+    // The colleague's entry, held open at the moment it has written.
+    let mut holder = markiro_host::db::begin_write(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let at = admin.app.state.timestamp();
+    sqlx::query(
+        "UPDATE shifts SET status = 'active', snapshot = ?, opened_at = ?, owner_device_id = ? \
+         WHERE id = ?",
+    )
+    .bind(snapshot("Молоко", Value::Null).to_string())
+    .bind(&at)
+    .bind(&colleague)
+    .bind(&id)
+    .execute(&mut *holder)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO shift_participants (shift_id, device_id, first_entered_at, last_entered_at) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(&colleague)
+    .bind(&at)
+    .bind(&at)
+    .execute(&mut *holder)
+    .await
+    .unwrap();
+
+    // This station's entry arrives meanwhile and has to wait for the lock.
+    // The handler is called directly: the device authentication in front of
+    // it writes `last_seen_at`, so through the router the request would
+    // already wait there, before the handler opened its transaction.
+    let mut entry = Box::pin(enter_shift(
+        State(admin.app.state.clone()),
+        AuthDevice {
+            id: station,
+            kind: DeviceKind::Station,
+        },
+        ApiPath(id.clone()),
+    ));
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(200), &mut entry)
+            .await
+            .is_err(),
+        "the entry answered while another writer held the lock"
+    );
+    holder.commit().await.unwrap();
+
+    let refusal = entry.await.expect_err("the shift was taken meanwhile");
+    let response = refusal.into_response();
+    let status = response.status();
+    let body: Value =
+        serde_json::from_slice(&response.into_body().collect().await.unwrap().to_bytes()).unwrap();
+    assert_eq!(
+        (status, body["error"]["details"]["constraint"].clone()),
+        (StatusCode::CONFLICT, json!("shift_busy")),
+        "{body}"
+    );
+    let rows: Vec<String> =
+        sqlx::query_scalar("SELECT device_id FROM shift_participants WHERE shift_id = ?")
+            .bind(&id)
+            .fetch_all(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(rows, vec![colleague]);
+    assert!(audit_trail(&admin.app, "shift.open").await.is_empty());
 }
