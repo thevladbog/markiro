@@ -31,7 +31,8 @@ pub struct HostResponse {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestError {
-    /// No connection, a TLS failure other than the pin, or a timeout.
+    /// No connection, a TLS failure other than the pin, or one of the
+    /// client's own time limits (its 2 s to connect, its 10 s per request).
     Unreachable,
     /// The host presented a certificate other than the pinned one.
     CertificateMismatch,
@@ -149,7 +150,9 @@ impl PinnedClient {
             request = request.json(body);
         }
         let lost = |error: reqwest::Error| {
-            if limit.is_some() && error.is_timeout() {
+            // The client's own 2 s to connect also reads as a timeout, but it
+            // is not the caller's limit: that is `unreachable`.
+            if limit.is_some() && error.is_timeout() && !error.is_connect() {
                 RequestError::Timeout
             } else {
                 RequestError::Unreachable

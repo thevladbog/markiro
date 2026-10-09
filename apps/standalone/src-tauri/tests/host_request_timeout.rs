@@ -80,6 +80,28 @@ async fn a_request_past_its_own_limit_fails_with_timeout() {
     );
 }
 
+/// A limit above the client's own 2 s to connect does not turn that 2 s into
+/// `timeout`: the host that never finishes connecting is `unreachable`, and
+/// it is the client's limit that ended the request, not the caller's.
+#[tokio::test]
+async fn a_host_that_never_accepts_the_connection_is_unreachable_not_a_timeout() {
+    let app_dir = tempfile::tempdir().unwrap();
+    let station = paired_with(app_dir.path(), &silent_address());
+
+    let started = Instant::now();
+    let answer = tokio::time::timeout(
+        Duration::from_secs(8),
+        station.request_within("GET", "/v1/device/shifts", None, None, Some(5_000)),
+    )
+    .await
+    .expect("the client's own limit ends the request before the test's");
+    let elapsed = started.elapsed();
+
+    assert_eq!(answer, Err(DeviceError::Request(RequestError::Unreachable)));
+    // Ended by the client's 2 s to connect, well before the caller's 5 s.
+    assert!(elapsed < Duration::from_millis(4_000), "{elapsed:?}");
+}
+
 /// Without `timeoutMs` nothing changes: the client's own limits still end a
 /// hung request (here its 2 s to connect, which covers the TLS handshake the
 /// silent host never finishes), and it still reads as `unreachable`, as
