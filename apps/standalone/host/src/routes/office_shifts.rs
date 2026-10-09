@@ -1,14 +1,14 @@
 //! Shifts in the office (stage 2a spec §4.2, §4.7): `GET /v1/office/shifts`
 //! and `GET …/{id}` (every role); `POST`, `PUT …/{id}` (with
-//! `expectedRev`) and `DELETE …/{id}` (administrators and technologists,
-//! `planShifts`). A shift is no feed record: every change still takes a host
-//! revision, so open streams wake and stations read their shifts again
-//! (`GET /v1/device/shifts`).
+//! `expectedRev`), `DELETE …/{id}` and `POST …/{id}/close` (administrators
+//! and technologists, `planShifts`). A shift is no feed record: every change
+//! still takes a host revision, so open streams wake and stations read their
+//! shifts again (`GET /v1/device/shifts`).
 
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
-use markiro_proto::{OfficeShift, ShiftCreate, ShiftMode, ShiftStatus, ShiftUpdate};
+use markiro_proto::{OfficeShift, ShiftClose, ShiftCreate, ShiftMode, ShiftStatus, ShiftUpdate};
 use serde::Deserialize;
 use serde_json::json;
 use sqlx::SqliteConnection;
@@ -444,4 +444,64 @@ pub async fn delete_shift(
         .await
         .map_err(ApiError::internal)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// `POST /v1/office/shifts/{id}/close`: the office closes an active shift
+/// with its reason in words, over `expectedRev`; a planned or a closed one
+/// is `shift_status`. Facts a station sends for the shift afterwards are
+/// taken and marked late (plan 2a2).
+pub async fn close_shift(
+    State(state): State<AppState>,
+    context: OfficeContext,
+    ApiPath(id): ApiPath<String>,
+    ApiJson(close): ApiJson<ShiftClose>,
+) -> Result<Json<OfficeShift>, ApiError> {
+    context.require_shift_planning()?;
+    let reason = validate::close_reason("reason", &close.reason)?;
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_shift_planning_in(&mut tx).await?;
+    let current = read(&mut tx, &id)
+        .await?
+        .ok_or_else(|| ApiError::not_found("no such shift"))?;
+    if current.rev != close.expected_rev {
+        return Err(ApiError::stale_revision(current.rev));
+    }
+    if current.status != ShiftStatus::Active {
+        return Err(shifts::status_conflict(current.status));
+    }
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    sqlx::query(
+        "UPDATE shifts SET status = 'closed', closed_at = ?, closed_by_kind = 'office_user', \
+         closed_by = ?, close_reason_text = ?, rev = ? WHERE id = ?",
+    )
+    .bind(&at)
+    .bind(&context.user.id)
+    .bind(&reason)
+    .bind(rev)
+    .bind(&id)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::SHIFT_CLOSE,
+            target_type: Some("shift"),
+            target_id: Some(&id),
+            outcome: Outcome::Ok,
+            details: json!({ "reason": reason }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    let closed = read(&mut tx, &id)
+        .await?
+        .ok_or_else(|| ApiError::internal("shift vanished"))?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(Json(closed))
 }

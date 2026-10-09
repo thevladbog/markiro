@@ -399,6 +399,21 @@ pub fn civil_date(field: &str, text: &str) -> Result<time::Date, ApiError> {
         .ok_or_else(|| ApiError::validation(field, "a real calendar date YYYY-MM-DD is required"))
 }
 
+/// The office's reason for closing a shift: trimmed, 3-500 characters
+/// without control characters (the cloud's `closeShiftSchema` takes three
+/// at least).
+pub fn close_reason(field: &str, text: &str) -> Result<String, ApiError> {
+    let reason = text.trim();
+    if is_plain(reason, 500) && reason.chars().take(3).count() == 3 {
+        Ok(reason.to_owned())
+    } else {
+        Err(ApiError::validation(
+            field,
+            "the reason must be 3-500 characters without control characters",
+        ))
+    }
+}
+
 /// An identifier the client makes up (a station's request id): a UUID in
 /// its canonical form, lower-case and hyphenated, as `crypto.randomUUID()`
 /// writes it, so one id never has two spellings.

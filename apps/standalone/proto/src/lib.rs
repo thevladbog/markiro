@@ -1393,6 +1393,16 @@ pub struct ShiftUpdate {
     pub expected_rev: i64,
 }
 
+/// `POST /v1/office/shifts/{id}/close`: the office closes an active shift
+/// (a station that died, a shift nobody will finish) with its reason in
+/// words, 3–500 characters.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShiftClose {
+    pub reason: String,
+    pub expected_rev: i64,
+}
+
 /// A shift as a station sees it (`GET /v1/device/shifts` and the answer of
 /// `POST /v1/device/shifts`). The product's name and GTIN and the
 /// counterparty's name are the snapshot's once the shift is open, so a

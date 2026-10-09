@@ -1106,6 +1106,539 @@ async fn a_template_that_a_planned_shift_names_is_not_deleted() {
 }
 
 #[tokio::test]
+async fn the_office_closes_an_active_shift_with_its_reason() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    open_directly(&admin, &shift).await;
+    admin.app.clock.advance(time::Duration::minutes(20));
+    let close = format!("{}/close", path(&shift));
+    let (status, closed) = admin
+        .call(
+            "POST",
+            &close,
+            Some(json!({ "reason": "  Станция линии 1 вышла из строя  ", "expectedRev": 4 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(
+        [
+            closed["status"].clone(),
+            closed["closedAt"].clone(),
+            closed["closeReasonText"].clone(),
+            closed["closeReasonCode"].clone(),
+            closed["rev"].clone()
+        ],
+        [
+            json!("closed"),
+            json!(admin.app.state.timestamp()),
+            json!("Станция линии 1 вышла из строя"),
+            Value::Null,
+            json!(5)
+        ]
+    );
+    assert_eq!(host_revision(&admin.app).await, 5);
+    assert_eq!(
+        audit_trail(&admin.app, "shift.close").await,
+        vec![admin.row(
+            "shift.close",
+            "shift",
+            &id,
+            json!({ "reason": "Станция линии 1 вышла из строя" })
+        )]
+    );
+    let (by, kind): (String, String) =
+        sqlx::query_as("SELECT closed_by, closed_by_kind FROM shifts WHERE id = ?")
+            .bind(&id)
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!((by, kind), (admin.id.clone(), "office_user".to_owned()));
+    // Closed is closed: closing again is refused.
+    let (status, refused) = admin
+        .call(
+            "POST",
+            &close,
+            Some(json!({ "reason": "Ещё раз", "expectedRev": 5 })),
+        )
+        .await;
+    assert_eq!(
+        (status, refusal(&refused)),
+        (
+            StatusCode::CONFLICT,
+            (
+                json!("conflict"),
+                json!({ "constraint": "shift_status", "status": "closed" })
+            )
+        )
+    );
+}
+
+#[tokio::test]
+async fn only_an_active_shift_closes_and_only_with_a_reason() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let planned = plan_shift(&admin, shift_body(&setup)).await;
+    let active = plan_shift(&admin, shift_body(&setup)).await;
+    open_directly(&admin, &active).await;
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let close = |shift: &Value| format!("{}/close", path(shift));
+    let (status, refused) = admin
+        .call(
+            "POST",
+            &close(&planned),
+            Some(json!({ "reason": "Не нужна", "expectedRev": 4 })),
+        )
+        .await;
+    assert_eq!(
+        (status, refusal(&refused)),
+        (
+            StatusCode::CONFLICT,
+            (
+                json!("conflict"),
+                json!({ "constraint": "shift_status", "status": "planned" })
+            )
+        )
+    );
+    for reason in ["аб", "  аб  ", &"я".repeat(501), "Сбой\tстанции"] {
+        let (status, refused) = admin
+            .call(
+                "POST",
+                &close(&active),
+                Some(json!({ "reason": reason, "expectedRev": 5 })),
+            )
+            .await;
+        assert_eq!(
+            (status, refusal(&refused)),
+            (
+                StatusCode::BAD_REQUEST,
+                (json!("validation_failed"), json!({ "field": "reason" }))
+            ),
+            "{reason:?}"
+        );
+    }
+    for expected_rev in [4, 6] {
+        let (status, refused) = admin
+            .call(
+                "POST",
+                &close(&active),
+                Some(json!({ "reason": "Сбой", "expectedRev": expected_rev })),
+            )
+            .await;
+        assert_eq!(
+            (status, refusal(&refused)),
+            (
+                StatusCode::CONFLICT,
+                (json!("stale_revision"), json!({ "currentRev": 5 }))
+            )
+        );
+    }
+    let (status, refused) = admin
+        .call("POST", &close(&active), Some(json!({ "expectedRev": 5 })))
+        .await;
+    assert_eq!(
+        (status, refused["error"]["code"].clone()),
+        (StatusCode::BAD_REQUEST, json!("validation_failed"))
+    );
+    let (status, missing) = admin
+        .call(
+            "POST",
+            "/v1/office/shifts/no-such-shift/close",
+            Some(json!({ "reason": "Сбой", "expectedRev": 1 })),
+        )
+        .await;
+    assert_eq!(
+        (status, missing["error"]["code"].clone()),
+        (StatusCode::NOT_FOUND, json!("not_found"))
+    );
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    // Exactly 500 characters, by a technologist.
+    let token = admin.technologist().await;
+    let (status, closed) = admin
+        .call_as(
+            &token,
+            "POST",
+            &close(&active),
+            Some(json!({ "reason": "я".repeat(500), "expectedRev": 5 })),
+        )
+        .await;
+    assert_eq!(
+        (status, closed["status"].clone()),
+        (StatusCode::OK, json!("closed"))
+    );
+}
+
+/// Every column of `shifts` a close must leave alone, as one JSON text.
+async fn untouched_columns(admin: &Admin, id: &str) -> Value {
+    const COLUMNS: [&str; 24] = [
+        "id",
+        "number_month_key",
+        "number_seq",
+        "created_from",
+        "created_by_kind",
+        "created_by",
+        "create_request_id",
+        "mode",
+        "pallets_enabled",
+        "product_id",
+        "line_id",
+        "counterparty_id",
+        "production_date",
+        "planned_qty",
+        "box_capacity",
+        "pallet_box_capacity",
+        "box_template_id",
+        "pallet_template_id",
+        "owner_device_id",
+        "snapshot",
+        "opened_at",
+        "late_data_at",
+        "created_at",
+        "status IS NOT NULL",
+    ];
+    let pairs: Vec<String> = COLUMNS
+        .iter()
+        .map(|column| format!("'{column}', {column}"))
+        .collect();
+    let text: String = sqlx::query_scalar(&format!(
+        "SELECT json_object({}) FROM shifts WHERE id = ?",
+        pairs.join(", ")
+    ))
+    .bind(id)
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
+#[tokio::test]
+async fn a_close_writes_only_the_closing_columns_and_wakes_the_streams() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let bystander = plan_shift(&admin, shift_body(&setup)).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    open_directly(&admin, &shift).await;
+    sqlx::query("INSERT INTO shift_participants (shift_id, device_id, first_entered_at, last_entered_at) SELECT ?, owner_device_id, opened_at, opened_at FROM shifts WHERE id = ?")
+        .bind(&id)
+        .bind(&id)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let before = untouched_columns(&admin, &id).await;
+    let bystander_before = untouched_columns(&admin, bystander["id"].as_str().unwrap()).await;
+    let counters: Vec<(String, i64)> =
+        sqlx::query_as("SELECT month_key, last_seq FROM shift_number_counters ORDER BY month_key")
+            .fetch_all(&admin.app.state.pool)
+            .await
+            .unwrap();
+    let participants: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM shift_participants")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let rows = audit_rows(&admin.app).await;
+    let next = host_revision(&admin.app).await + 1;
+    let mut wake = admin.app.state.revisions.subscribe();
+    assert!(!wake.has_changed().unwrap());
+    let (status, closed) = admin
+        .call(
+            "POST",
+            &format!("{}/close", path(&shift)),
+            Some(json!({ "reason": "Сбой", "expectedRev": shift["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    // The streams wake with the close's own revision, so the line's stations
+    // read the shift as closed without waiting for another write.
+    assert!(wake.has_changed().unwrap());
+    assert_eq!(*wake.borrow_and_update(), next);
+    assert_eq!(*admin.app.state.revisions.borrow(), next);
+    assert_eq!(closed["rev"], json!(next));
+    assert_eq!(untouched_columns(&admin, &id).await, before);
+    assert_eq!(
+        untouched_columns(&admin, bystander["id"].as_str().unwrap()).await,
+        bystander_before
+    );
+    // The stored row and the answer agree.
+    let (status, read_back) = admin.call("GET", &path(&shift), None).await;
+    assert_eq!((status, read_back), (StatusCode::OK, closed));
+    let after: Vec<(String, i64)> =
+        sqlx::query_as("SELECT month_key, last_seq FROM shift_number_counters ORDER BY month_key")
+            .fetch_all(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(after, counters);
+    let still: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM shift_participants")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(still, participants);
+    assert_eq!(audit_rows(&admin.app).await, rows + 1);
+}
+
+#[tokio::test]
+async fn a_reason_is_trimmed_counted_in_characters_and_free_of_control_characters() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let wrong = |reason: Value| json!({ "reason": reason, "expectedRev": 4 });
+    let active = plan_shift(&admin, shift_body(&setup)).await;
+    open_directly(&admin, &active).await;
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let rejected = [
+        json!(""),
+        json!("   "),
+        json!("я"),
+        json!("Сбой\nстанции"),
+        json!("Сбой\u{85}станции"),
+        json!("Сбой станции\u{7f}"),
+        json!(format!("{}ы", "я".repeat(500))),
+        json!(format!("  {}ы  ", "я".repeat(500))),
+        json!(["Сбой"]),
+        json!(null),
+        json!(500),
+    ];
+    for reason in rejected {
+        let (status, refused) = admin
+            .call(
+                "POST",
+                &format!("{}/close", path(&active)),
+                Some(wrong(reason.clone())),
+            )
+            .await;
+        assert_eq!(
+            (status, refused["error"]["code"].clone()),
+            (StatusCode::BAD_REQUEST, json!("validation_failed")),
+            "{reason}"
+        );
+    }
+    // A bad reason is refused before the shift is even looked up.
+    let (status, refused) = admin
+        .call(
+            "POST",
+            "/v1/office/shifts/no-such-shift/close",
+            Some(wrong(json!("аб"))),
+        )
+        .await;
+    assert_eq!(
+        (status, refusal(&refused)),
+        (
+            StatusCode::BAD_REQUEST,
+            (json!("validation_failed"), json!({ "field": "reason" }))
+        )
+    );
+    // The office names no reason code, and the revision is required.
+    for body in [
+        json!({ "reason": "Сбой", "reasonCode": "equipment_failure", "expectedRev": 4 }),
+        json!({ "reason": "Сбой" }),
+        json!({ "reason": "Сбой", "expectedRev": "4" }),
+    ] {
+        let (status, refused) = admin
+            .call("POST", &format!("{}/close", path(&active)), Some(body))
+            .await;
+        assert_eq!(
+            (status, refused["error"]["code"].clone()),
+            (StatusCode::BAD_REQUEST, json!("validation_failed"))
+        );
+    }
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let (status, still) = admin.call("GET", &path(&active), None).await;
+    assert_eq!(
+        (
+            status,
+            still["status"].clone(),
+            still["closeReasonText"].clone()
+        ),
+        (StatusCode::OK, json!("active"), Value::Null)
+    );
+    // What is stored is the trimmed text, counted in characters: three
+    // Cyrillic letters are six bytes, and 500 of them a thousand.
+    let accepted = [
+        ("  абв  ", "абв".to_owned()),
+        ("а б", "а б".to_owned()),
+        (&format!("  {}  ", "я".repeat(500)), "я".repeat(500)),
+        ("Сбой\u{a0}станции", "Сбой\u{a0}станции".to_owned()),
+    ];
+    for (reason, stored) in accepted {
+        let shift = plan_shift(&admin, shift_body(&setup)).await;
+        open_directly(&admin, &shift).await;
+        let (status, closed) = admin
+            .call(
+                "POST",
+                &format!("{}/close", path(&shift)),
+                Some(json!({ "reason": reason, "expectedRev": shift["rev"] })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{reason:?}: {closed}");
+        assert_eq!(closed["closeReasonText"], json!(stored), "{reason:?}");
+        let audited = audit_trail(&admin.app, "shift.close").await;
+        assert_eq!(
+            audited.last().map(|row| row.6.clone()),
+            Some(json!({ "reason": stored })),
+            "{reason:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn the_state_machine_and_the_revision_decide_before_anything_is_written() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let planned = plan_shift(&admin, shift_body(&setup)).await;
+    let closed = plan_shift(&admin, shift_body(&setup)).await;
+    open_directly(&admin, &closed).await;
+    let (status, done) = admin
+        .call(
+            "POST",
+            &format!("{}/close", path(&closed)),
+            Some(json!({ "reason": "Сбой", "expectedRev": closed["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{done}");
+    let gone = plan_shift(&admin, shift_body(&setup)).await;
+    let (status, _) = admin.call("DELETE", &path(&gone), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let planned_before = untouched_columns(&admin, planned["id"].as_str().unwrap()).await;
+    let stale = |shift: &Value, expected_rev: i64| {
+        (
+            format!("{}/close", path(shift)),
+            json!({ "reason": "Сбой", "expectedRev": expected_rev }),
+        )
+    };
+    // A wrong revision is stale whatever the status; the right one on a
+    // planned or a closed shift is the status, with the status named.
+    let planned_rev = planned["rev"].as_i64().unwrap();
+    let closed_rev = done["rev"].as_i64().unwrap();
+    for (shift, current) in [(&planned, planned_rev), (&closed, closed_rev)] {
+        let (route, body) = stale(shift, current + 1);
+        let (status, refused) = admin.call("POST", &route, Some(body)).await;
+        assert_eq!(
+            (status, refusal(&refused)),
+            (
+                StatusCode::CONFLICT,
+                (json!("stale_revision"), json!({ "currentRev": current }))
+            )
+        );
+    }
+    for (shift, current, name) in [
+        (&planned, planned_rev, "planned"),
+        (&closed, closed_rev, "closed"),
+    ] {
+        let (route, body) = stale(shift, current);
+        let (status, refused) = admin.call("POST", &route, Some(body)).await;
+        assert_eq!(
+            (status, refusal(&refused)),
+            (
+                StatusCode::CONFLICT,
+                (
+                    json!("conflict"),
+                    json!({ "constraint": "shift_status", "status": name })
+                )
+            )
+        );
+    }
+    // A shift that is gone cannot be closed.
+    let (route, body) = stale(&gone, 4);
+    let (status, refused) = admin.call("POST", &route, Some(body)).await;
+    assert_eq!(
+        (status, refused["error"]["code"].clone()),
+        (StatusCode::NOT_FOUND, json!("not_found"))
+    );
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(
+        untouched_columns(&admin, planned["id"].as_str().unwrap()).await,
+        planned_before
+    );
+    let (status, unchanged) = admin.call("GET", &path(&planned), None).await;
+    assert_eq!((status, unchanged), (StatusCode::OK, planned));
+    let (status, same) = admin.call("GET", &path(&closed), None).await;
+    assert_eq!((status, same), (StatusCode::OK, done));
+}
+
+#[tokio::test]
+async fn a_technologist_closes_in_their_name_and_a_user_turned_off_or_a_device_cannot() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let (tech, tech_id) = admin.technologist_session().await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    open_directly(&admin, &shift).await;
+    let close = format!("{}/close", path(&shift));
+    let body = json!({ "reason": "Сбой", "expectedRev": shift["rev"] });
+    // A device key alone opens no office route.
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let (status, refused) = admin
+        .app
+        .send(support::app::json(
+            with_device(request("POST", &close), &admin.key),
+            body.clone(),
+        ))
+        .await;
+    assert_eq!(
+        (status, refused["error"]["details"]["credential"].clone()),
+        (StatusCode::UNAUTHORIZED, json!("session"))
+    );
+    // A user turned off after the extractor passed is refused by the route's
+    // own check inside the transaction.
+    turn_the_user_off_at_the_next_activity(&admin.app, &tech_id).await;
+    admin.app.clock.advance(time::Duration::minutes(2));
+    let (status, error) = admin
+        .call_as(&tech, "POST", &close, Some(body.clone()))
+        .await;
+    assert_eq!(
+        (
+            status,
+            error["error"]["code"].clone(),
+            error["error"]["details"]["credential"].clone()
+        ),
+        (
+            StatusCode::UNAUTHORIZED,
+            json!("unauthorized"),
+            json!("session")
+        ),
+        "{error}"
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    let (status, unchanged) = admin.call("GET", &path(&shift), None).await;
+    assert_eq!(
+        (status, unchanged["status"].clone()),
+        (StatusCode::OK, json!("active"))
+    );
+    // Another technologist closes it, and the row names them.
+    let other =
+        seed_office_user(&admin.app, "tech2", "technologist", "technologist password").await;
+    let token = support::app::login(&admin.app, &admin.key, "tech2", "technologist password").await;
+    let (status, closed) = admin.call_as(&token, "POST", &close, Some(body)).await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(
+        audit_trail(&admin.app, "shift.close").await,
+        vec![support::app::audit_row(
+            &other,
+            "shift.close",
+            "shift",
+            &id,
+            json!({ "reason": "Сбой" })
+        )]
+    );
+    let (by, kind): (String, String) =
+        sqlx::query_as("SELECT closed_by, closed_by_kind FROM shifts WHERE id = ?")
+            .bind(&id)
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!((by, kind), (other, "office_user".to_owned()));
+}
+
+#[tokio::test]
 async fn editing_and_deleting_stop_a_user_turned_off_after_the_extractor_passed() {
     let admin = admin().await;
     let setup = shift_setup(&admin).await;

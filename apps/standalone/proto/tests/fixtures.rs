@@ -11,9 +11,9 @@ use markiro_proto::{
     OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
     OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PasswordChange,
     PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate,
-    ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord, SsccCounterUpdate,
-    SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT,
-    PROTOCOL_VERSION,
+    ShiftClose, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord,
+    SsccCounterUpdate, SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose,
+    HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -812,4 +812,16 @@ fn an_entered_shift_carries_its_snapshot_and_the_list_never_does() {
         ),
         (codes::CONFLICT, Some("shift_busy"))
     );
+}
+
+#[test]
+fn a_shift_close_carries_the_reason_and_the_revision() {
+    let close: ShiftClose = round_trip("shift-close.json");
+    let office: OfficeShift = serde_json::from_value(fixture("office-shift.json")).unwrap();
+    assert_eq!(close.expected_rev, office.rev);
+    // The office's close names no reason code: the six codes are a
+    // station's.
+    let mut value = fixture("shift-close.json");
+    value["reasonCode"] = Value::String("equipment_failure".into());
+    assert!(serde_json::from_value::<ShiftClose>(value).is_err());
 }

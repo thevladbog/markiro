@@ -44,6 +44,9 @@ pub mod actions {
     pub const SHIFT_DELETE: &str = "shift.delete";
     /// A station opened a planned shift: its snapshot is frozen.
     pub const SHIFT_OPEN: &str = "shift.open";
+    /// The office closed an active shift (a station's close is a fact, plan
+    /// 2a2).
+    pub const SHIFT_CLOSE: &str = "shift.close";
 }
 
 /// `details.reason` of a denied row: every denial names one.

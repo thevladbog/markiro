@@ -1766,6 +1766,14 @@ does, with `labelTemplateSpecSchema`, when it enters. The opening writes
 `shift.open`; a second device's first entry (`shift.enter`) comes with plan
 2b, since in stage 2a a station's first entry is the opening.
 
+The office closes an active shift (`POST …/{id}/close`, `{ reason,
+expectedRev }`, administrators and technologists), for a station that died or
+a shift nobody will finish: the reason is words, 3–500 characters without
+control characters (`validate::close_reason`), kept in `close_reason_text`; a
+planned or a closed shift is `shift_status`. A station's close is a fact (plan
+2a2) with one of the domain's six reason codes in `close_reason_code`, and the
+facts of a shift the office closed are taken and marked late.
+
 ## Marking rules
 
 GS1, KM, SSCC and label rules stay in `@markiro/domain`; the host stores and

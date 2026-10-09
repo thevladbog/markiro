@@ -258,6 +258,10 @@ fn protected_routes() -> Router<AppState> {
                 .delete(crate::routes::office_shifts::delete_shift),
         )
         .route(
+            "/v1/office/shifts/{id}/close",
+            post(crate::routes::office_shifts::close_shift),
+        )
+        .route(
             "/v1/office/users",
             get(crate::routes::office_users::list_users)
                 .post(crate::routes::office_users::create_user),
