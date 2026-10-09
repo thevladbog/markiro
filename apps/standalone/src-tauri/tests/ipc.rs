@@ -454,7 +454,8 @@ fn silent_address() -> String {
 /// `timeoutMs` reaches the shell as milliseconds (`src/host/client.ts`): a
 /// host that never answers ends the call with `timeout` once the limit
 /// passes, and a limit outside 100–10 000 is `invalid_request` before any
-/// connection. Without the limit the same call would wait the client's 10 s.
+/// connection. Without the limit the same call would end at the client's own
+/// 2 s to connect, as `unreachable`.
 #[test]
 fn host_request_takes_a_limit_in_milliseconds() {
     let app_dir = tempfile::tempdir().unwrap();
