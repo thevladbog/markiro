@@ -4833,6 +4833,11 @@ export const STATION_MIGRATIONS: string[] = [
     FOREIGN KEY(owner,event_id) REFERENCES warehouse_reprint_events(owner,event_id) ON DELETE CASCADE);`,
   `ALTER TABLE warehouse_reprint_local_boxes ADD COLUMN group_override_json TEXT;`,
   `CREATE INDEX IF NOT EXISTS warehouse_reprint_jobs_source_idx ON warehouse_reprint_jobs(owner,source_kind,identity);`,
+  `ALTER TABLE warehouse_reprint_local_boxes ADD COLUMN cached_at TEXT NOT NULL DEFAULT '';`,
+  // Unknown historical ages start at the upgrade; never rewrite original fields.
+  `UPDATE warehouse_reprint_local_boxes SET cached_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE cached_at='';`,
+  `CREATE INDEX IF NOT EXISTS warehouse_reprint_local_boxes_retention_idx ON warehouse_reprint_local_boxes(owner,cached_at);`,
+  `CREATE INDEX IF NOT EXISTS inventory_repack_boxes_mirror_reprint_source_idx ON inventory_repack_boxes_mirror(box_id,new_sscc);`,
 ];
 
 export interface StationMigrationEntry {

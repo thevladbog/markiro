@@ -12,7 +12,11 @@ import {
 import { StationApiError, type StationClient } from "../api-client.js";
 import type { SqlExecutor } from "../mirror.js";
 import { readProductLabelJob } from "../product-labels/store.js";
-import { purgeWarehouseLookupCache, warehouseLookupCacheBefore } from "./retention.js";
+import {
+  purgeWarehouseLocalBoxes,
+  purgeWarehouseLookupCache,
+  warehouseLookupCacheBefore,
+} from "./retention.js";
 export function warehouseNetworkUnavailable(error: unknown): boolean {
   return (
     error instanceof TypeError ||
@@ -164,7 +168,14 @@ export async function resolveWarehouseSource(
     }
     await cacheWarehouseSource(exec, owner, result.source);
   } else {
-    if (scan.kind === "box" && result.status === "unavailable")
+    const pendingLocal =
+      result.status === "not_found" && originalLocal && local
+        ? await localSourcePendingSync(exec, owner, local)
+        : false;
+    if (
+      scan.kind === "box" &&
+      (result.status === "unavailable" || (originalLocal && !pendingLocal))
+    )
       await exec.run(
         `UPDATE warehouse_reprint_local_boxes SET eligibility_denied=1 WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND identity=?`,
         [owner, scan.sscc],
@@ -173,9 +184,42 @@ export async function resolveWarehouseSource(
       `DELETE FROM warehouse_reprint_cache WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND kind=? AND identity=?`,
       [owner, scan.kind, scan.kind === "box" ? scan.sscc : scan.codeHash],
     );
-    if (result.status === "not_found" && originalLocal) return offline();
+    if (pendingLocal) return offline();
   }
   return result;
+}
+
+/** A historical local fact is not proof that its production source is still awaiting sync. */
+async function localSourcePendingSync(
+  exec: SqlExecutor,
+  owner: string,
+  source: WarehouseReprintSource,
+): Promise<boolean> {
+  const rows =
+    source.kind === "box"
+      ? await exec.all(
+          `SELECT 1 FROM boxes_mirror b WHERE b.box_id=? AND b.sscc=? AND b.shift_id IS ?
+           AND b.closed_at IS NOT NULL AND b.acked_at IS NULL
+           UNION ALL SELECT 1 FROM inventory_repack_boxes_mirror b
+           JOIN inventory_outbox o ON o.inventory_id=b.inventory_id AND o.snapshot_id=b.snapshot_id AND o.event_id=b.closed_event_id
+           WHERE b.box_id=? AND b.new_sscc=? AND b.state='closed' AND b.closed_at IS NOT NULL LIMIT 1`,
+          [
+            source.sourceId,
+            source.identity,
+            source.sourceShiftId,
+            source.sourceId,
+            source.identity,
+          ],
+        )
+      : await exec.all(
+          `SELECT 1 FROM product_label_accept_commands a WHERE a.credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND a.code_hash=?
+           AND (EXISTS(SELECT 1 FROM outbox o WHERE o.code_hash=a.code_hash AND o.shift_id=a.shift_id AND o.terminal_id IS a.terminal_id AND o.verdict='ok')
+             OR EXISTS(SELECT 1 FROM product_label_outbox o JOIN product_label_events e
+               ON e.credential_ownership=o.credential_ownership AND e.event_id=o.event_id
+               WHERE e.credential_ownership=a.credential_ownership AND e.job_id=a.job_id AND e.sequence=1)) LIMIT 1`,
+          [owner, source.identity],
+        );
+  return rows.length > 0;
 }
 /** Cache the original closed-box model once, before an existing print path can replay it. */
 export async function cacheWarehouseClosedBox(
@@ -209,9 +253,10 @@ export async function cacheWarehouseClosedBox(
     revision: productLabelValueDigest(value),
   });
   await exec.run(
-    "INSERT INTO warehouse_reprint_local_boxes(owner,identity,value_json) VALUES(?,?,?) ON CONFLICT(owner,identity) DO NOTHING",
-    [owner, source.identity, JSON.stringify(source)],
+    "INSERT INTO warehouse_reprint_local_boxes(owner,identity,value_json,cached_at) VALUES(?,?,?,?) ON CONFLICT(owner,identity) DO NOTHING",
+    [owner, source.identity, JSON.stringify(source), new Date().toISOString()],
   );
+  await purgeWarehouseLocalBoxes(exec, owner, warehouseLookupCacheBefore());
 }
 
 async function localProductGroup(exec: SqlExecutor, shiftId: string): Promise<number | null> {

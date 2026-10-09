@@ -274,6 +274,159 @@ it("keeps an unsynced accepted unit printable after online not_found", async () 
   }
 });
 
+it("honors online not_found after a box closure was acknowledged without deleting original fields", async () => {
+  const { cacheWarehouseClosedBox } = await import("../src/lib/warehouse-reprint/sources");
+  const db = new DatabaseSync(":memory:");
+  const exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  const source = warehouseBoxSource();
+  const client = {
+    post: vi.fn().mockResolvedValue({ status: "not_found" }),
+  } as unknown as StationClient;
+  try {
+    await exec.run(
+      "INSERT INTO boxes_mirror(box_id,shift_id,sscc,opened_at,closed_at,acked_at) VALUES(?,?,?,'opened','closed','acked')",
+      [source.sourceId, source.sourceShiftId, source.identity],
+    );
+    await cacheWarehouseClosedBox(exec, "owner", {
+      sourceId: source.sourceId,
+      sourceShiftId: source.sourceShiftId,
+      fields: source.fields,
+    });
+    expect(
+      await resolveWarehouseSource(client, exec, "owner", source.identity, "operator"),
+    ).toEqual({ status: "not_found" });
+    expect(await exec.all("SELECT value_json FROM warehouse_reprint_local_boxes")).toHaveLength(1);
+    vi.mocked(client.post).mockRejectedValue(new TypeError("offline"));
+    expect(
+      await resolveWarehouseSource(client, exec, "owner", source.identity, "operator"),
+    ).toEqual({ status: "unavailable", code: "source_not_printable" });
+    vi.mocked(client.post).mockResolvedValue({ status: "found", source, repair: null });
+    expect(
+      await resolveWarehouseSource(client, exec, "owner", source.identity, "operator"),
+    ).toMatchObject({ status: "found", source: { fields: source.fields } });
+  } finally {
+    db.close();
+  }
+});
+
+it("does not treat pending later print events as an unsynced unit after acceptance was acknowledged", async () => {
+  const { productLabelAcceptanceFixture, seedProductLabelShift } =
+    await import("./support/product-labels");
+  const { recordProductLabelAcceptance } = await import("../src/lib/product-labels/acceptance");
+  const { appendProductLabelEvent } = await import("../src/lib/product-labels/store");
+  const db = new DatabaseSync(":memory:");
+  const exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  const input = productLabelAcceptanceFixture({ ownership: "owner" });
+  try {
+    await seedProductLabelShift(exec, input);
+    await recordProductLabelAcceptance(exec, input);
+    await appendProductLabelEvent(exec, "owner", {
+      kind: "sending",
+      eventId: crypto.randomUUID(),
+      jobId: input.jobId,
+      attemptId: input.preparedEvent.attemptId,
+      sequence: 2,
+      operatorId: input.operatorId,
+      occurredAt: input.acceptedAt,
+      shiftId: input.shiftId,
+      codeHash: input.codeHash,
+      acceptedAt: input.acceptedAt,
+      policyRevision: input.preparedEvent.policyRevision,
+      templateDigest: input.preparedEvent.templateDigest,
+      payloadDigest: input.preparedEvent.payloadDigest,
+    });
+    await exec.run("DELETE FROM outbox WHERE code_hash=?", [input.codeHash]);
+    await exec.run(
+      `INSERT INTO product_label_receipts(credential_ownership,event_id,event_json,outcome,rejection_code,received_at)
+       SELECT credential_ownership,event_id,event_json,'accepted',NULL,? FROM product_label_events WHERE credential_ownership='owner' AND sequence=1`,
+      [input.acceptedAt],
+    );
+    expect(await exec.all("SELECT event_id FROM product_label_outbox")).toHaveLength(1);
+    expect(
+      await resolveWarehouseSource(
+        { post: async () => ({ status: "not_found" }) } as unknown as StationClient,
+        exec,
+        "owner",
+        input.raw,
+        input.operatorId,
+      ),
+    ).toEqual({ status: "not_found" });
+  } finally {
+    db.close();
+  }
+});
+
+it.each(["scan", "prepared"] as const)(
+  "allows local unit fallback while its %s acceptance channel remains pending",
+  async (channel) => {
+    const { productLabelAcceptanceFixture, seedProductLabelShift } =
+      await import("./support/product-labels");
+    const { recordProductLabelAcceptance } = await import("../src/lib/product-labels/acceptance");
+    const db = new DatabaseSync(":memory:");
+    const exec = makeRotatingExec([db, db]);
+    await applyMigrations(exec);
+    const input = productLabelAcceptanceFixture({ ownership: "owner" });
+    try {
+      await seedProductLabelShift(exec, input);
+      await recordProductLabelAcceptance(exec, input);
+      if (channel === "prepared")
+        await exec.run("DELETE FROM outbox WHERE code_hash=?", [input.codeHash]);
+      else
+        await exec.run(
+          `INSERT INTO product_label_receipts(credential_ownership,event_id,event_json,outcome,rejection_code,received_at)
+       SELECT credential_ownership,event_id,event_json,'accepted',NULL,? FROM product_label_events WHERE credential_ownership='owner' AND sequence=1`,
+          [input.acceptedAt],
+        );
+      expect(
+        await resolveWarehouseSource(
+          { post: async () => ({ status: "not_found" }) } as unknown as StationClient,
+          exec,
+          "owner",
+          input.raw,
+          input.operatorId,
+        ),
+      ).toMatchObject({ status: "found", source: { identity: input.codeHash } });
+    } finally {
+      db.close();
+    }
+  },
+);
+
+it("limits local repack fallback to its pending closure event", async () => {
+  const { cacheWarehouseClosedBox } = await import("../src/lib/warehouse-reprint/sources");
+  const db = new DatabaseSync(":memory:");
+  const exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  const source = warehouseBoxSource();
+  const client = { post: async () => ({ status: "not_found" }) } as unknown as StationClient;
+  try {
+    await exec.run(
+      `INSERT INTO inventory_repack_boxes_mirror(inventory_id,snapshot_id,box_id,new_sscc,owner_device_id,capacity,production_date,state,print_state,opened_at,closed_at,updated_at,closed_event_id)
+       VALUES('inventory','snapshot',?,?,'device',20,'2026-10-09','closed','printed','opened','closed','updated','closure')`,
+      [source.sourceId, source.identity],
+    );
+    await cacheWarehouseClosedBox(exec, "owner", {
+      sourceId: source.sourceId,
+      sourceShiftId: null,
+      fields: source.fields,
+    });
+    await exec.run(
+      "INSERT INTO inventory_outbox(inventory_id,snapshot_id,event_id,device_sequence,payload_json,created_at) VALUES('inventory','snapshot','closure',1,'{}','queued')",
+    );
+    expect(
+      await resolveWarehouseSource(client, exec, "owner", source.identity, "operator"),
+    ).toMatchObject({ status: "found" });
+    await exec.run("DELETE FROM inventory_outbox WHERE event_id='closure'");
+    expect(
+      await resolveWarehouseSource(client, exec, "owner", source.identity, "operator"),
+    ).toEqual({ status: "not_found" });
+  } finally {
+    db.close();
+  }
+});
+
 it("preserves a locally frozen box through online absence, retirement, and later eligibility refresh", async () => {
   const { cacheWarehouseClosedBox } = await import("../src/lib/warehouse-reprint/sources");
   const db = new DatabaseSync(":memory:");

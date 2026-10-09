@@ -128,10 +128,12 @@ export const warehouseReprintLocalBoxes = sqliteTable(
     valueJson: text("value_json").notNull(),
     eligibilityDenied: integer("eligibility_denied", { mode: "boolean" }).notNull().default(false),
     groupOverrideJson: text("group_override_json"),
+    cachedAt: text("cached_at").notNull().default(""),
   },
   (t) => [
     primaryKey({ columns: [t.owner, t.identity] }),
     check("warehouse_local_box_json", sql`json_valid(${t.valueJson})`),
     check("warehouse_local_box_denied", sql`${t.eligibilityDenied} IN (0,1)`),
+    index("warehouse_reprint_local_boxes_retention_idx").on(t.owner, t.cachedAt),
   ],
 );

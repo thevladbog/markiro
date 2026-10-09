@@ -67,6 +67,7 @@ import {
 import {
   createHardwareScanSource,
   tauriHardware,
+  tauriWarehousePrint,
   type ScannerStatus,
   type PrintTarget,
 } from "./lib/hardware.js";
@@ -2395,7 +2396,7 @@ export function App() {
             credentialGeneration={floorGeneration}
             source={scanSource}
             hardwareConfig={hardwareConfig}
-            print={(target, bytes) => tauriHardware.print(target, bytes)}
+            print={tauriWarehousePrint}
             onExit={() => setFloorView("select")}
             onJournalChange={nudgeSync}
             onSetup={() => {

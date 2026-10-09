@@ -128,3 +128,53 @@ it("checks retained source jobs by the full source key without scanning an owner
     db.close();
   }
 });
+
+it("appends original snapshot retention metadata without changing or re-aging historical fields", () => {
+  const db = new DatabaseSync(":memory:");
+  const index = STATION_MIGRATIONS.findIndex((sql) =>
+    sql.startsWith("ALTER TABLE warehouse_reprint_local_boxes ADD COLUMN cached_at"),
+  );
+  expect(index).toBeGreaterThan(
+    STATION_MIGRATIONS.findIndex((sql) =>
+      sql.startsWith("CREATE INDEX IF NOT EXISTS warehouse_reprint_jobs_source_idx"),
+    ),
+  );
+  try {
+    apply(db, STATION_MIGRATIONS.slice(0, index));
+    const original = JSON.stringify(warehouseBoxSource());
+    db.prepare(
+      "INSERT INTO warehouse_reprint_local_boxes(owner,identity,value_json,eligibility_denied,group_override_json) VALUES('owner','identity',?,1,'null')",
+    ).run(original);
+    apply(db, STATION_MIGRATIONS.slice(index));
+    const row = db
+      .prepare(
+        "SELECT value_json,eligibility_denied,group_override_json,cached_at FROM warehouse_reprint_local_boxes",
+      )
+      .get();
+    expect(row).toMatchObject({
+      value_json: original,
+      eligibility_denied: 1,
+      group_override_json: "null",
+    });
+    expect(row?.cached_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    apply(db, STATION_MIGRATIONS.slice(index));
+    expect(
+      db
+        .prepare(
+          "SELECT value_json,eligibility_denied,group_override_json,cached_at FROM warehouse_reprint_local_boxes",
+        )
+        .get(),
+    ).toEqual(row);
+    expect(
+      db
+        .prepare(
+          "EXPLAIN QUERY PLAN SELECT identity FROM warehouse_reprint_local_boxes WHERE owner=? AND cached_at<?",
+        )
+        .all("owner", "before")
+        .map((step) => step.detail)
+        .join("\n"),
+    ).toMatch(/owner=\? AND cached_at<\?/);
+  } finally {
+    db.close();
+  }
+});

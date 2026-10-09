@@ -292,14 +292,27 @@ fn print_to_target(target: PrintTarget, bytes: &[u8]) -> Result<(), String> {
 /// on whichever async worker thread Tauri picked for this command and starve
 /// every other async task scheduled on it for as long as the OS takes.
 /// `spawn_blocking` moves the entire dispatch onto a thread dedicated to
-/// blocking work. USB bounds the result wait so a stalled spooler cannot keep
-/// print recovery pending forever; serial/TCP keep their existing I/O limits.
+/// blocking work. Callers that persist unknown delivery may opt into a bounded
+/// USB result wait; existing production callers keep their wait semantics, and
+/// serial/TCP keep their existing I/O limits.
 #[tauri::command]
-pub async fn print_bytes(target: PrintTarget, payload_base64: String) -> Result<(), String> {
+pub async fn print_bytes(
+    target: PrintTarget,
+    payload_base64: String,
+    delivery_unknown_on_timeout: Option<bool>,
+) -> Result<(), String> {
     let bytes = decode_payload(&payload_base64)?;
-    let wait_timeout = matches!(&target, PrintTarget::Usb { .. }).then_some(USB_PRINT_TIMEOUT);
+    let wait_timeout = print_wait_timeout(&target, delivery_unknown_on_timeout);
     let task = tauri::async_runtime::spawn_blocking(move || print_to_target(target, &bytes));
     await_print_transport(task, wait_timeout).await
+}
+
+fn print_wait_timeout(
+    target: &PrintTarget,
+    delivery_unknown_on_timeout: Option<bool>,
+) -> Option<Duration> {
+    (delivery_unknown_on_timeout == Some(true) && matches!(target, PrintTarget::Usb { .. }))
+        .then_some(USB_PRINT_TIMEOUT)
 }
 
 async fn await_print_transport(
@@ -327,6 +340,31 @@ async fn await_print_transport(
 #[cfg(test)]
 mod tests {
     use super::{decode_payload, resolve_socket_addr};
+
+    #[test]
+    fn usb_deadline_requires_explicit_unknown_delivery_opt_in() {
+        let usb = super::PrintTarget::Usb {
+            printer: "TSC 210".to_string(),
+        };
+        assert_eq!(super::print_wait_timeout(&usb, None), None);
+        assert_eq!(super::print_wait_timeout(&usb, Some(false)), None);
+        assert_eq!(
+            super::print_wait_timeout(&usb, Some(true)),
+            Some(super::USB_PRINT_TIMEOUT)
+        );
+        for target in [
+            super::PrintTarget::Tcp {
+                host: "127.0.0.1".to_string(),
+                port: 9100,
+            },
+            super::PrintTarget::Serial {
+                port: "COM1".to_string(),
+                baud: 9600,
+            },
+        ] {
+            assert_eq!(super::print_wait_timeout(&target, Some(true)), None);
+        }
+    }
 
     #[test]
     fn stalled_usb_transport_returns_unknown_delivery_before_blocking_work_finishes() {

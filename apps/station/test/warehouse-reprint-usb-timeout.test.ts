@@ -2,7 +2,7 @@
 import { DatabaseSync } from "node:sqlite";
 import { expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { tauriHardware } from "../src/lib/hardware.js";
+import { tauriWarehousePrint } from "../src/lib/hardware.js";
 import { applyMigrations } from "../src/lib/mirror.js";
 import { printWarehouseJob, recoverWarehouseJobs } from "../src/lib/warehouse-reprint/printing.js";
 import {
@@ -50,7 +50,7 @@ it("releases recovery after a USB IPC timeout and preserves frozen bytes without
       owner: input.owner,
       operatorId: input.operatorId,
       profile: input.printer,
-      print: tauriHardware.print,
+      print: tauriWarehousePrint,
       isCurrent: () => true,
     },
     input.jobId,
@@ -69,7 +69,14 @@ it("releases recovery after a USB IPC timeout and preserves frozen bytes without
     expect(saved.bytesBase64).toBe(input.bytesBase64);
     await recoverWarehouseJobs(exec, input.owner, input.operatorId);
     expect(vi.mocked(invoke).mock.calls).toEqual([
-      ["print_bytes", { target: input.printer.target, payloadBase64: input.bytesBase64 }],
+      [
+        "print_bytes",
+        {
+          target: input.printer.target,
+          payloadBase64: input.bytesBase64,
+          deliveryUnknownOnTimeout: true,
+        },
+      ],
     ]);
     expect(
       await exec.all(

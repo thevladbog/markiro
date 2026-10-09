@@ -764,6 +764,7 @@ export const inventoryRepackBoxesMirror = sqliteTable(
       table.ownerDeviceId,
       table.state,
     ),
+    index("inventory_repack_boxes_mirror_reprint_source_idx").on(table.boxId, table.newSscc),
   ],
 );
 
