@@ -82,6 +82,14 @@ describe("civil dates", () => {
     expect(() => civilDaysBetween("2026-02-30", "2026-03-01")).toThrow(RangeError);
   });
 
+  it("applies the 400-year leap rule in both directions: 2100 and 2200 are common years, 2400 is a leap year", () => {
+    expect(isCivilDate("2100-02-29")).toBe(false);
+    expect(isCivilDate("2200-02-29")).toBe(false);
+    expect(isCivilDate("2400-02-29")).toBe(true);
+    expect(civilDaysBetween("2100-02-28", "2100-03-01")).toBe(1);
+    expect(civilDaysBetween("2400-02-28", "2400-03-01")).toBe(2);
+  });
+
   it("gives today's date in the organization's zone, not this PC's", () => {
     const evening = new Date("2026-10-08T21:30:00Z");
     expect(civilToday("Europe/Moscow", evening)).toBe("2026-10-09");
@@ -125,20 +133,24 @@ describe("civil dates", () => {
     expect(civilToday("Mars/Olympus_Mons", now)).toBe("2026-10-08");
   });
 
-  it("falls back to the PC's own calendar day, not the UTC day, when the two differ", () => {
-    // Kiritimati is UTC+14 all year: 12:00Z on the 8th is 02:00 on the 9th there.
-    const zone = process.env.TZ;
-    process.env.TZ = "Pacific/Kiritimati";
-    try {
-      const instant = new Date("2026-10-08T12:00:00Z");
-      expect(instant.getDate()).toBe(9);
-      expect(civilToday(null, instant)).toBe("2026-10-09");
-      expect(civilToday("UTC", instant)).toBe("2026-10-08");
-    } finally {
-      if (zone === undefined) delete process.env.TZ;
-      else process.env.TZ = zone;
-    }
-  });
+  // Node re-reads `TZ` at run time on POSIX only; on Windows the assignment below changes nothing.
+  it.skipIf(process.platform === "win32")(
+    "falls back to the PC's own calendar day, not the UTC day, when the two differ",
+    () => {
+      // Kiritimati is UTC+14 all year: 12:00Z on the 8th is 02:00 on the 9th there.
+      const zone = process.env.TZ;
+      process.env.TZ = "Pacific/Kiritimati";
+      try {
+        const instant = new Date("2026-10-08T12:00:00Z");
+        expect(instant.getDate()).toBe(9);
+        expect(civilToday(null, instant)).toBe("2026-10-09");
+        expect(civilToday("UTC", instant)).toBe("2026-10-08");
+      } finally {
+        if (zone === undefined) delete process.env.TZ;
+        else process.env.TZ = zone;
+      }
+    },
+  );
 
   it("knows which zones this runtime has", () => {
     expect(isKnownTimeZone("Europe/Moscow")).toBe(true);

@@ -81,6 +81,27 @@ describe("SSCC page", () => {
     ).toBeTruthy();
   });
 
+  it("says an administrator's pallet counter past its last serial has run out too, with no change of it", async () => {
+    const session = fakeOfficeSession();
+    // The pallet counter of the current prefix is the one that ran out; the box counter still has serials.
+    session.api.getSscc.mockResolvedValue({
+      ...SSCC_STATE,
+      counters: SSCC_STATE.counters.map((counter) =>
+        counter.issuerPrefix === "460709100" && counter.extension === 1
+          ? { ...counter, nextSerial: counter.maxSerial + 1 }
+          : counter,
+      ),
+    });
+    await openSscc(session);
+    const [boxes, pallets] = await counterRows();
+    if (boxes === undefined || pallets === undefined) throw new Error("no rows");
+    expect(within(pallets).getAllByRole("cell")[2]?.textContent).toBe("!Номера закончились");
+    expect(within(pallets).queryByRole("button")).toBeNull();
+    expect(
+      within(boxes).getByRole("button", { name: "Изменить счётчик: Короба, префикс 460709100" }),
+    ).toBeTruthy();
+  });
+
   it("shows a technologist a counter that has run out as run out, with the others as they are", async () => {
     const session = fakeOfficeSession({ user: TECHNOLOGIST });
     session.api.getSscc.mockResolvedValue({

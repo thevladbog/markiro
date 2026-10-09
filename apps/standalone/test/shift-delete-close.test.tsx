@@ -18,6 +18,10 @@ const TOKEN = "office-session-token";
 
 const REASON_WORDS = "Опишите причину: от 3 до 500 символов";
 const CONTROL_WORDS = "Уберите табуляцию, перенос строки или другой служебный символ";
+// A lost answer (`unreachable`) and a refused role (`forbidden`), as `errors.*` words them
+// (the alert puts an icon glyph before the words).
+const LOST_WORDS = "Нет связи с хостом. Проверьте, что ПК-хост включён и служба запущена.";
+const FORBIDDEN_WORDS = "Недостаточно прав для этого действия.";
 
 function api(code: string, details: Record<string, unknown> = {}): HostError {
   return new HostError({ kind: "api", code, status: 409, message: code, details });
@@ -203,7 +207,7 @@ describe("office shifts: deleting a planned shift", () => {
     session.api.deleteShift.mockRejectedValueOnce(lost());
     const confirm = await openDelete(session);
     fireEvent.click(within(confirm).getByRole("button", { name: "Удалить" }));
-    expect(await within(confirm).findByRole("alert")).toBeTruthy();
+    expect((await within(confirm).findByRole("alert")).textContent).toContain(LOST_WORDS);
     expect(session.api.listShifts).toHaveBeenCalledTimes(1);
     // Still asking, and not stuck: «Удалить» works again.
     await waitFor(() => expect(deleteButton(confirm).disabled).toBe(false));
@@ -219,7 +223,7 @@ describe("office shifts: deleting a planned shift", () => {
     session.api.deleteShift.mockRejectedValueOnce(lost());
     const confirm = await openDelete(session);
     fireEvent.click(deleteButton(confirm));
-    expect(await within(confirm).findByRole("alert")).toBeTruthy();
+    expect((await within(confirm).findByRole("alert")).textContent).toContain(LOST_WORDS);
     await waitFor(() => expect(deleteButton(confirm).disabled).toBe(false));
     const write = pending<undefined>();
     session.api.deleteShift.mockReturnValueOnce(write.promise);
@@ -237,7 +241,7 @@ describe("office shifts: deleting a planned shift", () => {
     session.api.deleteShift.mockRejectedValue(api("forbidden"));
     const confirm = await openDelete(session);
     fireEvent.click(within(confirm).getByRole("button", { name: "Удалить" }));
-    expect(await within(confirm).findByRole("alert")).toBeTruthy();
+    expect((await within(confirm).findByRole("alert")).textContent).toContain(FORBIDDEN_WORDS);
     expect(screen.getByRole("dialog")).toBe(confirm);
     expect(session.api.listShifts).toHaveBeenCalledTimes(1);
   });
@@ -518,7 +522,7 @@ describe("office shifts: closing an active shift", () => {
     session.api.closeShift.mockRejectedValueOnce(lost());
     const confirm = await openClose(session);
     giveReason("Станция сломалась");
-    expect(await within(confirm).findByRole("alert")).toBeTruthy();
+    expect((await within(confirm).findByRole("alert")).textContent).toContain(LOST_WORDS);
     expect(reason().value).toBe("Станция сломалась");
     await waitFor(() => expect(closeButton().disabled).toBe(false));
     session.api.closeShift.mockResolvedValueOnce(CLOSED_ACTIVE);
@@ -536,7 +540,7 @@ describe("office shifts: closing an active shift", () => {
     session.api.closeShift.mockRejectedValueOnce(lost());
     const confirm = await openClose(session);
     giveReason("Станция сломалась");
-    expect(await within(confirm).findByRole("alert")).toBeTruthy();
+    expect((await within(confirm).findByRole("alert")).textContent).toContain(LOST_WORDS);
     await waitFor(() => expect(closeButton().disabled).toBe(false));
     const write = pending<OfficeShift>();
     session.api.closeShift.mockReturnValueOnce(write.promise);
