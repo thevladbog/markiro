@@ -1813,7 +1813,9 @@ console stays silent), any hash or the TLS private key. A label template's
 layout is no secret, but at up to 256 KB it stays
 out of the log as it stays out of audit details; `no_secrets_in_logs.rs`
 walks a stock and an office layout through the template routes, the
-defaults and the feed. Kiosk mode's failures are logged by the command's name
+defaults and the feed, and a shift's snapshot that carries a layout through
+the plan, the station's entry and list, an SSCC block and the office's
+close. Kiosk mode's failures are logged by the command's name
 alone (`standalone: enter_lockdown failed`), never by what the shell answered.
 
 ## Verification

@@ -1,8 +1,9 @@
 //! Spec §4.10: the process log never holds device keys, session tokens,
 //! passwords, password, PIN and badge hashes, pairing codes, the badge salt
 //! or the TLS private key. A label template's layout is no secret, but at
-//! up to 256 KB it stays out of the log too. Its own binary, because it
-//! installs the global tracing subscriber.
+//! up to 256 KB it stays out of the log too, a shift's snapshot that carries
+//! one included. Its own binary, because it installs the global tracing
+//! subscriber.
 
 mod support;
 
@@ -424,6 +425,136 @@ async fn secrets_never_reach_the_process_log() {
         .unwrap();
     assert_eq!(catalog_feed.status(), 200);
 
+    // A shift (plan 2a1): planned with the office's template, opened by the
+    // station, which gets the snapshot with the whole layout, read back in
+    // its list, given an SSCC block, and closed by the office. The layout
+    // is in the snapshot the host keeps, never in the log.
+    let lines: serde_json::Value = client
+        .get(format!("{base}/v1/office/lines"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let line_id = lines[0]["id"].as_str().unwrap().to_owned();
+    let on_line = client
+        .put(format!("{base}/v1/device/line"))
+        .header(protocol.0, &protocol.1)
+        .bearer_auth(&key)
+        .json(&json!({ "lineId": line_id }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(on_line.status(), 200);
+    let milk: serde_json::Value = client
+        .post(format!("{base}/v1/office/products"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({
+            "gtin14": "04600682000020", "name": "Кефир", "chzProductGroupCode": 8,
+            "boxCapacity": 12, "palletBoxCapacity": 40
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let shift: serde_json::Value = client
+        .post(format!("{base}/v1/office/shifts"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({
+            "productId": milk["id"], "lineId": line_id, "productionDate": "2026-10-08",
+            "boxTemplateId": template_id
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let shift_id = shift["id"].as_str().unwrap().to_owned();
+    let entered = client
+        .post(format!("{base}/v1/device/shifts/{shift_id}/enter"))
+        .header(protocol.0, &protocol.1)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(entered.status(), 200);
+    let entered = entered.text().await.unwrap();
+    assert!(
+        entered.contains("layout-marker-office-2"),
+        "the entry carries the snapshot with the layout"
+    );
+    // The owner enters again, the path that serves the stored snapshot
+    // back: it carries the layout too, and no more than the first entry may
+    // it reach the log.
+    let reentered = client
+        .post(format!("{base}/v1/device/shifts/{shift_id}/enter"))
+        .header(protocol.0, &protocol.1)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(reentered.status(), 200);
+    assert!(
+        reentered
+            .text()
+            .await
+            .unwrap()
+            .contains("layout-marker-office-2"),
+        "the second entry carries the snapshot with the layout"
+    );
+    let device_shifts = client
+        .get(format!("{base}/v1/device/shifts"))
+        .header(protocol.0, &protocol.1)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(device_shifts.status(), 200);
+    let block = client
+        .post(format!("{base}/v1/device/sscc/blocks"))
+        .header(protocol.0, &protocol.1)
+        .bearer_auth(&key)
+        .json(&json!({
+            "requestId": "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a",
+            "issuerPrefix": "460068200", "extension": 0
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(block.status(), 200);
+    let opened: serde_json::Value = client
+        .get(format!("{base}/v1/office/shifts/{shift_id}"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let closed = client
+        .post(format!("{base}/v1/office/shifts/{shift_id}/close"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({ "reason": "Проверка журнала", "expectedRev": opened["rev"] }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(closed.status(), 200);
+
     // A wrong device key and a wrong session token are both rejected...
     let wrong_device_key = "not-a-real-device-key";
     let wrong_device = client
@@ -474,6 +605,11 @@ async fn secrets_never_reach_the_process_log() {
         .fetch_all(&pool)
         .await
         .unwrap();
+    let snapshots: Vec<String> =
+        sqlx::query_scalar("SELECT snapshot FROM shifts WHERE snapshot IS NOT NULL")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     let key_der = std::fs::read(paths.tls_dir().join("key.der")).unwrap();
     pool.close().await;
 
@@ -555,4 +691,10 @@ async fn secrets_never_reach_the_process_log() {
             "the host never kept {kept}"
         );
     }
+    assert!(
+        snapshots
+            .iter()
+            .any(|snapshot| snapshot.contains("layout-marker-office-2")),
+        "the shift never froze the layout"
+    );
 }

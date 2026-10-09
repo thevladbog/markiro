@@ -1227,3 +1227,86 @@ async fn an_entry_waiting_for_the_write_lock_sees_the_entry_that_held_it() {
     assert_eq!(rows, vec![colleague]);
     assert!(audit_trail(&admin.app, "shift.open").await.is_empty());
 }
+
+#[tokio::test]
+async fn a_shift_the_office_closes_reads_closed_to_its_owner_and_no_station_reenters_it() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let station = device_id(&admin, &admin.key).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let (_, colleague) = pair_device(&admin.app, "station").await;
+    select_line(&admin, &colleague, &setup.line).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    // The station of the line enters, so the shift is open and its own.
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert_eq!(entered["status"], json!("active"));
+    let opened_at = entered["openedAt"].as_str().unwrap().to_owned();
+    let read = |key: String| {
+        let admin = &admin;
+        let id = id.clone();
+        async move {
+            let (status, body) = device_call(admin, &key, "GET", "/v1/device/shifts", None).await;
+            assert_eq!(status, StatusCode::OK, "{body}");
+            body["shifts"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|shift| shift["id"] == json!(id))
+                .cloned()
+        }
+    };
+    let before = read(admin.key.clone())
+        .await
+        .expect("the open shift is listed");
+    assert_eq!(
+        (&before["status"], &before["closedAt"]),
+        (&json!("active"), &Value::Null)
+    );
+    // The office closes it, later than the entry.
+    admin.app.clock.advance(time::Duration::minutes(5));
+    let closed_instant = admin.app.state.timestamp();
+    assert_ne!(closed_instant, opened_at);
+    let path = format!("/v1/office/shifts/{id}");
+    let (status, office) = admin.call("GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{office}");
+    let (status, closed) = admin
+        .call(
+            "POST",
+            &format!("{path}/close"),
+            Some(json!({ "reason": "Сбой питания", "expectedRev": office["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    assert_eq!(closed["status"], json!("closed"));
+    // The owner's list still has the shift, now closed and stamped with the
+    // instant of the close; nothing else of it changed.
+    let after = read(admin.key.clone())
+        .await
+        .expect("the owner still lists the closed shift");
+    assert_eq!(after["status"], json!("closed"));
+    assert_eq!(after["closedAt"], json!(closed_instant));
+    assert_eq!(after["openedAt"], json!(opened_at));
+    assert_eq!(after["ownerDeviceId"], json!(station));
+    assert_eq!(after["number"], before["number"]);
+    // A closed shift a station never entered is no longer on its line's list.
+    assert_eq!(read(colleague.clone()).await, None);
+    // Nobody enters it again, the owner included.
+    for key in [admin.key.clone(), colleague] {
+        let (status, body) = enter(&admin, &key, &shift).await;
+        assert_eq!(
+            (
+                status,
+                body["error"]["code"].clone(),
+                body["error"]["details"].clone()
+            ),
+            (
+                StatusCode::CONFLICT,
+                json!("conflict"),
+                json!({ "constraint": "shift_status", "status": "closed" })
+            ),
+            "{body}"
+        );
+    }
+}
