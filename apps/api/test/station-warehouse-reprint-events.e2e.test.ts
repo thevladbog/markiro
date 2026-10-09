@@ -402,12 +402,26 @@ describe.skipIf(!ready)("warehouse event history", () => {
           .from(schema.warehouseReprintJobs)
           .where(eq(schema.warehouseReprintJobs.jobId, p.jobId)),
       ).toEqual([]);
-      expect(
-        await h.db
-          .select()
-          .from(schema.tenantAuditEvents)
-          .where(eq(schema.tenantAuditEvents.targetId, p.jobId)),
-      ).toEqual([]);
+      const claims = await h.db
+        .select()
+        .from(schema.tenantAuditEvents)
+        .where(eq(schema.tenantAuditEvents.targetId, p.jobId));
+      expect(claims).toHaveLength(1);
+      expect(claims[0]).toMatchObject({
+        organizationId: h.a.tenantId,
+        actorUserId: null,
+        action: "warehouse_label.prepared_claim",
+        outcome: "quarantined",
+        targetType: "warehouse_label_job",
+        targetId: p.jobId,
+        after: {
+          deviceId: h.a.deviceId,
+          operatorId: p.operatorId,
+          eventId: p.eventId,
+          rejectionCode: code,
+          event: p,
+        },
+      });
     }
   });
   it("accepts a legacy device box ID without modifying the production box", async () => {

@@ -179,6 +179,29 @@ export class WarehouseEventsService {
               },
             });
           }
+          if (
+            event.kind === "prepared" &&
+            (rejection === "source_not_printable" || rejection === "template_mismatch")
+          ) {
+            // Preserve the complete submitted claim, without treating it as an
+            // accepted print. The protocol carries identities/digests, not raw KM
+            // or printer bytes, and replay returns the existing receipt above.
+            await tx.insert(schema.tenantAuditEvents).values({
+              organizationId: tenantId,
+              actorUserId: null,
+              action: "warehouse_label.prepared_claim",
+              outcome: "quarantined",
+              targetType: "warehouse_label_job",
+              targetId: event.jobId,
+              after: {
+                deviceId,
+                operatorId: event.operatorId,
+                eventId: event.eventId,
+                rejectionCode: rejection,
+                event: { ...event },
+              },
+            });
+          }
           await tx.insert(schema.warehouseReprintReceipts).values({
             tenantId,
             deviceId,

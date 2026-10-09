@@ -1413,6 +1413,68 @@ describe("pairingServerUrl", () => {
 });
 
 describe("App", () => {
+  it("enters the reprint screen with a bound station and active credential generation", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(pinHash, {
+      scanner: null,
+      printer: null,
+      printerLanguage: "zpl",
+      verifyPrintedLabel: false,
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        async (url: string) =>
+          new Response(
+            JSON.stringify(
+              new URL(url).pathname === "/station/warehouse-reprint/templates"
+                ? {
+                    protocol: "warehouse-label-reprint-v1",
+                    revision: "e".repeat(64),
+                    templates: [],
+                  }
+                : { items: [] },
+            ),
+          ),
+      ),
+    );
+    render(<App />);
+    await signInAsOperator();
+    fireEvent.click(screen.getByRole("button", { name: /Warehouse operations/ }));
+    fireEvent.click(await screen.findByRole("button", { name: "Reprint labels" }));
+    await screen.findByRole("heading", { name: "Reprint labels" });
+    expect(screen.getByRole("button", { name: "Enter code manually" })).toBeDefined();
+    expect(screen.queryByRole("heading", { name: "New shift" })).toBeNull();
+    expect(hardwareMock.print).not.toHaveBeenCalled();
+  });
+
+  it("keeps reprint unavailable until credential generation exists", async () => {
+    const pinHash = await hashSecret(OPERATOR_PIN);
+    mockInvokeForFloor(
+      pinHash,
+      { scanner: null, printer: null, printerLanguage: "zpl", verifyPrintedLabel: false },
+      [],
+      {
+        machine_id: "",
+        api_key: "mk_key",
+        server_url: "https://api.factory.example",
+        device_id: "device-1",
+        tenant_id: "tenant-1",
+      },
+    );
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => new Response(JSON.stringify({ items: [] }))),
+    );
+    render(<App />);
+    await signInAsOperator();
+    fireEvent.click(screen.getByRole("button", { name: /Warehouse operations/ }));
+    await screen.findByRole("heading", { name: "Warehouse operations" });
+    expect(screen.queryByRole("button", { name: "Reprint labels" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "New shift" })).toBeNull();
+    expect(hardwareMock.print).not.toHaveBeenCalled();
+  });
+
   it("keeps fullscreen while workstation setup opens and closes", async () => {
     const pinHash = await hashSecret(OPERATOR_PIN);
     mockInvokeForFloor(pinHash, {

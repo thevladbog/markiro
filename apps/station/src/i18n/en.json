@@ -1088,6 +1088,7 @@
       "WAREHOUSE_OPERATOR_DENIED": "Operator access was revoked. Sign in with an active operator."
     },
     "entryHint": "Scan an existing unit or box code to print a new label.",
+    "entryUnavailable": "Label reprinting is unavailable. Check the station connection in setup.",
     "entryButton": "Reprint labels",
     "historyProblem": "Print history needs attention: {{reason}}. Records remain on this station.",
     "historyReasons": {

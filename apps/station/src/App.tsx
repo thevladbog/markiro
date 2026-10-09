@@ -2385,24 +2385,34 @@ export function App() {
           <Button onClick={() => setShowConflicts(true)}>{t("replacement.conflicts")}</Button>
           <Button onClick={() => setShowSetup(true)}>{t("replacement.setup")}</Button>
         </Card>
-      ) : floorView === "reprint" && config.deviceId && floorGeneration ? (
-        <WarehouseReprint
-          exec={tauriExecutor}
-          client={activeClient}
-          deviceId={config.deviceId}
-          operatorId={operator.operatorId}
-          credentialGeneration={floorGeneration}
-          source={scanSource}
-          hardwareConfig={hardwareConfig}
-          print={(target, bytes) => tauriHardware.print(target, bytes)}
-          onExit={() => setFloorView("select")}
-          onJournalChange={nudgeSync}
-          onSetup={() => {
-            setSetupPrinterTab(true);
-            setShowSetup(true);
-          }}
-          onFloorWorkRegister={registerFloorWorkBarrier}
-        />
+      ) : floorView === "reprint" ? (
+        config.deviceId && floorGeneration ? (
+          <WarehouseReprint
+            exec={tauriExecutor}
+            client={activeClient}
+            deviceId={config.deviceId}
+            operatorId={operator.operatorId}
+            credentialGeneration={floorGeneration}
+            source={scanSource}
+            hardwareConfig={hardwareConfig}
+            print={(target, bytes) => tauriHardware.print(target, bytes)}
+            onExit={() => setFloorView("select")}
+            onJournalChange={nudgeSync}
+            onSetup={() => {
+              setSetupPrinterTab(true);
+              setShowSetup(true);
+            }}
+            onFloorWorkRegister={registerFloorWorkBarrier}
+          />
+        ) : (
+          <Card style={{ padding: 32 }}>
+            <h1>{t("warehouse.title")}</h1>
+            <p role="alert">{t("warehouse.entryUnavailable")}</p>
+            <Button size="floor" onClick={() => setFloorView("select")}>
+              {t("shifts.back")}
+            </Button>
+          </Card>
+        )
       ) : floorView === "select" ? (
         <TaskSelection
           client={activeClient}
@@ -2413,7 +2423,9 @@ export function App() {
           currentLineName={config.lineName ?? null}
           onShiftSelected={handleShiftEntered}
           onInventorySelected={handleInventoryEntered}
-          onWarehouseReprint={() => setFloorView("reprint")}
+          {...(config.deviceId && floorGeneration
+            ? { onWarehouseReprint: () => setFloorView("reprint") }
+            : {})}
           isCurrent={() =>
             floorGeneration ? credentialGenerationIsCurrent(floorGeneration) : false
           }

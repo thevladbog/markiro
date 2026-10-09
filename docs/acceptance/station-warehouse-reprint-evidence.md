@@ -11,7 +11,7 @@
 | Domain, полный набор                                               | 72 файла, 988 тестов прошли                                                       |
 | DB, полный набор на отдельном Postgres                             | 123 файла, 654 теста прошли                                                       |
 | API, полный прогон после исправлений ревью                         | 426 файлов прошли, 1 failed, 14 skipped; 4852 теста прошли, 1 timeout, 90 skipped |
-| Station, полный повторный набор после исправлений ревью            | 146 файлов, 2037 тестов прошли                                                    |
+| Station, полный повторный набор после исправлений ревью            | 146 файлов, 2039 тестов прошли                                                    |
 | Domain / DB / API / Station                                        | typecheck, lint, build прошли                                                     |
 | Chromium, весь station-inventory browser набор после ручного ввода | 20 проверок прошли                                                                |
 | API ZIP, отдельный повтор без изменений                            | 51 тест прошёл; проблемный тест отдельно — 1212 мс                                |
@@ -53,6 +53,14 @@ Domain и DB собраны перед проверками потребител
 | 10        | Общий render plan для preview/bytes, text/bitmap/barcode geometry, full GS1 KM и DPI. Свежий reviewer нашёл default EAN-13 HRI в ZPL; RED→GREEN bars-only regression сохраняет legacy generateZpl bytes.                                                                                                                                                           |
 
 Во время итерации первоначальный API RED запуск без тестовой БД не использован как доказательство: контейнер задачи был восстановлен, миграции применены и behavioral RED повторён. Pooled SQLite выявил повторное CREATE trigger после DROP; добавлены IF NOT EXISTS и узкая канонизация только нового warehouse trigger для migration parity. Полный Station run выявил, что общая нормализация заново включала superseded inventory v1 triggers при втором applyMigrations; воспроизведено отдельным RED-тестом повторных миграций и исправлено без изменения исторического DDL. Прерванные прогоны во время незавершённых изменений заменены полными итоговыми проверками ниже. Неизменённые публичные KM/inventory parsers не требуют Kotlin fixture regeneration; Handheld JSON decoder допускает добавочное optional поле bundle.
+
+## Inline review после 0f0df1eae
+
+Предложение добавить tx-reader методы в lookup/templates пропущено: receive уже использует только tx, включая проверки устройства и исторического оператора, и не вызывает эти публичные сервисы. Существующий max=1 regression проверяет эту границу.
+
+Подтверждены и исправлены три пункта: source/template rejection сохраняет полный полученный prepared DTO как tenant audit `warehouse_label.prepared_claim` / `quarantined` перед receipt в одной транзакции; replay не дублирует claim и не создаёт accepted production/job/event. Исходные rendered bytes и raw KM отсутствуют в протоколе и не реконструируются для аудита. App скрывает вход без device/generation и явно обрабатывает недоступный reprint, исключая переход в NewShift. Дублирующий justify-content удалён, safe center сохранён. Behavioral RED воспроизведён для потерянного claim и видимого недоступного entry; итоговые проверки отражены ниже.
+
+Проверка inline patch: API history E2E — 10/10, включая max=1 и однократный полный quarantine claim; два App routing сценария — 2/2; API/Station typecheck, lint, build и весь Chromium набор — 20/20. Полный API не повторялся после этой узкой правки обработчика: выше сохранён фактический предыдущий результат, включая ZIP timeout. Native transport/Rust и печатные байты этой правкой не менялись; новое аппаратное/Windows подтверждение не получено. Первый полный Station запуск: 2038 passed / 1 failed beforeEach hook timeout 10s в неизменённом product-labels-printing fixture; assertions этого теста не выполнялись. Отдельный запуск прошёл за 2,02 с; итоговый полный повтор при двух workers и прежних assertions/timeouts прошёл: 146 файлов, 2039 тестов (382,62 с). Финальные Station typecheck/lint/build также прошли. Результат первого запуска и граница восстановления нагрузки сохранены в отчёте; это не объявляется доказательством точной причины timeout.
 
 ## Принятые решения
 
