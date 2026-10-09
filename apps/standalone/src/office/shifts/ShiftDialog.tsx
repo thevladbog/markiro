@@ -99,10 +99,14 @@ function ShiftForm({
   onSaved,
   onReload,
   onOutdated,
-  today,
-  dateNote,
+  today: todayAtOpen,
+  dateNote: dateNoteAtOpen,
 }: ShiftFormProps) {
   const { t } = useTranslation();
+  // The date the form started on and the note about where it came from are fixed when the
+  // dialog opens: the profile read again later (failing, or arriving after a failure)
+  // must not put a note under, or take one from, a date that did not change.
+  const [{ today, dateNote }] = useState(() => ({ today: todayAtOpen, dateNote: dateNoteAtOpen }));
   const ids = useId();
   const queryClient = useQueryClient();
   const fieldId = (name: (typeof SHIFT_FIELD_ORDER)[number]) => `${ids}-${name}`;
@@ -152,10 +156,19 @@ function ShiftForm({
     document.getElementById(fieldId(target))?.focus();
   });
   const productId = watch("productId");
+  const lineId = watch("lineId");
+  const counterpartyId = watch("counterpartyId");
   const product = products.data?.find((each) => each.id === productId);
   // A changed shift of an archived or draft product will not open, whatever is changed.
   const productBlocker = shift === null ? null : openBlocker(shift, products.data, undefined);
 
+  // How a product the form holds is named when it is no longer one in use: a draft or an archived one.
+  const productMarkedLabel = (id: string): string => {
+    const record = products.data?.find((each) => each.id === id);
+    return record !== undefined && !record.archived && record.status !== "active"
+      ? t("office.shifts.draftName", { name: record.name })
+      : recordLabel("product", products.data, id, t);
+  };
   // A product in use: active and not archived, by name, its GTIN beside it.
   const productOptions = activeFirstByName(products.data ?? [])
     .filter((each) => !each.archived && each.status === "active")
@@ -172,23 +185,28 @@ function ShiftForm({
       .filter((each) => !each.archived)
       .map((each) => ({ value: each.id, label: each.name })),
   ];
-  // A changed shift keeps its own line and counterparty as choices, marked when
-  // archived or missing from the list: the host keeps one that does not change.
-  if (shift !== null) {
-    if (!lineOptions.some((option) => option.value === shift.lineId)) {
-      lineOptions.push({
-        value: shift.lineId,
-        label: recordLabel("line", lines.data, shift.lineId, t),
-      });
+  // The form's own choices stay offered, marked when the record is archived (or a draft) or
+  // missing from the list: a changed shift's own line and counterparty (the host keeps one that
+  // does not change), and a record the host refused after the person chose it. A select whose
+  // value matches no option shows another record, which the person could not pick again.
+  const keep = (
+    options: { value: string; label: string }[],
+    ids: string[],
+    label: (id: string) => string,
+  ) => {
+    for (const id of ids) {
+      if (id !== "" && !options.some((option) => option.value === id)) {
+        options.push({ value: id, label: label(id) });
+      }
     }
-    const own = shift.counterpartyId;
-    if (own !== null && !counterpartyOptions.some((option) => option.value === own)) {
-      counterpartyOptions.push({
-        value: own,
-        label: recordLabel("counterparty", counterparties.data, own, t),
-      });
-    }
+  };
+  if (shift === null) {
+    keep(productOptions, [productId], productMarkedLabel);
   }
+  keep(lineOptions, [shift?.lineId ?? "", lineId], (id) => recordLabel("line", lines.data, id, t));
+  keep(counterpartyOptions, [shift?.counterpartyId ?? "", counterpartyId], (id) =>
+    recordLabel("counterparty", counterparties.data, id, t),
+  );
 
   // Without the product's record (its list did not load) a changed shift can name only its
   // own template, and cannot say whether it fits.
@@ -422,7 +440,9 @@ function ShiftForm({
               ? { hint: t("office.shifts.fields.templatesUnavailable") }
               : shift !== null && product === undefined && products.isError
                 ? { hint: t("office.shifts.fields.productsUnavailable") }
-                : {})}
+                : shift === null && defaults.isError
+                  ? { hint: t("office.shifts.fields.defaultsUnavailable") }
+                  : {})}
             {...fieldError(errors.boxTemplateId?.message)}
           />
         )}

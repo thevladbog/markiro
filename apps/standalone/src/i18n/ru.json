@@ -523,6 +523,7 @@
       "closeSubmit": "Закрыть смену",
       "closed": "Смена {{number}} закрыта.",
       "productOption": "{{name}} — {{gtin}}",
+      "draftName": "{{name}} (черновик)",
       "fields": {
         "product": "Товар",
         "productPlaceholder": "Выберите товар",
@@ -543,6 +544,7 @@
         "templatePlaceholder": "Выберите шаблон",
         "templateAfterProduct": "Сначала выберите товар",
         "templatesUnavailable": "Список шаблонов не загрузился. Закройте окно и откройте его снова.",
+        "defaultsUnavailable": "Умолчания шаблонов не загрузились: шаблон берётся только из товара — проверьте выбор.",
         "counterparty": "Контрагент",
         "noCounterparty": "Не выбран",
         "counterpartyHint": "Необязательно: его название будет на этикетке короба",
