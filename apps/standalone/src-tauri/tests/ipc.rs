@@ -417,10 +417,15 @@ fn forgetting_the_device_clears_the_local_copies_first() {
 
 /// A pairing on disk that the app can read, for tests that need no host.
 fn save_pairing(dir: &std::path::Path) {
+    save_pairing_at(dir, "https://127.0.0.1:45710");
+}
+
+/// A pairing on disk with the host at `address`; no host issued its key.
+fn save_pairing_at(dir: &std::path::Path, address: &str) {
     device_config::save(
         dir,
         &DeviceConfig {
-            host_address: "https://127.0.0.1:45710".into(),
+            host_address: address.into(),
             fingerprint: "ab".repeat(32),
             host_id: "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f".into(),
             device_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7".into(),
@@ -433,6 +438,46 @@ fn save_pairing(dir: &std::path::Path) {
         },
     )
     .unwrap();
+}
+
+/// A local address that accepts connections and never answers, not even the
+/// TLS handshake; the thread holds them until the test binary exits.
+fn silent_address() -> String {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let _held: Vec<_> = listener.incoming().collect();
+    });
+    format!("https://127.0.0.1:{port}")
+}
+
+/// `timeoutMs` reaches the shell as milliseconds (`src/host/client.ts`): a
+/// host that never answers ends the call with `timeout` once the limit
+/// passes, and a limit outside 100–10 000 is `invalid_request` before any
+/// connection. Without the limit the same call would wait the client's 10 s.
+#[test]
+fn host_request_takes_a_limit_in_milliseconds() {
+    let app_dir = tempfile::tempdir().unwrap();
+    save_pairing_at(app_dir.path(), &silent_address());
+    let (_app, webview) = mock_app(DeviceState::load(app_dir.path().to_path_buf()));
+    let within = |ms: Value| {
+        json!({
+            "method": "GET",
+            "path": "/v1/device/shifts",
+            "body": null,
+            "officeToken": null,
+            "timeoutMs": ms
+        })
+    };
+
+    assert_eq!(
+        invoke(&webview, "host_request", within(json!(300))),
+        Err(json!("timeout"))
+    );
+    assert_eq!(
+        invoke(&webview, "host_request", within(json!(50))),
+        Err(json!("invalid_request"))
+    );
 }
 
 /// The database file and the files SQLite keeps beside it.

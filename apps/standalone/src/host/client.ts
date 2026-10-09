@@ -18,6 +18,7 @@ export const TRANSPORT_CODES = [
   "invalid_request",
   "not_paired",
   "config_unreadable",
+  "timeout",
 ] as const;
 export type TransportCode = (typeof TRANSPORT_CODES)[number];
 
@@ -65,6 +66,12 @@ export class HostError extends Error {
 export interface HostRequestOptions<T> {
   body?: unknown;
   officeToken?: string;
+  /**
+   * Limits this request to 100–10 000 ms instead of the shell's 10 s; past
+   * it the call fails with the transport code `timeout` (the scan pipeline's
+   * 300 ms code check).
+   */
+  timeoutMs?: number;
   /** Parses a 2xx body; a 204 answer parses as `null`. */
   schema: z.ZodType<T>;
 }
@@ -78,7 +85,7 @@ type Invoke = (command: string, args: Record<string, unknown>) => Promise<unknow
 /** Calls the host through the shell's `host_request`: the webview never performs HTTP. */
 export function createTauriHostClient(call: Invoke = invoke): HostClient {
   return {
-    async request(method, path, { body, officeToken, schema }) {
+    async request(method, path, { body, officeToken, timeoutMs, schema }) {
       let raw: unknown;
       try {
         raw = await call("host_request", {
@@ -86,6 +93,7 @@ export function createTauriHostClient(call: Invoke = invoke): HostClient {
           path,
           body: body ?? null,
           officeToken: officeToken ?? null,
+          ...(timeoutMs === undefined ? {} : { timeoutMs }),
         });
       } catch (error) {
         const code = TRANSPORT_CODES.find((candidate) => candidate === error) ?? "unreachable";

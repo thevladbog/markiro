@@ -5,6 +5,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use markiro_proto::{
     codes, pairing, ClaimRequest, DeviceInfo, DeviceKind, DeviceLineRequest, ErrorBody,
@@ -26,6 +27,24 @@ const LINE_ROUTE: &str = "/v1/device/line";
 /// This device's own record (`GET /v1/device`), which [`DeviceState::refresh`]
 /// reads for the line the office assigned.
 const DEVICE_ROUTE: &str = "/v1/device";
+
+/// The bounds of `host_request`'s `timeoutMs` (stage 2a spec §5.2). A caller
+/// may ask for a shorter answer than the client's 10 s (the scan pipeline's
+/// 300 ms code check), never for a longer one.
+pub const MIN_TIMEOUT_MS: u64 = 100;
+pub const MAX_TIMEOUT_MS: u64 = 10_000;
+
+/// The limit a `timeoutMs` asks for: none without one, the duration inside
+/// the bounds, [`RequestError::InvalidRequest`] outside them.
+pub fn request_limit(timeout_ms: Option<u64>) -> Result<Option<Duration>, DeviceError> {
+    match timeout_ms {
+        None => Ok(None),
+        Some(ms) if (MIN_TIMEOUT_MS..=MAX_TIMEOUT_MS).contains(&ms) => {
+            Ok(Some(Duration::from_millis(ms)))
+        }
+        Some(_) => Err(DeviceError::Request(RequestError::InvalidRequest)),
+    }
+}
 
 /// What the webview may know about the pairing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -463,13 +482,30 @@ impl DeviceState {
         body: Option<&Value>,
         office_token: Option<&str>,
     ) -> Result<HostResponse, DeviceError> {
+        self.request_within(method, path, body, office_token, None)
+            .await
+    }
+
+    /// [`Self::request`] with `host_request`'s `timeoutMs`: a limit outside
+    /// [`MIN_TIMEOUT_MS`]..=[`MAX_TIMEOUT_MS`] is refused before any I/O,
+    /// like a route the webview may not reach, and a request that runs past
+    /// the limit fails with [`RequestError::Timeout`].
+    pub async fn request_within(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+        office_token: Option<&str>,
+        timeout_ms: Option<u64>,
+    ) -> Result<HostResponse, DeviceError> {
         if !webview_may_reach(path) {
             return Err(DeviceError::Request(RequestError::InvalidRequest));
         }
+        let limit = request_limit(timeout_ms)?;
         let device = self.paired()?;
         device
             .client
-            .send(
+            .send_within(
                 method,
                 path,
                 body,
@@ -477,6 +513,7 @@ impl DeviceState {
                     device_key: Some(&device.key),
                     office_token,
                 },
+                limit,
             )
             .await
             .map_err(DeviceError::Request)
@@ -592,6 +629,31 @@ mod tests {
         ] {
             assert!(!webview_may_reach(route), "{route}");
         }
+    }
+
+    #[test]
+    fn a_timeout_must_lie_between_100_ms_and_10_s() {
+        // The spec's numbers, not the constants: moving a bound must fail here.
+        assert_eq!((MIN_TIMEOUT_MS, MAX_TIMEOUT_MS), (100, 10_000));
+        assert_eq!(request_limit(None), Ok(None));
+        for ms in [100, 101, 300, 9_999, 10_000] {
+            assert_eq!(
+                request_limit(Some(ms)),
+                Ok(Some(Duration::from_millis(ms))),
+                "{ms}"
+            );
+        }
+        for ms in [0, 1, 99, 10_001, u64::MAX] {
+            assert_eq!(
+                request_limit(Some(ms)),
+                Err(DeviceError::Request(RequestError::InvalidRequest)),
+                "{ms}"
+            );
+        }
+        assert_eq!(
+            DeviceError::Request(RequestError::Timeout).code(),
+            "timeout"
+        );
     }
 
     #[test]

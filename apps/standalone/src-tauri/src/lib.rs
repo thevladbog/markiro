@@ -84,6 +84,8 @@ async fn host_claim(
         .map_err(|error| error.code().to_owned())
 }
 
+/// `timeoutMs` (100–10 000) limits this one request instead of the client's
+/// 10 s; running past it answers `timeout` (stage 2a spec §5.2).
 #[tauri::command]
 async fn host_request(
     state: tauri::State<'_, DeviceState>,
@@ -91,9 +93,16 @@ async fn host_request(
     path: String,
     body: Option<Value>,
     office_token: Option<String>,
+    timeout_ms: Option<u64>,
 ) -> Result<HostResponse, String> {
     state
-        .request(&method, &path, body.as_ref(), office_token.as_deref())
+        .request_within(
+            &method,
+            &path,
+            body.as_ref(),
+            office_token.as_deref(),
+            timeout_ms,
+        )
         .await
         .map_err(|error| error.code().to_owned())
 }
