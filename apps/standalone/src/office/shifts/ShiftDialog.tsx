@@ -30,7 +30,7 @@ import {
   toShiftInput,
   type ShiftFields,
 } from "./shift-form.js";
-import { recordLabel } from "./shift-list.js";
+import { openBlocker, recordLabel } from "./shift-list.js";
 import { datePickerTexts } from "./shift-text.js";
 
 export interface ShiftDialogProps {
@@ -148,6 +148,8 @@ function ShiftForm({
   });
   const productId = watch("productId");
   const product = products.data?.find((each) => each.id === productId);
+  // A changed shift of an archived or draft product will not open, whatever is changed.
+  const productBlocker = shift === null ? null : openBlocker(shift, products.data, undefined);
 
   // A product in use: active and not archived, by name, its GTIN beside it.
   const productOptions = activeFirstByName(products.data ?? [])
@@ -224,7 +226,12 @@ function ShiftForm({
           shift === null
             ? { failure: writeFailure(error, SHIFT_FIELDS, SHIFT_CONFLICTS), outdated: false }
             : shiftWriteFailure(error, SHIFT_FIELDS, SHIFT_CONFLICTS);
-        if (outcome.kind === "field") {
+        if (outcome.kind === "field" && shift !== null && outcome.field === "productId") {
+          // A changed shift has no product control to put the refusal under: the host
+          // refused it because the shift's product is no longer in use.
+          setFailure({ kind: "alert", message: outcome.message });
+          void products.refetch();
+        } else if (outcome.kind === "field") {
           setError(outcome.field, { type: "server", message: outcome.message });
           focusAfterRender.current = outcome.field;
           // A record the host refused (archived, switched off or narrowed meanwhile) is
@@ -268,11 +275,14 @@ function ShiftForm({
     >
       {shift !== null ? (
         // The product never changes: a changed shift names it.
-        <p>
-          {t("office.shifts.fields.productFixed", {
-            name: recordLabel("product", products.data, shift.productId, t),
-          })}
-        </p>
+        <>
+          <p>
+            {t("office.shifts.fields.productFixed", {
+              name: recordLabel("product", products.data, shift.productId, t),
+            })}
+          </p>
+          {productBlocker !== null && <p>{t(`office.shifts.blockers.${productBlocker}`)}</p>}
+        </>
       ) : (
         <Controller
           control={control}

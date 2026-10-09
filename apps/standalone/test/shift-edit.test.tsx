@@ -10,6 +10,7 @@ import {
   BOX_58,
   CLOSED,
   freezeToday,
+  KEFIR_DRAFT,
   LINE_2,
   NORTH,
   OLD_BOX,
@@ -407,6 +408,48 @@ describe("office shifts: changing a shift, the edges", () => {
       plannedQty: 700,
       expectedRev: 72,
     });
+  });
+
+  it("says a product that is no longer in use refused the change, and reads the products again", async () => {
+    const shift: OfficeShift = { ...PLANNED, productId: AYRAN_ARCHIVED.id };
+    const session = shiftsSession([shift]);
+    session.api.listTemplates.mockResolvedValue([BOX_58, BOX_70]);
+    session.api.updateShift.mockRejectedValue(api("conflict", { constraint: "product_inactive" }));
+    const name = await openEdit(session, shift);
+    const productsRead = session.api.listProducts.mock.calls.length;
+    fireEvent.change(field(name, "Шаблон этикетки короба"), { target: { value: BOX_70.id } });
+    fireEvent.click(save(name));
+    expect(
+      await within(dialog(name)).findByText(
+        "Товар больше не в работе: он в архиве или стал черновиком",
+      ),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(session.api.listProducts.mock.calls.length).toBeGreaterThan(productsRead),
+    );
+    // The change was sent once with the template alone; nothing else moved.
+    expect(session.api.updateShift).toHaveBeenCalledTimes(1);
+    expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, shift.id, {
+      boxTemplateId: BOX_70.id,
+      expectedRev: 72,
+    });
+  });
+
+  it("says under the product that a shift of an archived or draft product will not open", async () => {
+    for (const [product, text] of [
+      [AYRAN_ARCHIVED, "Не откроется: товар в архиве"],
+      [KEFIR_DRAFT, "Не откроется: товар — черновик"],
+    ] as const) {
+      const shift: OfficeShift = { ...PLANNED, productId: product.id };
+      const view = await openShifts(shiftsSession([shift]));
+      fireEvent.click(screen.getByRole("button", { name: `Изменить смену ${shift.number}` }));
+      const name = `Смена ${shift.number}`;
+      await screen.findByRole("dialog", { name });
+      expect(await within(dialog(name)).findByText(text)).toBeTruthy();
+      view.unmount();
+    }
+    const name = await openEdit(shiftsSession(), PLANNED);
+    expect(within(dialog(name)).queryByText(/Не откроется/)).toBeNull();
   });
 
   it("names a line, counterparty and template the lists lack by their ids, as choices", async () => {
