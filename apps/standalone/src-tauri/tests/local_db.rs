@@ -698,7 +698,15 @@ async fn an_outbox_that_cannot_be_counted_stops_a_forget() {
 /// the forget waits for the write lock is counted, not wiped. The test holds
 /// the write lock on a second connection, lets the forget start waiting for
 /// it, commits an unsent record, and the forget must then see the record.
-#[tokio::test]
+///
+/// SQLite reports no "waiting on the lock" event, so the test waits a fixed
+/// second (the busy timeout is 5 s) for the forget to reach the lock: it is a
+/// detector of a count made outside the transaction only under that margin.
+/// If the spawned forget needed longer than a second to start, a wrong
+/// implementation would pass vacuously; correct code can never fail here.
+/// The multi-thread runtime keeps the forget's task from being starved by
+/// this one while it sleeps.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_record_arriving_while_a_forget_waits_is_counted_not_wiped() {
     let (dir, db) = open().await;
     db.transaction(vec![statement(
@@ -725,7 +733,7 @@ async fn a_record_arriving_while_a_forget_waits_is_counted_not_wiped() {
     });
     // The forget is blocked on the write lock for as long as this holds it
     // (the busy timeout is 5 s).
-    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
     assert!(!forget.is_finished(), "the forget waits for the write lock");
     sqlx::query(&format!(
         "INSERT INTO outbox VALUES ('late', '{HOST}', '{DEVICE}', NULL)"
@@ -1160,6 +1168,72 @@ async fn a_database_that_did_not_open_is_counted_without_being_changed() {
         assert_eq!(
             local.unopened_unsent_records(guard).await,
             Err(LocalDbError::StatementFailed)
+        );
+    }
+}
+
+/// Two forgets at once move the files once. The lock in
+/// `set_aside_unopened_at` is what makes the second one see the new database;
+/// without it the second races the first between its checks and its renames
+/// (`NotFound`), or moves the new database aside while the state keeps
+/// writing to the old inode. Many rounds, on threads of their own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_set_asides_at_once_move_the_files_once() {
+    for round in 0..20 {
+        let dir = tempfile::tempdir().unwrap();
+        let local = std::sync::Arc::new(unopened(dir.path(), &["-wal"]).await);
+        let first = tokio::spawn({
+            let local = std::sync::Arc::clone(&local);
+            async move { local.set_aside_unopened_at(1_790_000_000_001).await }
+        });
+        let second = tokio::spawn({
+            let local = std::sync::Arc::clone(&local);
+            async move { local.set_aside_unopened_at(1_790_000_000_002).await }
+        });
+        let results = [first.await.unwrap(), second.await.unwrap()];
+
+        let moved: Vec<_> = results
+            .iter()
+            .map(|result| {
+                result
+                    .as_ref()
+                    .unwrap_or_else(|error| panic!("round {round}: {error}"))
+            })
+            .filter(|moved| moved.is_some())
+            .collect();
+        assert_eq!(moved.len(), 1, "round {round}: {results:?}");
+        let kept: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .filter(|name| name.contains(".unreadable-"))
+            .collect();
+        assert_eq!(
+            kept.len(),
+            2,
+            "round {round}: one database and its -wal: {kept:?}"
+        );
+
+        // The state writes into the file that stands at the database's name.
+        let db = local.get().unwrap();
+        db.transaction(vec![statement(
+            INSERT_LINE,
+            json!([LINE_1, "Линия 1", 0, 3]),
+        )])
+        .await
+        .unwrap();
+        let mut raw = SqliteConnectOptions::new()
+            .filename(dir.path().join(FILE_NAME))
+            .connect()
+            .await
+            .unwrap();
+        let (lines,): (i64,) = sqlx::query_as("SELECT count(*) FROM ref_lines")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap();
+        raw.close().await.unwrap();
+        assert_eq!(
+            lines, 1,
+            "round {round}: the new database is the one in use"
         );
     }
 }
