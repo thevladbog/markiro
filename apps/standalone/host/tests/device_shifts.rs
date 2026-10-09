@@ -1224,8 +1224,9 @@ async fn an_entry_waiting_for_the_write_lock_sees_the_entry_that_held_it() {
 
     // This station's entry arrives meanwhile and has to wait for the lock.
     // The handler is called directly: the device authentication in front of
-    // it writes `last_seen_at`, so through the router the request would
-    // already wait there, before the handler opened its transaction.
+    // it may write `last_seen_at` (once a minute), so through the router the
+    // request could already wait there, before the handler opened its
+    // transaction.
     let mut entry = Box::pin(enter_shift(
         State(admin.app.state.clone()),
         AuthDevice {
@@ -1265,8 +1266,9 @@ async fn an_entry_waiting_for_the_write_lock_sees_the_entry_that_held_it() {
 /// A station's shift write that has passed the device authentication and now
 /// waits for the write lock, with the office revoking the station in the
 /// meantime: the handler is called directly (the authentication in front of it
-/// writes `last_seen_at`, so through the router the request would already wait
-/// there), and the revocation is committed by the writer it waits for.
+/// may write `last_seen_at`, once a minute, so through the router the request
+/// could already wait there), and the revocation is committed by the writer it
+/// waits for.
 async fn revoked_while_waiting<F>(admin: &Admin, station: &str, handler: F) -> (StatusCode, Value)
 where
     F: std::future::Future<Output = Result<axum::Json<DeviceShift>, ApiError>>,

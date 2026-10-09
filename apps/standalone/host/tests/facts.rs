@@ -1114,8 +1114,8 @@ async fn a_database_error_fails_the_whole_batch() {
 }
 
 /// The handler called directly as device `id` with `records`, bypassing the
-/// device authentication in front of it (which writes `last_seen_at`, and
-/// has read the key before the handler's transaction starts).
+/// device authentication in front of it (which has read the key before the
+/// handler's transaction starts, and may write `last_seen_at` once a minute).
 async fn receive_as(admin: &Admin, id: &str, records: &[Value]) -> (StatusCode, Value) {
     let batch: IncomingFacts = serde_json::from_value(json!({ "records": records })).unwrap();
     let outcome = receive_facts(
