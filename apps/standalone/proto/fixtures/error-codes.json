@@ -15,6 +15,7 @@
     "rate_limited",
     "internal",
     "pairing_code_invalid",
-    "pairing_code_expired"
+    "pairing_code_expired",
+    "sscc_exhausted"
   ]
 }

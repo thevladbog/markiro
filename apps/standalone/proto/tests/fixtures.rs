@@ -12,8 +12,8 @@ use markiro_proto::{
     OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PasswordChange,
     PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate,
     ShiftClose, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord,
-    SsccCounterUpdate, SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose,
-    HOST_PRODUCT, PROTOCOL_VERSION,
+    SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
+    TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -824,4 +824,30 @@ fn a_shift_close_carries_the_reason_and_the_revision() {
     let mut value = fixture("shift-close.json");
     value["reasonCode"] = Value::String("equipment_failure".into());
     assert!(serde_json::from_value::<ShiftClose>(value).is_err());
+}
+
+#[test]
+fn sscc_block_fixtures_round_trip_and_a_station_never_names_the_size() {
+    let request: SsccBlockRequest = round_trip("sscc-block-request.json");
+    let block: SsccBlock = round_trip("sscc-block.json");
+    let state: SsccState = serde_json::from_value(fixture("sscc-state.json")).unwrap();
+    // The first block starts where the box counter stood.
+    let counter = &state.counters[0];
+    assert_eq!(
+        (&request.issuer_prefix, request.extension, block.from_serial),
+        (
+            &counter.issuer_prefix,
+            counter.extension,
+            counter.next_serial
+        )
+    );
+    assert_eq!(
+        block.to_serial - block.from_serial + 1,
+        u64::from(state.box_block_size)
+    );
+    let mut value = fixture("sscc-block-request.json");
+    value["size"] = Value::from(10);
+    assert!(serde_json::from_value::<SsccBlockRequest>(value).is_err());
+    let exhausted: ErrorBody = round_trip("error-sscc-exhausted.json");
+    assert_eq!(exhausted.error.code, codes::SSCC_EXHAUSTED);
 }

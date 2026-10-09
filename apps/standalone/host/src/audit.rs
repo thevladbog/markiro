@@ -47,6 +47,8 @@ pub mod actions {
     /// The office closed an active shift (a station's close is a fact, plan
     /// 2a2).
     pub const SHIFT_CLOSE: &str = "shift.close";
+    /// A station got a block of SSCC serials.
+    pub const SSCC_BLOCK_ISSUE: &str = "sscc.block.issue";
 }
 
 /// `details.reason` of a denied row: every denial names one.

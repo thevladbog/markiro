@@ -1778,6 +1778,23 @@ the lookup (404), then a stale `expectedRev` (`stale_revision`), then
 domain's six reason codes in `close_reason_code`, and the facts of a shift the
 office closed are taken and marked late.
 
+SSCC blocks: a station asks for a block of serials
+(`POST /v1/device/sscc/blocks`, `{ requestId, issuerPrefix, extension }`,
+stations only) when it has none for its shift's prefix or its newest is half
+used (plan 2a6). Stage 2a issues box blocks only (`validation_failed` on
+`extension` otherwise), of a prefix that has a counter (`validation_failed` on
+`issuerPrefix` otherwise). A block is the counter's next `site.box_block_size`
+serials (2000 by default, «SSCC → Размеры блоков»), fewer at the end of the
+prefix's serials, and then `sscc_exhausted` (409, with the prefix and the
+extension). The counter moves past the block with a new revision in the same
+transaction, so every issued serial lies below its counter, `sscc_below_floor`
+keeps it from being issued again, and a counter form opened before the issue
+meets `stale_revision`. The same `requestId` of the same station answers the
+same block, even after others were issued. The device is read again inside the
+write transaction (a station revoked while the request waited gets 401). A
+block's use (`consumed_through`) comes with the facts of plan 2a2; revoking
+blocks and showing them per device with plan 2b.
+
 ## Marking rules
 
 GS1, KM, SSCC and label rules stay in `@markiro/domain`; the host stores and

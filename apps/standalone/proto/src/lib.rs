@@ -44,6 +44,9 @@ pub mod codes {
     pub const INTERNAL: &str = "internal";
     pub const PAIRING_CODE_INVALID: &str = "pairing_code_invalid";
     pub const PAIRING_CODE_EXPIRED: &str = "pairing_code_expired";
+    /// The SSCC counter of a prefix reached the end of its serials: no block
+    /// of it can be issued any more.
+    pub const SSCC_EXHAUSTED: &str = "sscc_exhausted";
 
     /// Every code above, for the parity fixture the webview also reads.
     pub const ALL: &[&str] = &[
@@ -63,6 +66,7 @@ pub mod codes {
         INTERNAL,
         PAIRING_CODE_INVALID,
         PAIRING_CODE_EXPIRED,
+        SSCC_EXHAUSTED,
     ];
 }
 
@@ -826,6 +830,31 @@ pub struct BlockSizesUpdate {
     pub box_block_size: u32,
     pub pallet_block_size: u32,
     pub expected_rev: i64,
+}
+
+/// `POST /v1/device/sscc/blocks`: a station asks for a block of serials of
+/// an issuer prefix (its shift's snapshot names it) and an extension (0, a
+/// box, in stage 2a). `requestId` (a lower-case hyphenated UUID the station
+/// made up) makes it repeatable: the same request of the same station
+/// answers the same block.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct SsccBlockRequest {
+    pub request_id: String,
+    pub issuer_prefix: String,
+    pub extension: u8,
+}
+
+/// A block of SSCC serials issued to one station, both ends included; the
+/// station builds the SSCC with the domain's `buildSscc`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SsccBlock {
+    pub id: String,
+    pub issuer_prefix: String,
+    pub extension: u8,
+    pub from_serial: u64,
+    pub to_serial: u64,
 }
 
 /// An office user as the administrator sees it.

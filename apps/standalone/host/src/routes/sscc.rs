@@ -1,7 +1,10 @@
 //! SSCC counters and block sizes: `GET /v1/office/sscc` (every role);
 //! `PUT …/counters/{prefix}/{extension}` and `PUT …/block-sizes`
-//! (administrators). Counters only move forward (spec §4.3); the checks for
-//! active shifts and issued blocks join with the blocks in plan 2a.
+//! (administrators). Counters only move forward (spec §4.3). Issuing a block
+//! to a station (`routes/sscc_blocks.rs`) moves its counter past the block
+//! in the same transaction, with a new revision, so every issued serial lies
+//! below its counter and `sscc_below_floor` keeps it from being issued
+//! again, and a counter form opened before an issue meets `stale_revision`.
 
 use axum::extract::State;
 use axum::http::StatusCode;

@@ -141,6 +141,10 @@ fn protected_routes() -> Router<AppState> {
             "/v1/device/shifts/{id}/enter",
             post(crate::routes::device_shifts::enter_shift),
         )
+        .route(
+            "/v1/device/sscc/blocks",
+            post(crate::routes::sscc_blocks::issue_block),
+        )
         .route("/v1/changes", get(crate::routes::changes::changes))
         .route("/v1/changes/stream", get(crate::routes::changes::stream))
         .route(
