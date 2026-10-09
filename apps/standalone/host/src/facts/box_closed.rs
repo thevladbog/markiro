@@ -90,11 +90,16 @@ pub async fn apply(
     if issued.is_none() {
         return Err(Reject::new(receipt_codes::SSCC_NOT_ISSUED).into());
     }
-    let taken: Option<i64> = sqlx::query_scalar("SELECT 1 FROM boxes WHERE sscc = ?")
-        .bind(&closed.sscc)
-        .fetch_optional(&mut *conn)
-        .await
-        .map_err(ApiError::internal)?;
+    // One serial of a block is one label: another box with this SSCC, or on
+    // this serial of this block under any check digit, holds it.
+    let taken: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM boxes WHERE sscc = ? OR (block_id = ? AND serial = ?)")
+            .bind(&closed.sscc)
+            .bind(&closed.block_id)
+            .bind(serial)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
     if taken.is_some() {
         return Err(Reject::new(receipt_codes::SSCC_TAKEN).into());
     }

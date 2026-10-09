@@ -1904,8 +1904,10 @@ shift (`box_unknown` otherwise) with an SSCC of 18 digits whose first 17 are
 the box extension `0`, the snapshot's issuer prefix and `serial` (the check
 digit is the domain's, never checked here), where `serial` lies in the block
 `blockId` that the host issued to this device for that prefix and did not
-revoke (`sscc_not_issued`), and no other box carries the SSCC
-(`sscc_taken`, backed by the unique index). A box already closed with the
+revoke (`sscc_not_issued`), and no other box carries the SSCC or is closed
+on this serial of this block under any check digit (`sscc_taken`: one serial
+is one label; backed by the unique indexes on the SSCC and on `(block_id,
+serial)`). A box already closed with the
 same SSCC is the same close sent again (accepted, nothing written); with
 another, `box_already_closed`. The close keeps the station's `openedAt`,
 `closedAt`, count, digest and operator, raises the block's

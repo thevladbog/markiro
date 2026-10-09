@@ -86,6 +86,9 @@ CREATE TABLE boxes (
   CHECK (disassembled_at IS NULL OR closed_at IS NOT NULL)
 );
 CREATE UNIQUE INDEX boxes_sscc ON boxes (sscc) WHERE sscc IS NOT NULL;
+-- One serial of a block is one label, whatever the SSCC's check digit says.
+CREATE UNIQUE INDEX boxes_block_serial ON boxes (block_id, serial)
+  WHERE block_id IS NOT NULL AND serial IS NOT NULL;
 CREATE INDEX boxes_shift ON boxes (shift_id);
 
 -- A box's items: one row per accepted scan that owned its code. An item

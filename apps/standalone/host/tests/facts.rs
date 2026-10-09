@@ -3040,6 +3040,123 @@ async fn the_host_never_counts_the_check_digit_of_an_sscc() {
     assert_eq!(box_row(&admin, &box_id(1)).await[2], json!(wrong));
 }
 
+/// `sscc(serial)` with its last digit moved on: the same 17 digits.
+fn sscc_off_by_a_digit(serial: u64) -> String {
+    let right = sscc(serial);
+    let last = right.as_bytes()[17] - b'0';
+    format!("{}{}", &right[..17], (last + 1) % 10)
+}
+
+#[tokio::test]
+async fn one_serial_of_a_block_closes_one_box_whatever_the_check_digits_say() {
+    // The host does not count the check digit (decision 13), but one serial
+    // is one physical label: two SSCCs of the same 17 digits are the same
+    // serial, and the second box is refused `sscc_taken` as for one SSCC.
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    scan_into(&admin, &floor, &[(1, 1), (2, 2), (3, 3), (4, 4)]).await;
+    let on = |box_n: u32, serial: u64, sscc: String| {
+        let mut data = box_closed(
+            &box_id(box_n),
+            &block,
+            serial,
+            &[box_n],
+            &instant(box_n, 0),
+            &instant(40, 0),
+        );
+        data["sscc"] = json!(sscc);
+        data
+    };
+    // The right digit first, the wrong one second, and the other way round
+    // on the next serial.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                close_in(&floor, 10, on(1, 1500, sscc(1500))),
+                close_in(&floor, 11, on(2, 1500, sscc_off_by_a_digit(1500))),
+                close_in(&floor, 12, on(4, 1501, sscc_off_by_a_digit(1501))),
+                close_in(&floor, 13, on(3, 1501, sscc(1501))),
+            ]
+        )
+        .await,
+        vec![
+            accepted(&record_id(10)),
+            rejected(Some(&record_id(11)), "sscc_taken", None),
+            accepted(&record_id(12)),
+            rejected(Some(&record_id(13)), "sscc_taken", None),
+        ]
+    );
+    for (box_n, closes) in [(1, true), (2, false), (4, true), (3, false)] {
+        let row = box_row(&admin, &box_id(box_n)).await;
+        assert_eq!(row[1] != Value::Null, closes, "box {box_n}");
+        if !closes {
+            assert_eq!(
+                (&row[2], &row[3], &row[4]),
+                (&Value::Null, &Value::Null, &Value::Null)
+            );
+        }
+    }
+    assert_eq!(box_row(&admin, &box_id(1)).await[2], json!(sscc(1500)));
+    assert_eq!(
+        box_row(&admin, &box_id(4)).await[2],
+        json!(sscc_off_by_a_digit(1501))
+    );
+    assert_eq!(consumed_through(&admin, &block).await, Some(1501));
+    // The refusal is no business of the box that holds the serial: the same
+    // close again is its receipt, and the same box closed with the other
+    // digit is a closed box.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[close_in(&floor, 14, on(1, 1500, sscc_off_by_a_digit(1500)))]
+        )
+        .await,
+        vec![rejected(Some(&record_id(14)), "box_already_closed", None)]
+    );
+    assert_eq!(box_row(&admin, &box_id(1)).await[2], json!(sscc(1500)));
+}
+
+#[tokio::test]
+async fn a_serial_of_a_block_is_unique_among_closed_boxes_in_the_database_itself() {
+    // Defence in depth under the handler's refusal: no code path may leave
+    // two closed boxes on one serial of a block.
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    scan_into(&admin, &floor, &[(1, 1), (2, 2)]).await;
+    let close = |box_n: u32, sscc: String| {
+        let id = box_id(box_n);
+        let block_id = block["id"].as_str().unwrap().to_string();
+        let pool = admin.app.state.pool.clone();
+        async move {
+            sqlx::query(
+                "UPDATE boxes SET closed_at = ?, sscc = ?, block_id = ?, serial = 1500, \
+                 item_count_reported = 1, membership_digest = ?, digest_matches = 1 WHERE id = ?",
+            )
+            .bind(instant(40, 0))
+            .bind(sscc)
+            .bind(block_id)
+            .bind(members_digest(&[box_n]))
+            .bind(id)
+            .execute(&pool)
+            .await
+        }
+    };
+    close(1, sscc(1500)).await.unwrap();
+    let refused = close(2, sscc_off_by_a_digit(1500)).await.unwrap_err();
+    assert!(
+        refused.to_string().contains("UNIQUE"),
+        "expected a unique violation, got {refused}"
+    );
+    assert_eq!(box_row(&admin, &box_id(2)).await[1], Value::Null);
+}
+
 #[tokio::test]
 async fn one_sscc_closes_one_box_whichever_arrives_first_and_the_same_close_again_changes_nothing()
 {
