@@ -1,0 +1,15 @@
+{
+  "codes": [
+    "invalid_record",
+    "payload_mismatch",
+    "unknown_shift",
+    "not_entered",
+    "gtin_mismatch",
+    "box_unknown",
+    "box_closed",
+    "box_already_closed",
+    "box_state",
+    "sscc_not_issued",
+    "sscc_taken"
+  ]
+}

@@ -1838,6 +1838,23 @@ inside the write transaction (a station revoked while the request waited
 gets 401). A block's use (`consumed_through`) comes with the facts of plan
 2a2; revoking blocks and showing them per device with plan 2b.
 
+## Facts
+
+Stage 2a, plan 2a2 (`host/src/facts`). A station sends what happened on the
+line as facts, and the host keeps them. The rules the host and the webview
+must answer alike live in `host/src/facts/rules.rs`, each pinned by a
+fixture both read (`host/tests/fact_rules.rs`, `test/fact-rules.test.ts`):
+the digest of a box's members (`box-digest.json`, the domain's
+`boxMembershipDigestV1`), a device's instant (`device-instants.json`: exactly
+what `Date.toISOString` writes, `YYYY-MM-DDTHH:MM:SS.sssZ`, 24 characters, so
+comparing the stored text orders the instants) and when a station's close
+needs a reason (`shift-close-reasons.json`, the domain's six
+`SHIFT_CLOSE_REASON_CODES` and `shiftCloseReasonRequired`). The codes of a
+rejected receipt (`proto::receipt_codes`, `fact-receipt-codes.json`) and the
+reason codes of box exceptions (`proto::exception_reasons`,
+`exception-reasons.json`) are fixtures too; the webview reads them with the
+facts sender (plan 2a6) and the exception screens (plan 2a8).
+
 ## Marking rules
 
 GS1, KM, SSCC and label rules stay in `@markiro/domain`; the host stores and

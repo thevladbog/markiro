@@ -7,6 +7,7 @@ pub mod clock;
 pub mod config;
 pub mod db;
 pub mod error;
+pub mod facts;
 pub mod feed;
 pub mod logging;
 pub mod network;

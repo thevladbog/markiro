@@ -861,3 +861,33 @@ fn sscc_block_fixtures_round_trip_and_a_station_never_names_the_size() {
     let exhausted: ErrorBody = round_trip("error-sscc-exhausted.json");
     assert_eq!(exhausted.error.code, codes::SSCC_EXHAUSTED);
 }
+
+/// The receipt codes and the reason codes, as the webview reads them from
+/// the same fixtures: a code added on one side only fails here.
+#[test]
+fn the_fact_code_fixtures_list_every_receipt_and_reason_code() {
+    let codes = fixture("fact-receipt-codes.json");
+    assert_eq!(
+        serde_json::from_value::<Vec<String>>(codes["codes"].clone()).unwrap(),
+        markiro_proto::receipt_codes::ALL
+    );
+    let reasons = fixture("exception-reasons.json");
+    assert_eq!(
+        serde_json::from_value::<Vec<String>>(reasons["reprint"].clone()).unwrap(),
+        markiro_proto::exception_reasons::REPRINT
+    );
+    assert_eq!(
+        serde_json::from_value::<Vec<String>>(reasons["disassemble"].clone()).unwrap(),
+        markiro_proto::exception_reasons::DISASSEMBLE
+    );
+    assert_eq!(reasons["other"], markiro_proto::exception_reasons::OTHER);
+    assert_eq!(
+        reasons["maxTextChars"],
+        markiro_proto::exception_reasons::MAX_TEXT_CHARS
+    );
+    let close = fixture("shift-close-reasons.json");
+    assert_eq!(
+        serde_json::from_value::<Vec<String>>(close["codes"].clone()).unwrap(),
+        markiro_proto::shift_close_reasons::ALL
+    );
+}

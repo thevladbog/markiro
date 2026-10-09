@@ -1,0 +1,42 @@
+{
+  "codes": [
+    "production_defect",
+    "material_shortage",
+    "equipment_stop",
+    "production_order_changed",
+    "planned_quantity_error",
+    "other_production_deviation"
+  ],
+  "required": [
+    {
+      "plannedQty": null,
+      "actualQty": 0,
+      "required": false
+    },
+    {
+      "plannedQty": null,
+      "actualQty": 250,
+      "required": false
+    },
+    {
+      "plannedQty": 250,
+      "actualQty": 250,
+      "required": false
+    },
+    {
+      "plannedQty": 250,
+      "actualQty": 249,
+      "required": true
+    },
+    {
+      "plannedQty": 250,
+      "actualQty": 251,
+      "required": true
+    },
+    {
+      "plannedQty": 1,
+      "actualQty": 0,
+      "required": true
+    }
+  ]
+}

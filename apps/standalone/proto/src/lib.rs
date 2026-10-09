@@ -79,6 +79,89 @@ pub mod credentials {
     pub const PASSWORD: &str = "password";
 }
 
+/// Codes of a `rejected` fact receipt (stage 2a spec §4.8). They are no
+/// error codes of an HTTP answer: a batch of facts is answered 200 with a
+/// receipt per record, and a record the host refuses names one of these.
+pub mod receipt_codes {
+    /// The record could not be read, or one of its fields breaks its rule
+    /// (`details.field` names it when the record itself was readable).
+    pub const INVALID_RECORD: &str = "invalid_record";
+    /// A record with this id was received before with other content.
+    pub const PAYLOAD_MISMATCH: &str = "payload_mismatch";
+    pub const UNKNOWN_SHIFT: &str = "unknown_shift";
+    /// The device never entered the shift the record names.
+    pub const NOT_ENTERED: &str = "not_entered";
+    /// An accepted scan's GTIN is not the one the shift's snapshot froze.
+    pub const GTIN_MISMATCH: &str = "gtin_mismatch";
+    /// No box of this device and this shift has the id.
+    pub const BOX_UNKNOWN: &str = "box_unknown";
+    /// A scan names a box that is closed.
+    pub const BOX_CLOSED: &str = "box_closed";
+    /// A box closed with one SSCC is closed again with another.
+    pub const BOX_ALREADY_CLOSED: &str = "box_already_closed";
+    /// The box is not in the state the record needs (an exception or a
+    /// label check of an open box, an undo in a closed one).
+    pub const BOX_STATE: &str = "box_state";
+    /// The SSCC is not of the shift's prefix, or its serial lies in no block
+    /// issued to this device.
+    pub const SSCC_NOT_ISSUED: &str = "sscc_not_issued";
+    /// Another box carries the SSCC.
+    pub const SSCC_TAKEN: &str = "sscc_taken";
+
+    /// Every code above, for the parity fixture the webview also reads.
+    pub const ALL: &[&str] = &[
+        INVALID_RECORD,
+        PAYLOAD_MISMATCH,
+        UNKNOWN_SHIFT,
+        NOT_ENTERED,
+        GTIN_MISMATCH,
+        BOX_UNKNOWN,
+        BOX_CLOSED,
+        BOX_ALREADY_CLOSED,
+        BOX_STATE,
+        SSCC_NOT_ISSUED,
+        SSCC_TAKEN,
+    ];
+}
+
+/// Reason codes of a box exception (stage 2a spec, decision 36): a station
+/// sends a code, never translated text; free text of at most
+/// [`exception_reasons::MAX_TEXT_CHARS`] characters goes only with
+/// [`exception_reasons::OTHER`].
+pub mod exception_reasons {
+    pub const OTHER: &str = "other";
+    pub const MAX_TEXT_CHARS: usize = 200;
+    /// Why a box's label is printed again.
+    pub const REPRINT: &[&str] = &[
+        "damaged_label",
+        "unreadable_label",
+        "printer_jam",
+        "quality_request",
+        OTHER,
+    ];
+    /// Why a closed box is taken apart.
+    pub const DISASSEMBLE: &[&str] = &[
+        "wrong_product",
+        "wrong_quantity",
+        "damaged_package",
+        "quality_rejected",
+        OTHER,
+    ];
+}
+
+/// The domain's six `SHIFT_CLOSE_REASON_CODES`: the reason a station gives
+/// when it closes a shift whose fact differs from its plan.
+pub mod shift_close_reasons {
+    pub const ALL: &[&str] = &[
+        "production_defect",
+        "material_shortage",
+        "equipment_stop",
+        "production_order_changed",
+        "planned_quantity_error",
+        "other_production_deviation",
+    ];
+}
+
 pub mod pairing;
 
 /// Serde for a field of a partial update that may be absent (keep the stored

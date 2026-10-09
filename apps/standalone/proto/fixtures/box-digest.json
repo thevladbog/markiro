@@ -1,0 +1,35 @@
+{
+  "cases": [
+    {
+      "hashes": [],
+      "digest": "5a57cbf1b6092eaed17eecefca5c9aaf5c14614ac182f87ca1fbf240aa028494"
+    },
+    {
+      "hashes": ["a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1"],
+      "digest": "e54732dfe1f3e9b6cfb06d638c2b0249e5e2e6c55f6665d5b8d7eb6b387d640c"
+    },
+    {
+      "hashes": [
+        "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f",
+        "9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e"
+      ],
+      "digest": "39e3dbefdfff2c243c8fad25abe0b1e435fcab76ff4d6041b8caa9b2afb8402e"
+    },
+    {
+      "hashes": [
+        "9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e9e",
+        "a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1a1",
+        "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f"
+      ],
+      "digest": "39e3dbefdfff2c243c8fad25abe0b1e435fcab76ff4d6041b8caa9b2afb8402e"
+    },
+    {
+      "hashes": [
+        "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "0000000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "digest": "5180cc7e2f4e30c5f67431d793b47f52f3bf0900b6eb663de83f31dc543e4864"
+    }
+  ]
+}
