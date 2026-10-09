@@ -574,6 +574,11 @@ for (const locale of ["ru", "en"])
     }, info) => {
       const writes: Record<string, unknown>[] = [];
       const unexpected: string[] = [];
+      const sqliteRequests: string[] = [];
+      page.on("request", (request) => {
+        if (new URL(request.url()).pathname === "/__product_labels_sql")
+          sqliteRequests.push(request.url());
+      });
       const template = { widthMm: 100, heightMm: 150, dpi: 203, language: "zpl" };
       await page.addInitScript((theme) => localStorage.setItem("markiro.theme", theme), theme);
       await page.route(`${station}/__product_labels_api/**`, async (route) => {
@@ -697,6 +702,7 @@ for (const locale of ["ru", "en"])
         expect(write).not.toHaveProperty("boxCapacity");
       }
       expect(unexpected).toEqual([]);
+      expect(sqliteRequests).toEqual([]);
     });
 
 for (const width of [1024, 1280])

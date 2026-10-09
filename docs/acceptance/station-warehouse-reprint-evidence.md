@@ -62,6 +62,14 @@ Domain и DB собраны перед проверками потребител
 
 Проверка inline patch: API history E2E — 10/10, включая max=1 и однократный полный quarantine claim; два App routing сценария — 2/2; API/Station typecheck, lint, build и весь Chromium набор — 20/20. Полный API не повторялся после этой узкой правки обработчика: выше сохранён фактический предыдущий результат, включая ZIP timeout. Native transport/Rust и печатные байты этой правкой не менялись; новое аппаратное/Windows подтверждение не получено. Первый полный Station запуск: 2038 passed / 1 failed beforeEach hook timeout 10s в неизменённом product-labels-printing fixture; assertions этого теста не выполнялись. Отдельный запуск прошёл за 2,02 с; итоговый полный повтор при двух workers и прежних assertions/timeouts прошёл: 146 файлов, 2039 тестов (382,62 с). Финальные Station typecheck/lint/build также прошли. Результат первого запуска и граница восстановления нагрузки сохранены в отчёте; это не объявляется доказательством точной причины timeout.
 
+## Browser workflow после ef5c806a2
+
+В CI run 37994143739 браузерный сценарий создания паллеты EN/light завершился таймаутом поля GTIN. Trace показывает пустой экран и 306 последовательных SQLite RPC после второй навигации: bootstrap ещё выполнял миграции, ошибки SQL/приложения не было. NewShift использует API и scanner без локальной истории печати; его test-only harness теперь сразу рендерит экран после установки языка. Остальные сценарии сохраняют настоящие миграции и журнал SQLite. Production bootstrap, migration DDL, Playwright retries и timeouts не менялись.
+
+Добавлена проверка отсутствия SQLite RPC в сценарии создания паллеты на обоих размерах окна. До исправления проверка падала; после исправления все RU/EN × light/dark варианты прошли по пять повторов — 20/20. Отдельные typecheck Station и production-browser, lint Station прошли. Полный product-labels браузерный набор прошёл — 59/59 (2,1 минуты); конфигурационные Node tests также прошли. Формат всего checkout и diff прошли.
+
+В том же старом CI run verify-api-tests не дошёл до тестов из-за таймаута Docker Hub token endpoint, а tenant-team-infrastructure получил Docker Hub unauthenticated pull rate limit при загрузке SeaweedFS. В следующем run 37996155826 на ef5c806a2 инициализация PostgreSQL и tenant-team-infrastructure прошли, как и verify-static, verify-app-tests, station-rust, station-windows-build и CodeQL. Финальный результат общего CI следует сверять с текущим SHA PR; локальный повтор не заменяет remote CI.
+
 ## Принятые решения
 
 1. До прямого разрешения сохранять новый режим без коммита/пуша. После указания «После правок — пуш и пр» это ограничение снято. В PR включается весь утверждённый режим; merge, выпуск и deployment не разрешены этим указанием.
