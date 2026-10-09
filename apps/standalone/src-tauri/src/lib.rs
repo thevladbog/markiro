@@ -11,6 +11,7 @@ pub mod local_db;
 pub mod lockdown;
 pub mod power;
 pub mod printer;
+pub mod scanner;
 pub mod secret_store;
 pub mod tls;
 
@@ -262,7 +263,11 @@ pub fn invoke_handler<R: tauri::Runtime>(
         lockdown::exit_lockdown,
         power::set_system_awake,
         printer::print_bytes,
-        printer::list_usb_printers
+        printer::list_usb_printers,
+        scanner::list_serial_ports,
+        scanner::configure_scanners,
+        scanner::get_scanner_connections,
+        scanner::close_scanners
     ]
 }
 
@@ -283,6 +288,7 @@ pub fn run() {
             app.manage(tauri::async_runtime::block_on(LocalDbState::open(&dir)));
             let status = ConnectionState::default();
             app.manage(status.clone());
+            app.manage(scanner::manager(app.handle().clone()));
             tauri::async_runtime::spawn(connection::supervise(
                 link,
                 Arc::new(TauriLinkEvents(app.handle().clone())),

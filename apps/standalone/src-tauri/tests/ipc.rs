@@ -19,6 +19,7 @@ use markiro_standalone_lib::local_db::{
     LocalDbState, TableClass, FILE_NAME, MIGRATOR, TABLE_CLASSES,
 };
 use markiro_standalone_lib::power::SystemAwakeState;
+use markiro_standalone_lib::scanner::{self, PortOpener, ScannerManager};
 use markiro_standalone_lib::secret_store::{ProtectedSecret, Scheme};
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
@@ -1339,6 +1340,199 @@ fn printing_refusals_are_bare_codes_through_ipc() {
         print(json!({ "kind": "lpt" }), ""),
         Err(json!("invalid_target"))
     );
+}
+
+/// A fake COM port: the test pushes bytes, the shell's scanner thread reads
+/// them. A read waits at most 10 ms, as a real port's timeout does, so a
+/// closed configuration stops its thread at once.
+struct FakePort(std::sync::mpsc::Receiver<Vec<u8>>);
+
+impl std::io::Read for FakePort {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        use std::sync::mpsc::RecvTimeoutError;
+        match self.0.recv_timeout(std::time::Duration::from_millis(10)) {
+            Ok(bytes) => {
+                buf[..bytes.len()].copy_from_slice(&bytes);
+                Ok(bytes.len())
+            }
+            Err(RecvTimeoutError::Timeout) => Err(std::io::ErrorKind::TimedOut.into()),
+            Err(RecvTimeoutError::Disconnected) => Err(std::io::ErrorKind::BrokenPipe.into()),
+        }
+    }
+}
+
+/// Polls `check` until it holds, for at most 3 s.
+fn wait_for(what: &str, check: impl Fn() -> bool) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+    while !check() {
+        assert!(std::time::Instant::now() < deadline, "{what}");
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+}
+
+/// The scanner commands with the webview's arguments (`scanners` of
+/// `{ port, baud }`), and the events `standalone://scan` and
+/// `standalone://scanner-status` as the webview hears them, from a fake
+/// `COM3` behind the shell's real scanner runtime.
+#[test]
+fn scanners_answer_through_the_ipc_shapes() {
+    use std::sync::{mpsc, Arc, Mutex};
+    use tauri::{Listener, Manager};
+
+    let dir = tempfile::tempdir().unwrap();
+    let (bytes, port) = mpsc::channel::<Vec<u8>>();
+    let port = Arc::new(Mutex::new(Some(port)));
+    let opener: PortOpener = Arc::new(move |config| {
+        let taken = (config.port == "COM3")
+            .then(|| port.lock().unwrap().take())
+            .flatten();
+        match taken {
+            Some(port) => Ok(Box::new(FakePort(port)) as Box<dyn std::io::Read + Send>),
+            None => Err(std::io::ErrorKind::NotFound.into()),
+        }
+    });
+    let app = mock_builder()
+        .manage(DeviceState::load(dir.path().to_path_buf()))
+        .manage(LocalDbState::unavailable())
+        .manage(ConnectionState::default())
+        .invoke_handler(markiro_standalone_lib::invoke_handler())
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    // The mock builder does not run `setup`, so the manager, which needs the
+    // app's handle for its events, is managed once the app exists.
+    let sink = scanner::tauri_sink(app.handle().clone());
+    app.manage(ScannerManager::new(
+        opener,
+        sink,
+        std::time::Duration::from_millis(20),
+    ));
+    let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    // The names `src/hardware/hardware.ts` listens to.
+    assert_eq!(scanner::SCAN_EVENT, "standalone://scan");
+    assert_eq!(scanner::SCANNER_STATUS_EVENT, "standalone://scanner-status");
+    let (scan_tx, scans) = mpsc::channel::<String>();
+    app.listen(scanner::SCAN_EVENT, move |event| {
+        let _ = scan_tx.send(event.payload().to_owned());
+    });
+    let (status_tx, statuses) = mpsc::channel::<String>();
+    app.listen(scanner::SCANNER_STATUS_EVENT, move |event| {
+        let _ = status_tx.send(event.payload().to_owned());
+    });
+    let connections = || invoke(&webview, "get_scanner_connections", json!({})).unwrap();
+
+    assert_eq!(
+        invoke(
+            &webview,
+            "configure_scanners",
+            json!({ "scanners": [{ "port": "com3", "baud": 9600 }] })
+        ),
+        Ok(Value::Null)
+    );
+    wait_for("COM3 connects", || {
+        connections()["scanners"][0]["status"] == "connected"
+    });
+    let snapshot = connections();
+    assert!(snapshot["revision"].as_u64().unwrap() >= 2, "{snapshot}");
+    assert_eq!(
+        snapshot["scanners"],
+        json!([{ "port": "COM3", "baud": 9600, "status": "connected" }])
+    );
+    let status: Value = serde_json::from_str(
+        &statuses
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(status["revision"], 1);
+    assert_eq!(status["scanners"][0]["port"], "COM3");
+
+    bytes
+        .send(b"]d2010460000000001521serial\x1d91key\x1d92crypto\r\n".to_vec())
+        .unwrap();
+    let scan: String = serde_json::from_str(
+        &scans
+            .recv_timeout(std::time::Duration::from_secs(3))
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(scan, "]d2010460000000001521serial\u{1d}91key\u{1d}92crypto");
+    // Two scans in one read, a CR-only terminator and one scan cut in two
+    // reads: each arrives once, whole and in order.
+    bytes.send(b"FIRST\rSEC".to_vec()).unwrap();
+    bytes.send(b"OND\n\n".to_vec()).unwrap();
+    let mut heard = Vec::new();
+    for _ in 0..2 {
+        heard.push(
+            serde_json::from_str::<String>(
+                &scans
+                    .recv_timeout(std::time::Duration::from_secs(3))
+                    .unwrap(),
+            )
+            .unwrap(),
+        );
+    }
+    assert_eq!(heard, ["FIRST", "SECOND"]);
+    assert!(scans.try_recv().is_err());
+
+    let too_many: Vec<Value> = (1..=33)
+        .map(|n| json!({ "port": format!("COM{n}"), "baud": 9600 }))
+        .collect();
+    assert_eq!(
+        invoke(&webview, "configure_scanners", json!({})),
+        Err(json!("invalid_scanners"))
+    );
+    for scanners in [
+        Value::Null,
+        Value::Array(too_many),
+        json!([{ "port": "COM3", "baud": 9600.5 }]),
+        json!([{ "port": "COM\u{0}3", "baud": 9600 }]),
+        json!([{ "port": "COM3", "baud": 0 }]),
+        json!([{ "port": "COM3" }]),
+        json!([{ "port": "COM3", "baud": 9600, "parity": "none" }]),
+        json!([{ "port": "COM3", "baud": 9600 }, { "port": "com3", "baud": 9600 }]),
+        json!("COM3"),
+    ] {
+        assert_eq!(
+            invoke(
+                &webview,
+                "configure_scanners",
+                json!({ "scanners": scanners })
+            ),
+            Err(json!("invalid_scanners")),
+            "{scanners}"
+        );
+    }
+    assert_eq!(connections()["scanners"][0]["status"], "connected");
+
+    assert_eq!(
+        invoke(&webview, "close_scanners", json!({})),
+        Ok(Value::Null)
+    );
+    assert_eq!(connections()["scanners"], json!([]));
+    // Closing what is closed is no error.
+    assert_eq!(
+        invoke(&webview, "close_scanners", json!({})),
+        Ok(Value::Null)
+    );
+    // Every status the webview heard, in the order it was emitted: the
+    // revisions grow by one, and the last is what `get_scanner_connections`
+    // answers.
+    let mut revisions = vec![status["revision"].as_u64().unwrap()];
+    let mut last = status;
+    while let Ok(next) = statuses.recv_timeout(std::time::Duration::from_millis(200)) {
+        last = serde_json::from_str(&next).unwrap();
+        revisions.push(last["revision"].as_u64().unwrap());
+    }
+    assert_eq!(revisions, (1..=revisions.len() as u64).collect::<Vec<_>>());
+    assert_eq!(last, connections());
+    assert_eq!(last["scanners"], json!([]));
+    match invoke(&webview, "list_serial_ports", json!({})) {
+        Ok(Value::Array(_)) => {}
+        Err(code) => assert_eq!(code, json!("serial_unavailable")),
+        other => panic!("{other:?}"),
+    }
 }
 
 /// `src/host/connection.ts` reads this snapshot before the first event.
