@@ -1770,9 +1770,13 @@ The office closes an active shift (`POST …/{id}/close`, `{ reason,
 expectedRev }`, administrators and technologists), for a station that died or
 a shift nobody will finish: the reason is words, 3–500 characters without
 control characters (`validate::close_reason`), kept in `close_reason_text`; a
-planned or a closed shift is `shift_status`. A station's close is a fact (plan
-2a2) with one of the domain's six reason codes in `close_reason_code`, and the
-facts of a shift the office closed are taken and marked late.
+planned or a closed shift is `shift_status`. The close writes the audit row
+`shift.close` with the details `{ reason }` (the trimmed text). The refusals
+come in the order of `PUT`: a bad reason is 400 even for an unknown id, then
+the lookup (404), then a stale `expectedRev` (`stale_revision`), then
+`shift_status`. A station's close is a fact (plan 2a2) with one of the
+domain's six reason codes in `close_reason_code`, and the facts of a shift the
+office closed are taken and marked late.
 
 ## Marking rules
 

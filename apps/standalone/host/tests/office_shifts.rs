@@ -1273,7 +1273,7 @@ async fn only_an_active_shift_closes_and_only_with_a_reason() {
 
 /// Every column of `shifts` a close must leave alone, as one JSON text.
 async fn untouched_columns(admin: &Admin, id: &str) -> Value {
-    const COLUMNS: [&str; 24] = [
+    const COLUMNS: [&str; 23] = [
         "id",
         "number_month_key",
         "number_seq",
@@ -1297,9 +1297,41 @@ async fn untouched_columns(admin: &Admin, id: &str) -> Value {
         "opened_at",
         "late_data_at",
         "created_at",
-        "status IS NOT NULL",
     ];
     let pairs: Vec<String> = COLUMNS
+        .iter()
+        .map(|column| format!("'{column}', {column}"))
+        .collect();
+    let text: String = sqlx::query_scalar(&format!(
+        "SELECT json_object({}) FROM shifts WHERE id = ?",
+        pairs.join(", ")
+    ))
+    .bind(id)
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    serde_json::from_str(&text).unwrap()
+}
+
+/// The WHOLE row of a shift (every column the table has, `status`, `rev` and
+/// `closed_*` included) as one JSON text, so a bystander is compared in full.
+async fn whole_row(admin: &Admin, id: &str) -> Value {
+    let columns: Vec<String> =
+        sqlx::query_scalar("SELECT name FROM pragma_table_info('shifts') ORDER BY cid")
+            .fetch_all(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert!(columns.len() >= 30, "{columns:?}");
+    for needed in [
+        "status",
+        "rev",
+        "closed_at",
+        "closed_by",
+        "close_reason_text",
+    ] {
+        assert!(columns.iter().any(|c| c == needed), "{needed}");
+    }
+    let pairs: Vec<String> = columns
         .iter()
         .map(|column| format!("'{column}', {column}"))
         .collect();
@@ -1322,6 +1354,9 @@ async fn a_close_writes_only_the_closing_columns_and_wakes_the_streams() {
     let bystander = plan_shift(&admin, shift_body(&setup)).await;
     let id = shift["id"].as_str().unwrap().to_owned();
     open_directly(&admin, &shift).await;
+    // The bystander is RUNNING too: a close that reached past its own row
+    // would close it, and only an active neighbour can show that.
+    open_directly(&admin, &bystander).await;
     sqlx::query("INSERT INTO shift_participants (shift_id, device_id, first_entered_at, last_entered_at) SELECT ?, owner_device_id, opened_at, opened_at FROM shifts WHERE id = ?")
         .bind(&id)
         .bind(&id)
@@ -1329,7 +1364,9 @@ async fn a_close_writes_only_the_closing_columns_and_wakes_the_streams() {
         .await
         .unwrap();
     let before = untouched_columns(&admin, &id).await;
-    let bystander_before = untouched_columns(&admin, bystander["id"].as_str().unwrap()).await;
+    let bystander_id = bystander["id"].as_str().unwrap().to_owned();
+    let bystander_before = whole_row(&admin, &bystander_id).await;
+    assert_eq!(bystander_before["status"], json!("active"));
     let counters: Vec<(String, i64)> =
         sqlx::query_as("SELECT month_key, last_seq FROM shift_number_counters ORDER BY month_key")
             .fetch_all(&admin.app.state.pool)
@@ -1358,10 +1395,12 @@ async fn a_close_writes_only_the_closing_columns_and_wakes_the_streams() {
     assert_eq!(*admin.app.state.revisions.borrow(), next);
     assert_eq!(closed["rev"], json!(next));
     assert_eq!(untouched_columns(&admin, &id).await, before);
-    assert_eq!(
-        untouched_columns(&admin, bystander["id"].as_str().unwrap()).await,
-        bystander_before
-    );
+    // The running neighbour is the same row, column for column: still
+    // active, same `rev`, nothing of a close on it.
+    assert_eq!(whole_row(&admin, &bystander_id).await, bystander_before);
+    let closed_row = whole_row(&admin, &id).await;
+    assert_eq!(closed_row["status"], json!("closed"));
+    assert_eq!(closed_row["rev"], json!(next));
     // The stored row and the answer agree.
     let (status, read_back) = admin.call("GET", &path(&shift), None).await;
     assert_eq!((status, read_back), (StatusCode::OK, closed));
