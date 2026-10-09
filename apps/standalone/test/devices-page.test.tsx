@@ -230,6 +230,30 @@ describe("office devices", () => {
     expect(await screen.findByText("Изменения сохранены.")).toBeTruthy();
   });
 
+  it("says a station taken off its line will ask for a line, not show the new line's shifts, and changes the words with the choice", async () => {
+    const session = adminSession();
+    const other = LINES[2];
+    if (!other) throw new Error("no second line");
+    session.api.listShifts.mockResolvedValue([{ ...ACTIVE, ownerDeviceId: HOST_PC.id }]);
+    await openDevices(session);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Изменить устройство «Рабочее место хоста»" }),
+    );
+    await waitFor(() =>
+      expect(session.api.listShifts).toHaveBeenCalledWith("office-session-token"),
+    );
+    const toLine =
+      "На станции идёт смена OCT26-004. После перевода станция доделает начатую работу, выведет оператора и покажет смены новой линии; смена останется открытой, закрыть её можно на странице «Смены».";
+    const noLine =
+      "На станции идёт смена OCT26-004. Если убрать линию, станция доделает начатую работу, выведет оператора и попросит выбрать линию; смена останется открытой, закрыть её можно на странице «Смены».";
+    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: "" } });
+    expect(await within(dialog()).findByText(noLine)).toBeTruthy();
+    expect(within(dialog()).queryByText(toLine)).toBeNull();
+    fireEvent.change(screen.getByLabelText("Линия"), { target: { value: other.id } });
+    expect(await within(dialog()).findByText(toLine)).toBeTruthy();
+    expect(within(dialog()).queryByText(noLine)).toBeNull();
+  });
+
   it("warns about the shift of the station whose dialog is open, not about another station's, a closed one or a planned one", async () => {
     const session = adminSession();
     // Station «Станция упаковки» works OCT26-004; the host PC has only a closed shift.
