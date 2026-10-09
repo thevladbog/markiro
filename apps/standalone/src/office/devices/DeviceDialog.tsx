@@ -137,7 +137,12 @@ export function DeviceDialog({ device, lines, onClose, onSaved }: DeviceDialogPr
       <div aria-live="polite">
         {running !== undefined && moving && (
           <p className="office-note">
-            {t("office.devices.shiftOnStation", { number: running.number })}
+            {t(
+              watch("lineId") === ""
+                ? "office.devices.shiftOnStationNoLine"
+                : "office.devices.shiftOnStation",
+              { number: running.number },
+            )}
           </p>
         )}
       </div>
