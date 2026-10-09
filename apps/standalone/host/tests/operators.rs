@@ -181,23 +181,138 @@ async fn pin_hashes_must_be_domain_phc_strings_within_the_iteration_bounds() {
 }
 
 #[tokio::test]
-async fn personnel_numbers_are_unique_with_their_leading_zeros() {
+async fn personnel_numbers_are_unique_and_never_differ_by_leading_zeros_alone() {
     let admin = admin().await;
     create(&admin).await;
+    // The same number, and one that differs only by leading zeros, which a
+    // keypad would mix up with it (owner question В13), are both taken; the
+    // answer names the number that stands in the way.
+    for login in ["0042", "042", "000042"] {
+        let (status, body) = admin
+            .call("POST", "/v1/office/operators", Some(new_operator(login)))
+            .await;
+        assert_eq!(
+            (status, body["error"]["details"].clone()),
+            (
+                StatusCode::CONFLICT,
+                json!({ "constraint": "login", "similarLogin": "0042" })
+            ),
+            "{login}"
+        );
+    }
+    assert_eq!(host_revision(&admin.app).await, 2);
+    assert_eq!(audit_trail(&admin.app, "operator.create").await.len(), 1);
+    // Leading zeros stay part of the number: 0420 and 0043 are others.
+    for login in ["0420", "0043"] {
+        let (status, other) = admin
+            .call("POST", "/v1/office/operators", Some(new_operator(login)))
+            .await;
+        assert_eq!(status, StatusCode::OK, "{other}");
+        assert_eq!(other["login"], login);
+    }
+    // Numbers of zeros alone are the same number too.
+    let (status, zeros) = admin
+        .call("POST", "/v1/office/operators", Some(new_operator("000")))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{zeros}");
     let (status, body) = admin
-        .call("POST", "/v1/office/operators", Some(new_operator("0042")))
+        .call("POST", "/v1/office/operators", Some(new_operator("0000")))
         .await;
     assert_eq!(
-        (status, body["error"]["details"]["constraint"].clone()),
-        (StatusCode::CONFLICT, json!("login"))
+        (status, body["error"]["details"].clone()),
+        (
+            StatusCode::CONFLICT,
+            json!({ "constraint": "login", "similarLogin": "000" })
+        )
     );
-    assert_eq!(host_revision(&admin.app).await, 2);
-    // Leading zeros are part of the number: 042 is another operator.
-    let (status, other) = admin
-        .call("POST", "/v1/office/operators", Some(new_operator("042")))
+}
+
+#[tokio::test]
+async fn the_leading_zero_check_counts_every_operator_and_answers_in_a_fixed_order() {
+    let admin = admin().await;
+    let id = create(&admin).await;
+    let post = |login: &'static str| {
+        let admin = &admin;
+        async move {
+            admin
+                .call("POST", "/v1/office/operators", Some(new_operator(login)))
+                .await
+        }
+    };
+    // The refusal is the plain `conflict` code, and the number is trimmed
+    // before it is compared.
+    let (status, body) = post(" 042 ").await;
+    assert_eq!(
+        (
+            status,
+            body["error"]["code"].clone(),
+            body["error"]["details"].clone()
+        ),
+        (
+            StatusCode::CONFLICT,
+            json!("conflict"),
+            json!({ "constraint": "login", "similarLogin": "0042" })
+        )
+    );
+    // A malformed number is still a field error, not a conflict.
+    let (status, body) = post("42").await;
+    assert_eq!(
+        (status, field(&body)),
+        (StatusCode::BAD_REQUEST, json!("login"))
+    );
+    // A deactivated operator keeps its number.
+    let (status, deactivated) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/operators/{id}"),
+            Some(json!({ "active": false, "expectedRev": 2 })),
+        )
         .await;
-    assert_eq!(status, StatusCode::OK, "{other}");
-    assert_eq!(audit_trail(&admin.app, "operator.create").await.len(), 2);
+    assert_eq!(status, StatusCode::OK, "{deactivated}");
+    let (status, body) = post("00042").await;
+    assert_eq!(
+        (status, body["error"]["details"].clone()),
+        (
+            StatusCode::CONFLICT,
+            json!({ "constraint": "login", "similarLogin": "0042" })
+        )
+    );
+    // A technologist is refused before the host says which numbers exist.
+    let tech = admin.technologist().await;
+    let (status, body) = admin
+        .call_as(
+            &tech,
+            "POST",
+            "/v1/office/operators",
+            Some(new_operator("042")),
+        )
+        .await;
+    assert_eq!(
+        (
+            status,
+            body["error"]["code"].clone(),
+            body["error"]["details"].clone()
+        ),
+        (StatusCode::FORBIDDEN, json!("forbidden"), json!(null))
+    );
+    // Pairs that already exist stay as they are. With two numbers in the way
+    // the same number is named first, otherwise the lowest.
+    sqlx::query(
+        "INSERT INTO operators (id, login, name, pin_phc, active, rev) VALUES (?, '00042', 'Legacy', ?, 1, 99)",
+    )
+    .bind(uuid::Uuid::new_v4().to_string())
+    .bind(PIN_4821)
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    for (login, expected) in [("0042", "0042"), ("00042", "00042"), ("042", "00042")] {
+        let (status, body) = post(login).await;
+        assert_eq!(
+            (status, body["error"]["details"]["similarLogin"].clone()),
+            (StatusCode::CONFLICT, json!(expected)),
+            "{login}"
+        );
+    }
 }
 
 #[tokio::test]

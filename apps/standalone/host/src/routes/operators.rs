@@ -152,6 +152,27 @@ pub async fn create_operator(
     let id = uuid::Uuid::new_v4().to_string();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     context.require_admin_in(&mut tx).await?;
+    // A number that differs from another only by leading zeros (`042` next
+    // to `0042`) is taken too (owner question В13): on a keypad the two are
+    // one slip apart. The unique index stays the guard of the exact number.
+    // Pairs that already exist stay as they are; when several numbers stand
+    // in the way, the same number comes first, then the lowest, so the answer
+    // does not depend on row order.
+    let similar: Option<String> = sqlx::query_scalar(
+        "SELECT login FROM operators WHERE ltrim(login, '0') = ltrim(?, '0') \
+         ORDER BY login = ? DESC, login LIMIT 1",
+    )
+    .bind(&login)
+    .bind(&login)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    if let Some(similar) = similar {
+        return Err(
+            ApiError::conflict("login", "this personnel number is already taken")
+                .with_details(json!({ "constraint": "login", "similarLogin": similar })),
+        );
+    }
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query(
         "INSERT INTO operators (id, login, name, role, pin_phc, active, rev) \

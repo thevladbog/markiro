@@ -381,7 +381,11 @@ with padding; `test/credentials.test.ts` reproduces `operator-create.json`
 and `badge-create.json` byte for byte. The forms' rules (`src/lib/rules.ts`)
 follow the host's for a personnel number of 3–12 ASCII digits, kept as text
 with its leading zeros, a role of up to 120 characters and a label of up to
-100, both blank for none. The PIN rule, 4–6 ASCII digits, mirrors the
+100, both blank for none. Since plan 2a1 the host also refuses a new number
+that differs from an existing one only by leading zeros (`042` next to
+`0042`, which a keypad mixes up; owner question В13): `conflict` on `login`
+with `similarLogin`, the number in the way, which the office's form shows as
+a taken number. The PIN rule, 4–6 ASCII digits, mirrors the
 cloud's (`apps/api/src/modules/operators/dto.ts`): the host never sees a
 PIN. A badge code is what a scanner types: trimmed, 1–256 printable ASCII
 characters, and hashed exactly so. A keyboard-wedge scanner presses keys,
