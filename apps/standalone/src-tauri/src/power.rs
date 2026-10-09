@@ -187,8 +187,11 @@ mod tests {
         assert!(!state.is_awake());
     }
 
-    /// The app closing (or its state dropping for any reason) lets the
-    /// computer sleep: the lease is never leaked past the state that owns it.
+    /// The state dropping lets the computer sleep: the lease is never leaked
+    /// past the state that owns it. The running app does not exercise this at
+    /// exit (it ends through `process::exit`, so its managed state is never
+    /// dropped); Windows closes the request's handle with the process, which
+    /// is not verified here.
     #[test]
     fn dropping_the_state_lets_the_computer_sleep() {
         let probe = Fake::default();

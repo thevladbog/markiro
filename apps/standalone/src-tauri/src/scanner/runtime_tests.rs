@@ -763,6 +763,9 @@ fn port_names_and_the_number_of_scanners_are_bounded_and_canonical() {
         ("com3x", "com3x"),
         ("com\u{663}", "com\u{663}"),
         ("/dev/ttyUSB0", "/dev/ttyUSB0"),
+        // The first letter is the Cyrillic С (U+0421), which looks like the
+        // Latin C: only the ASCII spelling is a COM port to upper-case. Written
+        // as an escape on purpose, so that no editor turns it into a Latin one.
         ("\u{421}OM3", "\u{421}OM3"),
     ] {
         assert_eq!(rig.manager.configure(vec![config(given, 115_200)]), Ok(()));
@@ -872,13 +875,7 @@ fn bytes_are_decoded_only_when_the_frame_is_whole() {
     ]);
     assert_eq!(
         scans,
-        [
-            "\u{410}",
-            "caf\u{fffd}",
-            "\u{fffd}\u{fffd}",
-            "A\0B",
-            "\u{feff}X"
-        ]
+        ["А", "caf\u{fffd}", "\u{fffd}\u{fffd}", "A\0B", "\u{feff}X"]
     );
     // Every byte value but the terminators in one frame: nothing is dropped
     // or reordered, only replaced.
@@ -893,7 +890,7 @@ fn bytes_are_decoded_only_when_the_frame_is_whole() {
 fn the_chunking_of_the_stream_never_changes_the_scans() {
     let stream: Vec<u8> = [
         &b"]d2010460000000001521serial\x1d91key\x1d92crypto\r\n"[..],
-        "\u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}\r".as_bytes(),
+        "Привет\r".as_bytes(),
         b"\n\n]C1\x1d\x1d\rA\0B\r\n",
         &[0xff, 0xd0, b'\n', 0xd0],
         &[0x90, b'\r', b'T', b'A', b'I', b'L'],
@@ -904,11 +901,11 @@ fn the_chunking_of_the_stream_never_changes_the_scans() {
         whole,
         [
             "]d2010460000000001521serial\x1d91key\x1d92crypto",
-            "\u{41f}\u{440}\u{438}\u{432}\u{435}\u{442}",
+            "Привет",
             "]C1\x1d\x1d",
             "A\0B",
             "\u{fffd}\u{fffd}",
-            "\u{410}"
+            "А"
         ]
     );
     assert_eq!(whole_framer.pending, b"TAIL");

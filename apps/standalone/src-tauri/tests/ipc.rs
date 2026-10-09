@@ -18,6 +18,7 @@ use markiro_standalone_lib::device_config::{self, DeviceConfig};
 use markiro_standalone_lib::local_db::{
     LocalDbState, TableClass, FILE_NAME, MIGRATOR, TABLE_CLASSES,
 };
+use markiro_standalone_lib::lockdown::LockdownState;
 use markiro_standalone_lib::power::SystemAwakeState;
 use markiro_standalone_lib::scanner::{self, PortOpener, ScannerManager};
 use markiro_standalone_lib::secret_store::{ProtectedSecret, Scheme};
@@ -1193,6 +1194,53 @@ fn an_unpaired_device_has_nothing_to_refresh() {
     assert_eq!(
         invoke(&webview, "device_refresh", json!({})),
         Err(json!("not_paired"))
+    );
+}
+
+/// `run` hands the shell's states to the app through `manage_state`, so a
+/// state a command reads cannot go missing there unseen: Tauri answers such a
+/// command with its own «state not managed» text, which no other test of this
+/// file would meet (the mock apps above manage their states themselves). The
+/// mock builder does not run `setup`, so the function is called on the built
+/// app, directly, as `run`'s `setup` does.
+#[test]
+fn the_app_manages_every_state_its_commands_read() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = mock_builder()
+        .invoke_handler(markiro_standalone_lib::invoke_handler())
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    let link = markiro_standalone_lib::manage_state(app.handle(), dir.path());
+
+    assert!(app.try_state::<DeviceState>().is_some());
+    assert!(app.try_state::<LocalDbState>().is_some());
+    assert!(app.try_state::<ConnectionState>().is_some());
+    assert!(app.try_state::<ScannerManager>().is_some());
+    assert!(app.try_state::<LockdownState>().is_some());
+    assert!(app.try_state::<SystemAwakeState>().is_some());
+    // An unpaired app has no link yet; the receiver is the device's own.
+    assert!(link.borrow().is_none());
+    // Commands that read the managed states answer, instead of Tauri's refusal.
+    assert_eq!(
+        invoke(&webview, "device_status", json!({})),
+        Ok(Value::Null)
+    );
+    assert_eq!(
+        invoke(&webview, "connection_status", json!({}))
+            .unwrap()
+            .get("state"),
+        Some(&json!("offline"))
+    );
+    assert_eq!(
+        invoke(&webview, "get_scanner_connections", json!({})),
+        Ok(json!({ "revision": 0, "scanners": [] }))
+    );
+    assert_eq!(
+        invoke(&webview, "set_system_awake", json!({ "awake": false })),
+        Ok(Value::Null)
     );
 }
 

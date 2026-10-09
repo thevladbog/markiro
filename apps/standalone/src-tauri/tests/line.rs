@@ -106,6 +106,15 @@ fn saved_line(dir: &Path) -> Option<String> {
         .line_id
 }
 
+/// The name `device.json` holds, read as the app does at start.
+fn saved_name(dir: &Path) -> Option<String> {
+    DeviceState::load(dir.to_path_buf())
+        .status()
+        .unwrap()
+        .unwrap()
+        .device_name
+}
+
 /// The ids of the host's lines, read from the change feed as the webview does.
 async fn line_ids(station: &DeviceState) -> Vec<String> {
     let feed = station
@@ -320,6 +329,8 @@ async fn an_unreachable_host_leaves_the_line_alone() {
     station.select_line(&first).await.unwrap();
     let second = office_line(&station, &token, "Линия 2").await;
     assign_line(&station, &token, Some(&second)).await;
+    let name = station.status().unwrap().unwrap().device_name;
+    assert_eq!(name.as_deref(), Some("Рабочее место хоста"));
     host.stop().await.unwrap();
 
     assert_eq!(
@@ -330,7 +341,11 @@ async fn an_unreachable_host_leaves_the_line_alone() {
         station.status().unwrap().unwrap().line_id.as_deref(),
         Some(first.as_str())
     );
+    // The name is kept as well, in memory and on disk: a host that cannot be
+    // asked does not clear what it last said.
+    assert_eq!(station.status().unwrap().unwrap().device_name, name);
     assert_eq!(saved_line(station_dir.path()), Some(first));
+    assert_eq!(saved_name(station_dir.path()), name);
 }
 
 /// A `device.json` whose key the host never issued (as after a revocation).
@@ -346,7 +361,7 @@ async fn a_refresh_with_a_key_the_host_does_not_know_is_rejected() {
         device_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7".into(),
         kind: DeviceKind::Station,
         line_id: Some(UNKNOWN_LINE.into()),
-        device_name: None,
+        device_name: Some("Станция упаковки".into()),
         device_key: secret_store::protect("not-a-key-the-host-issued").unwrap(),
     };
     device_config::save(station_dir.path(), &config).unwrap();
@@ -356,6 +371,15 @@ async fn a_refresh_with_a_key_the_host_does_not_know_is_rejected() {
     assert_eq!(
         station.status().unwrap().unwrap().line_id.as_deref(),
         Some(UNKNOWN_LINE)
+    );
+    // A refused key keeps the name too, in memory and on disk.
+    assert_eq!(
+        station.status().unwrap().unwrap().device_name.as_deref(),
+        Some("Станция упаковки")
+    );
+    assert_eq!(
+        saved_name(station_dir.path()).as_deref(),
+        Some("Станция упаковки")
     );
     host.stop().await.unwrap();
 }

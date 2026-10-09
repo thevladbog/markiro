@@ -81,10 +81,12 @@ async fn a_request_past_its_own_limit_fails_with_timeout() {
 }
 
 /// A limit above the client's own 2 s to connect does not turn that 2 s into
-/// `timeout`: the host that never finishes connecting is `unreachable`, and
-/// it is the client's limit that ended the request, not the caller's.
+/// `timeout`: the host that accepts the connection and never finishes the TLS
+/// handshake is `unreachable`, and it is the client's limit that ended the
+/// request, not the caller's. Under 2 s the caller's limit comes first and the
+/// same host reads as `timeout` (the test above).
 #[tokio::test]
-async fn a_host_that_never_accepts_the_connection_is_unreachable_not_a_timeout() {
+async fn a_limit_above_the_clients_connect_limit_leaves_a_hung_handshake_unreachable() {
     let app_dir = tempfile::tempdir().unwrap();
     let station = paired_with(app_dir.path(), &silent_address());
 
@@ -145,13 +147,17 @@ async fn a_limit_outside_its_bounds_is_refused_before_any_io() {
     );
 }
 
-/// The limit covers reading the body too, not only waiting for the answer's
-/// start: the host's change stream answers at once and then never ends, so
-/// the request is past its limit with the headers already in. That is still
-/// `timeout`, while the same read without a limit is the client's own
-/// `unreachable` (10 s, not waited for here).
-#[tokio::test]
-async fn a_body_that_never_ends_is_a_timeout_too() {
+/// A real host on loopback and a station paired with it, as the tests that
+/// need a connected request (headers in, body never ending) use them.
+struct Live {
+    host: markiro_host::RunningHost,
+    client: PinnedClient,
+    link: std::sync::Arc<markiro_standalone_lib::device::HostLink>,
+    _host_dir: tempfile::TempDir,
+    _app_dir: tempfile::TempDir,
+}
+
+async fn live_host() -> Live {
     let host_dir = tempfile::tempdir().unwrap();
     let app_dir = tempfile::tempdir().unwrap();
     let host = start(
@@ -174,16 +180,33 @@ async fn a_body_that_never_ends_is_a_timeout_too() {
         .clone()
         .expect("a paired device has a link");
     let client = PinnedClient::new(&link.address, &link.fingerprint).unwrap();
+    Live {
+        host,
+        client,
+        link,
+        _host_dir: host_dir,
+        _app_dir: app_dir,
+    }
+}
+
+/// The limit covers reading the body too, not only waiting for the answer's
+/// start: the host's change stream answers at once and then never ends, so
+/// the request is past its limit with the headers already in. That is still
+/// `timeout`, while the same read without a limit is the client's own
+/// `unreachable` (the test below).
+#[tokio::test]
+async fn a_body_that_never_ends_is_a_timeout_too() {
+    let live = live_host().await;
 
     let started = Instant::now();
     let answer = tokio::time::timeout(
         Duration::from_secs(5),
-        client.send_within(
+        live.client.send_within(
             "GET",
             "/v1/changes/stream",
             None,
             Credentials {
-                device_key: Some(link.key()),
+                device_key: Some(live.link.key()),
                 office_token: None,
             },
             Some(Duration::from_millis(300)),
@@ -195,5 +218,37 @@ async fn a_body_that_never_ends_is_a_timeout_too() {
 
     assert_eq!(answer, Err(RequestError::Timeout));
     assert!(elapsed >= Duration::from_millis(300), "{elapsed:?}");
-    host.stop().await.unwrap();
+    live.host.stop().await.unwrap();
+}
+
+/// A connected request with no limit of its own that runs past the client's
+/// 10 s is `unreachable`, not `timeout`: only a caller's limit makes a
+/// timeout, so the screens of stage 1 keep showing "no link". The headers
+/// arrive at once and the body never ends, so the 10 s that ends it is the
+/// client's total limit, not its 2 s to connect. The test waits for it.
+#[tokio::test]
+async fn a_connected_request_past_the_clients_limit_without_a_limit_is_unreachable() {
+    let live = live_host().await;
+
+    let started = Instant::now();
+    let answer = tokio::time::timeout(
+        Duration::from_secs(20),
+        live.client.send_within(
+            "GET",
+            "/v1/changes/stream",
+            None,
+            Credentials {
+                device_key: Some(live.link.key()),
+                office_token: None,
+            },
+            None,
+        ),
+    )
+    .await
+    .expect("the client's own limit ends the request before the test's");
+    let elapsed = started.elapsed();
+
+    assert_eq!(answer, Err(RequestError::Unreachable));
+    assert!(elapsed >= Duration::from_secs(10), "{elapsed:?}");
+    live.host.stop().await.unwrap();
 }

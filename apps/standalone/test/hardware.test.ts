@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it, vi } from "vitest";
 
 import {
@@ -9,8 +11,15 @@ import {
   SCAN_EVENT,
   SCANNER_STATUS_EVENT,
   type PrintTarget,
+  scannerSnapshotSchema,
+  usbPrinterSchema,
   type ScannerSnapshot,
 } from "../src/hardware/hardware.js";
+
+// Bind the module URL before use: the jsdom environment rewrites a literal
+// `new URL(..., import.meta.url)` (see test/protocol.test.ts).
+const moduleUrl = import.meta.url;
+const SHAPES_URL = new URL("../src-tauri/tests/fixtures/hardware-shapes.json", moduleUrl);
 
 type Handler = (event: { payload: unknown }) => void;
 
@@ -67,6 +76,16 @@ describe("the shell's hardware contract", () => {
       "invalid_response",
       "unknown",
     ]);
+  });
+
+  it("reads the shapes the shell's own test pins to the shared fixture", () => {
+    const shapes: { scannerSnapshot: unknown; usbPrinter: unknown } = JSON.parse(
+      readFileSync(SHAPES_URL, "utf8"),
+    );
+    // Both schemas are strict: a field the shell added and the schema lacks
+    // would fail here instead of dropping every status event in the app.
+    expect(scannerSnapshotSchema.parse(shapes.scannerSnapshot)).toEqual(shapes.scannerSnapshot);
+    expect(usbPrinterSchema.parse(shapes.usbPrinter)).toEqual(shapes.usbPrinter);
   });
 });
 

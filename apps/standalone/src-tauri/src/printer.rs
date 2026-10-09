@@ -359,6 +359,8 @@ fn installed_printers() -> Result<Vec<(String, String)>, String> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
+    use std::io::ErrorKind;
     use std::sync::mpsc;
     use std::thread;
 
@@ -728,6 +730,202 @@ mod tests {
         });
         assert_eq!(connected.unwrap(), addresses[1]);
         assert_eq!(tried, [addresses[0], addresses[1]]);
+    }
+
+    /// What one call of the fake writer does; once the script is spent it
+    /// takes everything it is offered.
+    enum Step {
+        Take(usize),
+        Fail(ErrorKind),
+        Zero,
+    }
+
+    /// A writer that follows a script and records what it was offered.
+    #[derive(Default)]
+    struct Script {
+        steps: VecDeque<Step>,
+        accepted: Vec<u8>,
+        offered: Vec<usize>,
+        flush_fails: bool,
+    }
+
+    impl Script {
+        fn of(steps: impl IntoIterator<Item = Step>) -> Self {
+            Self {
+                steps: steps.into_iter().collect(),
+                ..Self::default()
+            }
+        }
+    }
+
+    impl Write for Script {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.offered.push(buf.len());
+            match self.steps.pop_front() {
+                None => {
+                    self.accepted.extend_from_slice(buf);
+                    Ok(buf.len())
+                }
+                Some(Step::Take(count)) => {
+                    let count = count.min(buf.len());
+                    self.accepted.extend_from_slice(&buf[..count]);
+                    Ok(count)
+                }
+                Some(Step::Fail(kind)) => Err(kind.into()),
+                Some(Step::Zero) => Ok(0),
+            }
+        }
+
+        fn flush(&mut self) -> std::io::Result<()> {
+            if self.flush_fails {
+                Err(ErrorKind::BrokenPipe.into())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    const LABEL: &[u8] = b"^XA^FDlabel^FS^XZ";
+
+    /// From the first write on, a failure leaves the label in doubt: TCP and
+    /// COM share this, so a refactor cannot make one of them "safe to reprint".
+    #[test]
+    fn a_write_that_fails_at_once_is_outcome_unknown() {
+        let mut writer = Script::of([Step::Fail(ErrorKind::TimedOut)]);
+        let failure = send_all(&mut writer, LABEL).unwrap_err();
+        assert_eq!(failure.error, PrintError::OutcomeUnknown);
+        assert!(failure.detail.starts_with("write"), "{}", failure.detail);
+        assert!(writer.accepted.is_empty());
+    }
+
+    #[test]
+    fn a_write_that_fails_after_a_partial_write_is_outcome_unknown() {
+        let mut writer = Script::of([Step::Take(3), Step::Fail(ErrorKind::ConnectionReset)]);
+        let failure = send_all(&mut writer, LABEL).unwrap_err();
+        assert_eq!(failure.error, PrintError::OutcomeUnknown);
+        assert!(failure.detail.starts_with("write"), "{}", failure.detail);
+        assert_eq!(writer.accepted, &LABEL[..3]);
+    }
+
+    #[test]
+    fn a_writer_that_takes_no_byte_is_outcome_unknown() {
+        let mut writer = Script::of([Step::Take(2), Step::Zero]);
+        let failure = send_all(&mut writer, LABEL).unwrap_err();
+        assert_eq!(failure.error, PrintError::OutcomeUnknown);
+        assert!(failure.detail.starts_with("write"), "{}", failure.detail);
+        assert_eq!(writer.accepted, &LABEL[..2]);
+    }
+
+    #[test]
+    fn an_interrupted_write_is_retried_not_failed() {
+        let mut writer = Script::of([Step::Fail(ErrorKind::Interrupted), Step::Take(5)]);
+        send_all(&mut writer, LABEL).unwrap();
+        assert_eq!(writer.accepted, LABEL);
+    }
+
+    #[test]
+    fn a_failing_flush_is_outcome_unknown() {
+        let mut writer = Script {
+            flush_fails: true,
+            ..Script::default()
+        };
+        let failure = send_all(&mut writer, LABEL).unwrap_err();
+        assert_eq!(failure.error, PrintError::OutcomeUnknown);
+        assert!(failure.detail.starts_with("flush"), "{}", failure.detail);
+        assert_eq!(writer.accepted, LABEL);
+    }
+
+    /// Each write gets its own wait, so the writer is never offered more than
+    /// one chunk at a time, and the bytes arrive in order, once.
+    #[test]
+    fn a_long_label_goes_out_in_chunks_in_order() {
+        let label: Vec<u8> = (0..150_000u32).map(|i| (i % 251) as u8).collect();
+        let mut writer = Script::default();
+        send_all(&mut writer, &label).unwrap();
+        assert_eq!(writer.accepted, label);
+        assert_eq!(WRITE_CHUNK_BYTES, 64 * 1024);
+        assert_eq!(
+            writer.offered,
+            [WRITE_CHUNK_BYTES, WRITE_CHUNK_BYTES, 18_928]
+        );
+    }
+
+    #[test]
+    fn a_failure_in_a_later_chunk_is_outcome_unknown() {
+        let label = vec![0x5Eu8; 3 * WRITE_CHUNK_BYTES];
+        let mut writer = Script::of([
+            Step::Take(WRITE_CHUNK_BYTES),
+            Step::Take(WRITE_CHUNK_BYTES),
+            Step::Fail(ErrorKind::TimedOut),
+        ]);
+        let failure = send_all(&mut writer, &label).unwrap_err();
+        assert_eq!(failure.error, PrintError::OutcomeUnknown);
+        assert_eq!(writer.accepted.len(), 2 * WRITE_CHUNK_BYTES);
+    }
+
+    /// An address literal needs no lookup, so it never waits for one, whatever
+    /// the budget; a name does, and is `not_sent` once the budget is spent.
+    #[test]
+    fn an_address_literal_resolves_at_once_with_no_budget() {
+        let addresses = resolve("192.0.2.7", 9100, Duration::ZERO).unwrap();
+        assert_eq!(addresses, [SocketAddr::from(([192, 0, 2, 7], 9100))]);
+        let addresses = resolve("::1", 9100, Duration::ZERO).unwrap();
+        assert_eq!(
+            addresses,
+            [SocketAddr::from(([0, 0, 0, 0, 0, 0, 0, 1], 9100))]
+        );
+    }
+
+    #[test]
+    fn a_lookup_that_answers_gives_its_addresses() {
+        let wanted = vec![SocketAddr::from(([192, 0, 2, 9], 9100))];
+        let sent = wanted.clone();
+        let found = resolve_with(Duration::from_secs(5), move || Ok(sent)).unwrap();
+        assert_eq!(found, wanted);
+    }
+
+    #[test]
+    fn a_lookup_that_fails_is_not_sent() {
+        let failure = resolve_with(Duration::from_secs(5), || {
+            Err(std::io::Error::other("no such host"))
+        })
+        .unwrap_err();
+        assert_eq!(failure.error, PrintError::NotSent);
+        assert!(failure.detail.starts_with("resolve"), "{}", failure.detail);
+        assert!(
+            failure.detail.contains("no such host"),
+            "{}",
+            failure.detail
+        );
+    }
+
+    #[test]
+    fn a_lookup_that_dies_is_not_sent() {
+        let failure =
+            resolve_with(Duration::from_secs(5), || panic!("the lookup dies")).unwrap_err();
+        assert_eq!(failure.error, PrintError::NotSent);
+        assert!(failure.detail.starts_with("resolve"), "{}", failure.detail);
+    }
+
+    /// The operating system's resolver may wait ten seconds or more for a
+    /// name in an offline plant; the print does not.
+    #[test]
+    fn a_lookup_that_outlasts_the_budget_is_not_sent_when_the_budget_ends() {
+        let started = Instant::now();
+        let failure = within(|| {
+            resolve_with(Duration::from_millis(200), || {
+                thread::sleep(Duration::from_secs(3));
+                Ok(Vec::new())
+            })
+        })
+        .unwrap_err();
+        let waited = started.elapsed();
+        assert_eq!(failure.error, PrintError::NotSent);
+        assert!(failure.detail.starts_with("resolve"), "{}", failure.detail);
+        assert!(
+            waited >= Duration::from_millis(200) && waited < Duration::from_secs(2),
+            "{waited:?}"
+        );
     }
 
     #[test]
