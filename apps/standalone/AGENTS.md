@@ -384,8 +384,11 @@ with its leading zeros, a role of up to 120 characters and a label of up to
 100, both blank for none. Since plan 2a1 the host also refuses a new number
 that differs from an existing one only by leading zeros (`042` next to
 `0042`, which a keypad mixes up; owner question В13): `conflict` on `login`
-with `similarLogin`, the number in the way, which the office's form shows as
-a taken number. The PIN rule, 4–6 ASCII digits, mirrors the
+with `similarLogin`, the number in the way. The office's form names it under
+the number («Похож на занятый табельный номер 0042: …»; `similarLogin` in
+`src/office/operators/operator-forms.ts`) and puts the cursor there; a
+`similarLogin` equal to the number typed, or one that is no text, or none,
+says the number is taken. The PIN rule, 4–6 ASCII digits, mirrors the
 cloud's (`apps/api/src/modules/operators/dto.ts`): the host never sees a
 PIN. A badge code is what a scanner types: trimmed, 1–256 printable ASCII
 characters, and hashed exactly so. A keyboard-wedge scanner presses keys,
@@ -854,6 +857,17 @@ three states (left out keeps them, `null` is every category, a list is those,
 and a reordered list is a change), and never `null` for a name, a flag or a
 layout, which the host would read as «keep»; `templateDefaultsUpdate` sends
 the whole document.
+The shifts' builders (plan 2a3) follow the same rule: `shiftCreate` sends
+every field, `null` for no plan or no counterparty, and `mode: "aggregation"`
+and `palletsEnabled: false`, so the host's defaults never decide what was
+planned; `shiftUpdate` sends what differs from the loaded shift, with its
+revision, and `null` only to clear the plan or the counterparty (the host reads
+`null` elsewhere as «keep», and the strict `shiftUpdateSchema` refuses it
+there); `shiftClose` sends the reason `closeReasonRule` trimmed, with the
+loaded revision. A shift is read loosely (`officeShiftSchema`), its close
+reason code as text rather than an enum, so a code a newer host adds does not
+fail the list. `HostApi.listShifts` takes an optional period and
+percent-encodes both ends in the query; `deleteShift` answers nothing.
 The older forms (users, the organization, SSCC, sign-in and the own-password
 change) build their bodies inline, field by field, as does the wizard; its
 `templates`, built by `stockTemplates` since plan 1e3, are typed by the strict
@@ -1240,7 +1254,7 @@ kiosk mode shows them on the station.
   asks first and says that stations already on the line stay there: the host
   does not touch devices when a line is archived.
 - «Операторы» is for administrators only: `RequireRole`, and `OFFICE_NAV`
-  shows it to them alone, between «Линии» and «Устройства». It lists every
+  shows it to them alone, between «Смены» and «Устройства». It lists every
   operator, those turned off included: active ones first, each group by
   personnel number as text, as the host orders them (leading zeros are part
   of the number, so no numeric collator), with the role, whether a PIN is
@@ -1377,8 +1391,18 @@ kiosk mode shows them on the station.
   most once a minute and a stream only when it opens. One dialog renames a
   device and sets a station's line, sending only what changed
   (`deviceUpdate`): only an active line can be chosen, and a station's
-  current line stays on the list even when archived. A revoked device is a
-  dead record and offers no controls; revoking asks first, names the device
+  current line stays on the list even when archived. A station that works on
+  an active shift may be moved all the same (owner question В9, option А;
+  nothing refuses it): the dialog reads `GET /v1/office/shifts` when it opens,
+  for a station only, finds the active shift the station opened
+  (`stationShift`: `ownerDeviceId`), and once another line is chosen, an
+  empty one included, says in a live region that the station finishes its
+  work, signs the operator out and shows the new line's shifts, and that the
+  shift stays open, to be closed on «Смены». The sentence promises what the
+  station does from plan 2a5 on (decision 28), and it speaks of the new line's
+  shifts also when none is chosen. When the shifts do not load the dialog is
+  silent: no warning, no alert, and the station still moves. A revoked device
+  is a dead record and offers no controls; revoking asks first, names the device
   and says it cannot be undone, then the list is read again. The row of this
   PC — the device the office runs on, whose `deviceId` `App` passes into
   `Office` (`useThisDeviceId`) — is marked «Этот ПК», and revoking it asks
@@ -1674,6 +1698,90 @@ kiosk mode shows them on the station.
   умолчание категории». `stale_revision` offers «Загрузить заново» in words of
   its own, since a change of the organization's profile moves the document's
   revision too, and the reload drops the edits.
+- «Смены» (plan 2a3; section «Производство», after «Линии») lists what
+  `GET /v1/office/shifts` sends, in the host's order (newest production date
+  first); both roles read it. A row shows the number, the production date
+  (`08.10.2026`), the line, the product with «для: …» and the counterparty
+  under it, the mode as a word on a category tag (the cloud's tones:
+  aggregation teal, validation violet), the plan («—» for none; thousands
+  apart, `Intl.NumberFormat("ru")`) and the status as a phase (a closed shift
+  as done). It shows the plan, not units accepted: the list carries no totals,
+  and the «Итоги» window is the last task of plan 2a3, which waits for plan
+  2a2's contract (`totals` in `GET /v1/office/shifts/{id}`) and does not exist
+  yet. A shift carries ids, so the page names them from `listProducts`,
+  `listLines` and `listCounterparties`, an archived record marked «(в архиве)»,
+  and one a list lacks or that did not load by the first eight characters of
+  its id («Товар 5e6f7081…»). A lookup that fails leaves the list in place with
+  one warning and «Повторить», which reads again only what failed; the retry
+  of a failed list of shifts reads the failed lookups too.
+- A planned shift a station will refuse to open is marked from the page's own
+  lists (`openBlocker`, `src/office/shifts/shift-list.ts`): its product
+  archived or a draft (`product_inactive`), or its template switched off,
+  narrowed or of another group (`template_not_fit`, by `templateFitsSlot` for
+  the product's group). While a list it needs is not loaded, or lacks the
+  record, nothing is claimed; an archived line does not stop an opening and is
+  not marked. A closed shift says why: the office's words («Закрыта в офисе:
+  …») or a station's code in words («Причина расхождения: …»; a code a newer
+  host adds is shown as it is); late data is an attention tag.
+- The search (number or product name as the list shows it, without case), the
+  status and line filters and the pages of 25 (`SHIFT_PAGE_SIZE`, the shared
+  `OfficePager`, which «Товары» uses too) work in the page; a new search or
+  filter goes back to the first page. Without a period the page shows the
+  host's own list and says what it holds. Two date fields (`@markiro/ui`'s
+  `DatePicker`) ask for a period of production dates, both ends included, and
+  a request goes only once both are set (`periodState`): the period does not
+  end before it starts and is at most 366 days (`MAX_PERIOD_DAYS`), which
+  bounds what one request reads. While the period is half set or wrong the
+  list shown stays and a note or an error under the second field says why.
+- Both roles plan and change shifts (`useCan("planShifts")`). «Запланировать
+  смену» opens a dialog that waits for the organization's profile and starts
+  the production date as today in its time zone (`civilToday`); when the
+  profile does not load, or names a zone this PC does not know
+  (`isKnownTimeZone`), the date is this PC's and the field says so. The
+  product offers what is in use (active, not archived) by name with its GTIN,
+  and choosing one sets the box capacity and the template from it
+  (`suggestBoxTemplate`: the product's preference, the category's box default,
+  the organization's, the first that fits; none, and the person chooses); it
+  also clears an earlier refusal of those two fields. The template offers what
+  fits the product's group and has no «Не выбран»; the line offers active
+  lines; the counterparty is optional. While a write is on its way every
+  control of the dialog is off. A refused field takes the focus, the first in
+  the form's order (`SHIFT_FIELD_ORDER`), the selects and the date included.
+  A record refused on a select (`product_inactive`, `validation_failed` on
+  `lineId`, `boxTemplateId`, `counterpartyId`, `productId`) goes under it, and
+  that record's list is read again, so the choice no longer offers it or shows
+  it marked; a lost answer to a create reads the lists of shifts again, since
+  the host may have planned the shift.
+- A row's actions follow its status. A planned shift has «Изменить»: the same
+  dialog on the shift's own values, the product shown as text because it never
+  changes, its own line, counterparty and template kept as marked choices when
+  archived, switched off or narrowed, and only what differs sent
+  (`shiftUpdate`); an edit that changes nothing closes the dialog and sends
+  nothing, and a refusal on `productId`, which this dialog has no control for,
+  is the dialog's alert. A planned shift also has «Удалить» (asks first,
+  `destructive`; a `not_found` is taken as deleted). An active shift has
+  «Изменить план» (the plan alone, blank clears it) and «Закрыть»
+  (`destructive`): a reason of 3–500 characters counted in code points as the
+  host counts them (`closeReasonRule`), sent trimmed with the loaded revision;
+  a line break is a control character, so the field says
+  `rules.controlCharacter` and nothing is sent. A closed shift has no action.
+- Every write sends the opened row's revision, and a saved write says so and
+  reads every list of shifts again (`officeKeys.shifts`, whatever the period).
+  `stale_revision` offers «Загрузить заново», which closes the dialog and reads
+  the list again. A shift opened, closed or deleted meanwhile (`shift_status`
+  with its `details.status`, `not_found`) is an alert in words of its own
+  (`shiftWriteFailure`; a create's `not_found` is not one of these), the list is
+  read again behind the dialog, and the save button stays off, since a resend
+  would be refused the same way, until «Загрузить заново» closes the dialog.
+- Known gaps of the page, not closed by plan 2a3: while the products list has
+  not loaded the search matches the placeholder «Товар …»; when the template
+  defaults fail to load, the new-shift dialog says nothing and the template
+  stays «Выберите шаблон»; after a refusal on a select the refused id stays in
+  the form value until the person chooses again; a lost answer to a delete or
+  a close does not read the list again; the calendar of `DatePicker` is
+  portalled out of the dialog, so Tab from its last button leaves the dialog
+  (Escape is held back in `ShiftDialog` by `keepCalendarEscape`, a workaround:
+  the cause is `@markiro/ui`'s `Modal`, and `packages/*` is not this plan's).
 
 ## Shifts
 
@@ -1710,7 +1818,9 @@ included; newest production date first. A shift is no feed record, but every
 change of one takes a host revision, stamped on its `rev`, with no feed item,
 so open streams wake and stations read their shifts again. `OfficeShift`
 carries ids, not names: the office names products, lines and counterparties
-from its own lists.
+from its own lists. The office's page is «Смены» (plan 2a3, «Office pages»);
+it bounds a period to 366 days, since the host's list has no paging and one
+request reads the whole period.
 
 An edit (`PUT …/{id}`, with `expectedRev`) changes only what it sends: a
 planned shift every field but its product, which is no field of the request;
@@ -1797,7 +1907,11 @@ meets `stale_revision`. The same `requestId` of the same station answers the
 same block, even after others were issued. The device is read again inside the
 write transaction (a station revoked while the request waited gets 401). A
 block's use (`consumed_through`) comes with the facts of plan 2a2; revoking
-blocks and showing them per device with plan 2b.
+blocks and showing them per device with plan 2b. A counter the last block
+moved past its last serial (`nextSerial` above `maxSerial`) shows on the
+office's «SSCC» page, a box counter and a pallet counter alike, as «Номера
+закончились», with no change offered: no number could be valid there
+(`isExhausted`, `src/office/sscc/counter-kind.ts`).
 
 ## Marking rules
 
@@ -1894,3 +2008,19 @@ alone (`standalone: enter_lockdown failed`), never by what the shell answered.
   - the layout of the name-search step and of the status bar, and the 64 px
     controls, on the real screen and touch panel (and the Windows on-screen
     keyboard for typing a name).
+- The office's «Смены» and the three small items of plan 2a3 («Номера
+  закончились», the similar personnel number, the warning in «Устройства»)
+  have run only under jsdom, against a fake `HostApi` and fixture shifts; no
+  WebView2, no real host and no browser has shown them. Never run: the
+  `DatePicker` calendar inside a dialog in WebView2 and in the locked window
+  (Tab from the calendar leaves the dialog until `@markiro/ui`'s `Modal` is
+  fixed, and Escape is held back only by `keepCalendarEscape`); the
+  organization's time zone of a real profile for «today» and a zone the PC's
+  ICU lacks (`isKnownTimeZone`); `Intl` output in WebView2 against Node's
+  (the no-break space in «1 200», `toLocaleLowerCase("ru")` in the search, the
+  `ru` collator behind the name order); a shift planned in the office and
+  opened by a real station (the station's side is plan 2a5); a station moved
+  to another line while it works on a shift (the dialog's sentence describes
+  what plan 2a5 builds); and the list against a host with months of shifts or
+  a period of 366 days. The «Итоги» window is not built (plan 2a3, last task,
+  after plan 2a2).
