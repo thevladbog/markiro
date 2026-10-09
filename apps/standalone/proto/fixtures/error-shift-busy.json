@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "conflict",
+    "message": "another station works on this shift",
+    "details": { "constraint": "shift_busy" }
+  }
+}

@@ -501,6 +501,340 @@ async fn a_station_create_follows_the_plan_rules_on_its_own_line() {
     assert_eq!(host_revision(&admin.app).await, revision + 1);
 }
 
+/// `POST /v1/device/shifts/{id}/enter` with `key`.
+async fn enter(admin: &Admin, key: &str, shift: &Value) -> (StatusCode, Value) {
+    let path = format!("/v1/device/shifts/{}/enter", shift["id"].as_str().unwrap());
+    device_call(admin, key, "POST", &path, None).await
+}
+
+/// The participants of a shift, as `(device, first entry, last entry)`.
+async fn participants(admin: &Admin, shift: &Value) -> Vec<(String, String, String)> {
+    sqlx::query_as(
+        "SELECT device_id, first_entered_at, last_entered_at FROM shift_participants \
+         WHERE shift_id = ? ORDER BY device_id",
+    )
+    .bind(shift["id"].as_str().unwrap())
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn entering_a_planned_shift_opens_it_and_freezes_its_snapshot() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let station = device_id(&admin, &admin.key).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let (status, berth) = admin
+        .call(
+            "POST",
+            "/v1/office/counterparties",
+            Some(json!({ "name": "ООО «Северный берег»", "gln": "4601234000017", "gs1Prefixes": [] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{berth}");
+    let mut body = shift_body(&setup);
+    body["counterpartyId"] = berth["id"].clone();
+    let shift = plan_shift(&admin, body).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    let opened_at = admin.app.state.timestamp();
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    let snapshot = json!({
+        "product": {
+            "id": setup.product, "gtin14": "04600682000013", "name": "Молоко 3,2% 0,9 л",
+            "printName": "Молоко 3,2%", "chzProductGroupCode": 8, "shelfLifeDays": 10
+        },
+        "boxTemplate": {
+            "id": setup.template, "name": "Короб 58×40", "rev": 2,
+            "spec": { "widthMm": 58, "heightMm": 40, "dpi": 203, "language": "zpl", "elements": [] }
+        },
+        "issuerPrefix": "460068200",
+        "counterpartyName": "ООО «Северный берег»"
+    });
+    let mut expected = device_shift(&id, "OCT26-001", &setup);
+    for (key, value) in [
+        ("status", json!("active")),
+        ("counterpartyName", json!("ООО «Северный берег»")),
+        ("ownerDeviceId", json!(station)),
+        ("openedAt", json!(opened_at)),
+        ("snapshot", snapshot.clone()),
+    ] {
+        expected[key] = value;
+    }
+    assert_eq!(entered, expected);
+    // The wizard, the template, the product, the counterparty, the plan and
+    // the opening each took a revision.
+    assert_eq!(host_revision(&admin.app).await, 6);
+    assert_eq!(
+        audit_trail(&admin.app, "shift.open").await,
+        vec![device_row(
+            &station,
+            "shift.open",
+            &id,
+            json!({ "number": "OCT26-001", "templateId": setup.template, "templateRev": 2 })
+        )]
+    );
+    assert_eq!(
+        participants(&admin, &shift).await,
+        vec![(station.clone(), opened_at.clone(), opened_at.clone())]
+    );
+    let (status, office) = admin
+        .call("GET", &format!("/v1/office/shifts/{id}"), None)
+        .await;
+    assert_eq!(
+        (
+            status,
+            office["status"].clone(),
+            office["ownerDeviceId"].clone(),
+            office["openedAt"].clone(),
+            office["rev"].clone()
+        ),
+        (
+            StatusCode::OK,
+            json!("active"),
+            json!(station),
+            json!(opened_at),
+            json!(6)
+        )
+    );
+
+    // The catalog, the template, the counterparty and the GLN change; the
+    // shift keeps what it froze.
+    let (status, product) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/products/{}", setup.product),
+            Some(json!({
+                "gtin14": "04600682000013", "name": "Молоко 2,5%", "chzProductGroupCode": 8,
+                "boxCapacity": 12, "palletBoxCapacity": 40, "archived": false, "expectedRev": 3
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{product}");
+    let (status, template) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/templates/{}", setup.template),
+            Some(json!({ "spec": { "widthMm": 100 }, "expectedRev": 2 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{template}");
+    let (status, org) = admin.call("GET", "/v1/office/org", None).await;
+    assert_eq!(status, StatusCode::OK, "{org}");
+    let (status, moved) = admin
+        .call(
+            "PUT",
+            "/v1/office/org",
+            Some(json!({
+                "name": org["name"], "inn": org["inn"], "gln": "4601234000017",
+                "gs1Prefixes": org["gs1Prefixes"], "timeZone": org["timeZone"],
+                "expectedRev": org["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    admin.app.clock.advance(time::Duration::minutes(5));
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let (status, again) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(
+        (status, again["snapshot"].clone()),
+        (StatusCode::OK, snapshot)
+    );
+    assert_eq!(again["productName"], "Молоко 3,2% 0,9 л");
+    // Entering again takes no revision and writes no row; it marks the
+    // entry.
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(
+        participants(&admin, &shift).await,
+        vec![(station, opened_at, admin.app.state.timestamp())]
+    );
+}
+
+#[tokio::test]
+async fn a_shift_takes_one_station_of_its_line_and_never_opens_once_closed() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let station = device_id(&admin, &admin.key).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let (_, colleague) = pair_device(&admin.app, "station").await;
+    select_line(&admin, &colleague, &setup.line).await;
+    let (_, elsewhere) = pair_device(&admin.app, "station").await;
+    select_line(&admin, &elsewhere, &setup.other_line).await;
+    let (_, unassigned) = pair_device(&admin.app, "station").await;
+    let (_, office_pc) = pair_device(&admin.app, "office").await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let conflict = |constraint: &str| {
+        (
+            StatusCode::CONFLICT,
+            json!({ "code": "conflict", "constraint": constraint }),
+        )
+    };
+    let try_enter = |key: String| {
+        let admin = &admin;
+        let shift = &shift;
+        async move {
+            let (status, body) = enter(admin, &key, shift).await;
+            (
+                status,
+                json!({
+                    "code": body["error"]["code"],
+                    "constraint": body["error"]["details"]["constraint"]
+                }),
+            )
+        }
+    };
+    // Another line, or none, never opens it.
+    assert_eq!(try_enter(elsewhere.clone()).await, conflict("shift_line"));
+    assert_eq!(try_enter(unassigned).await, conflict("shift_line"));
+    let (status, refused) = enter(&admin, &office_pc, &shift).await;
+    assert_eq!(
+        (status, refused["error"]["code"].clone()),
+        (StatusCode::FORBIDDEN, json!("forbidden"))
+    );
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    // Once one station opened it, another of the line is refused.
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    assert_eq!(try_enter(colleague.clone()).await, conflict("shift_busy"));
+    assert_eq!(
+        participants(&admin, &shift)
+            .await
+            .into_iter()
+            .map(|(device, _, _)| device)
+            .collect::<Vec<_>>(),
+        vec![station.clone()]
+    );
+    // A closed shift opens for nobody, its own station included.
+    sqlx::query(
+        "UPDATE shifts SET status = 'closed', closed_at = ?, closed_by_kind = 'device', \
+         closed_by = ? WHERE id = ?",
+    )
+    .bind(admin.app.state.timestamp())
+    .bind(&station)
+    .bind(shift["id"].as_str().unwrap())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    for key in [admin.key.clone(), colleague] {
+        let (status, body) = enter(&admin, &key, &shift).await;
+        assert_eq!(
+            (status, body["error"]["details"].clone()),
+            (
+                StatusCode::CONFLICT,
+                json!({ "constraint": "shift_status", "status": "closed" })
+            )
+        );
+    }
+    let (status, missing) = enter(&admin, &admin.key, &json!({ "id": "no-such-shift" })).await;
+    assert_eq!(
+        (status, missing["error"]["code"].clone()),
+        (StatusCode::NOT_FOUND, json!("not_found"))
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+#[tokio::test]
+async fn a_plan_that_no_longer_fits_its_product_or_template_does_not_open() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let product_path = format!("/v1/office/products/{}", setup.product);
+    let product = |archived: bool, pallet: Value, rev: i64| {
+        json!({
+            "gtin14": "04600682000013", "name": "Молоко 3,2% 0,9 л", "chzProductGroupCode": 8,
+            "boxCapacity": 12, "palletBoxCapacity": pallet, "archived": archived,
+            "expectedRev": rev
+        })
+    };
+    let template_path = format!("/v1/office/templates/{}", setup.template);
+    let refused = |constraint: &str| json!({ "constraint": constraint });
+    let attempt = || async {
+        let (status, body) = enter(&admin, &admin.key, &shift).await;
+        (status, body["error"]["details"].clone())
+    };
+    // The product archived, then a draft (no pallet capacity).
+    let (status, _) = admin
+        .call("PUT", &product_path, Some(product(true, json!(40), 3)))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        attempt().await,
+        (StatusCode::CONFLICT, refused("product_inactive"))
+    );
+    let (status, _) = admin
+        .call("PUT", &product_path, Some(product(false, Value::Null, 5)))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        attempt().await,
+        (StatusCode::CONFLICT, refused("product_inactive"))
+    );
+    let (status, _) = admin
+        .call("PUT", &product_path, Some(product(false, json!(40), 6)))
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    // The template disabled, then narrowed to beer.
+    let (status, _) = admin
+        .call(
+            "PUT",
+            &template_path,
+            Some(json!({ "enabled": false, "expectedRev": 2 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(
+        attempt().await,
+        (StatusCode::CONFLICT, refused("template_not_fit"))
+    );
+    let (status, _) = admin
+        .call(
+            "PUT",
+            &template_path,
+            Some(json!({ "enabled": true, "chzProductGroupCodes": [15], "expectedRev": 8 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let revision = host_revision(&admin.app).await;
+    assert_eq!(
+        attempt().await,
+        (StatusCode::CONFLICT, refused("template_not_fit"))
+    );
+    // Nothing opened: the plan waits, and no revision was taken.
+    let (_, office) = admin
+        .call(
+            "GET",
+            &format!("/v1/office/shifts/{}", shift["id"].as_str().unwrap()),
+            None,
+        )
+        .await;
+    assert_eq!(
+        (office["status"].clone(), office["ownerDeviceId"].clone()),
+        (json!("planned"), Value::Null)
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert!(participants(&admin, &shift).await.is_empty());
+    // Widened again, it opens.
+    let (status, _) = admin
+        .call(
+            "PUT",
+            &template_path,
+            Some(json!({ "chzProductGroupCodes": null, "expectedRev": 9 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(
+        (status, entered["status"].clone()),
+        (StatusCode::OK, json!("active"))
+    );
+}
+
 #[tokio::test]
 async fn a_station_create_takes_every_field_it_names() {
     let admin = admin().await;
@@ -541,4 +875,253 @@ async fn a_station_create_takes_every_field_it_names() {
     assert_eq!(status, StatusCode::OK, "{office}");
     assert_eq!(office["counterpartyId"], counterparty["id"]);
     assert_eq!(office["lineId"], json!(setup.line));
+}
+
+/// The status and `details` of an entry that is refused.
+async fn refused_entry(admin: &Admin, key: &str, shift: &Value) -> (StatusCode, Value) {
+    let (status, body) = enter(admin, key, shift).await;
+    (status, body["error"]["details"].clone())
+}
+
+/// Archive or restore the shift's product (it is a complete, active product
+/// otherwise); returns its new revision.
+async fn archive_product(admin: &Admin, setup: &ShiftSetup, archived: bool, rev: i64) -> i64 {
+    let (status, product) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/products/{}", setup.product),
+            Some(json!({
+                "gtin14": "04600682000013", "name": "Молоко 3,2% 0,9 л",
+                "printName": "Молоко 3,2%", "chzProductGroupCode": 8, "boxCapacity": 12,
+                "palletBoxCapacity": 40, "shelfLifeDays": 10, "archived": archived,
+                "expectedRev": rev
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{product}");
+    product["rev"].as_i64().unwrap()
+}
+
+/// Change the shift's template with `patch` (and its `expectedRev`); returns
+/// its new revision.
+async fn patch_template(admin: &Admin, setup: &ShiftSetup, mut patch: Value, rev: i64) -> i64 {
+    patch["expectedRev"] = json!(rev);
+    let (status, template) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/templates/{}", setup.template),
+            Some(patch),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{template}");
+    template["rev"].as_i64().unwrap()
+}
+
+#[tokio::test]
+async fn an_entry_names_the_first_rule_it_breaks_and_the_owner_keeps_its_shift() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let station = device_id(&admin, &admin.key).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let (_, colleague) = pair_device(&admin.app, "station").await;
+    select_line(&admin, &colleague, &setup.line).await;
+    let (_, elsewhere) = pair_device(&admin.app, "station").await;
+    select_line(&admin, &elsewhere, &setup.other_line).await;
+    let (_, unassigned) = pair_device(&admin.app, "station").await;
+    let handheld = pair_handheld(&admin).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let busy = (StatusCode::CONFLICT, json!({ "constraint": "shift_busy" }));
+    let line = (StatusCode::CONFLICT, json!({ "constraint": "shift_line" }));
+    let mut product_rev = archive_product(&admin, &setup, true, 3).await;
+    let mut template_rev = patch_template(&admin, &setup, json!({ "enabled": false }), 2).await;
+    // The line is checked before the plan; the product before the template
+    // (both are broken here).
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    // Only a station enters, whatever its line (a handheld has none).
+    let (status, refused) = enter(&admin, &handheld, &shift).await;
+    assert_eq!(
+        (status, refused["error"]["code"].clone()),
+        (StatusCode::FORBIDDEN, json!("forbidden"))
+    );
+    assert_eq!(refused_entry(&admin, &elsewhere, &shift).await, line);
+    assert_eq!(refused_entry(&admin, &unassigned, &shift).await, line);
+    assert_eq!(
+        refused_entry(&admin, &admin.key, &shift).await,
+        (
+            StatusCode::CONFLICT,
+            json!({ "constraint": "product_inactive" })
+        )
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    product_rev = archive_product(&admin, &setup, false, product_rev).await;
+    template_rev = patch_template(&admin, &setup, json!({ "enabled": true }), template_rev).await;
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    // The station's list does not carry the snapshot.
+    let (status, listed) = device_call(&admin, &admin.key, "GET", "/v1/device/shifts", None).await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["shifts"][0]["status"], "active");
+    assert!(listed["shifts"][0].get("snapshot").is_none(), "{listed}");
+
+    // The plan breaks now; a shift another station opened is busy before the
+    // plan is looked at, the line before busy.
+    archive_product(&admin, &setup, true, product_rev).await;
+    patch_template(&admin, &setup, json!({ "enabled": false }), template_rev).await;
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    assert_eq!(refused_entry(&admin, &colleague, &shift).await, busy);
+    assert_eq!(refused_entry(&admin, &elsewhere, &shift).await, line);
+    assert_eq!(refused_entry(&admin, &unassigned, &shift).await, line);
+    // The owner enters again and gets what it froze: a product archived or
+    // a template disabled since does not take the shift from a running line.
+    let (status, again) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{again}");
+    assert_eq!(again, entered);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(
+        participants(&admin, &shift)
+            .await
+            .into_iter()
+            .map(|(device, _, _)| device)
+            .collect::<Vec<_>>(),
+        vec![station.clone()]
+    );
+    // The owner's own station moved to another line no longer enters.
+    select_line(&admin, &admin.key, &setup.other_line).await;
+    assert_eq!(refused_entry(&admin, &admin.key, &shift).await, line);
+    // Closed, the shift opens for nobody; the status comes first, whatever
+    // line the station is on.
+    close_directly(&admin, &shift, &station).await;
+    let closed = (
+        StatusCode::CONFLICT,
+        json!({ "constraint": "shift_status", "status": "closed" }),
+    );
+    for key in [&admin.key, &colleague, &elsewhere, &unassigned] {
+        assert_eq!(refused_entry(&admin, key, &shift).await, closed);
+    }
+}
+
+#[tokio::test]
+async fn a_station_shift_without_a_counterparty_opens_on_a_template_that_names_its_group() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let station = device_id(&admin, &admin.key).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let template_rev = patch_template(
+        &admin,
+        &setup,
+        json!({ "chzProductGroupCodes": [15, 8] }),
+        2,
+    )
+    .await;
+    let (status, created) = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/shifts",
+        Some(device_create(&setup, REQUEST)),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let (status, entered) = enter(&admin, &admin.key, &created).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert_eq!(entered["status"], "active");
+    assert_eq!(entered["createdFrom"], "station");
+    assert_eq!(entered["counterpartyName"], Value::Null);
+    assert_eq!(
+        entered["snapshot"],
+        json!({
+            "product": {
+                "id": setup.product, "gtin14": "04600682000013", "name": "Молоко 3,2% 0,9 л",
+                "printName": "Молоко 3,2%", "chzProductGroupCode": 8, "shelfLifeDays": 10
+            },
+            "boxTemplate": {
+                "id": setup.template, "name": "Короб 58×40", "rev": template_rev,
+                "spec": { "widthMm": 58, "heightMm": 40, "dpi": 203, "language": "zpl", "elements": [] }
+            },
+            "issuerPrefix": "460068200",
+            "counterpartyName": null
+        })
+    );
+    // The number of a shift a station made keeps its `/S` in the audit row.
+    assert_eq!(
+        audit_trail(&admin.app, "shift.open").await,
+        vec![device_row(
+            &station,
+            "shift.open",
+            created["id"].as_str().unwrap(),
+            json!({
+                "number": "OCT26-001/S", "templateId": setup.template,
+                "templateRev": template_rev
+            })
+        )]
+    );
+}
+
+#[tokio::test]
+async fn a_template_deleted_behind_the_plan_does_not_open_it() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    // The office refuses to delete a template a planned shift names
+    // (`template_in_use`); a template gone anyway is a plan that no longer
+    // fits, not a server error.
+    sqlx::query("DELETE FROM label_templates WHERE id = ?")
+        .bind(&setup.template)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        refused_entry(&admin, &admin.key, &shift).await,
+        (
+            StatusCode::CONFLICT,
+            json!({ "constraint": "template_not_fit" })
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_layout_of_the_largest_size_is_frozen_whole() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    // The most a template stores (256 KB once compact).
+    let spec = json!({ "f": "я".repeat((262_144 - 8) / 2) });
+    assert_eq!(serde_json::to_string(&spec).unwrap().len(), 262_144);
+    patch_template(&admin, &setup, json!({ "spec": spec }), 2).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{}", entered["error"]);
+    assert_eq!(entered["snapshot"]["boxTemplate"]["spec"], spec);
+    let (status, again) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!((status, again), (StatusCode::OK, entered));
+}
+
+#[tokio::test]
+async fn two_stations_entering_together_leave_one_owner() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let (_, colleague) = pair_device(&admin.app, "station").await;
+    select_line(&admin, &colleague, &setup.line).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let (first, second) = tokio::join!(
+        enter(&admin, &admin.key, &shift),
+        enter(&admin, &colleague, &shift)
+    );
+    let mut statuses = [first.0, second.0];
+    statuses.sort();
+    assert_eq!(statuses, [StatusCode::OK, StatusCode::CONFLICT]);
+    let loser = if first.0 == StatusCode::OK {
+        second
+    } else {
+        first
+    };
+    assert_eq!(loser.1["error"]["details"]["constraint"], "shift_busy");
+    assert_eq!(participants(&admin, &shift).await.len(), 1);
+    assert_eq!(audit_trail(&admin.app, "shift.open").await.len(), 1);
 }

@@ -42,6 +42,8 @@ pub mod actions {
     pub const SHIFT_CREATE: &str = "shift.create";
     pub const SHIFT_UPDATE: &str = "shift.update";
     pub const SHIFT_DELETE: &str = "shift.delete";
+    /// A station opened a planned shift: its snapshot is frozen.
+    pub const SHIFT_OPEN: &str = "shift.open";
 }
 
 /// `details.reason` of a denied row: every denial names one.

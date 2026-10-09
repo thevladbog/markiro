@@ -765,3 +765,51 @@ fn device_shift_fixtures_round_trip_and_a_station_names_no_line() {
     value.as_object_mut().unwrap().remove("requestId");
     assert!(serde_json::from_value::<DeviceShiftCreate>(value).is_err());
 }
+
+#[test]
+fn an_entered_shift_carries_its_snapshot_and_the_list_never_does() {
+    let entered: DeviceShift = round_trip("device-shift-entered.json");
+    let snapshot = entered
+        .snapshot
+        .clone()
+        .expect("an entry carries the snapshot");
+    // The snapshot is the product and the template as the office had them.
+    let product: OfficeProduct = serde_json::from_value(fixture("office-product.json")).unwrap();
+    let template: LabelTemplate = serde_json::from_value(fixture("label-template.json")).unwrap();
+    assert_eq!(
+        (
+            &snapshot.product.id,
+            &snapshot.product.gtin14,
+            &snapshot.product.print_name
+        ),
+        (&product.id, &product.gtin14, &product.print_name)
+    );
+    assert_eq!(
+        (
+            &snapshot.box_template.id,
+            snapshot.box_template.rev,
+            &snapshot.box_template.spec
+        ),
+        (&template.id, template.rev, &template.spec)
+    );
+    let state: SsccState = serde_json::from_value(fixture("sscc-state.json")).unwrap();
+    assert_eq!(snapshot.issuer_prefix, state.current_issuer_prefix);
+    // The same shift in the list, without the snapshot.
+    let list: DeviceShifts = serde_json::from_value(fixture("device-shifts.json")).unwrap();
+    assert_eq!(
+        DeviceShift {
+            snapshot: None,
+            ..entered
+        },
+        list.shifts[0]
+    );
+    assert!(list.shifts.iter().all(|shift| shift.snapshot.is_none()));
+    let busy: ErrorBody = round_trip("error-shift-busy.json");
+    assert_eq!(
+        (
+            busy.error.code.as_str(),
+            busy.error.details.expect("details")["constraint"].as_str()
+        ),
+        (codes::CONFLICT, Some("shift_busy"))
+    );
+}

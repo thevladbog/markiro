@@ -1748,6 +1748,24 @@ tombstones, so a retry after the office deleted it plans a new shift. Every
 device route of stage 2a lives under `/v1/device/…`, which `host_request`
 already lets through, and none returns a secret.
 
+A station on the shift's line enters it (`POST /v1/device/shifts/{id}/enter`).
+A planned shift opens: the host checks its product (`product_inactive`) and
+its template (`template_not_fit`) again, freezes the snapshot
+(`ShiftSnapshot`: the product's id, GTIN, names, group and shelf life; the box
+template's id, name, revision and whole layout; the issuer prefix of the
+organization's GLN; the counterparty's name), makes the station the shift's
+owner, adds it to `shift_participants` and takes a revision, so the line's
+other stations see the shift busy. The owner enters again with no revision and
+gets the same snapshot back, so a station that lost its database recovers it;
+a change of the catalog, the template or the GLN never changes it. A closed
+shift is `shift_status` for every station, a shift of another line (or a
+station without one) `shift_line`, a shift another station opened
+`shift_busy`: stage 2a puts one device on a shift. The snapshot is at most
+320 KB (a `CHECK` of `0009`), and the host never checks its layout: the station
+does, with `labelTemplateSpecSchema`, when it enters. The opening writes
+`shift.open`; a second device's first entry (`shift.enter`) comes with plan
+2b, since in stage 2a a station's first entry is the opening.
+
 ## Marking rules
 
 GS1, KM, SSCC and label rules stay in `@markiro/domain`; the host stores and

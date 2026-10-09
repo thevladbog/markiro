@@ -1421,6 +1421,49 @@ pub struct DeviceShift {
     pub owner_device_id: Option<String>,
     pub opened_at: Option<String>,
     pub closed_at: Option<String>,
+    /// What the shift froze when it opened: only in the answer of
+    /// `POST /v1/device/shifts/{id}/enter`, never in the list.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snapshot: Option<ShiftSnapshot>,
+}
+
+/// What a shift freezes when a station opens it (stage 2a spec §4.2): the
+/// station prints and reprints from this alone, so a change of the catalog,
+/// the template or the organization's GLN never changes a shift that runs.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftSnapshot {
+    pub product: ShiftSnapshotProduct,
+    pub box_template: ShiftSnapshotTemplate,
+    /// The SSCC issuer prefix of the organization's GLN when the shift
+    /// opened: the station asks for blocks of it.
+    pub issuer_prefix: String,
+    pub counterparty_name: Option<String>,
+}
+
+/// The product as a shift froze it; only an active product opens a shift,
+/// so it has a group.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftSnapshotProduct {
+    pub id: String,
+    pub gtin14: String,
+    pub name: String,
+    pub print_name: Option<String>,
+    pub chz_product_group_code: u32,
+    pub shelf_life_days: Option<u32>,
+}
+
+/// The box template as a shift froze it, its layout whole. The host never
+/// checks a layout; the station checks it with `labelTemplateSpecSchema`
+/// when it enters the shift.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftSnapshotTemplate {
+    pub id: String,
+    pub name: String,
+    pub rev: i64,
+    pub spec: serde_json::Value,
 }
 
 /// `GET /v1/device/shifts`: the planned and active shifts of the station's

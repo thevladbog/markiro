@@ -6,7 +6,10 @@
 //! both must answer alike; `host/tests/shift_numbers.rs` and the webview's
 //! `test/shift-numbers.test.ts` read every one.
 
-use markiro_proto::{ProductStatus, ShiftMode, ShiftOrigin, ShiftStatus, TemplatePurpose};
+use markiro_proto::{
+    ProductStatus, ShiftMode, ShiftOrigin, ShiftSnapshot, ShiftSnapshotProduct,
+    ShiftSnapshotTemplate, ShiftStatus, TemplatePurpose,
+};
 use serde_json::json;
 use sqlx::SqliteConnection;
 
@@ -225,4 +228,98 @@ pub fn civil_text(date: time::Date) -> String {
         u8::from(date.month()),
         date.day()
     )
+}
+
+/// `conflict` on `shift_busy`: another station entered the shift (stage 2a
+/// puts one device on a shift).
+pub fn busy() -> ApiError {
+    ApiError::conflict("shift_busy", "another station works on this shift")
+}
+
+/// `conflict` on `template_not_fit`: the planned shift's box template is
+/// disabled now, or no longer covers the product's group.
+pub fn template_not_fit() -> ApiError {
+    ApiError::conflict(
+        "template_not_fit",
+        "the shift's box template no longer fits its product",
+    )
+}
+
+/// The snapshot a planned shift freezes when a station opens it: its product
+/// (still active and not archived, or `product_inactive`), its box template
+/// (still enabled and covering the product's group, or `template_not_fit`)
+/// with the whole layout, the issuer prefix of the organization's current
+/// GLN, and the counterparty's name.
+pub async fn snapshot(
+    conn: &mut SqliteConnection,
+    product_id: &str,
+    template_id: &str,
+    counterparty_id: Option<&str>,
+) -> Result<ShiftSnapshot, ApiError> {
+    type ProductRow = (
+        String,
+        String,
+        Option<String>,
+        Option<u32>,
+        Option<u32>,
+        String,
+        bool,
+    );
+    let product: Option<ProductRow> = sqlx::query_as(
+        "SELECT gtin14, name, print_name, chz_group_code, shelf_life_days, status, archived \
+         FROM products WHERE id = ?",
+    )
+    .bind(product_id)
+    .fetch_optional(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
+    let (gtin14, name, print_name, group, shelf_life_days, status, archived) =
+        product.ok_or_else(|| ApiError::internal("the shift's product vanished"))?;
+    let group = match (status.parse::<ProductStatus>(), archived, group) {
+        (Ok(ProductStatus::Active), false, Some(group)) => group,
+        _ => return Err(product_inactive()),
+    };
+    match templates::scope(conn, template_id).await? {
+        Some(scope) if templates::fits(&scope, TemplatePurpose::Box, Some(group)) => {}
+        _ => return Err(template_not_fit()),
+    }
+    let (template_name, spec, template_rev): (String, String, i64) =
+        sqlx::query_as("SELECT name, spec, rev FROM label_templates WHERE id = ?")
+            .bind(template_id)
+            .fetch_one(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+    let gln: Option<String> = sqlx::query_scalar("SELECT gln FROM org_profile WHERE id = 1")
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(ApiError::internal)?;
+    let gln = gln.ok_or_else(|| ApiError::not_found("the host is not initialized"))?;
+    let counterparty_name = match counterparty_id {
+        Some(id) => Some(
+            sqlx::query_scalar("SELECT name FROM counterparties WHERE id = ?")
+                .bind(id)
+                .fetch_one(&mut *conn)
+                .await
+                .map_err(ApiError::internal)?,
+        ),
+        None => None,
+    };
+    Ok(ShiftSnapshot {
+        product: ShiftSnapshotProduct {
+            id: product_id.to_owned(),
+            gtin14,
+            name,
+            print_name,
+            chz_product_group_code: group,
+            shelf_life_days,
+        },
+        box_template: ShiftSnapshotTemplate {
+            id: template_id.to_owned(),
+            name: template_name,
+            rev: template_rev,
+            spec: serde_json::from_str(&spec).map_err(ApiError::internal)?,
+        },
+        issuer_prefix: crate::validate::issuer_prefix(&gln).to_owned(),
+        counterparty_name,
+    })
 }

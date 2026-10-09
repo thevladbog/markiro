@@ -1,5 +1,6 @@
 //! Shifts at a station (stage 2a spec §4.2, §4.7), with the device key, for
-//! stations only: `GET /v1/device/shifts` and `POST /v1/device/shifts`. A
+//! stations only: `GET /v1/device/shifts`, `POST /v1/device/shifts` and
+//! `POST /v1/device/shifts/{id}/enter`. A
 //! station reads its shifts at the moments it reads its device record
 //! (after it subscribes to the link and after every revision event), since a
 //! shift is no feed record: shifts are per line, and an open one carries a
@@ -7,7 +8,10 @@
 
 use axum::extract::State;
 use axum::Json;
-use markiro_proto::{DeviceKind, DeviceShift, DeviceShiftCreate, DeviceShifts, ShiftOrigin};
+use markiro_proto::{
+    DeviceKind, DeviceShift, DeviceShiftCreate, DeviceShifts, ShiftOrigin, ShiftSnapshot,
+    ShiftStatus,
+};
 use serde_json::json;
 use sqlx::SqliteConnection;
 
@@ -15,7 +19,7 @@ use crate::audit::{self, actions, Actor, Entry, Outcome};
 use crate::auth::AuthDevice;
 use crate::clock::format_timestamp;
 use crate::db::{begin_write, commit_with_revision, next_revision};
-use crate::error::{ApiError, ApiJson};
+use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::routes::devices::require_active_line;
 use crate::server::AppState;
 use crate::shifts::{self, NewShift};
@@ -78,6 +82,7 @@ fn record(row: ShiftRow) -> Result<DeviceShift, ApiError> {
         owner_device_id: row.owner_device_id,
         opened_at: row.opened_at,
         closed_at: row.closed_at,
+        snapshot: None,
     })
 }
 
@@ -235,4 +240,147 @@ pub async fn create_device_shift(
         .await
         .map_err(ApiError::internal)?;
     Ok(Json(created))
+}
+
+/// A shift as an entry reads it.
+#[derive(sqlx::FromRow)]
+struct EntryRow {
+    status: String,
+    line_id: String,
+    owner_device_id: Option<String>,
+    product_id: String,
+    box_template_id: String,
+    counterparty_id: Option<String>,
+    snapshot: Option<String>,
+    number_month_key: String,
+    number_seq: i64,
+    created_from: String,
+}
+
+/// `POST /v1/device/shifts/{id}/enter`: a station on the shift's line opens
+/// a planned shift (the host freezes its snapshot and makes the station its
+/// owner) or enters again the active shift it opened; the answer carries the
+/// snapshot, so a station that lost its database gets it back. A closed
+/// shift is `shift_status`, another line `shift_line`, a shift another
+/// station opened `shift_busy`. Opening takes a revision, so the other
+/// stations of the line see the shift busy; entering again takes none.
+pub async fn enter_shift(
+    State(state): State<AppState>,
+    device: AuthDevice,
+    ApiPath(id): ApiPath<String>,
+) -> Result<Json<DeviceShift>, ApiError> {
+    require_station(&device)?;
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    let shift: Option<EntryRow> = sqlx::query_as(
+        "SELECT status, line_id, owner_device_id, product_id, box_template_id, counterparty_id, \
+         snapshot, number_month_key, number_seq, created_from FROM shifts WHERE id = ?",
+    )
+    .bind(&id)
+    .fetch_optional(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    let shift = shift.ok_or_else(|| ApiError::not_found("no such shift"))?;
+    let status: ShiftStatus = shift.status.parse().map_err(ApiError::internal)?;
+    if status == ShiftStatus::Closed {
+        return Err(shifts::status_conflict(status));
+    }
+    let line_id: Option<String> = sqlx::query_scalar("SELECT line_id FROM devices WHERE id = ?")
+        .bind(&device.id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    if line_id.as_deref() != Some(shift.line_id.as_str()) {
+        return Err(line_conflict());
+    }
+    if shift
+        .owner_device_id
+        .as_deref()
+        .is_some_and(|owner| owner != device.id)
+    {
+        return Err(shifts::busy());
+    }
+    let snapshot = match shift.snapshot {
+        // The station that opened the shift enters it again.
+        Some(text) => {
+            sqlx::query(
+                "UPDATE shift_participants SET last_entered_at = ? \
+                 WHERE shift_id = ? AND device_id = ?",
+            )
+            .bind(&at)
+            .bind(&id)
+            .bind(&device.id)
+            .execute(&mut *tx)
+            .await
+            .map_err(ApiError::internal)?;
+            let snapshot: ShiftSnapshot =
+                serde_json::from_str(&text).map_err(ApiError::internal)?;
+            let mut entered = read(&mut tx, &id)
+                .await?
+                .ok_or_else(|| ApiError::internal("shift vanished"))?;
+            tx.commit().await.map_err(ApiError::internal)?;
+            entered.snapshot = Some(snapshot);
+            return Ok(Json(entered));
+        }
+        None => {
+            shifts::snapshot(
+                &mut tx,
+                &shift.product_id,
+                &shift.box_template_id,
+                shift.counterparty_id.as_deref(),
+            )
+            .await?
+        }
+    };
+    let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
+    sqlx::query(
+        "UPDATE shifts SET status = 'active', snapshot = ?, opened_at = ?, owner_device_id = ?, \
+         rev = ? WHERE id = ?",
+    )
+    .bind(serde_json::to_string(&snapshot).map_err(ApiError::internal)?)
+    .bind(&at)
+    .bind(&device.id)
+    .bind(rev)
+    .bind(&id)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    sqlx::query(
+        "INSERT INTO shift_participants (shift_id, device_id, first_entered_at, last_entered_at) \
+         VALUES (?, ?, ?, ?)",
+    )
+    .bind(&id)
+    .bind(&device.id)
+    .bind(&at)
+    .bind(&at)
+    .execute(&mut *tx)
+    .await
+    .map_err(ApiError::internal)?;
+    let origin = shift.created_from.parse().map_err(ApiError::internal)?;
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: Actor::Device(&device.id),
+            action: actions::SHIFT_OPEN,
+            target_type: Some("shift"),
+            target_id: Some(&id),
+            outcome: Outcome::Ok,
+            details: json!({
+                "number": shifts::format_number(&shift.number_month_key, shift.number_seq, origin),
+                "templateId": snapshot.box_template.id,
+                "templateRev": snapshot.box_template.rev,
+            }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    let mut opened = read(&mut tx, &id)
+        .await?
+        .ok_or_else(|| ApiError::internal("shift vanished"))?;
+    commit_with_revision(tx, &state.revisions, rev)
+        .await
+        .map_err(ApiError::internal)?;
+    opened.snapshot = Some(snapshot);
+    Ok(Json(opened))
 }
