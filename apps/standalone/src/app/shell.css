@@ -249,6 +249,16 @@
   color: var(--fg-2);
 }
 
+/* The note under the close reason: the hint, or the refusal in the error tone, as `Input` writes them. */
+.shift-note {
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}
+
+.shift-note--error {
+  color: var(--err-fg);
+}
+
 .office-pager {
   display: flex;
   justify-content: flex-end;

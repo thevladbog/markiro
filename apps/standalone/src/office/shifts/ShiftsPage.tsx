@@ -37,6 +37,8 @@ import {
   SHIFT_PAGE_SIZE,
   type ShiftStatusFilter,
 } from "./shift-list.js";
+import { CloseShiftDialog } from "./CloseShiftDialog.js";
+import { DeleteShiftDialog } from "./DeleteShiftDialog.js";
 import { ShiftDialog } from "./ShiftDialog.js";
 import { ShiftPlanDialog } from "./ShiftPlanDialog.js";
 import { datePickerTexts } from "./shift-text.js";
@@ -60,7 +62,11 @@ const STATUS_FILTERS: readonly ShiftStatusFilter[] = ["all", "planned", "active"
 const UNITS = new Intl.NumberFormat("ru");
 
 type ShiftsDialog =
-  { kind: "create" } | { kind: "edit"; shift: OfficeShift } | { kind: "plan"; shift: OfficeShift };
+  | { kind: "create" }
+  | { kind: "edit"; shift: OfficeShift }
+  | { kind: "plan"; shift: OfficeShift }
+  | { kind: "delete"; shift: OfficeShift }
+  | { kind: "close"; shift: OfficeShift };
 
 /**
  * Shifts (stage 2a spec §5.6), in the section «Производство». The host sends
@@ -239,24 +245,44 @@ export function ShiftsPage() {
       render: (shift) => (
         <RowActions>
           {shift.status === "planned" && (
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.shifts.editNamed", { number: shift.number })}
-              onClick={() => open({ kind: "edit", shift })}
-            >
-              {t("office.shifts.edit")}
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                size="compact"
+                aria-label={t("office.shifts.editNamed", { number: shift.number })}
+                onClick={() => open({ kind: "edit", shift })}
+              >
+                {t("office.shifts.edit")}
+              </Button>
+              <Button
+                variant="secondary"
+                size="compact"
+                aria-label={t("office.shifts.deleteNamed", { number: shift.number })}
+                onClick={() => open({ kind: "delete", shift })}
+              >
+                {t("office.shifts.delete")}
+              </Button>
+            </>
           )}
           {shift.status === "active" && (
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.shifts.planNamed", { number: shift.number })}
-              onClick={() => open({ kind: "plan", shift })}
-            >
-              {t("office.shifts.plan")}
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                size="compact"
+                aria-label={t("office.shifts.planNamed", { number: shift.number })}
+                onClick={() => open({ kind: "plan", shift })}
+              >
+                {t("office.shifts.plan")}
+              </Button>
+              <Button
+                variant="secondary"
+                size="compact"
+                aria-label={t("office.shifts.closeNamed", { number: shift.number })}
+                onClick={() => open({ kind: "close", shift })}
+              >
+                {t("office.shifts.close")}
+              </Button>
+            </>
           )}
         </RowActions>
       ),
@@ -424,6 +450,25 @@ export function ShiftsPage() {
                 : t("office.common.saved"),
             )
           }
+          onReload={reload}
+          onOutdated={readAgain}
+        />
+      )}
+      {canPlan && dialog?.kind === "delete" && (
+        <DeleteShiftDialog
+          shift={dialog.shift}
+          productName={productName(dialog.shift)}
+          onClose={() => setDialog(null)}
+          onDeleted={() => saved(t("office.shifts.deleted", { number: dialog.shift.number }))}
+          onReload={reload}
+          onOutdated={readAgain}
+        />
+      )}
+      {canPlan && dialog?.kind === "close" && (
+        <CloseShiftDialog
+          shift={dialog.shift}
+          onClose={() => setDialog(null)}
+          onClosed={(shift) => saved(t("office.shifts.closed", { number: shift.number }))}
           onReload={reload}
           onOutdated={readAgain}
         />

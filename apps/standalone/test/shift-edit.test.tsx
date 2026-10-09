@@ -98,19 +98,19 @@ describe("office shifts: changing a shift", () => {
     vi.useRealTimers();
   });
 
-  it("offers a planned shift's change, an active one's plan and nothing for a closed one, to both roles", async () => {
+  it("offers a planned shift's change and delete, an active one's plan and close, and nothing for a closed one, to both roles", async () => {
     for (const user of [undefined, TECHNOLOGIST]) {
       const view = await openShifts(shiftsSession(undefined, user));
       expect(
         within(shiftRow("OCT26-005"))
           .getAllByRole("button")
           .map((button) => button.getAttribute("aria-label")),
-      ).toEqual(["Изменить смену OCT26-005"]);
+      ).toEqual(["Изменить смену OCT26-005", "Удалить смену OCT26-005"]);
       expect(
         within(shiftRow("OCT26-004"))
           .getAllByRole("button")
           .map((button) => button.getAttribute("aria-label")),
-      ).toEqual(["Изменить план смены OCT26-004"]);
+      ).toEqual(["Изменить план смены OCT26-004", "Закрыть смену OCT26-004"]);
       expect(within(shiftRow(CLOSED.number)).queryAllByRole("button")).toEqual([]);
       view.unmount();
     }
