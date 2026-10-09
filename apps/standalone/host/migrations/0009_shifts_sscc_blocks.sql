@@ -54,9 +54,16 @@ CREATE TABLE shifts (
   rev INTEGER NOT NULL,
   UNIQUE (number_month_key, number_seq),
   UNIQUE (created_by, create_request_id),
-  CHECK ((status = 'planned')
-    = (snapshot IS NULL AND opened_at IS NULL AND owner_device_id IS NULL)),
-  CHECK ((status = 'closed') = (closed_at IS NOT NULL AND closed_by_kind IS NOT NULL))
+  -- The lifecycle, whole: a planned shift is unopened; an active or closed
+  -- one has its snapshot, its opening and its owner; a closed one says when
+  -- and by whom it was closed, any other says neither. The reason columns
+  -- and `late_data_at` are left open for the station's close (plan 2a2).
+  CHECK (CASE WHEN status = 'planned'
+    THEN snapshot IS NULL AND opened_at IS NULL AND owner_device_id IS NULL
+    ELSE snapshot IS NOT NULL AND opened_at IS NOT NULL AND owner_device_id IS NOT NULL END),
+  CHECK (CASE WHEN status = 'closed'
+    THEN closed_at IS NOT NULL AND closed_by_kind IS NOT NULL AND closed_by IS NOT NULL
+    ELSE closed_at IS NULL AND closed_by_kind IS NULL AND closed_by IS NULL END)
 );
 CREATE INDEX shifts_line_status ON shifts (line_id, status);
 CREATE INDEX shifts_status_production_date ON shifts (status, production_date);
