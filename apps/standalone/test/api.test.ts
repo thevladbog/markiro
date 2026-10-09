@@ -20,6 +20,9 @@ import {
   pairingCodeRequestSchema,
   productCreateSchema,
   productUpdateSchema,
+  shiftCloseSchema,
+  shiftCreateSchema,
+  shiftUpdateSchema,
   templateCreateSchema,
   templateDefaultsUpdateSchema,
   templateUpdateSchema,
@@ -76,6 +79,10 @@ const TEMPLATE_UPDATE = templateUpdateSchema.parse(fixture("template-update.json
 const DEFAULTS_UPDATE = templateDefaultsUpdateSchema.parse(
   fixture("template-defaults-update.json"),
 );
+const SHIFT_ID = "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b";
+const SHIFT_CREATE = shiftCreateSchema.parse(fixture("shift-create.json"));
+const SHIFT_UPDATE = shiftUpdateSchema.parse(fixture("shift-update.json"));
+const SHIFT_CLOSE = shiftCloseSchema.parse(fixture("shift-close.json"));
 
 type Case = [
   name: string,
@@ -355,6 +362,42 @@ const CASES: Case[] = [
     { method: "PUT", path: "/v1/office/template-defaults", body: DEFAULTS_UPDATE },
   ],
   [
+    "listShifts",
+    [fixture("office-shift.json")],
+    (api) => api.listShifts(TOKEN),
+    { method: "GET", path: "/v1/office/shifts", body: undefined },
+  ],
+  [
+    "listShifts for a period",
+    [fixture("office-shift.json")],
+    (api) => api.listShifts(TOKEN, { from: "2026-09-01", to: "2026-10-08" }),
+    { method: "GET", path: "/v1/office/shifts?from=2026-09-01&to=2026-10-08", body: undefined },
+  ],
+  [
+    "createShift",
+    fixture("office-shift.json"),
+    (api) => api.createShift(TOKEN, SHIFT_CREATE),
+    { method: "POST", path: "/v1/office/shifts", body: SHIFT_CREATE },
+  ],
+  [
+    "updateShift",
+    fixture("office-shift.json"),
+    (api) => api.updateShift(TOKEN, SHIFT_ID, SHIFT_UPDATE),
+    { method: "PUT", path: `/v1/office/shifts/${SHIFT_ID}`, body: SHIFT_UPDATE },
+  ],
+  [
+    "deleteShift",
+    null,
+    (api) => api.deleteShift(TOKEN, SHIFT_ID),
+    { method: "DELETE", path: `/v1/office/shifts/${SHIFT_ID}`, body: undefined },
+  ],
+  [
+    "closeShift",
+    fixture("office-shift.json"),
+    (api) => api.closeShift(TOKEN, SHIFT_ID, SHIFT_CLOSE),
+    { method: "POST", path: `/v1/office/shifts/${SHIFT_ID}/close`, body: SHIFT_CLOSE },
+  ],
+  [
     "setUserPassword",
     null,
     (api) => api.setUserPassword(TOKEN, USER_ID, { password: "a new long password" }),
@@ -387,6 +430,52 @@ describe("HostApi office endpoints", () => {
   it("rejects a users answer that is not a list", async () => {
     const { api } = recording(fixture("office-user-record.json"));
     await expect(api.listUsers(TOKEN)).rejects.toThrow();
+  });
+});
+
+describe("HostApi shifts", () => {
+  const shift = fixture("office-shift.json");
+  const notAShift = { ...(shift as object), status: "open" };
+
+  it("returns the shifts of the list and the shift of a write as the host sent them", async () => {
+    await expect(recording([shift]).api.listShifts(TOKEN)).resolves.toMatchObject([
+      { number: "OCT26-004", status: "active", rev: 71 },
+    ]);
+    await expect(recording([]).api.listShifts(TOKEN)).resolves.toEqual([]);
+    const answer = recording(shift).api;
+    await expect(answer.createShift(TOKEN, SHIFT_CREATE)).resolves.toMatchObject({ rev: 71 });
+    await expect(answer.updateShift(TOKEN, SHIFT_ID, SHIFT_UPDATE)).resolves.toMatchObject({
+      number: "OCT26-004",
+    });
+    await expect(answer.closeShift(TOKEN, SHIFT_ID, SHIFT_CLOSE)).resolves.toMatchObject({
+      productionDate: "2026-10-08",
+    });
+  });
+
+  it("rejects a list that is no list of shifts and a write whose answer is no shift", async () => {
+    await expect(recording([notAShift]).api.listShifts(TOKEN)).rejects.toThrow();
+    await expect(recording(shift).api.listShifts(TOKEN)).rejects.toThrow();
+    const bad = recording(notAShift).api;
+    await expect(bad.createShift(TOKEN, SHIFT_CREATE)).rejects.toThrow();
+    await expect(bad.updateShift(TOKEN, SHIFT_ID, SHIFT_UPDATE)).rejects.toThrow();
+    await expect(bad.closeShift(TOKEN, SHIFT_ID, SHIFT_CLOSE)).rejects.toThrow();
+    const list = recording([shift]).api;
+    await expect(list.createShift(TOKEN, SHIFT_CREATE)).rejects.toThrow();
+    await expect(list.updateShift(TOKEN, SHIFT_ID, SHIFT_UPDATE)).rejects.toThrow();
+    await expect(list.closeShift(TOKEN, SHIFT_ID, SHIFT_CLOSE)).rejects.toThrow();
+  });
+
+  it("resolves a delete with nothing, and rejects an answer that carries a body", async () => {
+    await expect(recording(null).api.deleteShift(TOKEN, SHIFT_ID)).resolves.toBeUndefined();
+    await expect(recording(shift).api.deleteShift(TOKEN, SHIFT_ID)).rejects.toThrow();
+  });
+
+  it("encodes both ends of a period in the query", async () => {
+    const { api, sent } = recording([]);
+    await api.listShifts(TOKEN, { from: "2026-09-01&to=x", to: "a b" });
+    expect(sent.map((request) => request.path)).toEqual([
+      "/v1/office/shifts?from=2026-09-01%26to%3Dx&to=a%20b",
+    ]);
   });
 });
 
