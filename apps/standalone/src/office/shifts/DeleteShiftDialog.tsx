@@ -8,6 +8,7 @@ import { FormDialog } from "../FormDialog.js";
 import { useOfficeMutation } from "../office-query.js";
 import { StaleAlert, WriteFailureAlert } from "../page-state.js";
 import { shiftWriteFailure } from "./shift-form.js";
+import { useRereadShiftsOnLostAnswer } from "./shift-reread.js";
 
 export interface DeleteShiftDialogProps {
   /** A planned shift no station has entered. */
@@ -40,6 +41,7 @@ export function DeleteShiftDialog({
   // The key of the text that says a station opened or someone closed the shift meanwhile:
   // a repeat would be refused the same way, so «Удалить» stays off and the alert offers the list.
   const [outdatedMessage, setOutdatedMessage] = useState<string | null>(null);
+  const rereadIfLost = useRereadShiftsOnLostAnswer();
   const remove = useOfficeMutation((api, token, id: string) => api.deleteShift(token, id));
 
   const submit = async () => {
@@ -55,6 +57,7 @@ export function DeleteShiftDialog({
           setOutdatedMessage(outcome.message);
         } else {
           setFailure(outcome);
+          rereadIfLost(error);
         }
         if (outdated) onOutdated();
         return;

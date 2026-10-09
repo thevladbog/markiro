@@ -1,12 +1,10 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
 import { DatePicker, Input, Select } from "@markiro/ui";
 
-import { HostError } from "../../host/client.js";
 import type { OfficeShift, ShiftCreate, ShiftUpdate } from "../../host/protocol.js";
 import { shiftCreate, shiftUpdate } from "../../host/requests.js";
 import { suggestBoxTemplate } from "../../lib/box-template-choice.js";
@@ -31,6 +29,7 @@ import {
   type ShiftFields,
 } from "./shift-form.js";
 import { openBlocker, recordLabel } from "./shift-list.js";
+import { useRereadShiftsOnLostAnswer } from "./shift-reread.js";
 import { datePickerTexts } from "./shift-text.js";
 
 export interface ShiftDialogProps {
@@ -108,7 +107,7 @@ function ShiftForm({
   // must not put a note under, or take one from, a date that did not change.
   const [{ today, dateNote }] = useState(() => ({ today: todayAtOpen, dateNote: dateNoteAtOpen }));
   const ids = useId();
-  const queryClient = useQueryClient();
+  const rereadIfLost = useRereadShiftsOnLostAnswer();
   const fieldId = (name: (typeof SHIFT_FIELD_ORDER)[number]) => `${ids}-${name}`;
   // The refused field, focused once the form is on again after a submit.
   const focusAfterRender = useRef<(typeof SHIFT_FIELD_ORDER)[number] | null>(null);
@@ -278,11 +277,9 @@ function ShiftForm({
           setOutdatedMessage(outcome.message);
         } else {
           setFailure(outcome);
-          // A lost answer: the host may have planned the shift (the create has no request id
-          // to make it repeatable), so the list behind the dialog must show whether it did.
-          if (error instanceof HostError && error.kind === "transport") {
-            void queryClient.invalidateQueries({ queryKey: officeKeys.shifts });
-          }
+          // A lost answer: the host may have planned or changed the shift (a create has no
+          // request id to make it repeatable), so the list behind shows whether it did.
+          rereadIfLost(error);
         }
         if (outdated) onOutdated();
         return;

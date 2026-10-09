@@ -14,6 +14,7 @@ import { FormDialog } from "../FormDialog.js";
 import { useOfficeMutation } from "../office-query.js";
 import { StaleAlert, WriteFailureAlert } from "../page-state.js";
 import { shiftWriteFailure } from "./shift-form.js";
+import { useRereadShiftsOnLostAnswer } from "./shift-reread.js";
 
 const closeSchema = z.object({ reason: closeReasonRule });
 type CloseValues = z.input<typeof closeSchema>;
@@ -48,6 +49,7 @@ export function CloseShiftDialog({
   // The key of the text that says the shift was closed or deleted meanwhile: a resend would
   // be refused the same way, so «Закрыть смену» stays off and the alert offers to load the list.
   const [outdatedMessage, setOutdatedMessage] = useState<string | null>(null);
+  const rereadIfLost = useRereadShiftsOnLostAnswer();
   const close = useOfficeMutation((api, token, reason: string) =>
     api.closeShift(token, shift.id, shiftClose(reason, shift.rev)),
   );
@@ -81,6 +83,7 @@ export function CloseShiftDialog({
         setOutdatedMessage(outcome.message);
       } else {
         setFailure(outcome);
+        rereadIfLost(error);
       }
       if (outdated) onOutdated();
       return;
