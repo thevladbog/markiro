@@ -242,10 +242,11 @@ function barWidthCommand(element: LabelBarcodeElement, dpi: LabelTemplateSpec["d
   return `^BY${moduleDots}`;
 }
 
-function renderBarcodeElement(
+export function renderZplBarcodeElement(
   element: LabelBarcodeElement,
   data: Record<LabelField, string>,
   dpi: LabelTemplateSpec["dpi"],
+  options: { ean13IncludeText?: boolean } = {},
 ): string {
   const x = mmToDots(element.xMm, dpi);
   const y = mmToDots(element.yMm, dpi);
@@ -276,7 +277,7 @@ function renderBarcodeElement(
     case "ean13": {
       const heightDots = mmToDots(element.sizeMm, dpi);
       const { fh, data: escaped } = escapeFdData(value);
-      return `^FO${x},${y}${barWidthCommand(element, dpi)}^BEN,${heightDots}${fh}^FD${escaped}^FS`;
+      return `^FO${x},${y}${barWidthCommand(element, dpi)}^BEN,${heightDots}${options.ean13IncludeText === false ? ",N" : ""}${fh}^FD${escaped}^FS`;
     }
     case "datamatrix": {
       const moduleDots = mmToDots(element.sizeMm, dpi);
@@ -387,7 +388,7 @@ export async function generateZpl(
             `^FO${mmToDots(element.xMm, spec.dpi)},${mmToDots(element.yMm, spec.dpi)}${buildGfaCommand(raster)}^FS`,
           );
         } else {
-          lines.push(renderBarcodeElement(element, data, spec.dpi));
+          lines.push(renderZplBarcodeElement(element, data, spec.dpi));
         }
         break;
       case "line":

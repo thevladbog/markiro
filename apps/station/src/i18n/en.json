@@ -1031,6 +1031,8 @@
     "pickPreview": "Select a template to preview",
     "previewLabel": "Preview: {{name}}",
     "previewSample": "Sample",
+    "previewLoading": "Preparing label sample…",
+    "previewUnavailable": "Could not render the label sample",
     "mm": "mm",
     "working": "Working…",
     "verifyButton": "Check the new label",

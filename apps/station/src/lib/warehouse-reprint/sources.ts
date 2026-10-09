@@ -53,6 +53,10 @@ export async function findWarehouseSource(
     const source = warehouseSourceSchema.parse(JSON.parse(cached.value_json));
     if (source.identity !== identity || source.kind !== scan.kind)
       throw new Error("WAREHOUSE_SOURCE_CORRUPT");
+    if (source.chzProductGroupCode === null && source.sourceShiftId !== null) {
+      const group = await localProductGroup(exec, source.sourceShiftId);
+      if (group !== null) return withSourceGroup(source, group);
+    }
     return source;
   }
   if (scan.kind === "unit") {
@@ -68,7 +72,7 @@ export async function findWarehouseSource(
         sourceId: identity,
         identity,
         productName: job.fields["product.name"],
-        chzProductGroupCode: null,
+        chzProductGroupCode: await localProductGroup(exec, job.shiftId),
         fields: { ...job.fields, "km.code": job.canonicalRaw, sscc: "" },
         unavailableFields: [],
         payloadDigest: productLabelBytesDigest(new TextEncoder().encode(job.canonicalRaw)),
@@ -96,13 +100,15 @@ export async function resolveWarehouseSource(
       return { status: "unavailable" as const, code: "source_not_printable" as const };
     throw error;
   }
-  if (local)
-    return {
-      status: "found" as const,
-      source: local,
-      repair: scan.kind === "box" ? scan.repair : null,
-    };
   let response: unknown;
+  if (typeof navigator !== "undefined" && !navigator.onLine)
+    return local
+      ? {
+          status: "found" as const,
+          source: local,
+          repair: scan.kind === "box" ? scan.repair : null,
+        }
+      : { status: "network_required" as const };
   try {
     response = await client.post("/station/warehouse-reprint/lookup", {
       protocol: WAREHOUSE_REPRINT_PROTOCOL,
@@ -110,7 +116,14 @@ export async function resolveWarehouseSource(
       operatorId,
     });
   } catch (error) {
-    if (warehouseNetworkUnavailable(error)) return { status: "network_required" as const };
+    if (warehouseNetworkUnavailable(error))
+      return local
+        ? {
+            status: "found" as const,
+            source: local,
+            repair: scan.kind === "box" ? scan.repair : null,
+          }
+        : { status: "network_required" as const };
     throw error;
   }
   const result = warehouseLookupResultSchema.parse(response);
@@ -121,7 +134,28 @@ export async function resolveWarehouseSource(
       result.repair !== (scan.kind === "box" ? scan.repair : null)
     )
       throw new Error("WAREHOUSE_SOURCE_MISMATCH");
+    if (result.source.sourceShiftId !== null)
+      await exec.run(
+        "UPDATE product_mirror SET chz_product_group_code=? WHERE id IN (SELECT product_id FROM shift_mirror WHERE id=?)",
+        [result.source.chzProductGroupCode, result.source.sourceShiftId],
+      );
+    // A local print snapshot retains its historical fields; the online read validates
+    // current eligibility and supplies the current group, never recalculates its dates.
+    if (
+      local &&
+      local.unavailableFields.length === 0 &&
+      local.sourceShiftId === result.source.sourceShiftId
+    ) {
+      const source = withSourceGroup(local, result.source.chzProductGroupCode);
+      await cacheWarehouseSource(exec, owner, source);
+      return { ...result, source };
+    }
     await cacheWarehouseSource(exec, owner, result.source);
+  } else if (scan.kind === "box") {
+    await exec.run(
+      `DELETE FROM warehouse_reprint_cache WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND kind='box' AND identity=?`,
+      [owner, scan.sscc],
+    );
   }
   return result;
 }
@@ -133,6 +167,7 @@ export async function cacheWarehouseClosedBox(
     sourceId: string;
     sourceShiftId: string | null;
     fields: WarehouseReprintSource["fields"];
+    chzProductGroupCode?: number | null;
   },
 ): Promise<void> {
   const value = {
@@ -141,7 +176,12 @@ export async function cacheWarehouseClosedBox(
     sourceShiftId: input.sourceShiftId,
     identity: input.fields.sscc,
     productName: input.fields["product.name"],
-    chzProductGroupCode: null,
+    chzProductGroupCode:
+      input.chzProductGroupCode === undefined
+        ? input.sourceShiftId === null
+          ? null
+          : await localProductGroup(exec, input.sourceShiftId)
+        : input.chzProductGroupCode,
     fields: input.fields,
     unavailableFields: [],
     payloadDigest: productLabelBytesDigest(new TextEncoder().encode(input.fields.sscc)),
@@ -154,4 +194,21 @@ export async function cacheWarehouseClosedBox(
     "INSERT INTO warehouse_reprint_cache(owner,kind,identity,value_json) VALUES(?,'box',?,?) ON CONFLICT(owner,kind,identity) DO NOTHING",
     [owner, source.identity, JSON.stringify(source)],
   );
+}
+
+async function localProductGroup(exec: SqlExecutor, shiftId: string): Promise<number | null> {
+  const [row] = await exec.all<{ code: number | null }>(
+    "SELECT p.chz_product_group_code AS code FROM shift_mirror s JOIN product_mirror p ON p.id=s.product_id WHERE s.id=?",
+    [shiftId],
+  );
+  return row?.code ?? null;
+}
+function withSourceGroup(
+  source: WarehouseReprintSource,
+  chzProductGroupCode: number | null,
+): WarehouseReprintSource {
+  const { revision, ...snapshot } = source;
+  void revision;
+  const value = { ...snapshot, chzProductGroupCode };
+  return warehouseSourceSchema.parse({ ...value, revision: productLabelValueDigest(value) });
 }

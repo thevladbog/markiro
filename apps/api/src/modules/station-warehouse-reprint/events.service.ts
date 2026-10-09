@@ -2,8 +2,8 @@ import { ConflictException, ForbiddenException, Inject, Injectable } from "@nest
 import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import {
-  resolveWarehouseReprintScan,
   applyWarehouseReprintEvent,
+  productLabelBytesDigest,
   productLabelValueDigest,
   WAREHOUSE_REPRINT_PROTOCOL,
   type WarehouseReprintEvent,
@@ -12,16 +12,14 @@ import {
   type WarehouseReprintRejection,
 } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
-import { assertWarehouseDevice, assertWarehouseOperator } from "./access";
-import { WarehouseLookupService } from "./lookup.service";
-import { WarehouseTemplatesService } from "./templates.service";
+import {
+  assertWarehouseDevice,
+  assertWarehouseHistoricalOperator,
+  type WarehouseReader,
+} from "./access";
 @Injectable()
 export class WarehouseEventsService {
-  constructor(
-    @Inject(DB) private readonly db: Db,
-    private readonly lookup: WarehouseLookupService,
-    private readonly templates: WarehouseTemplatesService,
-  ) {}
+  constructor(@Inject(DB) private readonly db: Db) {}
   async receive(
     tenantId: string,
     deviceId: string,
@@ -61,7 +59,7 @@ export class WarehouseEventsService {
           );
           const [saved] = await tx.select().from(schema.warehouseReprintJobs).where(jobScope);
           try {
-            await assertWarehouseOperator(tx, tenantId, event.operatorId);
+            await assertWarehouseHistoricalOperator(tx, tenantId, event.operatorId);
           } catch (error) {
             if (!(error instanceof ForbiddenException)) throw error;
             rejection = "invalid_operator";
@@ -72,47 +70,21 @@ export class WarehouseEventsService {
           if (!rejection && !saved) {
             if (event.kind !== "prepared") rejection = "parent_missing";
             else {
-              const raw =
-                event.sourceKind === "box"
-                  ? `00${event.identity}`
-                  : await this.unitRaw(tx, tenantId, event.identity);
-              const found =
-                resolveWarehouseReprintScan(raw).kind === "invalid"
-                  ? { status: "not_found" as const }
-                  : await this.lookup.lookup(tenantId, deviceId, {
-                      protocol: WAREHOUSE_REPRINT_PROTOCOL,
-                      operatorId: event.operatorId,
-                      raw,
-                    });
-              if (
-                found.status !== "found" ||
-                !(await this.sourceMatches(
-                  tx,
-                  tenantId,
-                  found.source.sourceId,
-                  event.sourceId,
-                  event.identity,
-                  event.sourceKind,
-                )) ||
-                found.source.kind !== event.sourceKind ||
-                found.source.identity !== event.identity ||
-                found.source.payloadDigest !== event.payloadDigest ||
-                found.source.sourceShiftId !== event.sourceShiftId
-              )
+              if (!(await this.sourceMatches(tx, tenantId, event)))
                 rejection = "source_not_printable";
               else {
-                const catalog = await this.templates.templates(tenantId, deviceId);
-                const t = catalog.templates.find((t) => t.id === event.templateId);
-                if (
-                  !t ||
-                  t.purpose !== (event.sourceKind === "box" ? "box" : "product_duplicate") ||
-                  t.digest !== event.templateDigest ||
-                  t.revision !== event.templateRevision ||
-                  (t.chzProductGroupCodes !== null &&
-                    (found.source.chzProductGroupCode === null ||
-                      !t.chzProductGroupCodes.includes(found.source.chzProductGroupCode)))
-                )
-                  rejection = "template_mismatch";
+                // Historical snapshots and print bytes remain device claims: only their
+                // digests are submitted, and historical template revisions are not archived.
+                const [template] = await tx
+                  .select({ id: schema.labelTemplates.id })
+                  .from(schema.labelTemplates)
+                  .where(
+                    and(
+                      eq(schema.labelTemplates.tenantId, tenantId),
+                      eq(schema.labelTemplates.id, event.templateId),
+                    ),
+                  );
+                if (!template) rejection = "template_mismatch";
               }
             }
           }
@@ -222,38 +194,56 @@ export class WarehouseEventsService {
     });
   }
   private async sourceMatches(
-    tx: Pick<Db, "select">,
+    tx: WarehouseReader,
     tenantId: string,
-    serverId: string,
-    sourceId: string,
-    identity: string,
-    kind: "unit" | "box",
+    event: Extract<WarehouseReprintEvent, { kind: "prepared" }>,
   ): Promise<boolean> {
-    if (serverId === sourceId) return true;
-    if (kind !== "box") return false;
+    if (event.sourceKind === "unit") {
+      if (event.sourceId !== event.identity || event.sourceShiftId === null) return false;
+      // The ownership registry is released on disaggregation; original scans remain
+      // in codes, including their original crypto payloads.
+      const codes = await tx
+        .select({ raw: schema.codes.canonicalRaw })
+        .from(schema.codes)
+        .where(
+          and(
+            eq(schema.codes.tenantId, tenantId),
+            eq(schema.codes.codeHash, event.identity),
+            eq(schema.codes.shiftId, event.sourceShiftId),
+          ),
+        );
+      return codes.some((code) => this.payloadMatches(code.raw, event.payloadDigest));
+    }
+    if (!this.payloadMatches(event.identity, event.payloadDigest)) return false;
+    // Resolve durable identity without current printable/eligibility checks: packaging
+    // can be disassembled or invalidated while an offline print awaits synchronization.
     const [box] = await tx
-      .select({ id: schema.boxes.id })
+      .select({
+        id: schema.boxes.id,
+        deviceBoxId: schema.boxes.deviceBoxId,
+        shiftId: schema.boxes.shiftId,
+      })
       .from(schema.boxes)
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.sscc, event.identity)));
+    if (
+      box &&
+      (box.id === event.sourceId || box.deviceBoxId === event.sourceId) &&
+      box.shiftId === event.sourceShiftId
+    )
+      return true;
+    if (event.sourceShiftId !== null) return false;
+    const [repack] = await tx
+      .select({ id: schema.inventoryRepackBoxes.id })
+      .from(schema.inventoryRepackBoxes)
       .where(
         and(
-          eq(schema.boxes.tenantId, tenantId),
-          eq(schema.boxes.id, serverId),
-          eq(schema.boxes.deviceBoxId, sourceId),
-          eq(schema.boxes.sscc, identity),
+          eq(schema.inventoryRepackBoxes.tenantId, tenantId),
+          eq(schema.inventoryRepackBoxes.newSscc, event.identity),
         ),
       );
-    return Boolean(box);
+    return repack?.id === event.sourceId;
   }
-  private async unitRaw(
-    tx: Pick<Db, "select">,
-    tenantId: string,
-    identity: string,
-  ): Promise<string> {
-    const [code] = await tx
-      .select({ raw: schema.codes.canonicalRaw })
-      .from(schema.codes)
-      .where(and(eq(schema.codes.tenantId, tenantId), eq(schema.codes.codeHash, identity)))
-      .limit(1);
-    return code?.raw ?? "";
+  private payloadMatches(raw: string, digest: string): boolean {
+    return productLabelBytesDigest(new TextEncoder().encode(raw)) === digest;
   }
 }

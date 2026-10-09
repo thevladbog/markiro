@@ -20,12 +20,11 @@ import { resolveWarehouseSource } from "./sources.js";
 import { loadWarehouseTemplates } from "./templates.js";
 import { renderWarehouseLabel } from "./prepare.js";
 import {
-  listWarehouseJobs,
+  findWarehouseJobView,
   prepareWarehouseJob,
   readWarehouseJob,
   resumeWarehouseSession,
   saveWarehouseSession,
-  warehouseJobView,
 } from "./store.js";
 import {
   printWarehouseJob,
@@ -91,21 +90,18 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
   };
   const refresh = async (jobId?: string) => {
     const session = await resumeWarehouseSession(o.exec, owner);
-    const jobs = await listWarehouseJobs(o.exec, owner, session?.sessionId);
-    const job = jobId
-      ? await readWarehouseJob(o.exec, owner, jobId)
-      : (jobs.find((j) =>
-          ["prepared", "sending", "delivery_unknown", "failed_before_send"].includes(
-            j.projection.state,
-          ),
-        ) ?? jobs[0]);
+    const job = await findWarehouseJobView(
+      o.exec,
+      owner,
+      jobId ? { jobId } : session ? { sessionId: session.sessionId } : {},
+    );
     const [problem] = await o.exec.all<{ rejection_code: string }>(
       `SELECT rejection_code FROM warehouse_reprint_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='quarantined' ORDER BY rowid DESC LIMIT 1`,
       [owner],
     );
     publish({
       session,
-      job: job ? warehouseJobView(job) : null,
+      job,
       historyIssue: problem?.rejection_code ?? null,
     });
   };
@@ -302,11 +298,13 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
         const scan = resolveWarehouseReprintScan(raw);
         if (scan.kind === "invalid") throw new Error("WAREHOUSE_SCAN_INVALID");
         const identity = scan.kind === "box" ? scan.sscc : scan.codeHash;
-        const existing = (await listWarehouseJobs(o.exec, owner, session.sessionId)).find(
-          (j) => j.source.kind === scan.kind && j.source.identity === identity,
-        );
+        const existing = await findWarehouseJobView(o.exec, owner, {
+          sessionId: session.sessionId,
+          kind: scan.kind,
+          identity,
+        });
         if (existing) {
-          publish({ duplicate: true, job: warehouseJobView(existing) });
+          publish({ duplicate: true, job: existing });
           return;
         }
         const found = await resolveWarehouseSource(o.client, guarded, owner, raw, o.operatorId);
@@ -380,13 +378,7 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
     newSession: () =>
       operation(async () => {
         if (!state.session) throw new Error("WAREHOUSE_OPERATION_FAILED");
-        if (
-          (await listWarehouseJobs(o.exec, owner)).some((j) =>
-            ["prepared", "sending", "delivery_unknown", "failed_before_send"].includes(
-              j.projection.state,
-            ),
-          )
-        )
+        if (await findWarehouseJobView(o.exec, owner, { unresolvedOnly: true }))
           throw new Error("WAREHOUSE_RECOVERY_REQUIRED");
         await saveWarehouseSession(guarded, { ...state.session, status: "paused" });
         await saveWarehouseSession(guarded, {

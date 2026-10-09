@@ -9,6 +9,132 @@ import {
   resolveWarehouseSource,
 } from "../src/lib/warehouse-reprint/sources";
 import type { StationClient } from "../src/lib/api-client";
+it("uses a known offline source without waiting for an online lookup", async () => {
+  const db = new DatabaseSync(":memory:");
+  const exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  const s = warehouseBoxSource();
+  const client = {
+    post: vi.fn().mockRejectedValue(new Error("must not contact offline network")),
+  } as unknown as StationClient;
+  const connected = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  try {
+    await cacheWarehouseSource(exec, "owner", s);
+    expect(
+      await resolveWarehouseSource(client, exec, "owner", s.identity, "operator"),
+    ).toMatchObject({ status: "found", source: s });
+    expect(client.post).not.toHaveBeenCalled();
+  } finally {
+    connected.mockRestore();
+    db.close();
+  }
+});
+it("uses the mirrored CHZ group for an offline accepted unit with a restricted template", async () => {
+  const { productLabelAcceptanceFixture, seedProductLabelShift } =
+    await import("./support/product-labels");
+  const { recordProductLabelAcceptance } = await import("../src/lib/product-labels/acceptance");
+  const { renderWarehouseLabel } = await import("../src/lib/warehouse-reprint/prepare");
+  const { buildWarehouseCodeOnlyLabelTemplate, productLabelValueDigest, warehouseBoxTemplate } =
+    await import("@markiro/domain");
+  const db = new DatabaseSync(":memory:");
+  const exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  const i = productLabelAcceptanceFixture({ ownership: "owner" });
+  try {
+    await seedProductLabelShift(exec, i);
+    await exec.run(
+      "INSERT INTO product_mirror(id,gtin14,name,status,chz_product_group_code) SELECT product_id,?,'Unit','active',15 FROM shift_mirror WHERE id=?",
+      [i.gtin14, i.shiftId],
+    );
+    await recordProductLabelAcceptance(exec, i);
+    const found = await resolveWarehouseSource(
+      {
+        post: async () => {
+          throw new TypeError("offline");
+        },
+      } as unknown as StationClient,
+      exec,
+      "owner",
+      i.raw,
+      i.operatorId,
+    );
+    expect(found).toMatchObject({
+      status: "found",
+      source: { chzProductGroupCode: 15, fields: { "km.code": i.canonicalRaw } },
+    });
+    if (found.status !== "found") throw new Error("missing local source");
+    const { digest, ...base } = warehouseBoxTemplate();
+    void digest;
+    const selection = {
+      ...base,
+      purpose: "product_duplicate" as const,
+      chzProductGroupCodes: [15],
+      spec: buildWarehouseCodeOnlyLabelTemplate().spec,
+    };
+    const rendered = await renderWarehouseLabel(
+      found.source,
+      { ...selection, digest: productLabelValueDigest(selection) },
+      {
+        id: "tsc",
+        name: "TSC 210",
+        target: { kind: "tcp", host: "127.0.0.1", port: 9100 },
+        language: "tspl",
+        dpi: 203,
+      },
+      async () => ({ width: 8, height: 1, hex: "80", bytesPerRow: 1, totalBytes: 1 }),
+    );
+    expect(rendered.fields["km.code"]).toBe(i.canonicalRaw);
+    expect(rendered.bytesBase64.length).toBeGreaterThan(0);
+  } finally {
+    db.close();
+  }
+});
+it("refreshes online box eligibility and does not resurrect a remote retired box offline", async () => {
+  const db = new DatabaseSync(":memory:");
+  const exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  const s = warehouseBoxSource();
+  const client = {
+    post: vi.fn().mockResolvedValue({ status: "unavailable", code: "source_not_printable" }),
+  } as unknown as StationClient;
+  try {
+    await cacheWarehouseSource(exec, "owner", s);
+    expect(
+      await resolveWarehouseSource(client, exec, "owner", `00${s.identity}`, "operator"),
+    ).toEqual({ status: "unavailable", code: "source_not_printable" });
+    vi.mocked(client.post).mockRejectedValue(new TypeError("offline"));
+    expect(
+      await resolveWarehouseSource(client, exec, "owner", `00${s.identity}`, "operator"),
+    ).toEqual({ status: "network_required" });
+  } finally {
+    db.close();
+  }
+});
+it("keeps the local closed-box group and historical fields when eligibility is refreshed", async () => {
+  const { cacheWarehouseClosedBox } = await import("../src/lib/warehouse-reprint/sources");
+  const db = new DatabaseSync(":memory:");
+  const exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  const s = warehouseBoxSource();
+  const client = {
+    post: vi.fn().mockResolvedValue({ status: "found", source: s, repair: null }),
+  } as unknown as StationClient;
+  try {
+    await cacheWarehouseClosedBox(exec, "owner", {
+      sourceId: s.sourceId,
+      sourceShiftId: s.sourceShiftId,
+      fields: s.fields,
+      chzProductGroupCode: 15,
+    });
+    const local = await findWarehouseSource(exec, "owner", resolveWarehouseReprintScan(s.identity));
+    expect(local?.chzProductGroupCode).toBe(15);
+    const found = await resolveWarehouseSource(client, exec, "owner", s.identity, "operator");
+    expect(found).toMatchObject({ status: "found", source: { fields: s.fields } });
+    expect(client.post).toHaveBeenCalledTimes(1);
+  } finally {
+    db.close();
+  }
+});
 it("uses an owned durable source offline, keeps owners separate and reports absence", async () => {
   const db = new DatabaseSync(":memory:");
   const exec = makeRotatingExec([db, db]);
@@ -24,7 +150,7 @@ it("uses an owned durable source offline, keeps owners separate and reports abse
     expect(
       await resolveWarehouseSource(client, exec, "owner", `!100${source.identity}`, "operator"),
     ).toMatchObject({ status: "found", repair: "legacy_tspl_fnc1_literal" });
-    expect(client.post).not.toHaveBeenCalled();
+    expect(client.post).toHaveBeenCalledTimes(1);
     expect(
       await resolveWarehouseSource(client, exec, "other", `00${source.identity}`, "operator"),
     ).toEqual({ status: "network_required" });

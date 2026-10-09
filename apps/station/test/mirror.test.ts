@@ -78,6 +78,59 @@ const bundle: StationBundle = {
   sscc: null,
 };
 
+it("does not resurrect superseded inventory print triggers when replaying warehouse migrations", async () => {
+  const db = new DatabaseSync(":memory:");
+  const exec = nodeExecutor(db);
+  try {
+    await applyMigrations(exec);
+    await applyMigrations(exec);
+    expect(
+      await exec.all<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('inventory_repack_claim_print_v1','inventory_repack_apply_print_v1')",
+      ),
+    ).toEqual([]);
+    expect(
+      await exec.all<{ name: string }>(
+        "SELECT name FROM sqlite_master WHERE type='trigger' AND name IN ('inventory_repack_claim_print_v2','inventory_repack_apply_print_v2','warehouse_reprint_safe_cleanup') ORDER BY name",
+      ),
+    ).toEqual([
+      { name: "inventory_repack_apply_print_v2" },
+      { name: "inventory_repack_claim_print_v2" },
+      { name: "warehouse_reprint_safe_cleanup" },
+    ]);
+  } finally {
+    db.close();
+  }
+});
+
+it("preserves a downloaded CHZ group code for offline labels and through a legacy bundle", async () => {
+  const db = new DatabaseSync(":memory:");
+  const exec = nodeExecutor(db);
+  try {
+    await applyMigrations(exec);
+    await upsertBundle(exec, {
+      ...bundle,
+      product: { ...bundle.product, chzProductGroupCode: 15 },
+    });
+    expect(
+      await exec.all("SELECT chz_product_group_code FROM product_mirror WHERE id='p1'"),
+    ).toEqual([{ chz_product_group_code: 15 }]);
+    await upsertBundle(exec, bundle);
+    expect(
+      await exec.all("SELECT chz_product_group_code FROM product_mirror WHERE id='p1'"),
+    ).toEqual([{ chz_product_group_code: 15 }]);
+    await upsertBundle(exec, {
+      ...bundle,
+      product: { ...bundle.product, chzProductGroupCode: null },
+    });
+    expect(
+      await exec.all("SELECT chz_product_group_code FROM product_mirror WHERE id='p1'"),
+    ).toEqual([{ chz_product_group_code: null }]);
+  } finally {
+    db.close();
+  }
+});
+
 describe("mirror", () => {
   it("keeps the replay-aware grant association trigger stable across restarts", async () => {
     const exec = nodeExecutor();

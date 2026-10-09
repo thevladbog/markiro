@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { productLabelValueDigest, warehouseBoxSource, warehouseBoxTemplate } from "@markiro/domain";
 import { renderWarehouseLabel } from "../src/lib/warehouse-reprint/prepare";
 import { warehousePreparedJobInput } from "./support/warehouse-reprint";
@@ -67,4 +67,24 @@ it("rejects group and purpose mismatches even with recomputed valid template dig
       raster,
     ),
   ).rejects.toThrow("WAREHOUSE_TEMPLATE_GROUP");
+});
+
+it("rasterizes ASCII frozen values as well as Cyrillic in newly prepared warehouse bytes", async () => {
+  const source = warehouseBoxSource();
+  const raster = vi.fn(async (_text: string) => ({
+    width: 8,
+    height: 1,
+    hex: "80",
+    totalBytes: 1,
+    bytesPerRow: 1,
+  }));
+  const rendered = await renderWarehouseLabel(
+    source,
+    warehouseBoxTemplate(),
+    warehousePreparedJobInput().printer,
+    raster,
+  );
+  expect(raster.mock.calls.map(([text]) => text)).toContain(source.fields.date);
+  expect(atob(rendered.bytesBase64)).not.toContain("TEXT ");
+  expect(atob(rendered.bytesBase64)).toContain("BITMAP ");
 });

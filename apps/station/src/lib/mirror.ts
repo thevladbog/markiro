@@ -60,6 +60,8 @@ export interface StationBundle {
     gtin14: string;
     name: string;
     productGroup: string | null;
+    /** Absent from older servers; retain a known code through legacy bundle replay. */
+    chzProductGroupCode?: number | null;
     boxCapacity: number | null;
     palletBoxCapacity: number | null;
     status: string;
@@ -241,9 +243,23 @@ const STATION_TRIGGER_REPLACEMENTS = new Map<
     "box_exception_disassemble_local",
     { dropId: "station-sqlite-321", createId: "station-sqlite-322" },
   ],
+  [
+    "warehouse_reprint_safe_cleanup",
+    { dropId: "station-sqlite-334", createId: "station-sqlite-335" },
+  ],
 ]);
 
-const canonicalTriggerSql = (value: string) => value.trim().replace(/;$/, "").replace(/\s+/g, " ");
+const canonicalTriggerSql = (value: string) =>
+  value
+    .trim()
+    .replace(/;$/, "")
+    // Only this appended replacement is replay-skippable. Historical inventory
+    // pairs must still run their DROP: earlier CREATEs recreate superseded v1s.
+    .replace(
+      /^CREATE TRIGGER IF NOT EXISTS warehouse_reprint_safe_cleanup/i,
+      "CREATE TRIGGER warehouse_reprint_safe_cleanup",
+    )
+    .replace(/\s+/g, " ");
 
 export async function applyMigrations(exec: SqlExecutor): Promise<void> {
   const inventoryEventColumns = await exec.all<{ name: string }>(
@@ -515,15 +531,15 @@ async function upsertBundleBody(
   await exec.run(
     `INSERT INTO product_mirror (
        id, gtin14, name, print_name, product_group, box_capacity, pallet_box_capacity, status,
-       default_counterparty_id, default_label_template_id, egais_code, shelf_life_days${imageColumns}
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?${imageValues})
+       default_counterparty_id, default_label_template_id, egais_code, shelf_life_days, chz_product_group_code${imageColumns}
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?${imageValues})
      ON CONFLICT(id) DO UPDATE SET
        gtin14=excluded.gtin14, name=excluded.name, print_name=excluded.print_name,
        product_group=excluded.product_group,
        box_capacity=excluded.box_capacity, pallet_box_capacity=excluded.pallet_box_capacity,
        status=excluded.status, default_counterparty_id=excluded.default_counterparty_id,
        default_label_template_id=excluded.default_label_template_id,
-       egais_code=excluded.egais_code, shelf_life_days=excluded.shelf_life_days${imageUpdate}`,
+       egais_code=excluded.egais_code, shelf_life_days=excluded.shelf_life_days${p.chzProductGroupCode === undefined ? "" : ", chz_product_group_code=excluded.chz_product_group_code"}${imageUpdate}`,
     [
       p.id,
       p.gtin14,
@@ -541,6 +557,7 @@ async function upsertBundleBody(
       // an error, never a stale value left behind from a prior sync.
       p.egaisCode ?? null,
       p.shelfLifeDays ?? null,
+      p.chzProductGroupCode ?? null,
       ...(p.image === undefined
         ? []
         : [

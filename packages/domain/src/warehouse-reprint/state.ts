@@ -77,7 +77,11 @@ export function applyWarehouseReprintEvent(
       state = "delivery_unknown";
       break;
     case "failed_before_send":
-      if (current.state !== "prepared") invalid();
+      if (
+        current.state !== "prepared" &&
+        !(current.state === "sending" && event.errorCode === "owner_changed")
+      )
+        invalid();
       state = "failed_before_send";
       break;
     case "verified":

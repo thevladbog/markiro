@@ -7,12 +7,17 @@ export function useWarehouseReprint(
 ) {
   const latest = useRef(options);
   latest.current = options;
-  const { exec, client, generation, deviceId, operatorId } = options;
+  const { exec, generation, deviceId, operatorId } = options;
   const work = useMemo(
     () =>
       createWarehouseWork({
         exec,
-        client,
+        client: {
+          get: (path, requestOptions) => latest.current.client.get(path, requestOptions),
+          post: (path, body) => latest.current.client.post(path, body),
+          download: (path) => latest.current.client.download(path),
+          whoami: (signal) => latest.current.client.whoami(signal),
+        },
         generation,
         deviceId,
         operatorId,
@@ -20,7 +25,7 @@ export function useWarehouseReprint(
         print: (target, bytes) => latest.current.print(target, bytes),
         onJournalChange: () => latest.current.onJournalChange?.(),
       }),
-    [exec, client, generation, deviceId, operatorId],
+    [exec, generation, deviceId, operatorId],
   );
   const state = useSyncExternalStore(work.subscribe, work.getSnapshot, work.getSnapshot);
   useEffect(() => {

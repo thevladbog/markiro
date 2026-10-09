@@ -4813,6 +4813,17 @@ export const STATION_MIGRATIONS: string[] = [
   `DELETE FROM box_reconciliation_issues
     WHERE box_id IN (SELECT box_id FROM boxes_mirror WHERE disassembled_at IS NOT NULL);`,
   ...WAREHOUSE_REPRINT_MIGRATIONS,
+  `ALTER TABLE product_mirror ADD COLUMN chz_product_group_code INTEGER CHECK(chz_product_group_code IS NULL OR (typeof(chz_product_group_code)='integer' AND chz_product_group_code>=0));`,
+  `DROP TRIGGER IF EXISTS warehouse_reprint_safe_cleanup;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_safe_cleanup BEFORE DELETE ON warehouse_reprint_jobs BEGIN
+    SELECT RAISE(ABORT,'WAREHOUSE_RETENTION_BLOCKED') WHERE OLD.state NOT IN ('sent','verified')
+      OR EXISTS(SELECT 1 FROM warehouse_reprint_events WHERE owner=OLD.owner AND job_id=OLD.job_id AND receive_status<>'accepted')
+      OR NOT EXISTS(SELECT 1 FROM warehouse_reprint_sessions s WHERE s.owner=OLD.owner AND s.session_id=OLD.session_id AND s.status='paused'
+        AND s.rowid<(SELECT MAX(rowid) FROM warehouse_reprint_sessions WHERE owner=OLD.owner));
+    DELETE FROM warehouse_reprint_events WHERE owner=OLD.owner AND job_id=OLD.job_id;
+    DELETE FROM warehouse_reprint_attempts WHERE owner=OLD.owner AND job_id=OLD.job_id;
+    DELETE FROM printer_destinations WHERE scope=OLD.owner AND job_id=OLD.job_id AND purpose=CASE OLD.source_kind WHEN 'box' THEN 'box' ELSE 'duplicate' END;
+  END;`,
 ];
 
 export interface StationMigrationEntry {

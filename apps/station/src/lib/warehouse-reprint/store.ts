@@ -172,6 +172,77 @@ export function warehouseJobView(job: WarehouseJob): WarehouseJobView {
     updatedAt: job.updatedAt,
   };
 }
+
+/** UI and deduplication read one indexed projection; bytes are verified at print boundaries. */
+export async function findWarehouseJobView(
+  exec: SqlExecutor,
+  owner: string,
+  selector: {
+    sessionId?: string;
+    jobId?: string;
+    kind?: "unit" | "box";
+    identity?: string;
+    unresolvedOnly?: boolean;
+  } = {},
+): Promise<WarehouseJobView | null> {
+  const params: unknown[] = [owner];
+  const filters: string[] = [];
+  for (const [column, value] of [
+    ["session_id", selector.sessionId],
+    ["job_id", selector.jobId],
+    ["source_kind", selector.kind],
+    ["identity", selector.identity],
+  ] as const) {
+    if (value !== undefined) {
+      filters.push(`j.${column}=?`);
+      params.push(value);
+    }
+  }
+  if (selector.unresolvedOnly)
+    filters.push("j.state IN ('prepared','sending','delivery_unknown','failed_before_send')");
+  const [row] = await exec.all<Record<string, unknown>>(
+    `WITH candidate AS MATERIALIZED (
+      SELECT j.owner,j.job_id FROM warehouse_reprint_jobs j
+      WHERE j.owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL})${filters.length ? " AND " + filters.join(" AND ") : ""}
+      ORDER BY j.state IN ('prepared','sending','delivery_unknown','failed_before_send') DESC,j.updated_at DESC,j.job_id DESC LIMIT 1
+    )
+    SELECT j.job_id AS jobId,j.attempt_id AS attemptId,j.state,j.source_kind AS kind,j.identity,j.updated_at AS updatedAt,
+      json_extract(j.projection_json,'$.attemptNo') AS attemptNo,
+      json_extract(j.job_json,'$.source.productName') AS productName,
+      json_extract(j.job_json,'$.template.name') AS templateName,
+      COALESCE((SELECT json_extract(d.profile_json,'$.name') FROM printer_destinations d WHERE d.scope=j.owner
+        AND d.job_id=j.job_id AND d.attempt_id=j.attempt_id AND d.purpose=CASE j.source_kind WHEN 'box' THEN 'box' ELSE 'duplicate' END),
+        json_extract(j.job_json,'$.printer.name')) AS printerName,
+      json_extract(j.job_json,'$.preparedEvent.repair') AS repair,
+      j.owner=json_extract(j.job_json,'$.owner') AND j.job_id=json_extract(j.job_json,'$.jobId')
+        AND j.session_id=json_extract(j.projection_json,'$.sessionId') AND j.job_id=json_extract(j.projection_json,'$.jobId')
+        AND j.state=json_extract(j.projection_json,'$.state') AND j.latest_sequence=json_extract(j.projection_json,'$.latestSequence')
+        AND j.attempt_id=json_extract(j.projection_json,'$.attemptId') AND j.source_kind=json_extract(j.job_json,'$.source.kind')
+        AND j.identity=json_extract(j.job_json,'$.source.identity') AS consistent
+    FROM candidate c JOIN warehouse_reprint_jobs j ON j.owner=c.owner AND j.job_id=c.job_id`,
+    params,
+  );
+  if (!row) return null;
+  if (row.consistent !== 1) throw new Error("WAREHOUSE_REPRINT_STORAGE_INVALID");
+  const { consistent, ...value } = row;
+  void consistent;
+  const view = z
+    .strictObject({
+      jobId: z.uuid(),
+      attemptId: z.uuid(),
+      attemptNo: z.number().int().positive(),
+      state: projectionSchema.shape.state,
+      kind: z.enum(["unit", "box"]),
+      identity: z.string().min(1),
+      updatedAt: z.iso.datetime(),
+      productName: z.string().min(1),
+      templateName: z.string().min(1),
+      printerName: z.string().min(1),
+      repair: z.literal("legacy_tspl_fnc1_literal").nullable(),
+    })
+    .parse(value);
+  return { ...view, identity: view.kind === "unit" ? view.identity.slice(-8) : view.identity };
+}
 export async function prepareWarehouseJob(
   exec: SqlExecutor,
   value: WarehousePreparedJobInput,

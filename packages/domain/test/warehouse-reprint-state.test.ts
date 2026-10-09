@@ -83,4 +83,35 @@ describe("warehouse reprint state", () => {
     ).toThrow();
     expect(() => applyWarehouseReprintEvent(state, { ...base, kind: "verified" })).toThrow();
   });
+  it("allows a sending claim to be retired only when hardware was never invoked", () => {
+    const first = warehousePreparedEvent();
+    const prepared = applyWarehouseReprintEvent(null, first);
+    const base = {
+      eventId,
+      jobId: first.jobId,
+      sessionId: first.sessionId,
+      attemptId: first.attemptId,
+      operatorId: first.operatorId,
+      sequence: 2,
+      occurredAt: now,
+    };
+    const sending = applyWarehouseReprintEvent(prepared, { ...base, kind: "sending" });
+    expect(
+      applyWarehouseReprintEvent(sending, {
+        ...base,
+        sequence: 3,
+        kind: "failed_before_send",
+        errorCode: "owner_changed",
+      }),
+    ).toMatchObject({ state: "failed_before_send", latestSequence: 3 });
+    for (const errorCode of ["printer_changed", "printer_unconfigured"] as const)
+      expect(() =>
+        applyWarehouseReprintEvent(sending, {
+          ...base,
+          sequence: 3,
+          kind: "failed_before_send",
+          errorCode,
+        }),
+      ).toThrow("Invalid warehouse print transition");
+  });
 });

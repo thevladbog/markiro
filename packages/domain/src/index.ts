@@ -390,3 +390,10 @@ export * from "./offline-grants/jws.js";
 export * from "./offline-grants/clock.js";
 export * from "./offline-grants/decision.js";
 export * from "./offline-grants/budgets.js";
+
+export {
+  createLabelRenderPlan,
+  emitLabelRenderPlan,
+  labelRasterSvgPath,
+} from "./labels/render-plan.js";
+export type { LabelRenderPlan, LabelRenderElement } from "./labels/render-plan.js";

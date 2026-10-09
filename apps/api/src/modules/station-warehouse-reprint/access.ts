@@ -46,3 +46,15 @@ export async function assertWarehouseOperator(
     );
   if (!operator) throw new ForbiddenException({ code: "WAREHOUSE_OPERATOR_DENIED" });
 }
+
+export async function assertWarehouseHistoricalOperator(
+  db: WarehouseReader,
+  tenantId: string,
+  operatorId: string,
+): Promise<void> {
+  const [operator] = await db
+    .select({ id: schema.employees.id })
+    .from(schema.employees)
+    .where(and(eq(schema.employees.tenantId, tenantId), eq(schema.employees.id, operatorId)));
+  if (!operator) throw new ForbiddenException({ code: "WAREHOUSE_OPERATOR_DENIED" });
+}

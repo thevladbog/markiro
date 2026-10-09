@@ -1,4 +1,6 @@
 import {
+  createLabelRenderPlan,
+  emitLabelRenderPlan,
   labelTemplateUsesField,
   productLabelBytesDigest,
   warehouseSourceSchema,
@@ -9,7 +11,7 @@ import {
 } from "@markiro/domain";
 import { bytesToBase64 } from "../hardware.js";
 import { parsePrinterProfile, type PrinterProfile } from "../printer-routing.js";
-import { renderLabelBytes } from "../print-label.js";
+import { latin1ToBytes } from "../print-label.js";
 export async function renderWarehouseLabel(
   value: WarehouseReprintSource,
   selection: WarehouseTemplate,
@@ -34,9 +36,11 @@ export async function renderWarehouseLabel(
   if (source.unavailableFields.some((field) => labelTemplateUsesField(template.spec, field)))
     throw new Error("WAREHOUSE_SOURCE_FIELDS");
   const fields = { ...source.fields };
-  const bytes = await renderLabelBytes(template.spec, fields, printer.language, rasterizeText, {
+  const plan = await createLabelRenderPlan(template.spec, fields, {
+    language: printer.language,
     dpi: printer.dpi,
-    kmDataMatrix: "raster",
+    rasterizeText,
   });
+  const bytes = latin1ToBytes(emitLabelRenderPlan(plan));
   return { fields, bytesBase64: bytesToBase64(bytes), bytesDigest: productLabelBytesDigest(bytes) };
 }

@@ -387,6 +387,8 @@ export function WarehouseReprintView(
       {picker && state.catalog ? (
         <TemplatePicker
           catalog={state.catalog}
+          unitLanguage={resolvePrinter(props.hardwareConfig, "duplicate")?.language ?? null}
+          boxLanguage={resolvePrinter(props.hardwareConfig, "box")?.language ?? null}
           unitDpi={resolvePrinter(props.hardwareConfig, "duplicate")?.dpi ?? null}
           boxDpi={resolvePrinter(props.hardwareConfig, "box")?.dpi ?? null}
           unitTemplate={session?.unitTemplate ?? null}

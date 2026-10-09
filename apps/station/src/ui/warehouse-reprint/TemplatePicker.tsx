@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
-import type { PrinterDpi, WarehouseTemplate, WarehouseTemplateCatalog } from "@markiro/domain";
+import type {
+  LabelTemplateSpec,
+  PrinterDpi,
+  WarehouseTemplate,
+  WarehouseTemplateCatalog,
+} from "@markiro/domain";
 import { LabelPreview } from "./LabelPreview.js";
 export function TemplatePicker({
   catalog,
@@ -11,6 +16,8 @@ export function TemplatePicker({
   onCancel,
   unitDpi,
   boxDpi,
+  unitLanguage,
+  boxLanguage,
 }: {
   catalog: WarehouseTemplateCatalog;
   unitTemplate: WarehouseTemplate | null;
@@ -19,6 +26,8 @@ export function TemplatePicker({
   onCancel: () => void;
   unitDpi: PrinterDpi | null;
   boxDpi: PrinterDpi | null;
+  unitLanguage: LabelTemplateSpec["language"] | null;
+  boxLanguage: LabelTemplateSpec["language"] | null;
 }) {
   const { t } = useTranslation();
   const [tab, setTab] = useState<"product_duplicate" | "box">("product_duplicate");
@@ -99,6 +108,7 @@ export function TemplatePicker({
           {selected ? (
             <LabelPreview
               template={selected}
+              language={(tab === "box" ? boxLanguage : unitLanguage) ?? selected.spec.language}
               dpi={(tab === "box" ? boxDpi : unitDpi) ?? selected.spec.dpi}
             />
           ) : (

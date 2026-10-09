@@ -6,6 +6,8 @@ import {
   buildWarehouseCodeOnlyLabelTemplate,
   WAREHOUSE_REPRINT_PROTOCOL,
   warehouseBoxSource,
+  buildSscc,
+  productLabelBytesDigest,
 } from "@markiro/domain";
 import { applyMigrations } from "../src/lib/mirror";
 import { makeRotatingExec } from "./support/sqlite-exec";
@@ -90,6 +92,99 @@ it("retires delayed lookup without cache writes or printing and resumes the same
     expect(resumed.getSnapshot().session?.sentCount).toBe(0);
     await resumed.close();
   } finally {
+    db.close();
+  }
+});
+
+it("polls and detects a duplicate without decoding every saved label in the session", async () => {
+  const { saveWarehouseSession, prepareWarehouseJob, appendWarehouseEvent } =
+    await import("../src/lib/warehouse-reprint/store");
+  const db = new DatabaseSync(":memory:");
+  const exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  const i = warehousePreparedJobInput();
+  await seedWarehouseOperator(exec, i.operatorId);
+  const work = createWarehouseWork({
+    exec,
+    client: {
+      get: vi.fn().mockRejectedValue(new TypeError("offline")),
+      post: vi.fn(),
+    } as unknown as StationClient,
+    generation: createCredentialGeneration("summary-key"),
+    deviceId: i.deviceId,
+    operatorId: i.operatorId,
+    hardware: () => ({
+      scanner: null,
+      printer: i.printer.target,
+      printerLanguage: "tspl",
+      printerDpi: 203,
+      verifyPrintedLabel: false,
+    }),
+    print: vi.fn(),
+  });
+  const decode = vi.spyOn(globalThis, "atob");
+  try {
+    await work.initialize();
+    const session = work.getSnapshot().session;
+    if (!session) throw new Error("session missing");
+    await saveWarehouseSession(exec, { ...session, status: "active" });
+    for (let n = 1; n <= 4; n++) {
+      const identity = buildSscc(3, "4600682", n);
+      const { revision, ...sourceBase } = i.source;
+      void revision;
+      const sourceValue = {
+        ...sourceBase,
+        identity,
+        fields: { ...sourceBase.fields, sscc: identity },
+        payloadDigest: productLabelBytesDigest(new TextEncoder().encode(identity)),
+      };
+      const source = { ...sourceValue, revision: productLabelValueDigest(sourceValue) };
+      const p = {
+        ...i.preparedEvent,
+        eventId: crypto.randomUUID(),
+        jobId: crypto.randomUUID(),
+        sessionId: session.sessionId,
+        attemptId: crypto.randomUUID(),
+        identity,
+        sourceRevision: source.revision,
+        payloadDigest: source.payloadDigest,
+      };
+      await prepareWarehouseJob(exec, {
+        ...i,
+        owner: session.owner,
+        jobId: p.jobId,
+        sessionId: session.sessionId,
+        source,
+        fields: source.fields,
+        preparedEvent: p,
+      });
+      for (const [kind, sequence] of [
+        ["sending", 2],
+        ["sent", 3],
+      ] as const)
+        await appendWarehouseEvent(exec, session.owner, {
+          kind,
+          sequence,
+          eventId: crypto.randomUUID(),
+          jobId: p.jobId,
+          sessionId: p.sessionId,
+          attemptId: p.attemptId,
+          operatorId: p.operatorId,
+          occurredAt: p.occurredAt,
+        });
+    }
+    decode.mockClear();
+    await work.poll();
+    expect(decode).not.toHaveBeenCalled();
+    await work.scan(buildSscc(3, "4600682", 2));
+    expect(work.getSnapshot()).toMatchObject({
+      duplicate: true,
+      job: { identity: "346006820000000021", state: "sent" },
+    });
+    expect(decode).not.toHaveBeenCalled();
+    await work.close();
+  } finally {
+    decode.mockRestore();
     db.close();
   }
 });

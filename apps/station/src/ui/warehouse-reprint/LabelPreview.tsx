@@ -1,102 +1,96 @@
+import { useEffect, useState } from "react";
 import {
-  elementBoundsMm,
-  labelFieldDisplayValue,
-  renderCode128Svg,
-  renderDataMatrixSvg,
-  renderLiteralDataMatrixSvg,
-  renderQrSvg,
+  createLabelRenderPlan,
   sampleLabelData,
+  type LabelRenderPlan,
   type WarehouseTemplate,
   type PrinterDpi,
+  type LabelTemplateSpec,
 } from "@markiro/domain";
 import { TextPreview } from "./TextPreview.js";
+import { rasterizeText } from "../../lib/rasterizer.js";
 import { useTranslation } from "react-i18next";
 export function LabelPreview({
   template,
   dpi = template.spec.dpi,
+  language = template.spec.language,
 }: {
   template: WarehouseTemplate;
   dpi?: PrinterDpi;
+  language?: LabelTemplateSpec["language"];
 }) {
   const { t } = useTranslation();
+  const [loaded, setLoaded] = useState<{
+    template: WarehouseTemplate;
+    dpi: PrinterDpi;
+    language: LabelTemplateSpec["language"];
+    plan: LabelRenderPlan | null;
+  } | null>(null);
+  useEffect(() => {
+    let active = true;
+    void createLabelRenderPlan(
+      template.spec,
+      { ...sampleLabelData(), "km.code": `${sampleLabelData()["km.code"]}\u001d93DEMO` },
+      { dpi, language, rasterizeText },
+    )
+      .then((plan) => {
+        if (active) setLoaded({ template, dpi, language, plan });
+      })
+      .catch(() => {
+        if (active) setLoaded({ template, dpi, language, plan: null });
+      });
+    return () => {
+      active = false;
+    };
+  }, [template, dpi, language]);
+  const current =
+    loaded?.template === template && loaded.dpi === dpi && loaded.language === language;
+  const plan = current ? loaded.plan : null;
   const spec = template.spec;
-  const fields = sampleLabelData();
   return (
     <figure className="warehouse-label-preview">
-      <svg
-        role="img"
-        aria-label={t("warehouse.previewLabel", { name: template.name })}
-        viewBox={`0 0 ${spec.widthMm} ${spec.heightMm}`}
-      >
-        <rect width={spec.widthMm} height={spec.heightMm} fill="white" />
-        {spec.elements.map((e) => {
-          if (e.kind === "text" || e.kind === "field")
-            return (
-              <TextPreview
+      {plan ? (
+        <svg
+          role="img"
+          aria-label={t("warehouse.previewLabel", { name: template.name })}
+          viewBox={`0 0 ${plan.widthDots} ${plan.heightDots}`}
+          data-language={plan.language}
+          data-dpi={plan.dpi}
+        >
+          <rect width={plan.widthDots} height={plan.heightDots} fill="white" />
+          {plan.elements.map((e) =>
+            e.kind === "raster" ? (
+              <TextPreview key={e.id} element={e} dpi={plan.dpi} />
+            ) : e.kind === "barcode" ? (
+              <image
                 key={e.id}
-                element={e}
-                dpi={dpi}
-                text={
-                  e.kind === "text" ? e.text : labelFieldDisplayValue(e.field, fields, e.textFormat)
-                }
+                data-barcode-element={e.id}
+                x={e.xDots}
+                y={e.yDots}
+                width={e.widthDots}
+                height={e.heightDots}
+                href={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(e.svg)}`}
+                preserveAspectRatio="none"
               />
-            );
-          if (e.kind === "line")
-            return (
-              <line
-                key={e.id}
-                x1={e.xMm}
-                y1={e.yMm}
-                x2={e.x2Mm}
-                y2={e.y2Mm}
-                stroke="black"
-                strokeWidth={e.thicknessMm}
-              />
-            );
-          if (e.kind === "box")
-            return (
+            ) : (
               <rect
                 key={e.id}
-                x={e.xMm}
-                y={e.yMm}
-                width={e.widthMm}
-                height={e.heightMm}
-                fill="none"
-                stroke="black"
-                strokeWidth={e.thicknessMm}
+                x={e.xDots + (e.filled ? 0 : e.thicknessDots / 2)}
+                y={e.yDots + (e.filled ? 0 : e.thicknessDots / 2)}
+                width={e.widthDots - (e.filled ? 0 : e.thicknessDots)}
+                height={e.heightDots - (e.filled ? 0 : e.thicknessDots)}
+                fill={e.filled ? "black" : "none"}
+                stroke={e.filled ? "none" : "black"}
+                strokeWidth={e.thicknessDots}
               />
-            );
-          const data = typeof e.data === "string" ? fields[e.data] : e.data.literal;
-          let svg: string;
-          try {
-            svg =
-              e.format === "datamatrix"
-                ? e.data === "km.code"
-                  ? renderDataMatrixSvg(data)
-                  : renderLiteralDataMatrixSvg(data)
-                : e.format === "qr"
-                  ? renderQrSvg(data)
-                  : renderCode128Svg(e.data === "sscc" ? `(00)${data}` : data, {
-                      includeText: false,
-                      gs1: e.data === "sscc",
-                    });
-          } catch {
-            return null;
-          }
-          const bounds = elementBoundsMm(e, fields, { kmDataMatrix: "raster" });
-          return (
-            <image
-              key={e.id}
-              x={e.xMm}
-              y={e.yMm}
-              width={bounds.w}
-              height={e.sizeMm}
-              href={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`}
-              preserveAspectRatio="none"
-            />
-          );
-        })}
-      </svg>
+            ),
+          )}
+        </svg>
+      ) : (
+        <p role="status">
+          {t(current ? "warehouse.previewUnavailable" : "warehouse.previewLoading")}
+        </p>
+      )}
       <figcaption>
         {t("warehouse.previewSample")} · {spec.widthMm} × {spec.heightMm} {t("warehouse.mm")}
       </figcaption>

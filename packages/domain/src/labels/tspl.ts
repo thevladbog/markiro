@@ -382,7 +382,7 @@ function barWidthParams(element: LabelBarcodeElement, dpi: LabelTemplateSpec["dp
   return `${narrow},${narrow}`;
 }
 
-function renderBarcodeElement(
+export function renderTsplBarcodeElement(
   element: LabelBarcodeElement,
   data: Record<LabelField, string>,
   dpi: LabelTemplateSpec["dpi"],
@@ -517,7 +517,7 @@ export async function generateTspl(
             ),
           );
         } else {
-          lines.push(renderBarcodeElement(element, data, spec.dpi));
+          lines.push(renderTsplBarcodeElement(element, data, spec.dpi));
         }
         break;
       case "line":

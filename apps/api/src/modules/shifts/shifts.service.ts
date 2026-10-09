@@ -1870,6 +1870,7 @@ export class ShiftsService {
       gtin14: productRow.gtin14,
       name: productRow.name,
       productGroup: productRow.productGroupName,
+      chzProductGroupCode: productRow.chzProductGroupCode,
       boxCapacity: productRow.boxCapacity,
       palletBoxCapacity: productRow.palletBoxCapacity,
       status: productRow.status,

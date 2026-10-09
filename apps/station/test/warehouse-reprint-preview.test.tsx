@@ -1,8 +1,8 @@
 import { render, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import {
-  buildWarehouseCodeOnlyBoxTemplate,
   warehouseBoxTemplate,
+  buildWarehouseCodeOnlyLabelTemplate,
   productLabelValueDigest,
   type LabelTemplateSpec,
 } from "@markiro/domain";
@@ -16,15 +16,7 @@ function template(spec: LabelTemplateSpec) {
   void digest;
   return { ...snapshot, digest: productLabelValueDigest(snapshot) };
 }
-it("centers the standard SSCC caption in the label's content box", () => {
-  const view = render(
-    <LabelPreview template={template(buildWarehouseCodeOnlyBoxTemplate().spec)} />,
-  );
-  const text = view.container.querySelector("text");
-  expect(text?.getAttribute("text-anchor")).toBe("middle");
-  expect(text?.getAttribute("x")).toBe("29");
-});
-it("wraps and ellipsizes native text without stretching or overflowing the width", () => {
+it("uses the print bitmap for bounded ASCII captions instead of separate native wrapping", async () => {
   const spec: LabelTemplateSpec = {
     language: "tspl",
     dpi: 203,
@@ -45,11 +37,22 @@ it("wraps and ellipsizes native text without stretching or overflowing the width
     ],
   };
   const view = render(<LabelPreview template={template(spec)} />);
-  const lines = [...view.container.querySelectorAll("tspan")];
-  expect(lines.map((line) => line.textContent)).toEqual(["PACK BOX", "CODE LONG…"]);
-  expect(lines.map((line) => line.getAttribute("x"))).toEqual(["22", "22"]);
-  expect(view.container.querySelector("text")?.getAttribute("text-anchor")).toBe("end");
-  expect(Number(lines[1]?.getAttribute("y"))).toBeCloseTo(9.2916667);
+  await waitFor(() =>
+    expect(rasterizeText).toHaveBeenCalledWith("PACK BOX CODE LONG TITLE", {
+      fontFamily: "sans-serif",
+      fontSizePx: 28,
+      bold: false,
+      maxWidthPx: 160,
+      maxLines: 2,
+    }),
+  );
+  await waitFor(() =>
+    expect(view.container.querySelector('[data-raster-element="title"]')).toBeTruthy(),
+  );
+  expect(view.container.querySelector("text")).toBeNull();
+  expect(
+    view.container.querySelector('[data-raster-element="title"]')?.getAttribute("data-x-mm"),
+  ).toBe(String((167 * 25.4) / 203));
 });
 it.each([203, 300] as const)("uses the print raster and exact alignment at %s DPI", async (dpi) => {
   const spec: LabelTemplateSpec = {
@@ -143,4 +146,22 @@ it("discards a late raster when a different template is selected", async () => {
   finish(bitmap);
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(view.container.querySelector('[data-raster-element="old"]')).toBeNull();
+});
+
+it("previews the complete GS1 KM including a crypto tail with the destination language", async () => {
+  const view = render(
+    <LabelPreview
+      template={template(buildWarehouseCodeOnlyLabelTemplate().spec)}
+      language="tspl"
+      dpi={300}
+    />,
+  );
+  await waitFor(() =>
+    expect(view.container.querySelector('[data-raster-element="km"]')).toBeTruthy(),
+  );
+  expect(view.container.querySelector("svg")?.getAttribute("data-language")).toBe("tspl");
+  expect(view.container.querySelector("svg")?.getAttribute("data-dpi")).toBe("300");
+  expect(
+    view.container.querySelector('[data-raster-element="km"]')?.getAttribute("aria-label"),
+  ).toContain("\u001d93");
 });
