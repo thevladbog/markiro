@@ -5,9 +5,9 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use http_body_util::BodyExt;
 use markiro_host::auth::AuthDevice;
-use markiro_host::error::ApiPath;
-use markiro_host::routes::device_shifts::enter_shift;
-use markiro_proto::DeviceKind;
+use markiro_host::error::{ApiError, ApiJson, ApiPath};
+use markiro_host::routes::device_shifts::{create_device_shift, enter_shift};
+use markiro_proto::{DeviceKind, DeviceShift, DeviceShiftCreate};
 use serde_json::{json, Value};
 use support::app::{
     admin, audit_rows, audit_trail, empty, host_revision, json as json_request, pair_device,
@@ -1260,6 +1260,127 @@ async fn an_entry_waiting_for_the_write_lock_sees_the_entry_that_held_it() {
             .unwrap();
     assert_eq!(rows, vec![colleague]);
     assert!(audit_trail(&admin.app, "shift.open").await.is_empty());
+}
+
+/// A station's shift write that has passed the device authentication and now
+/// waits for the write lock, with the office revoking the station in the
+/// meantime: the handler is called directly (the authentication in front of it
+/// writes `last_seen_at`, so through the router the request would already wait
+/// there), and the revocation is committed by the writer it waits for.
+async fn revoked_while_waiting<F>(admin: &Admin, station: &str, handler: F) -> (StatusCode, Value)
+where
+    F: std::future::Future<Output = Result<axum::Json<DeviceShift>, ApiError>>,
+{
+    let mut holder = markiro_host::db::begin_write(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let mut waiting = Box::pin(handler);
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(200), &mut waiting)
+            .await
+            .is_err(),
+        "the write answered while another writer held the lock"
+    );
+    sqlx::query("UPDATE devices SET revoked_at = ? WHERE id = ?")
+        .bind(admin.app.state.timestamp())
+        .bind(station)
+        .execute(&mut *holder)
+        .await
+        .unwrap();
+    holder.commit().await.unwrap();
+    let response = match waiting.await {
+        Ok(shift) => shift.into_response(),
+        Err(error) => error.into_response(),
+    };
+    let status = response.status();
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    (status, serde_json::from_slice(&body).unwrap())
+}
+
+#[tokio::test]
+async fn a_station_revoked_while_its_write_waited_neither_enters_nor_creates_a_shift() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    let mut stations = Vec::new();
+    for _ in 0..2 {
+        let (station, key) = pair_device(&admin.app, "station").await;
+        select_line(&admin, &key, &setup.line).await;
+        stations.push(station);
+    }
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let counters: Vec<(String, i64)> =
+        sqlx::query_as("SELECT month_key, last_seq FROM shift_number_counters")
+            .fetch_all(&admin.app.state.pool)
+            .await
+            .unwrap();
+    let enter_handler = enter_shift(
+        State(admin.app.state.clone()),
+        AuthDevice {
+            id: stations[0].clone(),
+            kind: DeviceKind::Station,
+        },
+        ApiPath(id.clone()),
+    );
+    let create: DeviceShiftCreate = serde_json::from_value(device_create(&setup, REQUEST)).unwrap();
+    let create_handler = create_device_shift(
+        State(admin.app.state.clone()),
+        AuthDevice {
+            id: stations[1].clone(),
+            kind: DeviceKind::Station,
+        },
+        ApiJson(create),
+    );
+    for (what, station, answer) in [
+        (
+            "enter",
+            &stations[0],
+            revoked_while_waiting(&admin, &stations[0], enter_handler).await,
+        ),
+        (
+            "create",
+            &stations[1],
+            revoked_while_waiting(&admin, &stations[1], create_handler).await,
+        ),
+    ] {
+        let (status, body) = answer;
+        assert_eq!(
+            (status, body["error"]["details"]["credential"].clone()),
+            (StatusCode::UNAUTHORIZED, json!("device")),
+            "{what} {station}: {body}"
+        );
+    }
+    // The plan is still free for a colleague, and nothing was written.
+    let (status, office) = admin
+        .call("GET", &format!("/v1/office/shifts/{id}"), None)
+        .await;
+    assert_eq!(
+        (
+            status,
+            office["status"].clone(),
+            office["ownerDeviceId"].clone()
+        ),
+        (StatusCode::OK, json!("planned"), Value::Null)
+    );
+    let participants: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM shift_participants")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let shifts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM shifts")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!((participants, shifts), (0, 1));
+    let after: Vec<(String, i64)> =
+        sqlx::query_as("SELECT month_key, last_seq FROM shift_number_counters")
+            .fetch_all(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(after, counters);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
 }
 
 #[tokio::test]

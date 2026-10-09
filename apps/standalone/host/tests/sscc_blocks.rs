@@ -417,6 +417,98 @@ async fn a_repeated_request_answers_its_own_block_after_others_were_issued() {
     assert_eq!(block_rows(&admin).await.len(), 4);
 }
 
+/// A request id names one block of one prefix. A station that repeats it with
+/// another prefix has lost track of what it asked for, and the host must not
+/// answer the old block as if it were the new prefix's serials.
+#[tokio::test]
+async fn a_repeated_request_id_with_another_prefix_is_refused_and_the_same_body_answers_its_block()
+{
+    const OTHER_PREFIX: &str = "460123400";
+    let admin = admin().await;
+    // A second box counter, which really exists: only the request id's
+    // history can be why the request is refused.
+    sqlx::query(
+        "INSERT INTO sscc_counters (issuer_prefix, extension, next_serial, rev) \
+         VALUES (?, 0, 100, 1)",
+    )
+    .bind(OTHER_PREFIX)
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let other_request = |request_id: &str| {
+        let mut body = block_request(request_id);
+        body["issuerPrefix"] = json!(OTHER_PREFIX);
+        body
+    };
+    let (status, mine) = ask(&admin, &admin.key, block_request(FIRST)).await;
+    assert_eq!(status, StatusCode::OK, "{mine}");
+    let (status, theirs) = ask(&admin, &admin.key, other_request(SECOND)).await;
+    assert_eq!(
+        (
+            status,
+            theirs["fromSerial"].clone(),
+            theirs["issuerPrefix"].clone()
+        ),
+        (StatusCode::OK, json!(100), json!(OTHER_PREFIX)),
+        "{theirs}"
+    );
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let counter = box_counter(&admin).await;
+    let blocks = block_rows(&admin).await;
+    let other_counter: (i64, i64) = sqlx::query_as(
+        "SELECT next_serial, rev FROM sscc_counters WHERE issuer_prefix = ? AND extension = 0",
+    )
+    .bind(OTHER_PREFIX)
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    // Each id again with the other prefix: refused on `requestId`, and
+    // nothing is written, whichever way round.
+    for body in [other_request(FIRST), block_request(SECOND)] {
+        let (status, refused) = ask(&admin, &admin.key, body.clone()).await;
+        assert_eq!(
+            (
+                status,
+                refused["error"]["code"].clone(),
+                refused["error"]["details"].clone()
+            ),
+            (
+                StatusCode::BAD_REQUEST,
+                json!("validation_failed"),
+                json!({ "field": "requestId" })
+            ),
+            "{body}"
+        );
+    }
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(box_counter(&admin).await, counter);
+    assert_eq!(block_rows(&admin).await, blocks);
+    let after: (i64, i64) = sqlx::query_as(
+        "SELECT next_serial, rev FROM sscc_counters WHERE issuer_prefix = ? AND extension = 0",
+    )
+    .bind(OTHER_PREFIX)
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(after, other_counter);
+    // The same bodies again are still their own blocks.
+    let (status, again) = ask(&admin, &admin.key, block_request(FIRST)).await;
+    assert_eq!((status, again), (StatusCode::OK, mine));
+    let (status, again) = ask(&admin, &admin.key, other_request(SECOND)).await;
+    assert_eq!((status, again), (StatusCode::OK, theirs));
+    // A colleague's request with the same id is its own, for any prefix.
+    let (_, colleague) = pair_device(&admin.app, "station").await;
+    let (status, theirs) = ask(&admin, &colleague, other_request(FIRST)).await;
+    assert_eq!(
+        (status, theirs["fromSerial"].clone()),
+        (StatusCode::OK, json!(2100)),
+        "{theirs}"
+    );
+    assert_eq!(host_revision(&admin.app).await, revision + 1);
+}
+
 #[tokio::test]
 async fn an_issue_stores_the_block_whole_wakes_the_streams_and_touches_no_other_counter() {
     let admin = admin().await;
