@@ -10,6 +10,7 @@ pub mod host_probe;
 pub mod local_db;
 pub mod lockdown;
 pub mod power;
+pub mod printer;
 pub mod secret_store;
 pub mod tls;
 
@@ -259,7 +260,9 @@ pub fn invoke_handler<R: tauri::Runtime>(
         connection_status,
         lockdown::enter_lockdown,
         lockdown::exit_lockdown,
-        power::set_system_awake
+        power::set_system_awake,
+        printer::print_bytes,
+        printer::list_usb_printers
     ]
 }
 

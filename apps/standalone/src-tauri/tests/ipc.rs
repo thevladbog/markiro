@@ -1223,6 +1223,124 @@ fn keeping_the_computer_awake_answers_through_the_ipc_shape() {
     assert!(!held());
 }
 
+/// `print_bytes` takes `target` and `payloadBase64` (`src/hardware/hardware.ts`)
+/// and answers `null` or a bare code; `list_usb_printers` takes nothing. A
+/// stub printer on 127.0.0.1 takes the label.
+#[test]
+fn printing_answers_through_the_ipc_shapes() {
+    use std::io::Read;
+    let dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app(DeviceState::load(dir.path().to_path_buf()));
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let (received, printed) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut bytes = Vec::new();
+        stream.read_to_end(&mut bytes).unwrap();
+        received.send(bytes).unwrap();
+    });
+    let tcp = |port: u16| json!({ "kind": "tcp", "host": "127.0.0.1", "port": port });
+    let print = |target: Value, payload: &str| {
+        invoke(
+            &webview,
+            "print_bytes",
+            json!({ "target": target, "payloadBase64": payload }),
+        )
+    };
+
+    assert_eq!(print(tcp(port), "XlhBpB0="), Ok(Value::Null));
+    assert_eq!(
+        printed
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .unwrap(),
+        [0x5E, 0x58, 0x41, 0xA4, 0x1D]
+    );
+    let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let closed_port = closed.local_addr().unwrap().port();
+    drop(closed);
+    assert_eq!(print(tcp(closed_port), "XlhB"), Err(json!("not_sent")));
+    assert_eq!(
+        print(json!({ "kind": "lpt", "port": "LPT1" }), "XlhB"),
+        Err(json!("invalid_target"))
+    );
+    assert_eq!(print(tcp(port), ""), Err(json!("invalid_payload")));
+    #[cfg(not(windows))]
+    {
+        assert_eq!(
+            print(json!({ "kind": "usb", "printer": "Zebra ZD421" }), "XlhB"),
+            Err(json!("unsupported"))
+        );
+        assert_eq!(
+            invoke(&webview, "list_usb_printers", json!({})),
+            Ok(json!([]))
+        );
+    }
+}
+
+/// Every refusal of `print_bytes` is a bare code string, not Tauri's text, and
+/// the code says whether a retry could double the label: a printer that takes
+/// the connection and hangs up while the label goes out is `outcome_unknown`.
+#[test]
+fn printing_refusals_are_bare_codes_through_ipc() {
+    use base64::Engine;
+    let dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app(DeviceState::load(dir.path().to_path_buf()));
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    std::thread::spawn(move || {
+        let (stream, _) = listener.accept().unwrap();
+        drop(stream);
+    });
+    let print = |target: Value, payload: &str| {
+        invoke(
+            &webview,
+            "print_bytes",
+            json!({ "target": target, "payloadBase64": payload }),
+        )
+    };
+    let tcp = |port: u16| json!({ "kind": "tcp", "host": "127.0.0.1", "port": port });
+
+    // The largest label the command takes, to a printer that hangs up.
+    let largest = base64::engine::general_purpose::STANDARD.encode(
+        vec![b'^'; markiro_standalone_lib::printer::MAX_PAYLOAD_BYTES],
+    );
+    assert_eq!(print(tcp(port), &largest), Err(json!("outcome_unknown")));
+    drop(largest);
+
+    for payload in ["not base64!!", "XlhB\n", "Xg", "\u{39e}g=="] {
+        assert_eq!(
+            print(tcp(port), payload),
+            Err(json!("invalid_payload")),
+            "{payload:?}"
+        );
+    }
+    let too_long = base64::engine::general_purpose::STANDARD.encode(vec![
+        b'^';
+        markiro_standalone_lib::printer::MAX_PAYLOAD_BYTES
+            + 1
+    ]);
+    assert_eq!(print(tcp(port), &too_long), Err(json!("invalid_payload")));
+    for target in [
+        json!(null),
+        json!({ "kind": "tcp", "host": "127.0.0.1", "port": 0 }),
+        json!({ "kind": "tcp", "host": "127.0.0.1 ", "port": 9100 }),
+        json!({ "kind": "serial", "port": "COM3", "baud": 0 }),
+        json!({ "kind": "usb", "printer": "" }),
+    ] {
+        assert_eq!(
+            print(target.clone(), "XlhB"),
+            Err(json!("invalid_target")),
+            "{target}"
+        );
+    }
+    // A target that is wrong wins over a payload that is wrong.
+    assert_eq!(
+        print(json!({ "kind": "lpt" }), ""),
+        Err(json!("invalid_target"))
+    );
+}
+
 /// `src/host/connection.ts` reads this snapshot before the first event.
 #[test]
 fn the_connection_status_has_the_webview_shape() {
