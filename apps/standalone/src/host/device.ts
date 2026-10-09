@@ -23,6 +23,7 @@ export const DEVICE_ERROR_CODES = [
   "line_rejected",
   "key_rejected",
   "request_failed",
+  "unsent_facts",
 ] as const;
 export type DeviceErrorCode = (typeof DEVICE_ERROR_CODES)[number];
 
@@ -57,8 +58,13 @@ export interface DeviceApi {
   claim(input: ClaimInput): Promise<DeviceStatus>;
   /** Choose this station's line; the shell keeps the host's answer in `device.json`. */
   selectLine(lineId: string): Promise<DeviceStatus>;
-  /** Forget the pairing kept on this computer. */
-  forget(): Promise<void>;
+  /**
+   * Forget the pairing kept on this computer. While this pairing has shift
+   * records the host has not acknowledged, the shell refuses with
+   * `unsent_facts`; `keepUnsent: true` goes ahead anyway (a person confirmed
+   * it), and the records stay on this PC's disk.
+   */
+  forget(options?: { keepUnsent?: boolean }): Promise<void>;
   /**
    * Read this device's record from the host again (`device_refresh`); the
    * shell keeps the line the office assigned in `device.json`. A
@@ -94,8 +100,8 @@ export function createTauriDeviceApi(call: Invoke = invoke): DeviceApi {
     async selectLine(lineId) {
       return parseStatus(await run("device_select_line", { lineId }));
     },
-    async forget() {
-      await run("device_forget", {});
+    async forget(options) {
+      await run("device_forget", options?.keepUnsent === true ? { keepUnsent: true } : {});
     },
     refresh: async () => parseStatus(await run("device_refresh", {})),
   };

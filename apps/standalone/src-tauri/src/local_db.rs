@@ -11,7 +11,8 @@
 //! (`json_each`), so the limits bound SQL, not rows.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use serde_json::{Map, Number, Value};
@@ -57,8 +58,11 @@ pub enum TableClass {
 /// [`LocalDb::clear_copies`] empties the disposable ones. A migration that
 /// adds a table adds it here in the same change: `tests/local_db.rs` fails on
 /// a table without a class, and on a name here that no migration creates. No
-/// table has a foreign key; one between tables of different classes would
-/// make a forget fail at its commit, so add none.
+/// table has a foreign key, and `tests/local_db.rs` fails on one: a plain key
+/// makes the forget fail at the `DELETE` that breaks it, and `ON DELETE
+/// CASCADE` or `SET NULL` from a table the forget keeps to one it empties
+/// would delete or rewrite this device's own records without a word, so add
+/// none.
 pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
     ("floor_sign_in_failures", TableClass::Disposable),
     ("ref_lines", TableClass::Disposable),
@@ -122,6 +126,9 @@ pub enum LocalDbError {
     /// A statement changed another number of rows than `expectedChanges`;
     /// the batch rolled back whole.
     ChangesMismatch,
+    /// [`LocalDb::clear_copies`] found `count` outbox records without a
+    /// receipt that its [`UnsentGuard`] protects, and cleared nothing.
+    UnsentRecords { count: u64 },
 }
 
 impl LocalDbError {
@@ -133,8 +140,25 @@ impl LocalDbError {
             LocalDbError::UnsupportedValue => "unsupported_value",
             LocalDbError::StatementFailed => "statement_failed",
             LocalDbError::ChangesMismatch => "changes_mismatch",
+            LocalDbError::UnsentRecords { .. } => "unsent_facts",
         }
     }
+}
+
+/// Which outbox records without a receipt stop a forget (stage 2a spec §5.2,
+/// question В7): a forget never waits for them, it refuses, so the station
+/// sends them first or a person confirms the loss of the link to them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnsentGuard<'a> {
+    /// This pairing's (host id, device id): records of an earlier pairing
+    /// that was forgotten with a confirmation do not count.
+    Pairing(&'a str, &'a str),
+    /// Any pairing's: `device.json` is unreadable, so the current pairing is
+    /// unknown.
+    AnyPairing,
+    /// None: a person confirmed the forget knowing the count, or there is no
+    /// pairing to forget. The records stay on disk either way.
+    Ignore,
 }
 
 /// One statement of `local_transaction`.
@@ -285,19 +309,30 @@ impl LocalDb {
     /// it ran with `secure_delete`, which nothing here scrubs (see "Local
     /// database" in `apps/standalone/AGENTS.md`). The list is named, not read
     /// from `pragma_table_list`: a table a later migration adds is emptied
-    /// only once that migration's plan classes it disposable.
-    pub async fn clear_copies(&self) -> Result<(), LocalDbError> {
-        self.clear_classed(TABLE_CLASSES).await
+    /// only once that migration's plan classes it disposable. The unsent
+    /// records `guard` protects are counted in this same transaction, before
+    /// the first delete: with any, nothing is deleted and the call answers
+    /// [`LocalDbError::UnsentRecords`].
+    pub async fn clear_copies(&self, guard: UnsentGuard<'_>) -> Result<(), LocalDbError> {
+        self.clear_classed(TABLE_CLASSES, guard).await
     }
 
     /// [`LocalDb::clear_copies`] over `classes`, so a unit test can give it
     /// tables of every class while [`TABLE_CLASSES`] holds only disposable ones.
-    async fn clear_classed(&self, classes: &[(&str, TableClass)]) -> Result<(), LocalDbError> {
+    async fn clear_classed(
+        &self,
+        classes: &[(&str, TableClass)],
+        guard: UnsentGuard<'_>,
+    ) -> Result<(), LocalDbError> {
         let mut tx = self
             .writer
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(|_| LocalDbError::StatementFailed)?;
+        let count = unsent_records(&mut tx, guard).await?;
+        if count > 0 {
+            return Err(LocalDbError::UnsentRecords { count });
+        }
         let disposable = classes
             .iter()
             .filter(|(_, class)| *class == TableClass::Disposable);
@@ -322,21 +357,73 @@ impl LocalDb {
     }
 }
 
+/// How many outbox records without a receipt (`acked_at IS NULL`) `guard`
+/// protects, counted inside the forget's own transaction, so no record can
+/// arrive between the count and the clear. 0 while no migration has created
+/// `outbox` (plan 2a5 does, with the columns `host_id`, `device_id` and
+/// `acked_at`). An outbox that cannot be counted is an error, never 0.
+async fn unsent_records(
+    tx: &mut sqlx::SqliteConnection,
+    guard: UnsentGuard<'_>,
+) -> Result<u64, LocalDbError> {
+    let failed = |_| LocalDbError::StatementFailed;
+    if guard == UnsentGuard::Ignore {
+        return Ok(0);
+    }
+    let outbox: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pragma_table_list WHERE schema = 'main' AND name = 'outbox'",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(failed)?;
+    if outbox == 0 {
+        return Ok(0);
+    }
+    let count: i64 = match guard {
+        UnsentGuard::Pairing(host_id, device_id) => sqlx::query_scalar(
+            "SELECT count(*) FROM outbox WHERE acked_at IS NULL AND host_id = ? AND device_id = ?",
+        )
+        .bind(host_id)
+        .bind(device_id)
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(failed)?,
+        UnsentGuard::AnyPairing => {
+            sqlx::query_scalar("SELECT count(*) FROM outbox WHERE acked_at IS NULL")
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(failed)?
+        }
+        UnsentGuard::Ignore => 0,
+    };
+    Ok(u64::try_from(count).unwrap_or(0))
+}
+
 /// Tauri state: the local database, or none when it could not be opened.
 /// The app still starts — the office works without it — and the local
 /// commands answer `local_db_unavailable`.
 pub struct LocalDbState {
-    db: Option<LocalDb>,
+    /// Set when the database opened at start, or later by
+    /// [`Self::set_aside_unopened`], which opens a new one in its place.
+    db: OnceLock<LocalDb>,
     /// Where `open` looked for the database; `None` for a shell with no
     /// local database at all (`unavailable`).
     dir: Option<PathBuf>,
+    /// Serialises [`Self::set_aside_unopened`]: two forgets must not move
+    /// the same files aside twice or open two databases.
+    setting_aside: tokio::sync::Mutex<()>,
 }
 
 impl LocalDbState {
     pub async fn open(dir: &Path) -> Self {
+        let db = OnceLock::new();
+        if let Ok(opened) = LocalDb::open(dir).await {
+            let _ = db.set(opened);
+        }
         Self {
-            db: LocalDb::open(dir).await.ok(),
+            db,
             dir: Some(dir.to_path_buf()),
+            setting_aside: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -344,45 +431,80 @@ impl LocalDbState {
     /// tests that need neither use.
     pub fn unavailable() -> Self {
         Self {
-            db: None,
+            db: OnceLock::new(),
             dir: None,
+            setting_aside: tokio::sync::Mutex::new(()),
         }
     }
 
     pub fn get(&self) -> Result<&LocalDb, LocalDbError> {
-        self.db.as_ref().ok_or(LocalDbError::Unavailable)
+        self.db.get().ok_or(LocalDbError::Unavailable)
     }
 
-    /// Remove the database `open` could not open, with its `-wal`, `-shm`
-    /// and `-journal` files: it may still hold PIN and badge hashes, and
-    /// forgetting the device must not leave them behind. Each file goes on a
-    /// best-effort basis, then all four are checked again, and one still
-    /// there fails the call. Does nothing for an open database, which
-    /// [`LocalDb::clear_copies`] empties instead, or without a directory.
-    /// Everything in these files is treated as a disposable copy, as in
-    /// `clear_copies`: the first plan that adds data this device owns instead
-    /// of a copy (the scan journal, boxes, the outbox) must keep this removal
-    /// from deleting it, and block or confirm a forget while unsynced records
-    /// exist (`AGENTS.md`, "Local database").
-    pub fn remove_unopened(&self) -> std::io::Result<()> {
-        let (None, Some(dir)) = (&self.db, &self.dir) else {
-            return Ok(());
+    /// Move the database `open` could not open out of the way, with its
+    /// `-wal`, `-shm` and `-journal` files, and open a new one in its place
+    /// (stage 2a spec §5.2, question В7). Nothing is deleted: the file may
+    /// hold this device's unsent records, which support can still read (plan
+    /// 5), and it may hold PIN and badge hashes — the accepted price of
+    /// keeping those records. The files become
+    /// `standalone-station.db.unreadable-<unix ms>` plus their suffix, so the
+    /// set stays openable together. A file that cannot be moved puts back
+    /// the ones already moved and fails the call; so does a name that is
+    /// already taken (an earlier set-aside with the same stamp), which a
+    /// rename would silently replace. Answers where the database went, `None`
+    /// when there was nothing to move, an open database or no directory; a
+    /// new database that does not open either leaves the state without one,
+    /// as at start.
+    pub async fn set_aside_unopened(&self) -> std::io::Result<Option<PathBuf>> {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis())
+            .unwrap_or(0);
+        self.set_aside_unopened_at(stamp).await
+    }
+
+    /// [`Self::set_aside_unopened`] with the time stamp given, for tests.
+    pub async fn set_aside_unopened_at(&self, stamp: u128) -> std::io::Result<Option<PathBuf>> {
+        let Some(dir) = &self.dir else {
+            return Ok(None);
         };
-        let files: Vec<PathBuf> = FILE_SUFFIXES
-            .iter()
-            .map(|suffix| dir.join(format!("{FILE_NAME}{suffix}")))
-            .collect();
-        for file in &files {
-            // Best effort: a file that stays is found just below.
-            let _ = std::fs::remove_file(file);
+        let _setting_aside = self.setting_aside.lock().await;
+        if self.db.get().is_some() {
+            return Ok(None);
         }
-        match files.iter().find(|file| file.symlink_metadata().is_ok()) {
-            Some(file) => Err(std::io::Error::other(format!(
-                "{} is still there",
-                file.display()
-            ))),
-            None => Ok(()),
+        let aside = format!("{FILE_NAME}.unreadable-{stamp}");
+        let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let mut database = None;
+        for suffix in FILE_SUFFIXES {
+            let from = dir.join(format!("{FILE_NAME}{suffix}"));
+            if from.symlink_metadata().is_err() {
+                continue;
+            }
+            let to = dir.join(format!("{aside}{suffix}"));
+            let moving = if to.symlink_metadata().is_ok() {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("{} is already there", to.display()),
+                ))
+            } else {
+                std::fs::rename(&from, &to)
+            };
+            if let Err(error) = moving {
+                for (back, place) in moved.iter().rev() {
+                    // Best effort: a file left aside is still kept, not lost.
+                    let _ = std::fs::rename(place, back);
+                }
+                return Err(error);
+            }
+            if suffix.is_empty() {
+                database = Some(to.clone());
+            }
+            moved.push((from, to));
         }
+        if let Ok(opened) = LocalDb::open(dir).await {
+            let _ = self.db.set(opened);
+        }
+        Ok(database)
     }
 }
 
@@ -604,7 +726,10 @@ mod tests {
             ("probe_disposable", TableClass::Disposable),
             ("probe_workstation", TableClass::Workstation),
         ];
-        assert_eq!(db.clear_classed(&classes).await, Ok(()));
+        assert_eq!(
+            db.clear_classed(&classes, UnsentGuard::Ignore).await,
+            Ok(())
+        );
 
         for (table, left) in [
             ("probe_disposable", 0),
@@ -627,6 +752,7 @@ mod tests {
             LocalDbError::UnsupportedValue,
             LocalDbError::StatementFailed,
             LocalDbError::ChangesMismatch,
+            LocalDbError::UnsentRecords { count: 3 },
         ]
         .into_iter()
         .map(LocalDbError::code)
@@ -638,7 +764,8 @@ mod tests {
                 "invalid_statement",
                 "unsupported_value",
                 "statement_failed",
-                "changes_mismatch"
+                "changes_mismatch",
+                "unsent_facts"
             ]
         );
     }

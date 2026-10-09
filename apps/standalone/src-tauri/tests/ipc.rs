@@ -482,14 +482,6 @@ fn host_request_takes_a_limit_in_milliseconds() {
     );
 }
 
-/// The database file and the files SQLite keeps beside it.
-fn database_files(dir: &std::path::Path) -> Vec<std::path::PathBuf> {
-    ["", "-wal", "-shm", "-journal"]
-        .iter()
-        .map(|suffix| dir.join(format!("{FILE_NAME}{suffix}")))
-        .collect()
-}
-
 /// A local database that did not open: a file of garbage where the database
 /// belongs. The open fails with that file alone in the directory, and only
 /// then do the files SQLite keeps beside it appear (`beside`, by suffix), as a
@@ -507,80 +499,245 @@ fn unopened_database(dir: &std::path::Path, beside: &[&str]) -> LocalDbState {
     local
 }
 
-/// A local database that did not open (here, files of garbage) may still
-/// hold PIN and badge hashes: `device_forget` removes it with its `-wal`,
-/// `-shm` and `-journal` files before it removes `device.json`. Like the
-/// test above, this one needs no host and runs in the sandbox.
+/// The files whose name says `device_forget` moved them aside.
+fn set_aside(dir: &std::path::Path) -> Vec<String> {
+    let prefix = format!("{FILE_NAME}.unreadable-");
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+        .filter(|name| name.starts_with(&prefix))
+        .collect();
+    names.sort_unstable();
+    names
+}
+
+/// A local database that did not open (here, files of garbage) may hold
+/// this device's unsent records: `device_forget` moves it aside with its
+/// `-wal`, `-shm` and `-journal` files instead of deleting it, opens a new
+/// one, and only then removes `device.json` (stage 2a spec §5.2, question
+/// В7). Like the test above, this one needs no host and runs in the sandbox.
 #[test]
-fn forgetting_the_device_removes_a_local_database_that_did_not_open() {
+fn forgetting_the_device_sets_aside_a_local_database_that_did_not_open() {
     let app_dir = tempfile::tempdir().unwrap();
     let config = app_dir.path().join("device.json");
     save_pairing(app_dir.path());
     let local = unopened_database(app_dir.path(), &["-wal", "-shm", "-journal"]);
-    let files = database_files(app_dir.path());
-    for file in &files {
-        assert!(file.exists(), "{} is not there to remove", file.display());
-    }
     let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+    assert_eq!(
+        invoke(
+            &webview,
+            "local_query",
+            json!({ "sql": "SELECT 1", "params": [] })
+        ),
+        Err(json!("local_db_unavailable"))
+    );
 
     assert_eq!(
         invoke(&webview, "device_forget", json!({})),
         Ok(Value::Null)
     );
     assert!(!config.exists());
-    for file in &files {
-        assert!(!file.exists(), "{} is still there", file.display());
+    let aside = set_aside(app_dir.path());
+    assert_eq!(aside.len(), 4, "{aside:?}");
+    for name in &aside {
+        assert_eq!(
+            std::fs::read_to_string(app_dir.path().join(name)).unwrap(),
+            "not a database",
+            "{name} is kept as it was"
+        );
     }
+    // A new database stands in its place and answers at once.
+    assert_eq!(
+        invoke(
+            &webview,
+            "local_query",
+            json!({ "sql": "SELECT count(*) AS n FROM ref_lines", "params": [] })
+        ),
+        Ok(json!([{ "n": 0 }]))
+    );
 }
 
-/// A database file that cannot be removed fails the forget with `storage`,
-/// and `device.json` stays for another try, as when clearing an open
-/// database fails. A directory in place of the WAL stands for a file that is
-/// locked or not the app's to remove. The removal does not stop there: the
-/// `-shm` and `-journal` files that come after the WAL in its order go too.
+/// A database file that cannot be moved aside fails the forget with
+/// `storage`, and `device.json` stays for another try, as when clearing an
+/// open database fails. A directory the app may not write stands for a file
+/// that is locked or not the app's to move; the same refusal on every system
+/// is `a_file_that_cannot_be_set_aside_puts_the_others_back` in
+/// `tests/local_db.rs`. A user the permissions do not stop (root) skips it.
+#[cfg(unix)]
 #[test]
 fn forgetting_the_device_keeps_the_pairing_while_an_unopened_database_stays() {
+    use std::os::unix::fs::PermissionsExt;
+    // The database lives in a directory of its own, so that `device.json`
+    // stays removable while the database cannot be moved: a forget that went
+    // on after a failed move would then remove the pairing, and the test
+    // sees it.
     let app_dir = tempfile::tempdir().unwrap();
+    let db_dir = tempfile::tempdir().unwrap();
     let config = app_dir.path().join("device.json");
     save_pairing(app_dir.path());
-    let file = app_dir.path().join(FILE_NAME);
-    let local = unopened_database(app_dir.path(), &["-shm", "-journal"]);
-    let stuck = app_dir.path().join(format!("{FILE_NAME}-wal"));
-    std::fs::create_dir(&stuck).unwrap();
-    std::fs::write(stuck.join("kept"), "kept").unwrap();
-    let after_the_wal = [
-        app_dir.path().join(format!("{FILE_NAME}-shm")),
-        app_dir.path().join(format!("{FILE_NAME}-journal")),
-    ];
+    let local = unopened_database(db_dir.path(), &["-wal"]);
     let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
     let paired = invoke(&webview, "device_status", json!({}));
     assert!(
         matches!(&paired, Ok(status) if !status.is_null()),
         "the app starts paired"
     );
+    let mode = |bits| std::fs::Permissions::from_mode(bits);
+    std::fs::set_permissions(db_dir.path(), mode(0o500)).unwrap();
+    let probe = db_dir.path().join("probe");
+    if std::fs::write(&probe, "").is_ok() {
+        std::fs::remove_file(&probe).unwrap();
+        std::fs::set_permissions(db_dir.path(), mode(0o700)).unwrap();
+        eprintln!("skipped: the permissions do not stop this user");
+        return;
+    }
 
-    assert_eq!(
-        invoke(&webview, "device_forget", json!({})),
-        Err(json!("storage"))
-    );
+    let refused = invoke(&webview, "device_forget", json!({}));
+    // Writable again before any assertion, so the directory can be removed.
+    std::fs::set_permissions(db_dir.path(), mode(0o700)).unwrap();
+
+    assert_eq!(refused, Err(json!("storage")));
     assert!(config.exists(), "the pairing stays for another try");
     assert_eq!(
         invoke(&webview, "device_status", json!({})),
         paired,
         "the pairing stays"
     );
-    assert!(stuck.exists(), "the file that cannot go stays");
-    assert!(!file.exists(), "what could go is gone");
-    for file in &after_the_wal {
-        assert!(!file.exists(), "{} is still there", file.display());
+    assert!(set_aside(db_dir.path()).is_empty(), "nothing was moved");
+    for suffix in ["", "-wal"] {
+        let file = db_dir.path().join(format!("{FILE_NAME}{suffix}"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "not a database");
     }
 
-    std::fs::remove_dir_all(&stuck).unwrap();
     assert_eq!(
         invoke(&webview, "device_forget", json!({})),
         Ok(Value::Null)
     );
     assert!(!config.exists());
+    assert_eq!(set_aside(db_dir.path()).len(), 2);
+}
+
+/// `outbox` as plan 2a5's migration will create it, with only the columns a
+/// forget reads; plan 2a5 replaces it with its own table here.
+const OUTBOX: &str = "CREATE TABLE outbox (id TEXT PRIMARY KEY, host_id TEXT NOT NULL, \
+    device_id TEXT NOT NULL, acked_at TEXT)";
+const PAIRED_HOST: &str = "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
+const PAIRED_DEVICE: &str = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+
+/// `device_forget` takes `keepUnsent` (`src/host/device.ts`): without it, a
+/// record of this pairing without a receipt answers `unsent_facts` and
+/// nothing changes; with `true` the forget goes ahead, clears the copies and
+/// keeps the record on disk. A record of another pairing does not stop it.
+#[test]
+fn forgetting_the_device_waits_for_this_pairings_unsent_records() {
+    let app_dir = tempfile::tempdir().unwrap();
+    let config = app_dir.path().join("device.json");
+    save_pairing(app_dir.path());
+    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    let unsent =
+        format!("INSERT INTO outbox VALUES ('r1', '{PAIRED_HOST}', '{PAIRED_DEVICE}', NULL)");
+    run_raw(
+        app_dir.path(),
+        &[
+            OUTBOX,
+            &unsent,
+            "INSERT INTO sync_state (key, value) VALUES ('last_rev', '1')",
+        ],
+    );
+    let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+    let left = || {
+        invoke(
+            &webview,
+            "local_query",
+            json!({
+                "sql": "SELECT (SELECT count(*) FROM sync_state) AS copies, \
+                        (SELECT count(*) FROM outbox) AS records",
+                "params": []
+            }),
+        )
+        .unwrap()
+    };
+
+    for args in [json!({}), json!({ "keepUnsent": false })] {
+        assert_eq!(
+            invoke(&webview, "device_forget", args),
+            Err(json!("unsent_facts"))
+        );
+    }
+    assert!(config.exists(), "the pairing stays");
+    assert_eq!(left(), json!([{ "copies": 1, "records": 1 }]));
+
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({ "keepUnsent": true })),
+        Ok(Value::Null)
+    );
+    assert!(!config.exists());
+    assert_eq!(left(), json!([{ "copies": 0, "records": 1 }]));
+}
+
+/// With `device.json` unreadable the current pairing is unknown, so a record
+/// without a receipt of any pairing stops the forget, until the person
+/// confirms.
+#[test]
+fn with_an_unreadable_pairing_any_unsent_record_stops_a_forget() {
+    let app_dir = tempfile::tempdir().unwrap();
+    let config = app_dir.path().join("device.json");
+    std::fs::write(&config, "{").unwrap();
+    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    run_raw(
+        app_dir.path(),
+        &[
+            OUTBOX,
+            "INSERT INTO outbox VALUES ('r1', 'another-host', 'another-device', NULL)",
+        ],
+    );
+    let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({})),
+        Err(json!("unsent_facts"))
+    );
+    assert!(config.exists());
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({ "keepUnsent": true })),
+        Ok(Value::Null)
+    );
+    assert!(!config.exists());
+}
+
+/// Without any pairing there is no pairing's record to wait for: a forget
+/// (the reset of a device that was never paired, or of a pairing already
+/// gone) clears the copies at once and leaves the outbox alone.
+#[test]
+fn without_a_pairing_unsent_records_do_not_stop_a_forget() {
+    let app_dir = tempfile::tempdir().unwrap();
+    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    run_raw(
+        app_dir.path(),
+        &[
+            OUTBOX,
+            "INSERT INTO outbox VALUES ('r1', 'another-host', 'another-device', NULL)",
+            "INSERT INTO sync_state (key, value) VALUES ('last_rev', '1')",
+        ],
+    );
+    let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({})),
+        Ok(Value::Null)
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "local_query",
+            json!({
+                "sql": "SELECT (SELECT count(*) FROM sync_state) AS copies, \
+                        (SELECT count(*) FROM outbox) AS records",
+                "params": []
+            }),
+        ),
+        Ok(json!([{ "copies": 0, "records": 1 }]))
+    );
 }
 
 #[test]

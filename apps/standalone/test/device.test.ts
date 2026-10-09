@@ -56,6 +56,19 @@ describe("Tauri device API", () => {
     expect(call).toHaveBeenCalledWith("device_forget", {});
   });
 
+  it("forgets despite unsent records only when asked to keep them", async () => {
+    const call = vi.fn().mockResolvedValue(null);
+    await createTauriDeviceApi(call).forget({ keepUnsent: true });
+    expect(call).toHaveBeenLastCalledWith("device_forget", { keepUnsent: true });
+    await createTauriDeviceApi(call).forget({ keepUnsent: false });
+    expect(call).toHaveBeenLastCalledWith("device_forget", {});
+  });
+
+  it("keeps the shell's refusal while unsent records remain", async () => {
+    const call = vi.fn().mockRejectedValue("unsent_facts");
+    expect((await failure(createTauriDeviceApi(call).forget())).code).toBe("unsent_facts");
+  });
+
   it("pairs by code with the host's address, the confirmed fingerprint and a name", async () => {
     const call = vi.fn().mockResolvedValue(DEVICE_STATUS);
     const input = {
