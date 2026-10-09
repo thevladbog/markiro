@@ -36,7 +36,7 @@ export function isCivilDate(text: string): boolean {
   return parts(text) !== null;
 }
 
-/** Days since 0001-01-01 of a civil date `isCivilDate` accepted. */
+/** Days since 1970-01-01 (negative before it) of a civil date `isCivilDate` accepted. */
 function dayNumber(text: string): number {
   const date = parts(text);
   if (date === null) throw new RangeError(`not a civil date: ${JSON.stringify(text)}`);

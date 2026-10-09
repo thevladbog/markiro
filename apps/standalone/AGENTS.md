@@ -1397,11 +1397,13 @@ kiosk mode shows them on the station.
   for a station only, finds the active shift the station opened
   (`stationShift`: `ownerDeviceId`), and once another line is chosen, an
   empty one included, says in a live region that the station finishes its
-  work, signs the operator out and shows the new line's shifts, and that the
-  shift stays open, to be closed on «Смены». The sentence promises what the
-  station does from plan 2a5 on (decision 28), and it speaks of the new line's
-  shifts also when none is chosen. When the shifts do not load the dialog is
-  silent: no warning, no alert, and the station still moves. A revoked device
+  work, signs the operator out and shows the new line's shifts, or, when
+  «Не выбрана» is chosen, asks for a line (two texts, chosen by
+  `watch("lineId") === ""`), and that the shift stays open, to be closed on
+  «Смены». The sentences promise what the station does from plan 2a5 on
+  (decision 28). When the shifts do not load the dialog is
+  silent: no warning, no alert, and the station still moves (a small note «не
+  удалось проверить смены» is left to the owner). A revoked device
   is a dead record and offers no controls; revoking asks first, names the device
   and says it cannot be undone, then the list is read again. The row of this
   PC — the device the office runs on, whose `deviceId` `App` passes into
@@ -1705,15 +1707,26 @@ kiosk mode shows them on the station.
   under it, the mode as a word on a category tag (the cloud's tones:
   aggregation teal, validation violet), the plan («—» for none; thousands
   apart, `Intl.NumberFormat("ru")`) and the status as a phase (a closed shift
-  as done). It shows the plan, not units accepted: the list carries no totals,
-  and the «Итоги» window is the last task of plan 2a3, which waits for plan
-  2a2's contract (`totals` in `GET /v1/office/shifts/{id}`) and does not exist
-  yet. A shift carries ids, so the page names them from `listProducts`,
+  as done). It shows the plan, not units accepted. Plan 2a2 adds a required
+  `totals` (accepted units, closed and open boxes, last fact, device ids) to
+  **every** `OfficeShift`, the list included (fixture
+  `proto/fixtures/office-shift.json`; there is no separate detail fixture), and
+  this page does not read it yet: `officeShiftSchema` is not strict, so a host
+  that sends `totals` is tolerated, but the test «response fixture
+  office-shift.json parses without losing a field» in `test/protocol.test.ts`
+  fails once the fixture carries it. Whichever of plan 2a2 and plan 2a3 merges second adds
+  `totals` to `officeShiftSchema` and to the test shifts
+  (`test/support/shifts.ts`, the test files) in its PR; the row then shows the
+  accepted units and boxes, and what remains of the «Итоги» window (plan 2a3's
+  last task, rewritten after plan 2a2) is decided then. A shift carries ids,
+  so the page names them from `listProducts`,
   `listLines` and `listCounterparties`, an archived record marked «(в архиве)»,
   and one a list lacks or that did not load by the first eight characters of
   its id («Товар 5e6f7081…»). A lookup that fails leaves the list in place with
-  one warning and «Повторить», which reads again only what failed; the retry
-  of a failed list of shifts reads the failed lookups too.
+  one warning (names that are missing are shown by the start of their codes,
+  and the marks of shifts that will not open may be missing) and «Повторить»,
+  which reads again only what failed; the retry of a failed list of shifts
+  reads the failed lookups too.
 - A planned shift a station will refuse to open is marked from the page's own
   lists (`openBlocker`, `src/office/shifts/shift-list.ts`): its product
   archived or a draft (`product_inactive`), or its template switched off,
@@ -1723,7 +1736,9 @@ kiosk mode shows them on the station.
   not marked. A closed shift says why: the office's words («Закрыта в офисе:
   …») or a station's code in words («Причина расхождения: …»; a code a newer
   host adds is shown as it is); late data is an attention tag.
-- The search (number or product name as the list shows it, without case), the
+- The search (the number or the product's own name, without case: neither the
+  «Товар …» placeholder nor the «(в архиве)» mark that stand in for a missing
+  or archived product's name are searched), the
   status and line filters and the pages of 25 (`SHIFT_PAGE_SIZE`, the shared
   `OfficePager`, which «Товары» uses too) work in the page; a new search or
   filter goes back to the first page. Without a period the page shows the
@@ -1737,21 +1752,28 @@ kiosk mode shows them on the station.
   смену» opens a dialog that waits for the organization's profile and starts
   the production date as today in its time zone (`civilToday`); when the
   profile does not load, or names a zone this PC does not know
-  (`isKnownTimeZone`), the date is this PC's and the field says so. The
+  (`isKnownTimeZone`), the date is this PC's and the field says so; the date
+  and that note are fixed when the dialog opens, so a later read of the profile
+  cannot put a note under a date that did not change. The
   product offers what is in use (active, not archived) by name with its GTIN,
   and choosing one sets the box capacity and the template from it
   (`suggestBoxTemplate`: the product's preference, the category's box default,
   the organization's, the first that fits; none, and the person chooses); it
   also clears an earlier refusal of those two fields. The template offers what
   fits the product's group and has no «Не выбран»; the line offers active
-  lines; the counterparty is optional. While a write is on its way every
+  lines; the counterparty is optional. When the template defaults do not load,
+  a note under the template says it comes from the product alone. While a write is on its way every
   control of the dialog is off. A refused field takes the focus, the first in
   the form's order (`SHIFT_FIELD_ORDER`), the selects and the date included.
   A record refused on a select (`product_inactive`, `validation_failed` on
   `lineId`, `boxTemplateId`, `counterpartyId`, `productId`) goes under it, and
-  that record's list is read again, so the choice no longer offers it or shows
-  it marked; a lost answer to a create reads the lists of shifts again, since
-  the host may have planned the shift.
+  that record's list is read again; the form's own product, line, counterparty
+  and template stay offered as a marked choice («(в архиве)», a product also
+  «(черновик)»), so the select shows the record the host refused rather than
+  another one, and the person picks another. The counterparty is never cleared
+  to «Не выбран» on the person's behalf: a resend would plan a shift without
+  the counterparty that is printed on the box label. A lost answer to a create
+  reads the lists of shifts again, since the host may have planned the shift.
 - A row's actions follow its status. A planned shift has «Изменить»: the same
   dialog on the shift's own values, the product shown as text because it never
   changes, its own line, counterparty and template kept as marked choices when
@@ -1763,25 +1785,47 @@ kiosk mode shows them on the station.
   «Изменить план» (the plan alone, blank clears it) and «Закрыть»
   (`destructive`): a reason of 3–500 characters counted in code points as the
   host counts them (`closeReasonRule`), sent trimmed with the loaded revision;
-  a line break is a control character, so the field says
-  `rules.controlCharacter` and nothing is sent. A closed shift has no action.
-- Every write sends the opened row's revision, and a saved write says so and
-  reads every list of shifts again (`officeKeys.shifts`, whatever the period).
-  `stale_revision` offers «Загрузить заново», which closes the dialog and reads
-  the list again. A shift opened, closed or deleted meanwhile (`shift_status`
-  with its `details.status`, `not_found`) is an alert in words of its own
-  (`shiftWriteFailure`; a create's `not_found` is not one of these), the list is
-  read again behind the dialog, and the save button stays off, since a resend
-  would be refused the same way, until «Загрузить заново» closes the dialog.
-- Known gaps of the page, not closed by plan 2a3: while the products list has
-  not loaded the search matches the placeholder «Товар …»; when the template
-  defaults fail to load, the new-shift dialog says nothing and the template
-  stays «Выберите шаблон»; after a refusal on a select the refused id stays in
-  the form value until the person chooses again; a lost answer to a delete or
-  a close does not read the list again; the calendar of `DatePicker` is
-  portalled out of the dialog, so Tab from its last button leaves the dialog
-  (Escape is held back in `ShiftDialog` by `keepCalendarEscape`, a workaround:
-  the cause is `@markiro/ui`'s `Modal`, and `packages/*` is not this plan's).
+  a line break is a control character, so Enter writes none (the hint says
+  «одной строкой»; an Enter that confirms an input method's word is left alone)
+  and a pasted one is refused with `rules.controlCharacter`, nothing sent. A
+  closed shift has no action.
+- Every change and close sends the opened row's revision; a delete sends none
+  (the host takes no `expectedRev` on `DELETE`, only the status), so it removes
+  a planned shift whatever was changed in it meanwhile, and a create has no
+  revision. A saved write says so, the notice takes the focus (the dialog is
+  gone, and so may be the row's button), and every list of shifts is read
+  again (`officeKeys.shifts`, whatever the period). `stale_revision` offers
+  «Загрузить заново», which closes the dialog and reads the list again. The
+  host checks the revision before the status, and every open or close of a
+  shift takes a new revision, so a change or a close of a shift that a station
+  opened or someone closed meanwhile comes back as `stale_revision`, not as
+  `shift_status`. The own-words alert (`shiftWriteFailure`: `shift_status` with
+  its `details.status`, and `not_found`; a create's `not_found` is not one of
+  these) is therefore what a delete of a shift opened or closed meanwhile gets
+  (`shift_status`; a delete takes `not_found` as done), and what a change, a
+  plan change or a close of a shift deleted meanwhile gets (`not_found`); those
+  dialogs keep the `shift_status` branch in case a later host orders its
+  checks differently. The list is read again behind the dialog, and the save
+  button stays off, since a resend would be refused the same way, until
+  «Загрузить заново» closes the dialog. After a lost answer (a transport
+  failure) all four dialogs read the lists of shifts again, since the host may
+  have done the work; a refusal of the host leaves them alone.
+- Known gaps of the page, not closed by plan 2a3: the calendar of
+  `DatePicker` is portalled out of the dialog, so Tab from its last button
+  leaves the dialog (Escape is held back in `ShiftDialog` by
+  `keepCalendarEscape`, a workaround: the cause is `@markiro/ui`'s `Modal`, and
+  `packages/*` is not this plan's); a resend after a lost answer to a create
+  can plan a second shift: the create has no request id (plan 2a1's design),
+  the dialog stays open with «Нет связи с хостом…» and the list behind it is
+  read again, but nothing asks the person to look at that list before
+  pressing «Запланировать» again, and a duplicate can be deleted though its
+  number is spent (a create-specific text such as «ответ хоста не пришёл:
+  проверьте список смен за окном» waits for plan 2a4's `timeout` code, which
+  decides what a lost answer is); a server-side page of `GET /v1/office/shifts`
+  does not exist, and the 366-day bound stands in for it (a carry to a host
+  plan); a change or a close of a shift opened meanwhile says the generic
+  «Данные изменились…» rather than that the shift is now active, since the
+  host answers `stale_revision`.
 
 ## Shifts
 
@@ -2022,5 +2066,6 @@ alone (`standalone: enter_lockdown failed`), never by what the shell answered.
   opened by a real station (the station's side is plan 2a5); a station moved
   to another line while it works on a shift (the dialog's sentence describes
   what plan 2a5 builds); and the list against a host with months of shifts or
-  a period of 366 days. The «Итоги» window is not built (plan 2a3, last task,
-  after plan 2a2).
+  a period of 366 days. The shifts' totals (plan 2a2's `totals` in every
+  `OfficeShift`) are not read, and the «Итоги» window is not built (plan 2a3's
+  last task, rewritten after plan 2a2).
