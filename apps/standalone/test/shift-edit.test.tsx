@@ -807,6 +807,33 @@ describe("office shifts: changing an active shift's plan, the edges", () => {
     await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
   });
 
+  it("reads the list again after a lost answer, since the plan may have been changed", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "x" }),
+    );
+    const name = await openPlan(session, ACTIVE);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(save(name));
+    expect(await within(dialog(name)).findByRole("alert")).toBeTruthy();
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+    expect(screen.getByRole("dialog", { name })).toBeTruthy();
+    expect(valueOf(name, "План, шт")).toBe("900");
+  });
+
+  it("leaves the list alone after an answer of the host that changed nothing", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockRejectedValue(api("internal"));
+    const name = await openPlan(session, ACTIVE);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(save(name));
+    expect(await within(dialog(name)).findByRole("alert")).toBeTruthy();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(session.api.listShifts).toHaveBeenCalledTimes(1);
+  });
+
   it("sends nothing and closes without a word when the plan differs from the shift in blanks only", async () => {
     const session = shiftsSession();
     const name = await openPlan(session, ACTIVE);

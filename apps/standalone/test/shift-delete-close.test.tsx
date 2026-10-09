@@ -202,13 +202,14 @@ describe("office shifts: deleting a planned shift", () => {
     await waitFor(() => expect(session.api.listShifts.mock.calls.length).toBeGreaterThan(1));
   });
 
-  it("explains a failed request, reads nothing again and deletes on the second try", async () => {
+  it("explains a lost answer, reads the list again to show whether the shift went and deletes on the second try", async () => {
     const session = shiftsSession();
     session.api.deleteShift.mockRejectedValueOnce(lost());
     const confirm = await openDelete(session);
     fireEvent.click(within(confirm).getByRole("button", { name: "Удалить" }));
     expect((await within(confirm).findByRole("alert")).textContent).toContain(LOST_WORDS);
-    expect(session.api.listShifts).toHaveBeenCalledTimes(1);
+    // The host may have deleted the shift before the answer was lost: the list behind says so.
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
     // Still asking, and not stuck: «Удалить» works again.
     await waitFor(() => expect(deleteButton(confirm).disabled).toBe(false));
     session.api.deleteShift.mockResolvedValueOnce(undefined);
@@ -243,6 +244,10 @@ describe("office shifts: deleting a planned shift", () => {
     fireEvent.click(within(confirm).getByRole("button", { name: "Удалить" }));
     expect((await within(confirm).findByRole("alert")).textContent).toContain(FORBIDDEN_WORDS);
     expect(screen.getByRole("dialog")).toBe(confirm);
+    // An answer of the host that deleted nothing leaves the list alone.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
     expect(session.api.listShifts).toHaveBeenCalledTimes(1);
   });
 
@@ -523,6 +528,8 @@ describe("office shifts: closing an active shift", () => {
     const confirm = await openClose(session);
     giveReason("Станция сломалась");
     expect((await within(confirm).findByRole("alert")).textContent).toContain(LOST_WORDS);
+    // The host may have closed the shift before the answer was lost: the list behind says so.
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
     expect(reason().value).toBe("Станция сломалась");
     await waitFor(() => expect(closeButton().disabled).toBe(false));
     session.api.closeShift.mockResolvedValueOnce(CLOSED_ACTIVE);
@@ -533,6 +540,18 @@ describe("office shifts: closing an active shift", () => {
       reason: "Станция сломалась",
       expectedRev: 71,
     });
+  });
+
+  it("leaves the list alone after an answer of the host that closed nothing", async () => {
+    const session = shiftsSession();
+    session.api.closeShift.mockRejectedValue(api("forbidden"));
+    const confirm = await openClose(session);
+    giveReason("Станция сломалась");
+    expect((await within(confirm).findByRole("alert")).textContent).toContain(FORBIDDEN_WORDS);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(session.api.listShifts).toHaveBeenCalledTimes(1);
   });
 
   it("takes the failure away when the next try starts", async () => {
