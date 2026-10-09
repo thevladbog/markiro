@@ -173,6 +173,7 @@ async fn a_key_the_host_does_not_know_is_rejected() {
         device_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7".into(),
         kind: DeviceKind::Station,
         line_id: None,
+        device_name: None,
         device_key: secret_store::protect("not-a-key-the-host-issued").unwrap(),
     };
     device_config::save(station_dir.path(), &config).unwrap();
@@ -203,26 +204,78 @@ async fn a_station_adopts_the_line_the_office_assigns_and_keeps_it_across_restar
     host.stop().await.unwrap();
 }
 
+/// A rename in the office reaches the station with its next refresh (plan
+/// 2a4): the floor's status bar names the station, and the name survives a
+/// restart without the host.
 #[tokio::test]
-async fn a_refresh_that_finds_the_same_line_writes_nothing() {
+async fn a_station_takes_the_name_the_office_gives_it() {
     let host_dir = tempfile::tempdir().unwrap();
     let station_dir = tempfile::tempdir().unwrap();
     let host = start_host(host_dir.path()).await;
     let (station, token) = office_station(&host, station_dir.path()).await;
     let line = line_ids(&station).await.remove(0);
     let chosen = station.select_line(&line).await.unwrap();
-    // A rename in the office is no line change for the station.
+    assert_eq!(chosen.device_name.as_deref(), Some("Рабочее место хоста"));
     let device_id = chosen.device_id.clone();
     let renamed = station
         .request(
             "PUT",
             &format!("/v1/office/devices/{device_id}"),
-            Some(&json!({ "name": "Станция упаковки" })),
+            Some(&json!({ "name": "  Станция упаковки " })),
             Some(&token),
         )
         .await
         .unwrap();
     assert_eq!(renamed.status, 200, "{:?}", renamed.body);
+
+    let refreshed = station.refresh().await.unwrap();
+    assert_eq!(refreshed.device_name.as_deref(), Some("Станция упаковки"));
+    assert_eq!(refreshed.line_id, chosen.line_id);
+    assert_eq!(station.status(), Ok(Some(refreshed.clone())));
+    let reloaded = DeviceState::load(station_dir.path().to_path_buf());
+    assert_eq!(reloaded.status(), Ok(Some(refreshed)));
+    host.stop().await.unwrap();
+}
+
+/// Choosing a line reads the host's record of the device too, so a rename
+/// that the station has not fetched yet arrives with it, even when the line
+/// chosen is the one already kept.
+#[tokio::test]
+async fn choosing_a_line_brings_a_rename_with_it() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let (station, token) = office_station(&host, station_dir.path()).await;
+    let line = line_ids(&station).await.remove(0);
+    let chosen = station.select_line(&line).await.unwrap();
+    let renamed = station
+        .request(
+            "PUT",
+            &format!("/v1/office/devices/{}", chosen.device_id),
+            Some(&json!({ "name": "Станция сортировки" })),
+            Some(&token),
+        )
+        .await
+        .unwrap();
+    assert_eq!(renamed.status, 200, "{:?}", renamed.body);
+    assert_eq!(station.status(), Ok(Some(chosen.clone())));
+
+    let again = station.select_line(&line).await.unwrap();
+    assert_eq!(again.device_name.as_deref(), Some("Станция сортировки"));
+    assert_eq!(again.line_id, chosen.line_id);
+    let reloaded = DeviceState::load(station_dir.path().to_path_buf());
+    assert_eq!(reloaded.status(), Ok(Some(again)));
+    host.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_refresh_that_finds_the_same_line_and_name_writes_nothing() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let (station, _token) = office_station(&host, station_dir.path()).await;
+    let line = line_ids(&station).await.remove(0);
+    let chosen = station.select_line(&line).await.unwrap();
     let config = device_config::path(station_dir.path());
     let before = std::fs::read(&config).unwrap();
     #[cfg(unix)]
@@ -293,6 +346,7 @@ async fn a_refresh_with_a_key_the_host_does_not_know_is_rejected() {
         device_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7".into(),
         kind: DeviceKind::Station,
         line_id: Some(UNKNOWN_LINE.into()),
+        device_name: None,
         device_key: secret_store::protect("not-a-key-the-host-issued").unwrap(),
     };
     device_config::save(station_dir.path(), &config).unwrap();

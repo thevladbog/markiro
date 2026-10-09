@@ -26,6 +26,22 @@ describe("Tauri device API", () => {
     await expect(createTauriDeviceApi(call).status()).resolves.toEqual(DEVICE_STATUS);
   });
 
+  it("accepts a pairing whose device name is not known yet", async () => {
+    const call = vi.fn().mockResolvedValue({ ...DEVICE_STATUS, deviceName: null });
+    await expect(createTauriDeviceApi(call).status()).resolves.toEqual({
+      ...DEVICE_STATUS,
+      deviceName: null,
+    });
+  });
+
+  it.each([
+    ["without the device name", { deviceName: undefined }],
+    ["with an empty device name", { deviceName: "" }],
+  ])("rejects a pairing %s", async (_case, change) => {
+    const call = vi.fn().mockResolvedValue({ ...DEVICE_STATUS, ...change });
+    expect((await failure(createTauriDeviceApi(call).status())).code).toBe("invalid_response");
+  });
+
   it("pairs locally under the given device name", async () => {
     const call = vi.fn().mockResolvedValue(DEVICE_STATUS);
     await expect(createTauriDeviceApi(call).pairLocally("Рабочее место хоста")).resolves.toEqual(

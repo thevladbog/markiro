@@ -25,7 +25,7 @@ use crate::secret_store;
 const LINE_ROUTE: &str = "/v1/device/line";
 
 /// This device's own record (`GET /v1/device`), which [`DeviceState::refresh`]
-/// reads for the line the office assigned.
+/// reads for the line the office assigned and the name it gave the device.
 const DEVICE_ROUTE: &str = "/v1/device";
 
 /// The bounds of `host_request`'s `timeoutMs` (stage 2a spec §5.2). A caller
@@ -56,6 +56,9 @@ pub struct DeviceStatus {
     pub device_id: String,
     pub kind: DeviceKind,
     pub line_id: Option<String>,
+    /// The name the host keeps for this device; `None` until a refresh brings
+    /// it to a `device.json` written before plan 2a4.
+    pub device_name: Option<String>,
 }
 
 /// What the connection task needs to reach the paired host. The key stays
@@ -164,6 +167,7 @@ impl PairedDevice {
             device_id: self.config.device_id.clone(),
             kind: self.config.kind,
             line_id: self.config.line_id.clone(),
+            device_name: self.config.device_name.clone(),
         }
     }
 
@@ -265,7 +269,7 @@ impl DeviceState {
         if response.status != 200 {
             return Err(DeviceError::PairRejected);
         }
-        self.remember(address, observation, client, response.body)
+        self.remember(address, observation, client, name, response.body)
     }
 
     /// Pair with the host at `address` using a one-time `code` from the
@@ -322,7 +326,7 @@ impl DeviceState {
         if response.status != 200 {
             return Err(claim_refusal(response.body.as_ref()));
         }
-        self.remember(address, observation, client, response.body)
+        self.remember(address, observation, client, name, response.body)
     }
 
     /// Choose the line this station works on (`PUT /v1/device/line`) and
@@ -355,13 +359,14 @@ impl DeviceState {
             401 => return Err(DeviceError::KeyRejected),
             _ => return Err(DeviceError::RequestFailed),
         }
-        self.keep_line(&device, response.body)
+        self.keep_record(&device, response.body)
     }
 
     /// Read this device's record again (`GET /v1/device`) and keep the line
-    /// the host has for it, so a line an administrator set or cleared in the
-    /// office reaches the station (plan 1d3). `device.json` is written only
-    /// when the line differs. Serialised with pairing, forgetting and
+    /// and the name the host has for it, so a line an administrator set or
+    /// cleared in the office reaches the station (plan 1d3), and a rename
+    /// reaches its status bar (plan 2a4). `device.json` is written only when
+    /// the line or the name differs. Serialised with pairing, forgetting and
     /// [`Self::select_line`] through the same lock, so an answer never
     /// writes over a pairing or a line choice that changed meanwhile. A host
     /// that cannot be reached changes nothing: the station keeps working on
@@ -387,13 +392,13 @@ impl DeviceState {
             401 => return Err(DeviceError::KeyRejected),
             _ => return Err(DeviceError::RequestFailed),
         }
-        self.keep_line(&device, response.body)
+        self.keep_record(&device, response.body)
     }
 
-    /// Make the line in the host's answer (`DeviceInfo`) this device's line:
-    /// `device.json` first, then the pairing in memory, and neither when the
-    /// line is already the one kept. Called with the pairing lock held.
-    fn keep_line(
+    /// Make the line and the name in the host's answer (`DeviceInfo`) this
+    /// device's: `device.json` first, then the pairing in memory, and neither
+    /// when both are already the ones kept. Called with the pairing lock held.
+    fn keep_record(
         &self,
         device: &PairedDevice,
         body: Option<Value>,
@@ -401,11 +406,13 @@ impl DeviceState {
         let info: DeviceInfo = body
             .and_then(|body| serde_json::from_value(body).ok())
             .ok_or(DeviceError::Request(RequestError::InvalidResponse))?;
-        if info.line_id == device.config.line_id {
+        let name = Some(info.name);
+        if info.line_id == device.config.line_id && name == device.config.device_name {
             return Ok(device.status());
         }
         let config = DeviceConfig {
             line_id: info.line_id,
+            device_name: name,
             ..device.config.clone()
         };
         device_config::save(&self.dir, &config).map_err(|_| DeviceError::Storage)?;
@@ -436,12 +443,15 @@ impl DeviceState {
     }
 
     /// Save a pairing the host just granted and make it current. The host
-    /// that answered must be the one `hello` described.
+    /// that answered must be the one `hello` described. The device's name is
+    /// the one it paired under, trimmed as the host keeps it; a refresh
+    /// replaces it with whatever the office renames it to.
     fn remember(
         &self,
         address: &str,
         observation: HelloObservation,
         client: PinnedClient,
+        name: &str,
         body: Option<Value>,
     ) -> Result<DeviceStatus, DeviceError> {
         let pair: PairResponse = body
@@ -457,6 +467,7 @@ impl DeviceState {
             device_id: pair.device_id,
             kind: DeviceKind::Station,
             line_id: None,
+            device_name: Some(name.trim().to_owned()),
             device_key: secret_store::protect(pair.device_key.expose())
                 .map_err(|_| DeviceError::Storage)?,
         };
@@ -672,6 +683,7 @@ mod tests {
             device_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7".into(),
             kind: DeviceKind::Station,
             line_id: None,
+            device_name: Some("Станция на линии 1".into()),
         };
         let value = serde_json::to_value(&status).expect("DeviceStatus serializes");
         let object = value.as_object().expect("DeviceStatus is a JSON object");
@@ -684,6 +696,7 @@ mod tests {
             "deviceId",
             "kind",
             "lineId",
+            "deviceName",
         ];
         expected.sort_unstable();
         assert_eq!(keys, expected);

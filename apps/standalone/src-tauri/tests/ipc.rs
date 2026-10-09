@@ -181,6 +181,7 @@ fn a_paired_device_reaches_the_host_through_the_ipc_shapes() {
         keys,
         [
             "deviceId",
+            "deviceName",
             "fingerprint",
             "hostAddress",
             "hostId",
@@ -189,6 +190,7 @@ fn a_paired_device_reaches_the_host_through_the_ipc_shapes() {
         ]
     );
     assert_eq!(device["deviceId"], status.device_id);
+    assert_eq!(device["deviceName"], NAME);
     assert_eq!(device["hostAddress"], host.address());
 
     // A method outside GET/POST/PUT/DELETE is refused by the paired client.
@@ -431,6 +433,7 @@ fn save_pairing_at(dir: &std::path::Path, address: &str) {
             device_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7".into(),
             kind: DeviceKind::Station,
             line_id: None,
+            device_name: Some("Станция на линии 1".into()),
             device_key: ProtectedSecret {
                 scheme: Scheme::Plain,
                 value: "device-key-value".into(),
@@ -648,6 +651,7 @@ fn a_device_claims_a_code_through_the_ipc_shapes() {
     assert_eq!(status["fingerprint"], host.running.fingerprint);
     assert_eq!(status["kind"], "station");
     assert_eq!(status["lineId"], Value::Null);
+    assert_eq!(status["deviceName"], "Станция на линии 2");
     assert_eq!(invoke(&webview, "device_status", json!({})), Ok(status));
 
     drop(webview);
