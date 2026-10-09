@@ -4,7 +4,10 @@
 //! `site.box_block_size` serials of the counter (fewer at the end of the
 //! prefix's serials, then `sscc_exhausted`) and moves the counter past them
 //! with a new revision in the same transaction. A repeated `requestId` of
-//! the same station answers the same block, even after others were issued.
+//! the same station answers the same block, even after others were issued;
+//! with another issuer prefix in the body it is `validation_failed` on
+//! `requestId`, since the station would file the old block's serials under
+//! a prefix they were not reserved for.
 //! Revoking blocks and a screen of them per device are plan 2b's.
 
 use axum::extract::State;

@@ -89,7 +89,9 @@ adds its name there. Every `denied` row carries `details.reason` from
 `{ from, to }` for each changed field (`audit::update_details`), except `pinPhc`
 and a template's `spec`: they are named in `changed` without a value
 (`audit::update_details_hiding`), a hash because it is a secret and a layout
-because it may be 256 KB.
+because it may be 256 KB. A station's writes (shift create and open, SSCC
+blocks) carry the device as the actor (`Actor::Device`), and a request a
+station repeats (a create, a re-entry, a block) writes no row.
 Details never hold pairing codes, keys, tokens, passwords, salts or hashes, and
 a refused login never records the typed login. An attempt refused by a rate
 limiter writes no row, so a flood cannot fill the log. An office write the host
@@ -385,7 +387,9 @@ with its leading zeros, a role of up to 120 characters and a label of up to
 that differs from an existing one only by leading zeros (`042` next to
 `0042`, which a keypad mixes up; owner question В13): `conflict` on `login`
 with `similarLogin`, the number in the way, which the office's form shows as
-a taken number. The PIN rule, 4–6 ASCII digits, mirrors the
+a taken number. Every operator counts, a deactivated one included; with two
+numbers in the way the answer names the same number first, then the lowest.
+The PIN rule, 4–6 ASCII digits, mirrors the
 cloud's (`apps/api/src/modules/operators/dto.ts`): the host never sees a
 PIN. A badge code is what a scanner types: trimmed, 1–256 printable ASCII
 characters, and hashed exactly so. A keyboard-wedge scanner presses keys,
@@ -1770,6 +1774,35 @@ does, with `labelTemplateSpecSchema`, when it enters. The opening writes
 `shift.open`; a second device's first entry (`shift.enter`) comes with plan
 2b, since in stage 2a a station's first entry is the opening.
 
+The create and the enter, like the block issue, read the device again inside
+the write transaction (`AuthDevice::require_station_in`, first after
+`begin_write`): a station revoked while its request waited for the write lock
+gets 401 `credential: device`, so a revoked station neither leaves a stray
+plan nor becomes the owner of a shift that every colleague on the line would
+then find busy. A device that is no station is `forbidden`.
+
+The table holds the lifecycle itself (two `CHECK`s of `0009`): a planned shift
+has no snapshot, opening or owner; an active or a closed one has all three; a
+closed one has `closed_at`, `closed_by_kind` and `closed_by`, any other has
+none of them. A writer that sets only part of them fails with a database
+error, so a station's close (plan 2a2) writes its three columns together.
+`close_reason_code`, `close_reason_text` and `late_data_at` stay free. A
+SQLite `CHECK` changes only by rebuilding the table, so these are not edited
+lightly. The stored snapshot outlives the host that froze it, and the owner's
+re-entry reads it through `ShiftSnapshot`: a field added to the struct later
+is an `Option` with `#[serde(default)]`, or the shifts opened before cannot be
+entered again.
+
+The audit rows of this part are six, all `ok`: `shift.create` (an office user,
+or a station as the device; target `shift`, details `{ number, productId,
+lineId, productionDate }`), `shift.update` (an office user; the update details
+of `lineId`, `productionDate`, `boxTemplateId`, `boxCapacity`, `plannedQty`
+and `counterpartyId`, no row when nothing changed), `shift.delete` (an office
+user; `{ number }`), `shift.open` (the station; `{ number, templateId,
+templateRev }`), `shift.close` (an office user; `{ reason }`) and
+`sscc.block.issue` (a station; target `sscc_block`; `{ issuerPrefix,
+extension, fromSerial, toSerial }`). A refusal writes none.
+
 The office closes an active shift (`POST …/{id}/close`, `{ reason,
 expectedRev }`, administrators and technologists), for a station that died or
 a shift nobody will finish: the reason is words, 3–500 characters without
@@ -1794,10 +1827,16 @@ extension). The counter moves past the block with a new revision in the same
 transaction, so every issued serial lies below its counter, `sscc_below_floor`
 keeps it from being issued again, and a counter form opened before the issue
 meets `stale_revision`. The same `requestId` of the same station answers the
-same block, even after others were issued. The device is read again inside the
-write transaction (a station revoked while the request waited gets 401). A
-block's use (`consumed_through`) comes with the facts of plan 2a2; revoking
-blocks and showing them per device with plan 2b.
+same block, even after others were issued, but only for the same prefix: the
+id with another `issuerPrefix` is `validation_failed` on `requestId` and
+writes nothing. A correct station keeps the prefix beside the id and repeats
+its request whole, so a mismatch is its mistake, and the old block's serials
+must not be filed under a prefix they were not reserved for (a shift create
+is lenient the other way, since a station reads that shift from the answer;
+the extension is 0 on both sides until plan 2b). The device is read again
+inside the write transaction (a station revoked while the request waited
+gets 401). A block's use (`consumed_through`) comes with the facts of plan
+2a2; revoking blocks and showing them per device with plan 2b.
 
 ## Marking rules
 

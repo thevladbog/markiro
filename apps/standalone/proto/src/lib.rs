@@ -1469,6 +1469,11 @@ pub struct DeviceShift {
 /// What a shift freezes when a station opens it (stage 2a spec §4.2): the
 /// station prints and reprints from this alone, so a change of the catalog,
 /// the template or the organization's GLN never changes a shift that runs.
+///
+/// A frozen snapshot outlives the host that froze it: the owner's re-entry
+/// reads the stored JSON through this struct. A field added here later must
+/// therefore be an `Option` with `#[serde(default)]`, or every shift opened
+/// before the change would fail to parse (and could not be entered again).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShiftSnapshot {

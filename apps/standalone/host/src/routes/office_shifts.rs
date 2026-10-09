@@ -258,10 +258,10 @@ pub async fn create_shift(
 
 /// `PUT /v1/office/shifts/{id}`: a planned shift changes every field it
 /// sends (its product never changes); an active one only its plan, which
-/// neither its label nor its snapshot shows; a closed one nothing. A line or
-/// a template that changes is checked as at planning; one that stays is
-/// kept even if it was archived, disabled or narrowed since (the station's
-/// open then refuses the template: `template_not_fit`).
+/// neither its label nor its snapshot shows; a closed one nothing. A line, a
+/// template or a counterparty that changes is checked as at planning; one that
+/// stays is kept even if it was archived, disabled or narrowed since (the
+/// station's open then refuses the template: `template_not_fit`).
 pub async fn update_shift(
     State(state): State<AppState>,
     context: OfficeContext,
