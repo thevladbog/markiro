@@ -5,6 +5,7 @@
  * (test/sqlite-schema.test.ts) applies these and round-trips a row to catch
  * drift. `drizzle.sqlite.config.ts` exists for regeneration parity only.
  */
+import { WAREHOUSE_REPRINT_MIGRATIONS } from "./warehouse-reprint-migrations.js";
 export const STATION_MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS station_meta (
      key TEXT PRIMARY KEY,
@@ -4811,6 +4812,7 @@ export const STATION_MIGRATIONS: string[] = [
   // Issues an older station left on boxes it had already taken apart.
   `DELETE FROM box_reconciliation_issues
     WHERE box_id IN (SELECT box_id FROM boxes_mirror WHERE disassembled_at IS NOT NULL);`,
+  ...WAREHOUSE_REPRINT_MIGRATIONS,
 ];
 
 export interface StationMigrationEntry {

@@ -374,7 +374,7 @@ export async function readSealedWorkSummary(
     `SELECT
        (SELECT COUNT(*) FROM outbox) AS scans,
        (SELECT COUNT(*) FROM inventory_outbox) AS inventory_scans,
-       (SELECT COUNT(*) FROM product_label_outbox) AS product_labels,
+       (SELECT COUNT(*) FROM product_label_outbox)+(SELECT COUNT(*) FROM warehouse_reprint_events WHERE receive_status='pending') AS product_labels,
        (SELECT COUNT(*) FROM boxes_mirror
          WHERE closed_at IS NOT NULL AND (acked_at IS NULL OR
            (disassembled_at IS NULL AND sscc IS NOT NULL AND confirmed_revision<reconciliation_revision))) AS boxes,
@@ -382,9 +382,9 @@ export async function readSealedWorkSummary(
        (SELECT COUNT(*) FROM shift_close_outbox)+
        (SELECT COUNT(*) FROM offline_grant_inventory_leave_intents WHERE left_at IS NULL) AS closes,
        (SELECT COUNT(*) FROM conflicts_mirror)+(SELECT COUNT(*) FROM inventory_conflicts_mirror) AS conflicts,
-       (SELECT COUNT(*) FROM product_label_receipts WHERE outcome='quarantined') AS quarantined_labels,
+       (SELECT COUNT(*) FROM product_label_receipts WHERE outcome='quarantined')+(SELECT COUNT(*) FROM warehouse_reprint_events WHERE receive_status='quarantined') AS quarantined_labels,
        (SELECT COUNT(*) FROM product_label_jobs WHERE json_extract(projection_json,'$.attemptState') IN ('sending','delivery_unknown'))+
-       (SELECT COUNT(*) FROM inventory_repack_print_attempts WHERE state='printing') AS unknown_prints`,
+       (SELECT COUNT(*) FROM inventory_repack_print_attempts WHERE state='printing')+(SELECT COUNT(*) FROM warehouse_reprint_jobs WHERE state IN ('prepared','sending','delivery_unknown','failed_before_send')) AS unknown_prints`,
   );
   if (!rows[0]) throw new Error("Recovery summary unavailable");
   const scans = rows[0]?.scans ?? 0;

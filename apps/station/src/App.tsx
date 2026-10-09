@@ -134,6 +134,7 @@ import type { ShiftEntryLease } from "./lib/shift-entry-lease.js";
 import { ConflictList } from "./pages/ConflictList.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
+import { WarehouseReprint } from "./pages/WarehouseReprint.js";
 import { TaskSelection } from "./pages/TaskSelection.js";
 import { NewShift, type NewShiftDraft } from "./pages/NewShift.js";
 import { WorkScreen } from "./pages/WorkScreen.js";
@@ -270,7 +271,7 @@ export function App() {
   const configRef = useRef<StationConfig | null>(null);
   const configTransitions = useRef(new ConfigTransitionCoordinator());
   const [operator, setOperator] = useState<OperatorMirrorRecord | null>(null);
-  const [floorView, setFloorView] = useState<"select" | "new">("select");
+  const [floorView, setFloorView] = useState<"select" | "new" | "reprint">("select");
   const [activeFloorTask, setActiveFloorTask] = useState<ActiveFloorTask | null>(null);
   const [floorRouteReady, setFloorRouteReady] = useState(false);
   const shift = activeFloorTask?.kind === "production" ? activeFloorTask.shift : null;
@@ -282,7 +283,12 @@ export function App() {
   const [shiftEntryPending, setShiftEntryPending] = useState(false);
   const [offlineGrantNotice, setOfflineGrantNotice] = useState<string | null>(null);
   const updateOperationBlocked = useCallback(() => shiftEntryLeaseRef.current !== null, []);
-  const activeShiftGuard = useCallback(() => activeShiftIdRef.current !== null, []);
+  const warehouseActiveRef = useRef(false);
+  warehouseActiveRef.current = floorView === "reprint";
+  const activeShiftGuard = useCallback(
+    () => activeShiftIdRef.current !== null || warehouseActiveRef.current,
+    [],
+  );
   const shiftEntryGenerationRef = useRef(0);
   const [shiftBundleRevision, setShiftBundleRevision] = useState(0);
   const [browserOnline, setBrowserOnline] = useState(() => navigator.onLine);
@@ -1179,7 +1185,7 @@ export function App() {
     enabled: config !== null,
     updateCenterVisible: showUpdates,
     exec: tauriExecutor,
-    activeShift: activeFloorTask !== null,
+    activeShift: activeFloorTask !== null || floorView === "reprint",
     pendingOutbox: syncState.pending,
     port: tauriStationUpdater,
     updateOperationBlocked,
@@ -1412,7 +1418,7 @@ export function App() {
 
   const windowModeControlProps = {
     snapshot: lockdownSnapshot,
-    activeShift: activeFloorTask !== null,
+    activeShift: activeFloorTask !== null || floorView === "reprint",
     disabled: operatorSwitchState !== "idle" || floorRecoveryBlocked || shiftEntryPending,
     onEnter: enterLockdown,
     onExit: exitLockdown,
@@ -2379,6 +2385,24 @@ export function App() {
           <Button onClick={() => setShowConflicts(true)}>{t("replacement.conflicts")}</Button>
           <Button onClick={() => setShowSetup(true)}>{t("replacement.setup")}</Button>
         </Card>
+      ) : floorView === "reprint" && config.deviceId && floorGeneration ? (
+        <WarehouseReprint
+          exec={tauriExecutor}
+          client={activeClient}
+          deviceId={config.deviceId}
+          operatorId={operator.operatorId}
+          credentialGeneration={floorGeneration}
+          source={scanSource}
+          hardwareConfig={hardwareConfig}
+          print={(target, bytes) => tauriHardware.print(target, bytes)}
+          onExit={() => setFloorView("select")}
+          onJournalChange={nudgeSync}
+          onSetup={() => {
+            setSetupPrinterTab(true);
+            setShowSetup(true);
+          }}
+          onFloorWorkRegister={registerFloorWorkBarrier}
+        />
       ) : floorView === "select" ? (
         <TaskSelection
           client={activeClient}
@@ -2389,6 +2413,7 @@ export function App() {
           currentLineName={config.lineName ?? null}
           onShiftSelected={handleShiftEntered}
           onInventorySelected={handleInventoryEntered}
+          onWarehouseReprint={() => setFloorView("reprint")}
           isCurrent={() =>
             floorGeneration ? credentialGenerationIsCurrent(floorGeneration) : false
           }

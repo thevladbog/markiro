@@ -56,6 +56,7 @@ export interface TaskSelectionProps {
   onShiftSelected: ShiftSelectionProps["onSelected"];
   onInventorySelected: (task: InventoryFloorTask, lease?: ShiftEntryLease) => void | Promise<void>;
   onNew: () => void;
+  onWarehouseReprint?: () => void;
   onSetup?: () => void;
   onConflicts?: () => void;
   isCurrent?: () => boolean;
@@ -93,6 +94,7 @@ export function TaskSelection({
   onShiftSelected,
   onInventorySelected,
   onNew,
+  onWarehouseReprint,
   onSetup,
   onConflicts,
   isCurrent,
@@ -574,6 +576,26 @@ export function TaskSelection({
         </div>
         <strong>{t("inventory.taskBarcode")}</strong>
       </div>
+      {onWarehouseReprint ? (
+        <article className="inventory-task-card warehouse-entry">
+          <div>
+            <strong>{t("warehouse.title")}</strong>
+            <span>{t("warehouse.entryHint")}</span>
+          </div>
+          <Button
+            size="floor"
+            disabled={busy || routePending}
+            onClick={() => {
+              void retireSelectionLifecycle().then(() => {
+                if (!credentialGeneration?.sealed && isCurrentRef.current?.() !== false)
+                  onWarehouseReprint();
+              });
+            }}
+          >
+            {t("warehouse.entryButton")}
+          </Button>
+        </article>
+      ) : null}
       <div className="inventory-task-selection__heading">
         <h3>{t("inventory.assignedTitle", { line: currentLineName ?? "—" })}</h3>
         <span>{t("inventory.taskCount", { count: tasks.length })}</span>

@@ -1,0 +1,252 @@
+import { StrictMode } from "react";
+import { DatabaseSync } from "node:sqlite";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+import {
+  WAREHOUSE_REPRINT_PROTOCOL,
+  warehouseBoxTemplate,
+  productLabelValueDigest,
+  buildWarehouseCodeOnlyLabelTemplate,
+  warehouseTemplateSchema,
+  warehouseBoxSource,
+} from "@markiro/domain";
+import i18n from "../src/i18n/index";
+vi.mock("../src/lib/rasterizer", () => ({
+  rasterizeText: async () => ({
+    width: 8,
+    height: 8,
+    hex: "0000000000000000",
+    totalBytes: 8,
+    bytesPerRow: 1,
+  }),
+}));
+import { WarehouseReprint } from "../src/pages/WarehouseReprint";
+import { applyMigrations } from "../src/lib/mirror";
+import { makeRotatingExec } from "./support/sqlite-exec";
+import { createCredentialGeneration } from "../src/lib/credential-recovery";
+import type { StationClient } from "../src/lib/api-client";
+import { warehousePreparedJobInput, seedWarehouseOperator } from "./support/warehouse-reprint";
+export function warehouseTestCatalog() {
+  const box = warehouseBoxTemplate();
+  const spec = buildWarehouseCodeOnlyLabelTemplate().spec;
+  const snap = {
+    ...box,
+    id: "00000000-0000-4000-8000-000000000040",
+    name: "Только код",
+    purpose: "product_duplicate" as const,
+    spec,
+  };
+  const { digest, ...value } = snap;
+  void digest;
+  const unit = warehouseTemplateSchema.parse({ ...value, digest: productLabelValueDigest(value) });
+  return {
+    protocol: WAREHOUSE_REPRINT_PROTOCOL,
+    revision: productLabelValueDigest([box, unit]),
+    templates: [box, unit],
+  };
+}
+it("selects independent templates and sends legacy and ordinary scans only once", async () => {
+  await i18n.changeLanguage("ru");
+  const db = new DatabaseSync(":memory:");
+  const exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  const i = warehousePreparedJobInput();
+  await seedWarehouseOperator(exec, i.operatorId);
+  let listener: (raw: string) => void = () => {};
+  const client = {
+    get: vi.fn().mockResolvedValue(warehouseTestCatalog()),
+    post: vi.fn().mockResolvedValue({
+      status: "found",
+      source: warehouseBoxSource(),
+      repair: "legacy_tspl_fnc1_literal",
+    }),
+  } as unknown as StationClient;
+  const print = vi.fn().mockResolvedValue(undefined);
+  const view = render(
+    <StrictMode>
+      <WarehouseReprint
+        exec={exec}
+        client={client}
+        deviceId={i.deviceId}
+        operatorId={i.operatorId}
+        credentialGeneration={createCredentialGeneration("synthetic-test-key")}
+        source={{
+          start: (fn) => {
+            listener = fn;
+            return () => {};
+          },
+        }}
+        hardwareConfig={{
+          scanner: null,
+          printer: i.printer.target,
+          printerLanguage: "tspl",
+          printerDpi: 203,
+          verifyPrintedLabel: false,
+        }}
+        print={print}
+        onExit={() => {}}
+      />
+    </StrictMode>,
+  );
+  try {
+    const user = {
+      click: async (element: Element) => {
+        await act(async () => fireEvent.click(element));
+      },
+    };
+    await waitFor(() =>
+      expect(
+        screen.getByRole<HTMLButtonElement>("button", { name: "Выбрать шаблоны" }).disabled,
+      ).toBe(false),
+    );
+    await user.click(screen.getByRole("button", { name: "Выбрать шаблоны" }));
+    await user.click(screen.getByRole("radio", { name: /Только код/ }));
+    await user.click(screen.getByRole("button", { name: "Короба · SSCC" }));
+    await user.click(
+      screen.getByRole("radio", {
+        name: new RegExp(i.template.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "Применить шаблоны" }));
+    await user.click(screen.getByRole("button", { name: "Начать перепечатку" }));
+    await waitFor(() =>
+      expect(screen.getByText("Отсканируйте код единицы или короба")).toBeTruthy(),
+    );
+    act(() => listener(`!100${i.source.identity}`));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByText("Этикетка передана на принтер")).toBeTruthy());
+    act(() => listener(`00${i.source.identity}`));
+    await waitFor(() =>
+      expect(screen.getByText("Этот код уже печатали в этом сеансе")).toBeTruthy(),
+    );
+    expect(print).toHaveBeenCalledTimes(1);
+  } finally {
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    db.close();
+  }
+});
+
+it("prints a manually entered SSCC once, pauses scanner intake and rejects invalid numbers", async () => {
+  const { credentialGenerationOwnership } = await import("../src/lib/credential-recovery");
+  const { saveWarehouseSession } = await import("../src/lib/warehouse-reprint/store");
+  await i18n.changeLanguage("ru");
+  const db = new DatabaseSync(":memory:");
+  const exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  const i = warehousePreparedJobInput();
+  await seedWarehouseOperator(exec, i.operatorId);
+  const generation = createCredentialGeneration("manual-test-key");
+  const owner = await credentialGenerationOwnership(generation);
+  if (!owner) throw new Error("fixture owner");
+  const catalog = warehouseTestCatalog();
+  await saveWarehouseSession(exec, {
+    owner,
+    sessionId: i.sessionId,
+    operatorId: i.operatorId,
+    reason: "damaged",
+    status: "paused",
+    unitTemplate: catalog.templates[1] ?? null,
+    boxTemplate: i.template,
+  });
+  let scanning = false;
+  const client = {
+    get: vi.fn().mockResolvedValue(catalog),
+    post: vi
+      .fn()
+      .mockResolvedValue({ status: "found", source: warehouseBoxSource(), repair: null }),
+  } as unknown as StationClient;
+  const print = vi.fn().mockResolvedValue(undefined);
+  const view = render(
+    <WarehouseReprint
+      exec={exec}
+      client={client}
+      deviceId={i.deviceId}
+      operatorId={i.operatorId}
+      credentialGeneration={generation}
+      source={{
+        start: () => {
+          scanning = true;
+          return () => {
+            scanning = false;
+          };
+        },
+      }}
+      hardwareConfig={{
+        scanner: null,
+        printer: i.printer.target,
+        printerLanguage: "tspl",
+        printerDpi: 203,
+        verifyPrintedLabel: false,
+      }}
+      print={print}
+      onExit={() => {}}
+    />,
+  );
+  const click = async (name: string) =>
+    act(async () => fireEvent.click(screen.getByRole("button", { name })));
+  try {
+    await waitFor(() =>
+      expect(
+        screen.getByRole<HTMLButtonElement>("button", { name: "Начать перепечатку" }).disabled,
+      ).toBe(false),
+    );
+    await click("Начать перепечатку");
+    expect(
+      screen.getByRole("button", { name: "Ввести код вручную" }).closest("header"),
+    ).toBeTruthy();
+    await click("Ввести код вручную");
+    expect(scanning).toBe(false);
+    const field = screen.getByRole<HTMLInputElement>("textbox", {
+      name: "Номер короба или полный код единицы",
+    });
+    expect(document.activeElement).toBe(field);
+    fireEvent.change(field, { target: { value: "346006820000000015" } });
+    fireEvent.blur(field);
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Найти и перепечатать" }).disabled,
+    ).toBe(true);
+    const form = field.closest("form");
+    if (!form) throw new Error("missing form");
+    fireEvent.submit(form);
+    expect(client.post).not.toHaveBeenCalled();
+    expect(print).not.toHaveBeenCalled();
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    await waitFor(() => expect(scanning).toBe(true));
+    await click("Ввести код вручную");
+    const input = screen.getByRole<HTMLInputElement>("textbox", {
+      name: "Номер короба или полный код единицы",
+    });
+    expect(input.value).toBe("");
+    fireEvent.change(input, { target: { value: i.source.identity } });
+    const validForm = input.closest("form");
+    if (!validForm) throw new Error("missing form");
+    await act(async () => fireEvent.submit(validForm));
+    await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+    expect(client.post).toHaveBeenCalledWith(
+      "/station/warehouse-reprint/lookup",
+      expect.objectContaining({ raw: i.source.identity, operatorId: i.operatorId }),
+    );
+    await waitFor(() => expect(scanning).toBe(true));
+    await click("Ввести код вручную");
+    fireEvent.change(screen.getByRole("textbox", { name: "Номер короба или полный код единицы" }), {
+      target: { value: i.source.identity },
+    });
+    await click("Найти и перепечатать");
+    await waitFor(() =>
+      expect(screen.getByText("Этот код уже печатали в этом сеансе")).toBeTruthy(),
+    );
+    expect(print).toHaveBeenCalledTimes(1);
+    expect(
+      screen.getByRole("button", { name: "Ввести код вручную" }).closest("header"),
+    ).toBeTruthy();
+    await click("Проверить новую этикетку");
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Ввести код вручную" }).disabled,
+    ).toBe(true);
+  } finally {
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    db.close();
+  }
+});

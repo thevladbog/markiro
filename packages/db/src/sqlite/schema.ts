@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+export * from "./warehouse-reprint-schema.js";
 import {
   check,
   foreignKey,

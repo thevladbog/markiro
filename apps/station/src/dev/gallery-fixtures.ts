@@ -26,6 +26,14 @@ const VISUAL_STRESS_GALLERY_STATE_IDS = [
   "long-copy-en",
 ] as const;
 
+export const WAREHOUSE_GALLERY_STATE_IDS = [
+  "warehouse-reprint-ready",
+  "warehouse-reprint-setup",
+  "warehouse-reprint-lookup",
+  "warehouse-reprint-unknown",
+  "warehouse-reprint-legacy-sent",
+] as const;
+
 export const INVENTORY_GALLERY_STATE_IDS = [
   "inventory-task-selection",
   "inventory-other-line-confirmation",
@@ -51,13 +59,15 @@ export const INVENTORY_GALLERY_STATE_IDS = [
 export type GalleryStateId =
   | PersistentGalleryStateId
   | (typeof VISUAL_STRESS_GALLERY_STATE_IDS)[number]
-  | (typeof INVENTORY_GALLERY_STATE_IDS)[number];
+  | (typeof INVENTORY_GALLERY_STATE_IDS)[number]
+  | (typeof WAREHOUSE_GALLERY_STATE_IDS)[number];
 
 export const EXPECTED_GALLERY_STATE_IDS: readonly GalleryStateId[] = Array.from(
   new Set<GalleryStateId>([
     ...PERSISTENT_GALLERY_STATE_IDS,
     ...VISUAL_STRESS_GALLERY_STATE_IDS,
     ...INVENTORY_GALLERY_STATE_IDS,
+    ...WAREHOUSE_GALLERY_STATE_IDS,
   ]),
 );
 export type GalleryLocale = "ru" | "en";
@@ -91,6 +101,7 @@ export type GalleryFixtureKind =
   | "sync"
   | "print"
   | "updates"
+  | "warehouse-reprint"
   | "inventory"
   | "floor-header"
   | "long-copy";
@@ -403,6 +414,12 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
   { id: "print-not-sscc", kind: "print", variant: "not-sscc", source: "synthetic" },
   { id: "long-copy-ru", kind: "long-copy", variant: "ru", source: "synthetic" },
   { id: "long-copy-en", kind: "long-copy", variant: "en", source: "synthetic" },
+  ...WAREHOUSE_GALLERY_STATE_IDS.map((id) => ({
+    id,
+    kind: "warehouse-reprint" as const,
+    variant: id.replace("warehouse-reprint-", ""),
+    source: "synthetic" as const,
+  })),
   ...INVENTORY_GALLERY_STATE_IDS.map((id) => ({
     id,
     kind: "inventory" as const,

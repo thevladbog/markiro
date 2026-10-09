@@ -7,6 +7,8 @@ import {
   PALLET_LABEL_TEMPLATE_NAME,
   buildDefaultLabelTemplates,
   buildDuplicateLabelTemplates,
+  buildWarehouseCodeOnlyLabelTemplate,
+  buildWarehouseCodeOnlyBoxTemplate,
   buildPalletLabelTemplates,
 } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
@@ -137,7 +139,10 @@ export class TenantProvisioningService {
       // Seeded only on tenant CREATION — re-provisioning an existing tenant
       // (idempotent retry) must not duplicate them.
       let defaultBoxLabelTemplateId: string | null = null;
-      for (const template of buildDefaultLabelTemplates()) {
+      for (const template of [
+        ...buildDefaultLabelTemplates(),
+        buildWarehouseCodeOnlyBoxTemplate(),
+      ]) {
         const templateId = createId();
         await tx.insert(schema.labelTemplates).values({
           id: templateId,
@@ -159,7 +164,10 @@ export class TenantProvisioningService {
           `No seeded label template matched DEFAULT_BOX_LABEL_TEMPLATE_NAME (${DEFAULT_BOX_LABEL_TEMPLATE_NAME})`,
         );
       }
-      for (const { name, spec } of buildDuplicateLabelTemplates()) {
+      for (const { name, spec } of [
+        ...buildDuplicateLabelTemplates(),
+        buildWarehouseCodeOnlyLabelTemplate(),
+      ]) {
         await tx.insert(schema.labelTemplates).values({
           id: createId(),
           tenantId: tenant.id,
