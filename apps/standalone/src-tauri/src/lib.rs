@@ -20,7 +20,7 @@ use tauri::{Emitter, Manager, Runtime};
 use connection::{Backoff, ConnectionState, HostRevision, HostStatus, LinkEvents};
 use device::{DeviceError, DeviceState, DeviceStatus};
 use host_client::HostResponse;
-use local_db::{LocalDbError, LocalDbState, LocalStatement, UnsentGuard};
+use local_db::{LocalDbError, LocalDbState, LocalStatement, OpenFailure, UnsentGuard};
 
 /// The host service on this computer.
 fn local_host_address() -> String {
@@ -136,39 +136,75 @@ async fn device_refresh(state: tauri::State<'_, DeviceState>) -> Result<DeviceSt
 /// records without a receipt: then the command answers `unsent_facts`, clears
 /// nothing and keeps `device.json`, until the records are sent or the person
 /// confirms with `keepUnsent: true` (the records stay on disk). With
-/// `device.json` unreadable, any pairing's unsent records count. A database
-/// that did not open is moved aside with its `-wal`, `-shm` and `-journal`
-/// files and a new one opens (`LocalDbState::set_aside_unopened`): nothing is
-/// deleted, so no confirmation is needed. When clearing or moving fails, the
+/// `device.json` unreadable, any pairing's unsent records count.
+///
+/// A database that did not open is a different case, and only a corrupt one
+/// (`OpenFailure::Corrupt`: not a database, `SQLITE_CORRUPT`) may be touched.
+/// Any other failure — a migration this app version does not know, a changed
+/// checksum, a busy or unreadable file, a full disk — leaves a file that may
+/// be sound and hold unsent records: the command answers `storage` and keeps
+/// everything in place, `keepUnsent` or not. A corrupt file is first read on
+/// a read-only connection without migrations: if it still lists an `outbox`
+/// with unsent records, the same guard applies (`unsent_facts` unless
+/// `keepUnsent: true`, and an `outbox` that cannot be counted answers
+/// `unsent_facts` too). Then it is moved aside with its `-wal`, `-shm` and
+/// `-journal` files and a new database opens (`LocalDbState::
+/// set_aside_unopened`): nothing is deleted. When clearing or moving fails, the
 /// command answers `storage` and `device.json` stays for another try (stage
 /// 2a spec §5.2, question В7).
+///
+/// One window stays by design: a fact written between the clear's commit and
+/// the removal of `device.json` belongs to the pairing that is still current,
+/// but the count did not see it, and it loses its link with no confirmation.
+/// Nothing guards it here; the forget screen (plan 2a5) is offered only with
+/// no open shift and with the fact writer stopped, so no fact is written
+/// while the forget runs.
 #[tauri::command]
 async fn device_forget(
     state: tauri::State<'_, DeviceState>,
     local: tauri::State<'_, LocalDbState>,
     keep_unsent: Option<bool>,
 ) -> Result<(), String> {
-    let cleared = match local.get() {
-        Ok(db) => {
-            let status = state.status();
-            let guard = match (keep_unsent, &status) {
-                (Some(true), _) | (_, Ok(None)) => UnsentGuard::Ignore,
-                (_, Ok(Some(paired))) => UnsentGuard::Pairing(&paired.host_id, &paired.device_id),
-                (_, Err(_)) => UnsentGuard::AnyPairing,
-            };
-            match db.clear_copies(guard).await {
-                Ok(()) => true,
-                Err(error @ LocalDbError::UnsentRecords { count }) => {
-                    eprintln!("standalone: device_forget refused: {count} unsent outbox records");
-                    return Err(error.code().to_owned());
-                }
-                Err(_) => false,
+    let status = state.status();
+    let guard = match (keep_unsent, &status) {
+        (Some(true), _) | (_, Ok(None)) => UnsentGuard::Ignore,
+        (_, Ok(Some(paired))) => UnsentGuard::Pairing(&paired.host_id, &paired.device_id),
+        (_, Err(_)) => UnsentGuard::AnyPairing,
+    };
+    let storage = || DeviceError::Storage.code().to_owned();
+    let refused = |count: Option<u64>| {
+        match count {
+            Some(count) => {
+                eprintln!("standalone: device_forget refused: {count} unsent outbox records")
+            }
+            None => eprintln!("standalone: device_forget refused: the outbox cannot be counted"),
+        }
+        LocalDbError::UnsentRecords { count: 0 }.code().to_owned()
+    };
+    match local.get() {
+        Ok(db) => match db.clear_copies(guard).await {
+            Ok(()) => {}
+            Err(LocalDbError::UnsentRecords { count }) => return Err(refused(Some(count))),
+            Err(_) => return Err(storage()),
+        },
+        Err(_) => {
+            if local.open_failure() == Some(OpenFailure::Other) {
+                eprintln!("standalone: device_forget kept a local database that is not corrupt");
+                return Err(storage());
+            }
+            match local.unopened_unsent_records(guard).await {
+                Ok(0) => {}
+                Ok(count) => return Err(refused(Some(count))),
+                Err(_) => return Err(refused(None)),
+            }
+            if let Err(error) = local.set_aside_unopened().await {
+                eprintln!(
+                    "standalone: device_forget could not set the local database aside: {:?}",
+                    error.kind()
+                );
+                return Err(storage());
             }
         }
-        Err(_) => local.set_aside_unopened().await.is_ok(),
-    };
-    if !cleared {
-        return Err(DeviceError::Storage.code().to_owned());
     }
     state
         .forget()

@@ -15,7 +15,9 @@ use markiro_proto::DeviceKind;
 use markiro_standalone_lib::connection::ConnectionState;
 use markiro_standalone_lib::device::DeviceState;
 use markiro_standalone_lib::device_config::{self, DeviceConfig};
-use markiro_standalone_lib::local_db::{LocalDbState, TableClass, FILE_NAME, TABLE_CLASSES};
+use markiro_standalone_lib::local_db::{
+    LocalDbState, TableClass, FILE_NAME, MIGRATOR, TABLE_CLASSES,
+};
 use markiro_standalone_lib::secret_store::{ProtectedSecret, Scheme};
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
@@ -614,7 +616,14 @@ fn forgetting_the_device_keeps_the_pairing_while_an_unopened_database_stays() {
         Ok(Value::Null)
     );
     assert!(!config.exists());
-    assert_eq!(set_aside(db_dir.path()).len(), 2);
+    // The database and its WAL, plus the `-shm` index the read-only count of
+    // the forget may have created beside them: it moves with them.
+    let aside = set_aside(db_dir.path());
+    let kept: Vec<_> = aside
+        .iter()
+        .filter(|name| !name.ends_with("-shm"))
+        .collect();
+    assert_eq!(kept.len(), 2, "{aside:?}");
 }
 
 /// `outbox` as plan 2a5's migration will create it, with only the columns a
@@ -738,6 +747,248 @@ fn without_a_pairing_unsent_records_do_not_stop_a_forget() {
         ),
         Ok(json!([{ "copies": 0, "records": 1 }]))
     );
+}
+
+/// A migrated database file built on a plain connection (rollback journal, so
+/// the file stands alone), with `statements` run on it afterwards.
+fn database_file(dir: &std::path::Path, statements: &[&str]) {
+    tauri::async_runtime::block_on(async {
+        let mut raw = SqliteConnectOptions::new()
+            .filename(dir.join(FILE_NAME))
+            .create_if_missing(true)
+            .connect()
+            .await
+            .unwrap();
+        MIGRATOR.run(&mut raw).await.unwrap();
+        for sql in statements {
+            sqlx::query(sql).execute(&mut raw).await.unwrap();
+        }
+        raw.close().await.unwrap();
+    });
+}
+
+/// Overwrites the page of `_sqlx_migrations` with bytes no b-tree page has:
+/// the database still lists its tables and still reads `outbox`, but opening
+/// it (the migrations read that table) fails with `SQLITE_CORRUPT`.
+fn corrupt_the_migrations_table(dir: &std::path::Path) {
+    let path = dir.join(FILE_NAME);
+    let (root, size): (i64, i64) = tauri::async_runtime::block_on(async {
+        let mut raw = SqliteConnectOptions::new()
+            .filename(&path)
+            .connect()
+            .await
+            .unwrap();
+        let found = sqlx::query_as(
+            "SELECT (SELECT rootpage FROM sqlite_master WHERE name = '_sqlx_migrations'), \
+                    (SELECT page_size FROM pragma_page_size)",
+        )
+        .fetch_one(&mut raw)
+        .await
+        .unwrap();
+        raw.close().await.unwrap();
+        found
+    });
+    let mut bytes = std::fs::read(&path).unwrap();
+    let start = usize::try_from((root - 1) * size).unwrap();
+    bytes[start..start + usize::try_from(size).unwrap()].fill(0xff);
+    std::fs::write(&path, bytes).unwrap();
+}
+
+/// A row of a record nobody sent, with a marker to find in the file.
+fn unsent_row(host: &str, device: &str) -> String {
+    format!("INSERT INTO outbox VALUES ('unsent-record-marker', '{host}', '{device}', NULL)")
+}
+
+/// Whether the file at `path` holds `marker` anywhere.
+fn file_holds(path: &std::path::Path, marker: &str) -> bool {
+    std::fs::read(path).is_ok_and(|bytes| {
+        bytes
+            .windows(marker.len())
+            .any(|window| window == marker.as_bytes())
+    })
+}
+
+/// Only a corrupt database may be set aside (stage 2a spec §5.2, question В7).
+/// A database that fails to open for any other reason is a readable file that
+/// may hold this pairing's unsent records: here one that a newer app version
+/// migrated, which an older version cannot open (`VersionMissing`). The forget
+/// answers `storage` and keeps everything in place — `device.json`, the
+/// database and its record — with or without `keepUnsent`.
+#[test]
+fn a_database_that_fails_to_open_for_another_reason_is_never_set_aside() {
+    let app_dir = tempfile::tempdir().unwrap();
+    let config = app_dir.path().join("device.json");
+    save_pairing(app_dir.path());
+    database_file(
+        app_dir.path(),
+        &[
+            OUTBOX,
+            &unsent_row(PAIRED_HOST, PAIRED_DEVICE),
+            "INSERT INTO _sqlx_migrations (version, description, success, checksum, \
+             execution_time) VALUES (9999, 'newer', 1, x'00', 0)",
+        ],
+    );
+    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    assert!(local.get().is_err(), "a newer migration does not open");
+    let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+    let paired = invoke(&webview, "device_status", json!({}));
+
+    for args in [json!({}), json!({ "keepUnsent": true })] {
+        assert_eq!(
+            invoke(&webview, "device_forget", args),
+            Err(json!("storage"))
+        );
+        assert!(config.exists(), "the pairing stays");
+        assert_eq!(invoke(&webview, "device_status", json!({})), paired);
+        assert!(set_aside(app_dir.path()).is_empty(), "nothing was moved");
+        assert!(
+            file_holds(&app_dir.path().join(FILE_NAME), "unsent-record-marker"),
+            "the record stays where it was"
+        );
+    }
+}
+
+/// A corrupt database that can still be read is counted before it is moved:
+/// this pairing's record without a receipt stops the forget until the person
+/// confirms (`unsent_facts`); then the file is moved, record and all.
+#[test]
+fn a_corrupt_database_with_unsent_records_waits_for_a_confirmation() {
+    let app_dir = tempfile::tempdir().unwrap();
+    let config = app_dir.path().join("device.json");
+    save_pairing(app_dir.path());
+    database_file(
+        app_dir.path(),
+        &[OUTBOX, &unsent_row(PAIRED_HOST, PAIRED_DEVICE)],
+    );
+    corrupt_the_migrations_table(app_dir.path());
+    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    assert!(local.get().is_err(), "a corrupt table does not open");
+    let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+
+    for args in [json!({}), json!({ "keepUnsent": false })] {
+        assert_eq!(
+            invoke(&webview, "device_forget", args),
+            Err(json!("unsent_facts"))
+        );
+        assert!(config.exists(), "the pairing stays");
+        assert!(set_aside(app_dir.path()).is_empty(), "nothing was moved");
+    }
+
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({ "keepUnsent": true })),
+        Ok(Value::Null)
+    );
+    assert!(!config.exists());
+    let aside = set_aside(app_dir.path());
+    let main = aside
+        .iter()
+        .find(|name| !name.ends_with("-wal") && !name.ends_with("-shm"))
+        .expect("the database file was moved");
+    assert!(
+        file_holds(&app_dir.path().join(main), "unsent-record-marker"),
+        "the record went with the file"
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "local_query",
+            json!({ "sql": "SELECT count(*) AS n FROM ref_lines", "params": [] })
+        ),
+        Ok(json!([{ "n": 0 }])),
+        "a new database stands in its place"
+    );
+}
+
+/// Records with a receipt, and another pairing's, do not stop a corrupt
+/// database from being set aside, as they do not stop clearing an open one.
+#[test]
+fn a_corrupt_database_without_this_pairings_unsent_records_is_set_aside() {
+    let app_dir = tempfile::tempdir().unwrap();
+    let config = app_dir.path().join("device.json");
+    save_pairing(app_dir.path());
+    let acked = format!(
+        "INSERT INTO outbox VALUES ('a', '{PAIRED_HOST}', '{PAIRED_DEVICE}', '2026-10-09T08:00:00.000Z')"
+    );
+    database_file(
+        app_dir.path(),
+        &[
+            OUTBOX,
+            &acked,
+            "INSERT INTO outbox VALUES ('b', 'another-host', 'another-device', NULL)",
+        ],
+    );
+    corrupt_the_migrations_table(app_dir.path());
+    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    assert!(local.get().is_err());
+    let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({})),
+        Ok(Value::Null)
+    );
+    assert!(!config.exists());
+    assert!(!set_aside(app_dir.path()).is_empty(), "the file was moved");
+}
+
+/// With `device.json` unreadable any pairing's record without a receipt stops
+/// the forget of a corrupt database too.
+#[test]
+fn with_an_unreadable_pairing_a_corrupt_database_with_any_unsent_record_waits() {
+    let app_dir = tempfile::tempdir().unwrap();
+    let config = app_dir.path().join("device.json");
+    std::fs::write(&config, "{").unwrap();
+    database_file(
+        app_dir.path(),
+        &[OUTBOX, &unsent_row("another-host", "another-device")],
+    );
+    corrupt_the_migrations_table(app_dir.path());
+    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    assert!(local.get().is_err());
+    let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({})),
+        Err(json!("unsent_facts"))
+    );
+    assert!(config.exists());
+    assert!(set_aside(app_dir.path()).is_empty());
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({ "keepUnsent": true })),
+        Ok(Value::Null)
+    );
+    assert!(!config.exists());
+    assert!(!set_aside(app_dir.path()).is_empty());
+}
+
+/// A corrupt database whose `outbox` cannot be counted (it lacks the columns
+/// a forget reads) is not moved without a confirmation either: the count is
+/// unknown, so the forget answers `unsent_facts`, and `keepUnsent` confirms.
+#[test]
+fn a_corrupt_database_whose_outbox_cannot_be_counted_waits_for_a_confirmation() {
+    let app_dir = tempfile::tempdir().unwrap();
+    let config = app_dir.path().join("device.json");
+    save_pairing(app_dir.path());
+    database_file(
+        app_dir.path(),
+        &["CREATE TABLE outbox (id TEXT PRIMARY KEY)"],
+    );
+    corrupt_the_migrations_table(app_dir.path());
+    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    assert!(local.get().is_err());
+    let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({})),
+        Err(json!("unsent_facts"))
+    );
+    assert!(config.exists());
+    assert!(set_aside(app_dir.path()).is_empty());
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({ "keepUnsent": true })),
+        Ok(Value::Null)
+    );
+    assert!(!config.exists());
+    assert!(!set_aside(app_dir.path()).is_empty());
 }
 
 #[test]

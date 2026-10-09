@@ -2,8 +2,8 @@
 //! query path and the one-transaction batch path (stage 1 spec §5.2).
 
 use markiro_standalone_lib::local_db::{
-    table_class, LocalDb, LocalDbError, LocalDbState, LocalStatement, TableClass, UnsentGuard,
-    FILE_NAME, TABLE_CLASSES,
+    table_class, LocalDb, LocalDbError, LocalDbState, LocalStatement, OpenFailure, TableClass,
+    UnsentGuard, FILE_NAME, MIGRATOR, TABLE_CLASSES,
 };
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
@@ -969,5 +969,197 @@ async fn clearing_the_copies_leaves_no_deleted_hash_in_the_file_or_its_wal() {
     for marker in [IN_FILE, IN_WAL] {
         assert!(!file_holds(&file, marker), "{marker} stayed in the file");
         assert!(!file_holds(&wal, marker), "{marker} stayed in the WAL");
+    }
+}
+
+/// A migrated database file built on a plain connection (rollback journal, so
+/// the file stands alone), with `statements` run on it afterwards.
+async fn database_file(dir: &std::path::Path, statements: &[&str]) {
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    MIGRATOR.run(&mut raw).await.unwrap();
+    for sql in statements {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    raw.close().await.unwrap();
+}
+
+/// Overwrites the page of `_sqlx_migrations` with bytes no b-tree page has:
+/// the database still lists its tables and still reads `outbox`, but opening
+/// it (the migrations read that table) fails with `SQLITE_CORRUPT`.
+async fn corrupt_the_migrations_table(dir: &std::path::Path) {
+    let path = dir.join(FILE_NAME);
+    let mut raw = SqliteConnectOptions::new()
+        .filename(&path)
+        .connect()
+        .await
+        .unwrap();
+    let (root, size): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT rootpage FROM sqlite_master WHERE name = '_sqlx_migrations'), \
+                (SELECT page_size FROM pragma_page_size)",
+    )
+    .fetch_one(&mut raw)
+    .await
+    .unwrap();
+    raw.close().await.unwrap();
+    let mut bytes = std::fs::read(&path).unwrap();
+    let start = usize::try_from((root - 1) * size).unwrap();
+    bytes[start..start + usize::try_from(size).unwrap()].fill(0xff);
+    std::fs::write(&path, bytes).unwrap();
+}
+
+/// Why a database did not open decides what a forget may do with it: only a
+/// corrupt file may be set aside (stage 2a spec §5.2, question В7). Every
+/// other failure — a newer app version's migration, a changed checksum, a
+/// directory that is a file — leaves a database that may be perfectly fine
+/// and must stay where it is.
+#[tokio::test]
+async fn only_a_corrupt_file_is_recorded_as_corrupt() {
+    let opened = tempfile::tempdir().unwrap();
+    let local = LocalDbState::open(opened.path()).await;
+    assert!(local.get().is_ok());
+    assert_eq!(local.open_failure(), None);
+    assert_eq!(LocalDbState::unavailable().open_failure(), None);
+
+    let garbage = tempfile::tempdir().unwrap();
+    let local = unopened(garbage.path(), &[]).await;
+    assert_eq!(local.open_failure(), Some(OpenFailure::Corrupt));
+
+    let broken = tempfile::tempdir().unwrap();
+    database_file(broken.path(), &[]).await;
+    corrupt_the_migrations_table(broken.path()).await;
+    let local = LocalDbState::open(broken.path()).await;
+    assert!(local.get().is_err());
+    assert_eq!(local.open_failure(), Some(OpenFailure::Corrupt));
+
+    let newer = tempfile::tempdir().unwrap();
+    database_file(
+        newer.path(),
+        &[
+            "INSERT INTO _sqlx_migrations (version, description, success, checksum, \
+           execution_time) VALUES (9999, 'newer', 1, x'00', 0)",
+        ],
+    )
+    .await;
+    let local = LocalDbState::open(newer.path()).await;
+    assert!(local.get().is_err());
+    assert_eq!(local.open_failure(), Some(OpenFailure::Other));
+
+    let changed = tempfile::tempdir().unwrap();
+    database_file(
+        changed.path(),
+        &["UPDATE _sqlx_migrations SET checksum = x'00' WHERE version = 1"],
+    )
+    .await;
+    let local = LocalDbState::open(changed.path()).await;
+    assert!(local.get().is_err());
+    assert_eq!(local.open_failure(), Some(OpenFailure::Other));
+
+    // A "directory" that is a file: the open fails on the file system.
+    let parent = tempfile::tempdir().unwrap();
+    let not_a_directory = parent.path().join("file");
+    std::fs::write(&not_a_directory, "").unwrap();
+    let local = LocalDbState::open(&not_a_directory).await;
+    assert!(local.get().is_err());
+    assert_eq!(local.open_failure(), Some(OpenFailure::Other));
+}
+
+/// A database set aside leaves a new one in its place; the failure recorded
+/// for the old file is gone with it.
+#[tokio::test]
+async fn setting_a_corrupt_database_aside_clears_its_recorded_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let local = unopened(dir.path(), &[]).await;
+    assert_eq!(local.open_failure(), Some(OpenFailure::Corrupt));
+    local
+        .set_aside_unopened_at(1_790_000_000_000)
+        .await
+        .unwrap();
+    assert!(local.get().is_ok());
+    assert_eq!(local.open_failure(), None);
+}
+
+/// A corrupt database that can still be read is counted on a read-only
+/// connection, without migrations and without changing the file: the same
+/// records as `UnsentGuard` protects in an open one. A file nothing can be
+/// read from has none to protect; an outbox that exists but cannot be counted
+/// is an error, never 0.
+#[tokio::test]
+async fn a_database_that_did_not_open_is_counted_without_being_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mine = format!("INSERT INTO outbox VALUES ('a', '{HOST}', '{DEVICE}', NULL)");
+    let other_device = format!("INSERT INTO outbox VALUES ('b', '{HOST}', '{OTHER_DEVICE}', NULL)");
+    let sent = format!(
+        "INSERT INTO outbox VALUES ('c', '{HOST}', '{DEVICE}', '2026-10-09T08:00:00.000Z')"
+    );
+    database_file(dir.path(), &[OUTBOX, &mine, &other_device, &sent]).await;
+    corrupt_the_migrations_table(dir.path()).await;
+    let local = LocalDbState::open(dir.path()).await;
+    assert_eq!(local.open_failure(), Some(OpenFailure::Corrupt));
+    let before = std::fs::read(dir.path().join(FILE_NAME)).unwrap();
+
+    assert_eq!(
+        local
+            .unopened_unsent_records(UnsentGuard::Pairing(HOST, DEVICE))
+            .await,
+        Ok(1)
+    );
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::AnyPairing).await,
+        Ok(2)
+    );
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::Ignore).await,
+        Ok(0)
+    );
+    assert_eq!(
+        std::fs::read(dir.path().join(FILE_NAME)).unwrap(),
+        before,
+        "the file is read, not written"
+    );
+
+    // Nothing can be read from a file of garbage, from no file and from no
+    // directory: there is no record anyone could send.
+    let garbage = tempfile::tempdir().unwrap();
+    let local = unopened(garbage.path(), &[]).await;
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::AnyPairing).await,
+        Ok(0)
+    );
+    assert_eq!(
+        LocalDbState::unavailable()
+            .unopened_unsent_records(UnsentGuard::AnyPairing)
+            .await,
+        Ok(0)
+    );
+
+    // Readable, but with no outbox yet: nothing to protect.
+    let bare = tempfile::tempdir().unwrap();
+    database_file(bare.path(), &[]).await;
+    corrupt_the_migrations_table(bare.path()).await;
+    let local = LocalDbState::open(bare.path()).await;
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::AnyPairing).await,
+        Ok(0)
+    );
+
+    // An outbox without the columns a forget reads cannot be counted.
+    let unreadable = tempfile::tempdir().unwrap();
+    database_file(
+        unreadable.path(),
+        &["CREATE TABLE outbox (id TEXT PRIMARY KEY)"],
+    )
+    .await;
+    corrupt_the_migrations_table(unreadable.path()).await;
+    let local = LocalDbState::open(unreadable.path()).await;
+    for guard in [UnsentGuard::Pairing(HOST, DEVICE), UnsentGuard::AnyPairing] {
+        assert_eq!(
+            local.unopened_unsent_records(guard).await,
+            Err(LocalDbError::StatementFailed)
+        );
     }
 }

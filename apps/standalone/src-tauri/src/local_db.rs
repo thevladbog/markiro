@@ -22,7 +22,7 @@ use sqlx::sqlite::{
     SqliteArguments, SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions,
     SqliteRow, SqliteSynchronous,
 };
-use sqlx::{Column, Row, Sqlite, TypeInfo, ValueRef};
+use sqlx::{Column, ConnectOptions, Connection, Row, Sqlite, TypeInfo, ValueRef};
 
 pub const FILE_NAME: &str = "standalone-station.db";
 /// The files SQLite keeps beside [`FILE_NAME`]: the database itself, its WAL,
@@ -159,6 +159,49 @@ pub enum UnsentGuard<'a> {
     /// None: a person confirmed the forget knowing the count, or there is no
     /// pairing to forget. The records stay on disk either way.
     Ignore,
+}
+
+/// Why [`LocalDb::open`] failed, as far as a forget needs to tell (stage 2a
+/// spec §5.2, question В7): only a corrupt file may be set aside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenFailure {
+    /// SQLite called the file corrupt or not a database (`SQLITE_CORRUPT`,
+    /// `SQLITE_NOTADB`): no app version will open it.
+    Corrupt,
+    /// Anything else — a migration this app version does not know (the app
+    /// was rolled back), a changed checksum, a busy or unreadable file, a full
+    /// disk. The file may be a sound database with unsent records and an app
+    /// that can open it later: it stays where it is.
+    Other,
+}
+
+/// The primary SQLite result codes `SQLITE_CORRUPT` and `SQLITE_NOTADB`.
+const SQLITE_CORRUPT: i64 = 11;
+const SQLITE_NOTADB: i64 = 26;
+
+/// [`OpenFailure`] of an error from [`LocalDb::open`]: a database error with
+/// a corruption code, also when it came out of a migration. SQLite's extended
+/// result codes keep the primary code in their low byte.
+fn open_failure_of(error: &sqlx::Error) -> OpenFailure {
+    use sqlx::migrate::MigrateError;
+    let corrupt = match error {
+        sqlx::Error::Database(database) => database
+            .code()
+            .and_then(|code| code.parse::<i64>().ok())
+            .is_some_and(|code| matches!(code & 0xff, SQLITE_CORRUPT | SQLITE_NOTADB)),
+        sqlx::Error::Migrate(migrate) => match &**migrate {
+            MigrateError::Execute(inner) | MigrateError::ExecuteMigration(inner, _) => {
+                open_failure_of(inner) == OpenFailure::Corrupt
+            }
+            _ => false,
+        },
+        _ => false,
+    };
+    if corrupt {
+        OpenFailure::Corrupt
+    } else {
+        OpenFailure::Other
+    }
 }
 
 /// One statement of `local_transaction`.
@@ -366,31 +409,43 @@ async fn unsent_records(
     tx: &mut sqlx::SqliteConnection,
     guard: UnsentGuard<'_>,
 ) -> Result<u64, LocalDbError> {
-    let failed = |_| LocalDbError::StatementFailed;
     if guard == UnsentGuard::Ignore {
         return Ok(0);
     }
+    if !outbox_exists(tx).await? {
+        return Ok(0);
+    }
+    count_unsent(tx, guard).await
+}
+
+async fn outbox_exists(connection: &mut sqlx::SqliteConnection) -> Result<bool, LocalDbError> {
     let outbox: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM pragma_table_list WHERE schema = 'main' AND name = 'outbox'",
     )
-    .fetch_one(&mut *tx)
+    .fetch_one(&mut *connection)
     .await
-    .map_err(failed)?;
-    if outbox == 0 {
-        return Ok(0);
-    }
+    .map_err(|_| LocalDbError::StatementFailed)?;
+    Ok(outbox != 0)
+}
+
+/// The count of [`unsent_records`] once `outbox` is known to exist.
+async fn count_unsent(
+    connection: &mut sqlx::SqliteConnection,
+    guard: UnsentGuard<'_>,
+) -> Result<u64, LocalDbError> {
+    let failed = |_| LocalDbError::StatementFailed;
     let count: i64 = match guard {
         UnsentGuard::Pairing(host_id, device_id) => sqlx::query_scalar(
             "SELECT count(*) FROM outbox WHERE acked_at IS NULL AND host_id = ? AND device_id = ?",
         )
         .bind(host_id)
         .bind(device_id)
-        .fetch_one(&mut *tx)
+        .fetch_one(&mut *connection)
         .await
         .map_err(failed)?,
         UnsentGuard::AnyPairing => {
             sqlx::query_scalar("SELECT count(*) FROM outbox WHERE acked_at IS NULL")
-                .fetch_one(&mut *tx)
+                .fetch_one(&mut *connection)
                 .await
                 .map_err(failed)?
         }
@@ -412,18 +467,25 @@ pub struct LocalDbState {
     /// Serialises [`Self::set_aside_unopened`]: two forgets must not move
     /// the same files aside twice or open two databases.
     setting_aside: tokio::sync::Mutex<()>,
+    /// Why the database is not open, while it is not.
+    failure: std::sync::Mutex<Option<OpenFailure>>,
 }
 
 impl LocalDbState {
     pub async fn open(dir: &Path) -> Self {
         let db = OnceLock::new();
-        if let Ok(opened) = LocalDb::open(dir).await {
-            let _ = db.set(opened);
+        let mut failure = None;
+        match LocalDb::open(dir).await {
+            Ok(opened) => {
+                let _ = db.set(opened);
+            }
+            Err(error) => failure = Some(open_failure_of(&error)),
         }
         Self {
             db,
             dir: Some(dir.to_path_buf()),
             setting_aside: tokio::sync::Mutex::new(()),
+            failure: std::sync::Mutex::new(failure),
         }
     }
 
@@ -434,11 +496,54 @@ impl LocalDbState {
             db: OnceLock::new(),
             dir: None,
             setting_aside: tokio::sync::Mutex::new(()),
+            failure: std::sync::Mutex::new(None),
         }
     }
 
     pub fn get(&self) -> Result<&LocalDb, LocalDbError> {
         self.db.get().ok_or(LocalDbError::Unavailable)
+    }
+
+    /// Why `open` failed, `None` while the database is open and for a shell
+    /// that never tried to open one (`unavailable`).
+    pub fn open_failure(&self) -> Option<OpenFailure> {
+        *self
+            .failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// How many records without a receipt `guard` protects in the database
+    /// that did not open, read on a read-only connection without migrations
+    /// and without changing the file. A file nothing can be read from (not a
+    /// database, no file, no directory) holds none anyone could send: 0. An
+    /// `outbox` that exists but cannot be counted is an error, never 0, as in
+    /// [`LocalDb::clear_copies`].
+    pub async fn unopened_unsent_records(
+        &self,
+        guard: UnsentGuard<'_>,
+    ) -> Result<u64, LocalDbError> {
+        let Some(dir) = &self.dir else {
+            return Ok(0);
+        };
+        if guard == UnsentGuard::Ignore {
+            return Ok(0);
+        }
+        let Ok(mut connection) = SqliteConnectOptions::new()
+            .filename(dir.join(FILE_NAME))
+            .read_only(true)
+            .busy_timeout(BUSY_TIMEOUT)
+            .connect()
+            .await
+        else {
+            return Ok(0);
+        };
+        let counted = match outbox_exists(&mut connection).await {
+            Ok(true) => count_unsent(&mut connection, guard).await,
+            Ok(false) | Err(_) => Ok(0),
+        };
+        let _ = connection.close().await;
+        counted
     }
 
     /// Move the database `open` could not open out of the way, with its
@@ -451,10 +556,12 @@ impl LocalDbState {
     /// set stays openable together. A file that cannot be moved puts back
     /// the ones already moved and fails the call; so does a name that is
     /// already taken (an earlier set-aside with the same stamp), which a
-    /// rename would silently replace. Answers where the database went, `None`
-    /// when there was nothing to move, an open database or no directory; a
-    /// new database that does not open either leaves the state without one,
-    /// as at start.
+    /// rename would silently replace. Whether this database may be set aside at
+    /// all is the caller's decision: `device_forget` calls it only for a
+    /// corrupt one ([`OpenFailure::Corrupt`]), after the unsent-records
+    /// guard. Answers where the database went, `None` when there was nothing
+    /// to move, an open database or no directory; a new database that does
+    /// not open either leaves the state without one, as at start.
     pub async fn set_aside_unopened(&self) -> std::io::Result<Option<PathBuf>> {
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -501,9 +608,17 @@ impl LocalDbState {
             }
             moved.push((from, to));
         }
-        if let Ok(opened) = LocalDb::open(dir).await {
-            let _ = self.db.set(opened);
-        }
+        let failure = match LocalDb::open(dir).await {
+            Ok(opened) => {
+                let _ = self.db.set(opened);
+                None
+            }
+            Err(error) => Some(open_failure_of(&error)),
+        };
+        *self
+            .failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = failure;
         Ok(database)
     }
 }
@@ -829,5 +944,83 @@ mod tests {
             expected_changes: None,
         }];
         assert_eq!(db.transaction(probe).await, Ok(vec![1]));
+    }
+
+    /// A database error SQLite reports with the given extended result code.
+    #[derive(Debug)]
+    struct Coded(&'static str);
+
+    impl std::fmt::Display for Coded {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(formatter, "result code {}", self.0)
+        }
+    }
+
+    impl std::error::Error for Coded {}
+
+    impl sqlx::error::DatabaseError for Coded {
+        fn message(&self) -> &str {
+            "coded"
+        }
+
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+            Some(self.0.into())
+        }
+
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+
+        fn kind(&self) -> sqlx::error::ErrorKind {
+            sqlx::error::ErrorKind::Other
+        }
+    }
+
+    fn database_error(code: &'static str) -> sqlx::Error {
+        sqlx::Error::Database(Box::new(Coded(code)))
+    }
+
+    /// Corruption is the primary code `SQLITE_CORRUPT` (11) or `SQLITE_NOTADB`
+    /// (26), also in its extended forms (`CORRUPT_VTAB` 267, `CORRUPT_INDEX`
+    /// 779: the primary code is the low byte), and also when it surfaces from a
+    /// migration. Busy (5), cannot-open (14), full disk (13), I/O (10, 522)
+    /// and a code that is no number are not.
+    #[test]
+    fn only_corruption_codes_make_an_open_failure_corrupt() {
+        use sqlx::migrate::MigrateError;
+        for code in ["11", "26", "267", "779"] {
+            assert_eq!(
+                open_failure_of(&database_error(code)),
+                OpenFailure::Corrupt,
+                "{code}"
+            );
+            let in_a_migration =
+                sqlx::Error::Migrate(Box::new(MigrateError::Execute(database_error(code))));
+            assert_eq!(open_failure_of(&in_a_migration), OpenFailure::Corrupt);
+            let in_one_migration = sqlx::Error::Migrate(Box::new(MigrateError::ExecuteMigration(
+                database_error(code),
+                3,
+            )));
+            assert_eq!(open_failure_of(&in_one_migration), OpenFailure::Corrupt);
+        }
+        for code in ["5", "13", "14", "10", "522", "1", "", "corrupt"] {
+            assert_eq!(
+                open_failure_of(&database_error(code)),
+                OpenFailure::Other,
+                "{code:?}"
+            );
+        }
+        let missing = sqlx::Error::Migrate(Box::new(MigrateError::VersionMissing(9999)));
+        assert_eq!(open_failure_of(&missing), OpenFailure::Other);
+        let io = sqlx::Error::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert_eq!(open_failure_of(&io), OpenFailure::Other);
     }
 }
