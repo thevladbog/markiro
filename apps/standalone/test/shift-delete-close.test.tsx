@@ -6,6 +6,7 @@ import type { OfficeShift } from "../src/host/protocol.js";
 import { TECHNOLOGIST, type FakeOfficeSession } from "./support/office.js";
 import {
   ACTIVE,
+  expectFocusedNotice,
   freezeToday,
   openShifts,
   PLANNED,
@@ -157,6 +158,18 @@ describe("office shifts: deleting a planned shift", () => {
     expect(session.api.deleteShift).toHaveBeenCalledWith(TOKEN, PLANNED.id);
     expect(screen.queryByRole("dialog")).toBeNull();
     await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+  });
+
+  it("moves the focus to the notice once the shift is deleted, though the button that opened the dialog is gone", async () => {
+    const session = shiftsSession();
+    session.api.deleteShift.mockResolvedValue(undefined);
+    // The list behind no longer has the row.
+    const confirm = await openDelete(session);
+    session.api.listShifts.mockResolvedValue([ACTIVE]);
+    fireEvent.click(within(confirm).getByRole("button", { name: "Удалить" }));
+    await expectFocusedNotice("Смена OCT26-005 удалена.");
+    await waitFor(() => expect(screen.queryByText("OCT26-005")).toBeNull());
+    await expectFocusedNotice("Смена OCT26-005 удалена.");
   });
 
   it("takes a shift already gone as deleted", async () => {
@@ -540,6 +553,14 @@ describe("office shifts: closing an active shift", () => {
       reason: "Станция сломалась",
       expectedRev: 71,
     });
+  });
+
+  it("moves the focus to the notice once the shift is closed", async () => {
+    const session = shiftsSession();
+    session.api.closeShift.mockResolvedValue(CLOSED_ACTIVE);
+    await openClose(session);
+    giveReason("Станция сломалась");
+    await expectFocusedNotice("Смена OCT26-004 закрыта.");
   });
 
   it("leaves the list alone after an answer of the host that closed nothing", async () => {

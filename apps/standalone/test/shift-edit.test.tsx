@@ -9,6 +9,7 @@ import {
   AYRAN_ARCHIVED,
   BOX_58,
   CLOSED,
+  expectFocusedNotice,
   freezeToday,
   KEFIR_DRAFT,
   LINE_10,
@@ -217,6 +218,15 @@ describe("office shifts: changing a shift", () => {
     expect(valueOf(name, "Контрагент")).toBe(NORTH.id);
   });
 
+  it("moves the focus to the notice once a shift is changed", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockResolvedValue({ ...PLANNED, plannedQty: 900, rev: 91 });
+    const name = await openEdit(session, PLANNED);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(save(name));
+    await expectFocusedNotice("Изменения сохранены.");
+  });
+
   it("clears the plan and the counterparty with null", async () => {
     const session = shiftsSession();
     const shift: OfficeShift = {
@@ -301,6 +311,15 @@ describe("office shifts: changing a shift", () => {
         expectedRev: 71,
       }),
     );
+  });
+
+  it("moves the focus to the notice once an active shift's plan is changed", async () => {
+    const session = shiftsSession();
+    session.api.updateShift.mockResolvedValue({ ...ACTIVE, plannedQty: 1500, rev: 92 });
+    const name = await openPlan(session, ACTIVE);
+    fireEvent.change(field(name, "План, шт"), { target: { value: "1500" } });
+    fireEvent.click(save(name));
+    await expectFocusedNotice("Изменения сохранены.");
   });
 
   it("refuses a plan that is no whole number from 1 to 10 000 000, and says a shift closed meanwhile", async () => {

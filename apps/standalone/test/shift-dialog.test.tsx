@@ -8,6 +8,7 @@ import {
   ACTIVE,
   BOX_58,
   DEFAULTS,
+  expectFocusedNotice,
   freezeToday,
   LINE_10,
   LINE_2,
@@ -220,6 +221,15 @@ describe("office shifts: planning a shift", () => {
     });
     expect(screen.queryByRole("dialog", { name: "Новая смена" })).toBeNull();
     await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+  });
+
+  it("moves the focus to the notice once the shift is planned", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockResolvedValue(CREATED);
+    await openCreate(session);
+    fillMilk();
+    submit();
+    await expectFocusedNotice("Смена OCT26-006 запланирована.");
   });
 
   it("sends no plan and no counterparty as null, and a capacity typed over the product's", async () => {

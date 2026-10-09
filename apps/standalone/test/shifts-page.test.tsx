@@ -579,6 +579,45 @@ describe("office shifts: the list, boundaries and states", () => {
     expect(cells("A-7")[6]).toBe("◷Запланирована");
   });
 
+  it("searches the product's own name only, never the placeholder or the mark that stand in for it", async () => {
+    // The products do not load: every shift is named «Товар xxxxxxxx…», which nobody searches for.
+    const lost = shiftsSession();
+    lost.api.listProducts.mockRejectedValue(unreachable());
+    await openShifts(lost);
+    await screen.findByText(/Не все справочники загрузились/);
+    const search = screen.getByLabelText("Поиск по номеру и товару");
+    fireEvent.change(search, { target: { value: "товар" } });
+    expect(screen.getByText("Ничего не найдено. Измените отбор.")).toBeTruthy();
+    // The number still finds a shift.
+    fireEvent.change(search, { target: { value: "oct26-004" } });
+    expect(shiftRows()).toHaveLength(1);
+    cleanup();
+    // An archived product is marked «(в архиве)» in the list; the mark is not its name.
+    const marked = shiftsSession([
+      { ...PLANNED, id: "10000000-0000-4000-8000-000000000007", productId: AYRAN_ARCHIVED.id },
+    ]);
+    await openShifts(marked);
+    expect(cells("OCT26-005")[3]).toBe("Айран (в архиве)");
+    const again = screen.getByLabelText("Поиск по номеру и товару");
+    fireEvent.change(again, { target: { value: "в архиве" } });
+    expect(screen.getByText("Ничего не найдено. Измените отбор.")).toBeTruthy();
+    fireEvent.change(again, { target: { value: "айран" } });
+    expect(shiftRows()).toHaveLength(1);
+  });
+
+  it("says only what can be wrong when just one list of names did not load", async () => {
+    const session = shiftsSession();
+    session.api.listTemplates.mockRejectedValue(unreachable());
+    await openShifts(session);
+    // Names that came in stay names; what is missing is shown by the start of its code.
+    expect(
+      await screen.findByText(
+        "Не все справочники загрузились: названия, которых нет, показаны началами кодов, а смены, которые не откроются, могут быть не помечены.",
+      ),
+    ).toBeTruthy();
+    expect(cells("OCT26-005")[3]).toBe("Вода 0,5 л");
+  });
+
   it("names a line the loaded list lacks by its id, and an archived line in the filter as archived", async () => {
     const session = shiftsSession([ACTIVE]);
     session.api.listLines.mockResolvedValue([LINE_10, OLD_LINE]);

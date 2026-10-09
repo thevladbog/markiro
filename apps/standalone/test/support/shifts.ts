@@ -254,6 +254,17 @@ export function pickDate(label: string, day: string, monthsBack = 0): void {
   fireEvent.click(within(calendar).getByRole("button", { name: day }));
 }
 
+/**
+ * Waits for the notice that says what was saved and for the focus to be on it: the
+ * button that opened the dialog may be gone (a deleted or closed shift's row), and the
+ * focus must not be left on the page's body.
+ */
+export async function expectFocusedNotice(text: string): Promise<void> {
+  const notice = (await screen.findByText(text)).closest('[role="alert"]');
+  if (notice === null) throw new Error(`"${text}" is not in an alert`);
+  await waitFor(() => expect(document.activeElement).toBe(notice));
+}
+
 /** «Today» for the date pickers and the production date: the organization's day is 9 October 2026. */
 export function freezeToday(): void {
   vi.useFakeTimers({ toFake: ["Date"] });
