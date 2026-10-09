@@ -24,6 +24,15 @@ export const officeKeys = {
   products: ["office", "products"],
   templates: ["office", "templates"],
   templateDefaults: ["office", "template-defaults"],
+  /** Every list of shifts, whatever its period: a write reads them all again. */
+  shifts: ["office", "shifts"],
+  /** The list of shifts of a period of production dates, or the host's own list (`null`). */
+  shiftList: (period: { from: string; to: string } | null) => [
+    "office",
+    "shifts",
+    period?.from ?? null,
+    period?.to ?? null,
+  ],
   /** One template with its layout (`GET /v1/office/templates/{id}`). */
   template: (id: string) => ["office", "template", id],
   /**

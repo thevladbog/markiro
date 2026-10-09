@@ -19,6 +19,7 @@ import type { OfficeProduct } from "../../host/protocol.js";
 import { useCan } from "../access.js";
 import { useProductGroups } from "../catalog-queries.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
+import { OfficePager } from "../OfficePager.js";
 import { LoadError, PageLoading } from "../page-state.js";
 import { activeFirstByName, useStoreRecord } from "../records.js";
 import { ProductDialog } from "./ProductDialog.js";
@@ -41,42 +42,6 @@ const STATE_PHASE = {
 const FILTERS: readonly ProductFilter[] = ["all", "draft", "active", "archived"];
 
 type ProductsDialog = { kind: "create" } | { kind: "edit"; product: OfficeProduct };
-
-interface ProductsPagerProps {
-  page: number;
-  pageCount: number;
-  onPage: (page: number) => void;
-}
-
-/**
- * The list's pages, in the office's words. The shared `@markiro/ui` `Pager` is not
- * used: its buttons are floor-sized and full width with no size prop, and this plan
- * leaves `packages/*` alone (the cloud's own catalog page has a compact pager too).
- */
-function ProductsPager({ page, pageCount, onPage }: ProductsPagerProps) {
-  const { t } = useTranslation();
-  return (
-    <nav aria-label={t("office.products.pager.label")} className="office-pager">
-      <Button
-        variant="secondary"
-        size="compact"
-        disabled={page <= 1}
-        onClick={() => onPage(page - 1)}
-      >
-        {t("office.products.pager.previous")}
-      </Button>
-      <span aria-live="polite">{t("office.products.pager.page", { page, pages: pageCount })}</span>
-      <Button
-        variant="secondary"
-        size="compact"
-        disabled={page >= pageCount}
-        onClick={() => onPage(page + 1)}
-      >
-        {t("office.products.pager.next")}
-      </Button>
-    </nav>
-  );
-}
 
 /**
  * The catalog's products (spec §4.3, §5.5), archived ones included. The host
@@ -225,7 +190,14 @@ export function ProductsPage() {
             )}
             scrollLabel={t("office.products.title")}
           />
-          {pageCount > 1 && <ProductsPager page={shown} pageCount={pageCount} onPage={setPage} />}
+          {pageCount > 1 && (
+            <OfficePager
+              label={t("office.products.pager.label")}
+              page={shown}
+              pageCount={pageCount}
+              onPage={setPage}
+            />
+          )}
         </Card>
       </>
     );

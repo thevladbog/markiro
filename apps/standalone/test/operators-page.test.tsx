@@ -177,6 +177,7 @@ describe("office operators", () => {
     const links = screen.getAllByRole("link").map((link) => link.textContent);
     expect(links.slice(links.indexOf("Линии"), links.indexOf("Устройства") + 1)).toEqual([
       "Линии",
+      "Смены",
       "Операторы",
       "Устройства",
     ]);

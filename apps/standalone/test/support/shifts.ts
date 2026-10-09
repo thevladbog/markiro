@@ -1,0 +1,253 @@
+import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { expect, vi } from "vitest";
+
+import type {
+  CounterpartyRecord,
+  LabelTemplateSummary,
+  OfficeLine,
+  OfficeProduct,
+  OfficeShift,
+  TemplateDefaults,
+} from "../../src/host/protocol.js";
+import { fakeOfficeSession, renderOffice, type FakeOfficeSession } from "./office.js";
+
+export const LINE_2: OfficeLine = {
+  id: "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
+  name: "Линия 2",
+  archived: false,
+  rev: 40,
+};
+export const LINE_10: OfficeLine = {
+  id: "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21",
+  name: "Линия 10",
+  archived: false,
+  rev: 41,
+};
+export const OLD_LINE: OfficeLine = {
+  id: "9b2e4a6c-1d3f-4e5a-8b7c-6d5e4f3a2b1c",
+  name: "Линия 1",
+  archived: true,
+  rev: 30,
+};
+
+/** Box templates: for every category, for milk only (group 8), and switched off. */
+export const BOX_58: LabelTemplateSummary = {
+  id: "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+  name: "Коробка 58×40",
+  purpose: "box",
+  enabled: true,
+  chzProductGroupCodes: null,
+  stock: true,
+  widthMm: 58,
+  heightMm: 40,
+  dpi: 203,
+  language: "zpl",
+  rev: 62,
+};
+export const MILK_BOX: LabelTemplateSummary = {
+  ...BOX_58,
+  id: "7c1e4b2a-9d3f-4e5a-8b6c-1d2e3f4a5b6c",
+  name: "Молоко 100×72",
+  chzProductGroupCodes: [8],
+  stock: false,
+  rev: 63,
+};
+export const OLD_BOX: LabelTemplateSummary = {
+  ...BOX_58,
+  id: "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+  name: "Старая коробка",
+  enabled: false,
+  stock: false,
+  rev: 64,
+};
+export const PALLET: LabelTemplateSummary = {
+  ...BOX_58,
+  id: "0b1c2d3e-4f5a-4b6c-8d7e-8f9a0b1c2d3e",
+  name: "Паллета 100×150",
+  purpose: "pallet",
+  rev: 65,
+};
+
+export const MILK: OfficeProduct = {
+  id: "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
+  gtin14: "04600682000013",
+  name: "Молоко 3,2% 0,9 л",
+  printName: "Молоко 3,2%",
+  chzProductGroupCode: 8,
+  boxCapacity: 12,
+  palletBoxCapacity: 40,
+  shelfLifeDays: 10,
+  defaultBoxTemplateId: MILK_BOX.id,
+  defaultPalletTemplateId: null,
+  archived: false,
+  status: "active",
+  rev: 65,
+};
+export const WATER: OfficeProduct = {
+  ...MILK,
+  id: "2b3c4d5e-6f70-4812-9a3b-4c5d6e7f8091",
+  gtin14: "04601234000017",
+  name: "Вода 0,5 л",
+  printName: null,
+  chzProductGroupCode: 13,
+  boxCapacity: 24,
+  defaultBoxTemplateId: null,
+  rev: 70,
+};
+export const KEFIR_DRAFT: OfficeProduct = {
+  ...MILK,
+  id: "3c4d5e6f-7081-4923-8b4c-5d6e7f809102",
+  gtin14: "04602222000026",
+  name: "Кефир",
+  printName: null,
+  palletBoxCapacity: null,
+  defaultBoxTemplateId: null,
+  status: "draft",
+  rev: 71,
+};
+export const AYRAN_ARCHIVED: OfficeProduct = {
+  ...MILK,
+  id: "4d5e6f70-8192-4a34-9c5d-6e7f80910213",
+  gtin14: "04605555000015",
+  name: "Айран",
+  printName: null,
+  defaultBoxTemplateId: null,
+  archived: true,
+  rev: 72,
+};
+
+export const NORTH: CounterpartyRecord = {
+  id: "d2b7c9e1-4f3a-4b6c-8d5e-9f0a1b2c3d4e",
+  name: "ООО «Северный берег»",
+  inn: null,
+  gln: "4601234000017",
+  gs1Prefixes: ["4601234"],
+  archived: false,
+  rev: 12,
+};
+export const SOUTH_ARCHIVED: CounterpartyRecord = {
+  ...NORTH,
+  id: "e3c8d0f2-5a4b-4c7d-9e6f-0a1b2c3d4e5f",
+  name: "ООО «Юг»",
+  archived: true,
+  rev: 13,
+};
+
+export const DEFAULTS: TemplateDefaults = {
+  defaultBoxTemplateId: BOX_58.id,
+  defaultPalletTemplateId: PALLET.id,
+  defaultDuplicateTemplateId: null,
+  categories: [],
+  rev: 80,
+};
+
+/** An active shift of milk on line 2 for a counterparty, as `office-shift.json`. */
+export const ACTIVE: OfficeShift = {
+  id: "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+  number: "OCT26-004",
+  status: "active",
+  mode: "aggregation",
+  palletsEnabled: false,
+  createdFrom: "office",
+  productId: MILK.id,
+  lineId: LINE_2.id,
+  counterpartyId: NORTH.id,
+  productionDate: "2026-10-08",
+  plannedQty: 1200,
+  boxCapacity: 12,
+  boxTemplateId: MILK_BOX.id,
+  ownerDeviceId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  openedAt: "2026-10-08T06:02:00Z",
+  closedAt: null,
+  closeReasonCode: null,
+  closeReasonText: null,
+  lateDataAt: null,
+  createdAt: "2026-10-07T15:30:00Z",
+  rev: 71,
+};
+
+/** A planned shift of water on line 10, no plan and no counterparty. */
+export const PLANNED: OfficeShift = {
+  ...ACTIVE,
+  id: "1c9f5e3b-7d2e-4a4f-8b8c-3e6d9f2a5b7c",
+  number: "OCT26-005",
+  status: "planned",
+  productId: WATER.id,
+  lineId: LINE_10.id,
+  counterpartyId: null,
+  productionDate: "2026-10-09",
+  plannedQty: null,
+  boxCapacity: 24,
+  boxTemplateId: BOX_58.id,
+  ownerDeviceId: null,
+  openedAt: null,
+  rev: 72,
+};
+
+/** A shift a station created and closed with a reason, data arriving after. */
+export const CLOSED: OfficeShift = {
+  ...ACTIVE,
+  id: "2d0a6f4c-8e3f-4b5a-9c9d-4f7e0a3b6c8d",
+  number: "OCT26-001/S",
+  status: "closed",
+  createdFrom: "station",
+  counterpartyId: null,
+  productionDate: "2026-10-01",
+  plannedQty: 500,
+  closedAt: "2026-10-01T14:00:00Z",
+  closeReasonCode: "equipment_stop",
+  lateDataAt: "2026-10-01T14:30:00Z",
+  rev: 60,
+};
+
+/** The office's session with every list the shifts page and its dialogs read. */
+export function shiftsSession(
+  shifts: OfficeShift[] = [PLANNED, ACTIVE, CLOSED],
+): FakeOfficeSession {
+  const session = fakeOfficeSession();
+  session.api.listShifts.mockResolvedValue(shifts);
+  session.api.listProducts.mockResolvedValue([MILK, WATER, KEFIR_DRAFT, AYRAN_ARCHIVED]);
+  session.api.listLines.mockResolvedValue([LINE_10, LINE_2, OLD_LINE]);
+  session.api.listCounterparties.mockResolvedValue([NORTH, SOUTH_ARCHIVED]);
+  session.api.listTemplates.mockResolvedValue([BOX_58, MILK_BOX, OLD_BOX, PALLET]);
+  return session;
+}
+
+/** Opens «Смены» from the menu and waits for the list. */
+export async function openShifts(session: FakeOfficeSession): Promise<void> {
+  renderOffice(session);
+  fireEvent.click(await screen.findByRole("link", { name: "Смены" }));
+  await screen.findByRole("heading", { name: "Смены" });
+  await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
+}
+
+/** The rows of the list, without the header. */
+export function shiftRows(): HTMLElement[] {
+  return within(screen.getByRole("table")).getAllByRole("row").slice(1);
+}
+
+/** The row of the shift numbered `number`. */
+export function shiftRow(number: string): HTMLElement {
+  const row = screen.getByText(number).closest("tr");
+  if (!row) throw new Error(`no row for ${number}`);
+  return row;
+}
+
+/**
+ * Picks `day` (as the calendar names it, «8 октября 2026») in the date picker
+ * labelled `label`, going back `monthsBack` months from the one it opens on.
+ */
+export function pickDate(label: string, day: string, monthsBack = 0): void {
+  fireEvent.click(screen.getByRole("button", { name: label }));
+  const calendar = screen.getByRole("dialog", { name: "Календарь" });
+  for (let step = 0; step < monthsBack; step++) {
+    fireEvent.click(within(calendar).getByRole("button", { name: "Предыдущий месяц" }));
+  }
+  fireEvent.click(within(calendar).getByRole("button", { name: day }));
+}
+
+/** «Today» for the date pickers and the production date: the organization's day is 9 October 2026. */
+export function freezeToday(): void {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-10-09T09:00:00Z"));
+}

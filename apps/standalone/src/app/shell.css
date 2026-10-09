@@ -238,6 +238,17 @@
   color: var(--fg-2);
 }
 
+/* A shift's cell of several lines: a name, its counterparty, its status and its marks. */
+.shift-cell {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+.shift-cell__quiet {
+  color: var(--fg-2);
+}
+
 .office-pager {
   display: flex;
   justify-content: flex-end;
