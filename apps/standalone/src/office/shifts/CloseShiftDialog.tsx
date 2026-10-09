@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useId, useState } from "react";
+import { useId, useState, type KeyboardEvent } from "react";
 import { useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
@@ -15,6 +15,14 @@ import { useOfficeMutation } from "../office-query.js";
 import { StaleAlert, WriteFailureAlert } from "../page-state.js";
 import { shiftWriteFailure } from "./shift-form.js";
 import { useRereadShiftsOnLostAnswer } from "./shift-reread.js";
+
+/**
+ * The reason is one line (the host refuses a line break): Enter writes none, however it is
+ * pressed. An Enter that only confirms a word of an input method is the method's own.
+ */
+function keepOneLine(event: KeyboardEvent<HTMLTextAreaElement>): void {
+  if (event.key === "Enter" && !event.nativeEvent.isComposing) event.preventDefault();
+}
 
 const closeSchema = z.object({ reason: closeReasonRule });
 type CloseValues = z.input<typeof closeSchema>;
@@ -117,6 +125,7 @@ export function CloseShiftDialog({
         readOnly={isSubmitting}
         aria-invalid={message === undefined ? undefined : true}
         aria-describedby={noteId}
+        onKeyDown={keepOneLine}
         {...register("reason")}
       />
       <span
