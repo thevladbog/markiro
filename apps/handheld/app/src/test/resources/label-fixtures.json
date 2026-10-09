@@ -137,7 +137,7 @@
         "counterparty.name": "Zavod Partner"
       },
       "zpl": "^XA\n^PW464\n^LL320\n^FO32,96^BY2^BCN,120,N,N,N^FD>;>800346006820000000014^FS\n^FO32,240^A0N,23,23^FD(00)346006820000000014^FS\n^XZ\n",
-      "tspl": "SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBARCODE 32,96,\"128\",120,0,0,2,2,\"!100346006820000000014\"\nTEXT 32,240,\"0\",0,8,8,\"(00)346006820000000014\"\nPRINT 1\n"
+      "tspl": "SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBARCODE 32,96,\"EAN128\",120,0,0,2,2,\"00346006820000000014\"\nTEXT 32,240,\"0\",0,8,8,\"(00)346006820000000014\"\nPRINT 1\n"
     },
     {
       "name": "literal barcode without a module width",
@@ -598,7 +598,7 @@
         "DIRECTION 1",
         "CLS",
         "BITMAP 16,16,34,42,0,<payload:1428>",
-        "BARCODE 32,96,\"128\",120,0,0,2,2,\"!100346006820000000014\"",
+        "BARCODE 32,96,\"EAN128\",120,0,0,2,2,\"00346006820000000014\"",
         "PRINT 1"
       ]
     }
