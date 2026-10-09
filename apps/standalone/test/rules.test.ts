@@ -1,12 +1,13 @@
 import { isValidGtin } from "@markiro/domain";
 import { describe, expect, it } from "vitest";
-import type { z } from "zod";
+import { z } from "zod";
 
 import i18n from "../src/i18n/index.js";
 import {
   badgeCodeRule,
   badgeLabelRule,
   boxCapacityRule,
+  closeReasonRule,
   companyNameRule,
   deviceNameRule,
   glnRule,
@@ -18,9 +19,12 @@ import {
   lineNameRule,
   loginRule,
   MAX_BOX_CAPACITY,
+  MAX_CLOSE_REASON,
   MAX_PALLET_BOX_CAPACITY,
+  MAX_PLANNED_QTY,
   MAX_PRODUCT_NAME,
   MAX_SHELF_LIFE_DAYS,
+  MIN_CLOSE_REASON,
   operatorLoginRule,
   operatorRoleRule,
   ORG_HOST_FIELDS,
@@ -30,10 +34,13 @@ import {
   passwordRule,
   personNameRule,
   pinRule,
+  plannedQtyRule,
   printNameRule,
   productGroupRule,
+  productionDateRule,
   productNameRule,
   shelfLifeDaysRule,
+  shiftBoxCapacityRule,
   toCount,
   toGroupCode,
   toGtin14,
@@ -520,6 +527,80 @@ describe("product rules", () => {
     expect(i18n.t("rules.productGroup")).toBe("Выберите группу из списка");
     expect(toGroupCode("")).toBeNull();
     expect(toGroupCode("15")).toBe(15);
+  });
+});
+
+describe("shift rules", () => {
+  it("pins the host's caps: a plan of 10 000 000 units, a reason of 3 to 500 characters", () => {
+    expect(MAX_PLANNED_QTY).toBe(10_000_000);
+    expect(MIN_CLOSE_REASON).toBe(3);
+    expect(MAX_CLOSE_REASON).toBe(500);
+  });
+
+  it("takes a plan of 1 to 10 000 000 whole units or none, and a box capacity that must be given", () => {
+    for (const text of ["", " ", "1", "10000000"]) {
+      expect(message(plannedQtyRule, text), text).toBeUndefined();
+    }
+    for (const text of ["0", "10000001", "1e3", "12.0", "-5", "012"]) {
+      expect(message(plannedQtyRule, text), text).toBe("rules.plannedQty");
+    }
+    for (const text of ["1", " 12 ", "100000"]) {
+      expect(message(shiftBoxCapacityRule, text), text).toBeUndefined();
+    }
+    for (const text of ["", "  ", "0", "100001", "1e3", "12.0", "012"]) {
+      expect(message(shiftBoxCapacityRule, text), text).toBe("rules.shiftBoxCapacity");
+    }
+  });
+
+  it("takes a production date only as a real civil date", () => {
+    expect(message(productionDateRule, "2026-10-08")).toBeUndefined();
+    expect(message(productionDateRule, "2028-02-29")).toBeUndefined();
+    for (const text of ["", "2026-02-29", "08.10.2026", " 2026-10-08", "0000-01-01"]) {
+      expect(message(productionDateRule, text), text).toBe("rules.productionDate");
+    }
+  });
+
+  it("counts a close reason in characters as the host does, not in UTF-16 units as zod's min and max", () => {
+    // Two emoji are four UTF-16 units: zod's `min(3)` would take them, the host does not.
+    expect(z.string().min(3).safeParse("😀😀").success).toBe(true);
+    expect(message(closeReasonRule, "😀😀")).toBe("rules.closeReason");
+    expect(message(closeReasonRule, "😀😀😀")).toBeUndefined();
+    // 500 emoji are 1000 UTF-16 units: zod's `max(500)` would refuse them, the host takes them.
+    expect(z.string().max(500).safeParse("😀".repeat(500)).success).toBe(false);
+    expect(message(closeReasonRule, "😀".repeat(500))).toBeUndefined();
+    expect(message(closeReasonRule, "😀".repeat(501))).toBe("rules.closeReason");
+    expect(message(closeReasonRule, "я".repeat(500))).toBeUndefined();
+    expect(message(closeReasonRule, "я".repeat(501))).toBe("rules.closeReason");
+    expect(message(closeReasonRule, "абв")).toBeUndefined();
+    // A pair of emoji and a letter is three characters; so is a letter between two emoji.
+    expect(message(closeReasonRule, "😀😀я")).toBeUndefined();
+    expect(message(closeReasonRule, "😀я😀")).toBeUndefined();
+  });
+
+  it("refuses an empty or blank close reason, and one with a line break inside", () => {
+    for (const text of ["", " ", "   ", "\t\n "]) {
+      expect(message(closeReasonRule, text), JSON.stringify(text)).toBe("rules.closeReason");
+    }
+    // The host refuses every control character, a line break among them.
+    expect(message(closeReasonRule, "Станция\nсломалась")).toBe("rules.controlCharacter");
+  });
+
+  it("trims a close reason before it counts and refuses a control character or an unpaired surrogate inside", () => {
+    expect(closeReasonRule.safeParse("  Станция сломалась  ").data).toBe("Станция сломалась");
+    expect(message(closeReasonRule, "  аб  ")).toBe("rules.closeReason");
+    expect(message(closeReasonRule, "Станция\tсломалась")).toBe("rules.controlCharacter");
+    expect(message(closeReasonRule, "Станция\ud800сломалась")).toBe("rules.controlCharacter");
+    // The other free-text fields still take a single character.
+    expect(message(personNameRule, "Я")).toBeUndefined();
+  });
+
+  it("words each shift rule's message", () => {
+    expect(i18n.t("rules.plannedQty")).toBe(
+      "Укажите целое число от 1 до 10 000 000 или оставьте пустым",
+    );
+    expect(i18n.t("rules.shiftBoxCapacity")).toBe("Укажите целое число от 1 до 100 000");
+    expect(i18n.t("rules.productionDate")).toBe("Укажите дату производства");
+    expect(i18n.t("rules.closeReason")).toBe("Опишите причину: от 3 до 500 символов");
   });
 });
 
