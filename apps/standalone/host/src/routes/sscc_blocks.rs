@@ -10,7 +10,7 @@
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::Json;
-use markiro_proto::{codes, credentials, DeviceKind, SsccBlock, SsccBlockRequest};
+use markiro_proto::{codes, DeviceKind, SsccBlock, SsccBlockRequest};
 use serde_json::json;
 use sqlx::SqliteConnection;
 
@@ -47,33 +47,6 @@ async fn read(
     .transpose()
 }
 
-/// The device is still a paired, unrevoked station, read inside the write
-/// transaction: a revocation committed after the extractor read the key (the
-/// request waited for the write lock) must stop the issue, since a revoked
-/// station never gets serials.
-async fn require_station_in(
-    conn: &mut SqliteConnection,
-    device: &AuthDevice,
-) -> Result<(), ApiError> {
-    let kind: Option<String> =
-        sqlx::query_scalar("SELECT kind FROM devices WHERE id = ? AND revoked_at IS NULL")
-            .bind(&device.id)
-            .fetch_optional(conn)
-            .await
-            .map_err(ApiError::internal)?;
-    let kind: DeviceKind = kind
-        .ok_or_else(|| {
-            ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
-        })?
-        .parse()
-        .map_err(ApiError::internal)?;
-    if kind == DeviceKind::Station {
-        Ok(())
-    } else {
-        Err(ApiError::forbidden("only a station gets SSCC blocks"))
-    }
-}
-
 pub async fn issue_block(
     State(state): State<AppState>,
     device: AuthDevice,
@@ -92,8 +65,21 @@ pub async fn issue_block(
     }
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
-    require_station_in(&mut tx, &device).await?;
+    device
+        .require_station_in(&mut tx, "only a station gets SSCC blocks")
+        .await?;
     if let Some(block) = read(&mut tx, &device.id, &request.request_id).await? {
+        // A request id names one block of one prefix (the station keeps the
+        // prefix it asked for beside the id and repeats the same body). The
+        // same id for another prefix is a station's mistake, and answering
+        // the old block would hand it serials it files under the wrong
+        // prefix. Extension is 0 on both sides until plan 2b.
+        if block.issuer_prefix != request.issuer_prefix {
+            return Err(ApiError::validation(
+                "requestId",
+                "this request id was used for another prefix",
+            ));
+        }
         // Nothing to write: the transaction rolls back when dropped.
         return Ok(Json(block));
     }

@@ -95,12 +95,16 @@ async fn read(conn: &mut SqliteConnection, id: &str) -> Result<Option<DeviceShif
     row.map(record).transpose()
 }
 
-/// Shifts are a station's: another kind of device works on none.
+const STATION_ONLY: &str = "only a station works on shifts";
+
+/// Shifts are a station's: another kind of device works on none. The write
+/// routes read the device again inside their transaction
+/// ([`AuthDevice::require_station_in`]).
 fn require_station(device: &AuthDevice) -> Result<(), ApiError> {
     if device.kind == DeviceKind::Station {
         Ok(())
     } else {
-        Err(ApiError::forbidden("only a station works on shifts"))
+        Err(ApiError::forbidden(STATION_ONLY))
     }
 }
 
@@ -169,6 +173,7 @@ pub async fn create_device_shift(
     )?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    device.require_station_in(&mut tx, STATION_ONLY).await?;
     let repeated: Option<String> =
         sqlx::query_scalar("SELECT id FROM shifts WHERE created_by = ? AND create_request_id = ?")
             .bind(&device.id)
@@ -272,6 +277,7 @@ pub async fn enter_shift(
     require_station(&device)?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    device.require_station_in(&mut tx, STATION_ONLY).await?;
     let shift: Option<EntryRow> = sqlx::query_as(
         "SELECT status, line_id, owner_device_id, product_id, box_template_id, counterparty_id, \
          snapshot, number_month_key, number_seq, created_from FROM shifts WHERE id = ?",

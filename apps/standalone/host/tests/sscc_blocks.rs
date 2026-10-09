@@ -410,12 +410,6 @@ async fn a_repeated_request_answers_its_own_block_after_others_were_issued() {
     }
     let (status, repeated) = ask(&admin, &colleague, block_request(FIRST)).await;
     assert_eq!((status, repeated), (StatusCode::OK, theirs));
-    // The repeated request is answered whatever the body names now, as the
-    // shifts' are: the station's retry after a lost answer makes no block.
-    let mut other = block_request(FIRST);
-    other["issuerPrefix"] = json!("460123400");
-    let (status, repeated) = ask(&admin, &admin.key, other).await;
-    assert_eq!((status, &repeated), (StatusCode::OK, &blocks[0]));
     // None of it took a revision, wrote a row or moved the counter.
     assert_eq!(host_revision(&admin.app).await, revision);
     assert_eq!(audit_rows(&admin.app).await, rows);

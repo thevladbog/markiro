@@ -69,6 +69,37 @@ impl FromRequestParts<AppState> for AuthDevice {
     }
 }
 
+impl AuthDevice {
+    /// The device is still a paired, unrevoked station, read inside the
+    /// write transaction: a revocation committed after the extractor read the
+    /// key (the request waited for the write lock) must stop the write, since
+    /// a revoked station neither creates a shift, nor enters one, nor gets
+    /// serials. `forbidden` is the text for a device of another kind.
+    pub async fn require_station_in(
+        &self,
+        conn: &mut SqliteConnection,
+        forbidden: &str,
+    ) -> Result<(), ApiError> {
+        let kind: Option<String> =
+            sqlx::query_scalar("SELECT kind FROM devices WHERE id = ? AND revoked_at IS NULL")
+                .bind(&self.id)
+                .fetch_optional(conn)
+                .await
+                .map_err(ApiError::internal)?;
+        let kind: DeviceKind = kind
+            .ok_or_else(|| {
+                ApiError::unauthorized(credentials::DEVICE, "unknown or revoked device key")
+            })?
+            .parse()
+            .map_err(ApiError::internal)?;
+        if kind == DeviceKind::Station {
+            Ok(())
+        } else {
+            Err(ApiError::forbidden(forbidden))
+        }
+    }
+}
+
 /// Only peers on this computer (spec §2, decision 14).
 pub fn require_loopback(peer: SocketAddr) -> Result<(), ApiError> {
     if peer.ip().to_canonical().is_loopback() {
