@@ -96,6 +96,7 @@ function isRootToolchainPath(path) {
 }
 
 function jobsForPath(path) {
+  if (path.startsWith("tools/station-printer-tests/")) return stationJobs;
   if (isDocumentation(path)) return [];
   // This protected deployment workflow is covered by the bundle's production
   // and Yandex contract suites. CI policy and other workflows still fail closed.

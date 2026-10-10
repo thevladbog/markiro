@@ -9,6 +9,9 @@ import type { SetupCheckResult } from "./test-code.js";
 type PrinterTransport = PrintTarget["kind"] | "none";
 
 export interface PrinterSetupPanelProps {
+  mode?: "raw" | "windows_driver";
+  windowsSupported?: boolean;
+  onModeChange?: (mode: "raw" | "windows_driver") => void;
   name?: string;
   onNameChange?: (value: string) => void;
   /** The code on the last test label sent to the printer; null before any test print. */
@@ -39,6 +42,9 @@ export interface PrinterSetupPanelProps {
 }
 
 export function PrinterSetupPanel({
+  mode = "raw",
+  windowsSupported = false,
+  onModeChange,
   name,
   onNameChange,
   printedCode,
@@ -207,7 +213,31 @@ export function PrinterSetupPanel({
               <p className="setup-panel__empty">{t("setup.noPrinterHint")}</p>
             )}
           </div>
-          <fieldset className="setup-choice-group setup-choice-group--printer-language">
+          {transport === "usb" && (
+            <Select
+              native
+              size="floor"
+              label={t("setup.printMode")}
+              value={mode}
+              options={[
+                { value: "raw", label: t("setup.printModeRaw") },
+                ...(windowsSupported
+                  ? [{ value: "windows_driver", label: t("setup.printModeWindows") }]
+                  : []),
+              ]}
+              disabled={disabled}
+              onValueChange={(value) => {
+                if (value === "raw" || value === "windows_driver") onModeChange?.(value);
+              }}
+            />
+          )}
+          {mode === "windows_driver" && (
+            <p className="setup-windows-hint">{t("setup.windowsDriverHint")}</p>
+          )}
+          <fieldset
+            hidden={mode === "windows_driver"}
+            className="setup-choice-group setup-choice-group--printer-language"
+          >
             <legend>{t("setup.printerLanguage")}</legend>
             <div className="setup-choice-group__options setup-choice-group__options--compact">
               {(["zpl", "tspl"] as const).map((value) => (

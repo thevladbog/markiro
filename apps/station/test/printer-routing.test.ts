@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_HARDWARE_CONFIG } from "../src/lib/hardware-config.js";
 import {
+  parsePrinterProfile,
   configuredPrinterRouting,
   resolvePrinter,
   printerTargetKey,
@@ -112,5 +113,33 @@ describe("printer role routing", () => {
       }),
     ).rejects.toThrow("offline");
     await expect(serializePrinterOutput(box.target, async () => "next")).resolves.toBe("next");
+  });
+});
+
+describe("Windows driver profile", () => {
+  const legacy = {
+    id: "p",
+    name: "Queue",
+    target: { kind: "usb", printer: "Queue" },
+    language: "tspl",
+    dpi: 203,
+  };
+  it("preserves legacy JSON for destination compare-and-swap", () => {
+    expect(JSON.stringify(parsePrinterProfile(legacy))).toBe(JSON.stringify(legacy));
+  });
+  it("retains explicit driver mode and rejects incompatible targets", () => {
+    expect(parsePrinterProfile({ ...legacy, mode: "windows_driver" })).toEqual({
+      ...legacy,
+      mode: "windows_driver",
+    });
+    expect(parsePrinterProfile({ ...legacy, mode: "unknown" })).toBeNull();
+    expect(parsePrinterProfile({ ...legacy, mode: "windows_driver", dpi: null })).toBeNull();
+    expect(
+      parsePrinterProfile({
+        ...legacy,
+        mode: "windows_driver",
+        target: { kind: "tcp", host: "printer", port: 9100 },
+      }),
+    ).toBeNull();
   });
 });

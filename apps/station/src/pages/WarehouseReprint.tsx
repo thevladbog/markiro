@@ -1,3 +1,4 @@
+import { WindowsDeliveryStatus } from "../ui/WindowsDeliveryStatus.js";
 import { useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, FullScreenDialog, Input } from "@markiro/ui";
@@ -184,6 +185,15 @@ export function WarehouseReprintView(
               verification={state.verification}
             />
           )}
+          {state.job?.printScope ? (
+            <WindowsDeliveryStatus
+              exec={props.exec}
+              scope={state.job.printScope}
+              purpose={state.job.kind === "box" ? "box" : "duplicate"}
+              jobId={state.job.jobId}
+              revision={state.job.updatedAt}
+            />
+          ) : null}
           {state.busy ? <p role="status">{t("warehouse.working")}</p> : null}
           {state.job &&
           ["sent", "verified", "delivery_unknown", "failed_before_send", "prepared"].includes(

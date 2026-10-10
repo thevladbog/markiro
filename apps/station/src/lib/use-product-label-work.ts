@@ -1,3 +1,5 @@
+import { printerMode } from "./printer-routing.js";
+import { rasterizeDriverText } from "./rasterizer.js";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { DomainError, productLabelValueDigest, type ReprintReason } from "@markiro/domain";
 import type { SqlExecutor } from "./mirror.js";
@@ -523,7 +525,11 @@ export function useProductLabelWork(input: {
               },
               language: deps.language,
               printerDpi: deps.dpi,
-              rasterizeText,
+              printerMode: deps.profile ? printerMode(deps.profile) : "raw",
+              rasterizeText:
+                deps.profile && printerMode(deps.profile) === "windows_driver"
+                  ? rasterizeDriverText
+                  : rasterizeText,
             });
             await bindPrintDestination(
               exec,

@@ -346,3 +346,21 @@ describe("explicit verification skip", () => {
     ).toBe(false);
   });
 });
+
+it("keeps raster identity across verification and refuses conversion on reprint", () => {
+  const { language, ...common } = PREPARED;
+  expect(language).toBe("zpl");
+  const raster = domain.productLabelEventSchema.parse({ ...common, printFormat: "mono-raster-v1" });
+  const current = project("required", [raster, SENDING, SENT, VERIFIED]);
+  expect(current).toMatchObject({ printFormat: "mono-raster-v1", verificationOutcome: "verified" });
+  expect(current).not.toHaveProperty("language");
+  expect(
+    domain.canApplyProductLabelEvent(current, {
+      ...PREPARED,
+      sequence: 5,
+      attemptId: SECOND,
+      attemptNo: 2,
+      reason: "lost",
+    }),
+  ).toBe(false);
+});

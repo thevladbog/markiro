@@ -6139,3 +6139,9 @@ body,
   flex-shrink: 0;
   align-items: center;
 }
+
+.setup-windows-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  font: 400 14px/20px var(--font-ui);
+}

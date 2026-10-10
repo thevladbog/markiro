@@ -617,7 +617,7 @@
     "transportNone": "No printer",
     "transportTcp": "Network (TCP)",
     "transportSerial": "Serial (COM port)",
-    "transportUsb": "Windows (USB)",
+    "transportUsb": "Windows printer",
     "usbPrinterList": "Windows printer",
     "usbRefresh": "Refresh list",
     "usbNotFound": "No installed Windows printers found",
@@ -693,6 +693,28 @@
       "box": "Box",
       "duplicate": "Code duplicate",
       "pallet": "Pallet"
+    },
+    "printMode": "Print mode",
+    "printModeRaw": "Printer language (ZPL / TSPL)",
+    "printModeWindows": "Through Windows",
+    "windowsDriverHint": "Install the printer driver in Windows. Paper size and DPI must match the label. Queue acceptance does not confirm printing — scan the label to verify it.",
+    "windowsDelivery": "Windows delivery",
+    "windowsStatusUnavailable": "Queue status unavailable",
+    "windowsCheckQueue": "Check queue",
+    "windowsSavedPreview": "Saved label",
+    "windowsAcknowledge": "Reviewed by operator — dismiss",
+    "windowsState": {
+      "prepared": "Prepared",
+      "sending": "Sending to Windows queue",
+      "sent": "Accepted by queue. Scan the physical label to verify printing.",
+      "failed_before_send": "Send did not start: check driver, paper and DPI.",
+      "delivery_unknown": "Result unknown. The original job may still print. Check the printer and Windows queue before reprinting."
+    },
+    "windowsObservation": {
+      "present": "Job is present in the queue.",
+      "absent": "Job is absent. This does not confirm physical printing.",
+      "identity_mismatch": "The ID belongs to another job.",
+      "unavailable": "Queue unavailable."
     }
   },
   "conflicts": {

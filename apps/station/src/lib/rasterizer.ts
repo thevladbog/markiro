@@ -198,3 +198,13 @@ export const rasterizeText: RasterizeTextFn = async (text, opts) => {
     throw err instanceof Error ? err : new Error(String(err));
   }
 };
+
+/** Driver pages must not freeze pixels from a fallback font into a saved job. */
+export const rasterizeDriverText: RasterizeTextFn = async (text, opts) => {
+  const font = buildFontShorthand(opts.fontFamily, opts.fontSizePx, opts.bold);
+  if (!document.fonts) throw new RasterUnavailableError("Font loading is unavailable");
+  const loaded = await document.fonts.load(font, text || "Аа");
+  if (loaded.length === 0 || !document.fonts.check(font, text || "Аа"))
+    throw new RasterUnavailableError("Bundled label font is unavailable");
+  return rasterizeTextSync(text, opts);
+};

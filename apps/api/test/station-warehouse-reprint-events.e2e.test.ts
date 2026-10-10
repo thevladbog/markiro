@@ -59,6 +59,22 @@ describe.skipIf(!ready)("warehouse event history", () => {
     };
   });
   afterAll(async () => h?.close());
+  it("accepts raster prepared events and replays their original receipt", async () => {
+    const { language, ...base } = prepared;
+    void language;
+    const event = {
+      ...base,
+      eventId: randomUUID(),
+      jobId: randomUUID(),
+      attemptId: randomUUID(),
+      sessionId: randomUUID(),
+      printFormat: "mono-raster-v1" as const,
+    };
+    const first = await post([event]).expect(200);
+    expect(first.body.acceptedEventIds).toEqual([event.eventId]);
+    expect(first.body.quarantined).toEqual([]);
+    expect((await post([event]).expect(200)).body).toEqual(first.body);
+  });
   it("replays exact receipts and audit without touching production facts", async () => {
     const tail = (kind: "sending" | "sent", sequence: number): WarehouseReprintEvent => ({
       kind,

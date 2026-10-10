@@ -4,6 +4,9 @@ mod grant_clock;
 mod grant_transaction;
 mod power;
 mod printer;
+mod printer_raster;
+mod printer_windows;
+mod printer_windows_commands;
 mod scanner;
 mod storage;
 mod updater;
@@ -67,6 +70,10 @@ pub fn run() {
             scanner::close_scanner,
             printer::print_bytes,
             printer::list_usb_printers,
+            printer_windows_commands::supports_windows_printing,
+            printer_windows_commands::preflight_windows_raster,
+            printer_windows_commands::print_windows_raster,
+            printer_windows_commands::get_windows_print_job,
             updater::station_update_check,
             updater::station_update_download_and_install,
             updater::station_update_close,

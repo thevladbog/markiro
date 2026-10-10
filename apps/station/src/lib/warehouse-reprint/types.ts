@@ -33,7 +33,7 @@ export const warehousePreparedInputSchema = z.strictObject({
   fields: warehouseSourceSchema.shape.fields,
   bytesBase64: z.string().min(1),
   bytesDigest: z.string().regex(/^[0-9a-f]{64}$/),
-  preparedEvent: warehouseEventSchema.options[0],
+  preparedEvent: z.union([warehouseEventSchema.options[0], warehouseEventSchema.options[1]]),
 });
 export interface WarehousePreparedJobInput extends z.infer<typeof warehousePreparedInputSchema> {
   printer: PrinterProfile;
@@ -43,6 +43,7 @@ export interface WarehouseJob extends WarehousePreparedJobInput {
   updatedAt: string;
 }
 export interface WarehouseJobView {
+  printScope?: string;
   jobId: string;
   attemptId: string;
   attemptNo: number;

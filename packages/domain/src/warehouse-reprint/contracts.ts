@@ -134,26 +134,33 @@ const eventBase = z.strictObject({
   sequence: positive,
   occurredAt: z.iso.datetime(),
 });
-export const warehouseEventSchema = z.discriminatedUnion("kind", [
-  eventBase.extend({
-    kind: z.literal("prepared"),
-    attemptNo: z.literal(1),
-    reason: warehouseReasonSchema,
-    sourceKind: z.enum(["unit", "box"]),
-    sourceId: z.string().min(1).max(128),
-    identity: z.string().min(1).max(64),
-    sourceRevision: digest,
-    sourceShiftId: id.nullable(),
-    templateId: id,
-    templateRevision: digest,
-    templateDigest: digest,
-    payloadDigest: digest,
-    bytesDigest: digest,
-    scanDigest: digest,
-    repair,
-    language: z.enum(["zpl", "tspl"]),
-    dpi: z.union([z.literal(203), z.literal(300)]),
-  }),
+const warehousePreparedBase = eventBase.extend({
+  kind: z.literal("prepared"),
+  attemptNo: z.literal(1),
+  reason: warehouseReasonSchema,
+  sourceKind: z.enum(["unit", "box"]),
+  sourceId: z.string().min(1).max(128),
+  identity: z.string().min(1).max(64),
+  sourceRevision: digest,
+  sourceShiftId: id.nullable(),
+  templateId: id,
+  templateRevision: digest,
+  templateDigest: digest,
+  payloadDigest: digest,
+  bytesDigest: digest,
+  scanDigest: digest,
+  repair,
+  dpi: z.union([z.literal(203), z.literal(300)]),
+});
+const warehouseRawPrepared = warehousePreparedBase.extend({
+  language: z.enum(["zpl", "tspl"]),
+  printFormat: z.never().optional(),
+});
+const warehouseRasterPrepared = warehousePreparedBase.extend({
+  printFormat: z.literal("mono-raster-v1"),
+  language: z.never().optional(),
+});
+const warehouseOtherEventSchema = z.discriminatedUnion("kind", [
   eventBase.extend({ kind: z.literal("sending") }),
   eventBase.extend({ kind: z.literal("sent") }),
   eventBase.extend({ kind: z.literal("verified") }),
@@ -170,6 +177,11 @@ export const warehouseEventSchema = z.discriminatedUnion("kind", [
     attemptNo: positive,
     reason: warehouseReasonSchema,
   }),
+]);
+export const warehouseEventSchema = z.union([
+  warehouseRawPrepared,
+  warehouseRasterPrepared,
+  warehouseOtherEventSchema,
 ]);
 export type WarehouseReprintEvent = z.infer<typeof warehouseEventSchema>;
 export const warehouseEventBatchSchema = z.strictObject({

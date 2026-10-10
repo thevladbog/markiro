@@ -1,3 +1,6 @@
+import type { SqlExecutor } from "../../lib/mirror.js";
+import { WindowsDeliveryStatus } from "../WindowsDeliveryStatus.js";
+import { printerFormat } from "../../lib/printer-routing.js";
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import { PrinterDestination } from "../PrinterDestination.js";
@@ -73,6 +76,7 @@ export function ProductLabelVerification({
   onSetup,
   onSkipped,
   recovery = false,
+  exec,
 }: {
   state: ProductLabelWorkState;
   work: ProductLabelWork;
@@ -80,6 +84,7 @@ export function ProductLabelVerification({
   onSetup?: () => void;
   onSkipped?: () => void;
   recovery?: boolean;
+  exec?: SqlExecutor;
 }) {
   const { t } = useTranslation();
   const [reasonOpen, setReasonOpen] = useState(false);
@@ -88,7 +93,10 @@ export function ProductLabelVerification({
   const job = state.job;
   const compatiblePrinters = work
     .printers()
-    .filter((printer) => printer.language === job?.language && printer.dpi === job.dpi);
+    .filter(
+      (printer) =>
+        printerFormat(printer) === (job?.printFormat ?? job?.language) && printer.dpi === job?.dpi,
+    );
   const awaiting = job?.status === "awaiting_verification" && !state.error;
   useEffect(() => () => work.setVerificationPaused(false), [work]);
   async function reprint(reason: ReprintReason) {
@@ -103,21 +111,34 @@ export function ProductLabelVerification({
       setError(true);
     }
   }
+  const delivery =
+    exec && job?.printScope ? (
+      <WindowsDeliveryStatus
+        exec={exec}
+        scope={job.printScope}
+        purpose="duplicate"
+        jobId={job.jobId}
+        revision={job.updatedAt}
+      />
+    ) : null;
   if (reasonOpen)
     return (
       <ProductLabelReprintReason
         destination={
           job ? (
-            <PrinterDestination
-              purpose="duplicate"
-              printer={replacement ?? job.printer ?? null}
-              printers={compatiblePrinters}
-              disabled={state.busy}
-              onChoose={(printer) => {
-                setReplacement(printer);
-                return Promise.resolve();
-              }}
-            />
+            <>
+              {delivery}
+              <PrinterDestination
+                purpose="duplicate"
+                printer={replacement ?? job.printer ?? null}
+                printers={compatiblePrinters}
+                disabled={state.busy}
+                onChoose={(printer) => {
+                  setReplacement(printer);
+                  return Promise.resolve();
+                }}
+              />
+            </>
           ) : null
         }
         busy={state.busy}
@@ -206,6 +227,7 @@ export function ProductLabelVerification({
       }
     >
       <div className="print-verification">
+        {delivery}
         {job ? (
           <PrinterDestination
             purpose="duplicate"

@@ -1,5 +1,8 @@
 import { z } from "zod";
 import {
+  encodeMonoRaster,
+  renderMonoLabel,
+  withPrinterDpi,
   assertDuplicateTemplate,
   DomainError,
   duplicatePayloadDigest,
@@ -75,13 +78,19 @@ export async function prepareProductLabelAcceptance(
     canonicalRaw: km.raw,
     acceptedAt: input.acceptedAt,
   });
-  const bytes = await renderLabelBytes(
-    policy.snapshot.spec,
-    fields,
-    language,
-    input.rasterizeText,
-    { kmDataMatrix: "raster", dpi: printerDpi },
-  );
+  const bytes =
+    input.printerMode === "windows_driver"
+      ? encodeMonoRaster(
+          await renderMonoLabel(
+            withPrinterDpi(policy.snapshot.spec, printerDpi),
+            fields,
+            input.rasterizeText,
+          ),
+        )
+      : await renderLabelBytes(policy.snapshot.spec, fields, language, input.rasterizeText, {
+          kmDataMatrix: "raster",
+          dpi: printerDpi,
+        });
   const codeHash = kmHash(km);
   return parseProductLabelAcceptance({
     jobId: input.jobId,
@@ -115,7 +124,9 @@ export async function prepareProductLabelAcceptance(
       occurredAt: input.acceptedAt,
       attemptNo: 1,
       reason: null,
-      language,
+      ...(input.printerMode === "windows_driver"
+        ? { printFormat: "mono-raster-v1" as const }
+        : { language }),
       dpi: printerDpi,
       bytesDigest: productLabelBytesDigest(bytes),
     },

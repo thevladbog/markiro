@@ -1,4 +1,7 @@
 import {
+  encodeMonoRaster,
+  renderMonoLabel,
+  withPrinterDpi,
   createLabelRenderPlan,
   emitLabelRenderPlan,
   labelTemplateUsesField,
@@ -10,7 +13,7 @@ import {
   type RasterizeTextFn,
 } from "@markiro/domain";
 import { bytesToBase64 } from "../hardware.js";
-import { parsePrinterProfile, type PrinterProfile } from "../printer-routing.js";
+import { parsePrinterProfile, printerMode, type PrinterProfile } from "../printer-routing.js";
 import { latin1ToBytes } from "../print-label.js";
 export async function renderWarehouseLabel(
   value: WarehouseReprintSource,
@@ -36,6 +39,16 @@ export async function renderWarehouseLabel(
   if (source.unavailableFields.some((field) => labelTemplateUsesField(template.spec, field)))
     throw new Error("WAREHOUSE_SOURCE_FIELDS");
   const fields = { ...source.fields };
+  if (printerMode(printer) === "windows_driver") {
+    const bytes = encodeMonoRaster(
+      await renderMonoLabel(withPrinterDpi(template.spec, printer.dpi), fields, rasterizeText),
+    );
+    return {
+      fields,
+      bytesBase64: bytesToBase64(bytes),
+      bytesDigest: productLabelBytesDigest(bytes),
+    };
+  }
   const plan = await createLabelRenderPlan(template.spec, fields, {
     language: printer.language,
     dpi: printer.dpi,

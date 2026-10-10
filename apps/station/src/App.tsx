@@ -1,3 +1,4 @@
+import { recoverPrintDeliveries } from "./lib/print-deliveries.js";
 import { useDeviceReplacement } from "./lib/use-device-replacement.js";
 import { readBoxReconciliationSummary } from "./lib/box-reconciliation.js";
 import { createBoxSerialTopUp } from "./lib/box-serial-top-up.js";
@@ -698,6 +699,7 @@ export function App() {
       // rest of the flow (config read, enrollment) still proceeds.
       try {
         await applyMigrations(tauriExecutor);
+        await recoverPrintDeliveries(tauriExecutor);
       } catch (err) {
         console.error("station: applyMigrations failed", err);
         if (!cancelled) setStartupRecoveryFailed(true);
@@ -1584,6 +1586,11 @@ export function App() {
     if (showSetup) {
       return withWindowChrome(
         <WorkstationSetup
+          printScope={JSON.stringify([
+            "setup",
+            config.tenantId ?? null,
+            config.deviceId ?? config.machineId,
+          ])}
           initialTab={setupPrinterTab ? "printer" : "scanner"}
           hw={tauriHardware}
           exec={tauriExecutor}
@@ -1874,6 +1881,7 @@ export function App() {
     try {
       await pauseSyncAndWaitForIdle();
       await applyMigrations(tauriExecutor);
+      await recoverPrintDeliveries(tauriExecutor);
       if (!expected) {
         const recoveryTerminalId = configRef.current?.deviceId ?? null;
         const [ctx, mirror] = await Promise.all([
@@ -2029,6 +2037,11 @@ export function App() {
         />
       ) : showSetup ? (
         <WorkstationSetup
+          printScope={JSON.stringify([
+            "setup",
+            config.tenantId ?? null,
+            config.deviceId ?? config.machineId,
+          ])}
           initialTab={setupPrinterTab ? "printer" : "scanner"}
           hw={tauriHardware}
           exec={tauriExecutor}

@@ -138,3 +138,52 @@ export function createHardwareScanSource(hw: HardwareContract): ScanSource {
     },
   };
 }
+
+export interface WindowsPrintReceipt {
+  queue: string;
+  jobId: number;
+  documentName: string;
+}
+export interface WindowsPrintFailure {
+  code:
+    | "unsupported_platform"
+    | "invalid_artifact"
+    | "queue_unavailable"
+    | "geometry_mismatch"
+    | "driver_failure";
+  phase: "before_start" | "delivery_unknown";
+  receipt?: WindowsPrintReceipt;
+}
+export type WindowsPrintResult =
+  { ok: true; receipt: WindowsPrintReceipt } | { ok: false; error: WindowsPrintFailure };
+export type WindowsPreflight = { ok: true } | { ok: false; error: WindowsPrintFailure };
+export type WindowsJobObservation =
+  | { state: "present"; statusFlags: number }
+  | { state: "absent" | "identity_mismatch" | "unavailable" };
+/** Kept separate so old injected scanner/RAW adapters stay source-compatible. */
+export interface WindowsPrinting {
+  supportsWindowsPrinting(): Promise<boolean>;
+  preflightWindowsRaster(queue: string, bytes: Uint8Array): Promise<WindowsPreflight>;
+  printWindowsRaster(
+    queue: string,
+    bytes: Uint8Array,
+    documentName: string,
+  ): Promise<WindowsPrintResult>;
+  getWindowsPrintJob(receipt: WindowsPrintReceipt): Promise<WindowsJobObservation>;
+}
+export const tauriWindowsPrinting: WindowsPrinting = {
+  supportsWindowsPrinting: () => invoke<boolean>("supports_windows_printing"),
+  preflightWindowsRaster: (queue, bytes) =>
+    invoke<WindowsPreflight>("preflight_windows_raster", {
+      queue,
+      payloadBase64: bytesToBase64(bytes),
+    }),
+  printWindowsRaster: (queue, bytes, documentName) =>
+    invoke<WindowsPrintResult>("print_windows_raster", {
+      queue,
+      payloadBase64: bytesToBase64(bytes),
+      documentName,
+    }),
+  getWindowsPrintJob: (receipt) =>
+    invoke<WindowsJobObservation>("get_windows_print_job", { receipt }),
+};

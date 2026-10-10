@@ -88,20 +88,42 @@ const eventBaseSchema = z.strictObject({
 });
 export type ProductLabelEventBase = z.infer<typeof eventBaseSchema>;
 
-export const productLabelEventSchema = z.discriminatedUnion("kind", [
-  eventBaseSchema
-    .extend({
-      kind: z.literal("prepared"),
-      attemptNo: positiveIntegerSchema,
-      reason: reprintReasonSchema.nullable(),
-      language: printerLanguageSchema,
-      dpi: dpiSchema,
-      bytesDigest: digestSchema,
-    })
-    .refine((event) => (event.attemptNo === 1) === (event.reason === null), {
-      message: "Only the initial attempt has no reprint reason",
-      path: ["reason"],
-    }),
+const preparedBaseSchema = eventBaseSchema.extend({
+  kind: z.literal("prepared"),
+  attemptNo: positiveIntegerSchema,
+  reason: reprintReasonSchema.nullable(),
+  dpi: dpiSchema,
+  bytesDigest: digestSchema,
+});
+const preparedReason = (event: { attemptNo: number; reason: ReprintReason | null }) =>
+  (event.attemptNo === 1) === (event.reason === null);
+const preparedReasonError = {
+  message: "Only the initial attempt has no reprint reason",
+  path: ["reason"],
+};
+const rawPreparedSchema = preparedBaseSchema
+  .extend({ language: printerLanguageSchema, printFormat: z.never().optional() })
+  .refine(preparedReason, preparedReasonError);
+const rasterPreparedSchema = preparedBaseSchema
+  .extend({ printFormat: z.literal("mono-raster-v1"), language: z.never().optional() })
+  .refine(preparedReason, preparedReasonError);
+
+export type ProductLabelPrintIdentity =
+  | { language: PrinterLanguage; printFormat?: undefined }
+  | { printFormat: "mono-raster-v1"; language?: undefined };
+export function productLabelPrintIdentity(
+  value: ProductLabelPrintIdentity,
+): ProductLabelPrintIdentity {
+  return value.printFormat === "mono-raster-v1"
+    ? { printFormat: value.printFormat }
+    : { language: value.language };
+}
+export function productLabelPrintFormat(
+  value: ProductLabelPrintIdentity,
+): PrinterLanguage | "mono-raster-v1" {
+  return value.printFormat === "mono-raster-v1" ? value.printFormat : value.language;
+}
+const nonPreparedEventSchema = z.discriminatedUnion("kind", [
   eventBaseSchema.extend({ kind: z.literal("sending") }),
   eventBaseSchema.extend({ kind: z.literal("sent") }),
   eventBaseSchema.extend({
@@ -118,6 +140,11 @@ export const productLabelEventSchema = z.discriminatedUnion("kind", [
     kind: z.literal("verification_rejected"),
     reason: z.enum(["invalid", "mismatch"]),
   }),
+]);
+export const productLabelEventSchema = z.union([
+  rawPreparedSchema,
+  rasterPreparedSchema,
+  nonPreparedEventSchema,
 ]);
 export type ProductLabelEvent = z.infer<typeof productLabelEventSchema>;
 

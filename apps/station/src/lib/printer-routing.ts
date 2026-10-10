@@ -5,6 +5,7 @@ export const PRINT_PURPOSES = ["box", "duplicate", "pallet"] as const;
 export type PrintPurpose = (typeof PRINT_PURPOSES)[number];
 export interface PrinterProfile {
   id: string;
+  mode?: "raw" | "windows_driver";
   name: string;
   target: PrintTarget;
   language: PrinterLanguage;
@@ -78,7 +79,16 @@ export function parsePrinterProfile(value: unknown): PrinterProfile | null {
   const target = parsePrintTarget(row.target);
   if (!id || !name || !target || (row.language !== "zpl" && row.language !== "tspl")) return null;
   if (row.dpi !== null && row.dpi !== 203 && row.dpi !== 300) return null;
-  return { id, name, target, language: row.language, dpi: row.dpi };
+  if (row.mode !== undefined && row.mode !== "raw" && row.mode !== "windows_driver") return null;
+  if (row.mode === "windows_driver" && (target.kind !== "usb" || row.dpi === null)) return null;
+  return {
+    id,
+    name,
+    target,
+    language: row.language,
+    dpi: row.dpi,
+    ...(row.mode === undefined ? {} : { mode: row.mode }),
+  };
 }
 
 /** An explicit malformed or empty routing is unconfigured, never a legacy fallback. */
@@ -177,4 +187,11 @@ export async function serializePrinterOutput<T>(
   } finally {
     if (outputTails.get(key) === settled) outputTails.delete(key);
   }
+}
+
+export function printerMode(profile: PrinterProfile): "raw" | "windows_driver" {
+  return profile.mode ?? "raw";
+}
+export function printerFormat(profile: PrinterProfile): "zpl" | "tspl" | "mono-raster-v1" {
+  return printerMode(profile) === "windows_driver" ? "mono-raster-v1" : profile.language;
 }

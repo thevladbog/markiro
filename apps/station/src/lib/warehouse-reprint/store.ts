@@ -1,3 +1,5 @@
+import { productLabelPrintFormat } from "@markiro/domain";
+import { printerFormat } from "../printer-routing.js";
 import { AUTHORIZED_CREDENTIAL_OWNERS_SQL } from "../device-recovery.js";
 import { readPrintDestination } from "../print-destinations.js";
 import { z } from "zod";
@@ -55,7 +57,7 @@ export function parseWarehousePreparedInput(value: unknown): WarehousePreparedJo
   if (
     !profile ||
     profile.dpi === null ||
-    profile.language !== input.preparedEvent.language ||
+    printerFormat(profile) !== productLabelPrintFormat(input.preparedEvent) ||
     profile.dpi !== input.preparedEvent.dpi
   )
     throw new Error("WAREHOUSE_REPRINT_PRINTER_INVALID");
@@ -152,13 +154,15 @@ export async function readWarehouseJob(
   });
   if (
     destination &&
-    (destination.language !== input.printer.language || destination.dpi !== input.printer.dpi)
+    (printerFormat(destination) !== printerFormat(input.printer) ||
+      destination.dpi !== input.printer.dpi)
   )
     throw new Error("WAREHOUSE_REPRINT_PRINTER_INVALID");
   return { ...input, printer: destination ?? input.printer, projection, updatedAt: row.updated_at };
 }
 export function warehouseJobView(job: WarehouseJob): WarehouseJobView {
   return {
+    ...(job.preparedEvent.printFormat ? { printScope: job.owner } : {}),
     jobId: job.jobId,
     attemptId: job.projection.attemptId,
     attemptNo: job.projection.attemptNo,
@@ -206,7 +210,7 @@ export async function findWarehouseJobView(
       WHERE j.owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL})${filters.length ? " AND " + filters.join(" AND ") : ""}
       ORDER BY j.state IN ('prepared','sending','delivery_unknown','failed_before_send') DESC,j.updated_at DESC,j.job_id DESC LIMIT 1
     )
-    SELECT j.job_id AS jobId,j.attempt_id AS attemptId,j.state,j.source_kind AS kind,j.identity,j.updated_at AS updatedAt,
+    SELECT CASE WHEN json_extract(j.job_json,'$.preparedEvent.printFormat')='mono-raster-v1' THEN j.owner END AS printScope,j.job_id AS jobId,j.attempt_id AS attemptId,j.state,j.source_kind AS kind,j.identity,j.updated_at AS updatedAt,
       json_extract(j.projection_json,'$.attemptNo') AS attemptNo,
       json_extract(j.job_json,'$.source.productName') AS productName,
       json_extract(j.job_json,'$.template.name') AS templateName,
@@ -228,6 +232,7 @@ export async function findWarehouseJobView(
   void consistent;
   const view = z
     .strictObject({
+      printScope: z.string().nullable(),
       jobId: z.uuid(),
       attemptId: z.uuid(),
       attemptNo: z.number().int().positive(),
@@ -241,7 +246,12 @@ export async function findWarehouseJobView(
       repair: z.literal("legacy_tspl_fnc1_literal").nullable(),
     })
     .parse(value);
-  return { ...view, identity: view.kind === "unit" ? view.identity.slice(-8) : view.identity };
+  const { printScope, ...rest } = view;
+  return {
+    ...rest,
+    ...(printScope === null ? {} : { printScope }),
+    identity: view.kind === "unit" ? view.identity.slice(-8) : view.identity,
+  };
 }
 export async function prepareWarehouseJob(
   exec: SqlExecutor,

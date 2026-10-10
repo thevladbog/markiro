@@ -4838,6 +4838,44 @@ export const STATION_MIGRATIONS: string[] = [
   `UPDATE warehouse_reprint_local_boxes SET cached_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE cached_at='';`,
   `CREATE INDEX IF NOT EXISTS warehouse_reprint_local_boxes_retention_idx ON warehouse_reprint_local_boxes(owner,cached_at);`,
   `CREATE INDEX IF NOT EXISTS inventory_repack_boxes_mirror_reprint_source_idx ON inventory_repack_boxes_mirror(box_id,new_sscc);`,
+  `CREATE TABLE IF NOT EXISTS printer_deliveries (
+    scope TEXT NOT NULL, purpose TEXT NOT NULL CHECK(purpose IN ('test','box','pallet','duplicate')),
+    job_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('prepared','sending','sent','failed_before_send','delivery_unknown')),
+    profile_json TEXT NOT NULL CHECK(json_valid(profile_json)), artifact_digest TEXT NOT NULL,
+    artifact_base64 TEXT, document_name TEXT NOT NULL,
+    receipt_json TEXT CHECK(receipt_json IS NULL OR json_valid(receipt_json)),
+    error_code TEXT, updated_at TEXT NOT NULL, resolved_at TEXT,
+    PRIMARY KEY(scope,purpose,job_id,attempt_id),
+    CHECK ((purpose='duplicate' AND artifact_base64 IS NULL) OR
+      (purpose<>'duplicate' AND artifact_base64 IS NOT NULL AND length(artifact_base64)<=2796204))
+  );`,
+  `CREATE TRIGGER IF NOT EXISTS printer_deliveries_guard_destination BEFORE DELETE ON printer_destinations
+    WHEN EXISTS(SELECT 1 FROM printer_deliveries d WHERE d.scope=OLD.scope AND d.purpose=OLD.purpose AND d.job_id=OLD.job_id AND d.attempt_id=OLD.attempt_id AND d.state IN ('prepared','sending','delivery_unknown') AND d.resolved_at IS NULL)
+    BEGIN SELECT RAISE(ABORT,'PRINT_DELIVERY_UNRESOLVED'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS printer_deliveries_cleanup AFTER DELETE ON printer_destinations
+    BEGIN DELETE FROM printer_deliveries WHERE scope=OLD.scope AND purpose=OLD.purpose AND job_id=OLD.job_id AND attempt_id=OLD.attempt_id; END;`,
+  `CREATE TRIGGER IF NOT EXISTS boxes_mirror_resolve_windows_delivery AFTER UPDATE OF print_verified_at,print_skipped_at ON boxes_mirror
+    WHEN NEW.print_verified_at IS NOT NULL OR NEW.print_skipped_at IS NOT NULL
+    BEGIN UPDATE printer_deliveries SET resolved_at=COALESCE(NEW.print_verified_at,NEW.print_skipped_at)
+      WHERE scope=json_array(NEW.shift_id,NEW.terminal_id) AND purpose='box' AND job_id=NEW.sscc AND state<>'sending'; END;`,
+  `CREATE TRIGGER IF NOT EXISTS pallets_mirror_resolve_windows_delivery AFTER UPDATE OF print_verified_at,print_skipped_at ON pallets_mirror
+    WHEN NEW.print_verified_at IS NOT NULL OR NEW.print_skipped_at IS NOT NULL
+    BEGIN UPDATE printer_deliveries SET resolved_at=COALESCE(NEW.print_verified_at,NEW.print_skipped_at)
+      WHERE scope=json_array(NEW.shift_id,NEW.terminal_id) AND purpose='pallet' AND job_id=NEW.sscc AND state<>'sending'; END;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_resolve_windows_delivery AFTER UPDATE OF projection_json ON product_label_jobs
+    WHEN json_extract(NEW.projection_json,'$.verificationOutcome') IN ('verified','skipped')
+    BEGIN UPDATE printer_deliveries SET resolved_at=NEW.updated_at WHERE scope=NEW.credential_ownership AND purpose='duplicate' AND job_id=NEW.job_id AND state<>'sending'; END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_resolve_windows_delivery AFTER UPDATE OF projection_json ON warehouse_reprint_jobs
+    WHEN NEW.state='verified' OR NEW.attempt_id<>OLD.attempt_id
+    BEGIN UPDATE printer_deliveries SET resolved_at=NEW.updated_at
+      WHERE scope=NEW.owner AND job_id=NEW.job_id AND purpose=CASE NEW.source_kind WHEN 'box' THEN 'box' ELSE 'duplicate' END
+      AND (NEW.state='verified' OR attempt_id=OLD.attempt_id) AND state<>'sending'; END;`,
+
+  `CREATE TRIGGER IF NOT EXISTS product_label_reprint_resolve_windows_delivery AFTER UPDATE OF projection_json ON product_label_jobs
+    WHEN json_extract(NEW.projection_json,'$.attemptId')<>json_extract(OLD.projection_json,'$.attemptId')
+    BEGIN UPDATE printer_deliveries SET resolved_at=NEW.updated_at WHERE scope=NEW.credential_ownership AND purpose='duplicate' AND job_id=NEW.job_id
+      AND attempt_id=json_extract(OLD.projection_json,'$.attemptId') AND state<>'sending'; END;`,
 ];
 
 export interface StationMigrationEntry {

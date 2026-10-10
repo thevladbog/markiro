@@ -1,8 +1,14 @@
+import {
+  dispatchWindowsDelivery,
+  resolvePrintDelivery,
+  PrintDeliveryBeforeSendError,
+} from "../print-deliveries.js";
 import { bindPrintDestination } from "../print-destinations.js";
 import { compareWarehouseReprintLabel, type WarehouseReprintEvent } from "@markiro/domain";
 import type { PrintTarget } from "../hardware.js";
 import type { SqlExecutor } from "../mirror.js";
 import {
+  printerFormat,
   printerTargetKey,
   serializePrinterOutput,
   type PrinterProfile,
@@ -59,7 +65,7 @@ export async function printWarehouseJob(deps: WarehousePrintingDeps, jobId: stri
   if (!deps.isCurrent()) throw new Error("WAREHOUSE_OWNER_CHANGED");
   if (
     !profile ||
-    profile.language !== before.printer.language ||
+    printerFormat(profile) !== printerFormat(before.printer) ||
     profile.dpi !== before.printer.dpi ||
     printerTargetKey(profile.target) !== printerTargetKey(before.printer.target)
   ) {
@@ -91,7 +97,10 @@ export async function printWarehouseJob(deps: WarehousePrintingDeps, jobId: stri
       });
       const sending = await readWarehouseJob(deps.exec, deps.owner, jobId);
       const bytes = Uint8Array.from(atob(job.bytesBase64), (c) => c.charCodeAt(0));
-      let outcome: Extract<WarehouseReprintEvent, { kind: "sent" | "delivery_unknown" }>;
+      let outcome: Extract<
+        WarehouseReprintEvent,
+        { kind: "sent" | "delivery_unknown" | "failed_before_send" }
+      >;
       if (!deps.isCurrent()) {
         await appendWarehouseEvent(deps.exec, deps.owner, {
           ...base(sending, deps.operatorId),
@@ -102,13 +111,33 @@ export async function printWarehouseJob(deps: WarehousePrintingDeps, jobId: stri
       }
       // No async boundary between the final ownership check and hardware dispatch.
       try {
-        await deps.print(profile.target, bytes);
+        if (printerFormat(profile) === "mono-raster-v1")
+          await dispatchWindowsDelivery(
+            deps.exec,
+            {
+              scope: job.owner,
+              purpose: job.source.kind === "box" ? "box" : "duplicate",
+              jobId,
+              attemptId: job.projection.attemptId,
+            },
+            profile,
+            bytes,
+            undefined,
+            () => deps.isCurrent(),
+          );
+        else await deps.print(profile.target, bytes);
         outcome = { ...base(sending, deps.operatorId), kind: "sent" };
-      } catch {
+      } catch (error) {
+        const ownerChanged =
+          error instanceof PrintDeliveryBeforeSendError && error.message === "owner_changed";
         outcome = {
           ...base(sending, deps.operatorId),
-          kind: "delivery_unknown",
-          errorCode: "transport_failed",
+          ...(ownerChanged
+            ? ({
+                kind: "failed_before_send",
+                errorCode: error.message === "owner_changed" ? "owner_changed" : "printer_changed",
+              } as const)
+            : ({ kind: "delivery_unknown", errorCode: "transport_failed" } as const)),
         };
       }
       // Result belongs to the original owner even if intake closed while transport ran.
@@ -153,6 +182,12 @@ export async function verifyWarehouseJob(
       : { kind: "unit" as const, canonicalRaw: job.source.fields["km.code"] };
   if (compareWarehouseReprintLabel(expected, raw) !== "match") return false;
   await appendWarehouseEvent(exec, owner, { ...base(job, operatorId), kind: "verified" });
+  await resolvePrintDelivery(exec, {
+    scope: job.owner,
+    purpose: job.source.kind === "box" ? "box" : "duplicate",
+    jobId,
+    attemptId: job.projection.attemptId,
+  });
   return true;
 }
 export async function reprintWarehouseJob(
@@ -164,7 +199,7 @@ export async function reprintWarehouseJob(
   const job = await readWarehouseJob(deps.exec, deps.owner, jobId);
   if (
     !deps.profile ||
-    deps.profile.language !== job.printer.language ||
+    printerFormat(deps.profile) !== printerFormat(job.printer) ||
     deps.profile.dpi !== job.printer.dpi
   )
     throw new Error("WAREHOUSE_PRINTER_CHANGED");
@@ -185,6 +220,12 @@ export async function reprintWarehouseJob(
     attemptId,
     attemptNo: job.projection.attemptNo + 1,
     reason,
+  });
+  await resolvePrintDelivery(deps.exec, {
+    scope: job.owner,
+    purpose: job.source.kind === "box" ? "box" : "duplicate",
+    jobId,
+    attemptId: job.projection.attemptId,
   });
   await printWarehouseJob(deps, jobId);
 }

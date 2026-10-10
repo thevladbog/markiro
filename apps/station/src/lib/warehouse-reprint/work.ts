@@ -1,3 +1,4 @@
+import { printerMode } from "../printer-routing.js";
 import {
   productLabelBytesDigest,
   resolveWarehouseReprintScan,
@@ -15,7 +16,7 @@ import { AUTHORIZED_CREDENTIAL_OWNERS_SQL, deviceRecoveryAllowsWork } from "../d
 import { resolvePrinter } from "../printer-routing.js";
 import type { HardwareConfig } from "../hardware-config.js";
 import type { PrintTarget } from "../hardware.js";
-import { rasterizeText } from "../rasterizer.js";
+import { rasterizeText, rasterizeDriverText } from "../rasterizer.js";
 import { resolveWarehouseSource } from "./sources.js";
 import { loadWarehouseTemplates } from "./templates.js";
 import { renderWarehouseLabel } from "./prepare.js";
@@ -359,7 +360,12 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
           found.source.kind === "box" ? "box" : "duplicate",
         );
         if (!profile) throw new Error("WAREHOUSE_PRINTER_UNCONFIGURED");
-        const rendered = await renderWarehouseLabel(found.source, template, profile, rasterizeText);
+        const rendered = await renderWarehouseLabel(
+          found.source,
+          template,
+          profile,
+          printerMode(profile) === "windows_driver" ? rasterizeDriverText : rasterizeText,
+        );
         if (
           !current() ||
           state.session?.sessionId !== session.sessionId ||
@@ -390,7 +396,9 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
           bytesDigest: rendered.bytesDigest,
           scanDigest: productLabelBytesDigest(new TextEncoder().encode(raw)),
           repair: found.repair,
-          language: profile.language,
+          ...(printerMode(profile) === "windows_driver"
+            ? { printFormat: "mono-raster-v1" as const }
+            : { language: profile.language }),
           dpi: profile.dpi,
         };
         if (event.dpi === null) throw new Error("WAREHOUSE_PRINTER_DPI");
