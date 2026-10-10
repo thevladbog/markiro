@@ -24,6 +24,7 @@ import {
 import type { FloorNotice } from "../src/app/shell.js";
 import type { FloorAppProps } from "../src/floor/FloorApp.js";
 import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
+import type { HardwareApi } from "../src/hardware/hardware.js";
 import type { HostApi } from "../src/host/api.js";
 import { HostError } from "../src/host/client.js";
 import type { ConnectionApi, ConnectionHandlers } from "../src/host/connection.js";
@@ -237,6 +238,7 @@ interface Services {
   local?: LocalExecutor;
   idleTimeoutMs?: number;
   scanSource?: ScanSource;
+  hardware?: HardwareApi;
   lockdown?: LockdownLifecycle;
 }
 
@@ -2223,6 +2225,127 @@ describe("the operator on the floor", () => {
     await checked();
     expect(screen.queryByText(SIGNED_IN)).toBeNull();
     scanner.read("MRK-000742");
+    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+  });
+
+  it("reads the shell's COM scanners next to the keyboard when given no scan source", async () => {
+    let comListener: ScanListener | null = null;
+    const hardware: HardwareApi = {
+      printBytes: vi.fn<HardwareApi["printBytes"]>(),
+      listUsbPrinters: vi.fn<HardwareApi["listUsbPrinters"]>(),
+      listSerialPorts: vi.fn<HardwareApi["listSerialPorts"]>(),
+      configureScanners: vi.fn<HardwareApi["configureScanners"]>(),
+      closeScanners: vi.fn<HardwareApi["closeScanners"]>(),
+      watchScanners: vi.fn<HardwareApi["watchScanners"]>(),
+      onScan: vi.fn<HardwareApi["onScan"]>(async (listener) => {
+        comListener = listener;
+        return () => {
+          comListener = null;
+        };
+      }),
+      setSystemAwake: vi.fn<HardwareApi["setSystemAwake"]>(),
+    };
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: fakeConnection().connection,
+      hardware,
+    });
+    await screen.findByText(PROMPT);
+    await waitFor(() => expect(comListener).not.toBeNull());
+    act(() => {
+      comListener?.("MRK-000742");
+    });
+    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+  });
+
+  /** The shell's hardware as a COM scan subscription is the only thing the app asks of it. */
+  function scanHardware() {
+    const subscriptions: Array<{ listener: ScanListener; unsubscribed: boolean }> = [];
+    const onScan = vi.fn<HardwareApi["onScan"]>(async (listener) => {
+      const subscription = { listener, unsubscribed: false };
+      subscriptions.push(subscription);
+      return () => {
+        subscription.unsubscribed = true;
+      };
+    });
+    const hardware: HardwareApi = {
+      printBytes: vi.fn<HardwareApi["printBytes"]>(),
+      listUsbPrinters: vi.fn<HardwareApi["listUsbPrinters"]>(),
+      listSerialPorts: vi.fn<HardwareApi["listSerialPorts"]>(),
+      configureScanners: vi.fn<HardwareApi["configureScanners"]>(),
+      closeScanners: vi.fn<HardwareApi["closeScanners"]>(),
+      watchScanners: vi.fn<HardwareApi["watchScanners"]>(),
+      onScan,
+      setSystemAwake: vi.fn<HardwareApi["setSystemAwake"]>(),
+    };
+    return { hardware, onScan, subscriptions };
+  }
+
+  it("leaves no COM subscription behind when the app goes away, StrictMode's double start included", async () => {
+    const shell = scanHardware();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    const { unmount } = render(
+      <StrictMode>
+        <ThemeProvider defaultTheme="dark">
+          <App
+            probe={probeAnswering(true)}
+            device={fakeDevice(DEVICE_STATUS)}
+            host={host}
+            connection={fakeConnection().connection}
+            local={openLocalDb().executor}
+            address={ADDRESS}
+            hardware={shell.hardware}
+          />
+        </ThemeProvider>
+      </StrictMode>,
+    );
+    await screen.findByText(PROMPT);
+    await waitFor(() => expect(shell.subscriptions.length).toBeGreaterThan(1));
+    unmount();
+    await flush();
+    expect(shell.subscriptions.length).toBeGreaterThan(1);
+    expect(shell.subscriptions.filter((subscription) => !subscription.unsubscribed)).toEqual([]);
+  });
+
+  it("does not subscribe to the COM scanners when it is given a scan source", async () => {
+    const shell = scanHardware();
+    const scanner = fakeScanSource();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: fakeConnection().connection,
+      scanSource: scanner.source,
+      hardware: shell.hardware,
+    });
+    await screen.findByText(PROMPT);
+    await flush();
+    expect(shell.onScan).not.toHaveBeenCalled();
+    scanner.read("MRK-000742");
+    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+  });
+
+  it("takes a keyboard scan while it also listens to the COM scanners", async () => {
+    const shell = scanHardware();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: fakeConnection().connection,
+      hardware: shell.hardware,
+    });
+    await screen.findByText(PROMPT);
+    await waitFor(() => expect(shell.subscriptions.length).toBeGreaterThan(0));
+    scan("MRK-000742");
     expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
   });
 
