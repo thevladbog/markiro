@@ -2,7 +2,8 @@
 
 use markiro_host::config::HostPaths;
 use markiro_host::{start, RunningHost, StartOptions};
-use markiro_standalone_lib::device::{DeviceError, DeviceState};
+use markiro_standalone_lib::device::{DeviceError, DeviceState, DeviceStatus};
+use markiro_standalone_lib::device_config;
 use markiro_standalone_lib::host_client::{Credentials, PinnedClient, RequestError};
 use markiro_standalone_lib::host_probe::ProbeError;
 use serde_json::json;
@@ -183,6 +184,78 @@ async fn an_unpaired_device_sends_nothing() {
         state.request("GET", "/v1/device", None, None).await,
         Err(DeviceError::NotPaired)
     );
+}
+
+/// Plan 2a4: a pairing keeps the name the host stores for the device, which
+/// is the name it paired under without the spaces around it, however long
+/// (the host's limit is 100 characters), so the status bar names the station
+/// before any refresh and the host's own record says the same.
+#[tokio::test]
+async fn pairing_keeps_the_name_the_host_stores() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let app_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let state = DeviceState::load(app_dir.path().to_path_buf());
+    let longest = "Я".repeat(100);
+
+    let status = state
+        .local_pair(&address(&host), &format!("  {longest} \u{a0} "), "0.1.0")
+        .await
+        .unwrap();
+    assert_eq!(status.device_name.as_deref(), Some(longest.as_str()));
+    let record = state
+        .request("GET", "/v1/device", None, None)
+        .await
+        .unwrap();
+    assert_eq!(record.body.unwrap()["name"], longest.as_str());
+    // On disk too: a restart without the host still names the station.
+    let reloaded = DeviceState::load(app_dir.path().to_path_buf());
+    assert_eq!(reloaded.status(), Ok(Some(status)));
+    host.stop().await.unwrap();
+}
+
+/// A `device.json` written before plan 2a4 has no `deviceName`: the station
+/// opens with no name (`null` in the status the webview reads), the file
+/// stays as it is until the host answers, and the first refresh brings the
+/// name in and writes it.
+#[tokio::test]
+async fn a_device_paired_before_the_name_gets_it_with_the_first_refresh() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let app_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let paired = DeviceState::load(app_dir.path().to_path_buf());
+    let status = paired
+        .local_pair(&address(&host), NAME, "0.1.0")
+        .await
+        .unwrap();
+    drop(paired);
+    let file = device_config::path(app_dir.path());
+    let mut old: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert!(old.as_object_mut().unwrap().remove("deviceName").is_some());
+    std::fs::write(&file, serde_json::to_vec(&old).unwrap()).unwrap();
+
+    let state = DeviceState::load(app_dir.path().to_path_buf());
+    let nameless = state.status().unwrap().unwrap();
+    assert_eq!(nameless.device_name, None);
+    assert_eq!(
+        serde_json::to_value(&nameless).unwrap()["deviceName"],
+        serde_json::Value::Null
+    );
+    assert_eq!(
+        DeviceStatus {
+            device_name: Some(NAME.into()),
+            ..nameless
+        },
+        status
+    );
+
+    let refreshed = state.refresh().await.unwrap();
+    assert_eq!(refreshed, status);
+    let saved: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(saved["deviceName"], NAME);
+    host.stop().await.unwrap();
 }
 
 #[tokio::test]

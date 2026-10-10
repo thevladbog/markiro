@@ -31,7 +31,8 @@ pub struct HostResponse {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RequestError {
-    /// No connection, a TLS failure other than the pin, or a timeout.
+    /// No connection, a TLS failure other than the pin, or one of the
+    /// client's own time limits (its 2 s to connect, its 10 s per request).
     Unreachable,
     /// The host presented a certificate other than the pinned one.
     CertificateMismatch,
@@ -41,6 +42,10 @@ pub enum RequestError {
     /// allowed, the office token is not a valid header value, or the host
     /// address is not HTTPS.
     InvalidRequest,
+    /// The host did not answer within the limit the caller set
+    /// ([`PinnedClient::send_within`]); without one, a request that runs
+    /// past the client's 10 s stays [`RequestError::Unreachable`].
+    Timeout,
 }
 
 impl RequestError {
@@ -51,6 +56,7 @@ impl RequestError {
             RequestError::CertificateMismatch => "certificate_mismatch",
             RequestError::InvalidResponse => "invalid_response",
             RequestError::InvalidRequest => "invalid_request",
+            RequestError::Timeout => "timeout",
         }
     }
 }
@@ -108,12 +114,32 @@ impl PinnedClient {
         body: Option<&Value>,
         credentials: Credentials<'_>,
     ) -> Result<HostResponse, RequestError> {
+        self.send_within(method, path, body, credentials, None)
+            .await
+    }
+
+    /// [`Self::send`], limited to `limit` from connecting to the end of the
+    /// body instead of the client's 10 s. A request that runs past `limit`
+    /// is [`RequestError::Timeout`], so a caller that asked for a short
+    /// answer (the station's 300 ms code check) can tell "too slow" from
+    /// "unreachable".
+    pub async fn send_within(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+        credentials: Credentials<'_>,
+        limit: Option<Duration>,
+    ) -> Result<HostResponse, RequestError> {
         let method = allowed_method(method)?;
         validate_path(path)?;
         let mut request = self
             .client
             .request(method, format!("{}{path}", self.address))
             .header(PROTOCOL_HEADER, PROTOCOL_VERSION.to_string());
+        if let Some(limit) = limit {
+            request = request.timeout(limit);
+        }
         if let Some(key) = credentials.device_key {
             request = request.bearer_auth(key.expose());
         }
@@ -123,19 +149,25 @@ impl PinnedClient {
         if let Some(body) = body {
             request = request.json(body);
         }
+        let lost = |error: reqwest::Error| {
+            // The client's own 2 s to connect also reads as a timeout, but it
+            // is not the caller's limit: that is `unreachable`.
+            if limit.is_some() && error.is_timeout() && !error.is_connect() {
+                RequestError::Timeout
+            } else {
+                RequestError::Unreachable
+            }
+        };
         let response = match request.send().await {
             Ok(response) => response,
             Err(error) if error.is_builder() => return Err(RequestError::InvalidRequest),
             Err(error) if is_fingerprint_mismatch(&error) => {
                 return Err(RequestError::CertificateMismatch)
             }
-            Err(_) => return Err(RequestError::Unreachable),
+            Err(error) => return Err(lost(error)),
         };
         let status = response.status().as_u16();
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|_| RequestError::Unreachable)?;
+        let bytes = response.bytes().await.map_err(lost)?;
         let body = if bytes.is_empty() {
             None
         } else {

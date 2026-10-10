@@ -5,6 +5,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use markiro_proto::{
     codes, pairing, ClaimRequest, DeviceInfo, DeviceKind, DeviceLineRequest, ErrorBody,
@@ -24,8 +25,26 @@ use crate::secret_store;
 const LINE_ROUTE: &str = "/v1/device/line";
 
 /// This device's own record (`GET /v1/device`), which [`DeviceState::refresh`]
-/// reads for the line the office assigned.
+/// reads for the line the office assigned and the name it gave the device.
 const DEVICE_ROUTE: &str = "/v1/device";
+
+/// The bounds of `host_request`'s `timeoutMs` (stage 2a spec §5.2). A caller
+/// may ask for a shorter answer than the client's 10 s (the scan pipeline's
+/// 300 ms code check), never for a longer one.
+pub const MIN_TIMEOUT_MS: u64 = 100;
+pub const MAX_TIMEOUT_MS: u64 = 10_000;
+
+/// The limit a `timeoutMs` asks for: none without one, the duration inside
+/// the bounds, [`RequestError::InvalidRequest`] outside them.
+pub fn request_limit(timeout_ms: Option<u64>) -> Result<Option<Duration>, DeviceError> {
+    match timeout_ms {
+        None => Ok(None),
+        Some(ms) if (MIN_TIMEOUT_MS..=MAX_TIMEOUT_MS).contains(&ms) => {
+            Ok(Some(Duration::from_millis(ms)))
+        }
+        Some(_) => Err(DeviceError::Request(RequestError::InvalidRequest)),
+    }
+}
 
 /// What the webview may know about the pairing.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -37,6 +56,9 @@ pub struct DeviceStatus {
     pub device_id: String,
     pub kind: DeviceKind,
     pub line_id: Option<String>,
+    /// The name the host keeps for this device; `None` until a refresh brings
+    /// it to a `device.json` written before plan 2a4.
+    pub device_name: Option<String>,
 }
 
 /// What the connection task needs to reach the paired host. The key stays
@@ -145,6 +167,7 @@ impl PairedDevice {
             device_id: self.config.device_id.clone(),
             kind: self.config.kind,
             line_id: self.config.line_id.clone(),
+            device_name: self.config.device_name.clone(),
         }
     }
 
@@ -246,7 +269,7 @@ impl DeviceState {
         if response.status != 200 {
             return Err(DeviceError::PairRejected);
         }
-        self.remember(address, observation, client, response.body)
+        self.remember(address, observation, client, name, response.body)
     }
 
     /// Pair with the host at `address` using a one-time `code` from the
@@ -303,7 +326,7 @@ impl DeviceState {
         if response.status != 200 {
             return Err(claim_refusal(response.body.as_ref()));
         }
-        self.remember(address, observation, client, response.body)
+        self.remember(address, observation, client, name, response.body)
     }
 
     /// Choose the line this station works on (`PUT /v1/device/line`) and
@@ -336,13 +359,14 @@ impl DeviceState {
             401 => return Err(DeviceError::KeyRejected),
             _ => return Err(DeviceError::RequestFailed),
         }
-        self.keep_line(&device, response.body)
+        self.keep_record(&device, response.body)
     }
 
     /// Read this device's record again (`GET /v1/device`) and keep the line
-    /// the host has for it, so a line an administrator set or cleared in the
-    /// office reaches the station (plan 1d3). `device.json` is written only
-    /// when the line differs. Serialised with pairing, forgetting and
+    /// and the name the host has for it, so a line an administrator set or
+    /// cleared in the office reaches the station (plan 1d3), and a rename
+    /// reaches its status bar (plan 2a4). `device.json` is written only when
+    /// the line or the name differs. Serialised with pairing, forgetting and
     /// [`Self::select_line`] through the same lock, so an answer never
     /// writes over a pairing or a line choice that changed meanwhile. A host
     /// that cannot be reached changes nothing: the station keeps working on
@@ -368,13 +392,13 @@ impl DeviceState {
             401 => return Err(DeviceError::KeyRejected),
             _ => return Err(DeviceError::RequestFailed),
         }
-        self.keep_line(&device, response.body)
+        self.keep_record(&device, response.body)
     }
 
-    /// Make the line in the host's answer (`DeviceInfo`) this device's line:
-    /// `device.json` first, then the pairing in memory, and neither when the
-    /// line is already the one kept. Called with the pairing lock held.
-    fn keep_line(
+    /// Make the line and the name in the host's answer (`DeviceInfo`) this
+    /// device's: `device.json` first, then the pairing in memory, and neither
+    /// when both are already the ones kept. Called with the pairing lock held.
+    fn keep_record(
         &self,
         device: &PairedDevice,
         body: Option<Value>,
@@ -382,11 +406,13 @@ impl DeviceState {
         let info: DeviceInfo = body
             .and_then(|body| serde_json::from_value(body).ok())
             .ok_or(DeviceError::Request(RequestError::InvalidResponse))?;
-        if info.line_id == device.config.line_id {
+        let name = Some(info.name);
+        if info.line_id == device.config.line_id && name == device.config.device_name {
             return Ok(device.status());
         }
         let config = DeviceConfig {
             line_id: info.line_id,
+            device_name: name,
             ..device.config.clone()
         };
         device_config::save(&self.dir, &config).map_err(|_| DeviceError::Storage)?;
@@ -417,12 +443,15 @@ impl DeviceState {
     }
 
     /// Save a pairing the host just granted and make it current. The host
-    /// that answered must be the one `hello` described.
+    /// that answered must be the one `hello` described. The device's name is
+    /// the one it paired under, trimmed as the host keeps it; a refresh
+    /// replaces it with whatever the office renames it to.
     fn remember(
         &self,
         address: &str,
         observation: HelloObservation,
         client: PinnedClient,
+        name: &str,
         body: Option<Value>,
     ) -> Result<DeviceStatus, DeviceError> {
         let pair: PairResponse = body
@@ -438,6 +467,7 @@ impl DeviceState {
             device_id: pair.device_id,
             kind: DeviceKind::Station,
             line_id: None,
+            device_name: Some(name.trim().to_owned()),
             device_key: secret_store::protect(pair.device_key.expose())
                 .map_err(|_| DeviceError::Storage)?,
         };
@@ -463,13 +493,30 @@ impl DeviceState {
         body: Option<&Value>,
         office_token: Option<&str>,
     ) -> Result<HostResponse, DeviceError> {
+        self.request_within(method, path, body, office_token, None)
+            .await
+    }
+
+    /// [`Self::request`] with `host_request`'s `timeoutMs`: a limit outside
+    /// [`MIN_TIMEOUT_MS`]..=[`MAX_TIMEOUT_MS`] is refused before any I/O,
+    /// like a route the webview may not reach, and a request that runs past
+    /// the limit fails with [`RequestError::Timeout`].
+    pub async fn request_within(
+        &self,
+        method: &str,
+        path: &str,
+        body: Option<&Value>,
+        office_token: Option<&str>,
+        timeout_ms: Option<u64>,
+    ) -> Result<HostResponse, DeviceError> {
         if !webview_may_reach(path) {
             return Err(DeviceError::Request(RequestError::InvalidRequest));
         }
+        let limit = request_limit(timeout_ms)?;
         let device = self.paired()?;
         device
             .client
-            .send(
+            .send_within(
                 method,
                 path,
                 body,
@@ -477,6 +524,7 @@ impl DeviceState {
                     device_key: Some(&device.key),
                     office_token,
                 },
+                limit,
             )
             .await
             .map_err(DeviceError::Request)
@@ -595,6 +643,31 @@ mod tests {
     }
 
     #[test]
+    fn a_timeout_must_lie_between_100_ms_and_10_s() {
+        // The spec's numbers, not the constants: moving a bound must fail here.
+        assert_eq!((MIN_TIMEOUT_MS, MAX_TIMEOUT_MS), (100, 10_000));
+        assert_eq!(request_limit(None), Ok(None));
+        for ms in [100, 101, 300, 9_999, 10_000] {
+            assert_eq!(
+                request_limit(Some(ms)),
+                Ok(Some(Duration::from_millis(ms))),
+                "{ms}"
+            );
+        }
+        for ms in [0, 1, 99, 10_001, u64::MAX] {
+            assert_eq!(
+                request_limit(Some(ms)),
+                Err(DeviceError::Request(RequestError::InvalidRequest)),
+                "{ms}"
+            );
+        }
+        assert_eq!(
+            DeviceError::Request(RequestError::Timeout).code(),
+            "timeout"
+        );
+    }
+
+    #[test]
     fn line_and_key_error_codes_are_stable() {
         assert_eq!(DeviceError::LineRejected.code(), "line_rejected");
         assert_eq!(DeviceError::KeyRejected.code(), "key_rejected");
@@ -610,6 +683,7 @@ mod tests {
             device_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7".into(),
             kind: DeviceKind::Station,
             line_id: None,
+            device_name: Some("Станция на линии 1".into()),
         };
         let value = serde_json::to_value(&status).expect("DeviceStatus serializes");
         let object = value.as_object().expect("DeviceStatus is a JSON object");
@@ -622,6 +696,7 @@ mod tests {
             "deviceId",
             "kind",
             "lineId",
+            "deviceName",
         ];
         expected.sort_unstable();
         assert_eq!(keys, expected);

@@ -25,6 +25,11 @@ pub struct DeviceConfig {
     pub device_id: String,
     pub kind: DeviceKind,
     pub line_id: Option<String>,
+    /// The name the host keeps for this device (`GET /v1/device`), for the
+    /// floor's status bar; `None` in a file written before plan 2a4, which
+    /// has no such key (serde reads a missing `Option` as `None`, even under
+    /// `deny_unknown_fields`).
+    pub device_name: Option<String>,
     pub device_key: ProtectedSecret,
 }
 
@@ -165,6 +170,7 @@ mod tests {
             device_id: "7c9e6679-7425-40de-944b-e07fc1f90ae7".into(),
             kind: DeviceKind::Station,
             line_id: None,
+            device_name: Some("Станция на линии 1".into()),
             device_key: ProtectedSecret {
                 scheme: Scheme::Plain,
                 value: "device-key-value".into(),
@@ -214,6 +220,25 @@ mod tests {
         save(dir.path(), &sample()).unwrap();
         assert_eq!(load(dir.path()).unwrap(), Some(sample()));
         assert!(!dir.path().join(TEMPORARY_NAME).exists());
+    }
+
+    /// `device.json` as plan 1f2 wrote it, without `deviceName`: it still
+    /// loads, with no name until the next refresh brings the host's.
+    #[test]
+    fn a_file_from_before_the_device_name_still_loads() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut old = serde_json::to_value(sample()).unwrap();
+        old.as_object_mut().unwrap().remove("deviceName").unwrap();
+        fs::write(path(dir.path()), serde_json::to_vec(&old).unwrap()).unwrap();
+        let loaded = load(dir.path()).unwrap().unwrap();
+        assert_eq!(loaded.device_name, None);
+        assert_eq!(
+            loaded,
+            DeviceConfig {
+                device_name: None,
+                ..sample()
+            }
+        );
     }
 
     #[test]

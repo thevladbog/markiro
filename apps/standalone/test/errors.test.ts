@@ -33,6 +33,12 @@ describe("error messages", () => {
     }
   });
 
+  it("say that a host which did not answer in time did not answer in time", () => {
+    const timeout = new HostError({ kind: "transport", code: "timeout", message: "timeout" });
+    expect(errorMessageKey(timeout)).toBe("errors.transport.timeout");
+    expect(i18n.t("errors.transport.timeout")).toBe("Хост не ответил вовремя.");
+  });
+
   it("prefer the rejected credential for unauthorized answers", () => {
     expect(errorMessageKey(apiError("unauthorized", { credential: "password" }))).toBe(
       "errors.unauthorized.password",

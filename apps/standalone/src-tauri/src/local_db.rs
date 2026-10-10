@@ -11,7 +11,8 @@
 //! (`json_each`), so the limits bound SQL, not rows.
 
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::OnceLock;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
 use serde_json::{Map, Number, Value};
@@ -21,7 +22,7 @@ use sqlx::sqlite::{
     SqliteArguments, SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions,
     SqliteRow, SqliteSynchronous,
 };
-use sqlx::{Column, Row, Sqlite, TypeInfo, ValueRef};
+use sqlx::{Column, ConnectOptions, Connection, Row, Sqlite, TypeInfo, ValueRef};
 
 pub const FILE_NAME: &str = "standalone-station.db";
 /// The files SQLite keeps beside [`FILE_NAME`]: the database itself, its WAL,
@@ -36,6 +37,53 @@ pub const MAX_SQL_BYTES: usize = 64 * 1024;
 pub const MAX_VALUES: usize = 256;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// What a forget (`device_forget`, [`LocalDb::clear_copies`]) does with a
+/// table (stage 2a spec §5.2, decision 30).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TableClass {
+    /// Copies of the host's data and this pairing's own bookkeeping: the
+    /// forget empties them, PIN and badge hashes included.
+    Disposable,
+    /// What this device recorded itself — shifts, boxes, scans, the outbox
+    /// (plans 2a5–2a8): the forget keeps them, each row tagged with the
+    /// pairing that wrote it.
+    DeviceData,
+    /// This computer's workstation settings — printers, scanners, sound
+    /// (plan 2a7): they belong to the PC, not to a pairing, and outlive it.
+    Workstation,
+}
+
+/// Every table `src-tauri/migrations` creates, with its class, in the order
+/// [`LocalDb::clear_copies`] empties the disposable ones. A migration that
+/// adds a table adds it here in the same change: `tests/local_db.rs` fails on
+/// a table without a class, and on a name here that no migration creates. No
+/// table has a foreign key, and `tests/local_db.rs` fails on one: a plain key
+/// makes the forget fail at the `DELETE` that breaks it, and `ON DELETE
+/// CASCADE` or `SET NULL` from a table the forget keeps to one it empties
+/// would delete or rewrite this device's own records without a word, so add
+/// none.
+pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
+    ("floor_sign_in_failures", TableClass::Disposable),
+    ("ref_lines", TableClass::Disposable),
+    ("ref_operator_badges", TableClass::Disposable),
+    ("ref_operators", TableClass::Disposable),
+    ("ref_org", TableClass::Disposable),
+    ("ref_products", TableClass::Disposable),
+    ("ref_site", TableClass::Disposable),
+    ("ref_template_defaults", TableClass::Disposable),
+    ("ref_templates", TableClass::Disposable),
+    ("sync_quarantine", TableClass::Disposable),
+    ("sync_state", TableClass::Disposable),
+];
+
+/// The class of `table`, `None` for a table [`TABLE_CLASSES`] does not name.
+pub fn table_class(table: &str) -> Option<TableClass> {
+    TABLE_CLASSES
+        .iter()
+        .find(|(name, _)| *name == table)
+        .map(|(_, class)| *class)
+}
 
 /// `src-tauri/migrations`, embedded at compile time. Applied migrations are
 /// never edited: sqlx refuses to open a database whose checksums changed.
@@ -78,6 +126,9 @@ pub enum LocalDbError {
     /// A statement changed another number of rows than `expectedChanges`;
     /// the batch rolled back whole.
     ChangesMismatch,
+    /// [`LocalDb::clear_copies`] found `count` outbox records without a
+    /// receipt that its [`UnsentGuard`] protects, and cleared nothing.
+    UnsentRecords { count: u64 },
 }
 
 impl LocalDbError {
@@ -89,7 +140,67 @@ impl LocalDbError {
             LocalDbError::UnsupportedValue => "unsupported_value",
             LocalDbError::StatementFailed => "statement_failed",
             LocalDbError::ChangesMismatch => "changes_mismatch",
+            LocalDbError::UnsentRecords { .. } => "unsent_facts",
         }
+    }
+}
+
+/// Which outbox records without a receipt stop a forget (stage 2a spec §5.2,
+/// question В7): a forget never waits for them, it refuses, so the station
+/// sends them first or a person confirms the loss of the link to them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnsentGuard<'a> {
+    /// This pairing's (host id, device id): records of an earlier pairing
+    /// that was forgotten with a confirmation do not count.
+    Pairing(&'a str, &'a str),
+    /// Any pairing's: `device.json` is unreadable, so the current pairing is
+    /// unknown.
+    AnyPairing,
+    /// None: a person confirmed the forget knowing the count, or there is no
+    /// pairing to forget. The records stay on disk either way.
+    Ignore,
+}
+
+/// Why [`LocalDb::open`] failed, as far as a forget needs to tell (stage 2a
+/// spec §5.2, question В7): only a corrupt file may be set aside.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenFailure {
+    /// SQLite called the file corrupt or not a database (`SQLITE_CORRUPT`,
+    /// `SQLITE_NOTADB`): no app version will open it.
+    Corrupt,
+    /// Anything else — a migration this app version does not know (the app
+    /// was rolled back), a changed checksum, a busy or unreadable file, a full
+    /// disk. The file may be a sound database with unsent records and an app
+    /// that can open it later: it stays where it is.
+    Other,
+}
+
+/// The primary SQLite result codes `SQLITE_CORRUPT` and `SQLITE_NOTADB`.
+const SQLITE_CORRUPT: i64 = 11;
+const SQLITE_NOTADB: i64 = 26;
+
+/// [`OpenFailure`] of an error from [`LocalDb::open`]: a database error with
+/// a corruption code, also when it came out of a migration. SQLite's extended
+/// result codes keep the primary code in their low byte.
+fn open_failure_of(error: &sqlx::Error) -> OpenFailure {
+    use sqlx::migrate::MigrateError;
+    let corrupt = match error {
+        sqlx::Error::Database(database) => database
+            .code()
+            .and_then(|code| code.parse::<i64>().ok())
+            .is_some_and(|code| matches!(code & 0xff, SQLITE_CORRUPT | SQLITE_NOTADB)),
+        sqlx::Error::Migrate(migrate) => match &**migrate {
+            MigrateError::Execute(inner) | MigrateError::ExecuteMigration(inner, _) => {
+                open_failure_of(inner) == OpenFailure::Corrupt
+            }
+            _ => false,
+        },
+        _ => false,
+    };
+    if corrupt {
+        OpenFailure::Corrupt
+    } else {
+        OpenFailure::Other
     }
 }
 
@@ -224,55 +335,52 @@ impl LocalDb {
         Ok(changes)
     }
 
-    /// Delete every row of every table but sqlx's migration journal, in one
-    /// writer transaction: forgetting the device must not leave another
-    /// pairing's copies behind, PIN and badge hashes included. The writer
-    /// zeroes deleted rows (`secure_delete`), and a checkpoint that truncates
-    /// the WAL follows the commit: it moves the zeroed pages into the file
-    /// and empties the WAL, which still held the frames written before the
-    /// delete. A reader holding an older snapshot keeps it from finishing
-    /// within the busy timeout, and the call then fails; the delete stays
-    /// committed and a retry repeats only the checkpoint. `VACUUM` is not
-    /// needed for the rows deleted here: it would only shrink the file. It
-    /// would do more for bytes a writer freed before it ran with
-    /// `secure_delete`, which nothing here scrubs (see "Local database" in
-    /// `apps/standalone/AGENTS.md`).
-    /// Every table here is disposable: the copies of the host's data, and
-    /// `floor_sign_in_failures` (plan 1f), this device's own failed
-    /// sign-ins, which a forget clears with the rest (the sync's wipe for
-    /// another pairing keeps them on purpose, see the migration). The first
-    /// plan that adds data this device must keep — the scan journal, boxes, the
-    /// outbox (the station design's §6.2, "Логическая модель") — must
-    /// exclude those tables from this list and block or confirm a forget
-    /// while unsynced records exist, not extend this silently.
-    /// The tables come from `pragma_table_list`, so one a later migration
-    /// adds is covered without a change here; `type IN ('table', 'virtual')`
-    /// excludes a virtual table's own shadow tables (FTS5, RTree), which
-    /// `sqlite_master` lists as ordinary tables but a bare `DELETE` would
-    /// corrupt instead of clearing through the virtual table itself. Foreign
-    /// keys are checked at the commit, when every table is empty, so the
-    /// order of the deletes does not matter.
-    pub async fn clear_copies(&self) -> Result<(), LocalDbError> {
+    /// Delete every row of the disposable tables ([`TableClass::Disposable`]
+    /// in [`TABLE_CLASSES`]), in one writer transaction: forgetting the device
+    /// must not leave another pairing's copies behind, PIN and badge hashes
+    /// included. The tables of this device's own records and of the
+    /// workstation's settings keep their rows (stage 2a spec §5.2, decision
+    /// 30); `device_forget` decides first whether unsent records allow a
+    /// forget at all. The writer zeroes deleted rows (`secure_delete`), and a
+    /// checkpoint that truncates the WAL follows the commit: it moves the
+    /// zeroed pages into the file and empties the WAL, which still held the
+    /// frames written before the delete. A reader holding an older snapshot
+    /// keeps it from finishing within the busy timeout, and the call then
+    /// fails; the delete stays committed and a retry repeats only the
+    /// checkpoint. `VACUUM` is not needed for the rows deleted here: it would
+    /// only shrink the file. It would do more for bytes a writer freed before
+    /// it ran with `secure_delete`, which nothing here scrubs (see "Local
+    /// database" in `apps/standalone/AGENTS.md`). The list is named, not read
+    /// from `pragma_table_list`: a table a later migration adds is emptied
+    /// only once that migration's plan classes it disposable. The unsent
+    /// records `guard` protects are counted in this same transaction, before
+    /// the first delete: with any, nothing is deleted and the call answers
+    /// [`LocalDbError::UnsentRecords`].
+    pub async fn clear_copies(&self, guard: UnsentGuard<'_>) -> Result<(), LocalDbError> {
+        self.clear_classed(TABLE_CLASSES, guard).await
+    }
+
+    /// [`LocalDb::clear_copies`] over `classes`, so a unit test can give it
+    /// tables of every class while [`TABLE_CLASSES`] holds only disposable ones.
+    async fn clear_classed(
+        &self,
+        classes: &[(&str, TableClass)],
+        guard: UnsentGuard<'_>,
+    ) -> Result<(), LocalDbError> {
         let mut tx = self
             .writer
             .begin_with("BEGIN IMMEDIATE")
             .await
             .map_err(|_| LocalDbError::StatementFailed)?;
-        sqlx::query("PRAGMA defer_foreign_keys = ON")
-            .execute(&mut *tx)
-            .await
-            .map_err(|_| LocalDbError::StatementFailed)?;
-        let tables: Vec<String> = sqlx::query_scalar(
-            "SELECT name FROM pragma_table_list WHERE schema = 'main' \
-             AND type IN ('table', 'virtual') AND name <> '_sqlx_migrations' \
-             AND name NOT GLOB 'sqlite_*' ORDER BY name",
-        )
-        .fetch_all(&mut *tx)
-        .await
-        .map_err(|_| LocalDbError::StatementFailed)?;
-        for table in tables {
-            let delete = format!("DELETE FROM \"{}\"", table.replace('"', "\"\""));
-            sqlx::query(&delete)
+        let count = unsent_records(&mut tx, guard).await?;
+        if count > 0 {
+            return Err(LocalDbError::UnsentRecords { count });
+        }
+        let disposable = classes
+            .iter()
+            .filter(|(_, class)| *class == TableClass::Disposable);
+        for (table, _) in disposable {
+            sqlx::query(&format!("DELETE FROM {table}"))
                 .execute(&mut *tx)
                 .await
                 .map_err(|_| LocalDbError::StatementFailed)?;
@@ -292,21 +400,92 @@ impl LocalDb {
     }
 }
 
+/// How many outbox records without a receipt (`acked_at IS NULL`) `guard`
+/// protects, counted inside the forget's own transaction, so no record can
+/// arrive between the count and the clear. 0 while no migration has created
+/// `outbox` (plan 2a5 does, with the columns `host_id`, `device_id` and
+/// `acked_at`). An outbox that cannot be counted is an error, never 0.
+async fn unsent_records(
+    tx: &mut sqlx::SqliteConnection,
+    guard: UnsentGuard<'_>,
+) -> Result<u64, LocalDbError> {
+    if guard == UnsentGuard::Ignore {
+        return Ok(0);
+    }
+    if !outbox_exists(tx).await? {
+        return Ok(0);
+    }
+    count_unsent(tx, guard).await
+}
+
+async fn outbox_exists(connection: &mut sqlx::SqliteConnection) -> Result<bool, LocalDbError> {
+    let outbox: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pragma_table_list WHERE schema = 'main' AND name = 'outbox'",
+    )
+    .fetch_one(&mut *connection)
+    .await
+    .map_err(|_| LocalDbError::StatementFailed)?;
+    Ok(outbox != 0)
+}
+
+/// The count of [`unsent_records`] once `outbox` is known to exist.
+async fn count_unsent(
+    connection: &mut sqlx::SqliteConnection,
+    guard: UnsentGuard<'_>,
+) -> Result<u64, LocalDbError> {
+    let failed = |_| LocalDbError::StatementFailed;
+    let count: i64 = match guard {
+        UnsentGuard::Pairing(host_id, device_id) => sqlx::query_scalar(
+            "SELECT count(*) FROM outbox WHERE acked_at IS NULL AND host_id = ? AND device_id = ?",
+        )
+        .bind(host_id)
+        .bind(device_id)
+        .fetch_one(&mut *connection)
+        .await
+        .map_err(failed)?,
+        UnsentGuard::AnyPairing => {
+            sqlx::query_scalar("SELECT count(*) FROM outbox WHERE acked_at IS NULL")
+                .fetch_one(&mut *connection)
+                .await
+                .map_err(failed)?
+        }
+        UnsentGuard::Ignore => 0,
+    };
+    Ok(u64::try_from(count).unwrap_or(0))
+}
+
 /// Tauri state: the local database, or none when it could not be opened.
 /// The app still starts — the office works without it — and the local
 /// commands answer `local_db_unavailable`.
 pub struct LocalDbState {
-    db: Option<LocalDb>,
+    /// Set when the database opened at start, or later by
+    /// [`Self::set_aside_unopened`], which opens a new one in its place.
+    db: OnceLock<LocalDb>,
     /// Where `open` looked for the database; `None` for a shell with no
     /// local database at all (`unavailable`).
     dir: Option<PathBuf>,
+    /// Serialises [`Self::set_aside_unopened`]: two forgets must not move
+    /// the same files aside twice or open two databases.
+    setting_aside: tokio::sync::Mutex<()>,
+    /// Why the database is not open, while it is not.
+    failure: std::sync::Mutex<Option<OpenFailure>>,
 }
 
 impl LocalDbState {
     pub async fn open(dir: &Path) -> Self {
+        let db = OnceLock::new();
+        let mut failure = None;
+        match LocalDb::open(dir).await {
+            Ok(opened) => {
+                let _ = db.set(opened);
+            }
+            Err(error) => failure = Some(open_failure_of(&error)),
+        }
         Self {
-            db: LocalDb::open(dir).await.ok(),
+            db,
             dir: Some(dir.to_path_buf()),
+            setting_aside: tokio::sync::Mutex::new(()),
+            failure: std::sync::Mutex::new(failure),
         }
     }
 
@@ -314,46 +493,193 @@ impl LocalDbState {
     /// tests that need neither use.
     pub fn unavailable() -> Self {
         Self {
-            db: None,
+            db: OnceLock::new(),
             dir: None,
+            setting_aside: tokio::sync::Mutex::new(()),
+            failure: std::sync::Mutex::new(None),
         }
     }
 
     pub fn get(&self) -> Result<&LocalDb, LocalDbError> {
-        self.db.as_ref().ok_or(LocalDbError::Unavailable)
+        self.db.get().ok_or(LocalDbError::Unavailable)
     }
 
-    /// Remove the database `open` could not open, with its `-wal`, `-shm`
-    /// and `-journal` files: it may still hold PIN and badge hashes, and
-    /// forgetting the device must not leave them behind. Each file goes on a
-    /// best-effort basis, then all four are checked again, and one still
-    /// there fails the call. Does nothing for an open database, which
-    /// [`LocalDb::clear_copies`] empties instead, or without a directory.
-    /// Everything in these files is treated as a disposable copy, as in
-    /// `clear_copies`: the first plan that adds data this device owns instead
-    /// of a copy (the scan journal, boxes, the outbox) must keep this removal
-    /// from deleting it, and block or confirm a forget while unsynced records
-    /// exist (`AGENTS.md`, "Local database").
-    pub fn remove_unopened(&self) -> std::io::Result<()> {
-        let (None, Some(dir)) = (&self.db, &self.dir) else {
-            return Ok(());
+    /// Why `open` failed, `None` while the database is open and for a shell
+    /// that never tried to open one (`unavailable`).
+    pub fn open_failure(&self) -> Option<OpenFailure> {
+        *self
+            .failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// How many records without a receipt `guard` protects in the database
+    /// that did not open, read on a read-only connection without migrations
+    /// and without changing the file. A file nothing can be read from (not a
+    /// database, no file, no directory) holds none anyone could send: 0. An
+    /// `outbox` that exists but cannot be counted is an error, never 0, as in
+    /// [`LocalDb::clear_copies`].
+    pub async fn unopened_unsent_records(
+        &self,
+        guard: UnsentGuard<'_>,
+    ) -> Result<u64, LocalDbError> {
+        let Some(dir) = &self.dir else {
+            return Ok(0);
         };
-        let files: Vec<PathBuf> = FILE_SUFFIXES
-            .iter()
-            .map(|suffix| dir.join(format!("{FILE_NAME}{suffix}")))
-            .collect();
-        for file in &files {
-            // Best effort: a file that stays is found just below.
-            let _ = std::fs::remove_file(file);
+        if guard == UnsentGuard::Ignore {
+            return Ok(0);
         }
-        match files.iter().find(|file| file.symlink_metadata().is_ok()) {
-            Some(file) => Err(std::io::Error::other(format!(
-                "{} is still there",
-                file.display()
-            ))),
-            None => Ok(()),
+        let Ok(mut connection) = SqliteConnectOptions::new()
+            .filename(dir.join(FILE_NAME))
+            .read_only(true)
+            .busy_timeout(BUSY_TIMEOUT)
+            .connect()
+            .await
+        else {
+            return Ok(0);
+        };
+        let counted = match outbox_exists(&mut connection).await {
+            Ok(true) => count_unsent(&mut connection, guard).await,
+            Ok(false) | Err(_) => Ok(0),
+        };
+        let _ = connection.close().await;
+        counted
+    }
+
+    /// Move the database `open` could not open out of the way, with its
+    /// `-wal`, `-shm` and `-journal` files, and open a new one in its place
+    /// (stage 2a spec §5.2, question В7). Nothing is deleted: the file may
+    /// hold this device's unsent records, which support can still read (plan
+    /// 5), and it may hold PIN and badge hashes — the accepted price of
+    /// keeping those records. The files become
+    /// `standalone-station.db.unreadable-<unix ms>` plus their suffix, so the
+    /// set stays openable together. A file that cannot be moved puts back
+    /// the ones already moved and fails the call; so does a name that is
+    /// already taken (an earlier set-aside with the same stamp), which a
+    /// rename would silently replace; so does a set that an earlier failed
+    /// put-back left split (`set_is_split`), which another move would part for
+    /// good. Each failure leaves a trace on stderr (the error kind and the
+    /// part of the set, no path). Whether this database may be set aside at
+    /// all is the caller's decision: `device_forget` calls it only for a
+    /// corrupt one ([`OpenFailure::Corrupt`]), after the unsent-records
+    /// guard. Answers where the database went, `None` when there was nothing
+    /// to move, an open database or no directory; a new database that does
+    /// not open either leaves the state without one, as at start.
+    pub async fn set_aside_unopened(&self) -> std::io::Result<Option<PathBuf>> {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|elapsed| elapsed.as_millis())
+            .unwrap_or(0);
+        self.set_aside_unopened_at(stamp).await
+    }
+
+    /// [`Self::set_aside_unopened`] with the time stamp given, for tests.
+    pub async fn set_aside_unopened_at(&self, stamp: u128) -> std::io::Result<Option<PathBuf>> {
+        let Some(dir) = &self.dir else {
+            return Ok(None);
+        };
+        let _setting_aside = self.setting_aside.lock().await;
+        if self.db.get().is_some() {
+            return Ok(None);
+        }
+        if set_is_split(dir)? {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "an earlier set-aside left the database files split",
+            ));
+        }
+        let aside = format!("{FILE_NAME}.unreadable-{stamp}");
+        let mut moved: Vec<(PathBuf, PathBuf)> = Vec::new();
+        let mut database = None;
+        for suffix in FILE_SUFFIXES {
+            let from = dir.join(format!("{FILE_NAME}{suffix}"));
+            if from.symlink_metadata().is_err() {
+                continue;
+            }
+            let to = dir.join(format!("{aside}{suffix}"));
+            let moving = if to.symlink_metadata().is_ok() {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::AlreadyExists,
+                    format!("{} is already there", to.display()),
+                ))
+            } else {
+                std::fs::rename(&from, &to)
+            };
+            if let Err(error) = moving {
+                let part = if suffix.is_empty() {
+                    "database"
+                } else {
+                    suffix
+                };
+                eprintln!(
+                    "standalone: setting the local database aside failed at its {part} file: {:?}",
+                    error.kind()
+                );
+                for (back, place) in moved.iter().rev() {
+                    // Best effort: a file left aside is still kept, not lost.
+                    if let Err(error) = std::fs::rename(place, back) {
+                        eprintln!(
+                            "standalone: a file of the local database could not be put back after a failed set-aside: {:?}",
+                            error.kind()
+                        );
+                    }
+                }
+                return Err(error);
+            }
+            if suffix.is_empty() {
+                database = Some(to.clone());
+            }
+            moved.push((from, to));
+        }
+        let failure = match LocalDb::open(dir).await {
+            Ok(opened) => {
+                let _ = self.db.set(opened);
+                None
+            }
+            Err(error) => Some(open_failure_of(&error)),
+        };
+        *self
+            .failure
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = failure;
+        Ok(database)
+    }
+}
+
+/// Whether an earlier set-aside left the files of one database split: a side
+/// file (`-wal`, `-shm`, `-journal`) under an `.unreadable-<stamp>` name with
+/// no database file under that stamp, or side files at the original names
+/// with no database file there. A failed put-back does this; moving what is
+/// left under a new stamp would part the files for good.
+fn set_is_split(dir: &Path) -> std::io::Result<bool> {
+    let side_at_original = FILE_SUFFIXES[1..].iter().any(|suffix| {
+        dir.join(format!("{FILE_NAME}{suffix}"))
+            .symlink_metadata()
+            .is_ok()
+    });
+    if side_at_original && dir.join(FILE_NAME).symlink_metadata().is_err() {
+        return Ok(true);
+    }
+    let prefix = format!("{FILE_NAME}.unreadable-");
+    let mut databases = std::collections::HashSet::new();
+    let mut sides = std::collections::HashSet::new();
+    for entry in std::fs::read_dir(dir)? {
+        let name = entry?.file_name();
+        let Some(rest) = name.to_str().and_then(|name| name.strip_prefix(&prefix)) else {
+            continue;
+        };
+        let digits = rest.chars().take_while(char::is_ascii_digit).count();
+        let (stamp, suffix) = rest.split_at(digits);
+        if stamp.is_empty() {
+            continue;
+        }
+        if suffix.is_empty() {
+            databases.insert(stamp.to_owned());
+        } else if FILE_SUFFIXES[1..].contains(&suffix) {
+            sides.insert(stamp.to_owned());
         }
     }
+    Ok(sides.iter().any(|stamp| !databases.contains(stamp)))
 }
 
 /// One statement within the size limits: no second statement, no comment,
@@ -547,6 +873,51 @@ mod tests {
         }
     }
 
+    /// `TABLE_CLASSES` holds only disposable tables until plan 2a5, so the
+    /// class filter itself is pinned here, on tables of all three classes.
+    #[tokio::test]
+    async fn a_forget_empties_the_disposable_tables_and_keeps_the_other_classes() {
+        use sqlx::{ConnectOptions, Connection};
+        let dir = tempfile::tempdir().unwrap();
+        let db = LocalDb::open(dir.path()).await.unwrap();
+        let mut raw = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(dir.path().join(FILE_NAME))
+            .connect()
+            .await
+            .unwrap();
+        for table in ["probe_disposable", "probe_device", "probe_workstation"] {
+            for sql in [
+                format!("CREATE TABLE {table} (id TEXT PRIMARY KEY)"),
+                format!("INSERT INTO {table} (id) VALUES ('row')"),
+            ] {
+                sqlx::query(&sql).execute(&mut raw).await.unwrap();
+            }
+        }
+        raw.close().await.unwrap();
+
+        let classes = [
+            ("probe_device", TableClass::DeviceData),
+            ("probe_disposable", TableClass::Disposable),
+            ("probe_workstation", TableClass::Workstation),
+        ];
+        assert_eq!(
+            db.clear_classed(&classes, UnsentGuard::Ignore).await,
+            Ok(())
+        );
+
+        for (table, left) in [
+            ("probe_disposable", 0),
+            ("probe_device", 1),
+            ("probe_workstation", 1),
+        ] {
+            let rows = db
+                .query(&format!("SELECT count(*) AS n FROM {table}"), vec![])
+                .await
+                .unwrap();
+            assert_eq!(rows[0]["n"], serde_json::json!(left), "{table}");
+        }
+    }
+
     #[test]
     fn error_codes_are_stable() {
         let codes: Vec<&str> = [
@@ -555,6 +926,7 @@ mod tests {
             LocalDbError::UnsupportedValue,
             LocalDbError::StatementFailed,
             LocalDbError::ChangesMismatch,
+            LocalDbError::UnsentRecords { count: 3 },
         ]
         .into_iter()
         .map(LocalDbError::code)
@@ -566,7 +938,8 @@ mod tests {
                 "invalid_statement",
                 "unsupported_value",
                 "statement_failed",
-                "changes_mismatch"
+                "changes_mismatch",
+                "unsent_facts"
             ]
         );
     }
@@ -630,5 +1003,83 @@ mod tests {
             expected_changes: None,
         }];
         assert_eq!(db.transaction(probe).await, Ok(vec![1]));
+    }
+
+    /// A database error SQLite reports with the given extended result code.
+    #[derive(Debug)]
+    struct Coded(&'static str);
+
+    impl std::fmt::Display for Coded {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(formatter, "result code {}", self.0)
+        }
+    }
+
+    impl std::error::Error for Coded {}
+
+    impl sqlx::error::DatabaseError for Coded {
+        fn message(&self) -> &str {
+            "coded"
+        }
+
+        fn code(&self) -> Option<std::borrow::Cow<'_, str>> {
+            Some(self.0.into())
+        }
+
+        fn as_error(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn std::error::Error + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn std::error::Error + Send + Sync + 'static> {
+            self
+        }
+
+        fn kind(&self) -> sqlx::error::ErrorKind {
+            sqlx::error::ErrorKind::Other
+        }
+    }
+
+    fn database_error(code: &'static str) -> sqlx::Error {
+        sqlx::Error::Database(Box::new(Coded(code)))
+    }
+
+    /// Corruption is the primary code `SQLITE_CORRUPT` (11) or `SQLITE_NOTADB`
+    /// (26), also in its extended forms (`CORRUPT_VTAB` 267, `CORRUPT_INDEX`
+    /// 779: the primary code is the low byte), and also when it surfaces from a
+    /// migration. Busy (5), cannot-open (14), full disk (13), I/O (10, 522)
+    /// and a code that is no number are not.
+    #[test]
+    fn only_corruption_codes_make_an_open_failure_corrupt() {
+        use sqlx::migrate::MigrateError;
+        for code in ["11", "26", "267", "779"] {
+            assert_eq!(
+                open_failure_of(&database_error(code)),
+                OpenFailure::Corrupt,
+                "{code}"
+            );
+            let in_a_migration =
+                sqlx::Error::Migrate(Box::new(MigrateError::Execute(database_error(code))));
+            assert_eq!(open_failure_of(&in_a_migration), OpenFailure::Corrupt);
+            let in_one_migration = sqlx::Error::Migrate(Box::new(MigrateError::ExecuteMigration(
+                database_error(code),
+                3,
+            )));
+            assert_eq!(open_failure_of(&in_one_migration), OpenFailure::Corrupt);
+        }
+        for code in ["5", "13", "14", "10", "522", "1", "", "corrupt"] {
+            assert_eq!(
+                open_failure_of(&database_error(code)),
+                OpenFailure::Other,
+                "{code:?}"
+            );
+        }
+        let missing = sqlx::Error::Migrate(Box::new(MigrateError::VersionMissing(9999)));
+        assert_eq!(open_failure_of(&missing), OpenFailure::Other);
+        let io = sqlx::Error::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+        assert_eq!(open_failure_of(&io), OpenFailure::Other);
     }
 }

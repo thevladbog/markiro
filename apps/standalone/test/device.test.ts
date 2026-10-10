@@ -26,6 +26,22 @@ describe("Tauri device API", () => {
     await expect(createTauriDeviceApi(call).status()).resolves.toEqual(DEVICE_STATUS);
   });
 
+  it("accepts a pairing whose device name is not known yet", async () => {
+    const call = vi.fn().mockResolvedValue({ ...DEVICE_STATUS, deviceName: null });
+    await expect(createTauriDeviceApi(call).status()).resolves.toEqual({
+      ...DEVICE_STATUS,
+      deviceName: null,
+    });
+  });
+
+  it.each([
+    ["without the device name", { deviceName: undefined }],
+    ["with an empty device name", { deviceName: "" }],
+  ])("rejects a pairing %s", async (_case, change) => {
+    const call = vi.fn().mockResolvedValue({ ...DEVICE_STATUS, ...change });
+    expect((await failure(createTauriDeviceApi(call).status())).code).toBe("invalid_response");
+  });
+
   it("pairs locally under the given device name", async () => {
     const call = vi.fn().mockResolvedValue(DEVICE_STATUS);
     await expect(createTauriDeviceApi(call).pairLocally("Рабочее место хоста")).resolves.toEqual(
@@ -38,6 +54,19 @@ describe("Tauri device API", () => {
     const call = vi.fn().mockResolvedValue(null);
     await createTauriDeviceApi(call).forget();
     expect(call).toHaveBeenCalledWith("device_forget", {});
+  });
+
+  it("forgets despite unsent records only when asked to keep them", async () => {
+    const call = vi.fn().mockResolvedValue(null);
+    await createTauriDeviceApi(call).forget({ keepUnsent: true });
+    expect(call).toHaveBeenLastCalledWith("device_forget", { keepUnsent: true });
+    await createTauriDeviceApi(call).forget({ keepUnsent: false });
+    expect(call).toHaveBeenLastCalledWith("device_forget", {});
+  });
+
+  it("keeps the shell's refusal while unsent records remain", async () => {
+    const call = vi.fn().mockRejectedValue("unsent_facts");
+    expect((await failure(createTauriDeviceApi(call).forget())).code).toBe("unsent_facts");
   });
 
   it("pairs by code with the host's address, the confirmed fingerprint and a name", async () => {

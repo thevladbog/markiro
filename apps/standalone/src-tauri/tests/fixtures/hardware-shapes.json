@@ -1,0 +1,10 @@
+{
+  "scannerSnapshot": {
+    "revision": 7,
+    "scanners": [
+      { "port": "COM3", "baud": 9600, "status": "connected" },
+      { "port": "COM4", "baud": 115200, "status": "disconnected" }
+    ]
+  },
+  "usbPrinter": { "name": "Zebra ZD421", "port": "USB001" }
+}

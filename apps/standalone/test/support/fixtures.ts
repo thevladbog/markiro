@@ -14,6 +14,7 @@ export const DEVICE_STATUS: DeviceStatus = {
   deviceId: DEVICE_ID,
   kind: "station",
   lineId: LINE_ID,
+  deviceName: "Станция на линии 1",
 };
 
 /** A station just paired: it chooses its line first. */

@@ -71,6 +71,34 @@ async fn new_code(office: &DeviceState, token: &str) -> String {
     created.body.unwrap()["code"].as_str().unwrap().to_owned()
 }
 
+/// Plan 2a4: a station that paired by code keeps the name the host stores
+/// for it, without the spaces it was typed with.
+#[tokio::test]
+async fn a_station_paired_by_code_keeps_the_trimmed_name() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let office_dir = tempfile::tempdir().unwrap();
+    let station_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path()).await;
+    let (office, token) = office(&host, office_dir.path()).await;
+    let code = new_code(&office, &token).await;
+
+    let station = DeviceState::load(station_dir.path().to_path_buf());
+    let status = station
+        .claim(
+            &address(&host),
+            &host.fingerprint,
+            &code,
+            &format!("  {STATION} "),
+            "0.1.0",
+        )
+        .await
+        .unwrap();
+    assert_eq!(status.device_name.as_deref(), Some(STATION));
+    let reloaded = DeviceState::load(station_dir.path().to_path_buf());
+    assert_eq!(reloaded.status(), Ok(Some(status)));
+    host.stop().await.unwrap();
+}
+
 #[tokio::test]
 async fn a_second_device_pairs_with_a_code_and_the_confirmed_fingerprint() {
     let host_dir = tempfile::tempdir().unwrap();

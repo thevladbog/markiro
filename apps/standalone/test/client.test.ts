@@ -46,6 +46,61 @@ describe("Tauri host client", () => {
     });
   });
 
+  it("passes a time limit in milliseconds only when one is asked for", async () => {
+    const call = vi.fn().mockResolvedValue({ status: 200, body: { value: 1 } });
+    await createTauriHostClient(call).request("GET", "/v1/device/codes/ab", {
+      timeoutMs: 300,
+      schema: valueSchema,
+    });
+    expect(call).toHaveBeenCalledWith("host_request", {
+      method: "GET",
+      path: "/v1/device/codes/ab",
+      body: null,
+      officeToken: null,
+      timeoutMs: 300,
+    });
+
+    call.mockClear();
+    await createTauriHostClient(call).request("GET", "/v1/device", { schema: valueSchema });
+    expect(call.mock.calls[0]?.[1]).not.toHaveProperty("timeoutMs");
+  });
+
+  it.each([100, 300, 10_000])(
+    "passes a whole number of milliseconds inside the bounds: %s",
+    async (timeoutMs) => {
+      const call = vi.fn().mockResolvedValue({ status: 200, body: { value: 1 } });
+      await createTauriHostClient(call).request("GET", "/v1/device", {
+        timeoutMs,
+        schema: valueSchema,
+      });
+      expect(call.mock.calls[0]?.[1]).toHaveProperty("timeoutMs", timeoutMs);
+    },
+  );
+
+  // `NaN` and `Infinity` would reach the shell as JSON `null`, which it reads
+  // as "no limit"; the rest it would answer with Tauri's own text or refuse
+  // (`invalid_request`), so the webview refuses all of them itself, before
+  // the shell is called, with the same code.
+  it.each([
+    ["a fraction", 300.5],
+    ["NaN", Number.NaN],
+    ["Infinity", Number.POSITIVE_INFINITY],
+    ["-Infinity", Number.NEGATIVE_INFINITY],
+    ["zero", 0],
+    ["a negative number", -300],
+    ["one below the lower bound", 99],
+    ["one above the upper bound", 10_001],
+  ])("refuses %s as a time limit before the shell is called", async (_name, timeoutMs) => {
+    const call = vi.fn().mockResolvedValue({ status: 200, body: { value: 1 } });
+    const error = await failure(
+      createTauriHostClient(call).request("GET", "/v1/device", { timeoutMs, schema: valueSchema }),
+    );
+    expect(error.kind).toBe("transport");
+    expect(error.code).toBe("invalid_request");
+    expect(error.status).toBeNull();
+    expect(call).not.toHaveBeenCalled();
+  });
+
   it("turns an error body into an api error naming the credential", async () => {
     const call = vi.fn().mockResolvedValue({
       status: 401,
@@ -87,6 +142,19 @@ describe("Tauri host client", () => {
     expect(error.kind).toBe("transport");
     expect(error.code).toBe(code);
     expect(error.status).toBeNull();
+  });
+
+  it("reads the shell's timeout as its own transport code, not as unreachable", async () => {
+    const call = vi.fn().mockRejectedValue("timeout");
+    const error = await failure(
+      createTauriHostClient(call).request("GET", "/v1/device/codes/ab", {
+        timeoutMs: 300,
+        schema: z.unknown(),
+      }),
+    );
+    expect(error.kind).toBe("transport");
+    expect(error.code).toBe("timeout");
+    expect(TRANSPORT_CODES).toContain("timeout");
   });
 
   it("treats an unexpected shell error as unreachable", async () => {

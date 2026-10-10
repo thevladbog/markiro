@@ -14,11 +14,13 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+base64 = "=0.22.1"
 markiro-proto = { path = "../proto" }
 reqwest = { version = "=0.13.4", default-features = false, features = ["json", "rustls"] }
 rustls = { version = "=0.23.43", default-features = false, features = ["aws_lc_rs", "std", "tls12", "logging"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serialport = "=4.9.0"
 sqlx = { version = "=0.8.6", default-features = false, features = ["runtime-tokio", "sqlite", "migrate", "macros"] }
 tauri = { version = "2.11", features = [] }
 tauri-plugin-single-instance = "2"
@@ -26,8 +28,22 @@ thiserror = "2"
 tokio = { version = "=1.53.1", features = ["sync", "macros", "time"] }
 
 [target.'cfg(windows)'.dependencies]
-base64 = "=0.22.1"
-windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Security_Cryptography"] }
+# Win32_Graphics_Gdi and Win32_UI_WindowsAndMessaging: kiosk mode (lockdown.rs).
+# Win32_Graphics_Printing with Win32_Graphics_Gdi and Win32_Security: the
+# spooler (printer/spooler.rs; PRINTER_INFO_2W needs all three, and
+# Win32_Security_Cryptography would bring Win32_Security in anyway).
+# Win32_System_Power with Win32_System_Threading: set_system_awake
+# (power/windows.rs; PowerCreateRequest takes a REASON_CONTEXT).
+windows-sys = { version = "=0.61.2", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Graphics_Printing",
+  "Win32_Security",
+  "Win32_Security_Cryptography",
+  "Win32_System_Power",
+  "Win32_System_Threading",
+  "Win32_UI_WindowsAndMessaging",
+] }
 
 [dev-dependencies]
 markiro-host = { path = "../host" }

@@ -106,6 +106,8 @@ export const deviceStatusSchema = z
     deviceId: z.uuid(),
     kind: deviceKindSchema,
     lineId: z.uuid().nullable(),
+    /** The name the host keeps for this device; `null` until a refresh fills an old `device.json`. */
+    deviceName: z.string().min(1).nullable(),
   })
   .strict();
 export type DeviceStatus = z.infer<typeof deviceStatusSchema>;

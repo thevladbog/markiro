@@ -1,7 +1,10 @@
 //! The station's local database on a real file: migrations, the read-only
 //! query path and the one-transaction batch path (stage 1 spec §5.2).
 
-use markiro_standalone_lib::local_db::{LocalDb, LocalDbError, LocalStatement, FILE_NAME};
+use markiro_standalone_lib::local_db::{
+    table_class, LocalDb, LocalDbError, LocalDbState, LocalStatement, OpenFailure, TableClass,
+    UnsentGuard, FILE_NAME, MIGRATOR, TABLE_CLASSES,
+};
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection};
@@ -43,15 +46,9 @@ async fn lines(db: &LocalDb) -> Value {
     Value::Array(rows.into_iter().map(Value::Object).collect())
 }
 
-/// Pins today's user tables. `clear_copies` treats every one of them as
-/// disposable (see its doc comment): the copies of the host's data, and
-/// `floor_sign_in_failures` (plan 1f), this device's own failed sign-ins,
-/// which a forget clears on purpose. A new migration that adds a table makes
-/// this assertion fail, on purpose, so whoever adds it must decide whether
-/// it is disposable too (extend the list here) or data this device must keep
-/// — the scan journal, boxes, the outbox (the station design's §6.2,
-/// "Логическая модель") — which `clear_copies` and `device_forget` then need
-/// to treat deliberately, not silently wipe.
+/// Pins today's user tables. What a forget does with each is
+/// `TABLE_CLASSES`'s business (`every_table_has_a_forget_class` below); this
+/// list changes with every migration that adds a table.
 #[tokio::test]
 async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
     let (dir, db) = open().await;
@@ -412,13 +409,66 @@ async fn one_value_of_a_few_mebibytes_passes_the_limits() {
     );
 }
 
-/// Forgetting the device (`device_forget`) clears every table but sqlx's
-/// migration journal: tables a later migration adds too, since the list
-/// comes from `pragma_table_list`, and in any order despite foreign keys.
+/// Every table the migrations create has exactly one forget class
+/// (stage 2a spec §5.2, decision 30), and the class list names nothing else:
+/// a plan that adds a table must say whether a forget empties it, keeps it as
+/// this device's own record, or keeps it as the workstation's setting.
 #[tokio::test]
-async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
+async fn every_table_has_a_forget_class() {
+    let (_dir, db) = open().await;
+    let rows = db
+        .query(
+            "SELECT name FROM pragma_table_list WHERE schema = 'main' \
+             AND type IN ('table', 'virtual') AND name <> '_sqlx_migrations' \
+             AND name NOT GLOB 'sqlite_*' ORDER BY name",
+            vec![],
+        )
+        .await
+        .unwrap();
+    let tables: Vec<&str> = rows
+        .iter()
+        .map(|row| row["name"].as_str().unwrap())
+        .collect();
+    let unclassified: Vec<&str> = tables
+        .iter()
+        .copied()
+        .filter(|table| table_class(table).is_none())
+        .collect();
+    assert!(
+        unclassified.is_empty(),
+        "tables without a forget class: {unclassified:?}; add each to TABLE_CLASSES in local_db.rs"
+    );
+    let mut listed: Vec<&str> = TABLE_CLASSES.iter().map(|(table, _)| *table).collect();
+    listed.sort_unstable();
+    assert_eq!(
+        listed, tables,
+        "TABLE_CLASSES names each table of the migrations once, and nothing else"
+    );
+    // Until plan 2a5 brings the first records of the device's own, every
+    // table is a copy or this pairing's bookkeeping.
+    assert!(TABLE_CLASSES
+        .iter()
+        .all(|(_, class)| *class == TableClass::Disposable));
+}
+
+/// Forgetting the device (`device_forget`) empties every disposable table and
+/// nothing else: a table outside that class (here two a later migration might
+/// add, one of this device's records and one of the workstation's settings)
+/// keeps its rows, and so does sqlx's migration journal.
+#[tokio::test]
+async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
     let (dir, db) = open().await;
     db.transaction(vec![
+        statement(
+            "INSERT INTO ref_org (id, name, inn, gln, gs1_prefixes, time_zone, rev) \
+             VALUES ('org-1', 'Завод', NULL, '4600682000006', '[]', 'Europe/Moscow', 1)",
+            json!([]),
+        ),
+        statement(
+            "INSERT INTO ref_site (id, badge_salt, box_block_size, pallet_block_size, rev) \
+             VALUES ('site-1', 'c2FsdA==', 100, 10, 2)",
+            json!([]),
+        ),
         statement(INSERT_LINE, json!([LINE_1, "Линия 1", 0, 3])),
         statement(
             "INSERT INTO sync_state (key, value) VALUES ('last_rev', '3')",
@@ -444,6 +494,16 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
              VALUES ('8:box', 8, 'box', 'template-1', 7)",
             json!([]),
         ),
+        statement(
+            "INSERT INTO ref_operators (id, login, name, pin_phc, rev) \
+             VALUES ('operator-1', '0001', 'Анна', 'pbkdf2$pin', 8)",
+            json!([]),
+        ),
+        statement(
+            "INSERT INTO ref_operator_badges (id, operator_id, badge_phc, label, rev) \
+             VALUES ('badge-1', 'operator-1', 'pbkdf2$badge', NULL, 9)",
+            json!([]),
+        ),
         // This device's own failed sign-ins (plan 1f): cleared with the copies.
         statement(
             "INSERT INTO floor_sign_in_failures (key, failures, locked_at, last_failure_at) \
@@ -453,21 +513,18 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
     ])
     .await
     .unwrap();
-    // Tables as a later migration might add them, the second referring to
-    // the first; the webview may not create tables, so a raw connection
-    // does. `extra_holder` sorts first, so its delete runs while
-    // `extra_item` still refers to it.
+    // Tables as a later migration might add them; the webview may not create
+    // tables, so a raw connection does.
     let mut raw = SqliteConnectOptions::new()
         .filename(dir.path().join(FILE_NAME))
         .connect()
         .await
         .unwrap();
     for sql in [
-        "CREATE TABLE extra_holder (id TEXT PRIMARY KEY)",
-        "CREATE TABLE extra_item (id TEXT PRIMARY KEY, \
-         holder_id TEXT NOT NULL REFERENCES extra_holder (id))",
-        "INSERT INTO extra_holder (id) VALUES ('h')",
-        "INSERT INTO extra_item (id, holder_id) VALUES ('i', 'h')",
+        "CREATE TABLE kept_device_records (id TEXT PRIMARY KEY)",
+        "CREATE TABLE kept_workstation_settings (key TEXT PRIMARY KEY)",
+        "INSERT INTO kept_device_records (id) VALUES ('scan-1')",
+        "INSERT INTO kept_workstation_settings (key) VALUES ('printers')",
     ] {
         sqlx::query(sql).execute(&mut raw).await.unwrap();
     }
@@ -475,21 +532,24 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
     let journal = "SELECT count(*) AS n FROM _sqlx_migrations";
     let migrations = db.query(journal, vec![]).await.unwrap();
 
-    assert_eq!(db.clear_copies().await, Ok(()));
+    assert_eq!(db.clear_copies(UnsentGuard::Ignore).await, Ok(()));
 
-    let left = db
+    for (table, _) in TABLE_CLASSES {
+        let left = db
+            .query(&format!("SELECT count(*) AS n FROM {table}"), vec![])
+            .await
+            .unwrap();
+        assert_eq!(Value::Object(left[0].clone()), json!({ "n": 0 }), "{table}");
+    }
+    let kept = db
         .query(
-            "SELECT (SELECT count(*) FROM ref_org) + (SELECT count(*) FROM ref_site) \
-             + (SELECT count(*) FROM ref_lines) + (SELECT count(*) FROM sync_state) \
-             + (SELECT count(*) FROM sync_quarantine) + (SELECT count(*) FROM ref_products) \
-             + (SELECT count(*) FROM ref_templates) + (SELECT count(*) FROM ref_template_defaults) \
-             + (SELECT count(*) FROM floor_sign_in_failures) \
-             + (SELECT count(*) FROM extra_holder) + (SELECT count(*) FROM extra_item) AS n",
+            "SELECT (SELECT count(*) FROM kept_device_records) \
+             + (SELECT count(*) FROM kept_workstation_settings) AS n",
             vec![],
         )
         .await
         .unwrap();
-    assert_eq!(Value::Object(left[0].clone()), json!({ "n": 0 }));
+    assert_eq!(Value::Object(kept[0].clone()), json!({ "n": 2 }));
     assert_eq!(db.query(journal, vec![]).await.unwrap(), migrations);
     // The database takes writes afterwards as before.
     assert_eq!(
@@ -500,6 +560,372 @@ async fn clearing_the_copies_empties_every_table_but_the_migration_journal() {
         .await,
         Ok(vec![1])
     );
+}
+
+const HOST: &str = "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
+const OTHER_HOST: &str = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
+const DEVICE: &str = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
+const OTHER_DEVICE: &str = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
+
+/// Runs `statements` on a raw connection, as a later migration would: the
+/// webview may not create tables. `outbox` here stands for plan 2a5's table
+/// with only the columns a forget reads; plan 2a5 replaces it with its own.
+async fn run_raw(dir: &std::path::Path, statements: &[&str]) {
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    for sql in statements {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    raw.close().await.unwrap();
+}
+
+const OUTBOX: &str = "CREATE TABLE outbox (id TEXT PRIMARY KEY, host_id TEXT NOT NULL, \
+    device_id TEXT NOT NULL, acked_at TEXT)";
+
+async fn count(db: &LocalDb, table: &str) -> Value {
+    let rows = db
+        .query(&format!("SELECT count(*) AS n FROM {table}"), vec![])
+        .await
+        .unwrap();
+    rows[0]["n"].clone()
+}
+
+/// A forget refuses while records without a receipt remain (stage 2a spec
+/// §5.2, question В7): this pairing's with `Pairing`, anyone's with
+/// `AnyPairing`; it clears nothing then. `Ignore` — the person confirmed —
+/// clears the copies and keeps every outbox record. The records of another
+/// device and of another host, each with the same other id, are told apart
+/// from this pairing's.
+#[tokio::test]
+async fn a_forget_refuses_while_unsent_records_remain() {
+    let (dir, db) = open().await;
+    db.transaction(vec![statement(
+        INSERT_LINE,
+        json!([LINE_1, "Линия 1", 0, 3]),
+    )])
+    .await
+    .unwrap();
+    let mine = format!("INSERT INTO outbox VALUES ('a', '{HOST}', '{DEVICE}', NULL)");
+    let other_device = format!("INSERT INTO outbox VALUES ('b', '{HOST}', '{OTHER_DEVICE}', NULL)");
+    let other_host = format!("INSERT INTO outbox VALUES ('c', '{OTHER_HOST}', '{DEVICE}', NULL)");
+    run_raw(dir.path(), &[OUTBOX, &mine, &other_device, &other_host]).await;
+
+    assert_eq!(
+        db.clear_copies(UnsentGuard::Pairing(HOST, DEVICE)).await,
+        Err(LocalDbError::UnsentRecords { count: 1 })
+    );
+    assert_eq!(
+        db.clear_copies(UnsentGuard::AnyPairing).await,
+        Err(LocalDbError::UnsentRecords { count: 3 })
+    );
+    assert_eq!(
+        count(&db, "ref_lines").await,
+        json!(1),
+        "nothing was cleared"
+    );
+
+    assert_eq!(db.clear_copies(UnsentGuard::Ignore).await, Ok(()));
+    assert_eq!(count(&db, "ref_lines").await, json!(0));
+    assert_eq!(count(&db, "outbox").await, json!(3), "the records stay");
+}
+
+/// Records with a receipt, and another pairing's, do not stop this
+/// pairing's forget; nor does a database without an outbox yet (before plan
+/// 2a5's migration). Once every record has a receipt, no pairing's forget is
+/// stopped, `AnyPairing` included.
+#[tokio::test]
+async fn sent_records_and_other_pairings_do_not_stop_a_forget() {
+    let (dir, db) = open().await;
+    assert_eq!(
+        db.clear_copies(UnsentGuard::Pairing(HOST, DEVICE)).await,
+        Ok(())
+    );
+    assert_eq!(db.clear_copies(UnsentGuard::AnyPairing).await, Ok(()));
+
+    let acked = format!(
+        "INSERT INTO outbox VALUES ('a', '{HOST}', '{DEVICE}', '2026-10-09T08:00:00.000Z')"
+    );
+    let others = format!("INSERT INTO outbox VALUES ('b', '{HOST}', '{OTHER_DEVICE}', NULL)");
+    run_raw(dir.path(), &[OUTBOX, &acked, &others]).await;
+    assert_eq!(
+        db.clear_copies(UnsentGuard::Pairing(HOST, DEVICE)).await,
+        Ok(())
+    );
+    assert_eq!(
+        db.clear_copies(UnsentGuard::AnyPairing).await,
+        Err(LocalDbError::UnsentRecords { count: 1 })
+    );
+    assert_eq!(count(&db, "outbox").await, json!(2));
+
+    db.transaction(vec![statement(
+        "UPDATE outbox SET acked_at = '2026-10-09T08:01:00.000Z' WHERE id = 'b'",
+        json!([]),
+    )])
+    .await
+    .unwrap();
+    assert_eq!(db.clear_copies(UnsentGuard::AnyPairing).await, Ok(()));
+}
+
+/// An outbox the forget cannot read fails the forget and clears nothing,
+/// instead of counting it as empty: a misread must never wipe copies while
+/// records may be waiting.
+#[tokio::test]
+async fn an_outbox_that_cannot_be_counted_stops_a_forget() {
+    let (dir, db) = open().await;
+    db.transaction(vec![statement(
+        INSERT_LINE,
+        json!([LINE_1, "Линия 1", 0, 3]),
+    )])
+    .await
+    .unwrap();
+    run_raw(dir.path(), &["CREATE TABLE outbox (id TEXT PRIMARY KEY)"]).await;
+
+    for guard in [UnsentGuard::Pairing(HOST, DEVICE), UnsentGuard::AnyPairing] {
+        assert_eq!(
+            db.clear_copies(guard).await,
+            Err(LocalDbError::StatementFailed)
+        );
+    }
+    assert_eq!(count(&db, "ref_lines").await, json!(1), "nothing cleared");
+    // A confirmed forget does not read the outbox at all.
+    assert_eq!(db.clear_copies(UnsentGuard::Ignore).await, Ok(()));
+}
+
+/// The count and the clear are one transaction: a record that arrives while
+/// the forget waits for the write lock is counted, not wiped. The test holds
+/// the write lock on a second connection, lets the forget start waiting for
+/// it, commits an unsent record, and the forget must then see the record.
+///
+/// SQLite reports no "waiting on the lock" event, so the test waits a fixed
+/// second (the busy timeout is 5 s) for the forget to reach the lock: it is a
+/// detector of a count made outside the transaction only under that margin.
+/// If the spawned forget needed longer than a second to start, a wrong
+/// implementation would pass vacuously; correct code can never fail here.
+/// The multi-thread runtime keeps the forget's task from being starved by
+/// this one while it sleeps.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_record_arriving_while_a_forget_waits_is_counted_not_wiped() {
+    let (dir, db) = open().await;
+    db.transaction(vec![statement(
+        INSERT_LINE,
+        json!([LINE_1, "Линия 1", 0, 3]),
+    )])
+    .await
+    .unwrap();
+    run_raw(dir.path(), &[OUTBOX]).await;
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    sqlx::query("BEGIN IMMEDIATE")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+
+    let db = std::sync::Arc::new(db);
+    let forget = tokio::spawn({
+        let db = std::sync::Arc::clone(&db);
+        async move { db.clear_copies(UnsentGuard::Pairing(HOST, DEVICE)).await }
+    });
+    // The forget is blocked on the write lock for as long as this holds it
+    // (the busy timeout is 5 s).
+    tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
+    assert!(!forget.is_finished(), "the forget waits for the write lock");
+    sqlx::query(&format!(
+        "INSERT INTO outbox VALUES ('late', '{HOST}', '{DEVICE}', NULL)"
+    ))
+    .execute(&mut raw)
+    .await
+    .unwrap();
+    sqlx::query("COMMIT").execute(&mut raw).await.unwrap();
+    raw.close().await.unwrap();
+
+    let result = tokio::time::timeout(std::time::Duration::from_secs(10), forget)
+        .await
+        .expect("the forget ends once the lock is free")
+        .unwrap();
+    assert_eq!(result, Err(LocalDbError::UnsentRecords { count: 1 }));
+    assert_eq!(count(&db, "ref_lines").await, json!(1), "nothing cleared");
+    assert_eq!(count(&db, "outbox").await, json!(1));
+}
+
+/// The checkpoint that ends a forget must finish, or the forget fails: a
+/// reader holding an older snapshot keeps the pre-delete frames, with their
+/// PIN and badge hashes, in the WAL. The delete is committed by then, and a
+/// retry once the reader is gone succeeds. Costs one busy timeout (5 s).
+#[tokio::test]
+async fn a_forget_fails_while_a_reader_keeps_the_wal_and_succeeds_after() {
+    let (dir, db) = open().await;
+    db.transaction(vec![statement(
+        INSERT_LINE,
+        json!([LINE_1, "Линия 1", 0, 3]),
+    )])
+    .await
+    .unwrap();
+    let mut reader = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    sqlx::query("BEGIN").execute(&mut reader).await.unwrap();
+    sqlx::query("SELECT count(*) FROM ref_lines")
+        .fetch_one(&mut reader)
+        .await
+        .unwrap();
+
+    let first = tokio::time::timeout(
+        std::time::Duration::from_secs(30),
+        db.clear_copies(UnsentGuard::Ignore),
+    )
+    .await
+    .expect("the checkpoint gives up after the busy timeout");
+    assert_eq!(first, Err(LocalDbError::StatementFailed));
+    assert_eq!(count(&db, "ref_lines").await, json!(0), "the delete stays");
+
+    sqlx::query("COMMIT").execute(&mut reader).await.unwrap();
+    reader.close().await.unwrap();
+    assert_eq!(db.clear_copies(UnsentGuard::Ignore).await, Ok(()));
+}
+
+/// No table of the migrations has a foreign key. The writer enforces them
+/// (`foreign_keys(true)`), and a forget deletes table by table: a plain key
+/// between tables fails the `DELETE` that breaks it, and `ON DELETE CASCADE`
+/// or `SET NULL` from a table the forget keeps to one it empties would delete
+/// or rewrite this device's own records without a word. The rule is read from
+/// the real, migrated schema, so a migration that adds a key fails here.
+#[tokio::test]
+async fn no_table_has_a_foreign_key() {
+    let (_dir, db) = open().await;
+    let keys = db
+        .query(
+            "SELECT t.name AS child, fk.\"table\" AS parent, fk.on_delete AS on_delete \
+             FROM pragma_table_list t, pragma_foreign_key_list(t.name) fk \
+             WHERE t.schema = 'main' AND t.type = 'table' ORDER BY t.name, fk.id",
+            vec![],
+        )
+        .await
+        .unwrap();
+    let described: Vec<String> = keys
+        .iter()
+        .map(|key| {
+            format!(
+                "{} -> {} (ON DELETE {})",
+                key["child"], key["parent"], key["on_delete"]
+            )
+        })
+        .collect();
+    assert!(
+        described.is_empty(),
+        "foreign keys are not allowed between local tables: {described:?}; see TABLE_CLASSES in local_db.rs"
+    );
+}
+
+/// The files of a database that did not open: a file of garbage where the
+/// database belongs, and the given side files written after the failed open
+/// (see `unopened_database` in `tests/ipc.rs` for why after).
+async fn unopened(dir: &std::path::Path, beside: &[&str]) -> LocalDbState {
+    std::fs::write(dir.join(FILE_NAME), "not a database").unwrap();
+    let local = LocalDbState::open(dir).await;
+    assert!(local.get().is_err(), "a file of garbage does not open");
+    for suffix in beside {
+        std::fs::write(dir.join(format!("{FILE_NAME}{suffix}")), "not a database").unwrap();
+    }
+    local
+}
+
+/// A database that did not open is moved aside with its side files, nothing
+/// deleted, and a new one opens in its place (stage 2a spec §5.2, question
+/// В7).
+#[tokio::test]
+async fn an_unopened_database_is_set_aside_and_a_new_one_opens() {
+    let dir = tempfile::tempdir().unwrap();
+    let local = unopened(dir.path(), &["-wal", "-shm"]).await;
+
+    let aside = local
+        .set_aside_unopened_at(1_790_000_000_000)
+        .await
+        .unwrap();
+
+    let aside_name = format!("{FILE_NAME}.unreadable-1790000000000");
+    assert_eq!(aside, Some(dir.path().join(&aside_name)));
+    for suffix in ["", "-wal", "-shm"] {
+        let kept = dir.path().join(format!("{aside_name}{suffix}"));
+        assert_eq!(std::fs::read_to_string(&kept).unwrap(), "not a database");
+    }
+    assert!(!dir.path().join(format!("{aside_name}-journal")).exists());
+    let db = local.get().expect("a new database opened in its place");
+    assert_eq!(count(db, "ref_lines").await, json!(0));
+    // Once open, there is nothing more to move aside.
+    assert_eq!(
+        local
+            .set_aside_unopened_at(1_790_000_000_001)
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+/// A file that cannot be moved aside puts back the ones already moved: the
+/// database never loses its WAL to a half-done move, and no new database
+/// opens over it. A non-empty directory already standing at the WAL's new
+/// name stops that one move.
+#[tokio::test]
+async fn a_file_that_cannot_be_set_aside_puts_the_others_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let local = unopened(dir.path(), &["-wal"]).await;
+    let blocked = dir
+        .path()
+        .join(format!("{FILE_NAME}.unreadable-1790000000000-wal"));
+    std::fs::create_dir(&blocked).unwrap();
+    std::fs::write(blocked.join("kept"), "kept").unwrap();
+
+    assert!(local
+        .set_aside_unopened_at(1_790_000_000_000)
+        .await
+        .is_err());
+
+    for suffix in ["", "-wal"] {
+        let file = dir.path().join(format!("{FILE_NAME}{suffix}"));
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "not a database");
+    }
+    assert!(!dir
+        .path()
+        .join(format!("{FILE_NAME}.unreadable-1790000000000"))
+        .exists());
+    assert_eq!(
+        std::fs::read_to_string(blocked.join("kept")).unwrap(),
+        "kept"
+    );
+    assert!(local.get().is_err(), "no new database over the old files");
+}
+
+/// What an earlier set-aside kept is never replaced by a later one that
+/// happens to carry the same time stamp: `std::fs::rename` replaces an
+/// existing file on Unix and on Windows alike.
+#[tokio::test]
+async fn an_earlier_set_aside_is_never_overwritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let local = unopened(dir.path(), &[]).await;
+    let earlier = dir
+        .path()
+        .join(format!("{FILE_NAME}.unreadable-1790000000000"));
+    std::fs::write(&earlier, "the earlier one").unwrap();
+
+    assert!(local
+        .set_aside_unopened_at(1_790_000_000_000)
+        .await
+        .is_err());
+
+    assert_eq!(
+        std::fs::read_to_string(&earlier).unwrap(),
+        "the earlier one"
+    );
+    let file = dir.path().join(FILE_NAME);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), "not a database");
 }
 
 /// Whether the file at `path` holds `marker` anywhere; a missing file holds nothing.
@@ -547,7 +973,7 @@ async fn clearing_the_copies_leaves_no_deleted_hash_in_the_file_or_its_wal() {
     );
     assert!(file_holds(&wal, IN_WAL), "the second marker is in the WAL");
 
-    assert_eq!(db.clear_copies().await, Ok(()));
+    assert_eq!(db.clear_copies(UnsentGuard::Ignore).await, Ok(()));
 
     for marker in [IN_FILE, IN_WAL] {
         assert!(!file_holds(&file, marker), "{marker} stayed in the file");
@@ -555,51 +981,321 @@ async fn clearing_the_copies_leaves_no_deleted_hash_in_the_file_or_its_wal() {
     }
 }
 
-/// An FTS5 virtual table's shadow tables (`search_data`, `search_idx`, …)
-/// hold its index; `sqlite_master` lists them as ordinary tables, but
-/// deleting their rows directly — instead of through the virtual table —
-/// corrupts the index. `clear_copies` must clear through the virtual table
-/// and leave it fully usable afterwards.
-#[tokio::test]
-async fn clearing_the_copies_leaves_a_virtual_table_usable() {
-    let (dir, db) = open().await;
+/// A migrated database file built on a plain connection (rollback journal, so
+/// the file stands alone), with `statements` run on it afterwards.
+async fn database_file(dir: &std::path::Path, statements: &[&str]) {
     let mut raw = SqliteConnectOptions::new()
-        .filename(dir.path().join(FILE_NAME))
+        .filename(dir.join(FILE_NAME))
+        .create_if_missing(true)
         .connect()
         .await
         .unwrap();
-    sqlx::query("CREATE VIRTUAL TABLE search USING fts5(body)")
-        .execute(&mut raw)
-        .await
-        .unwrap();
-    sqlx::query("INSERT INTO search (rowid, body) VALUES (1, 'первая строка')")
-        .execute(&mut raw)
-        .await
-        .unwrap();
+    MIGRATOR.run(&mut raw).await.unwrap();
+    for sql in statements {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
     raw.close().await.unwrap();
+}
 
-    assert_eq!(db.clear_copies().await, Ok(()));
-
-    let empty = db
-        .query("SELECT count(*) AS n FROM search", vec![])
+/// Overwrites the page of `_sqlx_migrations` with bytes no b-tree page has:
+/// the database still lists its tables and still reads `outbox`, but opening
+/// it (the migrations read that table) fails with `SQLITE_CORRUPT`.
+async fn corrupt_the_migrations_table(dir: &std::path::Path) {
+    let path = dir.join(FILE_NAME);
+    let mut raw = SqliteConnectOptions::new()
+        .filename(&path)
+        .connect()
         .await
         .unwrap();
-    assert_eq!(Value::Object(empty[0].clone()), json!({ "n": 0 }));
-    db.transaction(vec![statement(
-        "INSERT INTO search (rowid, body) VALUES (1, ?)",
-        json!(["вторая строка"]),
-    )])
+    let (root, size): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT rootpage FROM sqlite_master WHERE name = '_sqlx_migrations'), \
+                (SELECT page_size FROM pragma_page_size)",
+    )
+    .fetch_one(&mut raw)
     .await
     .unwrap();
-    let found = db
-        .query(
-            "SELECT body FROM search WHERE search MATCH 'вторая' ORDER BY rowid",
-            vec![],
-        )
+    raw.close().await.unwrap();
+    let mut bytes = std::fs::read(&path).unwrap();
+    let start = usize::try_from((root - 1) * size).unwrap();
+    bytes[start..start + usize::try_from(size).unwrap()].fill(0xff);
+    std::fs::write(&path, bytes).unwrap();
+}
+
+/// Why a database did not open decides what a forget may do with it: only a
+/// corrupt file may be set aside (stage 2a spec §5.2, question В7). Every
+/// other failure — a newer app version's migration, a changed checksum, a
+/// directory that is a file — leaves a database that may be perfectly fine
+/// and must stay where it is.
+#[tokio::test]
+async fn only_a_corrupt_file_is_recorded_as_corrupt() {
+    let opened = tempfile::tempdir().unwrap();
+    let local = LocalDbState::open(opened.path()).await;
+    assert!(local.get().is_ok());
+    assert_eq!(local.open_failure(), None);
+    assert_eq!(LocalDbState::unavailable().open_failure(), None);
+
+    let garbage = tempfile::tempdir().unwrap();
+    let local = unopened(garbage.path(), &[]).await;
+    assert_eq!(local.open_failure(), Some(OpenFailure::Corrupt));
+
+    let broken = tempfile::tempdir().unwrap();
+    database_file(broken.path(), &[]).await;
+    corrupt_the_migrations_table(broken.path()).await;
+    let local = LocalDbState::open(broken.path()).await;
+    assert!(local.get().is_err());
+    assert_eq!(local.open_failure(), Some(OpenFailure::Corrupt));
+
+    let newer = tempfile::tempdir().unwrap();
+    database_file(
+        newer.path(),
+        &[
+            "INSERT INTO _sqlx_migrations (version, description, success, checksum, \
+           execution_time) VALUES (9999, 'newer', 1, x'00', 0)",
+        ],
+    )
+    .await;
+    let local = LocalDbState::open(newer.path()).await;
+    assert!(local.get().is_err());
+    assert_eq!(local.open_failure(), Some(OpenFailure::Other));
+
+    let changed = tempfile::tempdir().unwrap();
+    database_file(
+        changed.path(),
+        &["UPDATE _sqlx_migrations SET checksum = x'00' WHERE version = 1"],
+    )
+    .await;
+    let local = LocalDbState::open(changed.path()).await;
+    assert!(local.get().is_err());
+    assert_eq!(local.open_failure(), Some(OpenFailure::Other));
+
+    // A "directory" that is a file: the open fails on the file system.
+    let parent = tempfile::tempdir().unwrap();
+    let not_a_directory = parent.path().join("file");
+    std::fs::write(&not_a_directory, "").unwrap();
+    let local = LocalDbState::open(&not_a_directory).await;
+    assert!(local.get().is_err());
+    assert_eq!(local.open_failure(), Some(OpenFailure::Other));
+}
+
+/// A database set aside leaves a new one in its place; the failure recorded
+/// for the old file is gone with it.
+#[tokio::test]
+async fn setting_a_corrupt_database_aside_clears_its_recorded_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    let local = unopened(dir.path(), &[]).await;
+    assert_eq!(local.open_failure(), Some(OpenFailure::Corrupt));
+    local
+        .set_aside_unopened_at(1_790_000_000_000)
         .await
         .unwrap();
-    assert_eq!(
-        Value::Object(found[0].clone()),
-        json!({ "body": "вторая строка" })
+    assert!(local.get().is_ok());
+    assert_eq!(local.open_failure(), None);
+}
+
+/// A corrupt database that can still be read is counted on a read-only
+/// connection, without migrations and without changing the file: the same
+/// records as `UnsentGuard` protects in an open one. A file nothing can be
+/// read from has none to protect; an outbox that exists but cannot be counted
+/// is an error, never 0.
+#[tokio::test]
+async fn a_database_that_did_not_open_is_counted_without_being_changed() {
+    let dir = tempfile::tempdir().unwrap();
+    let mine = format!("INSERT INTO outbox VALUES ('a', '{HOST}', '{DEVICE}', NULL)");
+    let other_device = format!("INSERT INTO outbox VALUES ('b', '{HOST}', '{OTHER_DEVICE}', NULL)");
+    let sent = format!(
+        "INSERT INTO outbox VALUES ('c', '{HOST}', '{DEVICE}', '2026-10-09T08:00:00.000Z')"
     );
+    database_file(dir.path(), &[OUTBOX, &mine, &other_device, &sent]).await;
+    corrupt_the_migrations_table(dir.path()).await;
+    let local = LocalDbState::open(dir.path()).await;
+    assert_eq!(local.open_failure(), Some(OpenFailure::Corrupt));
+    let before = std::fs::read(dir.path().join(FILE_NAME)).unwrap();
+
+    assert_eq!(
+        local
+            .unopened_unsent_records(UnsentGuard::Pairing(HOST, DEVICE))
+            .await,
+        Ok(1)
+    );
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::AnyPairing).await,
+        Ok(2)
+    );
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::Ignore).await,
+        Ok(0)
+    );
+    assert_eq!(
+        std::fs::read(dir.path().join(FILE_NAME)).unwrap(),
+        before,
+        "the file is read, not written"
+    );
+
+    // Nothing can be read from a file of garbage, from no file and from no
+    // directory: there is no record anyone could send.
+    let garbage = tempfile::tempdir().unwrap();
+    let local = unopened(garbage.path(), &[]).await;
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::AnyPairing).await,
+        Ok(0)
+    );
+    assert_eq!(
+        LocalDbState::unavailable()
+            .unopened_unsent_records(UnsentGuard::AnyPairing)
+            .await,
+        Ok(0)
+    );
+
+    // Readable, but with no outbox yet: nothing to protect.
+    let bare = tempfile::tempdir().unwrap();
+    database_file(bare.path(), &[]).await;
+    corrupt_the_migrations_table(bare.path()).await;
+    let local = LocalDbState::open(bare.path()).await;
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::AnyPairing).await,
+        Ok(0)
+    );
+
+    // An outbox without the columns a forget reads cannot be counted.
+    let unreadable = tempfile::tempdir().unwrap();
+    database_file(
+        unreadable.path(),
+        &["CREATE TABLE outbox (id TEXT PRIMARY KEY)"],
+    )
+    .await;
+    corrupt_the_migrations_table(unreadable.path()).await;
+    let local = LocalDbState::open(unreadable.path()).await;
+    for guard in [UnsentGuard::Pairing(HOST, DEVICE), UnsentGuard::AnyPairing] {
+        assert_eq!(
+            local.unopened_unsent_records(guard).await,
+            Err(LocalDbError::StatementFailed)
+        );
+    }
+}
+
+/// Two forgets at once move the files once. The lock in
+/// `set_aside_unopened_at` is what makes the second one see the new database;
+/// without it the second races the first between its checks and its renames
+/// (`NotFound`), or moves the new database aside while the state keeps
+/// writing to the old inode. Many rounds, on threads of their own.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn two_set_asides_at_once_move_the_files_once() {
+    for round in 0..20 {
+        let dir = tempfile::tempdir().unwrap();
+        let local = std::sync::Arc::new(unopened(dir.path(), &["-wal"]).await);
+        let first = tokio::spawn({
+            let local = std::sync::Arc::clone(&local);
+            async move { local.set_aside_unopened_at(1_790_000_000_001).await }
+        });
+        let second = tokio::spawn({
+            let local = std::sync::Arc::clone(&local);
+            async move { local.set_aside_unopened_at(1_790_000_000_002).await }
+        });
+        let results = [first.await.unwrap(), second.await.unwrap()];
+
+        let moved: Vec<_> = results
+            .iter()
+            .map(|result| {
+                result
+                    .as_ref()
+                    .unwrap_or_else(|error| panic!("round {round}: {error}"))
+            })
+            .filter(|moved| moved.is_some())
+            .collect();
+        assert_eq!(moved.len(), 1, "round {round}: {results:?}");
+        let kept: Vec<String> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name().into_string().unwrap())
+            .filter(|name| name.contains(".unreadable-"))
+            .collect();
+        assert_eq!(
+            kept.len(),
+            2,
+            "round {round}: one database and its -wal: {kept:?}"
+        );
+
+        // The state writes into the file that stands at the database's name.
+        let db = local.get().unwrap();
+        db.transaction(vec![statement(
+            INSERT_LINE,
+            json!([LINE_1, "Линия 1", 0, 3]),
+        )])
+        .await
+        .unwrap();
+        let mut raw = SqliteConnectOptions::new()
+            .filename(dir.path().join(FILE_NAME))
+            .connect()
+            .await
+            .unwrap();
+        let (lines,): (i64,) = sqlx::query_as("SELECT count(*) FROM ref_lines")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap();
+        raw.close().await.unwrap();
+        assert_eq!(
+            lines, 1,
+            "round {round}: the new database is the one in use"
+        );
+    }
+}
+
+/// A set-aside whose put-back failed leaves its files split: the database
+/// under an `.unreadable-` name and its `-wal` under the original one, or the
+/// reverse. Moving what is left under a new stamp would part them for good,
+/// so a later set-aside refuses until support has put them together.
+#[tokio::test]
+async fn a_split_set_aside_is_not_added_to() {
+    // The database is aside; its WAL is still at the original name.
+    let dir = tempfile::tempdir().unwrap();
+    let local = unopened(dir.path(), &["-wal"]).await;
+    std::fs::rename(
+        dir.path().join(FILE_NAME),
+        dir.path()
+            .join(format!("{FILE_NAME}.unreadable-1790000000000")),
+    )
+    .unwrap();
+    assert!(local
+        .set_aside_unopened_at(1_790_000_000_005)
+        .await
+        .is_err());
+    assert!(dir.path().join(format!("{FILE_NAME}-wal")).exists());
+    assert!(local.get().is_err(), "no new database over a split set");
+
+    // The WAL is aside; the database is still at the original name.
+    let dir = tempfile::tempdir().unwrap();
+    let local = unopened(dir.path(), &[]).await;
+    std::fs::write(
+        dir.path()
+            .join(format!("{FILE_NAME}.unreadable-1790000000000-wal")),
+        "its wal",
+    )
+    .unwrap();
+    assert!(local
+        .set_aside_unopened_at(1_790_000_000_005)
+        .await
+        .is_err());
+    assert!(dir.path().join(FILE_NAME).exists());
+    assert!(!dir
+        .path()
+        .join(format!("{FILE_NAME}.unreadable-1790000000005"))
+        .exists());
+
+    // A complete earlier set-aside, or one that kept only the database, is
+    // not a split.
+    let dir = tempfile::tempdir().unwrap();
+    let local = unopened(dir.path(), &[]).await;
+    std::fs::write(
+        dir.path()
+            .join(format!("{FILE_NAME}.unreadable-1790000000000")),
+        "the earlier one",
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path()
+            .join(format!("{FILE_NAME}.unreadable-1790000000000-wal")),
+        "its wal",
+    )
+    .unwrap();
+    assert!(local.set_aside_unopened_at(1_790_000_000_005).await.is_ok());
+    assert!(local.get().is_ok());
 }
