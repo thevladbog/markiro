@@ -2900,8 +2900,8 @@ forget or a sign-out never appears under a write in flight. `closeSteps` (the
 steps of every close) and `onClosed` (told once for every box that closed, also
 one read back after a lost answer, in the queue's turn after the write) are the
 extension points of plan 2a7 (the label's print job) and of the pallets' plan
-(joining the station's open pallet, with a new field of `box_closed` that raises
-`PROTOCOL_VERSION`). Whatever they start goes to `track` before it begins, and
+(joining the station's open pallet with the `palletId` of `box_closed`, which the
+host already takes since plan ПЛ-Х, so the plan adds no protocol version). Whatever they start goes to `track` before it begins, and
 every writer of a box — plan 2a8's exceptions and the pallets' plan too — stays
 in the screen's queue: the digest of a closing box is read apart from the box,
 and only the queue keeps an undo from changing the box between the two reads. A

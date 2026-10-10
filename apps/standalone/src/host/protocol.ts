@@ -729,6 +729,10 @@ export const FACT_RECEIPT_CODES = [
   "box_state",
   "sscc_not_issued",
   "sscc_taken",
+  "no_pallets",
+  "pallet_unknown",
+  "pallet_already_closed",
+  "pallet_state",
 ] as const;
 
 /**
