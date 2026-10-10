@@ -6,10 +6,10 @@
 
 **Architecture:**
 
-- `src/host/protocol.ts`, `src/host/requests.ts`, `src/host/api.ts` — схемы Zod смен по фикстурам плана 2a1 (`officeShiftSchema` и три тела запросов), построители `shiftCreate`, `shiftUpdate`, `shiftClose`, методы `HostApi` `listShifts`, `createShift`, `updateShift`, `deleteShift`, `closeShift`; в задаче 9 — `shiftTotalsSchema`, `officeShiftDetailSchema` и `getShift`.
+- `src/host/protocol.ts`, `src/host/requests.ts`, `src/host/api.ts` — схемы Zod смен по фикстурам плана 2a1 (`officeShiftSchema` и три тела запросов), построители `shiftCreate`, `shiftUpdate`, `shiftClose`, методы `HostApi` `listShifts`, `createShift`, `updateShift`, `deleteShift`, `closeShift`; в задаче 9 — `shiftTotalsSchema` (обязательное `totals` каждой `OfficeShift`, контракт плана 2a2) и `getShift`.
 - `src/lib/civil-date.ts` (`isCivilDate` по фикстуре хоста `shift-numbers.json`, `civilDaysBetween`, `civilToday` по часовому поясу), `src/lib/box-template-choice.ts` (`suggestBoxTemplate` — правило решения 7, общее с новой сменой станции в плане 2a5), правила формы в `src/lib/rules.ts` (план, вместимость, дата, причина закрытия в кодовых точках).
 - `src/office/shifts/` — `shift-list.ts` (названия, пометка «не откроется», отбор, период), `shift-form.ts` (форма и разбор отказов), `shift-text.ts`, страница `ShiftsPage` и окна `ShiftDialog` (план и правка запланированной), `ShiftPlanDialog`, `DeleteShiftDialog`, `CloseShiftDialog`, `ShiftTotalsDialog`; общий `src/office/OfficePager.tsx` вынесен из «Товаров».
-- Хост, `proto/src`, оболочка, станция и `packages/*` не меняются; в `proto/fixtures` план 2a3 ничего не добавляет (фикстура итогов — плана 2a2).
+- Хост, `proto/src`, оболочка, станция и `packages/*` не меняются; в `proto/fixtures` план 2a3 ничего не добавляет (итоги — в фикстуре плана 2a2 `office-shift.json`).
 
 **Tech Stack:** React 19.2, TypeScript 6 (strict, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`), zod 4.4.3, react-hook-form с `@hookform/resolvers/zod`, TanStack Query 5, i18next, `@markiro/ui` (`Table`, `FilterBar`, `Select` с `native`, `DatePicker`, `Textarea`, `StatusChip`, `Badge`, `RowActions`, `DefinitionGrid`, `Modal`, `Alert`), `@markiro/domain` (`isShiftCloseReasonCode`, правило слота через `templateFitsSlot`), Vitest 4 с jsdom.
 
@@ -63,7 +63,7 @@
 
 **Решения планировщика** (открытые места спецификации; задача 8 записывает их в §16)
 
-- Список хоста не несёт итогов, поэтому строка показывает план, а «принято единиц и коробов» — окно «Итоги» активной и закрытой смены (`GET /v1/office/shifts/{id}`, задача 9, после 2a2), которое видят обе роли.
+- Строка показывает план; итоги (обязательное `totals` каждой `OfficeShift`, план 2a2) — колонка «Выпуск» (коды в закрытых коробах и закрытые короба) и окно «Итоги» активной и закрытой смены (`GET /v1/office/shifts/{id}`, задача 9, после 2a2), которое видят обе роли.
 - Период — два поля `DatePicker`; запрос уходит, только когда заданы обе даты, конец не раньше начала и период не длиннее 366 дней с обоими концами (`MAX_PERIOD_DAYS`): хост отдаёт период целиком и без страниц (пункт 4 очереди 2a1), предел ограничивает один запрос. Пока период неполный или неверный, показан прежний список и заметка; обе даты пусты — список хоста по умолчанию.
 - Поиск (номер или название товара, без регистра), отбор по статусу и по линии и страницы по 25 работают в странице; страницы — общий `OfficePager`, вынесенный из «Товаров» (второй потребитель; разделы офиса друг друга не импортируют).
 - Пометка «Не откроется» — по спискам офиса (`openBlocker`): товар в архиве, товар-черновик, шаблон не подходит группе товара (выключен, сужен, не той группы). Нет нужного списка или записи — пометки нет. Архивная линия открытию не мешает.
@@ -73,14 +73,14 @@
 - `shift_status` и `not_found` на записи — предупреждение своими словами (`shiftWriteFailure`), окно остаётся, список перечитывается за ним; `not_found` на удалении — смена считается удалённой. Отказ на шаблоне перечитывает список шаблонов, чтобы он показался с пометкой.
 - После любой записи страница перечитывает все списки смен (`officeKeys.shifts` — префикс ключей всех периодов), а не вставляет ответ: принадлежность смены периоду и отбору решает хост.
 - Причина закрытия — `Textarea` из `@markiro/ui` (у него нет `error`): подсказка и отказ — строка под полем с `aria-describedby` и `aria-invalid`, классы `shift-note`.
-- Окно «Итоги» — `Modal` без формы, `DefinitionGrid`: план, принято единиц, закрыто и открыто коробов, время последних данных (по часовому поясу организации), число устройств; имена устройств — только администратору, поэтому число.
+- Окно «Итоги» — `Modal` без формы, `DefinitionGrid`: план, «Принято кодов», «Кодов в закрытых коробах», закрыто и открыто коробов, «Последние данные со станции» (по часовому поясу организации), устройства смены — администратору по названиям из списка устройств, технологу началами кодов (список устройств хост отдаёт только администратору).
 
 **Код и процесс**
 
 - TypeScript strict, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`: без `any`, приведений типов в исходниках и `!`. Именованные экспорты, `import type`.
 - Элементы управления — из `@markiro/ui` (ESLint запрещает нативные поля в `src/`). Кнопки офиса — офисного размера (`size="compact"` в строках, как на прочих страницах офиса); правило 64 px — для экранов цеха, которых план не трогает.
 - CSS — только переменные, объявленные в `packages/ui/src/tokens.css` (`--fg-2`, `--fg-3`, `--err-fg`, `--text-body-sm`); итоговая проверка сверяет каждую новую.
-- Новых зависимостей нет. Не меняются: `apps/station`, `packages/*`, `apps/standalone/host`, `apps/standalone/proto` (фикстура итогов — плана 2a2, см. шаг 0 задачи 9), `apps/standalone/src-tauri`, Rust.
+- Новых зависимостей нет. Не меняются: `apps/station`, `packages/*`, `apps/standalone/host`, `apps/standalone/proto` (итоги — в фикстуре плана 2a2, см. шаг 0 задачи 9), `apps/standalone/src-tauri`, Rust.
 - Коммиты — явные пути, трейлер ровно одной строкой `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`; push и PR не разрешены.
 
 ## Заметки для исполнения
@@ -152,7 +152,7 @@
 
 **Счёт тестов**
 
-- До плана (HEAD `366e87f06`): Vitest — 67 файлов, 1744 теста; cargo не затрагивается (46 наборов, 494 теста по плану 2a1). Каждое «Expected» ниже измерено на копии репозитория с кодом самого плана, задача за задачей. Если до 2a3 исполнен план 2a4 (он добавляет тесты вебвью), база — прогон перед задачей 1, а к ней прибавляются числа этого плана: задача 1 — +24 теста, 2 — +2 файла и +38, 3 — +2 и +16, 4 — +1 и +17, 5 — +2 и +14, 6 — +1 и +11, 7 — +5, 8 — 0, 9 — +1 и +8. Расхождение значит, что шаг применён не так (тесты, добавленные исполнителем сверх плана, он называет в отчёте).
+- До плана (HEAD `366e87f06`): Vitest — 67 файлов, 1744 теста; cargo не затрагивается (46 наборов, 494 теста по плану 2a1). Каждое «Expected» ниже измерено на копии репозитория с кодом самого плана, задача за задачей. Если до 2a3 исполнен план 2a4 (он добавляет тесты вебвью), база — прогон перед задачей 1, а к ней прибавляются числа этого плана: задача 1 — +24 теста, 2 — +2 файла и +38, 3 — +2 и +16, 4 — +1 и +17, 5 — +2 и +14, 6 — +1 и +11, 7 — +5, 8 — 0, 9 — +1 и +12 (задача 9 переписана под контракт 2a2 и измерена на `claude/integration`, см. её шаг 7). Расхождение значит, что шаг применён не так (тесты, добавленные исполнителем сверх плана, он называет в отчёте).
 
 ## Файлы
 
@@ -167,14 +167,14 @@ apps/standalone/test/{civil-date,box-template-choice,rules}.test.ts             
 apps/standalone/src/office/{nav.ts,routes.tsx,office-query.ts,OfficePager.tsx}              задачи 3, 9
 apps/standalone/src/office/products/ProductsPage.tsx                                       задача 3
 apps/standalone/src/office/shifts/{shift-list.ts,shift-text.ts,ShiftsPage.tsx}              задачи 3–6, 9
-apps/standalone/test/{shifts-page.test.tsx,shift-list.test.ts}, test/support/shifts.ts      задачи 3–5
+apps/standalone/test/{shifts-page.test.tsx,shift-list.test.ts}, test/support/shifts.ts      задачи 3–5, 9
 apps/standalone/test/operators-page.test.tsx                                               задачи 3, 7
 apps/standalone/src/office/access.ts                                                       задача 4
-apps/standalone/src/office/shifts/{shift-form.ts,ShiftDialog.tsx}, test/shift-dialog.test.tsx   задачи 4, 5
+apps/standalone/src/office/shifts/{shift-form.ts,ShiftDialog.tsx}, test/shift-dialog.test.tsx   задачи 4, 5, 9
 apps/standalone/src/office/shifts/ShiftPlanDialog.tsx                                      задача 5
 apps/standalone/test/shift-edit.test.tsx, test/shift-form.test.ts                          задачи 5, 6, 9
 apps/standalone/src/office/shifts/{DeleteShiftDialog,CloseShiftDialog}.tsx                  задача 6
-apps/standalone/test/shift-delete-close.test.tsx                                           задача 6
+apps/standalone/test/shift-delete-close.test.tsx                                           задачи 6, 9
 apps/standalone/src/office/sscc/{SsccPage.tsx,counter-kind.ts}, test/sscc-page.test.tsx     задача 7
 apps/standalone/src/office/operators/{CreateOperatorDialog.tsx,operator-forms.ts}           задача 7
 apps/standalone/src/office/devices/{DeviceDialog.tsx,station-shift.ts}, test/devices-page.test.tsx   задача 7
@@ -182,10 +182,10 @@ apps/standalone/src/office/shifts/ShiftTotalsDialog.tsx, test/shift-totals.test.
 apps/standalone/src/app/shell.css                                                          задачи 3, 6
 apps/standalone/src/i18n/ru.json                                                           задачи 2–7, 9
 apps/standalone/AGENTS.md                                                                  задачи 8, 9
-docs/superpowers/specs/2026-10-08-standalone-2a-shift-and-boxes-design.md                  задача 8
+docs/superpowers/specs/2026-10-08-standalone-2a-shift-and-boxes-design.md                  задачи 8, 9
 ```
 
-Слой протокола (задача 1) и правила с чистыми функциями (задача 2) идут первыми: страница опирается на оба, а их тесты не зависят от экранов. Страница приходит сначала без кнопок записи (задача 3: список, названия, пометки, отбор, период, страницы), затем каждое действие — со своим окном: планирование (задача 4), правка запланированной и план активной (задача 5), удаление и закрытие (задача 6), поэтому мёртвых кнопок нет ни на одном коммите. Задача 7 — три мелочи офиса из очереди ревью и вопроса В9, независимые от страницы смен (предупреждение в «Устройствах» читает тот же список смен хоста). Задача 8 переносит решения плана в `AGENTS.md` и §16 спецификации. Задача 9 — итоги смены: она зависит от поля `totals`, которое добавляет план 2a2, и исполняется после него; задачи 1–8 от плана 2a2 не зависят.
+Слой протокола (задача 1) и правила с чистыми функциями (задача 2) идут первыми: страница опирается на оба, а их тесты не зависят от экранов. Страница приходит сначала без кнопок записи (задача 3: список, названия, пометки, отбор, период, страницы), затем каждое действие — со своим окном: планирование (задача 4), правка запланированной и план активной (задача 5), удаление и закрытие (задача 6), поэтому мёртвых кнопок нет ни на одном коммите. Задача 7 — три мелочи офиса из очереди ревью и вопроса В9, независимые от страницы смен (предупреждение в «Устройствах» читает тот же список смен хоста). Задача 8 переносит решения плана в `AGENTS.md` и §16 спецификации. Задача 9 — итоги смены: она зависит от поля `totals`, которое план 2a2 кладёт в каждую `OfficeShift`, и исполняется после него (переписана под итоговый контракт 2a2 на дереве `claude/integration`); задачи 1–8 от плана 2a2 не зависят.
 
 ---
 
@@ -8243,52 +8243,30 @@ git commit -m "docs(standalone): the office's shifts in AGENTS.md and the stage 
 
 ### Task 9: Итоги смены (после плана 2a2)
 
-**Исполняется после плана 2a2.** План 2a2 (хост: факты) добавляет итоги в `GET /v1/office/shifts/{id}`; на момент написания этого плана план 2a2 ещё не написан и не исполнен, поэтому задача написана по описанию спецификации (§4.5: «принято единиц — позиции без `removed_at` и `displaced_at`; коробов закрыто — закрытые без `disassembled_at`; открыто коробов; время последнего факта; устройства смены»). Предполагаемая форма — поле `totals` с `acceptedUnits`, `closedBoxes`, `openBoxes`, `lastFactAt` (UTC RFC 3339 или `null`) и `deviceIds`, и фикстура ответа `proto/fixtures/office-shift-detail.json`.
+**Исполняется после плана 2a2, на дереве, где влиты 2a2, задачи 1–8 этого плана и 2a4** (ветка `claude/integration`, проверено на `8a2b60c6e`). Задача переписана 2026-10-10 под итоговый контракт плана 2a2 (замечание I1 итогового ревью 2a3; пункт 24 очереди `.superpowers/sdd/2a2-minors.md`; §19 спецификации; абзац про `totals` в разделе «Facts» `apps/standalone/AGENTS.md`). Прежний текст ждал поле `totals` из трёх чисел только у `GET /v1/office/shifts/{id}` и фикстуру `office-shift-detail.json`; на деле:
 
-Окно «Итоги» строки активной и закрытой смены видят обе роли (читать смены могут все): колонка действий теперь есть всегда, а кнопки записи по-прежнему закрыты `planShifts`. Окно читает смену при каждом открытии (`officeKeys.shift(id)`, `staleTime` 0) и показывает план, принято единиц, закрыто и открыто коробов, время последних данных (по часовому поясу организации, как «сегодня» в задаче 4; профиль не загрузился — по часам этого ПК) и число устройств (их имена читает только администратор). Не загрузилось — ошибка с «Повторить». Полная карточка смены — этап 4.
+- обязательное `totals` (`ShiftTotals` в `proto/src/lib.rs`) есть в **каждом** `OfficeShift`: строки списка, ответ `GET …/{id}` и ответ каждой записи офиса. Шесть полей, все обязательные: `acceptedUnits`, `unitsInClosedBoxes`, `closedBoxes`, `openBoxes` (неотрицательные целые), `lastFactAt` (время хоста, целые секунды, `…Z`, или `null`), `deviceIds` (UUID, по первому входу). У запланированной смены — нули, `null` и `[]`;
+- фикстура одна — `proto/fixtures/office-shift.json` (547 принятых кодов, 540 в закрытых коробах, 45 закрытых и 1 открытый короб). Её читают тесты Rust (`proto/tests/fixtures.rs`) и вебвью: `test/protocol.test.ts` (таблица `RESPONSES` — тест «response fixture office-shift.json > parses without losing a field», это и есть сверка вебвью с фикстурой; и пять тестов «shift shapes»/построителей) и `test/api.test.ts` (ответы `listShifts`, `createShift`, `updateShift`, `closeShift`). Новую фикстуру задача не создаёт;
+- `officeShiftSchema` (`src/host/protocol.ts`) — обычный `z.object` без `totals`: Zod молча отбрасывает поле, поэтому на дереве перед задачей тест «response fixture office-shift.json > parses without losing a field» **красный** (так задумано правилом слияния 2a3);
+- подписи — из плана 2a2: `acceptedUnits` — «Принято кодов» (никогда «в коробах»), `unitsInClosedBoxes` — «Кодов в закрытых коробах» (облачное `containedUnits`), `lastFactAt` — «Последние данные со станции» (не мера выпуска и не опоздания). Итоги меняются без ревизии: список, прочитанный раньше, их не освежает.
+
+Что делает задача:
+
+1. `shiftTotalsSchema` (шесть полей, типы как у Rust) — обязательное поле `totals` в `officeShiftSchema`; схемы ответов остаются нестрогими (`z.object`, поле новее хоста терпится). Отдельной «детальной» схемы нет. `HostApi.getShift` читает `GET /v1/office/shifts/{id}` той же схемой.
+2. Список: колонка «Выпуск» после «Статуса» (а не после «Плана», чтобы индексы колонок 0–6, на которых стоят тесты `shifts-page.test.tsx`, не сдвинулись): у активной и закрытой смены — «540 шт · 45 кор.» (`unitsInClosedBoxes` и `closedBoxes`, как облачное `pages.shifts.table.outputAggregation`), у запланированной — «—» (§5.6: «у активных и закрытых, принято единиц и коробов»).
+3. Окно «Итоги» строки активной и закрытой смены видят обе роли: колонка действий есть всегда, кнопки записи по-прежнему закрыты `planShifts`. Окно читает смену при каждом открытии (`officeKeys.shift(id)`, `staleTime` 0) и показывает: план, «Принято кодов», «Кодов в закрытых коробах», закрыто и открыто коробов, «Последние данные со станции» (в часовом поясе организации; профиль не загрузился или ПК не знает пояс — по часам этого ПК с подписью, как «сегодня» у `ShiftDialog`; пояс и подпись замораживаются при первом показе чисел), устройства смены — по названиям из `listDevices` у администратора (отозванное помечено «(отозвано)»), а у технолога (список устройств хост отдаёт только администратору, `require_admin`), для кода, которого нет в списке, и при неудаче списка — началами кодов («Устройство 7c9e6679…») с подписью почему. Пустая смена — нули, «Данных ещё нет», «Ни одно устройство ещё не входило в смену». Не загрузилось — ошибка с «Повторить». Отметку поздних данных (`lateDataAt`) окно не повторяет: она уже есть в колонке «Статус» («Данные после закрытия»). Полная карточка смены — этап 4.
+
+**Ручные значения `OfficeShift` в тестах, которые трогает задача** (проверено `grep` по `apps/standalone/test` и `src` дерева `claude/integration`: в `src` ручных значений нет, а все ручные значения тестов, кроме трёх в `test/support/shifts.ts`, распаковывают `ACTIVE`, `PLANNED` или `CLOSED`): обязательна для `typecheck` одна правка — `ACTIVE` в `test/support/shifts.ts` (получает `totals` фикстуры); ещё три — ради честных данных: `PLANNED` (нули, новая константа `NO_TOTALS`), `CLOSED` (свои итоги закрытой смены) и `CREATED` в `test/shift-dialog.test.tsx` (ответ на планирование — запланированная смена, итоги нулевые). Остальные распаковки (`numbered()` в `shifts-page.test.tsx` и `shifts-refetch.test.tsx`, `CLOSED_ACTIVE`/`PLANNED_2` в `shift-delete-close.test.tsx`, значения `shift-edit.test.tsx`, `devices-page.test.tsx`, `shift-list.test.ts`, `shift-form.test.ts`) наследуют итоги без правок. Кроме того, `fakeHostApi` в `test/support/office.tsx` получает заглушку `getShift`, а два теста, утверждавшие «у закрытой смены нет ни одной кнопки» (`shift-delete-close.test.tsx`, удаление и закрытие), сужаются до своей кнопки: у закрытой смены теперь есть «Итоги».
 
 - [ ] **Step 0: Сверка с контрактом плана 2a2**
 
-Открыть `docs/superpowers/plans/2026-10-09-standalone-2a2-host-facts.md`, раздел «Контракт для 2a3 и 2a6», и `proto/src/lib.rs` после его исполнения. Сверить:
+Run: `rtk proxy grep -n -A8 "pub struct ShiftTotals" apps/standalone/proto/src/lib.rs`
+Expected: ровно шесть полей `accepted_units: u64`, `units_in_closed_boxes: u64`, `closed_boxes: u32`, `open_boxes: u32`, `last_fact_at: Option<String>`, `device_ids: Vec<String>` под `#[serde(rename_all = "camelCase")]`, без `deny_unknown_fields`; в `apps/standalone/proto/fixtures/office-shift.json` поле `totals` с ними же (547, 540, 45, 1, `"2026-10-08T09:41:07Z"`, один UUID).
 
-1. имя поля итогов в ответе `GET /v1/office/shifts/{id}` (здесь — `totals`) и имена и типы его полей (здесь — `acceptedUnits`, `closedBoxes`, `openBoxes`: целые неотрицательные; `lastFactAt`: время или `null`; `deviceIds`: UUID);
-2. имя фикстуры этого ответа (здесь — `proto/fixtures/office-shift-detail.json`; её содержимое по этому плану — ниже).
+Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/protocol.test.ts -t "office-shift.json"`
+Expected: FAIL — «response fixture office-shift.json > parses without losing a field» (`AssertionError: expected { …(21) } to deeply equal { …(22) }`); «tolerates a field added by a newer host» проходит.
 
-Если план 2a2 назвал иначе — заменить имена во всех блоках этой задачи (схема, тесты, окно, тексты не меняются) и записать замену в «Отклонения при исполнении». Если контракт дал полям другой смысл (например, итоги только у закрытой смены) или фикстуры ответа нет — остановиться и спросить контролёра: создавать фикстуру `proto` этот план не вправе. Ожидаемое содержимое фикстуры (то, на котором задача проверена на копии):
-
-<!-- prettier-ignore -->
-```json
-{
-  "id": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
-  "number": "OCT26-004",
-  "status": "active",
-  "mode": "aggregation",
-  "palletsEnabled": false,
-  "createdFrom": "office",
-  "productId": "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
-  "lineId": "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
-  "counterpartyId": "d2b7c9e1-4f3a-4b6c-8d5e-9f0a1b2c3d4e",
-  "productionDate": "2026-10-08",
-  "plannedQty": 1200,
-  "boxCapacity": 12,
-  "boxTemplateId": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
-  "ownerDeviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
-  "openedAt": "2026-10-08T06:02:00Z",
-  "closedAt": null,
-  "closeReasonCode": null,
-  "closeReasonText": null,
-  "lateDataAt": null,
-  "createdAt": "2026-10-07T15:30:00Z",
-  "rev": 71,
-  "totals": {
-    "acceptedUnits": 1150,
-    "closedBoxes": 95,
-    "openBoxes": 1,
-    "lastFactAt": "2026-10-08T14:30:00Z",
-    "deviceIds": ["7c9e6679-7425-40de-944b-e07fc1f90ae7"]
-  }
-}
-```
+Если поля или фикстура другие (другое имя, другой тип, итоги не в каждом `OfficeShift`) — остановиться и спросить контролёра; фикстуры `proto` эта задача не меняет.
 
 - [ ] **Step 1: Тесты (падающие)**
 
@@ -8306,7 +8284,7 @@ git commit -m "docs(standalone): the office's shifts in AGENTS.md and the stage 
 ```ts
   [
     "getShift",
-    fixture("office-shift-detail.json"),
+    fixture("office-shift.json"),
     (api) => api.getShift(TOKEN, SHIFT_ID),
     { method: "GET", path: `/v1/office/shifts/${SHIFT_ID}`, body: undefined },
   ],
@@ -8314,48 +8292,40 @@ git commit -m "docs(standalone): the office's shifts in AGENTS.md and the stage 
     "createShift",
 ```
 
-2. В `apps/standalone/test/protocol.test.ts`, фрагмент
+2. В `apps/standalone/test/api.test.ts`, фрагмент
 
 <!-- prettier-ignore -->
 ```ts
-  officeSessionSchema,
-  officeShiftSchema,
+  it("resolves a delete with nothing, and rejects an answer that carries a body", async () => {
 ```
 
 заменить на
 
 <!-- prettier-ignore -->
 ```ts
-  officeSessionSchema,
-  officeShiftDetailSchema,
-  officeShiftSchema,
+  it("returns one shift with its figures, and rejects an answer that is a list or no shift", async () => {
+    await expect(recording(shift).api.getShift(TOKEN, SHIFT_ID)).resolves.toMatchObject({
+      number: "OCT26-004",
+      totals: { acceptedUnits: 547, unitsInClosedBoxes: 540, closedBoxes: 45, openBoxes: 1 },
+    });
+    await expect(recording([shift]).api.getShift(TOKEN, SHIFT_ID)).rejects.toThrow();
+    await expect(recording(notAShift).api.getShift(TOKEN, SHIFT_ID)).rejects.toThrow();
+    const withoutTotals = Object.fromEntries(
+      Object.entries(shift as object).filter(([key]) => key !== "totals"),
+    );
+    await expect(recording(withoutTotals).api.getShift(TOKEN, SHIFT_ID)).rejects.toThrow();
+  });
+
+  it("resolves a delete with nothing, and rejects an answer that carries a body", async () => {
 ```
 
 3. В `apps/standalone/test/protocol.test.ts`, фрагмент
 
 <!-- prettier-ignore -->
 ```ts
-  ["error-sscc-exhausted.json", errorBodySchema],
-] as const;
-```
-
-заменить на
-
-<!-- prettier-ignore -->
-```ts
-  ["error-sscc-exhausted.json", errorBodySchema],
-  ["office-shift-detail.json", officeShiftDetailSchema],
-] as const;
-```
-
-4. В `apps/standalone/test/protocol.test.ts`, фрагмент
-
-<!-- prettier-ignore -->
-```ts
   });
 
   it("read the refusals of a busy shift and of a prefix with no serials left", () => {
-    expect(errorBodySchema.parse(fixture("error-shift-busy.json")).error).toMatchObject({
 ```
 
 заменить на
@@ -8364,36 +8334,138 @@ git commit -m "docs(standalone): the office's shifts in AGENTS.md and the stage 
 ```ts
   });
 
-  it("read a shift's figures, with no fact yet, and refuse a count that is no whole number or a device that is no UUID", () => {
-    const detail = officeShiftDetailSchema.parse(fixture("office-shift-detail.json"));
-    const none = {
-      ...detail,
-      totals: { acceptedUnits: 0, closedBoxes: 0, openBoxes: 0, lastFactAt: null, deviceIds: [] },
+  it("read a shift's figures, a planned shift's zeros among them, and refuse a figure of another form or a figure left out", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    // The live codes in the boxes against those in closed boxes: one box is still open.
+    expect(shift.totals).toEqual({
+      acceptedUnits: 547,
+      unitsInClosedBoxes: 540,
+      closedBoxes: 45,
+      openBoxes: 1,
+      lastFactAt: "2026-10-08T09:41:07Z",
+      deviceIds: ["7c9e6679-7425-40de-944b-e07fc1f90ae7"],
+    });
+    const planned = {
+      ...shift,
+      status: "planned",
+      ownerDeviceId: null,
+      openedAt: null,
+      totals: {
+        acceptedUnits: 0,
+        unitsInClosedBoxes: 0,
+        closedBoxes: 0,
+        openBoxes: 0,
+        lastFactAt: null,
+        deviceIds: [],
+      },
     };
-    expect(officeShiftDetailSchema.parse(none)).toEqual(none);
-    for (const totals of [
-      { acceptedUnits: -1 },
-      { closedBoxes: 1.5 },
-      { openBoxes: "1" },
-      { lastFactAt: "yesterday" },
-      { deviceIds: ["42"] },
-    ]) {
-      const result = officeShiftDetailSchema.safeParse({
-        ...detail,
-        totals: { ...detail.totals, ...totals },
-      });
-      expect(result.success, JSON.stringify(totals)).toBe(false);
+    expect(officeShiftSchema.parse(planned)).toEqual(planned);
+    const refused: Record<string, unknown[]> = {
+      acceptedUnits: [-1, 1.5, "547", null],
+      unitsInClosedBoxes: [-1, 1.5, "540", null],
+      closedBoxes: [-1, 1.5, "45", null],
+      openBoxes: [-1, 1.5, "1", null],
+      lastFactAt: ["yesterday", 20261008],
+      deviceIds: [["42"], "7c9e6679-7425-40de-944b-e07fc1f90ae7", null],
+    };
+    for (const [field, values] of Object.entries(refused)) {
+      for (const value of values) {
+        const result = officeShiftSchema.safeParse({
+          ...shift,
+          totals: { ...shift.totals, [field]: value },
+        });
+        expect(result.success, `${field}: ${JSON.stringify(value)}`).toBe(false);
+      }
     }
-    // A shift without its figures is the list's, not the one shift's answer.
-    const listed = Object.fromEntries(Object.entries(detail).filter(([key]) => key !== "totals"));
-    expect(officeShiftDetailSchema.safeParse(listed).success).toBe(false);
+    for (const field of Object.keys(shift.totals)) {
+      const totals = Object.fromEntries(
+        Object.entries(shift.totals).filter(([key]) => key !== field),
+      );
+      expect(officeShiftSchema.safeParse({ ...shift, totals }).success, `without ${field}`).toBe(
+        false,
+      );
+    }
+    for (const totals of [null, [], undefined]) {
+      expect(officeShiftSchema.safeParse({ ...shift, totals }).success, String(totals)).toBe(false);
+    }
   });
 
   it("read the refusals of a busy shift and of a prefix with no serials left", () => {
-    expect(errorBodySchema.parse(fixture("error-shift-busy.json")).error).toMatchObject({
 ```
 
-5. В `apps/standalone/test/shift-edit.test.tsx`, фрагмент
+4. В `apps/standalone/test/shift-delete-close.test.tsx`, фрагмент
+
+<!-- prettier-ignore -->
+```tsx
+      expect(within(shiftRow("OCT26-004")).queryByRole("button", { name: /Удалить/ })).toBeNull();
+      expect(within(shiftRow("OCT26-001/S")).queryAllByRole("button")).toEqual([]);
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```tsx
+      expect(within(shiftRow("OCT26-004")).queryByRole("button", { name: /Удалить/ })).toBeNull();
+      expect(within(shiftRow("OCT26-001/S")).queryByRole("button", { name: /Удалить/ })).toBeNull();
+```
+
+5. В `apps/standalone/test/shift-delete-close.test.tsx`, фрагмент
+
+<!-- prettier-ignore -->
+```tsx
+      expect(within(shiftRow("OCT26-005")).queryByRole("button", { name: /Закрыть/ })).toBeNull();
+      expect(within(shiftRow("OCT26-001/S")).queryAllByRole("button")).toEqual([]);
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```tsx
+      expect(within(shiftRow("OCT26-005")).queryByRole("button", { name: /Закрыть/ })).toBeNull();
+      expect(within(shiftRow("OCT26-001/S")).queryByRole("button", { name: /Закрыть/ })).toBeNull();
+```
+
+6. В `apps/standalone/test/shift-dialog.test.tsx`, фрагмент
+
+<!-- prettier-ignore -->
+```tsx
+  MILK_BOX,
+  NORTH,
+  openShifts,
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```tsx
+  MILK_BOX,
+  NO_TOTALS,
+  NORTH,
+  openShifts,
+```
+
+7. В `apps/standalone/test/shift-dialog.test.tsx`, фрагмент
+
+<!-- prettier-ignore -->
+```tsx
+  status: "planned",
+  ownerDeviceId: null,
+  openedAt: null,
+};
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```tsx
+  status: "planned",
+  ownerDeviceId: null,
+  openedAt: null,
+  totals: NO_TOTALS,
+};
+```
+
+8. В `apps/standalone/test/shift-edit.test.tsx`, фрагмент
 
 <!-- prettier-ignore -->
 ```tsx
@@ -8407,7 +8479,7 @@ git commit -m "docs(standalone): the office's shifts in AGENTS.md and the stage 
   it("offers a planned shift's change and delete, an active one's figures, plan and close, and a closed one's figures alone, to both roles", async () => {
 ```
 
-6. В `apps/standalone/test/shift-edit.test.tsx`, фрагмент
+9. В `apps/standalone/test/shift-edit.test.tsx`, фрагмент
 
 <!-- prettier-ignore -->
 ```tsx
@@ -8431,20 +8503,214 @@ git commit -m "docs(standalone): the office's shifts in AGENTS.md and the stage 
       ).toEqual(["Итоги смены OCT26-001/S"]);
 ```
 
-7. Создать `apps/standalone/test/shift-totals.test.tsx`:
+10. В `apps/standalone/test/shifts-page.test.tsx`, фрагмент
 
 <!-- prettier-ignore -->
 ```tsx
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+      "▸Активна",
+    ]);
+    expect(screen.getByText("Показано 3 из 3")).toBeTruthy();
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```tsx
+      "▸Активна",
+    ]);
+    expect(screen.getByText("Показано 3 из 3")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Выпуск" })).toBeTruthy();
+```
+
+11. В `apps/standalone/test/shifts-page.test.tsx`, фрагмент
+
+<!-- prettier-ignore -->
+```tsx
+  it("says why a closed shift closed, with data after closing, a station's reason in words and the office's in its own", async () => {
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```tsx
+  it("shows what an active and a closed shift put in closed boxes, and nothing for a planned one", async () => {
+    const big: OfficeShift = {
+      ...ACTIVE,
+      id: "10000000-0000-4000-8000-000000000009",
+      number: "B-1",
+      totals: {
+        ...ACTIVE.totals,
+        acceptedUnits: 12_010,
+        unitsInClosedBoxes: 12_000,
+        closedBoxes: 1000,
+      },
+    };
+    await openShifts(shiftsSession([PLANNED, ACTIVE, CLOSED, big]));
+    expect(cells("OCT26-005")[7]).toBe("—");
+    // The codes in closed boxes, not every accepted code: one box of the active shift is open.
+    expect(cells("OCT26-004")[7]).toBe("540 шт · 45 кор.");
+    expect(cells("OCT26-001/S")[7]).toBe("492 шт · 41 кор.");
+    // A no-break space between the thousands.
+    expect(cells("B-1")[7]).toBe("12\u00a0000 шт · 1\u00a0000 кор.");
+  });
+
+  it("says why a closed shift closed, with data after closing, a station's reason in words and the office's in its own", async () => {
+```
+
+12. В `apps/standalone/test/support/office.tsx`, фрагмент
+
+<!-- prettier-ignore -->
+```tsx
+    listShifts: vi.fn<HostApi["listShifts"]>(() => unexpected("listShifts")),
+    createShift: vi.fn<HostApi["createShift"]>(() => unexpected("createShift")),
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```tsx
+    listShifts: vi.fn<HostApi["listShifts"]>(() => unexpected("listShifts")),
+    getShift: vi.fn<HostApi["getShift"]>(() => unexpected("getShift")),
+    createShift: vi.fn<HostApi["createShift"]>(() => unexpected("createShift")),
+```
+
+13. В `apps/standalone/test/support/shifts.ts`, фрагмент
+
+<!-- prettier-ignore -->
+```ts
+  OfficeUser,
+  TemplateDefaults,
+} from "../../src/host/protocol.js";
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```ts
+  OfficeUser,
+  ShiftTotals,
+  TemplateDefaults,
+} from "../../src/host/protocol.js";
+```
+
+14. В `apps/standalone/test/support/shifts.ts`, фрагмент
+
+<!-- prettier-ignore -->
+```ts
+/** An active shift of milk on line 2 for a counterparty, as `office-shift.json`. */
+export const ACTIVE: OfficeShift = {
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```ts
+/** The figures of a shift no station has worked on: a planned one's. */
+export const NO_TOTALS: ShiftTotals = {
+  acceptedUnits: 0,
+  unitsInClosedBoxes: 0,
+  closedBoxes: 0,
+  openBoxes: 0,
+  lastFactAt: null,
+  deviceIds: [],
+};
+
+/** An active shift of milk on line 2 for a counterparty, as `office-shift.json`. */
+export const ACTIVE: OfficeShift = {
+```
+
+15. В `apps/standalone/test/support/shifts.ts`, фрагмент
+
+<!-- prettier-ignore -->
+```ts
+  lateDataAt: null,
+  createdAt: "2026-10-07T15:30:00Z",
+  rev: 71,
+};
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```ts
+  lateDataAt: null,
+  createdAt: "2026-10-07T15:30:00Z",
+  rev: 71,
+  totals: {
+    acceptedUnits: 547,
+    unitsInClosedBoxes: 540,
+    closedBoxes: 45,
+    openBoxes: 1,
+    lastFactAt: "2026-10-08T09:41:07Z",
+    deviceIds: ["7c9e6679-7425-40de-944b-e07fc1f90ae7"],
+  },
+};
+```
+
+16. В `apps/standalone/test/support/shifts.ts`, фрагмент
+
+<!-- prettier-ignore -->
+```ts
+  ownerDeviceId: null,
+  openedAt: null,
+  rev: 72,
+};
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```ts
+  ownerDeviceId: null,
+  openedAt: null,
+  rev: 72,
+  totals: NO_TOTALS,
+};
+```
+
+17. В `apps/standalone/test/support/shifts.ts`, фрагмент
+
+<!-- prettier-ignore -->
+```ts
+  closeReasonCode: "equipment_stop",
+  lateDataAt: "2026-10-01T14:30:00Z",
+  rev: 60,
+};
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```ts
+  closeReasonCode: "equipment_stop",
+  lateDataAt: "2026-10-01T14:30:00Z",
+  rev: 60,
+  totals: {
+    acceptedUnits: 492,
+    unitsInClosedBoxes: 492,
+    closedBoxes: 41,
+    openBoxes: 0,
+    lastFactAt: "2026-10-01T14:30:00Z",
+    deviceIds: ["7c9e6679-7425-40de-944b-e07fc1f90ae7"],
+  },
+};
+```
+
+18. Создать `apps/standalone/test/shift-totals.test.tsx`:
+
+<!-- prettier-ignore -->
+```tsx
+import { act, fireEvent, screen, waitFor, within, type RenderResult } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { HostError } from "../src/host/client.js";
-import type { OfficeShiftDetail } from "../src/host/protocol.js";
+import type { DeviceRecord, OfficeShift } from "../src/host/protocol.js";
 import { ORG_PROFILE, TECHNOLOGIST, type FakeOfficeSession } from "./support/office.js";
 import {
   ACTIVE,
   CLOSED,
   freezeToday,
+  NO_TOTALS,
   openShifts,
   shiftRow,
   shiftsSession,
@@ -8452,16 +8718,31 @@ import {
 
 const TOKEN = "office-session-token";
 
-/** The active shift's figures, as `office-shift-detail.json`. */
-const DETAIL: OfficeShiftDetail = {
+/** The station that opened the active shift. */
+const STATION: DeviceRecord = {
+  id: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+  kind: "station",
+  name: "Станция линии 2",
+  lineId: "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
+  appVersion: "0.1.0",
+  pairedAt: "2026-09-26T09:15:00Z",
+  lastSeenAt: "2026-10-08T09:41:00Z",
+  revokedAt: null,
+};
+/** A station that worked on the shift and was revoked since. */
+const OLD_STATION: DeviceRecord = {
+  ...STATION,
+  id: "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+  name: "Старая станция",
+  revokedAt: "2026-10-08T12:00:00Z",
+};
+/** A device the list of devices does not have. */
+const UNLISTED_ID = "0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e";
+
+/** The active shift with three devices: listed, revoked and unlisted. */
+const DETAIL: OfficeShift = {
   ...ACTIVE,
-  totals: {
-    acceptedUnits: 1150,
-    closedBoxes: 95,
-    openBoxes: 1,
-    lastFactAt: "2026-10-08T14:30:00Z",
-    deviceIds: ["7c9e6679-7425-40de-944b-e07fc1f90ae7"],
-  },
+  totals: { ...ACTIVE.totals, deviceIds: [STATION.id, OLD_STATION.id, UNLISTED_ID] },
 };
 
 function dialog(): HTMLElement {
@@ -8470,16 +8751,35 @@ function dialog(): HTMLElement {
 
 /** The figures as term → description. */
 function figures(): Record<string, string | null> {
-  const terms = within(dialog()).getAllByRole("term");
   return Object.fromEntries(
-    terms.map((term) => [term.textContent ?? "", term.nextElementSibling?.textContent ?? null]),
+    within(dialog())
+      .getAllByRole("term")
+      .map((term) => [term.textContent ?? "", term.nextElementSibling?.textContent ?? null]),
   );
 }
 
-async function openTotals(session: FakeOfficeSession): Promise<void> {
-  await openShifts(session);
+/** The devices of the shift, one name per line. */
+function deviceNames(): (string | null)[] {
+  const term = within(dialog())
+    .getAllByRole("term")
+    .find((each) => each.textContent === "Устройства смены");
+  const list = term?.nextElementSibling?.firstElementChild;
+  return Array.from(list?.children ?? []).map((line) => line.textContent);
+}
+
+async function openTotals(session: FakeOfficeSession): Promise<RenderResult> {
+  const view = await openShifts(session);
   fireEvent.click(screen.getByRole("button", { name: "Итоги смены OCT26-004" }));
   await screen.findByRole("dialog", { name: "Итоги смены OCT26-004" });
+  await waitFor(() => expect(within(dialog()).getAllByRole("term")).toHaveLength(7));
+  return view;
+}
+
+/** How this PC writes `instant`, with no time zone named. */
+function pcTime(instant: string): string {
+  return new Intl.DateTimeFormat("ru", { dateStyle: "short", timeStyle: "short" }).format(
+    new Date(instant),
+  );
 }
 
 describe("office shifts: a shift's figures", () => {
@@ -8504,37 +8804,130 @@ describe("office shifts: a shift's figures", () => {
     }
   });
 
-  it("reads the shift when the dialog opens and shows its figures, the last fact in the organization's time", async () => {
+  it("reads the shift when the dialog opens and shows its figures, the last fact in the organization's time and the devices by name", async () => {
     const session = shiftsSession();
     // Kamchatka (UTC+12), so the organization's time is no PC's own by chance.
     session.api.getOrg.mockResolvedValue({ ...ORG_PROFILE, timeZone: "Asia/Kamchatka" });
     session.api.getShift.mockResolvedValue(DETAIL);
+    session.api.listDevices.mockResolvedValue([OLD_STATION, STATION]);
     await openTotals(session);
-    await waitFor(() => expect(within(dialog()).getAllByRole("term")).toHaveLength(6));
     expect(session.api.getShift).toHaveBeenCalledWith(TOKEN, ACTIVE.id);
     expect(figures()).toEqual({
-      // Thousands apart by a no-break space.
+      // A no-break space between the thousands.
       "План, шт": "1\u00a0200",
-      "Принято единиц": "1\u00a0150",
-      "Закрыто коробов": "95",
+      "Принято кодов": "547",
+      "Кодов в закрытых коробах": "540",
+      "Закрыто коробов": "45",
       "Открыто коробов": "1",
-      // 14:30 UTC on 8 October is 02:30 on 9 October in Kamchatka.
-      "Последние данные со станции": "09.10.2026, 02:30",
-      "Устройств на смене": "1",
+      // 09:41 UTC on 8 October is 21:41 the same day in Kamchatka.
+      "Последние данные со станции": "08.10.2026, 21:41",
+      "Устройства смены": "Станция линии 2Старая станция (отозвано)Устройство 0f1e2d3c…",
+    });
+    expect(deviceNames()).toEqual([
+      "Станция линии 2",
+      "Старая станция (отозвано)",
+      "Устройство 0f1e2d3c…",
+    ]);
+    expect(within(dialog()).queryByText(/по часам этого ПК/)).toBeNull();
+    expect(within(dialog()).queryByText(/началами кодов/)).toBeNull();
+  });
+
+  it("shows a technologist the devices by the start of their ids and says why, without asking for the list", async () => {
+    const session = shiftsSession(undefined, TECHNOLOGIST);
+    session.api.getShift.mockResolvedValue(DETAIL);
+    await openTotals(session);
+    expect(deviceNames()).toEqual([
+      "Устройство 7c9e6679…",
+      "Устройство 4d5e6f7a…",
+      "Устройство 0f1e2d3c…",
+    ]);
+    expect(
+      within(dialog()).getByText(
+        "Названия устройств видит только администратор: устройства показаны началами кодов.",
+      ),
+    ).toBeTruthy();
+    expect(session.api.listDevices).not.toHaveBeenCalled();
+  });
+
+  it("shows the devices by the start of their ids when the list of devices does not load, and says so", async () => {
+    const session = shiftsSession();
+    session.api.getShift.mockResolvedValue(DETAIL);
+    session.api.listDevices.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "x" }),
+    );
+    await openTotals(session);
+    expect(deviceNames()).toEqual([
+      "Устройство 7c9e6679…",
+      "Устройство 4d5e6f7a…",
+      "Устройство 0f1e2d3c…",
+    ]);
+    expect(
+      within(dialog()).getByText(
+        "Список устройств не загрузился: устройства показаны началами кодов.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("says when no fact has arrived and no device has entered yet, and when there is no plan", async () => {
+    const session = shiftsSession();
+    session.api.getShift.mockResolvedValue({ ...ACTIVE, plannedQty: null, totals: NO_TOTALS });
+    session.api.listDevices.mockResolvedValue([STATION]);
+    await openTotals(session);
+    expect(figures()).toEqual({
+      "План, шт": "—",
+      "Принято кодов": "0",
+      "Кодов в закрытых коробах": "0",
+      "Закрыто коробов": "0",
+      "Открыто коробов": "0",
+      "Последние данные со станции": "Данных ещё нет",
+      "Устройства смены": "Ни одно устройство ещё не входило в смену",
     });
   });
 
-  it("says when no fact has arrived yet and when there is no plan", async () => {
+  it("writes the time by this PC's clock when the profile does not load or names a zone this PC lacks, and says which", async () => {
+    for (const [answer, note] of [
+      [
+        () =>
+          Promise.reject(new HostError({ kind: "transport", code: "unreachable", message: "x" })),
+        "Часовой пояс организации не загрузился: время — по часам этого ПК.",
+      ],
+      [
+        () => Promise.resolve({ ...ORG_PROFILE, timeZone: "Mars/Olympus_Mons" }),
+        "Этот ПК не знает часовой пояс организации: время — по часам этого ПК.",
+      ],
+    ] as const) {
+      const session = shiftsSession();
+      session.api.getOrg.mockImplementation(answer);
+      session.api.getShift.mockResolvedValue(ACTIVE);
+      session.api.listDevices.mockResolvedValue([STATION]);
+      const view = await openTotals(session);
+      expect(figures()["Последние данные со станции"]).toBe(pcTime("2026-10-08T09:41:07Z"));
+      expect(within(dialog()).getByText(note)).toBeTruthy();
+      view.unmount();
+    }
+  });
+
+  it("keeps the time in the organization's zone while the dialog is open, though the profile read again fails", async () => {
     const session = shiftsSession();
-    session.api.getShift.mockResolvedValue({
-      ...DETAIL,
-      plannedQty: null,
-      totals: { acceptedUnits: 0, closedBoxes: 0, openBoxes: 0, lastFactAt: null, deviceIds: [] },
-    });
+    session.api.getOrg.mockResolvedValueOnce({ ...ORG_PROFILE, timeZone: "Asia/Kamchatka" });
+    session.api.getShift.mockResolvedValue(ACTIVE);
+    session.api.listDevices.mockResolvedValue([STATION]);
     await openTotals(session);
-    await waitFor(() => expect(within(dialog()).getAllByRole("term")).toHaveLength(6));
-    expect(figures()["План, шт"]).toBe("—");
-    expect(figures()["Последние данные со станции"]).toBe("Данных ещё нет");
+    fireEvent.click(within(dialog()).getAllByRole("button", { name: "Закрыть" })[0] as HTMLElement);
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    // The profile is in the cache now; read again at the next opening, it fails.
+    session.api.getOrg.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "x" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Итоги смены OCT26-004" }));
+    await waitFor(() => expect(within(dialog()).getAllByRole("term")).toHaveLength(7));
+    await waitFor(() => expect(session.api.getOrg).toHaveBeenCalledTimes(2));
+    // Let the failed read settle into the query's state.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(figures()["Последние данные со станции"]).toBe("08.10.2026, 21:41");
+    expect(within(dialog()).queryByText(/по часам этого ПК/)).toBeNull();
   });
 
   it("offers to read the figures again when they do not load, and reads them anew at every opening", async () => {
@@ -8543,10 +8936,12 @@ describe("office shifts: a shift's figures", () => {
       .mockRejectedValueOnce(
         new HostError({ kind: "transport", code: "unreachable", message: "x" }),
       )
-      .mockResolvedValue(DETAIL);
-    await openTotals(session);
+      .mockResolvedValue(ACTIVE);
+    session.api.listDevices.mockResolvedValue([STATION]);
+    await openShifts(session);
+    fireEvent.click(screen.getByRole("button", { name: "Итоги смены OCT26-004" }));
     fireEvent.click(await within(dialog()).findByRole("button", { name: "Повторить" }));
-    await waitFor(() => expect(within(dialog()).getAllByRole("term")).toHaveLength(6));
+    await waitFor(() => expect(within(dialog()).getAllByRole("term")).toHaveLength(7));
     fireEvent.click(within(dialog()).getAllByRole("button", { name: "Закрыть" })[0] as HTMLElement);
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Итоги смены OCT26-004" }));
@@ -8555,27 +8950,18 @@ describe("office shifts: a shift's figures", () => {
 });
 ```
 
-8. В `apps/standalone/test/support/office.tsx`, фрагмент
-
-<!-- prettier-ignore -->
-```tsx
-    listShifts: vi.fn<HostApi["listShifts"]>(() => unexpected("listShifts")),
-    createShift: vi.fn<HostApi["createShift"]>(() => unexpected("createShift")),
-```
-
-заменить на
-
-<!-- prettier-ignore -->
-```tsx
-    listShifts: vi.fn<HostApi["listShifts"]>(() => unexpected("listShifts")),
-    getShift: vi.fn<HostApi["getShift"]>(() => unexpected("getShift")),
-    createShift: vi.fn<HostApi["createShift"]>(() => unexpected("createShift")),
-```
-
 - [ ] **Step 2: Тесты падают**
 
-Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shift-totals.test.tsx test/shift-edit.test.tsx test/protocol.test.ts test/api.test.ts`
-Expected: FAIL — все 4 теста `test/shift-totals.test.tsx` (`Unable to find an accessible element with the role "button" and name "Итоги смены OCT26-004"`); в `test/shift-edit.test.tsx` — «offers a planned shift's change and delete, an active one's figures…»; в `test/protocol.test.ts` — три новых теста итогов (`Cannot read properties of undefined (reading 'parse')` и `'safeParse'`); в `test/api.test.ts` — «getShift sends the office token…» (`api.getShift is not a function`); остальные 261 проходят.
+Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shift-totals.test.tsx test/shift-edit.test.tsx test/shifts-page.test.tsx test/shift-delete-close.test.tsx test/protocol.test.ts test/api.test.ts test/shift-dialog.test.tsx`
+Expected: FAIL — 15 из 439 тестов (7 файлов):
+
+- `test/shift-totals.test.tsx` — все 8 (`Unable to find an accessible element with the role "button" and name "Итоги смены OCT26-004"`);
+- `test/shift-edit.test.tsx` — «offers a planned shift's change and delete, an active one's figures, plan and close, and a closed one's figures alone, to both roles» (`expected [ …(2) ] to deeply equal [ 'Итоги смены OCT26-004', …(2) ]`);
+- `test/shifts-page.test.tsx` — «lists the shifts in the host's order…» (`Unable to find an accessible element with the role "columnheader" and name "Выпуск"`) и «shows what an active and a closed shift put in closed boxes…» (`expected 'ИзменитьУдалить' to be '—'`);
+- `test/protocol.test.ts` — «response fixture office-shift.json > parses without losing a field» (красный и до задачи) и «shift shapes > read a shift's figures…» (`expected undefined to deeply equal { acceptedUnits: 547, …(5) }`);
+- `test/api.test.ts` — «HostApi office endpoints > getShift sends the office token to the right route» (`api.getShift is not a function`) и «HostApi shifts > returns one shift with its figures…» (`recording(...).api.getShift is not a function`).
+
+Остальные 424 проходят (тесты `shift-delete-close.test.tsx` и `shift-dialog.test.tsx` — тоже: их правки только сужают утверждения и дают данные). При нагрузке машины тесты окон могут падать по сроку 5 с — такие падения не в счёт; сроки не поднимать.
 
 - [ ] **Step 3: Реализация**
 
@@ -8583,58 +8969,25 @@ Expected: FAIL — все 4 теста `test/shift-totals.test.tsx` (`Unable to 
 
 <!-- prettier-ignore -->
 ```ts
-  productGroupSchema,
-  officeShiftSchema,
+  listShifts: (token: string, period?: ShiftPeriod) => Promise<OfficeShift[]>;
+  createShift: (token: string, create: ShiftCreate) => Promise<OfficeShift>;
 ```
 
 заменить на
 
 <!-- prettier-ignore -->
 ```ts
-  productGroupSchema,
-  officeShiftDetailSchema,
-  officeShiftSchema,
+  listShifts: (token: string, period?: ShiftPeriod) => Promise<OfficeShift[]>;
+  /** One shift, its figures read afresh; `not_found` once it was deleted. */
+  getShift: (token: string, id: string) => Promise<OfficeShift>;
+  createShift: (token: string, create: ShiftCreate) => Promise<OfficeShift>;
 ```
 
 2. В `apps/standalone/src/host/api.ts`, фрагмент
 
 <!-- prettier-ignore -->
 ```ts
-  type OfficeShift,
-  type OfficeUser,
-```
-
-заменить на
-
-<!-- prettier-ignore -->
-```ts
-  type OfficeShift,
-  type OfficeShiftDetail,
-  type OfficeUser,
-```
-
-3. В `apps/standalone/src/host/api.ts`, фрагмент
-
-<!-- prettier-ignore -->
-```ts
-  listShifts: (token: string, period?: ShiftPeriod) => Promise<OfficeShift[]>;
-  createShift: (token: string, create: ShiftCreate) => Promise<OfficeShift>;
-```
-
-заменить на
-
-<!-- prettier-ignore -->
-```ts
-  listShifts: (token: string, period?: ShiftPeriod) => Promise<OfficeShift[]>;
-  /** One shift with its figures. */
-  getShift: (token: string, id: string) => Promise<OfficeShiftDetail>;
-  createShift: (token: string, create: ShiftCreate) => Promise<OfficeShift>;
-```
-
-4. В `apps/standalone/src/host/api.ts`, фрагмент
-
-<!-- prettier-ignore -->
-```ts
+        { officeToken: token, schema: z.array(officeShiftSchema) },
       ),
     createShift: (token, create) =>
 ```
@@ -8643,41 +8996,46 @@ Expected: FAIL — все 4 теста `test/shift-totals.test.tsx` (`Unable to 
 
 <!-- prettier-ignore -->
 ```ts
+        { officeToken: token, schema: z.array(officeShiftSchema) },
       ),
     getShift: (token, id) =>
       client.request("GET", `/v1/office/shifts/${id}`, {
         officeToken: token,
-        schema: officeShiftDetailSchema,
+        schema: officeShiftSchema,
       }),
     createShift: (token, create) =>
 ```
 
-5. В `apps/standalone/src/host/protocol.ts`, фрагмент
+3. В `apps/standalone/src/host/protocol.ts`, фрагмент
 
 <!-- prettier-ignore -->
 ```ts
-});
-export type OfficeShift = z.infer<typeof officeShiftSchema>;
-
-// --- Request bodies (strict) ---
-
-export const officeLoginRequestSchema = z
+/**
+ * `GET /v1/office/shifts` and the answer of every office write of a shift. It
+ * carries ids, not names: the office names products, lines and counterparties
+ * from its own lists. `closeReasonCode` is one of the domain's six codes of a
+ * station's close (plan 2a2), read as text so a code a newer host adds does
+ * not fail the list; `closeReasonText` is the office's words.
+ */
+export const officeShiftSchema = z.object({
 ```
 
 заменить на
 
 <!-- prettier-ignore -->
 ```ts
-});
-export type OfficeShift = z.infer<typeof officeShiftSchema>;
-
 /**
- * A shift's figures (plan 2a2): the units taken in its boxes, neither removed
- * nor displaced; the boxes closed, not disassembled, and the boxes open; when
- * the last fact arrived; the devices that worked on it.
+ * A shift's figures (plan 2a2), read from its facts on every answer and never
+ * stored, so they change without a revision: the live codes in its boxes, open
+ * and closed alike («Принято кодов»); the live codes in boxes closed and not
+ * taken apart («Кодов в закрытых коробах», the cloud's `containedUnits`); the
+ * boxes closed and not taken apart; the open boxes that hold a live code; the
+ * host's time of the last record of the shift; its devices, first entry first.
+ * A planned shift's are zeros, `null` and `[]`.
  */
 export const shiftTotalsSchema = z.object({
   acceptedUnits: z.number().int().nonnegative(),
+  unitsInClosedBoxes: z.number().int().nonnegative(),
   closedBoxes: z.number().int().nonnegative(),
   openBoxes: z.number().int().nonnegative(),
   lastFactAt: z.iso.datetime().nullable(),
@@ -8685,16 +9043,75 @@ export const shiftTotalsSchema = z.object({
 });
 export type ShiftTotals = z.infer<typeof shiftTotalsSchema>;
 
-/** `GET /v1/office/shifts/{id}`: the shift with its figures. */
-export const officeShiftDetailSchema = officeShiftSchema.extend({ totals: shiftTotalsSchema });
-export type OfficeShiftDetail = z.infer<typeof officeShiftDetailSchema>;
+/**
+ * `GET /v1/office/shifts`, `GET …/{id}` and the answer of every office write of
+ * a shift, each with its `totals`. It carries ids, not names: the office names
+ * products, lines, counterparties and devices from its own lists.
+ * `closeReasonCode` is one of the domain's six codes of a station's close
+ * (plan 2a2), read as text so a code a newer host adds does not fail the list;
+ * `closeReasonText` is the office's words.
+ */
+export const officeShiftSchema = z.object({
+```
 
-// --- Request bodies (strict) ---
+4. В `apps/standalone/src/host/protocol.ts`, фрагмент
 
-export const officeLoginRequestSchema = z
+<!-- prettier-ignore -->
+```ts
+  createdAt: z.iso.datetime(),
+  rev: z.number().int(),
+});
+export type OfficeShift = z.infer<typeof officeShiftSchema>;
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```ts
+  createdAt: z.iso.datetime(),
+  rev: z.number().int(),
+  totals: shiftTotalsSchema,
+});
+export type OfficeShift = z.infer<typeof officeShiftSchema>;
+```
+
+5. В `apps/standalone/src/i18n/ru.json`, фрагмент
+
+<!-- prettier-ignore -->
+```json
+        "plannedQty": "План, шт",
+        "status": "Статус",
+        "actions": "Действия"
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```json
+        "plannedQty": "План, шт",
+        "status": "Статус",
+        "output": "Выпуск",
+        "actions": "Действия"
 ```
 
 6. В `apps/standalone/src/i18n/ru.json`, фрагмент
+
+<!-- prettier-ignore -->
+```json
+      "forCounterparty": "для: {{name}}",
+      "modes": {
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```json
+      "forCounterparty": "для: {{name}}",
+      "output": "{{units}} шт · {{boxes}} кор.",
+      "modes": {
+```
+
+7. В `apps/standalone/src/i18n/ru.json`, фрагмент
 
 <!-- prettier-ignore -->
 ```json
@@ -8712,7 +9129,7 @@ export const officeLoginRequestSchema = z
       "createTitle": "Новая смена",
 ```
 
-7. В `apps/standalone/src/i18n/ru.json`, фрагмент
+8. В `apps/standalone/src/i18n/ru.json`, фрагмент
 
 <!-- prettier-ignore -->
 ```json
@@ -8728,17 +9145,25 @@ export const officeLoginRequestSchema = z
       "totals": {
         "title": "Итоги смены {{number}}",
         "plan": "План, шт",
-        "accepted": "Принято единиц",
+        "accepted": "Принято кодов",
+        "inClosedBoxes": "Кодов в закрытых коробах",
         "closedBoxes": "Закрыто коробов",
         "openBoxes": "Открыто коробов",
         "lastFact": "Последние данные со станции",
         "noFacts": "Данных ещё нет",
-        "devices": "Устройств на смене"
+        "devices": "Устройства смены",
+        "noDevices": "Ни одно устройство ещё не входило в смену",
+        "unknownDevice": "Устройство {{id}}…",
+        "revokedDevice": "{{name}} (отозвано)",
+        "devicesAdminOnly": "Названия устройств видит только администратор: устройства показаны началами кодов.",
+        "devicesUnavailable": "Список устройств не загрузился: устройства показаны началами кодов.",
+        "localTime": "Часовой пояс организации не загрузился: время — по часам этого ПК.",
+        "localTimeZone": "Этот ПК не знает часовой пояс организации: время — по часам этого ПК."
       },
       "productOption": "{{name}} — {{gtin}}",
 ```
 
-8. В `apps/standalone/src/office/office-query.ts`, фрагмент
+9. В `apps/standalone/src/office/office-query.ts`, фрагмент
 
 <!-- prettier-ignore -->
 ```ts
@@ -8751,58 +9176,139 @@ export const officeLoginRequestSchema = z
 <!-- prettier-ignore -->
 ```ts
   ],
-  /** One shift with its figures (`GET /v1/office/shifts/{id}`). */
+  /** One shift with its figures (`GET /v1/office/shifts/{id}`), read afresh at every opening. */
   shift: (id: string) => ["office", "shift", id],
   /** One template with its layout (`GET /v1/office/templates/{id}`). */
 ```
 
-9. Создать `apps/standalone/src/office/shifts/ShiftTotalsDialog.tsx`:
+10. Создать `apps/standalone/src/office/shifts/ShiftTotalsDialog.tsx`:
 
 <!-- prettier-ignore -->
 ```tsx
+import type { TFunction } from "i18next";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button, DefinitionGrid, Modal } from "@markiro/ui";
 
-import type { OfficeShift } from "../../host/protocol.js";
+import type { DeviceRecord, OfficeShift } from "../../host/protocol.js";
+import { isKnownTimeZone } from "../../lib/civil-date.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
+import { useOfficeSession } from "../office-session.js";
 import { LoadError, PageLoading } from "../page-state.js";
 
-/** Units with the thousands apart by a no-break space. */
+/** Counts with the thousands apart by a no-break space, as Russian writes them: «1 200». */
 const UNITS = new Intl.NumberFormat("ru");
 
+/** Why the times are this PC's, not the organization's; `null` when they are the organization's. */
+type TimeNote = "localTime" | "localTimeZone" | null;
+
+/** Why the devices are shown by the start of their ids; `null` when the list names them. */
+type DevicesNote = "devicesAdminOnly" | "devicesUnavailable" | null;
+
 export interface ShiftTotalsDialogProps {
-  /** An active or a closed shift. */
+  /** An active or a closed shift of the list. */
   shift: OfficeShift;
   onClose: () => void;
 }
 
 /**
- * A shift's figures in numbers (stage 2a spec §5.6): read whenever the dialog
- * opens (`GET /v1/office/shifts/{id}`, never cached for a later opening as
- * fresh). The last fact's time is written in the organization's time zone, or
- * this PC's while the profile does not load. The full card of a shift (its
- * boxes, exceptions, conflicts, late and refused records) is stage 4.
+ * A shift's figures (stage 2a spec §5.6, plan 2a2's `totals`): the shift is read
+ * whenever the dialog opens (`GET /v1/office/shifts/{id}`), since the figures
+ * change without a revision and the list behind it may be old. The last fact's
+ * time is in the organization's time zone, or this PC's while the profile does
+ * not load or names a zone this PC lacks, and says so; the zone is fixed when
+ * the figures first show. The devices are named from the administrator's list
+ * of devices; a technologist, an id that list lacks, or a list that did not
+ * load shows the start of the id. The full card of a shift is stage 4.
  */
 export function ShiftTotalsDialog({ shift, onClose }: ShiftTotalsDialogProps) {
   const { t } = useTranslation();
+  const isAdmin = useOfficeSession().user.role === "admin";
   const detail = useOfficeQuery(officeKeys.shift(shift.id), (api, token) =>
     api.getShift(token, shift.id),
   );
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
-  const time = new Intl.DateTimeFormat("ru", {
-    dateStyle: "short",
-    timeStyle: "short",
-    ...(org.isSuccess ? { timeZone: org.data.timeZone } : {}),
+  const devices = useOfficeQuery(officeKeys.devices, (api, token) => api.listDevices(token), {
+    enabled: isAdmin,
   });
 
   const body = () => {
-    if (detail.isPending) return <PageLoading />;
+    if (detail.isPending || org.isPending || (isAdmin && devices.isPending)) {
+      return <PageLoading />;
+    }
     if (detail.isError) {
       return <LoadError error={detail.error} onRetry={() => void detail.refetch()} />;
     }
-    const { plannedQty, totals } = detail.data;
+    const zone = org.isSuccess && isKnownTimeZone(org.data.timeZone) ? org.data.timeZone : null;
     return (
+      <ShiftFigures
+        shift={detail.data}
+        zone={zone}
+        timeNote={zone !== null ? null : org.isSuccess ? "localTimeZone" : "localTime"}
+        devices={isAdmin ? devices.data : undefined}
+        devicesNote={!isAdmin ? "devicesAdminOnly" : devices.isError ? "devicesUnavailable" : null}
+      />
+    );
+  };
+
+  return (
+    <Modal
+      open
+      title={t("office.shifts.totals.title", { number: shift.number })}
+      onClose={onClose}
+      closeLabel={t("office.common.close")}
+      footer={
+        <Button variant="secondary" onClick={onClose}>
+          {t("office.common.close")}
+        </Button>
+      }
+    >
+      {body()}
+    </Modal>
+  );
+}
+
+/**
+ * How the dialog names a device: its name, marked when revoked; the start of
+ * its id when the list lacks it or was not read.
+ */
+function deviceLabel(id: string, devices: readonly DeviceRecord[] | undefined, t: TFunction) {
+  const device = devices?.find((each) => each.id === id);
+  if (device === undefined) return t("office.shifts.totals.unknownDevice", { id: id.slice(0, 8) });
+  return device.revokedAt === null
+    ? device.name
+    : t("office.shifts.totals.revokedDevice", { name: device.name });
+}
+
+interface ShiftFiguresProps {
+  shift: OfficeShift;
+  zone: string | null;
+  timeNote: TimeNote;
+  devices: readonly DeviceRecord[] | undefined;
+  devicesNote: DevicesNote;
+}
+
+function ShiftFigures({
+  shift,
+  zone: zoneAtOpen,
+  timeNote: timeNoteAtOpen,
+  devices,
+  devicesNote,
+}: ShiftFiguresProps) {
+  const { t } = useTranslation();
+  // The zone the time is written in and the note about it are fixed when the figures first
+  // show: the profile read again later (failing, or arriving after a failure) must not move
+  // the time, or put a note under it, while the dialog stays open.
+  const [{ zone, timeNote }] = useState(() => ({ zone: zoneAtOpen, timeNote: timeNoteAtOpen }));
+  const time = new Intl.DateTimeFormat("ru", {
+    dateStyle: "short",
+    timeStyle: "short",
+    ...(zone === null ? {} : { timeZone: zone }),
+  });
+  const { plannedQty, totals } = shift;
+  return (
+    <>
       <DefinitionGrid
         items={[
           {
@@ -8815,6 +9321,12 @@ export function ShiftTotalsDialog({ shift, onClose }: ShiftTotalsDialogProps) {
             id: "accepted",
             term: t("office.shifts.totals.accepted"),
             description: UNITS.format(totals.acceptedUnits),
+            mono: true,
+          },
+          {
+            id: "inClosedBoxes",
+            term: t("office.shifts.totals.inClosedBoxes"),
+            description: UNITS.format(totals.unitsInClosedBoxes),
             mono: true,
           },
           {
@@ -8840,33 +9352,31 @@ export function ShiftTotalsDialog({ shift, onClose }: ShiftTotalsDialogProps) {
           {
             id: "devices",
             term: t("office.shifts.totals.devices"),
-            description: UNITS.format(totals.deviceIds.length),
-            mono: true,
+            description:
+              totals.deviceIds.length === 0 ? (
+                t("office.shifts.totals.noDevices")
+              ) : (
+                <span className="shift-cell">
+                  {totals.deviceIds.map((id) => (
+                    <span key={id}>{deviceLabel(id, devices, t)}</span>
+                  ))}
+                </span>
+              ),
           },
         ]}
       />
-    );
-  };
-
-  return (
-    <Modal
-      open
-      title={t("office.shifts.totals.title", { number: shift.number })}
-      onClose={onClose}
-      closeLabel={t("office.common.close")}
-      footer={
-        <Button variant="secondary" onClick={onClose}>
-          {t("office.common.close")}
-        </Button>
-      }
-    >
-      {body()}
-    </Modal>
+      {timeNote !== null && totals.lastFactAt !== null && (
+        <p className="office-note">{t(`office.shifts.totals.${timeNote}`)}</p>
+      )}
+      {devicesNote !== null && totals.deviceIds.length > 0 && (
+        <p className="office-note">{t(`office.shifts.totals.${devicesNote}`)}</p>
+      )}
+    </>
   );
 }
 ```
 
-10. В `apps/standalone/src/office/shifts/ShiftsPage.tsx`, фрагмент
+11. В `apps/standalone/src/office/shifts/ShiftsPage.tsx`, фрагмент
 
 <!-- prettier-ignore -->
 ```tsx
@@ -8883,7 +9393,7 @@ import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
 import { datePickerTexts } from "./shift-text.js";
 ```
 
-11. В `apps/standalone/src/office/shifts/ShiftsPage.tsx`, фрагмент
+12. В `apps/standalone/src/office/shifts/ShiftsPage.tsx`, фрагмент
 
 <!-- prettier-ignore -->
 ```tsx
@@ -8898,10 +9408,15 @@ import { datePickerTexts } from "./shift-text.js";
   | { kind: "totals"; shift: OfficeShift };
 ```
 
-12. В `apps/standalone/src/office/shifts/ShiftsPage.tsx`, фрагмент
+13. В `apps/standalone/src/office/shifts/ShiftsPage.tsx`, фрагмент
 
 <!-- prettier-ignore -->
 ```tsx
+        );
+      },
+    },
+  ];
+
   if (canPlan) {
     columns.push({
       key: "actions",
@@ -8952,74 +9467,95 @@ import { datePickerTexts } from "./shift-text.js";
       ),
     });
   }
+
 ```
 
 заменить на
 
 <!-- prettier-ignore -->
 ```tsx
-  // Every role reads a shift's figures; writing is `planShifts`.
-  columns.push({
-    key: "actions",
-    title: t("office.shifts.table.actions"),
-    render: (shift) => (
-      <RowActions>
-        {shift.status !== "planned" && (
-          <Button
-            variant="secondary"
-            size="compact"
-            aria-label={t("office.shifts.totalsNamed", { number: shift.number })}
-            onClick={() => open({ kind: "totals", shift })}
-          >
-            {t("office.shifts.totalsAction")}
-          </Button>
-        )}
-        {canPlan && shift.status === "planned" && (
-          <>
+        );
+      },
+    },
+    {
+      // What the shift put in closed boxes, as the cloud's list shows it; a planned shift has none.
+      // After the status, so the columns before it keep their places.
+      key: "output",
+      title: t("office.shifts.table.output"),
+      mono: true,
+      align: "right",
+      render: (shift) =>
+        shift.status === "planned"
+          ? t("office.common.none")
+          : t("office.shifts.output", {
+              units: UNITS.format(shift.totals.unitsInClosedBoxes),
+              boxes: UNITS.format(shift.totals.closedBoxes),
+            }),
+    },
+    // Every role reads a shift's figures; the writes are `planShifts`.
+    {
+      key: "actions",
+      title: t("office.shifts.table.actions"),
+      render: (shift) => (
+        <RowActions>
+          {shift.status !== "planned" && (
             <Button
               variant="secondary"
               size="compact"
-              aria-label={t("office.shifts.editNamed", { number: shift.number })}
-              onClick={() => open({ kind: "edit", shift })}
+              aria-label={t("office.shifts.totalsNamed", { number: shift.number })}
+              onClick={() => open({ kind: "totals", shift })}
             >
-              {t("office.shifts.edit")}
+              {t("office.shifts.totalsAction")}
             </Button>
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.shifts.deleteNamed", { number: shift.number })}
-              onClick={() => open({ kind: "delete", shift })}
-            >
-              {t("office.shifts.delete")}
-            </Button>
-          </>
-        )}
-        {canPlan && shift.status === "active" && (
-          <>
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.shifts.planNamed", { number: shift.number })}
-              onClick={() => open({ kind: "plan", shift })}
-            >
-              {t("office.shifts.plan")}
-            </Button>
-            <Button
-              variant="secondary"
-              size="compact"
-              aria-label={t("office.shifts.closeNamed", { number: shift.number })}
-              onClick={() => open({ kind: "close", shift })}
-            >
-              {t("office.shifts.close")}
-            </Button>
-          </>
-        )}
-      </RowActions>
-    ),
-  });
+          )}
+          {canPlan && shift.status === "planned" && (
+            <>
+              <Button
+                variant="secondary"
+                size="compact"
+                aria-label={t("office.shifts.editNamed", { number: shift.number })}
+                onClick={() => open({ kind: "edit", shift })}
+              >
+                {t("office.shifts.edit")}
+              </Button>
+              <Button
+                variant="secondary"
+                size="compact"
+                aria-label={t("office.shifts.deleteNamed", { number: shift.number })}
+                onClick={() => open({ kind: "delete", shift })}
+              >
+                {t("office.shifts.delete")}
+              </Button>
+            </>
+          )}
+          {canPlan && shift.status === "active" && (
+            <>
+              <Button
+                variant="secondary"
+                size="compact"
+                aria-label={t("office.shifts.planNamed", { number: shift.number })}
+                onClick={() => open({ kind: "plan", shift })}
+              >
+                {t("office.shifts.plan")}
+              </Button>
+              <Button
+                variant="secondary"
+                size="compact"
+                aria-label={t("office.shifts.closeNamed", { number: shift.number })}
+                onClick={() => open({ kind: "close", shift })}
+              >
+                {t("office.shifts.close")}
+              </Button>
+            </>
+          )}
+        </RowActions>
+      ),
+    },
+  ];
+
 ```
 
-13. В `apps/standalone/src/office/shifts/ShiftsPage.tsx`, фрагмент
+14. В `apps/standalone/src/office/shifts/ShiftsPage.tsx`, фрагмент
 
 <!-- prettier-ignore -->
 ```tsx
@@ -9040,10 +9576,14 @@ import { datePickerTexts } from "./shift-text.js";
 
 - [ ] **Step 4: Тесты проходят**
 
-Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shift-totals.test.tsx test/shift-edit.test.tsx test/protocol.test.ts test/api.test.ts --reporter=verbose`
-Expected: PASS — 4 файла, 270 тестов; stderr пуст. Затем `test/shift-totals.test.tsx`, `test/shift-edit.test.tsx`, `test/shifts-page.test.tsx`, `test/shift-dialog.test.tsx`, `test/shift-delete-close.test.tsx` — под стендом с задержкой `setImmediate`: PASS.
+Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shift-totals.test.tsx test/shift-edit.test.tsx test/shifts-page.test.tsx test/shift-delete-close.test.tsx test/protocol.test.ts test/api.test.ts test/shift-dialog.test.tsx --reporter=verbose`
+Expected: PASS — 7 файлов, 439 тестов; stderr пуст (нет предупреждений `act(...)` и ошибок React).
+
+Затем те же 7 файлов — под стендом с задержкой `setImmediate` на 3 мс («Заметки для исполнения»; оба файла стенда создать, запустить, сразу удалить): PASS, 439 тестов. Тест «keeps the time in the organization's zone…» ждёт неудачного повторного чтения профиля сам (`act` с паузой 20 мс): без паузы он прошёл бы и без заморозки пояса.
 
 - [ ] **Step 5: Мутации**
+
+По правилу «Мутации» из «Заметок для исполнения» (`cp`, `shasum -a 256`, правка, ожидаемый FAIL названного теста, `cp` назад, `cmp` молчит, хеш прежний; не коммитить). Каждая мутация — одна строка; каждая убита названным тестом (проверено на копии).
 
 Мутация 1 — `getShift` читает не тот путь. В `apps/standalone/src/host/api.ts` фрагмент
 
@@ -9059,65 +9599,163 @@ Expected: PASS — 4 файла, 270 тестов; stderr пуст. Затем `
       client.request("GET", `/v1/office/shifts?id=${id}`, {
 ```
 
-Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/api.test.ts -t "getShift"`
-Expected: FAIL — «HostApi office endpoints > getShift sends the office token to the right route» — `AssertionError: expected [ { method: 'GET', …(3) } ] to deeply equal [ { method: 'GET', …(3) } ]`. Восстановить файл: `cmp` молчит, хеш прежний.
+Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/api.test.ts -t "getShift sends"`
+Expected: FAIL — «HostApi office endpoints > getShift sends the office token to the right route» — `AssertionError: expected [ { method: 'GET', …(3) } ] to deeply equal [ { method: 'GET', …(3) } ]`.
 
-Мутация 2 — время последних данных — без часового пояса организации. В `apps/standalone/src/office/shifts/ShiftTotalsDialog.tsx` фрагмент
+Мутация 2 — отрицательное число кодов в закрытых коробах принимается. В `apps/standalone/src/host/protocol.ts` фрагмент
+
+<!-- prettier-ignore -->
+```ts
+  unitsInClosedBoxes: z.number().int().nonnegative(),
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```ts
+  unitsInClosedBoxes: z.number().int(),
+```
+
+Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/protocol.test.ts -t "a shift's figures"`
+Expected: FAIL — «shift shapes > read a shift's figures, a planned shift's zeros among them, and refuse a figure of another form or a figure left out» — `AssertionError: unitsInClosedBoxes: -1: expected true to be false`.
+
+Мутация 3 — «Выпуск» показывает все принятые коды, а не коды в закрытых коробах. В `apps/standalone/src/office/shifts/ShiftsPage.tsx` фрагмент
 
 <!-- prettier-ignore -->
 ```tsx
-    ...(org.isSuccess ? { timeZone: org.data.timeZone } : {}),
+              units: UNITS.format(shift.totals.unitsInClosedBoxes),
 ```
 
 заменить на
 
 <!-- prettier-ignore -->
 ```tsx
-    ...({}),
+              units: UNITS.format(shift.totals.acceptedUnits),
 ```
 
-Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shift-totals.test.tsx -t "organization's time"`
-Expected: FAIL — «office shifts: a shift's figures > reads the shift when the dialog opens and shows its figures, the last fact in the organization's time» — `AssertionError: expected { 'План, шт': '1 200', …(5) } to deeply equal { 'План, шт': '1 200', …(5) }`. Восстановить файл: `cmp` молчит, хеш прежний.
-
-Мутация 3 — итоги не перечитываются при новом открытии окна. В `apps/standalone/src/office/shifts/ShiftTotalsDialog.tsx` фрагмент
-
-<!-- prettier-ignore -->
-```tsx
-  const detail = useOfficeQuery(officeKeys.shift(shift.id), (api, token) =>
-    api.getShift(token, shift.id),
-  );
-```
-
-заменить на
-
-<!-- prettier-ignore -->
-```tsx
-  const detail = useOfficeQuery(
-    officeKeys.shift(shift.id),
-    (api, token) => api.getShift(token, shift.id),
-    { staleTime: Infinity },
-  );
-```
-
-Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shift-totals.test.tsx -t "anew at every opening"`
-Expected: FAIL — «office shifts: a shift's figures > offers to read the figures again when they do not load, and reads them anew at every opening» — `AssertionError: expected "vi.fn()" to be called 3 times, but got 2 times`. Восстановить файл: `cmp` молчит, хеш прежний.
+Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shifts-page.test.tsx -t "put in closed boxes"`
+Expected: FAIL — «office shifts: the list > shows what an active and a closed shift put in closed boxes, and nothing for a planned one» — `AssertionError: expected '547 шт · 45 кор.' to be '540 шт · 45 кор.'`.
 
 Мутация 4 — итоги только у активной смены. В `apps/standalone/src/office/shifts/ShiftsPage.tsx` фрагмент
 
 <!-- prettier-ignore -->
 ```tsx
-        {shift.status !== "planned" && (
+          {shift.status !== "planned" && (
 ```
 
 заменить на
 
 <!-- prettier-ignore -->
 ```tsx
-        {shift.status === "active" && (
+          {shift.status === "active" && (
 ```
 
 Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shift-totals.test.tsx -t "offers the figures"`
-Expected: FAIL — «office shifts: a shift's figures > offers the figures of an active and a closed shift to both roles, and none of a planned one» — `TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Итоги смены OCT26-001/S"`. Восстановить файл: `cmp` молчит, хеш прежний.
+Expected: FAIL — «office shifts: a shift's figures > offers the figures of an active and a closed shift to both roles, and none of a planned one» — `TestingLibraryElementError: Unable to find an accessible element with the role "button" and name "Итоги смены OCT26-001/S"`.
+
+Мутация 5 — время последних данных без часового пояса организации. В `apps/standalone/src/office/shifts/ShiftTotalsDialog.tsx` фрагмент
+
+<!-- prettier-ignore -->
+```tsx
+    ...(zone === null ? {} : { timeZone: zone }),
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```tsx
+    ...{},
+```
+
+Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shift-totals.test.tsx -t "organization's time and the devices"`
+Expected: FAIL — «office shifts: a shift's figures > reads the shift when the dialog opens and shows its figures, the last fact in the organization's time and the devices by name» — `AssertionError: expected { 'План, шт': '1 200', …(6) } to deeply equal { 'План, шт': '1 200', …(6) }`.
+
+Мутация 6 — пояс не замораживается при первом показе. В `apps/standalone/src/office/shifts/ShiftTotalsDialog.tsx` фрагмент
+
+<!-- prettier-ignore -->
+```tsx
+  const [{ zone, timeNote }] = useState(() => ({ zone: zoneAtOpen, timeNote: timeNoteAtOpen }));
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```tsx
+  const [{ zone, timeNote }] = [{ zone: zoneAtOpen, timeNote: timeNoteAtOpen }];
+```
+
+Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shift-totals.test.tsx -t "keeps the time"`
+Expected: FAIL — «office shifts: a shift's figures > keeps the time in the organization's zone while the dialog is open, though the profile read again fails» — `AssertionError: expected '08.10.2026, 12:41' to be '08.10.2026, 21:41'` (12:41 — время ПК в Москве; на ПК в другом поясе — другое, но не 21:41; тест бессилен, только если пояс ПК — Камчатка).
+
+Мутация 7 — отозванное устройство не помечено. В `apps/standalone/src/office/shifts/ShiftTotalsDialog.tsx` фрагмент
+
+<!-- prettier-ignore -->
+```tsx
+  return device.revokedAt === null
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```tsx
+  return device.revokedAt !== "never"
+```
+
+Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shift-totals.test.tsx -t "organization's time and the devices"`
+Expected: FAIL — тот же тест, что у мутации 5 — `AssertionError: expected { 'План, шт': '1 200', …(6) } to deeply equal { 'План, шт': '1 200', …(6) }` (расходится строка «Устройства смены»).
+
+Мутация 8 — окно технолога спрашивает список устройств, который хост отдаёт только администратору. В `apps/standalone/src/office/shifts/ShiftTotalsDialog.tsx` фрагмент
+
+<!-- prettier-ignore -->
+```tsx
+    enabled: isAdmin,
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```tsx
+    enabled: true,
+```
+
+Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shift-totals.test.tsx -t "technologist"`
+Expected: FAIL — «office shifts: a shift's figures > shows a technologist the devices by the start of their ids and says why, without asking for the list» — `AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times`.
+
+Мутация 9 — неудача списка устройств молчит. В `apps/standalone/src/office/shifts/ShiftTotalsDialog.tsx` фрагмент
+
+<!-- prettier-ignore -->
+```tsx
+        devicesNote={!isAdmin ? "devicesAdminOnly" : devices.isError ? "devicesUnavailable" : null}
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```tsx
+        devicesNote={!isAdmin ? "devicesAdminOnly" : null}
+```
+
+Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shift-totals.test.tsx -t "list of devices does not load"`
+Expected: FAIL — «office shifts: a shift's figures > shows the devices by the start of their ids when the list of devices does not load, and says so» — `TestingLibraryElementError: Unable to find an element with the text: Список устройств не загрузился: устройства показаны началами кодов..`.
+
+Мутация 10 — пояс, которого ПК не знает, называется «не загрузился». В `apps/standalone/src/office/shifts/ShiftTotalsDialog.tsx` фрагмент
+
+<!-- prettier-ignore -->
+```tsx
+        timeNote={zone !== null ? null : org.isSuccess ? "localTimeZone" : "localTime"}
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```tsx
+        timeNote={zone !== null ? null : "localTime"}
+```
+
+Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone exec vitest run test/shift-totals.test.tsx -t "this PC's clock"`
+Expected: FAIL — «office shifts: a shift's figures > writes the time by this PC's clock when the profile does not load or names a zone this PC lacks, and says which» — `TestingLibraryElementError: Unable to find an element with the text: Этот ПК не знает часовой пояс организации: время — по часам этого ПК..`.
+
+Не мутируется: чтение итогов заново при каждом открытии держит `staleTime` 0 по умолчанию `useOfficeQuery` (однострочной мутации в коде окна нет; тест «reads them anew at every opening» ловит `{ staleTime: Infinity }`, добавленный вызову).
 
 - [ ] **Step 6: Документы**
 
@@ -9125,43 +9763,118 @@ Expected: FAIL — «office shifts: a shift's figures > offers the figures of an
 
 <!-- prettier-ignore -->
 ```text
-  sent trimmed with the loaded revision); a closed shift nothing. Every write
+  as done). It shows the plan, not units accepted. Plan 2a2 adds a required
+  `totals` (accepted units, closed and open boxes, last fact, device ids) to
+  **every** `OfficeShift`, the list included (fixture
+  `proto/fixtures/office-shift.json`; there is no separate detail fixture), and
+  this page does not read it yet: `officeShiftSchema` is not strict, so a host
+  that sends `totals` is tolerated, but the test «response fixture
+  office-shift.json parses without losing a field» in `test/protocol.test.ts`
+  fails once the fixture carries it. Whichever of plan 2a2 and plan 2a3 merges second adds
+  `totals` to `officeShiftSchema` and to the test shifts
+  (`test/support/shifts.ts`, the test files) in its PR; the row then shows the
+  accepted units and boxes, and what remains of the «Итоги» window (plan 2a3's
+  last task, rewritten after plan 2a2) is decided then. A shift carries ids,
 ```
 
 заменить на
 
 <!-- prettier-ignore -->
 ```text
-  sent trimmed with the loaded revision); a closed shift nothing to change.
-  «Итоги» on an active or a closed row, for every role, reads `GET …/{id}`
-  whenever it opens (`officeKeys.shift`, `ShiftTotalsDialog`): the plan, the
-  units taken, the boxes closed and open, the last fact's time in the
-  organization's zone and how many devices worked on the shift; the full card
-  of a shift is stage 4. Every write
+  as done), then «Выпуск»: for an active or a closed shift the codes in closed
+  boxes and the closed boxes of its `totals` («540 шт · 45 кор.», the cloud's
+  `containedUnits` and `closedBoxes`), «—» for a planned one; the column
+  follows the status so the columns before it keep their places. Every
+  `OfficeShift` carries plan 2a2's required `totals` (`shiftTotalsSchema`, six
+  fields; fixture `proto/fixtures/office-shift.json`, read by the Rust fixture
+  tests and by «response fixture office-shift.json» in `test/protocol.test.ts`).
+  «Итоги» on an active or a closed row, for every role (the writes stay
+  `planShifts`), opens `ShiftTotalsDialog`, which reads `GET …/{id}`
+  (`getShift`, `officeKeys.shift`) at every opening, since the totals change
+  without a revision: the plan, «Принято кодов» (`acceptedUnits`), «Кодов в
+  закрытых коробах», the closed and open boxes, «Последние данные со станции»
+  (in the organization's zone, or this PC's with a note while the profile does
+  not load or names a zone the PC lacks; the zone is fixed when the figures
+  first show) and the shift's devices, named from `listDevices` for an
+  administrator (a revoked one marked «(отозвано)») and by the first eight
+  characters of the id for a technologist, for an id the list lacks or while
+  the list does not load, with a note saying why. The full card of a shift is
+  stage 4. A shift carries ids,
+```
+
+2. В `apps/standalone/AGENTS.md`, фрагмент
+
+<!-- prettier-ignore -->
+```text
+  a period of 366 days. The shifts' totals (plan 2a2's `totals` in every
+  `OfficeShift`) are not read, and the «Итоги» window is not built (plan 2a3's
+  last task, rewritten after plan 2a2).
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```text
+  a period of 366 days. The «Итоги» window and the «Выпуск» column have run
+  only against fixture totals: never against a host's subqueries over real
+  facts, nor with the time of the last fact written by WebView2's `Intl`.
+```
+
+3. В `docs/superpowers/specs/2026-10-08-standalone-2a-shift-and-boxes-design.md`, фрагмент
+
+<!-- prettier-ignore -->
+```text
+- План 2a2 кладёт обязательное `totals` (принято единиц, закрытые и открытые короба, последний
+  факт, идентификаторы устройств) в каждый `OfficeShift`, список тоже (фикстура
+  `proto/fixtures/office-shift.json`, отдельной фикстуры строки нет). Страница 2a3 пока его не
+  читает и показывает план, а не «принято единиц и коробов»; схема `officeShiftSchema` не строгая,
+  поэтому хост с `totals` терпим, но тест фикстуры `office-shift.json` падает, пока схема его не
+  знает. Ветка, которая сливается второй (план 2a2 или 2a3), сама добавляет `totals` в схему и в
+  тестовые смены; тогда строка показывает принятые единицы и короба, а объём окна «Итоги»
+  (последняя задача плана 2a3, переписывается после 2a2) решается заново.
+```
+
+заменить на
+
+<!-- prettier-ignore -->
+```text
+- План 2a2 кладёт обязательное `totals` в каждый `OfficeShift`, список тоже (фикстура
+  `proto/fixtures/office-shift.json`, отдельной фикстуры строки нет): шесть полей —
+  `acceptedUnits`, `unitsInClosedBoxes`, `closedBoxes`, `openBoxes`, `lastFactAt`, `deviceIds`
+  (`shiftTotalsSchema`, обязательное поле `officeShiftSchema`; схемы ответов по-прежнему не
+  строгие). После статуса строка показывает колонку «Выпуск»: коды в закрытых коробах и закрытые
+  короба («540 шт · 45 кор.», как `containedUnits` облака), у запланированной смены — «—». Окно
+  «Итоги» строки активной и закрытой смены видят обе роли; оно читает `GET /v1/office/shifts/{id}`
+  при каждом открытии (итоги меняются без ревизии): план, «Принято кодов», «Кодов в закрытых
+  коробах», закрытые и открытые короба, «Последние данные со станции» в часовом поясе организации
+  (профиль не загрузился или пояс неизвестен ПК — по часам ПК с подписью; пояс фиксируется при
+  первом показе) и устройства смены: администратору — по названиям из списка устройств,
+  технологу, для кода, которого нет в списке, и пока список не загрузился — началами кодов с
+  подписью. Полная карточка смены — этап 4.
 ```
 
 - [ ] **Step 7: Проверки и коммит**
 
-Run: `node_modules/.bin/prettier --check apps/standalone/src/host/protocol.ts apps/standalone/src/host/api.ts apps/standalone/src/office/office-query.ts apps/standalone/src/office/shifts apps/standalone/src/i18n/ru.json apps/standalone/test/shift-totals.test.tsx apps/standalone/test/shift-edit.test.tsx apps/standalone/test/protocol.test.ts apps/standalone/test/api.test.ts apps/standalone/test/support/office.tsx apps/standalone/AGENTS.md`; `git diff --check`; `grep -rnF '\u04' apps/standalone/src apps/standalone/test`
-Expected: чисто; `grep` находит только `src/host/pairing-code.ts:66`.
+Run: `node_modules/.bin/prettier --check apps/standalone/src/host/protocol.ts apps/standalone/src/host/api.ts apps/standalone/src/office/office-query.ts apps/standalone/src/office/shifts apps/standalone/src/i18n/ru.json apps/standalone/test/shift-totals.test.tsx apps/standalone/test/shift-edit.test.tsx apps/standalone/test/shifts-page.test.tsx apps/standalone/test/shift-delete-close.test.tsx apps/standalone/test/shift-dialog.test.tsx apps/standalone/test/protocol.test.ts apps/standalone/test/api.test.ts apps/standalone/test/support/office.tsx apps/standalone/test/support/shifts.ts apps/standalone/AGENTS.md`; `git diff --check`; `grep -rnF '\u04' apps/standalone/src apps/standalone/test`
+Expected: чисто; `grep` находит только `src/host/pairing-code.ts:66`. Спецификацию prettier не проверять поштучно: на `8a2b60c6e` она уже не чиста до задачи (строка 1171 в §19, текст плана 2a2), правка §16 этого не меняет; `git diff --check` её покрывает.
 
 Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone typecheck`; `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone lint`
 Expected: без ошибок.
 
 Run: `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone test`
-Expected: PASS — 76 файлов, 1877 тестов (1869 + 8), если до задачи 9 не исполнены другие планы с тестами вебвью (план 2a2 их не добавляет; иначе — база перед задачей плюс 1 файл и 8 тестов).
+Expected: PASS — 81 файл, 2263 теста. На `claude/integration` `8a2b60c6e` до задачи — 80 файлов, 2251 тест, из них один красный («response fixture office-shift.json > parses without losing a field»); задача добавляет 1 файл и 12 тестов (8 в `shift-totals.test.tsx`, 2 в `api.test.ts`, по одному в `protocol.test.ts` и `shifts-page.test.tsx`). Другая база (влиты ещё планы) — её счёт плюс 1 файл и 12 тестов. Тайм-ауты 5 с под нагрузкой (`template-editor`, `shifts-page`) — повторить файл отдельно; сроки не поднимать.
 
 <!-- prettier-ignore -->
 ```bash
-git add apps/standalone/src/host/protocol.ts apps/standalone/src/host/api.ts apps/standalone/src/office/office-query.ts apps/standalone/src/office/shifts/ShiftTotalsDialog.tsx apps/standalone/src/office/shifts/ShiftsPage.tsx apps/standalone/src/i18n/ru.json apps/standalone/test/shift-totals.test.tsx apps/standalone/test/shift-edit.test.tsx apps/standalone/test/protocol.test.ts apps/standalone/test/api.test.ts apps/standalone/test/support/office.tsx apps/standalone/AGENTS.md
-git commit -m "feat(standalone): a shift's figures in the office" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git add apps/standalone/src/host/protocol.ts apps/standalone/src/host/api.ts apps/standalone/src/office/office-query.ts apps/standalone/src/office/shifts/ShiftTotalsDialog.tsx apps/standalone/src/office/shifts/ShiftsPage.tsx apps/standalone/src/i18n/ru.json apps/standalone/test/shift-totals.test.tsx apps/standalone/test/shift-edit.test.tsx apps/standalone/test/shifts-page.test.tsx apps/standalone/test/shift-delete-close.test.tsx apps/standalone/test/shift-dialog.test.tsx apps/standalone/test/protocol.test.ts apps/standalone/test/api.test.ts apps/standalone/test/support/office.tsx apps/standalone/test/support/shifts.ts apps/standalone/AGENTS.md docs/superpowers/specs/2026-10-08-standalone-2a-shift-and-boxes-design.md
+git commit -m "feat(standalone): a shift's figures in the office — totals in every shift, the output column, the «Итоги» window" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
 ```
 
 ---
 
 ## Итоговая проверка плана
 
-- [ ] `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone test` — 76 файлов, 1877 тестов (было 67 и 1744: +9 файлов, +133 теста); если до 2a3 исполнен план 2a4, база — его итог, а прирост тот же. После задачи 8 (до задачи 9) — 75 файлов, 1869 тестов.
+- [ ] `pnpm --config.verifyDepsBeforeRun=false --filter @markiro/standalone test` — задачи 1–8 исполнены и измерены в ветке `claude/2a3-office` (77 файлов, 2027 тестов, см. «Отклонения при исполнении»). Задача 9 — на `claude/integration` (влиты 2a4, 2a3 задачи 1–8 и 2a2; `8a2b60c6e`): до неё 80 файлов, 2251 тест, один красный по замыслу («response fixture office-shift.json > parses without losing a field»); после — 81 файл, 2263 теста, все зелёные. Другая база — её счёт плюс 1 файл и 12 тестов.
 - [ ] `typecheck`, `lint` и `build` того же пакета — без ошибок. Сборка: главный чанк около 943 кБ (на HEAD `366e87f06` — 902 кБ; прибавка — страница «Смены», её окна и `DatePicker`); ленивые чанки прежние.
 - [ ] `node_modules/.bin/prettier --check` по всем изменённым TS, TSX, JSON, CSS и MD — чисто; `git diff --check <начало плана>..HEAD` — чисто; `grep -rnF '\u04' apps/standalone/src apps/standalone/test` — только `src/host/pairing-code.ts:66`.
 - [ ] Каждая новая CSS-переменная объявлена в `packages/ui/src/tokens.css`: `for v in --fg-2 --fg-3 --err-fg --text-body-sm; do grep -c -- "$v:" packages/ui/src/tokens.css; done` — у каждой не меньше 1 (светлая и тёмная темы); других переменных новые правила `shell.css` (`.shift-cell`, `.shift-cell__quiet`, `.shift-note`, `.shift-note--error`) не берут.
@@ -9169,10 +9882,10 @@ git commit -m "feat(standalone): a shift's figures in the office" -m "Co-Authore
 - [ ] `git diff <начало плана>..HEAD --stat` — только файлы раздела «Файлы»; `Cargo.toml`, `Cargo.lock`, `package.json`, `pnpm-lock.yaml`, `apps/station`, `packages/*`, `apps/standalone/host`, `apps/standalone/proto` и `apps/standalone/src-tauri` этим планом не менялись (фикстура итогов — плана 2a2); Rust не менялся, cargo не запускается.
 - [ ] Каждый коммит плана несёт ровно одну строку `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>` и никаких других трейлеров.
 - [ ] В отчёте отдельно — что не проверялось и почему:
-  - страница и окна работали только под jsdom с поддельным `HostApi`: ни разу — в WebView2 (Windows) и WKWebView, в том числе календарь `DatePicker` внутри окна `Modal` и в окне киоск-режима, раскладка таблицы из восьми колонок на мониторе офиса;
+  - страница и окна работали только под jsdom с поддельным `HostApi`: ни разу — в WebView2 (Windows) и WKWebView, в том числе календарь `DatePicker` внутри окна `Modal` и в окне киоск-режима, раскладка таблицы из девяти колонок (с «Выпуском») на мониторе офиса;
   - против настоящего хоста не проверялись: смена, запланированная в офисе и открытая станцией (станция придёт в плане 2a5), ответы `shift_status`, `template_not_fit` и `not_found` на живых гонках двух рабочих мест, список с месяцами смен;
   - «сегодня» по часовому поясу настоящего профиля организации и `Intl` WebView2 (формат «08.10.2026, 17:30» и неразрывный пробел в «1 200» взяты из ICU Node);
-  - задача 9 проверена на копии против фикстуры, написанной по описанию спецификации, а не против ответа хоста плана 2a2; поля сверяются шагом 0 задачи 9;
+  - задача 9 проверена на копии `claude/integration` (`8a2b60c6e`) против фикстуры плана 2a2 `office-shift.json` и поддельного `HostApi`, но не против живого хоста с фактами (подзапросы итогов, `lastFactAt` хоста); поля сверяются шагом 0 задачи 9;
   - CI (общее задание JS с Vitest вебвью, `standalone-rust`, `standalone-windows-build`) — для него нужен push; `standalone-windows-build` по-прежнему ждёт шага владельца плана 1f2.
 
 ---
@@ -9181,14 +9894,14 @@ git commit -m "feat(standalone): a shift's figures in the office" -m "Co-Authore
 
 - **Хост (пункт 4 очереди 2a1).** Список смен хоста не постраничный, а запрос без периода (`status <> 'closed' OR production_date >= ?`) и запрос периода не пользуются индексами `(line_id, status)` и `(status, production_date)` в полную силу. Офис ограничивает период 366 днями, но хост принимает любой; предел или страницы на стороне хоста и индекс под запрос без периода — план хоста (2b или 4) или итоговая волна 2a2.
 - **Фикстура `proto/fixtures/error-with-details.json`** (пункт 9 очереди 2a1) всё ещё говорит «protocol 7 is outside 1..=1»: она общая с Rust (`proto/tests/fixtures.rs`), её правит итоговая волна плана 2a1 или следующий план хоста вместе с утверждением `test/protocol.test.ts` о её `details`.
-- **Итоги смены — числа без имён устройств:** список устройств читает только администратор; имена, короба, исключения, конфликты, поздние и отклонённые записи — полная карточка смены этапа 4.
+- **Итоги смены:** технолог видит устройства смены началами кодов — список устройств хост отдаёт только администратору (`require_admin`); названия для технолога — отдельное решение хоста. Короба, исключения, конфликты, поздние и отклонённые записи — полная карточка смены этапа 4.
 - **Возможности облачной формы смены вне 2a:** эмитент SSCC (вопрос В2, вариант Б), паллеты и их шаблон (2b), режим валидации (3), предупреждение облака о «критическом изменении активной смены» (в 2a у активной смены меняется только план, который не влияет на этикетку).
 - **«Не откроется» не учитывает линию:** хост не проверяет линию при открытии (станция её линии открывает смену и в архивной линии); если владелец решит иначе — правило в `openBlocker` и хосте вместе.
 - **Предупреждение «Устройства»** опирается на список хоста по умолчанию (в нём всегда все активные смены); станция, у которой хост не помнит владельца (офис закрыл смену), не предупреждается — и не должна.
 - **Размер главного чанка** вырос примерно на 41 кБ; ленивая загрузка страниц офиса (как у растеризатора и редактора) — отдельное решение, если чанк станет помехой.
 - **Вопросы владельцу**, допущения по которым приняты в начале плана: В1, В2, В3, В4, В6, В9, В13; при другом ответе — правки, названные там.
 - **Итоговое ревью 2a3** (Critical 0, Important 1, Minor 5 новых; очередь из 20 замечаний: исполнено 14, сняты 1, 4, 8, 17, перенесены 11 и 19). Остальное из него ушло в следующие пункты.
-- **Задача 9 («Итоги») не исполнена и переписывается до исполнения** (замечание I1 итогового ревью). План 2a2 кладёт обязательное `totals` в каждый `OfficeShift`, список тоже, а отдельной `office-shift-detail.json` у него нет, поэтому шаг 0 задачи 9 упрётся в своё условие остановки. Переписать так: `totals` — обязательное поле `officeShiftSchema` (`shiftTotalsSchema`: неотрицательные целые, `lastFactAt` — `z.iso.datetime().nullable()`, `deviceIds` — `z.array(z.uuid())`); строка списка показывает принятые единицы и короба (§5.6 спецификации); объём окна «Итоги» (имена устройств только администратору, время последнего факта в часовом поясе организации с тем же правилом «подпись замораживается при открытии», что у `ShiftForm`) решает контролёр или оно становится меньше; схемы ответов остаются нестрогими. Слияние: ветка, которая вливается второй (задача 7 плана 2a2 или этот план), сама добавляет `totals` в `officeShiftSchema` и в каждую `OfficeShift` в `test/support/shifts.ts` и в тестах, иначе тест «response fixture office-shift.json parses without losing a field» падает (так задумано). Раздел спецификации — §16.
+- **Задача 9 («Итоги») переписана 2026-10-10 под итоговый контракт плана 2a2** (замечание I1 итогового ревью; пункт 24 очереди `2a2-minors.md`) и проверена на копии `claude/integration` `8a2b60c6e` (влиты 2a4, задачи 1–8 этого плана и 2a2): `totals` из шести обязательных полей — поле `officeShiftSchema` (`shiftTotalsSchema`; схемы ответов нестрогие), отдельной схемы и фикстуры «детали» нет, сверку вебвью с `office-shift.json` делает существующий тест «response fixture office-shift.json»; строка списка получает колонку «Выпуск» после «Статуса»; объём окна «Итоги» решён так: план, «Принято кодов», «Кодов в закрытых коробах», короба, «Последние данные со станции» (пояс организации, замораживается при первом показе) и устройства по названиям у администратора, началами кодов у технолога. Правило слияния исполняет сама задача 9 (`test/support/shifts.ts`, `CREATED` в `shift-dialog.test.tsx`, два утверждения `shift-delete-close.test.tsx`). Раздел спецификации — §16; задача 9 правит его первый пункт.
 - **`@markiro/ui`, `Modal` (пункт 11 очереди; задача-чип).** Календарь `DatePicker` выносится порталом из старого `Modal` (контекста слоя нет), поэтому Tab из его последней кнопки выводит из окна на страницу позади. Чинится только в `packages/ui`: `Modal` игнорирует Escape с `defaultPrevented` и даёт `DatePicker` и `Select` контейнер портала. После этого убрать `keepCalendarEscape` из `ShiftDialog` и заново проверить Tab внутри окна.
 - **Хост (подтверждено итоговым ревью):** постраничность `GET /v1/office/shifts` на стороне хоста — предел периода в 366 дней её только заменяет; запись в первом пункте остаётся в силе. Хост проверяет `expectedRev` раньше статуса, а открытие и закрытие смены берут новую ревизию, поэтому `shift_status` на правке и закрытии не бывает — только `stale_revision`; `shift_status` доходит до одного `DELETE`, у которого нет `expectedRev`.
 - **Владельцу:**
@@ -9206,7 +9919,7 @@ git commit -m "feat(standalone): a shift's figures in the office" -m "Co-Authore
 
 ## Отклонения при исполнении
 
-Записано по итогам исполнения 2026-10-09. Задачи 1–8 исполнены в ветке `claude/2a3-office` (24 коммита от `51925bae2`, HEAD `105ad8bca`: восемь коммитов задач, четыре коммита исправлений по ревью задач 4 и 5, двенадцать коммитов итоговой волны) и **ещё не влиты** в главную ветку. **Задача 9 («Итоги») не исполнена**: до исполнения её надо переписать, потому что план 2a2 кладёт обязательное `totals` в каждый `OfficeShift` (см. «Перенесено»). Там, где задачи выше расходятся с кодом в ветке, верен этот раздел. Владелец не ответил на вопросы раздела 11 спецификации 2a: действуют допущения в начале плана (В1, В2, В3, В4, В6, В9, В13). Раздел спецификации — §16 «Уточнения плана 2a3».
+Записано по итогам исполнения 2026-10-09. Задачи 1–8 исполнены в ветке `claude/2a3-office` (24 коммита от `51925bae2`, HEAD `105ad8bca`: восемь коммитов задач, четыре коммита исправлений по ревью задач 4 и 5, двенадцать коммитов итоговой волны) и **ещё не влиты** в главную ветку. **Задача 9 («Итоги») не исполнена**; 2026-10-10 она переписана под итоговый контракт плана 2a2 (обязательное `totals` в каждом `OfficeShift`, см. «Перенесено») и исполняется на `claude/integration`. Там, где задачи выше расходятся с кодом в ветке, верен этот раздел. Владелец не ответил на вопросы раздела 11 спецификации 2a: действуют допущения в начале плана (В1, В2, В3, В4, В6, В9, В13). Раздел спецификации — §16 «Уточнения плана 2a3».
 
 **Поправки плана по ходу исполнения**
 
@@ -9220,7 +9933,7 @@ git commit -m "feat(standalone): a shift's figures in the office" -m "Co-Authore
 - Задача 7: фокус на отклонённое поле (`shouldFocus: true`) получают в `CreateOperatorDialog` все отказы хоста по полю, не только «похожий номер» (соглашение задач 5–6). 15 тестов сверх плана.
 - Задача 8: предложение в «Устройствах» записано с оговорками (для «Не выбрана» оно неточно; при неудачной загрузке смен окно молчит); порядок меню («Смены» перед «Операторы») исправлен в тексте про навигацию; пункт «Смены» разбит на шесть пунктов и дополнен тем, что добавили исправления задач 4–6; раздел спецификации — §16 (его до этого не было). Счёт тестов в документы не записан.
 - Хост проверяет ревизию раньше статуса (`update_shift`, `close_shift`), а открытие и закрытие смены берут новую ревизию: поэтому правка, план и закрытие смены, которую тем временем открыли или закрыли, получают `stale_revision` («Загрузить заново»); `shift_status` своими словами доходит только до удаления (у него нет `expectedRev`). Ветки `shift_status` в правке и закрытии оставлены на случай другого порядка проверок; тесты подставляют такой ответ сами. Слова «каждая запись шлёт ревизию открытой строки» поправлены: удаление ревизии не шлёт (хост её не принимает), создание её не имеет; удалить запланированную смену можно, что бы в ней тем временем ни изменили (так сказано в AGENTS.md и §16).
-- Контракт итогов: план 2a2 (написан после этого плана) кладёт обязательное `totals` в каждый `OfficeShift`, список тоже, с фикстурой `office-shift.json`; отдельной `office-shift-detail.json` нет. `officeShiftSchema` нестрогая, поэтому работающий хост с `totals` не ломает вебвью (поле отбрасывается), а тест фикстуры станет красным — как и задумано.
+- Контракт итогов: план 2a2 (написан после этого плана) кладёт обязательное `totals` в каждый `OfficeShift`, список тоже, с фикстурой `office-shift.json`; отдельной `office-shift-detail.json` нет. `officeShiftSchema` нестрогая, поэтому работающий хост с `totals` не ломает вебвью (поле отбрасывается), а тест фикстуры станет красным — как и задумано. Задача 9 переписана под этот контракт (шесть полей, включая `unitsInClosedBoxes`).
 - Список смен хоста не постраничный; предел периода в 366 дней его заменяет. Постраничность `GET /v1/office/shifts` — перенос в план хоста.
 - Наблюдение при проверке: при полных прогонах Vitest на загруженной машине (нагрузка 11–18, диск почти полон) падали по сроку 5 с чужие файлы (`template-editor`, `templates-page`, период в `shifts-page`); набор менялся от прогона к прогону, повторный полный прогон и отдельный прогон проходили. Сроки не поднимались.
 
