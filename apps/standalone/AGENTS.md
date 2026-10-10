@@ -187,11 +187,12 @@ Every table of `src-tauri/migrations` has a class in `TABLE_CLASSES`
 (`src-tauri/src/local_db.rs`; stage 2a spec §5.2, decision 30):
 `Disposable` — the copies of the host's data, `sync_state`,
 `sync_quarantine` and `floor_sign_in_failures`; `DeviceData` — what the
-device records itself (plans 2a5–2a8: shifts, boxes, scans, the outbox), each
-row tagged with the pairing that wrote it; `Workstation` — the PC's own
-settings (plan 2a7), which outlive any pairing. Of the 19 tables 11 are
-`Disposable` and the 8 of migration `0006` are `DeviceData` (below);
-`Workstation` stays empty until plan 2a7 adds tables. `tests/local_db.rs` fails on a table without a class and on a class
+device records itself (plans 2a5–2a8: shifts, boxes, scans, the outbox, the
+print jobs), each row tagged with the pairing that wrote it; `Workstation` —
+the PC's own settings (plan 2a7), which outlive any pairing. Of the 21 tables
+11 are `Disposable`, the 8 of migration `0006` and `floor_print_jobs` of `0007`
+are `DeviceData` (below), and `workstation_settings` of `0007` is the one
+`Workstation` table. `tests/local_db.rs` fails on a table without a class and on a class
 that names no table, so a plan that adds a table classes it in the same
 change. The same file forbids any foreign key between local tables
 (`no_table_has_a_foreign_key`): a plain key fails the forget at its `DELETE`,
@@ -314,6 +315,27 @@ have no retention at all; plan 2a8's `RETAINED_TABLES` deletes a shift's codes
 and boxes 30 days after the host took its close, so the header is out of date on
 that point. It is left as written: sqlx stores a checksum of the migration file,
 and a changed header would refuse a database that already applied `0006`.
+
+Migration `0007_floor_printing.sql` (plan 2a7) adds `floor_print_jobs`
+(`DeviceData`, see «Floor printing») and `workstation_settings`
+(`Workstation`, the only table of that class: one JSON value per key —
+`printers` (the profiles and the purposes' assignments), `scanners`, `sound`,
+`verify_printed_label` — with no pairing; a forget keeps it).
+`floor_print_jobs.purpose` admits `box` and `pallet` from the start, so the
+pallets' plan (ПЛ-Ц) rebuilds no table. `CHECK`s tie a job's state to its
+bytes, its printer and its reason code (only a job with bytes can be
+`sending`, `sent`, `unknown` or `verified`; a reason code exactly for `failed`
+and `unknown`; a `prepared` job has never been sent; `verified` only where
+`verify` is 1), and the partial unique index `floor_print_jobs_open` lets one
+job of a label wait at a time (`prepared`, `sending`, `failed`, `unknown`, or
+`sent` with `verify = 1`) — the rule that `isOpenJob` and the SQL of
+`readOpenJob` and `shiftLabelsSettled` repeat word for word.
+`test/floor-print-schema.test.ts` pins these rules and `test/floor-schema.test.ts`
+the columns and indexes. The jobs' repeating reads (`readOpenJob` before every
+close and after it, `shiftLabelsSettled`) have no line in the query-plan lists
+above: they rest on `floor_print_jobs_shift`, and nothing pins that yet. A job
+keeps its bytes as base64 text with no size bound, and no retention removes
+a job in plan 2a7 (decision 31 gives it to plan 2a8).
 
 ## Writes
 
@@ -1117,9 +1139,9 @@ each revision and never opens the stream itself.
 
 The shell's printers, COM scanners and power request (plan 2a4, ported from
 the cloud station's `printer.rs`, `scanner.rs` and `power.rs`) are reached
-only through `src/hardware/hardware.ts` (`createTauriHardware`); since plan 2a6
-the app calls `onScan` alone (the floor's COM scan source, see "Floor work"),
-and printing and the power request wait for plan 2a7.
+only through `src/hardware/hardware.ts` (`createTauriHardware`): the floor's
+COM scans (plan 2a6, see "Floor work"), and the printers, the scanners'
+configuration and the power request (plan 2a7, see "Floor printing").
 `src-tauri/tests/ipc.rs` pins the names and arguments, refusals are bare
 codes, and the system's own words go to the shell's stderr only.
 
@@ -1152,13 +1174,18 @@ codes, and the system's own words go to the shell's stderr only.
   an unknown outcome must never look like `not_sent`, because only
   `not_sent` makes printing again safe. Bytes the wrapper cannot encode are
   `invalid_payload` before the shell is asked. Neither the shell nor the
-  wrapper ever sends again; plan 2a7 owns one send at a time per address.
+  wrapper ever sends again; the floor's print runtime
+  (`src/floor/print/print-runtime.ts`) sends one at a time per address.
   `sent` means every byte left this computer, not that a label printed: a
   network printer sends no receipt, so a paused, out-of-paper or open printer
   that accepted the connection buffers the label and prints it later, and a
   reprint then doubles it; a spooler may take a job for a printer that is
-  off. A status query before sending (ZPL `~HS`, a TSPL equivalent) is a
-  language-specific decision left to plans 2a7 and `@markiro/domain`.
+  off. A status query before sending (ZPL `~HS`, a TSPL equivalent) is not
+  made: plan 2a7 left it to the owner (`print_bytes` only writes, so it would
+  need a read on the same connection and a reply parsed per language, and
+  neither a COM printer without flow control nor a spooler queue is known to
+  answer one; none of it was tried); the label check by scan is what proves a
+  label.
   Other limits, all unverified on Windows: Winsock may count the 5 s over one
   whole `send`, which is why a label goes out in 64 KiB chunks (a multi-MiB
   label to a slow printer stays on the manual list); a printer name that
@@ -1168,8 +1195,12 @@ codes, and the system's own words go to the shell's stderr only.
   spooler job is still ended
   after a failed write, so a half label can reach the printer (whether to
   abort it instead is an owner question); and a COM flush or a trickling
-  printer keeps the webview's call pending, so plan 2a7 needs its own limit
-  on the awaiting side that answers `outcome_unknown`.
+  printer keeps the webview's call pending, so the print runtime answers a
+  send it waited `PRINT_SEND_LIMIT_MS` (20 s, queue wait included) for as
+  `timeout`, which the job reads as an unknown outcome. The shell's call is
+  not cancelled by that: the runtime keeps its address busy until the call
+  really ends, so later sends to it end `printer_busy`, and a call that never
+  ends keeps it busy until the webview starts again.
 - `configure_scanners { scanners: [{ port, baud }] }` replaces the whole set
   of COM scanners. The argument is read as JSON, so a missing or misshapen
   one is `invalid_scanners` too, and so are more than 32 scanners, a name of
@@ -1216,8 +1247,8 @@ codes, and the system's own words go to the shell's stderr only.
   next `true` tries again. Dropping the state releases the request; at exit
   Tauri ends the process without dropping it, and Windows closes the handle
   with the process (unverified). The request survives a webview reload, so
-  plan 2a7 calls `setSystemAwake(false)` once when the webview starts; it is
-  idempotent and never fails.
+  the app lets it go once when the webview starts (`createSystemAwake`,
+  `src/hardware/awake.ts`, `reset`); it is idempotent and never fails.
 - `run()` manages every state through `manage_state` in `setup`: the device,
   the local database, the connection status, the scanner manager, kiosk mode
   and the awake lease. The mock runtime does not run `setup`, so
@@ -2361,7 +2392,8 @@ The station's side (plan 2a5). After a sign-in the floor is `FloorApp`, a small
 machine of its own like the cloud station's: the line's shifts
 (`src/floor/shifts/ShiftList.tsx`), a new shift (`NewShift.tsx`) and the work
 screen of the shift entered (`src/floor/work/WorkScreen.tsx`: scanning and
-boxes, see "Floor work"). `App` keys it by the pairing and the session, so nothing
+boxes, see "Floor work") and, from plan 2a7, the workstation setup (see "Floor
+printing"). `App` keys it by the pairing and the session, so nothing
 of one operator's screen outlives their sign-out. Any operator signed in may
 enter and create shifts (question В10): the station checks no role. The list
 shows this pairing's copies of the line's planned and active shifts and one
@@ -2759,8 +2791,10 @@ touches the idle wait (`touch`): a COM scanner presses no key.
 A scan (`scan-pipeline.ts`, `processScan`) is read once by the domain
 (`readScan` over `classifyScan`: the AIM prefixes go, the group separators and
 the crypto tail stay). A GTIN, an SSCC or anything else is `invalid` and keeps
-only its kind and its length, never its text (a badge is a secret; plan 2a7
-reads a label's SSCC before the pipeline). A code whose serial is longer than
+only its kind and its length, never its text (a badge is a secret). The one
+SSCC the screen reads is a printed label's, and it takes it before the
+pipeline while the label's check waits (see "Floor printing"). A code whose
+serial is longer than
 the host keeps (64 bytes, `HOST_MAX_SERIAL_BYTES`) or holds a control character
 reads as unknown, for the host would refuse it. A code of another product is
 `wrong_gtin`. A code this pairing holds in any box (`floor_codes`) is a local
@@ -2897,18 +2931,168 @@ without serials then says that the link is stopped until the operator leaves,
 instead of promising serials. The shell holds `other_host` and every
 `host_probed` answer behind the shift (`pendingOtherHost`, `pendingProbe`), so a
 forget or a sign-out never appears under a write in flight. `closeSteps` (the
-steps of every close) and `onClosed` (told once for every box that closed, also
-one read back after a lost answer, in the queue's turn after the write) are the
-extension points of plan 2a7 (the label's print job) and of the pallets' plan
-(joining the station's open pallet with the `palletId` of `box_closed`, which the
-host already takes since plan ПЛ-Х, so the plan adds no protocol version). Whatever they start goes to `track` before it begins, and
+steps of every close, which run after the screen's own label step, see "Floor
+printing") and `onClosed` (told once for every box that closed, also one read
+back after a lost answer, in the queue's turn after the write) are the
+extension points of the pallets' plan (joining the station's open pallet with
+the `palletId` of `box_closed`, which the host already takes since plan ПЛ-Х, so
+the plan adds no protocol version); plan 2a7's label job is not started from
+`onClosed` but written by the screen's own step. Whatever they start goes to `track` before it begins, and
 every writer of a box — plan 2a8's exceptions and the pallets' plan too — stays
 in the screen's queue: the digest of a closing box is read apart from the box,
 and only the queue keeps an undo from changing the box between the two reads. A
 box whose lost answer was not read back before the operator left is closed in
-the database and told to nobody, so the print recovery of plan 2a7 finds such
-boxes in `floor_boxes`. Printing the box's label is plan 2a7; the exceptions and
-the shift's close are plan 2a8.
+the database and told to nobody, but its label job was written by the same
+transaction, so the next entry of the screen finds it (`readOpenJob`). The box's
+label is «Floor printing»; the exceptions and the shift's close are plan 2a8.
+
+## Floor printing
+
+Stage 2a, plan 2a7 (`src/floor/print`, `src/floor/setup`, `src/hardware/awake.ts`).
+A closing box gets its print job in the close's own transaction (`boxLabelStep`,
+a `CloseStep` of plan 2a6, which the screen puts before the `closeSteps` of later
+plans): the label's fields are the domain's `boxLabelFields` from the shift's
+SNAPSHOT (product, print name, GTIN, shelf life, counterparty — never today's
+catalog), the box (SSCC, count, the stored `closedAt`), the shift's number and
+production date and the name of the operator who closed it; the bytes are
+rendered for the box's printer of the workstation's settings, read at each close:
+its language (`generateZpl` or `generateTspl`, loaded on their own) and
+resolution (`withPrinterDpi`), the template being the snapshot's revision, whose
+id and revision the job keeps along with the fields and a copy of the printer's
+profile. Non-Latin text goes through `src/labels/rasterizer.ts`, the office
+preview's rasterizer («предпросмотр = печать»), which refuses a canvas over 4096
+dots on a side (`RasterTooLargeError`) before it makes it. No printer assigned for
+boxes — the job is `failed` `printer_unconfigured`; no render — `failed`
+`render_failed` with the printer kept; the box closes either way, and no job
+exists for a box that did not close. The shift's number and production date come
+from the shift copy (the host's last list), because the snapshot has neither.
+
+A job (`floor_print_jobs`, `print-jobs.ts`) walks `prepared → sending → sent`,
+then `verified` or `skipped` when the job asks for the label check (`verify`, the
+workstation's setting when the job was made; a `sent` job with `verify = 0` is
+done), `failed` (nothing left this computer: `not_sent`, `invalid_target`,
+`invalid_payload`, `unsupported`, `printer_busy`) or `unknown` (a label may
+exist: `outcome_unknown`, `timeout`, `interrupted`). `sending` and the attempt
+are written before the bytes go (`sendLabelJob`), and every move compares the
+job's state and attempt with what was read, so a late answer never overwrites a
+job moved on. `sent` comes only from the shell's `{ sent: true }`. A send goes
+through the app's one `PrintRuntime` (`createPrintRuntime`, in `App`): one at a
+time per address (`printerTargetKey`), each answered within `PRINT_SEND_LIMIT_MS`
+(20 s from the ask, the wait behind another send included); a send whose limit
+ran out while an earlier one to the same address still had the printer is never
+given to the shell (`printer_busy`). The queue waits for the shell's call to
+really end, not for the limit, so a job whose call outlives the limit stays in
+flight and a recovery does not touch it. When the work screen opens, before it
+reads a job, every `sending` job of the pairing whose bytes no send of this app
+holds becomes `unknown` `interrupted` (`recoverInterruptedJobs`); it runs in the
+screen's work queue, never beside a send, and nowhere else but the operator's own
+check below. Nothing sends a label twice by itself: a `prepared` job — written
+with its box, never sent — is sent once when the screen finds it, after a close
+or on entry; every other send is the operator's.
+
+The work screen stops at a label that waits (`Stop` `label`, `LabelPanel`) and
+closes no next box while one does (`label_waits`; the unique index
+`floor_print_jobs_open` holds one waiting job per label). A failed label:
+«Напечатать снова» (the job's bytes again, no reason), «Другой принтер»,
+«Настроить принтер» (the setup, after the work settles, and back to the shift),
+«Продолжить без этикетки» after a confirmation (`skipped` with a `box_label`
+record `skipped`; the record has no field for a reason). An unknown one adds
+«Этикетка напечаталась» (`sent`, then the check when asked), and printing it
+again needs a reason of `REPRINT_REASONS` (`src/floor/exception-reasons.ts`, the
+host's fixture), built from the panel's buttons and written as a `reprint`
+exception (`floor_exceptions` and its `box_exception` record, no words) in the
+transaction that marks the job `sending`. Before a reprint is confirmed the panel
+names the printer it goes to, and says so when the job's own printer was deleted
+from the settings and the purpose's printer takes its place. Printing again keeps
+the job's bytes when the printer's language and resolution are the job's and
+renders again from the snapshot's template revision otherwise (`printAgain`); no
+printer or no render changes and sends nothing. A check that waits takes the scan
+before the pipeline: the SSCC read by `parseScannedSscc` equal to the job's —
+`verified` with its `box_label` record; another SSCC or no SSCC — said under the
+label with the error tone, nothing written or journalled; «Пропустить проверку» —
+`skipped`, with the record. «Выйти из смены» stays open at every label: the label
+waits for the operator's return, and a leave asked while a send is on its way
+waits for that send (up to the 20 s limit and two local writes). Once a label is
+done with, a box a stop of the station left full closes. A job left `sending`
+whose final write failed, with no send of this app holding its bytes, shows
+«Итог отправки этикетки не записан» and one button, «Проверить, вышла ли этикетка»:
+the operator's own check runs the same recovery as a piece of the work queue (so
+it moves every dead `sending` job of the pairing, not only this one) and the
+decisions of an unknown label follow; it sends nothing. Every press on the panel
+is ignored for 400 ms after the panel changes its view (`VIEW_GUARD_MS`), and the
+focus after a change goes to a control that decides nothing (a second tap of a
+double tap would otherwise choose a reason, a printer or a decision). A shift
+closes only once every label of it is done with (`shiftLabelsSettled`, which
+counts rows, so a waiting job this build cannot read keeps the shift open; plan
+2a8 asks it first): a `box_label` record after `shift_closed` would mark the
+station's own shift late on the host (`late_data_at`).
+
+The workstation setup (`WorkstationSetup.tsx`, one screen, from the list of
+shifts and from a label's recovery; any signed-in operator may open it) stores the
+printers (`{ id, name, target, language, dpi }`, one per address) and the printer
+of each purpose — `box`, `pallet`, `duplicate`; only `box` prints in stage 2a —
+the COM scanners, the tones' level and the label check (one setting for all
+labels), all at once on «Сохранить»: the four keys of `workstation_settings` in
+one transaction, then the whole set of scanners to the shell (also when the app
+starts, `applySavedScanners`). What would not read back is refused before
+anything is written: a printer address twice, a scanner port twice, a port name
+or a number of scanners the shell refuses (the shell refuses the whole set), and
+one COM port for a serial printer and a scanner (refused only when both are in
+the settings). A save whose shell step is refused keeps the settings and keeps
+«Сохранить» active to give the shell the set again. «Назад» leaves at once and
+says when it drops a change. A scanner's line is «Подключится после сохранения»,
+«Проверяем связь…» until the shell's first answer, then connected or not as
+`watchScanners` reports (the shell's snapshot has no other state). The test print
+sends a 58 × 40 label of ASCII only («MARKIRO TEST» and a random `MKR-` code in
+Code 128, `testLabelSpec`; no product data) through the same runtime and checks
+the scan of its code; a scan that is not that code is never shown (it may be a
+badge). It is no job: it takes no in-flight slot and queues behind a real send to
+the same address, and leaving the setup does not cancel it. The sound level (0 to
+100 in steps of 10, or none) is read by `FloorApp` when it opens and again after
+a save, and the work screen's tones play at it (`playSignalTone`, level 0 plays
+nothing). The work screen keeps the computer awake while it is open
+(`SystemAwake.hold`, generation-counted; the app lets any earlier request go once
+at start with `reset`).
+
+What plan 2a7 accepted and left open, none of it verified on a printer:
+
+- A reprint's trail does not name the printer the first label may have come out
+  on: a rebind overwrites the job's printer and bytes, and neither
+  `floor_exceptions` nor the host's `box_exception` has a field for a printer. The
+  operator holds the physical labels. A column or an attempts log (a migration) or
+  a protocol field is an owner / plan 2b item. Editing the profile of the job's
+  own printer (same id) likewise moves where «Напечатать снова» goes; the panel
+  names the printer first.
+- A stored job this build cannot read (`UnreadableJobError`: damaged printer or
+  fields JSON) makes every read of its shift's open job throw. The shift's line
+  stays on «Состояние этикетки не прочитано» until the operator leaves the shift,
+  and `shiftLabelsSettled` counts the row. Nothing is sent or lost and another
+  shift is not affected; a stop whose one action skips the label in SQL by the
+  job's id is proposed in the JSDoc of `UnreadableJobError`, an owner / plan 2b
+  item.
+- `verifyPrintedLabel` is one boolean for every label purpose; a switch per
+  purpose is a model change for the pallets' plan. A job keeps the setting it was
+  made under, so turning the check off does not release a waiting label.
+- Recovery runs only on entering the work screen and by the operator's check
+  button. A decision shows the decided job and trusts it instead of reading the
+  shift's next waiting job, exact while a shift has one box label at a time; the
+  pallets' plan (two labels can open in one close) must read the next job
+  (`settleLabel`) and add a test with two open jobs.
+- The 20 s limit counts the queue wait, so with pallet labels on the box printer a
+  label behind a slow send can end `timeout` or `busy`.
+- «Продолжить без этикетки» says only «Короб уже закрыт. Без этикетки его нужно
+  будет промаркировать позже.»: plan 2a8's «Исключения» screen does not exist yet.
+  When it lands, restore the reference in the text with a test that the reprint is
+  really reachable there, and change the test «promises nothing the screen does not
+  have…» in `floor-work-print.test.tsx`.
+- Open for the final review: the production date and the shift number of a label
+  come from the shift copy, so what the host lets an active shift edit after
+  entry decides whether the label rule (do not recalculate a persisted fact)
+  requires snapshotting them; the size of the stock label's bytes was not
+  measured.
+- `FloorApp` reads the saved sound level once when it opens (a read slower than a
+  whole setup visit could overwrite a newer level); a spooler queue whose port is a
+  COM port is not known to the app.
 
 ## Marking rules
 
@@ -3012,6 +3196,42 @@ either; a file log is stage 5.
     stretches of it through the real screen and the link (a restart finds the
     request, the full box and the records). Neither shows a real host, a real
     scanner or a real Windows.
+- The floor's printing (plan 2a7) by hand, on Windows 10 and 11, with the
+  client's printers. None of it has been run: the print jobs, the runtime, the
+  label panel and the setup have run only under jsdom, with node:sqlite behind
+  `LocalExecutor`, a fake canvas and `fakeHardware`: no printer, COM port,
+  spooler, WebView2 canvas or audio, Windows or screen reader has met them.
+  Check at least:
+  - the box label on a Zebra (ZPL) and a TSC (TSPL) at 203 and 300 dpi over
+    TCP 9100, a COM port and a USB spooler queue: the label's size and
+    position, a long Cyrillic name (IBM Plex through the WebView2 canvas,
+    including a canvas near 4096 dots), the dates, and the printed SSCC and
+    barcode read back by the client's scanner and equal to the box's; the same
+    template matches the office preview; the size of a stock label's stored
+    base64 at each resolution;
+  - the test print and its scan back on each printer and each connection;
+  - a printer switched off, out of paper, paused and unplugged before and in
+    the middle of a label: «не напечатана» or «неизвестно» as the shell
+    answers, never a second label without the operator; a spooler that takes
+    a job for a printer that is off; a COM printer that stops reading (the 20 s
+    limit, then «Принтер не ответил вовремя», and the next send to it ending
+    «ещё занят»);
+  - the PC switched off in the middle of a send: on return the label is
+    «Печать прервалась», and the operator's decisions work (printed, print
+    again with a reason, another printer, continue without a label); the
+    reprint's `box_exception` reaches the host once the link is back;
+  - the label check with the client's scanners (an SSCC with and without the
+    `]C1` prefix, a badge or a code of marking scanned by mistake),
+    «Пропустить проверку» and the reprint with a reason;
+  - the work screen's layout with a label panel at 1024 × 768 and 1280 × 800 on
+    the touch panel (64 px, a double tap on a view change), and the setup's;
+  - `powercfg /requests` while a work screen is open and after it closes, and
+    after the window was reloaded during a shift;
+  - the COM scanners of the setup: the port list, a scanner added and removed,
+    its status, a refused set, and the scanners again after a restart;
+  - the kiosk window with the setup open: the Windows on-screen keyboard over
+    the printer's fields, the USB printer list, no way out of the locked
+    window, and the idle sign-out from the setup.
 - The Windows service and DPAPI run only in the `standalone-windows-build`
   job: it compiles the service and the Tauri app for Windows, and its cargo
   tests round-trip a key through DPAPI. A real Windows user profile, the
