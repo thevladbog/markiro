@@ -50,10 +50,10 @@ export type SyncFailure = "host" | "local" | "feed";
 /**
  * Why the last send of the outbox failed: the host could not be reached
  * (`offline`); it answered with an error or with receipts that do not fit
- * (`host`: a 500, a 413, an answer this build cannot read); or this computer
- * could not keep its receipts (`local`). Either way nothing was kept and the
- * same batch goes again; the status bar names a failure that is not the
- * link's.
+ * (`host`: a 500, a 400 for a batch it cannot take, an answer this build
+ * cannot read); or this computer could not keep its receipts (`local`).
+ * Either way nothing was kept and the same batch goes again; the status bar
+ * names a failure that is not the link's.
  */
 export type FactsFailure = "offline" | "host" | "local";
 

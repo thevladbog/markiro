@@ -62,8 +62,8 @@ export function scannedCode(km: ParsedKm): ScannedCode {
  * The largest record the outbox keeps, in bytes of its JSON. A scan's record
  * is about 1.3 KB at most (a canonical code of 1024 bytes), so this only
  * keeps out a record no fact makes; and a batch of 100 such records stays
- * under the host's 2 MiB body limit, past which the host answers 413 and
- * the same batch would be refused for good.
+ * under the host's 2 MiB body limit, past which the host answers 400
+ * `validation_failed` and the same batch would be refused for good.
  */
 export const MAX_RECORD_BYTES = 16 * 1024;
 

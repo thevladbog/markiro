@@ -26,9 +26,12 @@ export interface BlockContext {
  * How a top-up went: `enough` — the newest block still has half its serials,
  * nothing asked; `stored` — a block arrived and is kept; `offline` — a block
  * is needed (or a request waits) and the link is not online; `exhausted` —
- * the host has no serials left for the prefix; `failed` — no answer, or one
- * this station does not keep: a request the host may have answered stays in
- * `floor_block_requests` and is repeated as it is, next time.
+ * the host has no serials left for the prefix; `failed` — no answer (the
+ * request the host may have answered stays in `floor_block_requests` and is
+ * repeated as it is, next time), or an answer this station does not keep
+ * (another prefix or extension, an inverted range, a range that shares serials
+ * with a kept block, a `validation_failed`): that request is dropped, and
+ * nothing but this result says so.
  */
 export type SupplyResult =
   | { kind: "enough" }
@@ -52,7 +55,10 @@ const spanRow = z.object({ next_serial: z.number().int(), to_serial: z.number().
  * (a serial past it is lost, not used). A serial that two kept blocks both
  * cover is counted once, as only one box can carry it. The host numbers its
  * blocks from a counter that only grows, so the blocks do not overlap and
- * stay inside the capacity; the count does not rely on it.
+ * stay inside the capacity; the count does not rely on it. It counts a serial
+ * whose SSCC another box already holds (a former pairing's, after a host that
+ * was reinstalled with its counter reset), which the close then loses as an
+ * `invalid_serial`; that state is not one a host can produce today.
  */
 export async function remainingSerials(
   local: LocalExecutor,
@@ -232,6 +238,10 @@ async function storeBlock(
  * time; a call while one runs shares it. A request the host refuses as
  * another prefix's (`validation_failed` on `requestId`, plan 2a1's final
  * wave) is dropped and a new one sent, once; `sscc_exhausted` drops it. A
+ * block that is not the one asked for (another prefix or extension, an
+ * inverted range) or that shares serials with a block kept is never filed:
+ * its request is dropped too, and the result is `failed`, with no report
+ * through `onHostError` (a screen for it belongs to the queue, plan ОЧ). A
  * failed write of this computer rejects.
  */
 export function createBlockSupply(context: BlockContext): { topUp: () => Promise<SupplyResult> } {

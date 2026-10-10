@@ -16,10 +16,12 @@ const unsentRow = z.object({ id: z.string(), kind: z.string(), payload: z.string
 
 /**
  * The most bytes of record JSON one batch carries. The host refuses a body
- * over 2 MiB (413), and a refused batch is sent again unchanged, so a batch
- * that is too large would hold back every record behind it for good. A
- * record is at most 16 KiB (`MAX_RECORD_BYTES`), which puts a batch of 100
- * at about 1.6 MiB: this only cuts a batch of records that no fact makes.
+ * over 2 MiB (axum's default; its extractor answers the length rejection like
+ * any malformed body: 400 `validation_failed`), and a refused batch is sent
+ * again unchanged, so a batch that is too large would hold back every record
+ * behind it for good. A record is at most 16 KiB (`MAX_RECORD_BYTES`), which
+ * puts a batch of 100 at about 1.6 MiB: this only cuts a batch of records
+ * that no fact makes.
  */
 export const MAX_BATCH_BYTES = 1_835_008;
 
@@ -27,8 +29,10 @@ const encoder = new TextEncoder();
 
 /**
  * The records of `rows` from the first to the last that fits `MAX_BATCH_BYTES`
- * together, counted in bytes of UTF-8 (the first goes alone, however large:
- * it can only be refused, never pass over).
+ * together, counted in bytes of UTF-8. The first goes alone, however large;
+ * were it over the host's body limit it would be refused with 400 on every
+ * send and block the queue, which cannot happen: `outboxStatement` keeps no
+ * record over `MAX_RECORD_BYTES` (16 KiB), far below the limit.
  */
 function withinBudget<T extends { payload: string }>(rows: readonly T[]): T[] {
   let bytes = 0;
@@ -113,8 +117,9 @@ export function receiptStatements(
 /**
  * One batch of the outbox to the host (stage 2a spec §5.5, decision 11): this
  * pairing's oldest records without a receipt, up to 100, in their order, sent
- * as kept (and within `MAX_BATCH_BYTES`). Each send counts in `attempts` first. The receipts are checked
- * against the records — as many, each with its record's id or none (a record
+ * as kept (and within `MAX_BATCH_BYTES`). Each send counts in `attempts`
+ * first. The receipts are checked against the records — as many, each with
+ * its record's id or none (a record
  * the host could not read, matched by its place) — and applied in ONE
  * transaction through `json_each`: the outcome, its code and details, and
  * the time on every record; a `conflict` of a scan marks the scan and its
