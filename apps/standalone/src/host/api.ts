@@ -26,6 +26,7 @@ import {
   productGroupSchema,
   officeShiftSchema,
   shiftExportRowsSchema,
+  boxReportRowsSchema,
   ssccCounterSchema,
   ssccStateSchema,
   templateDefaultsSchema,
@@ -75,6 +76,7 @@ import {
   type ShiftCreate,
   type ShiftExportRecord,
   type ShiftExportRows,
+  type BoxReportRows,
   type ShiftUpdate,
   type SsccCounter,
   type SsccCounterUpdate,
@@ -196,6 +198,8 @@ export interface HostApi {
   listShiftPallets: (token: string, id: string) => Promise<OfficePallet[]>;
   /** `204`: the export's files are saved; the host writes its `shift.export` audit row (plan ЧЗ). */
   recordShiftExport: (token: string, id: string, record: ShiftExportRecord) => Promise<void>;
+  /** What «Состав короба» prints of the box, in one snapshot (plan О-Ф); every office role. */
+  getBoxReportRows: (token: string, id: string) => Promise<BoxReportRows>;
   /**
    * The station's shifts, with the device key only: the planned and active
    * shifts of its line and those it entered, active or closed within 30
@@ -499,5 +503,10 @@ export function createHostApi(client: HostClient): HostApi {
         schema: NO_CONTENT,
       });
     },
+    getBoxReportRows: (token, id) =>
+      client.request("GET", `/v1/office/boxes/${id}/report-data`, {
+        officeToken: token,
+        schema: boxReportRowsSchema,
+      }),
   };
 }

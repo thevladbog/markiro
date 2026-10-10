@@ -290,6 +290,10 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::office_exports::record_export),
         )
         .route(
+            "/v1/office/boxes/{id}/report-data",
+            get(crate::routes::office_reports::box_report),
+        )
+        .route(
             "/v1/office/users",
             get(crate::routes::office_users::list_users)
                 .post(crate::routes::office_users::create_user),

@@ -88,6 +88,7 @@ const DEFAULTS_UPDATE = templateDefaultsUpdateSchema.parse(
   fixture("template-defaults-update.json"),
 );
 const SHIFT_ID = "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b";
+const BOX_ID = "b0000000-0000-4000-8000-000000000001";
 const SHIFT_CREATE = shiftCreateSchema.parse(fixture("shift-create.json"));
 const SHIFT_UPDATE = shiftUpdateSchema.parse(fixture("shift-update.json"));
 const SHIFT_CLOSE = shiftCloseSchema.parse(fixture("shift-close.json"));
@@ -435,6 +436,12 @@ const CASES: Case[] = [
     null,
     (api) => api.recordShiftExport(TOKEN, SHIFT_ID, EXPORT_RECORD),
     { method: "POST", path: `/v1/office/shifts/${SHIFT_ID}/exports`, body: EXPORT_RECORD },
+  ],
+  [
+    "getBoxReportRows",
+    fixture("box-report-rows.json"),
+    (api) => api.getBoxReportRows(TOKEN, BOX_ID),
+    { method: "GET", path: `/v1/office/boxes/${BOX_ID}/report-data`, body: undefined },
   ],
   [
     "setUserPassword",

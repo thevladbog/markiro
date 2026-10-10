@@ -689,6 +689,27 @@ export const officePalletSchema = z.object({
 export type OfficePallet = z.infer<typeof officePalletSchema>;
 
 /**
+ * Mirrors `markiro_proto::BoxReportRows`: `GET /v1/office/boxes/{id}/report-data`
+ * (plan О-Ф), what «Состав короба» prints of one box, in one snapshot of the
+ * host: the codes the cloud's form prints (the live ones, and of a box taken
+ * apart those its disassembly took out), ordered by GTIN and serial, each
+ * with the canonical text its DataMatrix encodes. Codes and SSCCs are plain
+ * text, as in the export source.
+ */
+export const boxReportRowsSchema = z.object({
+  id: z.string(),
+  shiftId: z.uuid(),
+  sscc: z.string().nullable(),
+  openedAt: z.iso.datetime(),
+  closedAt: z.iso.datetime().nullable(),
+  disassembledAt: z.iso.datetime().nullable(),
+  productName: z.string(),
+  organization: z.object({ name: z.string(), inn: z.string().nullable() }),
+  items: z.array(z.object({ gtin14: z.string(), serial: z.string(), canonical: z.string() })),
+});
+export type BoxReportRows = z.infer<typeof boxReportRowsSchema>;
+
+/**
  * The product as a shift froze it when a station opened it
  * (`markiro_proto::ShiftSnapshotProduct`); only an active product opens a
  * shift, so it has a group.

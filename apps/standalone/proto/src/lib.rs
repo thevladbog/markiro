@@ -2258,6 +2258,40 @@ pub struct ExportPallet {
     pub disassembled_at: Option<String>,
 }
 
+/// `GET /v1/office/boxes/{id}/report-data` (plan О-Ф): what «Состав
+/// короба» prints of one box, read in one snapshot. `items` are the codes
+/// the cloud's form prints (`CodeSearchService.boxReportData`): the box's
+/// live items, and of a box taken apart the items its disassembly took out
+/// (`removed_at` equal to the box's `disassembled_at`: the host writes both
+/// from the one instant of the `disassemble` fact), never an item taken out
+/// earlier or taken by an earlier scan elsewhere; each with its scan's GTIN,
+/// serial and canonical text (crypto tail included), ordered by GTIN, then
+/// serial, byte for byte. `productName` is the product's name now, as the
+/// cloud's form joins it; the device's instants are as it sent them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoxReportRows {
+    pub id: String,
+    pub shift_id: String,
+    pub sscc: Option<String>,
+    pub opened_at: String,
+    pub closed_at: Option<String>,
+    pub disassembled_at: Option<String>,
+    pub product_name: String,
+    pub organization: ExportOrganization,
+    pub items: Vec<BoxReportItem>,
+}
+
+/// A code «Состав короба» prints: the AI 01 and AI 21 of its label line and
+/// the full canonical text its DataMatrix encodes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoxReportItem {
+    pub gtin14: String,
+    pub serial: String,
+    pub canonical: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

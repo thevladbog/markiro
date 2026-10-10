@@ -100,6 +100,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     getDeviceShifts: vi.fn<HostApi["getDeviceShifts"]>(async () => []),
     createDeviceShift: vi.fn<HostApi["createDeviceShift"]>(() => unexpected("createDeviceShift")),
     enterShift: vi.fn<HostApi["enterShift"]>(() => unexpected("enterShift")),
+    getBoxReportRows: vi.fn<HostApi["getBoxReportRows"]>(() => unexpected("getBoxReportRows")),
     ...overrides,
   };
 }

@@ -11,6 +11,7 @@ pub mod lines;
 pub mod office_auth;
 pub mod office_boxes;
 pub mod office_exports;
+pub mod office_reports;
 pub mod office_shifts;
 pub mod office_users;
 pub mod operators;

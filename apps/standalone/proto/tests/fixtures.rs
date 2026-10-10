@@ -1,11 +1,11 @@
 use markiro_proto::{
     category_default_id, certificate_fingerprint, codes, compatibility, compatibility_for,
     credentials, display_fingerprint, BadgeCreate, BadgeSalt, BlockSizesUpdate, BootstrapRequest,
-    BootstrapResponse, BoxClosedFact, BoxExceptionFact, BoxLabelFact, CategoryTemplateDefault,
-    ChangesResponse, ClaimRequest, CodeCheck, CodeOwner, Compatibility, CounterpartyCreate,
-    CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind, DeviceLineRequest,
-    DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts, DeviceUpdate, ErrorBody,
-    ExceptionKind, FactBatch, FactKind, FactOutcome, FactReceipts, Hello, HelloEnvelope,
+    BootstrapResponse, BoxClosedFact, BoxExceptionFact, BoxLabelFact, BoxReportRows,
+    CategoryTemplateDefault, ChangesResponse, ClaimRequest, CodeCheck, CodeOwner, Compatibility,
+    CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind,
+    DeviceLineRequest, DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts, DeviceUpdate,
+    ErrorBody, ExceptionKind, FactBatch, FactKind, FactOutcome, FactReceipts, Hello, HelloEnvelope,
     LabelOutcome, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary,
     LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeBox,
     OfficeLine, OfficeLoginRequest, OfficeOperator, OfficePallet, OfficeProduct, OfficeRole,
@@ -1349,6 +1349,60 @@ fn shift_export_record_round_trips_and_counts_the_rows_of_its_shift() {
     let mut value = fixture("shift-export-record.json");
     value["folder"] = Value::String("C:\\Users".into());
     assert!(serde_json::from_value::<ShiftExportRecord>(value).is_err());
+}
+
+/// «Состав короба»'s data (plan О-Ф) round-trips and agrees with the export
+/// source of the same shift: a box not taken apart prints exactly its live
+/// codes there, ordered by GTIN and then serial, and each code's GTIN and
+/// serial are the ones its canonical text carries.
+#[test]
+fn box_report_rows_round_trip_and_agree_with_the_export_source() {
+    let report: BoxReportRows = round_trip("box-report-rows.json");
+    let rows: ShiftExportRows = serde_json::from_value(fixture("shift-export-rows.json")).unwrap();
+    assert_eq!(report.shift_id, rows.shift.id);
+    assert_eq!(report.product_name, rows.shift.product_name);
+    assert_eq!(report.organization, rows.organization);
+    let source = rows.boxes.iter().find(|b| b.id == report.id).unwrap();
+    assert_eq!(
+        (
+            &report.sscc,
+            &report.opened_at,
+            &report.closed_at,
+            &report.disassembled_at
+        ),
+        (
+            &source.sscc,
+            &source.opened_at,
+            &source.closed_at,
+            &source.disassembled_at
+        )
+    );
+    let mut live: Vec<&str> = rows
+        .items
+        .iter()
+        .filter(|i| i.box_id == report.id)
+        .map(|i| {
+            rows.codes
+                .iter()
+                .find(|c| c.code_hash == i.code_hash)
+                .unwrap()
+                .canonical
+                .as_str()
+        })
+        .collect();
+    live.sort_unstable();
+    let printed: Vec<&str> = report.items.iter().map(|i| i.canonical.as_str()).collect();
+    assert_eq!(printed, live);
+    let mut ordered = report.items.clone();
+    ordered.sort_by(|a, b| (&a.gtin14, &a.serial).cmp(&(&b.gtin14, &b.serial)));
+    assert_eq!(ordered, report.items);
+    for item in &report.items {
+        assert!(
+            item.canonical
+                .starts_with(&format!("01{}21{}\u{1d}", item.gtin14, item.serial)),
+            "{item:?}"
+        );
+    }
 }
 
 /// A shift's totals carry both pallet counts (plan ПЛ-Х): each is required,

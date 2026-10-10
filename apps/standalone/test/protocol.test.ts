@@ -11,6 +11,7 @@ import {
   blockSizesUpdateSchema,
   bootstrapRequestSchema,
   bootstrapResponseSchema,
+  boxReportRowsSchema,
   canonicalSaltSchema,
   categoryTemplateDefaultSchema,
   changesResponseSchema,
@@ -264,6 +265,7 @@ const RESPONSES = [
   ["error-template-is-default.json", errorBodySchema],
   ["office-shift.json", officeShiftSchema],
   ["shift-export-rows.json", shiftExportRowsSchema],
+  ["box-report-rows.json", boxReportRowsSchema],
   ["error-shift-busy.json", errorBodySchema],
   ["error-snapshot-too-large.json", errorBodySchema],
   ["error-sscc-exhausted.json", errorBodySchema],
@@ -2091,5 +2093,83 @@ describe("unauthorized errors", () => {
   it("name the rejected credential", () => {
     const body = errorBodySchema.parse(fixture("error-unauthorized.json"));
     expect(credentialSchema.parse(body.error.details?.credential)).toBe("session");
+  });
+});
+
+describe("a box's form data (plan О-Ф)", () => {
+  type Report = ReturnType<typeof boxReportRowsSchema.parse>;
+  const report = (): Report => boxReportRowsSchema.parse(fixture("box-report-rows.json"));
+  const refused = (value: unknown): boolean => !boxReportRowsSchema.safeParse(value).success;
+
+  it("reads the nulls of an open box, an unclosed one and a box with no codes", () => {
+    const open: Report = {
+      ...report(),
+      sscc: null,
+      closedAt: null,
+      disassembledAt: null,
+      organization: { name: "ООО «Атолл»", inn: null },
+      items: [],
+    };
+    expect(boxReportRowsSchema.parse(open)).toEqual(open);
+    const apart: Report = { ...report(), disassembledAt: "2026-10-08T07:00:00.000Z" };
+    expect(boxReportRowsSchema.parse(apart)).toEqual(apart);
+  });
+
+  it("keeps the group separator and the crypto tail of a code, and reads a box id or an SSCC the domain will refuse as plain text", () => {
+    const base = report();
+    expect(base.items.every((item) => item.canonical.includes("\u001d"))).toBe(true);
+    const odd: Report = {
+      ...base,
+      id: "box-1",
+      sscc: "12345",
+      items: [{ gtin14: "1", serial: "", canonical: "not a km" }],
+    };
+    expect(boxReportRowsSchema.parse(odd)).toEqual(odd);
+  });
+
+  it("refuses a missing field at every level", () => {
+    const without = <T extends object>(value: T, field: string): object =>
+      Object.fromEntries(Object.entries(value).filter(([key]) => key !== field));
+    const base = report();
+    for (const field of Object.keys(base)) {
+      expect(refused(without(base, field)), field).toBe(true);
+    }
+    for (const field of Object.keys(base.organization)) {
+      const organization = without(base.organization, field);
+      expect(refused({ ...base, organization }), `organization.${field}`).toBe(true);
+    }
+    for (const field of Object.keys(base.items[0]!)) {
+      const item = without(base.items[0]!, field);
+      expect(refused({ ...base, items: [item] }), `items.${field}`).toBe(true);
+    }
+  });
+
+  it("refuses a value of the wrong kind", () => {
+    const base = report();
+    const bad: [string, unknown][] = [
+      ["shiftId", "not-a-uuid"],
+      ["shiftId", null],
+      ["id", null],
+      ["sscc", 4600682],
+      ["openedAt", "yesterday"],
+      ["openedAt", null],
+      ["closedAt", "2026-10-08"],
+      ["disassembledAt", 5],
+      ["productName", null],
+      ["organization", null],
+      ["items", null],
+    ];
+    for (const [field, value] of bad) {
+      expect(refused({ ...base, [field]: value }), `${field}: ${JSON.stringify(value)}`).toBe(true);
+    }
+    expect(refused({ ...base, organization: { name: null, inn: null } })).toBe(true);
+    expect(refused({ ...base, organization: { name: "ООО", inn: 7701234567 } })).toBe(true);
+    for (const item of [
+      { ...base.items[0]!, gtin14: null },
+      { ...base.items[0]!, serial: 5 },
+      { ...base.items[0]!, canonical: null },
+    ]) {
+      expect(refused({ ...base, items: [item] })).toBe(true);
+    }
   });
 });
