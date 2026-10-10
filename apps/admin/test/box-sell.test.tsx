@@ -76,6 +76,33 @@ afterEach(() => {
 });
 
 describe("SellBoxPage", () => {
+  it.each(["!1123456789012345675", "!100123456789012345675"])(
+    "loads a legacy box label %s using the bare SSCC",
+    async (raw) => {
+      const fetchMock = stubFetch();
+      renderPage();
+      const user = userEvent.setup();
+      await user.type(screen.getByLabelText("SSCC короба"), raw);
+      await user.click(screen.getByRole("button", { name: "Найти короб" }));
+
+      expect(await screen.findByText("1 / 2")).toBeTruthy();
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/boxes/sell-codes?sscc=123456789012345675",
+        expect.anything(),
+      );
+    },
+  );
+
+  it("rejects a legacy label with a wrong check digit without requesting a box", async () => {
+    const fetchMock = stubFetch();
+    renderPage();
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText("SSCC короба"), "!100123456789012345670");
+    await user.click(screen.getByRole("button", { name: "Найти короб" }));
+    expect(await screen.findByText("Неверный SSCC — проверьте 18 цифр кода")).toBeTruthy();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("walks entry → per-code display → finish", async () => {
     stubFetch();
     renderPage();

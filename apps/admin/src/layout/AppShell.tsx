@@ -202,7 +202,7 @@ export function AppShell() {
   }));
 
   return (
-    <div className="mk-app-shell" style={{ display: "flex", height: "100vh", overflow: "hidden" }}>
+    <div className="mk-app-shell" style={{ display: "flex", height: "100dvh", overflow: "hidden" }}>
       <Sidebar
         className="mk-app-sidebar"
         // The footer link below carries its own 10px padding on every side;
