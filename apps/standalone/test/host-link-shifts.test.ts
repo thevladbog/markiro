@@ -250,6 +250,30 @@ describe("the station's shifts on the link", () => {
     expect(reads()).toEqual([{ type: "shifts_read", ok: true }]);
     hook.unmount();
   });
+
+  it("say nothing and are not retried when the shell has no pairing to read for", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const unpaired = new HostError({
+      kind: "transport",
+      code: "not_paired",
+      message: "no pairing",
+    });
+    const deviceShifts = vi.fn<() => Promise<DeviceShift[]>>().mockRejectedValue(unpaired);
+    const { dispatch, reads, hook } = link(deviceShifts);
+    await waitFor(() => expect(deviceShifts).toHaveBeenCalledTimes(1));
+    await settle();
+    expect(reads()).toEqual([]);
+    expect(dispatch).not.toHaveBeenCalledWith(expect.objectContaining({ type: "device_rejected" }));
+    // A retry would be due after 2 s; the clock also runs with real time, so
+    // the check keeps its distance from it on both sides.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_000);
+    });
+    await settle();
+    expect(deviceShifts).toHaveBeenCalledTimes(1);
+    expect(reads()).toEqual([]);
+    hook.unmount();
+  });
 });
 
 describe("the device read on the link", () => {
