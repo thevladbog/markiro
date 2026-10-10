@@ -2030,7 +2030,20 @@ out of the log as it stays out of audit details; `no_secrets_in_logs.rs`
 walks a stock and an office layout through the template routes, the
 defaults and the feed, and a shift's snapshot that carries a layout through
 the plan, the station's entry and list, an SSCC block and the office's
-close. Kiosk mode's failures are logged by the command's name
+close. Nor do facts reach it (stage 2a spec §4.11): no code of marking, crypto
+tail, code hash, SSCC or reason words — a refused record is logged by the
+device, its id and its receipt code alone (the two `warn!` calls of
+`facts::receive`), and a database error of a batch by SQLite's own words.
+`no_secrets_in_logs.rs` sends every kind of fact, accepted and refused, with
+a code of marking that has a crypto tail, an 18-digit SSCC and reasons in
+words, a resend, a mismatched resend, a station's close of a shift and a
+late scan after it, a batch the host cannot write (a 500), the code check
+and the totals, and asks that the host kept them and the log has none. The
+test sees `info` and above, what `tracing` writes to the file: `println!`,
+`eprintln!`, `dbg!` and `debug!`/`trace!` escape it, so its second test
+pins the source: the library prints nothing and the facts path holds exactly
+those two logging calls; a new one there is a decision for both tests.
+Kiosk mode's failures are logged by the command's name
 alone (`standalone: enter_lockdown failed`), never by what the shell answered.
 
 ## Verification
