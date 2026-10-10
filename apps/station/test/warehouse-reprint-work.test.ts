@@ -8,11 +8,14 @@ import {
   warehouseBoxSource,
   buildSscc,
   productLabelBytesDigest,
+  warehouseTemplateSchema,
+  type WarehouseTemplate,
+  type WarehouseTemplateCatalog,
 } from "@markiro/domain";
 import { applyMigrations } from "../src/lib/mirror";
 import { makeRotatingExec } from "./support/sqlite-exec";
 import { createCredentialGeneration } from "../src/lib/credential-recovery";
-import type { StationClient } from "../src/lib/api-client";
+import { StationApiError, type StationClient } from "../src/lib/api-client";
 import { createWarehouseWork } from "../src/lib/warehouse-reprint/work";
 import { warehousePreparedJobInput, seedWarehouseOperator } from "./support/warehouse-reprint";
 vi.mock("../src/lib/rasterizer", () => ({
@@ -24,6 +27,338 @@ vi.mock("../src/lib/rasterizer", () => ({
     bytesPerRow: 1,
   }),
 }));
+
+function catalogResponse(
+  path: string,
+  catalog: WarehouseTemplateCatalog,
+  defaultBoxId: string | null = null,
+) {
+  const url = new URL(path, "https://station.test");
+  if (url.pathname === "/shifts/box-label-templates")
+    return {
+      items: [],
+      defaultBoxLabelTemplateId: defaultBoxId,
+      defaultSource: defaultBoxId ? "organization" : null,
+    };
+  const ids = url.searchParams.get("ids")?.split(",");
+  const templates = ids ? catalog.templates.filter((t) => ids.includes(t.id)) : catalog.templates;
+  return { ...catalog, revision: productLabelValueDigest(templates), templates };
+}
+function changedTemplate(template: WarehouseTemplate, changes: Partial<WarehouseTemplate>) {
+  const { digest, ...value } = { ...template, ...changes };
+  void digest;
+  return warehouseTemplateSchema.parse({ ...value, digest: productLabelValueDigest(value) });
+}
+async function templateWork() {
+  const db = new DatabaseSync(":memory:");
+  const exec = makeRotatingExec([db, db]);
+  await applyMigrations(exec);
+  const input = warehousePreparedJobInput();
+  await seedWarehouseOperator(exec, input.operatorId);
+  const box = warehouseBoxTemplate();
+  const unit = changedTemplate(box, {
+    id: crypto.randomUUID(),
+    purpose: "product_duplicate",
+    spec: buildWarehouseCodeOnlyLabelTemplate().spec,
+  });
+  let catalog: WarehouseTemplateCatalog = {
+    protocol: WAREHOUSE_REPRINT_PROTOCOL,
+    revision: productLabelValueDigest([unit, box]),
+    templates: [unit, box],
+  };
+  let defaultBoxId: string | null = box.id;
+  const get = vi.fn(async (path: string) => catalogResponse(path, catalog, defaultBoxId));
+  const print = vi.fn().mockResolvedValue(undefined);
+  const options = {
+    exec,
+    client: {
+      get,
+      post: vi
+        .fn()
+        .mockResolvedValue({ status: "found", source: warehouseBoxSource(), repair: null }),
+    } as unknown as StationClient,
+    generation: createCredentialGeneration("template-controller-key"),
+    deviceId: input.deviceId,
+    operatorId: input.operatorId,
+    hardware: () => ({
+      scanner: null,
+      printer: input.printer.target,
+      printerLanguage: "tspl" as const,
+      printerDpi: 203 as const,
+      verifyPrintedLabel: false,
+    }),
+    print,
+  };
+  const work = createWarehouseWork(options);
+  return {
+    db,
+    exec,
+    input,
+    box,
+    unit,
+    get,
+    print,
+    work,
+    options,
+    setCatalog: (value: WarehouseTemplate[]) => {
+      catalog = { ...catalog, templates: value, revision: productLabelValueDigest(value) };
+    },
+    setDefault: (id: string | null) => {
+      defaultBoxId = id;
+    },
+  };
+}
+
+it("preselects the cabinet box default and sole enabled unit and refreshes explicit choices on reopen", async () => {
+  const h = await templateWork();
+  try {
+    await h.work.initialize();
+    expect(h.work.getSnapshot()).toMatchObject({
+      defaultBoxId: h.box.id,
+      session: { unitTemplate: { id: h.unit.id }, boxTemplate: { id: h.box.id } },
+    });
+    const other = changedTemplate(h.box, { id: crypto.randomUUID(), name: "Other box" });
+    h.setCatalog([h.unit, h.box, other]);
+    h.setDefault(other.id);
+    await h.work.refreshCatalog();
+    expect(h.work.getSnapshot().session?.boxTemplate?.id).toBe(h.box.id);
+    const renamed = changedTemplate(h.box, {
+      name: "Current cabinet name",
+      revision: "b".repeat(64),
+    });
+    h.setCatalog([h.unit, renamed, other]);
+    await h.work.refreshCatalog();
+    expect(h.work.getSnapshot().session?.boxTemplate).toEqual(renamed);
+    await h.work.close();
+    const resumed = createWarehouseWork(h.options);
+    await resumed.initialize();
+    expect(resumed.getSnapshot().session?.boxTemplate).toEqual(renamed);
+    await resumed.close();
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+
+it("checks only a fresh job's selected template and saves its current spec and digest, while reprints replay bytes", async () => {
+  const h = await templateWork();
+  try {
+    await h.work.initialize();
+    await h.work.configure("damaged", h.unit, h.box);
+    await h.work.start();
+    const current = changedTemplate(h.box, {
+      name: "Updated cabinet label",
+      revision: "c".repeat(64),
+      spec: { ...h.box.spec, widthMm: h.box.spec.widthMm + 1 },
+    });
+    h.setCatalog([h.unit, current]);
+    h.get.mockClear();
+    await h.work.scan(h.input.source.identity);
+    expect(h.print).toHaveBeenCalledTimes(1);
+    const jobId = h.work.getSnapshot().job?.jobId;
+    if (!jobId) throw new Error("job missing");
+    const { readWarehouseJob } = await import("../src/lib/warehouse-reprint/store");
+    const job = await readWarehouseJob(h.exec, h.work.getSnapshot().session?.owner ?? "", jobId);
+    expect(job.template).toEqual(current);
+    expect(job.preparedEvent.templateDigest).toBe(current.digest);
+    expect(h.get.mock.calls.map(([path]) => path)).toEqual([
+      `/station/warehouse-reprint/templates?ids=${h.box.id}`,
+    ]);
+    h.setCatalog([]);
+    h.get.mockRejectedValue(new StationApiError(403, "denied"));
+    await h.work.reprint("lost");
+    expect(h.print).toHaveBeenCalledTimes(2);
+    expect(h.print.mock.calls[1]?.[1]).toEqual(h.print.mock.calls[0]?.[1]);
+    expect(h.get).toHaveBeenCalledTimes(1);
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+
+it.each(["removed", "group", "fields", "denied"])(
+  "refuses fresh printing after %s template eligibility changes",
+  async (kind) => {
+    const h = await templateWork();
+    try {
+      await h.work.initialize();
+      await h.work.configure("damaged", h.unit, h.box);
+      await h.work.start();
+      if (kind === "removed") h.setCatalog([h.unit]);
+      if (kind === "group")
+        h.setCatalog([h.unit, changedTemplate(h.box, { chzProductGroupCodes: [4] })]);
+      if (kind === "fields") {
+        const { revision, ...source } = warehouseBoxSource();
+        void revision;
+        const value = { ...source, unavailableFields: ["expiry" as const] };
+        vi.mocked(h.options.client.post).mockResolvedValue({
+          status: "found",
+          source: { ...value, revision: productLabelValueDigest(value) },
+          repair: null,
+        });
+      }
+      if (kind === "denied") h.get.mockRejectedValue(new StationApiError(403, "denied"));
+      await h.work.scan(h.input.source.identity);
+      expect(h.print).not.toHaveBeenCalled();
+      expect(await h.exec.all("SELECT job_id FROM warehouse_reprint_jobs")).toEqual([]);
+      expect(h.work.getSnapshot().error).toBe(
+        kind === "removed"
+          ? "WAREHOUSE_TEMPLATE_UNAVAILABLE"
+          : kind === "group"
+            ? "WAREHOUSE_TEMPLATE_GROUP"
+            : kind === "fields"
+              ? "WAREHOUSE_SOURCE_FIELDS"
+              : "WAREHOUSE_OPERATION_FAILED",
+      );
+    } finally {
+      await h.work.close();
+      h.db.close();
+    }
+  },
+);
+
+it("retires a delayed picker refresh on close without overwriting the current template cache", async () => {
+  const h = await templateWork();
+  try {
+    await h.work.initialize();
+    const before = await h.exec.all(
+      "SELECT value_json FROM warehouse_reprint_cache ORDER BY rowid",
+    );
+    let complete: (value: ReturnType<typeof catalogResponse>) => void = () => {};
+    const response = new Promise<ReturnType<typeof catalogResponse>>((resolve) => {
+      complete = resolve;
+    });
+    h.get.mockClear();
+    h.get.mockReturnValueOnce(response);
+    const refresh = h.work.refreshCatalog();
+    await vi.waitFor(() => expect(h.get).toHaveBeenCalledTimes(1));
+    const close = h.work.close();
+    complete({
+      protocol: WAREHOUSE_REPRINT_PROTOCOL,
+      revision: productLabelValueDigest([]),
+      templates: [],
+    });
+    await refresh;
+    await close;
+    expect(
+      await h.exec.all("SELECT value_json FROM warehouse_reprint_cache ORDER BY rowid"),
+    ).toEqual(before);
+    expect(h.work.getSnapshot().session?.boxTemplate).toEqual(h.box);
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+
+it("remembers the last enabled unit across finished sessions while starting a new identity with the cabinet box default", async () => {
+  const h = await templateWork();
+  try {
+    const second = changedTemplate(h.unit, { id: crypto.randomUUID(), name: "Chosen unit" });
+    h.setCatalog([h.unit, second, h.box]);
+    await h.work.initialize();
+    await h.work.configure("lost", second, h.box);
+    await h.work.start();
+    await h.work.scan(h.input.source.identity);
+    const original = h.work.getSnapshot().session;
+    if (!original) throw new Error("session missing");
+    expect(original.sentCount).toBe(1);
+    expect(await h.work.finish()).toBe(true);
+    const current = changedTemplate(second, {
+      name: "Canonical unit after restart",
+      revision: "e".repeat(64),
+    });
+    const cabinet = changedTemplate(h.box, {
+      id: crypto.randomUUID(),
+      name: "New cabinet default",
+    });
+    h.setCatalog([h.unit, current, h.box, cabinet]);
+    h.setDefault(cabinet.id);
+    const { saveWarehouseSession } = await import("../src/lib/warehouse-reprint/store");
+    await saveWarehouseSession(h.exec, {
+      ...original,
+      owner: "unrelated-credential-owner",
+      sessionId: crypto.randomUUID(),
+      unitTemplate: h.unit,
+    });
+    const fresh = createWarehouseWork(h.options);
+    try {
+      await fresh.initialize();
+      expect(fresh.getSnapshot().session).toMatchObject({
+        reason: "damaged",
+        status: "paused",
+        sentCount: 0,
+        unitTemplate: current,
+        boxTemplate: cabinet,
+      });
+      expect(fresh.getSnapshot().session?.sessionId).not.toBe(original.sessionId);
+      expect(fresh.getSnapshot().job).toBeNull();
+    } finally {
+      await fresh.close();
+    }
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+
+it("treats the newest finished session as a barrier to older paused sessions and remembers only its template preference", async () => {
+  const h = await templateWork();
+  try {
+    const second = changedTemplate(h.unit, { id: crypto.randomUUID(), name: "Latest unit choice" });
+    h.setCatalog([h.unit, second, h.box]);
+    await h.work.initialize();
+    await h.work.configure("damaged", h.unit, h.box);
+    const older = h.work.getSnapshot().session;
+    if (!older) throw new Error("older session missing");
+    await h.work.newSession();
+    await h.work.configure("lost", second, h.box);
+    const latest = h.work.getSnapshot().session;
+    if (!latest) throw new Error("latest session missing");
+    expect(latest.sessionId).not.toBe(older.sessionId);
+    expect(await h.work.finish()).toBe(true);
+    const fresh = createWarehouseWork(h.options);
+    try {
+      await fresh.initialize();
+      expect(fresh.getSnapshot().session?.sessionId).not.toBe(older.sessionId);
+      expect(fresh.getSnapshot().session?.sessionId).not.toBe(latest.sessionId);
+      expect(fresh.getSnapshot().session).toMatchObject({
+        reason: "damaged",
+        sentCount: 0,
+        unitTemplate: second,
+      });
+      expect(fresh.getSnapshot().job).toBeNull();
+    } finally {
+      await fresh.close();
+    }
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+
+it("recovers unresolved older work ahead of a newer finished-session barrier", async () => {
+  const h = await templateWork();
+  try {
+    await h.work.initialize();
+    const older = h.work.getSnapshot().session;
+    if (!older) throw new Error("older session missing");
+    await h.work.newSession();
+    expect(await h.work.finish()).toBe(true);
+    const { prepareWarehouseJob, saveWarehouseSession, resumeWarehouseSession } =
+      await import("../src/lib/warehouse-reprint/store");
+    await saveWarehouseSession(h.exec, { ...older, status: "active" });
+    await prepareWarehouseJob(h.exec, {
+      ...h.input,
+      owner: older.owner,
+      sessionId: older.sessionId,
+      preparedEvent: { ...h.input.preparedEvent, sessionId: older.sessionId },
+    });
+    expect((await resumeWarehouseSession(h.exec, older.owner))?.sessionId).toBe(older.sessionId);
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
 it("retires delayed lookup without cache writes or printing and resumes the same identity set", async () => {
   const db = new DatabaseSync(":memory:");
   const exec = makeRotatingExec([db, db]);
@@ -44,11 +379,12 @@ it("retires delayed lookup without cache writes or printing and resumes the same
     complete = resolve;
   });
   const client = {
-    get: async () => ({
-      protocol: WAREHOUSE_REPRINT_PROTOCOL,
-      revision: productLabelValueDigest([unit, box]),
-      templates: [unit, box],
-    }),
+    get: async (path: string) =>
+      catalogResponse(path, {
+        protocol: WAREHOUSE_REPRINT_PROTOCOL,
+        revision: productLabelValueDigest([unit, box]),
+        templates: [unit, box],
+      }),
     post: vi.fn(() => response),
   } as unknown as StationClient;
   const print = vi.fn();
@@ -204,12 +540,14 @@ it("checks the current local operator roster before preparing a label", async ()
   void digest;
   const unit = { ...v, digest: productLabelValueDigest(v) };
   const client = {
-    get: () =>
-      Promise.resolve({
-        protocol: WAREHOUSE_REPRINT_PROTOCOL,
-        revision: productLabelValueDigest([unit, box]),
-        templates: [unit, box],
-      }),
+    get: (path: string) =>
+      Promise.resolve(
+        catalogResponse(path, {
+          protocol: WAREHOUSE_REPRINT_PROTOCOL,
+          revision: productLabelValueDigest([unit, box]),
+          templates: [unit, box],
+        }),
+      ),
     post: vi.fn().mockResolvedValue({
       status: "found",
       source: warehouseBoxSource(),

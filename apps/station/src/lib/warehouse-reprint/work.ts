@@ -17,12 +17,19 @@ import type { HardwareConfig } from "../hardware-config.js";
 import type { PrintTarget } from "../hardware.js";
 import { rasterizeText } from "../rasterizer.js";
 import { resolveWarehouseSource } from "./sources.js";
-import { loadWarehouseTemplates } from "./templates.js";
+import {
+  loadWarehouseBoxDefault,
+  loadWarehouseTemplates,
+  refreshWarehouseTemplates,
+  resolveWarehouseTemplateSelection,
+} from "./templates.js";
 import { renderWarehouseLabel } from "./prepare.js";
 import {
   findWarehouseJobView,
+  finishWarehouseSession,
   prepareWarehouseJob,
   readWarehouseJob,
+  readWarehouseTemplatePreference,
   resumeWarehouseSession,
   saveWarehouseSession,
 } from "./store.js";
@@ -38,6 +45,7 @@ export interface WarehouseWorkState {
   busy: boolean;
   session: WarehouseSession | null;
   catalog: WarehouseTemplateCatalog | null;
+  defaultBoxId: string | null;
   job: WarehouseJobView | null;
   duplicate: boolean;
   error: string | null;
@@ -60,6 +68,7 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
     busy: false,
     session: null,
     catalog: null,
+    defaultBoxId: null,
     job: null,
     duplicate: false,
     error: null,
@@ -68,6 +77,8 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
   };
   let accepting = true;
   let pending: Promise<void> | null = null;
+  let finishing: Promise<boolean> | null = null;
+  let finished = false;
   let owner = "";
   let refreshVersion = 0;
   let historyProblem: {
@@ -77,7 +88,7 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
     rejection_code: string;
   } | null = null;
   const subscribers = new Set<() => void>();
-  const current = () => accepting && !o.generation.sealed;
+  const current = () => accepting && !finished && !o.generation.sealed;
   const publish = (patch: Partial<WarehouseWorkState>) => {
     state = { ...state, ...patch };
     for (const notify of subscribers) notify();
@@ -120,7 +131,7 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
     });
   };
   const operation = (run: () => Promise<void>) => {
-    if (pending || !current()) return pending ?? Promise.resolve();
+    if (finishing || pending || !current()) return pending ?? Promise.resolve();
     publish({ busy: true, error: null });
     const task = run()
       .catch((error) => {
@@ -134,7 +145,7 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
       })
       .finally(() => {
         if (pending === task) pending = null;
-        publish({ busy: false });
+        publish({ busy: finishing !== null });
         o.onJournalChange?.();
       });
     pending = task;
@@ -146,6 +157,36 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
       [o.operatorId],
     );
     if (!operator) throw new Error("WAREHOUSE_OPERATOR_DENIED");
+  };
+  const refreshTemplateCatalog = async (freshSession = false) => {
+    const catalog = await loadWarehouseTemplates(o.client, guarded, owner);
+    const defaultBoxId = await loadWarehouseBoxDefault(o.client, guarded, owner);
+    if (!current()) throw new Error("WAREHOUSE_OWNER_CHANGED");
+    const session = state.session;
+    if (session) {
+      await saveWarehouseSession(guarded, {
+        ...session,
+        unitTemplate: resolveWarehouseTemplateSelection(
+          catalog,
+          "unit",
+          session.unitTemplate?.id ?? null,
+          defaultBoxId,
+        ),
+        boxTemplate:
+          (freshSession
+            ? resolveWarehouseTemplateSelection(catalog, "box", null, defaultBoxId)
+            : null) ??
+          resolveWarehouseTemplateSelection(
+            catalog,
+            "box",
+            session.boxTemplate?.id ?? null,
+            defaultBoxId,
+          ),
+      });
+    }
+    if (!current()) throw new Error("WAREHOUSE_OWNER_CHANGED");
+    publish({ catalog, defaultBoxId });
+    await refresh(state.job?.jobId);
   };
   const printing = async (jobId: string, reprint?: WarehouseSession["reason"]) => {
     if (!current() || !(await deviceRecoveryAllowsWork(o.exec, o.generation)))
@@ -177,6 +218,7 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
       return () => subscribers.delete(fn);
     },
     getSnapshot: () => state,
+    refreshCatalog: () => operation(refreshTemplateCatalog),
     acknowledgeHistory: () =>
       operation(async () => {
         const problem = historyProblem;
@@ -203,7 +245,7 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
       }),
     // Effect setup can reopen this same controller after StrictMode's simulated cleanup.
     open: () => {
-      if (!o.generation.sealed) accepting = true;
+      if (!finished && !o.generation.sealed) accepting = true;
     },
     initialize: () =>
       operation(async () => {
@@ -212,6 +254,10 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
           throw new Error("WAREHOUSE_OWNER_CHANGED");
         owner = proof;
         let session = await resumeWarehouseSession(o.exec, owner);
+        const freshSession = session === null;
+        const preference = freshSession
+          ? await readWarehouseTemplatePreference(o.exec, owner)
+          : null;
         session = session
           ? { ...session, operatorId: o.operatorId, status: "paused" }
           : {
@@ -220,16 +266,15 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
               operatorId: o.operatorId,
               reason: "damaged",
               status: "paused",
-              unitTemplate: null,
-              boxTemplate: null,
+              unitTemplate: preference?.unitTemplate ?? null,
+              boxTemplate: preference?.boxTemplate ?? null,
               sentCount: 0,
             };
         await saveWarehouseSession(guarded, session);
         await recoverWarehouseJobs(guarded, owner, o.operatorId);
         await refresh();
         try {
-          const catalog = await loadWarehouseTemplates(o.client, guarded, owner);
-          if (current()) publish({ catalog });
+          await refreshTemplateCatalog(freshSession);
         } catch (error) {
           if (current())
             publish({
@@ -254,17 +299,27 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
           throw new Error("WAREHOUSE_BUSY");
         if (
           unitTemplate &&
-          (unitTemplate.purpose !== "product_duplicate" ||
+          (!unitTemplate.enabled ||
+            unitTemplate.purpose !== "product_duplicate" ||
             !state.catalog?.templates.some(
-              (t) => t.id === unitTemplate.id && t.digest === unitTemplate.digest,
+              (t) =>
+                t.enabled &&
+                t.purpose === "product_duplicate" &&
+                t.id === unitTemplate.id &&
+                t.digest === unitTemplate.digest,
             ))
         )
           throw new Error("WAREHOUSE_TEMPLATE_PURPOSE");
         if (
           boxTemplate &&
-          (boxTemplate.purpose !== "box" ||
+          (!boxTemplate.enabled ||
+            boxTemplate.purpose !== "box" ||
             !state.catalog?.templates.some(
-              (t) => t.id === boxTemplate.id && t.digest === boxTemplate.digest,
+              (t) =>
+                t.enabled &&
+                t.purpose === "box" &&
+                t.id === boxTemplate.id &&
+                t.digest === boxTemplate.digest,
             ))
         )
           throw new Error("WAREHOUSE_TEMPLATE_PURPOSE");
@@ -292,12 +347,14 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
               (t) =>
                 t.id === state.session?.unitTemplate?.id &&
                 t.digest === state.session.unitTemplate.digest &&
+                t.purpose === "product_duplicate" &&
                 t.enabled,
             ) ||
             !state.catalog.templates.some(
               (t) =>
                 t.id === state.session?.boxTemplate?.id &&
                 t.digest === state.session.boxTemplate.digest &&
+                t.purpose === "box" &&
                 t.enabled,
             ))
         )
@@ -352,8 +409,20 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
               ? `WAREHOUSE_${found.code.toUpperCase()}`
               : `WAREHOUSE_${found.status.toUpperCase()}`,
           );
-        const template = found.source.kind === "box" ? session.boxTemplate : session.unitTemplate;
-        if (!template) throw new Error("WAREHOUSE_TEMPLATES_REQUIRED");
+        const selected = found.source.kind === "box" ? session.boxTemplate : session.unitTemplate;
+        if (!selected || !state.catalog) throw new Error("WAREHOUSE_TEMPLATES_REQUIRED");
+        const catalog = await refreshWarehouseTemplates(o.client, guarded, owner, state.catalog, [
+          selected.id,
+        ]);
+        if (!current()) throw new Error("WAREHOUSE_OWNER_CHANGED");
+        const template = catalog.templates.find((t) => t.id === selected.id && t.enabled) ?? null;
+        await saveWarehouseSession(guarded, {
+          ...session,
+          ...(found.source.kind === "box" ? { boxTemplate: template } : { unitTemplate: template }),
+        });
+        publish({ catalog });
+        await refresh();
+        if (!template) throw new Error("WAREHOUSE_TEMPLATE_UNAVAILABLE");
         const profile = resolvePrinter(
           o.hardware(),
           found.source.kind === "box" ? "box" : "duplicate",
@@ -424,6 +493,10 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
           sessionId: crypto.randomUUID(),
           status: "paused",
           sentCount: 0,
+          boxTemplate:
+            (state.catalog
+              ? resolveWarehouseTemplateSelection(state.catalog, "box", null, state.defaultBoxId)
+              : null) ?? state.session.boxTemplate,
         });
         publish({ duplicate: false, verification: false, job: null });
         await refresh();
@@ -448,10 +521,56 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
       operation(async () => {
         if (state.job) await printing(state.job.jobId);
       }),
+    /** Stops new intake, drains accepted work, and returns true only after durable closure. */
+    finish: (): Promise<boolean> => {
+      if (finished) return Promise.resolve(true);
+      if (finishing) return finishing;
+      if (!current() || !owner || !state.session) return Promise.resolve(false);
+      const task = Promise.resolve()
+        .then(async () => {
+          await pending;
+          const session = state.session;
+          if (!current() || !session) throw new Error("WAREHOUSE_OWNER_CHANGED");
+          await assertOperator();
+          if (!(await deviceRecoveryAllowsWork(o.exec, o.generation)))
+            throw new Error("WAREHOUSE_OWNER_CHANGED");
+          const committed = await finishWarehouseSession(
+            guarded,
+            owner,
+            session.sessionId,
+            o.operatorId,
+          );
+          if (!committed) throw new Error("WAREHOUSE_OWNER_CHANGED");
+          finished = true;
+          accepting = false;
+          ++refreshVersion;
+          publish({ session: null, job: null, duplicate: false, verification: false });
+          return true;
+        })
+        .catch((error: unknown) => {
+          if (current())
+            publish({
+              error:
+                error instanceof Error && error.message.startsWith("WAREHOUSE_")
+                  ? error.message
+                  : "WAREHOUSE_OPERATION_FAILED",
+            });
+          return false;
+        })
+        .finally(() => {
+          if (finishing === task) finishing = null;
+          publish({ busy: false });
+          o.onJournalChange?.();
+        });
+      finishing = task;
+      publish({ busy: true, error: null });
+      return task;
+    },
     close: async () => {
       accepting = false;
       await pending;
-      if (!accepting && owner && state.session) {
+      await finishing;
+      if (!finished && !accepting && owner && state.session) {
         const lease = acquireCredentialCommitLease(o.generation);
         if (lease) {
           try {
@@ -464,9 +583,10 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
     },
     idle: async () => {
       await pending;
+      await finishing;
     },
     poll: async () => {
-      if (current() && owner && !pending) await refresh(state.job?.jobId);
+      if (current() && owner && !pending && !finishing) await refresh(state.job?.jobId);
     },
   };
 }

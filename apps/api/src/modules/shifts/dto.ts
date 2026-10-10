@@ -3,6 +3,7 @@ import type { SchemaObject } from "@nestjs/swagger";
 import {
   validationPrintInputSchema,
   validationPrintPolicySchema,
+  labelTemplateSpecSchema,
   PRODUCT_LABEL_PROTOCOL,
   VALIDATION_REPROCESSING_PROTOCOL,
   type ValidationPrintPolicy,
@@ -246,6 +247,23 @@ export const productLabelTemplateProductQuerySchema = z.object({ productId: z.uu
 export type ProductLabelTemplateProductQueryDto = z.infer<
   typeof productLabelTemplateProductQuerySchema
 >;
+
+export const shiftLabelTemplatePreviewQuerySchema = z.strictObject({
+  productId: z.uuid(),
+  templateId: z.uuid(),
+  purpose: z.enum(["box", "pallet", "product_duplicate"]),
+});
+export type ShiftLabelTemplatePreviewQueryDto = z.infer<
+  typeof shiftLabelTemplatePreviewQuerySchema
+>;
+
+export const shiftLabelTemplatePreviewSchema = z.strictObject({
+  id: z.uuid(),
+  name: z.string(),
+  purpose: shiftLabelTemplatePreviewQuerySchema.shape.purpose,
+  spec: labelTemplateSpecSchema,
+});
+export type ShiftLabelTemplatePreviewDto = z.infer<typeof shiftLabelTemplatePreviewSchema>;
 
 /** GET /shifts/planning-config response — the operations-readable planning subset only. */
 export interface ShiftPlanningConfigDto {

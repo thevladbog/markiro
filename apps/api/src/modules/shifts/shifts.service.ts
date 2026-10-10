@@ -88,6 +88,8 @@ import type {
   ShiftOrigin,
   ShiftOutputDto,
   ShiftPlanningConfigDto,
+  ShiftLabelTemplatePreviewDto,
+  ShiftLabelTemplatePreviewQueryDto,
   ShiftReferenceBundleDto,
   ShiftSummaryDto,
   UpdateShiftDto,
@@ -477,6 +479,49 @@ export class ShiftsService {
           };
         }),
     });
+  }
+
+  async getLabelTemplatePreview(
+    tenantId: string,
+    query: ShiftLabelTemplatePreviewQueryDto,
+  ): Promise<ShiftLabelTemplatePreviewDto> {
+    const category = await this.productGroupCodeForPicker(tenantId, query.productId);
+    const [template] = await this.db
+      .select({
+        id: schema.labelTemplates.id,
+        name: schema.labelTemplates.name,
+        purpose: schema.labelTemplates.purpose,
+        spec: schema.labelTemplates.spec,
+        enabled: schema.labelTemplates.enabled,
+        chzProductGroupCodes: schema.labelTemplates.chzProductGroupCodes,
+      })
+      .from(schema.labelTemplates)
+      .where(
+        and(
+          eq(schema.labelTemplates.tenantId, tenantId),
+          eq(schema.labelTemplates.id, query.templateId),
+          eq(schema.labelTemplates.purpose, query.purpose),
+          eq(schema.labelTemplates.enabled, true),
+        ),
+      );
+    const eligible =
+      template?.purpose === query.purpose &&
+      (query.purpose === "box"
+        ? isBoxLabelTemplateEligible(template, category)
+        : query.purpose === "pallet"
+          ? isPalletLabelTemplateEligible(template, category)
+          : template.enabled &&
+            (template.chzProductGroupCodes === null ||
+              (category !== null && template.chzProductGroupCodes.includes(category))));
+    if (!template || !eligible) {
+      throw new NotFoundException("Unknown eligible label template for this product");
+    }
+    return {
+      id: template.id,
+      name: template.name,
+      purpose: query.purpose,
+      spec: parseLabelTemplate(template.spec),
+    };
   }
 
   /** `null` without a product (organisation-level answer); 404 for a product outside the tenant. */

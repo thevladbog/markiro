@@ -3,25 +3,25 @@ import {
   createLabelRenderPlan,
   sampleLabelData,
   type LabelRenderPlan,
-  type WarehouseTemplate,
   type PrinterDpi,
   type LabelTemplateSpec,
 } from "@markiro/domain";
 import { TextPreview } from "./TextPreview.js";
 import { rasterizeText } from "../../lib/rasterizer.js";
 import { useTranslation } from "react-i18next";
+type PreviewTemplate = { name: string; spec: LabelTemplateSpec };
 export function LabelPreview({
   template,
   dpi = template.spec.dpi,
   language = template.spec.language,
 }: {
-  template: WarehouseTemplate;
+  template: PreviewTemplate;
   dpi?: PrinterDpi;
   language?: LabelTemplateSpec["language"];
 }) {
   const { t } = useTranslation();
   const [loaded, setLoaded] = useState<{
-    template: WarehouseTemplate;
+    template: PreviewTemplate;
     dpi: PrinterDpi;
     language: LabelTemplateSpec["language"];
     plan: LabelRenderPlan | null;

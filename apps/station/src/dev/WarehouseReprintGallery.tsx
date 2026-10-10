@@ -37,7 +37,19 @@ export function WarehouseReprintGallery({ variant }: { variant: string }) {
       catalog: {
         protocol: WAREHOUSE_REPRINT_PROTOCOL,
         revision: productLabelValueDigest([unit, box]),
-        templates: [unit, box],
+        templates: [
+          unit,
+          box,
+          ...Array.from({ length: 18 }, (_, index) => {
+            const { digest: oldDigest, ...copy } = {
+              ...(index % 2 ? unit : box),
+              id: `00000000-0000-4000-8000-${String(index + 100).padStart(12, "0")}`,
+              name: `${index % 2 ? "Код" : "Короб"} ${index + 2}`,
+            };
+            void oldDigest;
+            return { ...copy, digest: productLabelValueDigest(copy) };
+          }),
+        ],
       },
       session: {
         owner: "synthetic",
@@ -68,6 +80,7 @@ export function WarehouseReprintGallery({ variant }: { variant: string }) {
       duplicate: false,
       error: null,
       verification: false,
+      defaultBoxId: box.id,
       historyIssue: variant === "history-warning" ? "template_mismatch" : null,
     };
     return state;
@@ -88,6 +101,8 @@ export function WarehouseReprintGallery({ variant }: { variant: string }) {
       return Promise.resolve();
     },
     close: async () => {},
+    finish: () => Promise.resolve(true),
+    refreshCatalog: async () => {},
     requestVerification: () => setState((s) => ({ ...s, verification: true })),
     cancelVerification: () => setState((s) => ({ ...s, verification: false })),
     reprint: async () => {},
