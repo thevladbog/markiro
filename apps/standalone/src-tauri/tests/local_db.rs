@@ -842,7 +842,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 19] = [
+    let reads: [(&str, &str); 23] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -934,6 +934,30 @@ async fn the_floors_repeating_reads_search_an_index() {
              AND closed_at IS NULL AND item_count = ?",
             "sqlite_autoindex_floor_boxes_1 (id=?)",
         ),
+        // The supply of SSCC blocks: the newest block of the prefix (the half rule), the
+        // serials the pairing has left (the status bar), whether a block shares serials
+        // with one kept, and a request's removal by its key.
+        (
+            "SELECT from_serial, to_serial, next_serial FROM floor_sscc_blocks WHERE host_id = ? \
+             AND device_id = ? AND issuer_prefix = ? AND extension = ? \
+             ORDER BY from_serial DESC LIMIT 1",
+            "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+        ),
+        (
+            "SELECT coalesce(sum(to_serial + 1 - next_serial), 0) AS n FROM floor_sscc_blocks \
+             WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ?",
+            "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+        ),
+        (
+            "SELECT 1 AS n FROM floor_sscc_blocks WHERE host_id = ? AND device_id = ? \
+             AND issuer_prefix = ? AND extension = ? AND block_id <> ? \
+             AND from_serial <= ? AND to_serial >= ? LIMIT 1",
+            "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+        ),
+        (
+            "DELETE FROM floor_block_requests WHERE request_id = ?",
+            "sqlite_autoindex_floor_block_requests_1 (request_id=?)",
+        ),
         (
             "SELECT id FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?",
             "floor_scans_shift",
@@ -968,6 +992,34 @@ async fn the_floors_repeating_reads_search_an_index() {
             "{sql}\n  scans a table: {plan:?}"
         );
     }
+    // The one read of the floor that names no index: a pairing's waiting block
+    // requests. The table holds at most one row per pairing and issuer prefix
+    // (a request is kept only when none waits, and goes with its block), so the
+    // read takes the whole table, and no other.
+    let waiting = "SELECT request_id, issuer_prefix, extension FROM floor_block_requests \
+                   WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ? \
+                   ORDER BY requested_at, request_id LIMIT 1";
+    let text = format!("EXPLAIN QUERY PLAN {waiting}");
+    let mut explain = sqlx::query(&text);
+    for _ in 0..waiting.matches('?').count() {
+        explain = explain.bind("x");
+    }
+    let plan: Vec<String> = explain
+        .fetch_all(&mut raw)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.get::<String, _>("detail"))
+        .collect();
+    let scans: Vec<&String> = plan
+        .iter()
+        .filter(|step| step.starts_with("SCAN "))
+        .collect();
+    assert_eq!(
+        scans,
+        ["SCAN floor_block_requests"],
+        "{waiting}\n  should scan only the waiting requests, its plan is {plan:?}"
+    );
     raw.close().await.unwrap();
 }
 

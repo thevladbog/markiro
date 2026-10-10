@@ -688,6 +688,44 @@ describe("the shape of the production tables (migration 0006)", () => {
           "WHERE id = ? AND host_id = ? AND device_id = ? AND closed_at IS NULL AND item_count = ?",
       ),
     ).toContain("sqlite_autoindex_floor_boxes_1 (id=?)");
+    // The supply of SSCC blocks: the newest block of the prefix (the half rule), the
+    // serials the pairing has left, whether a block shares serials with one kept, and
+    // a request's removal by its key. The waiting request's own read scans the one
+    // small table of requests (below).
+    const prefixIndex =
+      "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)";
+    expect(
+      plan(
+        "SELECT from_serial, to_serial, next_serial FROM floor_sscc_blocks WHERE host_id = ? " +
+          "AND device_id = ? AND issuer_prefix = ? AND extension = ? ORDER BY from_serial DESC LIMIT 1",
+      ),
+    ).toContain(prefixIndex);
+    expect(
+      plan(
+        "SELECT coalesce(sum(to_serial + 1 - next_serial), 0) AS n FROM floor_sscc_blocks " +
+          "WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ?",
+      ),
+    ).toContain(prefixIndex);
+    expect(
+      plan(
+        "SELECT 1 AS n FROM floor_sscc_blocks WHERE host_id = ? AND device_id = ? " +
+          "AND issuer_prefix = ? AND extension = ? AND block_id <> ? " +
+          "AND from_serial <= ? AND to_serial >= ? LIMIT 1",
+      ),
+    ).toContain(prefixIndex);
+    expect(plan("DELETE FROM floor_block_requests WHERE request_id = ?")).toContain(
+      "sqlite_autoindex_floor_block_requests_1 (request_id=?)",
+    );
+    // At most one request waits per pairing and prefix: the read takes the table whole.
+    expect(
+      plan(
+        "SELECT request_id, issuer_prefix, extension FROM floor_block_requests " +
+          "WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ? " +
+          "ORDER BY requested_at, request_id LIMIT 1",
+      )
+        .split("\n")
+        .filter((step) => step.startsWith("SCAN ")),
+    ).toEqual(["SCAN floor_block_requests"]);
     // What the sender writes stays on the unsent index and the record's own key.
     expect(
       plan(
