@@ -86,14 +86,15 @@ function noteText(note: LabelNote, t: TFunction): string {
  * Which printer a reprint of `job` goes to, in words, before the operator
  * confirms it: the chosen one, the job's own as the settings have it now, or —
  * when the job's own printer was deleted from the settings — the purpose's
- * printer, which the operator is told is another one than the label may have
- * come out on.
+ * printer, which the operator is told is another one — and, only when the
+ * label may exist (`mayExist`), that it may have come out on the deleted one.
  */
 function targetText(
   t: TFunction,
   job: PrintJob,
   settings: Settings,
   chosen: PrinterProfile | null,
+  mayExist: boolean,
 ): string | null {
   if (settings.kind === "loading") return null;
   if (settings.kind === "failed") return t("floor.print.target.unknown");
@@ -104,7 +105,12 @@ function targetText(
     chosen === null &&
     former !== null &&
     !settings.value.printers.some((candidate) => candidate.id === former.id);
-  return t(gone ? "floor.print.target.replaced" : "floor.print.target.label", {
+  const key = !gone
+    ? "floor.print.target.label"
+    : mayExist
+      ? "floor.print.target.replaced"
+      : "floor.print.target.replacedFailed";
+  return t(key, {
     name: printer.name,
     language: printer.language.toUpperCase(),
     dpi: printer.dpi,
@@ -228,7 +234,7 @@ export function LabelPanel({
 
   let body: ReactNode;
   if (mode.kind === "reason") {
-    const target = targetText(t, job, settings, mode.printer);
+    const target = targetText(t, job, settings, mode.printer, mayExist);
     body = (
       <Alert
         tone="warn"
@@ -362,7 +368,7 @@ export function LabelPanel({
       </Alert>
     );
   } else {
-    const target = targetText(t, job, settings, null);
+    const target = targetText(t, job, settings, null, mayExist);
     body = (
       <Alert
         tone="error"

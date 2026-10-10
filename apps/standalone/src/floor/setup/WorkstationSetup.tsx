@@ -1,5 +1,12 @@
 import { sampleLabelData } from "@markiro/domain";
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, Input, Select } from "@markiro/ui";
@@ -202,6 +209,17 @@ export function WorkstationSetup({
     [source, setTest],
   );
 
+  // The keys typed into a text field are the field's, not a scan: the scan
+  // source ignores them, and its Enter stays the field's. A field removed with
+  // the focus on it (the printer form closing, the setup leaving) sends no
+  // blur, so the source is told again when the form opens or closes and when
+  // this screen goes.
+  const manualEntry = {
+    onFocus: () => source.setManualTextEntryActive(true),
+    onBlur: () => source.setManualTextEntryActive(false),
+  };
+  useLayoutEffect(() => () => source.setManualTextEntryActive(false), [source, editing]);
+
   // Only the newest ask is heard: an older answer that comes late is dropped.
   const usbAsk = useRef(0);
   const refreshUsb = () => {
@@ -345,6 +363,8 @@ export function WorkstationSetup({
       return;
     }
     const settled = settleOutcome(await printing.send(null, printer.target, bytes));
+    // What was typed ahead (a letter on a list) would join the code of the label.
+    source.clearPendingInput();
     setTest(
       settled.state === "sent"
         ? { kind: "sent", printerId: printer.id, name: printer.name, code }
@@ -455,6 +475,7 @@ export function WorkstationSetup({
             : t("floor.setup.printers.editor.titleEdit", { name: form.name })}
         </h3>
         <Input
+          {...manualEntry}
           size="floor"
           label={t("floor.setup.printers.editor.name")}
           value={form.name}
@@ -477,12 +498,14 @@ export function WorkstationSetup({
         {form.kind === "tcp" && (
           <>
             <Input
+              {...manualEntry}
               size="floor"
               label={t("floor.setup.printers.editor.host")}
               value={form.host}
               onChange={(event) => set({ host: event.target.value })}
             />
             <Input
+              {...manualEntry}
               size="floor"
               inputMode="numeric"
               label={t("floor.setup.printers.editor.port")}
@@ -494,12 +517,14 @@ export function WorkstationSetup({
         {form.kind === "serial" && (
           <>
             <Input
+              {...manualEntry}
               size="floor"
               label={t("floor.setup.printers.editor.serialPort")}
               value={form.serialPort}
               onChange={(event) => set({ serialPort: event.target.value })}
             />
             <Input
+              {...manualEntry}
               size="floor"
               inputMode="numeric"
               label={t("floor.setup.printers.editor.baud")}
@@ -749,6 +774,7 @@ export function WorkstationSetup({
               </ul>
             )}
             <Input
+              {...manualEntry}
               size="floor"
               label={t("floor.setup.scanners.port")}
               value={scanner.port}
@@ -759,6 +785,7 @@ export function WorkstationSetup({
               }}
             />
             <Input
+              {...manualEntry}
               size="floor"
               inputMode="numeric"
               label={t("floor.setup.scanners.baud")}
