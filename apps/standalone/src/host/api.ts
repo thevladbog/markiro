@@ -23,6 +23,7 @@ import {
   pairingCodeSchema,
   productGroupSchema,
   officeShiftSchema,
+  shiftExportRowsSchema,
   ssccCounterSchema,
   ssccStateSchema,
   templateDefaultsSchema,
@@ -68,6 +69,7 @@ import {
   type ProductUpdate,
   type ShiftClose,
   type ShiftCreate,
+  type ShiftExportRows,
   type ShiftUpdate,
   type SsccCounter,
   type SsccCounterUpdate,
@@ -178,6 +180,11 @@ export interface HostApi {
   /** `204`, only a planned shift; a delete repeated after a lost answer is `not_found`. */
   deleteShift: (token: string, id: string) => Promise<void>;
   closeShift: (token: string, id: string, close: ShiftClose) => Promise<OfficeShift>;
+  /**
+   * What the shift's exports are built from, in one snapshot of the host
+   * (plan ЧЗ); every office role. A planned shift answers with empty lists.
+   */
+  getShiftExportSource: (token: string, id: string) => Promise<ShiftExportRows>;
   /**
    * The station's shifts, with the device key only: the planned and active
    * shifts of its line and those it entered, active or closed within 30
@@ -458,6 +465,11 @@ export function createHostApi(client: HostClient): HostApi {
         body: close,
         officeToken: token,
         schema: officeShiftSchema,
+      }),
+    getShiftExportSource: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/export-source`, {
+        officeToken: token,
+        schema: shiftExportRowsSchema,
       }),
   };
 }

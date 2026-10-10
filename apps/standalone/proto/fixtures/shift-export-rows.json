@@ -1,0 +1,80 @@
+{
+  "shift": {
+    "id": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+    "number": "OCT26-004",
+    "status": "closed",
+    "productionDate": "2026-10-08",
+    "productName": "Молоко 3,2% 0,9 л",
+    "palletsEnabled": true,
+    "closedAt": "2026-10-08T14:00:07Z",
+    "stationClosedAt": "2026-10-08T14:00:07.412Z",
+    "lateDataAt": null
+  },
+  "organization": { "name": "ООО «Атолл»", "inn": "7701234567" },
+  "codes": [
+    {
+      "codeHash": "3f1d6a0c9b8e7f2a4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3",
+      "scannedAt": "2026-10-08T06:05:12.031Z",
+      "canonical": "010460068200001321Kq8vT2mXc5Rz\u001d93Ab1Z"
+    },
+    {
+      "codeHash": "8c2e4a6b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c1b3d5f7e9a1c3b5d7f9e0a",
+      "scannedAt": "2026-10-08T06:05:12.031Z",
+      "canonical": "010460068200001321Pw3nY7hLd9Fs\u001d93Cd2Y"
+    },
+    {
+      "codeHash": "a9d8c7b6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8",
+      "scannedAt": "2026-10-08T06:06:40.507Z",
+      "canonical": "010460068200001321Gt5kR1wQe8Uv\u001d93Ef3X"
+    }
+  ],
+  "boxes": [
+    {
+      "id": "b0000000-0000-4000-8000-000000000001",
+      "sscc": "046006820000015000",
+      "openedAt": "2026-10-08T06:05:12.031Z",
+      "closedAt": "2026-10-08T06:06:01.118Z",
+      "disassembledAt": null,
+      "palletId": "a0000000-0000-4000-8000-000000000001"
+    },
+    {
+      "id": "b0000000-0000-4000-8000-000000000002",
+      "sscc": "046006820000015017",
+      "openedAt": "2026-10-08T06:06:40.507Z",
+      "closedAt": "2026-10-08T06:07:15.902Z",
+      "disassembledAt": null,
+      "palletId": null
+    },
+    {
+      "id": "b0000000-0000-4000-8000-000000000003",
+      "sscc": null,
+      "openedAt": "2026-10-08T06:08:02.244Z",
+      "closedAt": null,
+      "disassembledAt": null,
+      "palletId": null
+    }
+  ],
+  "items": [
+    {
+      "boxId": "b0000000-0000-4000-8000-000000000001",
+      "codeHash": "3f1d6a0c9b8e7f2a4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3"
+    },
+    {
+      "boxId": "b0000000-0000-4000-8000-000000000001",
+      "codeHash": "8c2e4a6b0d1f3e5a7c9b1d3f5e7a9c0b2d4f6e8a0c1b3d5f7e9a1c3b5d7f9e0a"
+    },
+    {
+      "boxId": "b0000000-0000-4000-8000-000000000002",
+      "codeHash": "a9d8c7b6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0c9d8e7f6a5b4c3d2e1f0a9b8"
+    }
+  ],
+  "pallets": [
+    {
+      "id": "a0000000-0000-4000-8000-000000000001",
+      "sscc": "146006820000000409",
+      "openedAt": "2026-10-08T06:06:01.118Z",
+      "closedAt": "2026-10-08T06:20:44.650Z",
+      "disassembledAt": null
+    }
+  ]
+}

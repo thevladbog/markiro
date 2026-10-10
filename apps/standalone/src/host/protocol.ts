@@ -596,6 +596,56 @@ export const officeShiftSchema = z.object({
 export type OfficeShift = z.infer<typeof officeShiftSchema>;
 
 /**
+ * Mirrors `markiro_proto::ShiftExportRows`: `GET /v1/office/shifts/{id}/export-source`
+ * (plan ЧЗ), what a shift's exports are built from, in one snapshot of the
+ * host. `codes` are the codes the shift owns with their owning scans'
+ * canonical text; `boxes` every box of the shift; `items` the live items of
+ * those boxes only; `pallets` every pallet of the shift. A device's ids,
+ * SSCCs and codes are read as plain text: the ported source rules and the
+ * domain's renderer say what is wrong with one (`INVALID_BOX_SSCC`,
+ * `INVALID_CIS`), as the cloud's export does, instead of the whole answer
+ * failing as an invalid response.
+ */
+export const shiftExportRowsSchema = z.object({
+  shift: z.object({
+    id: z.uuid(),
+    number: z.string().min(1),
+    status: shiftStatusSchema,
+    productionDate: civilDateTextSchema,
+    productName: z.string(),
+    palletsEnabled: z.boolean(),
+    closedAt: z.iso.datetime().nullable(),
+    stationClosedAt: z.iso.datetime().nullable(),
+    lateDataAt: z.iso.datetime().nullable(),
+  }),
+  organization: z.object({ name: z.string(), inn: z.string().nullable() }),
+  codes: z.array(
+    z.object({ codeHash: z.string(), scannedAt: z.iso.datetime(), canonical: z.string() }),
+  ),
+  boxes: z.array(
+    z.object({
+      id: z.string(),
+      sscc: z.string().nullable(),
+      openedAt: z.iso.datetime(),
+      closedAt: z.iso.datetime().nullable(),
+      disassembledAt: z.iso.datetime().nullable(),
+      palletId: z.string().nullable(),
+    }),
+  ),
+  items: z.array(z.object({ boxId: z.string(), codeHash: z.string() })),
+  pallets: z.array(
+    z.object({
+      id: z.string(),
+      sscc: z.string().nullable(),
+      openedAt: z.iso.datetime(),
+      closedAt: z.iso.datetime().nullable(),
+      disassembledAt: z.iso.datetime().nullable(),
+    }),
+  ),
+});
+export type ShiftExportRows = z.infer<typeof shiftExportRowsSchema>;
+
+/**
  * The product as a shift froze it when a station opened it
  * (`markiro_proto::ShiftSnapshotProduct`); only an active product opens a
  * shift, so it has a group.

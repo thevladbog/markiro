@@ -2101,6 +2101,95 @@ pub enum CodeCheck {
     Taken { owner: CodeOwner },
 }
 
+/// `GET /v1/office/shifts/{id}/export-source` (plan ЧЗ): what a shift's
+/// exports are built from, read in one snapshot. The office ports the
+/// cloud's source rules (`shift-export-source.service.ts`) over these rows
+/// and renders the files with `@markiro/domain`; the host checks nothing of
+/// an export itself. `codes` are the codes the shift owns, each with the
+/// canonical text of its owning scan (crypto tail included); `boxes` every
+/// box of the shift, open and taken apart ones too; `items` the live items
+/// of those boxes only (neither taken out by an exception nor taken by an
+/// earlier scan elsewhere), the only ones the cloud's rules ever read;
+/// `pallets` every pallet of the shift.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftExportRows {
+    pub shift: ExportShift,
+    pub organization: ExportOrganization,
+    pub codes: Vec<ExportCode>,
+    pub boxes: Vec<ExportBox>,
+    pub items: Vec<ExportItem>,
+    pub pallets: Vec<ExportPallet>,
+}
+
+/// The shift of [`ShiftExportRows`]. `closedAt` is the host's (whole
+/// seconds); `stationClosedAt` is the instant of the station's close the
+/// host accepted (the device's, with milliseconds), `null` when the office
+/// closed the shift or it is not closed. `productName` is the product's
+/// name now, as the cloud's export joins it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportShift {
+    pub id: String,
+    pub number: String,
+    pub status: ShiftStatus,
+    pub production_date: String,
+    pub product_name: String,
+    pub pallets_enabled: bool,
+    pub closed_at: Option<String>,
+    pub station_closed_at: Option<String>,
+    pub late_data_at: Option<String>,
+}
+
+/// The organization as the ЧЗ document names it: `org_name` and `LP_TIN`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportOrganization {
+    pub name: String,
+    pub inn: Option<String>,
+}
+
+/// A code the shift owns: its hash, the instant of its owning scan and that
+/// scan's canonical text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportCode {
+    pub code_hash: String,
+    pub scanned_at: String,
+    pub canonical: String,
+}
+
+/// A box of the shift; the device's instants as it sent them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportBox {
+    pub id: String,
+    pub sscc: Option<String>,
+    pub opened_at: String,
+    pub closed_at: Option<String>,
+    pub disassembled_at: Option<String>,
+    pub pallet_id: Option<String>,
+}
+
+/// A live item: the code `codeHash` lies in box `boxId`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportItem {
+    pub box_id: String,
+    pub code_hash: String,
+}
+
+/// A pallet of the shift; the device's instants as it sent them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPallet {
+    pub id: String,
+    pub sscc: Option<String>,
+    pub opened_at: String,
+    pub closed_at: Option<String>,
+    pub disassembled_at: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

@@ -58,6 +58,7 @@ import {
   productUpdateSchema,
   shiftCloseSchema,
   shiftCreateSchema,
+  shiftExportRowsSchema,
   shiftUpdateSchema,
   siteRecordSchema,
   ssccCounterUpdateSchema,
@@ -256,6 +257,7 @@ const RESPONSES = [
   ["template-defaults.json", templateDefaultsSchema],
   ["error-template-is-default.json", errorBodySchema],
   ["office-shift.json", officeShiftSchema],
+  ["shift-export-rows.json", shiftExportRowsSchema],
   ["error-shift-busy.json", errorBodySchema],
   ["error-snapshot-too-large.json", errorBodySchema],
   ["error-sscc-exhausted.json", errorBodySchema],
@@ -1512,6 +1514,109 @@ describe("shift shapes", () => {
       code: "conflict",
       details: { constraint: "snapshot_too_large" },
     });
+  });
+});
+
+describe("a shift's export rows", () => {
+  type Rows = ReturnType<typeof shiftExportRowsSchema.parse>;
+  const rows = (): Rows => shiftExportRowsSchema.parse(fixture("shift-export-rows.json"));
+  const refused = (value: unknown): boolean => !shiftExportRowsSchema.safeParse(value).success;
+
+  it("read the nulls of a planned shift, an office close and an open box and pallet", () => {
+    const base = rows();
+    const planned: Rows = {
+      ...base,
+      shift: {
+        ...base.shift,
+        status: "planned",
+        closedAt: null,
+        stationClosedAt: null,
+        lateDataAt: null,
+      },
+      organization: { name: "ООО «Атолл»", inn: null },
+      codes: [],
+      boxes: [],
+      items: [],
+      pallets: [],
+    };
+    expect(shiftExportRowsSchema.parse(planned)).toEqual(planned);
+    const office: Rows = {
+      ...base,
+      shift: { ...base.shift, stationClosedAt: null, lateDataAt: "2026-10-08T15:00:00Z" },
+      pallets: [{ ...base.pallets[0]!, sscc: null, closedAt: null, disassembledAt: null }],
+    };
+    expect(shiftExportRowsSchema.parse(office)).toEqual(office);
+  });
+
+  it("keep the group separator and the crypto tail of a code, and read an id, an SSCC or a code the domain will refuse as plain text", () => {
+    const base = rows();
+    expect(base.codes.every((code) => code.canonical.includes("\u001d"))).toBe(true);
+    const odd: Rows = {
+      ...base,
+      codes: [{ ...base.codes[0]!, canonical: "not a km" }],
+      boxes: [{ ...base.boxes[0]!, id: "box-1", sscc: "12345", palletId: "pallet-1" }],
+      items: [{ boxId: "box-1", codeHash: "not-a-hash" }],
+      pallets: [{ ...base.pallets[0]!, id: "pallet-1", sscc: "12345" }],
+    };
+    expect(shiftExportRowsSchema.parse(odd)).toEqual(odd);
+  });
+
+  const DROP = Symbol("drop the field");
+  /** The fixture with the field at `path` set to `value`, or dropped. */
+  function changed(path: string[], value: unknown): unknown {
+    const copy: unknown = JSON.parse(JSON.stringify(rows()));
+    let at = copy as Record<string, unknown>;
+    for (const key of path.slice(0, -1)) at = at[key] as Record<string, unknown>;
+    const last = path[path.length - 1]!;
+    if (value === DROP) delete at[last];
+    else at[last] = value;
+    return copy;
+  }
+
+  it("refuse a missing field at any level", () => {
+    const base = rows();
+    const fields: [string[], string[]][] = [
+      [[], Object.keys(base)],
+      [["shift"], Object.keys(base.shift)],
+      [["organization"], Object.keys(base.organization)],
+      [["codes", "0"], Object.keys(base.codes[0]!)],
+      [["boxes", "0"], Object.keys(base.boxes[0]!)],
+      [["items", "0"], Object.keys(base.items[0]!)],
+      [["pallets", "0"], Object.keys(base.pallets[0]!)],
+    ];
+    for (const [parent, keys] of fields) {
+      for (const key of keys) {
+        expect(refused(changed([...parent, key], DROP)), [...parent, key].join(".")).toBe(true);
+      }
+    }
+  });
+
+  it("refuse a shift that is no UUID, a status or date of another form and an instant that is no instant", () => {
+    const cases: [string[], unknown][] = [
+      [["shift", "id"], "42"],
+      [["shift", "number"], ""],
+      [["shift", "status"], "open"],
+      [["shift", "productionDate"], "08.10.2026"],
+      [["shift", "closedAt"], "yesterday"],
+      [["shift", "stationClosedAt"], "yesterday"],
+      [["shift", "lateDataAt"], "yesterday"],
+      [["shift", "palletsEnabled"], "yes"],
+      [["codes", "0", "scannedAt"], "yesterday"],
+      [["codes", "0", "canonical"], null],
+      [["boxes", "0", "openedAt"], null],
+      [["boxes", "0", "closedAt"], "yesterday"],
+      [["boxes", "0", "disassembledAt"], "yesterday"],
+      [["pallets", "0", "openedAt"], null],
+      [["pallets", "0", "closedAt"], "yesterday"],
+      [["pallets", "0", "disassembledAt"], "yesterday"],
+      [["organization", "inn"], 7701234567],
+      [["items"], {}],
+    ];
+    for (const [path, value] of cases) {
+      expect(refused(changed(path, value)), `${path.join(".")} = ${JSON.stringify(value)}`).toBe(
+        true,
+      );
+    }
   });
 });
 

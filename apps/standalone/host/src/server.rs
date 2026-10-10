@@ -274,6 +274,10 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::office_shifts::close_shift),
         )
         .route(
+            "/v1/office/shifts/{id}/export-source",
+            get(crate::routes::office_exports::export_source),
+        )
+        .route(
             "/v1/office/users",
             get(crate::routes::office_users::list_users)
                 .post(crate::routes::office_users::create_user),

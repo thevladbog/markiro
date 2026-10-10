@@ -14,9 +14,9 @@ use markiro_proto::{
     PairResponse, PairingCode, PairingCodeRequest, PalletClosedFact, PalletExceptionFact,
     PalletExceptionKind, PalletLabelFact, PasswordChange, PasswordSet, ProductCreate, ProductGroup,
     ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict, ShiftClose,
-    ShiftClosedFact, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord,
-    SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
-    TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
+    ShiftClosedFact, ShiftCreate, ShiftExportRows, ShiftMode, ShiftOrigin, ShiftStatus,
+    ShiftUpdate, SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState,
+    TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -1254,6 +1254,40 @@ fn code_check_fixtures_round_trip_and_name_the_owner_as_a_conflict_does() {
     let winner: CodeOwner =
         typed(&Value::Object(receipts.receipts[1].details.clone().unwrap())["winner"]);
     assert_eq!(taken, CodeCheck::Taken { owner: winner });
+}
+
+/// The export source of a shift (plan ЧЗ) round-trips, and its rows hang
+/// together as the host writes them: every live item names a box and a code
+/// of the source, a box names a pallet of the source, a closed box has its
+/// SSCC and an open one none, the station's close keeps its milliseconds
+/// beside the host's whole seconds, and a canonical code keeps its group
+/// separator and crypto tail.
+#[test]
+fn shift_export_rows_round_trip_and_hang_together() {
+    let rows: ShiftExportRows = round_trip("shift-export-rows.json");
+    assert_eq!(rows.shift.status, ShiftStatus::Closed);
+    for item in &rows.items {
+        assert!(rows.boxes.iter().any(|b| b.id == item.box_id), "{item:?}");
+        assert!(
+            rows.codes.iter().any(|c| c.code_hash == item.code_hash),
+            "{item:?}"
+        );
+    }
+    for b in &rows.boxes {
+        if let Some(pallet) = &b.pallet_id {
+            assert!(rows.pallets.iter().any(|p| &p.id == pallet), "{b:?}");
+        }
+        assert_eq!(b.closed_at.is_some(), b.sscc.is_some(), "{b:?}");
+    }
+    assert_eq!(
+        rows.shift.closed_at.as_deref(),
+        Some("2026-10-08T14:00:07Z")
+    );
+    assert_eq!(
+        rows.shift.station_closed_at.as_deref(),
+        Some("2026-10-08T14:00:07.412Z")
+    );
+    assert!(rows.codes.iter().all(|c| c.canonical.contains('\u{1d}')));
 }
 
 /// A shift's totals carry both pallet counts (plan ПЛ-Х): each is required,

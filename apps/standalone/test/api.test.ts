@@ -411,6 +411,12 @@ const CASES: Case[] = [
     { method: "POST", path: `/v1/office/shifts/${SHIFT_ID}/close`, body: SHIFT_CLOSE },
   ],
   [
+    "getShiftExportSource",
+    fixture("shift-export-rows.json"),
+    (api) => api.getShiftExportSource(TOKEN, SHIFT_ID),
+    { method: "GET", path: `/v1/office/shifts/${SHIFT_ID}/export-source`, body: undefined },
+  ],
+  [
     "setUserPassword",
     null,
     (api) => api.setUserPassword(TOKEN, USER_ID, { password: "a new long password" }),
