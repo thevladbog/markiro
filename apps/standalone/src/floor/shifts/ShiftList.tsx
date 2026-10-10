@@ -43,6 +43,12 @@ type Copies = { kind: "loading" } | { kind: "failed" } | { kind: "ready"; copies
  * host away. One entry at a time; «Сменить оператора» is never held by an
  * entry, so one that never settles does not trap the station here, and an
  * answer that lands after the screen is gone is dropped.
+ *
+ * What the list says of itself (a refusal of the entry or the office's close of
+ * the shift, and the state of the link) is said together in one polite region
+ * that is there before any of it: the first never hides the second. The focus
+ * starts on the line that names the operator, so a keyboard or a screen reader
+ * does not begin on the page after the work screen or the new shift is gone.
  */
 export function ShiftList({
   local,
@@ -65,6 +71,7 @@ export function ShiftList({
   const [entering, setEntering] = useState<string | null>(null);
   const [refusal, setRefusal] = useState<EntryRefusal | null>(null);
   const alive = useRef(true);
+  const start = useRef<HTMLParagraphElement>(null);
   // The guard of one entry at a time: two presses in one turn both pass a
   // check of `entering`, which only the next render changes.
   const running = useRef(false);
@@ -73,6 +80,9 @@ export function ShiftList({
     return () => {
       alive.current = false;
     };
+  }, []);
+  useLayoutEffect(() => {
+    start.current?.focus();
   }, []);
   // The latest props, for an entry's answer that lands after a render.
   const current = useRef({ online, onEntered, onHostError });
@@ -130,6 +140,28 @@ export function ShiftList({
   };
 
   const busy = entering !== null;
+  // Not alerts as well (`role="presentation"` drops the component's own role):
+  // inside a polite region each would be read twice.
+  const standing =
+    refusal !== null ? (
+      <Alert tone="error" role="presentation">
+        {t(`floor.shifts.refused.${refusal}`)}
+      </Alert>
+    ) : notice !== null ? (
+      <Alert tone="info" role="presentation">
+        {t("floor.shifts.officeClosed", { number: notice.number })}
+      </Alert>
+    ) : null;
+  // Without the host, the list that did not update says nothing more.
+  const linkState = !online ? (
+    <Alert tone="warn" role="presentation">
+      {t("floor.shifts.offline")}
+    </Alert>
+  ) : shiftReads.failed ? (
+    <Alert tone="warn" role="presentation">
+      {t("floor.shifts.readHostFailed")}
+    </Alert>
+  ) : null;
   const body = () => {
     if (copies.kind === "loading") return <p>{t("floor.shifts.loading")}</p>;
     if (copies.kind === "failed") {
@@ -167,19 +199,12 @@ export function ShiftList({
   return (
     <Card className="standalone-card shift-list" title={t("floor.shifts.title")} titleAs="h2">
       <div className="standalone-form">
-        <p className="floor-sign-in__prompt">
+        <p ref={start} tabIndex={-1} className="floor-sign-in__prompt">
           {t("floor.operator.signedIn", { name: operator.name, login: operator.login })}
         </p>
-        <div className="floor-sign-in__message" aria-live="polite">
-          {refusal !== null ? (
-            <Alert tone="error">{t(`floor.shifts.refused.${refusal}`)}</Alert>
-          ) : notice !== null ? (
-            <Alert tone="info">{t("floor.shifts.officeClosed", { number: notice.number })}</Alert>
-          ) : !online ? (
-            <Alert tone="warn">{t("floor.shifts.offline")}</Alert>
-          ) : shiftReads.failed ? (
-            <Alert tone="warn">{t("floor.shifts.readHostFailed")}</Alert>
-          ) : null}
+        <div className="floor-sign-in__message floor-sign-in__message--stack" aria-live="polite">
+          {standing}
+          {linkState}
           {busy && <p>{t("floor.shifts.entering")}</p>}
         </div>
         {body()}

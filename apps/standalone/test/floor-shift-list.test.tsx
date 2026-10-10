@@ -383,6 +383,110 @@ describe("the shifts of the station's line", () => {
     expect(screen.getByText("Смену OCT26-004 закрыли в офисе.")).toBeTruthy();
   });
 
+  describe("what the list says in its one polite region", () => {
+    const OFFLINE =
+      "Нет связи с хостом: показаны смены, полученные раньше. Продолжить можно смену, которую эта станция уже открыла.";
+    const NOT_UPDATED = "Список смен не обновился с хоста — показаны полученные раньше.";
+    const CLOSED = "Смену OCT26-004 закрыли в офисе.";
+    const NOTICE = { kind: "office_closed", number: "OCT26-004" } as const;
+
+    /** The polite region, there from the first render, and what sits in it. */
+    function region(): HTMLElement {
+      const element = screen.getByText(
+        "Вошёл: Анна Кузнецова, табельный номер 0042.",
+      ).nextElementSibling;
+      if (!(element instanceof HTMLElement) || element.getAttribute("aria-live") !== "polite") {
+        throw new Error("no polite region after the prompt");
+      }
+      return element;
+    }
+
+    it("shows the office's close of the shift and the lost link together, not one in place of the other", async () => {
+      const { executor } = await copiesOf([PLANNED]);
+      renderList(executor, { online: false, notice: NOTICE });
+      await screen.findByText("OCT26-005/S");
+      expect(within(region()).getByText(CLOSED)).toBeTruthy();
+      expect(within(region()).getByText(OFFLINE)).toBeTruthy();
+    });
+
+    it("shows the office's close of the shift and the host's list that did not update together", async () => {
+      const { executor } = await copiesOf([PLANNED]);
+      renderList(executor, { notice: NOTICE, shiftReads: { done: 1, failed: true } });
+      await screen.findByText("OCT26-005/S");
+      expect(within(region()).getByText(CLOSED)).toBeTruthy();
+      expect(within(region()).getByText(NOT_UPDATED)).toBeTruthy();
+      expect(within(region()).queryAllByRole("alert")).toEqual([]);
+    });
+
+    it("shows the host's refusal of an entry and the lost link together", async () => {
+      const { executor } = await copiesOf([MINE], [ENTERED_MINE]);
+      const closed = new HostError({
+        kind: "api",
+        code: "conflict",
+        status: 409,
+        message: "no",
+        details: { constraint: "shift_status" },
+      });
+      // Online when the entry starts and offline when it is refused is one list's life.
+      const enter = vi.fn(async () => Promise.reject(closed));
+      const handlers = handlersOf();
+      const view = render(listOf(executor, handlers, { enter }));
+      fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+      expect(await screen.findByText("Смена закрыта.")).toBeTruthy();
+      view.rerender(listOf(executor, handlers, { enter, online: false }));
+      expect(within(region()).getByText("Смена закрыта.")).toBeTruthy();
+      expect(within(region()).getByText(OFFLINE)).toBeTruthy();
+      expect(within(region()).queryAllByRole("alert")).toEqual([]);
+    });
+
+    it("keeps the lost link as the one thing said of the link, however the host's list went", async () => {
+      const { executor } = await copiesOf([PLANNED]);
+      renderList(executor, { online: false, shiftReads: { done: 1, failed: true } });
+      await screen.findByText("OCT26-005/S");
+      expect(within(region()).getByText(OFFLINE)).toBeTruthy();
+      expect(within(region()).queryByText(NOT_UPDATED)).toBeNull();
+    });
+
+    it("has the region on screen before any of it is said, and says nothing of the link while it is fine", async () => {
+      const { executor } = await copiesOf([PLANNED]);
+      const handlers = handlersOf();
+      const view = render(listOf(executor, handlers, {}));
+      await screen.findByText("OCT26-005/S");
+      const before = region();
+      expect(before.textContent).toBe("");
+      view.rerender(listOf(executor, handlers, { online: false, notice: NOTICE }));
+      expect(region()).toBe(before);
+      expect(within(before).getByText(CLOSED)).toBeTruthy();
+    });
+
+    it("is heard once: its messages are not alerts of their own inside a polite region", async () => {
+      const { executor } = await copiesOf([PLANNED]);
+      renderList(executor, { online: false, notice: NOTICE });
+      await screen.findByText("OCT26-005/S");
+      expect(within(region()).queryAllByRole("alert")).toEqual([]);
+    });
+  });
+
+  it("gives the focus to the list when it appears, so a keyboard or a screen reader starts there", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    renderList(executor);
+    await screen.findByText("OCT26-005/S");
+    const prompt = screen.getByText("Вошёл: Анна Кузнецова, табельный номер 0042.");
+    expect(document.activeElement).toBe(prompt);
+    expect(prompt.tabIndex).toBe(-1);
+  });
+
+  it("does not take the focus back from a button when it reads its copies again", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    const handlers = handlersOf();
+    const view = render(listOf(executor, handlers, {}));
+    const open = await screen.findByRole("button", { name: "Открыть" });
+    open.focus();
+    view.rerender(listOf(executor, handlers, { shiftReads: { done: 2, failed: false } }));
+    await screen.findByRole("button", { name: "Открыть" });
+    expect(document.activeElement).toBe(open);
+  });
+
   it("explains a copy it cannot read and reads again on «Повторить»", async () => {
     const real = (await copiesOf([PLANNED])).executor;
     let broken = true;

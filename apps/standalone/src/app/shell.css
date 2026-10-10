@@ -62,6 +62,16 @@
   font: var(--floor-body-strong);
 }
 
+.floor-status__health {
+  display: grid;
+  gap: 8px;
+}
+
+.floor-status__alerts {
+  display: grid;
+  gap: 8px;
+}
+
 .floor-sign-in {
   display: flex;
   flex-direction: column;
@@ -87,6 +97,13 @@
 
 .floor-sign-in__message {
   min-height: 64px;
+}
+
+/* Several messages at once (the shift list): one under the other, apart. */
+.floor-sign-in__message--stack {
+  display: grid;
+  align-content: start;
+  gap: 8px;
 }
 
 .line-select {

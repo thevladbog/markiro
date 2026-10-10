@@ -511,7 +511,13 @@ export function NewShift({
     <Card className="standalone-card shift-list" title={t("floor.newShift.title")} titleAs="h2">
       <div className="standalone-form">
         <div className="floor-sign-in__message" aria-live="polite">
-          {problem !== null && <Alert tone="error">{problemText(problem)}</Alert>}
+          {/* Not an alert as well (`role="presentation"` drops the component's
+              own role): inside this polite region it would be read twice. */}
+          {problem !== null && (
+            <Alert tone="error" role="presentation">
+              {problemText(problem)}
+            </Alert>
+          )}
           {busy !== null && <p>{t(`floor.newShift.${busy}`)}</p>}
         </div>
         {step.kind === "form" && ready !== null ? formStep(step.form, ready) : productStep()}

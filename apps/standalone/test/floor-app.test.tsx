@@ -244,6 +244,36 @@ describe("the floor after an operator signed in", () => {
     view.unmount();
   });
 
+  const SIGNED_IN = "Вошёл: Анна Кузнецова, табельный номер 0042.";
+
+  it("gives the focus to the list once the operator is back on it from a shift, held work or not", async () => {
+    const handlers = handlersOf();
+    const work = holdingWork();
+    render(floorOf(await floorCopies(), handlers, { workScreen: work.Work }));
+    await enterPlanned();
+    const leave = await screen.findByRole("button", { name: "Работа OCT26-005/S" });
+    await work.tracked();
+    leave.focus();
+    fireEvent.click(leave);
+    await settle();
+    // The work is not over: the screen of the shift is still there.
+    expect(screen.queryByText(SIGNED_IN)).toBeNull();
+    await work.release();
+    const prompt = await screen.findByText(SIGNED_IN);
+    expect(document.activeElement).toBe(prompt);
+  });
+
+  it("gives the focus to the list when the operator turns back from a new shift", async () => {
+    render(floorOf(await floorCopies(), handlersOf()));
+    fireEvent.click(await screen.findByRole("button", { name: "Новая смена" }));
+    const back = await screen.findByRole("button", { name: "Назад" });
+    back.focus();
+    expect(document.activeElement).toBe(back);
+    fireEvent.click(back);
+    const prompt = await screen.findByText(SIGNED_IN);
+    expect(document.activeElement).toBe(prompt);
+  });
+
   it("leaves the shift only once the work its screen tracks has settled", async () => {
     const handlers = handlersOf();
     const work = holdingWork();
@@ -1433,7 +1463,7 @@ describe("the stub of the work screen", () => {
     expect(region?.textContent).toBe("Дожидаемся окончания начатой работы…");
   });
 
-  it("asks to leave once, with a 64 px button that the wait disables", () => {
+  it("asks to leave once, with a 64 px button that the wait does not disable", () => {
     const onLeave = vi.fn();
     const view = render(
       <ThemeProvider>
@@ -1443,6 +1473,8 @@ describe("the stub of the work screen", () => {
     const leave = screen.getByRole("button", { name: "Выйти из смены" });
     expect(leave.className).toContain("mk-btn--floor");
     expect(leave).toHaveProperty("disabled", false);
+    expect(leave.getAttribute("aria-disabled")).toBeNull();
+    leave.focus();
     fireEvent.click(leave);
     expect(onLeave).toHaveBeenCalledTimes(1);
     view.rerender(
@@ -1450,6 +1482,15 @@ describe("the stub of the work screen", () => {
         <WorkScreen {...props({ onLeave, leaving: true })} />
       </ThemeProvider>,
     );
-    expect(screen.getByRole("button", { name: "Выйти из смены" })).toHaveProperty("disabled", true);
+    // The same button with the focus still on it: a disabled one drops the
+    // focus onto the page, and a keyboard or a screen reader loses its place.
+    const waiting = screen.getByRole("button", { name: "Выйти из смены" });
+    expect(waiting).toBe(leave);
+    expect(document.activeElement).toBe(leave);
+    expect(waiting).toHaveProperty("disabled", false);
+    expect(waiting.getAttribute("aria-disabled")).toBe("true");
+    // Pressing it while the leave waits asks for nothing more.
+    fireEvent.click(waiting);
+    expect(onLeave).toHaveBeenCalledTimes(1);
   });
 });

@@ -1,4 +1,6 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
@@ -6,12 +8,20 @@ import { ThemeProvider } from "@markiro/ui";
 import type { SyncState } from "../src/app/shell.js";
 import { readFloorPlace } from "../src/floor/floor-status.js";
 import { FloorStatusBar, type FloorStatusBarProps } from "../src/floor/FloorStatusBar.js";
-import type { ChangeItem, HostStatus } from "../src/host/protocol.js";
+import { keepEnteredShift } from "../src/floor/shifts/shift-copies.js";
+import { enteredShiftSchema, type ChangeItem, type HostStatus } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import { syncReferences } from "../src/local/reference-sync.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
 import { openLocalDb } from "./support/local-db.js";
 
+// See test/protocol.test.ts: bind import.meta.url before building the URL.
+const testModuleUrl = import.meta.url;
+const ENTERED = enteredShiftSchema.parse(
+  JSON.parse(
+    readFileSync(new URL("../proto/fixtures/device-shift-entered.json", testModuleUrl), "utf8"),
+  ),
+);
 const PAIRING = { hostId: HOST_ID, deviceId: DEVICE_ID };
 const OTHER_DEVICE = "1d2e3f4a-5b6c-4d7e-8f90-a1b2c3d4e5f6";
 const OTHER_LINE_ID = "00000000-6a3e-4b9f-9d3c-2b1a0e8f7d61";
@@ -53,6 +63,10 @@ function bar(props: Partial<FloorStatusBarProps> & { local: LocalExecutor }) {
         operator={null}
         link={null}
         sync={SYNCED}
+        deviceName={null}
+        shiftId={null}
+        deviceNotSaved={false}
+        refusalHeld={false}
         {...props}
       />
     </ThemeProvider>
@@ -211,5 +225,104 @@ describe("the floor's status bar", () => {
     });
     expect(screen.getByText("Линия розлива 2")).toBeTruthy();
     expect(screen.queryByText("Линия фасовки 1")).toBeNull();
+  });
+
+  it("names the device, and the shift the operator works in while they work in it", async () => {
+    const local = await synced([ORG, line("Линия розлива 2")]);
+    await keepEnteredShift(local, PAIRING, ENTERED, "2026-10-09T06:00:00.000Z", 1_790_000_000_000);
+    const view = render(bar({ local, deviceName: "Станция у окна", shiftId: ENTERED.id }));
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    expect(within(region).getByText("Станция у окна")).toBeTruthy();
+    expect(await within(region).findByText("OCT26-004")).toBeTruthy();
+    view.rerender(bar({ local, deviceName: "Станция у окна", shiftId: null }));
+    expect(within(region).queryByText("OCT26-004")).toBeNull();
+    expect(within(region).queryByText("Смена")).toBeNull();
+  });
+
+  it("names no device for a pairing file that has no name", async () => {
+    render(bar({ local: await synced([ORG]) }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    expect(screen.queryByText("Устройство")).toBeNull();
+  });
+
+  it("keeps the number of the shift read before out of the bar when the next shift cannot be read", async () => {
+    const local = await synced([ORG]);
+    await keepEnteredShift(local, PAIRING, ENTERED, "2026-10-09T06:00:00.000Z", 1_790_000_000_000);
+    const view = render(bar({ local, shiftId: ENTERED.id }));
+    expect(await screen.findByText("OCT26-004")).toBeTruthy();
+    // A shift this pairing has no copy of, and one it cannot read at all.
+    view.rerender(bar({ local, shiftId: "4e7a1c9d-2b5f-4d8e-a3c6-9f0b1e2d3c4a" }));
+    await waitFor(() => expect(screen.queryByText("OCT26-004")).toBeNull());
+    expect(screen.queryByText("Смена")).toBeNull();
+    view.rerender(bar({ local, shiftId: ENTERED.id }));
+    expect(await screen.findByText("OCT26-004")).toBeTruthy();
+    const broken: LocalExecutor = {
+      query: () => Promise.reject(new Error("disk")),
+      transaction: (statements) => local.transaction(statements),
+    };
+    view.rerender(bar({ local: broken, shiftId: ENTERED.id }));
+    await waitFor(() => expect(screen.queryByText("OCT26-004")).toBeNull());
+  });
+
+  it("names no shift of a pairing other than its own", async () => {
+    const local = await synced([ORG]);
+    await keepEnteredShift(local, PAIRING, ENTERED, "2026-10-09T06:00:00.000Z", 1_790_000_000_000);
+    render(
+      bar({ local, pairing: { hostId: HOST_ID, deviceId: OTHER_DEVICE }, shiftId: ENTERED.id }),
+    );
+    await act(async () => {
+      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+    });
+    expect(screen.queryByText("OCT26-004")).toBeNull();
+  });
+
+  /** The polite live regions of the bar, before anything is warned of. */
+  function politeRegions(region: HTMLElement): Set<Element> {
+    return new Set(region.querySelectorAll('[aria-live="polite"]'));
+  }
+
+  /** The element sits in one of those regions (it is not, when it brought its own). */
+  function isIn(regions: Set<Element>, element: HTMLElement): boolean {
+    const region = element.closest('[aria-live="polite"]');
+    return region !== null && regions.has(region);
+  }
+
+  it("warns while a change the office made to the device was not saved here, in a polite region that was there before", async () => {
+    const local = await synced([ORG]);
+    const view = render(bar({ local }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    const before = politeRegions(region);
+    view.rerender(bar({ local, deviceNotSaved: true }));
+    const warning = screen.getByText(
+      "Офис изменил это устройство, но изменение не удалось сохранить на этом компьютере: станция работает по-прежнему. Освободите место на диске или обратитесь к администратору.",
+    );
+    // A region that appears together with its text is not announced.
+    expect(isIn(before, warning)).toBe(true);
+    // The warning is heard once, by that region: it is not an alert of its own as well.
+    expect(within(region).queryAllByRole("alert")).toEqual([]);
+    view.rerender(bar({ local, deviceNotSaved: false }));
+    expect(screen.queryByText(/не удалось сохранить на этом компьютере/)).toBeNull();
+  });
+
+  it("says in the same polite region that the host refused this station while the operator is still in the shift", async () => {
+    const local = await synced([ORG]);
+    const view = render(bar({ local }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    const before = politeRegions(region);
+    const marker =
+      "Хост отказал этой станции: записи не отправляются. Выйдите из смены и подключите станцию заново.";
+    expect(screen.queryByText(marker)).toBeNull();
+    view.rerender(bar({ local, refusalHeld: true }));
+    const shown = screen.getByText(marker);
+    expect(isIn(before, shown)).toBe(true);
+    expect(within(region).queryAllByRole("alert")).toEqual([]);
+    // Both warnings stand together.
+    view.rerender(bar({ local, refusalHeld: true, deviceNotSaved: true }));
+    expect(screen.getByText(marker)).toBeTruthy();
+    expect(screen.getByText(/не удалось сохранить на этом компьютере/)).toBeTruthy();
+    view.rerender(bar({ local, refusalHeld: false, deviceNotSaved: true }));
+    expect(screen.queryByText(marker)).toBeNull();
   });
 });

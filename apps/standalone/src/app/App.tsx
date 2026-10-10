@@ -25,6 +25,7 @@ import {
   type OfficeLoginRequest,
 } from "../host/protocol.js";
 import { createTauriLocalExecutor, type LocalExecutor } from "../local/executor.js";
+import { countUnsentRecords } from "../local/outbox.js";
 import { Office } from "../office/Office.js";
 import { OfficeLogin } from "../office/OfficeLogin.js";
 import type { OfficeSessionValue } from "../office/office-session.js";
@@ -146,6 +147,8 @@ export function App({
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
   const [probeAttempt, setProbeAttempt] = useState(0);
   const [repairState, setRepairState] = useState<"idle" | "busy" | DeviceErrorCode>("idle");
+  // A forget the shell refused for records not yet sent, and how many there are.
+  const [unsent, setUnsent] = useState<{ records: number | null } | null>(null);
   const view = nextShellView(state, address);
   const localName = t("device.localName");
   const pairedStatus = state.device.kind === "ready" ? state.device.status : null;
@@ -267,21 +270,44 @@ export function App({
     setProbeAttempt((attempt) => attempt + 1);
   }, []);
 
-  const repair = useCallback(() => {
-    setRepairState("busy");
-    deviceApi.forget().then(
-      () => {
-        setRepairState("idle");
-        dispatch({ type: "forgotten" });
-        retryProbe();
-      },
-      (error: unknown) => {
-        // The config could not be removed; this screen stays and offers the
-        // same action again, now explaining why it did not work.
-        setRepairState(error instanceof DeviceError ? error.code : "unreachable");
-      },
-    );
-  }, [deviceApi, retryProbe]);
+  const forgetHostId = pairedStatus?.hostId ?? null;
+  const forgetDeviceId = pairedStatus?.deviceId ?? null;
+  const forget = useCallback(
+    (keepUnsent: boolean) => {
+      setRepairState("busy");
+      deviceApi.forget(keepUnsent ? { keepUnsent: true } : undefined).then(
+        () => {
+          setRepairState("idle");
+          setUnsent(null);
+          dispatch({ type: "forgotten" });
+          retryProbe();
+        },
+        (error: unknown) => {
+          if (error instanceof DeviceError && error.code === "unsent_facts") {
+            // A rejected device can send nothing more, so a person decides,
+            // knowing how many (question В7): the records stay on this PC. The
+            // pairing's own, or every pairing's when the file is unreadable,
+            // as the shell counts them.
+            const pairing =
+              forgetHostId === null || forgetDeviceId === null
+                ? null
+                : { hostId: forgetHostId, deviceId: forgetDeviceId };
+            void countUnsentRecords(localDb, pairing).then((records) => {
+              setUnsent({ records });
+              setRepairState("idle");
+            });
+            return;
+          }
+          // The config could not be removed; this screen stays and offers the
+          // same action again, now explaining why it did not work.
+          setRepairState(error instanceof DeviceError ? error.code : "unreachable");
+        },
+      );
+    },
+    [deviceApi, retryProbe, localDb, forgetHostId, forgetDeviceId],
+  );
+  const repair = useCallback(() => forget(false), [forget]);
+  const confirmRepair = useCallback(() => forget(true), [forget]);
 
   const unpaired = state.device.kind === "ready" && state.device.status === null;
   const bootstrap = useCallback(
@@ -448,7 +474,13 @@ export function App({
     <main className="standalone-screen">
       {view.kind === "loading" && <WaitScreen messageKey="shell.loading" />}
       {view.kind === "config_error" && (
-        <ConfigErrorScreen busy={repairBusy} error={repairError} onReset={repair} />
+        <ConfigErrorScreen
+          busy={repairBusy}
+          error={repairError}
+          unsent={unsent}
+          onReset={repair}
+          onConfirm={confirmRepair}
+        />
       )}
       {view.kind === "host_missing" && (
         <HostMissingScreen
@@ -484,7 +516,9 @@ export function App({
           remoteAddress={remoteAddress}
           busy={repairBusy}
           error={repairError}
+          unsent={unsent}
           onRepair={repair}
+          onConfirm={confirmRepair}
         />
       )}
       {view.kind === "other_host" && (
@@ -492,7 +526,9 @@ export function App({
           hostAddress={view.hostAddress}
           busy={repairBusy}
           error={repairError}
+          unsent={unsent}
           onRepair={repair}
+          onConfirm={confirmRepair}
         />
       )}
       {view.kind === "line_select" && (
@@ -514,6 +550,10 @@ export function App({
             operator={view.kind === "floor_operator" ? view.operator : null}
             link={state.link}
             sync={state.sync}
+            deviceName={pairedStatus.deviceName}
+            shiftId={state.floorWork?.shiftId ?? null}
+            deviceNotSaved={state.deviceNotSaved}
+            refusalHeld={state.pendingRejection !== null}
           />
           {view.kind === "floor" ? (
             <OperatorSignIn

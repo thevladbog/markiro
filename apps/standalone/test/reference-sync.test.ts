@@ -2408,6 +2408,54 @@ describe("catalog copies", () => {
     ]);
   });
 
+  it("keeps an older organization or line out while its newer revision waits in quarantine, even from a stale run of a forgotten pairing with the same host", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: feed({ 0: page(20, [{ ...ORG, rev: 20 }, line(LINE_1, 20, "Линия 1")]) }),
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
+    // The next sync's fetch stays in flight across `device_forget`.
+    let resolve: ((value: ChangesResponse) => void) | undefined;
+    const held = vi.fn(
+      () =>
+        new Promise<ChangesResponse>((resolveFetch) => {
+          resolve = resolveFetch;
+        }),
+    );
+    const stale = syncReferences({
+      changes: held,
+      local: executor,
+      hostId: HOST_ID,
+      deviceId: DEVICE_ID,
+    });
+    await vi.waitFor(() => expect(held).toHaveBeenCalledWith(20));
+    // `device_forget` clears every table; the device pairs again with the
+    // same host, whose first sync quarantines the newer revisions.
+    for (const table of COPY_TABLES) db.prepare(`DELETE FROM ${table}`).run();
+    await expect(
+      syncReferences({
+        changes: feed({
+          0: page(40, [
+            { ...ORG, rev: 35, data: { ...(ORG.data as object), timeZone: 3 } },
+            brokenLine(LINE_1, 36),
+          ]),
+        }),
+        local: executor,
+        hostId: HOST_ID,
+        deviceId: DEVICE_ID,
+        now: () => SEEN_AT,
+      }),
+    ).resolves.toEqual({ kind: "synced", rev: 40, quarantined: 2 });
+    // The forgotten pairing's page lands last: the quarantine keeps the older
+    // organization and line out, as it does for people and the catalog.
+    resolve?.(page(30, [{ ...ORG, rev: 25 }, line(LINE_1, 25, "Линия старая")]));
+    await expect(stale).resolves.toEqual({ kind: "synced", rev: 30, quarantined: 2 });
+    expect(tables(db).org).toEqual([]);
+    expect(tables(db).lines).toEqual([]);
+  });
+
   it("applies a revision larger than a page's 1 MiB, a template's tombstone and 5000 products, in one batch", async () => {
     const { db, executor } = openLocalDb();
     await syncReferences({

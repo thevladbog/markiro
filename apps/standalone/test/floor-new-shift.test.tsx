@@ -452,6 +452,55 @@ describe("a new shift on the station", () => {
     ).toBeTruthy();
   });
 
+  it("says a refusal once: in a polite region that was there before it, not as an alert inside one", async () => {
+    const down = new HostError({ kind: "transport", code: "unreachable", message: "down" });
+    renderNew(await copiesOf(CATALOG), { create: async () => Promise.reject(down) });
+    await chooseMilk();
+    const before = new Set(document.querySelectorAll('[aria-live="polite"]'));
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    const text = await screen.findByText(
+      "Нет связи с хостом. Создать смену можно только при связи с ним.",
+    );
+    const region = text.closest('[aria-live="polite"]');
+    expect(region !== null && before.has(region)).toBe(true);
+    // An element with the role of an alert inside the region is read twice.
+    expect(region?.querySelector('[role="alert"]')).toBeNull();
+    expect(screen.queryAllByRole("alert")).toEqual([]);
+  });
+
+  it("says the progress of a request in the region that holds the refusal that stands", async () => {
+    const down = new HostError({ kind: "transport", code: "unreachable", message: "down" });
+    let answer: (shift: DeviceShift) => void = () => undefined;
+    const create = vi
+      .fn<(create: DeviceShiftCreate) => Promise<DeviceShift>>()
+      .mockRejectedValueOnce(down)
+      .mockImplementation(
+        () =>
+          new Promise<DeviceShift>((resolve) => {
+            answer = resolve;
+          }),
+      );
+    renderNew(await copiesOf(CATALOG), { create });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    const refusal = await screen.findByText(
+      "Нет связи с хостом. Создать смену можно только при связи с ним.",
+    );
+    const region = refusal.closest('[aria-live="polite"]');
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Создать и открыть" })).toHaveProperty(
+        "disabled",
+        false,
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    const progress = await screen.findByText("Создаём смену…");
+    expect(progress.closest('[aria-live="polite"]')).toBe(region);
+    await act(async () => {
+      answer(MADE);
+    });
+  });
+
   it("hands a refused device key to the shell", async () => {
     const rejected = new HostError({
       kind: "api",
