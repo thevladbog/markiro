@@ -62,9 +62,20 @@ pub enum TableClass {
 /// makes the forget fail at the `DELETE` that breaks it, and `ON DELETE
 /// CASCADE` or `SET NULL` from a table the forget keeps to one it empties
 /// would delete or rewrite this device's own records without a word, so add
-/// none.
+/// none. `floor_sign_in_failures` is disposable although this device wrote
+/// it: a new pairing brings a new roster (`apps/standalone/AGENTS.md`, «Local
+/// database»), and keeping the lockout counters across a forget is an open
+/// owner question.
 pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
+    ("floor_block_requests", TableClass::DeviceData),
+    ("floor_boxes", TableClass::DeviceData),
+    ("floor_codes", TableClass::DeviceData),
+    ("floor_exceptions", TableClass::DeviceData),
+    ("floor_scans", TableClass::DeviceData),
+    ("floor_shifts", TableClass::DeviceData),
     ("floor_sign_in_failures", TableClass::Disposable),
+    ("floor_sscc_blocks", TableClass::DeviceData),
+    ("outbox", TableClass::DeviceData),
     ("ref_lines", TableClass::Disposable),
     ("ref_operator_badges", TableClass::Disposable),
     ("ref_operators", TableClass::Disposable),
@@ -402,17 +413,14 @@ impl LocalDb {
 
 /// How many outbox records without a receipt (`acked_at IS NULL`) `guard`
 /// protects, counted inside the forget's own transaction, so no record can
-/// arrive between the count and the clear. 0 while no migration has created
-/// `outbox` (plan 2a5 does, with the columns `host_id`, `device_id` and
-/// `acked_at`). An outbox that cannot be counted is an error, never 0.
+/// arrive between the count and the clear (`outbox`, migration `0006`, is in
+/// every database that opened). An outbox that cannot be counted is an error,
+/// never 0.
 async fn unsent_records(
     tx: &mut sqlx::SqliteConnection,
     guard: UnsentGuard<'_>,
 ) -> Result<u64, LocalDbError> {
     if guard == UnsentGuard::Ignore {
-        return Ok(0);
-    }
-    if !outbox_exists(tx).await? {
         return Ok(0);
     }
     count_unsent(tx, guard).await
@@ -428,7 +436,9 @@ async fn outbox_exists(connection: &mut sqlx::SqliteConnection) -> Result<bool, 
     Ok(outbox != 0)
 }
 
-/// The count of [`unsent_records`] once `outbox` is known to exist.
+/// The count of [`unsent_records`]. [`LocalDbState::unopened_unsent_records`]
+/// calls it once [`outbox_exists`] says the table is there: a database that
+/// did not open may be one an older build left, with no `outbox` at all.
 async fn count_unsent(
     connection: &mut sqlx::SqliteConnection,
     guard: UnsentGuard<'_>,
@@ -873,8 +883,8 @@ mod tests {
         }
     }
 
-    /// `TABLE_CLASSES` holds only disposable tables until plan 2a5, so the
-    /// class filter itself is pinned here, on tables of all three classes.
+    /// `TABLE_CLASSES` holds no workstation table until plan 2a7, so the
+    /// class filter itself is pinned here too, on tables of all three classes.
     #[tokio::test]
     async fn a_forget_empties_the_disposable_tables_and_keeps_the_other_classes() {
         use sqlx::{ConnectOptions, Connection};
