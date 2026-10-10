@@ -2395,6 +2395,36 @@ batch's write transaction, so an office close that commits while the batch
 waits for the lock is seen. The office closing a shift the station closed
 finds it changed (`stale_revision`) or closed (`shift_status`).
 
+Pallets (plan ПЛ-Х; `facts/pallets.rs`, `facts/pallet_closed.rs`,
+`facts/blocks.rs`; migration `0012_pallets.sql`). In a shift with pallets a
+`box_closed` names the station's pallet the box joined as it closed
+(`palletId`); a shift without pallets answers it, and every pallet fact,
+`no_pallets`. The first closed box that names a pallet opens it on the host
+(`opened_at` is that box's `closedAt`); a pallet of another device or
+another shift is `pallet_unknown`. The pallet's state never refuses a box:
+the station put the box there, and a box whose close comes again under a
+new id after a refusal joins the pallet it named, closed or not. A box
+closed on one pallet and sent again on another, or without its pallet, is
+`box_already_closed`. A `pallet_closed` closes the pallet with an SSCC of 18
+digits (its form is checked before its serial is read, which looks at the
+first 17 characters only) whose first 17 are the pallet extension `1`, the snapshot's prefix
+and `serial`, where `serial` lies in a live pallet block (extension 1) that
+the host issued to this device (`sscc_not_issued`), and no other pallet
+carries the SSCC or is closed on that serial of that block (`sscc_taken`;
+the unique indexes `pallets_sscc` and `pallets_block_serial` back it, and a
+box's SSCC starts with `0` from a box block, so boxes and pallets never meet
+on one). It keeps the station's `openedAt`, `closedAt`, `boxCount`
+(`box_count_reported`) and operator and raises the pallet block's
+`consumed_through` (`blocks::consume`, shared with `box_closed`). A pallet
+none of whose boxes reached the host opens closed, so its printed SSCC is
+held. The same close again is accepted with nothing written; another SSCC
+is `pallet_already_closed`. Which boxes a pallet holds is derived — the
+closed boxes whose `pallet_id` names it, not taken apart — and never
+stored; `box_count_reported` is evidence beside it, which the reports of
+plan О-Х compare. One open pallet per station and shift is the station's
+rule, not the host's: a second open pallet of a device is kept, since a
+refusal would fail a batch the station can never get past.
+
 Any device asks whether a code is taken (`GET /v1/device/codes/{codeHash}`,
 `routes/codes.rs`; 64 lower-case hex digits, `validation_failed` on
 `codeHash` otherwise): `{ status: "free" }` or `{ status: "taken", owner }`

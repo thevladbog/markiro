@@ -3,13 +3,15 @@
 //! never its check digit (a marking rule, the domain's); it raises the
 //! block's `consumed_through` and compares the station's digest of the box's
 //! members with its own items, keeping the result for the shift's card
-//! (stage 4).
+//! (stage 4). In a shift with pallets the box joins the pallet it names
+//! (plan ПЛ-Х), which its first box opens on the host; the pallet's state
+//! never refuses a box, since the station put the box on it.
 
 use markiro_proto::{receipt_codes, BoxClosedFact};
 use serde_json::Value;
 use sqlx::SqliteConnection;
 
-use super::{boxes, rules, Applied, Context, Failure, Reject};
+use super::{blocks, boxes, pallets, rules, Applied, Context, Failure, Reject};
 use crate::error::ApiError;
 use crate::validate;
 
@@ -40,6 +42,11 @@ fn check(closed: &BoxClosedFact) -> Result<(), Reject> {
     if !rules::is_code_hash(&closed.membership_digest) {
         return Err(Reject::field("data.membershipDigest"));
     }
+    if let Some(pallet_id) = &closed.pallet_id {
+        if validate::client_uuid("data.palletId", pallet_id).is_err() {
+            return Err(Reject::field("data.palletId"));
+        }
+    }
     Ok(())
 }
 
@@ -52,33 +59,24 @@ pub async fn apply(
         serde_json::from_value(data.clone()).map_err(|_| Reject::field("data"))?;
     check(&closed)?;
     let serial = i64::try_from(closed.serial).map_err(|_| Reject::field("data.serial"))?;
+    if closed.pallet_id.is_some() {
+        pallets::require(context)?;
+    }
     let found = boxes::find(&mut *conn, context, &closed.box_id)
         .await?
         .ok_or_else(|| Reject::new(receipt_codes::BOX_UNKNOWN))?;
     if let Some(sscc) = &found.sscc {
-        // The same close sent again under another id changes nothing.
-        return if *sscc == closed.sscc {
+        // The same close sent again under another id changes nothing; on
+        // another pallet it is another close.
+        return if *sscc == closed.sscc && found.pallet_id == closed.pallet_id {
             Ok(Applied::accepted())
         } else {
             Err(Reject::new(receipt_codes::BOX_ALREADY_CLOSED).into())
         };
     }
-    if !rules::names_serial(&closed.sscc, 0, &context.shift.issuer_prefix, closed.serial) {
-        return Err(Reject::new(receipt_codes::SSCC_NOT_ISSUED).into());
-    }
-    let issued: Option<i64> = sqlx::query_scalar(
-        "SELECT 1 FROM sscc_blocks WHERE id = ? AND device_id = ? AND issuer_prefix = ? \
-         AND extension = 0 AND from_serial <= ? AND to_serial >= ? AND revoked_at IS NULL",
-    )
-    .bind(&closed.block_id)
-    .bind(context.device_id)
-    .bind(&context.shift.issuer_prefix)
-    .bind(serial)
-    .bind(serial)
-    .fetch_optional(&mut *conn)
-    .await
-    .map_err(ApiError::internal)?;
-    if issued.is_none() {
+    if !rules::names_serial(&closed.sscc, 0, &context.shift.issuer_prefix, closed.serial)
+        || !blocks::issued(&mut *conn, context, &closed.block_id, 0, serial).await?
+    {
         return Err(Reject::new(receipt_codes::SSCC_NOT_ISSUED).into());
     }
     // One serial of a block is one label: another box with this SSCC, or on
@@ -94,6 +92,15 @@ pub async fn apply(
     if taken.is_some() {
         return Err(Reject::new(receipt_codes::SSCC_TAKEN).into());
     }
+    // The pallet is this device's in this shift (`pallet_unknown`
+    // otherwise), or new.
+    let new_pallet = match &closed.pallet_id {
+        Some(pallet_id) => pallets::find(&mut *conn, context, pallet_id)
+            .await?
+            .is_none()
+            .then_some(pallet_id),
+        None => None,
+    };
     let members: Vec<String> = sqlx::query_scalar(
         "SELECT code_hash FROM box_items \
          WHERE box_id = ? AND removed_at IS NULL AND displaced_at IS NULL",
@@ -103,10 +110,13 @@ pub async fn apply(
     .await
     .map_err(ApiError::internal)?;
     let matches = rules::box_membership_digest(&members) == closed.membership_digest;
+    if let Some(pallet_id) = new_pallet {
+        pallets::open(&mut *conn, context, pallet_id, &closed.closed_at).await?;
+    }
     sqlx::query(
         "UPDATE boxes SET opened_at = ?, closed_at = ?, sscc = ?, block_id = ?, serial = ?, \
-         item_count_reported = ?, membership_digest = ?, digest_matches = ?, operator_id = ? \
-         WHERE id = ?",
+         item_count_reported = ?, membership_digest = ?, digest_matches = ?, operator_id = ?, \
+         pallet_id = ? WHERE id = ?",
     )
     .bind(&closed.opened_at)
     .bind(&closed.closed_at)
@@ -117,18 +127,11 @@ pub async fn apply(
     .bind(&closed.membership_digest)
     .bind(matches)
     .bind(context.operator_id)
+    .bind(&closed.pallet_id)
     .bind(&closed.box_id)
     .execute(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
-    sqlx::query(
-        "UPDATE sscc_blocks SET consumed_through = max(coalesce(consumed_through, ?1), ?1) \
-         WHERE id = ?2",
-    )
-    .bind(serial)
-    .bind(&closed.block_id)
-    .execute(&mut *conn)
-    .await
-    .map_err(ApiError::internal)?;
+    blocks::consume(&mut *conn, &closed.block_id, serial).await?;
     Ok(Applied::accepted())
 }

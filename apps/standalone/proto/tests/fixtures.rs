@@ -11,11 +11,12 @@ use markiro_proto::{
     OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeShift,
     OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord,
     OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord,
-    PairResponse, PairingCode, PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate,
-    ProductGroup, ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict,
-    ShiftClose, ShiftClosedFact, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate,
-    SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
-    TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
+    PairResponse, PairingCode, PairingCodeRequest, PalletClosedFact, PasswordChange, PasswordSet,
+    ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate, ScanFact,
+    ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate, ShiftMode, ShiftOrigin,
+    ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate,
+    SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT,
+    PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -992,6 +993,39 @@ fn the_fact_code_fixtures_list_every_receipt_and_reason_code() {
     );
 }
 
+/// The pallet facts of a shift with pallets (plan ПЛ-Х), in their own
+/// fixture so a station of stage 2a reads `facts-request.json` as before: a
+/// box closed on the station's pallet, then the pallet's close with the SSCC
+/// of the first serial of a pallet block.
+#[test]
+fn pallet_fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
+    let batch: FactBatch = round_trip("facts-request-pallets.json");
+    let kinds: Vec<FactKind> = batch.records.iter().map(|record| record.kind).collect();
+    assert_eq!(kinds, vec![FactKind::BoxClosed, FactKind::PalletClosed]);
+    let boxed: BoxClosedFact = typed(&batch.records[0].data);
+    assert_eq!(serde_json::to_value(&boxed).unwrap(), batch.records[0].data);
+    let closed: PalletClosedFact = typed(&batch.records[1].data);
+    assert_eq!(
+        serde_json::to_value(&closed).unwrap(),
+        batch.records[1].data
+    );
+    assert_eq!(boxed.pallet_id.as_deref(), Some(closed.pallet_id.as_str()));
+    assert_eq!(closed.opened_at, boxed.closed_at);
+    assert!(closed.sscc.starts_with("1460068200"));
+    // A box of a shift without pallets names none, and writes none back.
+    let plain: FactBatch = serde_json::from_value(fixture("facts-request.json")).unwrap();
+    let plain_box: BoxClosedFact = typed(&plain.records[2].data);
+    assert_eq!(plain_box.pallet_id, None);
+    assert!(serde_json::to_value(&plain_box)
+        .unwrap()
+        .get("palletId")
+        .is_none());
+    // The pallet's close is read strictly, as every request.
+    let mut extra = batch.records[1].data.clone();
+    extra["boxes"] = serde_json::json!([]);
+    assert!(serde_json::from_value::<PalletClosedFact>(extra).is_err());
+}
+
 /// A batch of facts and its receipts. The records' `data` stays JSON in the
 /// envelope (the host reads it by kind, record by record); each one reads
 /// as its kind's type and writes back unchanged.
@@ -1024,6 +1058,9 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
             }
             FactKind::ShiftClosed => {
                 serde_json::to_value(typed::<ShiftClosedFact>(&record.data)).unwrap()
+            }
+            FactKind::PalletClosed => {
+                serde_json::to_value(typed::<PalletClosedFact>(&record.data)).unwrap()
             }
         };
         assert_eq!(typed, record.data, "{}", record.id);

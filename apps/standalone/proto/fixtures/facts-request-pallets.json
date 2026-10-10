@@ -1,0 +1,36 @@
+{
+  "records": [
+    {
+      "id": "9c6b2e4f-7a5d-4b1c-8e0f-4a6b8c0d2e54",
+      "kind": "box_closed",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "boxId": "8e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
+        "sscc": "046006820000015000",
+        "blockId": "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+        "serial": 1500,
+        "openedAt": "2026-10-08T06:15:02.418Z",
+        "closedAt": "2026-10-08T06:21:47.302Z",
+        "itemCount": 12,
+        "membershipDigest": "39e3dbefdfff2c243c8fad25abe0b1e435fcab76ff4d6041b8caa9b2afb8402e",
+        "palletId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
+      }
+    },
+    {
+      "id": "ad7c3f5a-8b6e-4c2d-9f1a-5b7c9d1e3f65",
+      "kind": "pallet_closed",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "palletId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+        "sscc": "146006820000000409",
+        "blockId": "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b",
+        "serial": 40,
+        "openedAt": "2026-10-08T06:21:47.302Z",
+        "closedAt": "2026-10-08T09:02:11.540Z",
+        "boxCount": 40
+      }
+    }
+  ]
+}

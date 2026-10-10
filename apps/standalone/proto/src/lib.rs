@@ -100,7 +100,8 @@ pub mod receipt_codes {
     pub const BOX_UNKNOWN: &str = "box_unknown";
     /// A scan names a box that is closed.
     pub const BOX_CLOSED: &str = "box_closed";
-    /// A box closed with one SSCC is closed again with another.
+    /// A box closed with one SSCC (or on one pallet) is closed again with
+    /// another.
     pub const BOX_ALREADY_CLOSED: &str = "box_already_closed";
     /// The box is not in the state the record needs (an exception or a
     /// label check of an open box, an undo in a closed one).
@@ -1698,7 +1699,8 @@ pub struct DeviceShiftCreate {
 /// What a fact records (stage 2a spec §4.4): the kind tells the host how
 /// to read the record's `data`. A kind added later is a new variant; a host
 /// that does not know it answers the record `invalid_record`, for good, as it
-/// does a new `data` field: either raises `PROTOCOL_VERSION`.
+/// does a new `data` field: either raises `PROTOCOL_VERSION` (the pallet
+/// kinds came with protocol 3, plan ПЛ-Х).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactKind {
@@ -1707,6 +1709,7 @@ pub enum FactKind {
     BoxLabel,
     BoxException,
     ShiftClosed,
+    PalletClosed,
 }
 
 impl FactKind {
@@ -1717,6 +1720,7 @@ impl FactKind {
             FactKind::BoxLabel => "box_label",
             FactKind::BoxException => "box_exception",
             FactKind::ShiftClosed => "shift_closed",
+            FactKind::PalletClosed => "pallet_closed",
         }
     }
 }
@@ -1854,7 +1858,9 @@ pub struct ScanFact {
 /// `serial` from block `blockId`, which the host issued to this station.
 /// `itemCount` and `membershipDigest` (the domain's `boxMembershipDigestV1`
 /// of the box's code hashes) are what the station saw; the host compares the
-/// digest with its own items and keeps the result.
+/// digest with its own items and keeps the result. In a shift with pallets
+/// `palletId` names the station's pallet the box joined as it closed (plan
+/// ПЛ-Х); a shift without pallets sends none.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BoxClosedFact {
@@ -1866,6 +1872,26 @@ pub struct BoxClosedFact {
     pub closed_at: String,
     pub item_count: u32,
     pub membership_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_id: Option<String>,
+}
+
+/// `data` of a `pallet_closed` fact (plan ПЛ-Х): the station closed its
+/// pallet, when it filled or early, with the SSCC of serial `serial` from
+/// the pallet block (extension 1) `blockId` the host issued to it.
+/// `openedAt` is when its first box closed, `boxCount` how many boxes the
+/// station counted on it; the pallet's boxes are the boxes whose
+/// `box_closed` named it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PalletClosedFact {
+    pub pallet_id: String,
+    pub sscc: String,
+    pub block_id: String,
+    pub serial: u64,
+    pub opened_at: String,
+    pub closed_at: String,
+    pub box_count: u32,
 }
 
 /// How a box's printed label was checked.
@@ -2162,6 +2188,7 @@ mod tests {
             FactKind::BoxLabel,
             FactKind::BoxException,
             FactKind::ShiftClosed,
+            FactKind::PalletClosed,
         ];
         for kind in &kinds {
             match kind {
@@ -2169,7 +2196,8 @@ mod tests {
                 | FactKind::BoxClosed
                 | FactKind::BoxLabel
                 | FactKind::BoxException
-                | FactKind::ShiftClosed => {}
+                | FactKind::ShiftClosed
+                | FactKind::PalletClosed => {}
             }
         }
         kinds
