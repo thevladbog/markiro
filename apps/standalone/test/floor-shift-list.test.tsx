@@ -276,6 +276,48 @@ describe("the shifts of the station's line", () => {
     expect(handlers.onEntered).not.toHaveBeenCalled();
   });
 
+  it("hands another host's certificate to the shell at once, though it holds the shift's snapshot", async () => {
+    const { executor } = await copiesOf([MINE], [ENTERED_MINE]);
+    const changed = new HostError({
+      kind: "transport",
+      code: "certificate_mismatch",
+      message: "other",
+    });
+    const { handlers } = renderList(executor, {
+      enter: vi.fn(async () => Promise.reject(changed)),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+    await waitFor(() => expect(handlers.onHostError).toHaveBeenCalledWith(changed));
+    // Not worked from the snapshot behind the shell's back, and not blamed on the shift.
+    expect(handlers.onEntered).not.toHaveBeenCalled();
+  });
+
+  it("takes the previous refusal off the screen once the next attempt starts", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    const closed = new HostError({
+      kind: "api",
+      code: "conflict",
+      status: 409,
+      message: "no",
+      details: { constraint: "shift_status" },
+    });
+    const enter = vi
+      .fn<(id: string) => Promise<EnteredShift>>()
+      .mockRejectedValueOnce(closed)
+      .mockImplementationOnce(() => new Promise<EnteredShift>(() => undefined));
+    renderList(executor, { enter });
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+    expect(await screen.findByText("Смена закрыта.")).toBeTruthy();
+    // The list reads its copies again after a refusal; the entry is offered again when it is back.
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Открыть" })).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Открыть" }));
+    expect(await screen.findByText("Открываем смену…")).toBeTruthy();
+    expect(enter).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("Смена закрыта.")).toBeNull();
+  });
+
   it("enters one shift at a time and keeps «Сменить оператора» while an entry hangs", async () => {
     const { executor } = await copiesOf([PLANNED, MINE], [ENTERED_MINE]);
     let answer: (shift: EnteredShift) => void = () => undefined;
@@ -634,4 +676,67 @@ describe("entering a shift without the host", () => {
       expect(result).toEqual({ kind: "refused", reason: "closed" });
     },
   );
+
+  it("hands another host's certificate to the shell, not the stored snapshot, though the station holds one", async () => {
+    const { executor } = await copiesOf([], [ENTERED_MINE]);
+    const changed = new HostError({
+      kind: "transport",
+      code: "certificate_mismatch",
+      message: "other",
+    });
+    const enter = vi.fn(async () => Promise.reject(changed));
+    const result = await enterShift({ ...context(executor, true), enter }, await staleCopy(executor));
+    expect(result).toEqual({ kind: "rejected", error: changed });
+    expect(enter).toHaveBeenCalledTimes(1);
+  });
+
+  it("calls a failure that is no answer of the host a plain failure, and does not fall back to the snapshot", async () => {
+    const { executor } = await copiesOf([], [ENTERED_MINE]);
+    const enter = vi.fn(async () => Promise.reject(new Error("boom")));
+    const result = await enterShift({ ...context(executor, true), enter }, await staleCopy(executor));
+    expect(result).toEqual({ kind: "refused", reason: "failed" });
+  });
+
+  describe("when the shift's snapshot cannot be kept or read back", () => {
+    it("says the computer could not keep it when the write fails", async () => {
+      const { executor } = await copiesOf([PLANNED]);
+      const broken: LocalExecutor = {
+        query: (sql, params, row) => executor.query(sql, params, row),
+        transaction: () => Promise.reject(new Error("disk full")),
+      };
+      const result = await enterShift(context(broken, true), await plannedCopy(executor));
+      expect(result).toEqual({ kind: "refused", reason: "local" });
+    });
+
+    it("says the same when the write took and the snapshot is not there to read back", async () => {
+      const { executor } = await copiesOf([PLANNED]);
+      const lost: LocalExecutor = {
+        query: (sql, params, row) => executor.query(sql, params, row),
+        // The write is acknowledged and nothing is stored.
+        transaction: async (statements) => statements.map(() => 1),
+      };
+      const result = await enterShift(context(lost, true), await plannedCopy(executor));
+      expect(result).toEqual({ kind: "refused", reason: "local" });
+    });
+
+    it("says the same when what was kept is a snapshot this build cannot read back", async () => {
+      const { db, executor } = await copiesOf([PLANNED]);
+      const spoiled: LocalExecutor = {
+        query: (sql, params, row) => executor.query(sql, params, row),
+        transaction: async (statements) => {
+          const changes = await executor.transaction(statements);
+          db.prepare("UPDATE floor_shifts SET snapshot = ? WHERE id = ?").run("{}", PLANNED.id);
+          return changes;
+        },
+      };
+      const result = await enterShift(context(spoiled, true), await plannedCopy(executor));
+      expect(result).toEqual({ kind: "refused", reason: "local" });
+    });
+
+    async function plannedCopy(local: LocalExecutor) {
+      const stored = await readShiftCopy(local, PAIRING, PLANNED.id);
+      if (stored === null) throw new Error("no stored copy");
+      return stored;
+    }
+  });
 });
