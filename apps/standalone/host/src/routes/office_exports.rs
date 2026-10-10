@@ -1,25 +1,54 @@
-//! The data of a shift's exports (plan ЧЗ): `GET
-//! /v1/office/shifts/{id}/export-source`, every office role. The host only
-//! reads: the office ports the cloud's source rules and its completeness
-//! checks over these rows and renders the files with `@markiro/domain`. One
-//! read transaction gives every row one snapshot, as the cloud's export reads
-//! in one repeatable-read transaction; each query searches by an index of
-//! `0010` or `0012`, never through every fact of the host.
+//! A shift's exports (plan ЧЗ): `GET /v1/office/shifts/{id}/export-source`
+//! and `POST …/exports`, every office role. The host only reads and records:
+//! the office ports the cloud's source rules and its completeness checks
+//! over these rows, renders the files with `@markiro/domain`, saves them and
+//! then records the export in the audit trail. One read transaction gives
+//! every row one snapshot, as the cloud's export reads in one
+//! repeatable-read transaction; each query searches by an index of `0010` or
+//! `0012`, never through every fact of the host.
 
 use std::future::Future;
 
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::Json;
 use markiro_proto::{
     ExportBox, ExportCode, ExportItem, ExportOrganization, ExportPallet, ExportShift,
-    ShiftExportRows,
+    ShiftExportRecord, ShiftExportRows, ShiftStatus,
 };
+use serde_json::json;
 use sqlx::{SqliteConnection, SqlitePool};
 
+use crate::audit::{self, actions, Entry, Outcome};
 use crate::auth::OfficeContext;
-use crate::error::{ApiError, ApiPath};
+use crate::db::begin_write;
+use crate::error::{ApiError, ApiJson, ApiPath};
 use crate::server::AppState;
 use crate::shifts;
+use crate::validate;
+
+/// The shift formats `@markiro/domain` advertises (`SHIFT_EXPORT_FORMATS`),
+/// with their versions; `proto/fixtures/export-formats.json` holds the same
+/// list, and both suites check it against the fixture.
+pub const SHIFT_FORMATS: [(&str, u32); 10] = [
+    ("shift_txt_flat", 1),
+    ("shift_txt_boxes", 2),
+    ("shift_csv_flat", 1),
+    ("shift_csv_boxes", 2),
+    ("shift_xml_gismt_aggregation", 1),
+    ("shift_txt_pallets", 1),
+    ("shift_csv_pallets", 1),
+    ("shift_xml_gismt_aggregation_pallets", 1),
+    ("shift_txt_pallet_boxes", 1),
+    ("shift_xml_gismt_pallet_boxes", 1),
+];
+
+/// The pallet formats (`PALLET_EXPORT_FORMATS`).
+pub const PALLET_FORMATS: [(&str, u32); 1] = [("pallet_xml_gismt_aggregation", 1)];
+
+/// The bounds of `maxLines`, as the domain's `INVALID_LINE_LIMIT`.
+const MIN_LINES: u32 = 2;
+const MAX_LINES: u32 = 1_000_000;
 
 /// The shift, its product's name now and the instant of the station's
 /// close the host accepted (one at most: the first close of an active
@@ -218,4 +247,107 @@ where
             )
             .collect(),
     }))
+}
+
+/// `POST /v1/office/shifts/{id}/exports`: one `shift.export` row with what
+/// the export wrote, `204`. A shift's export needs a closed shift (`conflict`
+/// on `shift_status`, as the cloud refuses one); a pallet's needs a pallet of
+/// this shift, and its state is not checked again: the files are written
+/// already, and the row records that they were.
+pub async fn record_export(
+    State(state): State<AppState>,
+    context: OfficeContext,
+    ApiPath(id): ApiPath<String>,
+    ApiJson(record): ApiJson<ShiftExportRecord>,
+) -> Result<StatusCode, ApiError> {
+    let format = (record.format_id.as_str(), record.format_version);
+    let of_pallet = PALLET_FORMATS.contains(&format);
+    if !of_pallet && !SHIFT_FORMATS.contains(&format) {
+        return Err(ApiError::validation(
+            "formatId",
+            "not a format the office exports",
+        ));
+    }
+    match (&record.pallet_id, of_pallet) {
+        (Some(pallet), true) => validate::client_uuid("palletId", pallet)?,
+        (None, false) => {}
+        _ => {
+            return Err(ApiError::validation(
+                "palletId",
+                "a pallet's export names its pallet, a shift's none",
+            ))
+        }
+    }
+    if let Some(lines) = record.max_lines {
+        if of_pallet || !(MIN_LINES..=MAX_LINES).contains(&lines) {
+            return Err(ApiError::validation(
+                "maxLines",
+                "2-1 000 000 lines a part, none for a pallet",
+            ));
+        }
+    }
+    validate::client_uuid("documentId", &record.document_id)?;
+    if record.part_count == 0 || (of_pallet && record.part_count != 1) {
+        return Err(ApiError::validation(
+            "partCount",
+            "at least one part, exactly one for a pallet",
+        ));
+    }
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_session_in(&mut tx).await?;
+    let status: Option<String> = sqlx::query_scalar("SELECT status FROM shifts WHERE id = ?")
+        .bind(&id)
+        .fetch_optional(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    let status: ShiftStatus = status
+        .ok_or_else(|| ApiError::not_found("no such shift"))?
+        .parse()
+        .map_err(ApiError::internal)?;
+    if !of_pallet && status != ShiftStatus::Closed {
+        return Err(shifts::status_conflict(status));
+    }
+    if let Some(pallet) = &record.pallet_id {
+        let found: Option<i64> =
+            sqlx::query_scalar("SELECT 1 FROM pallets WHERE id = ? AND shift_id = ?")
+                .bind(pallet)
+                .bind(&id)
+                .fetch_optional(&mut *tx)
+                .await
+                .map_err(ApiError::internal)?;
+        if found.is_none() {
+            return Err(ApiError::validation(
+                "palletId",
+                "no such pallet in the shift",
+            ));
+        }
+    }
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::SHIFT_EXPORT,
+            target_type: Some("shift"),
+            target_id: Some(&id),
+            outcome: Outcome::Ok,
+            details: json!({
+                "formatId": record.format_id,
+                "formatVersion": record.format_version,
+                "maxLines": record.max_lines,
+                "palletId": record.pallet_id,
+                "documentId": record.document_id,
+                "partCount": record.part_count,
+                "codeCount": record.code_count,
+                "boxCount": record.box_count,
+                "palletCount": record.pallet_count,
+                "openPalletSuppressedBoxCount": record.open_pallet_suppressed_box_count,
+            }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    tx.commit().await.map_err(ApiError::internal)?;
+    Ok(StatusCode::NO_CONTENT)
 }

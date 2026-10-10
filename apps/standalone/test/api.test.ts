@@ -28,6 +28,7 @@ import {
   productUpdateSchema,
   shiftCloseSchema,
   shiftCreateSchema,
+  shiftExportRecordSchema,
   shiftUpdateSchema,
   templateCreateSchema,
   templateDefaultsUpdateSchema,
@@ -90,6 +91,7 @@ const SHIFT_ID = "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b";
 const SHIFT_CREATE = shiftCreateSchema.parse(fixture("shift-create.json"));
 const SHIFT_UPDATE = shiftUpdateSchema.parse(fixture("shift-update.json"));
 const SHIFT_CLOSE = shiftCloseSchema.parse(fixture("shift-close.json"));
+const EXPORT_RECORD = shiftExportRecordSchema.parse(fixture("shift-export-record.json"));
 
 type Case = [
   name: string,
@@ -429,6 +431,12 @@ const CASES: Case[] = [
     { method: "GET", path: `/v1/office/shifts/${SHIFT_ID}/pallets`, body: undefined },
   ],
   [
+    "recordShiftExport",
+    null,
+    (api) => api.recordShiftExport(TOKEN, SHIFT_ID, EXPORT_RECORD),
+    { method: "POST", path: `/v1/office/shifts/${SHIFT_ID}/exports`, body: EXPORT_RECORD },
+  ],
+  [
     "setUserPassword",
     null,
     (api) => api.setUserPassword(TOKEN, USER_ID, { password: "a new long password" }),
@@ -507,6 +515,15 @@ describe("HostApi shifts", () => {
       Object.entries(shift as object).filter(([key]) => key !== "totals"),
     );
     await expect(recording(withoutTotals).api.getShift(TOKEN, SHIFT_ID)).rejects.toThrow();
+  });
+
+  it("resolves a recorded export with nothing, and rejects an answer that carries a body", async () => {
+    await expect(
+      recording(null).api.recordShiftExport(TOKEN, SHIFT_ID, EXPORT_RECORD),
+    ).resolves.toBeUndefined();
+    await expect(
+      recording(shift).api.recordShiftExport(TOKEN, SHIFT_ID, EXPORT_RECORD),
+    ).rejects.toThrow();
   });
 
   it("resolves a delete with nothing, and rejects an answer that carries a body", async () => {

@@ -2,6 +2,8 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it } from "vitest";
 
+import { PALLET_EXPORT_FORMATS, SHIFT_EXPORT_FORMATS } from "@markiro/domain";
+
 import {
   PROTOCOL_VERSION,
   badgeCreateSchema,
@@ -60,6 +62,7 @@ import {
   productUpdateSchema,
   shiftCloseSchema,
   shiftCreateSchema,
+  shiftExportRecordSchema,
   shiftExportRowsSchema,
   shiftUpdateSchema,
   siteRecordSchema,
@@ -87,6 +90,7 @@ import {
   productUpdate,
   shiftClose,
   shiftCreate,
+  shiftExportRecord,
   shiftUpdate,
   templateCreate,
   templateDefaultsUpdate,
@@ -296,6 +300,7 @@ const REQUESTS = [
   ["shift-create-pallets.json", shiftCreateSchema],
   ["shift-update.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
+  ["shift-export-record.json", shiftExportRecordSchema],
   ["device-shift-create.json", deviceShiftCreateSchema],
 ] as const;
 
@@ -714,6 +719,35 @@ describe("request builders produce their fixtures exactly", () => {
     );
   });
 
+  it("the record of an export names every field and sums its parts' counts (plan ЧЗ)", () => {
+    const written = {
+      formatId: "shift_xml_gismt_aggregation_pallets",
+      formatVersion: 1,
+      maxLines: null,
+      palletId: null,
+      documentId: "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
+      parts: [{ codeCount: 3, boxCount: 2, palletCount: 1 }],
+      openPalletSuppressedBoxCount: 0,
+    };
+    expect(shiftExportRecord(written)).toStrictEqual(fixture("shift-export-record.json"));
+    expect(
+      shiftExportRecord({
+        ...written,
+        maxLines: 7,
+        parts: [
+          { codeCount: 2, boxCount: 1, palletCount: 1 },
+          { codeCount: 1, boxCount: 1, palletCount: 0 },
+        ],
+        openPalletSuppressedBoxCount: 1,
+      }),
+    ).toStrictEqual({
+      ...(fixture("shift-export-record.json") as object),
+      maxLines: 7,
+      partCount: 2,
+      openPalletSuppressedBoxCount: 1,
+    });
+  });
+
   it("a shift planned with no plan and no counterparty names both as null and still names the mode and pallets", () => {
     const shift = officeShiftSchema.parse(fixture("office-shift.json"));
     const body = shiftCreate({
@@ -786,6 +820,93 @@ describe("request builders produce their fixtures exactly", () => {
       defaultDuplicateTemplateId: null,
       categories: [],
       expectedRev: 9,
+    });
+  });
+});
+
+describe("the record of an export, field by field (plan ЧЗ)", () => {
+  const record = fixture("shift-export-record.json") as Record<string, unknown>;
+  const written = {
+    formatId: "pallet_xml_gismt_aggregation",
+    formatVersion: 3,
+    maxLines: 500,
+    palletId: "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+    documentId: "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+    parts: [
+      { codeCount: 5, boxCount: 2, palletCount: 1 },
+      { codeCount: 7, boxCount: 3, palletCount: 4 },
+      { codeCount: 0, boxCount: 1, palletCount: 2 },
+    ],
+    openPalletSuppressedBoxCount: 6,
+  };
+
+  it("carries every field of what was written through, and totals each count over all parts", () => {
+    expect(shiftExportRecord(written)).toStrictEqual({
+      formatId: "pallet_xml_gismt_aggregation",
+      formatVersion: 3,
+      maxLines: 500,
+      palletId: "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      documentId: "7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d",
+      partCount: 3,
+      codeCount: 12,
+      boxCount: 6,
+      palletCount: 7,
+      openPalletSuppressedBoxCount: 6,
+    });
+    expect(shiftExportRecordSchema.safeParse(shiftExportRecord(written)).success).toBe(true);
+  });
+
+  it("names a part count of zero as it is: the host refuses it, the builder does not hide it", () => {
+    expect(shiftExportRecord({ ...written, parts: [] })).toMatchObject({
+      partCount: 0,
+      codeCount: 0,
+      boxCount: 0,
+      palletCount: 0,
+    });
+  });
+
+  it.each([
+    ["formatId", 7],
+    ["formatVersion", 1.5],
+    ["maxLines", 2.5],
+    ["maxLines", "100"],
+    ["palletId", 5],
+    ["documentId", "SEP26-003"],
+    ["documentId", null],
+    ["partCount", 1.5],
+    ["codeCount", 3.5],
+    ["codeCount", "3"],
+    ["boxCount", 2.5],
+    ["palletCount", 0.5],
+    ["openPalletSuppressedBoxCount", 1.5],
+    ["openPalletSuppressedBoxCount", null],
+  ])("refuses %s = %j", (field, value) => {
+    expect(shiftExportRecordSchema.safeParse({ ...record, [field]: value }).success).toBe(false);
+  });
+
+  it.each(Object.keys(record))("refuses a record with no %s", (field) => {
+    const rest = Object.fromEntries(Object.entries(record).filter(([key]) => key !== field));
+    expect(Object.keys(rest)).toHaveLength(Object.keys(record).length - 1);
+    expect(shiftExportRecordSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it("takes a pallet's id, a line limit and a count above 32 bits", () => {
+    expect(
+      shiftExportRecordSchema.safeParse({
+        ...record,
+        palletId: "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+        maxLines: 1_000_000,
+        codeCount: 5_000_000_000,
+      }).success,
+    ).toBe(true);
+  });
+});
+
+describe("the formats of exports (plan ЧЗ)", () => {
+  it("the host takes exactly the formats the domain advertises (export-formats.json)", () => {
+    expect(fixture("export-formats.json")).toEqual({
+      shift: SHIFT_EXPORT_FORMATS.map(({ id, version }) => ({ id, version })),
+      pallet: PALLET_EXPORT_FORMATS.map(({ id, version }) => ({ id, version })),
     });
   });
 });

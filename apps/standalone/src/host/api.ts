@@ -73,6 +73,7 @@ import {
   type ProductUpdate,
   type ShiftClose,
   type ShiftCreate,
+  type ShiftExportRecord,
   type ShiftExportRows,
   type ShiftUpdate,
   type SsccCounter,
@@ -193,6 +194,8 @@ export interface HostApi {
   listShiftBoxes: (token: string, id: string) => Promise<OfficeBox[]>;
   /** Every pallet of the shift, opened first first, with what stands on it (plan ЧЗ). */
   listShiftPallets: (token: string, id: string) => Promise<OfficePallet[]>;
+  /** `204`: the export's files are saved; the host writes its `shift.export` audit row (plan ЧЗ). */
+  recordShiftExport: (token: string, id: string, record: ShiftExportRecord) => Promise<void>;
   /**
    * The station's shifts, with the device key only: the planned and active
    * shifts of its line and those it entered, active or closed within 30
@@ -489,5 +492,12 @@ export function createHostApi(client: HostClient): HostApi {
         officeToken: token,
         schema: z.array(officePalletSchema),
       }),
+    recordShiftExport: async (token, id, record) => {
+      await client.request("POST", `/v1/office/shifts/${id}/exports`, {
+        body: record,
+        officeToken: token,
+        schema: NO_CONTENT,
+      });
+    },
   };
 }

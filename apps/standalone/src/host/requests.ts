@@ -19,6 +19,7 @@ import type {
   ProductUpdate,
   ShiftClose,
   ShiftCreate,
+  ShiftExportRecord,
   ShiftUpdate,
   TemplateCreate,
   TemplateDefaultsUpdate,
@@ -443,6 +444,44 @@ export function shiftUpdate(
  */
 export function shiftClose(reason: string, expectedRev: number): ShiftClose {
   return { reason, expectedRev };
+}
+
+/**
+ * What an export wrote (plan ЧЗ): its format, its line limit, its pallet
+ * (`null` for a shift's export), the base `document_id` of its files, each
+ * part's counts and the boxes written on no pallet because their pallet had
+ * not closed.
+ */
+export interface ExportWritten {
+  formatId: string;
+  formatVersion: number;
+  maxLines: number | null;
+  palletId: string | null;
+  documentId: string;
+  parts: readonly { codeCount: number; boxCount: number; palletCount: number }[];
+  openPalletSuppressedBoxCount: number;
+}
+
+/**
+ * `POST /v1/office/shifts/{id}/exports` (`shift-export-record.json`): every
+ * field named, the counts summed over the parts as the cloud's export
+ * totals them.
+ */
+export function shiftExportRecord(written: ExportWritten): ShiftExportRecord {
+  const total = (count: (part: ExportWritten["parts"][number]) => number) =>
+    written.parts.reduce((sum, part) => sum + count(part), 0);
+  return {
+    formatId: written.formatId,
+    formatVersion: written.formatVersion,
+    maxLines: written.maxLines,
+    palletId: written.palletId,
+    documentId: written.documentId,
+    partCount: written.parts.length,
+    codeCount: total((part) => part.codeCount),
+    boxCount: total((part) => part.boxCount),
+    palletCount: total((part) => part.palletCount),
+    openPalletSuppressedBoxCount: written.openPalletSuppressedBoxCount,
+  };
 }
 
 /** What a station's new shift carries: the operator's choices and the request's id. */

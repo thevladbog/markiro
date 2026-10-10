@@ -2101,6 +2101,30 @@ pub enum CodeCheck {
     Taken { owner: CodeOwner },
 }
 
+/// `POST /v1/office/shifts/{id}/exports` (plan ЧЗ): the office saved the
+/// files of an export and records it in the audit trail; nothing else
+/// changes. `formatId` and `formatVersion` are a format `@markiro/domain`
+/// advertises (`proto/fixtures/export-formats.json`); a pallet's export names
+/// its pallet and has one part and no `maxLines`, a shift's names no pallet.
+/// `documentId` is the base `document_id` the files carry; the counts are
+/// the parts' sums, as the cloud's export totals them, and
+/// `openPalletSuppressedBoxCount` the boxes written on no pallet because
+/// their pallet had not closed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShiftExportRecord {
+    pub format_id: String,
+    pub format_version: u32,
+    pub max_lines: Option<u32>,
+    pub pallet_id: Option<String>,
+    pub document_id: String,
+    pub part_count: u32,
+    pub code_count: u64,
+    pub box_count: u32,
+    pub pallet_count: u32,
+    pub open_pallet_suppressed_box_count: u32,
+}
+
 /// A box of a shift as the office lists it (`GET
 /// /v1/office/shifts/{id}/boxes`, plan ЧЗ for the card of plan О-Ф): the
 /// device's instants as it sent them; `units` the box's live items now;

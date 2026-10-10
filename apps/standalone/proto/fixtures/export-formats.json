@@ -1,0 +1,15 @@
+{
+  "shift": [
+    { "id": "shift_txt_flat", "version": 1 },
+    { "id": "shift_txt_boxes", "version": 2 },
+    { "id": "shift_csv_flat", "version": 1 },
+    { "id": "shift_csv_boxes", "version": 2 },
+    { "id": "shift_xml_gismt_aggregation", "version": 1 },
+    { "id": "shift_txt_pallets", "version": 1 },
+    { "id": "shift_csv_pallets", "version": 1 },
+    { "id": "shift_xml_gismt_aggregation_pallets", "version": 1 },
+    { "id": "shift_txt_pallet_boxes", "version": 1 },
+    { "id": "shift_xml_gismt_pallet_boxes", "version": 1 }
+  ],
+  "pallet": [{ "id": "pallet_xml_gismt_aggregation", "version": 1 }]
+}

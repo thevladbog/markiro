@@ -6,7 +6,7 @@ use support::app::{
     admin, box_closed, box_exception, box_id, close_from_office, code, code_hash, empty, fact,
     instant, issue_block, issue_pallet_block, ok_scan, open_floor, open_pallet_floor, pair_device,
     pallet_closed, pallet_id, pallet_sscc, receipts, record_id, request, shift_closed, shift_setup,
-    sscc, with_device, Admin, Floor,
+    sscc, with_device, Admin, Floor, ShiftSetup,
 };
 
 const BLOCK_REQUEST: &str = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a";
@@ -465,6 +465,534 @@ async fn every_query_of_the_source_searches_by_an_index() {
             "{name}: {steps:?}"
         );
     }
+}
+
+const DOCUMENT: &str = "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f";
+
+/// A record of `format` with no pallet, one part and the counts 3, 2, 1.
+fn record_of(format: &str, version: u32) -> Value {
+    json!({
+        "formatId": format, "formatVersion": version, "maxLines": null, "palletId": null,
+        "documentId": DOCUMENT, "partCount": 1, "codeCount": 3, "boxCount": 2,
+        "palletCount": 1, "openPalletSuppressedBoxCount": 0,
+    })
+}
+
+/// A shift with pallets after one box (code 1) on pallet 1, which closed;
+/// pallet 2 holds box 2 and stays open. The shift stays active.
+async fn pallet_shift(admin: &Admin) -> (ShiftSetup, Floor) {
+    let setup = shift_setup(admin).await;
+    let floor = open_pallet_floor(admin, &setup, &admin.key.clone(), &setup.line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let pallets = issue_pallet_block(&admin.app, &floor.key, PALLET_REQUEST).await;
+    let shift = floor.shift.clone();
+    let mut first = box_closed(
+        &box_id(1),
+        &block,
+        1500,
+        &[1],
+        &instant(10, 0),
+        &instant(11, 0),
+    );
+    first["palletId"] = json!(pallet_id(1));
+    let mut second = box_closed(
+        &box_id(2),
+        &block,
+        1501,
+        &[2],
+        &instant(20, 0),
+        &instant(21, 0),
+    );
+    second["palletId"] = json!(pallet_id(2));
+    accept(
+        admin,
+        &floor,
+        &[
+            fact(
+                &record_id(1),
+                "scan",
+                &shift,
+                ok_scan(1, &box_id(1), &instant(10, 0)),
+            ),
+            fact(&record_id(2), "box_closed", &shift, first),
+            fact(
+                &record_id(3),
+                "pallet_closed",
+                &shift,
+                pallet_closed(
+                    &pallet_id(1),
+                    &pallets,
+                    40,
+                    1,
+                    &instant(11, 0),
+                    &instant(12, 0),
+                ),
+            ),
+            fact(
+                &record_id(4),
+                "scan",
+                &shift,
+                ok_scan(2, &box_id(2), &instant(20, 0)),
+            ),
+            fact(&record_id(5), "box_closed", &shift, second),
+        ],
+    )
+    .await;
+    (setup, floor)
+}
+
+/// The station's close of `floor`'s shift.
+async fn close_by_station(admin: &Admin, floor: &Floor) {
+    accept(
+        admin,
+        floor,
+        &[fact(
+            &record_id(6),
+            "shift_closed",
+            &floor.shift,
+            shift_closed(None, 2, 2, None, &instant(30, 0)),
+        )],
+    )
+    .await;
+}
+
+async fn record_export(
+    admin: &Admin,
+    token: &str,
+    shift: &str,
+    record: Value,
+) -> (StatusCode, Value) {
+    admin
+        .call_as(
+            token,
+            "POST",
+            &format!("/v1/office/shifts/{shift}/exports"),
+            Some(record),
+        )
+        .await
+}
+
+/// An export of a closed shift writes one `shift.export` row, by whichever
+/// office user saved it, with exactly what the record says; a pallet's
+/// export of a pallet of an active shift writes one too. Neither takes a
+/// revision: nothing a station or a list reads changed.
+#[tokio::test]
+async fn an_export_writes_one_audit_row_with_what_it_wrote() {
+    let admin = admin().await;
+    let (_, floor) = pallet_shift(&admin).await;
+    let shift = floor.shift.clone();
+    // A pallet's export while the shift is still active.
+    let revision = support::app::host_revision(&admin.app).await;
+    let mut of_pallet = record_of("pallet_xml_gismt_aggregation", 1);
+    of_pallet["palletId"] = json!(pallet_id(1));
+    of_pallet["codeCount"] = json!(0);
+    of_pallet["boxCount"] = json!(1);
+    let (status, body) = record_export(&admin, &admin.token, &shift, of_pallet).await;
+    assert_eq!((status, &body), (StatusCode::NO_CONTENT, &Value::Null));
+    assert_eq!(support::app::host_revision(&admin.app).await, revision);
+    close_by_station(&admin, &floor).await;
+    let technologist = admin.technologist_session().await;
+    let revision_after_close = support::app::host_revision(&admin.app).await;
+    let mut of_shift = record_of("shift_xml_gismt_aggregation_pallets", 1);
+    of_shift["maxLines"] = json!(2);
+    of_shift["partCount"] = json!(3);
+    of_shift["openPalletSuppressedBoxCount"] = json!(1);
+    let (status, _) = record_export(&admin, &technologist.0, &shift, of_shift).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    assert_eq!(
+        support::app::host_revision(&admin.app).await,
+        revision_after_close
+    );
+    assert_eq!(
+        support::app::audit_trail(&admin.app, "shift.export").await,
+        vec![
+            admin.row(
+                "shift.export",
+                "shift",
+                &shift,
+                json!({
+                    "formatId": "pallet_xml_gismt_aggregation", "formatVersion": 1,
+                    "maxLines": null, "palletId": pallet_id(1), "documentId": DOCUMENT,
+                    "partCount": 1, "codeCount": 0, "boxCount": 1, "palletCount": 1,
+                    "openPalletSuppressedBoxCount": 0,
+                })
+            ),
+            support::app::audit_row(
+                &technologist.1,
+                "shift.export",
+                "shift",
+                &shift,
+                json!({
+                    "formatId": "shift_xml_gismt_aggregation_pallets", "formatVersion": 1,
+                    "maxLines": 2, "palletId": null, "documentId": DOCUMENT,
+                    "partCount": 3, "codeCount": 3, "boxCount": 2, "palletCount": 1,
+                    "openPalletSuppressedBoxCount": 1,
+                })
+            ),
+        ]
+    );
+}
+
+/// What the host refuses changes nothing and writes no row: a format the
+/// domain does not advertise (a retired version too), a pallet named or
+/// missing against the format, `maxLines` outside 2–1 000 000 or on a
+/// pallet, a `documentId` that is no UUID, no part or a pallet in two
+/// parts, an unknown shift, a shift's export of a shift not closed, a pallet
+/// of another shift. Both ends of `maxLines` are taken.
+#[tokio::test]
+async fn a_refused_record_writes_no_row_and_the_bounds_of_max_lines_are_taken() {
+    let admin = admin().await;
+    let (setup, floor) = pallet_shift(&admin).await;
+    let shift = floor.shift.clone();
+    let token = admin.token.clone();
+    let field = |body: &Value| body["error"]["details"]["field"].clone();
+    // The shift is still active: a shift's export is refused.
+    let (status, body) =
+        record_export(&admin, &token, &shift, record_of("shift_txt_pallets", 1)).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{body}");
+    assert_eq!(body["error"]["details"]["status"], "active");
+    close_by_station(&admin, &floor).await;
+    // The station's next shift has a pallet of its own: pallet 3.
+    let next = open_pallet_floor(&admin, &setup, &floor.key, &setup.line).await;
+    let block = issue_block(&admin.app, &next.key, BLOCK_REQUEST).await;
+    let mut on_three = box_closed(
+        &box_id(3),
+        &block,
+        1502,
+        &[3],
+        &instant(40, 0),
+        &instant(41, 0),
+    );
+    on_three["palletId"] = json!(pallet_id(3));
+    accept(
+        &admin,
+        &next,
+        &[
+            fact(
+                &record_id(7),
+                "scan",
+                &next.shift,
+                ok_scan(3, &box_id(3), &instant(40, 0)),
+            ),
+            fact(&record_id(8), "box_closed", &next.shift, on_three),
+        ],
+    )
+    .await;
+    let mut cases: Vec<(Value, &str)> = Vec::new();
+    cases.push((record_of("shift_pdf_flat", 1), "formatId"));
+    cases.push((record_of("shift_txt_boxes", 1), "formatId"));
+    cases.push((record_of("pallet_xml_gismt_aggregation", 1), "palletId"));
+    let mut named = record_of("shift_txt_flat", 1);
+    named["palletId"] = json!(pallet_id(1));
+    cases.push((named, "palletId"));
+    for lines in [1, 1_000_001] {
+        let mut wrong = record_of("shift_txt_flat", 1);
+        wrong["maxLines"] = json!(lines);
+        cases.push((wrong, "maxLines"));
+    }
+    let mut pallet_lines = record_of("pallet_xml_gismt_aggregation", 1);
+    pallet_lines["palletId"] = json!(pallet_id(1));
+    pallet_lines["maxLines"] = json!(2000);
+    cases.push((pallet_lines, "maxLines"));
+    let mut document = record_of("shift_txt_flat", 1);
+    document["documentId"] = json!("SEP26-003");
+    cases.push((document, "documentId"));
+    let mut no_part = record_of("shift_txt_flat", 1);
+    no_part["partCount"] = json!(0);
+    cases.push((no_part, "partCount"));
+    let mut two_parts = record_of("pallet_xml_gismt_aggregation", 1);
+    two_parts["palletId"] = json!(pallet_id(1));
+    two_parts["partCount"] = json!(2);
+    cases.push((two_parts, "partCount"));
+    let mut unknown = record_of("pallet_xml_gismt_aggregation", 1);
+    unknown["palletId"] = json!(pallet_id(99));
+    cases.push((unknown, "palletId"));
+    let mut foreign = record_of("pallet_xml_gismt_aggregation", 1);
+    foreign["palletId"] = json!(pallet_id(3));
+    cases.push((foreign, "palletId"));
+    for (record, expected) in cases {
+        let (status, body) = record_export(&admin, &token, &shift, record.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{record} {body}");
+        assert_eq!(body["error"]["code"], "validation_failed", "{record}");
+        assert_eq!(field(&body), json!(expected), "{record}");
+    }
+    let (status, body) = record_export(
+        &admin,
+        &token,
+        "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+        record_of("shift_txt_flat", 1),
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{body}");
+    assert_eq!(
+        support::app::audit_trail(&admin.app, "shift.export").await,
+        vec![]
+    );
+    for lines in [2, 1_000_000] {
+        let mut taken = record_of("shift_txt_flat", 1);
+        taken["maxLines"] = json!(lines);
+        let (status, body) = record_export(&admin, &token, &shift, taken).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{lines} {body}");
+    }
+    assert_eq!(
+        support::app::audit_trail(&admin.app, "shift.export")
+            .await
+            .len(),
+        2
+    );
+}
+
+/// Every format of the host's lists is recorded at its own version and at no
+/// other (the retired `shift_txt_boxes@1` among them): the version is part of
+/// the format, not decoration.
+#[tokio::test]
+async fn every_format_is_recorded_at_its_own_version_and_at_no_other() {
+    let admin = admin().await;
+    let (_, floor) = pallet_shift(&admin).await;
+    close_by_station(&admin, &floor).await;
+    let shift = floor.shift.clone();
+    let mut taken = 0;
+    for (id, version) in markiro_host::routes::office_exports::SHIFT_FORMATS {
+        for other in [0, version + 1, version + 2] {
+            let (status, body) =
+                record_export(&admin, &admin.token, &shift, record_of(id, other)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{id}@{other} {body}");
+            assert_eq!(
+                body["error"]["details"]["field"], "formatId",
+                "{id}@{other}"
+            );
+        }
+        let (status, body) =
+            record_export(&admin, &admin.token, &shift, record_of(id, version)).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{id}@{version} {body}");
+        taken += 1;
+    }
+    for (id, version) in markiro_host::routes::office_exports::PALLET_FORMATS {
+        for other in [0, version + 1] {
+            let mut wrong = record_of(id, other);
+            wrong["palletId"] = json!(pallet_id(1));
+            let (status, body) = record_export(&admin, &admin.token, &shift, wrong).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{id}@{other} {body}");
+            assert_eq!(
+                body["error"]["details"]["field"], "formatId",
+                "{id}@{other}"
+            );
+        }
+        let mut right = record_of(id, version);
+        right["palletId"] = json!(pallet_id(1));
+        let (status, body) = record_export(&admin, &admin.token, &shift, right).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{id}@{version} {body}");
+        taken += 1;
+    }
+    let rows = support::app::audit_trail(&admin.app, "shift.export").await;
+    assert_eq!(rows.len(), taken);
+    assert_eq!(taken, 11);
+}
+
+/// The session gate: no session, a device key alone and an unknown token are
+/// all `401` and record nothing; a planned shift is refused for a shift's
+/// format as an active one is (`conflict` naming its status), and a
+/// technologist's refused post writes nothing either.
+#[tokio::test]
+async fn only_a_signed_in_office_user_records_and_a_planned_shift_is_not_exportable() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let planned = support::app::plan_shift(&admin, support::app::shift_body(&setup)).await;
+    let id = planned["id"].as_str().unwrap();
+    let path = format!("/v1/office/shifts/{id}/exports");
+    let body = record_of("shift_txt_flat", 1);
+    let (status, answer) = admin
+        .app
+        .send(support::app::json(request("POST", &path), body.clone()))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "no credential {answer}");
+    let (status, answer) = admin
+        .app
+        .send(support::app::json(
+            with_device(request("POST", &path), &admin.key),
+            body.clone(),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "device key {answer}");
+    let (status, answer) = admin
+        .app
+        .send(support::app::json(
+            support::app::with_session(request("POST", &path), &admin.key, "not-a-token"),
+            body.clone(),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "unknown token {answer}");
+    let technologist = admin.technologist().await;
+    let (status, answer) = record_export(&admin, &technologist, id, body).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{answer}");
+    assert_eq!(answer["error"]["details"]["status"], "planned");
+    assert_eq!(
+        support::app::audit_trail(&admin.app, "shift.export").await,
+        vec![]
+    );
+}
+
+/// A pallet's export of a shift already closed is recorded too (its state is
+/// not checked again), and the same record posted twice is two rows: every
+/// export that saved files is one.
+#[tokio::test]
+async fn a_pallet_of_a_closed_shift_and_a_repeated_post_each_write_a_row() {
+    let admin = admin().await;
+    let (_, floor) = pallet_shift(&admin).await;
+    close_by_station(&admin, &floor).await;
+    let mut of_pallet = record_of("pallet_xml_gismt_aggregation", 1);
+    of_pallet["palletId"] = json!(pallet_id(1));
+    for _ in 0..2 {
+        let (status, body) =
+            record_export(&admin, &admin.token, &floor.shift, of_pallet.clone()).await;
+        assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    }
+    let rows = support::app::audit_trail(&admin.app, "shift.export").await;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0], rows[1]);
+    assert_eq!(rows[0].3.as_deref(), Some("shift"));
+    assert_eq!(rows[0].4.as_deref(), Some(floor.shift.as_str()));
+    assert_eq!(rows[0].6["palletId"], json!(pallet_id(1)));
+}
+
+/// A body the host cannot read as the record is `400` and records nothing:
+/// a field it does not know, a missing field (`maxLines` and `palletId`
+/// read as `null` when missing, as serde reads an `Option`), a count that is negative,
+/// fractional, null or a string, a `palletId` that is no UUID.
+#[tokio::test]
+async fn a_body_that_is_not_the_record_is_refused_and_writes_no_row() {
+    let admin = admin().await;
+    let (_, floor) = pallet_shift(&admin).await;
+    close_by_station(&admin, &floor).await;
+    let mut cases: Vec<(&str, Value)> = Vec::new();
+    let mut extra = record_of("shift_txt_flat", 1);
+    extra["folder"] = json!("C:\\Users\\someone");
+    cases.push(("folder", extra));
+    for field in [
+        "formatId",
+        "formatVersion",
+        "documentId",
+        "partCount",
+        "codeCount",
+        "boxCount",
+        "palletCount",
+        "openPalletSuppressedBoxCount",
+    ] {
+        let mut missing = record_of("shift_txt_flat", 1);
+        missing.as_object_mut().unwrap().remove(field);
+        cases.push((field, missing));
+    }
+    for (field, wrong) in [
+        ("maxLines", json!(-5)),
+        ("maxLines", json!(2.5)),
+        ("maxLines", json!("100")),
+        ("formatVersion", json!(1.5)),
+        ("partCount", json!(-1)),
+        ("partCount", json!(1.5)),
+        ("partCount", json!(null)),
+        ("codeCount", json!(-1)),
+        ("codeCount", json!("3")),
+        ("boxCount", json!(-1)),
+        ("palletCount", json!(1.5)),
+        ("openPalletSuppressedBoxCount", json!(-1)),
+        ("documentId", json!(null)),
+        ("formatId", json!(7)),
+    ] {
+        let mut record = record_of("shift_txt_flat", 1);
+        record[field] = wrong;
+        cases.push((field, record));
+    }
+    let mut not_uuid = record_of("pallet_xml_gismt_aggregation", 1);
+    not_uuid["palletId"] = json!("pallet-1");
+    cases.push(("palletId", not_uuid));
+    for (what, record) in cases {
+        let (status, body) =
+            record_export(&admin, &admin.token, &floor.shift, record.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{what} {record} {body}");
+    }
+    let path = format!("/v1/office/shifts/{}/exports", floor.shift);
+    let (status, body) = admin
+        .call_as(&admin.token, "POST", &path, Some(json!([])))
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(
+        support::app::audit_trail(&admin.app, "shift.export").await,
+        vec![]
+    );
+}
+
+/// A count above 32 bits is recorded whole: a shift's codes are counted in a
+/// `u64`, the parts' other counts in a `u32`.
+#[tokio::test]
+async fn a_count_above_32_bits_is_recorded_whole() {
+    let admin = admin().await;
+    let (_, floor) = pallet_shift(&admin).await;
+    close_by_station(&admin, &floor).await;
+    let mut big = record_of("shift_txt_flat", 1);
+    big["codeCount"] = json!(5_000_000_000_u64);
+    let (status, body) = record_export(&admin, &admin.token, &floor.shift, big).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    let rows = support::app::audit_trail(&admin.app, "shift.export").await;
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].6["codeCount"], json!(5_000_000_000_u64));
+}
+
+/// The host's lists of formats are the fixture's, which the webview checks
+/// against `@markiro/domain` (`test/protocol.test.ts`).
+#[test]
+fn the_formats_the_host_takes_are_the_fixtures() {
+    let path = format!(
+        "{}/../proto/fixtures/export-formats.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let fixture: Value = serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+    let listed = |kind: &str| -> Vec<(String, u32)> {
+        fixture[kind]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|f| {
+                (
+                    f["id"].as_str().unwrap().to_owned(),
+                    u32::try_from(f["version"].as_u64().unwrap()).unwrap(),
+                )
+            })
+            .collect()
+    };
+    let own = |formats: &[(&str, u32)]| -> Vec<(String, u32)> {
+        formats
+            .iter()
+            .map(|(id, version)| ((*id).to_owned(), *version))
+            .collect()
+    };
+    assert_eq!(
+        own(&markiro_host::routes::office_exports::SHIFT_FORMATS),
+        listed("shift")
+    );
+    assert_eq!(
+        own(&markiro_host::routes::office_exports::PALLET_FORMATS),
+        listed("pallet")
+    );
+}
+
+/// An office user turned off while the request waited records nothing: the
+/// session is read again inside the write.
+#[tokio::test]
+async fn a_user_turned_off_before_the_write_records_nothing() {
+    let admin = admin().await;
+    let (_, floor) = pallet_shift(&admin).await;
+    close_by_station(&admin, &floor).await;
+    let (token, tech_id) = admin.technologist_session().await;
+    support::app::turn_the_user_off_at_the_next_activity(&admin.app, &tech_id).await;
+    admin.app.clock.advance(time::Duration::minutes(2));
+    let (status, body) =
+        record_export(&admin, &token, &floor.shift, record_of("shift_txt_flat", 1)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED, "{body}");
+    assert_eq!(body["error"]["details"]["credential"], "session");
+    assert_eq!(
+        support::app::audit_trail(&admin.app, "shift.export").await,
+        vec![]
+    );
 }
 
 /// A scan of `verdict` that owns nothing and lies in no box.

@@ -49,6 +49,9 @@ pub mod actions {
     pub const SHIFT_CLOSE: &str = "shift.close";
     /// A station got a block of SSCC serials.
     pub const SSCC_BLOCK_ISSUE: &str = "sscc.block.issue";
+    /// The office saved the files of a shift's or a pallet's export (plan
+    /// ЧЗ); nothing else changed.
+    pub const SHIFT_EXPORT: &str = "shift.export";
 }
 
 /// `details.reason` of a denied row: every denial names one.

@@ -14,10 +14,10 @@ use markiro_proto::{
     OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PalletClosedFact,
     PalletExceptionFact, PalletExceptionKind, PalletLabelFact, PasswordChange, PasswordSet,
     ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate, ScanFact,
-    ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate, ShiftExportRows, ShiftMode,
-    ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock, SsccBlockRequest,
-    SsccCounterUpdate, SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose,
-    HOST_PRODUCT, PROTOCOL_VERSION,
+    ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate, ShiftExportRecord,
+    ShiftExportRows, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock,
+    SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults, TemplateDefaultsUpdate,
+    TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -1320,6 +1320,35 @@ fn office_box_and_pallet_lists_round_trip_and_agree_with_the_export_source() {
             "{p:?}"
         );
     }
+}
+
+/// The record of an export (plan ЧЗ) round-trips and names a format of
+/// `export-formats.json` with the counts of the rows of the same shift: the
+/// pallets format over `shift-export-rows.json` writes its three codes, its
+/// two closed boxes and its one pallet. A field the host does not read is
+/// refused.
+#[test]
+fn shift_export_record_round_trips_and_counts_the_rows_of_its_shift() {
+    let record: ShiftExportRecord = round_trip("shift-export-record.json");
+    let formats = fixture("export-formats.json");
+    assert!(formats["shift"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|f| f["id"] == record.format_id.as_str() && f["version"] == record.format_version));
+    let rows: ShiftExportRows = serde_json::from_value(fixture("shift-export-rows.json")).unwrap();
+    assert_eq!(record.code_count, u64::try_from(rows.items.len()).unwrap());
+    assert_eq!(
+        record.box_count,
+        u32::try_from(rows.boxes.iter().filter(|b| b.sscc.is_some()).count()).unwrap()
+    );
+    assert_eq!(
+        record.pallet_count,
+        u32::try_from(rows.pallets.len()).unwrap()
+    );
+    let mut value = fixture("shift-export-record.json");
+    value["folder"] = Value::String("C:\\Users".into());
+    assert!(serde_json::from_value::<ShiftExportRecord>(value).is_err());
 }
 
 /// A shift's totals carry both pallet counts (plan ПЛ-Х): each is required,

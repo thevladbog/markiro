@@ -1103,6 +1103,27 @@ export const shiftCloseSchema = z
 export type ShiftClose = z.infer<typeof shiftCloseSchema>;
 
 /**
+ * Mirrors `markiro_proto::ShiftExportRecord`: `POST /v1/office/shifts/{id}/exports`
+ * (plan ЧЗ), the record of an export the office saved. Built only by
+ * `shiftExportRecord` (`src/host/requests.ts`).
+ */
+export const shiftExportRecordSchema = z
+  .object({
+    formatId: z.string(),
+    formatVersion: z.number().int(),
+    maxLines: z.number().int().nullable(),
+    palletId: z.string().nullable(),
+    documentId: z.uuid(),
+    partCount: z.number().int(),
+    codeCount: z.number().int(),
+    boxCount: z.number().int(),
+    palletCount: z.number().int(),
+    openPalletSuppressedBoxCount: z.number().int(),
+  })
+  .strict();
+export type ShiftExportRecord = z.infer<typeof shiftExportRecordSchema>;
+
+/**
  * `POST /v1/device/shifts` (`markiro_proto::DeviceShiftCreate`): a station's
  * planned shift on its own line. `requestId`, a UUID the station made up,
  * makes it repeatable: the same request answers the shift it created.
