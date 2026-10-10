@@ -2479,6 +2479,7 @@ describe("useHostLink", () => {
           local: executor,
           changes,
           refresh,
+          deviceShifts: async () => [],
           dispatch,
         }),
       { initialProps: { deviceId: DEVICE_ID } },

@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef } from "react";
 
 import { HostError } from "../host/client.js";
 import type { ConnectionApi } from "../host/connection.js";
+import { replaceShiftCopies } from "../floor/shifts/shift-copies.js";
 import { DeviceError } from "../host/device.js";
-import type { ChangesResponse, DeviceStatus } from "../host/protocol.js";
+import type { ChangesResponse, DeviceShift, DeviceStatus } from "../host/protocol.js";
 import { LocalDbError, type LocalExecutor } from "../local/executor.js";
 import {
   createSyncScheduler,
@@ -52,6 +53,8 @@ export interface HostLinkOptions {
   changes: (since: number) => Promise<ChangesResponse>;
   /** `DeviceApi.refresh`: this device's record, read again with the office's line. */
   refresh: () => Promise<DeviceStatus>;
+  /** `HostApi.getDeviceShifts`: this station's shifts, kept in `floor_shifts`. */
+  deviceShifts: () => Promise<DeviceShift[]>;
   dispatch: (action: ShellAction) => void;
 }
 
@@ -67,7 +70,10 @@ export interface HostLinkOptions {
  * office assigns takes a revision but no feed item, so only the record
  * carries it. A failed read — not a rejected device, not a missing pairing —
  * keeps the line the station has and is retried the same way, with a count
- * of its own. Returns a function that asks for a sync and a read now.
+ * of its own. The station's shifts are read at the same moments and the same
+ * way (stage 2a spec §5.4): the answer replaces this pairing's copies
+ * (`replaceShiftCopies`), and a failed read keeps the copies the station has.
+ * Returns a function that asks for a sync and both reads now.
  */
 export function useHostLink({
   hostId,
@@ -76,6 +82,7 @@ export function useHostLink({
   local,
   changes,
   refresh,
+  deviceShifts,
   dispatch,
 }: HostLinkOptions): () => void {
   const syncNow = useRef<() => void>(() => undefined);
@@ -106,6 +113,24 @@ export function useHostLink({
       clearTimeout(refreshRetry);
       refreshRetry = null;
     };
+    // And for reading the station's shifts.
+    let shiftFailures = 0;
+    let shiftRetry: ReturnType<typeof setTimeout> | null = null;
+    const cancelShiftRetry = () => {
+      if (shiftRetry === null) return;
+      clearTimeout(shiftRetry);
+      shiftRetry = null;
+    };
+    // Nothing more should reach a host that refused this device's key or
+    // presented another certificate.
+    const stopAll = () => {
+      scheduler.stop();
+      refresher.stop();
+      shiftReader.stop();
+      cancelRetry();
+      cancelRefreshRetry();
+      cancelShiftRetry();
+    };
     const scheduler = createSyncScheduler(async () => {
       if (!active) return;
       // Any run — a revision's, a request's or the retry itself — replaces
@@ -122,8 +147,7 @@ export function useHostLink({
           // reach that host: the effect's cleanup (`active = false`, which
           // also stops the scheduler) only runs after React re-renders with
           // `hostId: null`, and that is later than this microtask chain.
-          scheduler.stop();
-          refresher.stop();
+          stopAll();
         }
         dispatch({ type: "sync_finished", result });
       } catch (error) {
@@ -133,8 +157,7 @@ export function useHostLink({
         if (action) {
           // Same reasoning as above: nothing more should reach a host that
           // just refused this device's key or presented another certificate.
-          scheduler.stop();
-          refresher.stop();
+          stopAll();
           dispatch(action);
         }
         // Worth reading only when nothing else is about to reset the sync
@@ -178,16 +201,18 @@ export function useHostLink({
         // every other host path: nothing more should reach that host.
         const reason = deviceRejection(error);
         if (reason !== null) {
-          scheduler.stop();
-          refresher.stop();
-          cancelRetry();
-          cancelRefreshRetry();
+          stopAll();
           dispatch({ type: "device_rejected", reason });
           return;
         }
         // No pairing: the shell is about to drop the link, and there is
         // nothing to read again.
         if (error instanceof DeviceError && error.code === "not_paired") return;
+        // The host's answer did not reach `device.json`: the station stays on
+        // the line it has, and says so (plan 1d3's open item).
+        if (error instanceof DeviceError && error.code === "storage") {
+          dispatch({ type: "device_not_saved" });
+        }
         // Anything else — the host away, an answer this build cannot read, a
         // failed write of `device.json` — keeps the line this station already
         // has, and the read is tried again while the link is online.
@@ -200,10 +225,45 @@ export function useHostLink({
         }
       }
     });
-    syncNow.current = () => {
+    // One read of the station's shifts at a time, retried like the reads
+    // above. A refused key ends the link as everywhere; any other failure —
+    // the host away, an answer this build cannot read, this computer's
+    // database — keeps the copies the station has (offline first).
+    const shiftReader = createSyncScheduler(async () => {
+      if (!active) return;
+      cancelShiftRetry();
+      try {
+        const shifts = await deviceShifts();
+        if (!active) return;
+        await replaceShiftCopies(local, { hostId, deviceId }, shifts, Date.now());
+        if (!active) return;
+        shiftFailures = 0;
+        dispatch({ type: "shifts_read", ok: true });
+      } catch (error) {
+        if (!active) return;
+        const action = shellActionFor(error, null);
+        if (action) {
+          stopAll();
+          dispatch(action);
+          return;
+        }
+        if (error instanceof HostError && error.code === "not_paired") return;
+        shiftFailures += 1;
+        dispatch({ type: "shifts_read", ok: false });
+        if (online) {
+          shiftRetry = setTimeout(() => {
+            shiftRetry = null;
+            shiftReader.trigger();
+          }, nextSyncRetryMs(shiftFailures));
+        }
+      }
+    });
+    const everything = () => {
       scheduler.trigger();
       refresher.trigger();
+      shiftReader.trigger();
     };
+    syncNow.current = everything;
     let unwatch: (() => void) | null = null;
     connection
       .watch({
@@ -216,6 +276,7 @@ export function useHostLink({
             // reconnect syncs and reads the device again.
             cancelRetry();
             cancelRefreshRetry();
+            cancelShiftRetry();
             return;
           }
           if (failures > 0 && !running && retry === null) {
@@ -223,14 +284,14 @@ export function useHostLink({
             // dropped: no need to wait for the revision event.
             scheduler.trigger();
           }
-          // The same for a failed read of this device.
+          // The same for a failed read of this device and of its shifts.
           if (refreshFailures > 0 && refreshRetry === null) refresher.trigger();
+          if (shiftFailures > 0 && shiftRetry === null) shiftReader.trigger();
         },
         onRevision: (rev) => {
           if (!active) return;
           dispatch({ type: "host_revision", rev });
-          scheduler.trigger();
-          refresher.trigger();
+          everything();
         },
       })
       .then(
@@ -243,27 +304,22 @@ export function useHostLink({
           // Sync only now: revisions announced before `watch` resolved are
           // not replayed, so a sync started earlier could miss a commit that
           // landed between its fetch and the listener.
-          scheduler.trigger();
-          refresher.trigger();
+          everything();
         },
         () => {
-          // Without events the copies sync and the device is read once here,
-          // and both again on request. `online` never becomes true, so neither
-          // a failed sync nor a failed read is retried on its own.
+          // Without events the copies sync and the device and its shifts are
+          // read once here, and again on request. `online` never becomes true,
+          // so no failed run is retried on its own.
           if (!active) return;
-          scheduler.trigger();
-          refresher.trigger();
+          everything();
         },
       );
     return () => {
       active = false;
       syncNow.current = () => undefined;
-      scheduler.stop();
-      refresher.stop();
-      cancelRetry();
-      cancelRefreshRetry();
+      stopAll();
       unwatch?.();
     };
-  }, [hostId, deviceId, connection, local, changes, refresh, dispatch]);
+  }, [hostId, deviceId, connection, local, changes, refresh, deviceShifts, dispatch]);
   return useCallback(() => syncNow.current(), []);
 }

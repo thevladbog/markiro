@@ -11,7 +11,7 @@ import {
 } from "../src/app/shell.js";
 import { HostError } from "../src/host/client.js";
 import { DeviceError } from "../src/host/device.js";
-import type { HostStatus } from "../src/host/protocol.js";
+import type { DeviceStatus, HostStatus } from "../src/host/protocol.js";
 import { DEVICE_STATUS, NEW_STATION, observation, SESSION } from "./support/fixtures.js";
 
 /** The address `App` probes; `DEVICE_STATUS.hostAddress` matches it by default. */
@@ -590,6 +590,8 @@ describe("the operator on the floor", () => {
     name: "Борис",
     role: null,
   };
+  /** Anna as the first session of a pairing has her. */
+  const ANNA_SESSION = { ...ANNA, sessionId: 1 };
   const signIn: Extract<ShellAction, { type: "operator_signed_in" }> = {
     type: "operator_signed_in",
     deviceId: DEVICE_STATUS.deviceId,
@@ -604,56 +606,66 @@ describe("the operator on the floor", () => {
 
   it("shows the signed-in operator's floor, and the sign-in again once they leave", () => {
     const floor = signedIn();
-    expect(nextShellView(floor, ADDRESS)).toEqual({ kind: "floor_operator", operator: ANNA });
+    expect(nextShellView(floor, ADDRESS)).toEqual({
+      kind: "floor_operator",
+      operator: ANNA_SESSION,
+    });
     const left = shellReducer(floor, {
       type: "operator_signed_out",
-      operatorId: ANNA.id,
+      sessionId: 1,
       notice: null,
     });
     expect(nextShellView(left, ADDRESS)).toEqual({ kind: "floor" });
     expect(left.floorNotice).toBeNull();
   });
 
-  it("stores exactly the operator's four fields, in a fresh object, whatever the action carries", () => {
+  it("stores exactly the operator's four fields and a new session number, whatever the action carries", () => {
     // The sign-in builds `{ id, login, name, role }` itself; the reducer does
     // not rely on it, so a hash that slipped into the object never reaches the
     // state (and with it the screen, the idle timer and the router).
     const carrying = { ...ANNA, pinPhc: "pbkdf2$sha256$100000$c2FsdA==$ZGlnZXN0" };
-    const stored = shellReducer(paired(), { ...signIn, operator: carrying }).operator;
-    expect(stored).toEqual(ANNA);
-    expect(Object.keys(stored ?? {}).sort()).toEqual(["id", "login", "name", "role"]);
-    expect(stored).not.toBe(carrying);
-    // One fresh object per sign-in: the session token of `App` is the object.
-    const again = shellReducer(paired(), { ...signIn, operator: carrying }).operator;
-    expect(again).not.toBe(stored);
+    const first = shellReducer(paired(), { ...signIn, operator: carrying });
+    expect(first.operator).toEqual(ANNA_SESSION);
+    expect(Object.keys(first.operator ?? {}).sort()).toEqual([
+      "id",
+      "login",
+      "name",
+      "role",
+      "sessionId",
+    ]);
+    // The same operator again is another session, with the next number.
+    const left = shellReducer(first, { type: "operator_signed_out", sessionId: 1, notice: null });
+    const again = shellReducer(left, { ...signIn, operator: carrying });
+    expect(again.operator).toEqual({ ...ANNA, sessionId: 2 });
+    expect(again.lastSessionId).toBe(2);
   });
 
   it("says why the operator was signed out until the next one signs in", () => {
     const idle = shellReducer(signedIn(), {
       type: "operator_signed_out",
-      operatorId: ANNA.id,
+      sessionId: 1,
       notice: "idle",
     });
     expect(idle.floorNotice).toBe("idle");
     const next = shellReducer(idle, { ...signIn, operator: BORIS });
-    expect(next.operator).toEqual(BORIS);
+    expect(next.operator).toEqual({ ...BORIS, sessionId: 2 });
     expect(next.floorNotice).toBeNull();
   });
 
   it("ignores a late sign-out for an operator who already left", () => {
     const left = shellReducer(signedIn(), {
       type: "operator_signed_out",
-      operatorId: ANNA.id,
+      sessionId: 1,
       notice: null,
     });
     const boris = shellReducer(left, { ...signIn, operator: BORIS });
-    expect(boris.operator).toEqual(BORIS);
-    expect(
-      shellReducer(boris, { type: "operator_signed_out", operatorId: ANNA.id, notice: "idle" }),
-    ).toBe(boris);
+    expect(boris.operator).toEqual({ ...BORIS, sessionId: 2 });
+    expect(shellReducer(boris, { type: "operator_signed_out", sessionId: 1, notice: "idle" })).toBe(
+      boris,
+    );
     const nobody = paired();
     expect(
-      shellReducer(nobody, { type: "operator_signed_out", operatorId: ANNA.id, notice: "removed" }),
+      shellReducer(nobody, { type: "operator_signed_out", sessionId: 1, notice: "removed" }),
     ).toBe(nobody);
   });
 
@@ -708,7 +720,10 @@ describe("the operator on the floor", () => {
     ] satisfies ShellAction[]) {
       state = shellReducer(state, action);
     }
-    expect(nextShellView(state, ADDRESS)).toEqual({ kind: "floor_operator", operator: ANNA });
+    expect(nextShellView(state, ADDRESS)).toEqual({
+      kind: "floor_operator",
+      operator: ANNA_SESSION,
+    });
   });
 });
 
@@ -725,6 +740,7 @@ describe("the operator session: every action and every late answer", () => {
     name: "Борис",
     role: "brigadier",
   };
+  const ANNA_SESSION = { ...ANNA, sessionId: 1 };
   const OTHER_LINE = "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21";
   const OTHER_DEVICE = "5d1c2b3a-4f6e-4a8b-9c0d-7e8f9a0b1c2d";
   const signIn: Extract<ShellAction, { type: "operator_signed_in" }> = {
@@ -876,14 +892,37 @@ describe("the operator session: every action and every late answer", () => {
     ],
     operator_signed_out: [
       {
-        action: { type: "operator_signed_out", operatorId: ANNA.id, notice: null },
+        action: { type: "operator_signed_out", sessionId: 1, notice: null },
         survives: false,
       },
       {
-        action: { type: "operator_signed_out", operatorId: BORIS.id, notice: "idle" },
+        action: { type: "operator_signed_out", sessionId: 2, notice: "idle" },
         survives: true,
       },
     ],
+    // A refresh with the same name and role changes nothing; another
+    // session's is ignored; neither ends the session.
+    operator_refreshed: [
+      {
+        action: { type: "operator_refreshed", sessionId: 1, name: ANNA.name, role: ANNA.role },
+        survives: true,
+      },
+      {
+        action: { type: "operator_refreshed", sessionId: 2, name: "Борис", role: null },
+        survives: true,
+      },
+    ],
+    work_entered: [
+      { action: { type: "work_entered", sessionId: 1, shiftId: OTHER_LINE }, survives: true },
+      { action: { type: "work_entered", sessionId: 2, shiftId: OTHER_LINE }, survives: true },
+    ],
+    // Leaving work that never began changes nothing.
+    work_left: [{ action: { type: "work_left", sessionId: 1 }, survives: true }],
+    shifts_read: [
+      { action: { type: "shifts_read", ok: true }, survives: true },
+      { action: { type: "shifts_read", ok: false }, survives: true },
+    ],
+    device_not_saved: [{ action: { type: "device_not_saved" }, survives: true }],
   };
 
   const CASES = Object.values(TABLE).flat();
@@ -892,7 +931,7 @@ describe("the operator session: every action and every late answer", () => {
     "decides whether the operator survives: %s",
     (_name, { action, survives }) => {
       const after = shellReducer(signedIn(), action);
-      expect(after.operator).toEqual(survives ? ANNA : null);
+      expect(after.operator).toEqual(survives ? ANNA_SESSION : null);
     },
   );
 
@@ -908,7 +947,13 @@ describe("the operator session: every action and every late answer", () => {
 
   it("holds the operator's identity and nothing that could open a door", () => {
     const state = signedIn();
-    expect(Object.keys(state.operator ?? {}).sort()).toEqual(["id", "login", "name", "role"]);
+    expect(Object.keys(state.operator ?? {}).sort()).toEqual([
+      "id",
+      "login",
+      "name",
+      "role",
+      "sessionId",
+    ]);
     expect(JSON.stringify(state)).not.toMatch(/pin|badge|hash|pbkdf|secret/i);
   });
 
@@ -916,7 +961,7 @@ describe("the operator session: every action and every late answer", () => {
     for (const notice of ["idle", "removed", "line_changed"] as const) {
       const left = shellReducer(signedIn(), {
         type: "operator_signed_out",
-        operatorId: ANNA.id,
+        sessionId: 1,
         notice,
       });
       expect(left.floorNotice).toBe(notice);
@@ -992,7 +1037,7 @@ describe("the operator session: every action and every late answer", () => {
     expect(moved.operator).toBeNull();
     // A sign-in that began on the new line is the one that counts.
     const next = shellReducer(moved, { ...signIn, lineId: OTHER_LINE });
-    expect(next.operator).toEqual(ANNA);
+    expect(next.operator).toEqual(ANNA_SESSION);
   });
 
   it("never replaces a running session with another sign-in, not even the same operator's", () => {
@@ -1002,10 +1047,13 @@ describe("the operator session: every action and every late answer", () => {
     // Once the operator leaves, the next sign-in is a new session.
     const left = shellReducer(running, {
       type: "operator_signed_out",
-      operatorId: ANNA.id,
+      sessionId: 1,
       notice: null,
     });
-    expect(shellReducer(left, { ...signIn, operator: BORIS }).operator).toEqual(BORIS);
+    expect(shellReducer(left, { ...signIn, operator: BORIS }).operator).toEqual({
+      ...BORIS,
+      sessionId: 2,
+    });
   });
 
   it("refuses a sign-in whose floor is not on screen, whatever else is right", () => {
@@ -1033,13 +1081,13 @@ describe("the operator session: every action and every late answer", () => {
       localHost: { kind: "missing", reason: "host_too_old" },
     });
     expect(nextShellView(remote, ADDRESS)).toEqual({ kind: "floor" });
-    expect(shellReducer(remote, signIn).operator).toEqual(ANNA);
+    expect(shellReducer(remote, signIn).operator).toEqual(ANNA_SESSION);
   });
 
   it("signs the operator out of the office the bootstrap wizard opens, and closing it shows the sign-in", () => {
     // The operator signed in while the start-up probe was still running.
     const floor = signedIn({ localHost: { kind: "probing" } });
-    expect(floor.operator).toEqual(ANNA);
+    expect(floor.operator).toEqual(ANNA_SESSION);
     const probed = shellReducer(floor, {
       type: "host_probed",
       localHost: { kind: "found", observation: observation(false) },
@@ -1048,7 +1096,7 @@ describe("the operator session: every action and every late answer", () => {
     expect(nextShellView(probed, ADDRESS)).toEqual({ kind: "bootstrap" });
     // Whatever way an operator is in the state on that screen (a sign-in that
     // answers late), the wizard's office must end the session itself.
-    const withOperator = { ...probed, operator: ANNA };
+    const withOperator = { ...probed, operator: ANNA_SESSION };
     const opened = shellReducer(shellReducer(withOperator, { type: "host_initialized" }), {
       type: "office_opened",
       session: SESSION,
@@ -1098,7 +1146,7 @@ describe("the operator session: every action and every late answer", () => {
       session: SESSION,
     });
     const back = shellReducer(opened, { type: "office_closed" });
-    expect(shellReducer(back, signIn).operator).toEqual(ANNA);
+    expect(shellReducer(back, signIn).operator).toEqual(ANNA_SESSION);
   });
 
   it("signs in a device of the office or the handheld kind without a line", () => {
@@ -1107,8 +1155,11 @@ describe("the operator session: every action and every late answer", () => {
         device: { kind: "ready", status: { ...DEVICE_STATUS, kind, lineId: null } },
       });
       const floor = shellReducer(state, { ...signIn, lineId: null });
-      expect(floor.operator).toEqual(ANNA);
-      expect(nextShellView(floor, ADDRESS)).toEqual({ kind: "floor_operator", operator: ANNA });
+      expect(floor.operator).toEqual(ANNA_SESSION);
+      expect(nextShellView(floor, ADDRESS)).toEqual({
+        kind: "floor_operator",
+        operator: ANNA_SESSION,
+      });
       // An answer that began on a line is not this device's: it has none.
       expect(shellReducer(state, signIn)).toBe(state);
     }
@@ -1181,5 +1232,413 @@ describe("the operator session: every action and every late answer", () => {
     });
     expect(fresh.operator).toBeNull();
     expect(fresh.floorNotice).toBeNull();
+  });
+});
+
+describe("the operator's session, the shift's work and what waits for it", () => {
+  const ANNA = {
+    id: "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+    login: "0042",
+    name: "Анна",
+    role: null,
+  };
+  const BORIS = {
+    id: "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+    login: "0099",
+    name: "Борис",
+    role: null,
+  };
+  const SHIFT_ID = "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b";
+  const OTHER_LINE = "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21";
+  const THIRD_LINE = "6a1f2c3d-4e5b-4a6c-8d7e-9f0a1b2c3d4e";
+  const MOVED: DeviceStatus = { ...DEVICE_STATUS, lineId: OTHER_LINE };
+  const signIn: ShellAction = {
+    type: "operator_signed_in",
+    deviceId: DEVICE_STATUS.deviceId,
+    lineId: DEVICE_STATUS.lineId,
+    address: ADDRESS,
+    operator: ANNA,
+  };
+
+  function working(): ShellState {
+    return shellReducer(shellReducer(paired(), signIn), {
+      type: "work_entered",
+      sessionId: 1,
+      shiftId: SHIFT_ID,
+    });
+  }
+
+  it("refreshes the name and role of the running session only, without a new session", () => {
+    const floor = shellReducer(paired(), signIn);
+    const renamed = shellReducer(floor, {
+      type: "operator_refreshed",
+      sessionId: 1,
+      name: "Анна Кузнецова",
+      role: "Упаковщик",
+    });
+    expect(renamed.operator).toEqual({
+      ...ANNA,
+      sessionId: 1,
+      name: "Анна Кузнецова",
+      role: "Упаковщик",
+    });
+    expect(renamed.lastSessionId).toBe(1);
+    const late = shellReducer(renamed, {
+      type: "operator_refreshed",
+      sessionId: 2,
+      name: "Кто-то",
+      role: null,
+    });
+    expect(late).toBe(renamed);
+    expect(
+      shellReducer(renamed, {
+        type: "operator_refreshed",
+        sessionId: 1,
+        name: "Анна Кузнецова",
+        role: "Упаковщик",
+      }),
+    ).toBe(renamed);
+  });
+
+  it("enters the work of the running session once, and leaves it", () => {
+    const state = working();
+    expect(state.floorWork).toEqual({ sessionId: 1, shiftId: SHIFT_ID });
+    expect(shellReducer(state, { type: "work_entered", sessionId: 1, shiftId: OTHER_LINE })).toBe(
+      state,
+    );
+    const floor = shellReducer(paired(), signIn);
+    expect(shellReducer(floor, { type: "work_entered", sessionId: 2, shiftId: SHIFT_ID })).toBe(
+      floor,
+    );
+    expect(shellReducer(state, { type: "work_left", sessionId: 2 })).toBe(state);
+    const left = shellReducer(state, { type: "work_left", sessionId: 1 });
+    expect(left.floorWork).toBeNull();
+    expect(left.operator).toEqual({ ...ANNA, sessionId: 1 });
+  });
+
+  it.each([
+    [
+      "the link refuses the key",
+      { type: "link_status", status: linkStatus({ lastError: "key_rejected" }) },
+    ],
+    ["a call refuses the key", { type: "device_rejected", reason: "key_rejected" }],
+  ] satisfies [string, ShellAction][])(
+    "keeps the operator in the shift when %s, and refuses the device once they leave it",
+    (_name, action) => {
+      const refused = shellReducer(working(), action);
+      expect(refused.rejection).toBeNull();
+      expect(refused.pendingRejection).toBe("key_rejected");
+      expect(nextShellView(refused, ADDRESS)).toEqual({
+        kind: "floor_operator",
+        operator: { ...ANNA, sessionId: 1 },
+      });
+      const left = shellReducer(refused, { type: "work_left", sessionId: 1 });
+      expect(left.rejection).toBe("key_rejected");
+      expect(left.operator).toBeNull();
+      expect(left.pendingRejection).toBeNull();
+      expect(nextShellView(left, ADDRESS)).toEqual({
+        kind: "device_rejected",
+        reason: "key_rejected",
+      });
+    },
+  );
+
+  it("refuses the device at once when the operator is not in a shift", () => {
+    const floor = shellReducer(paired(), signIn);
+    const refused = shellReducer(floor, {
+      type: "link_status",
+      status: linkStatus({ lastError: "certificate_mismatch" }),
+    });
+    expect(refused.rejection).toBe("host_changed");
+    expect(refused.operator).toBeNull();
+  });
+
+  it("keeps the station on its line while the operator works, and moves it once they leave", () => {
+    const moved = shellReducer(working(), { type: "device_refreshed", status: MOVED });
+    expect(moved.pendingDevice).toEqual(MOVED);
+    expect(moved.device).toEqual({ kind: "ready", status: DEVICE_STATUS });
+    expect(moved.operator).toEqual({ ...ANNA, sessionId: 1 });
+    const left = shellReducer(moved, { type: "work_left", sessionId: 1 });
+    expect(left.device).toEqual({ kind: "ready", status: MOVED });
+    expect(left.operator).toBeNull();
+    expect(left.floorNotice).toBe("line_changed");
+    // A cleared line waits too, then sends the station to choose one.
+    const cleared = shellReducer(working(), { type: "device_refreshed", status: NEW_STATION });
+    expect(nextShellView(cleared, ADDRESS).kind).toBe("floor_operator");
+    expect(
+      nextShellView(shellReducer(cleared, { type: "work_left", sessionId: 1 }), ADDRESS),
+    ).toEqual({ kind: "line_select" });
+  });
+
+  it("forgets a waiting move when the office moves the station back before the work ends", () => {
+    const moved = shellReducer(working(), { type: "device_refreshed", status: MOVED });
+    const back = shellReducer(moved, { type: "device_refreshed", status: DEVICE_STATUS });
+    expect(back.pendingDevice).toBeNull();
+    const left = shellReducer(back, { type: "work_left", sessionId: 1 });
+    expect(left.operator).toEqual({ ...ANNA, sessionId: 1 });
+    expect(left.floorNotice).toBeNull();
+  });
+
+  it("lets a refused device win over another line when the work ends", () => {
+    const both = shellReducer(
+      shellReducer(working(), { type: "device_refreshed", status: MOVED }),
+      { type: "device_rejected", reason: "key_rejected" },
+    );
+    const left = shellReducer(both, { type: "work_left", sessionId: 1 });
+    expect(nextShellView(left, ADDRESS)).toEqual({
+      kind: "device_rejected",
+      reason: "key_rejected",
+    });
+    expect(left.pendingDevice).toBeNull();
+  });
+
+  it("ends the work with a sign-out, and what waited for it happens then", () => {
+    const idle = shellReducer(working(), {
+      type: "operator_signed_out",
+      sessionId: 1,
+      notice: "idle",
+    });
+    expect(idle.floorWork).toBeNull();
+    expect(idle.floorNotice).toBe("idle");
+    const moved = shellReducer(working(), { type: "device_refreshed", status: MOVED });
+    const out = shellReducer(moved, { type: "operator_signed_out", sessionId: 1, notice: "idle" });
+    expect(out.device).toEqual({ kind: "ready", status: MOVED });
+    expect(out.floorNotice).toBe("line_changed");
+  });
+
+  it("drops the work and what waits for it with the operator: the office, a new pairing, a forget", () => {
+    const waiting = shellReducer(
+      shellReducer(working(), { type: "device_refreshed", status: MOVED }),
+      { type: "device_rejected", reason: "key_rejected" },
+    );
+    for (const action of [
+      { type: "office_requested" },
+      { type: "paired", status: DEVICE_STATUS },
+      { type: "forgotten" },
+      { type: "host_probed", localHost: { kind: "probing" } },
+    ] satisfies ShellAction[]) {
+      const after = shellReducer(waiting, action);
+      expect(after.floorWork).toBeNull();
+      expect(after.pendingRejection).toBeNull();
+      expect(after.pendingDevice).toBeNull();
+    }
+  });
+
+  it("takes a new name of the device on the same line without ending the session", () => {
+    const floor = shellReducer(paired(), signIn);
+    const renamed = shellReducer(floor, {
+      type: "device_refreshed",
+      status: { ...DEVICE_STATUS, deviceName: "Станция у окна" },
+    });
+    expect(renamed.device).toEqual({
+      kind: "ready",
+      status: { ...DEVICE_STATUS, deviceName: "Станция у окна" },
+    });
+    expect(renamed.operator).toEqual({ ...ANNA, sessionId: 1 });
+  });
+
+  it("says the office's change was not saved until a read of the device lands", () => {
+    const failed = shellReducer(paired(), { type: "device_not_saved" });
+    expect(failed.deviceNotSaved).toBe(true);
+    expect(shellReducer(failed, { type: "device_not_saved" })).toBe(failed);
+    const saved = shellReducer(failed, { type: "device_refreshed", status: DEVICE_STATUS });
+    expect(saved.deviceNotSaved).toBe(false);
+    const fresh = shellReducer(failed, { type: "paired", status: DEVICE_STATUS });
+    expect(fresh.deviceNotSaved).toBe(false);
+  });
+
+  it("counts the reads of the station's shifts and keeps whether the last failed", () => {
+    let state = paired();
+    state = shellReducer(state, { type: "shifts_read", ok: true });
+    state = shellReducer(state, { type: "shifts_read", ok: false });
+    expect(state.shiftReads).toEqual({ done: 1, failed: true });
+    state = shellReducer(state, { type: "shifts_read", ok: true });
+    expect(state.shiftReads).toEqual({ done: 2, failed: false });
+    expect(shellReducer(state, { type: "forgotten" }).shiftReads).toEqual({
+      done: 0,
+      failed: false,
+    });
+    expect(shellReducer(state, { type: "paired", status: DEVICE_STATUS }).shiftReads).toEqual({
+      done: 0,
+      failed: false,
+    });
+  });
+
+  it("numbers the sessions strictly upward, through a forget and a new pairing, and a late call of an earlier one ends nothing", () => {
+    let state = shellReducer(paired(), signIn);
+    state = shellReducer(state, { type: "operator_signed_out", sessionId: 1, notice: null });
+    state = shellReducer(state, { ...signIn, operator: BORIS });
+    expect(state.operator?.sessionId).toBe(2);
+    const forgotten = shellReducer(state, { type: "forgotten" });
+    expect(forgotten.lastSessionId).toBe(2);
+    const repaired = shellReducer(forgotten, { type: "paired", status: DEVICE_STATUS });
+    expect(repaired.lastSessionId).toBe(2);
+    const third = shellReducer(repaired, signIn);
+    expect(third.operator).toEqual({ ...ANNA, sessionId: 3 });
+    // The earlier sessions' timers and checks name their own numbers.
+    for (const sessionId of [1, 2]) {
+      expect(shellReducer(third, { type: "operator_signed_out", sessionId, notice: "idle" })).toBe(
+        third,
+      );
+      expect(
+        shellReducer(third, { type: "operator_refreshed", sessionId, name: "X", role: null }),
+      ).toBe(third);
+    }
+  });
+
+  it("lets nothing of an earlier session touch the work of the next one", () => {
+    const out = shellReducer(working(), {
+      type: "operator_signed_out",
+      sessionId: 1,
+      notice: null,
+    });
+    expect(out.floorWork).toBeNull();
+    const boris = shellReducer(out, { ...signIn, operator: BORIS });
+    const second = shellReducer(boris, { type: "work_entered", sessionId: 2, shiftId: SHIFT_ID });
+    expect(second.floorWork).toEqual({ sessionId: 2, shiftId: SHIFT_ID });
+    expect(shellReducer(second, { type: "work_left", sessionId: 1 })).toBe(second);
+    expect(shellReducer(second, { type: "work_entered", sessionId: 1, shiftId: OTHER_LINE })).toBe(
+      second,
+    );
+    expect(
+      shellReducer(second, { type: "operator_signed_out", sessionId: 1, notice: "idle" }),
+    ).toBe(second);
+  });
+
+  it.each(["idle", "removed", null] as const)(
+    "lets the operator leave a shift under a held refusal (notice %s), and the refusal comes at once",
+    (notice) => {
+      const refused = shellReducer(working(), { type: "device_rejected", reason: "key_rejected" });
+      const out = shellReducer(refused, { type: "operator_signed_out", sessionId: 1, notice });
+      expect(out.rejection).toBe("key_rejected");
+      expect(out.operator).toBeNull();
+      expect(out.floorWork).toBeNull();
+      expect(out.pendingRejection).toBeNull();
+      expect(out.pendingDevice).toBeNull();
+      expect(nextShellView(out, ADDRESS)).toEqual({
+        kind: "device_rejected",
+        reason: "key_rejected",
+      });
+    },
+  );
+
+  it("recovers after a held refusal is released: a new pairing starts clean and signs in again", () => {
+    const refused = shellReducer(working(), { type: "device_rejected", reason: "host_changed" });
+    const released = shellReducer(refused, { type: "work_left", sessionId: 1 });
+    expect(nextShellView(released, ADDRESS)).toEqual({
+      kind: "device_rejected",
+      reason: "host_changed",
+    });
+    // Nothing signs in under the refusal.
+    expect(shellReducer(released, signIn)).toBe(released);
+    const repaired = shellReducer(shellReducer(released, { type: "forgotten" }), {
+      type: "paired",
+      status: DEVICE_STATUS,
+    });
+    expect(repaired.rejection).toBeNull();
+    expect(repaired.pendingRejection).toBeNull();
+    const again = shellReducer(repaired, signIn);
+    expect(again.operator).toEqual({ ...ANNA, sessionId: 2 });
+    const entered = shellReducer(again, { type: "work_entered", sessionId: 2, shiftId: SHIFT_ID });
+    expect(entered.floorWork).toEqual({ sessionId: 2, shiftId: SHIFT_ID });
+  });
+
+  it("holds one refusal at a time: a second one while it waits replaces it, and the shift goes on", () => {
+    const first = shellReducer(working(), { type: "device_rejected", reason: "key_rejected" });
+    const same = shellReducer(first, { type: "device_rejected", reason: "key_rejected" });
+    expect(same.pendingRejection).toBe("key_rejected");
+    expect(same.rejection).toBeNull();
+    const other = shellReducer(first, {
+      type: "link_status",
+      status: linkStatus({ lastError: "certificate_mismatch" }),
+    });
+    expect(other.pendingRejection).toBe("host_changed");
+    expect(other.rejection).toBeNull();
+    expect(other.floorWork).toEqual({ sessionId: 1, shiftId: SHIFT_ID });
+    expect(other.operator).toEqual({ ...ANNA, sessionId: 1 });
+    const left = shellReducer(other, { type: "work_left", sessionId: 1 });
+    expect(left.rejection).toBe("host_changed");
+    expect(left.pendingRejection).toBeNull();
+  });
+
+  it("holds the latest of several moves to other lines, and a move back undoes them all", () => {
+    const first = shellReducer(working(), { type: "device_refreshed", status: MOVED });
+    const second = shellReducer(first, {
+      type: "device_refreshed",
+      status: { ...DEVICE_STATUS, lineId: THIRD_LINE },
+    });
+    expect(second.pendingDevice?.lineId).toBe(THIRD_LINE);
+    expect(second.device).toEqual({ kind: "ready", status: DEVICE_STATUS });
+    const left = shellReducer(second, { type: "work_left", sessionId: 1 });
+    expect(left.device).toEqual({
+      kind: "ready",
+      status: { ...DEVICE_STATUS, lineId: THIRD_LINE },
+    });
+  });
+
+  it("moves the station at once when the work has ended and the operator still stands on the floor", () => {
+    const left = shellReducer(working(), { type: "work_left", sessionId: 1 });
+    expect(left.floorWork).toBeNull();
+    const moved = shellReducer(left, { type: "device_refreshed", status: MOVED });
+    expect(moved.pendingDevice).toBeNull();
+    expect(moved.device).toEqual({ kind: "ready", status: MOVED });
+    expect(moved.operator).toBeNull();
+    expect(moved.floorNotice).toBe("line_changed");
+    const refused = shellReducer(left, { type: "device_rejected", reason: "key_rejected" });
+    expect(refused.pendingRejection).toBeNull();
+    expect(refused.rejection).toBe("key_rejected");
+  });
+
+  it("keeps the work and what waits for it through everything that does not decide them", () => {
+    const waiting = shellReducer(
+      shellReducer(working(), { type: "device_refreshed", status: MOVED }),
+      { type: "device_rejected", reason: "key_rejected" },
+    );
+    expect(waiting.pendingDevice).toEqual(MOVED);
+    expect(waiting.pendingRejection).toBe("key_rejected");
+    for (const action of [
+      { type: "link_status", status: linkStatus() },
+      { type: "link_status", status: linkStatus({ state: "offline", lastError: "unreachable" }) },
+      { type: "host_revision", rev: 11 },
+      { type: "sync_started" },
+      { type: "sync_finished", result: { kind: "synced", rev: 4, quarantined: 0 } },
+      { type: "sync_failed", failure: "host", quarantined: null },
+      { type: "shifts_read", ok: true },
+      { type: "shifts_read", ok: false },
+      { type: "device_not_saved" },
+      { type: "operator_refreshed", sessionId: 1, name: "Анна К.", role: "Упаковщик" },
+      { type: "work_entered", sessionId: 1, shiftId: OTHER_LINE },
+      { type: "work_left", sessionId: 2 },
+      { type: "office_closed" },
+      { type: "session_ended", token: SESSION.token },
+      { type: "device_rejected", reason: "host_changed", token: SESSION.token },
+      { type: "device_refreshed", status: { ...DEVICE_STATUS, deviceId: OTHER_LINE } },
+    ] satisfies ShellAction[]) {
+      const after = shellReducer(waiting, action);
+      expect(after.floorWork, action.type).toEqual({ sessionId: 1, shiftId: SHIFT_ID });
+      expect(after.pendingRejection, action.type).toBe("key_rejected");
+      expect(after.pendingDevice, action.type).toEqual(MOVED);
+      expect(after.rejection, action.type).toBeNull();
+      expect(after.operator?.sessionId, action.type).toBe(1);
+    }
+  });
+
+  it("does not hold the work of an operator whose host was replaced: the floor goes at once", () => {
+    const after = shellReducer(working(), {
+      type: "sync_finished",
+      result: { kind: "other_host" },
+    });
+    expect(after.operator).toBeNull();
+    expect(after.floorWork).toBeNull();
+    expect(after.pendingRejection).toBeNull();
+    expect(after.pendingDevice).toBeNull();
+    expect(nextShellView(after, ADDRESS).kind).toBe("other_host");
+  });
+
+  it("counts the reads of the shifts without touching the session or its work", () => {
+    const after = shellReducer(working(), { type: "shifts_read", ok: true });
+    expect(after.shiftReads).toEqual({ done: 1, failed: false });
+    expect(after.floorWork).toEqual({ sessionId: 1, shiftId: SHIFT_ID });
+    expect(after.operator).toEqual({ ...ANNA, sessionId: 1 });
   });
 });

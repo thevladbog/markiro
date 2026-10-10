@@ -1,13 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
 import { FloorOperatorScreen } from "../floor/FloorOperatorScreen.js";
@@ -162,8 +153,13 @@ export function App({
   const remoteAddress =
     pairedStatus !== null && pairedStatus.hostAddress !== address ? pairedStatus.hostAddress : null;
 
+  // A refusal that waits for the operator to leave the shift (question В8)
+  // already stops the link: nothing more reaches a host that refused us.
   const linked =
-    pairedStatus !== null && state.rejection === null && state.sync.kind !== "other_host"
+    pairedStatus !== null &&
+    state.rejection === null &&
+    state.pendingRejection === null &&
+    state.sync.kind !== "other_host"
       ? pairedStatus
       : null;
   const requestSync = useHostLink({
@@ -173,6 +169,7 @@ export function App({
     local: localDb,
     changes: hostApi.getChanges,
     refresh: deviceApi.refresh,
+    deviceShifts: hostApi.getDeviceShifts,
     dispatch,
   });
 
@@ -341,38 +338,28 @@ export function App({
   const operatorSignedIn = useCallback(
     (operator: FloorOperator, lineId: string | null) => {
       if (pairedDeviceId !== null) {
-        // A copy, and the reducer stores a fresh object of its own, so each
-        // sign-in is a session of its own: the sign-out below tells a session
-        // from the next one of the same operator by the STORED object, never
-        // by the operator's id.
+        // The reducer gives the sign-in a new session number.
         dispatch({
           type: "operator_signed_in",
           deviceId: pairedDeviceId,
           lineId,
           address,
-          operator: { ...operator },
+          operator,
         });
       }
     },
     [pairedDeviceId, address],
   );
-  // The operator of the session on screen, as the last commit has it.
-  const signedIn = state.operator;
-  const currentOperator = useRef<FloorOperator | null>(null);
-  useLayoutEffect(() => {
-    currentOperator.current = signedIn;
-  }, [signedIn]);
-  // Bound to ONE session (`signedIn` is the object that session's sign-in
-  // made): a late idle timer or copy check of an earlier session of the same
-  // operator must not end the session that followed it. The callback changes
-  // only with the session, so the screen's idle timer is not restarted by
-  // every event of the link.
+  // Bound to ONE session by its number: a late idle timer or copy check of an
+  // earlier session of the same operator ends nothing (the reducer compares
+  // the number). The callback changes only with the session, so the screen's
+  // idle timer is not restarted by every event of the link or a new name.
+  const sessionId = state.operator?.sessionId ?? null;
   const operatorSignedOut = useCallback(
     (notice: FloorNotice | null) => {
-      if (signedIn === null || currentOperator.current !== signedIn) return;
-      dispatch({ type: "operator_signed_out", operatorId: signedIn.id, notice });
+      if (sessionId !== null) dispatch({ type: "operator_signed_out", sessionId, notice });
     },
-    [signedIn],
+    [sessionId],
   );
 
   const session = view.kind === "office" ? view.session : null;
