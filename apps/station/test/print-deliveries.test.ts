@@ -160,3 +160,48 @@ it("allows rerender at corrected DPI only after a proven before-send failure", a
     w.close();
   }
 });
+
+it.each(["prepared", "delivery_unknown"] as const)(
+  "regenerates a resolved %s attempt whose raster was released",
+  async (state) => {
+    const key = { scope: "owner", purpose: "box" as const, jobId: "box", attemptId: "attempt" };
+    const w = await openProductLabelWork();
+    try {
+      await bindPrintDestination(w.exec, key, profile);
+      await preparePrintDelivery(w.exec, key, profile, bytes);
+      if (state === "delivery_unknown") {
+        await claimPrintDelivery(w.exec, key);
+        await recoverPrintDeliveries(w.exec);
+      }
+      await resolvePrintDelivery(w.exec, key);
+      expect((await readPrintDelivery(w.exec, key))?.artifact_base64).toBe("");
+      let rendered = false;
+      const next = await prepareWindowsReprint(w.exec, key, profile, async () => {
+        rendered = true;
+        return bytes;
+      });
+      expect(rendered).toBe(true);
+      expect(next?.key.attemptId).not.toBe(key.attemptId);
+      expect((await readPrintDelivery(w.exec, key))?.state).toBe(state);
+    } finally {
+      w.close();
+    }
+  },
+);
+
+it("replays an unresolved unknown attempt without invoking regeneration", async () => {
+  const key = { scope: "owner", purpose: "box" as const, jobId: "box", attemptId: "attempt" };
+  const w = await openProductLabelWork();
+  try {
+    await bindPrintDestination(w.exec, key, profile);
+    await preparePrintDelivery(w.exec, key, profile, bytes);
+    await claimPrintDelivery(w.exec, key);
+    await recoverPrintDeliveries(w.exec);
+    const next = await prepareWindowsReprint(w.exec, key, profile, async () => {
+      throw new Error("Must replay saved bytes");
+    });
+    expect(next?.bytes).toEqual(bytes);
+  } finally {
+    w.close();
+  }
+});

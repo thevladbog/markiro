@@ -160,6 +160,22 @@ const warehouseRasterPrepared = warehousePreparedBase.extend({
   printFormat: z.literal("mono-raster-v1"),
   language: z.never().optional(),
 });
+// Missing format is the legacy mono-raster DPI-only replacement.
+const warehouseRerenderBase = z.strictObject({
+  bytesDigest: digest,
+  dpi: z.union([z.literal(203), z.literal(300)]),
+});
+export const warehouseRerenderSchema = z.union([
+  warehouseRerenderBase.extend({
+    printFormat: z.literal("mono-raster-v1").optional(),
+    language: z.never().optional(),
+  }),
+  warehouseRerenderBase.extend({
+    language: z.enum(["zpl", "tspl"]),
+    printFormat: z.never().optional(),
+  }),
+]);
+export type WarehouseRerender = z.infer<typeof warehouseRerenderSchema>;
 const warehouseOtherEventSchema = z.discriminatedUnion("kind", [
   eventBase.extend({ kind: z.literal("sending") }),
   eventBase.extend({ kind: z.literal("sent") }),
@@ -181,12 +197,7 @@ const warehouseOtherEventSchema = z.discriminatedUnion("kind", [
     kind: z.literal("reprint_prepared"),
     attemptNo: positive,
     reason: warehouseReasonSchema,
-    rerender: z
-      .strictObject({
-        bytesDigest: digest,
-        dpi: z.union([z.literal(203), z.literal(300)]),
-      })
-      .optional(),
+    rerender: warehouseRerenderSchema.optional(),
   }),
 ]);
 export const warehouseEventSchema = z.union([

@@ -75,119 +75,128 @@ describe.skipIf(!ready)("warehouse event history", () => {
     expect(first.body.quarantined).toEqual([]);
     expect((await post([event]).expect(200)).body).toEqual(first.body);
   });
-  it("audits a corrected-DPI attempt without rewriting the original prepared event", async () => {
-    const { language, ...original } = prepared;
-    void language;
-    const first = {
-      ...original,
-      printFormat: "mono-raster-v1" as const,
-      eventId: randomUUID(),
-      jobId: randomUUID(),
-      attemptId: randomUUID(),
-      sessionId: randomUUID(),
-    };
-    const base = {
-      jobId: first.jobId,
-      sessionId: first.sessionId,
-      attemptId: first.attemptId,
-      operatorId: first.operatorId,
-      occurredAt: first.occurredAt,
-    };
-    const nextAttempt = randomUUID();
-    const nextDigest = "a".repeat(64);
-    const events: WarehouseReprintEvent[] = [
-      first,
-      { ...base, eventId: randomUUID(), sequence: 2, kind: "sending" },
-      {
-        ...base,
+  it.each(["mono-raster-v1", "zpl", "tspl"] as const)(
+    "audits a corrected-DPI %s attempt without rewriting the original prepared event",
+    async (format) => {
+      const { language, ...original } = prepared;
+      void language;
+      const first = {
+        ...original,
+        printFormat: "mono-raster-v1" as const,
         eventId: randomUUID(),
-        sequence: 3,
-        kind: "failed_before_send",
-        errorCode: "driver_rejected",
-      },
-      {
-        ...base,
-        eventId: randomUUID(),
-        sequence: 4,
-        kind: "reprint_prepared",
-        attemptId: nextAttempt,
-        attemptNo: 2,
-        reason: "not_printed",
-        rerender: { bytesDigest: nextDigest, dpi: 300 },
-      },
-      { ...base, eventId: randomUUID(), sequence: 5, kind: "sending", attemptId: nextAttempt },
-      { ...base, eventId: randomUUID(), sequence: 6, kind: "sent", attemptId: nextAttempt },
-    ];
-    await post([first]).expect(200);
-    const [legacy] = await h.db
-      .select()
-      .from(schema.warehouseReprintJobs)
-      .where(eq(schema.warehouseReprintJobs.jobId, first.jobId));
-    if (!legacy) throw new Error("Missing original job");
-    const legacyProjection = { ...legacy.projection };
-    delete legacyProjection.raster;
-    await h.db
-      .update(schema.warehouseReprintJobs)
-      .set({ projection: legacyProjection })
-      .where(
-        and(
-          eq(schema.warehouseReprintJobs.tenantId, h.a.tenantId),
-          eq(schema.warehouseReprintJobs.jobId, first.jobId),
-        ),
-      );
-    const received = await post(events).expect(200);
-    expect(received.body.quarantined).toEqual([]);
-    expect(received.body.acceptedEventIds).toEqual(events.map((event) => event.eventId));
-    expect((await post(events).expect(200)).body).toEqual(received.body);
-    const [saved] = await h.db
-      .select()
-      .from(schema.warehouseReprintJobs)
-      .where(
-        and(
-          eq(schema.warehouseReprintJobs.tenantId, h.a.tenantId),
-          eq(schema.warehouseReprintJobs.jobId, first.jobId),
-        ),
-      );
-    expect(saved?.prepared).toEqual(first);
-    expect(saved?.projection).toMatchObject({
-      bytesDigest: nextDigest,
-      raster: { dpi: 300 },
-      attemptIds: [first.attemptId, nextAttempt],
-    });
-    const audits = await h.db
-      .select()
-      .from(schema.tenantAuditEvents)
-      .where(eq(schema.tenantAuditEvents.targetId, first.jobId));
-    expect(audits).toHaveLength(events.length);
-    for (const event of events) {
-      expect(
-        audits.find(
-          (audit) =>
-            audit.after !== null &&
-            typeof audit.after === "object" &&
-            "eventId" in audit.after &&
-            audit.after.eventId === event.eventId,
-        ),
-      ).toMatchObject({
-        organizationId: h.a.tenantId,
-        actorUserId: null,
-        action: `warehouse_label.${event.kind}`,
-        targetType: "warehouse_label_job",
-        targetId: first.jobId,
-        outcome: "accepted",
-        after: expect.objectContaining({
-          deviceId: h.a.deviceId,
-          operatorId: first.operatorId,
-          attemptId: event.attemptId,
-          bytesDigest: event.sequence < 4 ? first.bytesDigest : nextDigest,
-          dpi: event.sequence < 4 ? first.dpi : 300,
-          printFormat: "mono-raster-v1",
-          templateDigest: first.templateDigest,
-          payloadDigest: first.payloadDigest,
-        }),
+        jobId: randomUUID(),
+        attemptId: randomUUID(),
+        sessionId: randomUUID(),
+      };
+      const base = {
+        jobId: first.jobId,
+        sessionId: first.sessionId,
+        attemptId: first.attemptId,
+        operatorId: first.operatorId,
+        occurredAt: first.occurredAt,
+      };
+      const nextAttempt = randomUUID();
+      const nextDigest = "a".repeat(64);
+      const events: WarehouseReprintEvent[] = [
+        first,
+        { ...base, eventId: randomUUID(), sequence: 2, kind: "sending" },
+        {
+          ...base,
+          eventId: randomUUID(),
+          sequence: 3,
+          kind: "failed_before_send",
+          errorCode: "driver_rejected",
+        },
+        {
+          ...base,
+          eventId: randomUUID(),
+          sequence: 4,
+          kind: "reprint_prepared",
+          attemptId: nextAttempt,
+          attemptNo: 2,
+          reason: "not_printed",
+          rerender: {
+            bytesDigest: nextDigest,
+            dpi: 300,
+            ...(format === "mono-raster-v1" ? {} : { language: format }),
+          },
+        },
+        { ...base, eventId: randomUUID(), sequence: 5, kind: "sending", attemptId: nextAttempt },
+        { ...base, eventId: randomUUID(), sequence: 6, kind: "sent", attemptId: nextAttempt },
+      ];
+      await post([first]).expect(200);
+      const [legacy] = await h.db
+        .select()
+        .from(schema.warehouseReprintJobs)
+        .where(eq(schema.warehouseReprintJobs.jobId, first.jobId));
+      if (!legacy) throw new Error("Missing original job");
+      const legacyProjection = { ...legacy.projection };
+      delete legacyProjection.raster;
+      await h.db
+        .update(schema.warehouseReprintJobs)
+        .set({ projection: legacyProjection })
+        .where(
+          and(
+            eq(schema.warehouseReprintJobs.tenantId, h.a.tenantId),
+            eq(schema.warehouseReprintJobs.jobId, first.jobId),
+          ),
+        );
+      const received = await post(events).expect(200);
+      expect(received.body.quarantined).toEqual([]);
+      expect(received.body.acceptedEventIds).toEqual(events.map((event) => event.eventId));
+      expect((await post(events).expect(200)).body).toEqual(received.body);
+      const [saved] = await h.db
+        .select()
+        .from(schema.warehouseReprintJobs)
+        .where(
+          and(
+            eq(schema.warehouseReprintJobs.tenantId, h.a.tenantId),
+            eq(schema.warehouseReprintJobs.jobId, first.jobId),
+          ),
+        );
+      expect(saved?.prepared).toEqual(first);
+      expect(saved?.projection).toMatchObject({
+        bytesDigest: nextDigest,
+        raster: { dpi: 300 },
+        attemptIds: [first.attemptId, nextAttempt],
       });
-    }
-  });
+      const audits = await h.db
+        .select()
+        .from(schema.tenantAuditEvents)
+        .where(eq(schema.tenantAuditEvents.targetId, first.jobId));
+      expect(audits).toHaveLength(events.length);
+      for (const event of events) {
+        expect(
+          audits.find(
+            (audit) =>
+              audit.after !== null &&
+              typeof audit.after === "object" &&
+              "eventId" in audit.after &&
+              audit.after.eventId === event.eventId,
+          ),
+        ).toMatchObject({
+          organizationId: h.a.tenantId,
+          actorUserId: null,
+          action: `warehouse_label.${event.kind}`,
+          targetType: "warehouse_label_job",
+          targetId: first.jobId,
+          outcome: "accepted",
+          after: expect.objectContaining({
+            deviceId: h.a.deviceId,
+            operatorId: first.operatorId,
+            attemptId: event.attemptId,
+            bytesDigest: event.sequence < 4 ? first.bytesDigest : nextDigest,
+            dpi: event.sequence < 4 ? first.dpi : 300,
+            ...(event.sequence < 4 || format === "mono-raster-v1"
+              ? { printFormat: "mono-raster-v1" }
+              : { language: format }),
+            templateDigest: first.templateDigest,
+            payloadDigest: first.payloadDigest,
+          }),
+        });
+      }
+    },
+  );
   it("replays exact receipts and audit without touching production facts", async () => {
     const tail = (kind: "sending" | "sent", sequence: number): WarehouseReprintEvent => ({
       kind,

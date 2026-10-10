@@ -6,6 +6,8 @@ import { z } from "zod";
 import {
   applyWarehouseReprintEvent,
   warehouseEventSchema,
+  warehouseRerenderSchema,
+  type WarehouseRerender,
   productLabelValueDigest,
   productLabelBytesDigest,
   labelTemplateUsesField,
@@ -40,10 +42,22 @@ const projectionSchema = z.strictObject({
   bytesDigest: z.string(),
   payloadDigest: z.string(),
   templateDigest: z.string(),
-  raster: z
-    .strictObject({ bytesDigest: z.string(), dpi: z.union([z.literal(203), z.literal(300)]) })
-    .optional(),
+  raster: warehouseRerenderSchema.optional(),
 });
+const replacementSchema = z
+  .preprocess(
+    (value) => {
+      const row = z.record(z.string(), z.unknown()).parse(value);
+      const { bytesBase64, ...metadata } = row;
+      return { bytesBase64, metadata };
+    },
+    z.strictObject({
+      bytesBase64: z.string().min(1),
+      metadata: warehouseRerenderSchema,
+    }),
+  )
+  .transform(({ bytesBase64, metadata }) => ({ ...metadata, bytesBase64 }));
+
 function json(raw: string): unknown {
   try {
     return JSON.parse(raw);
@@ -137,28 +151,23 @@ export async function readWarehouseJob(
   if (!row) throw new Error("WAREHOUSE_REPRINT_JOB_MISSING");
   const input = parseWarehousePreparedInput(json(row.job_json));
   const projection = projectionSchema.parse(json(row.projection_json));
-  const replacement = row.raster_json
-    ? z
-        .strictObject({
-          bytesBase64: z.string().min(1),
-          bytesDigest: z.string(),
-          dpi: z.union([z.literal(203), z.literal(300)]),
-        })
-        .parse(json(row.raster_json))
-    : null;
+  const replacement = row.raster_json ? replacementSchema.parse(json(row.raster_json)) : null;
   const currentBytes = replacement ?? input;
   if (replacement) {
     const bytes = Uint8Array.from(atob(replacement.bytesBase64), (c) => c.charCodeAt(0));
     if (
-      input.preparedEvent.printFormat !== "mono-raster-v1" ||
       productLabelBytesDigest(bytes) !== replacement.bytesDigest ||
-      decodeMonoRaster(bytes).dpi !== replacement.dpi ||
+      (!replacement.language && decodeMonoRaster(bytes).dpi !== replacement.dpi) ||
       projection.raster?.dpi !== replacement.dpi ||
-      projection.raster.bytesDigest !== replacement.bytesDigest
+      projection.raster.bytesDigest !== replacement.bytesDigest ||
+      projection.raster.language !== replacement.language
     )
       throw new Error("WAREHOUSE_REPRINT_STORAGE_INVALID");
   }
-  const currentPrinter = replacement ? { ...input.printer, dpi: replacement.dpi } : input.printer;
+  const currentFormat = replacement
+    ? (replacement.language ?? "mono-raster-v1")
+    : printerFormat(input.printer);
+  const currentDpi = replacement?.dpi ?? input.printer.dpi;
   if (
     input.owner !== row.owner ||
     input.jobId !== jobId ||
@@ -179,23 +188,23 @@ export async function readWarehouseJob(
     attemptId: projection.attemptId,
   });
   if (
-    destination &&
-    (printerFormat(destination) !== printerFormat(currentPrinter) ||
-      destination.dpi !== currentPrinter.dpi)
+    (replacement && !destination) ||
+    (destination &&
+      (printerFormat(destination) !== currentFormat || destination.dpi !== currentDpi))
   )
     throw new Error("WAREHOUSE_REPRINT_PRINTER_INVALID");
   return {
     ...input,
     bytesBase64: currentBytes.bytesBase64,
     bytesDigest: currentBytes.bytesDigest,
-    printer: destination ?? currentPrinter,
+    printer: destination ?? input.printer,
     projection,
     updatedAt: row.updated_at,
   };
 }
 export function warehouseJobView(job: WarehouseJob): WarehouseJobView {
   return {
-    ...(job.preparedEvent.printFormat ? { printScope: job.owner } : {}),
+    ...(printerFormat(job.printer) === "mono-raster-v1" ? { printScope: job.owner } : {}),
     jobId: job.jobId,
     attemptId: job.projection.attemptId,
     attemptNo: job.projection.attemptNo,
@@ -243,7 +252,7 @@ export async function findWarehouseJobView(
       WHERE j.owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL})${filters.length ? " AND " + filters.join(" AND ") : ""}
       ORDER BY j.state IN ('prepared','sending','delivery_unknown','failed_before_send') DESC,j.updated_at DESC,j.job_id DESC LIMIT 1
     )
-    SELECT CASE WHEN json_extract(j.job_json,'$.preparedEvent.printFormat')='mono-raster-v1' THEN j.owner END AS printScope,j.job_id AS jobId,j.attempt_id AS attemptId,j.state,j.source_kind AS kind,j.identity,j.updated_at AS updatedAt,
+    SELECT CASE WHEN COALESCE(json_extract(j.raster_json,'$.language'),json_extract(j.raster_json,'$.printFormat'),CASE WHEN j.raster_json IS NOT NULL THEN 'mono-raster-v1' END,json_extract(j.job_json,'$.preparedEvent.printFormat'))='mono-raster-v1' THEN j.owner END AS printScope,j.job_id AS jobId,j.attempt_id AS attemptId,j.state,j.source_kind AS kind,j.identity,j.updated_at AS updatedAt,
       json_extract(j.projection_json,'$.attemptNo') AS attemptNo,
       json_extract(j.job_json,'$.source.productName') AS productName,
       json_extract(j.job_json,'$.template.name') AS templateName,
@@ -317,7 +326,7 @@ export async function appendWarehouseEvent(
   exec: SqlExecutor,
   owner: string,
   input: WarehouseReprintEvent,
-  raster?: { bytesBase64: string; bytesDigest: string; dpi: 203 | 300 },
+  raster?: WarehouseRerender & { bytesBase64: string },
 ): Promise<"applied" | "replay"> {
   const event = warehouseEventSchema.parse(input);
   const eventDigest = productLabelValueDigest(event);
@@ -334,13 +343,14 @@ export async function appendWarehouseEvent(
     if (
       !raster ||
       raster.bytesDigest !== event.rerender.bytesDigest ||
-      raster.dpi !== event.rerender.dpi
+      raster.dpi !== event.rerender.dpi ||
+      raster.language !== event.rerender.language
     )
       throw new Error("WAREHOUSE_RASTER_MISSING");
     const bytes = Uint8Array.from(atob(raster.bytesBase64), (c) => c.charCodeAt(0));
     if (
       productLabelBytesDigest(bytes) !== raster.bytesDigest ||
-      decodeMonoRaster(bytes).dpi !== raster.dpi
+      (!raster.language && decodeMonoRaster(bytes).dpi !== raster.dpi)
     )
       throw new Error("WAREHOUSE_RASTER_INVALID");
   } else if (raster) throw new Error("WAREHOUSE_RASTER_UNEXPECTED");

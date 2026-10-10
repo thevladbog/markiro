@@ -28,14 +28,15 @@ product duplicates keep their existing reason and full-code verification rules.
 Old ZPL/TSPL jobs replay their original bytes on a compatible RAW profile.
 
 Box and pallet attempts regenerate from their label model after proven pre-send failure
-or after a successful send whose payload has been retired. Unknown delivery retains
-its original raster and requires a compatible DPI. The sidecar retains digest, receipt
+or after a successful send or operator resolution whose payload has been retired.
+Unresolved unknown delivery retains its original raster and requires a compatible DPI. The sidecar retains digest, receipt
 and state but clears settled raster payloads; SQLite can reuse the freed pages.
 
-For warehouse driver jobs only, a proven `failed_before_send` permits an explicit
-new attempt at corrected DPI from the saved source fields and template. The original
-prepared snapshot remains immutable. The new raster and `reprint_prepared.rerender`
-event commit atomically, and server history/audit records the new digest and DPI.
+For warehouse jobs, a proven `failed_before_send` permits an explicit new attempt
+with corrected DPI or format (Windows raster, ZPL or TSPL) from the saved source fields
+and template. The original prepared snapshot remains immutable. The new artifact and
+`reprint_prepared.rerender` event commit atomically, and server history/audit records
+the new digest, DPI and format. Legacy DPI-only events retain their raster meaning.
 Sent/unknown warehouse jobs and product-duplicate jobs still replay their frozen bytes.
 Deploy this expanded warehouse event contract on the API before Station.
 
@@ -77,6 +78,11 @@ network-installed queues, plus RAW ZPL and TSPL controls.
    Correct a failed box/pallet destination and retry. For warehouse jobs, correct the
    DPI and explicitly request a new attempt; confirm the original attempt remains in
    history and a changed DPI is still rejected after unknown delivery.
+   After a proven driver rejection, also switch to RAW ZPL/TSPL and explicitly retry;
+   verify the saved source/template, attempt history and printed label. Test RAW to
+   driver recovery before send as well. Format changes after sent/unknown are rejected.
+   Resolve an unknown box/pallet attempt by an explicit operator action, then reprint
+   it after its raster was released; confirm the label is regenerated.
 5. Offline/stopped queue, service interruption and Station restart during sending
    must expose uncertainty without an unsolicited extra label.
 6. Change current catalog/template/printer settings, then reprint a saved product
@@ -139,3 +145,18 @@ No release, deployment or physical printing was performed during this validation
 - Broad DB/API runs were not repeated; their initial timeout limitations above
   remain open. Native Rust was unchanged. Real Windows-driver and paper acceptance
   remain unrun in this macOS environment.
+
+### Resolved-attempt and format-change follow-up
+
+- Both additional findings reproduced before the fix. Resolved prepared/unknown
+  box attempts now regenerate after their raster was released; unresolved unknown
+  attempts still replay saved bytes.
+- Station: 152 files / 2104 tests; domain: 74 files / 1025 tests; warehouse API:
+  14 tests against task-owned PostgreSQL. Lint, typecheck and build passed for
+  Station, domain, DB and API.
+- Coverage includes all six transitions between Windows raster, ZPL and TSPL after
+  proven non-send, immutable saved source/template and initial prepared event,
+  current-format status/audit, subsequent byte replay, rejection after sent/unknown,
+  and restoration of each replacement format after a lost SQLite commit response.
+- This follow-up changes no native code or DDL. Broad DB/API, browser and physical
+  Windows/printer checks were not rerun; the earlier limitations remain.

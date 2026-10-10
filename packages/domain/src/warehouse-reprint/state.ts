@@ -1,5 +1,9 @@
 import { DomainError } from "../errors.js";
-import { warehouseEventSchema, type WarehouseReprintEvent } from "./contracts.js";
+import {
+  warehouseEventSchema,
+  type WarehouseReprintEvent,
+  type WarehouseRerender,
+} from "./contracts.js";
 
 export type WarehouseReprintState =
   "prepared" | "sending" | "sent" | "verified" | "delivery_unknown" | "failed_before_send";
@@ -14,7 +18,8 @@ export interface WarehouseReprintProjection {
   bytesDigest: string;
   payloadDigest: string;
   templateDigest: string;
-  raster?: { bytesDigest: string; dpi: 203 | 300 } | undefined;
+  // Historical field name; replacements may now contain a RAW artifact as well.
+  raster?: WarehouseRerender | undefined;
 }
 function invalid(): never {
   throw new DomainError("WAREHOUSE_REPRINT_TRANSITION", "Invalid warehouse print transition");
@@ -58,7 +63,15 @@ export function applyWarehouseReprintEvent(
       current.attemptIds.includes(event.attemptId)
     )
       invalid();
-    if (event.rerender && (current.state !== "failed_before_send" || !current.raster)) invalid();
+    if (event.rerender) {
+      if (current.state !== "failed_before_send") invalid();
+      if (
+        !event.rerender.printFormat &&
+        !event.rerender.language &&
+        (!current.raster || current.raster.language)
+      )
+        invalid();
+    }
     return {
       ...current,
       ...(event.rerender

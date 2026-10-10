@@ -12,11 +12,13 @@ import {
   saveWarehouseSession,
   readWarehouseJob,
   appendWarehouseEvent,
+  warehouseJobView,
+  findWarehouseJobView,
 } from "../src/lib/warehouse-reprint/store.js";
 import { printWarehouseJob, reprintWarehouseJob } from "../src/lib/warehouse-reprint/printing.js";
 import { resolvePrintDelivery, readPrintDelivery } from "../src/lib/print-deliveries.js";
 afterEach(() => vi.restoreAllMocks());
-async function setup() {
+async function setup(format: "mono-raster-v1" | "zpl" | "tspl" = "mono-raster-v1") {
   const db = new DatabaseSync(":memory:");
   const exec = makeRotatingExec([db, db]);
   await applyMigrations(exec);
@@ -32,9 +34,10 @@ async function setup() {
     requiredBounds: { left: 0, top: 0, right: 0, bottom: 0 },
     pixels: new Uint8Array(800),
   });
-  const { language, ...event } = original.preparedEvent;
+  const { language, printFormat, ...event } = original.preparedEvent;
   void language;
-  const input = {
+  void printFormat;
+  const rasterInput = {
     ...original,
     printer: {
       ...original.printer,
@@ -49,6 +52,14 @@ async function setup() {
       bytesDigest: productLabelBytesDigest(bytes),
     },
   };
+  const input =
+    format === "mono-raster-v1"
+      ? rasterInput
+      : {
+          ...original,
+          printer: { ...original.printer, language: format },
+          preparedEvent: { ...event, language: format },
+        };
   await seedWarehouseOperator(exec, input.operatorId);
   await saveWarehouseSession(exec, {
     owner: input.owner,
@@ -256,29 +267,104 @@ it("never changes the saved raster or DPI after uncertain warehouse delivery", a
   }
 });
 
-it("recovers a committed corrected-DPI attempt after its database response is lost", async () => {
-  const w = await setup();
-  try {
-    vi.mocked(tauriWindowsPrinting.preflightWindowsRaster).mockResolvedValueOnce({
-      ok: false,
-      error: { code: "geometry_mismatch", phase: "before_start" },
-    });
-    await printWarehouseJob(w.deps, w.input.jobId);
-    const corrected = { ...w.input.printer, dpi: 300 as const };
-    const faulty: typeof w.exec = {
-      all: w.exec.all,
-      run: async (sql, params) => {
-        await w.exec.run(sql, params);
-        if (sql.includes("INSERT INTO warehouse_reprint_commands"))
-          throw new Error("Lost commit response");
-      },
-    };
-    await expect(
-      reprintWarehouseJob(
+it.each(["mono-raster-v1", "zpl", "tspl"] as const)(
+  "recovers a committed %s replacement after its database response is lost",
+  async (format) => {
+    const w = await setup();
+    try {
+      vi.mocked(tauriWindowsPrinting.preflightWindowsRaster).mockResolvedValueOnce({
+        ok: false,
+        error: { code: "geometry_mismatch", phase: "before_start" },
+      });
+      await printWarehouseJob(w.deps, w.input.jobId);
+      const corrected = {
+        ...w.input.printer,
+        dpi: 300 as const,
+        mode: format === "mono-raster-v1" ? ("windows_driver" as const) : ("raw" as const),
+        language: format === "mono-raster-v1" ? ("zpl" as const) : format,
+      };
+      const faulty: typeof w.exec = {
+        all: w.exec.all,
+        run: async (sql, params) => {
+          await w.exec.run(sql, params);
+          if (sql.includes("INSERT INTO warehouse_reprint_commands"))
+            throw new Error("Lost commit response");
+        },
+      };
+      await expect(
+        reprintWarehouseJob(
+          {
+            ...w.deps,
+            exec: faulty,
+            profile: corrected,
+            rasterizeText: async () => ({
+              hex: "80",
+              bytesPerRow: 1,
+              totalBytes: 1,
+              width: 1,
+              height: 1,
+            }),
+          },
+          w.input.jobId,
+          "not_printed",
+        ),
+      ).rejects.toThrow("Lost commit response");
+      const restored = await readWarehouseJob(w.exec, w.input.owner, w.input.jobId);
+      expect(restored.projection).toMatchObject({
+        state: "prepared",
+        attemptNo: 2,
+        raster: { dpi: 300, bytesDigest: restored.bytesDigest },
+      });
+      expect(w.send).not.toHaveBeenCalled();
+      expect(w.deps.print).not.toHaveBeenCalled();
+      const send = format === "mono-raster-v1" ? w.send : w.deps.print;
+      await printWarehouseJob({ ...w.deps, profile: corrected }, w.input.jobId);
+      expect((await readWarehouseJob(w.exec, w.input.owner, w.input.jobId)).projection.state).toBe(
+        "sent",
+      );
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(
+        await w.exec.all(
+          "SELECT event_id FROM warehouse_reprint_events WHERE json_extract(event_json,'$.kind')='reprint_prepared'",
+        ),
+      ).toHaveLength(1);
+    } finally {
+      w.db.close();
+    }
+  },
+);
+
+it.each([
+  ["mono-raster-v1", "zpl"],
+  ["mono-raster-v1", "tspl"],
+  ["zpl", "mono-raster-v1"],
+  ["tspl", "mono-raster-v1"],
+  ["zpl", "tspl"],
+  ["tspl", "zpl"],
+] as const)(
+  "recovers an unsent %s job in %s with frozen source and attempt history",
+  async (from, to) => {
+    const w = await setup(from);
+    try {
+      if (from === "mono-raster-v1") {
+        vi.mocked(tauriWindowsPrinting.preflightWindowsRaster).mockResolvedValueOnce({
+          ok: false,
+          error: { code: "geometry_mismatch", phase: "before_start" },
+        });
+        await printWarehouseJob(w.deps, w.input.jobId);
+      } else {
+        await printWarehouseJob({ ...w.deps, profile: null }, w.input.jobId);
+      }
+      const profile = {
+        ...w.input.printer,
+        mode: to === "mono-raster-v1" ? ("windows_driver" as const) : ("raw" as const),
+        language: to === "mono-raster-v1" ? ("zpl" as const) : to,
+        target: { kind: "usb" as const, printer: "Replacement queue" },
+      };
+      await reprintWarehouseJob(
         {
           ...w.deps,
-          exec: faulty,
-          profile: corrected,
+          profile,
           rasterizeText: async () => ({
             hex: "80",
             bytesPerRow: 1,
@@ -289,26 +375,63 @@ it("recovers a committed corrected-DPI attempt after its database response is lo
         },
         w.input.jobId,
         "not_printed",
-      ),
-    ).rejects.toThrow("Lost commit response");
-    const restored = await readWarehouseJob(w.exec, w.input.owner, w.input.jobId);
-    expect(restored.projection).toMatchObject({
-      state: "prepared",
-      attemptNo: 2,
-      raster: { dpi: 300, bytesDigest: restored.bytesDigest },
-    });
-    expect(w.send).not.toHaveBeenCalled();
-    await printWarehouseJob({ ...w.deps, profile: corrected }, w.input.jobId);
-    expect((await readWarehouseJob(w.exec, w.input.owner, w.input.jobId)).projection.state).toBe(
-      "sent",
-    );
-    expect(w.send).toHaveBeenCalledTimes(1);
-    expect(
-      await w.exec.all(
-        "SELECT event_id FROM warehouse_reprint_events WHERE json_extract(event_json,'$.kind')='reprint_prepared'",
-      ),
-    ).toHaveLength(1);
-  } finally {
-    w.db.close();
-  }
-});
+      );
+      const next = await readWarehouseJob(w.exec, w.input.owner, w.input.jobId);
+      expect(next.projection.state).toBe("sent");
+      expect(next.preparedEvent).toEqual(w.input.preparedEvent);
+      expect(next.source).toEqual(w.input.source);
+      expect(next.template).toEqual(w.input.template);
+      expect(next.bytesDigest).not.toBe(w.input.bytesDigest);
+      expect(next.projection.attemptNo).toBe(2);
+      const scope = to === "mono-raster-v1" ? w.input.owner : undefined;
+      expect(warehouseJobView(next).printScope).toBe(scope);
+      expect(
+        (await findWarehouseJobView(w.exec, w.input.owner, { jobId: w.input.jobId }))?.printScope,
+      ).toBe(scope);
+      const calls = to === "mono-raster-v1" ? w.send : w.deps.print;
+      expect(calls).toHaveBeenCalledTimes(1);
+      const sentBytes = calls.mock.calls[0]?.[1];
+      expect(sentBytes).toEqual(Uint8Array.from(atob(next.bytesBase64), (c) => c.charCodeAt(0)));
+      if (to !== "mono-raster-v1") {
+        expect(new TextDecoder().decode(sentBytes)).toContain(to === "zpl" ? "^XA" : "SIZE");
+      }
+      await reprintWarehouseJob({ ...w.deps, profile }, w.input.jobId, "damaged");
+      expect((await readWarehouseJob(w.exec, w.input.owner, w.input.jobId)).bytesBase64).toBe(
+        next.bytesBase64,
+      );
+      expect(calls).toHaveBeenCalledTimes(2);
+      expect(await w.exec.all("SELECT attempt_id FROM warehouse_reprint_attempts")).toHaveLength(3);
+    } finally {
+      w.db.close();
+    }
+  },
+);
+
+it.each(["sent", "delivery_unknown"] as const)(
+  "rejects format changes after %s without creating an attempt",
+  async (state) => {
+    const w = await setup();
+    try {
+      if (state === "delivery_unknown")
+        w.send.mockResolvedValueOnce({
+          ok: false,
+          error: { code: "driver_failure", phase: "delivery_unknown" },
+        });
+      await printWarehouseJob(w.deps, w.input.jobId);
+      await expect(
+        reprintWarehouseJob(
+          { ...w.deps, profile: { ...w.input.printer, mode: "raw", language: "zpl" } },
+          w.input.jobId,
+          "not_printed",
+        ),
+      ).rejects.toThrow("WAREHOUSE_PRINTER_CHANGED");
+      const saved = await readWarehouseJob(w.exec, w.input.owner, w.input.jobId);
+      expect(saved.projection).toMatchObject({ state, attemptNo: 1 });
+      expect(saved.bytesBase64).toBe(w.input.bytesBase64);
+      expect(w.deps.print).not.toHaveBeenCalled();
+      expect(await w.exec.all("SELECT attempt_id FROM warehouse_reprint_attempts")).toHaveLength(1);
+    } finally {
+      w.db.close();
+    }
+  },
+);

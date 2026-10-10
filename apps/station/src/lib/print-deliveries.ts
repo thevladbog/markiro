@@ -214,7 +214,7 @@ export async function prepareWindowsReprint(
   let bytes: Uint8Array;
   if (
     previous.state === "failed_before_send" ||
-    (previous.state === "sent" && !previous.artifact_base64)
+    (!previous.artifact_base64 && (previous.state === "sent" || previous.resolved_at))
   ) {
     if (!render) throw new Error("Label regeneration required");
     bytes = await render();

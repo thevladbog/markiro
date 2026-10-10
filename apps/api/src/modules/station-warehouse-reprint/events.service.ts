@@ -185,7 +185,12 @@ export class WarehouseEventsService {
                 payloadDigest: initial.payloadDigest,
                 bytesDigest: projection.bytesDigest,
                 ...(projection.raster
-                  ? { dpi: projection.raster.dpi, printFormat: "mono-raster-v1" }
+                  ? {
+                      dpi: projection.raster.dpi,
+                      ...(projection.raster.language
+                        ? { language: projection.raster.language }
+                        : { printFormat: "mono-raster-v1" }),
+                    }
                   : {}),
                 repair: initial.repair,
                 scanDigest: initial.scanDigest,

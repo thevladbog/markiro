@@ -1,5 +1,5 @@
 import { renderWarehouseLabel } from "./prepare.js";
-import { rasterizeDriverText } from "../rasterizer.js";
+import { rasterizeDriverText, rasterizeText } from "../rasterizer.js";
 import type { RasterizeTextFn } from "@markiro/domain";
 import {
   dispatchWindowsDelivery,
@@ -203,14 +203,13 @@ export async function reprintWarehouseJob(
   const profile = deps.profile;
   const rerender =
     job.projection.state === "failed_before_send" &&
-    printerFormat(job.printer) === "mono-raster-v1" &&
-    profile?.mode === "windows_driver" &&
+    profile &&
     profile.dpi !== null &&
-    profile.dpi !== job.printer.dpi;
+    (printerFormat(profile) !== printerFormat(job.printer) || profile.dpi !== job.printer.dpi);
   if (
     !profile ||
-    printerFormat(profile) !== printerFormat(job.printer) ||
-    (!rerender && profile.dpi !== job.printer.dpi)
+    (!rerender &&
+      (printerFormat(profile) !== printerFormat(job.printer) || profile.dpi !== job.printer.dpi))
   )
     throw new Error("WAREHOUSE_PRINTER_CHANGED");
   const replacement =
@@ -220,9 +219,13 @@ export async function reprintWarehouseJob(
             job.source,
             job.template,
             profile,
-            deps.rasterizeText ?? rasterizeDriverText,
+            deps.rasterizeText ??
+              (printerFormat(profile) === "mono-raster-v1" ? rasterizeDriverText : rasterizeText),
           )),
           dpi: profile.dpi,
+          ...(printerFormat(profile) === "mono-raster-v1"
+            ? { printFormat: "mono-raster-v1" as const }
+            : { language: profile.language }),
         }
       : undefined;
   if (!deps.isCurrent()) throw new Error("WAREHOUSE_OWNER_CHANGED");
@@ -247,7 +250,15 @@ export async function reprintWarehouseJob(
       attemptNo: job.projection.attemptNo + 1,
       reason,
       ...(replacement
-        ? { rerender: { bytesDigest: replacement.bytesDigest, dpi: replacement.dpi } }
+        ? {
+            rerender: {
+              bytesDigest: replacement.bytesDigest,
+              dpi: replacement.dpi,
+              ...("language" in replacement
+                ? { language: replacement.language }
+                : { printFormat: "mono-raster-v1" as const }),
+            },
+          }
         : {}),
     },
     replacement
@@ -255,6 +266,9 @@ export async function reprintWarehouseJob(
           bytesBase64: replacement.bytesBase64,
           bytesDigest: replacement.bytesDigest,
           dpi: replacement.dpi,
+          ...("language" in replacement
+            ? { language: replacement.language }
+            : { printFormat: "mono-raster-v1" as const }),
         }
       : undefined,
   );
