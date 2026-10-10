@@ -143,6 +143,12 @@ export function FloorApp({
   });
   // What the leave that waits for the work ends in; `null` when none waits.
   const standing = useRef<Leave | null>(null);
+  // True from the moment a leave from a shift's work is asked for until the
+  // next shift is entered. The render's `leaving` lags behind a leave that a
+  // timer or an answer started, and a scan taken in between would be written
+  // after the gate had drained; the work screen asks this at once.
+  const ending = useRef(false);
+  const isLeaving = useCallback(() => ending.current, []);
 
   const finish = useCallback((leave: Leave) => {
     if (leave.kind === "sign_out") {
@@ -163,6 +169,7 @@ export function FloorApp({
         finish(reason);
         return;
       }
+      ending.current = true;
       const waiting = standing.current;
       if (waiting !== null) {
         // A sign-out outranks the leave that waits (the idle lock fires once
@@ -278,6 +285,7 @@ export function FloorApp({
         return;
       }
       current.current.dispatch({ type: "work_entered", sessionId, shiftId: copy.id });
+      ending.current = false;
       setView({ kind: "work", shift, leaving: false });
     },
     [sessionId],
@@ -303,6 +311,8 @@ export function FloorApp({
         track={gate.track}
         touch={lock.touch}
         leaving={view.leaving}
+        isLeaving={isLeaving}
+        linkHeld={rejectionPending}
         onLeave={() => leave({ kind: "list", notice: null })}
         source={source}
         checkCode={checkCode}

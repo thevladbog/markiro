@@ -324,6 +324,39 @@ describe("the floor after an operator signed in", () => {
     expect(types(handlers)).toContain("work_left");
   });
 
+  it("tells the work screen at once that the operator is leaving, until the next shift is entered", async () => {
+    const handlers = handlersOf();
+    const work = holdingWork();
+    render(floorOf(await floorCopies(), handlers, { workScreen: work.Work }));
+    await enterPlanned();
+    await screen.findByRole("button", { name: "Работа OCT26-005/S" });
+    await work.tracked();
+    const first = work.seen.at(-1);
+    expect(first?.isLeaving?.()).toBe(false);
+    // A leave that a timer or an answer started: asked for, and no render has shown it yet.
+    act(() => {
+      first?.onLeave();
+      expect(first?.isLeaving?.()).toBe(true);
+    });
+    await work.release();
+    fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+    await screen.findByRole("button", { name: "Работа OCT26-005/S" });
+    expect(work.seen.at(-1)?.isLeaving?.()).toBe(false);
+  });
+
+  it("tells the work screen when the link is held for the rest of the shift", async () => {
+    const handlers = handlersOf();
+    const work = holdingWork();
+    const local = await floorCopies();
+    const view = render(floorOf(local, handlers, { workScreen: work.Work }));
+    await enterPlanned();
+    await screen.findByRole("button", { name: "Работа OCT26-005/S" });
+    expect(work.seen.at(-1)?.linkHeld).toBe(false);
+    // A refusal or another host found while the operator works: held until they leave.
+    view.rerender(floorOf(local, handlers, { workScreen: work.Work, rejectionPending: true }));
+    expect(work.seen.at(-1)?.linkHeld).toBe(true);
+  });
+
   it("is not held for good by tracked work that failed", async () => {
     const handlers = handlersOf();
     const work = holdingWork();

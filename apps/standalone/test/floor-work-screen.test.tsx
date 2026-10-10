@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { buildSscc } from "@markiro/domain";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -10,6 +12,7 @@ import type { WorkShift } from "../src/floor/shifts/shift-copies.js";
 import { createWorkGate } from "../src/floor/work-gate.js";
 import type { ClosingBox, CloseStep } from "../src/floor/work/box-close.js";
 import {
+  CUE_MS,
   scanTime,
   SIGNAL_MS,
   WorkScreen,
@@ -32,6 +35,9 @@ import {
   seedBlock,
 } from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
+
+// See test/protocol.test.ts: bind import.meta.url before building the URL.
+const testModuleUrl = import.meta.url;
 
 const SESSION: FloorSession = {
   id: OPERATOR_ID,
@@ -333,35 +339,82 @@ describe("the work screen of a shift", () => {
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_scans")).toEqual([{ n: 6 }]);
   });
 
-  it("flashes the verdict with its words over the screen, and takes the flash away", async () => {
+  it("lights the last-scan line for an accepted scan, with no overlay, and puts the light out", async () => {
     const at = await station();
     const screenWork = work(at);
     await screenWork.scanner.listening();
     await screenWork.settled();
-    // The flash goes by a timer: the fake clock moves with the real one.
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    // The light goes by a timer: a clock the test moves by hand, no margin to lose under load.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
     await screenWork.scan(km("F1"));
-    const overlay = document.querySelector("[data-tone]");
-    expect(overlay?.getAttribute("data-tone")).toBe("ok");
-    expect(overlay?.textContent).toContain("ПРИНЯТО");
-    await screenWork.scan(km("F1"));
-    expect(document.querySelector("[data-tone]")?.getAttribute("data-tone")).toBe("duplicate");
-    expect(document.querySelector("[data-tone]")?.textContent).toContain("ДУБЛЬ");
-    // The words of the line are said by the flash too, for whoever hears it as an alert.
-    expect(document.querySelector("[data-tone]")?.textContent).toContain(lastLine() ?? "");
-    await screenWork.scan(km("F2", { gtin: OTHER_GTIN }));
-    expect(document.querySelector("[data-tone]")?.getAttribute("data-tone")).toBe("error");
-    expect(document.querySelector("[data-tone]")?.textContent).toContain("ЧУЖОЙ ТОВАР");
-    await screenWork.scan("MRK-000742");
-    expect(document.querySelector("[data-tone]")?.textContent).toContain("НЕВЕРНЫЙ КОД");
-    act(() => {
-      vi.advanceTimersByTime(200);
-    });
-    expect(document.querySelector("[data-tone]")).not.toBeNull();
-    act(() => {
-      vi.advanceTimersByTime(SIGNAL_MS + 50);
-    });
+    // The tone and the line say it; nothing covers the counts or the buttons.
+    expect(screenWork.props.signal).toHaveBeenLastCalledWith("ok");
     expect(document.querySelector("[data-tone]")).toBeNull();
+    expect(document.querySelector('[role="alert"]')).toBeNull();
+    const lit = () =>
+      document.querySelector(".work-screen__last")?.classList.contains("work-screen__last--cue");
+    expect(lit()).toBe(true);
+    expect(shown("Открытый короб")).toBe("1 из 12");
+    act(() => {
+      vi.advanceTimersByTime(CUE_MS - 1);
+    });
+    expect(lit()).toBe(true);
+    // A scan in the meantime lights it for a whole time again.
+    await screenWork.scan(km("F2"));
+    act(() => {
+      vi.advanceTimersByTime(CUE_MS - 1);
+    });
+    expect(lit()).toBe(true);
+    act(() => {
+      vi.advanceTimersByTime(2);
+    });
+    expect(lit()).toBe(false);
+  });
+
+  it("flashes a refusal with its words over the screen, never in the way of a tap, and takes the flash away", async () => {
+    const at = await station();
+    const screenWork = work(at);
+    await screenWork.scanner.listening();
+    await screenWork.settled();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    await screenWork.scan(km("F1"));
+    await screenWork.scan(km("F1"));
+    const overlay = () => document.querySelector("[data-tone]");
+    expect(overlay()?.getAttribute("data-tone")).toBe("duplicate");
+    expect(overlay()?.textContent).toContain("ДУБЛЬ");
+    // The words of the line are said by the flash too, for whoever hears it as an alert.
+    expect(overlay()?.textContent).toContain(lastLine() ?? "");
+    // The buttons under the flash work: it takes no tap.
+    expect(overlay()?.closest(".work-screen__flash")?.getAttribute("style")).toContain(
+      "pointer-events: none",
+    );
+    await screenWork.scan(km("F2", { gtin: OTHER_GTIN }));
+    expect(overlay()?.getAttribute("data-tone")).toBe("error");
+    expect(overlay()?.textContent).toContain("ЧУЖОЙ ТОВАР");
+    await screenWork.scan("MRK-000742");
+    expect(overlay()?.textContent).toContain("НЕВЕРНЫЙ КОД");
+    act(() => {
+      vi.advanceTimersByTime(SIGNAL_MS - 1);
+    });
+    expect(overlay()).not.toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(2);
+    });
+    expect(overlay()).toBeNull();
+  });
+
+  it("styles the light and the flash so that a tap goes through and motion is off on request", () => {
+    const css = readFileSync(new URL("../src/app/shell.css", testModuleUrl), "utf8");
+    expect(css).toMatch(/\.work-screen__flash\s*\{[^}]*pointer-events:\s*none/);
+    // The line's fade is motion: only for whoever did not ask for less.
+    const withoutMotion = css.replace(
+      /@media \(prefers-reduced-motion: no-preference\)\s*\{(?:[^{}]|\{[^{}]*\})*\}/g,
+      "",
+    );
+    expect(css).toMatch(
+      /prefers-reduced-motion: no-preference\)\s*\{\s*\.work-screen__last\s*\{[^}]*transition/,
+    );
+    expect(withoutMotion).not.toMatch(/\.work-screen[^{]*\{[^}]*(transition|animation)/);
   });
 
   it("asks the host while online and names the shift that took the code first", async () => {
@@ -624,7 +677,9 @@ describe("the work screen never lets a full box take another code", () => {
     await screenWork.scanner.listening();
     await screenWork.settled();
     // The failed read of the entry stops the line in a render of its own, after the act.
-    expect(await screen.findByText("Скан не записан")).toBeTruthy();
+    // Nothing was scanned: the title says the shift could not be read, not that a scan was lost.
+    expect(await screen.findByText("Смена не прочитана")).toBeTruthy();
+    expect(screen.queryByText("Скан не записан")).toBeNull();
     await screenWork.press("Понятно");
     expect(rows(at.db, "SELECT item_count FROM floor_boxes WHERE closed_at IS NULL")).toEqual([
       { item_count: 12 },
@@ -689,7 +744,7 @@ describe("the work screen never lets a full box take another code", () => {
     const screenWork = work({ ...at, local });
     await screenWork.scanner.listening();
     await screenWork.settled();
-    await screen.findByText("Скан не записан");
+    await screen.findByText("Смена не прочитана");
     await screenWork.press("Понятно");
     const scans = rows(at.db, "SELECT count(*) AS n FROM floor_scans");
     // The close in front of the code fails: the code is not taken, and the line is stopped again.
@@ -1210,5 +1265,247 @@ describe("the work screen's obligations to the floor", () => {
     } finally {
       for (const spy of spies) spy.mockRestore();
     }
+  });
+});
+
+/**
+ * An online screen whose entry's request for serials waits at the host, and
+ * whose box twelve codes fill: the close of the twelfth finds no serial and
+ * has to ask. `release` lets the host answer every request it was asked.
+ */
+async function boxFilledWhileTheEntryRequestWaits(prefix: string) {
+  const at = await station();
+  let blockReads = 0;
+  const counting: LocalExecutor = {
+    query: (sql, params, row) => {
+      if (sql.startsWith("SELECT block_id, next_serial FROM floor_sscc_blocks")) blockReads += 1;
+      return at.local.query(sql, params, row);
+    },
+    transaction: (statements) => at.local.transaction(statements),
+  };
+  const answers: Array<() => void> = [];
+  const requestBlock = vi.fn(
+    (request: SsccBlockRequest) =>
+      new Promise<SsccBlock>((resolve) => {
+        answers.push(() => resolve(blockFor(request)));
+      }),
+  );
+  const screenWork = work({ ...at, local: counting }, { online: true, requestBlock });
+  await screenWork.scanner.listening();
+  await waitFor(() => expect(requestBlock).toHaveBeenCalledTimes(1));
+  for (let index = 0; index < 12; index += 1)
+    await screenWork.scanner.read(km(`${prefix}${index}`));
+  // The twelfth fills the box, and its close looks for a serial.
+  await waitFor(() => expect(blockReads).toBeGreaterThan(0));
+  // Every hop of the close has run, in promises only: it has asked, or joined the request.
+  await act(async () => {
+    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+  return {
+    at,
+    screenWork,
+    requestBlock,
+    release: () =>
+      act(async () => {
+        for (const answer of answers) answer();
+        await screenWork.gate.drain();
+      }),
+  };
+}
+
+describe("the work screen: one supply on every path, and a close that waits", () => {
+  it("closes a box on the screen's one supply, so a close joins the request the entry made", async () => {
+    const held = await boxFilledWhileTheEntryRequestWaits("U");
+    // The entry's request is the only one: the close of the twelfth code waits for it.
+    expect(held.requestBlock).toHaveBeenCalledTimes(1);
+    await held.release();
+    expect(held.requestBlock).toHaveBeenCalledTimes(1);
+    expect(rows(held.at.db, "SELECT block_id FROM floor_sscc_blocks")).toEqual([
+      { block_id: BLOCK_ID },
+    ]);
+    expect(rows(held.at.db, "SELECT count(*) AS n FROM floor_block_requests")).toEqual([{ n: 0 }]);
+    expect(shown("Коробов закрыто")).toBe("1");
+    expect(screen.queryByText(CLOSE_FAILED)).toBeNull();
+    expect(screen.queryByText(NO_SERIALS)).toBeNull();
+  });
+
+  it("says that a close waits for the host's serials while it does, and stops saying it after", async () => {
+    const held = await boxFilledWhileTheEntryRequestWaits("W");
+    const waiting = screen.getByText("Закрываем короб: ждём номера SSCC от хоста…");
+    expect(alertsRegion().contains(waiting)).toBe(true);
+    await held.release();
+    expect(screen.queryByText("Закрываем короб: ждём номера SSCC от хоста…")).toBeNull();
+    expect(shown("Коробов закрыто")).toBe("1");
+  });
+});
+
+describe("the work screen: a leave that a render has not shown yet, and the buttons while it waits", () => {
+  it("refuses a scan once the floor knows it is leaving, before a render says so", async () => {
+    const at = await station();
+    let leavingNow = false;
+    const screenWork = work(at, { isLeaving: () => leavingNow });
+    await screenWork.scanner.listening();
+    await screenWork.settled();
+    leavingNow = true;
+    await screenWork.scan(km("N1"));
+    expect(lastLine()).toBe("Скан не принят: идёт выход из смены.");
+    expect(screenWork.props.signal).toHaveBeenLastCalledWith("error");
+    expect(rows(at.db, "SELECT count(*) AS n FROM floor_scans")).toEqual([{ n: 0 }]);
+  });
+
+  it("starts no close from «Повторить» while the operator leaves", async () => {
+    const at = await station();
+    const screenWork = work(at);
+    await screenWork.scanner.listening();
+    for (let index = 0; index < 12; index += 1) await screenWork.scan(km(`R${index}`));
+    expect(screen.getByText(NO_SERIALS)).toBeTruthy();
+    seedBlock(at.db, { blockId: BLOCK_ID, from: 1500, to: 3499 });
+    screenWork.rerender({ leaving: true });
+    expect(screen.getByRole("button", { name: "Повторить" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+    await screenWork.press("Повторить");
+    expect(
+      rows(at.db, "SELECT count(*) AS n FROM floor_boxes WHERE closed_at IS NOT NULL"),
+    ).toEqual([{ n: 0 }]);
+    // The leave over (the floor stays), the same press closes the box.
+    screenWork.rerender({ leaving: false });
+    await screenWork.press("Повторить");
+    expect(
+      rows(at.db, "SELECT count(*) AS n FROM floor_boxes WHERE closed_at IS NOT NULL"),
+    ).toEqual([{ n: 1 }]);
+  });
+
+  it("starts no close from «Повторить» of a close that failed while the operator leaves", async () => {
+    const at = await station();
+    seedBlock(at.db, { blockId: BLOCK_ID, from: 1500, to: 3499 });
+    let closes = 0;
+    const local = around(at.local, (statements, run) => {
+      if (!isClose(statements)) return run();
+      closes += 1;
+      return Promise.reject(new LocalDbError("statement_failed", "disk full"));
+    });
+    const screenWork = work({ ...at, local });
+    await screenWork.scanner.listening();
+    for (let index = 0; index < 12; index += 1) await screenWork.scan(km(`J${index}`));
+    expect(screen.getByText(CLOSE_FAILED)).toBeTruthy();
+    const tried = closes;
+    screenWork.rerender({ leaving: true });
+    expect(screen.getByRole("button", { name: "Повторить" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+    await screenWork.press("Повторить");
+    expect(closes).toBe(tried);
+  });
+
+  it("starts no close from the confirmation while the floor is leaving, and says it is not available", async () => {
+    const at = await station();
+    seedBlock(at.db, { blockId: BLOCK_ID, from: 1500, to: 3499 });
+    let leavingNow = false;
+    const screenWork = work(at, { isLeaving: () => leavingNow });
+    await screenWork.scanner.listening();
+    await screenWork.scan(km("T1"));
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть короб" }));
+    // The leave comes from a timer: the render has not shown it.
+    leavingNow = true;
+    await screenWork.press("Закрыть короб");
+    expect(
+      rows(at.db, "SELECT count(*) AS n FROM floor_boxes WHERE closed_at IS NOT NULL"),
+    ).toEqual([{ n: 0 }]);
+    screenWork.rerender({ leaving: true });
+    expect(
+      screen.getByRole("button", { name: "Закрыть короб" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+    // The safe answer is still there.
+    expect(screen.getByRole("button", { name: "Продолжить сборку" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+  });
+});
+
+describe("the work screen: words that match the situation", () => {
+  it("does not promise serials to a screen whose link is held for the rest of the shift", async () => {
+    const at = await station();
+    const screenWork = work(at, { linkHeld: true });
+    await screenWork.scanner.listening();
+    for (let index = 0; index < 12; index += 1) await screenWork.scan(km(`H${index}`));
+    expect(screen.getByText(/Связь с хостом остановлена до выхода из смены/)).toBeTruthy();
+    expect(screen.queryByText(/Короб закроется, как только номера придут/)).toBeNull();
+    // Without the hold the link may come back, and the text says the box will close.
+    screenWork.rerender({ linkHeld: false });
+    expect(screen.getByText(/Короб закроется, как только номера придут/)).toBeTruthy();
+    expect(screen.queryByText(/Связь с хостом остановлена до выхода из смены/)).toBeNull();
+  });
+});
+
+describe("the work screen: the focus after a message is answered", () => {
+  it("returns the focus to «Закрыть короб» when «Продолжить сборку» takes its own button away", async () => {
+    const at = await station();
+    const screenWork = work(at);
+    await screenWork.scanner.listening();
+    await screenWork.scan(km("V1"));
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть короб" }));
+    const keep = screen.getByRole("button", { name: "Продолжить сборку" });
+    expect(document.activeElement).toBe(keep);
+    fireEvent.click(keep);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Закрыть короб" }));
+  });
+
+  it("returns the focus to the last-scan line after a close the operator asked for has emptied the box", async () => {
+    const at = await station();
+    seedBlock(at.db, { blockId: BLOCK_ID, from: 1500, to: 3499 });
+    const screenWork = work(at);
+    await screenWork.scanner.listening();
+    await screenWork.scan(km("X1"));
+    fireEvent.click(screen.getByRole("button", { name: "Закрыть короб" }));
+    await screenWork.press("Закрыть короб");
+    expect(shown("Коробов закрыто")).toBe("1");
+    // The confirmation and the box it closed are gone: the line is the place, not a disabled button.
+    expect(document.activeElement).toBe(document.querySelector(".work-screen__last"));
+  });
+
+  it("returns the focus to the last-scan line after «Повторить» closes the box", async () => {
+    const at = await station();
+    const screenWork = work(at);
+    await screenWork.scanner.listening();
+    for (let index = 0; index < 12; index += 1) await screenWork.scan(km(`Y${index}`));
+    seedBlock(at.db, { blockId: BLOCK_ID, from: 1500, to: 3499 });
+    const retry = screen.getByRole("button", { name: "Повторить" });
+    retry.focus();
+    await screenWork.press("Повторить");
+    expect(shown("Коробов закрыто")).toBe("1");
+    expect(document.activeElement).toBe(document.querySelector(".work-screen__last"));
+  });
+
+  it("returns the focus to «Закрыть короб» after the notice of the plan", async () => {
+    const at = await station({ ...ENTERED, plannedQty: 2 });
+    const screenWork = work(at);
+    await screenWork.scanner.listening();
+    await screenWork.scan(km("P1"));
+    await screenWork.scan(km("P2"));
+    const next = screen.getByRole("button", { name: "Продолжить" });
+    next.focus();
+    fireEvent.click(next);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Закрыть короб" }));
+  });
+
+  it("returns the focus to the last-scan line when the box is empty and there is nothing to close", async () => {
+    const at = await station();
+    let broken = false;
+    const local = around(at.local, (statements, run) =>
+      broken ? Promise.reject(new LocalDbError("statement_failed", "disk full")) : run(),
+    );
+    const screenWork = work({ ...at, local });
+    await screenWork.scanner.listening();
+    await screenWork.settled();
+    broken = true;
+    await screenWork.scan(km("E1"));
+    broken = false;
+    const dismiss = screen.getByRole("button", { name: "Понятно" });
+    dismiss.focus();
+    fireEvent.click(dismiss);
+    // Not on a button that could leave or close by a stray key.
+    expect(document.activeElement).toBe(document.querySelector(".work-screen__last"));
   });
 });

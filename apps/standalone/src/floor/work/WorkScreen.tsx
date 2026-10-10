@@ -57,14 +57,18 @@ import { readOpenBox, readWorkTotals, type WorkTotals } from "./work-reads.js";
  *   (`Promise.resolve().then(…)`, or a job queued behind another).
  * - No scan is accepted while `leaving`: a scan taken then would start work
  *   the leave no longer waits for. It is refused in words, by tone and by
- *   flash; none is dropped silently.
+ *   flash; none is dropped silently. `leaving` comes with a render, which a
+ *   leave started by a timer or an answer (the idle lock, the office closing
+ *   the shift) may not have had yet: `isLeaving` says it at once, and the
+ *   screen asks both.
  * - Tracked work is bounded, because the gate has no timeout of its own that
  *   could let the leave through in the middle of a write: a local write ends in
  *   about 35 s at the most (the busy timeout of 5 s and the wait for the pool
  *   of sqlx, 30 s), the shell's hand-over to the printer in 5 s, the check of a
- *   code at the host in 300 ms, a request for a block in 10 s (the host
- *   client's limit). Work that can wait longer than that must not be tracked
- *   as one piece.
+ *   code at the host in 300 ms, a request for a block in up to two calls of
+ *   10 s each (the host client's limit; a request refused as another prefix's
+ *   is sent once more, fresh), plus its local writes. Work that can wait
+ *   longer than that must not be tracked as one piece.
  * - The way back to the list is a button that stays on the keyboard while the
  *   leave waits: `aria-disabled`, not `disabled`, which drops the focus onto
  *   the page. The waiting is said in a polite region that is on the screen
@@ -84,6 +88,18 @@ export interface WorkScreenProps {
   touch: () => void;
   onLeave: () => void;
   leaving: boolean;
+  /**
+   * Whether the floor has begun to leave, answered at once (a ref's value, not
+   * the render's): true from the moment the leave is asked for until the next
+   * shift is entered. Optional; a screen without it goes by `leaving`.
+   */
+  isLeaving?: () => boolean;
+  /**
+   * The link to the host is held off for the rest of the shift (a refusal of
+   * the device or another host waits for the operator to leave): `online` is
+   * false and no serials will come, which the screen says in its own words.
+   */
+  linkHeld?: boolean;
   /** The floor's scanner: the keyboard and the COM scanners. */
   source: ScanSource;
   /** `HostApi.checkCode` (300 ms). */
@@ -108,13 +124,18 @@ export interface WorkScreenProps {
    * whose answer was lost (read back from `floor_boxes` on the next close).
    * Plan 2a7 starts the print here. It is told in the queue's turn, after the
    * write; whatever it starts must be handed to `track` before it begins.
+   * A box whose answer was lost is read back on the NEXT close of this
+   * screen: if the operator leaves first, the box stays closed in the
+   * database with its record and `onClosed` is never told of it, so the
+   * print recovery of plan 2a7 must find such boxes from `floor_boxes`.
    */
   onClosed?: (box: ClosingBox) => void;
 }
 
 /** What stops the scanning until the operator acts (stage 2a spec §5.7.3). */
 type Stop =
-  | { kind: "system_error" }
+  /** `write`: a scan or a close did not reach the database; `read`: the entry could not read it. */
+  | { kind: "system_error"; cause: "write" | "read" }
   | { kind: "confirm_close" }
   | { kind: "no_serials"; reason: "offline" | "exhausted" | "failed"; full: boolean }
   /**
@@ -127,8 +148,11 @@ type Stop =
 /** The last scan, said in words under the box. */
 type Last = ScanOutcome | { kind: "paused"; leaving: boolean };
 
-/** How long the coloured flash of a verdict covers the screen. */
+/** How long the coloured flash of a refusal covers the screen (an accepted scan has none). */
 export const SIGNAL_MS = 700;
+
+/** How long the last-scan line is lit after an accepted scan. */
+export const CUE_MS = 350;
 
 /** How many times a close that found the box or the block changed is tried in all. */
 const CLOSE_TRIES = 3;
@@ -183,6 +207,7 @@ interface Live {
   local: LocalExecutor;
   online: boolean;
   leaving: boolean;
+  isLeaving: (() => boolean) | undefined;
   touch: () => void;
   track: <T>(work: Promise<T>) => Promise<T>;
   checkCode: (codeHash: string) => Promise<CodeCheck>;
@@ -262,6 +287,8 @@ type CloseOutcome =
 
 interface CloseEnv {
   live: LiveRef;
+  /** Told while a close waits for the host's serials (true) and when it no longer does. */
+  waiting: (waiting: boolean) => void;
   supply: { topUp: () => Promise<SupplyResult> };
   /**
    * The box whose close ended without an answer (the write threw): it may have
@@ -309,7 +336,13 @@ async function attemptClose(env: CloseEnv, full: boolean): Promise<CloseOutcome>
   let result = await closeSettled(close);
   let supplied: SupplyResult | null = null;
   if (result.kind === "no_serials") {
-    supplied = await env.supply.topUp();
+    // Said while the host is asked: a close waits here for up to two calls.
+    env.waiting(now.online);
+    try {
+      supplied = await env.supply.topUp();
+    } finally {
+      env.waiting(false);
+    }
     if (supplied.kind === "stored") {
       env.live.current.onRecorded();
       result = await closeSettled(close);
@@ -351,7 +384,7 @@ async function attemptClose(env: CloseEnv, full: boolean): Promise<CloseOutcome>
  * verdict shows in words, as a flash and as a tone.
  */
 export function WorkScreen(props: WorkScreenProps) {
-  const { shift, leaving, onLeave, source } = props;
+  const { shift, leaving, onLeave, source, linkHeld = false } = props;
   const { t } = useTranslation();
   const [totals, setTotals] = useState<WorkTotals | null>(null);
   const [last, setLast] = useState<Last | null>(null);
@@ -360,6 +393,11 @@ export function WorkScreen(props: WorkScreenProps) {
     title: string;
     detail: string | null;
   } | null>(null);
+  // An accepted scan lights the last-scan line for a moment (no overlay: it
+  // would hide the counts and the buttons at the line's cadence).
+  const [cued, setCued] = useState(false);
+  // A close waits for the host's serials.
+  const [waitingSerials, setWaitingSerials] = useState(false);
   const [stop, setStopState] = useState<Stop | null>(null);
   const [planReached, setPlanReached] = useState(false);
   const capacity = shift.copy.boxCapacity;
@@ -374,6 +412,7 @@ export function WorkScreen(props: WorkScreenProps) {
     local: props.local,
     online: props.online,
     leaving,
+    isLeaving: props.isLeaving,
     touch: props.touch,
     track: props.track,
     checkCode: props.checkCode,
@@ -399,7 +438,7 @@ export function WorkScreen(props: WorkScreenProps) {
    * A failed read of this computer's database at the entry (the first thing the
    * queue does, so no other stop stands yet) stops the line.
    */
-  const failSystem = useCallback(() => setStop({ kind: "system_error" }), [setStop]);
+  const failSystem = useCallback(() => setStop({ kind: "system_error", cause: "read" }), [setStop]);
   const alive = useRef(true);
   useLayoutEffect(() => {
     alive.current = true;
@@ -410,13 +449,35 @@ export function WorkScreen(props: WorkScreenProps) {
   const planShown = useRef(false);
   const unsure = useRef<string | null>(null);
   const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cueTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(
     () => () => {
       if (flashTimer.current !== null) clearTimeout(flashTimer.current);
+      if (cueTimer.current !== null) clearTimeout(cueTimer.current);
     },
     [],
   );
   const confirmRef = useRef<HTMLDivElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
+  const lastRef = useRef<HTMLParagraphElement>(null);
+  // Counted when the operator answers a message: the element that held the
+  // focus is gone after that render, and the focus goes to a safe place instead.
+  const [refocused, setRefocused] = useState(0);
+  const refocus = useCallback(() => {
+    if (alive.current) setRefocused((times) => times + 1);
+  }, []);
+  useEffect(() => {
+    if (refocused === 0) return;
+    const close = actionsRef.current?.querySelector<HTMLButtonElement>(
+      '[data-action="close-box"]:not(:disabled)',
+    );
+    (close ?? lastRef.current)?.focus();
+  }, [refocused]);
+  /** Whether the floor has begun to leave: the render's word, and the floor's own at once. */
+  const leavingNow = useCallback(
+    () => live.current.leaving || live.current.isLeaving?.() === true,
+    [],
+  );
 
   // One queue and one supply for the screen's life: `useState` keeps them, where
   // `useMemo` may be recomputed, and two supplies would both write the block.
@@ -435,6 +496,17 @@ export function WorkScreen(props: WorkScreenProps) {
   const show = useCallback((tone: SignalTone, title: string, detail: string | null) => {
     live.current.signal(tone);
     if (!alive.current) return;
+    if (tone === "ok") {
+      // The tone and a lit line say it: an overlay over every accepted code
+      // would cover the counts and swallow the taps of a line at its pace.
+      setCued(true);
+      if (cueTimer.current !== null) clearTimeout(cueTimer.current);
+      cueTimer.current = setTimeout(() => {
+        cueTimer.current = null;
+        if (alive.current) setCued(false);
+      }, CUE_MS);
+      return;
+    }
     setFlash({ tone, title, detail });
     if (flashTimer.current !== null) clearTimeout(flashTimer.current);
     flashTimer.current = setTimeout(() => {
@@ -477,7 +549,14 @@ export function WorkScreen(props: WorkScreenProps) {
    */
   const closeBox = useCallback(
     async (full: boolean): Promise<void> => {
-      const env: CloseEnv = { live, supply, unsure };
+      const env: CloseEnv = {
+        live,
+        supply,
+        unsure,
+        waiting: (waiting) => {
+          if (alive.current) setWaitingSerials(waiting);
+        },
+      };
       let recovered: ClosingBox | null = null;
       let outcome: CloseOutcome;
       try {
@@ -558,7 +637,7 @@ export function WorkScreen(props: WorkScreenProps) {
       try {
         outcome = await processScan(scanContextOf(live), raw);
       } catch {
-        setStop({ kind: "system_error" });
+        setStop({ kind: "system_error", cause: "write" });
         const say = live.current.t;
         show("error", say("floor.work.signal.systemError"), null);
         return;
@@ -574,14 +653,14 @@ export function WorkScreen(props: WorkScreenProps) {
       source.start((raw) => {
         const now = live.current;
         now.touch();
-        if (now.leaving) {
+        if (leavingNow()) {
           refuse(true);
           return;
         }
         // The scan is handed to the gate in the turn before the queue starts it.
         void now.track(queue.run(() => scan(raw))).catch(() => undefined);
       }),
-    [source, queue, scan, refuse],
+    [source, queue, scan, refuse, leavingNow],
   );
 
   // On entry: the numbers, and a box a stopped station left full closes first.
@@ -625,6 +704,8 @@ export function WorkScreen(props: WorkScreenProps) {
 
   /** Runs a close as the line's next piece of work. */
   const closeNow = (full: boolean) => {
+    // Nothing the operator presses starts work the leave no longer waits for.
+    if (leavingNow()) return;
     setStop(null);
     void live.current
       .track(
@@ -633,7 +714,9 @@ export function WorkScreen(props: WorkScreenProps) {
           await refreshQuietly();
         }),
       )
-      .catch(failSystem);
+      .catch(failSystem)
+      // The button pressed is gone, and the box it closed may be too.
+      .finally(refocus);
   };
 
   // The operator who asked to close an incomplete box has the safe answer under their hand.
@@ -641,6 +724,12 @@ export function WorkScreen(props: WorkScreenProps) {
   useEffect(() => {
     if (confirming) confirmRef.current?.querySelector("button")?.focus();
   }, [confirming]);
+
+  /** The operator answers a message: what it held the focus with goes, and the focus goes somewhere safe. */
+  const dismiss = (answer: () => void) => {
+    answer();
+    refocus();
+  };
 
   const openBox = totals?.openBox ?? null;
   const items = openBox?.itemCount ?? 0;
@@ -690,8 +779,16 @@ export function WorkScreen(props: WorkScreenProps) {
             </div>
           )}
         </dl>
-        {/* The verdict is announced by its flash (an alert); this line keeps it in words. */}
-        <p className="work-screen__last">
+        {/*
+          A refusal is announced by its flash (an alert); this line keeps every
+          verdict in words, and an accepted scan lights it for a moment (the tone
+          and the counts carry the rest: no overlay, no announcement per scan).
+        */}
+        <p
+          className={cued ? "work-screen__last work-screen__last--cue" : "work-screen__last"}
+          ref={lastRef}
+          tabIndex={-1}
+        >
           {last === null ? t("floor.work.waiting") : lastText(last, t, capacity)}
         </p>
         {/*
@@ -704,14 +801,18 @@ export function WorkScreen(props: WorkScreenProps) {
             <Alert
               tone="error"
               role="presentation"
-              title={t("floor.work.systemError.title")}
+              title={t(`floor.work.systemError.${stop.cause}.title`)}
               action={
-                <Button size="floor" variant="secondary" onClick={() => setStop(null)}>
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  onClick={() => dismiss(() => setStop(null))}
+                >
                   {t("floor.work.systemError.dismiss")}
                 </Button>
               }
             >
-              {t("floor.work.systemError.body")}
+              {t(`floor.work.systemError.${stop.cause}.body`)}
             </Alert>
           )}
           {stop?.kind === "no_serials" && (
@@ -720,12 +821,22 @@ export function WorkScreen(props: WorkScreenProps) {
               role="presentation"
               title={t("floor.work.noSerials.title")}
               action={
-                <Button size="floor" variant="secondary" onClick={() => closeNow(stop.full)}>
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  aria-disabled={leaving ? true : undefined}
+                  style={leaving ? WAITING_STYLE : undefined}
+                  onClick={() => closeNow(stop.full)}
+                >
                   {t("floor.work.retry")}
                 </Button>
               }
             >
-              {t(`floor.work.noSerials.${stop.reason}`)}
+              {t(
+                stop.reason === "offline" && linkHeld
+                  ? "floor.work.noSerials.held"
+                  : `floor.work.noSerials.${stop.reason}`,
+              )}
             </Alert>
           )}
           {stop?.kind === "close_failed" && (
@@ -734,7 +845,13 @@ export function WorkScreen(props: WorkScreenProps) {
               role="presentation"
               title={t("floor.work.closeFailed.title")}
               action={
-                <Button size="floor" variant="secondary" onClick={() => closeNow(stop.full)}>
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  aria-disabled={leaving ? true : undefined}
+                  style={leaving ? WAITING_STYLE : undefined}
+                  onClick={() => closeNow(stop.full)}
+                >
                   {t("floor.work.retry")}
                 </Button>
               }
@@ -751,11 +868,18 @@ export function WorkScreen(props: WorkScreenProps) {
                 planned: formatQuantity(plannedQty ?? 0),
               })}
               action={
-                <Button size="floor" variant="secondary" onClick={() => setPlanReached(false)}>
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  onClick={() => dismiss(() => setPlanReached(false))}
+                >
                   {t("floor.work.continue")}
                 </Button>
               }
             />
+          )}
+          {waitingSerials && (
+            <p className="work-screen__waiting">{t("floor.work.waitingSerials")}</p>
           )}
         </div>
         {confirming && (
@@ -767,20 +891,26 @@ export function WorkScreen(props: WorkScreenProps) {
               })}
             </p>
             <div className="standalone-form__actions">
-              <Button size="floor" variant="secondary" onClick={() => setStop(null)}>
+              <Button size="floor" variant="secondary" onClick={() => dismiss(() => setStop(null))}>
                 {t("floor.work.keepFilling")}
               </Button>
-              <Button size="floor" onClick={() => closeNow(false)}>
+              <Button
+                size="floor"
+                aria-disabled={leaving ? true : undefined}
+                style={leaving ? WAITING_STYLE : undefined}
+                onClick={() => closeNow(false)}
+              >
                 {t("floor.work.closeBox")}
               </Button>
             </div>
           </div>
         )}
-        <div className="standalone-form__actions">
+        <div className="standalone-form__actions" ref={actionsRef}>
           {!confirming && (
             <Button
               size="floor"
               variant="secondary"
+              data-action="close-box"
               disabled={!canClose}
               onClick={() => setStop({ kind: "confirm_close" })}
             >
@@ -804,11 +934,14 @@ export function WorkScreen(props: WorkScreenProps) {
         </p>
       </div>
       {flash !== null && (
-        <SignalOverlay
-          tone={flash.tone}
-          title={flash.title}
-          {...(flash.detail === null ? {} : { detail: flash.detail })}
-        />
+        // Never in the way of a tap: the words and the tone already say it.
+        <div className="work-screen__flash" style={{ pointerEvents: "none" }}>
+          <SignalOverlay
+            tone={flash.tone}
+            title={flash.title}
+            {...(flash.detail === null ? {} : { detail: flash.detail })}
+          />
+        </div>
       )}
     </Card>
   );
