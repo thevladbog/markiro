@@ -3,8 +3,9 @@
 //! `POST /v1/device/shifts/{id}/enter`. A
 //! station reads its shifts at the moments it reads its device record
 //! (after it subscribes to the link and after every revision event), since a
-//! shift is no feed record: shifts are per line, and an open one carries a
-//! layout of up to 256 KB.
+//! shift is no feed record: shifts are per line, and an open one carries up
+//! to two layouts (a box's and, with pallets, a pallet's), its snapshot at
+//! most 320 KB.
 
 use axum::extract::State;
 use axum::Json;
@@ -159,9 +160,9 @@ pub fn line_conflict() -> ApiError {
 
 /// `POST /v1/device/shifts`: a station creates a planned shift on its own
 /// line, under the rules of the office's plan, pallets included; its number
-/// ends in `/S`. The
-/// same `requestId` again answers the shift it created, whatever the body
-/// says now, so a create retried after a lost answer makes no second shift.
+/// ends in `/S`. The same `requestId` again answers the shift it created,
+/// whatever the body says now, so a create retried after a lost answer makes
+/// no second shift.
 pub async fn create_device_shift(
     State(state): State<AppState>,
     device: AuthDevice,
@@ -280,8 +281,10 @@ struct EntryRow {
 /// owner) or enters again the active shift it opened; the answer carries the
 /// snapshot, so a station that lost its database gets it back. A closed
 /// shift is `shift_status`, another line `shift_line`, a shift another
-/// station opened `shift_busy`. Opening takes a revision, so the other
-/// stations of the line see the shift busy; entering again takes none.
+/// station opened `shift_busy`, and a plan whose layouts together would
+/// not fit the snapshot `snapshot_too_large`, once its templates fit. Opening
+/// takes a revision, so the other stations of the line see the shift busy;
+/// entering again takes none.
 pub async fn enter_shift(
     State(state): State<AppState>,
     device: AuthDevice,
@@ -353,12 +356,14 @@ pub async fn enter_shift(
             .await?
         }
     };
+    // After the templates, so a template that no longer fits is named first.
+    let text = shifts::snapshot_text(&snapshot)?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query(
         "UPDATE shifts SET status = 'active', snapshot = ?, opened_at = ?, owner_device_id = ?, \
          rev = ? WHERE id = ?",
     )
-    .bind(serde_json::to_string(&snapshot).map_err(ApiError::internal)?)
+    .bind(text)
     .bind(&at)
     .bind(&device.id)
     .bind(rev)

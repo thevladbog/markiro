@@ -371,6 +371,41 @@ pub fn pallet_template_not_fit() -> ApiError {
     )
 }
 
+/// The most bytes of snapshot text a shift keeps: the `CHECK` of `shifts` in
+/// migration `0009` (`length(CAST(snapshot AS BLOB)) <= 327680`). Each layout
+/// may be up to `validate::MAX_SPEC_BYTES` (256 KB), so a box layout and a
+/// pallet layout together can exceed it; the entry answers
+/// [`snapshot_too_large`] instead of failing the `CHECK` (a unit test ties
+/// the two numbers).
+pub const MAX_SNAPSHOT_BYTES: usize = 327_680;
+
+/// `conflict` on `snapshot_too_large`: the shift's box and pallet layouts
+/// together are more than a shift's snapshot keeps. The office can point the
+/// planned shift at smaller templates.
+pub fn snapshot_too_large() -> ApiError {
+    ApiError::conflict(
+        "snapshot_too_large",
+        "the shift's label layouts together are too large to open it",
+    )
+}
+
+/// Refuse a snapshot text of `len` bytes that the `CHECK` would not keep.
+fn check_snapshot_len(len: usize) -> Result<(), ApiError> {
+    if len > MAX_SNAPSHOT_BYTES {
+        return Err(snapshot_too_large());
+    }
+    Ok(())
+}
+
+/// The text a shift stores as its snapshot, or [`snapshot_too_large`]. The
+/// byte length of the `String` is what the `CHECK` measures of the text bound
+/// to the column.
+pub fn snapshot_text(snapshot: &ShiftSnapshot) -> Result<String, ApiError> {
+    let text = serde_json::to_string(snapshot).map_err(ApiError::internal)?;
+    check_snapshot_len(text.len())?;
+    Ok(text)
+}
+
 /// A template as a shift freezes it: its name, revision and whole layout.
 async fn frozen_template(
     conn: &mut SqliteConnection,
@@ -470,4 +505,77 @@ pub async fn snapshot(
         counterparty_name,
         pallet_template,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::StatusCode;
+
+    use super::{check_snapshot_len, snapshot_text, MAX_SNAPSHOT_BYTES};
+    use markiro_proto::{ShiftSnapshot, ShiftSnapshotProduct, ShiftSnapshotTemplate};
+
+    fn snapshot(filler: usize) -> ShiftSnapshot {
+        ShiftSnapshot {
+            product: ShiftSnapshotProduct {
+                id: "p".to_owned(),
+                gtin14: "04600682000013".to_owned(),
+                name: "Молоко".to_owned(),
+                print_name: None,
+                chz_product_group_code: 8,
+                shelf_life_days: None,
+            },
+            box_template: ShiftSnapshotTemplate {
+                id: "t".to_owned(),
+                name: "Короб".to_owned(),
+                rev: 2,
+                spec: serde_json::json!({ "f": "x".repeat(filler) }),
+            },
+            issuer_prefix: "460068200".to_owned(),
+            counterparty_name: None,
+            pallet_template: None,
+        }
+    }
+
+    /// The table's `CHECK` and the host's bound are one number.
+    #[test]
+    fn the_bound_is_the_check_of_the_shifts_table() {
+        let migration = include_str!("../migrations/0009_shifts_sscc_blocks.sql");
+        assert!(
+            migration.contains(&format!(
+                "length(CAST(snapshot AS BLOB)) <= {MAX_SNAPSHOT_BYTES}"
+            )),
+            "0009 does not keep {MAX_SNAPSHOT_BYTES} bytes of snapshot"
+        );
+    }
+
+    #[test]
+    fn a_snapshot_of_exactly_the_bound_is_kept_and_one_byte_more_is_not() {
+        assert!(check_snapshot_len(MAX_SNAPSHOT_BYTES).is_ok());
+        let refused = check_snapshot_len(MAX_SNAPSHOT_BYTES + 1).unwrap_err();
+        assert_eq!(
+            (
+                refused.status(),
+                refused.code(),
+                refused.details().unwrap()["constraint"].as_str()
+            ),
+            (StatusCode::CONFLICT, "conflict", Some("snapshot_too_large"))
+        );
+    }
+
+    /// The text is measured in bytes, as the `CHECK` does: a layout of
+    /// two-byte letters is counted twice.
+    #[test]
+    fn the_snapshot_text_is_measured_in_bytes_of_the_text_it_returns() {
+        let base = snapshot_text(&snapshot(0)).unwrap().len();
+        let room = MAX_SNAPSHOT_BYTES - base;
+        let exact = snapshot_text(&snapshot(room)).unwrap();
+        assert_eq!(exact.len(), MAX_SNAPSHOT_BYTES);
+        let refused = snapshot_text(&snapshot(room + 1)).unwrap_err();
+        assert_eq!(refused.code(), "conflict");
+        // Fewer characters than the room, more bytes.
+        let mut wide = snapshot(0);
+        wide.box_template.spec = serde_json::json!({ "f": "я".repeat(room / 2 + 1) });
+        let wide = snapshot_text(&wide).unwrap_err();
+        assert_eq!(wide.code(), "conflict");
+    }
 }
