@@ -40,6 +40,13 @@ Scope ограничивает сервисы, а не Git commits: API image в
 source SHA с установленной версией. Station публикуется отдельным beta/stable
 workflow после проверки серверного выпуска; `scope=api-only` не выпускает её.
 
+Изменение только `.github/workflows/deploy-production.yml` выбирает CI job
+`production-bundle`: он выполняет production и Yandex workflow contracts.
+Дополнительные файлы включают свои consumer jobs. Изменение самого CI,
+классификатора, общих toolchain files или неизвестного пути требует полного CI.
+Обязательный `ci-required` продолжает проверять все выбранные результаты;
+security workflows используют собственные правила запуска.
+
 Удалённая последовательность неизменна: transfer, prepare, migrations, start,
 readiness, public smoke, finalize. При ошибке после prepare выполняется один
 bounded rollback к предыдущему healthy release только пока выполнены границы
