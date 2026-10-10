@@ -435,3 +435,35 @@ it.each(["sent", "delivery_unknown"] as const)(
     }
   },
 );
+
+it.each(["zpl", "tspl"] as const)(
+  "asks for missing DPI when recovering an unsent job in %s",
+  async (language) => {
+    const w = await setup();
+    try {
+      vi.mocked(tauriWindowsPrinting.preflightWindowsRaster).mockResolvedValueOnce({
+        ok: false,
+        error: { code: "geometry_mismatch", phase: "before_start" },
+      });
+      await printWarehouseJob(w.deps, w.input.jobId);
+      await expect(
+        reprintWarehouseJob(
+          {
+            ...w.deps,
+            profile: { ...w.input.printer, mode: "raw", language, dpi: null },
+          },
+          w.input.jobId,
+          "not_printed",
+        ),
+      ).rejects.toThrow("WAREHOUSE_PRINTER_DPI");
+      const saved = await readWarehouseJob(w.exec, w.input.owner, w.input.jobId);
+      expect(saved.projection).toMatchObject({ state: "failed_before_send", attemptNo: 1 });
+      expect(saved.bytesBase64).toBe(w.input.bytesBase64);
+      expect(w.send).not.toHaveBeenCalled();
+      expect(w.deps.print).not.toHaveBeenCalled();
+      expect(await w.exec.all("SELECT attempt_id FROM warehouse_reprint_attempts")).toHaveLength(1);
+    } finally {
+      w.db.close();
+    }
+  },
+);

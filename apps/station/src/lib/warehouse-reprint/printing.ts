@@ -201,6 +201,8 @@ export async function reprintWarehouseJob(
   if (!deps.isCurrent()) throw new Error("WAREHOUSE_OWNER_CHANGED");
   const job = await readWarehouseJob(deps.exec, deps.owner, jobId);
   const profile = deps.profile;
+  if (job.projection.state === "failed_before_send" && profile?.dpi === null)
+    throw new Error("WAREHOUSE_PRINTER_DPI");
   const rerender =
     job.projection.state === "failed_before_send" &&
     profile &&
