@@ -15,6 +15,7 @@ export async function purgeCompletedProductLabelJobs(
      SELECT job.job_id FROM product_label_jobs job
      JOIN shift_mirror shift ON shift.id=job.shift_id
      WHERE job.credential_ownership IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND job.status='completed' AND job.ownership_conflict=0 AND shift.status='closed'
+       AND NOT EXISTS (SELECT 1 FROM printer_deliveries d WHERE d.scope=job.credential_ownership AND d.purpose='duplicate' AND d.job_id=job.job_id AND d.state IN ('prepared','sending','delivery_unknown') AND d.resolved_at IS NULL)
        AND NOT EXISTS (SELECT 1 FROM product_label_outbox pending JOIN product_label_events event ON event.credential_ownership=pending.credential_ownership AND event.event_id=pending.event_id WHERE event.credential_ownership=job.credential_ownership AND event.job_id=job.job_id)
        AND NOT EXISTS (SELECT 1 FROM product_label_receipts receipt JOIN product_label_events event ON event.credential_ownership=receipt.credential_ownership AND event.event_id=receipt.event_id WHERE event.credential_ownership=job.credential_ownership AND event.job_id=job.job_id AND receipt.outcome='quarantined')
        AND NOT EXISTS (SELECT 1 FROM product_label_events event WHERE event.credential_ownership=job.credential_ownership AND event.job_id=job.job_id AND NOT EXISTS (SELECT 1 FROM product_label_receipts receipt WHERE receipt.credential_ownership=event.credential_ownership AND receipt.event_id=event.event_id AND receipt.outcome='accepted'))

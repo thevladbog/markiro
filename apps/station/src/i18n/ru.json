@@ -617,7 +617,7 @@
     "transportNone": "Без принтера",
     "transportTcp": "Сеть (TCP)",
     "transportSerial": "COM-порт",
-    "transportUsb": "Windows (USB)",
+    "transportUsb": "Принтер Windows",
     "usbPrinterList": "Принтер Windows",
     "usbRefresh": "Обновить список",
     "usbNotFound": "Установленные принтеры Windows не найдены",
@@ -693,6 +693,28 @@
       "box": "Короб",
       "duplicate": "Дубль кода",
       "pallet": "Паллета"
+    },
+    "printMode": "Способ печати",
+    "printModeRaw": "На языке принтера (ZPL / TSPL)",
+    "printModeWindows": "Через Windows",
+    "windowsDriverHint": "Установите драйвер принтера в Windows. Размер бумаги и DPI должны совпадать с этикеткой. Отправка в очередь не подтверждает печать — проверьте этикетку сканером.",
+    "windowsDelivery": "Отправка через Windows",
+    "windowsStatusUnavailable": "Статус очереди недоступен",
+    "windowsCheckQueue": "Проверить очередь",
+    "windowsSavedPreview": "Сохранённая этикетка",
+    "windowsAcknowledge": "Проверено оператором — закрыть уведомление",
+    "windowsState": {
+      "prepared": "Подготовлено",
+      "sending": "Отправка в очередь Windows",
+      "sent": "Передано в очередь. Физическую печать проверьте сканером.",
+      "failed_before_send": "Отправка не началась: проверьте драйвер, бумагу и DPI.",
+      "delivery_unknown": "Результат неизвестен. Исходное задание ещё может выйти из очереди. Перед повтором проверьте принтер и очередь Windows."
+    },
+    "windowsObservation": {
+      "present": "Задание находится в очереди.",
+      "absent": "Задания нет в очереди. Это не подтверждает физическую печать.",
+      "identity_mismatch": "Номер уже принадлежит другому заданию.",
+      "unavailable": "Очередь недоступна."
     }
   },
   "conflicts": {

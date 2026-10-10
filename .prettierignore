@@ -9,6 +9,7 @@ docs/design-briefs/design_handoff_markiro/
 # Rust build output; these are gitignored in apps/station/src-tauri/.gitignore,
 # but Prettier only reads the root .gitignore, so we list them here to prevent CI failures.
 apps/station/src-tauri/target/
+tools/station-printer-tests/target/
 apps/station/src-tauri/gen/schemas/
 # Same issue for the signer agent: gitignored via apps/signer/.gitignore and
 # apps/signer/src-tauri/.gitignore, but Prettier only reads the root one.

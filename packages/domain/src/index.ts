@@ -397,3 +397,15 @@ export {
   labelRasterSvgPath,
 } from "./labels/render-plan.js";
 export type { LabelRenderPlan, LabelRenderElement } from "./labels/render-plan.js";
+
+export {
+  encodeMonoRaster,
+  decodeMonoRaster,
+  MONO_RASTER_MAX_BYTES,
+  MONO_RASTER_HEADER_BYTES,
+} from "./labels/mono-raster.js";
+export type { MonoRaster, MonoRasterBounds } from "./labels/mono-raster.js";
+
+export { productLabelPrintFormat, productLabelPrintIdentity } from "./product-labels/contracts.js";
+export type { ProductLabelPrintIdentity } from "./product-labels/contracts.js";
+export { renderMonoLabel } from "./labels/mono-render.js";

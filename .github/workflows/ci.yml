@@ -598,6 +598,8 @@ jobs:
       # probe) must at least compile on Windows. They are not launched: on
       # Windows Server 2025 the Tauri test harness can fail before main() with
       # STATUS_ENTRYPOINT_NOT_FOUND (see station-stable-release.yml).
+      - name: Test portable raster and Windows driver core
+        run: cargo test --manifest-path tools/station-printer-tests/Cargo.toml --locked
       - name: Compile station Rust tests for Windows
         run: cargo test --manifest-path apps/station/src-tauri/Cargo.toml --no-run
       - name: Compile the Windows Tauri application

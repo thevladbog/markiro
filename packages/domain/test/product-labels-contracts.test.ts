@@ -176,3 +176,11 @@ describe("product label receipts and template choices", () => {
     ).toBe(false);
   });
 });
+
+it("accepts raster identity without changing legacy bytes", () => {
+  const { language, ...common } = prepared;
+  const raster = { ...common, printFormat: "mono-raster-v1" };
+  expect(domain.productLabelEventSchema.parse(prepared)).toEqual(prepared);
+  expect(domain.productLabelEventSchema.safeParse(raster).success).toBe(true);
+  expect(domain.productLabelEventSchema.safeParse({ ...raster, language }).success).toBe(false);
+});

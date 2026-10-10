@@ -1588,3 +1588,42 @@ export const deviceReplacementDrain = sqliteTable(
     ),
   ],
 );
+
+/** Local Windows spooler facts; server events never infer physical verification. */
+export const printerDeliveries = sqliteTable(
+  "printer_deliveries",
+  {
+    scope: text("scope").notNull(),
+    purpose: text("purpose").notNull(),
+    jobId: text("job_id").notNull(),
+    attemptId: text("attempt_id").notNull(),
+    state: text("state").notNull(),
+    profileJson: text("profile_json").notNull(),
+    artifactDigest: text("artifact_digest").notNull(),
+    artifactBase64: text("artifact_base64"),
+    documentName: text("document_name").notNull(),
+    receiptJson: text("receipt_json"),
+    errorCode: text("error_code"),
+    updatedAt: text("updated_at").notNull(),
+    resolvedAt: text("resolved_at"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.scope, t.purpose, t.jobId, t.attemptId] }),
+    check(
+      "printer_deliveries_purpose_check",
+      sql`${t.purpose} IN ('test','box','pallet','duplicate')`,
+    ),
+    check(
+      "printer_deliveries_state_check",
+      sql`${t.state} IN ('prepared','sending','sent','failed_before_send','delivery_unknown')`,
+    ),
+    check(
+      "printer_deliveries_json_check",
+      sql`json_valid(${t.profileJson}) AND (${t.receiptJson} IS NULL OR json_valid(${t.receiptJson}))`,
+    ),
+    check(
+      "printer_deliveries_artifact_check",
+      sql`(${t.purpose}='duplicate' AND ${t.artifactBase64} IS NULL) OR (${t.purpose}<>'duplicate' AND ${t.artifactBase64} IS NOT NULL AND length(${t.artifactBase64})<=2796204)`,
+    ),
+  ],
+);

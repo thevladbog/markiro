@@ -178,8 +178,7 @@ export async function applyStationProductLabelEvents(
       shift.status === "planned" ||
       policy.mode !== "duplicate_dm" ||
       event.policyRevision !== policy.policyRevision ||
-      event.templateDigest !== policy.snapshot.digest ||
-      (event.kind === "prepared" && event.dpi !== policy.snapshot.spec.dpi)
+      event.templateDigest !== policy.snapshot.digest
     )
       return "policy_mismatch";
     // codes is shared by hash/time; the exact authenticated scan also needs the same full payload.

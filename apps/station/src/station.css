@@ -6259,3 +6259,9 @@ body,
 .warehouse-confirm-body legend {
   margin-bottom: var(--sp-3);
 }
+
+.setup-windows-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  font: 400 14px/20px var(--font-ui);
+}

@@ -1,5 +1,9 @@
 import { DomainError } from "../errors.js";
-import { warehouseEventSchema, type WarehouseReprintEvent } from "./contracts.js";
+import {
+  warehouseEventSchema,
+  type WarehouseReprintEvent,
+  type WarehouseRerender,
+} from "./contracts.js";
 
 export type WarehouseReprintState =
   "prepared" | "sending" | "sent" | "verified" | "delivery_unknown" | "failed_before_send";
@@ -14,6 +18,8 @@ export interface WarehouseReprintProjection {
   bytesDigest: string;
   payloadDigest: string;
   templateDigest: string;
+  // Historical field name; replacements may now contain a RAW artifact as well.
+  raster?: WarehouseRerender | undefined;
 }
 function invalid(): never {
   throw new DomainError("WAREHOUSE_REPRINT_TRANSITION", "Invalid warehouse print transition");
@@ -37,6 +43,11 @@ export function applyWarehouseReprintEvent(
       bytesDigest: event.bytesDigest,
       payloadDigest: event.payloadDigest,
       templateDigest: event.templateDigest,
+      ...(event.printFormat === "mono-raster-v1"
+        ? {
+            raster: { bytesDigest: event.bytesDigest, dpi: event.dpi },
+          }
+        : {}),
     };
   }
   if (
@@ -52,8 +63,20 @@ export function applyWarehouseReprintEvent(
       current.attemptIds.includes(event.attemptId)
     )
       invalid();
+    if (event.rerender) {
+      if (current.state !== "failed_before_send") invalid();
+      if (
+        !event.rerender.printFormat &&
+        !event.rerender.language &&
+        (!current.raster || current.raster.language)
+      )
+        invalid();
+    }
     return {
       ...current,
+      ...(event.rerender
+        ? { bytesDigest: event.rerender.bytesDigest, raster: event.rerender }
+        : {}),
       latestSequence: event.sequence,
       attemptId: event.attemptId,
       attemptNo: event.attemptNo,
@@ -79,7 +102,10 @@ export function applyWarehouseReprintEvent(
     case "failed_before_send":
       if (
         current.state !== "prepared" &&
-        !(current.state === "sending" && event.errorCode === "owner_changed")
+        !(
+          current.state === "sending" &&
+          ["owner_changed", "driver_rejected"].includes(event.errorCode)
+        )
       )
         invalid();
       state = "failed_before_send";

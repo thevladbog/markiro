@@ -90,3 +90,31 @@ for (const viewport of [
     });
   });
 }
+
+test("Windows driver mode preserves explicit RAW language and compact controls", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    Object.defineProperty(window, "__TAURI_INTERNALS__", {
+      value: { invoke: async (command: string) => command === "supports_windows_printing" },
+    });
+  });
+  await page.setViewportSize({ width: 1024, height: 768 });
+  await page.goto("/?gallery=1&state=setup-printer&locale=ru");
+  await page.getByRole("radio", { name: "TSPL", exact: true }).check();
+  await page.getByRole("radio", { name: "Принтер Windows", exact: true }).check();
+  const mode = page.getByRole("combobox", { name: "Способ печати", exact: true });
+  await expect(mode).toBeVisible();
+  await mode.selectOption("windows_driver");
+  await expect(page.getByRole("radio", { name: "TSPL", exact: true })).toBeHidden();
+  await expect(mode).toBeInViewport({ ratio: 1 });
+  await expect(page.getByTestId("setup-footer")).toBeInViewport({ ratio: 1 });
+  await expect(page.getByText(/Установите драйвер принтера в Windows/)).toBeInViewport({
+    ratio: 1,
+  });
+  await mode.selectOption("raw");
+  await expect(page.getByRole("radio", { name: "TSPL", exact: true })).toBeChecked();
+  await mode.selectOption("windows_driver");
+  await page.getByRole("radio", { name: "Сеть (TCP)", exact: true }).check();
+  await expect(page.getByRole("radio", { name: "TSPL", exact: true })).toBeChecked();
+});

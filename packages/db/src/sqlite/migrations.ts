@@ -4894,6 +4894,89 @@ export const STATION_MIGRATIONS: string[] = [
         session_json=json_set(session_json,'$.status','paused')
         WHERE owner=NEW.owner AND session_id=NEW.session_id;
     END;`,
+  `CREATE TABLE IF NOT EXISTS printer_deliveries (
+    scope TEXT NOT NULL, purpose TEXT NOT NULL CHECK(purpose IN ('test','box','pallet','duplicate')),
+    job_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('prepared','sending','sent','failed_before_send','delivery_unknown')),
+    profile_json TEXT NOT NULL CHECK(json_valid(profile_json)), artifact_digest TEXT NOT NULL,
+    artifact_base64 TEXT, document_name TEXT NOT NULL,
+    receipt_json TEXT CHECK(receipt_json IS NULL OR json_valid(receipt_json)),
+    error_code TEXT, updated_at TEXT NOT NULL, resolved_at TEXT,
+    PRIMARY KEY(scope,purpose,job_id,attempt_id),
+    CHECK ((purpose='duplicate' AND artifact_base64 IS NULL) OR
+      (purpose<>'duplicate' AND artifact_base64 IS NOT NULL AND length(artifact_base64)<=2796204))
+  );`,
+  `CREATE TRIGGER IF NOT EXISTS printer_deliveries_guard_destination BEFORE DELETE ON printer_destinations
+    WHEN EXISTS(SELECT 1 FROM printer_deliveries d WHERE d.scope=OLD.scope AND d.purpose=OLD.purpose AND d.job_id=OLD.job_id AND d.attempt_id=OLD.attempt_id AND d.state IN ('prepared','sending','delivery_unknown') AND d.resolved_at IS NULL)
+    BEGIN SELECT RAISE(ABORT,'PRINT_DELIVERY_UNRESOLVED'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS printer_deliveries_cleanup AFTER DELETE ON printer_destinations
+    BEGIN DELETE FROM printer_deliveries WHERE scope=OLD.scope AND purpose=OLD.purpose AND job_id=OLD.job_id AND attempt_id=OLD.attempt_id; END;`,
+  `CREATE TRIGGER IF NOT EXISTS boxes_mirror_resolve_windows_delivery AFTER UPDATE OF print_verified_at,print_skipped_at ON boxes_mirror
+    WHEN NEW.print_verified_at IS NOT NULL OR NEW.print_skipped_at IS NOT NULL
+    BEGIN UPDATE printer_deliveries SET resolved_at=COALESCE(NEW.print_verified_at,NEW.print_skipped_at)
+      WHERE scope=json_array(NEW.shift_id,NEW.terminal_id) AND purpose='box' AND job_id=NEW.sscc AND state<>'sending'; END;`,
+  `CREATE TRIGGER IF NOT EXISTS pallets_mirror_resolve_windows_delivery AFTER UPDATE OF print_verified_at,print_skipped_at ON pallets_mirror
+    WHEN NEW.print_verified_at IS NOT NULL OR NEW.print_skipped_at IS NOT NULL
+    BEGIN UPDATE printer_deliveries SET resolved_at=COALESCE(NEW.print_verified_at,NEW.print_skipped_at)
+      WHERE scope=json_array(NEW.shift_id,NEW.terminal_id) AND purpose='pallet' AND job_id=NEW.sscc AND state<>'sending'; END;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_resolve_windows_delivery AFTER UPDATE OF projection_json ON product_label_jobs
+    WHEN json_extract(NEW.projection_json,'$.verificationOutcome') IN ('verified','skipped')
+    BEGIN UPDATE printer_deliveries SET resolved_at=NEW.updated_at WHERE scope=NEW.credential_ownership AND purpose='duplicate' AND job_id=NEW.job_id AND state<>'sending'; END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_resolve_windows_delivery AFTER UPDATE OF projection_json ON warehouse_reprint_jobs
+    WHEN NEW.state='verified' OR NEW.attempt_id<>OLD.attempt_id
+    BEGIN UPDATE printer_deliveries SET resolved_at=NEW.updated_at
+      WHERE scope=NEW.owner AND job_id=NEW.job_id AND purpose=CASE NEW.source_kind WHEN 'box' THEN 'box' ELSE 'duplicate' END
+      AND (NEW.state='verified' OR attempt_id=OLD.attempt_id) AND state<>'sending'; END;`,
+
+  `CREATE TRIGGER IF NOT EXISTS product_label_reprint_resolve_windows_delivery AFTER UPDATE OF projection_json ON product_label_jobs
+    WHEN json_extract(NEW.projection_json,'$.attemptId')<>json_extract(OLD.projection_json,'$.attemptId')
+    BEGIN UPDATE printer_deliveries SET resolved_at=NEW.updated_at WHERE scope=NEW.credential_ownership AND purpose='duplicate' AND job_id=NEW.job_id
+      AND attempt_id=json_extract(OLD.projection_json,'$.attemptId') AND state<>'sending'; END;`,
+  // Empty payload is a tombstone; keep digest/receipt/state for audit and diagnostics.
+  // Uncertain or in-flight output retains the original bytes until explicit resolution.
+  `CREATE TRIGGER IF NOT EXISTS printer_deliveries_release_raster AFTER UPDATE OF state,resolved_at ON printer_deliveries
+    WHEN NEW.purpose<>'duplicate' AND NEW.artifact_base64<>'' AND
+      (NEW.state IN ('sent','failed_before_send') OR (NEW.resolved_at IS NOT NULL AND NEW.state<>'sending'))
+    BEGIN UPDATE printer_deliveries SET artifact_base64='' WHERE scope=NEW.scope AND purpose=NEW.purpose
+      AND job_id=NEW.job_id AND attempt_id=NEW.attempt_id; END;`,
+  `UPDATE printer_deliveries SET artifact_base64='' WHERE purpose<>'duplicate'
+    AND (state IN ('sent','failed_before_send') OR (resolved_at IS NOT NULL AND state<>'sending'));`,
+
+  `ALTER TABLE warehouse_reprint_jobs ADD COLUMN raster_json TEXT CHECK(raster_json IS NULL OR json_valid(raster_json));`,
+  `DROP TRIGGER IF EXISTS warehouse_reprint_event;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_event AFTER INSERT ON warehouse_reprint_commands
+    WHEN NEW.kind='event' BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_STALE_EVENT') WHERE NOT EXISTS (
+        SELECT 1 FROM warehouse_reprint_jobs WHERE owner=NEW.owner AND job_id=NEW.job_id
+        AND latest_sequence=json_extract(NEW.payload_json,'$.previousSequence')
+        AND state=json_extract(NEW.payload_json,'$.previousState')
+        AND session_id=json_extract(NEW.payload_json,'$.event.sessionId'));
+      SELECT RAISE(ABORT,'WAREHOUSE_EVENT_REPLAY_MISMATCH') WHERE EXISTS (
+        SELECT 1 FROM warehouse_reprint_events WHERE owner=NEW.owner AND event_id=NEW.command_id);
+      INSERT INTO warehouse_reprint_events(owner,event_id,job_id,sequence,event_json,digest)
+        VALUES(NEW.owner,NEW.command_id,NEW.job_id,json_extract(NEW.payload_json,'$.event.sequence'),
+        json_extract(NEW.payload_json,'$.event'),json_extract(NEW.payload_json,'$.eventDigest'));
+      INSERT INTO warehouse_reprint_attempts(owner,job_id,attempt_id,attempt_no,state,reason)
+        SELECT NEW.owner,NEW.job_id,json_extract(NEW.payload_json,'$.event.attemptId'),
+        json_extract(NEW.payload_json,'$.event.attemptNo'),'prepared',json_extract(NEW.payload_json,'$.event.reason')
+        WHERE json_extract(NEW.payload_json,'$.event.kind')='reprint_prepared';
+      UPDATE warehouse_reprint_attempts SET state=json_extract(NEW.payload_json,'$.projection.state')
+        WHERE owner=NEW.owner AND job_id=NEW.job_id AND attempt_id=json_extract(NEW.payload_json,'$.event.attemptId');
+      UPDATE warehouse_reprint_jobs SET raster_json=COALESCE(json_extract(NEW.payload_json,'$.raster'),raster_json),
+        projection_json=json_extract(NEW.payload_json,'$.projection'),
+        state=json_extract(NEW.payload_json,'$.projection.state'),latest_sequence=json_extract(NEW.payload_json,'$.event.sequence'),
+        attempt_id=json_extract(NEW.payload_json,'$.event.attemptId'),updated_at=json_extract(NEW.payload_json,'$.event.occurredAt')
+        WHERE owner=NEW.owner AND job_id=NEW.job_id;
+      UPDATE warehouse_reprint_sessions SET sent_count=sent_count+1 WHERE owner=NEW.owner
+        AND session_id=json_extract(NEW.payload_json,'$.event.sessionId')
+        AND (json_extract(NEW.payload_json,'$.event.kind')='sent' OR
+        (json_extract(NEW.payload_json,'$.event.kind')='verified' AND json_extract(NEW.payload_json,'$.previousState')='delivery_unknown'));
+      DELETE FROM warehouse_reprint_commands WHERE owner=NEW.owner AND command_id=NEW.command_id;
+    END;`,
+  `UPDATE warehouse_reprint_jobs SET projection_json=json_set(projection_json,'$.raster',
+      json_object('bytesDigest',json_extract(job_json,'$.bytesDigest'),'dpi',json_extract(job_json,'$.preparedEvent.dpi')))
+    WHERE json_extract(job_json,'$.preparedEvent.printFormat')='mono-raster-v1'
+      AND json_type(projection_json,'$.raster') IS NULL;`,
 ];
 
 export interface StationMigrationEntry {

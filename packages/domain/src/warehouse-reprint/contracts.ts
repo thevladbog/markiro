@@ -134,26 +134,49 @@ const eventBase = z.strictObject({
   sequence: positive,
   occurredAt: z.iso.datetime(),
 });
-export const warehouseEventSchema = z.discriminatedUnion("kind", [
-  eventBase.extend({
-    kind: z.literal("prepared"),
-    attemptNo: z.literal(1),
-    reason: warehouseReasonSchema,
-    sourceKind: z.enum(["unit", "box"]),
-    sourceId: z.string().min(1).max(128),
-    identity: z.string().min(1).max(64),
-    sourceRevision: digest,
-    sourceShiftId: id.nullable(),
-    templateId: id,
-    templateRevision: digest,
-    templateDigest: digest,
-    payloadDigest: digest,
-    bytesDigest: digest,
-    scanDigest: digest,
-    repair,
-    language: z.enum(["zpl", "tspl"]),
-    dpi: z.union([z.literal(203), z.literal(300)]),
+const warehousePreparedBase = eventBase.extend({
+  kind: z.literal("prepared"),
+  attemptNo: z.literal(1),
+  reason: warehouseReasonSchema,
+  sourceKind: z.enum(["unit", "box"]),
+  sourceId: z.string().min(1).max(128),
+  identity: z.string().min(1).max(64),
+  sourceRevision: digest,
+  sourceShiftId: id.nullable(),
+  templateId: id,
+  templateRevision: digest,
+  templateDigest: digest,
+  payloadDigest: digest,
+  bytesDigest: digest,
+  scanDigest: digest,
+  repair,
+  dpi: z.union([z.literal(203), z.literal(300)]),
+});
+const warehouseRawPrepared = warehousePreparedBase.extend({
+  language: z.enum(["zpl", "tspl"]),
+  printFormat: z.never().optional(),
+});
+const warehouseRasterPrepared = warehousePreparedBase.extend({
+  printFormat: z.literal("mono-raster-v1"),
+  language: z.never().optional(),
+});
+// Missing format is the legacy mono-raster DPI-only replacement.
+const warehouseRerenderBase = z.strictObject({
+  bytesDigest: digest,
+  dpi: z.union([z.literal(203), z.literal(300)]),
+});
+export const warehouseRerenderSchema = z.union([
+  warehouseRerenderBase.extend({
+    printFormat: z.literal("mono-raster-v1").optional(),
+    language: z.never().optional(),
   }),
+  warehouseRerenderBase.extend({
+    language: z.enum(["zpl", "tspl"]),
+    printFormat: z.never().optional(),
+  }),
+]);
+export type WarehouseRerender = z.infer<typeof warehouseRerenderSchema>;
+const warehouseOtherEventSchema = z.discriminatedUnion("kind", [
   eventBase.extend({ kind: z.literal("sending") }),
   eventBase.extend({ kind: z.literal("sent") }),
   eventBase.extend({ kind: z.literal("verified") }),
@@ -163,13 +186,24 @@ export const warehouseEventSchema = z.discriminatedUnion("kind", [
   }),
   eventBase.extend({
     kind: z.literal("failed_before_send"),
-    errorCode: z.enum(["printer_unconfigured", "printer_changed", "owner_changed"]),
+    errorCode: z.enum([
+      "printer_unconfigured",
+      "printer_changed",
+      "owner_changed",
+      "driver_rejected",
+    ]),
   }),
   eventBase.extend({
     kind: z.literal("reprint_prepared"),
     attemptNo: positive,
     reason: warehouseReasonSchema,
+    rerender: warehouseRerenderSchema.optional(),
   }),
+]);
+export const warehouseEventSchema = z.union([
+  warehouseRawPrepared,
+  warehouseRasterPrepared,
+  warehouseOtherEventSchema,
 ]);
 export type WarehouseReprintEvent = z.infer<typeof warehouseEventSchema>;
 export const warehouseEventBatchSchema = z.strictObject({

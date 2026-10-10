@@ -123,6 +123,22 @@ serialized per physical endpoint, including test labels. Local destination metad
 retires with the existing print-job retention rules and never enters server event digests.
 See [device printer routing](superpowers/specs/2026-09-13-device-printer-routing-design.md).
 
+Station additionally supports `windows_driver` profiles for installed Windows queues.
+The default and every legacy profile remain RAW ZPL/TSPL. Driver mode freezes a
+validated `mono-raster-v1` page at 203 or 300 DPI and prints it through GDI at 1:1
+scale. Product/warehouse prepared events carry `printFormat` instead of `language`;
+the profile retains the last RAW language solely for configuration. Windows receipts
+and delivery uncertainty stay in the local SQLite sidecar. Queue acceptance or an
+absent spooler job never establishes physical verification. Settled box/pallet
+rasters are released while their digest/receipt remains; unresolved unknown output
+retains its bytes, and an explicitly resolved box/pallet can regenerate on reprint.
+A warehouse job may regenerate only after proven failure before sending: an explicit
+new attempt uses saved fields/template and records its new format, DPI and digest
+atomically, without changing the original prepared snapshot. This permits recovery
+between Windows raster, ZPL and TSPL after a proven non-send. Deploy the compatible
+API before enabling this Station version. See the [Windows printing acceptance
+runbook](acceptance/station-windows-printing.md).
+
 A validation shift can print one duplicate of the full product Data Matrix on its
 outer packaging. This does not create another product unit, SSCC or aggregation.
 The administrator or station operator chooses `validationPrint` before activation:

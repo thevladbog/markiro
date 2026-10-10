@@ -1,3 +1,4 @@
+import { printerMode } from "../lib/printer-routing.js";
 import type { LabelField } from "@markiro/domain";
 import { cacheWarehouseClosedBox } from "../lib/warehouse-reprint/sources.js";
 import {
@@ -678,15 +679,19 @@ export function WorkScreen({
   /** The pallet-label equivalent of `attemptClosedBoxPrint` below, defined here
    * (rather than there) only because it needs `palletLabelSpecRef`/`Ready`,
    * declared alongside the rest of this pallet section. */
-  async function attemptClosedPalletPrint(result: {
-    sscc: string;
-    boxCount: number;
-    itemCount: number;
-    closedAt: string;
-  }) {
+  async function attemptClosedPalletPrint(
+    result: {
+      sscc: string;
+      boxCount: number;
+      itemCount: number;
+      closedAt: string;
+    },
+    explicitRetry = false,
+  ) {
     await palletLabelSpecReady.current;
     const currentPrinting = palletPrintingRef.current;
     return attemptBoxPrint({
+      explicitRetry,
       destination: {
         exec,
         key: {
@@ -727,6 +732,7 @@ export function WorkScreen({
     sscc: string,
     boxCount: number,
     closedAt: string,
+    explicitRetry = false,
   ): Promise<void> {
     let itemCount = 0;
     try {
@@ -738,7 +744,7 @@ export function WorkScreen({
       palletCloseRef.current?.palletId === palletId && palletCloseRef.current.resultPending;
     const attempt = resultPending
       ? { kind: "printed" as const }
-      : await attemptClosedPalletPrint({ sscc, boxCount, itemCount, closedAt });
+      : await attemptClosedPalletPrint({ sscc, boxCount, itemCount, closedAt }, explicitRetry);
 
     if (attempt.kind === "failed") {
       try {
@@ -834,14 +840,16 @@ export function WorkScreen({
     const cur = palletCloseRef.current;
     if (!cur || cur.pending) return;
     updatePalletClose({ ...cur, print: "printing", pending: true });
-    void attemptPalletPrintNow(cur.palletId, cur.sscc, cur.boxCount, cur.closedAt).then(() => {
-      // `attemptPalletPrintNow` already clears `pending` via the branch it
-      // takes; this only guards the (unreachable in practice) case where
-      // neither branch matched because the screen moved on in the meantime.
-      if (palletCloseRef.current?.palletId === cur.palletId && palletCloseRef.current.pending) {
-        updatePalletClose({ ...palletCloseRef.current, pending: false });
-      }
-    });
+    void attemptPalletPrintNow(cur.palletId, cur.sscc, cur.boxCount, cur.closedAt, true).then(
+      () => {
+        // `attemptPalletPrintNow` already clears `pending` via the branch it
+        // takes; this only guards the (unreachable in practice) case where
+        // neither branch matched because the screen moved on in the meantime.
+        if (palletCloseRef.current?.palletId === cur.palletId && palletCloseRef.current.pending) {
+          updatePalletClose({ ...palletCloseRef.current, pending: false });
+        }
+      },
+    );
   }
 
   function skipPalletPrint(): void {
@@ -1645,11 +1653,14 @@ export function WorkScreen({
     });
   }
 
-  async function attemptClosedBoxPrint(result: {
-    sscc: string;
-    itemCount: number;
-    closedAt: string;
-  }) {
+  async function attemptClosedBoxPrint(
+    result: {
+      sscc: string;
+      itemCount: number;
+      closedAt: string;
+    },
+    explicitRetry = false,
+  ) {
     await labelSpecReady.current;
     const currentPrinting = printingRef.current;
     if (credentialGeneration) {
@@ -1675,6 +1686,7 @@ export function WorkScreen({
       }
     }
     return attemptBoxPrint({
+      explicitRetry,
       destination: {
         exec,
         key: {
@@ -1700,11 +1712,14 @@ export function WorkScreen({
     });
   }
 
-  async function attemptRecoveryPrint(job: PrintRecoveryState): Promise<void> {
+  async function attemptRecoveryPrint(
+    job: PrintRecoveryState,
+    explicitRetry = false,
+  ): Promise<void> {
     updatePrintRecovery({ ...job, pending: true });
     const attempt = job.printedBytes
       ? { kind: "printed" as const, bytes: job.printedBytes }
-      : await attemptClosedBoxPrint(job);
+      : await attemptClosedBoxPrint(job, explicitRetry);
 
     if (attempt.kind === "failed") {
       try {
@@ -2512,7 +2527,7 @@ export function WorkScreen({
   function retryPrintRecovery(): void {
     const job = printRecoveryRef.current;
     if (!job || job.pending) return;
-    if (!queue.enqueueJob(() => attemptRecoveryPrint(job))) {
+    if (!queue.enqueueJob(() => attemptRecoveryPrint(job, true))) {
       console.error("station: box print retry was not admitted");
     }
   }
@@ -2703,6 +2718,7 @@ export function WorkScreen({
 
       {productLabels.work && productLabelsBlocked && !showExceptions ? (
         <ProductLabelVerification
+          exec={exec}
           state={productLabels.state}
           work={productLabels.work}
           onSkipped={() => live.current.onScanRecorded?.()}
@@ -3017,6 +3033,12 @@ export function WorkScreen({
                 );
                 const output = printTransport ?? printing?.print;
                 if (!printer || !output) return "printer_unconfigured";
+                if (printerMode(printer) === "windows_driver") {
+                  const attempt = await attemptClosedBoxPrint(verification, true);
+                  if (attempt.kind === "failed") return attempt.code;
+                  setPrinterDestinationRevision((value) => value + 1);
+                  return undefined;
+                }
                 const reprintBytes = verification.bytes;
                 await serializePrinterOutput(printer.target, () =>
                   serializePrint(() => output(printer.target, reprintBytes)),
@@ -3024,7 +3046,7 @@ export function WorkScreen({
                 setPrinterDestinationRevision((value) => value + 1);
                 return undefined;
               }
-              const attempt = await attemptClosedBoxPrint(verification);
+              const attempt = await attemptClosedBoxPrint(verification, true);
               if (attempt.kind === "failed") {
                 console.error("station: box label reprint failed");
                 return attempt.code;

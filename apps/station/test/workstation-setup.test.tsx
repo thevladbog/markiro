@@ -1202,7 +1202,7 @@ describe("WorkstationSetup", () => {
     render(<WorkstationSetup hw={hw} {...defaultProps} />);
     await screen.findByText("COM3");
     await selectSetupTab("Printer");
-    fireEvent.click(screen.getByRole("radio", { name: "Windows (USB)" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Windows printer" }));
     fireEvent.change(await screen.findByRole("combobox", { name: "Windows printer" }), {
       target: { value: "Zebra ZD421" },
     });
@@ -1223,7 +1223,7 @@ describe("WorkstationSetup", () => {
     render(<WorkstationSetup hw={hardware({ listUsbPrinters })} {...defaultProps} />);
     await screen.findByText("COM3");
     await selectSetupTab("Printer");
-    fireEvent.click(screen.getByRole("radio", { name: "Windows (USB)" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Windows printer" }));
     const emptySelector = await screen.findByRole("combobox", { name: "Windows printer" });
     expect((emptySelector as HTMLSelectElement).disabled).toBe(true);
     expect(
@@ -1249,7 +1249,7 @@ describe("WorkstationSetup", () => {
     );
     await screen.findByText("COM3");
     await selectSetupTab("Printer");
-    fireEvent.click(screen.getByRole("radio", { name: "Windows (USB)" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Windows printer" }));
 
     expect(
       await screen.findByRole("option", { name: "TSC TE200 · TSC_DRIVER_PORT" }),
@@ -1281,7 +1281,7 @@ describe("WorkstationSetup", () => {
     render(<WorkstationSetup hw={hw} {...defaultProps} onConfigChange={onConfigChange} />);
     await screen.findByText("COM3");
     await selectSetupTab("Printer");
-    fireEvent.click(screen.getByRole("radio", { name: "Windows (USB)" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Windows printer" }));
     fireEvent.change(await screen.findByRole("combobox", { name: "Windows printer" }), {
       target: { value: "TSC TE200" },
     });
@@ -1297,7 +1297,7 @@ describe("WorkstationSetup", () => {
     render(<WorkstationSetup hw={hardware()} {...defaultProps} />);
     await screen.findByText("COM3");
     await selectSetupTab("Printer");
-    fireEvent.click(screen.getByRole("radio", { name: "Windows (USB)" }));
+    fireEvent.click(screen.getByRole("radio", { name: "Windows printer" }));
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(await screen.findByText(/Enter the required printer connection details/)).toBeDefined();
   });

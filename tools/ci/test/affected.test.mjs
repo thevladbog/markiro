@@ -413,3 +413,11 @@ test("offline grant protocol and signed fixture changes exercise every native co
     );
   }
 });
+
+test("the standalone Windows printer harness selects both Station native gates", () => {
+  const result = classifyChangedFiles(["tools/station-printer-tests/lib.rs"]);
+  assert.equal(result.full, false);
+  const jobs = enabledJobs(result);
+  assert.ok(jobs.includes("station_rust"));
+  assert.ok(jobs.includes("station_windows_build"));
+});

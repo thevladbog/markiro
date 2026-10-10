@@ -57,5 +57,13 @@ export function SavedProductLabelRecovery(props: {
         onClose={close}
       />
     );
-  return <ProductLabelVerification state={labels.state} work={work} onPause={close} recovery />;
+  return (
+    <ProductLabelVerification
+      exec={props.exec}
+      state={labels.state}
+      work={work}
+      onPause={close}
+      recovery
+    />
+  );
 }
