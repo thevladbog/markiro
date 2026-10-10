@@ -189,6 +189,7 @@ export async function readBoxReconciliationBatch(
   shiftId?: string,
   limit = 200,
   checkedBefore?: string,
+  isCurrent: () => boolean = () => true,
 ): Promise<BoxReconciliationFact[]> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 200)
     throw new Error("Invalid reconciliation limit");
@@ -209,7 +210,9 @@ export async function readBoxReconciliationBatch(
   );
   const facts: BoxReconciliationFact[] = [];
   for (const row of rows) {
+    if (!isCurrent()) return [];
     const members = await readMembers(exec, row.box_id);
+    if (!isCurrent()) return [];
     const hashes = members.map((member) => member.code_hash);
     facts.push({
       shiftId: row.shift_id,
@@ -242,8 +245,10 @@ async function readMembers(exec: SqlExecutor, boxId: string): Promise<MemberRow[
 async function reconstructBox(
   exec: SqlExecutor,
   fact: BoxReconciliationFact,
+  isCurrent: () => boolean,
 ): Promise<readonly Record<string, string | null>[] | null> {
   const members = await readMembers(exec, fact.boxId);
+  if (!isCurrent()) return null;
   if (
     members.length === 0 ||
     boxMembershipDigestV1(members.map((m) => m.code_hash)) !== fact.membershipDigest
@@ -256,6 +261,7 @@ async function reconstructBox(
       AND scanned_at IN (SELECT value FROM json_each(?)) ORDER BY id`,
     [fact.shiftId, JSON.stringify([...new Set(members.map((member) => member.scanned_at))])],
   );
+  if (!isCurrent()) return null;
   const byHash = new Map<string, EventRow[]>();
   for (const event of events) {
     let hash: string;
@@ -272,6 +278,7 @@ async function reconstructBox(
   }
   const replay: Record<string, string | null>[] = [];
   for (const member of members) {
+    if (!isCurrent()) return null;
     const matches = (byHash.get(member.code_hash) ?? []).filter(
       (event) => event.scanned_at === member.scanned_at,
     );
@@ -340,6 +347,7 @@ export async function applyBoxReconciliationResults(
   exec: SqlExecutor,
   facts: readonly BoxReconciliationFact[],
   results: readonly BoxReconciliationResult[],
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
   if (
     facts.length !== results.length ||
@@ -348,6 +356,9 @@ export async function applyBoxReconciliationResults(
   )
     throw new Error("Incomplete box reconciliation response");
   for (const [index, result] of results.entries()) {
+    // Pause between boxes, never inside a durable commit. The remaining
+    // revisions stay due and will be retried by the next sync drain.
+    if (!isCurrent()) return;
     const fact = facts[index]!;
     const current = await exec.all<{
       revision: number;
@@ -358,8 +369,10 @@ export async function applyBoxReconciliationResults(
        FROM boxes_mirror WHERE box_id=? AND shift_id=?`,
       [fact.boxId, fact.shiftId],
     );
+    if (!isCurrent()) return;
     if (current[0]?.revision !== fact.revision || current[0]?.acked_at === null) continue;
     const members = await readMembers(exec, fact.boxId);
+    if (!isCurrent()) return;
     if (boxMembershipDigestV1(members.map((member) => member.code_hash)) !== fact.membershipDigest)
       continue;
     const guard = `box_id=? AND shift_id=? AND reconciliation_revision=? AND acked_at IS NOT NULL
@@ -409,7 +422,9 @@ export async function applyBoxReconciliationResults(
     }
     if (!exec.atomic) throw new Error("Atomic reconciliation commit unavailable");
     if (result.reasonCode === "box_absent") {
-      const replay = await reconstructBox(exec, fact);
+      const replay = await reconstructBox(exec, fact, isCurrent);
+      // Cancellation is not missing evidence and must not create an issue.
+      if (!isCurrent()) return;
       if (!replay) {
         await recordIssue(
           exec,

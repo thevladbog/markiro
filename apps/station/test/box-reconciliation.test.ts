@@ -159,6 +159,108 @@ describe("closed-box reconciliation", () => {
         .get(),
     ).toEqual({ scan_pending: 0, outbox_id: 2 });
   });
+  it.each(["membership", "confirmation", "replay"] as const)(
+    "retires a paused 1000-unit reconciliation during %s and resumes the remaining boxes",
+    async (stage) => {
+      const { db, exec } = fixture();
+      for (let i = 0; i < 100; i++) {
+        box(db, `box-${i}`);
+        for (let j = 0; j < 10; j++) {
+          const raw = `010400638133393121B${i}S${j}`;
+          const code = canonicalizeKm(raw);
+          const at = new Date(Date.UTC(2026, 8, 23, 0, 0, i * 10 + j)).toISOString();
+          db.prepare(
+            `INSERT INTO codes_mirror(code_hash,shift_id,gtin14,serial,scanned_at,box_id)
+            VALUES(?,?,?,?,?,?)`,
+          ).run(kmHash(code), "shift-1", code.gtin14, code.serial, at, `box-${i}`);
+          db.prepare(
+            `INSERT INTO scan_events_mirror(shift_id,terminal_id,raw,verdict,scanned_at,operator_id)
+            VALUES(?,?,?,?,?,?)`,
+          ).run("shift-1", "dev-1", raw, "ok", at, "operator-1");
+        }
+      }
+      let pause: Promise<void> | undefined;
+      let membershipReads = 0;
+      let replayReads = 0;
+      let confirmations = 0;
+      let resumed = false;
+      const instrumented: SqlExecutor = {
+        ...exec,
+        async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+          const rows = await exec.all<T>(sql, params);
+          if (sql.includes("SELECT code_hash,gtin14,serial,scanned_at FROM codes_mirror")) {
+            membershipReads++;
+            if (stage === "membership" && !pause) pause = engine.pauseAndWaitForIdle();
+          }
+          if (sql.includes("SELECT command.event_id")) {
+            replayReads++;
+            if (stage === "replay" && !pause) pause = engine.pauseAndWaitForIdle();
+          }
+          return rows;
+        },
+        async atomic(statements) {
+          const result = await exec.atomic!(statements);
+          if (statements.some(({ sql }) => sql.includes("SET confirmed_revision="))) {
+            confirmations++;
+            if (stage === "confirmation" && !pause) pause = engine.pauseAndWaitForIdle();
+          }
+          return result;
+        },
+      };
+      const engine = createSyncEngine({
+        exec: instrumented,
+        machineId: "machine-1",
+        credentialGeneration: createCredentialGeneration("test-key"),
+        onState: () => {},
+        client: {
+          async post<T>(path: string, body?: unknown): Promise<T> {
+            if (path === "/station/codes/releases")
+              return { until: "0", releasedCodeHashes: [] } as T;
+            if (path === "/station/boxes/reconciliation") {
+              const { boxes } = body as { boxes: { boxId: string; itemCount: number }[] };
+              return {
+                results: boxes.map(({ boxId, itemCount }) => ({
+                  boxId,
+                  status: stage === "replay" && !resumed ? "replay_required" : "confirmed",
+                  reasonCode: stage === "replay" && !resumed ? "box_absent" : "matched",
+                  serverItemCount: itemCount,
+                })),
+              } as T;
+            }
+            throw new Error(`unexpected route ${path}`);
+          },
+        },
+      });
+      try {
+        engine.nudge();
+        await engine.idle();
+        expect(pause).toBeDefined();
+        await pause;
+        if (stage === "membership") expect(membershipReads).toBe(1);
+        if (stage === "replay") expect(replayReads).toBe(1);
+        expect(confirmations).toBe(stage === "confirmation" ? 1 : 0);
+        expect(await readBoxReconciliationSummary(exec, "shift-1")).toMatchObject({
+          localClosed: 100,
+          delivered: 100,
+          confirmed: stage === "confirmation" ? 1 : 0,
+          issues: 0,
+        });
+        expect(db.prepare("SELECT COUNT(*) n FROM outbox").get()).toEqual({ n: 0 });
+        expect(db.prepare("SELECT COUNT(*) n FROM codes_mirror").get()).toEqual({ n: 1000 });
+        resumed = true;
+        engine.resume();
+        await engine.idle();
+        expect(await readBoxReconciliationSummary(exec, "shift-1")).toMatchObject({
+          confirmed: 100,
+          pending: 0,
+          issues: 0,
+        });
+      } finally {
+        engine.stop();
+        db.close();
+      }
+    },
+  );
   it("runs the comparison inside the device-wide drain and resends a missing box with a fresh batch", async () => {
     const { db, exec } = fixture();
     box(db, "b1");

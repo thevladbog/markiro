@@ -2219,6 +2219,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               undefined,
               200,
               new Date(now() - 120_000).toISOString(),
+              () => !pauseInvalidated() && !credentialGeneration.sealed,
             );
             if (facts.length > 0 && !pauseInvalidated() && !credentialGeneration.sealed) {
               const raw = await deps.client.post("/station/boxes/reconciliation", {
@@ -2244,7 +2245,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
                         credentialGeneration,
                         owner,
                       );
-                      await applyBoxReconciliationResults(writer, facts, response.results);
+                      await applyBoxReconciliationResults(
+                        writer,
+                        facts,
+                        response.results,
+                        () => !pauseInvalidated() && !credentialGeneration.sealed,
+                      );
                       if (response.results.some((result) => result.status === "replay_required"))
                         requested = true;
                       else if (facts.length === 200) requested = true;
