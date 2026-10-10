@@ -16,11 +16,14 @@ import {
   type SyncState,
 } from "../app/shell.js";
 import type {
+  CodeCheck,
   DeviceShift,
   DeviceShiftCreate,
   DeviceStatus,
   EnteredShift,
   HostStatus,
+  SsccBlock,
+  SsccBlockRequest,
 } from "../host/protocol.js";
 import type { LocalExecutor } from "../local/executor.js";
 import { createOperatorIdleLock, OPERATOR_IDLE_TIMEOUT_MS } from "./idle-lock.js";
@@ -54,10 +57,22 @@ export interface FloorAppProps {
   shiftReads: { done: number; failed: boolean };
   /** The office moved the station to another line, and the move waits for the work (`pendingDevice`). */
   lineChangePending: boolean;
+  /**
+   * The host refused this device, or another host answers at its address, while
+   * the operator works (`pendingRejection`, `pendingOtherHost`; question В8):
+   * the link is stopped, and the work screen asks the host nothing.
+   */
+  rejectionPending: boolean;
   /** `HostApi.enterShift`. */
   enter: (shiftId: string) => Promise<EnteredShift>;
   /** `HostApi.createDeviceShift`. */
   create: (create: DeviceShiftCreate) => Promise<DeviceShift>;
+  /** `HostApi.checkCode`: the work screen's check of a code on the host. */
+  checkCode: (codeHash: string) => Promise<CodeCheck>;
+  /** `HostApi.requestSsccBlock`: the work screen's serials for its boxes. */
+  requestBlock: (request: SsccBlockRequest) => Promise<SsccBlock>;
+  /** The link's delivery of the outbox, asked after every local write (`useHostLink`). */
+  requestFacts: () => void;
   /** The floor's scanner: a new shift's product is chosen by a scan. */
   source: ScanSource;
   /** Nobody touched the station this long: the operator is signed out. */
@@ -91,8 +106,12 @@ export function FloorApp({
   sync,
   shiftReads,
   lineChangePending,
+  rejectionPending,
   enter,
   create,
+  checkCode,
+  requestBlock,
+  requestFacts,
   source,
   idleTimeoutMs = OPERATOR_IDLE_TIMEOUT_MS,
   workScreen: Work = WorkScreen,
@@ -101,7 +120,8 @@ export function FloorApp({
 }: FloorAppProps) {
   const { hostId, deviceId, lineId } = device;
   const { sessionId } = operator;
-  const online = link?.state === "online";
+  // A refusal that waits for the operator stops the link: nothing more goes to that host.
+  const online = link?.state === "online" && !rejectionPending;
   const [view, setView] = useState<FloorView>({ kind: "list", notice: null });
   // How many times an entry was turned back on the list: it reads its copies
   // again, for those it showed are the ones the entry found out of date.
@@ -123,6 +143,12 @@ export function FloorApp({
   });
   // What the leave that waits for the work ends in; `null` when none waits.
   const standing = useRef<Leave | null>(null);
+  // True from the moment a leave from a shift's work is asked for until the
+  // next shift is entered. The render's `leaving` lags behind a leave that a
+  // timer or an answer started, and a scan taken in between would be written
+  // after the gate had drained; the work screen asks this at once.
+  const ending = useRef(false);
+  const isLeaving = useCallback(() => ending.current, []);
 
   const finish = useCallback((leave: Leave) => {
     if (leave.kind === "sign_out") {
@@ -143,6 +169,7 @@ export function FloorApp({
         finish(reason);
         return;
       }
+      ending.current = true;
       const waiting = standing.current;
       if (waiting !== null) {
         // A sign-out outranks the leave that waits (the idle lock fires once
@@ -258,6 +285,7 @@ export function FloorApp({
         return;
       }
       current.current.dispatch({ type: "work_entered", sessionId, shiftId: copy.id });
+      ending.current = false;
       setView({ kind: "work", shift, leaving: false });
     },
     [sessionId],
@@ -266,6 +294,11 @@ export function FloorApp({
     const action = shellActionFor(error, null);
     if (action !== null) current.current.dispatch(action);
   }, []);
+  // A record written: the status bar reads its counts again, and the outbox goes.
+  const recorded = useCallback(() => {
+    current.current.dispatch({ type: "outbox_changed" });
+    requestFacts();
+  }, [requestFacts]);
 
   if (view.kind === "work") {
     return (
@@ -278,7 +311,14 @@ export function FloorApp({
         track={gate.track}
         touch={lock.touch}
         leaving={view.leaving}
+        isLeaving={isLeaving}
+        linkHeld={rejectionPending}
         onLeave={() => leave({ kind: "list", notice: null })}
+        source={source}
+        checkCode={checkCode}
+        requestBlock={requestBlock}
+        onHostError={hostError}
+        onRecorded={recorded}
       />
     );
   }

@@ -842,15 +842,23 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 12] = [
+    let reads: [(&str, &str); 30] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
             "outbox_unsent",
         ),
+        // The status bar's three counts (`src/floor/outbox-status.ts`; `test/floor-schema.test.ts`
+        // checks the texts agree) and the oldest record not delivered, read while a send fails.
         (
-            "SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? AND acked_at IS NULL",
+            "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? \
+             AND acked_at IS NULL",
             "outbox_unsent",
+        ),
+        (
+            "SELECT attempts, sent_at, created_at FROM outbox WHERE host_id = ? AND device_id = ? \
+             AND acked_at IS NULL ORDER BY seq LIMIT 1",
+            "outbox_unsent (host_id=? AND device_id=?)",
         ),
         // The forget's count, as `src/local_db.rs` writes it.
         (
@@ -858,20 +866,52 @@ async fn the_floors_repeating_reads_search_an_index() {
             "outbox_unsent",
         ),
         (
-            "SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? \
+            "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? \
              AND outcome = 'rejected'",
             "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
         ),
         (
-            "SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? \
+            "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? \
              AND outcome = 'conflict'",
             "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
         ),
+        // What the sender writes, in the exact text it runs (`src/local/facts-sender.ts`;
+        // `test/floor-schema.test.ts` checks the two texts agree): each statement
+        // looks its few records up by their own key. The planner would rather walk
+        // the `(host_id, device_id, ...)` prefix of `outbox_unsent`,
+        // `floor_scans_shift` or `floor_boxes_shift`, which reads every unsent
+        // record, scan and box of the pairing for each batch.
         (
-            "UPDATE outbox SET outcome = r.value ->> 'outcome', acked_at = ? \
-             FROM json_each(?) AS r WHERE outbox.id = r.value ->> 'id' \
-             AND outbox.host_id = ? AND outbox.device_id = ? AND outbox.acked_at IS NULL",
-            "outbox_unsent",
+            "UPDATE outbox SET attempts = attempts + 1, sent_at = ? \
+             WHERE host_id = ? AND device_id = ? AND id IN (SELECT value FROM json_each(?))",
+            "sqlite_autoindex_outbox_1 (id=?)",
+        ),
+        (
+            "UPDATE outbox SET outcome = r.value ->> 'outcome', outcome_code = r.value ->> 'code', \
+             outcome_details = r.value -> 'details', acked_at = ? FROM json_each(?) AS r \
+             WHERE outbox.id = r.value ->> 'id' AND +outbox.host_id = ? AND +outbox.device_id = ? \
+             AND +outbox.acked_at IS NULL",
+            "sqlite_autoindex_outbox_1 (id=?)",
+        ),
+        (
+            "UPDATE floor_scans SET conflict = 1 WHERE +host_id = ? AND +device_id = ? AND id IN \
+             (SELECT value ->> 'id' FROM json_each(?) \
+             WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'conflict')",
+            "sqlite_autoindex_floor_scans_1 (id=?)",
+        ),
+        (
+            "UPDATE floor_boxes SET needs_fix = 1 WHERE +host_id = ? AND +device_id = ? AND id IN \
+             (SELECT box_id FROM floor_scans WHERE +host_id = ? AND +device_id = ? \
+             AND box_id IS NOT NULL AND id IN (SELECT value ->> 'id' FROM json_each(?) \
+             WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'conflict'))",
+            "sqlite_autoindex_floor_boxes_1 (id=?)",
+        ),
+        (
+            "UPDATE floor_boxes SET needs_fix = 1 WHERE +host_id = ? AND +device_id = ? AND id IN \
+             (SELECT box_id FROM floor_scans WHERE +host_id = ? AND +device_id = ? \
+             AND box_id IS NOT NULL AND id IN (SELECT value ->> 'id' FROM json_each(?) \
+             WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'conflict'))",
+            "sqlite_autoindex_floor_scans_1 (id=?)",
         ),
         (
             "SELECT count(*) FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?",
@@ -891,6 +931,85 @@ async fn the_floors_repeating_reads_search_an_index() {
             "SELECT code_hash FROM floor_codes WHERE host_id = ? AND device_id = ? \
              AND box_id = ? ORDER BY code_hash",
             "floor_codes_box (host_id=? AND device_id=? AND box_id=?)",
+        ),
+        // A box closed whose answer was lost, read back by its own key (`readClosedBox`).
+        (
+            "SELECT shift_id, sscc, block_id, serial, opened_at, closed_at, item_count, closed_by \
+             FROM floor_boxes WHERE id = ? AND host_id = ? AND device_id = ? \
+             AND closed_at IS NOT NULL",
+            "sqlite_autoindex_floor_boxes_1 (id=?)",
+        ),
+        // The scan pipeline's own reads and its one UPDATE, on every scan: the
+        // station's registry of a code, the open box of a shift, and the open
+        // box's count by the box's own key.
+        (
+            "SELECT scanned_at FROM floor_codes WHERE host_id = ? AND device_id = ? \
+             AND code_hash = ?",
+            "sqlite_autoindex_floor_codes_1 (host_id=? AND device_id=? AND code_hash=?)",
+        ),
+        (
+            "SELECT id, opened_at, item_count FROM floor_boxes WHERE host_id = ? \
+             AND device_id = ? AND shift_id = ? AND closed_at IS NULL",
+            "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "UPDATE floor_boxes SET item_count = item_count + 1 \
+             WHERE id = ? AND host_id = ? AND device_id = ? AND closed_at IS NULL",
+            "sqlite_autoindex_floor_boxes_1 (id=?)",
+        ),
+        // The close of a box: the next serial of the earliest block with room, whether
+        // a box already holds the SSCC, the cursor's compare-and-set by the block's key
+        // and the box's own close by its key.
+        (
+            "SELECT block_id, next_serial FROM floor_sscc_blocks WHERE host_id = ? \
+             AND device_id = ? AND issuer_prefix = ? AND extension = ? \
+             AND next_serial <= to_serial ORDER BY from_serial, block_id LIMIT 1",
+            "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+        ),
+        (
+            "SELECT 1 AS n FROM floor_boxes WHERE sscc = ? LIMIT 1",
+            "floor_boxes_sscc (sscc=?)",
+        ),
+        (
+            "UPDATE floor_sscc_blocks SET next_serial = next_serial + 1 \
+             WHERE block_id = ? AND next_serial = ?",
+            "sqlite_autoindex_floor_sscc_blocks_1 (block_id=?)",
+        ),
+        (
+            "UPDATE floor_boxes SET closed_at = ?, sscc = ?, block_id = ?, serial = ?, \
+             closed_by = ? WHERE id = ? AND host_id = ? AND device_id = ? \
+             AND closed_at IS NULL AND item_count = ?",
+            "sqlite_autoindex_floor_boxes_1 (id=?)",
+        ),
+        // The supply of SSCC blocks: the newest block of the prefix (the half rule), the
+        // serials the pairing has left (the status bar), whether a block shares serials
+        // with one kept, and a request's removal by its key.
+        (
+            "SELECT from_serial, to_serial, next_serial FROM floor_sscc_blocks WHERE host_id = ? \
+             AND device_id = ? AND issuer_prefix = ? AND extension = ? \
+             ORDER BY from_serial DESC LIMIT 1",
+            "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+        ),
+        (
+            "SELECT next_serial, to_serial FROM floor_sscc_blocks \
+             WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ? \
+             AND next_serial <= to_serial",
+            "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+        ),
+        (
+            "SELECT snapshot ->> 'issuerPrefix' AS prefix FROM floor_shifts \
+             WHERE host_id = ? AND device_id = ? AND id = ?",
+            "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
+        ),
+        (
+            "SELECT 1 AS n FROM floor_sscc_blocks WHERE host_id = ? AND device_id = ? \
+             AND issuer_prefix = ? AND extension = ? AND block_id <> ? \
+             AND from_serial <= ? AND to_serial >= ? LIMIT 1",
+            "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+        ),
+        (
+            "DELETE FROM floor_block_requests WHERE request_id = ?",
+            "sqlite_autoindex_floor_block_requests_1 (request_id=?)",
         ),
         (
             "SELECT id FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?",
@@ -926,6 +1045,34 @@ async fn the_floors_repeating_reads_search_an_index() {
             "{sql}\n  scans a table: {plan:?}"
         );
     }
+    // The one read of the floor that names no index: a pairing's waiting block
+    // requests. The table holds at most one row per pairing and issuer prefix
+    // (a request is kept only when none waits, and goes with its block), so the
+    // read takes the whole table, and no other.
+    let waiting = "SELECT request_id, issuer_prefix, extension FROM floor_block_requests \
+                   WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ? \
+                   ORDER BY requested_at, request_id LIMIT 1";
+    let text = format!("EXPLAIN QUERY PLAN {waiting}");
+    let mut explain = sqlx::query(&text);
+    for _ in 0..waiting.matches('?').count() {
+        explain = explain.bind("x");
+    }
+    let plan: Vec<String> = explain
+        .fetch_all(&mut raw)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.get::<String, _>("detail"))
+        .collect();
+    let scans: Vec<&String> = plan
+        .iter()
+        .filter(|step| step.starts_with("SCAN "))
+        .collect();
+    assert_eq!(
+        scans,
+        ["SCAN floor_block_requests"],
+        "{waiting}\n  should scan only the waiting requests, its plan is {plan:?}"
+    );
     raw.close().await.unwrap();
 }
 

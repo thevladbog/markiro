@@ -146,10 +146,12 @@ when the host refused the device or its config is unreadable), and kiosk mode
 (plan 1f2, see "App shell") leaves them reachable on purpose. A refusal that
 arrives while an operator works in a shift waits for them to leave it (see
 "Shifts"), so the device-rejected screen never replaces a shift's work screen.
-The other-host screen still does: another host found by the sync
-(`sync_finished` with `other_host`) drops the operator and the work at once,
-and the forget it offers can appear while a write is in flight, a window
-carried to plan 2a6's gate task (see "Shifts"). While this device holds shift
+Another host found by the sync (`sync_finished` with `other_host`) waits the
+same way since plan 2a6: while an operator works in a shift it is held
+(`pendingOtherHost`), the link is stopped and the status bar says why, and the
+other-host screen and the forget it offers come only after the operator left
+the shift and the work gate drained, so a forget never appears while a write
+is in flight (see "Shifts"). While this device holds shift
 records the host has not acknowledged, the shell refuses
 that forget (`unsent_facts`); since plan 2a5 those screens then say how many
 records there are (`countUnsentRecords`, `src/local/outbox.ts`: the pairing's,
@@ -260,12 +262,14 @@ removal of `device.json` belongs to the pairing that is still current but was
 not counted, so it loses its link with no confirmation: the forget screens
 must be offered only with no open shift and with the fact writer stopped. A
 refusal of the device meets the first condition since plan 2a5 (it waits in
-`pendingRejection` until the operator leaves the shift, see "Shifts"); another
-host found by the sync does not yet, and the second condition becomes real
-with plan 2a6, which writes the facts. And the records kept by
-`keepUnsent: true` carry the old `host_id` and `device_id`: plan 2a6's fact
-sender reads only the current pairing's `outbox` rows and must never send them
-to a new host. The confirm control that calls `forget({ keepUnsent: true })`
+`pendingRejection` until the operator leaves the shift, see "Shifts"), and
+another host found by the sync since plan 2a6 (`pendingOtherHost`). The second
+condition is real since plan 2a6, which writes the facts: the work screen's
+writes are tracked by the work gate, and `App` stops the link, and its fact
+sender with it, while a refusal or another host is held or its screen shows.
+And the records kept by `keepUnsent: true` carry the old `host_id` and
+`device_id`: the fact sender (`sendFactBatch`) reads only the current pairing's
+`outbox` rows and never sends them to a new host. The confirm control that calls `forget({ keepUnsent: true })`
 is plan 2a5's (above); the count it shows has the predicate of the shell's
 `unsent_records` (`acked_at IS NULL`, the pairing's or every pairing's) in a
 query of its own, `countUnsentRecords`. The sync's wipe for another pairing (`WIPE` in
@@ -641,10 +645,12 @@ whatever its revision (fail-closed).
   office changed without a new session. The session ends when the office
   opens (any way in, the bootstrap wizard's too), on a new pairing, a forget,
   a rejected device, another host, a change of the station's line (a refusal
-  of the device and another line wait while the operator works in a shift,
-  see "Shifts"), and on any host probe
+  of the device, another host and another line wait while the operator works
+  in a shift, see "Shifts"), and on any host probe
   (`host_probed`, which runs only at start-up, on a retry and after a forget:
-  a blocked version screen never leaves a session behind); and by
+  a blocked version screen never leaves a session behind; while the operator
+  works in a shift its answer is held, the last one counts, and it is applied
+  when they leave the shift, which then ends the session); and by
   «Сменить оператора», after ten minutes without a touch
   (`OPERATOR_IDLE_TIMEOUT_MS`, the cloud station's) and after a sync that
   leaves the operator out of the copies (the host turned them off, or their
@@ -1111,8 +1117,9 @@ each revision and never opens the stream itself.
 
 The shell's printers, COM scanners and power request (plan 2a4, ported from
 the cloud station's `printer.rs`, `scanner.rs` and `power.rs`) are reached
-only through `src/hardware/hardware.ts` (`createTauriHardware`); nothing in
-the app calls it yet (plan 2a5's floor does not; plans 2a6–2a7 will).
+only through `src/hardware/hardware.ts` (`createTauriHardware`); since plan 2a6
+the app calls `onScan` alone (the floor's COM scan source, see "Floor work"),
+and printing and the power request wait for plan 2a7.
 `src-tauri/tests/ipc.rs` pins the names and arguments, refusals are bare
 codes, and the system's own words go to the shell's stderr only.
 
@@ -2353,8 +2360,8 @@ on the office's «SSCC» page, a box counter and a pallet counter alike, as
 The station's side (plan 2a5). After a sign-in the floor is `FloorApp`, a small
 machine of its own like the cloud station's: the line's shifts
 (`src/floor/shifts/ShiftList.tsx`), a new shift (`NewShift.tsx`) and the work
-screen of the shift entered (`src/floor/work/WorkScreen.tsx`, a placeholder
-that plan 2a6 fills). `App` keys it by the pairing and the session, so nothing
+screen of the shift entered (`src/floor/work/WorkScreen.tsx`: scanning and
+boxes, see "Floor work"). `App` keys it by the pairing and the session, so nothing
 of one operator's screen outlives their sign-out. Any operator signed in may
 enter and create shifts (question В10): the station checks no role. The list
 shows this pairing's copies of the line's planned and active shifts and one
@@ -2446,18 +2453,30 @@ database, send to the host and job for the printer goes to `track` before it
 starts; no scan is accepted while `leaving`; tracked work is bounded, because
 the gate has no timeout of its own (a local write ends in about 35 s at the
 most, the shell's hand-over to the printer in 5 s, a code check at the host in
-300 ms), so work that can wait longer must not be one tracked piece; and the
-way back to the list stays on the keyboard while the leave waits
-(`aria-disabled`, not `disabled`, or the focus moves to the wait text). Two
-things carry to plan 2a6's gate task: another host found by the sync
-(`sync_finished` with `other_host`) still drops the operator and the work at
-once, without the gate, so once writes are tracked the other-host screen and
-its forget can appear while a write is in flight (hold it behind the gate like
-`pendingRejection`, or make the forget wait for `drain`; a host replaced at
-the same address in the middle of a shift is plan 2b's); and when 2a6 calls
-`countUnsentRecords` repeatedly, its exact text (`acked_at IS NULL AND host_id
-= ? AND device_id = ?`, not the order the Node list pins) joins both
-query-plan lists.
+300 ms, a request for a block in up to two host calls of 10 s each), so work
+that can wait longer must not be one tracked piece; and the way back to the
+list stays on the keyboard while the leave waits (`aria-disabled`, not
+`disabled`, or the focus moves to the wait text). A leave that a timer or an
+answer started is known to the screen at once through `isLeaving` (the
+render's `leaving` lags behind it); both refuse a scan and a close the
+operator presses.
+
+Plan 2a6's gate task holds the two things that used to drop the work at once:
+another host found by the sync (`sync_finished` with `other_host`) and every
+`host_probed` answer wait while the operator works in a shift
+(`pendingOtherHost`, `pendingProbe`) and are applied by `endWork` when they
+leave it, after the gate drained: a refusal of the device first, then the
+other host, then the probe's answer (the last one counts, and it signs the
+operator out), then another line. The held other host stops the link
+(`linked = null` in `App`, `FloorApp.rejectionPending`), so nothing is
+delivered for the rest of the shift and the status bar says why; the operator
+keeps working offline. Records made under a replaced host can be delivered
+only if the original host returns, otherwise only through the forget's
+«Сбросить всё равно» (a host replaced at the same address in the middle of a
+shift is plan 2b's). The status bar reads its own three outbox statements, so
+`countUnsentRecords` is still called once per forget (`App`); a plan that
+calls it repeatedly adds its exact text (`acked_at IS NULL AND host_id = ? AND
+device_id = ?`, not the order the Node list pins) to both query-plan lists.
 
 ## Facts
 
@@ -2726,6 +2745,171 @@ indexes of `0010` (`boxes_shift`, the partial `box_items_live`,
 `boxes_pallet`); a new column the totals read needs its index in the
 same change, since the list runs them once per shift listed.
 
+## Floor work
+
+Stage 2a, plan 2a6 (`src/floor/work`). The work screen of a shift
+(`WorkScreen.tsx`) reads the floor's scan source — the keyboard wedge and the
+shell's COM scanners at once (`mergeScanSources`, `createComScanSource`; the
+spec's decision 25 chose one by the setup, and reading both needs no setup) —
+and hands every scan to a queue that runs one job at a time (`work-queue.ts`,
+the cloud's `scan-queue.ts`). Each job is given to the floor's work gate
+(`track`) before it starts, so leaving the shift waits for it, and every scan
+touches the idle wait (`touch`): a COM scanner presses no key.
+
+A scan (`scan-pipeline.ts`, `processScan`) is read once by the domain
+(`readScan` over `classifyScan`: the AIM prefixes go, the group separators and
+the crypto tail stay). A GTIN, an SSCC or anything else is `invalid` and keeps
+only its kind and its length, never its text (a badge is a secret; plan 2a7
+reads a label's SSCC before the pipeline). A code whose serial is longer than
+the host keeps (64 bytes, `HOST_MAX_SERIAL_BYTES`) or holds a control character
+reads as unknown, for the host would refuse it. A code of another product is
+`wrong_gtin`. A code this pairing holds in any box (`floor_codes`) is a local
+duplicate with the time of its first scan, without asking the host. Otherwise,
+while the link is `online`, the host is asked within 300 ms (`HostApi.checkCode`,
+`CODE_CHECK_TIMEOUT_MS`): another device's scan that owns the code is a host
+duplicate with that shift's number; no answer, a failure, `free` or this
+station's own scan (its own registry is newer: an undo not yet sent) let the
+scan through, and a failure goes to `onHostError`, where the shell acts on a
+refused key. An accepted code goes into the shift's open box, which opens with
+it, in ONE `local_transaction` with its place in `floor_codes`, its journal row
+(`floor_scans`) and its `scan` record in the outbox (`outboxStatement`, which
+checks the record against `factRecordSchema` and its size against
+`MAX_RECORD_BYTES`, 16 KiB, so that 100 records never pass the host's 2 MiB
+body limit, and keeps it whole as the payload it is sent as). The key of
+`floor_codes` keeps a code in one box of the pairing at most: a second accept
+that the check missed fails whole with `changes_mismatch`, and a box closed
+while the scan was on its way fails it too. Refused scans are journalled with
+their record the same way. A failed write is a system error: the scan is not
+taken, and the work stops until the operator closes the message.
+
+A box (`box-close.ts`, `closeOpenBox`) closes with the next serial of the
+earliest block of the snapshot's issuer prefix and the box extension `0` that
+has one, its SSCC by the domain's `buildSscc`, in ONE transaction: the serial
+spent by comparing the block's cursor with the value read (`UPDATE … WHERE
+block_id = ? AND next_serial = ?`, `expectedChanges: 1`), the box closed only
+while it is open with the count read, its `box_closed` record
+(`boxMembershipDigestV1` of its codes) and what later plans add (`CloseStep` →
+`CloseAddition`: statements committed after the close, and fields of the
+record, whose own fields win). A guard that no longer holds is `stale`: nothing
+is written, and the screen tries again, three times in all (`CLOSE_TRIES`),
+before it stops the line. A serial past what the prefix can number, or one that
+a box already holds (the SSCC is unique across pairings: a forget keeps the
+boxes of a former one), is spent and the box stays open (`invalid_serial`, as in
+the cloud); the next close takes the next serial. An empty box spends nothing.
+A box closes by itself once it holds the shift's capacity — the screen's
+`closeBox(true)` runs in front of every scan, after the scan that fills a box
+and when the screen opens, so a station stopped between the scan that filled a
+box and its close finds it full — and an incomplete one after the operator
+confirms. "Full" is one function, `boxIsFull(itemCount, capacity)` in
+`box-close.ts`, which the screen's close and `closeIfFull` (for a caller outside
+the screen) both ask. A full box never takes another code: a close that leaves it open stops the line, and
+the scan that finds a stop is refused. A close whose write threw may have been
+committed all the same; the next close reads the box back from `floor_boxes`
+(`readClosedBox`) before it looks for an open one, so that a box which did
+close is reported once (`onClosed`, the half rule) and is not closed twice.
+
+Serials come by the half rule (`block-supply.ts`, `createBlockSupply`, ONE
+supply per work screen: two would both write the block): when the screen opens,
+after every close and when the link comes back, a block is asked for while the
+link is online if the pairing has none for the prefix or the newest has less
+than half left. The request is kept in `floor_block_requests` before it is sent
+and repeated whole, with the same `requestId`, until its block is kept, in the
+transaction that removes the request, so a lost answer or a restart never
+makes the host issue a second block for one need. A block of another prefix or
+extension than asked, or one that shares serials with a block already kept, is
+never filed (the request is dropped), and a block already kept is never
+overwritten, so a cursor is only moved by a close. The host's refusal of a
+request as another prefix's (`validation_failed` on `requestId`) drops it and
+sends a new one, once; `sscc_exhausted` drops it. One top-up runs at a time.
+Without serials the work stops and says why (no link, the link held until the
+operator leaves, the prefix exhausted, the host gave none); a block that arrives
+closes the box and the work goes on.
+
+The outbox goes to the host from `useHostLink` (`src/local/facts-sender.ts`,
+`sendFactBatch`), a batch at a time: this pairing's oldest records without a
+receipt, up to 100 (and within `MAX_BATCH_BYTES`), sent as kept, each send
+counted in `attempts` before it goes. The receipts must answer the records — as
+many, each with its record's id or none (matched by its place) — or nothing is
+kept and the batch goes again. They are applied in one transaction through
+`json_each`: the outcome, its code, its details and the time; a scan's
+`conflict` sets `floor_scans.conflict` and its box's `needs_fix`; a `rejected`
+record stays, with its code, for the queue screen of the pilot (plan ОЧ, not
+built yet). The host keeps a refusal for good and answers the same record id
+with it again, so a refused record is never sent again under its id: sending it
+again is a person's act that writes the refused record and its refused
+dependents again under new ids, in their order. A `rejected` receipt flags
+nothing on the floor: a refused scan leaves its code in the local box, which the
+host's later `box_closed` then meets as a digest mismatch (`digest_matches`),
+and the only trace on the station is the bar's count «Отклонено хостом». Making
+a refused scan mark its box as a conflict does is a one-word change in the two
+`value ->> 'outcome' = 'conflict'` terms of `receiptStatements`, and an owner decision
+(raise it at the pilot review). Any failed send — a transport failure, an
+answer other than 200 (a 500; a body over the host's limit is its 400, which a
+well-formed batch of at most 100 records of at most 16 KiB cannot reach),
+receipts that do not fit — keeps every record and sends the same batch, with the
+same ids, again; an unacknowledged record is never purged, skipped or
+quarantined (it would break the order the host's checks depend on: a
+`box_closed` after its scans), so a batch the host cannot take is retried for
+good by design, and the bar says for how long. The shell keeps why the last send
+failed (`ShellState.factsFailure`, `factsFailureOf`): the link's own failure
+shows on the link's line, the host's and this computer's as words of their own
+on the status bar. The link sends after it subscribes, after every revision
+event, whenever a screen asks after a local write (`requestFacts`), right away
+again after a full batch, and after a failed send by the sync's waits (2, 4, 8,
+16, 32 s, then 60 s) while online or at once when the link is back; a screen's
+request skips the wait and sends the head batch again, which a LAN allows; a
+refused key ends the link. It lives as long as the link: a refusal or another
+host that waits for the operator to leave the shift stops the link and the
+delivery, and the work screen asks the host nothing meanwhile (`FloorApp`'s
+`rejectionPending`). Every local write of the floor and every batch of receipts
+dispatch `outbox_changed` (`ShellState.outboxVersion`), and the status bar reads
+again the records not sent, refused and in conflict (three statements of their
+own, `src/floor/outbox-status.ts`) and, in a shift, the SSCC serials left for
+its boxes (`remainingSerials`, counted as a close takes them), with a warning at
+100 or fewer (`SERIALS_LOW`) and at none; while a send fails or the serials run
+low it reads again every 10 s (`REFRESH_MS`) and says how long the oldest record
+has waited and how often it was sent. The reads the screen repeats, and the
+receipts' transaction, are pinned in both query-plan lists (see "Local
+database").
+
+Each verdict shows in words in the last-scan line under the box and as a
+generated tone (`signal-sound.ts`; no audio files). A refusal or a duplicate
+also flashes (`SignalOverlay`, which lives in `packages/ui`, for `SIGNAL_MS`,
+700 ms) inside a wrapper with `pointer-events: none`, so that what the flash
+covers keeps its taps. An accepted scan has no flash: the tone and a lit
+last-scan line (`CUE_MS`, 350 ms, `work-screen__last--cue`; the fade runs only
+under `prefers-reduced-motion: no-preference`) say it, because an overlay at the
+pace of a line would hide the counts and the buttons. An accepted scan is not
+announced to a screen reader (the tone and the line only; a polite region for it
+is the owner's to ask for); a refusal is announced by its flash, and the stops
+and notices share one polite region that is on the screen before any of them.
+While a message stops the work — a failed write, no serials, a failed close, a
+close to confirm — or the operator leaves, a scan is not taken, and the screen
+says so: nothing is dropped silently. The plan notice «План выполнен» comes once
+per entry and does not stop the scanning.
+
+What the floor tells the screen beyond the gate (see "Shifts"): `isLeaving()`
+answers true synchronously from the moment a leave is asked, where the render's
+`leaving` lags, and a scan is then refused and a close the operator presses does
+nothing (its buttons carry `aria-disabled`); `linkHeld` is true while a refusal
+of the device or another host waits for the end of the shift, and a screen
+without serials then says that the link is stopped until the operator leaves,
+instead of promising serials. The shell holds `other_host` and every
+`host_probed` answer behind the shift (`pendingOtherHost`, `pendingProbe`), so a
+forget or a sign-out never appears under a write in flight. `closeSteps` (the
+steps of every close) and `onClosed` (told once for every box that closed, also
+one read back after a lost answer, in the queue's turn after the write) are the
+extension points of plan 2a7 (the label's print job) and of the pallets' plan
+(joining the station's open pallet, with a new field of `box_closed` that raises
+`PROTOCOL_VERSION`). Whatever they start goes to `track` before it begins, and
+every writer of a box — plan 2a8's exceptions and the pallets' plan too — stays
+in the screen's queue: the digest of a closing box is read apart from the box,
+and only the queue keeps an undo from changing the box between the two reads. A
+box whose lost answer was not read back before the operator left is closed in
+the database and told to nobody, so the print recovery of plan 2a7 finds such
+boxes in `floor_boxes`. Printing the box's label is plan 2a7; the exceptions and
+the shift's close are plan 2a8.
+
 ## Marking rules
 
 GS1, KM, SSCC and label rules stay in `@markiro/domain`; the host stores and
@@ -2799,6 +2983,35 @@ either; a file log is stage 5.
   Until then these have run only under jsdom, with node:sqlite behind
   `LocalExecutor` and a fake `HostApi`: no WebView2, no real host, no scanner
   and no Windows has shown the list, the new shift, the entry or the leave.
+- The floor's work (plan 2a6) by hand, on Windows 10 and 11. None of it has
+  been run; check at least:
+  - codes of marking with a GS and a crypto tail scanned on the work screen
+    by a keyboard-wedge scanner (RU and EN layouts, Caps Lock) and by a COM
+    scanner (`]d2` prefix on and off), both plugged in at once;
+  - 3–5 scans a second on a factory PC, with the host on this PC and on
+    another PC over Wi-Fi (the 300 ms check of a code at its worst);
+  - the access point switched off in the middle of a box: the box closes on
+    the block the station holds, the status bar counts the unsent records,
+    and once the link is back every record reaches the host once (the
+    office's totals equal the station's);
+  - the PC switched off right after a scan: the code is still there, and a
+    full box closes when the work screen opens again;
+  - the 2 000th box of a block: a new block arrives before the first runs out
+    (the half rule), and without a link the screen says «Нет номеров SSCC»;
+  - the tones on the PC's speakers, the lit last-scan line and the flash of a
+    refusal on the real screen and touch panel (a tap through the flash), and
+    the work screen's layout at 1024 × 768 and 1280 × 800 (64 px controls).
+  - what the tests show so far: the work screen, the pipeline, the closes and the delivery have
+    run only under jsdom and node:sqlite behind `LocalExecutor`, with a fake
+    `HostApi`: the real host's receipts (`conflict`, `sscc_not_issued`) have not
+    met them. `test/floor-offline-line.test.ts` plays the whole offline promise
+    over the real modules and a database file, with a fake host that is as
+    strict as the real one (a batch over 100, a record seen twice, a block asked
+    for twice under one request id): a host that vanishes and comes back,
+    restarts, answers lost and a request replayed. `test/app.test.tsx` plays two
+    stretches of it through the real screen and the link (a restart finds the
+    request, the full box and the records). Neither shows a real host, a real
+    scanner or a real Windows.
 - The Windows service and DPAPI run only in the `standalone-windows-build`
   job: it compiles the service and the Tauri app for Windows, and its cargo
   tests round-trip a key through DPAPI. A real Windows user profile, the

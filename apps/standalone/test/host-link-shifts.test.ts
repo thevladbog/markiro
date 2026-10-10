@@ -82,6 +82,7 @@ function link(deviceShifts: () => Promise<DeviceShift[]>, deviceId = DEVICE_ID, 
         changes,
         refresh,
         deviceShifts,
+        sendFacts: async () => [],
         dispatch,
       }),
     { initialProps: { id: deviceId } },
@@ -379,7 +380,7 @@ describe("the station's shifts when the link has no events", () => {
     const { reads, hook } = link(deviceShifts, DEVICE_ID, true);
     await waitFor(() => expect(reads()).toEqual([{ type: "shifts_read", ok: true }]));
     await act(async () => {
-      hook.result.current();
+      hook.result.current.requestSync();
     });
     await waitFor(() => expect(reads()).toHaveLength(2));
     expect(deviceShifts).toHaveBeenCalledTimes(2);

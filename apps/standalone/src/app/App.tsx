@@ -4,8 +4,14 @@ import { useTranslation } from "react-i18next";
 import { FloorApp } from "../floor/FloorApp.js";
 import { FloorStatusBar } from "../floor/FloorStatusBar.js";
 import { OperatorSignIn } from "../floor/OperatorSignIn.js";
-import { createKeyboardWedgeSource, type ScanSource } from "../floor/scan-source.js";
+import {
+  createComScanSource,
+  createKeyboardWedgeSource,
+  mergeScanSources,
+  type ScanSource,
+} from "../floor/scan-source.js";
 import type { FloorOperator } from "../floor/sign-in.js";
+import { createTauriHardware, type HardwareApi } from "../hardware/hardware.js";
 
 import { createHostApi, type HostApi } from "../host/api.js";
 import { createTauriHostClient, HostError } from "../host/client.js";
@@ -111,8 +117,13 @@ export interface AppProps {
   connection?: ConnectionApi;
   local?: LocalExecutor;
   address?: string;
-  /** Where the floor's badge scans come from; the keyboard wedge on this window by default. */
+  /**
+   * Where the floor's scans come from; by default the keyboard wedge on this
+   * window and the shell's COM scanners, both at once.
+   */
   scanSource?: ScanSource;
+  /** The shell's printers, COM scanners and power request; tests give their own. */
+  hardware?: HardwareApi;
   /** How long a signed-in operator may leave the station untouched; tests shorten it. */
   idleTimeoutMs?: number;
   /** The shortest wait between two syncs the sign-in asks for; tests lengthen it. */
@@ -129,6 +140,7 @@ export function App({
   local,
   address = LOCAL_HOST_ADDRESS,
   scanSource,
+  hardware,
   idleTimeoutMs,
   signInSyncGapMs = SIGN_IN_SYNC_GAP_MS,
   lockdown,
@@ -139,7 +151,13 @@ export function App({
   const hostApi = useMemo(() => host ?? createHostApi(createTauriHostClient()), [host]);
   const connectionApi = useMemo(() => connection ?? createTauriConnectionApi(), [connection]);
   const localDb = useMemo(() => local ?? createTauriLocalExecutor(), [local]);
-  const scanner = useMemo(() => scanSource ?? createKeyboardWedgeSource(), [scanSource]);
+  const hardwareApi = useMemo(() => hardware ?? createTauriHardware(), [hardware]);
+  const scanner = useMemo(
+    () =>
+      scanSource ??
+      mergeScanSources(createKeyboardWedgeSource(), createComScanSource(hardwareApi.onScan)),
+    [scanSource, hardwareApi],
+  );
   const kiosk = useMemo(
     () => lockdown ?? createLockdownLifecycle({ dev: import.meta.env.DEV }),
     [lockdown],
@@ -162,16 +180,18 @@ export function App({
   const remoteAddress =
     pairedStatus !== null && pairedStatus.hostAddress !== address ? pairedStatus.hostAddress : null;
 
-  // A refusal that waits for the operator to leave the shift (question В8)
-  // already stops the link: nothing more reaches a host that refused us.
+  // A refusal that waits for the operator to leave the shift (question В8), and
+  // another host that waits the same way, already stop the link: nothing more
+  // reaches a host that refused us or is not ours.
   const linked =
     pairedStatus !== null &&
     state.rejection === null &&
     state.pendingRejection === null &&
+    !state.pendingOtherHost &&
     state.sync.kind !== "other_host"
       ? pairedStatus
       : null;
-  const requestSync = useHostLink({
+  const { requestSync, requestFacts } = useHostLink({
     hostId: linked?.hostId ?? null,
     deviceId: linked?.deviceId ?? null,
     connection: connectionApi,
@@ -179,6 +199,7 @@ export function App({
     changes: hostApi.getChanges,
     refresh: deviceApi.refresh,
     deviceShifts: hostApi.getDeviceShifts,
+    sendFacts: hostApi.sendFacts,
     dispatch,
   });
 
@@ -560,7 +581,10 @@ export function App({
             deviceName={pairedStatus.deviceName}
             shiftId={state.floorWork?.shiftId ?? null}
             deviceNotSaved={state.deviceNotSaved}
-            refusalHeld={state.pendingRejection !== null}
+            outboxVersion={state.outboxVersion}
+            factsFailure={state.factsFailure}
+            refusalHeld={state.pendingRejection !== null || state.pendingOtherHost}
+            otherHostHeld={state.pendingRejection === null && state.pendingOtherHost}
           />
           {view.kind === "floor" ? (
             <OperatorSignIn
@@ -587,8 +611,12 @@ export function App({
               sync={state.sync}
               shiftReads={state.shiftReads}
               lineChangePending={state.pendingDevice !== null}
+              rejectionPending={state.pendingRejection !== null || state.pendingOtherHost}
               enter={hostApi.enterShift}
               create={hostApi.createDeviceShift}
+              checkCode={hostApi.checkCode}
+              requestBlock={hostApi.requestSsccBlock}
+              requestFacts={requestFacts}
               source={scanner}
               {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
               dispatch={dispatch}

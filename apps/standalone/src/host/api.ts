@@ -6,11 +6,13 @@ import {
   badgeSaltSchema,
   bootstrapResponseSchema,
   changesResponseSchema,
+  codeCheckSchema,
   counterpartyRecordSchema,
   deviceRecordSchema,
   deviceShiftSchema,
   deviceShiftsSchema,
   enteredShiftSchema,
+  factReceiptsSchema,
   labelTemplateSchema,
   labelTemplateSummarySchema,
   officeLineSchema,
@@ -23,6 +25,7 @@ import {
   pairingCodeSchema,
   productGroupSchema,
   officeShiftSchema,
+  ssccBlockSchema,
   ssccCounterSchema,
   ssccStateSchema,
   templateDefaultsSchema,
@@ -33,6 +36,7 @@ import {
   type BootstrapRequest,
   type BootstrapResponse,
   type ChangesResponse,
+  type CodeCheck,
   type CounterpartyCreate,
   type CounterpartyRecord,
   type CounterpartyUpdate,
@@ -41,6 +45,7 @@ import {
   type DeviceShiftCreate,
   type DeviceUpdate,
   type EnteredShift,
+  type FactReceipt,
   type LabelTemplate,
   type LabelTemplateSummary,
   type LineCreate,
@@ -69,6 +74,8 @@ import {
   type ShiftClose,
   type ShiftCreate,
   type ShiftUpdate,
+  type SsccBlock,
+  type SsccBlockRequest,
   type SsccCounter,
   type SsccCounterUpdate,
   type SsccState,
@@ -191,7 +198,28 @@ export interface HostApi {
    * the answer carries the frozen snapshot.
    */
   enterShift: (id: string) => Promise<EnteredShift>;
+  /**
+   * A block of SSCC serials for this station; the same `requestId` answers the
+   * same block, and the same id with another prefix is `validation_failed` on
+   * `requestId`. Stations only.
+   */
+  requestSsccBlock: (request: SsccBlockRequest) => Promise<SsccBlock>;
+  /**
+   * Whether an accepted scan on the host owns the code (`kmHash`), within
+   * `CODE_CHECK_TIMEOUT_MS`: past it the call fails with the transport code
+   * `timeout`, and the station decides on its own copy.
+   */
+  checkCode: (codeHash: string) => Promise<CodeCheck>;
+  /**
+   * The outbox's records as kept (1-100, `FactRecord` each); a receipt per
+   * record, in their order. A failed call is no receipt: the batch is sent
+   * again.
+   */
+  sendFacts: (records: readonly unknown[]) => Promise<FactReceipt[]>;
 }
+
+/** How long the scan pipeline waits for the host's code check (stage 2a spec, decision 16). */
+export const CODE_CHECK_TIMEOUT_MS = 300;
 
 /** A 204 answer parses as `null`. */
 const NO_CONTENT = z.null();
@@ -453,6 +481,20 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("POST", "/v1/device/shifts", { body: create, schema: deviceShiftSchema }),
     enterShift: (id) =>
       client.request("POST", `/v1/device/shifts/${id}/enter`, { schema: enteredShiftSchema }),
+    requestSsccBlock: (request) =>
+      client.request("POST", "/v1/device/sscc/blocks", { body: request, schema: ssccBlockSchema }),
+    checkCode: (codeHash) =>
+      client.request("GET", `/v1/device/codes/${encodeURIComponent(codeHash)}`, {
+        timeoutMs: CODE_CHECK_TIMEOUT_MS,
+        schema: codeCheckSchema,
+      }),
+    sendFacts: async (records) =>
+      (
+        await client.request("POST", "/v1/device/facts", {
+          body: { records },
+          schema: factReceiptsSchema,
+        })
+      ).receipts,
     closeShift: (token, id, close) =>
       client.request("POST", `/v1/office/shifts/${id}/close`, {
         body: close,

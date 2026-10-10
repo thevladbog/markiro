@@ -23,15 +23,19 @@ import {
   enteredShiftSchema,
   type ChangeItem,
   type ChangesResponse,
+  type CodeCheck,
   type DeviceShift,
   type DeviceShiftCreate,
   type DeviceStatus,
   type EnteredShift,
   type HostStatus,
+  type SsccBlock,
+  type SsccBlockRequest,
 } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import { syncReferences } from "../src/local/reference-sync.js";
 import { DEVICE_ID, DEVICE_STATUS, HOST_ID } from "./support/fixtures.js";
+import { enteredShift } from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
@@ -109,6 +113,7 @@ interface Options {
   sync?: SyncState;
   shiftReads?: { done: number; failed: boolean };
   lineChangePending?: boolean;
+  rejectionPending?: boolean;
   idleTimeoutMs?: number;
   workScreen?: ComponentType<WorkScreenProps>;
 }
@@ -128,8 +133,12 @@ function floorOf(
         sync={options.sync ?? SYNCED}
         shiftReads={options.shiftReads ?? { done: 1, failed: false }}
         lineChangePending={options.lineChangePending ?? false}
+        rejectionPending={options.rejectionPending ?? false}
         enter={handlers.enter}
         create={handlers.create}
+        checkCode={handlers.checkCode}
+        requestBlock={handlers.requestBlock}
+        requestFacts={handlers.requestFacts}
         source={options.source ?? SILENT_SOURCE}
         {...(options.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: options.idleTimeoutMs })}
         {...(options.workScreen === undefined ? {} : { workScreen: options.workScreen })}
@@ -149,6 +158,15 @@ function handlersOf(
   return {
     enter: vi.fn(answers.enter ?? (async () => OPENED)),
     create: vi.fn(answers.create ?? (async () => PLANNED)),
+    checkCode: vi.fn(async (): Promise<CodeCheck> => ({ status: "free" })),
+    requestBlock: vi.fn(async (request: SsccBlockRequest): Promise<SsccBlock> => ({
+      id: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+      issuerPrefix: request.issuerPrefix,
+      extension: request.extension,
+      fromSerial: 1500,
+      toSerial: 3499,
+    })),
+    requestFacts: vi.fn(),
     dispatch: vi.fn<(action: ShellAction) => void>(),
     onSignOut: vi.fn<(notice: FloorNotice | null) => void>(),
   };
@@ -175,6 +193,22 @@ async function settle(): Promise<void> {
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
   });
+}
+
+/**
+ * A work screen that does nothing of its own but the floor's leave: for a test
+ * of the floor that holds or counts the database's reads, which the real
+ * screen makes of its own on entry.
+ */
+function IdleWork(props: WorkScreenProps) {
+  return (
+    <div>
+      <p>{`Смена ${props.shift.copy.number}`}</p>
+      <button type="button" onClick={props.onLeave}>
+        Выйти из смены
+      </button>
+    </div>
+  );
 }
 
 /** A work screen that holds the leave with a piece of work the test settles. */
@@ -288,6 +322,39 @@ describe("the floor after an operator signed in", () => {
     await work.release();
     expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
     expect(types(handlers)).toContain("work_left");
+  });
+
+  it("tells the work screen at once that the operator is leaving, until the next shift is entered", async () => {
+    const handlers = handlersOf();
+    const work = holdingWork();
+    render(floorOf(await floorCopies(), handlers, { workScreen: work.Work }));
+    await enterPlanned();
+    await screen.findByRole("button", { name: "Работа OCT26-005/S" });
+    await work.tracked();
+    const first = work.seen.at(-1);
+    expect(first?.isLeaving?.()).toBe(false);
+    // A leave that a timer or an answer started: asked for, and no render has shown it yet.
+    act(() => {
+      first?.onLeave();
+      expect(first?.isLeaving?.()).toBe(true);
+    });
+    await work.release();
+    fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+    await screen.findByRole("button", { name: "Работа OCT26-005/S" });
+    expect(work.seen.at(-1)?.isLeaving?.()).toBe(false);
+  });
+
+  it("tells the work screen when the link is held for the rest of the shift", async () => {
+    const handlers = handlersOf();
+    const work = holdingWork();
+    const local = await floorCopies();
+    const view = render(floorOf(local, handlers, { workScreen: work.Work }));
+    await enterPlanned();
+    await screen.findByRole("button", { name: "Работа OCT26-005/S" });
+    expect(work.seen.at(-1)?.linkHeld).toBe(false);
+    // A refusal or another host found while the operator works: held until they leave.
+    view.rerender(floorOf(local, handlers, { workScreen: work.Work, rejectionPending: true }));
+    expect(work.seen.at(-1)?.linkHeld).toBe(true);
   });
 
   it("is not held for good by tracked work that failed", async () => {
@@ -513,12 +580,65 @@ describe("the work screen of plan 2a5", () => {
     render(floorOf(local, handlers));
     fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
     expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
-    expect(screen.getByText("Молоко 3,2% 0,9 л")).toBeTruthy();
-    expect(
-      screen.getByText(
-        "Сканирование кодов и сборка коробов появятся в следующем обновлении приложения.",
-      ),
-    ).toBeTruthy();
+    expect(screen.getByText("Молоко 3,2% 0,9 л · GTIN 04600682000013")).toBeTruthy();
+    expect(screen.getByText("Отсканируйте код маркировки.")).toBeTruthy();
+  });
+});
+
+describe("the work screen the floor mounts", () => {
+  it("gets the scanner, the host's calls, and a link that a waiting refusal stops", async () => {
+    const seen: WorkScreenProps[] = [];
+    function Work(props: WorkScreenProps) {
+      seen.push(props);
+      return (
+        <button type="button" onClick={props.onRecorded}>
+          {`Работа ${props.shift.copy.number}`}
+        </button>
+      );
+    }
+    const handlers = handlersOf();
+    const local = await floorCopies();
+    const view = render(floorOf(local, handlers, { workScreen: Work }));
+    await enterPlanned();
+    fireEvent.click(await screen.findByRole("button", { name: "Работа OCT26-005/S" }));
+    expect(handlers.requestFacts).toHaveBeenCalledTimes(1);
+    expect(types(handlers)).toContain("outbox_changed");
+    const props = seen.at(-1);
+    expect(props?.online).toBe(true);
+    expect(props?.source).toBe(SILENT_SOURCE);
+    expect(props?.checkCode).toBe(handlers.checkCode);
+    expect(props?.requestBlock).toBe(handlers.requestBlock);
+    view.rerender(floorOf(local, handlers, { workScreen: Work, rejectionPending: true }));
+    expect(seen.at(-1)?.online).toBe(false);
+  });
+
+  it("tells the shell of a refused key that a call of the screen met", async () => {
+    let hostError: (error: unknown) => void = () => undefined;
+    function Work(props: WorkScreenProps) {
+      hostError = props.onHostError;
+      return <p>{`Работа ${props.shift.copy.number}`}</p>;
+    }
+    const handlers = handlersOf();
+    render(floorOf(await floorCopies(), handlers, { workScreen: Work }));
+    await enterPlanned();
+    await screen.findByText("Работа OCT26-005/S");
+    hostError(
+      new HostError({
+        kind: "api",
+        code: "unauthorized",
+        status: 401,
+        message: "no",
+        details: { credential: "device" },
+      }),
+    );
+    expect(handlers.dispatch).toHaveBeenCalledWith({
+      type: "device_rejected",
+      reason: "key_rejected",
+    });
+    // An error the shell has nothing to do with is the screen's own.
+    handlers.dispatch.mockClear();
+    hostError(new Error("disk"));
+    expect(handlers.dispatch).not.toHaveBeenCalled();
   });
 });
 
@@ -534,8 +654,8 @@ describe("the work screen's product", () => {
     const handlers = handlersOf({ enter: async () => renamed });
     render(floorOf(await floorCopies(), handlers));
     await enterPlanned();
-    expect(await screen.findByText("Молоко из снимка")).toBeTruthy();
-    expect(screen.queryByText("Молоко 3,2% 0,9 л")).toBeNull();
+    expect(await screen.findByText("Молоко из снимка · GTIN 04600682000013")).toBeTruthy();
+    expect(screen.queryByText(/Молоко 3,2% 0,9 л/)).toBeNull();
   });
 });
 
@@ -1106,11 +1226,16 @@ describe("the shift's copy read after every read of the host's list", () => {
     const real = await floorCopies();
     const gate = gatedExecutor(real);
     const handlers = handlersOf();
-    const view = render(floorOf(gate.local, handlers));
+    const view = render(floorOf(gate.local, handlers, { workScreen: IdleWork }));
     await enterPlanned();
     await screen.findByText("Смена OCT26-005/S");
     gate.hold();
-    view.rerender(floorOf(gate.local, handlers, { shiftReads: { done: 2, failed: false } }));
+    view.rerender(
+      floorOf(gate.local, handlers, {
+        workScreen: IdleWork,
+        shiftReads: { done: 2, failed: false },
+      }),
+    );
     await settle();
     await officeCloses(real, SEEN + 1);
     fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
@@ -1313,8 +1438,12 @@ describe("the operator the copies hold, read after every sync", () => {
           sync={{ ...SYNCED, synced: 0 }}
           shiftReads={{ done: 1, failed: false }}
           lineChangePending={false}
+          rejectionPending={false}
           enter={handlers.enter}
           create={handlers.create}
+          checkCode={handlers.checkCode}
+          requestBlock={handlers.requestBlock}
+          requestFacts={handlers.requestFacts}
           source={SILENT_SOURCE}
           dispatch={handlers.dispatch}
           onSignOut={handlers.onSignOut}
@@ -1484,53 +1613,57 @@ describe("what the floor gives the screens it holds", () => {
   });
 });
 
-describe("the stub of the work screen", () => {
-  function props(over: Partial<WorkScreenProps> = {}): WorkScreenProps {
+describe("the leave button and the wait of the work screen", () => {
+  async function props(over: Partial<WorkScreenProps> = {}): Promise<WorkScreenProps> {
+    const { executor } = openLocalDb();
     return {
-      shift: {
-        copy: {
-          id: PLANNED.id,
-          number: "OCT26-005/S",
-        } as WorkScreenProps["shift"]["copy"],
-        snapshot: {
-          product: { name: "Молоко 3,2% 0,9 л" },
-        } as WorkScreenProps["shift"]["snapshot"],
-      },
+      shift: await enteredShift(executor),
       operator: SESSION,
       pairing: PAIRING,
-      local: {} as LocalExecutor,
-      online: true,
+      local: executor,
+      online: false,
       track: (work) => work,
       touch: () => undefined,
       onLeave: () => undefined,
       leaving: false,
+      source: SILENT_SOURCE,
+      checkCode: async (): Promise<CodeCheck> => ({ status: "free" }),
+      requestBlock: async (): Promise<SsccBlock> => {
+        throw new Error("a screen offline asks for no block");
+      },
+      onHostError: () => undefined,
+      onRecorded: () => undefined,
+      signal: () => undefined,
       ...over,
     };
   }
 
-  it("keeps a live region on the screen from the start, and puts the wait into it", () => {
+  it("keeps a live region on the screen from the start, and puts the wait into it", async () => {
+    const first = await props();
     const view = render(
       <ThemeProvider>
-        <WorkScreen {...props()} />
+        <WorkScreen {...first} />
       </ThemeProvider>,
     );
-    const region = view.container.querySelector('[aria-live="polite"]');
-    expect(region).not.toBeNull();
+    const region = view.container.querySelector(".work-screen__leaving");
+    expect(region?.getAttribute("aria-live")).toBe("polite");
     expect(region?.textContent).toBe("");
     view.rerender(
       <ThemeProvider>
-        <WorkScreen {...props({ leaving: true })} />
+        <WorkScreen {...first} leaving />
       </ThemeProvider>,
     );
-    expect(view.container.querySelector('[aria-live="polite"]')).toBe(region);
+    expect(view.container.querySelector(".work-screen__leaving")).toBe(region);
     expect(region?.textContent).toBe("Дожидаемся окончания начатой работы…");
+    await settle();
   });
 
-  it("asks to leave once, with a 64 px button that the wait does not disable", () => {
+  it("asks to leave once, with a 64 px button that the wait does not disable", async () => {
     const onLeave = vi.fn();
+    const first = await props({ onLeave });
     const view = render(
       <ThemeProvider>
-        <WorkScreen {...props({ onLeave })} />
+        <WorkScreen {...first} />
       </ThemeProvider>,
     );
     const leave = screen.getByRole("button", { name: "Выйти из смены" });
@@ -1542,7 +1675,7 @@ describe("the stub of the work screen", () => {
     expect(onLeave).toHaveBeenCalledTimes(1);
     view.rerender(
       <ThemeProvider>
-        <WorkScreen {...props({ onLeave, leaving: true })} />
+        <WorkScreen {...first} leaving />
       </ThemeProvider>,
     );
     // The same button with the focus still on it: a disabled one drops the
@@ -1555,5 +1688,6 @@ describe("the stub of the work screen", () => {
     // Pressing it while the leave waits asks for nothing more.
     fireEvent.click(waiting);
     expect(onLeave).toHaveBeenCalledTimes(1);
+    await settle();
   });
 });

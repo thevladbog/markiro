@@ -94,6 +94,9 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     getDeviceShifts: vi.fn<HostApi["getDeviceShifts"]>(async () => []),
     createDeviceShift: vi.fn<HostApi["createDeviceShift"]>(() => unexpected("createDeviceShift")),
     enterShift: vi.fn<HostApi["enterShift"]>(() => unexpected("enterShift")),
+    requestSsccBlock: vi.fn<HostApi["requestSsccBlock"]>(() => unexpected("requestSsccBlock")),
+    checkCode: vi.fn<HostApi["checkCode"]>(() => unexpected("checkCode")),
+    sendFacts: vi.fn<HostApi["sendFacts"]>(() => unexpected("sendFacts")),
     ...overrides,
   };
 }

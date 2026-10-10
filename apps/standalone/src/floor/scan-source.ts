@@ -2,8 +2,9 @@
 export type ScanListener = (raw: string) => void;
 
 /**
- * Where scans come from (stage 1 spec §5.6): a keyboard-wedge scanner today,
- * the COM scanners of plan 2a later. The sign-in screen does not care which.
+ * Where scans come from (stage 1 spec §5.6): a keyboard-wedge scanner and the
+ * COM scanners of the shell (plan 2a4). The sign-in screen, a new shift and
+ * the work screen do not care which.
  */
 export interface ScanSource {
   /** Begins delivering scans; returns the function that stops it. */
@@ -79,6 +80,74 @@ export function createKeyboardWedgeSource(target: KeyTarget = window): ScanSourc
     setManualTextEntryActive(active) {
       for (const clear of buffers) clear();
       manualTextEntry = active;
+    },
+  };
+}
+
+/**
+ * The COM scanners the shell reads (`standalone://scan`, plan 2a4) as a scan
+ * source: each frame as the scanner sent it, the group separator and the AIM
+ * prefixes kept (the domain removes them). The subscription is the shell's
+ * and asynchronous, so a source stopped before it answered drops it as soon
+ * as it does. A failed subscription (no shell event channel, as outside the
+ * application) leaves this source silent and the keyboard still scanning:
+ * which COM ports read, and whether they are connected, the workstation's
+ * setup shows (plan 2a7). While a text field takes typing, COM scans are
+ * dropped as the keyboard's are.
+ */
+export function createComScanSource(
+  subscribe: (listener: ScanListener) => Promise<() => void>,
+): ScanSource {
+  let manualTextEntry = false;
+  return {
+    start(listener) {
+      let stopped = false;
+      let unsubscribe: (() => void) | null = null;
+      subscribe((raw) => {
+        if (stopped || manualTextEntry || raw.length === 0) return;
+        listener(raw);
+      }).then(
+        (stop) => {
+          if (stopped) stop();
+          else unsubscribe = stop;
+        },
+        () => undefined,
+      );
+      return () => {
+        stopped = true;
+        unsubscribe?.();
+        unsubscribe = null;
+      };
+    },
+    clearPendingInput() {
+      // A COM frame arrives whole: nothing is pending between two scans.
+    },
+    setManualTextEntryActive(active) {
+      manualTextEntry = active;
+    },
+  };
+}
+
+/**
+ * Several sources as one: every scan of each reaches the one listener, and
+ * stopping stops them all. The floor reads the keyboard and the COM scanners
+ * at once (stage 2a spec, decision 25, chose one by the setup; plan 2a6 reads
+ * both, so a station needs no setup to scan and a stray wedge scanner still
+ * works next to a COM one).
+ */
+export function mergeScanSources(...sources: readonly ScanSource[]): ScanSource {
+  return {
+    start(listener) {
+      const stops = sources.map((source) => source.start(listener));
+      return () => {
+        for (const stop of stops) stop();
+      };
+    },
+    clearPendingInput() {
+      for (const source of sources) source.clearPendingInput();
+    },
+    setManualTextEntryActive(active) {
+      for (const source of sources) source.setManualTextEntryActive(active);
     },
   };
 }

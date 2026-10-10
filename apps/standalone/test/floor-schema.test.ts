@@ -1,9 +1,24 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import {
+  CONFLICT_COUNT_SQL,
+  HEAD_RECORD_SQL,
+  REJECTED_COUNT_SQL,
+  SHIFT_PREFIX_SQL,
+  UNSENT_COUNT_SQL,
+} from "../src/floor/outbox-status.js";
+import { BLOCKS_WITH_ROOM_SQL } from "../src/floor/work/block-supply.js";
+import { BOX_CODES_SQL, CLOSED_BOX_SQL } from "../src/floor/work/box-close.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
+import { attemptStatement, receiptStatements, UNSENT_SQL } from "../src/local/facts-sender.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
 import { openLocalDb } from "./support/local-db.js";
+
+// See test/protocol.test.ts: bind import.meta.url before building a URL from it.
+const testModuleUrl = import.meta.url;
 
 const OTHER_DEVICE = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
 const AT = "2026-10-09T08:00:00.000Z";
@@ -604,17 +619,35 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(
       plan("SELECT id FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?"),
     ).toContain("floor_scans_shift");
-    // The status bar re-counts the outbox after every scan, as three counts
-    // (one FILTER scan would read every record, payload included).
-    expect(
-      plan("SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? AND acked_at IS NULL"),
-    ).toContain("outbox_unsent");
-    for (const outcome of ["rejected", "conflict"]) {
+    // The status bar re-counts the outbox after every scan, as three counts (one
+    // FILTER scan would read every record, payload included), reads the oldest
+    // record not delivered while a send fails, and the serials left of the shift's
+    // prefix. The statements are the bar's own (`src/floor/outbox-status.ts`).
+    expect(plan(UNSENT_COUNT_SQL)).toContain("outbox_unsent");
+    for (const sql of [REJECTED_COUNT_SQL, CONFLICT_COUNT_SQL]) {
+      expect(plan(sql)).toContain("outbox_settled (host_id=? AND device_id=? AND outcome=?)");
+    }
+    expect(plan(HEAD_RECORD_SQL)).toContain("outbox_unsent (host_id=? AND device_id=?)");
+    expect(plan(SHIFT_PREFIX_SQL)).toContain(
+      "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
+    );
+    expect(plan(BLOCKS_WITH_ROOM_SQL)).toContain(
+      "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+    );
+    for (const sql of [
+      UNSENT_COUNT_SQL,
+      REJECTED_COUNT_SQL,
+      CONFLICT_COUNT_SQL,
+      HEAD_RECORD_SQL,
+      SHIFT_PREFIX_SQL,
+      BLOCKS_WITH_ROOM_SQL,
+    ]) {
       expect(
-        plan(
-          `SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? AND outcome = '${outcome}'`,
-        ),
-      ).toContain("outbox_settled (host_id=? AND device_id=? AND outcome=?)");
+        plan(sql)
+          .split("\n")
+          .filter((step) => step.startsWith("SCAN ") || step.includes("TEMP B-TREE")),
+        sql,
+      ).toEqual([]);
     }
     // The totals of the work screen: the codes and the closed boxes of a shift,
     // and the last SSCC.
@@ -633,27 +666,163 @@ describe("the shape of the production tables (migration 0006)", () => {
           "AND closed_at IS NOT NULL ORDER BY closed_at DESC, serial DESC LIMIT 1",
       ),
     ).toContain("floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?");
-    // The digest of a closing box reads its codes.
+    // The digest of a closing box reads its codes (the statement is the close's own).
+    expect(plan(BOX_CODES_SQL)).toContain(
+      "floor_codes_box (host_id=? AND device_id=? AND box_id=?)",
+    );
+    expect(plan(BOX_CODES_SQL)).not.toContain("TEMP B-TREE");
+    // A box closed whose answer was lost is read back by its own key.
+    expect(plan(CLOSED_BOX_SQL)).toContain("sqlite_autoindex_floor_boxes_1 (id=?)");
+    // The scan pipeline's own reads and its one UPDATE, on every scan: the
+    // station's registry of a code (the key of `floor_codes`), the open box of
+    // a shift, and the open box's count by the box's own key.
     expect(
       plan(
-        "SELECT code_hash FROM floor_codes WHERE host_id = ? AND device_id = ? AND box_id = ? " +
-          "ORDER BY code_hash",
+        "SELECT scanned_at FROM floor_codes WHERE host_id = ? AND device_id = ? AND code_hash = ?",
       ),
-    ).toContain("floor_codes_box (host_id=? AND device_id=? AND box_id=?)");
-    // What the sender writes stays on the unsent index and the record's own key.
+    ).toContain("sqlite_autoindex_floor_codes_1 (host_id=? AND device_id=? AND code_hash=?)");
     expect(
       plan(
-        "UPDATE outbox SET attempts = attempts + 1, sent_at = ? " +
-          "WHERE host_id = ? AND device_id = ? AND id IN (SELECT value FROM json_each(?))",
+        "SELECT id, opened_at, item_count FROM floor_boxes WHERE host_id = ? AND device_id = ? " +
+          "AND shift_id = ? AND closed_at IS NULL",
       ),
-    ).toContain("sqlite_autoindex_outbox_1");
+    ).toContain("floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?");
     expect(
       plan(
-        "UPDATE outbox SET outcome = r.value ->> 'outcome', acked_at = ? FROM json_each(?) AS r " +
-          "WHERE outbox.id = r.value ->> 'id' AND outbox.host_id = ? AND outbox.device_id = ? " +
-          "AND outbox.acked_at IS NULL",
+        "UPDATE floor_boxes SET item_count = item_count + 1 " +
+          "WHERE id = ? AND host_id = ? AND device_id = ? AND closed_at IS NULL",
       ),
-    ).toContain("outbox_unsent");
+    ).toContain("sqlite_autoindex_floor_boxes_1 (id=?)");
+    // The close of a box: the next serial of the earliest block with room (a
+    // few blocks of the prefix, ordered after the search), whether a box already
+    // holds the SSCC (the global unique key), the cursor's compare-and-set by the
+    // block's key and the box's own close by its key.
+    expect(
+      plan(
+        "SELECT block_id, next_serial FROM floor_sscc_blocks WHERE host_id = ? AND device_id = ? " +
+          "AND issuer_prefix = ? AND extension = ? AND next_serial <= to_serial " +
+          "ORDER BY from_serial, block_id LIMIT 1",
+      ),
+    ).toContain(
+      "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+    );
+    expect(plan("SELECT 1 AS n FROM floor_boxes WHERE sscc = ? LIMIT 1")).toContain(
+      "floor_boxes_sscc (sscc=?)",
+    );
+    expect(
+      plan(
+        "UPDATE floor_sscc_blocks SET next_serial = next_serial + 1 " +
+          "WHERE block_id = ? AND next_serial = ?",
+      ),
+    ).toContain("sqlite_autoindex_floor_sscc_blocks_1 (block_id=?)");
+    expect(
+      plan(
+        "UPDATE floor_boxes SET closed_at = ?, sscc = ?, block_id = ?, serial = ?, closed_by = ? " +
+          "WHERE id = ? AND host_id = ? AND device_id = ? AND closed_at IS NULL AND item_count = ?",
+      ),
+    ).toContain("sqlite_autoindex_floor_boxes_1 (id=?)");
+    // The supply of SSCC blocks: the newest block of the prefix (the half rule),
+    // whether a block shares serials with one kept, and a request's removal by its key
+    // (the blocks with room, which the serials left come from, are pinned above). The waiting request's own read scans the one
+    // small table of requests (below).
+    const prefixIndex =
+      "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)";
+    expect(
+      plan(
+        "SELECT from_serial, to_serial, next_serial FROM floor_sscc_blocks WHERE host_id = ? " +
+          "AND device_id = ? AND issuer_prefix = ? AND extension = ? ORDER BY from_serial DESC LIMIT 1",
+      ),
+    ).toContain(prefixIndex);
+    expect(
+      plan(
+        "SELECT 1 AS n FROM floor_sscc_blocks WHERE host_id = ? AND device_id = ? " +
+          "AND issuer_prefix = ? AND extension = ? AND block_id <> ? " +
+          "AND from_serial <= ? AND to_serial >= ? LIMIT 1",
+      ),
+    ).toContain(prefixIndex);
+    expect(plan("DELETE FROM floor_block_requests WHERE request_id = ?")).toContain(
+      "sqlite_autoindex_floor_block_requests_1 (request_id=?)",
+    );
+    // At most one request waits per pairing and prefix: the read takes the table whole.
+    expect(
+      plan(
+        "SELECT request_id, issuer_prefix, extension FROM floor_block_requests " +
+          "WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ? " +
+          "ORDER BY requested_at, request_id LIMIT 1",
+      )
+        .split("\n")
+        .filter((step) => step.startsWith("SCAN ")),
+    ).toEqual(["SCAN floor_block_requests"]);
+    // What the sender writes, taken from the sender itself (a copy of its text
+    // would not notice a change to the statement it runs): each statement looks
+    // its few records up by their own key. The planner would rather walk the
+    // `(host_id, device_id, …)` prefix of `outbox_unsent`, `floor_scans_shift`
+    // or `floor_boxes_shift` — every unsent record, scan and box of the pairing
+    // for each batch (9 s for the outbox's own statement with 100,000 records).
+    const pairing = { hostId: HOST_ID, deviceId: DEVICE_ID };
+    const attempt = attemptStatement(pairing, "[]", "x");
+    expect(plan(attempt.sql)).toContain(
+      "SEARCH outbox USING INDEX sqlite_autoindex_outbox_1 (id=?)",
+    );
+    const [settle, mark, fix] = receiptStatements(pairing, "[]", "x");
+    expect(plan(settle?.sql ?? "")).toContain(
+      "SEARCH outbox USING INDEX sqlite_autoindex_outbox_1 (id=?)",
+    );
+    expect(plan(mark?.sql ?? "")).toContain(
+      "SEARCH floor_scans USING INDEX sqlite_autoindex_floor_scans_1 (id=?)",
+    );
+    expect(plan(fix?.sql ?? "")).toContain(
+      "SEARCH floor_boxes USING INDEX sqlite_autoindex_floor_boxes_1 (id=?)",
+    );
+    expect(plan(fix?.sql ?? "")).toContain(
+      "SEARCH floor_scans USING INDEX sqlite_autoindex_floor_scans_1 (id=?)",
+    );
+    for (const statement of [attempt, settle, mark, fix]) {
+      for (const slow of [
+        "outbox_unsent",
+        "outbox_settled",
+        "floor_scans_shift",
+        "floor_boxes_shift",
+      ]) {
+        expect(plan(statement?.sql ?? "")).not.toContain(slow);
+      }
+    }
+    expect(plan(UNSENT_SQL)).toContain("outbox_unsent");
+  });
+
+  // The same for what the status bar reads.
+  it("are pinned on the shell's SQLite with the status bar's and the work screen's own statements", () => {
+    const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
+      // A line continuation of a Rust string drops the newline and the next line's indent.
+      .replace(/\\\n\s*/g, "");
+    const statements = [
+      UNSENT_COUNT_SQL,
+      REJECTED_COUNT_SQL,
+      CONFLICT_COUNT_SQL,
+      HEAD_RECORD_SQL,
+      SHIFT_PREFIX_SQL,
+      BLOCKS_WITH_ROOM_SQL,
+      CLOSED_BOX_SQL,
+      BOX_CODES_SQL,
+    ];
+    expect(new Set(statements).size).toBe(8);
+    for (const sql of statements) expect(source).toContain(`"${sql}"`);
+  });
+
+  // The shell's list (`tests/local_db.rs`) is written by hand: it must hold the
+  // exact text of every statement the sender runs, or its plans pin another text.
+  it("are pinned on the shell's SQLite with the sender's own statements", () => {
+    const pairing = { hostId: HOST_ID, deviceId: DEVICE_ID };
+    const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
+      // A line continuation of a Rust string drops the newline and the next line's indent.
+      .replace(/\\\n\s*/g, "");
+    const statements = [
+      UNSENT_SQL,
+      attemptStatement(pairing, "[]", "x").sql,
+      ...receiptStatements(pairing, "[]", "x").map((statement) => statement.sql),
+    ];
+    expect(statements).toHaveLength(5);
+    for (const sql of statements) expect(source).toContain(`"${sql}"`);
   });
 });
 

@@ -532,3 +532,77 @@
   display: grid;
   gap: 8px;
 }
+
+/* The work screen of a shift: the box and the shift in big numbers, the last
+   scan in words, and the 64 px actions under them. */
+.work-screen {
+  width: min(880px, 100%);
+}
+
+.work-screen__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.work-screen__facts dt {
+  color: var(--fg-2);
+}
+
+.work-screen__facts dd {
+  margin: 0;
+  font: var(--floor-lg);
+}
+
+.work-screen__last {
+  min-height: 64px;
+  margin: 0;
+  font: var(--floor-body-strong);
+}
+
+/* The focus lands here by code (after a message is answered), not by Tab. */
+.work-screen__last:focus {
+  outline: none;
+}
+
+/* An accepted scan lights the line for a moment: no overlay, so the counts and the buttons stay
+   in sight and under the finger. The words of the line and the tone say the rest. */
+.work-screen__last--cue {
+  background: var(--ok-bg);
+  box-shadow: 0 0 0 4px var(--ok-bg);
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .work-screen__last {
+    transition:
+      background-color 250ms ease-out,
+      box-shadow 250ms ease-out;
+  }
+}
+
+/* A refusal's flash never takes a tap: the buttons under it work. */
+.work-screen__flash {
+  pointer-events: none;
+}
+
+/* The stops of the line, in a polite region that is on the screen from the start. */
+.work-screen__alerts {
+  display: grid;
+  gap: 16px;
+}
+
+.work-screen__confirm {
+  display: grid;
+  gap: 16px;
+}
+
+.work-screen__leaving {
+  margin: 0;
+}
+
+.work-screen__waiting {
+  margin: 0;
+  font: var(--floor-body-strong);
+}

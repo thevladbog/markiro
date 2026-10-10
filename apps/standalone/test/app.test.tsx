@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   act,
@@ -24,6 +26,7 @@ import {
 import type { FloorNotice } from "../src/app/shell.js";
 import type { FloorAppProps } from "../src/floor/FloorApp.js";
 import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
+import type { HardwareApi } from "../src/hardware/hardware.js";
 import type { HostApi } from "../src/host/api.js";
 import { HostError } from "../src/host/client.js";
 import type { ConnectionApi, ConnectionHandlers } from "../src/host/connection.js";
@@ -36,6 +39,7 @@ import type {
   DeviceStatus,
   EnteredShift,
   HostStatus,
+  SsccBlockRequest,
 } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import { ENTITY_SET } from "../src/local/reference-sync.js";
@@ -48,7 +52,8 @@ import {
   observation,
   SESSION,
 } from "./support/fixtures.js";
-import { openLocalDb } from "./support/local-db.js";
+import { km, rows, unsentScans } from "./support/floor-work.js";
+import { openLocalDb, openLocalDbFile } from "./support/local-db.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
 
@@ -237,6 +242,7 @@ interface Services {
   local?: LocalExecutor;
   idleTimeoutMs?: number;
   scanSource?: ScanSource;
+  hardware?: HardwareApi;
   lockdown?: LockdownLifecycle;
 }
 
@@ -2226,6 +2232,127 @@ describe("the operator on the floor", () => {
     expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
   });
 
+  it("reads the shell's COM scanners next to the keyboard when given no scan source", async () => {
+    let comListener: ScanListener | null = null;
+    const hardware: HardwareApi = {
+      printBytes: vi.fn<HardwareApi["printBytes"]>(),
+      listUsbPrinters: vi.fn<HardwareApi["listUsbPrinters"]>(),
+      listSerialPorts: vi.fn<HardwareApi["listSerialPorts"]>(),
+      configureScanners: vi.fn<HardwareApi["configureScanners"]>(),
+      closeScanners: vi.fn<HardwareApi["closeScanners"]>(),
+      watchScanners: vi.fn<HardwareApi["watchScanners"]>(),
+      onScan: vi.fn<HardwareApi["onScan"]>(async (listener) => {
+        comListener = listener;
+        return () => {
+          comListener = null;
+        };
+      }),
+      setSystemAwake: vi.fn<HardwareApi["setSystemAwake"]>(),
+    };
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: fakeConnection().connection,
+      hardware,
+    });
+    await screen.findByText(PROMPT);
+    await waitFor(() => expect(comListener).not.toBeNull());
+    act(() => {
+      comListener?.("MRK-000742");
+    });
+    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+  });
+
+  /** The shell's hardware as a COM scan subscription is the only thing the app asks of it. */
+  function scanHardware() {
+    const subscriptions: Array<{ listener: ScanListener; unsubscribed: boolean }> = [];
+    const onScan = vi.fn<HardwareApi["onScan"]>(async (listener) => {
+      const subscription = { listener, unsubscribed: false };
+      subscriptions.push(subscription);
+      return () => {
+        subscription.unsubscribed = true;
+      };
+    });
+    const hardware: HardwareApi = {
+      printBytes: vi.fn<HardwareApi["printBytes"]>(),
+      listUsbPrinters: vi.fn<HardwareApi["listUsbPrinters"]>(),
+      listSerialPorts: vi.fn<HardwareApi["listSerialPorts"]>(),
+      configureScanners: vi.fn<HardwareApi["configureScanners"]>(),
+      closeScanners: vi.fn<HardwareApi["closeScanners"]>(),
+      watchScanners: vi.fn<HardwareApi["watchScanners"]>(),
+      onScan,
+      setSystemAwake: vi.fn<HardwareApi["setSystemAwake"]>(),
+    };
+    return { hardware, onScan, subscriptions };
+  }
+
+  it("leaves no COM subscription behind when the app goes away, StrictMode's double start included", async () => {
+    const shell = scanHardware();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    const { unmount } = render(
+      <StrictMode>
+        <ThemeProvider defaultTheme="dark">
+          <App
+            probe={probeAnswering(true)}
+            device={fakeDevice(DEVICE_STATUS)}
+            host={host}
+            connection={fakeConnection().connection}
+            local={openLocalDb().executor}
+            address={ADDRESS}
+            hardware={shell.hardware}
+          />
+        </ThemeProvider>
+      </StrictMode>,
+    );
+    await screen.findByText(PROMPT);
+    await waitFor(() => expect(shell.subscriptions.length).toBeGreaterThan(1));
+    unmount();
+    await flush();
+    expect(shell.subscriptions.length).toBeGreaterThan(1);
+    expect(shell.subscriptions.filter((subscription) => !subscription.unsubscribed)).toEqual([]);
+  });
+
+  it("does not subscribe to the COM scanners when it is given a scan source", async () => {
+    const shell = scanHardware();
+    const scanner = fakeScanSource();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: fakeConnection().connection,
+      scanSource: scanner.source,
+      hardware: shell.hardware,
+    });
+    await screen.findByText(PROMPT);
+    await flush();
+    expect(shell.onScan).not.toHaveBeenCalled();
+    scanner.read("MRK-000742");
+    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+  });
+
+  it("takes a keyboard scan while it also listens to the COM scanners", async () => {
+    const shell = scanHardware();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: fakeConnection().connection,
+      hardware: shell.hardware,
+    });
+    await screen.findByText(PROMPT);
+    await waitFor(() => expect(shell.subscriptions.length).toBeGreaterThan(0));
+    scan("MRK-000742");
+    expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+  });
+
   it("starts the wait again on a touch of the screen, not only on a key", async () => {
     fakeRetryTimers();
     await onTheFloor(4_000);
@@ -2488,14 +2615,14 @@ describe("the operator on the floor", () => {
   };
 
   /** Anna signed in, in the line's shift, on a station whose host lists it. */
-  async function inTheShift() {
+  async function inTheShift(probe: HostProbe = probeAnswering(true)) {
     const link = fakeConnection();
     const device = fakeDevice(DEVICE_STATUS);
     const host = fakeHost();
     host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
     host.getDeviceShifts.mockResolvedValue([PLANNED]);
     host.enterShift.mockResolvedValue(OPENED);
-    renderApp({ probe: probeAnswering(true), device, host, connection: link.connection });
+    renderApp({ probe, device, host, connection: link.connection });
     await screen.findByText(PROMPT);
     scan("MRK-000742");
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
@@ -2573,6 +2700,86 @@ describe("the operator on the floor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
     expect(reached()).toEqual(before);
+  });
+
+  it("takes a code of the product in the work screen, asks the host about it, and delivers the record", async () => {
+    const { host } = await inTheShift();
+    // The screen listens from the commit that also asks for serials on entry.
+    await waitFor(() => expect(host.requestSsccBlock).toHaveBeenCalled());
+    host.checkCode.mockResolvedValue({ status: "free" });
+    host.requestSsccBlock.mockRejectedValue(new Error("not wanted here"));
+    host.sendFacts.mockImplementation(async (records) =>
+      records.map((record) => ({
+        id: (record as { id: string }).id,
+        outcome: "accepted" as const,
+      })),
+    );
+    scan(km("APP1"));
+    await waitFor(() => expect(host.checkCode).toHaveBeenCalledTimes(1));
+    expect(host.checkCode.mock.calls[0]?.[0]).toMatch(/^[0-9a-f]{64}$/);
+    const value = (label: string) => screen.getByText(label).nextElementSibling?.textContent;
+    await waitFor(() => expect(value("Принято в смене")).toBe("1"));
+    // The write asked the link to deliver at once, and the receipt came back.
+    await waitFor(() => expect(host.sendFacts).toHaveBeenCalled());
+    const sent = host.sendFacts.mock.calls.flatMap(([records]) => records);
+    expect(sent).toContainEqual(expect.objectContaining({ kind: "scan", shiftId: PLANNED.id }));
+    await waitFor(() => expect(value("Не отправлено")).toBe("0"));
+    // The screen asked the host for serials on entry (the station had no block).
+    expect(host.requestSsccBlock).toHaveBeenCalled();
+  });
+
+  it("keeps the operator in the shift when a sync finds another host, and shows that host once they leave", async () => {
+    const { link, host } = await inTheShift();
+    const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
+    const marker =
+      "По адресу хоста отвечает другой хост: записи не отправляются. Выйдите из смены и подключите станцию заново.";
+    expect(within(bar).queryByText(marker)).toBeNull();
+    host.getChanges.mockResolvedValue(feedPage(43, [], OTHER_HOST_ID));
+    await link.revision(43);
+    // The link stops at once: nothing more reaches a host that is not ours.
+    await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
+    expect(await within(bar).findByText(marker)).toBeTruthy();
+    expect(within(bar).queryByText("На связи с хостом")).toBeNull();
+    // The shift is still on the screen: a write in flight is not cut off by the forget screen.
+    expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
+    expect(screen.queryByText("Устройство подключено к другому хосту")).toBeNull();
+    const reached = host.getChanges.mock.calls.length;
+    await link.late.revision(44);
+    await link.late.status({ ...ONLINE, seq: 3 });
+    expect(host.getChanges.mock.calls.length).toBe(reached);
+    // The line goes on, offline-first: the code is taken, and the other host is asked nothing.
+    host.checkCode.mockClear();
+    scan(km("OTHER1"));
+    await waitFor(() =>
+      expect(screen.getByText("Принято в смене").nextElementSibling?.textContent).toBe("1"),
+    );
+    expect(host.checkCode).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
+    expect(screen.queryByText("Смена OCT26-005/S")).toBeNull();
+  });
+
+  it("keeps the operator in the shift when the start-up probe answers late, and applies its answer once they leave", async () => {
+    const swapped = observation(true);
+    swapped.hello.hostId = OTHER_HOST_ID;
+    let answer: (found: typeof swapped) => void = () => undefined;
+    const probe: HostProbe = {
+      hello: vi.fn<HostProbe["hello"]>(
+        () =>
+          new Promise((resolve) => {
+            answer = resolve;
+          }),
+      ),
+    };
+    await inTheShift(probe);
+    await act(async () => {
+      answer(swapped);
+    });
+    // Not the probe's screen, in the middle of the work.
+    expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
+    expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
   });
 
   it("says in the status bar that the host refused the station while the operator is still in the shift, whichever way the refusal came", async () => {
@@ -2748,6 +2955,194 @@ describe("the operator on the floor", () => {
     expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+  });
+
+  it("keeps scanning while the host is away, and sends every record in order once it is back", async () => {
+    const link = fakeConnection();
+    const database = openLocalDb();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    host.getDeviceShifts.mockResolvedValue([PLANNED]);
+    host.enterShift.mockResolvedValue(OPENED);
+    host.requestSsccBlock.mockImplementation(async (request) => ({
+      id: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+      issuerPrefix: request.issuerPrefix,
+      extension: request.extension,
+      fromSerial: 1500,
+      toSerial: 3499,
+    }));
+    host.sendFacts.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "host away" }),
+    );
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+      local: database.executor,
+    });
+    await screen.findByText(PROMPT);
+    scan("MRK-000742");
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+    expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
+    await link.status({ state: "offline", lastContactAt: 1, lastError: "unreachable", seq: 2 });
+    const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
+    const unsent = () => within(bar).getByText("Не отправлено").nextElementSibling?.textContent;
+    for (const serial of ["A1", "A2", "A3"]) {
+      scan(km(serial));
+      await screen.findByText(`Принято: в коробе ${serial.slice(1)} из 12.`);
+    }
+    await waitFor(() => expect(unsent()).toBe("3"));
+    host.sendFacts.mockImplementation(async (records) =>
+      records.map((record) => ({
+        id: (record as { id: string }).id,
+        outcome: "accepted" as const,
+      })),
+    );
+    // The three records waited in the outbox, unsent, in the order of the scans.
+    const kept = rows(database.db, "SELECT id FROM outbox ORDER BY seq").map((row) => row["id"]);
+    expect(kept).toHaveLength(3);
+    await link.status({ ...ONLINE, seq: 3 });
+    await waitFor(() => expect(unsent()).toBe("0"));
+    const sent = host.sendFacts.mock.calls.at(-1)?.[0] ?? [];
+    expect(
+      sent.map((record) => {
+        const { kind, data } = record as { kind: string; data: { code: { serial: string } } };
+        return [kind, data.code.serial];
+      }),
+    ).toEqual([
+      ["scan", "A1"],
+      ["scan", "A2"],
+      ["scan", "A3"],
+    ]);
+    // Exactly the records kept, each once, and each with the host's receipt.
+    expect(sent.map((record) => (record as { id: string }).id)).toEqual(kept);
+    expect(rows(database.db, "SELECT outcome FROM outbox ORDER BY seq")).toEqual([
+      { outcome: "accepted" },
+      { outcome: "accepted" },
+      { outcome: "accepted" },
+    ]);
+  });
+
+  it("finds its request, its full box and its records after a restart, and finishes the work once the host is back", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "markiro-app-restart-"));
+    try {
+      const path = join(dir, "station.db");
+      // The host issues a block once per request id; the first answer never arrives.
+      const asked: string[] = [];
+      const issue = async (request: SsccBlockRequest) => {
+        asked.push(request.requestId);
+        if (asked.length === 1) throw hostDown();
+        return {
+          id: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+          issuerPrefix: request.issuerPrefix,
+          extension: request.extension,
+          fromSerial: 1500,
+          toSerial: 3499,
+        };
+      };
+      const unsentOf = () => screen.getByText("Не отправлено").nextElementSibling?.textContent;
+
+      // ---- The first start: the host is there for the entry only.
+      const first = openLocalDbFile(path);
+      const link = fakeConnection();
+      const host = fakeHost();
+      host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+      host.getDeviceShifts.mockResolvedValue([PLANNED]);
+      host.enterShift.mockResolvedValue(OPENED);
+      host.requestSsccBlock.mockImplementation(issue);
+      host.sendFacts.mockRejectedValue(hostDown());
+      const view = renderApp({
+        probe: probeAnswering(true),
+        device: fakeDevice(DEVICE_STATUS),
+        host,
+        connection: link.connection,
+        local: first.executor,
+      });
+      await screen.findByText(PROMPT);
+      scan("MRK-000742");
+      fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+      expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
+      // The entry asked for serials; the request is kept for the answer that was lost.
+      await waitFor(() => expect(asked).toHaveLength(1));
+      await waitFor(() =>
+        expect(rows(first.db, "SELECT request_id FROM floor_block_requests")).toEqual([
+          { request_id: asked[0] },
+        ]),
+      );
+      await link.status({ state: "offline", lastContactAt: 1, lastError: "unreachable", seq: 2 });
+      for (let n = 1; n <= 12; n += 1) {
+        scan(km(`B${String(n).padStart(2, "0")}`));
+        await screen.findByText(`Принято: в коробе ${n} из 12.`);
+      }
+      // The twelfth fills the box; with no serial and no host the box stays open, and the screen says why.
+      expect(await screen.findByText("Нет номеров SSCC: короб не закрыт")).toBeTruthy();
+      await waitFor(() => expect(unsentOf()).toBe("12"));
+      expect(rows(first.db, "SELECT item_count, closed_at FROM floor_boxes")).toEqual([
+        { item_count: 12, closed_at: null },
+      ]);
+      // Nothing was acknowledged: the host did not take a record while it was away.
+      expect(rows(first.db, "SELECT count(*) AS n FROM outbox WHERE acked_at IS NULL")).toEqual([
+        { n: 12 },
+      ]);
+      view.unmount();
+      first.db.close();
+
+      // ---- The computer starts again over the same file; the host is back.
+      const second = openLocalDbFile(path);
+      const back = fakeConnection();
+      const host2 = fakeHost();
+      host2.getChanges.mockResolvedValue(feedPage(42));
+      host2.getDeviceShifts.mockResolvedValue([
+        { ...PLANNED, status: "active", ownerDeviceId: DEVICE_ID, openedAt: OPENED.openedAt },
+      ]);
+      host2.enterShift.mockResolvedValue(OPENED);
+      host2.requestSsccBlock.mockImplementation(issue);
+      host2.sendFacts.mockImplementation(async (records) =>
+        records.map((record) => ({
+          id: (record as { id: string }).id,
+          outcome: "accepted" as const,
+        })),
+      );
+      renderApp({
+        probe: probeAnswering(true),
+        device: fakeDevice(DEVICE_STATUS),
+        host: host2,
+        connection: back.connection,
+        local: second.executor,
+      });
+      await screen.findByText(PROMPT);
+      scan("MRK-000742");
+      fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+      expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
+      // The entry repeats the request it kept, whole, and closes the full box on the block it brings.
+      await waitFor(() => expect(asked).toHaveLength(2));
+      expect(asked[1]).toBe(asked[0]);
+      await waitFor(() =>
+        expect(rows(second.db, "SELECT serial, item_count FROM floor_boxes")).toEqual([
+          { serial: 1500, item_count: 12 },
+        ]),
+      );
+      expect(rows(second.db, "SELECT request_id FROM floor_block_requests")).toEqual([]);
+      expect(rows(second.db, "SELECT next_serial FROM floor_sscc_blocks")).toEqual([
+        { next_serial: 1501 },
+      ]);
+      // Everything the first start kept goes once, in order, and nothing waits any more.
+      await waitFor(() => expect(unsentOf()).toBe("0"));
+      const delivered = host2.sendFacts.mock.calls.flatMap(([records]) =>
+        records.map((record) => record as { id: string; kind: string }),
+      );
+      const stored = rows(second.db, "SELECT id, kind, outcome FROM outbox ORDER BY seq");
+      expect(delivered.map((record) => record.id)).toEqual(stored.map((row) => row["id"]));
+      expect(delivered.map((record) => record.kind)).toEqual([
+        ...Array.from({ length: 12 }, () => "scan"),
+        "box_closed",
+      ]);
+      expect(stored.every((row) => row["outcome"] === "accepted")).toBe(true);
+      second.db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -3004,6 +3399,7 @@ describe("useHostLink", () => {
           changes,
           refresh,
           deviceShifts: async () => [],
+          sendFacts: async () => [],
           dispatch,
         }),
       { initialProps: { deviceId: DEVICE_ID } },
@@ -3019,5 +3415,89 @@ describe("useHostLink", () => {
     expect(link.connection.watch).toHaveBeenCalledTimes(2);
     expect(changes.mock.calls).toEqual([[0], [0]]);
     unmount();
+  });
+});
+
+describe("the outbox in the app", () => {
+  it("goes to the host once the station is linked, and each record keeps the host's answer", async () => {
+    const database = openLocalDb();
+    const [first, second] = await unsentScans(database.executor, 2);
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.sendFacts.mockImplementation(async (records) => [
+      { id: (records[0] as { id: string }).id, outcome: "accepted" },
+      { id: (records[1] as { id: string }).id, outcome: "rejected", code: "unknown_shift" },
+    ]);
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+      local: database.executor,
+    });
+    await waitFor(() =>
+      expect(
+        rows(database.db, "SELECT id, outcome, outcome_code FROM outbox ORDER BY seq"),
+      ).toEqual([
+        { id: first, outcome: "accepted", outcome_code: null },
+        { id: second, outcome: "rejected", outcome_code: "unknown_shift" },
+      ]),
+    );
+    expect(host.sendFacts).toHaveBeenCalledTimes(1);
+  });
+
+  /** The value the floor's status bar shows under `label`, or `null` when it shows no such item. */
+  function barValue(label: string): string | null {
+    const term = screen.queryByText(label);
+    return term === null ? null : (term.nextElementSibling?.textContent ?? null);
+  }
+
+  it("shows the floor's status bar what waits, what the host refused and what conflicts, as the host answers", async () => {
+    const database = openLocalDb();
+    const [first, second, third] = await unsentScans(database.executor, 3);
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.sendFacts.mockImplementation(async (records) => {
+      expect(records.map((record) => (record as { id: string }).id)).toEqual([
+        first,
+        second,
+        third,
+      ]);
+      return [
+        { id: first ?? "", outcome: "accepted" },
+        { id: second ?? "", outcome: "rejected", code: "unknown_shift" },
+        { id: third ?? "", outcome: "conflict", code: "code_taken" },
+      ];
+    });
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+      local: database.executor,
+    });
+    await waitFor(() => expect(barValue("Отклонено хостом")).toBe("1"));
+    expect(barValue("Конфликтов")).toBe("1");
+    expect(barValue("Не отправлено")).toBe("0");
+  });
+
+  it("tells the floor's status bar when the host fails the delivery, and how long the record has waited", async () => {
+    const database = openLocalDb();
+    await unsentScans(database.executor, 2);
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.sendFacts.mockRejectedValue(
+      new HostError({ kind: "api", code: "internal_error", status: 500, message: "boom" }),
+    );
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+      local: database.executor,
+    });
+    expect(await screen.findByText(/Хост не принимает записи смены/)).toBeTruthy();
+    expect(await screen.findByText(/Самая старая запись ждёт отправки уже/)).toBeTruthy();
+    expect(barValue("Не отправлено")).toBe("2");
   });
 });

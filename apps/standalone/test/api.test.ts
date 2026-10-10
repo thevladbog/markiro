@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { createHostApi, type HostApi } from "../src/host/api.js";
+import { CODE_CHECK_TIMEOUT_MS, createHostApi, type HostApi } from "../src/host/api.js";
 import {
   createTauriHostClient,
   HostError,
@@ -16,6 +16,7 @@ import {
   counterpartyUpdateSchema,
   deviceShiftCreateSchema,
   deviceUpdateSchema,
+  factBatchSchema,
   labelTemplateSchema,
   lineUpdateSchema,
   officeOperatorSchema,
@@ -29,6 +30,7 @@ import {
   shiftCloseSchema,
   shiftCreateSchema,
   shiftUpdateSchema,
+  ssccBlockRequestSchema,
   templateCreateSchema,
   templateDefaultsUpdateSchema,
   templateUpdateSchema,
@@ -47,6 +49,8 @@ interface Sent {
   path: string;
   body: unknown;
   officeToken: string | undefined;
+  /** Only the code check limits its request. */
+  timeoutMs?: number;
 }
 
 /** A client that records the request and answers `answer`, parsed by the caller's schema. */
@@ -54,7 +58,13 @@ function recording(answer: unknown) {
   const sent: Sent[] = [];
   const client: HostClient = {
     request: async (method, path, options) => {
-      sent.push({ method, path, body: options.body, officeToken: options.officeToken });
+      sent.push({
+        method,
+        path,
+        body: options.body,
+        officeToken: options.officeToken,
+        ...(options.timeoutMs === undefined ? {} : { timeoutMs: options.timeoutMs }),
+      });
       return options.schema.parse(answer);
     },
   };
@@ -683,5 +693,88 @@ describe("HostApi device shifts", () => {
       kind: "transport",
       code: "invalid_response",
     });
+  });
+});
+
+describe("HostApi floor work", () => {
+  const BLOCK_REQUEST = ssccBlockRequestSchema.parse(fixture("sscc-block-request.json"));
+  const RECORDS = factBatchSchema.parse(fixture("facts-request.json")).records;
+  const CODE_HASH = "3f6c0f1e2d8b4a5c9e7f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f";
+
+  it("asks for a block, checks a code within 300 ms and sends facts, with the device key only", async () => {
+    const block = recording(fixture("sscc-block.json"));
+    await expect(block.api.requestSsccBlock(BLOCK_REQUEST)).resolves.toEqual(
+      fixture("sscc-block.json"),
+    );
+    const check = recording(fixture("code-check-taken.json"));
+    await expect(check.api.checkCode(CODE_HASH)).resolves.toEqual(fixture("code-check-taken.json"));
+    const facts = recording(fixture("facts-response.json"));
+    await expect(facts.api.sendFacts(RECORDS)).resolves.toEqual(
+      (fixture("facts-response.json") as { receipts: unknown[] }).receipts,
+    );
+    expect(CODE_CHECK_TIMEOUT_MS).toBe(300);
+    expect([...block.sent, ...check.sent, ...facts.sent]).toEqual([
+      {
+        method: "POST",
+        path: "/v1/device/sscc/blocks",
+        body: BLOCK_REQUEST,
+        officeToken: undefined,
+      },
+      {
+        method: "GET",
+        path: `/v1/device/codes/${CODE_HASH}`,
+        body: undefined,
+        officeToken: undefined,
+        timeoutMs: 300,
+      },
+      {
+        method: "POST",
+        path: "/v1/device/facts",
+        body: { records: RECORDS },
+        officeToken: undefined,
+      },
+    ]);
+  });
+
+  it("limits the code check's request and no other", async () => {
+    const block = recording(fixture("sscc-block.json"));
+    await block.api.requestSsccBlock(BLOCK_REQUEST);
+    const facts = recording(fixture("facts-response.json"));
+    await facts.api.sendFacts(RECORDS);
+    for (const sent of [...block.sent, ...facts.sent]) {
+      expect(Object.keys(sent)).not.toContain("timeoutMs");
+    }
+  });
+
+  it("puts the hash into the path as one segment, whatever it holds", async () => {
+    const check = recording(fixture("code-check-free.json"));
+    await expect(check.api.checkCode("a/b?c")).resolves.toEqual({ status: "free" });
+    expect(check.sent.map((sent) => sent.path)).toEqual(["/v1/device/codes/a%2Fb%3Fc"]);
+  });
+
+  it("sends the records exactly as the outbox kept them, unread", async () => {
+    // The outbox's payloads are sent as stored: a record this build's schema
+    // would reshape (a field a later build added) still goes out untouched.
+    const kept = [{ id: "kept", kind: "scan", data: { later: true } }];
+    const facts = recording({ receipts: [] });
+    await expect(facts.api.sendFacts(kept)).resolves.toEqual([]);
+    expect(facts.sent.map((sent) => sent.body)).toEqual([{ records: kept }]);
+  });
+
+  it("is stood in for by a fake that refuses the three calls loudly until a test stubs them", async () => {
+    const fake = fakeHostApi();
+    await expect(fake.requestSsccBlock(BLOCK_REQUEST)).rejects.toThrow(
+      "unexpected HostApi.requestSsccBlock call",
+    );
+    await expect(fake.checkCode(CODE_HASH)).rejects.toThrow("unexpected HostApi.checkCode call");
+    await expect(fake.sendFacts(RECORDS)).rejects.toThrow("unexpected HostApi.sendFacts call");
+    const stubbed = fakeHostApi({ checkCode: vi.fn(async () => ({ status: "free" as const })) });
+    await expect(stubbed.checkCode(CODE_HASH)).resolves.toEqual({ status: "free" });
+  });
+
+  it("rejects a block, a check or receipts in another shape", async () => {
+    await expect(recording({ id: "x" }).api.requestSsccBlock(BLOCK_REQUEST)).rejects.toThrow();
+    await expect(recording({ status: "maybe" }).api.checkCode(CODE_HASH)).rejects.toThrow();
+    await expect(recording({ receipts: [{ id: null }] }).api.sendFacts(RECORDS)).rejects.toThrow();
   });
 });
