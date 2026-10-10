@@ -1069,6 +1069,8 @@
     "errors": {
       "WAREHOUSE_OPERATION_FAILED": "The operation failed. The saved job remains on this station.",
       "WAREHOUSE_CATALOG_NETWORK": "Connect to the server to load templates.",
+      "WAREHOUSE_TEMPLATE_CATALOG_MISMATCH": "The template catalog does not match the station request. Check station and server version compatibility.",
+      "WAREHOUSE_BUSY": "Finish the current print or label recovery first.",
       "WAREHOUSE_NETWORK_REQUIRED": "The code is not cached. Connect to the server and scan again.",
       "WAREHOUSE_NOT_FOUND": "Code not found in this organisation. Check the label.",
       "WAREHOUSE_INCOMPLETE_KM": "The database does not have the full marking code. A crypto tail is required.",

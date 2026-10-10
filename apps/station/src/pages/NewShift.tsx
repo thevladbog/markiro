@@ -168,6 +168,8 @@ export function NewShift({
   const [previewRetry, setPreviewRetry] = useState(0);
   const resolving = useRef(false);
   const mounted = useRef(true);
+  const isCurrentRef = useRef(isCurrent);
+  isCurrentRef.current = isCurrent;
   const shiftEntryOperation = useRef(0);
   const previewPurpose =
     view === "template"
@@ -205,9 +207,9 @@ export function NewShift({
   } | null>(null);
 
   useEffect(() => {
-    if (!previewOwner || !(isCurrent?.() ?? true)) return;
+    if (!previewOwner || !(isCurrentRef.current?.() ?? true)) return;
     let active = true;
-    const current = () => active && mounted.current && (isCurrent?.() ?? true);
+    const current = () => active && mounted.current && (isCurrentRef.current?.() ?? true);
     const query = new URLSearchParams({
       productId: previewOwner.productId,
       templateId: previewOwner.templateId,
@@ -234,7 +236,7 @@ export function NewShift({
     return () => {
       active = false;
     };
-  }, [previewOwner, isCurrent]);
+  }, [previewOwner]);
 
   useEffect(() => {
     mounted.current = true;

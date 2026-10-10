@@ -176,6 +176,97 @@ it("checks only a fresh job's selected template and saves its current spec and d
   }
 });
 
+it.each([502, 503, 504])(
+  "prints an authorized cached source and template during gateway failure %s",
+  async (status) => {
+    const h = await templateWork();
+    try {
+      await h.work.initialize();
+      await h.work.start();
+      const session = h.work.getSnapshot().session;
+      if (!session) throw new Error("session missing");
+      const { cacheWarehouseSource } = await import("../src/lib/warehouse-reprint/sources");
+      await cacheWarehouseSource(h.exec, session.owner, warehouseBoxSource());
+      vi.mocked(h.options.client.post).mockRejectedValue(new StationApiError(status, "gateway"));
+      h.get.mockRejectedValue(new StationApiError(status, "gateway"));
+      await h.work.scan(h.input.source.identity);
+      expect(h.work.getSnapshot().error).toBeNull();
+      expect(h.work.getSnapshot().job?.state).toBe("sent");
+      expect(h.print).toHaveBeenCalledTimes(1);
+    } finally {
+      await h.work.close();
+      h.db.close();
+    }
+  },
+);
+
+it("does not substitute retired choices when opening or cancelling selection or resuming the session", async () => {
+  const h = await templateWork();
+  try {
+    await h.work.initialize();
+    await h.work.configure("lost", h.unit, h.box);
+    const nextUnit = changedTemplate(h.unit, { id: crypto.randomUUID(), name: "Different size" });
+    const nextBox = changedTemplate(h.box, { id: crypto.randomUUID(), name: "New default" });
+    h.setCatalog([nextUnit, nextBox]);
+    h.setDefault(nextBox.id);
+    await h.work.refreshCatalog();
+    expect(h.work.getSnapshot().session).toMatchObject({ unitTemplate: null, boxTemplate: null });
+    // Cancelling invokes no configure command. The cleared choices must survive restart.
+    await h.work.close();
+    const resumed = createWarehouseWork(h.options);
+    try {
+      await resumed.initialize();
+      expect(resumed.getSnapshot().session).toMatchObject({
+        unitTemplate: null,
+        boxTemplate: null,
+      });
+      await resumed.start();
+      expect(resumed.getSnapshot().error).toBe("WAREHOUSE_TEMPLATES_REQUIRED");
+      expect(h.print).not.toHaveBeenCalled();
+      await resumed.configure("lost", nextUnit, nextBox);
+      await resumed.start();
+      expect(resumed.getSnapshot().session?.status).toBe("active");
+    } finally {
+      await resumed.close();
+    }
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+
+it.each([429, 500, "invalid"] as const)(
+  "keeps the loaded catalog available when optional box defaults fail: %s",
+  async (failure) => {
+    const h = await templateWork();
+    const normalGet = h.get.getMockImplementation();
+    if (!normalGet) throw new Error("catalog implementation missing");
+    h.get.mockImplementation(async (path) => {
+      if (path === "/shifts/box-label-templates") {
+        if (failure === "invalid")
+          return { items: [], defaultBoxLabelTemplateId: "broken", defaultSource: "organization" };
+        throw new StationApiError(failure, "default unavailable");
+      }
+      return normalGet(path);
+    });
+    try {
+      await h.work.initialize();
+      expect(h.work.getSnapshot()).toMatchObject({
+        initialized: true,
+        error: null,
+        defaultBoxId: null,
+      });
+      expect(h.work.getSnapshot().catalog?.templates).toEqual([h.unit, h.box]);
+      await h.work.configure("damaged", h.unit, h.box);
+      await h.work.start();
+      expect(h.work.getSnapshot().session?.status).toBe("active");
+    } finally {
+      await h.work.close();
+      h.db.close();
+    }
+  },
+);
+
 it.each(["removed", "group", "fields", "denied"])(
   "refuses fresh printing after %s template eligibility changes",
   async (kind) => {

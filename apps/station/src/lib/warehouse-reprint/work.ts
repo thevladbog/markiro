@@ -164,24 +164,30 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
     if (!current()) throw new Error("WAREHOUSE_OWNER_CHANGED");
     const session = state.session;
     if (session) {
+      const unitTemplate = resolveWarehouseTemplateSelection(
+        catalog,
+        "unit",
+        session.unitTemplate?.id ?? null,
+        defaultBoxId,
+      );
+      const boxTemplate =
+        (freshSession
+          ? resolveWarehouseTemplateSelection(catalog, "box", null, defaultBoxId)
+          : null) ??
+        resolveWarehouseTemplateSelection(
+          catalog,
+          "box",
+          session.boxTemplate?.id ?? null,
+          defaultBoxId,
+        );
       await saveWarehouseSession(guarded, {
         ...session,
-        unitTemplate: resolveWarehouseTemplateSelection(
-          catalog,
-          "unit",
-          session.unitTemplate?.id ?? null,
-          defaultBoxId,
-        ),
+        // Defaults may initialize a new session, never replace an existing
+        // choice as a side effect of opening or cancelling the picker.
+        unitTemplate:
+          freshSession || unitTemplate?.id === session.unitTemplate?.id ? unitTemplate : null,
         boxTemplate:
-          (freshSession
-            ? resolveWarehouseTemplateSelection(catalog, "box", null, defaultBoxId)
-            : null) ??
-          resolveWarehouseTemplateSelection(
-            catalog,
-            "box",
-            session.boxTemplate?.id ?? null,
-            defaultBoxId,
-          ),
+          freshSession || boxTemplate?.id === session.boxTemplate?.id ? boxTemplate : null,
       });
     }
     if (!current()) throw new Error("WAREHOUSE_OWNER_CHANGED");

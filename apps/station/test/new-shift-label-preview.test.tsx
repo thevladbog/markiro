@@ -114,6 +114,38 @@ async function openPicker(purpose: Purpose) {
 }
 
 describe("NewShift shared label selection and preview", () => {
+  it("keeps a pending preview across parent rerenders with new ownership callback identities", async () => {
+    const pending = deferred();
+    const h = setup(
+      () => pending.promise,
+      () => true,
+    );
+    await openPicker("box");
+    expect(h.previewReads).toHaveLength(1);
+    h.rerender(<NewShift {...h.props} isCurrent={() => true} />);
+    h.rerender(<NewShift {...h.props} isCurrent={() => true} />);
+    expect(h.previewReads).toHaveLength(1);
+    await act(async () =>
+      pending.resolve({ id: options[0]?.id, name: "Stable preview", purpose: "box", spec }),
+    );
+    await screen.findByRole("img", { name: /Stable preview/ });
+    expect(h.previewReads).toHaveLength(1);
+  });
+
+  it("uses the latest ownership callback to reject a pending preview after retirement", async () => {
+    const pending = deferred();
+    const h = setup(
+      () => pending.promise,
+      () => true,
+    );
+    await openPicker("box");
+    h.rerender(<NewShift {...h.props} isCurrent={() => false} />);
+    await act(async () =>
+      pending.resolve({ id: options[0]?.id, name: "Retired response", purpose: "box", spec }),
+    );
+    expect(screen.queryByRole("img", { name: /Retired response/ })).toBeNull();
+    expect(h.previewReads).toHaveLength(1);
+  });
   it("retries a failed preview without altering the selected template or creating a shift", async () => {
     let failures = 1;
     const h = setup(async () => {

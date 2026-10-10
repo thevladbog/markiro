@@ -138,7 +138,7 @@ describe("warehouse catalog freshness and defaults cache", () => {
     await expect(
       templates.refreshWarehouseTemplates(client, exec, "foreign", original, [selected.id]),
     ).rejects.toThrow("WAREHOUSE_CATALOG_NETWORK");
-    for (const status of [401, 403, 500, 502, 503, 504]) {
+    for (const status of [401, 403, 404, 429, 500]) {
       const denied = new StationApiError(status, "denied");
       get.mockRejectedValue(denied);
       await expect(
@@ -146,6 +146,27 @@ describe("warehouse catalog freshness and defaults cache", () => {
       ).rejects.toBe(denied);
     }
   });
+
+  it.each([502, 503, 504])(
+    "uses an authorized catalog during gateway failure %s",
+    async (status) => {
+      const selected = template();
+      const original = catalog([selected]);
+      const get = vi.fn().mockResolvedValue(original);
+      const client = station(get);
+      await templates.loadWarehouseTemplates(client, exec, "owner");
+      get.mockRejectedValue(new StationApiError(status, "gateway unavailable"));
+      expect(await templates.loadWarehouseTemplates(client, exec, "owner")).toEqual(original);
+      expect(
+        await templates.refreshWarehouseTemplates(client, exec, "owner", catalog([]), [
+          selected.id,
+        ]),
+      ).toEqual(original);
+      await expect(templates.loadWarehouseTemplates(client, exec, "foreign")).rejects.toThrow(
+        "WAREHOUSE_CATALOG_NETWORK",
+      );
+    },
+  );
 
   it("honors explicit offline mode without attempting a template/default request", async () => {
     const box = template();
@@ -182,12 +203,38 @@ describe("warehouse catalog freshness and defaults cache", () => {
     get.mockRejectedValue(new TypeError("offline"));
     expect(await templates.loadWarehouseBoxDefault(client, exec, "owner")).toBeNull();
     expect(await templates.loadWarehouseBoxDefault(client, exec, "foreign")).toBeNull();
-    for (const status of [401, 403, 500, 502, 503, 504]) {
+    for (const status of [401, 403]) {
       const denied = new StationApiError(status, "denied");
       get.mockRejectedValue(denied);
       await expect(templates.loadWarehouseBoxDefault(client, exec, "owner")).rejects.toBe(denied);
     }
   });
+
+  it.each([429, 500, 502, 503, 504])(
+    "keeps the optional cached default on HTTP %s",
+    async (status) => {
+      const box = template();
+      const get = vi.fn().mockResolvedValue({ defaultBoxLabelTemplateId: box.id });
+      const client = station(get);
+      await templates.loadWarehouseBoxDefault(client, exec, "owner");
+      get.mockRejectedValue(new StationApiError(status, "default unavailable"));
+      expect(await templates.loadWarehouseBoxDefault(client, exec, "owner")).toBe(box.id);
+      expect(await templates.loadWarehouseBoxDefault(client, exec, "foreign")).toBeNull();
+    },
+  );
+
+  it.each([{}, { defaultBoxLabelTemplateId: "not-a-uuid" }])(
+    "ignores invalid optional default metadata %# without changing its cache",
+    async (response) => {
+      const box = template();
+      const get = vi.fn().mockResolvedValue({ defaultBoxLabelTemplateId: box.id });
+      const client = station(get);
+      await templates.loadWarehouseBoxDefault(client, exec, "owner");
+      get.mockResolvedValue(response);
+      expect(await templates.loadWarehouseBoxDefault(client, exec, "owner")).toBe(box.id);
+      expect(await templates.loadWarehouseBoxDefault(client, exec, "foreign")).toBeNull();
+    },
+  );
 
   it("does not treat an invalid successful server response as offline cached data", async () => {
     const selected = template();
@@ -199,8 +246,6 @@ describe("warehouse catalog freshness and defaults cache", () => {
     await expect(
       templates.refreshWarehouseTemplates(client, exec, "owner", initial, [selected.id]),
     ).rejects.toThrow();
-    get.mockResolvedValue({ items: [], defaultBoxLabelTemplateId: "not-a-uuid" });
-    await expect(templates.loadWarehouseBoxDefault(client, exec, "owner")).rejects.toThrow();
   });
 
   it("rejects an unrelated filtered response without altering the last enabled catalog", async () => {

@@ -13,9 +13,6 @@ import type { SqlExecutor } from "../mirror.js";
 const boxDefaultSchema = z.object({ defaultBoxLabelTemplateId: z.uuid().toLowerCase().nullable() });
 const selectedIdsSchema = z.array(z.uuid().toLowerCase()).min(1).max(20);
 const offline = () => typeof navigator !== "undefined" && !navigator.onLine;
-// An HTTP response carries current server policy; it must never be hidden by a cache hit.
-const networkUnavailable = (error: unknown) =>
-  !(error instanceof StationApiError) && warehouseNetworkUnavailable(error);
 
 async function readCachedTemplates(
   exec: SqlExecutor,
@@ -51,7 +48,7 @@ export async function loadWarehouseTemplates(
   try {
     response = await client.get("/station/warehouse-reprint/templates");
   } catch (error) {
-    if (!networkUnavailable(error)) throw error;
+    if (!warehouseNetworkUnavailable(error)) throw error;
     return readCachedTemplates(exec, owner, error);
   }
   const catalog = warehouseTemplateCatalogSchema.parse(response);
@@ -75,7 +72,7 @@ export async function refreshWarehouseTemplates(
       `/station/warehouse-reprint/templates?ids=${[...selected].join(",")}`,
     );
   } catch (error) {
-    if (!networkUnavailable(error)) throw error;
+    if (!warehouseNetworkUnavailable(error)) throw error;
     return readCachedTemplates(exec, owner, error);
   }
   const fresh = warehouseTemplateCatalogSchema.parse(response);
@@ -120,10 +117,17 @@ export async function loadWarehouseBoxDefault(
   try {
     response = await client.get("/shifts/box-label-templates");
   } catch (error) {
-    if (!networkUnavailable(error)) throw error;
+    // Defaults are advisory; access denials still stop the operation.
+    if (
+      !warehouseNetworkUnavailable(error) &&
+      !(error instanceof StationApiError && ![401, 403].includes(error.status))
+    )
+      throw error;
     return cachedDefault();
   }
-  const value = boxDefaultSchema.parse(response);
+  const parsed = boxDefaultSchema.safeParse(response);
+  if (!parsed.success) return cachedDefault();
+  const value = parsed.data;
   await exec.run(
     "INSERT INTO warehouse_reprint_cache(owner,kind,identity,value_json) VALUES(?,'templates','box-default',?) ON CONFLICT(owner,kind,identity) DO UPDATE SET value_json=excluded.value_json",
     [owner, JSON.stringify(value)],
