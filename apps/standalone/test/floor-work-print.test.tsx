@@ -858,6 +858,12 @@ describe("a label whose state the screen could not read or write", () => {
     });
     // The bytes are with the shell: the answer is still to come, and there is nothing to check.
     expect(screen.getByText("Этикетка отправляется на принтер")).toBeTruthy();
+    // Said as the program does it: it asks the operator, it does not know.
+    expect(
+      screen.getByText(
+        "Дождитесь ответа принтера или выйдите из смены: при возвращении программа предложит решить, вышла ли этикетка. Сама она ничего не отправит.",
+      ),
+    ).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Проверить, вышла ли этикетка" })).toBeNull();
     await act(async () => {
       shell.releaseSend({ sent: true });
@@ -959,6 +965,31 @@ describe("what the panel tells the operator", () => {
     expect(await screen.findByText(gone)).toBeTruthy();
     await again.press("Напечатать снова");
     expect(await screen.findByText(gone)).toBeTruthy();
+  });
+
+  it("does not say a label may lie at the former printer when the job failed and nothing left the computer", async () => {
+    const at = await printStation();
+    const shell = fakeHardware(async () => ({ sent: false, code: "not_sent" }));
+    const first = work(at, { shell });
+    await fillBox(first);
+    expect(screen.getByText(MIDDLE_FAILED)).toBeTruthy();
+    // The Zebra is removed from the settings; the box's printer is now the TSC.
+    await saveWorkstationSettings(at.local, {
+      ...at.settings,
+      printers: [TSC],
+      assignments: { box: "tsc", pallet: null, duplicate: null },
+    });
+    first.view.unmount();
+    const again = work(at, { shell });
+    await again.settled();
+    expect(
+      await screen.findByText(
+        "Принтер «Zebra у линии» удалён из настройки. Печать пойдёт на принтер: TSC на COM4 · TSPL · 300 dpi.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/возможно, лежит/)).toBeNull();
+    // Looking sent nothing.
+    expect(shell.sends).toHaveLength(1);
   });
 
   it("names the printer on the view of a label that failed, where «Напечатать снова» sends at once", async () => {

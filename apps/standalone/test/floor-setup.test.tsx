@@ -7,7 +7,11 @@ import { ThemeProvider } from "@markiro/ui";
 import { renderLabel } from "../src/floor/print/label-render.js";
 import { readPrintJob, type RenderLabel } from "../src/floor/print/print-jobs.js";
 import { printerForAgain } from "../src/floor/print/print-resolution.js";
-import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
+import {
+  createKeyboardWedgeSource,
+  type ScanListener,
+  type ScanSource,
+} from "../src/floor/scan-source.js";
 import { NEW_PRINTER, profileOf } from "../src/floor/setup/printer-draft.js";
 import { makeTestCode, scannedTestCode, testLabelSpec } from "../src/floor/setup/test-label.js";
 import { WorkstationSetup } from "../src/floor/setup/WorkstationSetup.js";
@@ -69,6 +73,8 @@ interface Options {
   render?: RenderLabel;
   /** The runtime whose limit the test runs out by hand. */
   runtime?: ReturnType<typeof manualRuntime>;
+  /** The floor's real scan source, where the test needs the keyboard wedge itself. */
+  source?: ScanSource;
 }
 
 async function setup(options: Options = {}) {
@@ -83,7 +89,7 @@ async function setup(options: Options = {}) {
         local={local}
         hardware={shell.hardware}
         printing={(options.runtime ?? manualRuntime(shell.hardware)).runtime}
-        source={scanner.source}
+        source={options.source ?? scanner.source}
         render={options.render ?? fakeRender}
         onSaved={onSaved}
         onBack={onBack}
@@ -1381,5 +1387,127 @@ describe("what the scanners, the sound and the check say to a reader of them", (
     fireEvent.click(remove);
     expect(screen.queryByRole("button", { name: "Удалить сканер COM3" })).toBeNull();
     expect(document.activeElement?.textContent).toBe("Сканеры COM-портов");
+  });
+});
+
+/** The keys of a typist or of a scanner, one by one, on `target` (they bubble to the window). */
+function typeKeys(target: Element | Window, text: string): void {
+  for (const key of text) fireEvent.keyDown(target, { key });
+}
+
+/** The closing Enter; `true` when nothing stopped its default (a field keeps its own Enter). */
+function pressEnter(target: Element | Window): boolean {
+  return fireEvent.keyDown(target, { key: "Enter" });
+}
+
+describe("the setup's fields and the keyboard wedge", () => {
+  it("reads the first scan of a test label as its code after the operator typed in a field", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    const wedge = createKeyboardWedgeSource();
+    const { shell } = await setup({ local, render: realRender, source: wedge });
+    const field = screen.getByLabelText("COM-порт сканера");
+    act(() => field.focus());
+    typeKeys(field, "COM3");
+    type("COM-порт сканера", "COM3");
+    // As a touch or a mouse does it: the press moves the focus off the field.
+    const test = screen.getByRole("button", { name: "Пробная печать на «Zebra у линии»" });
+    act(() => test.focus());
+    await act(async () => {
+      fireEvent.click(test);
+    });
+    await screen.findByText(/Пробная этикетка ушла/);
+    const code = /\^FD(MKR-[A-Z0-9]{6})\^FS/.exec(shell.sends[0]?.text ?? "")?.[1] ?? "";
+    typeKeys(window, code);
+    pressEnter(window);
+    expect(screen.getByText("Код совпал: принтер и сканер работают.")).toBeTruthy();
+    expect(screen.queryByText(/Это не код пробной этикетки/)).toBeNull();
+  });
+
+  it("drops what was typed ahead on a list before the test label goes, so its scan stands alone", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    const wedge = createKeyboardWedgeSource();
+    const { shell } = await setup({ local, render: realRender, source: wedge });
+    // A letter typed on a list (it picks an entry) is no field, but the wedge hears it.
+    const list = screen.getByLabelText("Этикетка короба");
+    act(() => list.focus());
+    typeKeys(list, "ZZ");
+    const test = screen.getByRole("button", { name: "Пробная печать на «Zebra у линии»" });
+    act(() => test.focus());
+    await act(async () => {
+      fireEvent.click(test);
+    });
+    await screen.findByText(/Пробная этикетка ушла/);
+    const code = /\^FD(MKR-[A-Z0-9]{6})\^FS/.exec(shell.sends[0]?.text ?? "")?.[1] ?? "";
+    typeKeys(window, code);
+    pressEnter(window);
+    expect(screen.getByText("Код совпал: принтер и сканер работают.")).toBeTruthy();
+  });
+
+  it("leaves every text field its own keys and its Enter, and scans again once the focus leaves it", async () => {
+    const wedge = createKeyboardWedgeSource();
+    const scanned = vi.fn<ScanListener>();
+    const stop = wedge.start(scanned);
+    await setup({ source: wedge });
+    const fields: { label: string; open?: () => void }[] = [
+      { label: "COM-порт сканера" },
+      { label: "Скорость сканера, бод" },
+      { label: "Название", open: () => click("Добавить принтер") },
+      { label: "Адрес принтера" },
+      { label: "Порт" },
+      {
+        label: "COM-порт",
+        open: () =>
+          fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "serial" } }),
+      },
+      { label: "Скорость, бод" },
+    ];
+    for (const { label, open } of fields) {
+      open?.();
+      const field = screen.getByLabelText(label);
+      act(() => field.focus());
+      typeKeys(field, "AB");
+      expect(pressEnter(field), label).toBe(true);
+      expect(scanned, label).not.toHaveBeenCalled();
+      act(() => field.blur());
+      typeKeys(window, "C");
+      pressEnter(window);
+      expect(scanned, label).toHaveBeenCalledTimes(1);
+      expect(scanned, label).toHaveBeenCalledWith("C");
+      scanned.mockClear();
+    }
+    stop();
+  });
+
+  it("scans again when a field goes away with the focus on it", async () => {
+    const wedge = createKeyboardWedgeSource();
+    const scanned = vi.fn<ScanListener>();
+    const stop = wedge.start(scanned);
+    await setup({ source: wedge });
+    click("Добавить принтер");
+    act(() => screen.getByLabelText("Название").focus());
+    typeKeys(window, "AB");
+    // The form closes under the focus: a removed field sends no blur.
+    click("Отмена");
+    typeKeys(window, "D");
+    pressEnter(window);
+    expect(scanned).toHaveBeenCalledTimes(1);
+    expect(scanned).toHaveBeenCalledWith("D");
+    stop();
+  });
+
+  it("scans again when the setup itself goes away with the focus on a field", async () => {
+    const wedge = createKeyboardWedgeSource();
+    const scanned = vi.fn<ScanListener>();
+    const stop = wedge.start(scanned);
+    await setup({ source: wedge });
+    act(() => screen.getByLabelText("COM-порт сканера").focus());
+    cleanup();
+    typeKeys(window, "E");
+    pressEnter(window);
+    expect(scanned).toHaveBeenCalledTimes(1);
+    expect(scanned).toHaveBeenCalledWith("E");
+    stop();
   });
 });
