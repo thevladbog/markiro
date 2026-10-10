@@ -923,6 +923,9 @@ describe("the operator session: every action and every late answer", () => {
       { action: { type: "shifts_read", ok: false }, survives: true },
     ],
     device_not_saved: [{ action: { type: "device_not_saved" }, survives: true }],
+    outbox_changed: [{ action: { type: "outbox_changed" }, survives: true }],
+    facts_sent: [{ action: { type: "facts_sent" }, survives: true }],
+    facts_failed: [{ action: { type: "facts_failed", failure: "host" }, survives: true }],
   };
 
   const CASES = Object.values(TABLE).flat();
@@ -1640,5 +1643,43 @@ describe("the operator's session, the shift's work and what waits for it", () =>
     expect(after.shiftReads).toEqual({ done: 1, failed: false });
     expect(after.floorWork).toEqual({ sessionId: 1, shiftId: SHIFT_ID });
     expect(after.operator).toEqual({ ...ANNA, sessionId: 1 });
+  });
+});
+
+describe("the outbox's delivery", () => {
+  it("keeps why the last send failed until a send goes through", () => {
+    const host = shellReducer(initialShellState, { type: "facts_failed", failure: "host" });
+    const offline = shellReducer(host, { type: "facts_failed", failure: "offline" });
+    const sent = shellReducer(offline, { type: "facts_sent" });
+    expect([initialShellState.factsFailure, host.factsFailure, offline.factsFailure]).toEqual([
+      null,
+      "host",
+      "offline",
+    ]);
+    expect(sent.factsFailure).toBeNull();
+    expect(shellReducer(sent, { type: "outbox_changed" }).factsFailure).toBeNull();
+  });
+
+  it("does not carry a failure of one pairing over to the next", () => {
+    const failed = shellReducer(initialShellState, { type: "facts_failed", failure: "local" });
+    expect(failed.factsFailure).toBe("local");
+    expect(shellReducer(failed, { type: "forgotten" }).factsFailure).toBeNull();
+    expect(shellReducer(failed, { type: "paired", status: DEVICE_STATUS }).factsFailure).toBeNull();
+  });
+
+  it("changes nothing when a send fails for the reason already named", () => {
+    const failed = shellReducer(initialShellState, { type: "facts_failed", failure: "host" });
+    expect(shellReducer(failed, { type: "facts_failed", failure: "host" })).toBe(failed);
+    expect(shellReducer(initialShellState, { type: "facts_sent" })).toBe(initialShellState);
+  });
+});
+
+describe("the outbox's changes", () => {
+  it("count up with every change, whatever the floor shows", () => {
+    const once = shellReducer(initialShellState, { type: "outbox_changed" });
+    const twice = shellReducer(once, { type: "outbox_changed" });
+    expect([initialShellState.outboxVersion, once.outboxVersion, twice.outboxVersion]).toEqual([
+      0, 1, 2,
+    ]);
   });
 });

@@ -49,6 +49,7 @@ import {
   observation,
   SESSION,
 } from "./support/fixtures.js";
+import { rows, unsentScans } from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
@@ -3127,6 +3128,7 @@ describe("useHostLink", () => {
           changes,
           refresh,
           deviceShifts: async () => [],
+          sendFacts: async () => [],
           dispatch,
         }),
       { initialProps: { deviceId: DEVICE_ID } },
@@ -3142,5 +3144,34 @@ describe("useHostLink", () => {
     expect(link.connection.watch).toHaveBeenCalledTimes(2);
     expect(changes.mock.calls).toEqual([[0], [0]]);
     unmount();
+  });
+});
+
+describe("the outbox in the app", () => {
+  it("goes to the host once the station is linked, and each record keeps the host's answer", async () => {
+    const database = openLocalDb();
+    const [first, second] = await unsentScans(database.executor, 2);
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.sendFacts.mockImplementation(async (records) => [
+      { id: (records[0] as { id: string }).id, outcome: "accepted" },
+      { id: (records[1] as { id: string }).id, outcome: "rejected", code: "unknown_shift" },
+    ]);
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+      local: database.executor,
+    });
+    await waitFor(() =>
+      expect(
+        rows(database.db, "SELECT id, outcome, outcome_code FROM outbox ORDER BY seq"),
+      ).toEqual([
+        { id: first, outcome: "accepted", outcome_code: null },
+        { id: second, outcome: "rejected", outcome_code: "unknown_shift" },
+      ]),
+    );
+    expect(host.sendFacts).toHaveBeenCalledTimes(1);
   });
 });

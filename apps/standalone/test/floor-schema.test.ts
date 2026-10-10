@@ -1,9 +1,15 @@
+import { readFileSync } from "node:fs";
+
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
+import { attemptStatement, receiptStatements, UNSENT_SQL } from "../src/local/facts-sender.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
 import { openLocalDb } from "./support/local-db.js";
+
+// See test/protocol.test.ts: bind import.meta.url before building a URL from it.
+const testModuleUrl = import.meta.url;
 
 const OTHER_DEVICE = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
 const AT = "2026-10-09T08:00:00.000Z";
@@ -726,20 +732,57 @@ describe("the shape of the production tables (migration 0006)", () => {
         .split("\n")
         .filter((step) => step.startsWith("SCAN ")),
     ).toEqual(["SCAN floor_block_requests"]);
-    // What the sender writes stays on the unsent index and the record's own key.
-    expect(
-      plan(
-        "UPDATE outbox SET attempts = attempts + 1, sent_at = ? " +
-          "WHERE host_id = ? AND device_id = ? AND id IN (SELECT value FROM json_each(?))",
-      ),
-    ).toContain("sqlite_autoindex_outbox_1");
-    expect(
-      plan(
-        "UPDATE outbox SET outcome = r.value ->> 'outcome', acked_at = ? FROM json_each(?) AS r " +
-          "WHERE outbox.id = r.value ->> 'id' AND outbox.host_id = ? AND outbox.device_id = ? " +
-          "AND outbox.acked_at IS NULL",
-      ),
-    ).toContain("outbox_unsent");
+    // What the sender writes, taken from the sender itself (a copy of its text
+    // would not notice a change to the statement it runs): each statement looks
+    // its few records up by their own key. The planner would rather walk the
+    // `(host_id, device_id, …)` prefix of `outbox_unsent`, `floor_scans_shift`
+    // or `floor_boxes_shift` — every unsent record, scan and box of the pairing
+    // for each batch (9 s for the outbox's own statement with 100,000 records).
+    const pairing = { hostId: HOST_ID, deviceId: DEVICE_ID };
+    const attempt = attemptStatement(pairing, "[]", "x");
+    expect(plan(attempt.sql)).toContain(
+      "SEARCH outbox USING INDEX sqlite_autoindex_outbox_1 (id=?)",
+    );
+    const [settle, mark, fix] = receiptStatements(pairing, "[]", "x");
+    expect(plan(settle?.sql ?? "")).toContain(
+      "SEARCH outbox USING INDEX sqlite_autoindex_outbox_1 (id=?)",
+    );
+    expect(plan(mark?.sql ?? "")).toContain(
+      "SEARCH floor_scans USING INDEX sqlite_autoindex_floor_scans_1 (id=?)",
+    );
+    expect(plan(fix?.sql ?? "")).toContain(
+      "SEARCH floor_boxes USING INDEX sqlite_autoindex_floor_boxes_1 (id=?)",
+    );
+    expect(plan(fix?.sql ?? "")).toContain(
+      "SEARCH floor_scans USING INDEX sqlite_autoindex_floor_scans_1 (id=?)",
+    );
+    for (const statement of [attempt, settle, mark, fix]) {
+      for (const slow of [
+        "outbox_unsent",
+        "outbox_settled",
+        "floor_scans_shift",
+        "floor_boxes_shift",
+      ]) {
+        expect(plan(statement?.sql ?? "")).not.toContain(slow);
+      }
+    }
+    expect(plan(UNSENT_SQL)).toContain("outbox_unsent");
+  });
+
+  // The shell's list (`tests/local_db.rs`) is written by hand: it must hold the
+  // exact text of every statement the sender runs, or its plans pin another text.
+  it("are pinned on the shell's SQLite with the sender's own statements", () => {
+    const pairing = { hostId: HOST_ID, deviceId: DEVICE_ID };
+    const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
+      // A line continuation of a Rust string drops the newline and the next line's indent.
+      .replace(/\\\n\s*/g, "");
+    const statements = [
+      UNSENT_SQL,
+      attemptStatement(pairing, "[]", "x").sql,
+      ...receiptStatements(pairing, "[]", "x").map((statement) => statement.sql),
+    ];
+    expect(statements).toHaveLength(5);
+    for (const sql of statements) expect(source).toContain(`"${sql}"`);
   });
 });
 

@@ -189,7 +189,7 @@ export function App({
     state.sync.kind !== "other_host"
       ? pairedStatus
       : null;
-  const requestSync = useHostLink({
+  const { requestSync } = useHostLink({
     hostId: linked?.hostId ?? null,
     deviceId: linked?.deviceId ?? null,
     connection: connectionApi,
@@ -197,6 +197,7 @@ export function App({
     changes: hostApi.getChanges,
     refresh: deviceApi.refresh,
     deviceShifts: hostApi.getDeviceShifts,
+    sendFacts: hostApi.sendFacts,
     dispatch,
   });
 

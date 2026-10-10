@@ -4,6 +4,7 @@ import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import { vi } from "vitest";
 
+import { outboxStatement, scanRecord } from "../../src/floor/facts.js";
 import {
   keepEnteredShift,
   readStoredWork,
@@ -194,4 +195,44 @@ export function seedBlock(db: DatabaseSync, block: SeededBlock): void {
     block.next ?? block.from,
     block.receivedAt ?? "2026-10-08T06:00:00.000Z",
   );
+}
+
+/**
+ * `count` records of unreadable scans in the outbox of `pairing`, ids
+ * `…000001`, `…000002`, … in order, written as the floor writes them.
+ */
+export async function unsentScans(
+  local: LocalExecutor,
+  count: number,
+  pairing: { hostId: string; deviceId: string } = PAIRING,
+  firstId = 1,
+): Promise<string[]> {
+  const ids: string[] = [];
+  const statements: LocalStatement[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const id = `00000000-0000-4000-8000-${String(firstId + index).padStart(12, "0")}`;
+    ids.push(id);
+    statements.push(
+      outboxStatement(
+        scanRecord(
+          { id, shiftId: SHIFT_ID, operatorId: OPERATOR_ID },
+          {
+            scannedAt: "2026-10-08T06:15:00.000Z",
+            verdict: "invalid",
+            duplicateSource: null,
+            rawKind: "unknown",
+            rawLength: 10,
+            code: null,
+            boxId: null,
+          },
+        ),
+        pairing,
+        "2026-10-08T06:15:00.000Z",
+      ),
+    );
+    if (statements.length === 32 || index === count - 1) {
+      await local.transaction(statements.splice(0));
+    }
+  }
+  return ids;
 }

@@ -1,17 +1,24 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { HostError } from "../host/client.js";
 import type { ConnectionApi } from "../host/connection.js";
 import { replaceShiftCopies } from "../floor/shifts/shift-copies.js";
 import { DeviceError } from "../host/device.js";
-import type { ChangesResponse, DeviceShift, DeviceStatus } from "../host/protocol.js";
+import type { ChangesResponse, DeviceShift, DeviceStatus, FactReceipt } from "../host/protocol.js";
 import { LocalDbError, type LocalExecutor } from "../local/executor.js";
+import { sendFactBatch } from "../local/facts-sender.js";
 import {
   createSyncScheduler,
   readQuarantineCount,
   syncReferences,
 } from "../local/reference-sync.js";
-import { deviceRejection, shellActionFor, type ShellAction, type SyncFailure } from "./shell.js";
+import {
+  deviceRejection,
+  shellActionFor,
+  type FactsFailure,
+  type ShellAction,
+  type SyncFailure,
+} from "./shell.js";
 
 /** The waits before the first retries of a failed sync, in milliseconds. */
 const RETRY_MS = [2000, 4000, 8000, 16000, 32000] as const;
@@ -42,6 +49,20 @@ export function syncFailureOf(error: unknown): SyncFailure {
   return "feed";
 }
 
+/**
+ * Why a send of the outbox failed, for the status bar: the host not reached
+ * (any transport failure but an answer this build cannot read) is the link's
+ * own state; an error the host answered, an answer that does not fit and
+ * receipts that do not answer the records are the host's; a failed write of
+ * the receipts is this computer's.
+ */
+export function factsFailureOf(error: unknown): FactsFailure {
+  if (error instanceof HostError) {
+    return error.kind === "transport" && error.code !== "invalid_response" ? "offline" : "host";
+  }
+  return error instanceof LocalDbError ? "local" : "host";
+}
+
 export interface HostLinkOptions {
   /** The paired host; `null` while unpaired, rejected or stopped at another host. */
   hostId: string | null;
@@ -55,7 +76,16 @@ export interface HostLinkOptions {
   refresh: () => Promise<DeviceStatus>;
   /** `HostApi.getDeviceShifts`: this station's shifts, kept in `floor_shifts`. */
   deviceShifts: () => Promise<DeviceShift[]>;
+  /** `HostApi.sendFacts`: the outbox's records to the host, a receipt for each. */
+  sendFacts: (records: readonly unknown[]) => Promise<FactReceipt[]>;
   dispatch: (action: ShellAction) => void;
+}
+
+/** What the link offers the screens: a sync and both reads now, and the outbox's delivery now. */
+export interface HostLinkControls {
+  requestSync: () => void;
+  /** Sends the outbox now (after a local write); nothing goes while the link is stopped. */
+  requestFacts: () => void;
 }
 
 /**
@@ -73,7 +103,14 @@ export interface HostLinkOptions {
  * of its own. The station's shifts are read at the same moments and the same
  * way (stage 2a spec §5.4): the answer replaces this pairing's copies
  * (`replaceShiftCopies`), and a failed read keeps the copies the station has.
- * Returns a function that asks for a sync and both reads now.
+ * The outbox goes to the host at the same moments (stage 2a spec §5.5), a
+ * batch at a time (`sendFactBatch`), and whenever a screen asks after a local
+ * write; a batch of 100 asks for the next at once; a failed send is retried
+ * after `nextSyncRetryMs` with a count of its own while the link is online,
+ * and at once when the link is back; a refused key ends the link as
+ * everywhere. It lives exactly as long as the link: a refusal waiting for the
+ * operator to leave the shift stops the link (`App`), and the delivery with
+ * it. Returns the requests for a sync and for the delivery.
  */
 export function useHostLink({
   hostId,
@@ -83,9 +120,11 @@ export function useHostLink({
   changes,
   refresh,
   deviceShifts,
+  sendFacts,
   dispatch,
-}: HostLinkOptions): () => void {
+}: HostLinkOptions): HostLinkControls {
   const syncNow = useRef<() => void>(() => undefined);
+  const factsNow = useRef<() => void>(() => undefined);
   useEffect(() => {
     if (hostId === null || deviceId === null) return;
     // Nothing reaches the shell state after the pairing changed or ended.
@@ -121,15 +160,25 @@ export function useHostLink({
       clearTimeout(shiftRetry);
       shiftRetry = null;
     };
+    // And for sending the outbox.
+    let factFailures = 0;
+    let factRetry: ReturnType<typeof setTimeout> | null = null;
+    const cancelFactRetry = () => {
+      if (factRetry === null) return;
+      clearTimeout(factRetry);
+      factRetry = null;
+    };
     // Nothing more should reach a host that refused this device's key or
     // presented another certificate.
     const stopAll = () => {
       scheduler.stop();
       refresher.stop();
       shiftReader.stop();
+      factSender.stop();
       cancelRetry();
       cancelRefreshRetry();
       cancelShiftRetry();
+      cancelFactRetry();
     };
     const scheduler = createSyncScheduler(async () => {
       if (!active) return;
@@ -258,12 +307,50 @@ export function useHostLink({
         }
       }
     });
+    // One batch of the outbox at a time, retried like the reads above. A
+    // full batch asks for the next one at once; a refused key ends the link.
+    const factSender = createSyncScheduler(async () => {
+      if (!active) return;
+      cancelFactRetry();
+      try {
+        const { sent, more } = await sendFactBatch(
+          local,
+          { hostId, deviceId },
+          sendFacts,
+          () => new Date(),
+        );
+        if (!active) return;
+        factFailures = 0;
+        dispatch({ type: "facts_sent" });
+        if (sent > 0) dispatch({ type: "outbox_changed" });
+        if (more) factSender.trigger();
+      } catch (error) {
+        if (!active) return;
+        const action = shellActionFor(error, null);
+        if (action) {
+          stopAll();
+          dispatch(action);
+          return;
+        }
+        if (error instanceof HostError && error.code === "not_paired") return;
+        dispatch({ type: "facts_failed", failure: factsFailureOf(error) });
+        factFailures += 1;
+        if (online) {
+          factRetry = setTimeout(() => {
+            factRetry = null;
+            factSender.trigger();
+          }, nextSyncRetryMs(factFailures));
+        }
+      }
+    });
     const everything = () => {
       scheduler.trigger();
       refresher.trigger();
       shiftReader.trigger();
+      factSender.trigger();
     };
     syncNow.current = everything;
+    factsNow.current = () => factSender.trigger();
     let unwatch: (() => void) | null = null;
     connection
       .watch({
@@ -277,6 +364,7 @@ export function useHostLink({
             cancelRetry();
             cancelRefreshRetry();
             cancelShiftRetry();
+            cancelFactRetry();
             return;
           }
           if (failures > 0 && !running && retry === null) {
@@ -287,6 +375,7 @@ export function useHostLink({
           // The same for a failed read of this device and of its shifts.
           if (refreshFailures > 0 && refreshRetry === null) refresher.trigger();
           if (shiftFailures > 0 && shiftRetry === null) shiftReader.trigger();
+          if (factFailures > 0 && factRetry === null) factSender.trigger();
         },
         onRevision: (rev) => {
           if (!active) return;
@@ -317,9 +406,12 @@ export function useHostLink({
     return () => {
       active = false;
       syncNow.current = () => undefined;
+      factsNow.current = () => undefined;
       stopAll();
       unwatch?.();
     };
-  }, [hostId, deviceId, connection, local, changes, refresh, deviceShifts, dispatch]);
-  return useCallback(() => syncNow.current(), []);
+  }, [hostId, deviceId, connection, local, changes, refresh, deviceShifts, sendFacts, dispatch]);
+  const requestSync = useCallback(() => syncNow.current(), []);
+  const requestFacts = useCallback(() => factsNow.current(), []);
+  return useMemo(() => ({ requestSync, requestFacts }), [requestSync, requestFacts]);
 }

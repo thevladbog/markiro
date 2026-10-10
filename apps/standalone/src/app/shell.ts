@@ -48,6 +48,16 @@ export type OfficeState =
 export type SyncFailure = "host" | "local" | "feed";
 
 /**
+ * Why the last send of the outbox failed: the host could not be reached
+ * (`offline`); it answered with an error or with receipts that do not fit
+ * (`host`: a 500, a 413, an answer this build cannot read); or this computer
+ * could not keep its receipts (`local`). Either way nothing was kept and the
+ * same batch goes again; the status bar names a failure that is not the
+ * link's.
+ */
+export type FactsFailure = "offline" | "host" | "local";
+
+/**
  * The reference sync (`src/local/reference-sync.ts`): what the latest run
  * is doing or how it ended; how many runs brought the local copies up to
  * date since the pairing, so a screen reading them knows when to read
@@ -125,6 +135,14 @@ export interface ShellState {
   shiftReads: { done: number; failed: boolean };
   /** The office's change of this device could not be saved on this computer. */
   deviceNotSaved: boolean;
+  /**
+   * Grows with every change of the outbox: a record written by the floor, a
+   * batch of receipts applied, a block of SSCC serials kept. The status bar
+   * reads its counts again when it changes.
+   */
+  outboxVersion: number;
+  /** Why the last send of the outbox failed, until a send goes through. */
+  factsFailure: FactsFailure | null;
 }
 
 export type ShellView =
@@ -190,7 +208,12 @@ export type ShellAction =
   | { type: "work_left"; sessionId: number }
   | { type: "shifts_read"; ok: boolean }
   // `device_refresh` could not keep the host's answer in `device.json`.
-  | { type: "device_not_saved" };
+  | { type: "device_not_saved" }
+  // The floor wrote a record, the link applied receipts, a block was kept.
+  | { type: "outbox_changed" }
+  // A send of the outbox went through, or failed and why.
+  | { type: "facts_sent" }
+  | { type: "facts_failed"; failure: FactsFailure };
 
 const CLOSED_OFFICE: OfficeState = { kind: "closed" };
 const IDLE_SYNC: SyncState = { kind: "idle", synced: 0, failure: null, quarantined: 0 };
@@ -221,6 +244,8 @@ export const initialShellState: ShellState = {
   pendingDevice: null,
   shiftReads: NO_SHIFT_READS,
   deviceNotSaved: false,
+  outboxVersion: 0,
+  factsFailure: null,
 };
 
 /**
@@ -360,6 +385,7 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         floorNotice: null,
         shiftReads: NO_SHIFT_READS,
         deviceNotSaved: false,
+        factsFailure: null,
       };
     case "pairing_failed":
       return { ...state, pairing: { kind: "failed", code: action.code } };
@@ -383,6 +409,7 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         floorNotice: null,
         shiftReads: NO_SHIFT_READS,
         deviceNotSaved: false,
+        factsFailure: null,
       };
     case "host_initialized":
       if (state.localHost.kind !== "found") return state;
@@ -600,6 +627,14 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       };
     case "device_not_saved":
       return state.deviceNotSaved ? state : { ...state, deviceNotSaved: true };
+    case "outbox_changed":
+      return { ...state, outboxVersion: state.outboxVersion + 1 };
+    case "facts_sent":
+      return state.factsFailure === null ? state : { ...state, factsFailure: null };
+    case "facts_failed":
+      return state.factsFailure === action.failure
+        ? state
+        : { ...state, factsFailure: action.failure };
   }
 }
 

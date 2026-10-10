@@ -842,7 +842,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 23] = [
+    let reads: [(&str, &str); 27] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -867,11 +867,43 @@ async fn the_floors_repeating_reads_search_an_index() {
              AND outcome = 'conflict'",
             "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
         ),
+        // What the sender writes, in the exact text it runs (`src/local/facts-sender.ts`;
+        // `test/floor-schema.test.ts` checks the two texts agree): each statement
+        // looks its few records up by their own key. The planner would rather walk
+        // the `(host_id, device_id, ...)` prefix of `outbox_unsent`,
+        // `floor_scans_shift` or `floor_boxes_shift`, which reads every unsent
+        // record, scan and box of the pairing for each batch.
         (
-            "UPDATE outbox SET outcome = r.value ->> 'outcome', acked_at = ? \
-             FROM json_each(?) AS r WHERE outbox.id = r.value ->> 'id' \
-             AND outbox.host_id = ? AND outbox.device_id = ? AND outbox.acked_at IS NULL",
-            "outbox_unsent",
+            "UPDATE outbox SET attempts = attempts + 1, sent_at = ? \
+             WHERE host_id = ? AND device_id = ? AND id IN (SELECT value FROM json_each(?))",
+            "sqlite_autoindex_outbox_1 (id=?)",
+        ),
+        (
+            "UPDATE outbox SET outcome = r.value ->> 'outcome', outcome_code = r.value ->> 'code', \
+             outcome_details = r.value -> 'details', acked_at = ? FROM json_each(?) AS r \
+             WHERE outbox.id = r.value ->> 'id' AND +outbox.host_id = ? AND +outbox.device_id = ? \
+             AND +outbox.acked_at IS NULL",
+            "sqlite_autoindex_outbox_1 (id=?)",
+        ),
+        (
+            "UPDATE floor_scans SET conflict = 1 WHERE +host_id = ? AND +device_id = ? AND id IN \
+             (SELECT value ->> 'id' FROM json_each(?) \
+             WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'conflict')",
+            "sqlite_autoindex_floor_scans_1 (id=?)",
+        ),
+        (
+            "UPDATE floor_boxes SET needs_fix = 1 WHERE +host_id = ? AND +device_id = ? AND id IN \
+             (SELECT box_id FROM floor_scans WHERE +host_id = ? AND +device_id = ? \
+             AND box_id IS NOT NULL AND id IN (SELECT value ->> 'id' FROM json_each(?) \
+             WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'conflict'))",
+            "sqlite_autoindex_floor_boxes_1 (id=?)",
+        ),
+        (
+            "UPDATE floor_boxes SET needs_fix = 1 WHERE +host_id = ? AND +device_id = ? AND id IN \
+             (SELECT box_id FROM floor_scans WHERE +host_id = ? AND +device_id = ? \
+             AND box_id IS NOT NULL AND id IN (SELECT value ->> 'id' FROM json_each(?) \
+             WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'conflict'))",
+            "sqlite_autoindex_floor_scans_1 (id=?)",
         ),
         (
             "SELECT count(*) FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?",
