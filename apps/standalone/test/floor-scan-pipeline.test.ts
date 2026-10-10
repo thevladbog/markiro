@@ -107,6 +107,16 @@ describe("the reading of a raw scan against what the host keeps", () => {
     expect(readScan(km("A\tB"))).toEqual({ kind: "unknown" });
     expect(readScan(km("A\u0000B"))).toEqual({ kind: "unknown" });
     expect(readScan(km("A\u007fB"))).toEqual({ kind: "unknown" });
+    // The host refuses every control character (Rust's `is_control`, the
+    // category Cc), the C1 range U+0080-U+009F included.
+    for (const control of ["\u0080", "\u0085", "\u009f"]) {
+      expect(readScan(km(`A${control}B`))).toEqual({ kind: "unknown" });
+    }
+    // What is no control character stays a code: no-break space, a line
+    // separator and a zero-width space are the host's to keep.
+    for (const kept of ["\u00a0", "\u2028", "\u200b"]) {
+      expect(readScan(km(`A${kept}B`))).toMatchObject({ kind: "km" });
+    }
     expect(readScan(km(""))).toEqual({ kind: "unknown" });
     expect(readScan("")).toEqual({ kind: "unknown" });
     expect(readScan("  \t ")).toEqual({ kind: "unknown" });
@@ -124,9 +134,9 @@ describe("a scan of the work screen", () => {
       canonical: `01${GTIN}215Yq'Ct;\u001d93dGVz`,
       serial: "5Yq'Ct;",
     });
-    expect(rows(db, "SELECT payload FROM outbox").map((row) => String(row["payload"]))[0]).toContain(
-      `"rawLength":${raw.length}`,
-    );
+    expect(
+      rows(db, "SELECT payload FROM outbox").map((row) => String(row["payload"]))[0],
+    ).toContain(`"rawLength":${raw.length}`);
   });
 
   it("accepts a code into a new box, with its journal row and outbox record in one write", async () => {
@@ -338,6 +348,50 @@ describe("a scan of the work screen", () => {
       itemCount: 3,
     });
     expect(rows(db, "SELECT count(*) AS n FROM floor_codes")).toEqual([{ n: 3 }]);
+  });
+
+  it("lets no host hiccup lose a scan: a callback that throws decides nothing", async () => {
+    const { db, local, shift } = await station();
+    const timeout = new HostError({ kind: "transport", code: "timeout", message: "300 ms" });
+    const onHostError = vi.fn(() => {
+      throw new Error("the shell's reaction failed");
+    });
+    const context = scanContext(local, shift, {
+      online: () => true,
+      checkCode: async () => {
+        throw timeout;
+      },
+      onHostError,
+    });
+    await expect(processScan(context, km("T1"))).resolves.toMatchObject({
+      kind: "accepted",
+      itemCount: 1,
+    });
+    expect(onHostError).toHaveBeenCalledTimes(1);
+    expect(rows(db, "SELECT count(*) AS n FROM floor_scans")).toEqual([{ n: 1 }]);
+    expect(rows(db, "SELECT count(*) AS n FROM floor_codes")).toEqual([{ n: 1 }]);
+    expect(rows(db, "SELECT count(*) AS n FROM outbox")).toEqual([{ n: 1 }]);
+  });
+
+  it("opens one box at most in an empty shift: the second of two racing scans writes nothing", async () => {
+    const { db, local, shift } = await station();
+    const held = holdingWrites(local);
+    const context = scanContext(held.executor, shift, { newId: () => crypto.randomUUID() });
+    // Both scans read no open box; the first holds its write, the second opens
+    // the box, and the first then fails whole on the box's key.
+    held.holdNext();
+    const first = processScan(context, km("M1"));
+    await held.reached();
+    await expect(processScan(context, km("M2"))).resolves.toMatchObject({
+      kind: "accepted",
+      itemCount: 1,
+    });
+    held.release();
+    await expect(first).rejects.toBeInstanceOf(LocalDbError);
+    expect(rows(db, "SELECT item_count FROM floor_boxes")).toEqual([{ item_count: 1 }]);
+    expect(rows(db, "SELECT count(*) AS n FROM floor_codes")).toEqual([{ n: 1 }]);
+    expect(rows(db, "SELECT count(*) AS n FROM floor_scans")).toEqual([{ n: 1 }]);
+    expect(rows(db, "SELECT count(*) AS n FROM outbox")).toEqual([{ n: 1 }]);
   });
 
   it("holds a code in one box at most: a second accept the check missed writes nothing", async () => {
@@ -581,9 +635,7 @@ describe("a scan of the work screen, beyond the accepted one", () => {
     expect(stored).not.toContain("SECRET");
     expect(stored).not.toContain(sscc);
     expect(stored).not.toContain(GTIN);
-    expect(
-      rows(db, "SELECT raw_kind, raw_length FROM floor_scans ORDER BY scanned_at"),
-    ).toEqual([
+    expect(rows(db, "SELECT raw_kind, raw_length FROM floor_scans ORDER BY scanned_at")).toEqual([
       { raw_kind: "unknown", raw_length: badge.length },
       { raw_kind: "sscc", raw_length: `]C100${sscc}`.length },
       { raw_kind: "gtin", raw_length: GTIN.length },
@@ -614,7 +666,10 @@ describe("a scan of the work screen, beyond the accepted one", () => {
     });
     expect(checkCode).not.toHaveBeenCalled();
     expect(
-      rows(db, "SELECT shift_id, verdict, duplicate_source, box_id FROM floor_scans ORDER BY rowid"),
+      rows(
+        db,
+        "SELECT shift_id, verdict, duplicate_source, box_id FROM floor_scans ORDER BY rowid",
+      ),
     ).toEqual([
       { shift_id: SHIFT_ID, verdict: "ok", duplicate_source: null, box_id: expect.any(String) },
       { shift_id: SECOND_SHIFT, verdict: "wrong_gtin", duplicate_source: null, box_id: null },
@@ -675,10 +730,7 @@ describe("a scan of the work screen, beyond the accepted one", () => {
     });
     expect(checkCode).toHaveBeenCalledTimes(1);
     expect(
-      rows(
-        db,
-        `SELECT host_id, device_id, item_count FROM floor_boxes WHERE id = '${boxId}'`,
-      ),
+      rows(db, `SELECT host_id, device_id, item_count FROM floor_boxes WHERE id = '${boxId}'`),
     ).toEqual([{ host_id: PAIRING.hostId, device_id: PAIRING.deviceId, item_count: 1 }]);
     expect(
       rows(db, "SELECT item_count FROM floor_boxes WHERE id LIKE 'old-%' ORDER BY item_count"),
@@ -695,10 +747,12 @@ describe("a scan of the work screen, beyond the accepted one", () => {
     ).run(buildSscc(0, PREFIX, 1500));
     const next = await processScan(context, km("X2"));
     expect(next).toMatchObject({ kind: "accepted", itemCount: 1 });
-    expect(next.kind === "accepted" && first.kind === "accepted" && next.boxId !== first.boxId).toBe(
-      true,
-    );
-    expect(rows(db, "SELECT item_count, closed_at IS NULL AS open FROM floor_boxes ORDER BY opened_at")).toEqual([
+    expect(
+      next.kind === "accepted" && first.kind === "accepted" && next.boxId !== first.boxId,
+    ).toBe(true);
+    expect(
+      rows(db, "SELECT item_count, closed_at IS NULL AS open FROM floor_boxes ORDER BY opened_at"),
+    ).toEqual([
       { item_count: 1, open: 0 },
       { item_count: 1, open: 1 },
     ]);
@@ -740,7 +794,10 @@ describe("a scan while the host may not answer", () => {
     await expect(processScan(context, km("V1"))).resolves.toMatchObject({ kind: "accepted" });
     await expect(
       processScan(
-        { ...context, checkCode: async () => ({ ...TAKEN, owner: { ...TAKEN.owner, sameDevice: true } }) },
+        {
+          ...context,
+          checkCode: async () => ({ ...TAKEN, owner: { ...TAKEN.owner, sameDevice: true } }),
+        },
         km("V2"),
       ),
     ).resolves.toMatchObject({ kind: "accepted" });
@@ -751,18 +808,19 @@ describe("a scan while the host may not answer", () => {
   });
 
   const failures: [string, unknown][] = [
-    ...TRANSPORT_CODES.map(
-      (code): [string, unknown] => [
-        `transport ${code}`,
-        new HostError({ kind: "transport", code, message: code }),
-      ],
-    ),
+    ...TRANSPORT_CODES.map((code): [string, unknown] => [
+      `transport ${code}`,
+      new HostError({ kind: "transport", code, message: code }),
+    ]),
     [
       "unauthorized",
       new HostError({ kind: "api", code: "unauthorized", message: "no", status: 401 }),
     ],
     ["host fault", new HostError({ kind: "api", code: "internal", message: "no", status: 500 })],
-    ["protocol", new HostError({ kind: "api", code: "protocol_unsupported", message: "no", status: 426 })],
+    [
+      "protocol",
+      new HostError({ kind: "api", code: "protocol_unsupported", message: "no", status: 426 }),
+    ],
     ["an answer this build cannot read", new TypeError("not an answer")],
   ];
 
@@ -818,9 +876,9 @@ describe("a scan whose write does not happen", () => {
   it("leaves the code free: the same scan, written later, is taken as new", async () => {
     const { db, local, shift } = await station();
     const raw = km("R1");
-    await expect(
-      processScan(scanContext(failingWrites(local), shift), raw),
-    ).rejects.toBeInstanceOf(LocalDbError);
+    await expect(processScan(scanContext(failingWrites(local), shift), raw)).rejects.toBeInstanceOf(
+      LocalDbError,
+    );
     expect(everythingStored(db)).not.toContain(codeHashOf(raw));
     await expect(processScan(scanContext(local, shift), raw)).resolves.toMatchObject({
       kind: "accepted",

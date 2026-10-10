@@ -11,8 +11,9 @@ import { readOpenBox } from "./work-reads.js";
 /**
  * The longest serial the host keeps, in bytes of UTF-8 (`MAX_SERIAL_BYTES`,
  * `host/src/facts/scan.rs`). A GS1 serial has 20 characters at most, so a
- * longer one is no code of marking for the host: the station reads such a
- * scan as unknown rather than keep a code the host would refuse.
+ * longer one, or one with a control character, is no code of marking for the
+ * host: the station reads such a scan as unknown rather than keep a code the
+ * host would refuse.
  */
 export const HOST_MAX_SERIAL_BYTES = 64;
 
@@ -28,7 +29,12 @@ export type ScanReading = { kind: "km"; km: ParsedKm } | { kind: Exclude<ScanRaw
 export function readScan(raw: string): ScanReading {
   const scan = classifyScan(raw);
   if (scan.kind !== "km") return { kind: scan.kind };
-  if (new TextEncoder().encode(scan.km.serial).length > HOST_MAX_SERIAL_BYTES) {
+  // The host's two limits on a serial: its size, and no control character
+  // (Rust's `char::is_control`, the category Cc, C1 range included).
+  if (
+    new TextEncoder().encode(scan.km.serial).length > HOST_MAX_SERIAL_BYTES ||
+    /\p{Cc}/u.test(scan.km.serial)
+  ) {
     return { kind: "unknown" };
   }
   return { kind: "km", km: scan.km };
@@ -86,7 +92,11 @@ async function hostOwner(context: ScanContext, codeHash: string): Promise<CodeOw
   try {
     check = await context.checkCode(codeHash);
   } catch (error) {
-    context.onHostError(error);
+    try {
+      context.onHostError(error);
+    } catch {
+      // The shell's reaction never decides a scan: a host hiccup loses nothing.
+    }
     return null;
   }
   if (check.status !== "taken" || check.owner.sameDevice) return null;
@@ -130,7 +140,7 @@ function scanRow(context: ScanContext, id: string, data: ScanFact): LocalStateme
  * journalled with its outbox record in ONE transaction: the accepted one with
  * its box and its place in `floor_codes`, whose key keeps a code in one box
  * of the pairing at most — a second accept of a code the check missed fails
- * whole (`changes_mismatch`) and writes nothing. A scan that is no code
+ * whole (a key or `changes_mismatch`) and writes nothing. A scan that is no code
  * keeps its length and kind, never its text (decision 15: it may be a
  * badge). A failed write rejects: the scan is not taken, and the screen says
  * so.

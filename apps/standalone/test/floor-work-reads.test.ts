@@ -120,7 +120,11 @@ describe("what the work screen shows of a shift", () => {
     insertBox(db, { id: "second", closed: { at: "2026-10-08T06:20:00.000Z", serial: 1501 } });
     insertBox(db, {
       id: "taken-apart",
-      closed: { at: "2026-10-08T06:15:00.000Z", serial: 1502, disassembled: "2026-10-08T06:30:00Z" },
+      closed: {
+        at: "2026-10-08T06:15:00.000Z",
+        serial: 1502,
+        disassembled: "2026-10-08T06:30:00Z",
+      },
     });
     insertBox(db, { id: "open", items: 2 });
     for (const hash of ["a", "b", "c", "d", "e"]) insertCode(db, hash);
