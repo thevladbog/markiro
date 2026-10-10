@@ -264,7 +264,10 @@ describe("the keyboard and the COM scanners together", () => {
     for (const key of "93dGVz") fireEvent.keyDown(window, { key });
     fireEvent.keyDown(window, { key: "Enter" });
     events.emit("010460068200001321MRK-1\u001d93dGVz");
-    expect(scans).toEqual(["010460068200001321MRK-1\u001d93dGVz", "010460068200001321MRK-1\u001d93dGVz"]);
+    expect(scans).toEqual([
+      "010460068200001321MRK-1\u001d93dGVz",
+      "010460068200001321MRK-1\u001d93dGVz",
+    ]);
   });
 
   it("deliver in the order the scans happened, whichever source they came from", async () => {

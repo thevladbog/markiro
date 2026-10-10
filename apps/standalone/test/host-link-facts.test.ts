@@ -261,6 +261,8 @@ describe("why a send of the outbox failed", () => {
     }
     for (const error of [
       new HostError({ kind: "api", code: "internal", status: 500, message: "boom" }),
+      // The host itself answers an over-limit body with 400 `validation_failed`; a 413 is
+      // what something in front of it might say, and it is the host's failure all the same.
       new HostError({ kind: "api", code: "payload_too_large", status: 413, message: "big" }),
       new HostError({ kind: "transport", code: "invalid_response", message: "garbled" }),
       new ReceiptMismatchError("1 receipt for 2 records"),
@@ -299,7 +301,7 @@ describe("a send that does not go through", () => {
       "host",
     ],
     [
-      "a 413",
+      "a 413, which only something in front of the host would send",
       async () => {
         throw new HostError({
           kind: "api",
@@ -494,6 +496,7 @@ describe("a send that does not go through", () => {
     await waitFor(() => expect(station.send).toHaveBeenCalledTimes(1));
     station.hook.unmount();
     answer([{ id: "00000000-0000-4000-8000-000000000001", outcome: "accepted" }]);
+    await waitFor(() => expect(station.unsent()).toBe(0));
     await settle();
     expect(station.deliveries()).toEqual([]);
     expect(station.changed()).toBe(0);

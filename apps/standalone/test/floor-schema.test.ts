@@ -721,9 +721,9 @@ describe("the shape of the production tables (migration 0006)", () => {
           "WHERE id = ? AND host_id = ? AND device_id = ? AND closed_at IS NULL AND item_count = ?",
       ),
     ).toContain("sqlite_autoindex_floor_boxes_1 (id=?)");
-    // The supply of SSCC blocks: the newest block of the prefix (the half rule), the
-    // serials the pairing has left, whether a block shares serials with one kept, and
-    // a request's removal by its key. The waiting request's own read scans the one
+    // The supply of SSCC blocks: the newest block of the prefix (the half rule),
+    // whether a block shares serials with one kept, and a request's removal by its key
+    // (the blocks with room, which the serials left come from, are pinned above). The waiting request's own read scans the one
     // small table of requests (below).
     const prefixIndex =
       "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)";
@@ -731,12 +731,6 @@ describe("the shape of the production tables (migration 0006)", () => {
       plan(
         "SELECT from_serial, to_serial, next_serial FROM floor_sscc_blocks WHERE host_id = ? " +
           "AND device_id = ? AND issuer_prefix = ? AND extension = ? ORDER BY from_serial DESC LIMIT 1",
-      ),
-    ).toContain(prefixIndex);
-    expect(
-      plan(
-        "SELECT coalesce(sum(to_serial + 1 - next_serial), 0) AS n FROM floor_sscc_blocks " +
-          "WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ?",
       ),
     ).toContain(prefixIndex);
     expect(
