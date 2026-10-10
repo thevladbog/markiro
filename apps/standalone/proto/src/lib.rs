@@ -79,6 +79,89 @@ pub mod credentials {
     pub const PASSWORD: &str = "password";
 }
 
+/// Codes of a `rejected` fact receipt (stage 2a spec §4.8). They are no
+/// error codes of an HTTP answer: a batch of facts is answered 200 with a
+/// receipt per record, and a record the host refuses names one of these.
+pub mod receipt_codes {
+    /// The record could not be read, or one of its fields breaks its rule
+    /// (`details.field` names it when the record itself was readable).
+    pub const INVALID_RECORD: &str = "invalid_record";
+    /// A record with this id was received before with other content.
+    pub const PAYLOAD_MISMATCH: &str = "payload_mismatch";
+    pub const UNKNOWN_SHIFT: &str = "unknown_shift";
+    /// The device never entered the shift the record names.
+    pub const NOT_ENTERED: &str = "not_entered";
+    /// An accepted scan's GTIN is not the one the shift's snapshot froze.
+    pub const GTIN_MISMATCH: &str = "gtin_mismatch";
+    /// No box of this device and this shift has the id.
+    pub const BOX_UNKNOWN: &str = "box_unknown";
+    /// A scan names a box that is closed.
+    pub const BOX_CLOSED: &str = "box_closed";
+    /// A box closed with one SSCC is closed again with another.
+    pub const BOX_ALREADY_CLOSED: &str = "box_already_closed";
+    /// The box is not in the state the record needs (an exception or a
+    /// label check of an open box, an undo in a closed one).
+    pub const BOX_STATE: &str = "box_state";
+    /// The SSCC is not of the shift's prefix, or its serial lies in no block
+    /// issued to this device.
+    pub const SSCC_NOT_ISSUED: &str = "sscc_not_issued";
+    /// Another box carries the SSCC.
+    pub const SSCC_TAKEN: &str = "sscc_taken";
+
+    /// Every code above, for the parity fixture the webview also reads.
+    pub const ALL: &[&str] = &[
+        INVALID_RECORD,
+        PAYLOAD_MISMATCH,
+        UNKNOWN_SHIFT,
+        NOT_ENTERED,
+        GTIN_MISMATCH,
+        BOX_UNKNOWN,
+        BOX_CLOSED,
+        BOX_ALREADY_CLOSED,
+        BOX_STATE,
+        SSCC_NOT_ISSUED,
+        SSCC_TAKEN,
+    ];
+}
+
+/// Reason codes of a box exception (stage 2a spec, decision 36): a station
+/// sends a code, never translated text; free text of at most
+/// [`exception_reasons::MAX_TEXT_CHARS`] characters goes only with
+/// [`exception_reasons::OTHER`].
+pub mod exception_reasons {
+    pub const OTHER: &str = "other";
+    pub const MAX_TEXT_CHARS: usize = 200;
+    /// Why a box's label is printed again.
+    pub const REPRINT: &[&str] = &[
+        "damaged_label",
+        "unreadable_label",
+        "printer_jam",
+        "quality_request",
+        OTHER,
+    ];
+    /// Why a closed box is taken apart.
+    pub const DISASSEMBLE: &[&str] = &[
+        "wrong_product",
+        "wrong_quantity",
+        "damaged_package",
+        "quality_rejected",
+        OTHER,
+    ];
+}
+
+/// The domain's six `SHIFT_CLOSE_REASON_CODES`: the reason a station gives
+/// when it closes a shift whose fact differs from its plan.
+pub mod shift_close_reasons {
+    pub const ALL: &[&str] = &[
+        "production_defect",
+        "material_shortage",
+        "equipment_stop",
+        "production_order_changed",
+        "planned_quantity_error",
+        "other_production_deviation",
+    ];
+}
+
 pub mod pairing;
 
 /// Serde for a field of a partial update that may be absent (keep the stored
@@ -1339,7 +1422,7 @@ impl std::str::FromStr for ShiftMode {
 /// A shift as the office sees it (`GET /v1/office/shifts`, `GET …/{id}` and
 /// the answer of every office write). `number` is the host's
 /// (`OCT26-004`, `/S` for a station's). Names come from the office's own
-/// lists of products, lines and counterparties.
+/// lists of products, lines and counterparties; `totals` from the facts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OfficeShift {
@@ -1370,6 +1453,27 @@ pub struct OfficeShift {
     pub late_data_at: Option<String>,
     pub created_at: String,
     pub rev: i64,
+    /// What the facts of the shift add up to (plan 2a2), in every answer.
+    pub totals: ShiftTotals,
+}
+
+/// A shift's numbers as its facts give them (stage 2a spec §4.5): units
+/// accepted (items in a box, neither taken out by an exception nor taken by
+/// an earlier scan elsewhere), the units among them in closed boxes that
+/// were not taken apart (the cloud office's «Кодов в закрытых коробах»; the
+/// rest are in boxes still open, so a shift closed with a box open shows the
+/// gap), boxes closed and not taken apart, open boxes that hold a unit, when
+/// the host last received a record of the shift, and the devices that
+/// entered it, first entry first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftTotals {
+    pub accepted_units: u64,
+    pub units_in_closed_boxes: u64,
+    pub closed_boxes: u32,
+    pub open_boxes: u32,
+    pub last_fact_at: Option<String>,
+    pub device_ids: Vec<String>,
 }
 
 /// `POST /v1/office/shifts`: a planned shift. `boxCapacity` left out is the
@@ -1537,11 +1641,341 @@ pub struct DeviceShiftCreate {
     pub counterparty_id: Option<String>,
 }
 
+/// What a fact records (stage 2a spec §4.4): the kind tells the host how
+/// to read the record's `data`. A kind added later is a new variant; a host
+/// that does not know it answers the record `invalid_record`, for good, as it
+/// does a new `data` field: either raises `PROTOCOL_VERSION`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactKind {
+    Scan,
+    BoxClosed,
+    BoxLabel,
+    BoxException,
+    ShiftClosed,
+}
+
+impl FactKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FactKind::Scan => "scan",
+            FactKind::BoxClosed => "box_closed",
+            FactKind::BoxLabel => "box_label",
+            FactKind::BoxException => "box_exception",
+            FactKind::ShiftClosed => "shift_closed",
+        }
+    }
+}
+
+impl std::str::FromStr for FactKind {
+    type Err = UnknownVariant;
+
+    /// The name [`FactKind::as_str`] gives, as `fact_receipts.kind` stores
+    /// it.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("fact kind", text)
+    }
+}
+
+/// One record of a device's outbox (`POST /v1/device/facts`): `id` is a
+/// lower-case hyphenated UUID the device made up, which keys the receipt;
+/// `data` is read by `kind` (`ScanFact`, …). `operatorId` names the
+/// operator signed in when it happened, or `null`; the host keeps it as
+/// evidence without checking that the operator exists.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FactRecord {
+    pub id: String,
+    pub kind: FactKind,
+    pub shift_id: String,
+    #[serde(default)]
+    pub operator_id: Option<String>,
+    pub data: serde_json::Value,
+}
+
+/// `POST /v1/device/facts`: 1–100 records, applied in their order. The host
+/// reads each record on its own, so one it cannot read is answered
+/// `rejected` and the others are still applied.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct FactBatch {
+    pub records: Vec<FactRecord>,
+}
+
+/// What a station decided about a scan.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanVerdict {
+    /// Accepted into the box.
+    Ok,
+    /// A code already taken, by this station's own copy or by the host.
+    Duplicate,
+    /// A code of another product than the shift's.
+    WrongGtin,
+    /// No code of marking at all.
+    Invalid,
+}
+
+impl ScanVerdict {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScanVerdict::Ok => "ok",
+            ScanVerdict::Duplicate => "duplicate",
+            ScanVerdict::WrongGtin => "wrong_gtin",
+            ScanVerdict::Invalid => "invalid",
+        }
+    }
+}
+
+/// Who found a duplicate: the station's own copy of the shift, or the host
+/// asked with `GET /v1/device/codes/{codeHash}`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DuplicateSource {
+    Local,
+    Host,
+}
+
+impl DuplicateSource {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            DuplicateSource::Local => "local",
+            DuplicateSource::Host => "host",
+        }
+    }
+}
+
+/// What the domain's `classifyScan` read the scan as: a code of marking, or
+/// (for an `invalid` scan) a GTIN, an SSCC or nothing it knows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ScanRawKind {
+    Km,
+    Gtin,
+    Sscc,
+    Unknown,
+}
+
+impl ScanRawKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ScanRawKind::Km => "km",
+            ScanRawKind::Gtin => "gtin",
+            ScanRawKind::Sscc => "sscc",
+            ScanRawKind::Unknown => "unknown",
+        }
+    }
+}
+
+/// A code of marking as the domain read it: `codeHash` is `kmHash` (64
+/// lower-case hex digits), `canonical` the text `canonicalizeKm` kept (with
+/// its group separators, at most 1024 bytes). The host checks their shape,
+/// never the code.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScannedCode {
+    pub code_hash: String,
+    pub gtin14: String,
+    pub serial: String,
+    pub canonical: String,
+}
+
+/// `data` of a `scan` fact: every scan of the work screen, accepted or not.
+/// An `invalid` scan carries no text, only its length and what it looked
+/// like (it may be a badge, whose code is a secret); an `ok` one names the
+/// box it went into.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScanFact {
+    pub scanned_at: String,
+    pub verdict: ScanVerdict,
+    pub duplicate_source: Option<DuplicateSource>,
+    pub raw_kind: ScanRawKind,
+    pub raw_length: u32,
+    pub code: Option<ScannedCode>,
+    pub box_id: Option<String>,
+}
+
+/// `data` of a `box_closed` fact: a box closed with the SSCC of serial
+/// `serial` from block `blockId`, which the host issued to this station.
+/// `itemCount` and `membershipDigest` (the domain's `boxMembershipDigestV1`
+/// of the box's code hashes) are what the station saw; the host compares the
+/// digest with its own items and keeps the result.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BoxClosedFact {
+    pub box_id: String,
+    pub sscc: String,
+    pub block_id: String,
+    pub serial: u64,
+    pub opened_at: String,
+    pub closed_at: String,
+    pub item_count: u32,
+    pub membership_digest: String,
+}
+
+/// How a box's printed label was checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LabelOutcome {
+    /// The operator scanned the label's SSCC and it matched.
+    Verified,
+    /// The operator skipped the check.
+    Skipped,
+}
+
+/// `data` of a `box_label` fact: the check of a closed box's label.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BoxLabelFact {
+    pub box_id: String,
+    pub outcome: LabelOutcome,
+    pub at: String,
+}
+
+/// What a box exception does (the cloud's four kinds).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExceptionKind {
+    /// Take the last code out of an open box.
+    Undo,
+    /// Take every code out of an open box.
+    Clear,
+    /// Print a closed box's label again.
+    Reprint,
+    /// Take a closed box apart; its SSCC stays used.
+    Disassemble,
+}
+
+impl ExceptionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ExceptionKind::Undo => "undo",
+            ExceptionKind::Clear => "clear",
+            ExceptionKind::Reprint => "reprint",
+            ExceptionKind::Disassemble => "disassemble",
+        }
+    }
+}
+
+/// `data` of a `box_exception` fact, with the fields of each kind as the
+/// cloud's: `undo` names the code and its scan's instant and no reason;
+/// `clear` nothing; `reprint` and `disassemble` a reason code of
+/// [`exception_reasons`], and words only with `other`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BoxExceptionFact {
+    pub exception: ExceptionKind,
+    pub box_id: String,
+    pub code_hash: Option<String>,
+    pub target_scanned_at: Option<String>,
+    pub reason_code: Option<String>,
+    pub reason_text: Option<String>,
+    pub occurred_at: String,
+}
+
+/// `data` of a `shift_closed` fact: a station closed its shift. The numbers
+/// are the station's summary; a reason of [`shift_close_reasons`] is needed
+/// when the plan the station saw (`plannedQtySnapshot`) was set and differs
+/// from `actualQty` (the domain's `shiftCloseReasonRequired`). The answer to
+/// the close of a shift the office closed first is `accepted` with
+/// `details.alreadyClosed: true`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShiftClosedFact {
+    pub planned_qty_snapshot: Option<u32>,
+    pub actual_qty: u32,
+    pub closed_box_count: u32,
+    pub reason_code: Option<String>,
+    pub closed_at: String,
+}
+
+/// How the host answered a record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FactOutcome {
+    /// Applied.
+    Accepted,
+    /// Kept, but the code belongs to an earlier scan (`details.winner`).
+    Conflict,
+    /// Not applied (`code`, one of [`receipt_codes`]).
+    Rejected,
+}
+
+impl FactOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            FactOutcome::Accepted => "accepted",
+            FactOutcome::Conflict => "conflict",
+            FactOutcome::Rejected => "rejected",
+        }
+    }
+}
+
+impl std::str::FromStr for FactOutcome {
+    type Err = UnknownVariant;
+
+    /// The name [`FactOutcome::as_str`] gives, as `fact_receipts.outcome`
+    /// stores it.
+    fn from_str(text: &str) -> Result<Self, Self::Err> {
+        parse_variant("fact outcome", text)
+    }
+}
+
+/// The host's answer to one record. `id` is the record's, or `null` when the
+/// record had no readable id (then nothing was kept, and the device matches
+/// the receipt by its place in the batch). A `rejected` receipt names its
+/// `code`; `details` carries the field of an `invalid_record` and the winner
+/// of a `conflict`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FactReceipt {
+    pub id: Option<String>,
+    pub outcome: FactOutcome,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub details: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+/// The answer of `POST /v1/device/facts`: a receipt for each record, in the
+/// records' order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FactReceipts {
+    pub receipts: Vec<FactReceipt>,
+}
+
+/// The scan that owns a code (stage 2a spec §4.6): the earliest accepted
+/// scan of it. `sameDevice` tells the asking device that the scan is its
+/// own. It is a `conflict` receipt's `details.winner` too.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CodeOwner {
+    pub shift_id: String,
+    pub shift_number: String,
+    pub device_id: String,
+    pub scanned_at: String,
+    pub same_device: bool,
+}
+
+/// `GET /v1/device/codes/{codeHash}` (stage 2a spec §4.6): whether an
+/// accepted scan owns the code. A station asks while the link is `online`,
+/// within 300 ms; without an answer it accepts the scan on its own copy, and
+/// a duplicate shows later as a `conflict` receipt.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum CodeCheck {
+    Free,
+    Taken { owner: CodeOwner },
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        category_default_id, DeviceKind, OfficeRole, ProductStatus, ShiftMode, ShiftOrigin,
-        ShiftStatus, TemplatePurpose, UnknownVariant,
+        category_default_id, DeviceKind, DuplicateSource, FactKind, FactOutcome, OfficeRole,
+        ProductStatus, ScanRawKind, ScanVerdict, ShiftMode, ShiftOrigin, ShiftStatus,
+        TemplatePurpose, UnknownVariant,
     };
 
     /// Every `TemplatePurpose`, listed like `device_kinds` below.
@@ -1666,6 +2100,42 @@ mod tests {
         modes
     }
 
+    /// Every `FactKind`, listed the same way.
+    fn fact_kinds() -> Vec<FactKind> {
+        let kinds = vec![
+            FactKind::Scan,
+            FactKind::BoxClosed,
+            FactKind::BoxLabel,
+            FactKind::BoxException,
+            FactKind::ShiftClosed,
+        ];
+        for kind in &kinds {
+            match kind {
+                FactKind::Scan
+                | FactKind::BoxClosed
+                | FactKind::BoxLabel
+                | FactKind::BoxException
+                | FactKind::ShiftClosed => {}
+            }
+        }
+        kinds
+    }
+
+    /// Every `FactOutcome`, listed the same way.
+    fn fact_outcomes() -> Vec<FactOutcome> {
+        let outcomes = vec![
+            FactOutcome::Accepted,
+            FactOutcome::Conflict,
+            FactOutcome::Rejected,
+        ];
+        for outcome in &outcomes {
+            match outcome {
+                FactOutcome::Accepted | FactOutcome::Conflict | FactOutcome::Rejected => {}
+            }
+        }
+        outcomes
+    }
+
     /// The host stores `as_str` names and reads them back with `FromStr`;
     /// serde writes the same names on the wire.
     #[test]
@@ -1691,6 +2161,33 @@ mod tests {
             assert_eq!(serde_json::to_value(mode).unwrap(), mode.as_str());
         }
         assert_eq!(ShiftMode::default(), ShiftMode::Aggregation);
+        for kind in fact_kinds() {
+            assert_eq!(kind.as_str().parse::<FactKind>(), Ok(kind));
+            assert_eq!(serde_json::to_value(kind).unwrap(), kind.as_str());
+        }
+        for outcome in fact_outcomes() {
+            assert_eq!(outcome.as_str().parse::<FactOutcome>(), Ok(outcome));
+            assert_eq!(serde_json::to_value(outcome).unwrap(), outcome.as_str());
+        }
+        for verdict in [
+            ScanVerdict::Ok,
+            ScanVerdict::Duplicate,
+            ScanVerdict::WrongGtin,
+            ScanVerdict::Invalid,
+        ] {
+            assert_eq!(serde_json::to_value(verdict).unwrap(), verdict.as_str());
+        }
+        for source in [DuplicateSource::Local, DuplicateSource::Host] {
+            assert_eq!(serde_json::to_value(source).unwrap(), source.as_str());
+        }
+        for raw_kind in [
+            ScanRawKind::Km,
+            ScanRawKind::Gtin,
+            ScanRawKind::Sscc,
+            ScanRawKind::Unknown,
+        ] {
+            assert_eq!(serde_json::to_value(raw_kind).unwrap(), raw_kind.as_str());
+        }
         assert_eq!(
             "admin".parse::<ShiftOrigin>().unwrap_err().to_string(),
             "unknown shift origin \"admin\""

@@ -342,8 +342,8 @@ async fn pair_handheld(admin: &Admin) -> String {
 }
 
 /// The handler called directly as device `id` of `kind`, bypassing the
-/// device authentication in front of it (which writes `last_seen_at`, and
-/// has read the key before the handler's transaction starts).
+/// device authentication in front of it (which has read the key before the
+/// handler's transaction starts, and may write `last_seen_at` once a minute).
 async fn issue_as(admin: &Admin, id: &str, kind: DeviceKind, body: Value) -> (StatusCode, Value) {
     let request: SsccBlockRequest = serde_json::from_value(body).unwrap();
     let outcome = issue_block(

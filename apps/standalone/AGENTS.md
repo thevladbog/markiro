@@ -332,6 +332,13 @@ holds a file, need a manual check.
   technologists make (stage 2a spec §4.9, `planShifts`) — check
   `require_shift_planning` and `require_shift_planning_in` the same way, and
   `auth::plans_shifts` names their roles, also with no wildcard arm.
+- Device writes re-check the device the same way, right after
+  `begin_write`, since the extractor read it before the request queued for
+  the write lock: a station's shift create and entry and an SSCC block call
+  `AuthDevice::require_station_in` (a revoked device is 401 with
+  `credential: device`, one that is no station 403), and a batch of facts
+  calls `AuthDevice::require_live_in` (401 for a revoked device; any kind may
+  send), which `require_station_in` builds on.
 
 ## Change feed
 
@@ -933,7 +940,8 @@ change) build their bodies inline, field by field, as does the wizard; its
 `templates`, built by `stockTemplates` since plan 1e3, are typed by the strict
 `bootstrapRequestSchema`, against which `test/protocol.test.ts` parses
 `bootstrap-request-templates.json`. Raise `PROTOCOL_VERSION` for an incompatible
-change; the host keeps accepting the previous version. It is 2 since plan 2a1,
+change, a new fact kind or a new `data` field of a fact included (see Facts);
+the host keeps accepting the previous version. It is 2 since plan 2a1,
 with `MIN_PROTOCOL_VERSION` still 1: the host takes the stations of stage 1,
 and a station of stage 2a finds a host of stage 1 too old (`host_too_old` at
 the probe). `src/host/protocol.ts` mirrors it, and `test/protocol.test.ts`
@@ -2144,7 +2152,15 @@ has no snapshot, opening or owner; an active or a closed one has all three; a
 closed one has `closed_at`, `closed_by_kind` and `closed_by`, any other has
 none of them. A writer that sets only part of them fails with a database
 error, so a station's close (plan 2a2) writes its three columns together.
-`close_reason_code`, `close_reason_text` and `late_data_at` stay free. A
+`close_reason_code`, `close_reason_text` and `late_data_at` stay free: that
+`close_reason_code` is one of the six codes, that `close_reason_text` comes
+only from the office and that `late_data_at` follows a close are held by the
+writers (the office's close route, `facts::close_shift` and `mark_late`),
+each pinned by exact tests. They are not triggers: a trigger would repeat the
+six codes in SQL, need its own parity test against `shift_close_reasons::ALL`
+and add churn to `0010` for no new protection (a rebuild `CHECK` is ruled out
+by the foreign keys to the table). Reopen the decision if a third writer of
+these columns appears; the legacy import writes none. A
 SQLite `CHECK` changes only by rebuilding the table, so these are not edited
 lightly. The stored snapshot outlives the host that froze it, and the owner's
 re-entry reads it through `ShiftSnapshot`: a field added to the struct later
@@ -2200,6 +2216,206 @@ on the office's «SSCC» page, a box counter and a pallet counter alike, as
 «Номера закончились», with no change offered: no number could be valid there
 (`isExhausted`, `src/office/sscc/counter-kind.ts`).
 
+## Facts
+
+Stage 2a, plan 2a2 (`host/src/facts`). A station sends what happened on the
+line as facts, and the host keeps them. The rules the host and the webview
+must answer alike live in `host/src/facts/rules.rs`, each pinned by a
+fixture both read (`host/tests/fact_rules.rs`, `test/fact-rules.test.ts`):
+the digest of a box's members (`box-digest.json`, the domain's
+`boxMembershipDigestV1`), a device's instant (`device-instants.json`: exactly
+what `Date.toISOString` writes, `YYYY-MM-DDTHH:MM:SS.sssZ`, 24 characters, so
+comparing the stored text orders the instants) and when a station's close
+needs a reason (`shift-close-reasons.json`, the domain's six
+`SHIFT_CLOSE_REASON_CODES` and `shiftCloseReasonRequired`). The codes of a
+rejected receipt (`proto::receipt_codes`, `fact-receipt-codes.json`) and the
+reason codes of box exceptions (`proto::exception_reasons`,
+`exception-reasons.json`) are fixtures too; the webview reads them with the
+facts sender (plan 2a6) and the exception screens (plan 2a8).
+
+A device sends facts in batches (`POST /v1/device/facts`, `{ records }`,
+1–100 records, `validation_failed` on `records` otherwise; migration
+`0010_facts.sql`). Any device kind may send, but only a device that entered
+the shift — a station, in stage 2a — gets past `not_entered`. The batch is
+one `BEGIN IMMEDIATE` transaction, and each record is read from its own JSON
+value (`facts::receive`), so a record the host cannot read is answered
+`rejected` with `invalid_record` and the others are applied. The answer is a
+receipt per record, in their order: `accepted`, `conflict` (with
+`details.winner`) or `rejected` with a code of `receipt_codes`
+(`details.field` names the field an `invalid_record` broke). A record with a
+readable id (a canonical UUID the device made up) keeps its receipt for good
+in `fact_receipts`, keyed by the device and the id, with the SHA-256 of the
+record's compact JSON (`rules::record_digest`): the same record sent again
+gets the same receipt, and other content under the same id
+`payload_mismatch`, which is kept nowhere. A record without a readable id
+keeps nothing, and its receipt has `id: null`. Every record names a shift
+that exists (`unknown_shift`) and that the device entered (`not_entered`),
+and an operator by a UUID or `null`, kept as evidence without a foreign key.
+A record is checked whole before its first write, so a refusal leaves
+nothing but its receipt; a database error is no receipt, it fails the batch
+(500, `internal`; the log names the device and the record's position in
+the batch, see Logs), and the device sends the batch again. A body over
+axum's 2 MiB limit is `validation_failed` (400) like any unreadable body, not
+413: a station caps a record at 16 KiB, so 100 records fit, and a 400 on a
+well-formed batch can only be a host bug (the station sends the same batch
+again). What a batch writes (`received_at`, `displaced_at`, `detected_at`, the
+late mark) carries the host's clock read once the batch holds the write lock
+and has re-read its device, not the moment it arrived, so a batch that waited
+behind the office's close of its shift is stamped after that close. Facts are
+production data: they write no audit row and take no revision, but for a
+station's close of its shift and a closed shift's first late fact (below).
+A new fact kind, or a new field in a kind's `data`, raises `PROTOCOL_VERSION`:
+an older host answers the unknown kind or field `invalid_record`, and that
+receipt is kept for good.
+
+A `scan` (`facts/scan.rs`) is a journal row (`scans`) whatever its verdict;
+an `invalid` one keeps no code, only what it looked like (`rawKind`) and its
+length, since it may have been a badge. An `ok` one carries the GTIN the
+snapshot froze (`gtin_mismatch` otherwise) and a box of this device in this
+shift: an unknown box id opens the box, another device's or another shift's
+is `box_unknown`, a closed one `box_closed`. Its code goes to the registry
+(`code_owners`, `facts/registry.rs`): the earliest accepted scan since the
+code was last freed owns it whatever order the scans arrive in, compared by
+their device instants to the millisecond. After an exception released the
+code the next scan to ARRIVE owns it, not an earlier displaced item or
+conflict loser (re-electing the earliest remaining claim is plan 2b). A
+scan earlier than the owner takes the code, and the owner's item leaves its
+box (`box_items.displaced_at`); a later one, or one at the same instant, is
+`conflict` with `details.winner` (`CodeOwner`, `sameDevice` when the owner
+is the sender's own scan). Both write a `code_conflicts` row; telling the
+displaced device and the office's review come with plan 2b.
+
+A `box_closed` (`facts/box_closed.rs`) closes a box of this device in this
+shift (`box_unknown` otherwise) with an SSCC of 18 digits whose first 17 are
+the box extension `0`, the snapshot's issuer prefix and `serial` (the check
+digit is the domain's, never checked here), where `serial` lies in the block
+`blockId` that the host issued to this device for that prefix and did not
+revoke (`sscc_not_issued`), and no other box carries the SSCC or is closed
+on this serial of this block under any check digit (`sscc_taken`: one serial
+is one label; backed by the unique indexes on the SSCC and on `(block_id,
+serial)`). A box already closed with the
+same SSCC is the same close sent again (accepted, nothing written); with
+another, `box_already_closed`. The close keeps the station's `openedAt`,
+`closedAt`, count, digest and operator, raises the block's
+`consumed_through` to the highest serial closed (boxes may close out of
+order), and compares the station's `membershipDigest` with the digest of
+the box's live items (neither removed nor displaced), keeping the result in
+`digest_matches` for the shift's card (stage 4): a mismatch refuses
+nothing. It is computed once, at close: later exceptions or displacement
+change the items without recomputing it, so a report recomputes from the live
+items and shows no match for a box taken apart.
+
+A `box_label` (`facts/box_label.rs`) records the check of a closed box's
+label (`box_state` for an open one): `verified` sets `print_verified_at`,
+`skipped` `print_skipped_at`, each to the station's instant (a reprint and a
+second check set them again). A `box_exception` (`facts/exception.rs`) has
+the fields of its kind as the cloud's (`box_exceptions_kind_payload_check`):
+`undo` names the code and its scan's instant, `clear` nothing, `reprint` and
+`disassemble` a reason code of `exception_reasons` for their kind, with
+words (`validate::exception_reason_text`, trimmed, 1–200 characters) only
+for `other`. `undo` and `clear` take an open box, `reprint` and
+`disassemble` a closed box not taken apart (`box_state` otherwise). The
+items taken out get `removed_at` (the station's instant): an undo takes the
+live item of its code in this box that was added at exactly its
+`targetScannedAt` (none when that scan lost the code, the code sits in
+another box, or the code was scanned again since: the exception is still
+kept, `accepted`); a clear takes the live items added up to its own
+`occurredAt` (inclusive, canonical text comparison), never one scanned
+after it; a disassembly takes every item. So an exception sent again late
+(a new id) never takes out a code scanned after it, and the station's
+undo and clear records must carry the exact `targetScannedAt` and
+`occurredAt` of the scan and the moment they refer to. The codes of
+the items taken out leave the registry (`registry::release`, scoped to the
+item's own scan), free for another scan; a disassembly sets
+`disassembled_at` and the box keeps its SSCC, which no other box takes. A
+reprint changes no state. An item an exception took out never comes back;
+an item an earlier scan displaced is not taken out by an exception of its
+box (it is no longer in the box). One exception row per record, kept with
+the record's shift, device and operator.
+
+A `shift_closed` (`facts/shift_closed.rs`) is a station's close of its
+shift, the summary it showed (`plannedQtySnapshot`, `actualQty`,
+`closedBoxCount`) and a reason code of `shift_close_reasons`, required when
+the plan it saw was set and differs from the fact
+(`rules::close_reason_required`; `invalid_record` on `data.reasonCode`); a
+reason the plan did not call for is kept, as in the cloud. An active shift
+closes: `status = closed`, `closed_at` the station's instant in the host's
+format (whole seconds), `closed_by_kind = device`, `closed_by` the station,
+`close_reason_code`, and the audit row `shift.close` with the station as
+actor and `{ actualQty, plannedQty, closedBoxCount, reasonCode }`. A shift
+the office closed first answers `accepted` with `details.alreadyClosed:
+true`. Every close is kept in `shift_close_events` (`accepted` or
+`already_closed`). Any other fact accepted (or `conflict`) for a closed
+shift is taken and marks it late once (`late_data_at`, the host's clock); a
+refused one marks nothing. Closing a shift and marking it late change the
+shift's row, so the batch takes one host revision for all such changes
+(taken on first need, stamped on each changed row) and commits through
+`commit_with_revision`, which wakes the streams; a batch that changes no
+shift takes none. Only a device that entered the shift closes it (`not_entered`
+otherwise, and so for a shift only planned); the shift is read inside the
+batch's write transaction, so an office close that commits while the batch
+waits for the lock is seen. The office closing a shift the station closed
+finds it changed (`stale_revision`) or closed (`shift_status`).
+
+Any device asks whether a code is taken (`GET /v1/device/codes/{codeHash}`,
+`routes/codes.rs`; 64 lower-case hex digits, `validation_failed` on
+`codeHash` otherwise): `{ status: "free" }` or `{ status: "taken", owner }`
+with the same `CodeOwner` a `conflict` names. It reads the registry on a
+pooled connection outside any write transaction, so it never waits for a
+batch being written — a station asks within 300 ms (plan 2a6) — and it
+writes nothing: it authenticates through `AskingDevice`, the read-only twin of
+`AuthDevice` (same key, revocation and kind checks, no `last_seen_at` update),
+so it never waits for a writer, the first request after an idle minute and a
+busy station's once-a-minute touch included. This is the ONLY writer-free
+device route. Every other device route authenticates through `AuthDevice`,
+which touches `last_seen_at` at most once a minute per device (even an
+`UPDATE` that matches no row takes SQLite's write lock, so it runs only when a
+minute is up): the first request after each full minute, a scanning station's
+too, takes the write lock and can wait behind a writer.
+
+Any accepted fact that follows a station's own `shift_closed` in its queue
+marks the shift late, in the same batch too (`entered_shift` reads the status
+record by record). So the station closes a shift only after its prints are
+settled (plans 2a7 and 2a8), and a report reads `late_data_at − closed_at` as
+neither lateness nor output: the device clock meets the host clock there.
+
+Two timestamp formats live in the facts' tables and are never compared with
+each other: a device's instant (`scanned_at`, `opened_at`, `occurred_at`, …:
+24 characters, `YYYY-MM-DDTHH:MM:SS.sssZ`, kept as sent) and the host's own
+(`received_at`, `detected_at`, `displaced_at`: 20 characters, whole seconds,
+`clock::format_timestamp`). Text order is instant order only inside one
+format, so the registry compares `scanned_at` with `scanned_at` and nothing
+else. The schema (`0010`) holds what no row may break: a journal row, a box
+exception and a close event per record (`UNIQUE (device_id, record_id)`), the
+fields of each scan verdict, the fields of each exception kind, a closed box
+whole, and a code live in a box once. A refusal of a record is permanent: its
+receipt is kept, and the same record sent again is not looked at again, so a
+fact refused for a reason that later changes (a scan of a shift the device had
+not entered yet, say) can only be sent again under a new id.
+
+Every `OfficeShift` — the list, `GET …/{id}` and the answer of every office
+write — carries `totals` (`ShiftTotals`), read from the facts by subqueries
+of `routes/office_shifts.rs` and never stored: `acceptedUnits` (box items
+neither removed nor displaced, in open and closed boxes alike; the office's
+«Принято кодов», never «в коробах»), `unitsInClosedBoxes` (the live items in
+boxes closed and not taken apart, as the cloud's `containedUnits`: the
+office's «Кодов в закрытых коробах»; a shift closed with a box open shows the
+gap to `acceptedUnits`), `closedBoxes`
+(closed and not taken apart), `openBoxes` (open boxes that hold a live item: a
+box emptied by undos or by displacement is not counted), `lastFactAt` (the
+host's clock, whole seconds, at the last receipt of a record that named the
+shift and got past the entry check, refused ones included) and `deviceIds`
+(the shift's participants, first entry first, the id breaking a tie); the
+office's label for `lastFactAt` is «Последние данные со станции», and it is no
+measure of output or lateness. The six fields of `totals`, all required and in
+every `OfficeShift`: `acceptedUnits`, `unitsInClosedBoxes`, `closedBoxes`,
+`openBoxes` (non-negative integers), `lastFactAt` (an instant of the host's
+format or `null`) and `deviceIds` (an array of UUIDs). A planned shift's totals
+are zeros, `null` and `[]`. The subqueries run on the
+indexes of `0010` (`boxes_shift`, the partial `box_items_live`,
+`fact_receipts_shift`); a new column the totals read needs its index in the
+same change, since the list runs them once per shift listed.
+
 ## Marking rules
 
 GS1, KM, SSCC and label rules stay in `@markiro/domain`; the host stores and
@@ -2216,7 +2432,25 @@ out of the log as it stays out of audit details; `no_secrets_in_logs.rs`
 walks a stock and an office layout through the template routes, the
 defaults and the feed, and a shift's snapshot that carries a layout through
 the plan, the station's entry and list, an SSCC block and the office's
-close. Kiosk mode's failures are logged by the command's name
+close. Nor do facts reach it (stage 2a spec §4.11): no code of marking, crypto
+tail, code hash, SSCC or reason words — a refused record is logged by the
+device, its id and its receipt code alone (the two `warn!` calls of
+`facts::receive`), and a database error of a batch by SQLite's own words plus
+one `error!` of the batch route, `a fact batch failed`, with the device and
+the failing record's position in the batch (`position=1` is the second
+record), never the record or its id, which is device text.
+`no_secrets_in_logs.rs` sends every kind of fact, accepted and refused, with
+a code of marking that has a crypto tail, an 18-digit SSCC and reasons in
+words, a resend, a mismatched resend, a station's close of a shift and a
+late scan after it, a batch the host cannot write (a 500, its failing record
+second in the batch), the code check
+and the totals, and asks that the host kept them and the log has none. The
+test sees `info` and above, what `tracing` writes to the file: `println!`,
+`eprintln!`, `dbg!` and `debug!`/`trace!` escape it, so its second test
+pins the source: the library prints nothing and the facts path holds exactly
+three logging calls, the two `warn!` calls and the batch route's `error!`; a
+new one there is a decision for both tests.
+Kiosk mode's failures are logged by the command's name
 alone (`standalone: enter_lockdown failed`), never by what the shell answered.
 The hardware commands (see "Hardware") log a failure to the shell's stderr by
 the command's name, the code and the system's own words: never a printer's

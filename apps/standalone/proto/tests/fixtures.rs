@@ -1,18 +1,20 @@
 use markiro_proto::{
     category_default_id, certificate_fingerprint, codes, compatibility, compatibility_for,
     credentials, display_fingerprint, BadgeCreate, BadgeSalt, BlockSizesUpdate, BootstrapRequest,
-    BootstrapResponse, CategoryTemplateDefault, ChangesResponse, ClaimRequest, Compatibility,
-    CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind,
-    DeviceLineRequest, DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts, DeviceUpdate,
-    ErrorBody, Hello, HelloEnvelope, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord,
-    LabelTemplateSummary, LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate,
-    LocalPairRequest, OfficeLine, OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole,
-    OfficeSession, OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
-    OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
-    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PasswordChange,
-    PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate,
-    ShiftClose, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord,
-    SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
+    BootstrapResponse, BoxClosedFact, BoxExceptionFact, BoxLabelFact, CategoryTemplateDefault,
+    ChangesResponse, ClaimRequest, CodeCheck, CodeOwner, Compatibility, CounterpartyCreate,
+    CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind, DeviceLineRequest,
+    DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts, DeviceUpdate, ErrorBody,
+    ExceptionKind, FactBatch, FactKind, FactOutcome, FactReceipts, Hello, HelloEnvelope,
+    LabelOutcome, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary,
+    LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine,
+    OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeShift,
+    OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord,
+    OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord,
+    PairResponse, PairingCode, PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate,
+    ProductGroup, ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict,
+    ShiftClose, ShiftClosedFact, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate,
+    SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
     TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
@@ -684,6 +686,28 @@ fn office_shift_fixtures_round_trip_and_a_plan_carries_no_number_or_status() {
             ShiftOrigin::Office
         )
     );
+    // The owner entered it, so it is among the shift's devices.
+    assert_eq!(
+        shift.totals.device_ids,
+        vec![shift.owner_device_id.clone().unwrap()]
+    );
+    // The card's two unit numbers are the cloud office's: the units the
+    // facts accepted, and those of them in closed boxes (a full closed box
+    // each here; the open box holds the rest).
+    let totals = &fixture("office-shift.json")["totals"];
+    assert_eq!(totals["acceptedUnits"], 547);
+    assert_eq!(totals["unitsInClosedBoxes"], 540);
+    assert_eq!(
+        totals["unitsInClosedBoxes"].as_u64().unwrap(),
+        totals["closedBoxes"].as_u64().unwrap() * u64::from(shift.box_capacity)
+    );
+    // A shift without facts still carries every field, the instant as `null`.
+    let empty = serde_json::json!({
+        "acceptedUnits": 0, "unitsInClosedBoxes": 0, "closedBoxes": 0, "openBoxes": 0,
+        "lastFactAt": null, "deviceIds": []
+    });
+    let read: markiro_proto::ShiftTotals = serde_json::from_value(empty.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&read).unwrap(), empty);
     let create: ShiftCreate = round_trip("shift-create.json");
     assert_eq!(
         (&create.product_id, &create.line_id, &create.box_template_id),
@@ -860,4 +884,169 @@ fn sscc_block_fixtures_round_trip_and_a_station_never_names_the_size() {
     assert!(serde_json::from_value::<SsccBlockRequest>(value).is_err());
     let exhausted: ErrorBody = round_trip("error-sscc-exhausted.json");
     assert_eq!(exhausted.error.code, codes::SSCC_EXHAUSTED);
+}
+
+/// The receipt codes and the reason codes, as the webview will read them
+/// from the same fixtures (plans 2a6 and 2a8): a code added on one side only
+/// fails here.
+#[test]
+fn the_fact_code_fixtures_list_every_receipt_and_reason_code() {
+    let codes = fixture("fact-receipt-codes.json");
+    assert_eq!(
+        serde_json::from_value::<Vec<String>>(codes["codes"].clone()).unwrap(),
+        markiro_proto::receipt_codes::ALL
+    );
+    let reasons = fixture("exception-reasons.json");
+    assert_eq!(
+        serde_json::from_value::<Vec<String>>(reasons["reprint"].clone()).unwrap(),
+        markiro_proto::exception_reasons::REPRINT
+    );
+    assert_eq!(
+        serde_json::from_value::<Vec<String>>(reasons["disassemble"].clone()).unwrap(),
+        markiro_proto::exception_reasons::DISASSEMBLE
+    );
+    assert_eq!(reasons["other"], markiro_proto::exception_reasons::OTHER);
+    assert_eq!(
+        reasons["maxTextChars"],
+        markiro_proto::exception_reasons::MAX_TEXT_CHARS
+    );
+    let close = fixture("shift-close-reasons.json");
+    assert_eq!(
+        serde_json::from_value::<Vec<String>>(close["codes"].clone()).unwrap(),
+        markiro_proto::shift_close_reasons::ALL
+    );
+}
+
+/// A batch of facts and its receipts. The records' `data` stays JSON in the
+/// envelope (the host reads it by kind, record by record); each one reads
+/// as its kind's type and writes back unchanged.
+#[test]
+fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
+    let batch: FactBatch = round_trip("facts-request.json");
+    let kinds: Vec<FactKind> = batch.records.iter().map(|record| record.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            FactKind::Scan,
+            FactKind::Scan,
+            FactKind::BoxClosed,
+            FactKind::BoxLabel,
+            FactKind::BoxException,
+            FactKind::ShiftClosed
+        ]
+    );
+    for record in &batch.records {
+        let typed = match record.kind {
+            FactKind::Scan => serde_json::to_value(typed::<ScanFact>(&record.data)).unwrap(),
+            FactKind::BoxClosed => {
+                serde_json::to_value(typed::<BoxClosedFact>(&record.data)).unwrap()
+            }
+            FactKind::BoxLabel => {
+                serde_json::to_value(typed::<BoxLabelFact>(&record.data)).unwrap()
+            }
+            FactKind::BoxException => {
+                serde_json::to_value(typed::<BoxExceptionFact>(&record.data)).unwrap()
+            }
+            FactKind::ShiftClosed => {
+                serde_json::to_value(typed::<ShiftClosedFact>(&record.data)).unwrap()
+            }
+        };
+        assert_eq!(typed, record.data, "{}", record.id);
+    }
+    let accepted: ScanFact = typed(&batch.records[0].data);
+    let accepted_box = accepted.box_id.clone().unwrap();
+    assert_eq!(
+        (accepted.verdict, accepted.raw_kind),
+        (ScanVerdict::Ok, ScanRawKind::Km)
+    );
+    assert!(accepted.code.unwrap().canonical.contains('\u{1d}'));
+    let invalid: ScanFact = typed(&batch.records[1].data);
+    assert_eq!(
+        (invalid.verdict, invalid.code, invalid.box_id),
+        (ScanVerdict::Invalid, None, None)
+    );
+    // The box the accepted scan went into, closed with the SSCC of the
+    // first serial of `sscc-block.json`'s block.
+    let closed: BoxClosedFact = typed(&batch.records[2].data);
+    let block: SsccBlock = serde_json::from_value(fixture("sscc-block.json")).unwrap();
+    assert_eq!(
+        (&closed.box_id, &closed.block_id, closed.serial),
+        (&accepted_box, &block.id, block.from_serial)
+    );
+    assert!(closed
+        .sscc
+        .starts_with(&format!("0{}", block.issuer_prefix)));
+    // Its label checked, then printed again for a reason in words.
+    let label: BoxLabelFact = typed(&batch.records[3].data);
+    assert_eq!(
+        (&label.box_id, label.outcome),
+        (&accepted_box, LabelOutcome::Verified)
+    );
+    let reprint: BoxExceptionFact = typed(&batch.records[4].data);
+    assert_eq!(
+        (
+            reprint.exception,
+            &reprint.box_id,
+            reprint.reason_code.as_deref()
+        ),
+        (
+            ExceptionKind::Reprint,
+            &accepted_box,
+            Some(markiro_proto::exception_reasons::OTHER)
+        )
+    );
+    // The shift closed with fewer units than planned, and a reason.
+    let closed: ShiftClosedFact = typed(&batch.records[5].data);
+    assert_eq!(
+        (
+            closed.planned_qty_snapshot,
+            closed.actual_qty,
+            closed.reason_code.as_deref()
+        ),
+        (Some(1200), 1188, Some("material_shortage"))
+    );
+    assert!(markiro_proto::shift_close_reasons::ALL.contains(&"material_shortage"));
+    let receipts: FactReceipts = round_trip("facts-response.json");
+    let outcomes: Vec<FactOutcome> = receipts.receipts.iter().map(|r| r.outcome).collect();
+    assert_eq!(
+        outcomes,
+        vec![
+            FactOutcome::Accepted,
+            FactOutcome::Conflict,
+            FactOutcome::Rejected,
+            FactOutcome::Rejected,
+            FactOutcome::Rejected,
+            FactOutcome::Accepted
+        ]
+    );
+    let winner: CodeOwner =
+        typed(&Value::Object(receipts.receipts[1].details.clone().unwrap())["winner"]);
+    assert!(!winner.same_device);
+    // The close of a shift the office closed first.
+    assert_eq!(
+        receipts.receipts[5].details.clone().map(Value::Object),
+        Some(serde_json::json!({ "alreadyClosed": true }))
+    );
+    for receipt in &receipts.receipts[2..5] {
+        assert!(markiro_proto::receipt_codes::ALL.contains(&receipt.code.as_deref().unwrap()));
+    }
+    // A record names no field the host does not read, and a receipt of a
+    // record without a readable id has `id: null`.
+    let mut value = fixture("facts-request.json");
+    value["records"][0]["deviceId"] = Value::String("anything".into());
+    assert!(serde_json::from_value::<FactBatch>(value).is_err());
+    assert_eq!(receipts.receipts[3].id, None);
+}
+
+/// A code is free, or taken by its owner; the owner a `conflict` receipt
+/// names has the same shape.
+#[test]
+fn code_check_fixtures_round_trip_and_name_the_owner_as_a_conflict_does() {
+    let free: CodeCheck = round_trip("code-check-free.json");
+    assert_eq!(free, CodeCheck::Free);
+    let taken: CodeCheck = round_trip("code-check-taken.json");
+    let receipts: FactReceipts = serde_json::from_value(fixture("facts-response.json")).unwrap();
+    let winner: CodeOwner =
+        typed(&Value::Object(receipts.receipts[1].details.clone().unwrap())["winner"]);
+    assert_eq!(taken, CodeCheck::Taken { owner: winner });
 }

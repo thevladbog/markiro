@@ -503,3 +503,255 @@ pub async fn plan_shift(admin: &Admin, body: Value) -> Value {
     assert_eq!(status, StatusCode::OK, "{shift}");
     shift
 }
+
+/// A station inside an open shift: what facts are sent from.
+pub struct Floor {
+    pub shift: String,
+    /// The shift's number, as a `conflict` receipt names it.
+    pub number: String,
+    pub station: String,
+    pub key: String,
+}
+
+/// Put the station of `key` on `line`, plan a shift of `setup`'s product on
+/// that line and enter it from the station, so the shift is open and the
+/// station its owner.
+pub async fn open_floor(admin: &Admin, setup: &ShiftSetup, key: &str, line: &str) -> Floor {
+    let (status, device) = admin
+        .app
+        .send(empty(with_device(request("GET", "/v1/device"), key)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{device}");
+    let (status, moved) = admin
+        .app
+        .send(json(
+            with_device(request("PUT", "/v1/device/line"), key),
+            serde_json::json!({ "lineId": line }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    let mut body = shift_body(setup);
+    body["lineId"] = Value::String(line.to_owned());
+    let shift = plan_shift(admin, body).await;
+    let (status, entered) = admin
+        .app
+        .send(empty(with_device(
+            request(
+                "POST",
+                &format!("/v1/device/shifts/{}/enter", shift["id"].as_str().unwrap()),
+            ),
+            key,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    Floor {
+        shift: shift["id"].as_str().unwrap().to_owned(),
+        number: shift["number"].as_str().unwrap().to_owned(),
+        station: device["id"].as_str().unwrap().to_owned(),
+        key: key.to_owned(),
+    }
+}
+
+/// `POST /v1/device/facts` with `key`: the status and the body.
+pub async fn send_facts(app: &TestApp, key: &str, records: &[Value]) -> (StatusCode, Value) {
+    app.send(json(
+        with_device(request("POST", "/v1/device/facts"), key),
+        serde_json::json!({ "records": records }),
+    ))
+    .await
+}
+
+/// The receipts of a batch the host answered 200.
+pub async fn receipts(app: &TestApp, key: &str, records: &[Value]) -> Vec<Value> {
+    let (status, body) = send_facts(app, key, records).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["receipts"].as_array().unwrap().clone()
+}
+
+/// The id of record `n`, a canonical UUID.
+pub fn record_id(n: u32) -> String {
+    format!("00000000-0000-4000-8000-{n:012}")
+}
+
+/// The id of box `n`, a canonical UUID.
+pub fn box_id(n: u32) -> String {
+    format!("b0000000-0000-4000-8000-{n:012}")
+}
+
+/// A device's instant `second` seconds and `milli` milliseconds after
+/// 2026-10-08T06:00:00.000Z, as `Date.toISOString` writes it.
+pub fn instant(second: u32, milli: u32) -> String {
+    format!(
+        "2026-10-08T{:02}:{:02}:{:02}.{milli:03}Z",
+        6 + second / 3600,
+        second / 60 % 60,
+        second % 60
+    )
+}
+
+/// The hash of code `n`: 64 lower-case hex digits (the host never checks
+/// that it is the hash of the code).
+pub fn code_hash(n: u32) -> String {
+    format!("{n:064x}")
+}
+
+/// Code `n` of `shift_setup`'s product, as the domain reads it, with a
+/// group separator and a crypto tail in its canonical text.
+pub fn code(n: u32) -> Value {
+    serde_json::json!({
+        "codeHash": code_hash(n),
+        "gtin14": "04600682000013",
+        "serial": format!("S{n:06}"),
+        "canonical": format!("010460068200001321S{n:06}\u{1d}93Tail{n}")
+    })
+}
+
+/// A record of `kind` in `shift`, with no operator.
+pub fn fact(id: &str, kind: &str, shift: &str, data: Value) -> Value {
+    serde_json::json!({ "id": id, "kind": kind, "shiftId": shift, "operatorId": null, "data": data })
+}
+
+/// The `data` of an accepted scan of code `n` into `box_id` at `at`.
+pub fn ok_scan(n: u32, box_id: &str, at: &str) -> Value {
+    serde_json::json!({
+        "scannedAt": at, "verdict": "ok", "duplicateSource": null, "rawKind": "km",
+        "rawLength": 38, "code": code(n), "boxId": box_id
+    })
+}
+
+/// An `accepted` receipt of record `id`.
+pub fn accepted(id: &str) -> Value {
+    serde_json::json!({ "id": id, "outcome": "accepted" })
+}
+
+/// A `rejected` receipt of record `id` with `code`, and `field` for an
+/// `invalid_record` of one field.
+pub fn rejected(id: Option<&str>, code: &str, field: Option<&str>) -> Value {
+    let mut receipt = serde_json::json!({ "id": id, "outcome": "rejected", "code": code });
+    if let Some(field) = field {
+        receipt["details"] = serde_json::json!({ "field": field });
+    }
+    receipt
+}
+
+/// Row counts of every table the facts write, by table name.
+pub async fn fact_rows(app: &TestApp) -> Value {
+    let mut counts = serde_json::Map::new();
+    for table in [
+        "fact_receipts",
+        "scans",
+        "boxes",
+        "box_items",
+        "code_owners",
+        "code_conflicts",
+        "box_exceptions",
+        "shift_close_events",
+    ] {
+        let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+            .fetch_one(&app.state.pool)
+            .await
+            .unwrap();
+        counts.insert(table.to_owned(), Value::from(count));
+    }
+    Value::Object(counts)
+}
+
+/// A block of SSCC serials the station of `key` gets for request
+/// `request_id` (a canonical UUID); the wizard's box counter starts at 1500
+/// and a block is 2000 serials, so the first block is 1500–3499.
+pub async fn issue_block(app: &TestApp, key: &str, request_id: &str) -> Value {
+    let (status, block) = app
+        .send(json(
+            with_device(request("POST", "/v1/device/sscc/blocks"), key),
+            serde_json::json!({
+                "requestId": request_id, "issuerPrefix": "460068200", "extension": 0
+            }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{block}");
+    block
+}
+
+/// The SSCC of box serial `serial` under the wizard's prefix, with its GS1
+/// check digit (the host never checks it; the domain's `buildSscc` writes
+/// it).
+pub fn sscc(serial: u64) -> String {
+    sscc_under("460068200", serial)
+}
+
+/// The SSCC of a box of `serial` under `prefix`, with its check digit: the
+/// serial fills what the prefix leaves of the 16 digits after the extension.
+pub fn sscc_under(prefix: &str, serial: u64) -> String {
+    let width = 16 - prefix.len();
+    let body = format!("0{prefix}{serial:0width$}");
+    let sum: u32 = body
+        .bytes()
+        .rev()
+        .enumerate()
+        .map(|(place, digit)| u32::from(digit - b'0') * if place % 2 == 0 { 3 } else { 1 })
+        .sum();
+    format!("{body}{}", (10 - sum % 10) % 10)
+}
+
+/// The domain's digest of the codes `members` (`code_hash(n)` each).
+pub fn members_digest(members: &[u32]) -> String {
+    let hashes: Vec<String> = members.iter().map(|n| code_hash(*n)).collect();
+    markiro_host::facts::rules::box_membership_digest(&hashes)
+}
+
+/// The `data` of a box closed at `closed_at` with serial `serial` of
+/// `block`, holding the codes `members` as the station saw them.
+pub fn box_closed(
+    box_id: &str,
+    block: &Value,
+    serial: u64,
+    members: &[u32],
+    opened_at: &str,
+    closed_at: &str,
+) -> Value {
+    serde_json::json!({
+        "boxId": box_id, "sscc": sscc(serial), "blockId": block["id"], "serial": serial,
+        "openedAt": opened_at, "closedAt": closed_at, "itemCount": members.len(),
+        "membershipDigest": members_digest(members)
+    })
+}
+
+/// The `data` of a box exception of `kind` in `box_id` at `at`, with no
+/// code, scan instant or reason; a test sets the fields its kind needs.
+pub fn box_exception(kind: &str, box_id: &str, at: &str) -> Value {
+    serde_json::json!({
+        "exception": kind, "boxId": box_id, "codeHash": null, "targetScannedAt": null,
+        "reasonCode": null, "reasonText": null, "occurredAt": at
+    })
+}
+
+/// The `data` of a station's close of its shift at `closed_at`.
+pub fn shift_closed(
+    planned: Option<u32>,
+    actual: u32,
+    boxes: u32,
+    reason: Option<&str>,
+    closed_at: &str,
+) -> Value {
+    serde_json::json!({
+        "plannedQtySnapshot": planned, "actualQty": actual, "closedBoxCount": boxes,
+        "reasonCode": reason, "closedAt": closed_at
+    })
+}
+
+/// Close the open shift `shift` from the office, as the administrator, with
+/// `reason`.
+pub async fn close_from_office(admin: &Admin, shift: &str, reason: &str) -> Value {
+    let path = format!("/v1/office/shifts/{shift}");
+    let (status, current) = admin.call("GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    let (status, closed) = admin
+        .call(
+            "POST",
+            &format!("{path}/close"),
+            Some(serde_json::json!({ "reason": reason, "expectedRev": current["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    closed
+}

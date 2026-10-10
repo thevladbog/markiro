@@ -1,0 +1,12 @@
+{
+  "reprint": ["damaged_label", "unreadable_label", "printer_jam", "quality_request", "other"],
+  "disassemble": [
+    "wrong_product",
+    "wrong_quantity",
+    "damaged_package",
+    "quality_rejected",
+    "other"
+  ],
+  "other": "other",
+  "maxTextChars": 200
+}

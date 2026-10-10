@@ -1,0 +1,94 @@
+{
+  "records": [
+    {
+      "id": "5d2c8f0a-3b1e-4c7d-9a6f-0e2b4c6d8f10",
+      "kind": "scan",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "scannedAt": "2026-10-08T06:15:02.418Z",
+        "verdict": "ok",
+        "duplicateSource": null,
+        "rawKind": "km",
+        "rawLength": 83,
+        "code": {
+          "codeHash": "3f6c0f1e2d8b4a5c9e7f1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f",
+          "gtin14": "04600682000013",
+          "serial": "5Yq'Ct;",
+          "canonical": "0104600682000013215Yq'Ct;\u001d93dGVz"
+        },
+        "boxId": "8e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b"
+      }
+    },
+    {
+      "id": "6e3d9a1b-4c2f-4d8e-8b7a-1f3c5d7e9a21",
+      "kind": "scan",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "scannedAt": "2026-10-08T06:15:04.007Z",
+        "verdict": "invalid",
+        "duplicateSource": null,
+        "rawKind": "unknown",
+        "rawLength": 9,
+        "code": null,
+        "boxId": null
+      }
+    },
+    {
+      "id": "7a4f0c2d-5e3b-4f9a-8c6d-2e4f6a8b0c32",
+      "kind": "box_closed",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "boxId": "8e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
+        "sscc": "046006820000015000",
+        "blockId": "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+        "serial": 1500,
+        "openedAt": "2026-10-08T06:15:02.418Z",
+        "closedAt": "2026-10-08T06:21:47.302Z",
+        "itemCount": 12,
+        "membershipDigest": "39e3dbefdfff2c243c8fad25abe0b1e435fcab76ff4d6041b8caa9b2afb8402e"
+      }
+    },
+    {
+      "id": "8b5a1d3e-6f4c-4a0b-9d7e-3f5a7b9c1d43",
+      "kind": "box_label",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "boxId": "8e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
+        "outcome": "verified",
+        "at": "2026-10-08T06:21:55.016Z"
+      }
+    },
+    {
+      "id": "9c6b2e4f-7a5d-4b1c-8e8f-4a6b8c0d2e54",
+      "kind": "box_exception",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "exception": "reprint",
+        "boxId": "8e1f2a3b-4c5d-4e6f-8a9b-0c1d2e3f4a5b",
+        "codeHash": null,
+        "targetScannedAt": null,
+        "reasonCode": "other",
+        "reasonText": "Этикетка смята на аппликаторе",
+        "occurredAt": "2026-10-08T06:24:10.881Z"
+      }
+    },
+    {
+      "id": "ad7c3f5a-8b6e-4c2d-9f0a-5b7c9d1e3f65",
+      "kind": "shift_closed",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "plannedQtySnapshot": 1200,
+        "actualQty": 1188,
+        "closedBoxCount": 99,
+        "reasonCode": "material_shortage",
+        "closedAt": "2026-10-08T14:02:31.775Z"
+      }
+    }
+  ]
+}
