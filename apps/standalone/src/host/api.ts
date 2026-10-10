@@ -8,6 +8,9 @@ import {
   changesResponseSchema,
   counterpartyRecordSchema,
   deviceRecordSchema,
+  deviceShiftSchema,
+  deviceShiftsSchema,
+  enteredShiftSchema,
   labelTemplateSchema,
   labelTemplateSummarySchema,
   officeLineSchema,
@@ -34,7 +37,10 @@ import {
   type CounterpartyRecord,
   type CounterpartyUpdate,
   type DeviceRecord,
+  type DeviceShift,
+  type DeviceShiftCreate,
   type DeviceUpdate,
+  type EnteredShift,
   type LabelTemplate,
   type LabelTemplateSummary,
   type LineCreate,
@@ -170,6 +176,19 @@ export interface HostApi {
   /** `204`, only a planned shift; a delete repeated after a lost answer is `not_found`. */
   deleteShift: (token: string, id: string) => Promise<void>;
   closeShift: (token: string, id: string, close: ShiftClose) => Promise<OfficeShift>;
+  /**
+   * The station's shifts, with the device key only: the planned and active
+   * shifts of its line and those it entered, active or closed within 30
+   * days. Stations only (`forbidden` for another kind).
+   */
+  getDeviceShifts: () => Promise<DeviceShift[]>;
+  /** A planned shift on the station's own line; the same `requestId` answers the same shift. */
+  createDeviceShift: (create: DeviceShiftCreate) => Promise<DeviceShift>;
+  /**
+   * Opens a planned shift or enters again the active one this station opened;
+   * the answer carries the frozen snapshot.
+   */
+  enterShift: (id: string) => Promise<EnteredShift>;
 }
 
 /** A 204 answer parses as `null`. */
@@ -421,6 +440,12 @@ export function createHostApi(client: HostClient): HostApi {
         schema: NO_CONTENT,
       });
     },
+    getDeviceShifts: async () =>
+      (await client.request("GET", "/v1/device/shifts", { schema: deviceShiftsSchema })).shifts,
+    createDeviceShift: (create) =>
+      client.request("POST", "/v1/device/shifts", { body: create, schema: deviceShiftSchema }),
+    enterShift: (id) =>
+      client.request("POST", `/v1/device/shifts/${id}/enter`, { schema: enteredShiftSchema }),
     closeShift: (token, id, close) =>
       client.request("POST", `/v1/office/shifts/${id}/close`, {
         body: close,

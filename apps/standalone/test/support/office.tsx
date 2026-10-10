@@ -23,7 +23,10 @@ function unexpected(name: keyof HostApi): Promise<never> {
   return Promise.reject(new Error(`unexpected HostApi.${name} call`));
 }
 
-/** Every method a test did not stub fails loudly; `officeLogout` succeeds. */
+/**
+ * Every method a test did not stub fails loudly; `officeLogout` succeeds and
+ * `getDeviceShifts` answers no shifts.
+ */
 export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
   return {
     bootstrap: vi.fn<HostApi["bootstrap"]>(() => unexpected("bootstrap")),
@@ -85,6 +88,11 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     updateShift: vi.fn<HostApi["updateShift"]>(() => unexpected("updateShift")),
     deleteShift: vi.fn<HostApi["deleteShift"]>(() => unexpected("deleteShift")),
     closeShift: vi.fn<HostApi["closeShift"]>(() => unexpected("closeShift")),
+    // The floor reads its shifts whenever it reads its device record; a test
+    // about something else gets none.
+    getDeviceShifts: vi.fn<HostApi["getDeviceShifts"]>(async () => []),
+    createDeviceShift: vi.fn<HostApi["createDeviceShift"]>(() => unexpected("createDeviceShift")),
+    enterShift: vi.fn<HostApi["enterShift"]>(() => unexpected("enterShift")),
     ...overrides,
   };
 }

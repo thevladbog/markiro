@@ -1,14 +1,20 @@
 import { readFileSync } from "node:fs";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createHostApi, type HostApi } from "../src/host/api.js";
-import type { HostClient, HttpMethod } from "../src/host/client.js";
+import {
+  createTauriHostClient,
+  HostError,
+  type HostClient,
+  type HttpMethod,
+} from "../src/host/client.js";
 import {
   badgeCreateSchema,
   bootstrapRequestSchema,
   counterpartyCreateSchema,
   counterpartyUpdateSchema,
+  deviceShiftCreateSchema,
   deviceUpdateSchema,
   labelTemplateSchema,
   lineUpdateSchema,
@@ -27,6 +33,7 @@ import {
   templateDefaultsUpdateSchema,
   templateUpdateSchema,
 } from "../src/host/protocol.js";
+import { fakeHostApi } from "./support/office.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
 const testModuleUrl = import.meta.url;
@@ -498,5 +505,164 @@ describe("HostApi change feed", () => {
     expect(sent).toEqual([
       { method: "GET", path: "/v1/changes?since=41", body: undefined, officeToken: undefined },
     ]);
+  });
+});
+
+describe("HostApi device shifts", () => {
+  const list = fixture("device-shifts.json");
+  const entered = fixture("device-shift-entered.json");
+  const CREATE = deviceShiftCreateSchema.parse(fixture("device-shift-create.json"));
+
+  it("reads, creates and enters shifts with the device key only, no office session", async () => {
+    const reading = recording(list);
+    await expect(reading.api.getDeviceShifts()).resolves.toMatchObject([
+      { number: "OCT26-004", status: "active" },
+      { number: "OCT26-005/S", status: "planned" },
+    ]);
+    const creating = recording((list as { shifts: unknown[] }).shifts[1]);
+    await expect(creating.api.createDeviceShift(CREATE)).resolves.toMatchObject({
+      number: "OCT26-005/S",
+    });
+    const entering = recording(entered);
+    await expect(entering.api.enterShift(SHIFT_ID)).resolves.toMatchObject({
+      status: "active",
+      snapshot: { issuerPrefix: "460068200" },
+    });
+    expect([...reading.sent, ...creating.sent, ...entering.sent]).toEqual([
+      { method: "GET", path: "/v1/device/shifts", body: undefined, officeToken: undefined },
+      { method: "POST", path: "/v1/device/shifts", body: CREATE, officeToken: undefined },
+      {
+        method: "POST",
+        path: `/v1/device/shifts/${SHIFT_ID}/enter`,
+        body: undefined,
+        officeToken: undefined,
+      },
+    ]);
+  });
+
+  it("rejects a list without its shifts and an entry without its snapshot", async () => {
+    await expect(
+      recording({ shifts: [entered, { id: 1 }] }).api.getDeviceShifts(),
+    ).rejects.toThrow();
+    await expect(
+      recording((list as { shifts: unknown[] }).shifts).api.getDeviceShifts(),
+    ).rejects.toThrow();
+    const withoutSnapshot = { ...(entered as Record<string, unknown>) };
+    delete withoutSnapshot["snapshot"];
+    await expect(recording(withoutSnapshot).api.enterShift(SHIFT_ID)).rejects.toThrow();
+    await expect(recording(withoutSnapshot).api.createDeviceShift(CREATE)).resolves.toMatchObject({
+      id: SHIFT_ID,
+    });
+  });
+
+  it("reads the list as the shifts alone, in the host's order, and keeps nothing else of the answer", async () => {
+    const shifts = await recording(list).api.getDeviceShifts();
+    expect(shifts.map((shift) => shift.id)).toEqual(
+      (list as { shifts: { id: string }[] }).shifts.map((shift) => shift.id),
+    );
+    await expect(recording({ shifts: [] }).api.getDeviceShifts()).resolves.toEqual([]);
+  });
+
+  /** The real client over a shell that answers `status` and `body`, with the call it made. */
+  function overShell(status: number, body: unknown) {
+    const call = vi.fn().mockResolvedValue({ status, body });
+    return { api: createHostApi(createTauriHostClient(call)), call };
+  }
+
+  it("asks the shell for the device routes with no office token and the body the host takes", async () => {
+    const reading = overShell(200, list);
+    await reading.api.getDeviceShifts();
+    expect(reading.call).toHaveBeenCalledWith("host_request", {
+      method: "GET",
+      path: "/v1/device/shifts",
+      body: null,
+      officeToken: null,
+    });
+    const creating = overShell(200, (list as { shifts: unknown[] }).shifts[1]);
+    await creating.api.createDeviceShift(CREATE);
+    expect(creating.call).toHaveBeenCalledWith("host_request", {
+      method: "POST",
+      path: "/v1/device/shifts",
+      body: CREATE,
+      officeToken: null,
+    });
+    const entering = overShell(200, entered);
+    await entering.api.enterShift(SHIFT_ID);
+    expect(entering.call).toHaveBeenCalledWith("host_request", {
+      method: "POST",
+      path: `/v1/device/shifts/${SHIFT_ID}/enter`,
+      body: null,
+      officeToken: null,
+    });
+  });
+
+  it.each([
+    ["shift_busy", 409, "entering", "error-shift-busy.json"],
+    ["shift_line", 409, "entering", undefined],
+    ["shift_status", 409, "entering", undefined],
+    ["product_inactive", 409, "creating", undefined],
+    ["template_not_fit", 409, "creating", undefined],
+  ] as const)(
+    "lets the refusal %s through as it came, with its status and constraint",
+    async (constraint, status, what, file) => {
+      const body =
+        file === undefined
+          ? { error: { code: "conflict", message: "refused", details: { constraint } } }
+          : fixture(file);
+      const { api } = overShell(status, body);
+      const error: unknown = await (
+        what === "entering" ? api.enterShift(SHIFT_ID) : api.createDeviceShift(CREATE)
+      ).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+      expect(error).toBeInstanceOf(HostError);
+      expect(error).toMatchObject({
+        kind: "api",
+        code: "conflict",
+        status,
+        details: { constraint },
+      });
+    },
+  );
+
+  it("lets a refusal of the list through, and a transport failure of the shell", async () => {
+    const forbidden = overShell(403, {
+      error: { code: "forbidden", message: "stations only" },
+    });
+    await expect(forbidden.api.getDeviceShifts()).rejects.toMatchObject({
+      kind: "api",
+      code: "forbidden",
+      status: 403,
+    });
+    const lost = createHostApi(createTauriHostClient(vi.fn().mockRejectedValue("unreachable")));
+    await expect(lost.getDeviceShifts()).rejects.toMatchObject({
+      kind: "transport",
+      code: "unreachable",
+    });
+    await expect(lost.enterShift(SHIFT_ID)).rejects.toMatchObject({ code: "unreachable" });
+    await expect(lost.createDeviceShift(CREATE)).rejects.toMatchObject({ code: "unreachable" });
+  });
+
+  it("is stood in for by a fake that answers no shifts and refuses the writes loudly", async () => {
+    const fake = fakeHostApi();
+    await expect(fake.getDeviceShifts()).resolves.toEqual([]);
+    await expect(fake.createDeviceShift(CREATE)).rejects.toThrow(
+      "unexpected HostApi.createDeviceShift call",
+    );
+    await expect(fake.enterShift(SHIFT_ID)).rejects.toThrow("unexpected HostApi.enterShift call");
+    // A test that stubs the list gets its own answer, not the empty one.
+    const shifts = await recording(list).api.getDeviceShifts();
+    const stubbed = fakeHostApi({ getDeviceShifts: vi.fn(async () => shifts) });
+    await expect(stubbed.getDeviceShifts()).resolves.toBe(shifts);
+    expect(stubbed.getDeviceShifts).toHaveBeenCalledTimes(1);
+  });
+
+  it("reads a host answer that fails the schema as an invalid response, not as a shift", async () => {
+    const { api } = overShell(200, { shifts: [{ id: 1 }] });
+    await expect(api.getDeviceShifts()).rejects.toMatchObject({
+      kind: "transport",
+      code: "invalid_response",
+    });
   });
 });

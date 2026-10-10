@@ -4,6 +4,7 @@ import type {
   CounterpartyCreate,
   CounterpartyUpdate,
   DeviceRecord,
+  DeviceShiftCreate,
   DeviceUpdate,
   LabelTemplate,
   LineCreate,
@@ -442,4 +443,31 @@ export function shiftUpdate(
  */
 export function shiftClose(reason: string, expectedRev: number): ShiftClose {
   return { reason, expectedRev };
+}
+
+/** What a station's new shift carries: the operator's choices and the request's id. */
+export interface DeviceShiftInput {
+  requestId: string;
+  productId: string;
+  boxTemplateId: string;
+  productionDate: string;
+  boxCapacity: number;
+  plannedQty: number | null;
+}
+
+/**
+ * `POST /v1/device/shifts` (`device-shift-create.json`): every field, `null`
+ * for no plan, and no counterparty, of which the station keeps no copy. The
+ * line is the station's own and no field.
+ */
+export function deviceShiftCreate(shift: DeviceShiftInput): DeviceShiftCreate {
+  return {
+    requestId: shift.requestId,
+    productId: shift.productId,
+    boxTemplateId: shift.boxTemplateId,
+    productionDate: shift.productionDate,
+    boxCapacity: shift.boxCapacity,
+    plannedQty: shift.plannedQty,
+    counterpartyId: null,
+  };
 }
