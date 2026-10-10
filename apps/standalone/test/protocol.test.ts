@@ -32,6 +32,7 @@ import {
   officeOperatorSchema,
   officeProductSchema,
   officeSessionSchema,
+  officeShiftSchema,
   officeUserCreateSchema,
   officeUserRecordSchema,
   officeUserSchema,
@@ -51,6 +52,9 @@ import {
   productGroupSchema,
   productRecordSchema,
   productUpdateSchema,
+  shiftCloseSchema,
+  shiftCreateSchema,
+  shiftUpdateSchema,
   siteRecordSchema,
   ssccCounterUpdateSchema,
   ssccStateSchema,
@@ -73,6 +77,9 @@ import {
   pairingCodeRequest,
   productCreate,
   productUpdate,
+  shiftClose,
+  shiftCreate,
+  shiftUpdate,
   templateCreate,
   templateDefaultsUpdate,
   templateUpdate,
@@ -243,6 +250,9 @@ const RESPONSES = [
   ["label-template.json", labelTemplateSchema],
   ["template-defaults.json", templateDefaultsSchema],
   ["error-template-is-default.json", errorBodySchema],
+  ["office-shift.json", officeShiftSchema],
+  ["error-shift-busy.json", errorBodySchema],
+  ["error-sscc-exhausted.json", errorBodySchema],
 ] as const;
 
 const REQUESTS = [
@@ -270,6 +280,9 @@ const REQUESTS = [
   ["template-update.json", templateUpdateSchema],
   ["template-defaults-update.json", templateDefaultsUpdateSchema],
   ["bootstrap-request-templates.json", bootstrapRequestSchema],
+  ["shift-create.json", shiftCreateSchema],
+  ["shift-update.json", shiftUpdateSchema],
+  ["shift-close.json", shiftCloseSchema],
 ] as const;
 
 function extended(name: string): Record<string, unknown> {
@@ -535,6 +548,62 @@ describe("request builders produce their fixtures exactly", () => {
     expect(body.chzProductGroupCodes).toEqual([8, 15]);
   });
 
+  it("a shift to plan, one moved to another line and day with its plan cleared, and one to close", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    // A form holds more than the builder names: the product's name must not go.
+    const typed = {
+      productId: shift.productId,
+      lineId: shift.lineId,
+      productionDate: shift.productionDate,
+      boxTemplateId: shift.boxTemplateId,
+      boxCapacity: shift.boxCapacity,
+      plannedQty: 1200,
+      counterpartyId: shift.counterpartyId,
+      productName: "Молоко 3,2% 0,9 л",
+    };
+    expect(shiftCreate(typed)).toStrictEqual(fixture("shift-create.json"));
+    // Loaded on another line, moved back to the fixture's line.
+    const elsewhere = { ...shift, lineId: "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21" };
+    expect(
+      shiftUpdate(elsewhere, {
+        lineId: shift.lineId,
+        productionDate: "2026-10-09",
+        boxTemplateId: shift.boxTemplateId,
+        boxCapacity: shift.boxCapacity,
+        plannedQty: null,
+        counterpartyId: shift.counterpartyId,
+      }),
+    ).toStrictEqual(fixture("shift-update.json"));
+    expect(shiftClose("Станция линии 2 вышла из строя", shift.rev)).toStrictEqual(
+      fixture("shift-close.json"),
+    );
+  });
+
+  it("a shift planned with no plan and no counterparty names both as null and still names the mode and pallets", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    const body = shiftCreate({
+      productId: shift.productId,
+      lineId: shift.lineId,
+      productionDate: shift.productionDate,
+      boxTemplateId: shift.boxTemplateId,
+      boxCapacity: shift.boxCapacity,
+      plannedQty: null,
+      counterpartyId: null,
+    });
+    expect(body).toStrictEqual({
+      productId: shift.productId,
+      lineId: shift.lineId,
+      productionDate: shift.productionDate,
+      boxTemplateId: shift.boxTemplateId,
+      boxCapacity: 12,
+      plannedQty: null,
+      counterpartyId: null,
+      mode: "aggregation",
+      palletsEnabled: false,
+    });
+    expect(shiftCreateSchema.parse(body)).toStrictEqual(body);
+  });
+
   it("template defaults that keep each slot's own template and send only the fields they name", () => {
     const box = "7c1e4b2a-9d3f-4e5a-8b6c-1d2e3f4a5b6c";
     const pallet = "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d";
@@ -741,6 +810,70 @@ describe("request builders send only what changes", () => {
     ];
     for (const body of bodies) {
       expect(templateUpdateSchema.parse(body)).toStrictEqual(body);
+    }
+  });
+
+  it("names only the shift fields that differ, clears a plan or a counterparty with null and never sends null elsewhere", () => {
+    const shift = {
+      lineId: "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
+      productionDate: "2026-10-08",
+      boxTemplateId: "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+      boxCapacity: 12,
+      plannedQty: 1200,
+      counterpartyId: "d2b7c9e1-4f3a-4b6c-8d5e-9f0a1b2c3d4e",
+      rev: 71,
+    };
+    const same = {
+      lineId: shift.lineId,
+      productionDate: shift.productionDate,
+      boxTemplateId: shift.boxTemplateId,
+      boxCapacity: shift.boxCapacity,
+      plannedQty: shift.plannedQty,
+      counterpartyId: shift.counterpartyId,
+    };
+    const other = "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21";
+    const bodies = [
+      [shiftUpdate(shift, {}), { expectedRev: 71 }],
+      [shiftUpdate(shift, same), { expectedRev: 71 }],
+      [shiftUpdate(shift, { ...same, lineId: other }), { lineId: other, expectedRev: 71 }],
+      [
+        shiftUpdate(shift, { ...same, productionDate: "2026-10-09" }),
+        { productionDate: "2026-10-09", expectedRev: 71 },
+      ],
+      [
+        shiftUpdate(shift, { ...same, boxTemplateId: other }),
+        { boxTemplateId: other, expectedRev: 71 },
+      ],
+      [shiftUpdate(shift, { ...same, boxCapacity: 24 }), { boxCapacity: 24, expectedRev: 71 }],
+      [shiftUpdate(shift, { ...same, plannedQty: 1500 }), { plannedQty: 1500, expectedRev: 71 }],
+      [shiftUpdate(shift, { ...same, plannedQty: null }), { plannedQty: null, expectedRev: 71 }],
+      [
+        shiftUpdate(shift, { ...same, counterpartyId: null }),
+        { counterpartyId: null, expectedRev: 71 },
+      ],
+      // No plan and no counterparty, given one: the change goes.
+      [
+        shiftUpdate(
+          { ...shift, plannedQty: null, counterpartyId: null },
+          { plannedQty: 800, counterpartyId: other },
+        ),
+        { plannedQty: 800, counterpartyId: other, expectedRev: 71 },
+      ],
+      // `null` over `null` is no change.
+      [
+        shiftUpdate(
+          { ...shift, plannedQty: null, counterpartyId: null },
+          {
+            plannedQty: null,
+            counterpartyId: null,
+          },
+        ),
+        { expectedRev: 71 },
+      ],
+    ] as const;
+    for (const [body, expected] of bodies) {
+      expect(body).toStrictEqual(expected);
+      expect(shiftUpdateSchema.parse(body)).toStrictEqual(body);
     }
   });
 
@@ -1040,6 +1173,192 @@ describe("catalog shapes", () => {
         expect(schema.safeParse(without).success, `${name} without ${key}`).toBe(false);
       }
     }
+  });
+});
+
+describe("shift shapes", () => {
+  it("read a planned shift without a plan, a counterparty, an owner or times, and a closed one", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    const planned = {
+      ...shift,
+      status: "planned",
+      counterpartyId: null,
+      plannedQty: null,
+      ownerDeviceId: null,
+      openedAt: null,
+    };
+    expect(officeShiftSchema.parse(planned)).toEqual(planned);
+    const closed = {
+      ...shift,
+      status: "closed",
+      createdFrom: "station",
+      number: "OCT26-005/S",
+      closedAt: "2026-10-08T14:00:00Z",
+      closeReasonCode: "equipment_stop",
+      lateDataAt: "2026-10-08T14:30:00Z",
+    };
+    expect(officeShiftSchema.parse(closed)).toEqual(closed);
+  });
+
+  it("refuse an unknown status, mode or origin, an id that is no UUID, a count that is no positive whole number and a date of another form", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    const refused: Record<string, unknown[]> = {
+      status: ["open", null],
+      mode: ["boxes", null],
+      createdFrom: ["admin", null],
+      id: ["42"],
+      productId: ["42", null],
+      lineId: ["42", null],
+      boxTemplateId: ["42", null],
+      counterpartyId: ["42"],
+      ownerDeviceId: ["42"],
+      plannedQty: [0, 1.5, -1, "1200"],
+      boxCapacity: [0, 1.5, null],
+      productionDate: ["08.10.2026", "2026-10-8", 20261008, null],
+      openedAt: ["yesterday"],
+      rev: [1.5, null],
+    };
+    for (const [field, values] of Object.entries(refused)) {
+      for (const value of values) {
+        const result = officeShiftSchema.safeParse({ ...shift, [field]: value });
+        expect(result.success, `${field}: ${JSON.stringify(value)}`).toBe(false);
+      }
+    }
+  });
+
+  it("refuse null in a shift's update where the host would read it as keep, and take it for the plan and the counterparty", () => {
+    for (const field of [
+      "lineId",
+      "productionDate",
+      "boxTemplateId",
+      "boxCapacity",
+      "mode",
+      "palletsEnabled",
+    ]) {
+      expect(shiftUpdateSchema.safeParse({ [field]: null, expectedRev: 71 }).success, field).toBe(
+        false,
+      );
+    }
+    for (const field of ["plannedQty", "counterpartyId"]) {
+      expect(shiftUpdateSchema.safeParse({ [field]: null, expectedRev: 71 }).success, field).toBe(
+        true,
+      );
+    }
+  });
+
+  it("read a mode and a close reason code this build does not know, and a plan of one unit", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    const later = {
+      ...shift,
+      mode: "validation",
+      plannedQty: 1,
+      status: "closed",
+      closedAt: "2026-10-08T14:00:00Z",
+      closeReasonCode: "a_code_a_newer_host_adds",
+      closeReasonText: "Станция линии 2 вышла из строя",
+      lateDataAt: "2026-10-08T14:30:00Z",
+    };
+    expect(officeShiftSchema.parse(later)).toEqual(later);
+  });
+
+  it("refuse a shift whose times, number, flag, reason or date are of another form", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    const refused: Record<string, unknown[]> = {
+      number: ["", 4, null],
+      palletsEnabled: ["no", 0, null],
+      closedAt: ["yesterday", 20261008],
+      lateDataAt: ["yesterday", 20261008],
+      createdAt: ["yesterday", null],
+      closeReasonCode: [5],
+      closeReasonText: [5],
+      // The date is exactly `YYYY-MM-DD`, with nothing before or after it.
+      productionDate: ["2026-10-08 ", " 2026-10-08", "x2026-10-08", "2026-10-08T00:00:00Z"],
+    };
+    for (const [field, values] of Object.entries(refused)) {
+      for (const value of values) {
+        const result = officeShiftSchema.safeParse({ ...shift, [field]: value });
+        expect(result.success, `${field}: ${JSON.stringify(value)}`).toBe(false);
+      }
+    }
+    for (const field of Object.keys(shift)) {
+      const without = Object.fromEntries(Object.entries(shift).filter(([key]) => key !== field));
+      expect(officeShiftSchema.safeParse(without).success, `without ${field}`).toBe(false);
+    }
+  });
+
+  it("refuse a shift to plan, to move or to close with a field of another form, and one that lacks what it needs", () => {
+    const create = shiftCreateSchema.parse(fixture("shift-create.json"));
+    const update = shiftUpdateSchema.parse(fixture("shift-update.json"));
+    const close = shiftCloseSchema.parse(fixture("shift-close.json"));
+    const refusedCreate: Record<string, unknown[]> = {
+      productId: ["42", null],
+      lineId: ["42", null],
+      boxTemplateId: ["42", null],
+      productionDate: [20261008, null],
+      boxCapacity: [0, -1, 1.5, "12", null],
+      plannedQty: [0, -1, 1.5, "1200"],
+      counterpartyId: ["42"],
+      mode: ["boxes", null],
+      palletsEnabled: ["no", null],
+    };
+    for (const [field, values] of Object.entries(refusedCreate)) {
+      for (const value of values) {
+        const result = shiftCreateSchema.safeParse({ ...create, [field]: value });
+        expect(result.success, `create ${field}: ${JSON.stringify(value)}`).toBe(false);
+      }
+    }
+    for (const field of ["productId", "lineId", "productionDate", "boxTemplateId"]) {
+      const without = Object.fromEntries(Object.entries(create).filter(([key]) => key !== field));
+      expect(shiftCreateSchema.safeParse(without).success, `create without ${field}`).toBe(false);
+    }
+    // Only the four ids and the date are required; the rest may be left out or be null.
+    const { productId, lineId, productionDate, boxTemplateId } = create;
+    expect(
+      shiftCreateSchema.safeParse({ productId, lineId, productionDate, boxTemplateId }).success,
+    ).toBe(true);
+    expect(
+      shiftCreateSchema.safeParse({ ...create, plannedQty: null, counterpartyId: null }).success,
+    ).toBe(true);
+    const refusedUpdate: Record<string, unknown[]> = {
+      lineId: ["42"],
+      productionDate: [20261008],
+      boxTemplateId: ["42"],
+      boxCapacity: [0, -1, 1.5, "12"],
+      plannedQty: [0, -1, 1.5, "1200"],
+      counterpartyId: ["42"],
+      mode: ["boxes"],
+      palletsEnabled: ["no"],
+      expectedRev: [1.5, "71", null],
+    };
+    for (const [field, values] of Object.entries(refusedUpdate)) {
+      for (const value of values) {
+        const result = shiftUpdateSchema.safeParse({ ...update, [field]: value });
+        expect(result.success, `update ${field}: ${JSON.stringify(value)}`).toBe(false);
+      }
+    }
+    expect(shiftUpdateSchema.safeParse({ lineId: update.lineId }).success).toBe(false);
+    expect(
+      shiftUpdateSchema.safeParse({ ...update, boxCapacity: 24, mode: "validation" }).success,
+    ).toBe(true);
+    for (const value of [1.5, "71", null]) {
+      expect(shiftCloseSchema.safeParse({ ...close, expectedRev: value }).success).toBe(false);
+    }
+    for (const value of [5, null]) {
+      expect(shiftCloseSchema.safeParse({ ...close, reason: value }).success).toBe(false);
+    }
+    expect(shiftCloseSchema.safeParse({ expectedRev: 71 }).success).toBe(false);
+    expect(shiftCloseSchema.safeParse({ reason: close.reason }).success).toBe(false);
+  });
+
+  it("read the refusals of a busy shift and of a prefix with no serials left", () => {
+    expect(errorBodySchema.parse(fixture("error-shift-busy.json")).error).toMatchObject({
+      code: "conflict",
+      details: { constraint: "shift_busy" },
+    });
+    expect(errorBodySchema.parse(fixture("error-sscc-exhausted.json")).error).toMatchObject({
+      code: "sscc_exhausted",
+      details: { issuerPrefix: "460068200", extension: 0 },
+    });
   });
 });
 

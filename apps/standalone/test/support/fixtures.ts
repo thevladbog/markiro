@@ -1,5 +1,9 @@
 import type { HelloObservation } from "../../src/host/probe.js";
-import type { DeviceStatus, OfficeSession } from "../../src/host/protocol.js";
+import {
+  PROTOCOL_VERSION,
+  type DeviceStatus,
+  type OfficeSession,
+} from "../../src/host/protocol.js";
 
 export const HOST_ID = "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
 export const LINE_ID = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
@@ -24,7 +28,7 @@ export function observation(initialized: boolean): HelloObservation {
   return {
     hello: {
       product: "markiro-host",
-      protocol: 1,
+      protocol: PROTOCOL_VERSION,
       minProtocol: 1,
       hostId: HOST_ID,
       version: "0.1.0",

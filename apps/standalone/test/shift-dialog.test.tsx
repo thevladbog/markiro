@@ -1,0 +1,836 @@
+import { act, fireEvent, screen, waitFor, within, type RenderResult } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import { HostError } from "../src/host/client.js";
+import type { OfficeShift, TemplateDefaults } from "../src/host/protocol.js";
+import { ORG_PROFILE, TECHNOLOGIST, type FakeOfficeSession } from "./support/office.js";
+import {
+  ACTIVE,
+  BOX_58,
+  DEFAULTS,
+  expectFocusedNotice,
+  freezeToday,
+  LINE_10,
+  LINE_2,
+  MILK,
+  MILK_BOX,
+  NORTH,
+  openShifts,
+  pickDate,
+  shiftsSession,
+  WATER,
+} from "./support/shifts.js";
+
+const TOKEN = "office-session-token";
+
+/** The shift the host answers a plan with. */
+const CREATED: OfficeShift = {
+  ...ACTIVE,
+  id: "5a3d9c7f-1b6c-4e8d-9f2a-7c0b3d6e9f1a",
+  number: "OCT26-006",
+  status: "planned",
+  ownerDeviceId: null,
+  openedAt: null,
+};
+
+function api(code: string, details: Record<string, unknown> = {}): HostError {
+  return new HostError({ kind: "api", code, status: 409, message: code, details });
+}
+
+function dialog(): HTMLElement {
+  return screen.getByRole("dialog", { name: "Новая смена" });
+}
+
+function field(label: string): HTMLElement {
+  return within(dialog()).getByLabelText(label);
+}
+
+function set(label: string, value: string): void {
+  fireEvent.change(field(label), { target: { value } });
+}
+
+/** The texts of the options of the select labelled `label`. */
+function options(label: string): string[] {
+  return within(field(label))
+    .getAllByRole("option")
+    .map((option) => option.textContent ?? "");
+}
+
+function valueOf(label: string): string {
+  const control = field(label);
+  if (!(control instanceof HTMLInputElement || control instanceof HTMLSelectElement)) {
+    throw new Error(`${label} holds no value`);
+  }
+  return control.value;
+}
+
+/** The message under the field labelled `label`, by its `aria-describedby`. */
+function messageOf(label: string): string | null | undefined {
+  const id = field(label).getAttribute("aria-describedby");
+  return id === null ? undefined : document.getElementById(id)?.textContent;
+}
+
+async function openCreate(session: FakeOfficeSession): Promise<RenderResult> {
+  const view = await openShifts(session);
+  fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
+  await screen.findByRole("dialog", { name: "Новая смена" });
+  // The product waits for the products, the templates and the defaults.
+  await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
+  return view;
+}
+
+function submit(): void {
+  fireEvent.click(within(dialog()).getByRole("button", { name: "Запланировать" }));
+}
+
+/** Milk on line 2, a plan of 1200, for the northern counterparty. */
+function fillMilk(): void {
+  set("Товар", MILK.id);
+  set("Линия", LINE_2.id);
+  set("План, шт", " 1200 ");
+  set("Контрагент", NORTH.id);
+}
+
+describe("office shifts: planning a shift", () => {
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+    freezeToday();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("offers «Запланировать смену» to both roles", async () => {
+    for (const user of [undefined, TECHNOLOGIST]) {
+      const view = await openShifts(shiftsSession(undefined, user));
+      expect(screen.getByRole("button", { name: "Запланировать смену" })).toBeTruthy();
+      view.unmount();
+    }
+  });
+
+  it("starts on today in the organization's time zone", async () => {
+    // 13:00 UTC on 9 October is already 10 October in Kamchatka (UTC+12).
+    vi.setSystemTime(new Date("2026-10-09T13:00:00Z"));
+    const session = shiftsSession();
+    session.api.getOrg.mockResolvedValue({ ...ORG_PROFILE, timeZone: "Asia/Kamchatka" });
+    await openCreate(session);
+    expect(within(dialog()).getByRole("button", { name: "Дата производства" }).textContent).toBe(
+      "10 октября 2026",
+    );
+    expect(within(dialog()).queryByText(/Часовой пояс организации не загрузился/)).toBeNull();
+  });
+
+  it("starts on this PC's date and says so when the organization does not load", async () => {
+    const session = shiftsSession();
+    session.api.getOrg.mockRejectedValue(api("internal"));
+    await openCreate(session);
+    expect(within(dialog()).getByRole("button", { name: "Дата производства" }).textContent).toBe(
+      "9 октября 2026",
+    );
+    expect(
+      within(dialog()).getByText(
+        "Часовой пояс организации не загрузился: «сегодня» — по часам этого ПК.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("offers the products in use by name with their GTINs, the active lines and the counterparties in use", async () => {
+    await openCreate(shiftsSession());
+    expect(options("Товар")).toEqual([
+      "Выберите товар",
+      "Вода 0,5 л — 04601234000017",
+      "Молоко 3,2% 0,9 л — 04600682000013",
+    ]);
+    expect(options("Линия")).toEqual(["Выберите линию", "Линия 2", "Линия 10"]);
+    expect(options("Контрагент")).toEqual(["Не выбран", "ООО «Северный берег»"]);
+    expect(options("Шаблон этикетки короба")).toEqual(["Сначала выберите товар"]);
+    expect((field("Шаблон этикетки короба") as HTMLSelectElement).disabled).toBe(true);
+  });
+
+  it("takes the box capacity and the template from the product: its preference, else the organization's default", async () => {
+    await openCreate(shiftsSession());
+    set("Товар", MILK.id);
+    expect(valueOf("Вместимость короба, шт")).toBe("12");
+    expect(valueOf("Шаблон этикетки короба")).toBe(MILK_BOX.id);
+    expect(options("Шаблон этикетки короба")).toEqual([
+      "Выберите шаблон",
+      "Коробка 58×40",
+      "Молоко 100×72",
+    ]);
+    // Water has no preference and its group no default; milk's template is not of its group.
+    set("Вместимость короба, шт", "6");
+    set("Товар", WATER.id);
+    expect(valueOf("Вместимость короба, шт")).toBe("24");
+    expect(valueOf("Шаблон этикетки короба")).toBe(BOX_58.id);
+    expect(options("Шаблон этикетки короба")).toEqual(["Выберите шаблон", "Коробка 58×40"]);
+  });
+
+  it("lets the product be chosen only once the templates and the defaults are read, so the template follows it", async () => {
+    const session = shiftsSession();
+    let answer: (defaults: TemplateDefaults) => void = () => undefined;
+    session.api.getTemplateDefaults.mockReturnValue(
+      new Promise<TemplateDefaults>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    await openShifts(session);
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
+    await screen.findByRole("dialog", { name: "Новая смена" });
+    await waitFor(() => expect(options("Товар")).toHaveLength(3));
+    expect((field("Товар") as HTMLSelectElement).disabled).toBe(true);
+    act(() => answer(DEFAULTS));
+    await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
+    set("Товар", WATER.id);
+    expect(valueOf("Шаблон этикетки короба")).toBe(BOX_58.id);
+  });
+
+  it("asks the person to choose when no template fits by the rule", async () => {
+    const session = shiftsSession();
+    session.api.getTemplateDefaults.mockResolvedValue({
+      defaultBoxTemplateId: null,
+      defaultPalletTemplateId: null,
+      defaultDuplicateTemplateId: null,
+      categories: [],
+      rev: 80,
+    });
+    await openCreate(session);
+    set("Товар", WATER.id);
+    expect(valueOf("Шаблон этикетки короба")).toBe("");
+    expect(options("Шаблон этикетки короба")).toEqual(["Выберите шаблон", "Коробка 58×40"]);
+  });
+
+  it("plans the shift with the body built field by field, then closes, says so and reads the list again", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockResolvedValue(CREATED);
+    await openCreate(session);
+    fillMilk();
+    pickDate("Дата производства", "12 октября 2026");
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    expect(session.api.createShift).toHaveBeenCalledWith(TOKEN, {
+      productId: MILK.id,
+      lineId: LINE_2.id,
+      productionDate: "2026-10-12",
+      boxTemplateId: MILK_BOX.id,
+      boxCapacity: 12,
+      plannedQty: 1200,
+      counterpartyId: NORTH.id,
+      mode: "aggregation",
+      palletsEnabled: false,
+    });
+    expect(screen.queryByRole("dialog", { name: "Новая смена" })).toBeNull();
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+  });
+
+  it("moves the focus to the notice once the shift is planned", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockResolvedValue(CREATED);
+    await openCreate(session);
+    fillMilk();
+    submit();
+    await expectFocusedNotice("Смена OCT26-006 запланирована.");
+  });
+
+  it("sends no plan and no counterparty as null, and a capacity typed over the product's", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockResolvedValue(CREATED);
+    await openCreate(session);
+    set("Товар", WATER.id);
+    set("Линия", LINE_10.id);
+    set("Вместимость короба, шт", " 20 ");
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    expect(session.api.createShift).toHaveBeenCalledWith(TOKEN, {
+      productId: WATER.id,
+      lineId: LINE_10.id,
+      productionDate: "2026-10-09",
+      boxTemplateId: BOX_58.id,
+      boxCapacity: 20,
+      plannedQty: null,
+      counterpartyId: null,
+      mode: "aggregation",
+      palletsEnabled: false,
+    });
+  });
+
+  it("refuses an empty product, line, template, capacity and date before sending, and a bad plan", async () => {
+    const session = shiftsSession();
+    await openCreate(session);
+    fireEvent.click(
+      within(dialog()).getByRole("button", { name: "Очистить дату: Дата производства" }),
+    );
+    set("План, шт", "0");
+    submit();
+    await waitFor(() => expect(messageOf("Товар")).toBe("Выберите товар"));
+    expect(messageOf("Линия")).toBe("Выберите линию");
+    expect(messageOf("Шаблон этикетки короба")).toBe("Выберите шаблон этикетки короба");
+    expect(messageOf("Вместимость короба, шт")).toBe("Укажите целое число от 1 до 100 000");
+    expect(within(dialog()).getByText("Укажите дату производства")).toBeTruthy();
+    expect(messageOf("План, шт")).toBe(
+      "Укажите целое число от 1 до 10 000 000 или оставьте пустым",
+    );
+    expect(session.api.createShift).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "a product no longer in use",
+      api("conflict", { constraint: "product_inactive" }),
+      "Товар",
+      "Товар больше не в работе: он в архиве или стал черновиком",
+    ],
+    [
+      "an archived line",
+      api("validation_failed", { field: "lineId" }),
+      "Линия",
+      "Линия в архиве. Выберите другую.",
+    ],
+    [
+      "a counterparty archived meanwhile",
+      api("validation_failed", { field: "counterpartyId" }),
+      "Контрагент",
+      "Контрагент в архиве. Выберите другого.",
+    ],
+    [
+      "a plan the host does not take",
+      api("validation_failed", { field: "plannedQty" }),
+      "План, шт",
+      "Хост не принял это значение. Проверьте его.",
+    ],
+  ])("puts %s under its field and keeps the dialog", async (_what, refusal, label, message) => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(refusal);
+    await openCreate(session);
+    fillMilk();
+    submit();
+    await waitFor(() => expect(messageOf(label)).toBe(message));
+    expect(dialog()).toBeTruthy();
+  });
+
+  it("puts a template switched off meanwhile under the template and reads the templates again", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(api("validation_failed", { field: "boxTemplateId" }));
+    await openCreate(session);
+    fillMilk();
+    session.api.listTemplates.mockResolvedValue([BOX_58, { ...MILK_BOX, enabled: false }]);
+    submit();
+    await waitFor(() =>
+      expect(messageOf("Шаблон этикетки короба")).toBe(
+        "Шаблон выключен или больше не подходит товару. Выберите другой.",
+      ),
+    );
+    await waitFor(() =>
+      expect(options("Шаблон этикетки короба")).toEqual([
+        "Выберите шаблон",
+        "Коробка 58×40",
+        "Молоко 100×72 — не подходит",
+      ]),
+    );
+  });
+
+  it("explains any other failure above the fields and sends one request for a double click", async () => {
+    const session = shiftsSession();
+    let fail: (error: unknown) => void = () => undefined;
+    session.api.createShift.mockReturnValue(
+      new Promise<OfficeShift>((_resolve, reject) => {
+        fail = reject;
+      }),
+    );
+    await openCreate(session);
+    fillMilk();
+    act(() => {
+      submit();
+      submit();
+    });
+    await act(async () => {
+      fail(new HostError({ kind: "transport", code: "unreachable", message: "x" }));
+      await Promise.resolve();
+    });
+    expect(await within(dialog()).findByRole("alert")).toBeTruthy();
+    expect(session.api.createShift).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the template off and says why while the templates do not load", async () => {
+    const session = shiftsSession();
+    session.api.listTemplates.mockRejectedValue(api("internal"));
+    await openCreate(session);
+    set("Товар", MILK.id);
+    expect((field("Шаблон этикетки короба") as HTMLSelectElement).disabled).toBe(true);
+    expect(
+      within(dialog()).getByText(
+        "Список шаблонов не загрузился. Закройте окно и откройте его снова.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("says under the template that the defaults did not load and that it comes from the product alone", async () => {
+    const session = shiftsSession();
+    session.api.getTemplateDefaults.mockRejectedValue(api("internal"));
+    await openCreate(session);
+    const words =
+      "Умолчания шаблонов не загрузились: шаблон берётся только из товара — проверьте выбор.";
+    // Water has no preference of its own and its group's default is out of reach: no template.
+    set("Товар", WATER.id);
+    expect(valueOf("Шаблон этикетки короба")).toBe("");
+    expect(messageOf("Шаблон этикетки короба")).toBe(words);
+    // Milk has: the template is chosen, and the note still says where it came from.
+    set("Товар", MILK.id);
+    expect(valueOf("Шаблон этикетки короба")).toBe(MILK_BOX.id);
+    expect(messageOf("Шаблон этикетки короба")).toBe(words);
+  });
+
+  it("says nothing of the defaults when they loaded", async () => {
+    await openCreate(shiftsSession());
+    set("Товар", WATER.id);
+    expect(messageOf("Шаблон этикетки короба")).toBeUndefined();
+  });
+
+  it("waits for the organization's profile behind a loading dialog whose button is off", async () => {
+    const session = shiftsSession();
+    let answer: (org: typeof ORG_PROFILE) => void = () => undefined;
+    session.api.getOrg.mockReturnValue(
+      new Promise<typeof ORG_PROFILE>((resolve) => {
+        answer = resolve;
+      }),
+    );
+    await openShifts(session);
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
+    await screen.findByRole("dialog", { name: "Новая смена" });
+    expect(within(dialog()).getByText("Загрузка…")).toBeTruthy();
+    expect(
+      (within(dialog()).getByRole("button", { name: "Запланировать" }) as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    expect(within(dialog()).queryByLabelText("Товар")).toBeNull();
+    act(() => answer(ORG_PROFILE));
+    await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
+    expect(within(dialog()).queryByText("Загрузка…")).toBeNull();
+  });
+
+  it("changes the default date at the organization's midnight, to the second", async () => {
+    // Moscow is UTC+3: 20:59:59Z on the 9th is still the 9th there, 21:00:00Z is the 10th.
+    for (const [instant, day] of [
+      ["2026-10-09T20:59:59Z", "9 октября 2026"],
+      ["2026-10-09T21:00:00Z", "10 октября 2026"],
+    ] as const) {
+      vi.setSystemTime(new Date(instant));
+      const view = await openCreate(shiftsSession());
+      expect(within(dialog()).getByRole("button", { name: "Дата производства" }).textContent).toBe(
+        day,
+      );
+      view.unmount();
+    }
+  });
+
+  it("starts on this PC's date and says so when this PC does not know the organization's zone", async () => {
+    const session = shiftsSession();
+    session.api.getOrg.mockResolvedValue({ ...ORG_PROFILE, timeZone: "Mars/Olympus_Mons" });
+    await openCreate(session);
+    expect(within(dialog()).getByRole("button", { name: "Дата производства" }).textContent).toBe(
+      "9 октября 2026",
+    );
+    expect(
+      within(dialog()).getByText(
+        "Этот ПК не знает часовой пояс организации: «сегодня» — по часам этого ПК.",
+      ),
+    ).toBeTruthy();
+    expect(within(dialog()).queryByText(/не загрузился: «сегодня»/)).toBeNull();
+  });
+
+  it("takes a refused capacity and template error away once a product fills them", async () => {
+    await openCreate(shiftsSession());
+    submit();
+    await waitFor(() =>
+      expect(messageOf("Вместимость короба, шт")).toBe("Укажите целое число от 1 до 100 000"),
+    );
+    expect(messageOf("Шаблон этикетки короба")).toBe("Выберите шаблон этикетки короба");
+    set("Товар", MILK.id);
+    // Choosing the product checks the product's own field again, which ends after the click.
+    await waitFor(() => expect(messageOf("Товар")).toBeUndefined());
+    expect(messageOf("Вместимость короба, шт")).toBe("Берётся из товара; можно изменить");
+    expect(messageOf("Шаблон этикетки короба")).toBeUndefined();
+    expect(valueOf("Вместимость короба, шт")).toBe("12");
+  });
+
+  it.each([
+    [
+      "a product the host does not find",
+      api("validation_failed", { field: "productId" }),
+      "Товар",
+      "Хост не нашёл этот товар. Выберите другой.",
+    ],
+    [
+      "a date the host does not take",
+      api("validation_failed", { field: "productionDate" }),
+      "Дата производства",
+      "Хост не принял это значение. Проверьте его.",
+    ],
+    [
+      "a capacity the host does not take",
+      api("validation_failed", { field: "boxCapacity" }),
+      "Вместимость короба, шт",
+      "Хост не принял это значение. Проверьте его.",
+    ],
+  ])("puts %s under its field", async (_what, refusal, label, message) => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(refusal);
+    await openCreate(session);
+    fillMilk();
+    submit();
+    await waitFor(() => {
+      const control =
+        label === "Дата производства"
+          ? within(dialog()).getByRole("button", { name: label })
+          : field(label);
+      const id = control.getAttribute("aria-describedby");
+      expect(id === null ? undefined : document.getElementById(id)?.textContent).toBe(message);
+    });
+  });
+
+  it("explains a refusal for lack of rights above the fields, not under one", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(api("forbidden"));
+    await openCreate(session);
+    fillMilk();
+    submit();
+    expect(await within(dialog()).findByRole("alert")).toBeTruthy();
+    expect(within(dialog()).getByText("Недостаточно прав для этого действия.")).toBeTruthy();
+    expect(messageOf("Товар")).toBeUndefined();
+  });
+
+  it("puts the focus on the first refused field in the form's order", async () => {
+    const session = shiftsSession();
+    await openCreate(session);
+    // The plan and the line are refused, and the product is not chosen: the product comes first.
+    set("План, шт", "0");
+    // The form's own focus would visit the plan first; the product alone is to take it.
+    const planFocused = vi.fn();
+    field("План, шт").addEventListener("focus", planFocused);
+    submit();
+    await waitFor(() => expect(document.activeElement).toBe(field("Товар")));
+    expect(planFocused).not.toHaveBeenCalled();
+    set("Товар", MILK.id);
+    submit();
+    await waitFor(() => expect(document.activeElement).toBe(field("Линия")));
+    set("Линия", LINE_2.id);
+    submit();
+    await waitFor(() => expect(document.activeElement).toBe(field("План, шт")));
+    set("План, шт", "");
+    fireEvent.click(
+      within(dialog()).getByRole("button", { name: "Очистить дату: Дата производства" }),
+    );
+    submit();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(dialog()).getByRole("button", { name: "Дата производства" }),
+      ),
+    );
+    expect(session.api.createShift).not.toHaveBeenCalled();
+  });
+
+  it("puts the focus on the field the host refused", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(api("validation_failed", { field: "lineId" }));
+    await openCreate(session);
+    fillMilk();
+    submit();
+    await waitFor(() => expect(messageOf("Линия")).toBe("Линия в архиве. Выберите другую."));
+    await waitFor(() => expect(document.activeElement).toBe(field("Линия")));
+  });
+
+  it("holds every control while the write is on its way and frees them after a refusal", async () => {
+    const session = shiftsSession();
+    let fail: (error: unknown) => void = () => undefined;
+    session.api.createShift.mockReturnValueOnce(
+      new Promise<OfficeShift>((_resolve, reject) => {
+        fail = reject;
+      }),
+    );
+    await openCreate(session);
+    fillMilk();
+    submit();
+    await waitFor(() => expect(session.api.createShift).toHaveBeenCalledTimes(1));
+    const controls = (): HTMLElement[] => [
+      field("Товар"),
+      field("Линия"),
+      within(dialog()).getByRole("button", { name: "Дата производства" }),
+      field("План, шт"),
+      field("Вместимость короба, шт"),
+      field("Шаблон этикетки короба"),
+      field("Контрагент"),
+    ];
+    const disabled = (control: HTMLElement) =>
+      (control as HTMLInputElement | HTMLSelectElement | HTMLButtonElement).disabled;
+    await waitFor(() => expect(controls().map(disabled)).toEqual(Array(7).fill(true)));
+    expect(
+      (within(dialog()).getByRole("button", { name: "Отмена" }) as HTMLButtonElement).disabled,
+    ).toBe(true);
+    await act(async () => {
+      fail(api("internal"));
+      await Promise.resolve();
+    });
+    await waitFor(() => expect(controls().map(disabled)).toEqual(Array(7).fill(false)));
+    expect(await within(dialog()).findByRole("alert")).toBeTruthy();
+    // The form kept what was typed, and a second try goes out.
+    expect(valueOf("План, шт")).toBe(" 1200 ");
+    session.api.createShift.mockResolvedValueOnce(CREATED);
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    expect(session.api.createShift).toHaveBeenCalledTimes(2);
+  });
+
+  it("says when a list does not load and leaves its control off", async () => {
+    const session = shiftsSession();
+    session.api.listProducts.mockRejectedValue(api("internal"));
+    session.api.listLines.mockRejectedValue(api("internal"));
+    session.api.listCounterparties.mockRejectedValue(api("internal"));
+    await openShifts(session);
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
+    await screen.findByRole("dialog", { name: "Новая смена" });
+    for (const [label, hint] of [
+      ["Товар", "Список товаров не загрузился. Закройте окно и откройте его снова."],
+      ["Линия", "Список линий не загрузился. Закройте окно и откройте его снова."],
+      ["Контрагент", "Список контрагентов не загрузился: смена будет без контрагента."],
+    ] as const) {
+      await waitFor(() => expect(messageOf(label)).toBe(hint));
+      expect((field(label) as HTMLSelectElement).disabled).toBe(true);
+    }
+  });
+
+  it("drops what was typed when the dialog is closed, sends nothing and opens clean", async () => {
+    const session = shiftsSession();
+    await openCreate(session);
+    fillMilk();
+    pickDate("Дата производства", "12 октября 2026");
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Отмена" }));
+    expect(screen.queryByRole("dialog", { name: "Новая смена" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
+    await screen.findByRole("dialog", { name: "Новая смена" });
+    await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
+    expect(valueOf("Товар")).toBe("");
+    expect(valueOf("План, шт")).toBe("");
+    expect(valueOf("Вместимость короба, шт")).toBe("");
+    expect(valueOf("Контрагент")).toBe("");
+    expect(within(dialog()).getByRole("button", { name: "Дата производства" }).textContent).toBe(
+      "9 октября 2026",
+    );
+    expect(session.api.createShift).not.toHaveBeenCalled();
+  });
+
+  it("takes the notice away when the next dialog opens", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockResolvedValue(CREATED);
+    await openCreate(session);
+    fillMilk();
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    fireEvent.click(screen.getByRole("button", { name: "Запланировать смену" }));
+    await screen.findByRole("dialog", { name: "Новая смена" });
+    expect(screen.queryByText("Смена OCT26-006 запланирована.")).toBeNull();
+  });
+
+  it("takes the alert away when the next submit starts", async () => {
+    const session = shiftsSession();
+    session.api.createShift
+      .mockRejectedValueOnce(api("internal"))
+      .mockRejectedValueOnce(api("validation_failed", { field: "lineId" }));
+    await openCreate(session);
+    fillMilk();
+    submit();
+    await within(dialog()).findByRole("alert");
+    await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
+    submit();
+    await waitFor(() => expect(messageOf("Линия")).toBe("Линия в архиве. Выберите другую."));
+    expect(within(dialog()).queryByRole("alert")).toBeNull();
+  });
+
+  it("shows a product's name with markup as text, never as markup", async () => {
+    const session = shiftsSession();
+    const hostile = { ...MILK, name: '<img src="x" onerror="window.pwned = 1"> Сок' };
+    session.api.listProducts.mockResolvedValue([hostile]);
+    await openCreate(session);
+    expect(options("Товар")).toEqual([
+      "Выберите товар",
+      `<img src="x" onerror="window.pwned = 1"> Сок — 04600682000013`,
+    ]);
+    expect(dialog().querySelector("img")).toBeNull();
+  });
+
+  it("closes only the calendar on Escape and keeps the dialog with what was typed", async () => {
+    const session = shiftsSession();
+    await openCreate(session);
+    fillMilk();
+    fireEvent.click(within(dialog()).getByRole("button", { name: "Дата производства" }));
+    const calendar = screen.getByRole("dialog", { name: "Календарь" });
+    fireEvent.keyDown(within(calendar).getByRole("button", { name: "9 октября 2026" }), {
+      key: "Escape",
+    });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Календарь" })).toBeNull());
+    expect(dialog()).toBeTruthy();
+    expect(valueOf("Товар")).toBe(MILK.id);
+    expect(valueOf("План, шт")).toBe(" 1200 ");
+    // With the calendar shut, the same key on the date still closes the dialog.
+    fireEvent.keyDown(within(dialog()).getByRole("button", { name: "Дата производства" }), {
+      key: "Escape",
+    });
+    expect(screen.queryByRole("dialog", { name: "Новая смена" })).toBeNull();
+  });
+
+  it("reads the shifts again behind the dialog after a lost answer, since the shift may have been made", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "x" }),
+    );
+    await openCreate(session);
+    fillMilk();
+    submit();
+    expect(await within(dialog()).findByRole("alert")).toBeTruthy();
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+  });
+
+  it("does not read the shifts again after an answer of the host that planned nothing", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(api("internal"));
+    await openCreate(session);
+    fillMilk();
+    submit();
+    expect(await within(dialog()).findByRole("alert")).toBeTruthy();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(session.api.listShifts).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    [
+      "a product no longer in use",
+      api("conflict", { constraint: "product_inactive" }),
+      "Товар",
+      "listProducts",
+      "Молоко 3,2% 0,9 л",
+      MILK.id,
+      "Молоко 3,2% 0,9 л (в архиве)",
+    ],
+    [
+      "a product the host does not find",
+      api("validation_failed", { field: "productId" }),
+      "Товар",
+      "listProducts",
+      "Молоко 3,2% 0,9 л",
+      MILK.id,
+      "Молоко 3,2% 0,9 л (в архиве)",
+    ],
+    [
+      "a product that became a draft",
+      api("conflict", { constraint: "product_inactive" }),
+      "Товар",
+      "listProducts",
+      "Молоко 3,2% 0,9 л",
+      MILK.id,
+      "Молоко 3,2% 0,9 л (черновик)",
+    ],
+    [
+      "an archived line",
+      api("validation_failed", { field: "lineId" }),
+      "Линия",
+      "listLines",
+      "Линия 2",
+      LINE_2.id,
+      "Линия 2 (в архиве)",
+    ],
+    [
+      "a counterparty archived meanwhile",
+      api("validation_failed", { field: "counterpartyId" }),
+      "Контрагент",
+      "listCounterparties",
+      "ООО «Северный берег»",
+      NORTH.id,
+      "ООО «Северный берег» (в архиве)",
+    ],
+  ] as const)(
+    "reads the list again after the host refused %s, and keeps the record as a marked choice the select shows",
+    async (_what, refusal, label, list, name, id, marked) => {
+      const session = shiftsSession();
+      session.api.createShift.mockRejectedValue(refusal);
+      await openCreate(session);
+      fillMilk();
+      expect(options(label).some((text) => text.startsWith(name))).toBe(true);
+      session.api.listProducts.mockResolvedValue([
+        marked.endsWith("(черновик)") ? { ...MILK, status: "draft" } : { ...MILK, archived: true },
+        WATER,
+      ]);
+      session.api.listLines.mockResolvedValue([LINE_10, { ...LINE_2, archived: true }]);
+      session.api.listCounterparties.mockResolvedValue([{ ...NORTH, archived: true }]);
+      const before = session.api[list].mock.calls.length;
+      submit();
+      await waitFor(() => expect(session.api[list]).toHaveBeenCalledTimes(before + 1));
+      // The refused record is no longer offered as a normal choice, but the form still holds it,
+      // so the select shows it - marked - rather than another record or «Не выбран».
+      await waitFor(() => expect(options(label)).toContain(marked));
+      expect(options(label).filter((text) => text.startsWith(name))).toEqual([marked]);
+      const control = field(label) as HTMLSelectElement;
+      expect(control.value).toBe(id);
+      expect(control.selectedOptions[0]?.textContent).toBe(marked);
+      // The refusal stays under the field, and the person picks another record.
+      expect(messageOf(label)).not.toBeUndefined();
+    },
+  );
+
+  it("never clears a refused counterparty: a resend after the re-read still names it and is refused again", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(
+      api("validation_failed", { field: "counterpartyId" }),
+    );
+    await openCreate(session);
+    fillMilk();
+    session.api.listCounterparties.mockResolvedValue([{ ...NORTH, archived: true }]);
+    submit();
+    await waitFor(() =>
+      expect(messageOf("Контрагент")).toBe("Контрагент в архиве. Выберите другого."),
+    );
+    await waitFor(() => expect(options("Контрагент")).toContain("ООО «Северный берег» (в архиве)"));
+    await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
+    submit();
+    await waitFor(() => expect(session.api.createShift).toHaveBeenCalledTimes(2));
+    expect(session.api.createShift).toHaveBeenLastCalledWith(
+      TOKEN,
+      expect.objectContaining({ counterpartyId: NORTH.id }),
+    );
+    // The person picks «Не выбран» on purpose: that, and only that, sends no counterparty.
+    await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
+    session.api.createShift.mockResolvedValueOnce(CREATED);
+    set("Контрагент", "");
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    expect(session.api.createShift).toHaveBeenLastCalledWith(
+      TOKEN,
+      expect.objectContaining({ counterpartyId: null }),
+    );
+  });
+
+  it.each([
+    ["a date", "productionDate"],
+    ["a plan", "plannedQty"],
+    ["a capacity", "boxCapacity"],
+  ])("reads no list again after the host refused %s", async (_what, name) => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(api("validation_failed", { field: name }));
+    await openCreate(session);
+    fillMilk();
+    const lists = [
+      session.api.listProducts,
+      session.api.listLines,
+      session.api.listCounterparties,
+      session.api.listTemplates,
+    ];
+    const before = lists.map((list) => list.mock.calls.length);
+    submit();
+    await waitFor(() => expect(session.api.createShift).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect((field("Товар") as HTMLSelectElement).disabled).toBe(false));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    });
+    expect(lists.map((list) => list.mock.calls.length)).toEqual(before);
+  });
+});

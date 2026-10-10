@@ -12,6 +12,8 @@ const CAPABILITIES = {
   editReference: ["admin"],
   /** The catalog, label templates and their defaults (plan 1e). */
   editCatalog: ["admin", "technologist"],
+  /** Shifts: plan, change, delete a planned one, close an active one (stage 2a spec §4.9). */
+  planShifts: ["admin", "technologist"],
 } as const satisfies Record<string, readonly OfficeRole[]>;
 
 export type OfficeCapability = keyof typeof CAPABILITIES;

@@ -19,6 +19,7 @@ import {
   orgProfileSchema,
   pairingCodeSchema,
   productGroupSchema,
+  officeShiftSchema,
   ssccCounterSchema,
   ssccStateSchema,
   templateDefaultsSchema,
@@ -43,6 +44,7 @@ import {
   type OfficeOperator,
   type OfficeProduct,
   type OfficeSession,
+  type OfficeShift,
   type OfficeUser,
   type OfficeUserCreate,
   type OfficeUserRecord,
@@ -58,6 +60,9 @@ import {
   type ProductCreate,
   type ProductGroup,
   type ProductUpdate,
+  type ShiftClose,
+  type ShiftCreate,
+  type ShiftUpdate,
   type SsccCounter,
   type SsccCounterUpdate,
   type SsccState,
@@ -71,6 +76,12 @@ import {
 export interface SsccCounterKey {
   issuerPrefix: string;
   extension: number;
+}
+
+/** A period of production dates, both ends included, `YYYY-MM-DD`. */
+export interface ShiftPeriod {
+  from: string;
+  to: string;
 }
 
 /**
@@ -148,6 +159,17 @@ export interface HostApi {
     token: string,
     update: TemplateDefaultsUpdate,
   ) => Promise<TemplateDefaults>;
+  /**
+   * Without a period every planned and active shift and the closed ones
+   * produced in the last 31 days of the host's clock; with one, every shift
+   * produced in it. Newest production date first.
+   */
+  listShifts: (token: string, period?: ShiftPeriod) => Promise<OfficeShift[]>;
+  createShift: (token: string, create: ShiftCreate) => Promise<OfficeShift>;
+  updateShift: (token: string, id: string, update: ShiftUpdate) => Promise<OfficeShift>;
+  /** `204`, only a planned shift; a delete repeated after a lost answer is `not_found`. */
+  deleteShift: (token: string, id: string) => Promise<void>;
+  closeShift: (token: string, id: string, close: ShiftClose) => Promise<OfficeShift>;
 }
 
 /** A 204 answer parses as `null`. */
@@ -372,6 +394,38 @@ export function createHostApi(client: HostClient): HostApi {
         body: update,
         officeToken: token,
         schema: templateDefaultsSchema,
+      }),
+    listShifts: (token, period) =>
+      client.request(
+        "GET",
+        period === undefined
+          ? "/v1/office/shifts"
+          : `/v1/office/shifts?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}`,
+        { officeToken: token, schema: z.array(officeShiftSchema) },
+      ),
+    createShift: (token, create) =>
+      client.request("POST", "/v1/office/shifts", {
+        body: create,
+        officeToken: token,
+        schema: officeShiftSchema,
+      }),
+    updateShift: (token, id, update) =>
+      client.request("PUT", `/v1/office/shifts/${id}`, {
+        body: update,
+        officeToken: token,
+        schema: officeShiftSchema,
+      }),
+    deleteShift: async (token, id) => {
+      await client.request("DELETE", `/v1/office/shifts/${id}`, {
+        officeToken: token,
+        schema: NO_CONTENT,
+      });
+    },
+    closeShift: (token, id, close) =>
+      client.request("POST", `/v1/office/shifts/${id}/close`, {
+        body: close,
+        officeToken: token,
+        schema: officeShiftSchema,
       }),
   };
 }

@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { createTauriHostProbe, HostProbeError } from "../src/host/probe.js";
+import { PROTOCOL_VERSION } from "../src/host/protocol.js";
 
 const RAW = {
   hello: {
     product: "markiro-host",
-    protocol: 1,
+    protocol: PROTOCOL_VERSION,
     minProtocol: 1,
     hostId: "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
     version: "0.1.0",

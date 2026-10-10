@@ -238,6 +238,27 @@
   color: var(--fg-2);
 }
 
+/* A shift's cell of several lines: a name, its counterparty, its status and its marks. */
+.shift-cell {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
+}
+
+.shift-cell__quiet {
+  color: var(--fg-2);
+}
+
+/* The note under the close reason: the hint, or the refusal in the error tone, as `Input` writes them. */
+.shift-note {
+  font: var(--text-body-sm);
+  color: var(--fg-3);
+}
+
+.shift-note--error {
+  color: var(--err-fg);
+}
+
 .office-pager {
   display: flex;
   justify-content: flex-end;

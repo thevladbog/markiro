@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { hasCyrillic } from "../host/pairing-code.js";
 import type { OrgProfileInput } from "../host/protocol.js";
+import { isCivilDate } from "./civil-date.js";
 
 // Field rules shared by the first-run wizard and the office pages. They
 // mirror the host's own checks (`host/src/validate.rs`), so a form fails
@@ -50,16 +51,18 @@ export function isTransferable(text: string): boolean {
 }
 
 /**
- * A free-text field of 1 to `max` characters (`isPlainText`); the value is
- * trimmed. A wrong length says `message`; a control character or an unpaired
- * surrogate says `rules.controlCharacter`, since a tab pasted from a
- * spreadsheet is invisible and a length message would not explain it.
+ * A free-text field of `min` (1 unless given) to `max` characters, counted as
+ * the host counts them (`characters`: code points, where zod's own `min` and
+ * `max` count UTF-16 units and an emoji twice); the value is trimmed. A wrong
+ * length says `message`; a control character or an unpaired surrogate says
+ * `rules.controlCharacter`, since a tab pasted from a spreadsheet is invisible
+ * and a length message would not explain it.
  */
-export function plainTextRule(max: number, message: string): z.ZodString {
+export function plainTextRule(max: number, message: string, min = 1): z.ZodString {
   return z
     .string()
     .trim()
-    .refine((text) => characters(text) >= 1 && characters(text) <= max, message)
+    .refine((text) => characters(text) >= min && characters(text) <= max, message)
     .refine((text) => !CONTROL_OR_LONE_SURROGATE.test(text), "rules.controlCharacter");
 }
 
@@ -275,6 +278,18 @@ export function countRule(max: number, message: string): z.ZodString {
     .refine((text) => text === "" || (WHOLE_NUMBER.test(text) && Number(text) <= max), message);
 }
 
+/**
+ * A count the form always sends: a whole number from 1 to `max`, checked as
+ * text as `countRule` checks it, never blank. `toCount` of an accepted value
+ * is its number.
+ */
+export function requiredCountRule(max: number, message: string): z.ZodString {
+  return z
+    .string()
+    .trim()
+    .refine((text) => WHOLE_NUMBER.test(text) && Number(text) <= max, message);
+}
+
 /** An optional count `countRule` accepted, as the host takes it: `null` when blank. */
 export function toCount(text: string): number | null {
   const trimmed = text.trim();
@@ -302,3 +317,32 @@ export const productGroupRule = z.string().regex(/^(?:[1-9][0-9]*)?$/, "rules.pr
 export function toGroupCode(value: string): number | null {
   return value === "" ? null : Number(value);
 }
+
+// --- Shifts (plan 2a1's `validate.rs`) ---
+
+/** The largest plan of a shift, in units (`validate::MAX_PLANNED_QTY`). */
+export const MAX_PLANNED_QTY = 10_000_000;
+
+/** A shift's plan: 1 to `MAX_PLANNED_QTY` units, or none. */
+export const plannedQtyRule = countRule(MAX_PLANNED_QTY, "rules.plannedQty");
+
+/** A shift's box capacity: 1 to `MAX_BOX_CAPACITY` units, always sent. */
+export const shiftBoxCapacityRule = requiredCountRule(MAX_BOX_CAPACITY, "rules.shiftBoxCapacity");
+
+/** A production date: a civil date the host takes (`validate::civil_date`). */
+export const productionDateRule = z.string().refine(isCivilDate, "rules.productionDate");
+
+/** The shortest and the longest reason the office gives for closing a shift. */
+export const MIN_CLOSE_REASON = 3;
+export const MAX_CLOSE_REASON = 500;
+
+/**
+ * The office's reason for closing a shift (`validate::close_reason`): trimmed,
+ * 3 to 500 characters counted as the host counts them, with no control
+ * character and no unpaired surrogate.
+ */
+export const closeReasonRule = plainTextRule(
+  MAX_CLOSE_REASON,
+  "rules.closeReason",
+  MIN_CLOSE_REASON,
+);

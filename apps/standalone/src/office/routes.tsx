@@ -9,6 +9,7 @@ import { OperatorsPage } from "./operators/OperatorsPage.js";
 import { OrgProfilePage } from "./org/OrgProfilePage.js";
 import { ProductsPage } from "./products/ProductsPage.js";
 import { RequireRole } from "./RequireRole.js";
+import { ShiftsPage } from "./shifts/ShiftsPage.js";
 import { SsccPage } from "./sscc/SsccPage.js";
 import { TemplateDefaultsPage } from "./templates/TemplateDefaultsPage.js";
 import {
@@ -30,6 +31,7 @@ export const officeRoutes: RouteObject[] = [
       { path: "sscc", element: <SsccPage /> },
       { path: "counterparties", element: <CounterpartiesPage /> },
       { path: "lines", element: <LinesPage /> },
+      { path: "shifts", element: <ShiftsPage /> },
       {
         path: "operators",
         element: (

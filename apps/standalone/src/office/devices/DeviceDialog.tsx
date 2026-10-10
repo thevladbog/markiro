@@ -11,10 +11,11 @@ import { deviceUpdate } from "../../host/requests.js";
 import { deviceNameRule } from "../../lib/rules.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
 import { FormDialog } from "../FormDialog.js";
-import { useOfficeMutation } from "../office-query.js";
+import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { WriteFailureAlert } from "../page-state.js";
 import { activeFirstByName } from "../records.js";
 import { lineLabel } from "./line-label.js";
+import { stationShift } from "./station-shift.js";
 
 /** `lineId` is the chosen line's id, or `""` for none. */
 const deviceFieldsSchema = z.object({ name: deviceNameRule, lineId: z.string() });
@@ -38,12 +39,19 @@ export interface DeviceDialogProps {
  * Renames a device and, for a station, sets its line. Only the fields that
  * changed are sent (`deviceUpdate`). A line can be chosen only among the
  * active ones; a station's current line stays on the list even when it has
- * been archived since, and keeping it sends nothing for the line.
+ * been archived since, and keeping it sends nothing for the line. A station
+ * with an active shift may move (owner question В9, option А): the dialog
+ * says what happens to the shift once another line is chosen, by the host's
+ * list of shifts, read when the dialog opens.
  */
 export function DeviceDialog({ device, lines, onClose, onSaved }: DeviceDialogProps) {
   const { t } = useTranslation();
   const fieldError = useFieldError();
   const [failure, setFailure] = useState<AlertFailure | null>(null);
+  const shifts = useOfficeQuery(officeKeys.shiftList(null), (api, token) => api.listShifts(token), {
+    enabled: device.kind === "station",
+  });
+  const running = stationShift(shifts.data, device.id);
   const save = useOfficeMutation((api, token, values: DeviceFields) =>
     api.updateDevice(
       token,
@@ -59,11 +67,13 @@ export function DeviceDialog({ device, lines, onClose, onSaved }: DeviceDialogPr
     control,
     handleSubmit,
     setError,
+    watch,
     formState: { errors, isDirty },
   } = useForm<DeviceFields>({
     resolver: zodResolver(deviceFieldsSchema),
     defaultValues: { name: device.name, lineId: device.lineId ?? "" },
   });
+  const moving = watch("lineId") !== (device.lineId ?? "");
 
   const options: { value: string; label: string }[] = [
     { value: "", label: t("office.devices.noLine") },
@@ -124,6 +134,18 @@ export function DeviceDialog({ device, lines, onClose, onSaved }: DeviceDialogPr
           )}
         />
       )}
+      <div aria-live="polite">
+        {running !== undefined && moving && (
+          <p className="office-note">
+            {t(
+              watch("lineId") === ""
+                ? "office.devices.shiftOnStationNoLine"
+                : "office.devices.shiftOnStation",
+              { number: running.number },
+            )}
+          </p>
+        )}
+      </div>
     </FormDialog>
   );
 }

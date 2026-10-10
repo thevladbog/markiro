@@ -522,6 +522,53 @@ export const templateDefaultsSchema = z.object({
 });
 export type TemplateDefaults = z.infer<typeof templateDefaultsSchema>;
 
+/** Mirrors `markiro_proto::ShiftStatus`: planned in the office, active once a station opened it, closed for good. */
+export const shiftStatusSchema = z.enum(["planned", "active", "closed"]);
+export type ShiftStatus = z.infer<typeof shiftStatusSchema>;
+
+/** Mirrors `markiro_proto::ShiftMode`: the host takes only `aggregation` in stage 2a. */
+export const shiftModeSchema = z.enum(["aggregation", "validation"]);
+export type ShiftMode = z.infer<typeof shiftModeSchema>;
+
+/** Mirrors `markiro_proto::ShiftOrigin`: planned in the office or created at a station (`/S`). */
+export const shiftOriginSchema = z.enum(["office", "station"]);
+export type ShiftOrigin = z.infer<typeof shiftOriginSchema>;
+
+/** A civil date as the host writes it, `YYYY-MM-DD`; the host has checked it is a real date. */
+const civilDateTextSchema = z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/);
+
+/**
+ * `GET /v1/office/shifts` and the answer of every office write of a shift. It
+ * carries ids, not names: the office names products, lines and counterparties
+ * from its own lists. `closeReasonCode` is one of the domain's six codes of a
+ * station's close (plan 2a2), read as text so a code a newer host adds does
+ * not fail the list; `closeReasonText` is the office's words.
+ */
+export const officeShiftSchema = z.object({
+  id: z.uuid(),
+  number: z.string().min(1),
+  status: shiftStatusSchema,
+  mode: shiftModeSchema,
+  palletsEnabled: z.boolean(),
+  createdFrom: shiftOriginSchema,
+  productId: z.uuid(),
+  lineId: z.uuid(),
+  counterpartyId: z.uuid().nullable(),
+  productionDate: civilDateTextSchema,
+  plannedQty: z.number().int().positive().nullable(),
+  boxCapacity: z.number().int().positive(),
+  boxTemplateId: z.uuid(),
+  ownerDeviceId: z.uuid().nullable(),
+  openedAt: z.iso.datetime().nullable(),
+  closedAt: z.iso.datetime().nullable(),
+  closeReasonCode: z.string().nullable(),
+  closeReasonText: z.string().nullable(),
+  lateDataAt: z.iso.datetime().nullable(),
+  createdAt: z.iso.datetime(),
+  rev: z.number().int(),
+});
+export type OfficeShift = z.infer<typeof officeShiftSchema>;
+
 // --- Request bodies (strict) ---
 
 export const officeLoginRequestSchema = z
@@ -803,3 +850,50 @@ export const templateDefaultsUpdateSchema = z
   })
   .strict();
 export type TemplateDefaultsUpdate = z.infer<typeof templateDefaultsUpdateSchema>;
+
+/**
+ * `POST /v1/office/shifts`: a planned shift. The office always sends the box
+ * capacity, `null` for no plan or no counterparty, and `mode` and
+ * `palletsEnabled` as the only values stage 2a takes.
+ */
+export const shiftCreateSchema = z
+  .object({
+    productId: z.uuid(),
+    lineId: z.uuid(),
+    productionDate: z.string(),
+    boxTemplateId: z.uuid(),
+    boxCapacity: z.number().int().positive().optional(),
+    plannedQty: z.number().int().positive().nullable().optional(),
+    counterpartyId: z.uuid().nullable().optional(),
+    mode: shiftModeSchema.optional(),
+    palletsEnabled: z.boolean().optional(),
+  })
+  .strict();
+export type ShiftCreate = z.infer<typeof shiftCreateSchema>;
+
+/**
+ * `PUT /v1/office/shifts/{id}`: only the fields sent change, over the loaded
+ * revision. `plannedQty: null` and `counterpartyId: null` clear them; every
+ * other field is left out or a value, never `null`, which the host would read
+ * as «keep». The product never changes, so it is no field.
+ */
+export const shiftUpdateSchema = z
+  .object({
+    lineId: z.uuid().optional(),
+    productionDate: z.string().optional(),
+    boxTemplateId: z.uuid().optional(),
+    boxCapacity: z.number().int().positive().optional(),
+    plannedQty: z.number().int().positive().nullable().optional(),
+    counterpartyId: z.uuid().nullable().optional(),
+    mode: shiftModeSchema.optional(),
+    palletsEnabled: z.boolean().optional(),
+    expectedRev: z.number().int(),
+  })
+  .strict();
+export type ShiftUpdate = z.infer<typeof shiftUpdateSchema>;
+
+/** `POST /v1/office/shifts/{id}/close`: the office's reason in words, over the loaded revision. */
+export const shiftCloseSchema = z
+  .object({ reason: z.string(), expectedRev: z.number().int() })
+  .strict();
+export type ShiftClose = z.infer<typeof shiftCloseSchema>;

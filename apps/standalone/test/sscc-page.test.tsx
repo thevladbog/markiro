@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it } from "vitest";
 
 import { HostError } from "../src/host/client.js";
+import { isExhausted } from "../src/office/sscc/counter-kind.js";
 import {
   fakeOfficeSession,
   renderOffice,
@@ -54,6 +55,72 @@ describe("SSCC page", () => {
     expect(screen.queryByRole("button", { name: /Изменить счётчик/ })).toBeNull();
     expect(screen.queryByRole("button", { name: "Сохранить" })).toBeNull();
     expect(screen.getByText("Изменять эти данные может только администратор.")).toBeTruthy();
+  });
+
+  it("says a counter past its last serial has run out and offers no change of it, while one at its last serial still has it", async () => {
+    const session = fakeOfficeSession();
+    // The host moved the current box counter past 9 999 999 with its last block;
+    // the pallet counter is at its last serial, which it can still give.
+    session.api.getSscc.mockResolvedValue({
+      ...SSCC_STATE,
+      counters: SSCC_STATE.counters.map((counter) =>
+        counter.issuerPrefix !== "460709100"
+          ? counter
+          : { ...counter, nextSerial: counter.extension === 0 ? 10_000_000 : 9_999_999 },
+      ),
+    });
+    await openSscc(session);
+    const [boxes, pallets] = await counterRows();
+    if (boxes === undefined || pallets === undefined) throw new Error("no rows");
+    expect(within(boxes).getAllByRole("cell")[2]?.textContent).toBe("!Номера закончились");
+    expect(within(boxes).queryByRole("button")).toBeNull();
+    expect(screen.queryByText("10000000")).toBeNull();
+    expect(within(pallets).getAllByRole("cell")[2]?.textContent).toBe("9999999");
+    expect(
+      within(pallets).getByRole("button", { name: "Изменить счётчик: Паллеты, префикс 460709100" }),
+    ).toBeTruthy();
+  });
+
+  it("says an administrator's pallet counter past its last serial has run out too, with no change of it", async () => {
+    const session = fakeOfficeSession();
+    // The pallet counter of the current prefix is the one that ran out; the box counter still has serials.
+    session.api.getSscc.mockResolvedValue({
+      ...SSCC_STATE,
+      counters: SSCC_STATE.counters.map((counter) =>
+        counter.issuerPrefix === "460709100" && counter.extension === 1
+          ? { ...counter, nextSerial: counter.maxSerial + 1 }
+          : counter,
+      ),
+    });
+    await openSscc(session);
+    const [boxes, pallets] = await counterRows();
+    if (boxes === undefined || pallets === undefined) throw new Error("no rows");
+    expect(within(pallets).getAllByRole("cell")[2]?.textContent).toBe("!Номера закончились");
+    expect(within(pallets).queryByRole("button")).toBeNull();
+    expect(
+      within(boxes).getByRole("button", { name: "Изменить счётчик: Короба, префикс 460709100" }),
+    ).toBeTruthy();
+  });
+
+  it("shows a technologist a counter that has run out as run out, with the others as they are", async () => {
+    const session = fakeOfficeSession({ user: TECHNOLOGIST });
+    session.api.getSscc.mockResolvedValue({
+      ...SSCC_STATE,
+      counters: SSCC_STATE.counters.map((counter) =>
+        counter.issuerPrefix === "460068200" && counter.extension === 1
+          ? { ...counter, nextSerial: counter.maxSerial + 1 }
+          : counter,
+      ),
+    });
+    await openSscc(session);
+    const rows = await counterRows();
+    // The current prefix first, then the other: the exhausted one is the last row.
+    expect(rows.map((row) => within(row).getAllByRole("cell")[2]?.textContent)).toEqual([
+      "1",
+      "0",
+      "1500",
+      "!Номера закончились",
+    ]);
   });
 
   it("moves a counter forward with its revision", async () => {
@@ -236,5 +303,17 @@ describe("SSCC page", () => {
       expect(screen.getByLabelText("Номеров в блоке для коробов")).toHaveProperty("value", "5000"),
     );
     expect(session.api.getSscc).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("isExhausted", () => {
+  it("is true only for a counter past its own last serial", () => {
+    expect(isExhausted({ nextSerial: 9_999_999, maxSerial: 9_999_999 })).toBe(false);
+    expect(isExhausted({ nextSerial: 10_000_000, maxSerial: 9_999_999 })).toBe(true);
+    // The bound is the counter's own, not the usual one.
+    expect(isExhausted({ nextSerial: 100, maxSerial: 100 })).toBe(false);
+    expect(isExhausted({ nextSerial: 101, maxSerial: 100 })).toBe(true);
+    expect(isExhausted({ nextSerial: 50_000_000, maxSerial: 9_999_999 })).toBe(true);
+    expect(isExhausted({ nextSerial: 0, maxSerial: 9_999_999 })).toBe(false);
   });
 });

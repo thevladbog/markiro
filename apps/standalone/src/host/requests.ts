@@ -10,11 +10,15 @@ import type {
   LineUpdate,
   OfficeLine,
   OfficeOperator,
+  OfficeShift,
   OperatorCreate,
   OperatorUpdate,
   PairingCodeRequest,
   ProductCreate,
   ProductUpdate,
+  ShiftClose,
+  ShiftCreate,
+  ShiftUpdate,
   TemplateCreate,
   TemplateDefaultsUpdate,
   TemplatePurpose,
@@ -344,4 +348,98 @@ export function templateDefaultsUpdate(
     })),
     expectedRev,
   };
+}
+
+/**
+ * A planned shift's fields: ids the form chose, the production date
+ * `YYYY-MM-DD`, the counts the form accepted, `null` for no plan or no
+ * counterparty.
+ */
+export interface ShiftInput {
+  productId: string;
+  lineId: string;
+  productionDate: string;
+  boxTemplateId: string;
+  boxCapacity: number;
+  plannedQty: number | null;
+  counterpartyId: string | null;
+}
+
+/**
+ * `POST /v1/office/shifts` (`shift-create.json`): every field, `null` for
+ * none, and the mode and pallets stage 2a takes, so the host's defaults never
+ * decide what was planned.
+ */
+export function shiftCreate(shift: ShiftInput): ShiftCreate {
+  return {
+    productId: shift.productId,
+    lineId: shift.lineId,
+    productionDate: shift.productionDate,
+    boxTemplateId: shift.boxTemplateId,
+    boxCapacity: shift.boxCapacity,
+    plannedQty: shift.plannedQty,
+    counterpartyId: shift.counterpartyId,
+    mode: "aggregation",
+    palletsEnabled: false,
+  };
+}
+
+/**
+ * What a shift is to become; a field left out stays as it is. `plannedQty`
+ * and `counterpartyId` take `null` for none.
+ */
+export interface ShiftChange {
+  lineId?: string;
+  productionDate?: string;
+  boxTemplateId?: string;
+  boxCapacity?: number;
+  plannedQty?: number | null;
+  counterpartyId?: string | null;
+}
+
+/**
+ * `PUT /v1/office/shifts/{id}` (`shift-update.json`): only the fields that
+ * differ from the loaded shift, with its revision; `null` clears the plan or
+ * the counterparty. An active shift takes only its plan, which the caller
+ * alone changes.
+ */
+export function shiftUpdate(
+  shift: Pick<
+    OfficeShift,
+    | "lineId"
+    | "productionDate"
+    | "boxTemplateId"
+    | "boxCapacity"
+    | "plannedQty"
+    | "counterpartyId"
+    | "rev"
+  >,
+  next: ShiftChange,
+): ShiftUpdate {
+  const update: ShiftUpdate = { expectedRev: shift.rev };
+  if (next.lineId !== undefined && next.lineId !== shift.lineId) update.lineId = next.lineId;
+  if (next.productionDate !== undefined && next.productionDate !== shift.productionDate) {
+    update.productionDate = next.productionDate;
+  }
+  if (next.boxTemplateId !== undefined && next.boxTemplateId !== shift.boxTemplateId) {
+    update.boxTemplateId = next.boxTemplateId;
+  }
+  if (next.boxCapacity !== undefined && next.boxCapacity !== shift.boxCapacity) {
+    update.boxCapacity = next.boxCapacity;
+  }
+  if (next.plannedQty !== undefined && next.plannedQty !== shift.plannedQty) {
+    update.plannedQty = next.plannedQty;
+  }
+  if (next.counterpartyId !== undefined && next.counterpartyId !== shift.counterpartyId) {
+    update.counterpartyId = next.counterpartyId;
+  }
+  return update;
+}
+
+/**
+ * `POST /v1/office/shifts/{id}/close` (`shift-close.json`): the trimmed
+ * reason `closeReasonRule` accepted, with the loaded revision.
+ */
+export function shiftClose(reason: string, expectedRev: number): ShiftClose {
+  return { reason, expectedRev };
 }
