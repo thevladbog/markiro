@@ -4838,6 +4838,62 @@ export const STATION_MIGRATIONS: string[] = [
   `UPDATE warehouse_reprint_local_boxes SET cached_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE cached_at='';`,
   `CREATE INDEX IF NOT EXISTS warehouse_reprint_local_boxes_retention_idx ON warehouse_reprint_local_boxes(owner,cached_at);`,
   `CREATE INDEX IF NOT EXISTS inventory_repack_boxes_mirror_reprint_source_idx ON inventory_repack_boxes_mirror(box_id,new_sscc);`,
+  // Finishing is a separate durable fact: legacy active/paused JSON stays valid,
+  // and navigation cleanup cannot turn a completed session into resumable work.
+  `CREATE TABLE IF NOT EXISTS warehouse_reprint_session_closures (
+    owner TEXT NOT NULL, session_id TEXT NOT NULL, operator_id TEXT NOT NULL,
+    closed_at TEXT NOT NULL, PRIMARY KEY(owner,session_id),
+    FOREIGN KEY(owner,session_id) REFERENCES warehouse_reprint_sessions(owner,session_id));`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_session_close_guard
+    BEFORE INSERT ON warehouse_reprint_session_closures
+    WHEN NOT EXISTS(SELECT 1 FROM warehouse_reprint_session_closures
+      WHERE owner=NEW.owner AND session_id=NEW.session_id) BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_OPERATOR_DENIED') WHERE NOT EXISTS(
+        SELECT 1 FROM operators_mirror WHERE operator_id=NEW.operator_id AND active=1);
+      SELECT RAISE(ABORT,'WAREHOUSE_RECOVERY_REQUIRED') WHERE EXISTS(
+        SELECT 1 FROM warehouse_reprint_jobs j
+        WHERE (j.owner=NEW.owner OR j.owner IN (
+          SELECT related.credential_hash FROM station_device_owners related
+          JOIN station_device_owners original ON original.owner_json=related.owner_json
+          WHERE original.credential_hash=NEW.owner))
+        AND j.state IN ('prepared','sending','delivery_unknown','failed_before_send'));
+    END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_session_closure_no_update
+    BEFORE UPDATE ON warehouse_reprint_session_closures BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_SESSION_CLOSED');
+    END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_session_closure_no_delete
+    BEFORE DELETE ON warehouse_reprint_session_closures BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_SESSION_CLOSED');
+    END;`,
+  // These guards participate in the existing prepare/event command statement.
+  // A delayed preparation or explicit reprint rolls back its events and attempts.
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_closed_session_no_prepare
+    BEFORE INSERT ON warehouse_reprint_commands
+    WHEN NEW.kind='prepare' AND EXISTS(SELECT 1 FROM warehouse_reprint_session_closures
+      WHERE owner=NEW.owner AND session_id=json_extract(NEW.payload_json,'$.input.sessionId')) BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_SESSION_CLOSED');
+    END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_closed_session_no_job
+    BEFORE INSERT ON warehouse_reprint_jobs
+    WHEN EXISTS(SELECT 1 FROM warehouse_reprint_session_closures
+      WHERE owner=NEW.owner AND session_id=NEW.session_id) BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_SESSION_CLOSED');
+    END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_closed_session_no_reopen
+    BEFORE UPDATE OF state ON warehouse_reprint_jobs
+    WHEN NEW.state IN ('prepared','sending','delivery_unknown','failed_before_send')
+      AND EXISTS(SELECT 1 FROM warehouse_reprint_session_closures
+        WHERE owner=NEW.owner AND session_id=NEW.session_id) BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_SESSION_CLOSED');
+    END;`,
+  // Preserve the existing acknowledged-job retention gate in the same commit.
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_session_close_pause
+    AFTER INSERT ON warehouse_reprint_session_closures BEGIN
+      UPDATE warehouse_reprint_sessions SET status='paused',
+        session_json=json_set(session_json,'$.status','paused')
+        WHERE owner=NEW.owner AND session_id=NEW.session_id;
+    END;`,
   `CREATE TABLE IF NOT EXISTS printer_deliveries (
     scope TEXT NOT NULL, purpose TEXT NOT NULL CHECK(purpose IN ('test','box','pallet','duplicate')),
     job_id TEXT NOT NULL, attempt_id TEXT NOT NULL,

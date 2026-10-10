@@ -54,6 +54,13 @@ async function setup(
       return Response.json({
         items: [{ id: fixture.shiftId, gtin14: fixture.gtin14, name: "Cola", boxCapacity: null }],
       });
+    if (path === "/shifts/label-template-preview")
+      return Response.json({
+        id: fixture.policy.templateId,
+        name: "Product label",
+        purpose: "product_duplicate",
+        spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "zpl", elements: [] },
+      });
     if (path === "/shifts/planning-config")
       return Response.json({
         validationPrintProtocol: options.protocol === false ? null : "validation-dm-duplicate-v1",

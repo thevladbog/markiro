@@ -1027,7 +1027,7 @@
   },
   "warehouse": {
     "title": "Reprint labels",
-    "pauseExit": "Pause and exit",
+    "pauseExit": "Back to operations",
     "sessionSetup": "Prepare a reprint session",
     "sessionScope": "The reason applies to every label in this session.",
     "reason": "Reprint reason",
@@ -1091,6 +1091,8 @@
     "errors": {
       "WAREHOUSE_OPERATION_FAILED": "The operation failed. The saved job remains on this station.",
       "WAREHOUSE_CATALOG_NETWORK": "Connect to the server to load templates.",
+      "WAREHOUSE_TEMPLATE_CATALOG_MISMATCH": "The template catalog does not match the station request. Check station and server version compatibility.",
+      "WAREHOUSE_BUSY": "Finish the current print or label recovery first.",
       "WAREHOUSE_NETWORK_REQUIRED": "The code is not cached. Connect to the server and scan again.",
       "WAREHOUSE_NOT_FOUND": "Code not found in this organisation. Check the label.",
       "WAREHOUSE_INCOMPLETE_KM": "The database does not have the full marking code. A crypto tail is required.",
@@ -1107,7 +1109,9 @@
       "WAREHOUSE_RECOVERY_REQUIRED": "Resolve the current print job first.",
       "WAREHOUSE_OWNER_CHANGED": "Session stopped because station credentials changed.",
       "WAREHOUSE_TEMPLATES_REQUIRED": "Choose both label templates.",
-      "WAREHOUSE_OPERATOR_DENIED": "Operator access was revoked. Sign in with an active operator."
+      "WAREHOUSE_OPERATOR_DENIED": "Operator access was revoked. Sign in with an active operator.",
+      "WAREHOUSE_TEMPLATE_UNAVAILABLE": "The selected template was disabled or removed in the cabinet. Choose an enabled template.",
+      "WAREHOUSE_SESSION_CLOSED": "This session has finished. Start a new session."
     },
     "entryHint": "Scan an existing unit or box code to print a new label.",
     "entryUnavailable": "Label reprinting is unavailable. Check the station connection in setup.",
@@ -1132,6 +1136,16 @@
     "manualHint": "For a box, enter all 18 SSCC digits without spaces. A unit requires its full marking code.",
     "manualSubmit": "Find and reprint",
     "manualInvalid": "Check the code: a box number must be a valid SSCC. A unit requires its full marking code.",
-    "manualEffect": "We will find the existing record and send one label to the assigned printer."
+    "manualEffect": "We will find the existing record and send one label to the assigned printer.",
+    "finishSession": "Finish session",
+    "finishConfirm": "Finish and return",
+    "finishCount": "Sent to printer: {{count}}",
+    "finishHistory": "Reprint history is retained and will synchronize. This completed session will no longer be offered to resume.",
+    "finishShiftHint": "A reprint session is separate from a production shift. Use Back to shifts to close a shift.",
+    "repeatHint": "The label may already have printed. Choose a reason for another attempt; the saved data will be sent again.",
+    "additionalOperations": "Additional operations",
+    "backToInventory": "Back to inventory",
+    "operationsHint": "Choose an additional warehouse operation.",
+    "previewRetry": "Retry preview"
   }
 }

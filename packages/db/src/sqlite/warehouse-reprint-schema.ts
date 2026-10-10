@@ -25,6 +25,23 @@ export const warehouseReprintSessions = sqliteTable(
     check("warehouse_session_json", sql`json_valid(${t.sessionJson})`),
   ],
 );
+/** An append-only local finish fact; old active/paused snapshots remain compatible. */
+export const warehouseReprintSessionClosures = sqliteTable(
+  "warehouse_reprint_session_closures",
+  {
+    owner: text("owner").notNull(),
+    sessionId: text("session_id").notNull(),
+    operatorId: text("operator_id").notNull(),
+    closedAt: text("closed_at").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.owner, t.sessionId] }),
+    foreignKey({
+      columns: [t.owner, t.sessionId],
+      foreignColumns: [warehouseReprintSessions.owner, warehouseReprintSessions.sessionId],
+    }),
+  ],
+);
 export const warehouseReprintJobs = sqliteTable(
   "warehouse_reprint_jobs",
   {

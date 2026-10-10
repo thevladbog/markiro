@@ -56,6 +56,8 @@ export function WarehouseReprintView(
       | "newSession"
       | "start"
       | "close"
+      | "finish"
+      | "refreshCatalog"
       | "requestVerification"
       | "cancelVerification"
       | "reprint"
@@ -79,6 +81,8 @@ export function WarehouseReprintView(
     setManualTouched(false);
   };
   const [reasonDraft, setReason] = useState<WarehouseSession["reason"] | null>(null);
+  const [repeatDialog, setRepeatDialog] = useState(false);
+  const [finishDialog, setFinishDialog] = useState(false);
   const [reasonDialog, setReasonDialog] = useState(false);
   const [recoveryReason, setRecoveryReason] = useState<WarehouseSession["reason"]>("not_printed");
   const { state, work } = props;
@@ -88,12 +92,31 @@ export function WarehouseReprintView(
     state.job &&
     ["prepared", "sending", "delivery_unknown", "failed_before_send"].includes(state.job.state);
   useEffect(() => {
-    if (picker || reasonDialog || manual || state.busy || session?.status !== "active") return;
+    if (
+      picker ||
+      reasonDialog ||
+      repeatDialog ||
+      finishDialog ||
+      manual ||
+      state.busy ||
+      session?.status !== "active"
+    )
+      return;
     props.source.clearPendingInput?.();
     return props.source.start((raw) => {
       void work.scan(raw);
     });
-  }, [props.source, picker, reasonDialog, manual, state.busy, session?.status, work]);
+  }, [
+    props.source,
+    picker,
+    reasonDialog,
+    repeatDialog,
+    finishDialog,
+    manual,
+    state.busy,
+    session?.status,
+    work,
+  ]);
   const editable = state.initialized && !state.busy && !unresolved;
   const manualAction = (
     <Button
@@ -175,7 +198,7 @@ export function WarehouseReprintView(
                       .then(() => work.start());
                 }}
               >
-                {t("warehouse.start")}
+                {t((session?.sentCount ?? 0) > 0 ? "warehouse.resume" : "warehouse.start")}
               </Button>
             </section>
           ) : (
@@ -196,6 +219,7 @@ export function WarehouseReprintView(
           ) : null}
           {state.busy ? <p role="status">{t("warehouse.working")}</p> : null}
           {state.job &&
+          (session?.status === "active" || unresolved) &&
           ["sent", "verified", "delivery_unknown", "failed_before_send", "prepared"].includes(
             state.job.state,
           ) ? (
@@ -225,33 +249,17 @@ export function WarehouseReprintView(
                   {t("warehouse.sendPrepared")}
                 </Button>
               ) : (
-                <>
-                  <label>
-                    {t("warehouse.reprintReason")}
-                    <select
-                      value={recoveryReason}
-                      disabled={state.busy}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        if (value === "not_printed" || value === "damaged" || value === "lost")
-                          setRecoveryReason(value);
-                      }}
-                    >
-                      {(["not_printed", "damaged", "lost"] as const).map((value) => (
-                        <option key={value} value={value}>
-                          {t(`warehouse.reasons.${value}`)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <Button
-                    size="floor"
-                    disabled={state.busy}
-                    onClick={() => void work.reprint(recoveryReason)}
-                  >
-                    {t("warehouse.reprintButton")}
-                  </Button>
-                </>
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  disabled={state.busy}
+                  onClick={() => {
+                    setRecoveryReason("not_printed");
+                    setRepeatDialog(true);
+                  }}
+                >
+                  {t("warehouse.reprintButton")}
+                </Button>
               )}
             </div>
           ) : null}
@@ -286,7 +294,10 @@ export function WarehouseReprintView(
             size="floor"
             variant="secondary"
             disabled={!editable || !state.catalog}
-            onClick={() => setPicker(true)}
+            onClick={() => {
+              setPicker(true);
+              void work.refreshCatalog();
+            }}
           >
             {t("warehouse.chooseTemplates")}
           </Button>
@@ -306,11 +317,81 @@ export function WarehouseReprintView(
           size="floor"
           variant="secondary"
           disabled={!editable}
-          onClick={() => void work.newSession()}
+          onClick={() => setFinishDialog(true)}
         >
-          {t("warehouse.newSession")}
+          {t("warehouse.finishSession")}
         </Button>
       </footer>
+      {finishDialog ? (
+        <FullScreenDialog
+          open
+          title={t("warehouse.finishSession")}
+          onClose={() => setFinishDialog(false)}
+          backLabel={t("warehouse.cancel")}
+          backDisabled={state.busy}
+          footer={
+            <Button
+              size="floor"
+              disabled={!editable}
+              onClick={() => {
+                void work.finish().then((closed) => {
+                  if (closed) props.onExit();
+                  else setFinishDialog(false);
+                });
+              }}
+            >
+              {t("warehouse.finishConfirm")}
+            </Button>
+          }
+        >
+          <div className="warehouse-confirm-body">
+            <h2>{t("warehouse.finishCount", { count: session?.sentCount ?? 0 })}</h2>
+            <p>{t("warehouse.finishHistory")}</p>
+            <p>{t("warehouse.finishShiftHint")}</p>
+          </div>
+        </FullScreenDialog>
+      ) : null}
+      {repeatDialog ? (
+        <FullScreenDialog
+          open
+          title={t("warehouse.reprintReason")}
+          onClose={() => setRepeatDialog(false)}
+          backLabel={t("warehouse.cancel")}
+          backDisabled={state.busy}
+          footer={
+            <Button
+              size="floor"
+              disabled={state.busy}
+              onClick={() => {
+                setRepeatDialog(false);
+                void work.reprint(recoveryReason);
+              }}
+            >
+              {t("warehouse.reprintButton")}
+            </Button>
+          }
+        >
+          <div className="warehouse-confirm-body">
+            <p>{t("warehouse.repeatHint")}</p>
+            <fieldset>
+              <legend>{t("warehouse.reprintReason")}</legend>
+              <div className="warehouse-reasons">
+                {(["not_printed", "damaged", "lost"] as const).map((value) => (
+                  <label key={value}>
+                    <input
+                      type="radio"
+                      name="repeat-reason"
+                      checked={recoveryReason === value}
+                      onChange={() => setRecoveryReason(value)}
+                    />
+                    {t(`warehouse.reasons.${value}`)}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+          </div>
+        </FullScreenDialog>
+      ) : null}
       {manual ? (
         <FullScreenDialog
           open
@@ -405,7 +486,11 @@ export function WarehouseReprintView(
       ) : null}
       {picker && state.catalog ? (
         <TemplatePicker
+          key={state.catalog.revision}
+          loading={state.busy}
+          error={state.error}
           catalog={state.catalog}
+          defaultBoxId={state.defaultBoxId}
           unitLanguage={resolvePrinter(props.hardwareConfig, "duplicate")?.language ?? null}
           boxLanguage={resolvePrinter(props.hardwareConfig, "box")?.language ?? null}
           unitDpi={resolvePrinter(props.hardwareConfig, "duplicate")?.dpi ?? null}

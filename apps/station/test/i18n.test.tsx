@@ -11,6 +11,15 @@ function flatKeys(obj: Record<string, unknown>, prefix = ""): string[] {
 }
 
 describe("i18n lockstep", () => {
+  it("explains warehouse version mismatch and busy recovery in both languages", () => {
+    for (const locale of [ru, en]) {
+      const messages: Record<string, string> = locale.warehouse.errors;
+      for (const code of ["WAREHOUSE_TEMPLATE_CATALOG_MISMATCH", "WAREHOUSE_BUSY"]) {
+        expect(messages[code]).toBeTypeOf("string");
+        expect(messages[code]).not.toBe(messages.WAREHOUSE_OPERATION_FAILED);
+      }
+    }
+  });
   it("RU and EN have identical key sets", () => {
     expect(flatKeys(ru).sort()).toEqual(flatKeys(en).sort());
   });

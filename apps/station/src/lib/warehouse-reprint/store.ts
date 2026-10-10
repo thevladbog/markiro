@@ -116,19 +116,65 @@ export async function saveWarehouseSession(
 ): Promise<void> {
   const session = warehouseSessionSchema.parse(value);
   await exec.run(
-    "INSERT INTO warehouse_reprint_sessions(owner,session_id,operator_id,status,session_json) VALUES(?,?,?,?,?) ON CONFLICT(owner,session_id) DO UPDATE SET operator_id=excluded.operator_id,status=excluded.status,session_json=excluded.session_json",
+    "INSERT INTO warehouse_reprint_sessions(owner,session_id,operator_id,status,session_json) VALUES(?,?,?,?,?) ON CONFLICT(owner,session_id) DO UPDATE SET operator_id=excluded.operator_id,status=excluded.status,session_json=excluded.session_json WHERE NOT EXISTS(SELECT 1 FROM warehouse_reprint_session_closures WHERE owner=excluded.owner AND session_id=excluded.session_id)",
     [session.owner, session.sessionId, session.operatorId, session.status, JSON.stringify(session)],
   );
 }
 export async function resumeWarehouseSession(exec: SqlExecutor, owner: string) {
-  const [row] = await exec.all<{ owner: string; session_json: string; sent_count: number }>(
-    `SELECT owner,session_json,sent_count FROM warehouse_reprint_sessions s WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) ORDER BY EXISTS(SELECT 1 FROM warehouse_reprint_jobs j WHERE j.owner=s.owner AND j.session_id=s.session_id AND j.state IN ('prepared','sending','delivery_unknown','failed_before_send')) DESC,rowid DESC LIMIT 1`,
+  const [row] = await exec.all<{
+    owner: string;
+    session_json: string;
+    sent_count: number;
+    closed: number;
+  }>(
+    `SELECT owner,session_json,sent_count,
+     EXISTS(SELECT 1 FROM warehouse_reprint_session_closures c WHERE c.owner=s.owner AND c.session_id=s.session_id) AS closed
+     FROM warehouse_reprint_sessions s WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL})
+     ORDER BY EXISTS(SELECT 1 FROM warehouse_reprint_jobs j WHERE j.owner=s.owner AND j.session_id=s.session_id AND j.state IN ('prepared','sending','delivery_unknown','failed_before_send')) DESC,rowid DESC LIMIT 1`,
+    [owner],
+  );
+  // Unresolved work has priority; otherwise the latest closure ends earlier paused history.
+  if (!row || row.closed === 1) return null;
+  const session = warehouseSessionSchema.parse(json(row.session_json));
+  if (session.owner !== row.owner) throw new Error("WAREHOUSE_REPRINT_STORAGE_INVALID");
+  return { ...session, sentCount: row.sent_count };
+}
+/** Finished sessions provide template preferences only; their work identity stays closed. */
+export async function readWarehouseTemplatePreference(exec: SqlExecutor, owner: string) {
+  const [row] = await exec.all<{ owner: string; session_json: string }>(
+    `SELECT owner,session_json FROM warehouse_reprint_sessions WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) ORDER BY rowid DESC LIMIT 1`,
     [owner],
   );
   if (!row) return null;
   const session = warehouseSessionSchema.parse(json(row.session_json));
   if (session.owner !== row.owner) throw new Error("WAREHOUSE_REPRINT_STORAGE_INVALID");
-  return { ...session, sentCount: row.sent_count };
+  return { unitTemplate: session.unitTemplate, boxTemplate: session.boxTemplate };
+}
+/** One autocommit statement; the DB guard checks every retained credential owner. */
+export async function finishWarehouseSession(
+  exec: SqlExecutor,
+  owner: string,
+  sessionId: string,
+  operatorId: string,
+): Promise<boolean> {
+  z.string().min(1).parse(owner);
+  z.uuid().parse(sessionId);
+  z.uuid().parse(operatorId);
+  await exec.run(
+    `INSERT INTO warehouse_reprint_session_closures(owner,session_id,operator_id,closed_at)
+     SELECT s.owner,s.session_id,?,? FROM warehouse_reprint_sessions s
+     WHERE s.owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND s.session_id=?
+       AND NOT EXISTS(SELECT 1 FROM warehouse_reprint_session_closures c
+         WHERE c.owner=s.owner AND c.session_id=s.session_id)
+     ON CONFLICT(owner,session_id) DO NOTHING`,
+    [operatorId, new Date().toISOString(), owner, sessionId],
+  );
+  const [closure] = await exec.all<{ session_id: string }>(
+    `SELECT session_id FROM warehouse_reprint_session_closures
+     WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND session_id=?`,
+    [owner, sessionId],
+  );
+  return closure !== undefined;
 }
 export async function readWarehouseJob(
   exec: SqlExecutor,

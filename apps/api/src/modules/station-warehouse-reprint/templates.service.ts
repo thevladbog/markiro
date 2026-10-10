@@ -13,7 +13,11 @@ import { assertWarehouseDevice } from "./access";
 @Injectable()
 export class WarehouseTemplatesService {
   constructor(@Inject(DB) private readonly db: Db) {}
-  async templates(tenantId: string, deviceId: string): Promise<WarehouseTemplateCatalog> {
+  async templates(
+    tenantId: string,
+    deviceId: string,
+    ids?: readonly string[],
+  ): Promise<WarehouseTemplateCatalog> {
     await assertWarehouseDevice(this.db, tenantId, deviceId);
     const rows = await this.db
       .select()
@@ -23,6 +27,7 @@ export class WarehouseTemplatesService {
           eq(schema.labelTemplates.tenantId, tenantId),
           eq(schema.labelTemplates.enabled, true),
           inArray(schema.labelTemplates.purpose, ["box", "product_duplicate"]),
+          ids === undefined ? undefined : inArray(schema.labelTemplates.id, [...ids]),
         ),
       )
       .orderBy(asc(schema.labelTemplates.name), asc(schema.labelTemplates.id))

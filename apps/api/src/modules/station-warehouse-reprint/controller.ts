@@ -5,10 +5,12 @@ import {
   Get,
   HttpCode,
   Post,
+  Query,
   Req,
   UseGuards,
 } from "@nestjs/common";
 import { ApiOperation, ApiTags } from "@nestjs/swagger";
+import { z } from "zod";
 import {
   warehouseEventBatchSchema,
   warehouseReceiptSchema,
@@ -21,7 +23,13 @@ import {
   type WarehouseLookupResult,
   type WarehouseTemplateCatalog,
 } from "@markiro/domain";
-import { ApiHttpErrors, ApiStationAuth, ApiZodBody, ApiZodResponse } from "../../lib/openapi";
+import {
+  ApiHttpErrors,
+  ApiStationAuth,
+  ApiZodBody,
+  ApiZodQuery,
+  ApiZodResponse,
+} from "../../lib/openapi";
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import { AllowSubscriptionRecovery } from "../../subscriptions/subscription-access-policy";
 import { StationOnlyGuard } from "../../tenancy/station-only.guard";
@@ -30,6 +38,17 @@ import { ZodValidationPipe } from "../../zod.pipe";
 import { WarehouseEventsService } from "./events.service";
 import { WarehouseLookupService } from "./lookup.service";
 import { WarehouseTemplatesService } from "./templates.service";
+
+export const warehouseTemplateIdsQuerySchema = z.strictObject({
+  ids: z
+    .string()
+    .max(739)
+    .describe("Optional comma-separated list of up to 20 template UUIDs to refresh")
+    .transform((value) => value.split(","))
+    .pipe(z.array(z.uuid().toLowerCase()).min(1).max(20))
+    .transform((ids) => [...new Set(ids)])
+    .optional(),
+});
 
 function scope(req: RequestWithTenant): { tenantId: string; deviceId: string } {
   if (!req.tenantId || !req.deviceId || req.deviceKind !== "station")
@@ -78,10 +97,15 @@ export class StationWarehouseReprintController {
   }
   @Get("templates")
   @ApiOperation({ summary: "Read enabled warehouse reprint templates for the device organisation" })
+  @ApiZodQuery(warehouseTemplateIdsQuerySchema)
   @ApiZodResponse({ status: 200, schema: warehouseTemplateCatalogSchema })
-  @ApiHttpErrors(401, 403, 413)
-  templates(@Req() req: RequestWithTenant): Promise<WarehouseTemplateCatalog> {
+  @ApiHttpErrors(400, 401, 403, 413)
+  templates(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(warehouseTemplateIdsQuerySchema))
+    query: z.infer<typeof warehouseTemplateIdsQuerySchema>,
+  ): Promise<WarehouseTemplateCatalog> {
     const { tenantId, deviceId } = scope(req);
-    return this.templatesService.templates(tenantId, deviceId);
+    return this.templatesService.templates(tenantId, deviceId, query.ids);
   }
 }

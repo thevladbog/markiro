@@ -44,7 +44,9 @@ async function fixture() {
   let calls = 0;
   let catalogCalls = 0;
   const client: StationClient = {
-    get: async <T,>() => {
+    get: async <T,>(path: string) => {
+      if (path === "/shifts/box-label-templates")
+        return { items: [], defaultBoxLabelTemplateId: null, defaultSource: null } as T;
       catalogCalls += 1;
       return {
         protocol: WAREHOUSE_REPRINT_PROTOCOL,

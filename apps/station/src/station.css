@@ -1037,22 +1037,6 @@ body,
   background: color-mix(in srgb, var(--accent) 28%, var(--surface-panel));
 }
 
-.inventory-task-selection__scan-mark::before,
-.inventory-task-selection__scan-mark::after {
-  position: absolute;
-  inset: 12px;
-  border: solid var(--accent);
-  content: "";
-}
-
-.inventory-task-selection__scan-mark::before {
-  border-width: 2px 0 0 2px;
-}
-
-.inventory-task-selection__scan-mark::after {
-  border-width: 0 2px 2px 0;
-}
-
 .inventory-task-selection__scan h2,
 .inventory-task-selection__scan p,
 .inventory-task-selection__heading h3,
@@ -1143,8 +1127,8 @@ body,
 .inventory-task-card > div {
   display: grid;
   min-width: 0;
-  gap: 2px;
-  grid-template-columns: auto minmax(0, 1fr);
+  gap: var(--sp-1);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .inventory-task-card strong {
@@ -6033,11 +6017,6 @@ body,
   grid-template-columns: minmax(0, 1fr) minmax(260px, 1fr);
   gap: var(--sp-6);
 }
-.warehouse-template-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--sp-3);
-}
 .warehouse-template-option span {
   display: grid;
   gap: var(--sp-1);
@@ -6138,6 +6117,147 @@ body,
   gap: var(--sp-3);
   flex-shrink: 0;
   align-items: center;
+}
+
+/* Label choices share the same bounded layout in shift setup and reprinting. */
+.warehouse-template-dialog .mk-full-screen-dialog__body {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: var(--sp-3);
+}
+.warehouse-template-tabs {
+  margin-bottom: 0;
+}
+.warehouse-template-grid,
+.label-template-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.label-template-choices {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: var(--sp-3);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.label-template-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  min-height: 0;
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+  padding: var(--sp-1);
+}
+.label-template-list > * {
+  flex-shrink: 0;
+}
+.label-template-list :where(strong, small) {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.label-template-option {
+  min-height: 80px;
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  text-align: left;
+  font: inherit;
+  color: var(--fg-1);
+  background: var(--surface-card);
+  cursor: pointer;
+}
+.label-template-option--selected {
+  border-color: var(--ok-solid);
+  background: var(--ok-bg);
+}
+.label-template-default {
+  color: var(--accent);
+}
+.label-template-list :focus-visible {
+  outline: var(--focus-ring-w) solid var(--focus-ring);
+  outline-offset: 2px;
+}
+.warehouse-template-grid > div:last-child,
+.label-template-preview {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
+.new-shift__panel--template {
+  width: 100%;
+  grid-template-rows: auto minmax(0, 1fr) 64px;
+}
+.warehouse-status--sent,
+.warehouse-status--verified {
+  border-color: var(--ok-solid);
+  background: var(--ok-bg);
+}
+.warehouse-status--delivery_unknown {
+  border-color: var(--warn-solid);
+  background: var(--warn-bg);
+}
+.warehouse-status--sent .warehouse-scan-mark,
+.warehouse-status--verified .warehouse-scan-mark {
+  color: var(--ok-solid);
+}
+.warehouse-scan-mark {
+  border: 0;
+  background: none;
+  padding: 0;
+}
+.inventory-task-selection__scan-mark {
+  padding: var(--sp-2);
+  color: var(--accent);
+}
+.inventory-task-selection__scan > div {
+  display: grid;
+  gap: var(--sp-1);
+}
+.warehouse-navigation {
+  display: flex;
+  gap: var(--sp-3);
+}
+.warehouse-operations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-4);
+  min-width: 0;
+  overflow-y: auto;
+}
+.warehouse-entry > div {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--sp-2);
+}
+.warehouse-entry :where(strong, span) {
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+}
+.warehouse-confirm-body {
+  max-width: 800px;
+  margin-inline: auto;
+  padding-block: var(--sp-6);
+}
+.warehouse-footer {
+  justify-content: space-between;
+}
+.warehouse-confirm-body fieldset {
+  border: 0;
+  margin-top: var(--sp-5);
+  padding: 0;
+}
+.warehouse-confirm-body legend {
+  margin-bottom: var(--sp-3);
 }
 
 .setup-windows-hint {
