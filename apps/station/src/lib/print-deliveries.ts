@@ -7,6 +7,7 @@ import {
   type WindowsPrinting,
 } from "./hardware.js";
 import { parsePrinterProfile, printerMode, type PrinterProfile } from "./printer-routing.js";
+import { parsePalletSheetPrintSnapshot, sheetRequest } from "./pallet-sheet-print-snapshot.js";
 export interface WindowsDeliveryPreflight {
   profileJson: string;
   bytes: Uint8Array;
@@ -31,6 +32,7 @@ export interface PrintDeliveryRow {
   receipt_json: string | null;
   error_code: string | null;
   resolved_at: string | null;
+  render_snapshot_json: string | null;
 }
 const where = "scope=? AND purpose=? AND job_id=? AND attempt_id=?";
 const values = (key: DeliveryKey) => [key.scope, key.purpose, key.jobId, key.attemptId];
@@ -52,15 +54,24 @@ export async function preparePrintDelivery(
   key: DeliveryKey,
   profile: PrinterProfile,
   bytes: Uint8Array,
+  renderSnapshotJson: string | null = null,
 ): Promise<PrintDeliveryRow> {
   const page = decodeMonoRaster(bytes);
   const parsed = parsePrinterProfile(profile);
   if (!parsed || printerMode(parsed) !== "windows_driver" || parsed.dpi !== page.dpi)
     throw new Error("Invalid Windows profile");
+  if (parsed.paper === "a4") {
+    if (key.purpose !== "pallet" || !renderSnapshotJson) throw new Error("Sheet snapshot required");
+    const snapshot = parsePalletSheetPrintSnapshot(renderSnapshotJson);
+    if (snapshot.facts.sscc !== key.jobId || page.dpi !== 300)
+      throw new Error("Sheet identity mismatch");
+    if (snapshot.replayOf && snapshot.replayOf.artifactDigest !== productLabelBytesDigest(bytes))
+      throw new Error("Frozen replay raster changed");
+  } else if (renderSnapshotJson) throw new Error("A4 Windows profile required");
   const digest = productLabelBytesDigest(bytes),
     json = JSON.stringify(parsed);
   await exec.run(
-    `INSERT INTO printer_deliveries(scope,purpose,job_id,attempt_id,state,profile_json,artifact_digest,artifact_base64,document_name,updated_at) VALUES(?,?,?,?,'prepared',?,?,?,?,?) ON CONFLICT DO NOTHING`,
+    `INSERT INTO printer_deliveries(scope,purpose,job_id,attempt_id,state,profile_json,artifact_digest,artifact_base64,document_name,updated_at,render_snapshot_json) VALUES(?,?,?,?,'prepared',?,?,?,?,?,?) ON CONFLICT DO NOTHING`,
     [
       ...values(key),
       json,
@@ -68,10 +79,16 @@ export async function preparePrintDelivery(
       key.purpose === "duplicate" ? null : bytesToBase64(bytes),
       `Markiro:${crypto.randomUUID()}`,
       new Date().toISOString(),
+      renderSnapshotJson,
     ],
   );
   const row = await readPrintDelivery(exec, key);
-  if (!row || row.artifact_digest !== digest || row.profile_json !== json)
+  if (
+    !row ||
+    row.artifact_digest !== digest ||
+    row.profile_json !== json ||
+    row.render_snapshot_json !== renderSnapshotJson
+  )
     throw new Error("Print delivery identity changed");
   return row;
 }
@@ -126,16 +143,20 @@ export async function dispatchWindowsDelivery(
   hardware: WindowsPrinting = tauriWindowsPrinting,
   isCurrent: () => boolean = () => true,
   preflighted?: WindowsDeliveryPreflight,
+  renderSnapshotJson: string | null = null,
 ): Promise<void> {
-  const row = await preparePrintDelivery(exec, key, profile, bytes);
+  const row = await preparePrintDelivery(exec, key, profile, bytes, renderSnapshotJson);
+  const sheet = row.render_snapshot_json
+    ? sheetRequest(parsePalletSheetPrintSnapshot(row.render_snapshot_json))
+    : undefined;
   if (row.state !== "prepared") throw new Error("PRINT_DELIVERY_REQUIRES_RECOVERY");
   if (profile.target.kind !== "usb") throw new Error("Windows queue required");
   // Reuse only the exact in-memory page and printer snapshot checked by this caller.
   // Native print still validates geometry before StartDoc.
   const preflight =
-    preflighted?.bytes === bytes && preflighted.profileJson === JSON.stringify(profile)
+    !sheet && preflighted?.bytes === bytes && preflighted.profileJson === JSON.stringify(profile)
       ? { ok: true as const }
-      : await hardware.preflightWindowsRaster(profile.target.printer, bytes);
+      : await hardware.preflightWindowsRaster(profile.target.printer, bytes, sheet);
   if (!preflight.ok) {
     await exec.run(
       `UPDATE printer_deliveries SET state='failed_before_send',error_code=?,updated_at=? WHERE ${where} AND state='prepared'`,
@@ -157,7 +178,12 @@ export async function dispatchWindowsDelivery(
     }
     let result: WindowsPrintResult;
     try {
-      result = await hardware.printWindowsRaster(profile.target.printer, bytes, row.document_name);
+      result = await hardware.printWindowsRaster(
+        profile.target.printer,
+        bytes,
+        row.document_name,
+        sheet,
+      );
     } catch {
       result = { ok: false, error: { code: "driver_failure", phase: "delivery_unknown" } };
     }
@@ -210,6 +236,7 @@ export async function prepareWindowsReprint(
     [key.scope, key.purpose, key.jobId],
   );
   if (!previous) return null;
+  if (previous.render_snapshot_json) throw new Error("Saved A4 sheet requires sheet recovery");
   if (previous.state === "sending") throw new Error("Print is still active");
   let bytes: Uint8Array;
   if (

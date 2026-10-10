@@ -18,6 +18,26 @@ That response refreshes the mirrored shift/product/template references with
 `sscc: null`; it never allocates server serial state and the recovery mirror
 never calls the device's local `addRange` path.
 
+## Pallet A4 printing
+
+An updated Windows shell exposes the A4 paper option in Windows driver mode.
+Assign it to pallet printing; box and product-duplicate assignments retain their
+label printers. In New Shift, A4 opens the separate editable pallet sheet library.
+Choose portrait, landscape or one landscape sheet with two identical A5 copies,
+or any compatible custom V2 layout created/imported in the cabinet.
+
+Download the shift and organization branding before going offline. The configured
+company logo is used; explicit absence selects bundled Markiro. Actual driver
+margins determine preview and preparation. The settings geometry check sends no
+sheet and does not confirm physical printing. A4 source resolution is 300 dpi;
+supported physical driver resolutions are 300/600/1200, with exact integer scaling.
+
+Saved jobs retain their template revision, data and logo. A crash/transport timeout
+requires explicit recovery; printer settings cannot silently replace pending
+output. RAW ZPL/TSPL remains the independent V1 route. See
+[JSON/editor guide](../../docs/labels/pallet-sheet-json-v2.md) and
+[Windows acceptance checklist](../../docs/acceptance/validation-pallet-a4-printing.md).
+
 ## Windows account and station data
 
 Station keeps `station.json` and `station-mirror.db` in

@@ -30,6 +30,7 @@ export const orgProfiles = pgTable(
     logoAssetId: uuid("logo_asset_id"),
     defaultBoxLabelTemplateId: uuid("default_box_label_template_id"),
     defaultPalletLabelTemplateId: uuid("default_pallet_label_template_id"),
+    defaultPalletSheetTemplateId: uuid("default_pallet_sheet_template_id"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [
@@ -46,6 +47,11 @@ export const orgProfiles = pgTable(
     foreignKey({
       name: "org_profiles_pallet_label_template_tenant_fk",
       columns: [table.tenantId, table.defaultPalletLabelTemplateId],
+      foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
+    }),
+    foreignKey({
+      name: "org_profiles_pallet_sheet_template_tenant_fk",
+      columns: [table.tenantId, table.defaultPalletSheetTemplateId],
       foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
     }),
   ],
@@ -112,3 +118,27 @@ export const orgPalletLabelTemplateDefaults = pgTable(
 );
 
 export type OrgPalletLabelTemplateDefaultRow = typeof orgPalletLabelTemplateDefaults.$inferSelect;
+
+export const orgPalletSheetTemplateDefaults = pgTable(
+  "org_pallet_sheet_template_defaults",
+  {
+    tenantId: text("tenant_id")
+      .notNull()
+      .references(() => organization.id),
+    chzProductGroupCode: integer("chz_product_group_code")
+      .notNull()
+      .references(() => chzProductGroups.code),
+    templateId: uuid("template_id").notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.tenantId, table.chzProductGroupCode] }),
+    foreignKey({
+      name: "org_pallet_sheet_template_defaults_template_tenant_fk",
+      columns: [table.tenantId, table.templateId],
+      foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
+    }),
+  ],
+);
+
+export type OrgPalletSheetTemplateDefaultRow = typeof orgPalletSheetTemplateDefaults.$inferSelect;

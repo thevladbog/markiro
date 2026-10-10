@@ -107,6 +107,11 @@ const shiftProperties = [
 const requiredShiftProperties = shiftProperties.filter(
   (field) => field !== "image" && field !== "stationCloseAccess",
 );
+const optionalSheetProperties = [
+  "palletSheetTemplateId",
+  "palletSheetTemplateName",
+  "palletSheetTemplateRevision",
+];
 
 describe("shifts OpenAPI contract", () => {
   it("documents the station box SSCC top-up response", async () => {
@@ -232,6 +237,7 @@ describe("shifts OpenAPI contract", () => {
         "ssccIssuerCounterpartyId",
         "boxLabelTemplateId",
         "palletLabelTemplateId",
+        "palletSheetTemplateId",
         "validationPrint",
         "plannedQty",
         "plannedDate",
@@ -251,6 +257,7 @@ describe("shifts OpenAPI contract", () => {
         "ssccIssuerCounterpartyId",
         "boxLabelTemplateId",
         "palletLabelTemplateId",
+        "palletSheetTemplateId",
         "validationPrint",
         "plannedQty",
         "plannedDate",
@@ -296,7 +303,7 @@ describe("shifts OpenAPI contract", () => {
       const listShift = property(responseSchema(document, "/shifts", "get", "200"), "items").items!;
 
       for (const schema of [...directShiftSchemas, listShift]) {
-        expectProperties(schema, shiftProperties);
+        expectProperties(schema, [...shiftProperties, ...optionalSheetProperties]);
         expectRequired(schema, requiredShiftProperties);
         expect(property(schema, "productionDate")).toMatchObject(productionDateContract);
       }
@@ -309,6 +316,7 @@ describe("shifts OpenAPI contract", () => {
           "labelTemplate",
           "boxLabelTemplate",
           "palletLabelTemplate",
+          "palletSheetTemplate",
           "counterpartyGln",
           "operators",
           "sscc",
@@ -332,7 +340,12 @@ describe("shifts OpenAPI contract", () => {
           "palletSsccRevokedFrom",
         ]);
         const bundleShift = property(bundle, "shift");
-        expectProperties(bundleShift, [...shiftProperties, "labelTemplateId", "labelTemplateName"]);
+        expectProperties(bundleShift, [
+          ...shiftProperties,
+          ...optionalSheetProperties,
+          "labelTemplateId",
+          "labelTemplateName",
+        ]);
         expectRequired(bundleShift, [
           ...requiredShiftProperties,
           "image",

@@ -8,6 +8,28 @@ routes use `StationOnlyGuard`, shared station/cabinet routes use
 through `AuthorizationGuard`. A floor device is the most theft-exposed
 credential in the system, so this list is deliberately explicit.
 
+| Route                                                                      | Device access                                                                                                                                                                                      |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /shifts/pallet-sheet-templates?productId=UUID`                        | A4 summaries and separate category/organization default. Requires actual `station` kind and `pallet-sheet-v2`; handheld cannot enable it with a header. Cabinet access requires `operations.read`. |
+| `GET /shifts/pallet-sheet-template-preview?productId=UUID&templateId=UUID` | Same caller policy, strict query, same-tenant enabled V2 and product category. Returns editable content/revision for local preview; shift selection captures a separate immutable snapshot.        |
+
+Shift clients negotiate optional A4 metadata with `pallet-sheet-v2` (devices)
+and receive complete branding through these private routes:
+
+| Route                                            | Caller policy                                                                                                                        |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET /station/branding`                          | Actual Station only; handheld/cabinet/kiosk denied. Name and complete current logo metadata; explicit null means no logo configured. |
+| `GET /station/branding/logo/:revision`           | Same Station policy; only current active revision from that tenant, private WebP stream.                                             |
+| `GET /org/profile/print-branding`                | Cabinet `operations.read`, no device keys; only name/print logo metadata, never full settings CRUD.                                  |
+| `GET /org/profile/print-branding/logo/:revision` | Same cabinet policy, current same-tenant revision only.                                                                              |
+
+Cabinet optional shift metadata uses
+`x-label-template-formats: label-v1,pallet-sheet-v2`. Legacy
+responses omit sheet fields. An A4-only shift refuses unsupported device
+creation/entry/bundle before production activation or SSCC allocation; a saved
+V1 fallback remains usable. Signed task scope includes the saved A4 revision
+only for a capable actual station.
+
 This document is the source of truth for the `TenantGuard`-guarded surface:
 every such route in the API is expected to appear in one of the two tables
 below. See "Rule for new routes" for how it stays that way as routes are

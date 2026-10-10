@@ -19,13 +19,16 @@ import {
   isBoxLabelTemplateEligible,
   isPalletLabelTemplateEligible,
   type LabelTemplatePurpose,
-  type LabelTemplateSpec,
+  type StoredLabelTemplateSpec,
+  parseStoredLabelTemplate,
+  isPalletSheetSpec,
 } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import {
   assertKnownProductGroupCodes,
   findLabelTemplateDefaultUsage,
   findPalletLabelTemplateDefaultUsage,
+  findPalletSheetTemplateDefaultUsage,
 } from "./box-label-template-eligibility";
 import type {
   CreateLabelTemplateDto,
@@ -52,6 +55,9 @@ const LABEL_TEMPLATE_REFERENCE_CONSTRAINTS = new Set([
   "org_pallet_label_template_defaults_template_tenant_fk",
   "org_profiles_pallet_label_template_tenant_fk",
   "shifts_tenant_pallet_label_template_fk",
+  "shifts_tenant_pallet_sheet_template_fk",
+  "org_profiles_pallet_sheet_template_tenant_fk",
+  "org_pallet_sheet_template_defaults_template_tenant_fk",
 ]);
 
 @Injectable()
@@ -73,8 +79,10 @@ export class LabelTemplatesService {
   async listLabelTemplates(
     tenantId: string,
     query: ListLabelTemplatesQueryDto,
+    includeSheets = false,
   ): Promise<ListLabelTemplatesResponseDto> {
     const conditions = [eq(schema.labelTemplates.tenantId, tenantId)];
+    if (!includeSheets) conditions.push(eq(schema.labelTemplates.format, "label_v1"));
     if (query.enabled === "true") conditions.push(eq(schema.labelTemplates.enabled, true));
     if (query.enabled === "false") conditions.push(eq(schema.labelTemplates.enabled, false));
     const rows = await this.db
@@ -83,16 +91,25 @@ export class LabelTemplatesService {
       .where(and(...conditions))
       .orderBy(desc(schema.labelTemplates.updatedAt));
 
-    return { items: rows.map((row) => this.rowToSummaryDto(row)) };
+    return { items: rows.map((row) => this.rowToSummaryDto(row, includeSheets)) };
   }
 
   /** Get a single label template by id (must belong to the tenant), with the full spec. */
-  async getLabelTemplate(tenantId: string, id: string): Promise<LabelTemplateDto> {
+  async getLabelTemplate(
+    tenantId: string,
+    id: string,
+    includeSheets = false,
+  ): Promise<LabelTemplateDto> {
     const row = await this.findRow(tenantId, id);
     if (!row) {
       throw new NotFoundException();
     }
-    return this.rowToDto(row);
+    if (row.format === "pallet_sheet_v2" && !includeSheets)
+      throw new BadRequestException({
+        code: "LABEL_TEMPLATE_FORMAT_UNSUPPORTED",
+        message: "This client does not support pallet sheets",
+      });
+    return this.rowToDto(row, includeSheets);
   }
 
   /** Create a label template. `data.spec` has already been domain-validated by the zod pipe. */
@@ -105,6 +122,9 @@ export class LabelTemplatesService {
     if (data.chzProductGroupCodes !== null) {
       await assertKnownProductGroupCodes(this.db, data.chzProductGroupCodes);
     }
+    // The existing admission protocol hashes the legacy input shape. Adding
+    // storage metadata must not change that scope for unchanged V1 clients.
+    const { format, ...legacyScope } = data;
     const id = randomUUID();
     const facts = await this.admission.capture(tenantId);
     const row = await this.db.transaction(async (tx) => {
@@ -115,12 +135,18 @@ export class LabelTemplatesService {
         operationId: "labelEditor.template.write.v1",
         transaction: tx,
         runtime: { enabled: true, observedAt: new Date() },
-        scopeDigest: admissionScopeDigest({ action: "create", templateId: id, ...data }),
+        scopeDigest: admissionScopeDigest({
+          action: "create",
+          templateId: id,
+          ...(format === "label_v1" ? legacyScope : data),
+        }),
       });
       const [created] = await tx
         .insert(schema.labelTemplates)
         .values({ id, tenantId, ...data })
         .returning();
+      if (created?.format === "pallet_sheet_v2")
+        await this.auditSheet(tx, tenantId, actorUserId, "created", created);
       return created;
     });
 
@@ -152,6 +178,31 @@ export class LabelTemplatesService {
       if (!current) {
         throw new NotFoundException("Label template not found or does not belong to this tenant");
       }
+      if (current.format === "pallet_sheet_v2" && data.expectedRevision === undefined)
+        throw new BadRequestException({
+          code: "LABEL_TEMPLATE_REVISION_REQUIRED",
+          message: "expectedRevision is required for pallet sheets",
+        });
+      if (data.expectedRevision !== undefined && data.expectedRevision !== current.revision)
+        throw new ConflictException({
+          code: "LABEL_TEMPLATE_REVISION_CONFLICT",
+          message: "The template has been changed by another editor",
+          revision: current.revision,
+        });
+      const incomingFormat =
+        data.spec === undefined
+          ? data.format
+          : isPalletSheetSpec(data.spec)
+            ? "pallet_sheet_v2"
+            : "label_v1";
+      if (
+        (incomingFormat !== undefined && incomingFormat !== current.format) ||
+        (data.format !== undefined && data.format !== current.format)
+      )
+        throw new ConflictException({
+          code: "LABEL_TEMPLATE_FORMAT_IMMUTABLE",
+          message: "Template format cannot change; create a copy",
+        });
       if (data.purpose !== undefined && data.purpose !== current.purpose) {
         throw new ConflictException({
           code: "LABEL_TEMPLATE_PURPOSE_IMMUTABLE",
@@ -181,7 +232,9 @@ export class LabelTemplatesService {
         // to one usage query instead of always running both.
         const usage =
           current.purpose === "pallet"
-            ? await findPalletLabelTemplateDefaultUsage(tx, tenantId, id)
+            ? current.format === "pallet_sheet_v2"
+              ? await findPalletSheetTemplateDefaultUsage(tx, tenantId, id)
+              : await findPalletLabelTemplateDefaultUsage(tx, tenantId, id)
             : await findLabelTemplateDefaultUsage(tx, tenantId, id);
         const isEligible =
           current.purpose === "pallet" ? isPalletLabelTemplateEligible : isBoxLabelTemplateEligible;
@@ -198,7 +251,10 @@ export class LabelTemplatesService {
         }
       }
 
-      const setClause: Record<string, unknown> = { updatedAt: sql`now()` };
+      const setClause: Record<string, unknown> = {
+        updatedAt: sql`now()`,
+        revision: sql`${schema.labelTemplates.revision} + 1`,
+      };
       if (data.name !== undefined) setClause.name = data.name;
       if (data.spec !== undefined) setClause.spec = data.spec;
       if (data.enabled !== undefined) setClause.enabled = data.enabled;
@@ -208,8 +264,9 @@ export class LabelTemplatesService {
 
       const changed = Object.entries(data).some(
         ([key, value]) =>
+          key !== "expectedRevision" &&
           admissionScopeDigest(value) !==
-          admissionScopeDigest(current[key as keyof LabelTemplateRow]),
+            admissionScopeDigest(current[key as keyof LabelTemplateRow]),
       );
       if (changed)
         await this.admission.observe({
@@ -229,6 +286,8 @@ export class LabelTemplatesService {
       if (!row) {
         throw new NotFoundException("Label template not found or does not belong to this tenant");
       }
+      if (row.format === "pallet_sheet_v2")
+        await this.auditSheet(tx, tenantId, actorUserId, "updated", row, current.revision);
       return this.rowToDto(row);
     });
   }
@@ -258,6 +317,8 @@ export class LabelTemplatesService {
           runtime: { enabled: true, observedAt: new Date() },
           scopeDigest: admissionScopeDigest({ action: "delete", templateId: id }),
         });
+        if (current.format === "pallet_sheet_v2")
+          await this.auditSheet(tx, tenantId, actorUserId, "deleted", current);
         await tx
           .delete(schema.labelTemplates)
           .where(
@@ -284,7 +345,15 @@ export class LabelTemplatesService {
     }
   }
 
-  private assertPurposeSpec(purpose: LabelTemplatePurpose, spec: LabelTemplateSpec): void {
+  private assertPurposeSpec(purpose: LabelTemplatePurpose, spec: StoredLabelTemplateSpec): void {
+    if (isPalletSheetSpec(spec)) {
+      if (purpose !== "pallet")
+        throw new BadRequestException({
+          code: "LABEL_TEMPLATE_PURPOSE_INVALID",
+          message: "Pallet sheets require pallet purpose",
+        });
+      return;
+    }
     if (purpose !== "product_duplicate") return;
     try {
       assertDuplicateTemplate(spec);
@@ -302,12 +371,15 @@ export class LabelTemplatesService {
     return row;
   }
 
-  private rowToDto(row: LabelTemplateRow): LabelTemplateDto {
+  private rowToDto(row: LabelTemplateRow, includeMetadata = false): LabelTemplateDto {
     return {
       id: row.id,
       name: row.name,
       purpose: row.purpose,
-      spec: row.spec as LabelTemplateSpec,
+      spec: parseStoredLabelTemplate(row.spec),
+      ...(includeMetadata || row.format === "pallet_sheet_v2"
+        ? { format: row.format, revision: row.revision }
+        : {}),
       enabled: row.enabled,
       chzProductGroupCodes: row.chzProductGroupCodes,
       createdAt: row.createdAt,
@@ -315,19 +387,55 @@ export class LabelTemplatesService {
     };
   }
 
-  private rowToSummaryDto(row: LabelTemplateRow): LabelTemplateSummaryDto {
-    const spec = row.spec as LabelTemplateSpec;
-    return {
+  private rowToSummaryDto(
+    row: LabelTemplateRow,
+    includeMetadata: boolean,
+  ): LabelTemplateSummaryDto {
+    const spec = parseStoredLabelTemplate(row.spec);
+    const common = {
       id: row.id,
       name: row.name,
+      enabled: row.enabled,
+      chzProductGroupCodes: row.chzProductGroupCodes,
+      updatedAt: row.updatedAt,
+    };
+    if (isPalletSheetSpec(spec))
+      return {
+        ...common,
+        purpose: "pallet",
+        format: "pallet_sheet_v2",
+        revision: row.revision,
+        dpi: 300,
+        page: { size: "A4", orientation: spec.page.orientation, copies: spec.page.copies },
+      };
+    return {
+      ...common,
       purpose: row.purpose,
       widthMm: spec.widthMm,
       heightMm: spec.heightMm,
       dpi: spec.dpi,
       language: spec.language,
-      enabled: row.enabled,
-      chzProductGroupCodes: row.chzProductGroupCodes,
-      updatedAt: row.updatedAt,
+      ...(includeMetadata ? { format: "label_v1" as const, revision: row.revision } : {}),
     };
+  }
+
+  private async auditSheet(
+    tx: Pick<Db, "insert">,
+    tenantId: string,
+    actorUserId: string,
+    action: "created" | "updated" | "deleted",
+    row: LabelTemplateRow,
+    previousRevision?: number,
+  ): Promise<void> {
+    await tx.insert(schema.tenantAuditEvents).values({
+      organizationId: tenantId,
+      actorUserId,
+      action: `tenant.pallet_sheet_template.${action}`,
+      outcome: "success",
+      targetType: "label_template",
+      targetId: row.id,
+      ...(previousRevision === undefined ? {} : { before: { revision: previousRevision } }),
+      after: { templateId: row.id, format: row.format, revision: row.revision },
+    });
   }
 }

@@ -8,6 +8,9 @@ import {
   DomainError,
   parseLabelCode,
   parseLabelJson,
+  parseStoredLabelTemplate,
+  isPalletSheetSpec,
+  MAX_LABEL_CODE_BYTES,
   type LabelImportFormat,
   type LabelImportResult,
   type LabelTemplatePurpose,
@@ -25,6 +28,7 @@ export interface ImportAnalysisIssue {
 export type ImportAnalysisError =
   /** An element is larger than the label itself (`fitSpecElements`). */
   | { kind: "elementTooLarge" }
+  | { kind: "sheetEditor" }
   /** One blocking message: a parser error, a JSON syntax error, a limit. */
   | { kind: "message"; message: string }
   /** The spec failed the model schema: every issue with its dotted path. */
@@ -65,10 +69,24 @@ function isIssueList(cause: unknown): cause is ImportAnalysisIssue[] {
 export function analyzeImport(input: AnalyzeImportInput): AnalyzeImportOutcome {
   let parsed: LabelImportResult & { name?: string };
   try {
-    parsed =
-      input.format === "json"
-        ? parseLabelJson(input.source, { purpose: input.purpose })
-        : parseLabelCode(input.source, { language: input.format, dpi: input.dpi });
+    if (input.format === "json") {
+      if (new TextEncoder().encode(input.source).byteLength > MAX_LABEL_CODE_BYTES)
+        throw new DomainError("LABEL_CODE_TOO_LARGE", "Template JSON exceeds 256 KiB");
+      let root: unknown;
+      try {
+        root = JSON.parse(input.source);
+      } catch (error) {
+        throw new DomainError(
+          "LABEL_CODE_INVALID",
+          `invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const candidate =
+        root && typeof root === "object" && "spec" in root ? Reflect.get(root, "spec") : root;
+      const stored = parseStoredLabelTemplate(candidate);
+      if (isPalletSheetSpec(stored)) return { ok: false, error: { kind: "sheetEditor" } };
+      parsed = parseLabelJson(input.source, { purpose: input.purpose });
+    } else parsed = parseLabelCode(input.source, { language: input.format, dpi: input.dpi });
   } catch (caught) {
     if (
       caught instanceof DomainError &&

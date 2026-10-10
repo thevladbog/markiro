@@ -11,7 +11,7 @@ import { loadEnv } from "../src/env";
 import { schema, type Db } from "@markiro/db";
 import { listenOnLoopback } from "./support/listen-loopback";
 import { createTestStationDevice } from "./support/auth";
-import { buildDuplicateLabelTemplate } from "@markiro/domain";
+import { buildPalletSheetPresets, buildDuplicateLabelTemplate } from "@markiro/domain";
 
 /**
  * A minimal, valid `LabelTemplateSpec` (see packages/domain/src/labels/model.ts)
@@ -92,6 +92,146 @@ describe.skipIf(!ready)("label-templates e2e", () => {
       .expect(200);
     return orgId;
   }
+
+  it("isolates V2 reads, serializes concurrent revisions and audits the committed editor", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const actorUserId: string = (await agent.get("/api/auth/get-session").expect(200)).body.user.id;
+    const spec = buildPalletSheetPresets()[0]!.spec;
+    const created = await agent
+      .post("/label-templates")
+      .send({ name: "A4", purpose: "pallet", spec })
+      .expect(201);
+    const id: string = created.body.id;
+    expect(created.body).toMatchObject({ format: "pallet_sheet_v2", revision: 1, spec });
+    const legacyPicker = await agent.get("/shifts/pallet-label-templates").expect(200);
+    expect(legacyPicker.body.items).toEqual([]);
+    expect((await agent.get("/label-templates").expect(200)).body.items).toEqual([]);
+    expect((await agent.get(`/label-templates/${id}`).expect(400)).body.code).toBe(
+      "LABEL_TEMPLATE_FORMAT_UNSUPPORTED",
+    );
+    const list = await agent
+      .get("/label-templates")
+      .set("x-label-template-formats", "label-v1,pallet-sheet-v2")
+      .expect(200);
+    expect(list.body.items).toEqual([
+      expect.objectContaining({
+        id,
+        format: "pallet_sheet_v2",
+        revision: 1,
+        page: { size: "A4", orientation: "portrait", copies: 1 },
+      }),
+    ]);
+    expect(list.body.items[0]).not.toHaveProperty("language");
+    expect(
+      (await agent.patch(`/label-templates/${id}`).send({ name: "Unversioned" }).expect(400)).body
+        .code,
+    ).toBe("LABEL_TEMPLATE_REVISION_REQUIRED");
+    const changes = await Promise.all(
+      ["Editor A", "Editor B"].map((name) =>
+        agent.patch(`/label-templates/${id}`).send({ name, expectedRevision: 1 }),
+      ),
+    );
+    expect(changes.map((r) => r.status).sort()).toEqual([200, 409]);
+    const success = changes.find((r) => r.status === 200)!;
+    expect(success.body.revision).toBe(2);
+    expect(changes.find((r) => r.status === 409)!.body.code).toBe(
+      "LABEL_TEMPLATE_REVISION_CONFLICT",
+    );
+    const audit = await db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(eq(schema.tenantAuditEvents.targetId, id));
+    expect(
+      audit.map((r) => ({
+        action: r.action,
+        organizationId: r.organizationId,
+        actorUserId: r.actorUserId,
+        outcome: r.outcome,
+        targetType: r.targetType,
+        targetId: r.targetId,
+        before: r.before,
+        after: r.after,
+      })),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "tenant.pallet_sheet_template.created",
+          organizationId: tenantId,
+          actorUserId,
+          outcome: "success",
+          targetType: "label_template",
+          targetId: id,
+          after: { templateId: id, format: "pallet_sheet_v2", revision: 1 },
+        }),
+        expect.objectContaining({
+          action: "tenant.pallet_sheet_template.updated",
+          organizationId: tenantId,
+          actorUserId,
+          targetType: "label_template",
+          targetId: id,
+          outcome: "success",
+          before: { revision: 1 },
+          after: { templateId: id, format: "pallet_sheet_v2", revision: 2 },
+        }),
+      ]),
+    );
+    expect(audit.filter((r) => r.action === "tenant.pallet_sheet_template.updated")).toHaveLength(
+      1,
+    );
+    const other = request.agent(app!.getHttpServer());
+    await signUpAndActivate(other);
+    await other
+      .get(`/label-templates/${id}`)
+      .set("x-label-template-formats", "pallet-sheet-v2")
+      .expect(404);
+    await other
+      .patch(`/label-templates/${id}`)
+      .send({ name: "Cross tenant", expectedRevision: 2 })
+      .expect(404);
+    await other.put("/org/profile").send({ defaultPalletSheetTemplateId: id }).expect(400);
+    expect(
+      (await agent.put("/org/profile").send({ defaultPalletLabelTemplateId: id }).expect(400)).body
+        .code,
+    ).toBe("PALLET_LABEL_TEMPLATE_NOT_ELIGIBLE");
+    expect(
+      (
+        await agent
+          .patch(`/label-templates/${id}`)
+          .send({ spec: VALID_SPEC, expectedRevision: 2 })
+          .expect(409)
+      ).body.code,
+    ).toBe("LABEL_TEMPLATE_FORMAT_IMMUTABLE");
+    await agent.put("/org/profile").send({ defaultPalletSheetTemplateId: id }).expect(200);
+    expect(
+      (
+        await agent
+          .patch(`/label-templates/${id}`)
+          .send({ enabled: false, expectedRevision: 2 })
+          .expect(409)
+      ).body.code,
+    ).toBe("LABEL_TEMPLATE_IS_DEFAULT");
+    await agent.delete(`/label-templates/${id}`).expect(409);
+    await agent.put("/org/profile").send({ defaultPalletSheetTemplateId: null }).expect(200);
+    await agent
+      .put("/org/profile")
+      .send({ categoryPalletSheetTemplateDefaults: [{ chzProductGroupCode: 15, templateId: id }] })
+      .expect(200);
+    expect(
+      (
+        await agent
+          .patch(`/label-templates/${id}`)
+          .send({ chzProductGroupCodes: [8], expectedRevision: 2 })
+          .expect(409)
+      ).body.code,
+    ).toBe("LABEL_TEMPLATE_IS_DEFAULT");
+    await agent.put("/org/profile").send({ categoryPalletSheetTemplateDefaults: [] }).expect(200);
+    await agent
+      .patch(`/label-templates/${id}`)
+      .send({ enabled: false, expectedRevision: 2 })
+      .expect(200);
+    await agent.delete(`/label-templates/${id}`).expect(204);
+  });
 
   it("GET /label-templates is unauthorized without a session", async () => {
     await request(app!.getHttpServer()).get("/label-templates").expect(401);

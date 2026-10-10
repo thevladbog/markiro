@@ -5,6 +5,7 @@ mod grant_transaction;
 mod power;
 mod printer;
 mod printer_raster;
+mod printer_sheet;
 mod printer_windows;
 mod printer_windows_commands;
 mod scanner;
@@ -71,6 +72,8 @@ pub fn run() {
             printer::print_bytes,
             printer::list_usb_printers,
             printer_windows_commands::supports_windows_printing,
+            printer_windows_commands::supports_windows_a4_printing,
+            printer_windows_commands::get_windows_page_geometry,
             printer_windows_commands::preflight_windows_raster,
             printer_windows_commands::print_windows_raster,
             printer_windows_commands::get_windows_print_job,

@@ -116,6 +116,112 @@ describe.skipIf(!ready)("org profile e2e", () => {
     return orgId;
   }
 
+  it("serves private natural-aspect branding only to actual station devices", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpWithInactiveOrg(agent);
+    await agent
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: tenantId })
+      .expect(200);
+    const station = await createTestStationDevice(app!, agent, "Branding station");
+    const handheld = await createTestStationDevice(app!, agent, "Branding handheld", {
+      kind: "handheld",
+    });
+    await request(app!.getHttpServer()).get("/station/branding").expect(401);
+    await agent.get("/station/branding").expect(403);
+    await request(app!.getHttpServer())
+      .get("/station/branding")
+      .set("x-api-key", handheld.apiKey)
+      .expect(403);
+    const none = await request(app!.getHttpServer())
+      .get("/station/branding")
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+    expect(none.body).toEqual({
+      organizationName: "Test Plant",
+      logoRevision: null,
+      logoUrl: null,
+      logo: null,
+    });
+    const source = await sharp({
+      create: { width: 1000, height: 100, channels: 4, background: "#223344" },
+    })
+      .png()
+      .toBuffer();
+    const upload = await agent
+      .post("/org/profile/logo")
+      .attach("logo", source, { filename: "wide.png", contentType: "image/png" })
+      .expect(201);
+    const current = await request(app!.getHttpServer())
+      .get("/station/branding")
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+    expect(current.body).toMatchObject({
+      organizationName: "Test Plant",
+      logoRevision: upload.body.logoRevision,
+      logoUrl: `/station/branding/logo/${upload.body.logoRevision}`,
+      logo: { contentType: "image/webp", width: 1000, height: 100 },
+    });
+    const served = await request(app!.getHttpServer())
+      .get(current.body.logoUrl)
+      .set("x-api-key", station.apiKey)
+      .expect("content-type", /image\/webp/)
+      .expect(200);
+    expect(served.headers["cache-control"]).toContain("private");
+    await request(app!.getHttpServer())
+      .get(current.body.logoUrl)
+      .set("x-api-key", handheld.apiKey)
+      .expect(403);
+    await agent.get(current.body.logoUrl).expect(403);
+    const other = request.agent(app!.getHttpServer());
+    const otherTenant = await signUpWithInactiveOrg(other);
+    await other
+      .post("/api/auth/organization/set-active")
+      .send({ organizationId: otherTenant })
+      .expect(200);
+    const otherStation = await createTestStationDevice(app!, other, "Other station");
+    await request(app!.getHttpServer())
+      .get(current.body.logoUrl)
+      .set("x-api-key", otherStation.apiKey)
+      .expect(404);
+    await db
+      .update(schema.member)
+      .set({ role: "manager" })
+      .where(eq(schema.member.organizationId, tenantId));
+    await agent.get("/org/profile").expect(403);
+    const cabinetBranding = await agent.get("/org/profile/print-branding").expect(200);
+    expect(cabinetBranding.body).toMatchObject({
+      organizationName: "Test Plant",
+      logoRevision: upload.body.logoRevision,
+      logoUrl: `/org/profile/print-branding/logo/${upload.body.logoRevision}`,
+    });
+    await agent
+      .get(cabinetBranding.body.logoUrl)
+      .expect("content-type", /image\/webp/)
+      .expect(200);
+    await request(app!.getHttpServer())
+      .get("/org/profile/print-branding")
+      .set("x-api-key", station.apiKey)
+      .expect(403);
+    await db
+      .update(schema.member)
+      .set({ role: "owner" })
+      .where(eq(schema.member.organizationId, tenantId));
+    await agent.delete("/org/profile/logo").expect(204);
+    await request(app!.getHttpServer())
+      .get(current.body.logoUrl)
+      .set("x-api-key", station.apiKey)
+      .expect(404);
+    await db
+      .update(schema.stationDevices)
+      .set({ revokedAt: new Date() })
+      .where(eq(schema.stationDevices.id, station.deviceId));
+    await request(app!.getHttpServer())
+      .get("/station/branding")
+      .set("x-api-key", station.apiKey)
+      .expect(401);
+  });
+
   it("GET /org/profile is unauthorized without a session", async () => {
     await request(app!.getHttpServer()).get("/org/profile").expect(401);
   });
@@ -143,6 +249,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       categoryBoxLabelTemplateDefaults: [],
       defaultPalletLabelTemplateId: null,
       categoryPalletLabelTemplateDefaults: [],
+      defaultPalletSheetTemplateId: null,
+      categoryPalletSheetTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
@@ -171,6 +279,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       categoryBoxLabelTemplateDefaults: [],
       defaultPalletLabelTemplateId: null,
       categoryPalletLabelTemplateDefaults: [],
+      defaultPalletSheetTemplateId: null,
+      categoryPalletSheetTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
@@ -201,6 +311,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       categoryBoxLabelTemplateDefaults: [],
       defaultPalletLabelTemplateId: null,
       categoryPalletLabelTemplateDefaults: [],
+      defaultPalletSheetTemplateId: null,
+      categoryPalletSheetTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
@@ -554,6 +666,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       categoryBoxLabelTemplateDefaults: [],
       defaultPalletLabelTemplateId: null,
       categoryPalletLabelTemplateDefaults: [],
+      defaultPalletSheetTemplateId: null,
+      categoryPalletSheetTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
@@ -571,6 +685,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       categoryBoxLabelTemplateDefaults: [],
       defaultPalletLabelTemplateId: null,
       categoryPalletLabelTemplateDefaults: [],
+      defaultPalletSheetTemplateId: null,
+      categoryPalletSheetTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
@@ -604,6 +720,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       categoryBoxLabelTemplateDefaults: [],
       defaultPalletLabelTemplateId: null,
       categoryPalletLabelTemplateDefaults: [],
+      defaultPalletSheetTemplateId: null,
+      categoryPalletSheetTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: true,
       logoUrl: null,
@@ -637,6 +755,8 @@ describe.skipIf(!ready)("org profile e2e", () => {
       categoryBoxLabelTemplateDefaults: [],
       defaultPalletLabelTemplateId: null,
       categoryPalletLabelTemplateDefaults: [],
+      defaultPalletSheetTemplateId: null,
+      categoryPalletSheetTemplateDefaults: [],
       productGroupsInUse: [],
       pickupLimitsEnabled: false,
       logoUrl: null,

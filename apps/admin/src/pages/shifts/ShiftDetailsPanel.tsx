@@ -1,5 +1,6 @@
 import { ValidationReprocessingHistory } from "./ValidationReprocessingHistory.js";
 import { ProductLabelHistory } from "./ProductLabelHistory.js";
+import { ShiftPalletSheetPreview } from "./ShiftPalletSheetPreview.js";
 import {
   Alert,
   Badge,
@@ -462,6 +463,7 @@ export function ShiftDetailsPanel({ shift, onClose }: { shift: ShiftDto; onClose
       onClose={onClose}
     >
       <div className="mk-shift-details">
+        {shift.palletSheetTemplateId ? <ShiftPalletSheetPreview shift={shift} /> : null}
         <section className="mk-shift-details__section">
           <h3>{t("pages.shifts.details.outputTitle")}</h3>
           <ShiftOutput shift={shift} />

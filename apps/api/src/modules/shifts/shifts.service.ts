@@ -1,4 +1,17 @@
 import { assertDeviceReplacementNewWorkAllowed } from "../device-licensing/device-replacement-admission";
+import {
+  parsePalletSheetSnapshot,
+  parsePalletSheetSpec,
+  type PalletSheetTemplateSnapshot,
+} from "@markiro/domain";
+import {
+  assertPalletSheetClient,
+  assertPalletSheetEntry,
+  PALLET_SHEET_PROTOCOL,
+} from "./pallet-sheet-policy";
+import { snapshotSelectedPalletSheet } from "./pallet-sheet-template-store";
+import { resolveDefaultPalletSheetTemplate } from "../label-templates/box-label-template-eligibility";
+import type { ShiftPalletSheetTemplatesDto } from "./dto";
 import { loadValidationReprocessingDetails } from "./validation-reprocessing-details";
 import type { ValidationReprocessingDetailsQuery } from "@markiro/domain";
 import { loadValidationCodeHistory } from "./validation-code-history";
@@ -118,6 +131,7 @@ type JoinedShiftRow = Omit<ShiftDto, "image" | "number" | "validationPrint" | "o
   ValidationPrintStorage & {
     numberMonthKey: string;
     numberSeq: number;
+    palletSheetTemplateSnapshot?: unknown;
     imageChecksum: string | null;
     imageByteSize: number | null;
     imageWidth: number | null;
@@ -186,6 +200,8 @@ const CURRENT_SHIFT_STORAGE_SELECTION = {
   palletBoxCapacity: schema.shifts.palletBoxCapacity,
   palletsEnabled: schema.shifts.palletsEnabled,
   palletLabelTemplateId: schema.shifts.palletLabelTemplateId,
+  palletSheetTemplateId: schema.shifts.palletSheetTemplateId,
+  palletSheetTemplateSnapshot: schema.shifts.palletSheetTemplateSnapshot,
   createdFrom: schema.shifts.createdFrom,
   stationClosePolicy: schema.shifts.stationClosePolicy,
   stationCloseOwnerDeviceId: schema.shifts.stationCloseOwnerDeviceId,
@@ -310,9 +326,16 @@ export class ShiftsService {
   }
 
   /** The one organisation setting needed by operations shift planning, resolved for a product when given. */
-  async getPlanningConfig(tenantId: string, productId?: string): Promise<ShiftPlanningConfigDto> {
+  async getPlanningConfig(
+    tenantId: string,
+    productId?: string,
+    includeSheets = false,
+  ): Promise<ShiftPlanningConfigDto> {
     const chzProductGroupCode = await this.productGroupCodeForPicker(tenantId, productId);
     const resolved = await resolveDefaultBoxLabelTemplate(this.db, tenantId, chzProductGroupCode);
+    const sheetDefault = includeSheets
+      ? await resolveDefaultPalletSheetTemplate(this.db, tenantId, chzProductGroupCode)
+      : null;
     const [profile] = await this.db
       .select({ gln: schema.orgProfiles.gln })
       .from(schema.orgProfiles)
@@ -325,6 +348,13 @@ export class ShiftsService {
         ? VALIDATION_REPROCESSING_PROTOCOL
         : null,
       orgGlnConfigured: Boolean(profile?.gln),
+      ...(sheetDefault
+        ? {
+            defaultPalletSheetTemplateId: sheetDefault.templateId,
+            palletSheetDefaultSource: sheetDefault.source,
+            palletSheetProtocol: PALLET_SHEET_PROTOCOL,
+          }
+        : {}),
     };
   }
 
@@ -407,6 +437,7 @@ export class ShiftsService {
           eq(schema.labelTemplates.tenantId, tenantId),
           eq(schema.labelTemplates.enabled, true),
           eq(schema.labelTemplates.purpose, "pallet"),
+          eq(schema.labelTemplates.format, "label_v1"),
         ),
       )
       .orderBy(schema.labelTemplates.name, schema.labelTemplates.id);
@@ -501,6 +532,7 @@ export class ShiftsService {
           eq(schema.labelTemplates.tenantId, tenantId),
           eq(schema.labelTemplates.id, query.templateId),
           eq(schema.labelTemplates.purpose, query.purpose),
+          eq(schema.labelTemplates.format, "label_v1"),
           eq(schema.labelTemplates.enabled, true),
         ),
       );
@@ -580,7 +612,7 @@ export class ShiftsService {
     if (!template) {
       throw new BadRequestException("Unknown pallet label template for this organization");
     }
-    if (template.purpose !== "pallet") {
+    if (template.purpose !== "pallet" || template.format !== "label_v1") {
       throw new UnprocessableEntityException({
         code: "PALLET_LABEL_TEMPLATE_NOT_ELIGIBLE",
         message: "Only a pallet-purpose template can label a pallet",
@@ -596,6 +628,16 @@ export class ShiftsService {
 
   /** Get a single shift (joined), must belong to the tenant. */
   async getShift(tenantId: string, id: string): Promise<ShiftDto> {
+    return (await this.getShiftWithSheet(tenantId, id)).shift;
+  }
+
+  private async getShiftWithSheet(
+    tenantId: string,
+    id: string,
+  ): Promise<{
+    shift: ShiftDto;
+    sheetSnapshot: PalletSheetTemplateSnapshot | null;
+  }> {
     const [row] = await this.db
       .select(this.joinedSelection())
       .from(schema.shifts)
@@ -624,7 +666,10 @@ export class ShiftsService {
     }
     const shift = this.mapShiftRow(row);
     const outputs = await this.fetchShiftOutputs(tenantId, [shift]);
-    return { ...shift, output: outputs.get(shift.id) ?? defaultShiftOutput(shift.mode) };
+    return {
+      shift: { ...shift, output: outputs.get(shift.id) ?? defaultShiftOutput(shift.mode) },
+      sheetSnapshot: this.sheetSnapshotFromStorage(row),
+    };
   }
 
   /**
@@ -950,6 +995,7 @@ export class ShiftsService {
     actor: { domain: "cabinet" | "station_device"; id: string },
     createdFrom: ShiftOrigin = "admin",
     capabilities?: string,
+    includeSheets = false,
   ): Promise<ShiftDto> {
     const printInput = data.validationPrint ?? { mode: "none" };
     assertValidationPrintCompatible(data.mode, printInput);
@@ -1014,7 +1060,20 @@ export class ShiftsService {
     // A fresh shift has no prior state: `palletsEnabled` here IS the moment
     // pallets are enabled, so this always applies -- unlike the update path,
     // there is no "operator already cleared it" history to preserve.
-    this.assertPalletTemplateRule(palletsEnabled, palletLabelTemplateId);
+    const palletSheetTemplateId =
+      data.palletSheetTemplateId === undefined
+        ? palletsEnabled && includeSheets
+          ? (await resolveDefaultPalletSheetTemplate(this.db, tenantId, chzProductGroupCode))
+              .templateId
+          : null
+        : data.palletSheetTemplateId;
+    if (palletSheetTemplateId && !palletsEnabled) {
+      throw new BadRequestException({
+        code: "PALLET_SHEET_PALLETS_REQUIRED",
+        message: "A4 templates require enabled pallets",
+      });
+    }
+    this.assertPalletTemplateRule(palletsEnabled, palletLabelTemplateId, palletSheetTemplateId);
 
     const monthKey = shiftMonthKey(data.plannedDate ?? new Date().toISOString().slice(0, 10));
 
@@ -1031,6 +1090,27 @@ export class ShiftsService {
           data.mode,
           printInput,
         );
+        const sheetSnapshot = palletSheetTemplateId
+          ? await snapshotSelectedPalletSheet(
+              tx,
+              tenantId,
+              palletSheetTemplateId,
+              chzProductGroupCode,
+            )
+          : null;
+        if (sheetSnapshot && actor.domain === "station_device") {
+          const [device] = await tx
+            .select({ kind: schema.stationDevices.kind })
+            .from(schema.stationDevices)
+            .where(
+              and(
+                eq(schema.stationDevices.tenantId, tenantId),
+                eq(schema.stationDevices.id, actor.id),
+              ),
+            )
+            .for("share");
+          assertPalletSheetClient({ kind: "device", deviceKind: device?.kind, capabilities });
+        }
         const [counter] = await tx
           .insert(schema.shiftNumberCounters)
           .values({ tenantId, monthKey, lastSeq: 1 })
@@ -1062,6 +1142,9 @@ export class ShiftsService {
               boxCapacity,
               palletBoxCapacity,
               palletLabelTemplateId,
+              ...(sheetSnapshot
+                ? { palletSheetTemplateId, palletSheetDigest: sheetSnapshot.digest }
+                : {}),
             }),
           });
         return tx
@@ -1079,6 +1162,8 @@ export class ShiftsService {
             ssccIssuerCounterpartyId: data.ssccIssuerCounterpartyId ?? null,
             boxLabelTemplateId,
             palletLabelTemplateId,
+            palletSheetTemplateId,
+            palletSheetTemplateSnapshot: sheetSnapshot,
             mode: data.mode,
             plannedQty: data.plannedQty ?? null,
             plannedDate: data.plannedDate ?? null,
@@ -1255,6 +1340,44 @@ export class ShiftsService {
           );
         }
 
+        let nextSheetId =
+          data.palletSheetTemplateId === undefined
+            ? current.palletSheetTemplateId
+            : data.palletSheetTemplateId;
+        let nextSheetSnapshot = current.palletSheetTemplateSnapshot;
+        let sheetChanged = data.palletSheetTemplateId !== undefined;
+        if (data.palletSheetTemplateId !== undefined) {
+          if (nextSheetId && !(data.palletsEnabled ?? current.palletsEnabled)) {
+            throw new BadRequestException("Pallet sheet template requires pallets");
+          }
+          if (nextSheetId) {
+            const [product] = await tx
+              .select({ category: schema.products.chzProductGroupCode })
+              .from(schema.products)
+              .where(
+                and(
+                  eq(schema.products.tenantId, tenantId),
+                  eq(schema.products.id, current.productId),
+                ),
+              )
+              .for("share");
+            if (!product) throw new NotFoundException();
+            nextSheetSnapshot = await snapshotSelectedPalletSheet(
+              tx,
+              tenantId,
+              nextSheetId,
+              product.category,
+            );
+          } else nextSheetSnapshot = null;
+          this.assertPalletTemplateRule(
+            data.palletsEnabled ?? current.palletsEnabled,
+            data.palletLabelTemplateId === undefined
+              ? current.palletLabelTemplateId
+              : data.palletLabelTemplateId,
+            nextSheetId,
+          );
+        }
+
         if (current.status === "active") {
           // The pallet template joins the box template here: both are read
           // by the device at the next print, so swapping either mid-shift is
@@ -1268,7 +1391,9 @@ export class ShiftsService {
             "plannedDate",
             "productionDate",
             "boxLabelTemplateId",
-            ...(current.palletsEnabled ? (["palletLabelTemplateId"] as const) : []),
+            ...(current.palletsEnabled
+              ? (["palletLabelTemplateId", "palletSheetTemplateId"] as const)
+              : []),
           ]);
           const forbiddenField = (Object.keys(data) as (keyof UpdateShiftDto)[]).find(
             (field) => !allowedFields.has(field),
@@ -1281,7 +1406,11 @@ export class ShiftsService {
           if (data.palletLabelTemplateId !== undefined) {
             // Pallets on means a template is required, active or not
             // (eligibility of a non-null value was already asserted above).
-            this.assertPalletTemplateRule(current.palletsEnabled, data.palletLabelTemplateId);
+            this.assertPalletTemplateRule(
+              current.palletsEnabled,
+              data.palletLabelTemplateId,
+              nextSheetId,
+            );
           }
 
           const changes: Partial<
@@ -1293,8 +1422,14 @@ export class ShiftsService {
               | "productionDate"
               | "boxLabelTemplateId"
               | "palletLabelTemplateId"
+              | "palletSheetTemplateId"
+              | "palletSheetTemplateSnapshot"
             >
           > = {};
+          if (data.palletSheetTemplateId !== undefined) {
+            changes.palletSheetTemplateId = nextSheetId;
+            changes.palletSheetTemplateSnapshot = nextSheetSnapshot;
+          }
           if (data.lineId !== undefined) changes.lineId = data.lineId;
           if (data.plannedQty !== undefined) changes.plannedQty = data.plannedQty;
           if (data.plannedDate !== undefined) changes.plannedDate = data.plannedDate;
@@ -1303,10 +1438,12 @@ export class ShiftsService {
             changes.boxLabelTemplateId = data.boxLabelTemplateId;
           }
           if (
-            data.palletLabelTemplateId !== undefined &&
-            data.palletLabelTemplateId !== current.palletLabelTemplateId
+            (data.palletLabelTemplateId !== undefined &&
+              data.palletLabelTemplateId !== current.palletLabelTemplateId) ||
+            data.palletSheetTemplateId !== undefined
           ) {
-            changes.palletLabelTemplateId = data.palletLabelTemplateId;
+            if (data.palletLabelTemplateId !== undefined)
+              changes.palletLabelTemplateId = data.palletLabelTemplateId;
             // The same admission record a planned shift writes when its pallet
             // configuration changes (see the planned branch below).
             await this.admission.observe({
@@ -1323,7 +1460,16 @@ export class ShiftsService {
                 palletsEnabled: current.palletsEnabled,
                 boxCapacity: current.boxCapacity,
                 palletBoxCapacity: current.palletBoxCapacity,
-                palletLabelTemplateId: data.palletLabelTemplateId,
+                palletLabelTemplateId:
+                  data.palletLabelTemplateId === undefined
+                    ? current.palletLabelTemplateId
+                    : data.palletLabelTemplateId,
+                ...(data.palletSheetTemplateId !== undefined
+                  ? {
+                      palletSheetTemplateId: nextSheetId,
+                      palletSheetDigest: nextSheetSnapshot?.digest ?? null,
+                    }
+                  : {}),
               }),
             });
           }
@@ -1353,6 +1499,16 @@ export class ShiftsService {
               return { kind: "conflict", response: "Shift is no longer active" };
             }
             throw new ConflictException("Shift is no longer active");
+          }
+          if (data.palletSheetTemplateId !== undefined) {
+            await this.writePalletSheetAudit(
+              tx,
+              tenantId,
+              actorUserId,
+              id,
+              this.sheetSnapshotFromStorage(current),
+              nextSheetSnapshot,
+            );
           }
           if (productionDateChange) {
             await this.writeProductionDateAudit(tx, {
@@ -1407,6 +1563,11 @@ export class ShiftsService {
           data.palletBoxCapacity !== undefined ? data.palletBoxCapacity : current.palletBoxCapacity;
         const palletsEnabled =
           data.palletsEnabled !== undefined ? data.palletsEnabled : current.palletsEnabled;
+        if (!palletsEnabled && nextSheetId !== null) {
+          nextSheetId = null;
+          nextSheetSnapshot = null;
+          sheetChanged = true;
+        }
 
         // `createShift` resolves category default -> organisation default ->
         // none at the moment pallets become enabled. Turning them on by PATCH
@@ -1451,7 +1612,7 @@ export class ShiftsService {
         // tenant can clear its own default) and nothing refused it, so
         // pallets went live with no template to print a label from.
         if (palletsEnabled && !current.palletsEnabled) {
-          this.assertPalletTemplateRule(palletsEnabled, palletLabelTemplateId);
+          this.assertPalletTemplateRule(palletsEnabled, palletLabelTemplateId, nextSheetId);
         }
 
         if (
@@ -1459,7 +1620,8 @@ export class ShiftsService {
           (!current.palletsEnabled ||
             palletBoxCapacity !== current.palletBoxCapacity ||
             boxCapacity !== current.boxCapacity ||
-            palletLabelTemplateId !== current.palletLabelTemplateId)
+            palletLabelTemplateId !== current.palletLabelTemplateId ||
+            data.palletSheetTemplateId !== undefined)
         ) {
           await this.admission.observe({
             tenantId,
@@ -1476,6 +1638,12 @@ export class ShiftsService {
               boxCapacity,
               palletBoxCapacity,
               palletLabelTemplateId,
+              ...(data.palletSheetTemplateId !== undefined
+                ? {
+                    palletSheetTemplateId: nextSheetId,
+                    palletSheetDigest: nextSheetSnapshot?.digest ?? null,
+                  }
+                : {}),
             }),
           });
         }
@@ -1489,6 +1657,12 @@ export class ShiftsService {
             ssccIssuerCounterpartyId,
             boxLabelTemplateId,
             palletLabelTemplateId,
+            ...(sheetChanged
+              ? {
+                  palletSheetTemplateId: nextSheetId,
+                  palletSheetTemplateSnapshot: nextSheetSnapshot,
+                }
+              : {}),
             plannedQty,
             plannedDate,
             productionDate,
@@ -1518,6 +1692,16 @@ export class ShiftsService {
             return { kind: "conflict", response: "Shift can only be edited while planned" };
           }
           throw new ConflictException("Shift can only be edited while planned");
+        }
+        if (sheetChanged) {
+          await this.writePalletSheetAudit(
+            tx,
+            tenantId,
+            actorUserId,
+            id,
+            this.sheetSnapshotFromStorage(current),
+            nextSheetSnapshot,
+          );
         }
         if (productionDateChange) {
           await this.writeProductionDateAudit(tx, {
@@ -1682,7 +1866,7 @@ export class ShiftsService {
     await this.db.transaction(async (tx) => {
       await assertDeviceReplacementNewWorkAllowed(tx, tenantId, deviceId, { kind: "shift", id });
       const [device] = await tx
-        .select({ id: schema.stationDevices.id })
+        .select({ id: schema.stationDevices.id, kind: schema.stationDevices.kind })
         .from(schema.stationDevices)
         .where(
           and(
@@ -1702,6 +1886,8 @@ export class ShiftsService {
       if (!shift) throw new NotFoundException();
       const previous = validationPrintFromStorage(shift);
       assertProductLabelCapability(previous, capabilities);
+      assertPalletSheetEntry(shift, { kind: "device", deviceKind: device.kind, capabilities });
+      if (shift.palletSheetTemplateId !== null) this.sheetSnapshotFromStorage(shift);
       if (shift.status === "closed") throw new ConflictException("Closed shifts cannot be entered");
       if (shift.status === "planned") {
         // Same guard as openShift: a device entering a planned shift is what
@@ -1799,11 +1985,23 @@ export class ShiftsService {
     deviceId: string | null,
     capabilities?: string,
   ): Promise<ShiftBundleDto> {
+    const [device] = deviceId
+      ? await this.db
+          .select({ kind: schema.stationDevices.kind })
+          .from(schema.stationDevices)
+          .where(
+            and(
+              eq(schema.stationDevices.tenantId, tenantId),
+              eq(schema.stationDevices.id, deviceId),
+            ),
+          )
+      : [];
     const referenceBundle = await this.getReferenceBundle(
       tenantId,
       id,
       deviceId !== null,
       capabilities,
+      device?.kind,
     );
     const allocation =
       referenceBundle.shift.mode === "aggregation" && deviceId
@@ -1903,9 +2101,19 @@ export class ShiftsService {
     id: string,
     stationCaller = false,
     capabilities?: string,
+    deviceKind?: string,
   ): Promise<ShiftReferenceBundleDto> {
-    const shift = await this.getShift(tenantId, id); // 404 if cross-tenant/missing
-    if (stationCaller) assertProductLabelCapability(shift.validationPrint, capabilities);
+    const { shift, sheetSnapshot } = await this.getShiftWithSheet(tenantId, id);
+    if (stationCaller) {
+      assertProductLabelCapability(shift.validationPrint, capabilities);
+      assertPalletSheetEntry(
+        {
+          palletSheetTemplateId: shift.palletSheetTemplateId ?? null,
+          palletLabelTemplateId: shift.palletLabelTemplateId,
+        },
+        { kind: "device", deviceKind, capabilities },
+      );
+    }
 
     const productRow = await this.findProductRow(tenantId, shift.productId);
     if (!productRow) throw new NotFoundException("Shift product missing");
@@ -2015,6 +2223,7 @@ export class ShiftsService {
       labelTemplate: null,
       boxLabelTemplate,
       palletLabelTemplate,
+      palletSheetTemplate: sheetSnapshot,
       counterpartyGln,
       operators,
       sscc: null,
@@ -2320,7 +2529,9 @@ export class ShiftsService {
   private assertPalletTemplateRule(
     palletsEnabled: boolean,
     palletLabelTemplateId: string | null,
+    palletSheetTemplateId: string | null = null,
   ): void {
+    if (palletsEnabled && palletSheetTemplateId !== null) return;
     const resolution = this.resolvePalletTemplate(palletsEnabled, palletLabelTemplateId);
     if (!resolution.ok) {
       throw new UnprocessableEntityException({
@@ -2525,6 +2736,8 @@ export class ShiftsService {
       ssccIssuerCounterpartyId: schema.shifts.ssccIssuerCounterpartyId,
       boxLabelTemplateId: schema.shifts.boxLabelTemplateId,
       palletLabelTemplateId: schema.shifts.palletLabelTemplateId,
+      palletSheetTemplateId: schema.shifts.palletSheetTemplateId,
+      palletSheetTemplateSnapshot: schema.shifts.palletSheetTemplateSnapshot,
       plannedQty: schema.shifts.plannedQty,
       plannedDate: schema.shifts.plannedDate,
       productionDate: schema.shifts.productionDate,
@@ -2560,8 +2773,11 @@ export class ShiftsService {
       imageHeight,
       stationClosePolicy,
       stationCloseOwnerDeviceId,
+      palletSheetTemplateSnapshot,
       ...shift
     } = row;
+    const sheet = this.sheetSnapshotFromStorage(row);
+    void palletSheetTemplateSnapshot;
     const access =
       stationClosePolicy === "admin_only"
         ? ({ kind: "admin_only" } as const)
@@ -2570,6 +2786,12 @@ export class ShiftsService {
           : undefined;
     return {
       ...shift,
+      ...(row.palletSheetTemplateId !== undefined
+        ? {
+            palletSheetTemplateName: sheet?.name ?? null,
+            palletSheetTemplateRevision: sheet?.revision ?? null,
+          }
+        : {}),
       validationPrint: validationPrintFromStorage({
         allowPreviouslyAcceptedCodes,
         validationPrintMode,
@@ -2594,6 +2816,88 @@ export class ShiftsService {
           }
         : null,
     };
+  }
+
+  private sheetSnapshotFromStorage(row: {
+    palletSheetTemplateId?: string | null;
+    palletSheetTemplateSnapshot?: unknown;
+  }): PalletSheetTemplateSnapshot | null {
+    const snapshot =
+      row.palletSheetTemplateSnapshot == null
+        ? null
+        : parsePalletSheetSnapshot(row.palletSheetTemplateSnapshot);
+    if ((row.palletSheetTemplateId ?? null) !== (snapshot?.id ?? null)) {
+      throw new ConflictException({
+        code: "PALLET_SHEET_SNAPSHOT_INVALID",
+        message: "Selected A4 snapshot is inconsistent",
+      });
+    }
+    return snapshot;
+  }
+
+  async listPalletSheetTemplates(
+    tenantId: string,
+    productId?: string,
+  ): Promise<ShiftPalletSheetTemplatesDto> {
+    const category = await this.productGroupCodeForPicker(tenantId, productId);
+    const defaults = await resolveDefaultPalletSheetTemplate(this.db, tenantId, category);
+    const rows = await this.db
+      .select()
+      .from(schema.labelTemplates)
+      .where(
+        and(
+          eq(schema.labelTemplates.tenantId, tenantId),
+          eq(schema.labelTemplates.format, "pallet_sheet_v2"),
+          eq(schema.labelTemplates.purpose, "pallet"),
+          eq(schema.labelTemplates.enabled, true),
+        ),
+      );
+    return {
+      items: rows
+        .filter((row) => isPalletLabelTemplateEligible(row, category))
+        .map((row) => ({
+          id: row.id,
+          name: row.name,
+          revision: row.revision,
+          format: "pallet_sheet_v2",
+          page: parsePalletSheetSpec(row.spec).page,
+        })),
+      defaultPalletSheetTemplateId: defaults.templateId,
+      defaultSource: defaults.source,
+    };
+  }
+
+  async getPalletSheetPreview(tenantId: string, productId: string, templateId: string) {
+    const category = await this.productGroupCodeForPicker(tenantId, productId);
+    return this.db.transaction((tx) =>
+      snapshotSelectedPalletSheet(tx, tenantId, templateId, category),
+    );
+  }
+
+  private async writePalletSheetAudit(
+    writer: Pick<Db, "insert">,
+    tenantId: string,
+    actorUserId: string,
+    shiftId: string,
+    before: PalletSheetTemplateSnapshot | null,
+    after: unknown,
+  ): Promise<void> {
+    const next = after == null ? null : parsePalletSheetSnapshot(after);
+    const facts = (snapshot: PalletSheetTemplateSnapshot | null) => ({
+      templateId: snapshot?.id ?? null,
+      revision: snapshot?.revision ?? null,
+      digest: snapshot?.digest ?? null,
+    });
+    await writer.insert(schema.tenantAuditEvents).values({
+      organizationId: tenantId,
+      actorUserId,
+      action: "shift.pallet_sheet.changed",
+      outcome: "success",
+      targetType: "shift",
+      targetId: shiftId,
+      before: facts(before),
+      after: facts(next),
+    });
   }
 
   private async writeProductionDateAudit(

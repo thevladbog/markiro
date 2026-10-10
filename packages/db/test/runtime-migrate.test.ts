@@ -71,7 +71,7 @@ const migrationJournal = new URL("../migrations/meta/_journal.json", import.meta
 
 const legacyStationMigrationFixture = String.raw`
 import { randomUUID } from "node:crypto";
-import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -122,34 +122,32 @@ function quoteDatabaseIdentifier(identifier) {
 try {
   await maintenancePool.query("CREATE DATABASE " + quoteDatabaseIdentifier(databaseName));
   databaseCreated = true;
-  await cp(migrationsFolder, legacyMigrationsFolder, { recursive: true });
-  const journalPath = join(legacyMigrationsFolder, "meta", "_journal.json");
-  const journal = JSON.parse(await readFile(journalPath, "utf8"));
-  const scopedOrderMigration = journal.entries.find((entry) => entry.tag.startsWith("0072_"));
-  if (!scopedOrderMigration) {
+  const journal = JSON.parse(
+    await readFile(join(migrationsFolder, "meta", "_journal.json"), "utf8"),
+  );
+  if (!journal.entries.some((entry) => entry.tag.startsWith("0072_"))) {
     throw new Error("Missing forward-only 0072 SSCC allocation-order migration");
   }
-  await rm(join(legacyMigrationsFolder, scopedOrderMigration.tag + ".sql"));
-  await rm(join(legacyMigrationsFolder, "meta", "0072_snapshot.json"));
-  journal.entries = journal.entries.filter((entry) => Number(entry.tag.slice(0, 4)) < 72);
-  await writeFile(journalPath, JSON.stringify(journal));
-
-  await cp(migrationsFolder, stationMigrationsFolder, { recursive: true });
-  for (const tag of ["0029_loving_triathlon", "0071_fantastic_hellion", scopedOrderMigration.tag]) {
-    await rm(join(stationMigrationsFolder, tag + ".sql"));
+  // Drizzle reads only the journal and its SQL files. Copying all snapshots
+  // makes these historical fixtures pay for unrelated future schema growth.
+  async function prepareHistoricalMigrations(folder, beforeIndex) {
+    const entries = journal.entries.filter(
+      (entry) => Number(entry.tag.slice(0, 4)) < beforeIndex,
+    );
+    await mkdir(join(folder, "meta"), { recursive: true });
+    for (const entry of entries) {
+      await copyFile(
+        join(migrationsFolder, entry.tag + ".sql"),
+        join(folder, entry.tag + ".sql"),
+      );
+    }
+    await writeFile(join(folder, "meta", "_journal.json"), JSON.stringify({ ...journal, entries }));
   }
-  for (const index of ["0029", "0071", "0072"]) {
-    await rm(join(stationMigrationsFolder, "meta", index + "_snapshot.json"));
-  }
-  const stationJournalPath = join(stationMigrationsFolder, "meta", "_journal.json");
-  const stationJournal = JSON.parse(await readFile(stationJournalPath, "utf8"));
+  await prepareHistoricalMigrations(legacyMigrationsFolder, 72);
   // A genuine pre-0029 database has a contiguous migration history. Applying
   // later migrations while omitting 0029 makes its journal falsely claim that
   // paired_at/revoked_at exist and prevents runtime from ever adding them.
-  stationJournal.entries = stationJournal.entries.filter(
-    (entry) => Number(entry.tag.slice(0, 4)) < 29,
-  );
-  await writeFile(stationJournalPath, JSON.stringify(stationJournal));
+  await prepareHistoricalMigrations(stationMigrationsFolder, 29);
 
   pool = new pg.Pool({ connectionString: scratchUrl.toString() });
   await migrate(drizzle(pool), { migrationsFolder: legacyMigrationsFolder });

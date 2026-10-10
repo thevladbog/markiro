@@ -12,6 +12,10 @@ import {
 import { and, eq, inArray, isNotNull, isNull, lt, lte, notExists, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 import { isBoxLabelTemplateEligible, isPalletLabelTemplateEligible } from "@markiro/domain";
+import {
+  organizationBrandingDescriptorSchema,
+  type OrganizationBrandingDescriptor,
+} from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import {
   assertKnownProductGroupCodes,
@@ -56,55 +60,70 @@ export class OrgProfileService {
 
   /** Returns the tenant's profile, or the empty defaults if no row exists yet. */
   async getProfile(tenantId: string): Promise<OrgProfileDto> {
-    const [[row], [pickupPolicy], [logo], categoryDefaults, palletCategoryDefaults, groupsInUse] =
-      await Promise.all([
-        this.db.select().from(schema.orgProfiles).where(eq(schema.orgProfiles.tenantId, tenantId)),
-        this.db
-          .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
-          .from(schema.pickupTenantPolicies)
-          .where(eq(schema.pickupTenantPolicies.tenantId, tenantId)),
-        this.db
-          .select({ revision: schema.organizationLogoAssets.id })
-          .from(schema.orgProfiles)
-          .innerJoin(
-            schema.organizationLogoAssets,
-            and(
-              eq(schema.organizationLogoAssets.tenantId, tenantId),
-              eq(schema.organizationLogoAssets.id, schema.orgProfiles.logoAssetId),
-              eq(schema.organizationLogoAssets.status, "active"),
-            ),
-          )
-          .where(eq(schema.orgProfiles.tenantId, tenantId))
-          .limit(1),
-        this.db
-          .select({
-            chzProductGroupCode: schema.orgBoxLabelTemplateDefaults.chzProductGroupCode,
-            templateId: schema.orgBoxLabelTemplateDefaults.templateId,
-          })
-          .from(schema.orgBoxLabelTemplateDefaults)
-          .where(eq(schema.orgBoxLabelTemplateDefaults.tenantId, tenantId))
-          .orderBy(schema.orgBoxLabelTemplateDefaults.chzProductGroupCode),
-        this.db
-          .select({
-            chzProductGroupCode: schema.orgPalletLabelTemplateDefaults.chzProductGroupCode,
-            templateId: schema.orgPalletLabelTemplateDefaults.templateId,
-          })
-          .from(schema.orgPalletLabelTemplateDefaults)
-          .where(eq(schema.orgPalletLabelTemplateDefaults.tenantId, tenantId))
-          .orderBy(schema.orgPalletLabelTemplateDefaults.chzProductGroupCode),
-        this.db
-          .select({ code: schema.products.chzProductGroupCode })
-          .from(schema.products)
-          .where(
-            and(
-              eq(schema.products.tenantId, tenantId),
-              eq(schema.products.archived, false),
-              isNotNull(schema.products.chzProductGroupCode),
-            ),
-          )
-          .groupBy(schema.products.chzProductGroupCode)
-          .orderBy(schema.products.chzProductGroupCode),
-      ]);
+    const [
+      [row],
+      [pickupPolicy],
+      [logo],
+      categoryDefaults,
+      palletCategoryDefaults,
+      sheetCategoryDefaults,
+      groupsInUse,
+    ] = await Promise.all([
+      this.db.select().from(schema.orgProfiles).where(eq(schema.orgProfiles.tenantId, tenantId)),
+      this.db
+        .select({ limitsEnabled: schema.pickupTenantPolicies.limitsEnabled })
+        .from(schema.pickupTenantPolicies)
+        .where(eq(schema.pickupTenantPolicies.tenantId, tenantId)),
+      this.db
+        .select({ revision: schema.organizationLogoAssets.id })
+        .from(schema.orgProfiles)
+        .innerJoin(
+          schema.organizationLogoAssets,
+          and(
+            eq(schema.organizationLogoAssets.tenantId, tenantId),
+            eq(schema.organizationLogoAssets.id, schema.orgProfiles.logoAssetId),
+            eq(schema.organizationLogoAssets.status, "active"),
+          ),
+        )
+        .where(eq(schema.orgProfiles.tenantId, tenantId))
+        .limit(1),
+      this.db
+        .select({
+          chzProductGroupCode: schema.orgBoxLabelTemplateDefaults.chzProductGroupCode,
+          templateId: schema.orgBoxLabelTemplateDefaults.templateId,
+        })
+        .from(schema.orgBoxLabelTemplateDefaults)
+        .where(eq(schema.orgBoxLabelTemplateDefaults.tenantId, tenantId))
+        .orderBy(schema.orgBoxLabelTemplateDefaults.chzProductGroupCode),
+      this.db
+        .select({
+          chzProductGroupCode: schema.orgPalletLabelTemplateDefaults.chzProductGroupCode,
+          templateId: schema.orgPalletLabelTemplateDefaults.templateId,
+        })
+        .from(schema.orgPalletLabelTemplateDefaults)
+        .where(eq(schema.orgPalletLabelTemplateDefaults.tenantId, tenantId))
+        .orderBy(schema.orgPalletLabelTemplateDefaults.chzProductGroupCode),
+      this.db
+        .select({
+          chzProductGroupCode: schema.orgPalletSheetTemplateDefaults.chzProductGroupCode,
+          templateId: schema.orgPalletSheetTemplateDefaults.templateId,
+        })
+        .from(schema.orgPalletSheetTemplateDefaults)
+        .where(eq(schema.orgPalletSheetTemplateDefaults.tenantId, tenantId))
+        .orderBy(schema.orgPalletSheetTemplateDefaults.chzProductGroupCode),
+      this.db
+        .select({ code: schema.products.chzProductGroupCode })
+        .from(schema.products)
+        .where(
+          and(
+            eq(schema.products.tenantId, tenantId),
+            eq(schema.products.archived, false),
+            isNotNull(schema.products.chzProductGroupCode),
+          ),
+        )
+        .groupBy(schema.products.chzProductGroupCode)
+        .orderBy(schema.products.chzProductGroupCode),
+    ]);
     if (!pickupPolicy) {
       throw new InternalServerErrorException("Tenant pickup policy is not configured");
     }
@@ -116,6 +135,8 @@ export class OrgProfileService {
       defaultBoxLabelTemplateId: row?.defaultBoxLabelTemplateId ?? null,
       categoryBoxLabelTemplateDefaults: categoryDefaults,
       defaultPalletLabelTemplateId: row?.defaultPalletLabelTemplateId ?? null,
+      defaultPalletSheetTemplateId: row?.defaultPalletSheetTemplateId ?? null,
+      categoryPalletSheetTemplateDefaults: sheetCategoryDefaults,
       categoryPalletLabelTemplateDefaults: palletCategoryDefaults,
       productGroupsInUse: groupsInUse.flatMap((group) => (group.code === null ? [] : [group.code])),
       pickupLimitsEnabled: pickupPolicy.limitsEnabled,
@@ -145,6 +166,9 @@ export class OrgProfileService {
     }
     if (patch.defaultPalletLabelTemplateId !== undefined) {
       setClause.defaultPalletLabelTemplateId = patch.defaultPalletLabelTemplateId;
+    }
+    if (patch.defaultPalletSheetTemplateId !== undefined) {
+      setClause.defaultPalletSheetTemplateId = patch.defaultPalletSheetTemplateId;
     }
 
     try {
@@ -210,6 +234,7 @@ export class OrgProfileService {
           }
           if (
             template.purpose !== "pallet" ||
+            template.format !== "label_v1" ||
             !template.enabled ||
             template.chzProductGroupCodes !== null
           ) {
@@ -232,7 +257,11 @@ export class OrgProfileService {
               item.templateId,
               "share",
             );
-            if (!template || !isPalletLabelTemplateEligible(template, item.chzProductGroupCode)) {
+            if (
+              !template ||
+              template.format !== "label_v1" ||
+              !isPalletLabelTemplateEligible(template, item.chzProductGroupCode)
+            ) {
               throw new BadRequestException({
                 code: "PALLET_LABEL_TEMPLATE_NOT_ELIGIBLE",
                 message: "The category default must be an enabled template covering that category",
@@ -242,7 +271,74 @@ export class OrgProfileService {
             }
           }
         }
+        if (patch.defaultPalletSheetTemplateId) {
+          const template = await findLabelTemplateEligibility(
+            tx,
+            tenantId,
+            patch.defaultPalletSheetTemplateId,
+            "share",
+          );
+          if (!template) {
+            throw new BadRequestException("Unknown pallet label template for this organization");
+          }
+          if (
+            template.purpose !== "pallet" ||
+            template.format !== "pallet_sheet_v2" ||
+            !template.enabled ||
+            template.chzProductGroupCodes !== null
+          ) {
+            throw new BadRequestException({
+              code: "PALLET_SHEET_TEMPLATE_NOT_ELIGIBLE",
+              message: "The organisation default must be an enabled template for all categories",
+              field: "defaultPalletSheetTemplateId",
+            });
+          }
+        }
+        if (patch.categoryPalletSheetTemplateDefaults !== undefined) {
+          await assertKnownProductGroupCodes(
+            tx,
+            patch.categoryPalletSheetTemplateDefaults.map((item) => item.chzProductGroupCode),
+          );
+          for (const item of patch.categoryPalletSheetTemplateDefaults) {
+            const template = await findLabelTemplateEligibility(
+              tx,
+              tenantId,
+              item.templateId,
+              "share",
+            );
+            if (
+              !template ||
+              template.format !== "pallet_sheet_v2" ||
+              !isPalletLabelTemplateEligible(template, item.chzProductGroupCode)
+            ) {
+              throw new BadRequestException({
+                code: "PALLET_SHEET_TEMPLATE_NOT_ELIGIBLE",
+                message: "The category default must be an enabled template covering that category",
+                field: "categoryPalletSheetTemplateDefaults",
+                chzProductGroupCode: item.chzProductGroupCode,
+              });
+            }
+          }
+        }
 
+        if (patch.defaultPalletSheetTemplateId !== undefined) {
+          const [profileBefore] = await tx
+            .select({ id: schema.orgProfiles.defaultPalletSheetTemplateId })
+            .from(schema.orgProfiles)
+            .where(eq(schema.orgProfiles.tenantId, tenantId))
+            .for("update");
+          if ((profileBefore?.id ?? null) !== patch.defaultPalletSheetTemplateId)
+            await tx.insert(schema.tenantAuditEvents).values({
+              organizationId: tenantId,
+              actorUserId,
+              action: "tenant.pallet_sheet_template_default.updated",
+              outcome: "success",
+              targetType: "tenant",
+              targetId: tenantId,
+              before: { templateId: profileBefore?.id ?? null },
+              after: { templateId: patch.defaultPalletSheetTemplateId },
+            });
+        }
         await tx
           .insert(schema.orgProfiles)
           .values({
@@ -256,6 +352,9 @@ export class OrgProfileService {
               : {}),
             ...(patch.defaultPalletLabelTemplateId !== undefined
               ? { defaultPalletLabelTemplateId: patch.defaultPalletLabelTemplateId }
+              : {}),
+            ...(patch.defaultPalletSheetTemplateId !== undefined
+              ? { defaultPalletSheetTemplateId: patch.defaultPalletSheetTemplateId }
               : {}),
           })
           .onConflictDoUpdate({
@@ -337,6 +436,43 @@ export class OrgProfileService {
             });
           }
         }
+        if (patch.categoryPalletSheetTemplateDefaults !== undefined) {
+          const before: CategoryPalletLabelTemplateDefaultDto[] = await tx
+            .select({
+              chzProductGroupCode: schema.orgPalletSheetTemplateDefaults.chzProductGroupCode,
+              templateId: schema.orgPalletSheetTemplateDefaults.templateId,
+            })
+            .from(schema.orgPalletSheetTemplateDefaults)
+            .where(eq(schema.orgPalletSheetTemplateDefaults.tenantId, tenantId))
+            .orderBy(schema.orgPalletSheetTemplateDefaults.chzProductGroupCode);
+          const after: CategoryPalletLabelTemplateDefaultDto[] =
+            patch.categoryPalletSheetTemplateDefaults
+              .map((item) => ({
+                chzProductGroupCode: item.chzProductGroupCode,
+                templateId: item.templateId,
+              }))
+              .sort((a, b) => a.chzProductGroupCode - b.chzProductGroupCode);
+          await tx
+            .delete(schema.orgPalletSheetTemplateDefaults)
+            .where(eq(schema.orgPalletSheetTemplateDefaults.tenantId, tenantId));
+          if (after.length > 0) {
+            await tx
+              .insert(schema.orgPalletSheetTemplateDefaults)
+              .values(after.map((item) => ({ tenantId, ...item })));
+          }
+          if (JSON.stringify(before) !== JSON.stringify(after)) {
+            await tx.insert(schema.tenantAuditEvents).values({
+              organizationId: tenantId,
+              actorUserId,
+              action: "tenant.pallet_sheet_template_defaults.updated",
+              outcome: "success",
+              targetType: "tenant",
+              targetId: tenantId,
+              before: { defaults: before },
+              after: { defaults: after },
+            });
+          }
+        }
 
         if (patch.pickupLimitsEnabled !== undefined) {
           const [policy] = await tx
@@ -370,6 +506,8 @@ export class OrgProfileService {
       if (isDefaultLabelTemplateForeignKey(error, "org_profiles_pallet_label_template_tenant_fk")) {
         throw new BadRequestException("Unknown pallet label template for this organization");
       }
+      if (isDefaultLabelTemplateForeignKey(error, "org_profiles_pallet_sheet_template_tenant_fk"))
+        throw new BadRequestException("Unknown pallet sheet template for this organization");
       throw error;
     }
 
@@ -502,6 +640,62 @@ export class OrgProfileService {
       await this.writeLogoAudit(tx, tenantId, actorUserId, previousAssetId, null);
     });
     if (previousAssetId) await this.tryDeleteLogoAsset(tenantId, previousAssetId);
+  }
+
+  async getStationBranding(tenantId: string): Promise<OrganizationBrandingDescriptor> {
+    const [row] = await this.db
+      .select({
+        organizationName: schema.organization.name,
+        logoAssetId: schema.orgProfiles.logoAssetId,
+        revision: schema.organizationLogoAssets.id,
+        checksum: schema.organizationLogoAssets.checksum,
+        contentType: schema.organizationLogoAssets.contentType,
+        byteSize: schema.organizationLogoAssets.byteSize,
+        width: schema.organizationLogoAssets.width,
+        height: schema.organizationLogoAssets.height,
+      })
+      .from(schema.organization)
+      .leftJoin(schema.orgProfiles, eq(schema.orgProfiles.tenantId, schema.organization.id))
+      .leftJoin(
+        schema.organizationLogoAssets,
+        and(
+          eq(schema.organizationLogoAssets.tenantId, schema.organization.id),
+          eq(schema.organizationLogoAssets.id, schema.orgProfiles.logoAssetId),
+          eq(schema.organizationLogoAssets.status, "active"),
+        ),
+      )
+      .where(eq(schema.organization.id, tenantId))
+      .limit(1);
+    if (!row) throw new NotFoundException("Organization not found");
+    if (row.logoAssetId && !row.revision)
+      throw new ServiceUnavailableException("Configured logo is unavailable");
+    const parsed = organizationBrandingDescriptorSchema.safeParse({
+      organizationName: row.organizationName,
+      logoRevision: row.revision,
+      logoUrl: row.revision ? `/station/branding/logo/${row.revision}` : null,
+      logo: row.revision
+        ? {
+            contentType: row.contentType,
+            checksum: row.checksum,
+            byteSize: row.byteSize,
+            width: row.width,
+            height: row.height,
+          }
+        : null,
+    });
+    if (!parsed.success)
+      throw new ServiceUnavailableException("Organization branding is incomplete");
+    return parsed.data;
+  }
+
+  async getCabinetPrintBranding(tenantId: string): Promise<OrganizationBrandingDescriptor> {
+    const branding = await this.getStationBranding(tenantId);
+    return {
+      ...branding,
+      logoUrl: branding.logoRevision
+        ? `/org/profile/print-branding/logo/${branding.logoRevision}`
+        : null,
+    };
   }
 
   async getKioskBranding(tenantId: string): Promise<KioskBrandingDto> {

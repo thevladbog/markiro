@@ -118,7 +118,7 @@ export function ShiftsPage() {
   const productsQuery = useProducts({ archived: "all" });
   const linesQuery = useLines();
   const counterpartiesQuery = useCounterparties();
-  const labelTemplatesQuery = useLabelTemplates();
+  const labelTemplatesQuery = useLabelTemplates({ includeSheets: true });
 
   const items = shiftsQuery.data ?? [];
   const products = useMemo(() => productsQuery.data ?? [], [productsQuery.data]);

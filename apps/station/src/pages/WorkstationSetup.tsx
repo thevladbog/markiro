@@ -25,7 +25,7 @@ import {
 } from "../lib/hardware-config.js";
 import { renderPrintArtifact } from "../lib/print-artifact.js";
 import { dispatchWindowsDelivery, resolvePrintDelivery } from "../lib/print-deliveries.js";
-import { tauriWindowsPrinting } from "../lib/hardware.js";
+import { tauriWindowsPrinting, probeWindowsA4Printing } from "../lib/hardware.js";
 import { LabelRasterPreview } from "../ui/LabelRasterPreview.js";
 import { rasterizeText, rasterizeDriverText } from "../lib/rasterizer.js";
 import type { SqlExecutor } from "../lib/mirror.js";
@@ -134,8 +134,11 @@ export function WorkstationSetup({
   const [printerLanguage, setPrinterLanguage] = useState<PrinterLanguage>("zpl");
   const [printMode, setPrintMode] = useState<"raw" | "windows_driver">("raw");
   const [windowsSupported, setWindowsSupported] = useState(false);
+  const [a4Supported, setA4Supported] = useState(false);
+  const [printerPaper, setPrinterPaper] = useState<"a4" | undefined>();
   const [rasterPreview, setRasterPreview] = useState<Uint8Array | null>(null);
   useEffect(() => {
+    void probeWindowsA4Printing().then(setA4Supported);
     void tauriWindowsPrinting
       .supportsWindowsPrinting()
       .then(setWindowsSupported)
@@ -305,6 +308,7 @@ export function WorkstationSetup({
     setUsbPrinter(printer?.target.kind === "usb" ? printer.target.printer : "");
     setPrinterLanguage(printer?.language ?? "zpl");
     setPrintMode(printer ? printerMode(printer) : "raw");
+    setPrinterPaper(printer?.paper);
     setRasterPreview(null);
     setPrinterDpi(printer?.dpi ?? null);
     setPrintedTestCode(null);
@@ -357,6 +361,7 @@ export function WorkstationSetup({
       target,
       language: printerLanguage,
       dpi: printerDpi,
+      ...(printMode === "windows_driver" && printerPaper === "a4" ? { paper: "a4", dpi: 300 } : {}),
       ...(printMode === "windows_driver" ? { mode: printMode } : {}),
     });
     return printer ? { ok: true, printer } : { ok: false, error: t("setup.printerFieldRequired") };
@@ -371,7 +376,11 @@ export function WorkstationSetup({
         : [...routing.printers, printer],
       assignments:
         routing.printers.length === 0
-          ? { box: printer.id, duplicate: printer.id, pallet: printer.id }
+          ? {
+              box: printer.paper === "a4" ? null : printer.id,
+              duplicate: printer.paper === "a4" ? null : printer.id,
+              pallet: printer.id,
+            }
           : routing.assignments,
     };
   }
@@ -441,6 +450,17 @@ export function WorkstationSetup({
     setTestResult(null);
     try {
       if (!result.printer) throw new Error(t("setup.failed"));
+      if (result.printer.paper === "a4") {
+        if (result.printer.target.kind !== "usb" || !tauriWindowsPrinting.getWindowsPageGeometry)
+          throw new Error(t("palletSheet.unsupported"));
+        for (const orientation of ["portrait", "landscape"] as const)
+          await tauriWindowsPrinting.getWindowsPageGeometry(result.printer.target.printer, {
+            mode: "a4_sheet",
+            orientation,
+          });
+        setTestResult({ tab: "printer", text: t("palletSheet.geometryChecked") });
+        return;
+      }
       // A fresh code per print: scanning yesterday's test label must fail the
       // check, because the check certifies THIS print run, not the printer's
       // biography. The barcode makes the check end-to-end — transport,
@@ -645,6 +665,12 @@ export function WorkstationSetup({
               usbPrinter={usbPrinter}
               mode={printMode}
               windowsSupported={windowsSupported}
+              a4Supported={a4Supported}
+              paper={printerPaper}
+              onPaperChange={(paper) => {
+                setPrinterPaper(paper);
+                if (paper === "a4") setPrinterDpi(300);
+              }}
               onModeChange={setPrintMode}
               language={printerLanguage}
               printerDpi={printerDpi}

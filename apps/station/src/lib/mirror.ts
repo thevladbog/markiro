@@ -1,5 +1,10 @@
 import { stationRecoveryResponseSchema } from "@markiro/platform-contracts";
-import type { ValidationPrintPolicy } from "@markiro/domain";
+import {
+  parsePalletSheetSnapshot,
+  DomainError,
+  type ValidationPrintPolicy,
+  type PalletSheetTemplateSnapshot,
+} from "@markiro/domain";
 import {
   parseMirroredProductLabelContext,
   productLabelContextForBundle,
@@ -38,6 +43,7 @@ export interface StationBundle {
     ssccIssuerCounterpartyId?: string | null;
     boxLabelTemplateId?: string | null;
     palletLabelTemplateId?: string | null;
+    palletSheetTemplateId?: string | null;
     createdFrom?: "admin" | "station";
     stationCloseAccess?: { kind: "admin_only" } | { kind: "single_device"; ownerDeviceId: string };
     /** Rolling compatibility: current servers send null; older bundles may still carry an id. */
@@ -94,6 +100,7 @@ export interface StationBundle {
    * no pallet template.
    */
   palletLabelTemplate?: { id: string; name: string; spec: unknown } | null;
+  palletSheetTemplate?: PalletSheetTemplateSnapshot | null;
   counterpartyGln: string | null;
   operators: OperatorMirrorRecord[];
   /**
@@ -182,6 +189,7 @@ export interface ShiftMirrorRow {
    * template -- never a fallback to either of the others.
    */
   palletLabelTemplateSpec: string | null;
+  palletSheetTemplate?: PalletSheetTemplateSnapshot | null;
   /**
    * How many BOXES fill a pallet (`shift_mirror.pallet_box_capacity`), the
    * single signal `closeCurrentBox` uses to decide whether a closed box joins
@@ -364,6 +372,18 @@ async function upsertBundleBody(
 ): Promise<void> {
   const s = bundle.shift;
   const p = bundle.product;
+  const sheet =
+    bundle.palletSheetTemplate == null
+      ? null
+      : parsePalletSheetSnapshot(bundle.palletSheetTemplate);
+  if (
+    bundle.palletSheetTemplate !== undefined &&
+    (s.palletSheetTemplateId !== (sheet?.id ?? null) || (sheet !== null && !s.palletsEnabled))
+  )
+    throw new DomainError(
+      "LABEL_SHEET_SNAPSHOT",
+      "Sheet snapshot does not match the shift selection",
+    );
   const printContext = productLabelContextForBundle(bundle);
   const executionTemplates = [
     bundle.labelTemplate,
@@ -403,6 +423,9 @@ async function upsertBundleBody(
             labelTemplateId: s.labelTemplateId,
             boxLabelTemplateId: s.boxLabelTemplateId,
             palletLabelTemplateId: s.palletLabelTemplateId,
+            ...(sheet
+              ? { palletSheetTemplateId: sheet.id, palletSheetTemplateSnapshot: sheet }
+              : {}),
             validationPrintMode: s.validationPrint.mode,
             allowPreviouslyAcceptedCodes:
               s.validationPrint.mode === "duplicate_dm"
@@ -434,9 +457,28 @@ async function upsertBundleBody(
           },
           templates: executionTemplates,
         };
+  if (
+    sheet &&
+    (executionScope === null ||
+      s.productionDate === undefined ||
+      p.printName === undefined ||
+      p.egaisCode === undefined ||
+      p.shelfLifeDays === undefined)
+  )
+    throw new DomainError("LABEL_SHEET_SNAPSHOT", "Sheet bundle lacks complete execution facts");
+  const executionScopeUpdate = `CASE
+    WHEN shift_mirror.pallet_sheet_template_snapshot IS NOT NULL AND
+      (${bundle.palletSheetTemplate === undefined ? "1" : "0"} OR shift_mirror.status='closed' OR EXISTS (SELECT 1 FROM shift_close_outbox WHERE shift_id=excluded.id))
+    THEN shift_mirror.execution_scope_json ELSE excluded.execution_scope_json END`;
   // A pre-upgrade server omits `number` entirely; that absence must not
   // erase a number an upgraded server already mirrored (server rollback
   // mid-fleet). An explicit `null` from the server still applies.
+  const sheetUpdate =
+    bundle.palletSheetTemplate === undefined
+      ? ""
+      : `,
+    pallet_sheet_template_id=CASE WHEN shift_mirror.status='closed' OR EXISTS (SELECT 1 FROM shift_close_outbox WHERE shift_id=excluded.id) THEN shift_mirror.pallet_sheet_template_id ELSE excluded.pallet_sheet_template_id END,
+    pallet_sheet_template_snapshot=CASE WHEN shift_mirror.status='closed' OR EXISTS (SELECT 1 FROM shift_close_outbox WHERE shift_id=excluded.id) THEN shift_mirror.pallet_sheet_template_snapshot ELSE excluded.pallet_sheet_template_snapshot END`;
   const numberUpdate = s.number === undefined ? "" : ", number=excluded.number";
   const productionDateUpdate =
     s.productionDate === undefined
@@ -455,8 +497,8 @@ async function upsertBundleBody(
        label_template_id, label_template_name, label_template_spec,
        planned_qty, planned_date, production_date, box_capacity, pallet_box_capacity, pallets_enabled,
        opened_at, issuer_prefix, box_label_template_spec, pallet_label_template_spec,
-       number, validation_print_context, execution_scope_json
-     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+       number, validation_print_context, execution_scope_json, pallet_sheet_template_id, pallet_sheet_template_snapshot
+     ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET
        status=CASE
          WHEN shift_mirror.status='closed' OR EXISTS (
@@ -466,7 +508,7 @@ async function upsertBundleBody(
        END,
        mode=excluded.mode, product_id=excluded.product_id,
        validation_print_context=excluded.validation_print_context,
-       execution_scope_json=excluded.execution_scope_json,
+       execution_scope_json=${executionScopeUpdate}${sheetUpdate},
        product_name=excluded.product_name,
        line_id=excluded.line_id, line_name=excluded.line_name,
        counterparty_id=excluded.counterparty_id, counterparty_name=excluded.counterparty_name,
@@ -518,6 +560,8 @@ async function upsertBundleBody(
       s.number ?? null,
       printContext === null ? null : JSON.stringify(printContext),
       executionScope === null ? null : JSON.stringify(executionScope),
+      sheet?.id ?? null,
+      sheet === null ? null : JSON.stringify(sheet),
     ],
   );
 
@@ -815,11 +859,13 @@ export async function readShiftMirror(
     issuer_prefix: string | null;
     box_label_template_spec: string | null;
     pallet_label_template_spec: string | null;
+    pallet_sheet_template_id: string | null;
+    pallet_sheet_template_snapshot: string | null;
     validation_print_context: string | null;
   }>(
     `SELECT id, status, mode, counterparty_gln, label_template_spec, box_capacity,
             pallet_box_capacity, issuer_prefix,
-            box_label_template_spec, pallet_label_template_spec, validation_print_context
+            box_label_template_spec, pallet_label_template_spec, pallet_sheet_template_id, pallet_sheet_template_snapshot, validation_print_context
      FROM shift_mirror WHERE id = ?`,
     [id],
   );
@@ -837,6 +883,9 @@ export async function readShiftMirror(
     issuerPrefix: r.issuer_prefix ?? null,
     boxLabelTemplateSpec: r.box_label_template_spec ?? null,
     palletLabelTemplateSpec: r.pallet_label_template_spec ?? null,
+    palletSheetTemplate: r.pallet_sheet_template_snapshot
+      ? parsePalletSheetSnapshot(JSON.parse(r.pallet_sheet_template_snapshot))
+      : null,
   };
 }
 

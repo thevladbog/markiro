@@ -14,8 +14,16 @@
  * simply skipped there -- this component renders a normal (empty) canvas
  * element instead of throwing.
  */
+import { isPalletSheetSpec } from "@markiro/domain";
 import { useEffect, useRef } from "react";
 
+import { rasterizeText } from "../../labels/rasterizer.js";
+import {
+  renderSheetPreview,
+  previewSheetContext,
+  paintSheetRaster,
+} from "./editor/sheet/sheet-preview.js";
+import { loadCabinetSheetBranding } from "./editor/sheet/sheet-branding.js";
 import { labelPreviewData, labelRenderOptions } from "./preview-data.js";
 
 import { draw } from "./renderer.js";
@@ -53,8 +61,35 @@ export function TemplateThumb({ id, widthMm, heightMm }: TemplateThumbProps) {
     if (!canvas || !data) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    if (isPalletSheetSpec(data.spec)) {
+      let cancelled = false;
+      const spec = data.spec;
+      void loadCabinetSheetBranding()
+        .then((branding) =>
+          renderSheetPreview(
+            spec,
+            {
+              ...previewSheetContext(
+                { date: true, egais: true, longName: false, maximumCounts: false },
+                branding.logo,
+              ),
+              organizationName: branding.organizationName,
+            },
+            rasterizeText,
+          ),
+        )
+        .then((raster) => {
+          if (!cancelled) paintSheetRaster(canvas, raster);
+        })
+        .catch(() => {
+          if (!cancelled) ctx.clearRect(0, 0, canvas.width, canvas.height);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
     draw(data.spec, ctx, scale, labelPreviewData(data.purpose), labelRenderOptions(data.purpose));
-  });
+  }, [data, scale]);
 
   return (
     <div

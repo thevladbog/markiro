@@ -254,7 +254,9 @@ function ImportErrorBlock({ error }: { error: ImportAnalysisError }) {
     <div className="label-editor__import-error" role="alert">
       {error.kind === "elementTooLarge"
         ? t("pages.labels.editor.import.elementTooLarge")
-        : error.message}
+        : error.kind === "sheetEditor"
+          ? t("pages.labels.sheet.useSheetEditor")
+          : error.message}
     </div>
   );
 }

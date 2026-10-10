@@ -20,6 +20,7 @@ export async function renderPrintArtifact(
   rasterizeText: RasterizeTextFn,
   options: { kmDataMatrix?: "native" | "raster" } = {},
 ): Promise<PrintArtifact> {
+  if (profile.paper === "a4") throw new Error("A4 requires a pallet sheet template");
   if (printerMode(profile) === "windows_driver") {
     if (profile.target.kind !== "usb" || !profile.dpi)
       throw new Error("Windows printer and DPI required");

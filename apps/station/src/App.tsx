@@ -69,6 +69,7 @@ import {
   createHardwareScanSource,
   tauriHardware,
   tauriWarehousePrint,
+  probeWindowsA4Printing,
   type ScannerStatus,
   type PrintTarget,
 } from "./lib/hardware.js";
@@ -262,6 +263,16 @@ export function scannerIndicator(
 }
 
 export function App() {
+  const [palletSheetSupported, setPalletSheetSupported] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void probeWindowsA4Printing().then((supported) => {
+      if (active) setPalletSheetSupported(supported);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
   const { t } = useTranslation();
   const [config, setConfig] = useState<StationConfig | null>(null);
   const [deviceRecovery, setDeviceRecovery] = useState<DeviceRecoveryView | null>(null);
@@ -921,6 +932,7 @@ export function App() {
       return null;
     }
     return createStationClient(config, {
+      palletSheetSupported,
       onReachabilityChange: (state) => {
         // A request from a replaced credential/client may settle after the
         // new session has already proved its own reachability. Only the
@@ -947,8 +959,21 @@ export function App() {
     onCredentialRejected,
     reportServerReachability,
     verifiedClient,
+    palletSheetSupported,
   ]);
   const authenticatedClient = credentialRecovery ? null : credentialBoundClient;
+  const sheetBrandingOwner = useMemo(
+    () =>
+      config?.tenantId && credentialGeneration
+        ? {
+            exec: tauriExecutor,
+            tenantId: config.tenantId,
+            generation: credentialGeneration,
+            isCurrent: () => !credentialGeneration.sealed,
+          }
+        : undefined,
+    [config?.tenantId, credentialGeneration],
+  );
   const [replacementAuthorityEpoch, setReplacementAuthorityEpoch] = useState(0);
   const replacement = useDeviceReplacement({
     exec: tauriExecutor,
@@ -1035,6 +1060,7 @@ export function App() {
     exec: tauriExecutor,
     client: authenticatedClient,
     machineId: config?.machineId,
+    ...(config?.tenantId ? { brandingTenantId: config.tenantId } : {}),
     ...(credentialGeneration ? { credentialGeneration } : {}),
     onCredentialRejected,
   });
@@ -2130,6 +2156,7 @@ export function App() {
             </FullScreenDialog>
           ) : shiftContext && shift ? (
             <WorkScreen
+              {...(config?.tenantId ? { tenantId: config.tenantId } : {})}
               exec={tauriExecutor}
               offlineGrantNotice={offlineGrantNotice}
               {...(floorGeneration ? { credentialGeneration: floorGeneration } : {})}
@@ -2460,6 +2487,7 @@ export function App() {
         />
       ) : (
         <NewShift
+          {...(sheetBrandingOwner ? { sheetBrandingOwner } : {})}
           client={activeClient}
           hardwareConfig={hardwareConfig}
           onSetup={(draft) => {

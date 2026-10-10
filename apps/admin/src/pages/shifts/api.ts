@@ -10,6 +10,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 import {
   productLabelTemplateListSchema,
+  parsePalletSheetSnapshot,
+  type PalletSheetTemplateSnapshot,
   type ProductLabelTemplateList,
   type ValidationPrintInput,
   type ValidationPrintPolicy,
@@ -23,6 +25,43 @@ export type ShiftStatus = "planned" | "active" | "closed";
 
 /** Server-computed only (never client-submitted); "admin" for shifts created here. */
 export type ShiftOrigin = "admin" | "station";
+const sheetHeaders = { "x-label-template-formats": "label-v1,pallet-sheet-v2" };
+
+export async function fetchSavedShiftSheet(
+  shiftId: string,
+  templateId: string,
+  revision: number,
+): Promise<PalletSheetTemplateSnapshot> {
+  const bundle = await apiFetch<{ shift: { id: string }; palletSheetTemplate: unknown }>(
+    `/shifts/${shiftId}/reference-bundle`,
+    { headers: sheetHeaders },
+  );
+  const snapshot = parsePalletSheetSnapshot(bundle.palletSheetTemplate);
+  if (bundle.shift.id !== shiftId || snapshot.id !== templateId || snapshot.revision !== revision)
+    throw new Error("Saved pallet sheet changed; refresh the shift");
+  return snapshot;
+}
+
+export function useSavedShiftSheet(shift: ShiftDto, enabled: boolean) {
+  return useQuery({
+    queryKey: [
+      "shift-pallet-sheet",
+      shift.id,
+      shift.palletSheetTemplateId,
+      shift.palletSheetTemplateRevision,
+    ],
+    enabled: enabled && Boolean(shift.palletSheetTemplateId && shift.palletSheetTemplateRevision),
+    queryFn: () => {
+      if (!shift.palletSheetTemplateId || !shift.palletSheetTemplateRevision)
+        throw new Error("No saved pallet sheet");
+      return fetchSavedShiftSheet(
+        shift.id,
+        shift.palletSheetTemplateId,
+        shift.palletSheetTemplateRevision,
+      );
+    },
+  });
+}
 
 /** Mirrors `apps/api/src/modules/shifts/dto.ts`'s `ShiftDto` (joined with product/line/counterparty names). */
 export interface ShiftDto {
@@ -43,6 +82,9 @@ export interface ShiftDto {
   boxLabelTemplateId: string | null;
   /** Resolved at plan time from the category/organisation pallet default; null while pallets are off. */
   palletLabelTemplateId: string | null;
+  palletSheetTemplateId?: string | null;
+  palletSheetTemplateName?: string | null;
+  palletSheetTemplateRevision?: number | null;
   plannedQty: number | null;
   plannedDate: string | null;
   productionDate: string | null;
@@ -79,6 +121,7 @@ export interface CreateShiftInput {
    * must name a `purpose: "pallet"` template or the server 400s.
    */
   palletLabelTemplateId?: string | null;
+  palletSheetTemplateId?: string | null;
   plannedQty?: number | null;
   plannedDate?: string | null;
   productionDate?: string | null;
@@ -113,6 +156,9 @@ interface ListShiftsResponse {
 }
 
 export interface ShiftPlanningConfigDto {
+  palletSheetProtocol?: "pallet-sheet-v2";
+  defaultPalletSheetTemplateId?: string | null;
+  palletSheetDefaultSource?: "category" | "organization" | null;
   validationPrintProtocol: "validation-dm-duplicate-v1" | null;
   validationReprocessingProtocol?: "validation-reprocessing-v1" | null;
   defaultBoxLabelTemplateId: string | null;
@@ -161,17 +207,20 @@ function buildListPath(params: ListShiftsParams): string {
 }
 
 async function fetchShifts(params: ListShiftsParams): Promise<ShiftDto[]> {
-  const response = await apiFetch<ListShiftsResponse>(buildListPath(params));
+  const response = await apiFetch<ListShiftsResponse>(buildListPath(params), {
+    headers: sheetHeaders,
+  });
   return response.items;
 }
 
 function fetchShift(id: string): Promise<ShiftDto> {
-  return apiFetch<ShiftDto>(`/shifts/${id}`);
+  return apiFetch<ShiftDto>(`/shifts/${id}`, { headers: sheetHeaders });
 }
 
 function fetchShiftPlanningConfig(productId: string): Promise<ShiftPlanningConfigDto> {
   return apiFetch<ShiftPlanningConfigDto>(
     `/shifts/planning-config?productId=${encodeURIComponent(productId)}`,
+    { headers: sheetHeaders },
   );
 }
 
@@ -181,6 +230,7 @@ function fetchShiftSummary(id: string): Promise<ShiftSummaryDto> {
 
 function postShift(input: CreateShiftInput): Promise<ShiftDto> {
   return apiFetch<ShiftDto>("/shifts", {
+    headers: sheetHeaders,
     method: "POST",
     body: JSON.stringify(input),
   });
@@ -188,6 +238,7 @@ function postShift(input: CreateShiftInput): Promise<ShiftDto> {
 
 function patchShift(id: string, input: UpdateShiftInput): Promise<ShiftDto> {
   return apiFetch<ShiftDto>(`/shifts/${id}`, {
+    headers: sheetHeaders,
     method: "PATCH",
     body: JSON.stringify(input),
   });
