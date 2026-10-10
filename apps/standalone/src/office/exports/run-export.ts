@@ -52,7 +52,18 @@ export type ExportResult =
       openPalletSuppressedBoxCount: number;
       disassembledPalletCount: number;
     }
-  | { ok: false; failure: ExportFailure };
+  | { ok: false; failure: Exclude<ExportFailure, "GENERATION_FAILED"> }
+  | {
+      ok: false;
+      failure: "GENERATION_FAILED";
+      /**
+       * What broke, for the dialog to show and for a report of it: the domain's code
+       * when the domain refused with one the cloud does not record, otherwise the
+       * kind of the error (`RangeError`). Never the error's message: a message may
+       * hold a code or a line of the label's layout.
+       */
+      reason: string;
+    };
 
 /** The domain's codes the cloud's runner records as they are (`safeDomainErrorCode`). */
 const SAFE_DOMAIN_CODES = new Set<string>([
@@ -67,7 +78,7 @@ const SAFE_DOMAIN_CODES = new Set<string>([
   "INVALID_ORG_INN",
 ]);
 
-function isFailure(code: string): code is ExportFailure {
+function isFailure(code: string): code is Exclude<ExportFailure, "GENERATION_FAILED"> {
   return SAFE_DOMAIN_CODES.has(code);
 }
 
@@ -87,8 +98,14 @@ export function runExport(rows: ShiftExportRows, run: ExportRun): ExportResult {
     if (error instanceof ShiftExportDomainError && isFailure(error.code)) {
       return { ok: false, failure: error.code };
     }
-    return { ok: false, failure: "GENERATION_FAILED" };
+    return { ok: false, failure: "GENERATION_FAILED", reason: failureReason(error) };
   }
+}
+
+/** The domain's code, or the kind of any other error: what the dialog may say without a secret. */
+export function failureReason(error: unknown): string {
+  if (error instanceof ShiftExportDomainError) return error.code;
+  return error instanceof Error && error.name !== "" ? error.name : "Error";
 }
 
 function renderForShift(rows: ShiftExportRows, run: ExportRun): ExportResult {

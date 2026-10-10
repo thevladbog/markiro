@@ -1,6 +1,6 @@
 import { isShiftCloseReasonCode } from "@markiro/domain";
 import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useId, useState } from "react";
+import { lazy, Suspense, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -44,6 +44,14 @@ import { ShiftPlanDialog } from "./ShiftPlanDialog.js";
 import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
 import { datePickerTexts } from "./shift-text.js";
 
+/**
+ * The export dialog comes with the domain's renderers, the source rules and the
+ * check of every format: a chunk of its own, read when «Выгрузка» is first pressed.
+ */
+const ExportDialog = lazy(() =>
+  import("../exports/ExportDialog.js").then((module) => ({ default: module.ExportDialog })),
+);
+
 /** A status in its phase, after the cloud's `SHIFT_STATUS_TO_PHASE`. */
 const STATUS_PHASE = {
   planned: "planned",
@@ -68,7 +76,8 @@ type ShiftsDialog =
   | { kind: "plan"; shift: OfficeShift }
   | { kind: "delete"; shift: OfficeShift }
   | { kind: "close"; shift: OfficeShift }
-  | { kind: "totals"; shift: OfficeShift };
+  | { kind: "totals"; shift: OfficeShift }
+  | { kind: "export"; shift: OfficeShift };
 
 /**
  * Shifts (stage 2a spec §5.6), in the section «Производство». The host sends
@@ -320,6 +329,17 @@ export function ShiftsPage() {
               </Button>
             </>
           )}
+          {/* Every role exports (the cloud's `OPERATIONS_READ`, plan ЧЗ); a shift to come has nothing yet. */}
+          {shift.status !== "planned" && (
+            <Button
+              variant="secondary"
+              size="compact"
+              aria-label={t("office.shifts.exportNamed", { number: shift.number })}
+              onClick={() => open({ kind: "export", shift })}
+            >
+              {t("office.shifts.export")}
+            </Button>
+          )}
         </RowActions>
       ),
     },
@@ -515,6 +535,11 @@ export function ShiftsPage() {
       )}
       {dialog?.kind === "totals" && (
         <ShiftTotalsDialog shift={dialog.shift} onClose={() => setDialog(null)} />
+      )}
+      {dialog?.kind === "export" && (
+        <Suspense fallback={null}>
+          <ExportDialog shift={dialog.shift} onClose={() => setDialog(null)} />
+        </Suspense>
       )}
       {canPlan && dialog?.kind === "plan" && (
         <ShiftPlanDialog

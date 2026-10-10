@@ -10,6 +10,8 @@ import {
   palletExportSnapshot,
   shiftExportSnapshot,
   type ExportSourceRefusal,
+  type ShiftExportSnapshot,
+  type SourceResult,
 } from "./export-source.js";
 
 /**
@@ -70,12 +72,40 @@ export type ExportWarning =
  * source's refusal now.
  */
 export function formatOffers(rows: ShiftExportRows, formedAt: string): FormatOffer[] {
-  return SHIFT_EXPORT_FORMATS.filter(
-    (format) => rows.shift.palletsEnabled || !shiftExportFormatRequiresPallets(format),
-  ).map((format) => {
+  return offeredFormats(rows).map((format) => {
     const snapshot = shiftExportSnapshot(rows, format, formedAt);
     return { format, refusal: snapshot.ok ? null : snapshot.refusal };
   });
+}
+
+/** The formats of `formatOffers`, without the work of checking them. */
+export function offeredFormats(rows: ShiftExportRows): ShiftExportFormatDescriptor[] {
+  return SHIFT_EXPORT_FORMATS.filter(
+    (format) => rows.shift.palletsEnabled || !shiftExportFormatRequiresPallets(format),
+  );
+}
+
+/** A format's offer with its warnings, both from one snapshot of the shift. */
+export interface FormatCheck extends FormatOffer {
+  warnings: ExportWarning[];
+}
+
+/**
+ * `formatOffers`' offer and `exportWarnings`' warnings of one format from one
+ * pass over the shift's rows: the dialog checks every format of a large
+ * shift, one turn each, and a snapshot of 200 000 codes is not made twice.
+ */
+export function formatCheck(
+  rows: ShiftExportRows,
+  format: ShiftExportFormatDescriptor,
+  formedAt: string,
+): FormatCheck {
+  const snapshot = shiftExportSnapshot(rows, format, formedAt);
+  return {
+    format,
+    refusal: snapshot.ok ? null : snapshot.refusal,
+    warnings: warningsOf(rows, format, () => snapshot),
+  };
 }
 
 /** Every pallet of the shift, closed ones first by their close, then by SSCC; open ones last. */
@@ -139,12 +169,21 @@ export function exportWarnings(
   format: ShiftExportFormatDescriptor,
   formedAt: string,
 ): ExportWarning[] {
+  return warningsOf(rows, format, () => shiftExportSnapshot(rows, format, formedAt));
+}
+
+/** The warnings of `format`; the snapshot is asked for only by a pallets format. */
+function warningsOf(
+  rows: ShiftExportRows,
+  format: ShiftExportFormatDescriptor,
+  snapshotOf: () => SourceResult<ShiftExportSnapshot>,
+): ExportWarning[] {
   const warnings: ExportWarning[] = [];
   if (rows.shift.lateDataAt !== null) {
     warnings.push({ kind: "late_data", at: rows.shift.lateDataAt });
   }
   if (!shiftExportFormatRequiresPallets(format)) return warnings;
-  const snapshot = shiftExportSnapshot(rows, format, formedAt);
+  const snapshot = snapshotOf();
   if (!snapshot.ok) return warnings;
   if (snapshot.value.openPalletSuppressedBoxCount > 0) {
     warnings.push({ kind: "open_pallets", boxes: snapshot.value.openPalletSuppressedBoxCount });
@@ -192,11 +231,13 @@ export function reportedCountWarnings(pallets: readonly OfficePallet[]): ExportW
  */
 function lateBoxes(rows: ShiftExportRows, palletId: string | null, needCodes: boolean): number {
   const palletById = new Map(rows.pallets.map((pallet) => [pallet.id, pallet]));
-  const withCodes = new Set(rows.items.map((item) => item.boxId));
+  // Only a shift export reads it, and it takes a pass over every code of the shift: a pallet's
+  // own document asks for each pallet of a large shift in turn.
+  const withCodes = needCodes ? new Set(rows.items.map((item) => item.boxId)) : null;
   return rows.boxes.filter((box) => {
     if (box.palletId === null || (palletId !== null && box.palletId !== palletId)) return false;
     if (box.closedAt === null || box.disassembledAt !== null) return false;
-    if (needCodes && !withCodes.has(box.id)) return false;
+    if (withCodes !== null && !withCodes.has(box.id)) return false;
     const owner = palletById.get(box.palletId);
     if (owner === undefined || owner.sscc === null || owner.closedAt === null) return false;
     return Date.parse(box.closedAt) > Date.parse(owner.closedAt);

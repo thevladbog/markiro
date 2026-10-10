@@ -1,0 +1,568 @@
+import { shiftExportFormatRequiresPallets } from "@markiro/domain";
+import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useTranslation } from "react-i18next";
+
+import { Alert, Button, Checkbox, Input, Modal, RadioGroup } from "@markiro/ui";
+
+import { errorMessageKey } from "../../host/errors.js";
+import type { OfficeShift, ShiftExportRecord } from "../../host/protocol.js";
+import { shiftExportRecord } from "../../host/requests.js";
+import { isKnownTimeZone } from "../../lib/civil-date.js";
+import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
+import { useOfficeSession } from "../office-session.js";
+import { LoadError, PageLoading } from "../page-state.js";
+import { civilDateLabel } from "../shifts/shift-list.js";
+import { exportFolder, reportedCountWarnings, type ExportWarning } from "./export-checks.js";
+import { useExportPlan, yieldToUi } from "./export-plan.js";
+import { OfficeFilesError, type SavedFolder } from "./office-files.js";
+import { useOfficeFiles } from "./office-files-context.js";
+import { runExport } from "./run-export.js";
+
+const MIN_LINES = 2;
+const MAX_LINES = 1_000_000;
+/** The cloud's default lines a part (`ShiftExportsDialog`). */
+const DEFAULT_LINES = "2000";
+
+/** A whole number of lines in 2–1 000 000, as the domain takes it; `null` otherwise. */
+function parseLineLimit(value: string): number | null {
+  if (!/^\d+$/.test(value)) return null;
+  const parsed = Number(value);
+  return parsed >= MIN_LINES && parsed <= MAX_LINES ? parsed : null;
+}
+
+const formatKey = (format: { id: string; version: number }) => `${format.id}@${format.version}`;
+
+/** Where an export is: the first two can still be called off, the rest cannot. */
+type Phase = "idle" | "reading" | "forming" | "saving" | "recording";
+
+type Outcome =
+  | { kind: "failed"; message: string; reason?: string }
+  | { kind: "cancelled" }
+  | {
+      kind: "saved";
+      saved: SavedFolder;
+      /** The record the host has not taken, with why; `null` once it is written. */
+      unrecorded: { record: ShiftExportRecord; message: string } | null;
+    };
+
+export interface ExportDialogProps {
+  /** An active or closed shift. */
+  shift: OfficeShift;
+  onClose: () => void;
+}
+
+/**
+ * «Выгрузка» of a shift (plan ЧЗ): the cloud's formats with what the source
+ * would refuse now, the line limit, the warnings, and the pallets of the
+ * shift for a ЧЗ document each. Forming reads the host's rows again, renders
+ * with `@markiro/domain` exactly as the cloud does (`runExport`), saves the
+ * parts into a new folder under «Документы\Markiro\Выгрузки» and only then
+ * records the export in the host's audit trail; a record the host did not
+ * take is said, with «Записать снова», and the saved files stay.
+ *
+ * A shift can hold 200 000 codes, so the dialog works in turns: the formats
+ * are checked one a turn (`useExportPlan`), and forming gives the event loop
+ * back before it renders and again before it hands the files to the shell, so
+ * the words that say what is going on are on the screen first. Until the
+ * files are being saved an export can be called off (the button, or Escape);
+ * from then on nothing closes the dialog and nothing starts another export.
+ * What the dialog says it does goes into one polite region, where the focus
+ * goes when an export starts; the focus then goes to its result.
+ */
+export function ExportDialog({ shift, onClose }: ExportDialogProps) {
+  const { t } = useTranslation();
+  const formId = useId();
+  const progressId = useId();
+  const outcomeId = useId();
+  const files = useOfficeFiles();
+  const session = useOfficeSession();
+  const queryClient = useQueryClient();
+  const source = useOfficeQuery(officeKeys.shiftExportSource(shift.id), (api, token) =>
+    api.getShiftExportSource(token, shift.id),
+  );
+  const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
+  const rows = source.data;
+  // The host's own count of a pallet's boxes against the station's: information, so a list that
+  // does not load leaves the dialog whole and the warning out.
+  const palletList = useOfficeQuery(
+    officeKeys.shiftPallets(shift.id),
+    (api, token) => api.listShiftPallets(token, shift.id),
+    { enabled: rows?.shift.palletsEnabled === true },
+  );
+  const plan = useExportPlan(rows);
+  const record = useOfficeMutation((api, token, body: ShiftExportRecord) =>
+    api.recordShiftExport(token, shift.id, body),
+  );
+  const [chosen, setChosen] = useState<string | null>(null);
+  const [split, setSplit] = useState(false);
+  const [lineLimit, setLineLimit] = useState(DEFAULT_LINES);
+  const [phase, setPhase] = useState<Phase>("idle");
+  const [outcome, setOutcome] = useState<Outcome | null>(null);
+  const [openFailure, setOpenFailure] = useState<string | null>(null);
+  const inFlight = useRef(false);
+  const calledOff = useRef(false);
+  const wake = useRef<(() => void) | null>(null);
+
+  // The rows of a shift of 200 000 codes are tens of megabytes: they do not stay in the cache
+  // once the dialog is gone, and the next opening reads them again.
+  useEffect(() => {
+    const key = officeKeys.shiftExportSource(shift.id);
+    return () => queryClient.removeQueries({ queryKey: key });
+  }, [queryClient, shift.id]);
+
+  // The time zone of the organization, this PC's while its profile is unread or names a zone
+  // this PC lacks: it names the folder, and writes the time of late data.
+  const timeZone =
+    org.data !== undefined && isKnownTimeZone(org.data.timeZone)
+      ? org.data.timeZone
+      : Intl.DateTimeFormat().resolvedOptions().timeZone;
+
+  const checks = plan.status === "ready" ? plan.plan.checks : [];
+  const firstAllowed = checks.find((check) => check.refusal === null);
+  const selected =
+    checks.find((check) => formatKey(check.format) === chosen && check.refusal === null) ??
+    firstAllowed;
+  const warnings: ExportWarning[] =
+    selected === undefined
+      ? []
+      : [
+          ...selected.warnings,
+          ...(shiftExportFormatRequiresPallets(selected.format) && palletList.data !== undefined
+            ? reportedCountWarnings(palletList.data)
+            : []),
+        ];
+  const maxLines = split ? parseLineLimit(lineLimit) : null;
+  const lineLimitError =
+    split && maxLines === null ? t("office.exports.lineLimitError") : undefined;
+  const busy = phase !== "idle";
+  const cancelable = phase === "reading" || phase === "forming";
+
+  // The focus goes to what an export ended with, as after a write on the other pages.
+  useEffect(() => {
+    if (outcome !== null) document.getElementById(outcomeId)?.focus();
+  }, [outcome, outcomeId]);
+
+  /** Calls the export off: at once while its rows are read, at the next turn while it forms. */
+  const cancel = () => {
+    calledOff.current = true;
+    wake.current?.();
+  };
+
+  const close = () => {
+    if (cancelable) cancel();
+    else if (!inFlight.current) onClose();
+  };
+
+  async function exportNow(
+    format: { id: string; version: number },
+    lines: number | null,
+    palletId: string | null,
+  ): Promise<void> {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    calledOff.current = false;
+    setOutcome(null);
+    setOpenFailure(null);
+    setPhase("reading");
+    document.getElementById(progressId)?.focus();
+    try {
+      // Formed of the host's rows of this moment, as the cloud reads its source when it runs.
+      // Read here and not through the cache: a mutation would keep tens of megabytes.
+      const calledOffWhileReading = new Promise<null>((resolve) => {
+        wake.current = () => resolve(null);
+      });
+      let fresh;
+      try {
+        fresh = await Promise.race([
+          session.call((token) => session.api.getShiftExportSource(token, shift.id)),
+          calledOffWhileReading,
+        ]);
+      } catch (error) {
+        setOutcome({ kind: "failed", message: t(errorMessageKey(error)) });
+        return;
+      } finally {
+        wake.current = null;
+      }
+      if (fresh === null || calledOff.current) {
+        setOutcome({ kind: "cancelled" });
+        return;
+      }
+      setPhase("forming");
+      await yieldToUi();
+      const formedAt = new Date().toISOString();
+      const documentId = crypto.randomUUID();
+      const result = runExport(fresh, {
+        formatId: format.id,
+        formatVersion: format.version,
+        maxLines: lines,
+        palletId,
+        documentId,
+        formedAt,
+      });
+      // A click that came while it formed is handled in this turn, before anything is saved.
+      await yieldToUi();
+      if (calledOff.current) {
+        setOutcome({ kind: "cancelled" });
+        return;
+      }
+      if (!result.ok) {
+        setOutcome({
+          kind: "failed",
+          message: t(`office.exports.failures.${result.failure}`),
+          ...("reason" in result ? { reason: result.reason } : {}),
+        });
+        return;
+      }
+      setPhase("saving");
+      let saved: SavedFolder;
+      try {
+        saved = await files.save(
+          exportFolder(fresh.shift.number, format.id, formedAt, timeZone),
+          result.parts.map((part) => ({ name: part.filename, bytes: part.bytes })),
+        );
+      } catch (error) {
+        const code = error instanceof OfficeFilesError ? error.code : "storage";
+        setOutcome({ kind: "failed", message: t(`office.exports.files.${code}`) });
+        return;
+      }
+      const body = shiftExportRecord({
+        formatId: format.id,
+        formatVersion: format.version,
+        maxLines: lines,
+        palletId,
+        documentId,
+        parts: result.parts,
+        openPalletSuppressedBoxCount: result.openPalletSuppressedBoxCount,
+      });
+      await writeRecord(saved, body);
+    } catch (error) {
+      // Nothing above is meant to throw; if it does, the dialog says so instead of going quiet.
+      setOutcome({
+        kind: "failed",
+        message: t("office.exports.failures.GENERATION_FAILED"),
+        reason: error instanceof Error && error.name !== "" ? error.name : "Error",
+      });
+    } finally {
+      inFlight.current = false;
+      setPhase("idle");
+    }
+  }
+
+  /** Writes the journal's row of files already saved; a refusal leaves the same row to write again. */
+  async function writeRecord(saved: SavedFolder, body: ShiftExportRecord): Promise<void> {
+    setPhase("recording");
+    try {
+      await record.mutateAsync(body);
+      setOutcome({ kind: "saved", saved, unrecorded: null });
+    } catch (error) {
+      setOutcome({
+        kind: "saved",
+        saved,
+        unrecorded: { record: body, message: t(errorMessageKey(error)) },
+      });
+    }
+  }
+
+  async function recordAgain(saved: SavedFolder, body: ShiftExportRecord): Promise<void> {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    document.getElementById(progressId)?.focus();
+    try {
+      await writeRecord(saved, body);
+    } finally {
+      inFlight.current = false;
+      setPhase("idle");
+    }
+  }
+
+  async function openFolder(saved: SavedFolder): Promise<void> {
+    setOpenFailure(null);
+    try {
+      await files.open(saved.segments);
+    } catch (error) {
+      const code = error instanceof OfficeFilesError ? error.code : "storage";
+      setOpenFailure(t(`office.exports.files.${code}`));
+    }
+  }
+
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (selected === undefined || lineLimitError !== undefined) return;
+    void exportNow(selected.format, maxLines, null);
+  };
+
+  const warningText = (warning: ExportWarning): string => {
+    switch (warning.kind) {
+      case "late_data":
+        return t("office.exports.warnings.late_data", {
+          at: new Date(warning.at).toLocaleString("ru", { timeZone }),
+        });
+      case "open_pallets":
+        return t("office.exports.warnings.open_pallets", { count: warning.boxes });
+      case "disassembled_pallets":
+        return t("office.exports.warnings.disassembled_pallets", { count: warning.pallets });
+      case "late_boxes":
+        return t("office.exports.warnings.late_boxes", { count: warning.boxes });
+      case "pallet_count_mismatch":
+        return t("office.exports.warnings.pallet_count_mismatch", { count: warning.pallets });
+    }
+  };
+
+  const progressText = (): string => {
+    switch (phase) {
+      case "reading":
+        return t("office.exports.reading");
+      case "forming":
+        return t("office.exports.forming");
+      case "saving":
+        return t("office.exports.saving");
+      case "recording":
+        return t("office.exports.recording");
+      case "idle":
+        return plan.status === "working" && rows !== undefined
+          ? t("office.exports.checking", { done: plan.done, total: plan.total })
+          : "";
+    }
+  };
+
+  /** The alert the focus goes to: the last thing the export said. */
+  const outcomeAlerts = () => {
+    if (outcome === null) return null;
+    if (outcome.kind === "cancelled") {
+      return (
+        <Alert tone="info" id={outcomeId} tabIndex={-1}>
+          {t("office.exports.cancelled")}
+        </Alert>
+      );
+    }
+    if (outcome.kind === "failed") {
+      return (
+        <Alert tone="error" id={outcomeId} tabIndex={-1}>
+          {outcome.message}
+          {outcome.reason !== undefined && (
+            <span className="shift-cell__quiet">
+              {t("office.exports.reason", { reason: outcome.reason })}
+            </span>
+          )}
+        </Alert>
+      );
+    }
+    const unrecorded = outcome.unrecorded;
+    return (
+      <>
+        <Alert
+          tone="ok"
+          role="status"
+          {...(unrecorded === null ? { id: outcomeId, tabIndex: -1 } : {})}
+          action={
+            <Button
+              variant="secondary"
+              size="compact"
+              onClick={() => void openFolder(outcome.saved)}
+            >
+              {t("office.exports.openFolder")}
+            </Button>
+          }
+        >
+          {t("office.exports.saved", {
+            count: outcome.saved.files.length,
+            path: outcome.saved.path,
+          })}
+        </Alert>
+        {unrecorded !== null && (
+          <Alert
+            tone="warn"
+            id={outcomeId}
+            tabIndex={-1}
+            action={
+              <Button
+                variant="secondary"
+                size="compact"
+                disabled={busy}
+                onClick={() => void recordAgain(outcome.saved, unrecorded.record)}
+              >
+                {t("office.exports.recordAgain")}
+              </Button>
+            }
+          >
+            {t("office.exports.recordFailed", { reason: unrecorded.message })}
+          </Alert>
+        )}
+      </>
+    );
+  };
+
+  const content = () => {
+    if (source.isPending || org.isPending) return <PageLoading />;
+    if (source.isError || rows === undefined) {
+      return <LoadError error={source.error} onRetry={() => void source.refetch()} />;
+    }
+    return (
+      <>
+        <p>
+          {t("office.exports.summary", {
+            product: rows.shift.productName,
+            date: civilDateLabel(rows.shift.productionDate),
+          })}
+        </p>
+        {plan.status === "ready" && (
+          <p className="office-note">
+            {t("office.exports.counts", {
+              codes: plan.plan.counts.codes,
+              inClosedBoxes: plan.plan.counts.codesInClosedBoxes,
+              boxes: plan.plan.counts.closedBoxes,
+              pallets: plan.plan.counts.closedPallets,
+            })}
+          </p>
+        )}
+        <div id={progressId} role="status" tabIndex={-1} className="office-note">
+          {progressText()}
+        </div>
+        {cancelable && (
+          <div>
+            <Button variant="secondary" size="compact" onClick={cancel}>
+              {t("office.exports.cancel")}
+            </Button>
+          </div>
+        )}
+        {plan.status === "failed" && (
+          <Alert tone="error">
+            {t("office.exports.checkFailed")}
+            <span className="shift-cell__quiet">
+              {t("office.exports.reason", { reason: plan.reason })}
+            </span>
+          </Alert>
+        )}
+        {outcomeAlerts()}
+        {openFailure !== null && <Alert tone="error">{openFailure}</Alert>}
+        {/* Heard once, by this region: its messages are not alerts of their own (`role="presentation"`). */}
+        <div aria-live="polite">
+          {warnings.map((warning) => (
+            <Alert key={warning.kind} tone="warn" role="presentation">
+              {warningText(warning)}
+            </Alert>
+          ))}
+        </div>
+        {plan.status === "ready" && (
+          <>
+            <RadioGroup
+              label={t("office.exports.formats")}
+              name="shift-export-format"
+              disabled={busy}
+              value={selected === undefined ? "" : formatKey(selected.format)}
+              onValueChange={setChosen}
+              options={checks.map((check) => ({
+                value: formatKey(check.format),
+                disabled: check.refusal !== null,
+                label:
+                  check.refusal === null ? (
+                    check.format.label
+                  ) : (
+                    <span className="shift-cell">
+                      <span>{check.format.label}</span>
+                      <span className="shift-cell__quiet">
+                        {t(`office.exports.failures.${check.refusal}`)}
+                      </span>
+                    </span>
+                  ),
+              }))}
+            />
+            <Checkbox
+              label={t("office.exports.split")}
+              checked={split}
+              disabled={busy}
+              onCheckedChange={setSplit}
+            />
+            {split && (
+              <Input
+                label={t("office.exports.lineLimit")}
+                inputMode="numeric"
+                value={lineLimit}
+                disabled={busy}
+                {...(lineLimitError === undefined ? {} : { error: lineLimitError })}
+                onChange={(event) => setLineLimit(event.target.value)}
+              />
+            )}
+            <p className="office-note">{t("office.exports.folderHint")}</p>
+            {plan.plan.pallets.length > 0 && (
+              <section aria-label={t("office.exports.pallets")}>
+                <p>{t("office.exports.pallets")}</p>
+                {plan.plan.pallets.map((pallet) => (
+                  <div key={pallet.palletId} className="shift-cell">
+                    <span>
+                      {pallet.sscc === null
+                        ? t("office.exports.palletOpen", { boxes: pallet.boxes })
+                        : t("office.exports.palletRow", {
+                            sscc: pallet.sscc,
+                            boxes: pallet.boxes,
+                          })}
+                    </span>
+                    {pallet.refusal !== null && (
+                      <span className="shift-cell__quiet">
+                        {t(`office.exports.failures.${pallet.refusal}`)}
+                      </span>
+                    )}
+                    {pallet.warnings.map((warning) =>
+                      warning.kind === "late_boxes" ? (
+                        <span key={warning.kind} className="shift-cell__quiet">
+                          {t("office.exports.palletLate", { count: warning.boxes })}
+                        </span>
+                      ) : null,
+                    )}
+                    <Button
+                      variant="secondary"
+                      size="compact"
+                      disabled={busy || pallet.refusal !== null}
+                      aria-label={t("office.exports.palletExportNamed", {
+                        sscc: pallet.sscc ?? "—",
+                      })}
+                      onClick={() =>
+                        void exportNow(
+                          { id: "pallet_xml_gismt_aggregation", version: 1 },
+                          null,
+                          pallet.palletId,
+                        )
+                      }
+                    >
+                      {t("office.exports.palletExport")}
+                    </Button>
+                  </div>
+                ))}
+              </section>
+            )}
+          </>
+        )}
+      </>
+    );
+  };
+
+  return (
+    <Modal
+      open
+      title={t("office.exports.title", { number: shift.number })}
+      onClose={close}
+      closeLabel={t("office.common.close")}
+      width="min(760px, calc(100vw - 32px))"
+      footer={
+        <>
+          <Button variant="secondary" onClick={close} disabled={busy}>
+            {t("office.common.close")}
+          </Button>
+          <Button
+            type="submit"
+            form={formId}
+            loading={busy}
+            disabled={selected === undefined || lineLimitError !== undefined}
+          >
+            {t("office.exports.submit")}
+          </Button>
+        </>
+      }
+    >
+      <form id={formId} className="standalone-form" onSubmit={submit} noValidate aria-busy={busy}>
+        {content()}
+      </form>
+    </Modal>
+  );
+}
