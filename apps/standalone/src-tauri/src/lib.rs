@@ -275,7 +275,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         scanner::get_scanner_connections,
         scanner::close_scanners,
         office_files::save_office_files,
-        office_files::open_office_folder
+        office_files::open_office_folder,
+        office_files::open_office_file
     ]
 }
 

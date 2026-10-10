@@ -1,5 +1,5 @@
 //! Files the office saves on this computer (plan ЧЗ): the parts of an export
-//! today, a form's HTML for plan О-Ф next. Everything goes under
+//! and a printed form's HTML (plan О-Ф). Everything goes under
 //! `Документы\Markiro` (the system's documents folder, `document_dir`), in a
 //! first folder of [`ROOTS`] and the segments the webview names: no file
 //! dialog, so no plugin and no new dependency (pilot spec, question П16).
@@ -8,8 +8,10 @@
 //! and an export never lands beside an older one's parts. Every name is
 //! checked before anything is written, and a call that fails takes back
 //! the folder it made. `open_office_folder` shows such a folder in Windows
-//! Explorer. A failure is logged by its code and the I/O error's kind,
-//! never by a path, which names the Windows user.
+//! Explorer, and `open_office_file` opens a form's `.html` there with the
+//! program Windows has for it, the default browser (plan О-Ф). A failure is
+//! logged by its code and the I/O error's kind, never by a path, which
+//! names the Windows user.
 //!
 //! A name holds letters and digits of any script, spaces and `-_.()` only,
 //! and a file's name ends in an extension the office writes: nothing that
@@ -29,6 +31,13 @@ use serde::{Deserialize, Serialize};
 /// The first folders under `Документы\Markiro` the office writes into:
 /// exports (plan ЧЗ) and forms (plan О-Ф).
 pub const ROOTS: [&str; 2] = ["Выгрузки", "Формы"];
+
+/// The root a form is opened from: `open_office_file` takes a file of no
+/// other (the parts of an export are data, not documents to start).
+pub const FORMS_ROOT: &str = "Формы";
+
+/// The one extension `open_office_file` starts, in any case.
+pub const FORM_EXTENSION: &str = "html";
 
 /// The folder under the documents folder.
 pub const APP_FOLDER: &str = "Markiro";
@@ -70,7 +79,7 @@ pub enum OfficeFilesError {
     DocumentsUnavailable,
     /// Writing failed (a full disk, no access); what this call made is gone.
     Storage,
-    /// Showing a folder needs Windows Explorer.
+    /// Showing a folder or opening a file needs Windows Explorer.
     Unsupported,
 }
 
@@ -341,11 +350,25 @@ where
     })
 }
 
+/// A new file at `path`, which must not exist (a link there is not followed),
+/// readable by its owner alone where the system has owners: a form holds the
+/// organization's products and codes.
+fn create_new_file(path: &Path) -> std::io::Result<File> {
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    options.open(path)
+}
+
 /// Writes every file into `folder`, which this call made; on a failure the
 /// folder goes, with whatever was written into it.
 pub fn write_into(folder: &Path, files: &[(String, Vec<u8>)]) -> Result<(), OfficeFilesError> {
     let written = files.iter().try_for_each(|(name, bytes)| {
-        let mut file = File::create_new(folder.join(name))?;
+        let mut file = create_new_file(&folder.join(name))?;
         file.write_all(bytes)?;
         file.sync_all()
     });
@@ -416,8 +439,37 @@ pub fn existing_folder(root: &Path, segments: &[String]) -> Result<PathBuf, Offi
     Ok(folder)
 }
 
-/// How Explorer is started to show a folder: its program, the one argument
-/// and the directory it starts in.
+/// The form `root/segments…/name` to open: a `.html` file of a plain name,
+/// in a folder under [`FORMS_ROOT`] that `save_files` made. Nothing else is
+/// opened, so no file the webview names can be started as a program: the
+/// way and the name are checked whole before anything is looked at, every
+/// folder on the way is a real folder (not a link), and the file itself is
+/// a regular file (not a link, not a folder).
+pub fn existing_form(
+    root: &Path,
+    segments: &[String],
+    name: &str,
+) -> Result<PathBuf, OfficeFilesError> {
+    let is_html = is_plain_file_name(name)
+        && name
+            .rsplit_once('.')
+            .is_some_and(|(_, extension)| extension.eq_ignore_ascii_case(FORM_EXTENSION));
+    if segments.first().map(String::as_str) != Some(FORMS_ROOT) || !is_html {
+        return Err(OfficeFilesError::InvalidRequest);
+    }
+    let file = existing_folder(root, segments)?.join(name);
+    match fs::symlink_metadata(&file) {
+        Ok(meta) if meta.file_type().is_file() => Ok(file),
+        Ok(_) => Err(OfficeFilesError::InvalidRequest),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(OfficeFilesError::InvalidRequest)
+        }
+        Err(error) => Err(storage("open_office_file", &error)),
+    }
+}
+
+/// How Explorer is started to show a folder or open a file: its program,
+/// the one argument and the directory it starts in.
 #[cfg(any(windows, test))]
 #[derive(Debug, PartialEq, Eq)]
 struct ExplorerLaunch {
@@ -426,23 +478,24 @@ struct ExplorerLaunch {
     current_dir: PathBuf,
 }
 
-/// The launch of Windows Explorer for `folder`. The program is
+/// The launch of Windows Explorer for `folder`, a folder to show or a file to
+/// open with the program Windows has for its type. The program is
 /// `%SystemRoot%\explorer.exe` by its place: started by name, the system would
 /// look in the application's folder and the current directory first. The
-/// argument is the folder in double quotes, always: Explorer does not read
+/// argument is the path in double quotes, always: Explorer does not read
 /// its command line by the usual rules but splits it at commas, so a folder
 /// named `x,y` unquoted would be two arguments. It starts in the system
 /// folder, not in the application's or in the folder it shows, which holds
-/// what the webview wrote. A folder whose path has a double quote (no
-/// Windows path has) is no launch.
+/// what the webview wrote. A path with a double quote (no Windows path has)
+/// is no launch.
 #[cfg(any(windows, test))]
-fn explorer_launch(folder: &Path, system_root: Option<&OsStr>) -> Option<ExplorerLaunch> {
-    if folder.as_os_str().to_string_lossy().contains('"') {
+fn explorer_launch(target: &Path, system_root: Option<&OsStr>) -> Option<ExplorerLaunch> {
+    if target.as_os_str().to_string_lossy().contains('"') {
         return None;
     }
     let system = system_root.map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
     let mut argument = OsString::from("\"");
-    argument.push(folder);
+    argument.push(target);
     argument.push("\"");
     Some(ExplorerLaunch {
         program: system.join("explorer.exe"),
@@ -451,25 +504,38 @@ fn explorer_launch(folder: &Path, system_root: Option<&OsStr>) -> Option<Explore
     })
 }
 
+/// Hands `target` (a folder, or a file of a type Windows has a program for)
+/// to Explorer, which shows the folder or starts the program; `what` names
+/// the command in the log.
 #[cfg(windows)]
-fn show_in_explorer(folder: &Path) -> Result<(), OfficeFilesError> {
+fn launch_explorer(target: &Path, what: &str) -> Result<(), OfficeFilesError> {
     use std::os::windows::process::CommandExt;
 
-    let launch = explorer_launch(folder, std::env::var_os("SystemRoot").as_deref())
+    let launch = explorer_launch(target, std::env::var_os("SystemRoot").as_deref())
         .ok_or(OfficeFilesError::InvalidRequest)?;
-    // Explorer answers 1 even when it opened the folder: only a failure to
+    // Explorer answers 1 even when it did what was asked: only a failure to
     // start it counts. `raw_arg` hands the quoted text over as it is.
     std::process::Command::new(&launch.program)
         .raw_arg(&launch.argument)
         .current_dir(&launch.current_dir)
         .spawn()
         .map(|_| ())
-        .map_err(|error| storage("open_office_folder", &error))
+        .map_err(|error| storage(what, &error))
 }
 
 #[cfg(not(windows))]
-fn show_in_explorer(_folder: &Path) -> Result<(), OfficeFilesError> {
+fn launch_explorer(_target: &Path, _what: &str) -> Result<(), OfficeFilesError> {
     Err(OfficeFilesError::Unsupported)
+}
+
+fn show_in_explorer(folder: &Path) -> Result<(), OfficeFilesError> {
+    launch_explorer(folder, "open_office_folder")
+}
+
+/// Opens a form's `.html` (found by [`existing_form`]) with the program
+/// Windows has for it: the default browser.
+fn open_in_default_program(file: &Path) -> Result<(), OfficeFilesError> {
+    launch_explorer(file, "open_office_file")
 }
 
 /// Saves the office's files (see the module); off the IPC thread.
@@ -495,6 +561,20 @@ pub async fn open_office_folder(
     let root = state.root().map_err(|error| error.code().to_owned())?;
     existing_folder(&root, &segments)
         .and_then(|folder| show_in_explorer(&folder))
+        .map_err(|error| error.code().to_owned())
+}
+
+/// Opens a form's `.html` that `save_office_files` wrote under `Формы` in the
+/// default browser, where the office prints it (plan О-Ф).
+#[tauri::command]
+pub async fn open_office_file(
+    state: tauri::State<'_, OfficeFilesState>,
+    segments: Vec<String>,
+    name: String,
+) -> Result<(), String> {
+    let root = state.root().map_err(|error| error.code().to_owned())?;
+    existing_form(&root, &segments, &name)
+        .and_then(|file| open_in_default_program(&file))
         .map_err(|error| error.code().to_owned())
 }
 
@@ -1291,5 +1371,301 @@ mod tests {
             None
         );
         assert!(!folder.exists());
+    }
+
+    const FORM_NAME: &str = "Состав короба 046006820000015000.html";
+
+    /// A folder `Формы/OCT26-004/run` holding the form `FORM_NAME`.
+    fn forms_root_with_a_form() -> (tempfile::TempDir, Vec<String>) {
+        let root = tempfile::tempdir().unwrap();
+        let saved = save_files(
+            root.path(),
+            &segments(&["Формы", "OCT26-004", "run"]),
+            &[file(FORM_NAME, b"<!doctype html>")],
+        )
+        .unwrap();
+        (root, saved.segments)
+    }
+
+    /// Only a form's `.html` the office wrote is opened: the same file by its
+    /// name and by its path, whatever the case of its extension.
+    #[test]
+    fn a_form_of_the_office_is_found() {
+        let (root, folder) = forms_root_with_a_form();
+        let form = existing_form(root.path(), &folder, FORM_NAME).unwrap();
+        assert_eq!(
+            form,
+            root.path()
+                .join("Формы")
+                .join("OCT26-004")
+                .join("run")
+                .join(FORM_NAME)
+        );
+        assert_eq!(fs::read(&form).unwrap(), b"<!doctype html>");
+        fs::write(form.with_file_name("Бланк смены.HTML"), b"<p>").unwrap();
+        assert!(existing_form(root.path(), &folder, "Бланк смены.HTML").is_ok());
+        // The folder the second call of a name got.
+        let again = save_files(
+            root.path(),
+            &segments(&["Формы", "OCT26-004", "run"]),
+            &[file(FORM_NAME, b"<p>")],
+        )
+        .unwrap();
+        assert_eq!(again.segments[2], "run (2)");
+        assert!(existing_form(root.path(), &again.segments, FORM_NAME).is_ok());
+    }
+
+    /// A name that is no `.html` of a plain name is refused though a file of
+    /// that name is there: another kind of file is never started, and no
+    /// name leaves the folder or reads as something else.
+    #[test]
+    fn only_a_html_of_a_plain_name_is_opened() {
+        let (root, folder) = forms_root_with_a_form();
+        let dir = root.path().join("Формы").join("OCT26-004").join("run");
+        for name in [
+            "run.exe",
+            "run.bat",
+            "a.lnk",
+            "a.url",
+            "a.hta",
+            "page.htm",
+            "page.html.bat",
+            "page.html.exe",
+            "page.txt",
+            "page",
+            ".html",
+            "a,b.html",
+            "a;b.html",
+            "a%b.html",
+            "a&b.html",
+            "a~1.html",
+            "page.html.",
+            "page.html ",
+            "con.html",
+            "CON.HTML",
+            "nul.html",
+            "com1.html",
+            "page\u{200b}.html",
+            "page\u{202e}.html",
+        ] {
+            // Best effort: some names cannot exist on every file system.
+            let _ = fs::write(dir.join(name), b"x");
+            assert_eq!(
+                existing_form(root.path(), &folder, name),
+                Err(OfficeFilesError::InvalidRequest),
+                "{name:?}"
+            );
+        }
+        for name in [
+            "",
+            "..",
+            ".",
+            "a/b.html",
+            "a\\b.html",
+            "../run/page.html",
+            FORM_NAME.trim_end_matches(".html"),
+        ] {
+            assert_eq!(
+                existing_form(root.path(), &folder, name),
+                Err(OfficeFilesError::InvalidRequest),
+                "{name:?}"
+            );
+        }
+        assert_eq!(
+            existing_form(
+                root.path(),
+                &folder,
+                &format!("{}.html", "я".repeat(MAX_NAME_CHARS - 4))
+            ),
+            Err(OfficeFilesError::InvalidRequest),
+            "a name over the longest"
+        );
+    }
+
+    /// A form must be there, and be a file: a missing one, a folder of a
+    /// form's name and a link (even to a form) are not opened.
+    #[test]
+    fn a_form_that_is_not_there_or_not_a_file_is_not_opened() {
+        let (root, folder) = forms_root_with_a_form();
+        let dir = root.path().join("Формы").join("OCT26-004").join("run");
+        assert_eq!(
+            existing_form(root.path(), &folder, "Другая форма.html"),
+            Err(OfficeFilesError::InvalidRequest)
+        );
+        fs::create_dir(dir.join("Папка.html")).unwrap();
+        assert_eq!(
+            existing_form(root.path(), &folder, "Папка.html"),
+            Err(OfficeFilesError::InvalidRequest)
+        );
+        #[cfg(unix)]
+        {
+            let outside = tempfile::tempdir().unwrap();
+            fs::write(outside.path().join("x.html"), b"<p>outside</p>").unwrap();
+            std::os::unix::fs::symlink(outside.path().join("x.html"), dir.join("Внешняя.html"))
+                .unwrap();
+            assert_eq!(
+                existing_form(root.path(), &folder, "Внешняя.html"),
+                Err(OfficeFilesError::InvalidRequest)
+            );
+            // A link to a form of the folder itself is a link all the same.
+            std::os::unix::fs::symlink(dir.join(FORM_NAME), dir.join("Ссылка.html")).unwrap();
+            assert_eq!(
+                existing_form(root.path(), &folder, "Ссылка.html"),
+                Err(OfficeFilesError::InvalidRequest)
+            );
+            // A link where a folder of the way should be.
+            std::os::unix::fs::symlink(outside.path(), root.path().join("Формы/Ссылка")).unwrap();
+            fs::create_dir(outside.path().join("run")).unwrap();
+            fs::write(outside.path().join("run").join(FORM_NAME), b"<p>").unwrap();
+            assert_eq!(
+                existing_form(
+                    root.path(),
+                    &segments(&["Формы", "Ссылка", "run"]),
+                    FORM_NAME
+                ),
+                Err(OfficeFilesError::InvalidRequest)
+            );
+        }
+    }
+
+    /// Only the forms' root is opened from: an `.html` an export's folder
+    /// holds, a way out of the office's folder and a way too short are refused
+    /// though the file they lead to exists.
+    #[test]
+    fn a_form_is_opened_only_from_the_forms_root_by_a_plain_way() {
+        let (root, folder) = forms_root_with_a_form();
+        assert_eq!(FORMS_ROOT, "Формы");
+        assert!(ROOTS.contains(&FORMS_ROOT));
+        let exported = save_files(
+            root.path(),
+            &segments(&["Выгрузки", "OCT26-004", "run"]),
+            &[file(FORM_NAME, b"<p>")],
+        )
+        .unwrap();
+        assert!(existing_folder(root.path(), &exported.segments).is_ok());
+        assert_eq!(
+            existing_form(root.path(), &exported.segments, FORM_NAME),
+            Err(OfficeFilesError::InvalidRequest)
+        );
+        for way in [
+            segments(&["Формы", "OCT26-004", "..", "OCT26-004", "run"]),
+            segments(&["Формы", "..", "Формы", "OCT26-004", "run"]),
+            segments(&["Формы", "OCT26-004", "run", ".."]),
+            segments(&["Формы", "OCT26-004/run"]),
+            segments(&["Формы", "OCT26-004\\run"]),
+            segments(&["Формы"]),
+            segments(&["Формы", "OCT26-004", "run", ""]),
+            segments(&["Markiro", "Формы", "OCT26-004", "run"]),
+            vec![],
+        ] {
+            assert_eq!(
+                existing_form(root.path(), &way, FORM_NAME),
+                Err(OfficeFilesError::InvalidRequest),
+                "{way:?}"
+            );
+        }
+        // The folder the file is in, by itself: found.
+        assert!(existing_form(root.path(), &folder, FORM_NAME).is_ok());
+    }
+
+    /// Opening a form needs Windows: anywhere else the launcher is
+    /// `unsupported`, and it is the same launcher that shows a folder.
+    #[test]
+    fn opening_a_file_and_showing_a_folder_share_one_launcher() {
+        let (root, folder) = forms_root_with_a_form();
+        let form = existing_form(root.path(), &folder, FORM_NAME).unwrap();
+        if !cfg!(windows) {
+            assert_eq!(
+                open_in_default_program(&form),
+                Err(OfficeFilesError::Unsupported)
+            );
+            assert_eq!(
+                show_in_explorer(form.parent().unwrap()),
+                Err(OfficeFilesError::Unsupported)
+            );
+        }
+    }
+
+    /// What Explorer is given to open a form is the form's path in double
+    /// quotes, the path `existing_form` found: a Cyrillic name with spaces and
+    /// brackets arrives as one argument.
+    #[test]
+    fn explorer_opens_a_form_by_its_quoted_path() {
+        let form = Path::new(
+            r"C:\Users\Иван Петров\Документы\Markiro\Формы\OCT26-004\2026-10-08_18-30-00_placard (2)\Ярлык паллеты 146006820000000409 A5.html",
+        );
+        let launch = explorer_launch(form, Some(OsStr::new(r"C:\Windows"))).unwrap();
+        assert_eq!(
+            launch.argument,
+            OsString::from(
+                "\"C:\\Users\\Иван Петров\\Документы\\Markiro\\Формы\\OCT26-004\\2026-10-08_18-30-00_placard (2)\\Ярлык паллеты 146006820000000409 A5.html\""
+            )
+        );
+        assert_eq!(
+            launch.program,
+            PathBuf::from(r"C:\Windows").join("explorer.exe")
+        );
+        assert_eq!(launch.current_dir, PathBuf::from(r"C:\Windows"));
+        // Found on this machine, the path goes into the argument as it is.
+        let (root, folder) = forms_root_with_a_form();
+        let found = existing_form(root.path(), &folder, FORM_NAME).unwrap();
+        let launch = explorer_launch(&found, None).unwrap();
+        let mut quoted = OsString::from("\"");
+        quoted.push(found.as_os_str());
+        quoted.push("\"");
+        assert_eq!(launch.argument, quoted);
+    }
+
+    /// Every name the forms of the office make (the file names of
+    /// `render-form.ts` for the host's SSCC text, or none) is a name the
+    /// shell takes, saved and found again; the webview's sanitiser keeps
+    /// to the same allowlist.
+    #[test]
+    fn the_names_of_the_forms_are_taken() {
+        let root = tempfile::tempdir().unwrap();
+        let names = [
+            "Состав короба 046006820000015000.html",
+            "Состав короба без SSCC.html",
+            "Состав паллеты 146006820000000409.html",
+            "Состав паллеты без SSCC.html",
+            "Ярлык паллеты 146006820000000409 A4.html",
+            "Ярлык паллеты 146006820000000409 A5.html",
+            "Ярлык паллеты  A5.html",
+            "Ярлыки паллет смены A4.html",
+            "Ярлыки паллет смены A5.html",
+            "Бланк смены.html",
+        ];
+        for (n, name) in names.iter().enumerate() {
+            let folder = segments(&[
+                "Формы",
+                "OCT26-005_S",
+                &format!("2026-10-08_18-30-0{n}_task"),
+            ]);
+            let saved = save_files(root.path(), &folder, &[file(name, b"<p>")]).unwrap();
+            assert!(
+                existing_form(root.path(), &saved.segments, name).is_ok(),
+                "{name:?}"
+            );
+        }
+    }
+
+    /// What the office writes is readable by its owner alone (Unix; Windows
+    /// has its own access lists): the form of a tenant is not world-readable.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_is_written_for_its_owner_alone() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let root = tempfile::tempdir().unwrap();
+        let saved = save_files(
+            root.path(),
+            &segments(&["Формы", "OCT26-004", "run"]),
+            &[file(FORM_NAME, b"<p>")],
+        )
+        .unwrap();
+        let written = Path::new(&saved.path).join(FORM_NAME);
+        let mode = fs::metadata(&written).unwrap().permissions().mode();
+        assert_eq!(mode & 0o077, 0, "{mode:o}");
+        assert_eq!(mode & 0o600, 0o600, "{mode:o}");
     }
 }

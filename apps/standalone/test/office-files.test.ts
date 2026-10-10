@@ -48,6 +48,16 @@ describe("the office's files over the shell (plan ЧЗ)", () => {
     expect(calls).toEqual([["open_office_folder", { segments: SEGMENTS }]]);
   });
 
+  it("opens a form's file by its folder and its name (plan О-Ф)", async () => {
+    const { files, calls } = shell(null);
+    const form = ["Формы", "OCT26-004", "2026-10-08_18-30-00_task"];
+    await files.openFile(form, "Бланк смены.html");
+    expect(calls).toEqual([["open_office_file", { segments: form, name: "Бланк смены.html" }]]);
+    await expect(shell("unsupported", true).files.openFile(form, "a.html")).rejects.toMatchObject({
+      code: "unsupported",
+    });
+  });
+
   it.each(["invalid_request", "documents_unavailable", "storage", "unsupported"] as const)(
     "turns the shell's %s into an error of that code",
     async (code: OfficeFilesCode) => {
@@ -55,6 +65,9 @@ describe("the office's files over the shell (plan ЧЗ)", () => {
       await expect(save).rejects.toBeInstanceOf(OfficeFilesError);
       await expect(save).rejects.toMatchObject({ code });
       await expect(shell(code, true).files.open(SEGMENTS)).rejects.toMatchObject({ code });
+      await expect(shell(code, true).files.openFile(SEGMENTS, "a.html")).rejects.toMatchObject({
+        code,
+      });
     },
   );
 

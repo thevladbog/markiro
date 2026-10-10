@@ -1367,6 +1367,74 @@ fn saving_office_files_answers_through_the_ipc_shapes() {
     );
 }
 
+/// `open_office_file` takes `segments` and `name`
+/// (`src/office/exports/office-files.ts`, plan О-Ф) and opens only a form's
+/// `.html` the office wrote under `Формы`; refusals are bare codes, and off
+/// Windows opening is `unsupported`.
+#[test]
+fn opening_an_office_form_answers_through_the_ipc_shapes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app_saving_into(OfficeFilesState::at(dir.path().to_path_buf()));
+    let segments = json!(["Формы", "OCT26-004", "2026-10-08_18-30-00_task"]);
+    invoke(
+        &webview,
+        "save_office_files",
+        json!({
+            "segments": segments,
+            "files": [{ "name": "Бланк смены.html", "contentBase64": "PCFkb2N0eXBlIGh0bWw+" }]
+        }),
+    )
+    .unwrap();
+    // The same bytes saved as an export part, in the exports' root.
+    invoke(
+        &webview,
+        "save_office_files",
+        json!({
+            "segments": ["Выгрузки", "OCT26-004", "run"],
+            "files": [{ "name": "Бланк смены.html", "contentBase64": "PCFkb2N0eXBlIGh0bWw+" }]
+        }),
+    )
+    .unwrap();
+    for (folder, name) in [
+        (segments.clone(), "Бланк смены.txt"),
+        (segments.clone(), "Другая форма.html"),
+        (segments.clone(), "..\\Бланк смены.html"),
+        (segments.clone(), "a,b.html"),
+        (json!(["Формы", "OCT26-004", ".."]), "Бланк смены.html"),
+        (json!(["Формы", ".."]), "Бланк смены.html"),
+        (json!(["Выгрузки", "OCT26-004", "run"]), "Бланк смены.html"),
+    ] {
+        assert_eq!(
+            invoke(
+                &webview,
+                "open_office_file",
+                json!({ "segments": folder, "name": name }),
+            ),
+            Err(json!("invalid_request")),
+            "{folder} {name:?}"
+        );
+    }
+    if !cfg!(windows) {
+        assert_eq!(
+            invoke(
+                &webview,
+                "open_office_file",
+                json!({ "segments": segments, "name": "Бланк смены.html" }),
+            ),
+            Err(json!("unsupported"))
+        );
+    }
+    let (_app, unavailable) = mock_app_saving_into(OfficeFilesState::unavailable());
+    assert_eq!(
+        invoke(
+            &unavailable,
+            "open_office_file",
+            json!({ "segments": segments, "name": "Бланк смены.html" }),
+        ),
+        Err(json!("documents_unavailable"))
+    );
+}
+
 /// `set_system_awake` takes `awake` (`src/hardware/hardware.ts`) and answers
 /// `null`, asked twice or not; letting go never fails. Off Windows it holds
 /// nothing. On Windows this test asks for a real power request, which a CI

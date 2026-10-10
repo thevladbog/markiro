@@ -58,6 +58,7 @@ const CLOSED_PALLETS: OfficeShift = {
 function fakeFiles(): OfficeFilesApi & {
   save: ReturnType<typeof vi.fn<OfficeFilesApi["save"]>>;
   open: ReturnType<typeof vi.fn<OfficeFilesApi["open"]>>;
+  openFile: ReturnType<typeof vi.fn<OfficeFilesApi["openFile"]>>;
 } {
   return {
     save: vi.fn<OfficeFilesApi["save"]>(async (segments, files): Promise<SavedFolder> => ({
@@ -66,6 +67,7 @@ function fakeFiles(): OfficeFilesApi & {
       files: files.map((file) => file.name),
     })),
     open: vi.fn<OfficeFilesApi["open"]>(async () => undefined),
+    openFile: vi.fn<OfficeFilesApi["openFile"]>(async () => undefined),
   };
 }
 

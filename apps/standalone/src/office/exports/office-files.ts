@@ -4,10 +4,10 @@ import { z } from "zod";
 import { bytesToBase64 } from "../../hardware/hardware.js";
 
 /**
- * The shell's `save_office_files` and `open_office_folder`
- * (`src-tauri/src/office_files.rs`, plan ЧЗ): the office's files go into a
- * new folder under `Документы\Markiro\<segments…>`, the first segment one of
- * the shell's roots (`Выгрузки`, `Формы`); no file dialog.
+ * The shell's `save_office_files`, `open_office_folder` and `open_office_file`
+ * (`src-tauri/src/office_files.rs`, plans ЧЗ and О-Ф): the office's files go
+ * into a new folder under `Документы\Markiro\<segments…>`, the first segment
+ * one of the shell's roots (`Выгрузки`, `Формы`); no file dialog.
  */
 
 /** The codes the shell refuses with (`OfficeFilesError::code`). */
@@ -45,6 +45,11 @@ export interface OfficeFilesApi {
   save: (segments: readonly string[], files: readonly OfficeFile[]) => Promise<SavedFolder>;
   /** Shows a folder `save` made in Windows Explorer. */
   open: (segments: readonly string[]) => Promise<void>;
+  /**
+   * Opens a form's `.html` that `save` wrote under `Формы` in the default
+   * browser (plan О-Ф); the shell opens nothing else.
+   */
+  openFile: (segments: readonly string[], name: string) => Promise<void>;
 }
 
 type Invoke = (command: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -80,6 +85,9 @@ export function createTauriOfficeFiles(call: Invoke = invoke): OfficeFilesApi {
     },
     open: async (segments) => {
       await run("open_office_folder", { segments: [...segments] });
+    },
+    openFile: async (segments, name) => {
+      await run("open_office_file", { segments: [...segments], name });
     },
   };
 }
