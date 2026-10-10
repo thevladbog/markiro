@@ -1260,6 +1260,22 @@ describe("shift shapes", () => {
     expect(officeShiftSchema.parse(pallets)).toEqual(pallets);
   });
 
+  it("read a shift's pallets in its totals and refuse a count of pallets that is no whole number", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    const counted = { ...shift, totals: { ...shift.totals, closedPallets: 12, openPallets: 1 } };
+    expect(officeShiftSchema.parse(counted)).toEqual(counted);
+    for (const field of ["closedPallets", "openPallets"]) {
+      for (const value of [-1, 1.5, "1", null]) {
+        const totals = { ...shift.totals, [field]: value };
+        expect(officeShiftSchema.safeParse({ ...shift, totals }).success, field).toBe(false);
+      }
+      const totals = Object.fromEntries(
+        Object.entries(shift.totals).filter(([key]) => key !== field),
+      );
+      expect(officeShiftSchema.safeParse({ ...shift, totals }).success, field).toBe(false);
+    }
+  });
+
   it("read a mode and a close reason code this build does not know, and a plan of one unit", () => {
     const shift = officeShiftSchema.parse(fixture("office-shift.json"));
     const later = {
@@ -1378,6 +1394,8 @@ describe("shift shapes", () => {
       openBoxes: 1,
       lastFactAt: "2026-10-08T09:41:07Z",
       deviceIds: ["7c9e6679-7425-40de-944b-e07fc1f90ae7"],
+      closedPallets: 0,
+      openPallets: 0,
     });
     const planned = {
       ...shift,
@@ -1391,6 +1409,8 @@ describe("shift shapes", () => {
         openBoxes: 0,
         lastFactAt: null,
         deviceIds: [],
+        closedPallets: 0,
+        openPallets: 0,
       },
     };
     expect(officeShiftSchema.parse(planned)).toEqual(planned);
@@ -1401,6 +1421,8 @@ describe("shift shapes", () => {
       openBoxes: [-1, 1.5, "1", null],
       lastFactAt: ["yesterday", 20261008],
       deviceIds: [["42"], "7c9e6679-7425-40de-944b-e07fc1f90ae7", null],
+      closedPallets: [-1, 1.5, "1", null],
+      openPallets: [-1, 1.5, "1", null],
     };
     for (const [field, values] of Object.entries(refused)) {
       for (const value of values) {

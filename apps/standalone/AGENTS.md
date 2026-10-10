@@ -2481,16 +2481,21 @@ gap to `acceptedUnits`), `closedBoxes`
 (closed and not taken apart), `openBoxes` (open boxes that hold a live item: a
 box emptied by undos or by displacement is not counted), `lastFactAt` (the
 host's clock, whole seconds, at the last receipt of a record that named the
-shift and got past the entry check, refused ones included) and `deviceIds`
-(the shift's participants, first entry first, the id breaking a tie); the
+shift and got past the entry check, refused ones included), `deviceIds`
+(the shift's participants, first entry first, the id breaking a tie), and with
+plan ПЛ-Х `closedPallets` (pallets closed and not taken apart) and
+`openPallets` (open pallets that hold a box not taken apart: a pallet whose
+boxes were all taken apart is not counted, as an emptied box is not); the
 office's label for `lastFactAt` is «Последние данные со станции», and it is no
-measure of output or lateness. The six fields of `totals`, all required and in
-every `OfficeShift`: `acceptedUnits`, `unitsInClosedBoxes`, `closedBoxes`,
-`openBoxes` (non-negative integers), `lastFactAt` (an instant of the host's
-format or `null`) and `deviceIds` (an array of UUIDs). A planned shift's totals
-are zeros, `null` and `[]`. The subqueries run on the
+measure of output or lateness. The eight fields of `totals`, all required and
+in every `OfficeShift`: `acceptedUnits`, `unitsInClosedBoxes`, `closedBoxes`,
+`openBoxes`, `closedPallets`, `openPallets` (non-negative integers),
+`lastFactAt` (an instant of the host's format or `null`) and `deviceIds` (an
+array of UUIDs). A planned shift's totals are zeros, `null` and `[]`, and a
+shift without pallets has no pallet to count. The subqueries run on the
 indexes of `0010` (`boxes_shift`, the partial `box_items_live`,
-`fact_receipts_shift`); a new column the totals read needs its index in the
+`fact_receipts_shift`) and `0012` (`pallets_shift`, the partial
+`boxes_pallet`); a new column the totals read needs its index in the
 same change, since the list runs them once per shift listed.
 
 ## Marking rules

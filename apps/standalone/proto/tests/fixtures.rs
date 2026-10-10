@@ -705,7 +705,7 @@ fn office_shift_fixtures_round_trip_and_a_plan_carries_no_number_or_status() {
     // A shift without facts still carries every field, the instant as `null`.
     let empty = serde_json::json!({
         "acceptedUnits": 0, "unitsInClosedBoxes": 0, "closedBoxes": 0, "openBoxes": 0,
-        "lastFactAt": null, "deviceIds": []
+        "lastFactAt": null, "deviceIds": [], "closedPallets": 0, "openPallets": 0
     });
     let read: markiro_proto::ShiftTotals = serde_json::from_value(empty.clone()).unwrap();
     assert_eq!(serde_json::to_value(&read).unwrap(), empty);
@@ -1246,4 +1246,38 @@ fn code_check_fixtures_round_trip_and_name_the_owner_as_a_conflict_does() {
     let winner: CodeOwner =
         typed(&Value::Object(receipts.receipts[1].details.clone().unwrap())["winner"]);
     assert_eq!(taken, CodeCheck::Taken { owner: winner });
+}
+
+/// A shift's totals carry both pallet counts (plan ПЛ-Х): each is required,
+/// a whole non-negative number, and keeps its own name and place.
+#[test]
+fn a_shifts_totals_carry_both_pallet_counts_as_required_whole_numbers() {
+    let totals = fixture("office-shift.json")["totals"].clone();
+    let mut counted = totals.clone();
+    counted["closedPallets"] = serde_json::json!(12);
+    counted["openPallets"] = serde_json::json!(1);
+    let read: markiro_proto::ShiftTotals = serde_json::from_value(counted.clone()).unwrap();
+    assert_eq!((read.closed_pallets, read.open_pallets), (12, 1));
+    assert_eq!(serde_json::to_value(&read).unwrap(), counted);
+    for field in ["closedPallets", "openPallets"] {
+        let mut without = totals.clone();
+        without.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<markiro_proto::ShiftTotals>(without).is_err(),
+            "{field} left out"
+        );
+        for value in [
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("1"),
+            serde_json::Value::Null,
+        ] {
+            let mut bad = totals.clone();
+            bad[field] = value.clone();
+            assert!(
+                serde_json::from_value::<markiro_proto::ShiftTotals>(bad).is_err(),
+                "{field}: {value}"
+            );
+        }
+    }
 }

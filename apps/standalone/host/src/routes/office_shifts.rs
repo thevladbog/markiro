@@ -25,8 +25,9 @@ use crate::server::AppState;
 use crate::shifts::{self, NewShift};
 use crate::validate;
 
-/// The columns of an office shift, its totals (plan 2a2) included: each a
-/// subquery over the shift's facts, served by the indexes of `0010`.
+/// The columns of an office shift, its totals (plan 2a2, pallets plan ПЛ-Х)
+/// included: each a subquery over the shift's facts, served by the indexes
+/// of `0010` and `0012`.
 const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, status, mode, \
      pallets_enabled, product_id, line_id, counterparty_id, production_date, planned_qty, \
      box_capacity, box_template_id, pallet_box_capacity, pallet_template_id, owner_device_id, \
@@ -46,7 +47,12 @@ const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, sta
      (SELECT MAX(r.received_at) FROM fact_receipts r WHERE r.shift_id = shifts.id) \
       AS last_fact_at, \
      (SELECT json_group_array(p.device_id ORDER BY p.first_entered_at, p.device_id) \
-      FROM shift_participants p WHERE p.shift_id = shifts.id) AS device_ids \
+      FROM shift_participants p WHERE p.shift_id = shifts.id) AS device_ids, \
+     (SELECT COUNT(*) FROM pallets p WHERE p.shift_id = shifts.id \
+      AND p.closed_at IS NOT NULL AND p.disassembled_at IS NULL) AS closed_pallets, \
+     (SELECT COUNT(*) FROM pallets p WHERE p.shift_id = shifts.id AND p.closed_at IS NULL \
+      AND EXISTS (SELECT 1 FROM boxes b WHERE b.pallet_id = p.id \
+                  AND b.disassembled_at IS NULL)) AS open_pallets \
      FROM shifts";
 
 #[derive(sqlx::FromRow)]
@@ -82,6 +88,8 @@ struct ShiftRow {
     last_fact_at: Option<String>,
     /// A JSON array of ids.
     device_ids: String,
+    closed_pallets: i64,
+    open_pallets: i64,
 }
 
 fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
@@ -118,6 +126,8 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
             open_boxes: u32::try_from(row.open_boxes).map_err(ApiError::internal)?,
             last_fact_at: row.last_fact_at,
             device_ids: serde_json::from_str(&row.device_ids).map_err(ApiError::internal)?,
+            closed_pallets: u32::try_from(row.closed_pallets).map_err(ApiError::internal)?,
+            open_pallets: u32::try_from(row.open_pallets).map_err(ApiError::internal)?,
         },
     })
 }
@@ -610,4 +620,57 @@ pub async fn close_shift(
         .await
         .map_err(ApiError::internal)?;
     Ok(Json(closed))
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::Row;
+
+    use super::SELECT;
+
+    /// The plan SQLite makes of the office's shift query, one line a step.
+    async fn plan(filter: &str) -> Vec<String> {
+        let dir = tempfile::tempdir().unwrap();
+        let pool = crate::db::open(&dir.path().join("plan.db")).await.unwrap();
+        sqlx::query(&format!("EXPLAIN QUERY PLAN {SELECT} {filter}"))
+            .bind("00000000-0000-4000-8000-000000000000")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect()
+    }
+
+    /// The pallet totals read through the indexes of `0012`, for one shift
+    /// and for the list alike (it runs them once per shift listed): the
+    /// pallets of the shift through `pallets_shift`, the boxes of a pallet
+    /// through the partial `boxes_pallet`, and no scan of either table.
+    #[tokio::test]
+    async fn the_pallet_totals_run_on_the_indexes_of_0012() {
+        for filter in [
+            "WHERE id = ?",
+            "WHERE status <> 'closed' OR production_date >= ?",
+        ] {
+            let plan = plan(filter).await;
+            let count = |detail: &str| plan.iter().filter(|line| line.as_str() == detail).count();
+            assert_eq!(
+                count("SEARCH p USING INDEX pallets_shift (shift_id=?)"),
+                2,
+                "{filter}: {plan:#?}"
+            );
+            assert_eq!(
+                count("SEARCH b USING INDEX boxes_pallet (pallet_id=?)"),
+                1,
+                "{filter}: {plan:#?}"
+            );
+            // Only the outer read of the shifts may scan: the subqueries
+            // run once per shift listed.
+            let scans: Vec<&String> = plan
+                .iter()
+                .filter(|line| line.starts_with("SCAN") && !line.starts_with("SCAN shifts"))
+                .collect();
+            assert!(scans.is_empty(), "{filter}: {scans:?}");
+        }
+    }
 }

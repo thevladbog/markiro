@@ -11,10 +11,10 @@ use markiro_host::routes::facts::{receive_facts, IncomingFacts};
 use markiro_proto::DeviceKind;
 use serde_json::{json, Value};
 use support::app::{
-    accepted, admin, audit_rows, box_closed, box_id, close_from_office, fact, host_revision,
-    instant, issue_block, issue_pallet_block, ok_scan, open_floor, open_pallet_floor, pair_device,
-    pallet_closed, pallet_id, pallet_sscc, receipts, record_id, rejected, send_facts, shift_setup,
-    sscc_of, Admin, Floor,
+    accepted, admin, audit_rows, box_closed, box_exception, box_id, close_from_office, fact,
+    host_revision, instant, issue_block, issue_pallet_block, ok_scan, open_floor,
+    open_pallet_floor, pair_device, pallet_closed, pallet_id, pallet_sscc, receipts, record_id,
+    rejected, send_facts, shift_setup, sscc_of, Admin, Floor,
 };
 
 const BLOCK_REQUEST: &str = "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a";
@@ -1424,6 +1424,72 @@ async fn the_schema_refuses_the_pallet_exception_rows_no_fact_may_leave() {
     .unwrap();
 }
 
+/// The office's totals of a shift with pallets count its closed pallets
+/// that were not taken apart and its open pallets that hold a box not taken
+/// apart; the list and the shift's own answer agree.
+#[tokio::test]
+async fn the_office_reads_a_shifts_pallets_from_its_facts() {
+    let (admin, floor, block, pallets) = pallet_floor().await;
+    // Pallet 1 closes with boxes 1 and 2, pallet 2 closes with box 3 and is
+    // taken apart, pallet 3 stays open with box 4, pallet 4 stays open and
+    // its only box 5 is taken apart, pallet 5 closes with box 6.
+    let mut batch = Vec::new();
+    for (box_n, pallet) in [(1, 1), (2, 1), (3, 2), (4, 3), (5, 4), (6, 5)] {
+        batch.extend(boxed(&floor, &block, box_n, Some(&pallet_id(pallet))));
+    }
+    for (n, pallet, serial) in [(201, 1, 40), (202, 2, 41), (203, 5, 42)] {
+        batch.push(record(
+            &floor,
+            n,
+            "pallet_closed",
+            pallet_closed(
+                &pallet_id(pallet),
+                &pallets,
+                serial,
+                1,
+                &instant(100, 0),
+                &instant(150, 0),
+            ),
+        ));
+    }
+    batch.push(record(
+        &floor,
+        301,
+        "pallet_exception",
+        pallet_exception(
+            "disassemble",
+            &pallet_id(2),
+            "wrong_product",
+            Value::Null,
+            &instant(160, 0),
+        ),
+    ));
+    let mut apart = box_exception("disassemble", &box_id(5), &instant(161, 0));
+    apart["reasonCode"] = json!("damaged_package");
+    batch.push(record(&floor, 302, "box_exception", apart));
+    admin.app.clock.advance(time::Duration::minutes(5));
+    let at = admin.app.state.timestamp();
+    let answered = receipts(&admin.app, &floor.key, &batch).await;
+    assert!(
+        answered.iter().all(|r| r["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+    let (status, shift) = admin
+        .call("GET", &format!("/v1/office/shifts/{}", floor.shift), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{shift}");
+    assert_eq!(
+        shift["totals"],
+        json!({
+            "acceptedUnits": 5, "unitsInClosedBoxes": 5, "closedBoxes": 5, "openBoxes": 0,
+            "lastFactAt": at, "deviceIds": [floor.station],
+            "closedPallets": 2, "openPallets": 1
+        })
+    );
+    let (_, list) = admin.call("GET", "/v1/office/shifts", None).await;
+    assert_eq!(list[0]["totals"], shift["totals"]);
+}
+
 // Tests beyond the plan's own: the pallet's SSCC form, replays, overlapping
 // blocks, late closes, refused records that must leave no pallet, and the
 // station's counts kept as evidence.
@@ -2548,4 +2614,149 @@ async fn a_pallet_check_or_exception_is_written_with_its_batch_or_not_at_all() {
                 .unwrap();
         }
     }
+}
+
+// Tests beyond the plan's own for the office's pallet totals (plan ПЛ-Х
+// task 6): each shift counts its own pallets, a closed pallet counts with or
+// without boxes, an open pallet counts once, and the answer of an office
+// write carries the figures.
+
+/// A shift's pallet counts as the office reads them: `(closedPallets,
+/// openPallets)` of `GET /v1/office/shifts/{id}`.
+async fn pallet_totals(admin: &Admin, shift: &str) -> (Value, Value) {
+    let (status, body) = admin
+        .call("GET", &format!("/v1/office/shifts/{shift}"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    (
+        body["totals"]["closedPallets"].clone(),
+        body["totals"]["openPallets"].clone(),
+    )
+}
+
+/// Each shift's totals count the pallets of that shift only: two shifts with
+/// pallets of different states and one without pallets read differently,
+/// the list agrees shift by shift, a closed pallet counts whether its boxes
+/// are alive, taken apart or not yet received, an open pallet counts once
+/// however many boxes it holds, and the answer of the office's close of a
+/// shift carries the figures.
+#[tokio::test]
+async fn each_shift_counts_its_own_pallets_and_a_pallet_counts_once() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_pallet_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let pallets = issue_pallet_block(&admin.app, &floor.key, PALLET_REQUEST).await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let colleague = open_pallet_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
+    let colleague_block = issue_block(&admin.app, &colleague.key, BLOCK_REQUEST).await;
+    let colleague_pallets = issue_pallet_block(&admin.app, &colleague.key, PALLET_REQUEST).await;
+    let (_, third_key) = pair_device(&admin.app, "station").await;
+    let third = open_floor(&admin, &setup, &third_key, &setup.line).await;
+    let third_block = issue_block(&admin.app, &third.key, BLOCK_REQUEST).await;
+
+    let closing = |floor: &Floor, n: u32, pallet: u32, block: &Value, serial: u64| {
+        record(
+            floor,
+            n,
+            "pallet_closed",
+            pallet_closed(
+                &pallet_id(pallet),
+                block,
+                serial,
+                1,
+                &instant(100, 0),
+                &instant(150, 0),
+            ),
+        )
+    };
+    // This station: pallet 1 closed with a live box, pallet 2 closed and its
+    // only box (2) taken apart, pallet 3 closed before any box of it was
+    // received, pallet 4 open with three boxes (3 and 5 live, 6 taken apart).
+    let mut batch = Vec::new();
+    for (box_n, pallet) in [(1, 1), (2, 2), (3, 4), (5, 4), (6, 4)] {
+        batch.extend(boxed(&floor, &block, box_n, Some(&pallet_id(pallet))));
+    }
+    batch.push(closing(&floor, 201, 1, &pallets, 40));
+    batch.push(closing(&floor, 202, 2, &pallets, 41));
+    batch.push(closing(&floor, 203, 3, &pallets, 42));
+    for (n, box_n) in [(301, 2), (302, 6)] {
+        let mut apart = box_exception("disassemble", &box_id(box_n), &instant(161, 0));
+        apart["reasonCode"] = json!("damaged_package");
+        batch.push(record(&floor, n, "box_exception", apart));
+    }
+    let answered = receipts(&admin.app, &floor.key, &batch).await;
+    assert!(
+        answered.iter().all(|r| r["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+    // The colleague: pallets 50 and 51 closed with boxes, pallet 52 open
+    // with one; box 2001 has serial 3500, the first of its block.
+    let mut theirs = Vec::new();
+    for (box_n, pallet) in [(2001, 50), (2002, 51), (2003, 52)] {
+        theirs.extend(boxed(
+            &colleague,
+            &colleague_block,
+            box_n,
+            Some(&pallet_id(pallet)),
+        ));
+    }
+    theirs.push(closing(&colleague, 2201, 50, &colleague_pallets, 240));
+    theirs.push(closing(&colleague, 2202, 51, &colleague_pallets, 241));
+    let answered = receipts(&admin.app, &colleague.key, &theirs).await;
+    assert!(
+        answered.iter().all(|r| r["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+    // The third station works a shift without pallets: a box, no pallet.
+    let answered = receipts(
+        &admin.app,
+        &third.key,
+        &boxed(&third, &third_block, 4001, None),
+    )
+    .await;
+    assert!(
+        answered.iter().all(|r| r["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+
+    let expected = [
+        (&floor.shift, (json!(3), json!(1))),
+        (&colleague.shift, (json!(2), json!(1))),
+        (&third.shift, (json!(0), json!(0))),
+    ];
+    let (status, list) = admin.call("GET", "/v1/office/shifts", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    assert_eq!(list.as_array().unwrap().len(), 3, "{list}");
+    for (shift, counts) in &expected {
+        assert_eq!(&pallet_totals(&admin, shift).await, counts, "{shift}");
+        let listed = list
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == shift.as_str())
+            .unwrap_or_else(|| panic!("{shift} is not listed"));
+        assert_eq!(
+            (
+                &listed["totals"]["closedPallets"],
+                &listed["totals"]["openPallets"]
+            ),
+            (&counts.0, &counts.1),
+            "{shift}"
+        );
+    }
+    // The office's close answers with the figures, and a closed shift keeps
+    // them.
+    let closed = close_from_office(&admin, &floor.shift, "Станция не отвечает").await;
+    assert_eq!(
+        (
+            &closed["totals"]["closedPallets"],
+            &closed["totals"]["openPallets"]
+        ),
+        (&json!(3), &json!(1))
+    );
+    assert_eq!(
+        pallet_totals(&admin, &floor.shift).await,
+        (json!(3), json!(1))
+    );
 }

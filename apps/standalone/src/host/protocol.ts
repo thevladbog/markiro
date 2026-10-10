@@ -553,6 +553,8 @@ export const shiftTotalsSchema = z.object({
   openBoxes: z.number().int().nonnegative(),
   lastFactAt: z.iso.datetime().nullable(),
   deviceIds: z.array(z.uuid()),
+  closedPallets: z.number().int().nonnegative(),
+  openPallets: z.number().int().nonnegative(),
 });
 export type ShiftTotals = z.infer<typeof shiftTotalsSchema>;
 

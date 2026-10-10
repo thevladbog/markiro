@@ -6858,7 +6858,7 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
     let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
     let none = json!({
         "acceptedUnits": 0, "unitsInClosedBoxes": 0, "closedBoxes": 0, "openBoxes": 0,
-        "lastFactAt": null, "deviceIds": []
+        "lastFactAt": null, "deviceIds": [], "closedPallets": 0, "openPallets": 0
     });
     assert_eq!(totals(&admin, planned["id"].as_str().unwrap()).await, none);
     let mut entered = none.clone();
@@ -6954,7 +6954,8 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
         totals(&admin, shift).await,
         json!({
             "acceptedUnits": 5, "unitsInClosedBoxes": 3, "closedBoxes": 1, "openBoxes": 2,
-            "lastFactAt": first_batch, "deviceIds": [floor.station]
+            "lastFactAt": first_batch, "deviceIds": [floor.station],
+            "closedPallets": 0, "openPallets": 0
         })
     );
     // The number is a definition, not a side effect of the exceptions: an
@@ -7028,14 +7029,16 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
         totals(&admin, shift).await,
         json!({
             "acceptedUnits": 3, "unitsInClosedBoxes": 2, "closedBoxes": 1, "openBoxes": 1,
-            "lastFactAt": second_batch, "deviceIds": [floor.station]
+            "lastFactAt": second_batch, "deviceIds": [floor.station],
+            "closedPallets": 0, "openPallets": 0
         })
     );
     assert_eq!(
         totals(&admin, &colleague.shift).await,
         json!({
             "acceptedUnits": 2, "unitsInClosedBoxes": 0, "closedBoxes": 0, "openBoxes": 1,
-            "lastFactAt": second_batch, "deviceIds": [colleague.station]
+            "lastFactAt": second_batch, "deviceIds": [colleague.station],
+            "closedPallets": 0, "openPallets": 0
         })
     );
     // The devices come first entry first. A second device on a shift comes
@@ -7111,12 +7114,14 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
     );
     let colleagues = json!({
         "acceptedUnits": 3, "unitsInClosedBoxes": 1, "closedBoxes": 1, "openBoxes": 1,
-        "lastFactAt": third_batch, "deviceIds": [colleague.station]
+        "lastFactAt": third_batch, "deviceIds": [colleague.station],
+        "closedPallets": 0, "openPallets": 0
     });
     assert_eq!(totals(&admin, &colleague.shift).await, colleagues);
     let floors = json!({
         "acceptedUnits": 3, "unitsInClosedBoxes": 2, "closedBoxes": 1, "openBoxes": 1,
-        "lastFactAt": second_batch, "deviceIds": [other, floor.station]
+        "lastFactAt": second_batch, "deviceIds": [other, floor.station],
+        "closedPallets": 0, "openPallets": 0
     });
     assert_eq!(totals(&admin, shift).await, floors);
     // Every write of the office answers with the totals the list gives.

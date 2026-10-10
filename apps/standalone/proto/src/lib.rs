@@ -1488,8 +1488,10 @@ pub struct OfficeShift {
 /// were not taken apart (the cloud office's «Кодов в закрытых коробах»; the
 /// rest are in boxes still open, so a shift closed with a box open shows the
 /// gap), boxes closed and not taken apart, open boxes that hold a unit, when
-/// the host last received a record of the shift, and the devices that
-/// entered it, first entry first.
+/// the host last received a record of the shift, the devices that entered
+/// it, first entry first, and (plan ПЛ-Х) pallets closed and not taken apart
+/// and open pallets that hold a box not taken apart; a shift without pallets
+/// has none.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShiftTotals {
@@ -1499,6 +1501,8 @@ pub struct ShiftTotals {
     pub open_boxes: u32,
     pub last_fact_at: Option<String>,
     pub device_ids: Vec<String>,
+    pub closed_pallets: u32,
+    pub open_pallets: u32,
 }
 
 /// `POST /v1/office/shifts`: a planned shift. `boxCapacity` left out is the

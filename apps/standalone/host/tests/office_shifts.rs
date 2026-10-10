@@ -22,7 +22,7 @@ fn planned(id: &str, number: &str, setup: &ShiftSetup, rev: i64) -> Value {
         "rev": rev,
         "totals": {
             "acceptedUnits": 0, "unitsInClosedBoxes": 0, "closedBoxes": 0, "openBoxes": 0,
-            "lastFactAt": null, "deviceIds": []
+            "lastFactAt": null, "deviceIds": [], "closedPallets": 0, "openPallets": 0
         }
     })
 }
