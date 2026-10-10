@@ -294,26 +294,30 @@ async function badgeAttempt(context: SignInContext, raw: string): Promise<SignIn
   return signedIn(local, holder);
 }
 
-const OPERATOR_PRESENT = `SELECT o.id FROM ref_operators AS o WHERE o.id = ? AND ${NOT_QUARANTINED_OPERATOR}`;
+const OPERATOR_PRESENT = `SELECT o.name, o.role FROM ref_operators AS o WHERE o.id = ? AND ${NOT_QUARANTINED_OPERATOR}`;
 
 /**
- * Whether the signed-in operator would still be let in, after a sync:
- * `false` only when this pairing's copies are ready (a sync has begun to fill
- * them) and no longer hold the operator (the host turned them off, or their
- * record waits in quarantine). Copies that are not ready say nothing either
- * way.
+ * The signed-in operator as the copies have them now, after a sync: there,
+ * with the name and role to show (`present`); turned off by the host or
+ * waiting in quarantine (`absent`); or `unknown` while this pairing's copies
+ * are not ready, which says nothing either way.
  */
-export async function operatorStillAllowed(
+export type OperatorCopy =
+  { kind: "present"; name: string; role: string | null } | { kind: "absent" } | { kind: "unknown" };
+
+export async function readOperatorCopy(
   context: SignInContext,
   operatorId: string,
-): Promise<boolean> {
-  if (!(await copiesReady(context.local, context.pairing))) return true;
-  const rows = await context.local.query(
+): Promise<OperatorCopy> {
+  if (!(await copiesReady(context.local, context.pairing))) return { kind: "unknown" };
+  const [row] = await context.local.query(
     OPERATOR_PRESENT,
     [operatorId],
-    z.object({ id: z.string() }),
+    z.object({ name: z.string(), role: z.string().nullable() }),
   );
-  return rows.length > 0;
+  return row === undefined
+    ? { kind: "absent" }
+    : { kind: "present", name: row.name, role: row.role };
 }
 
 /** A personnel number and a PIN, one attempt at a time (`pinAttempt`). */

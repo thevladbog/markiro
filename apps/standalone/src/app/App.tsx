@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
-import { FloorOperatorScreen } from "../floor/FloorOperatorScreen.js";
+import { FloorApp } from "../floor/FloorApp.js";
 import { FloorStatusBar } from "../floor/FloorStatusBar.js";
 import { OperatorSignIn } from "../floor/OperatorSignIn.js";
 import { createKeyboardWedgeSource, type ScanSource } from "../floor/scan-source.js";
@@ -530,12 +530,21 @@ export function App({
               onOffice={() => dispatch({ type: "office_requested" })}
             />
           ) : (
-            <FloorOperatorScreen
+            <FloorApp
+              // One session's screen: nothing of it outlives the sign-out.
+              key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${view.operator.sessionId}`}
               operator={view.operator}
               local={localDb}
-              pairing={pairedStatus}
+              device={pairedStatus}
+              link={state.link}
               sync={state.sync}
+              shiftReads={state.shiftReads}
+              lineChangePending={state.pendingDevice !== null}
+              enter={hostApi.enterShift}
+              create={hostApi.createDeviceShift}
+              source={scanner}
               {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
+              dispatch={dispatch}
               onSignOut={operatorSignedOut}
             />
           )}

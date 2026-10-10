@@ -12,6 +12,11 @@ interface OperatorIdleLockOptions {
 export interface OperatorIdleLock {
   start(): void;
   stop(): void;
+  /**
+   * Starts the wait again, as a press does: a scan from a COM scanner presses
+   * no key. A function-typed property: the floor hands it on unbound.
+   */
+  touch: () => void;
 }
 
 const ACTIVITY_EVENTS = ["pointerdown", "keydown", "touchstart"] as const;
@@ -62,5 +67,6 @@ export function createOperatorIdleLock({
       activity();
     },
     stop,
+    touch: activity,
   };
 }
