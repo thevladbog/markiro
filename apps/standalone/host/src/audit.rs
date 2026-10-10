@@ -11,6 +11,8 @@ pub mod actions {
     /// `markiro-host restore` put a copy back (plan РК); the host is the
     /// actor.
     pub const HOST_RESTORE: &str = "host.restore";
+    /// An administrator resumed the stations' facts a restore held.
+    pub const HOST_RESTORE_RESUME: &str = "host.restore.resume";
     pub const DEVICE_LOCAL_PAIR: &str = "device.local_pair";
     pub const OFFICE_LOGIN: &str = "office.login";
     pub const OFFICE_LOGOUT: &str = "office.logout";
@@ -52,6 +54,9 @@ pub mod actions {
     pub const SHIFT_CLOSE: &str = "shift.close";
     /// A station got a block of SSCC serials.
     pub const SSCC_BLOCK_ISSUE: &str = "sscc.block.issue";
+    /// After a restore, a station gave the host back a block the copy had
+    /// lost (plan РК).
+    pub const SSCC_BLOCK_REGISTER: &str = "sscc.block.register";
     /// A copy of the database, scheduled (the host's) or asked for in the
     /// office (plan РК); `failed` when a folder did not get it.
     pub const BACKUP_CREATE: &str = "backup.create";

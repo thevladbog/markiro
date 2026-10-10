@@ -6,9 +6,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::{Request, State};
-use axum::http::{Method, Uri};
+use axum::http::header::RETRY_AFTER;
+use axum::http::{HeaderValue, Method, StatusCode, Uri};
 use axum::middleware::{self, Next};
-use axum::response::Response;
+use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post, put};
 use axum::{Json, Router};
 use sqlx::SqlitePool;
@@ -133,7 +134,52 @@ pub fn router(state: AppState) -> Router {
         .merge(protected_routes().route_layer(middleware::from_fn(protocol_guard)))
         .method_not_allowed_fallback(method_not_allowed)
         .fallback(not_found)
+        .layer(middleware::from_fn_with_state(state.clone(), restore_hold))
         .with_state(state)
+}
+
+/// `Retry-After` of a held answer, in seconds: the hold ends when an
+/// administrator decides, which takes minutes, so a station asks about once
+/// a minute.
+pub const RESTORE_RETRY_AFTER_SECS: u64 = 60;
+
+/// What a restore holds (plan РК): a station's facts and its code checks,
+/// whose answers depend on the shifts, blocks and codes a copy may lack.
+fn held_by_a_restore(path: &str) -> bool {
+    path == "/v1/device/facts" || path.starts_with("/v1/device/codes/")
+}
+
+/// From `markiro-host restore` until an administrator resumes, a held path
+/// answers `restore_pending` (503) instead of a receipt: a receipt is kept
+/// for good, so a fact refused against a copy that lacks its shift or block
+/// would stay refused, while a station sends a fact the host did not take
+/// again later. A layer over the whole router, so a held path is held
+/// whichever plan adds its route.
+pub async fn restore_hold(
+    State(state): State<AppState>,
+    request: Request,
+    next: Next,
+) -> Result<Response, ApiError> {
+    if held_by_a_restore(request.uri().path()) {
+        let since: Option<String> =
+            sqlx::query_scalar("SELECT facts_held_since FROM site WHERE id = 1")
+                .fetch_one(&state.pool)
+                .await
+                .map_err(ApiError::internal)?;
+        if let Some(since) = since {
+            let mut held = ApiError::new(
+                StatusCode::SERVICE_UNAVAILABLE,
+                markiro_proto::codes::RESTORE_PENDING,
+                "the host was restored from a copy: facts wait until the office resumes them",
+            )
+            .with_details(serde_json::json!({ "since": since }))
+            .into_response();
+            held.headers_mut()
+                .insert(RETRY_AFTER, HeaderValue::from(RESTORE_RETRY_AFTER_SECS));
+            return Ok(held);
+        }
+    }
+    Ok(next.run(request).await)
 }
 
 /// Routes behind the protocol guard.
@@ -154,6 +200,10 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/device/sscc/blocks",
             post(crate::routes::sscc_blocks::issue_block),
+        )
+        .route(
+            "/v1/device/sscc/blocks/known",
+            post(crate::routes::known_blocks::register_known_blocks),
         )
         .route(
             "/v1/device/facts",
@@ -290,6 +340,10 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/office/backups/settings",
             put(crate::routes::backups::put_settings),
+        )
+        .route(
+            "/v1/office/backups/resume",
+            post(crate::routes::backups::resume_facts),
         )
         .route(
             "/v1/office/users",

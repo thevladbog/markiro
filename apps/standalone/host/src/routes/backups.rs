@@ -3,9 +3,11 @@
 //! «Сделать копию сейчас», answered at once with `202`; the worker makes the
 //! copy, and the office reads the state again until nothing runs) and
 //! `PUT /v1/office/backups/settings` (administrators: the second folder,
-//! with `expectedRev`). A folder is tried before it is saved, outside the
-//! write lock and for at most [`PROBE_TIMEOUT`]: a share on a computer that
-//! is off can take much longer to fail than the office waits.
+//! with `expectedRev`) and `POST /v1/office/backups/resume` (administrators:
+//! end the hold of the stations' facts a restore set). A folder is tried
+//! before it is saved, outside the write lock and for at most
+//! [`PROBE_TIMEOUT`]: a share on a computer that is off can take much longer
+//! to fail than the office waits.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -244,6 +246,53 @@ pub async fn put_settings(
     commit_with_revision(tx, &state.revisions, new_rev)
         .await
         .map_err(ApiError::internal)?;
+    Ok(Json(answered))
+}
+
+/// End the hold a restore set: the stations' facts and code checks are
+/// answered again. Whether every station gave its blocks back first is the
+/// administrator's call (a station on a dead computer never will); the
+/// answer and the audit row say how many did. Resuming without a hold
+/// changes nothing and writes no row. Devices and the hold are no feed data:
+/// no revision.
+pub async fn resume_facts(
+    State(state): State<AppState>,
+    context: OfficeContext,
+) -> Result<Json<BackupState>, ApiError> {
+    context.require_admin()?;
+    let backups = backups(&state)?;
+    let at = state.timestamp();
+    let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
+    context.require_admin_in(&mut tx).await?;
+    let Some(hold) = read_hold(&mut tx).await? else {
+        return answer(&mut tx, backups, at).await.map(Json);
+    };
+    sqlx::query("UPDATE site SET facts_held_since = NULL WHERE id = 1")
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?;
+    let reconciled = hold.stations.iter().filter(|each| each.reconciled).count();
+    audit::record(
+        &mut tx,
+        &at,
+        Entry {
+            actor: context.actor(),
+            action: actions::HOST_RESTORE_RESUME,
+            target_type: Some("site"),
+            target_id: Some("1"),
+            outcome: Outcome::Ok,
+            details: json!({
+                "since": hold.since,
+                "epoch": hold.epoch,
+                "stations": hold.stations.len(),
+                "reconciled": reconciled,
+            }),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)?;
+    let answered = answer(&mut tx, backups, at).await?;
+    tx.commit().await.map_err(ApiError::internal)?;
     Ok(Json(answered))
 }
 
