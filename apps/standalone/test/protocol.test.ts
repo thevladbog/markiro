@@ -1350,6 +1350,69 @@ describe("shift shapes", () => {
     expect(shiftCloseSchema.safeParse({ reason: close.reason }).success).toBe(false);
   });
 
+  it("read a shift's figures, a planned shift's zeros among them, and refuse a figure of another form or a figure left out", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    // The live codes in the boxes against those in closed boxes: one box is still open.
+    expect(shift.totals).toEqual({
+      acceptedUnits: 547,
+      unitsInClosedBoxes: 540,
+      closedBoxes: 45,
+      openBoxes: 1,
+      lastFactAt: "2026-10-08T09:41:07Z",
+      deviceIds: ["7c9e6679-7425-40de-944b-e07fc1f90ae7"],
+    });
+    const planned = {
+      ...shift,
+      status: "planned",
+      ownerDeviceId: null,
+      openedAt: null,
+      totals: {
+        acceptedUnits: 0,
+        unitsInClosedBoxes: 0,
+        closedBoxes: 0,
+        openBoxes: 0,
+        lastFactAt: null,
+        deviceIds: [],
+      },
+    };
+    expect(officeShiftSchema.parse(planned)).toEqual(planned);
+    const refused: Record<string, unknown[]> = {
+      acceptedUnits: [-1, 1.5, "547", null],
+      unitsInClosedBoxes: [-1, 1.5, "540", null],
+      closedBoxes: [-1, 1.5, "45", null],
+      openBoxes: [-1, 1.5, "1", null],
+      lastFactAt: ["yesterday", 20261008],
+      deviceIds: [["42"], "7c9e6679-7425-40de-944b-e07fc1f90ae7", null],
+    };
+    for (const [field, values] of Object.entries(refused)) {
+      for (const value of values) {
+        const result = officeShiftSchema.safeParse({
+          ...shift,
+          totals: { ...shift.totals, [field]: value },
+        });
+        expect(result.success, `${field}: ${JSON.stringify(value)}`).toBe(false);
+      }
+    }
+    for (const field of Object.keys(shift.totals)) {
+      const totals = Object.fromEntries(
+        Object.entries(shift.totals).filter(([key]) => key !== field),
+      );
+      expect(officeShiftSchema.safeParse({ ...shift, totals }).success, `without ${field}`).toBe(
+        false,
+      );
+    }
+    for (const totals of [null, [], undefined]) {
+      expect(officeShiftSchema.safeParse({ ...shift, totals }).success, String(totals)).toBe(false);
+    }
+  });
+
+  it("tolerate a figure a newer host adds to a shift's figures", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    const newer = officeShiftSchema.safeParse({ ...shift, totals: { ...shift.totals, voided: 3 } });
+    expect(newer.success).toBe(true);
+    expect(newer.data?.totals.acceptedUnits).toBe(547);
+  });
+
   it("read the refusals of a busy shift and of a prefix with no serials left", () => {
     expect(errorBodySchema.parse(fixture("error-shift-busy.json")).error).toMatchObject({
       code: "conflict",

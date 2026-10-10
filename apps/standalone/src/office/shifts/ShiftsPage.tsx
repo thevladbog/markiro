@@ -41,6 +41,7 @@ import { CloseShiftDialog } from "./CloseShiftDialog.js";
 import { DeleteShiftDialog } from "./DeleteShiftDialog.js";
 import { ShiftDialog } from "./ShiftDialog.js";
 import { ShiftPlanDialog } from "./ShiftPlanDialog.js";
+import { ShiftTotalsDialog } from "./ShiftTotalsDialog.js";
 import { datePickerTexts } from "./shift-text.js";
 
 /** A status in its phase, after the cloud's `SHIFT_STATUS_TO_PHASE`. */
@@ -66,7 +67,8 @@ type ShiftsDialog =
   | { kind: "edit"; shift: OfficeShift }
   | { kind: "plan"; shift: OfficeShift }
   | { kind: "delete"; shift: OfficeShift }
-  | { kind: "close"; shift: OfficeShift };
+  | { kind: "close"; shift: OfficeShift }
+  | { kind: "totals"; shift: OfficeShift };
 
 /**
  * Shifts (stage 2a spec §5.6), in the section «Производство». The host sends
@@ -247,15 +249,38 @@ export function ShiftsPage() {
         );
       },
     },
-  ];
-
-  if (canPlan) {
-    columns.push({
+    {
+      // What the shift put in closed boxes, as the cloud's list shows it; a planned shift has none.
+      // After the status, so the columns before it keep their places.
+      key: "output",
+      title: t("office.shifts.table.output"),
+      mono: true,
+      align: "right",
+      render: (shift) =>
+        shift.status === "planned"
+          ? t("office.common.none")
+          : t("office.shifts.output", {
+              units: UNITS.format(shift.totals.unitsInClosedBoxes),
+              boxes: UNITS.format(shift.totals.closedBoxes),
+            }),
+    },
+    // Every role reads a shift's figures; the writes are `planShifts`.
+    {
       key: "actions",
       title: t("office.shifts.table.actions"),
       render: (shift) => (
         <RowActions>
-          {shift.status === "planned" && (
+          {shift.status !== "planned" && (
+            <Button
+              variant="secondary"
+              size="compact"
+              aria-label={t("office.shifts.totalsNamed", { number: shift.number })}
+              onClick={() => open({ kind: "totals", shift })}
+            >
+              {t("office.shifts.totalsAction")}
+            </Button>
+          )}
+          {canPlan && shift.status === "planned" && (
             <>
               <Button
                 variant="secondary"
@@ -275,7 +300,7 @@ export function ShiftsPage() {
               </Button>
             </>
           )}
-          {shift.status === "active" && (
+          {canPlan && shift.status === "active" && (
             <>
               <Button
                 variant="secondary"
@@ -297,8 +322,8 @@ export function ShiftsPage() {
           )}
         </RowActions>
       ),
-    });
-  }
+    },
+  ];
 
   const content = () => {
     if (shifts.isPending) return <PageLoading />;
@@ -487,6 +512,9 @@ export function ShiftsPage() {
           onReload={reload}
           onOutdated={readAgain}
         />
+      )}
+      {dialog?.kind === "totals" && (
+        <ShiftTotalsDialog shift={dialog.shift} onClose={() => setDialog(null)} />
       )}
       {canPlan && dialog?.kind === "plan" && (
         <ShiftPlanDialog

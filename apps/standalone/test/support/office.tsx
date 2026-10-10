@@ -81,6 +81,7 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
       unexpected("updateTemplateDefaults"),
     ),
     listShifts: vi.fn<HostApi["listShifts"]>(() => unexpected("listShifts")),
+    getShift: vi.fn<HostApi["getShift"]>(() => unexpected("getShift")),
     createShift: vi.fn<HostApi["createShift"]>(() => unexpected("createShift")),
     updateShift: vi.fn<HostApi["updateShift"]>(() => unexpected("updateShift")),
     deleteShift: vi.fn<HostApi["deleteShift"]>(() => unexpected("deleteShift")),

@@ -538,11 +538,31 @@ export type ShiftOrigin = z.infer<typeof shiftOriginSchema>;
 const civilDateTextSchema = z.string().regex(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/);
 
 /**
- * `GET /v1/office/shifts` and the answer of every office write of a shift. It
- * carries ids, not names: the office names products, lines and counterparties
- * from its own lists. `closeReasonCode` is one of the domain's six codes of a
- * station's close (plan 2a2), read as text so a code a newer host adds does
- * not fail the list; `closeReasonText` is the office's words.
+ * A shift's figures (plan 2a2), read from its facts on every answer and never
+ * stored, so they change without a revision: the live codes in its boxes, open
+ * and closed alike («Принято кодов»); the live codes in boxes closed and not
+ * taken apart («Кодов в закрытых коробах», the cloud's `containedUnits`); the
+ * boxes closed and not taken apart; the open boxes that hold a live code; the
+ * host's time of the last record of the shift; its devices, first entry first.
+ * A planned shift's are zeros, `null` and `[]`.
+ */
+export const shiftTotalsSchema = z.object({
+  acceptedUnits: z.number().int().nonnegative(),
+  unitsInClosedBoxes: z.number().int().nonnegative(),
+  closedBoxes: z.number().int().nonnegative(),
+  openBoxes: z.number().int().nonnegative(),
+  lastFactAt: z.iso.datetime().nullable(),
+  deviceIds: z.array(z.uuid()),
+});
+export type ShiftTotals = z.infer<typeof shiftTotalsSchema>;
+
+/**
+ * `GET /v1/office/shifts`, `GET …/{id}` and the answer of every office write of
+ * a shift, each with its `totals`. It carries ids, not names: the office names
+ * products, lines, counterparties and devices from its own lists.
+ * `closeReasonCode` is one of the domain's six codes of a station's close
+ * (plan 2a2), read as text so a code a newer host adds does not fail the list;
+ * `closeReasonText` is the office's words.
  */
 export const officeShiftSchema = z.object({
   id: z.uuid(),
@@ -566,6 +586,7 @@ export const officeShiftSchema = z.object({
   lateDataAt: z.iso.datetime().nullable(),
   createdAt: z.iso.datetime(),
   rev: z.number().int(),
+  totals: shiftTotalsSchema,
 });
 export type OfficeShift = z.infer<typeof officeShiftSchema>;
 

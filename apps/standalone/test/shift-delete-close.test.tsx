@@ -324,7 +324,7 @@ describe("office shifts: deleting a planned shift", () => {
       const view = await openShifts(session);
       expect(screen.getAllByRole("button", { name: /^Удалить смену / })).toHaveLength(1);
       expect(within(shiftRow("OCT26-004")).queryByRole("button", { name: /Удалить/ })).toBeNull();
-      expect(within(shiftRow("OCT26-001/S")).queryAllByRole("button")).toEqual([]);
+      expect(within(shiftRow("OCT26-001/S")).queryByRole("button", { name: /Удалить/ })).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Удалить смену OCT26-005" }));
       fireEvent.click(
         within(await screen.findByRole("dialog", { name: "Удалить смену OCT26-005?" })).getByRole(
@@ -670,7 +670,7 @@ describe("office shifts: closing an active shift", () => {
       const view = await openShifts(session);
       expect(screen.getAllByRole("button", { name: /^Закрыть смену / })).toHaveLength(1);
       expect(within(shiftRow("OCT26-005")).queryByRole("button", { name: /Закрыть/ })).toBeNull();
-      expect(within(shiftRow("OCT26-001/S")).queryAllByRole("button")).toEqual([]);
+      expect(within(shiftRow("OCT26-001/S")).queryByRole("button", { name: /Закрыть/ })).toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Закрыть смену OCT26-004" }));
       await screen.findByRole("dialog", { name: "Закрыть смену OCT26-004" });
       giveReason("Станция сломалась");

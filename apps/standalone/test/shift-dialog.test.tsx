@@ -14,6 +14,7 @@ import {
   LINE_2,
   MILK,
   MILK_BOX,
+  NO_TOTALS,
   NORTH,
   openShifts,
   pickDate,
@@ -31,6 +32,7 @@ const CREATED: OfficeShift = {
   status: "planned",
   ownerDeviceId: null,
   openedAt: null,
+  totals: NO_TOTALS,
 };
 
 function api(code: string, details: Record<string, unknown> = {}): HostError {

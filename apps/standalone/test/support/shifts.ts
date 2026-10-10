@@ -8,6 +8,7 @@ import type {
   OfficeProduct,
   OfficeShift,
   OfficeUser,
+  ShiftTotals,
   TemplateDefaults,
 } from "../../src/host/protocol.js";
 import { fakeOfficeSession, ORG_PROFILE, renderOffice, type FakeOfficeSession } from "./office.js";
@@ -142,6 +143,16 @@ export const DEFAULTS: TemplateDefaults = {
   rev: 80,
 };
 
+/** The figures of a shift no station has worked on: a planned one's. */
+export const NO_TOTALS: ShiftTotals = {
+  acceptedUnits: 0,
+  unitsInClosedBoxes: 0,
+  closedBoxes: 0,
+  openBoxes: 0,
+  lastFactAt: null,
+  deviceIds: [],
+};
+
 /** An active shift of milk on line 2 for a counterparty, as `office-shift.json`. */
 export const ACTIVE: OfficeShift = {
   id: "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
@@ -165,6 +176,14 @@ export const ACTIVE: OfficeShift = {
   lateDataAt: null,
   createdAt: "2026-10-07T15:30:00Z",
   rev: 71,
+  totals: {
+    acceptedUnits: 547,
+    unitsInClosedBoxes: 540,
+    closedBoxes: 45,
+    openBoxes: 1,
+    lastFactAt: "2026-10-08T09:41:07Z",
+    deviceIds: ["7c9e6679-7425-40de-944b-e07fc1f90ae7"],
+  },
 };
 
 /** A planned shift of water on line 10, no plan and no counterparty. */
@@ -183,6 +202,7 @@ export const PLANNED: OfficeShift = {
   ownerDeviceId: null,
   openedAt: null,
   rev: 72,
+  totals: NO_TOTALS,
 };
 
 /** A shift a station created and closed with a reason, data arriving after. */
@@ -199,6 +219,14 @@ export const CLOSED: OfficeShift = {
   closeReasonCode: "equipment_stop",
   lateDataAt: "2026-10-01T14:30:00Z",
   rev: 60,
+  totals: {
+    acceptedUnits: 492,
+    unitsInClosedBoxes: 492,
+    closedBoxes: 41,
+    openBoxes: 0,
+    lastFactAt: "2026-10-01T14:30:00Z",
+    deviceIds: ["7c9e6679-7425-40de-944b-e07fc1f90ae7"],
+  },
 };
 
 /**

@@ -98,11 +98,33 @@ describe("office shifts: the list", () => {
       "▸Активна",
     ]);
     expect(screen.getByText("Показано 3 из 3")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "Выпуск" })).toBeTruthy();
     expect(
       screen.getByText(
         "Показаны запланированные и активные смены и закрытые за последний 31 день. Чтобы найти другие, выберите период.",
       ),
     ).toBeTruthy();
+  });
+
+  it("shows what an active and a closed shift put in closed boxes, and nothing for a planned one", async () => {
+    const big: OfficeShift = {
+      ...ACTIVE,
+      id: "10000000-0000-4000-8000-000000000009",
+      number: "B-1",
+      totals: {
+        ...ACTIVE.totals,
+        acceptedUnits: 12_010,
+        unitsInClosedBoxes: 12_000,
+        closedBoxes: 1000,
+      },
+    };
+    await openShifts(shiftsSession([PLANNED, ACTIVE, CLOSED, big]));
+    expect(cells("OCT26-005")[7]).toBe("—");
+    // The codes in closed boxes, not every accepted code: one box of the active shift is open.
+    expect(cells("OCT26-004")[7]).toBe("540 шт · 45 кор.");
+    expect(cells("OCT26-001/S")[7]).toBe("492 шт · 41 кор.");
+    // A no-break space between the thousands.
+    expect(cells("B-1")[7]).toBe("12\u00a0000 шт · 1\u00a0000 кор.");
   });
 
   it("says why a closed shift closed, with data after closing, a station's reason in words and the office's in its own", async () => {

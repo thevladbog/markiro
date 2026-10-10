@@ -374,6 +374,12 @@ const CASES: Case[] = [
     { method: "GET", path: "/v1/office/shifts?from=2026-09-01&to=2026-10-08", body: undefined },
   ],
   [
+    "getShift",
+    fixture("office-shift.json"),
+    (api) => api.getShift(TOKEN, SHIFT_ID),
+    { method: "GET", path: `/v1/office/shifts/${SHIFT_ID}`, body: undefined },
+  ],
+  [
     "createShift",
     fixture("office-shift.json"),
     (api) => api.createShift(TOKEN, SHIFT_CREATE),
@@ -463,6 +469,19 @@ describe("HostApi shifts", () => {
     await expect(list.createShift(TOKEN, SHIFT_CREATE)).rejects.toThrow();
     await expect(list.updateShift(TOKEN, SHIFT_ID, SHIFT_UPDATE)).rejects.toThrow();
     await expect(list.closeShift(TOKEN, SHIFT_ID, SHIFT_CLOSE)).rejects.toThrow();
+  });
+
+  it("returns one shift with its figures, and rejects an answer that is a list or no shift", async () => {
+    await expect(recording(shift).api.getShift(TOKEN, SHIFT_ID)).resolves.toMatchObject({
+      number: "OCT26-004",
+      totals: { acceptedUnits: 547, unitsInClosedBoxes: 540, closedBoxes: 45, openBoxes: 1 },
+    });
+    await expect(recording([shift]).api.getShift(TOKEN, SHIFT_ID)).rejects.toThrow();
+    await expect(recording(notAShift).api.getShift(TOKEN, SHIFT_ID)).rejects.toThrow();
+    const withoutTotals = Object.fromEntries(
+      Object.entries(shift as object).filter(([key]) => key !== "totals"),
+    );
+    await expect(recording(withoutTotals).api.getShift(TOKEN, SHIFT_ID)).rejects.toThrow();
   });
 
   it("resolves a delete with nothing, and rejects an answer that carries a body", async () => {

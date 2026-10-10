@@ -1923,18 +1923,25 @@ kiosk mode shows them on the station.
   under it, the mode as a word on a category tag (the cloud's tones:
   aggregation teal, validation violet), the plan («—» for none; thousands
   apart, `Intl.NumberFormat("ru")`) and the status as a phase (a closed shift
-  as done). It shows the plan, not units accepted. Plan 2a2 adds a required
-  `totals` (accepted units, closed and open boxes, last fact, device ids) to
-  **every** `OfficeShift`, the list included (fixture
-  `proto/fixtures/office-shift.json`; there is no separate detail fixture), and
-  this page does not read it yet: `officeShiftSchema` is not strict, so a host
-  that sends `totals` is tolerated, but the test «response fixture
-  office-shift.json parses without losing a field» in `test/protocol.test.ts`
-  fails once the fixture carries it. Whichever of plan 2a2 and plan 2a3 merges second adds
-  `totals` to `officeShiftSchema` and to the test shifts
-  (`test/support/shifts.ts`, the test files) in its PR; the row then shows the
-  accepted units and boxes, and what remains of the «Итоги» window (plan 2a3's
-  last task, rewritten after plan 2a2) is decided then. A shift carries ids,
+  as done), then «Выпуск»: for an active or a closed shift the codes in closed
+  boxes and the closed boxes of its `totals` («540 шт · 45 кор.», the cloud's
+  `containedUnits` and `closedBoxes`), «—» for a planned one; the column
+  follows the status so the columns before it keep their places. Every
+  `OfficeShift` carries plan 2a2's required `totals` (`shiftTotalsSchema`, six
+  fields; fixture `proto/fixtures/office-shift.json`, read by the Rust fixture
+  tests and by «response fixture office-shift.json» in `test/protocol.test.ts`).
+  «Итоги» on an active or a closed row, for every role (the writes stay
+  `planShifts`), opens `ShiftTotalsDialog`, which reads `GET …/{id}`
+  (`getShift`, `officeKeys.shift`) at every opening, since the totals change
+  without a revision: the plan, «Принято кодов» (`acceptedUnits`), «Кодов в
+  закрытых коробах», the closed and open boxes, «Последние данные со станции»
+  (in the organization's zone, or this PC's with a note while the profile does
+  not load or names a zone the PC lacks; the zone is fixed when the figures
+  first show) and the shift's devices, named from `listDevices` for an
+  administrator (a revoked one marked «(отозвано)») and by the first eight
+  characters of the id for a technologist, for an id the list lacks or while
+  the list does not load, with a note saying why. The full card of a shift is
+  stage 4. A shift carries ids,
   so the page names them from `listProducts`,
   `listLines` and `listCounterparties`, an archived record marked «(в архиве)»,
   and one a list lacks or that did not load by the first eight characters of
@@ -2599,6 +2606,6 @@ either; a file log is stage 5.
   opened by a real station (the station's side is plan 2a5); a station moved
   to another line while it works on a shift (the dialog's sentence describes
   what plan 2a5 builds); and the list against a host with months of shifts or
-  a period of 366 days. The shifts' totals (plan 2a2's `totals` in every
-  `OfficeShift`) are not read, and the «Итоги» window is not built (plan 2a3's
-  last task, rewritten after plan 2a2).
+  a period of 366 days. The «Итоги» window and the «Выпуск» column have run
+  only against fixture totals: never against a host's subqueries over real
+  facts, nor with the time of the last fact written by WebView2's `Intl`.

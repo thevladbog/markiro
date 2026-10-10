@@ -165,6 +165,8 @@ export interface HostApi {
    * produced in it. Newest production date first.
    */
   listShifts: (token: string, period?: ShiftPeriod) => Promise<OfficeShift[]>;
+  /** One shift, its figures read afresh; `not_found` once it was deleted. */
+  getShift: (token: string, id: string) => Promise<OfficeShift>;
   createShift: (token: string, create: ShiftCreate) => Promise<OfficeShift>;
   updateShift: (token: string, id: string, update: ShiftUpdate) => Promise<OfficeShift>;
   /** `204`, only a planned shift; a delete repeated after a lost answer is `not_found`. */
@@ -403,6 +405,11 @@ export function createHostApi(client: HostClient): HostApi {
           : `/v1/office/shifts?from=${encodeURIComponent(period.from)}&to=${encodeURIComponent(period.to)}`,
         { officeToken: token, schema: z.array(officeShiftSchema) },
       ),
+    getShift: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}`, {
+        officeToken: token,
+        schema: officeShiftSchema,
+      }),
     createShift: (token, create) =>
       client.request("POST", "/v1/office/shifts", {
         body: create,

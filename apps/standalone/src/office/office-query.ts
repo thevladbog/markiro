@@ -33,6 +33,8 @@ export const officeKeys = {
     period?.from ?? null,
     period?.to ?? null,
   ],
+  /** One shift with its figures (`GET /v1/office/shifts/{id}`), read afresh at every opening. */
+  shift: (id: string) => ["office", "shift", id],
   /** One template with its layout (`GET /v1/office/templates/{id}`). */
   template: (id: string) => ["office", "template", id],
   /**
