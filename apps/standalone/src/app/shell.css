@@ -598,6 +598,23 @@
   gap: 16px;
 }
 
+/* The label the work stopped for (plan 2a7): its check or its recovery, with
+   the buttons in rows that wrap at 1024 px and the reasons of a reprint as a
+   grid of 64 px buttons. */
+.work-screen__label p {
+  margin: 0 0 8px;
+}
+
+.work-screen__label .standalone-form__actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+.work-screen__label .work-screen__reasons {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
 .work-screen__leaving {
   margin: 0;
 }

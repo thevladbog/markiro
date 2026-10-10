@@ -1,0 +1,338 @@
+import { formatSsccHri } from "@markiro/domain";
+import type { TFunction } from "i18next";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+
+import { Alert, Button } from "@markiro/ui";
+
+import { REPRINT_REASONS } from "../exception-reasons.js";
+import type { PrinterProfile, WorkstationSettings } from "../setup/workstation-settings.js";
+import type { PrintJob } from "./print-jobs.js";
+import { awaitsCheck, printerForAgain, type PrintAgain } from "./print-resolution.js";
+
+/** What the panel says under the label: a scan that did not match, a decision that could not be done. */
+export type LabelNote =
+  | { kind: "mismatch"; sscc: string }
+  | { kind: "not_sscc" }
+  | { kind: "no_printer" }
+  | { kind: "render_failed" }
+  | { kind: "moved" };
+
+/** The part of the workstation's settings the panel reads to say where a label will go. */
+export type PanelSettings = Pick<WorkstationSettings, "printers" | "assignments">;
+
+export interface LabelPanelProps {
+  /** A job that waits: prepared, sending, failed, unknown, or sent with its check to do. */
+  job: PrintJob;
+  /** A decision is being carried out: every button waits (and keeps its focus). */
+  busy: boolean;
+  note: LabelNote | null;
+  /** The workstation's settings, read when the panel opens: which printer a reprint goes to. */
+  loadSettings: () => Promise<PanelSettings>;
+  onPrintAgain: (request: PrintAgain) => void;
+  onPrinted: () => void;
+  onSkip: () => void;
+  /** The workstation setup; absent where the floor gives none. */
+  onSetup?: () => void;
+}
+
+type Mode =
+  | { kind: "main" }
+  | { kind: "reason"; printer: PrinterProfile | null }
+  | { kind: "printers"; printers: PrinterProfile[] | null }
+  | { kind: "skip" };
+
+type Settings = { kind: "loading" } | { kind: "ready"; value: PanelSettings } | { kind: "failed" };
+
+/** A button that is waiting for a decision's answer: on the keyboard still, and a press that does nothing. */
+const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
+
+function noteText(note: LabelNote, t: TFunction): string {
+  switch (note.kind) {
+    case "mismatch":
+      return t("floor.print.check.mismatch", { sscc: formatSsccHri(note.sscc) });
+    case "not_sscc":
+      return t("floor.print.check.notSscc");
+    case "no_printer":
+      return t("floor.print.notes.noPrinter");
+    case "render_failed":
+      return t("floor.print.notes.renderFailed");
+    case "moved":
+      return t("floor.print.notes.moved");
+  }
+}
+
+/**
+ * Which printer a reprint of `job` goes to, in words, before the operator
+ * confirms it: the chosen one, the job's own as the settings have it now, or —
+ * when the job's own printer was deleted from the settings — the purpose's
+ * printer, which the operator is told is another one than the label may have
+ * come out on.
+ */
+function targetText(
+  t: TFunction,
+  job: PrintJob,
+  settings: Settings,
+  chosen: PrinterProfile | null,
+): string | null {
+  if (settings.kind === "loading") return null;
+  if (settings.kind === "failed") return t("floor.print.target.unknown");
+  const printer = printerForAgain(job, settings.value, chosen);
+  if (printer === null) return t("floor.print.target.none");
+  const former = job.printer;
+  const gone =
+    chosen === null &&
+    former !== null &&
+    !settings.value.printers.some((candidate) => candidate.id === former.id);
+  return t(gone ? "floor.print.target.replaced" : "floor.print.target.label", {
+    name: printer.name,
+    language: printer.language.toUpperCase(),
+    dpi: printer.dpi,
+    former: former?.name ?? "",
+  });
+}
+
+/**
+ * The label of the box the work stopped for (stage 2a spec §5.7.5): its
+ * check — scan the SSCC, or skip it — or its recovery when it failed or its
+ * outcome is unknown. Only the operator sends a label again: a label that
+ * may already exist only with a reason, which the panel asks before the
+ * send and builds from its buttons alone; «Продолжить без этикетки» after a
+ * confirmation. Before a reprint is confirmed the panel says which printer
+ * it goes to. It sits in the work screen's polite region, so its alerts have
+ * no role of their own; the work screen's «Выйти из смены» stays outside it,
+ * so nobody is held here.
+ */
+export function LabelPanel({
+  job,
+  busy,
+  note,
+  loadSettings,
+  onPrintAgain,
+  onPrinted,
+  onSkip,
+  onSetup,
+}: LabelPanelProps) {
+  const { t } = useTranslation();
+  const [mode, setMode] = useState<Mode>({ kind: "main" });
+  const [settings, setSettings] = useState<Settings>({ kind: "loading" });
+  const root = useRef<HTMLDivElement>(null);
+  const shownMode = useRef(mode.kind);
+  const checking = awaitsCheck(job);
+  // A label that may already be on a box: a second one needs a reason.
+  const mayExist = checking || job.state === "unknown";
+  const sscc = t("floor.print.sscc", { sscc: formatSsccHri(job.sscc) });
+
+  useEffect(() => {
+    let cancelled = false;
+    loadSettings().then(
+      (value) => {
+        if (!cancelled) setSettings({ kind: "ready", value });
+      },
+      () => {
+        if (!cancelled) setSettings({ kind: "failed" });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+    // Read once, when the panel opens: a new job, state or attempt opens a new panel.
+  }, [loadSettings]);
+
+  // The button that was pressed is gone when the panel changes its view: the
+  // focus goes to the first button of the new one, not to the page.
+  useEffect(() => {
+    if (shownMode.current === mode.kind) return;
+    shownMode.current = mode.kind;
+    root.current?.querySelector("button")?.focus();
+  }, [mode.kind]);
+
+  /** Props of a button: while a decision runs it stays on the keyboard and does nothing. */
+  const press = (action: () => void) => ({
+    "aria-disabled": busy ? true : undefined,
+    style: busy ? WAITING_STYLE : undefined,
+    onClick: () => {
+      if (!busy) action();
+    },
+  });
+
+  const again = (printer: PrinterProfile | null) => {
+    if (mayExist) {
+      setMode({ kind: "reason", printer });
+      return;
+    }
+    setMode({ kind: "main" });
+    onPrintAgain({ reason: null, printer });
+  };
+
+  const choosePrinter = () => {
+    setMode({ kind: "printers", printers: null });
+    loadSettings().then(
+      (loaded) =>
+        setMode((now) =>
+          now.kind === "printers" ? { kind: "printers", printers: loaded.printers } : now,
+        ),
+      () => setMode((now) => (now.kind === "printers" ? { kind: "printers", printers: [] } : now)),
+    );
+  };
+
+  const back = (
+    <Button size="floor" variant="secondary" {...press(() => setMode({ kind: "main" }))}>
+      {t("floor.print.back")}
+    </Button>
+  );
+
+  let body: ReactNode;
+  if (mode.kind === "reason") {
+    const target = targetText(t, job, settings, mode.printer);
+    body = (
+      <Alert
+        tone="warn"
+        role="presentation"
+        title={t("floor.print.reason.title")}
+        className="work-screen__label"
+      >
+        <p>{t("floor.print.reason.hint")}</p>
+        <p>{sscc}</p>
+        {target !== null && <p>{target}</p>}
+        <div className="standalone-form__actions work-screen__reasons">
+          {REPRINT_REASONS.map((reason) => (
+            <Button
+              key={reason}
+              size="floor"
+              {...press(() => {
+                setMode({ kind: "main" });
+                onPrintAgain({ reason, printer: mode.printer });
+              })}
+            >
+              {t(`floor.print.reason.${reason}`)}
+            </Button>
+          ))}
+          {back}
+        </div>
+      </Alert>
+    );
+  } else if (mode.kind === "printers") {
+    body = (
+      <Alert
+        tone="warn"
+        role="presentation"
+        title={t("floor.print.printers.title")}
+        className="work-screen__label"
+      >
+        <p>{sscc}</p>
+        {mode.printers !== null && mode.printers.length === 0 && (
+          <p>{t("floor.print.printers.none")}</p>
+        )}
+        <div className="standalone-form__actions">
+          {(mode.printers ?? []).map((printer) => (
+            <Button key={printer.id} size="floor" {...press(() => again(printer))}>
+              {t("floor.print.printers.option", {
+                name: printer.name,
+                language: printer.language.toUpperCase(),
+                dpi: printer.dpi,
+              })}
+            </Button>
+          ))}
+          {back}
+        </div>
+      </Alert>
+    );
+  } else if (mode.kind === "skip") {
+    body = (
+      <Alert
+        tone="warn"
+        role="presentation"
+        title={t("floor.print.skipConfirm.title")}
+        className="work-screen__label"
+      >
+        <p>{t("floor.print.skipConfirm.body")}</p>
+        <p>{sscc}</p>
+        <div className="standalone-form__actions">
+          {back}
+          <Button
+            size="floor"
+            {...press(() => {
+              setMode({ kind: "main" });
+              onSkip();
+            })}
+          >
+            {t("floor.print.skipConfirm.confirm")}
+          </Button>
+        </div>
+      </Alert>
+    );
+  } else if (job.state === "prepared" || job.state === "sending") {
+    // On its way to the printer, or a send whose end was not written: nothing
+    // to decide yet (a restart reads a send left so as unknown).
+    body = (
+      <Alert
+        tone="info"
+        role="presentation"
+        title={t("floor.print.pending.title")}
+        className="work-screen__label"
+      >
+        <p>{t("floor.print.pending.body")}</p>
+        <p>{sscc}</p>
+      </Alert>
+    );
+  } else if (checking) {
+    body = (
+      <Alert
+        tone="info"
+        role="presentation"
+        title={t("floor.print.check.title")}
+        className="work-screen__label"
+      >
+        <p>{t("floor.print.check.body")}</p>
+        <p>{sscc}</p>
+        {note !== null && <p>{noteText(note, t)}</p>}
+        <div className="standalone-form__actions">
+          <Button size="floor" variant="secondary" {...press(() => again(null))}>
+            {t("floor.print.printAgain")}
+          </Button>
+          <Button size="floor" variant="secondary" {...press(onSkip)}>
+            {t("floor.print.check.skip")}
+          </Button>
+        </div>
+      </Alert>
+    );
+  } else {
+    const target = targetText(t, job, settings, null);
+    body = (
+      <Alert
+        tone="error"
+        role="presentation"
+        title={t(job.state === "unknown" ? "floor.print.unknownTitle" : "floor.print.failedTitle")}
+        className="work-screen__label"
+      >
+        {job.errorCode !== null && <p>{t(`floor.print.codes.${job.errorCode}`)}</p>}
+        <p>{sscc}</p>
+        {target !== null && <p>{target}</p>}
+        {note !== null && <p>{noteText(note, t)}</p>}
+        <div className="standalone-form__actions">
+          {job.state === "unknown" && (
+            <Button size="floor" {...press(onPrinted)}>
+              {t("floor.print.printed")}
+            </Button>
+          )}
+          <Button size="floor" {...press(() => again(null))}>
+            {t("floor.print.printAgain")}
+          </Button>
+          <Button size="floor" variant="secondary" {...press(choosePrinter)}>
+            {t("floor.print.otherPrinter")}
+          </Button>
+          {onSetup !== undefined && (
+            <Button size="floor" variant="secondary" {...press(onSetup)}>
+              {t("floor.print.setup")}
+            </Button>
+          )}
+          <Button size="floor" variant="secondary" {...press(() => setMode({ kind: "skip" }))}>
+            {t("floor.print.skip")}
+          </Button>
+        </div>
+      </Alert>
+    );
+  }
+  return <div ref={root}>{body}</div>;
+}

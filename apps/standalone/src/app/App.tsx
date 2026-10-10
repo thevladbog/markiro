@@ -10,8 +10,10 @@ import {
   mergeScanSources,
   type ScanSource,
 } from "../floor/scan-source.js";
+import { createPrintRuntime } from "../floor/print/print-runtime.js";
 import { applySavedScanners } from "../floor/setup/workstation-settings.js";
 import type { FloorOperator } from "../floor/sign-in.js";
+import { createSystemAwake } from "../hardware/awake.js";
 import { createTauriHardware, type HardwareApi } from "../hardware/hardware.js";
 
 import { createHostApi, type HostApi } from "../host/api.js";
@@ -164,6 +166,14 @@ export function App({
   useEffect(() => {
     void applySavedScanners(localDb, hardwareApi.configureScanners);
   }, [localDb, hardwareApi]);
+  // One queue of sends per printer for the whole app, and the request that
+  // keeps the computer awake, let go at the start: a webview that reloaded
+  // during a shift leaves the shell's request held.
+  const printing = useMemo(() => createPrintRuntime(hardwareApi.printBytes), [hardwareApi]);
+  const awake = useMemo(() => createSystemAwake(hardwareApi.setSystemAwake), [hardwareApi]);
+  useEffect(() => {
+    void awake.reset();
+  }, [awake]);
   const kiosk = useMemo(
     () => lockdown ?? createLockdownLifecycle({ dev: import.meta.env.DEV }),
     [lockdown],
@@ -624,6 +634,8 @@ export function App({
               requestBlock={hostApi.requestSsccBlock}
               requestFacts={requestFacts}
               source={scanner}
+              printing={printing}
+              awake={awake}
               {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
               dispatch={dispatch}
               onSignOut={operatorSignedOut}

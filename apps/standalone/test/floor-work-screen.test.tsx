@@ -8,6 +8,7 @@ import { ThemeProvider, type SignalTone } from "@markiro/ui";
 
 import type { FloorSession } from "../src/app/shell.js";
 import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
+import { createPrintRuntime } from "../src/floor/print/print-runtime.js";
 import type { WorkShift } from "../src/floor/shifts/shift-copies.js";
 import { createWorkGate } from "../src/floor/work-gate.js";
 import type { ClosingBox, CloseStep } from "../src/floor/work/box-close.js";
@@ -18,6 +19,7 @@ import {
   WorkScreen,
   type WorkScreenProps,
 } from "../src/floor/work/WorkScreen.js";
+import { createSystemAwake } from "../src/hardware/awake.js";
 import { HostError } from "../src/host/client.js";
 import type { CodeCheck, SsccBlock, SsccBlockRequest } from "../src/host/protocol.js";
 import { LocalDbError, type LocalExecutor, type LocalStatement } from "../src/local/executor.js";
@@ -34,7 +36,9 @@ import {
   rows,
   seedBlock,
 } from "./support/floor-work.js";
+import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb } from "./support/local-db.js";
+import { fakeRender, setUpPrinting } from "./support/printing.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
 const testModuleUrl = import.meta.url;
@@ -104,8 +108,10 @@ interface Station {
   shift: WorkShift;
 }
 
+/** A station with the shift entered and the Zebra set up for boxes (plan 2a7). */
 async function station(shift = ENTERED): Promise<Station> {
   const { db, executor } = openLocalDb();
+  await setUpPrinting(executor);
   return { db, local: executor, shift: await enteredShift(executor, shift) };
 }
 
@@ -128,6 +134,9 @@ function work(at: Station, overrides: Partial<WorkScreenProps> = {}) {
     onHostError: vi.fn(),
     onRecorded: vi.fn(),
     signal: vi.fn<(tone: SignalTone) => void>(),
+    printing: createPrintRuntime(fakeHardware().hardware.printBytes),
+    awake: createSystemAwake(vi.fn(async () => undefined)),
+    render: fakeRender,
     ...overrides,
   };
   // What the screen was given last: a rerender keeps what an earlier one changed.
@@ -823,7 +832,8 @@ describe("the work screen never lets a full box take another code", () => {
         // The read of the open box that follows another at once is the close's own: it
         // finds nothing, as if a writer outside the queue had taken the box in between.
         const hide = hiding && open && justRead;
-        justRead = open;
+        // The read of the shift's waiting label (plan 2a7) sits between the two reads.
+        if (!sql.includes("floor_print_jobs")) justRead = open;
         return hide ? [] : at.local.query(sql, params, row);
       },
       transaction: (statements) => {
@@ -847,8 +857,9 @@ describe("the work screen never lets a full box take another code", () => {
     seedBlock(at.db, { blockId: BLOCK_ID, from: 1500, to: 3499 });
     let closed = false;
     const local: LocalExecutor = {
+      // The totals' reads fail once the box is closed; the label's state (plan 2a7) is read.
       query: (sql, params, row) =>
-        closed
+        closed && !sql.includes("floor_print_jobs")
           ? Promise.reject(new LocalDbError("statement_failed", "disk busy"))
           : at.local.query(sql, params, row),
       transaction: async (statements) => {
@@ -1507,5 +1518,7 @@ describe("the work screen: the focus after a message is answered", () => {
     fireEvent.click(dismiss);
     // Not on a button that could leave or close by a stray key.
     expect(document.activeElement).toBe(document.querySelector(".work-screen__last"));
+    // The dismissal reads the shift's label again (plan 2a7), as work of the line.
+    await screenWork.settled();
   });
 });

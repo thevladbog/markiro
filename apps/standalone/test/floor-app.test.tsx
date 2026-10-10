@@ -9,6 +9,7 @@ import { ThemeProvider } from "@markiro/ui";
 import type { FloorNotice, FloorSession, ShellAction, SyncState } from "../src/app/shell.js";
 import { FloorApp } from "../src/floor/FloorApp.js";
 import { createOperatorIdleLock, OPERATOR_IDLE_TIMEOUT_MS } from "../src/floor/idle-lock.js";
+import { createPrintRuntime } from "../src/floor/print/print-runtime.js";
 import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
 import {
   keepEnteredShift,
@@ -17,6 +18,7 @@ import {
 } from "../src/floor/shifts/shift-copies.js";
 import { readOperatorCopy, signInWithPin } from "../src/floor/sign-in.js";
 import { WorkScreen, type WorkScreenProps } from "../src/floor/work/WorkScreen.js";
+import { createSystemAwake } from "../src/hardware/awake.js";
 import { HostError } from "../src/host/client.js";
 import {
   deviceShiftsSchema,
@@ -36,6 +38,7 @@ import type { LocalExecutor } from "../src/local/executor.js";
 import { syncReferences } from "../src/local/reference-sync.js";
 import { DEVICE_ID, DEVICE_STATUS, HOST_ID } from "./support/fixtures.js";
 import { enteredShift } from "./support/floor-work.js";
+import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb } from "./support/local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
@@ -140,6 +143,8 @@ function floorOf(
         requestBlock={handlers.requestBlock}
         requestFacts={handlers.requestFacts}
         source={options.source ?? SILENT_SOURCE}
+        printing={handlers.printing}
+        awake={handlers.awake}
         {...(options.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: options.idleTimeoutMs })}
         {...(options.workScreen === undefined ? {} : { workScreen: options.workScreen })}
         dispatch={handlers.dispatch}
@@ -167,6 +172,8 @@ function handlersOf(
       toSerial: 3499,
     })),
     requestFacts: vi.fn(),
+    printing: createPrintRuntime(fakeHardware().hardware.printBytes),
+    awake: createSystemAwake(vi.fn(async () => undefined)),
     dispatch: vi.fn<(action: ShellAction) => void>(),
     onSignOut: vi.fn<(notice: FloorNotice | null) => void>(),
   };
@@ -1445,6 +1452,8 @@ describe("the operator the copies hold, read after every sync", () => {
           requestBlock={handlers.requestBlock}
           requestFacts={handlers.requestFacts}
           source={SILENT_SOURCE}
+          printing={handlers.printing}
+          awake={handlers.awake}
           dispatch={handlers.dispatch}
           onSignOut={handlers.onSignOut}
         />
@@ -1634,6 +1643,8 @@ describe("the leave button and the wait of the work screen", () => {
       onHostError: () => undefined,
       onRecorded: () => undefined,
       signal: () => undefined,
+      printing: createPrintRuntime(fakeHardware().hardware.printBytes),
+      awake: createSystemAwake(async () => undefined),
       ...over,
     };
   }

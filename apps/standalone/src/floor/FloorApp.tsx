@@ -25,8 +25,11 @@ import type {
   SsccBlock,
   SsccBlockRequest,
 } from "../host/protocol.js";
+import type { SystemAwake } from "../hardware/awake.js";
 import type { LocalExecutor } from "../local/executor.js";
 import { createOperatorIdleLock, OPERATOR_IDLE_TIMEOUT_MS } from "./idle-lock.js";
+import type { RenderLabel } from "./print/print-jobs.js";
+import type { PrintRuntime } from "./print/print-runtime.js";
 import type { ScanSource } from "./scan-source.js";
 import { NewShift } from "./shifts/NewShift.js";
 import { readShiftCopy, type WorkShift } from "./shifts/shift-copies.js";
@@ -75,6 +78,12 @@ export interface FloorAppProps {
   requestFacts: () => void;
   /** The floor's scanner: a new shift's product is chosen by a scan. */
   source: ScanSource;
+  /** The app's printers (plan 2a7). */
+  printing: PrintRuntime;
+  /** Keeps the computer awake while a work screen is open. */
+  awake: SystemAwake;
+  /** How a label is rendered; tests give their own. */
+  render?: RenderLabel;
   /** Nobody touched the station this long: the operator is signed out. */
   idleTimeoutMs?: number;
   /** The work screen of a shift; tests give their own. */
@@ -113,6 +122,9 @@ export function FloorApp({
   requestBlock,
   requestFacts,
   source,
+  printing,
+  awake,
+  render,
   idleTimeoutMs = OPERATOR_IDLE_TIMEOUT_MS,
   workScreen: Work = WorkScreen,
   dispatch,
@@ -319,6 +331,9 @@ export function FloorApp({
         requestBlock={requestBlock}
         onHostError={hostError}
         onRecorded={recorded}
+        printing={printing}
+        awake={awake}
+        {...(render === undefined ? {} : { render })}
       />
     );
   }

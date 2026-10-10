@@ -2377,6 +2377,18 @@ describe("the operator on the floor", () => {
     );
   });
 
+  it("lets the computer sleep when it starts: a reloaded webview's request is let go", async () => {
+    const { hardware } = fakeHardware();
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host: fakeHost(),
+      hardware,
+    });
+    await waitFor(() => expect(hardware.setSystemAwake).toHaveBeenCalledWith(false));
+    expect(hardware.setSystemAwake).not.toHaveBeenCalledWith(true);
+  });
+
   it("starts the wait again on a touch of the screen, not only on a key", async () => {
     fakeRetryTimers();
     await onTheFloor(4_000);
