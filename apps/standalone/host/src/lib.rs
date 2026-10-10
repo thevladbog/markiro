@@ -52,6 +52,8 @@ pub struct RunningHost {
     pub host_id: String,
     stopping: std::sync::Arc<tokio::sync::watch::Sender<bool>>,
     task: tokio::task::JoinHandle<std::io::Result<()>>,
+    /// The backup worker (plan РК); it ends with `stopping`.
+    backups: tokio::task::JoinHandle<()>,
     pool: SqlitePool,
     _lock: std::fs::File,
 }
@@ -66,6 +68,17 @@ impl RunningHost {
                 tracing::warn!("graceful shutdown timed out; aborting open connections");
                 task.abort();
             }
+        }
+        // A copy in progress finishes first; one that takes longer than the
+        // deadline is abandoned, and its `.partial` file is removed by the
+        // next run.
+        let mut backups = self.backups;
+        if tokio::time::timeout(SHUTDOWN_DEADLINE, &mut backups)
+            .await
+            .is_err()
+        {
+            tracing::warn!("the backup worker did not stop in time; aborting it");
+            backups.abort();
         }
         self.pool.close().await;
         tracing::info!("markiro-host stopped");
@@ -90,13 +103,13 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), config.port));
     let listener = server::TlsListener::bind(bind, identity.server_config()?).await?;
     let addr = listener.bound_addr();
-    let state = server::AppState::new(
-        pool.clone(),
-        config.host_id.clone(),
-        std::sync::Arc::new(clock::SystemClock),
-    )
-    .with_endpoint(identity.fingerprint.clone(), addr.port());
+    let clock: std::sync::Arc<dyn clock::Clock> = std::sync::Arc::new(clock::SystemClock);
+    let backups = backup::Backups::from_paths(paths, config.host_id.clone());
+    let state = server::AppState::new(pool.clone(), config.host_id.clone(), clock.clone())
+        .with_endpoint(identity.fingerprint.clone(), addr.port())
+        .with_backups(backups.clone());
     let stopping = state.stopping.clone();
+    let backup_worker = backup::worker::spawn(backups, clock, stopping.subscribe());
     let mut stopped = state.stopping.subscribe();
     let task = tokio::spawn(server::serve(listener, state, async move {
         let _ = stopped.wait_for(|stopping| *stopping).await;
@@ -114,6 +127,7 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         host_id: config.host_id,
         stopping,
         task,
+        backups: backup_worker,
         pool,
         _lock: lock,
     })

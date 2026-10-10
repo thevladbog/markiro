@@ -55,6 +55,9 @@ pub struct AppState {
     /// How often a change stream writes a comment to keep the connection
     /// alive (15 s; tests shorten it).
     pub stream_heartbeat: Duration,
+    /// The copies of the database (plan РК); `None` answers the office's
+    /// backup routes `not_found`. `crate::start` always sets it.
+    pub backups: Option<Arc<crate::backup::Backups>>,
 }
 
 impl AppState {
@@ -81,6 +84,7 @@ impl AppState {
             stopping: Arc::new(watch::channel(false).0),
             revocations: Arc::new(watch::channel(0).0),
             stream_heartbeat: Duration::from_secs(15),
+            backups: None,
             clock,
         }
     }
@@ -113,6 +117,12 @@ impl AppState {
     /// Change-stream heartbeat interval; tests use a short one.
     pub fn with_stream_heartbeat(mut self, heartbeat: Duration) -> Self {
         self.stream_heartbeat = heartbeat;
+        self
+    }
+
+    /// The copies of the database the office's backup routes read.
+    pub fn with_backups(mut self, backups: Arc<crate::backup::Backups>) -> Self {
+        self.backups = Some(backups);
         self
     }
 }
