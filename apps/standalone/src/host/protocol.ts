@@ -4,7 +4,7 @@ import { isBadgePhc, isPinPhc } from "../lib/credentials.js";
 import { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from "./pairing-code.js";
 
 /** Mirrors `markiro_proto::PROTOCOL_VERSION` (apps/standalone/proto). */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 /** Mirrors `markiro_proto::DEFAULT_PORT`. */
 export const DEFAULT_HOST_PORT = 45710;
 /** The host on this computer, when the app runs next to the service. */

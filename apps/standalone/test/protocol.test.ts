@@ -111,7 +111,7 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
     expect(errorBodySchema.parse(fixture("error-with-details.json")).error.details).toEqual({
       protocol: 7,
       minProtocol: 1,
-      maxProtocol: 2,
+      maxProtocol: 3,
     });
   });
 

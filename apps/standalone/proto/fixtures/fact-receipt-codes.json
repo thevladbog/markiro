@@ -10,6 +10,10 @@
     "box_already_closed",
     "box_state",
     "sscc_not_issued",
-    "sscc_taken"
+    "sscc_taken",
+    "no_pallets",
+    "pallet_unknown",
+    "pallet_already_closed",
+    "pallet_state"
   ]
 }

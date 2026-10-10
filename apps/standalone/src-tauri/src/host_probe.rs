@@ -129,10 +129,15 @@ mod tests {
             classify_hello(json!({"product": HOST_PRODUCT, "protocol": 0, "minProtocol": 0})),
             Err(ProbeError::HostTooOld)
         );
-        // A host of stage 1 speaks protocol 1 only: a stage 2a station asks
-        // for an update of the host (stage 2a spec, decision 35).
+        // A host of stage 1 speaks protocol 1 only, a host of stage 2a up to
+        // 2: a station that knows pallets (protocol 3, plan ПЛ-Х) asks for
+        // an update of the host.
         assert_eq!(
             classify_hello(json!({"product": HOST_PRODUCT, "protocol": 1, "minProtocol": 1})),
+            Err(ProbeError::HostTooOld)
+        );
+        assert_eq!(
+            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 2, "minProtocol": 1})),
             Err(ProbeError::HostTooOld)
         );
     }
@@ -148,7 +153,7 @@ mod tests {
     #[test]
     fn a_compatible_envelope_with_an_unreadable_body_is_invalid() {
         assert_eq!(
-            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 2, "minProtocol": 1})),
+            classify_hello(json!({"product": HOST_PRODUCT, "protocol": 3, "minProtocol": 1})),
             Err(ProbeError::InvalidResponse)
         );
     }
@@ -157,7 +162,7 @@ mod tests {
     fn a_compatible_hello_is_read() {
         let hello = classify_hello(json!({
             "product": "markiro-host",
-            "protocol": 2,
+            "protocol": 3,
             "minProtocol": 1,
             "hostId": "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
             "version": "0.1.0",

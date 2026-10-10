@@ -13,8 +13,11 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Protocol version this build speaks.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// Protocol version this build speaks: 3 since plan ПЛ-Х (pallets: the
+/// shift's pallet fields, pallet blocks, the pallet facts and a box's
+/// `palletId`). A new fact kind or a new field of a fact's `data` raises it,
+/// because an older host refuses such a record for good.
+pub const PROTOCOL_VERSION: u32 = 3;
 /// Oldest protocol version this build still accepts from a client.
 pub const MIN_PROTOCOL_VERSION: u32 = 1;
 /// Request header carrying the client's protocol version.
@@ -102,11 +105,24 @@ pub mod receipt_codes {
     /// The box is not in the state the record needs (an exception or a
     /// label check of an open box, an undo in a closed one).
     pub const BOX_STATE: &str = "box_state";
-    /// The SSCC is not of the shift's prefix, or its serial lies in no block
-    /// issued to this device.
+    /// The SSCC is not of the record's extension (a box 0, a pallet 1) and
+    /// the shift's prefix, or its serial lies in no live block of that
+    /// extension issued to this device.
     pub const SSCC_NOT_ISSUED: &str = "sscc_not_issued";
-    /// Another box carries the SSCC.
+    /// Another box (or pallet) carries the SSCC, or is closed on its serial
+    /// of its block.
     pub const SSCC_TAKEN: &str = "sscc_taken";
+    /// The shift works without pallets, and the record names a pallet.
+    pub const NO_PALLETS: &str = "no_pallets";
+    /// No pallet of this device and this shift has the id: another device's
+    /// or another shift's has it, or (for a label check or an exception) no
+    /// pallet at all.
+    pub const PALLET_UNKNOWN: &str = "pallet_unknown";
+    /// A pallet closed with one SSCC is closed again with another.
+    pub const PALLET_ALREADY_CLOSED: &str = "pallet_already_closed";
+    /// The pallet is not in the state the record needs (a label check or an
+    /// exception of an open pallet, an exception of one taken apart).
+    pub const PALLET_STATE: &str = "pallet_state";
 
     /// Every code above, for the parity fixture the webview also reads.
     pub const ALL: &[&str] = &[
@@ -121,6 +137,10 @@ pub mod receipt_codes {
         BOX_STATE,
         SSCC_NOT_ISSUED,
         SSCC_TAKEN,
+        NO_PALLETS,
+        PALLET_UNKNOWN,
+        PALLET_ALREADY_CLOSED,
+        PALLET_STATE,
     ];
 }
 

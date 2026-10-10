@@ -941,11 +941,12 @@ change) build their bodies inline, field by field, as does the wizard; its
 `bootstrapRequestSchema`, against which `test/protocol.test.ts` parses
 `bootstrap-request-templates.json`. Raise `PROTOCOL_VERSION` for an incompatible
 change, a new fact kind or a new `data` field of a fact included (see Facts);
-the host keeps accepting the previous version. It is 2 since plan 2a1,
-with `MIN_PROTOCOL_VERSION` still 1: the host takes the stations of stage 1,
-and a station of stage 2a finds a host of stage 1 too old (`host_too_old` at
-the probe). `src/host/protocol.ts` mirrors it, and `test/protocol.test.ts`
-ties the mirror to `hello.json`. Response types, which
+the host keeps accepting the previous version. It is 3 since plan ПЛ-Х
+(pallets; 2 since plan 2a1), with `MIN_PROTOCOL_VERSION` still 1: the host
+takes the stations of stage 1 and of stage 2a, and a station that knows
+pallets finds a host of stage 1 or 2a too old (`host_too_old` at the probe).
+`src/host/protocol.ts` mirrors it, and `test/protocol.test.ts` ties the
+mirror to `hello.json`. Response types, which
 devices of different versions read, tolerate unknown fields; request types,
 which the host parses, reject them with `deny_unknown_fields`. The feed records
 that grant access or carry the salt (`site`, `operators`, `operator_badges`) are
@@ -2234,7 +2235,10 @@ the digest of a box's members (`box-digest.json`, the domain's
 what `Date.toISOString` writes, `YYYY-MM-DDTHH:MM:SS.sssZ`, 24 characters, so
 comparing the stored text orders the instants) and when a station's close
 needs a reason (`shift-close-reasons.json`, the domain's six
-`SHIFT_CLOSE_REASON_CODES` and `shiftCloseReasonRequired`). The codes of a
+`SHIFT_CLOSE_REASON_CODES` and `shiftCloseReasonRequired`) and how the first
+17 digits of an SSCC name its extension, prefix and serial
+(`sscc-serials.json`, `rules::names_serial`, built by the domain's
+`buildSscc`; the check digit is never read). The codes of a
 rejected receipt (`proto::receipt_codes`, `fact-receipt-codes.json`) and the
 reason codes of box exceptions (`proto::exception_reasons`,
 `exception-reasons.json`) are fixtures too; the webview reads them with the

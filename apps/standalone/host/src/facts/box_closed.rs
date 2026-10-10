@@ -43,15 +43,6 @@ fn check(closed: &BoxClosedFact) -> Result<(), Reject> {
     Ok(())
 }
 
-/// The SSCC is the box extension's, of the snapshot's prefix and of
-/// `serial`, whatever its check digit: the first 17 digits are
-/// `0`, the prefix and the serial padded to the prefix's serial width.
-fn names_serial(sscc: &str, issuer_prefix: &str, serial: u64) -> bool {
-    let width = 16 - issuer_prefix.len();
-    serial < validate::serial_capacity(issuer_prefix)
-        && sscc[..17] == format!("0{issuer_prefix}{serial:0width$}")
-}
-
 pub async fn apply(
     conn: &mut SqliteConnection,
     context: &Context<'_>,
@@ -72,7 +63,7 @@ pub async fn apply(
             Err(Reject::new(receipt_codes::BOX_ALREADY_CLOSED).into())
         };
     }
-    if !names_serial(&closed.sscc, &context.shift.issuer_prefix, closed.serial) {
+    if !rules::names_serial(&closed.sscc, 0, &context.shift.issuer_prefix, closed.serial) {
         return Err(Reject::new(receipt_codes::SSCC_NOT_ISSUED).into());
     }
     let issued: Option<i64> = sqlx::query_scalar(

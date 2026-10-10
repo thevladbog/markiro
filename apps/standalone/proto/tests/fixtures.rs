@@ -76,16 +76,16 @@ fn error_fixtures_round_trip() {
 #[test]
 fn hello_ignores_fields_added_by_newer_hosts() {
     let hello: Hello = serde_json::from_value(fixture("hello-future.json")).unwrap();
-    assert_eq!(hello.protocol, 3);
+    assert_eq!(hello.protocol, 4);
     assert!(hello.initialized);
 }
 
 #[test]
 fn envelope_decides_compatibility_before_the_rest() {
     let future: HelloEnvelope = serde_json::from_value(fixture("hello-future.json")).unwrap();
-    assert_eq!(compatibility_for(1, &future), Compatibility::AppTooOld);
-    assert_eq!(compatibility_for(2, &future), Compatibility::Compatible);
-    assert_eq!(compatibility_for(4, &future), Compatibility::HostTooOld);
+    assert_eq!(compatibility_for(2, &future), Compatibility::AppTooOld);
+    assert_eq!(compatibility_for(3, &future), Compatibility::Compatible);
+    assert_eq!(compatibility_for(5, &future), Compatibility::HostTooOld);
     let current: HelloEnvelope = serde_json::from_value(fixture("hello.json")).unwrap();
     assert_eq!(compatibility(&current), Compatibility::Compatible);
 }
