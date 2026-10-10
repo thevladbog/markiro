@@ -10,8 +10,9 @@ use markiro_host::routes::device_shifts::{create_device_shift, enter_shift};
 use markiro_proto::{DeviceKind, DeviceShift, DeviceShiftCreate};
 use serde_json::{json, Value};
 use support::app::{
-    admin, audit_rows, audit_trail, empty, host_revision, json as json_request, pair_device,
-    plan_shift, request, shift_body, shift_setup, with_device, Admin, AuditRow, ShiftSetup, LAN,
+    admin, audit_rows, audit_trail, empty, host_revision, json as json_request, office_template,
+    pair_device, pallet_shift_body, pallet_template, plan_shift, request, shift_body, shift_setup,
+    with_device, Admin, AuditRow, ShiftSetup, LAN,
 };
 
 /// This station's own id, as the host has it.
@@ -926,6 +927,24 @@ async fn a_station_create_takes_every_field_it_names() {
     assert_eq!(status, StatusCode::OK, "{office}");
     assert_eq!(office["counterpartyId"], counterparty["id"]);
     assert_eq!(office["lineId"], json!(setup.line));
+    // A station's shift has no pallets: neither the record nor the row
+    // carries a pallet field.
+    assert_eq!(
+        [
+            office["palletsEnabled"].clone(),
+            office["palletBoxCapacity"].clone(),
+            office["palletTemplateId"].clone()
+        ],
+        [json!(false), Value::Null, Value::Null]
+    );
+    let columns: (i64, Option<i64>, Option<String>) = sqlx::query_as(
+        "SELECT pallets_enabled, pallet_box_capacity, pallet_template_id FROM shifts WHERE id = ?",
+    )
+    .bind(created["id"].as_str().unwrap())
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(columns, (0, None, None));
 }
 
 /// The status and `details` of an entry that is refused.
@@ -1466,4 +1485,718 @@ async fn a_shift_the_office_closes_reads_closed_to_its_owner_and_no_station_reen
             "{body}"
         );
     }
+}
+
+/// A station creates a shift with pallets under the office's rules and
+/// enters it: the snapshot freezes the pallet template with its layout,
+/// the opening's audit row names it, and the station's list names the
+/// pallet capacity and template only for a shift with pallets.
+#[tokio::test]
+async fn a_station_creates_a_shift_with_pallets_and_its_entry_freezes_the_pallet_template() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let station = device_id(&admin, &admin.key).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let pallet = pallet_template(&admin).await;
+    let mut create = device_create(&setup, REQUEST);
+    create["palletsEnabled"] = json!(true);
+    create["palletTemplateId"] = json!(pallet);
+    let (status, created) = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/shifts",
+        Some(create),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let id = created["id"].as_str().unwrap().to_owned();
+    let mut expected = device_shift(&id, "OCT26-001/S", &setup);
+    expected["createdFrom"] = json!("station");
+    expected["productionDate"] = json!("2026-10-09");
+    expected["palletsEnabled"] = json!(true);
+    expected["palletBoxCapacity"] = json!(40);
+    expected["palletTemplateId"] = json!(pallet);
+    assert_eq!(created, expected);
+    let plain = plan_shift(&admin, shift_body(&setup)).await;
+    let opened_at = admin.app.state.timestamp();
+    let (status, entered) = enter(&admin, &admin.key, &created).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    // The wizard, the box template and the product took revisions 1 to 3,
+    // the pallet template 4.
+    let pallet_snapshot = json!({
+        "id": pallet, "name": "Паллета 100×150", "rev": 4,
+        "spec": { "widthMm": 100, "heightMm": 150, "dpi": 203, "language": "zpl", "elements": [] }
+    });
+    assert_eq!(entered["snapshot"]["palletTemplate"], pallet_snapshot);
+    assert_eq!(entered["palletBoxCapacity"], json!(40));
+    assert_eq!(
+        audit_trail(&admin.app, "shift.open").await,
+        vec![device_row(
+            &station,
+            "shift.open",
+            &id,
+            json!({
+                "number": "OCT26-001/S", "templateId": setup.template, "templateRev": 2,
+                "palletTemplateId": pallet, "palletTemplateRev": 4
+            })
+        )]
+    );
+    assert_eq!(entered["openedAt"], json!(opened_at));
+    // The list names the pallet fields of the shift with pallets only.
+    let (status, list) = device_call(&admin, &admin.key, "GET", "/v1/device/shifts", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let shifts = list["shifts"].as_array().unwrap();
+    let listed = |id: &Value| {
+        shifts
+            .iter()
+            .find(|shift| shift["id"] == *id)
+            .cloned()
+            .unwrap()
+    };
+    let mut with_pallets = entered.clone();
+    with_pallets.as_object_mut().unwrap().remove("snapshot");
+    assert_eq!(listed(&created["id"]), with_pallets);
+    let plain_listed = listed(&plain["id"]);
+    for key in ["palletBoxCapacity", "palletTemplateId"] {
+        assert!(
+            !plain_listed.as_object().unwrap().contains_key(key),
+            "{key}"
+        );
+    }
+    // The pallet template changes; the shift keeps the layout it froze.
+    let (status, changed) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/templates/{pallet}"),
+            Some(json!({ "spec": { "widthMm": 120 }, "expectedRev": 4 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+    let (status, again) = enter(&admin, &admin.key, &created).await;
+    assert_eq!(
+        (status, again["snapshot"]["palletTemplate"].clone()),
+        (StatusCode::OK, pallet_snapshot)
+    );
+    // A shift without pallets freezes no pallet template.
+    let (status, plain_entered) = enter(&admin, &admin.key, &plain).await;
+    assert_eq!(status, StatusCode::OK, "{plain_entered}");
+    assert!(!plain_entered["snapshot"]
+        .as_object()
+        .unwrap()
+        .contains_key("palletTemplate"));
+}
+
+/// A station's create follows the office's pallet rules: a template that
+/// fits, and no pallet field without pallets. A refusal writes nothing.
+#[tokio::test]
+async fn a_station_create_follows_the_pallet_rules() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let pallet = pallet_template(&admin).await;
+    let disabled = office_template(&admin, "pallet", false, Value::Null).await;
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let field = |name: &str| (json!("validation_failed"), json!({ "field": name }));
+    for (change, expected) in [
+        (json!({ "palletsEnabled": true }), field("palletTemplateId")),
+        (
+            json!({ "palletsEnabled": true, "palletTemplateId": setup.template }),
+            field("palletTemplateId"),
+        ),
+        (
+            json!({ "palletsEnabled": true, "palletTemplateId": disabled }),
+            field("palletTemplateId"),
+        ),
+        (
+            json!({ "palletsEnabled": true, "palletTemplateId": pallet, "palletBoxCapacity": 0 }),
+            field("palletBoxCapacity"),
+        ),
+        (
+            json!({ "palletBoxCapacity": 40 }),
+            field("palletBoxCapacity"),
+        ),
+        (
+            json!({ "palletTemplateId": pallet }),
+            field("palletTemplateId"),
+        ),
+    ] {
+        let mut body = device_create(&setup, REQUEST);
+        for (key, value) in change.as_object().unwrap() {
+            body[key] = value.clone();
+        }
+        let (status, refused) =
+            device_call(&admin, &admin.key, "POST", "/v1/device/shifts", Some(body)).await;
+        assert_eq!(
+            (
+                status,
+                (
+                    refused["error"]["code"].clone(),
+                    refused["error"]["details"].clone()
+                )
+            ),
+            (StatusCode::BAD_REQUEST, expected),
+            "{change}"
+        );
+    }
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+}
+
+/// A pallet template disabled or narrowed after the plan keeps the shift
+/// from opening (`pallet_template_not_fit`): nothing is frozen or written,
+/// and once it fits again the shift opens.
+#[tokio::test]
+async fn a_pallet_template_that_no_longer_fits_keeps_the_shift_planned() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let pallet = pallet_template(&admin).await;
+    let shift = plan_shift(&admin, pallet_shift_body(&setup, &pallet)).await;
+    let template = format!("/v1/office/templates/{pallet}");
+    for change in [
+        json!({ "enabled": false }),
+        json!({ "chzProductGroupCodes": [15] }),
+    ] {
+        let (_, current) = admin.call("GET", &template, None).await;
+        let mut body = change.clone();
+        body["expectedRev"] = current["rev"].clone();
+        let (status, narrowed) = admin.call("PUT", &template, Some(body)).await;
+        assert_eq!(status, StatusCode::OK, "{narrowed}");
+        let rows = audit_rows(&admin.app).await;
+        let revision = host_revision(&admin.app).await;
+        let (status, refused) = enter(&admin, &admin.key, &shift).await;
+        assert_eq!(
+            (status, refused["error"]["details"].clone()),
+            (
+                StatusCode::CONFLICT,
+                json!({ "constraint": "pallet_template_not_fit" })
+            ),
+            "{change}"
+        );
+        assert_eq!(audit_rows(&admin.app).await, rows);
+        assert_eq!(host_revision(&admin.app).await, revision);
+        let (_, office) = admin
+            .call(
+                "GET",
+                &format!("/v1/office/shifts/{}", shift["id"].as_str().unwrap()),
+                None,
+            )
+            .await;
+        assert_eq!(office["status"], json!("planned"), "{change}");
+        // Fit again for the next case.
+        let (_, current) = admin.call("GET", &template, None).await;
+        let (status, back) = admin
+            .call(
+                "PUT",
+                &template,
+                Some(json!({
+                    "enabled": true, "chzProductGroupCodes": null,
+                    "expectedRev": current["rev"]
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{back}");
+    }
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(
+        (status, entered["snapshot"]["palletTemplate"]["id"].clone()),
+        (StatusCode::OK, json!(pallet))
+    );
+}
+
+/// Change the template `id` with `patch`, whatever revision it is at.
+async fn patch_template_by_id(admin: &Admin, id: &str, mut patch: Value) {
+    let path = format!("/v1/office/templates/{id}");
+    let (_, current) = admin.call("GET", &path, None).await;
+    patch["expectedRev"] = current["rev"].clone();
+    let (status, changed) = admin.call("PUT", &path, Some(patch)).await;
+    assert_eq!(status, StatusCode::OK, "{changed}");
+}
+
+/// The snapshot text a shift stores, as the table keeps it.
+async fn stored_snapshot(admin: &Admin, shift: &Value) -> Option<String> {
+    sqlx::query_scalar("SELECT snapshot FROM shifts WHERE id = ?")
+        .bind(shift["id"].as_str().unwrap())
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+}
+
+/// A refused entry, which must have written nothing: the revision, the audit
+/// rows and the stored snapshot are as they were.
+async fn refused_untouched(admin: &Admin, key: &str, shift: &Value) -> (StatusCode, Value) {
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let stored = stored_snapshot(admin, shift).await;
+    let refused = refused_entry(admin, key, shift).await;
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(stored_snapshot(admin, shift).await, stored);
+    refused
+}
+
+/// An entry with pallets names the first rule it breaks: the product, the box
+/// template, then the pallet template, and the station's own rules (status,
+/// line, owner) before any of them. A refusal writes nothing. The owner who
+/// has the shift open enters again with the pallet template it froze, whatever
+/// became of the template since, and the stored snapshot is not touched.
+#[tokio::test]
+async fn an_entry_with_pallets_names_the_first_rule_it_breaks_and_the_frozen_pallet_template_stays()
+{
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let station = device_id(&admin, &admin.key).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let (_, colleague) = pair_device(&admin.app, "station").await;
+    select_line(&admin, &colleague, &setup.line).await;
+    let (_, elsewhere) = pair_device(&admin.app, "station").await;
+    select_line(&admin, &elsewhere, &setup.other_line).await;
+    let pallet = pallet_template(&admin).await;
+    let shift = plan_shift(&admin, pallet_shift_body(&setup, &pallet)).await;
+    // A colleague of the line reads the pallet fields of the planned shift.
+    let (status, listed) = device_call(&admin, &colleague, "GET", "/v1/device/shifts", None).await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(
+        (
+            listed["shifts"][0]["palletsEnabled"].clone(),
+            listed["shifts"][0]["palletBoxCapacity"].clone(),
+            listed["shifts"][0]["palletTemplateId"].clone()
+        ),
+        (json!(true), json!(40), json!(pallet))
+    );
+    // Everything is broken at once.
+    let product_rev = archive_product(&admin, &setup, true, 3).await;
+    patch_template_by_id(&admin, &setup.template, json!({ "enabled": false })).await;
+    patch_template_by_id(&admin, &pallet, json!({ "enabled": false })).await;
+    let line = (StatusCode::CONFLICT, json!({ "constraint": "shift_line" }));
+    let refused = |constraint: &str| (StatusCode::CONFLICT, json!({ "constraint": constraint }));
+    assert_eq!(refused_untouched(&admin, &elsewhere, &shift).await, line);
+    assert_eq!(
+        refused_untouched(&admin, &admin.key, &shift).await,
+        refused("product_inactive")
+    );
+    archive_product(&admin, &setup, false, product_rev).await;
+    assert_eq!(
+        refused_untouched(&admin, &admin.key, &shift).await,
+        refused("template_not_fit")
+    );
+    patch_template_by_id(&admin, &setup.template, json!({ "enabled": true })).await;
+    assert_eq!(
+        refused_untouched(&admin, &admin.key, &shift).await,
+        refused("pallet_template_not_fit")
+    );
+    assert_eq!(refused_untouched(&admin, &elsewhere, &shift).await, line);
+    assert_eq!(stored_snapshot(&admin, &shift).await, None);
+    patch_template_by_id(&admin, &pallet, json!({ "enabled": true })).await;
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert_eq!(entered["snapshot"]["palletTemplate"]["id"], json!(pallet));
+    let frozen = stored_snapshot(&admin, &shift).await.expect("frozen");
+    // The pallet template is disabled, narrowed away, then gone. The shift is
+    // open, so a colleague finds it busy and `elsewhere` off the line, before
+    // the pallet template is looked at, and the owner enters again with what
+    // it froze: no revision, no row, the same stored snapshot.
+    for step in 0..3 {
+        match step {
+            0 => patch_template_by_id(&admin, &pallet, json!({ "enabled": false })).await,
+            1 => {
+                patch_template_by_id(
+                    &admin,
+                    &pallet,
+                    json!({ "enabled": true, "chzProductGroupCodes": [15] }),
+                )
+                .await
+            }
+            _ => {
+                sqlx::query("DELETE FROM label_templates WHERE id = ?")
+                    .bind(&pallet)
+                    .execute(&admin.app.state.pool)
+                    .await
+                    .unwrap();
+            }
+        }
+        let revision = host_revision(&admin.app).await;
+        let rows = audit_rows(&admin.app).await;
+        assert_eq!(
+            refused_entry(&admin, &colleague, &shift).await,
+            refused("shift_busy"),
+            "step {step}"
+        );
+        assert_eq!(
+            refused_entry(&admin, &elsewhere, &shift).await,
+            line,
+            "step {step}"
+        );
+        let (status, back) = enter(&admin, &admin.key, &shift).await;
+        assert_eq!((status, &back), (StatusCode::OK, &entered), "step {step}");
+        assert_eq!(stored_snapshot(&admin, &shift).await, Some(frozen.clone()));
+        assert_eq!(host_revision(&admin.app).await, revision, "step {step}");
+        assert_eq!(audit_rows(&admin.app).await, rows, "step {step}");
+    }
+    assert_eq!(
+        participants(&admin, &shift)
+            .await
+            .into_iter()
+            .map(|(device, _, _)| device)
+            .collect::<Vec<_>>(),
+        vec![station.clone()]
+    );
+    // Closed, the shift opens for nobody, the status before the pallet
+    // template (which is gone).
+    close_directly(&admin, &shift, &station).await;
+    for key in [&admin.key, &colleague, &elsewhere] {
+        assert_eq!(
+            refused_entry(&admin, key, &shift).await,
+            (
+                StatusCode::CONFLICT,
+                json!({ "constraint": "shift_status", "status": "closed" })
+            )
+        );
+    }
+}
+
+/// A pallet template scoped to the groups of the product fits it at the
+/// entry, whether it names the product's group alone or among others, and
+/// stops fitting when it is narrowed to groups without it; a template
+/// deleted behind the plan keeps the shift planned, not a server error.
+#[tokio::test]
+async fn a_pallet_template_scoped_to_the_products_group_opens_the_shift() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let not_fit = (
+        StatusCode::CONFLICT,
+        json!({ "constraint": "pallet_template_not_fit" }),
+    );
+    for (codes, narrowed) in [(json!([8]), json!([15])), (json!([15, 8]), json!([15, 16]))] {
+        let pallet = office_template(&admin, "pallet", true, codes).await;
+        let shift = plan_shift(&admin, pallet_shift_body(&setup, &pallet)).await;
+        patch_template_by_id(&admin, &pallet, json!({ "chzProductGroupCodes": narrowed })).await;
+        assert_eq!(
+            refused_untouched(&admin, &admin.key, &shift).await,
+            not_fit,
+            "{narrowed}"
+        );
+        patch_template_by_id(&admin, &pallet, json!({ "chzProductGroupCodes": [8, 15] })).await;
+        let (status, entered) = enter(&admin, &admin.key, &shift).await;
+        assert_eq!(status, StatusCode::OK, "{entered}");
+        assert_eq!(entered["snapshot"]["palletTemplate"]["id"], json!(pallet));
+        // One station, one open shift at a time: close this one.
+        let station = device_id(&admin, &admin.key).await;
+        close_directly(&admin, &shift, &station).await;
+    }
+    let pallet = pallet_template(&admin).await;
+    let shift = plan_shift(&admin, pallet_shift_body(&setup, &pallet)).await;
+    sqlx::query("DELETE FROM label_templates WHERE id = ?")
+        .bind(&pallet)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(refused_untouched(&admin, &admin.key, &shift).await, not_fit);
+}
+
+/// A station's create with pallets keeps what it names, writes the same audit
+/// row as a create without them, and repeated with the same `requestId`
+/// answers the shift it made whatever the pallet fields say now. The capacity
+/// takes 1 to 10 000; a station without a line cannot plan pallets either.
+#[tokio::test]
+async fn a_station_create_with_pallets_keeps_what_it_names_and_repeats_as_the_same_shift() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let station = device_id(&admin, &admin.key).await;
+    let (_, unassigned) = pair_device(&admin.app, "station").await;
+    let pallet = pallet_template(&admin).await;
+    let with_pallets = |request: &str, capacity: Value| {
+        let mut body = device_create(&setup, request);
+        body["palletsEnabled"] = json!(true);
+        body["palletTemplateId"] = json!(pallet);
+        if !capacity.is_null() {
+            body["palletBoxCapacity"] = capacity;
+        }
+        body
+    };
+    // No line: nothing is planned, pallets or not.
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let (status, refused) = device_call(
+        &admin,
+        &unassigned,
+        "POST",
+        "/v1/device/shifts",
+        Some(with_pallets(REQUEST, json!(25))),
+    )
+    .await;
+    assert_eq!(
+        (status, refused["error"]["details"].clone()),
+        (StatusCode::CONFLICT, json!({ "constraint": "shift_line" }))
+    );
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    select_line(&admin, &admin.key, &setup.line).await;
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    // The edges of the capacity.
+    let mut wake = admin.app.state.revisions.subscribe();
+    wake.borrow_and_update();
+    let (status, refused) = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/shifts",
+        Some(with_pallets(SECOND_REQUEST, json!(10_001))),
+    )
+    .await;
+    assert_eq!(
+        (status, refused["error"]["details"].clone()),
+        (
+            StatusCode::BAD_REQUEST,
+            json!({ "field": "palletBoxCapacity" })
+        )
+    );
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert!(!wake.has_changed().unwrap());
+    let (status, largest) = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/shifts",
+        Some(with_pallets(SECOND_REQUEST, json!(10_000))),
+    )
+    .await;
+    assert_eq!(
+        (status, largest["palletBoxCapacity"].clone()),
+        (StatusCode::OK, json!(10_000)),
+        "{largest}"
+    );
+    // The capacity the station names is the shift's, not the product's 40.
+    let (status, created) = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/shifts",
+        Some(with_pallets(REQUEST, json!(25))),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    let id = created["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        (
+            created["palletsEnabled"].clone(),
+            created["palletBoxCapacity"].clone(),
+            created["palletTemplateId"].clone()
+        ),
+        (json!(true), json!(25), json!(pallet))
+    );
+    let columns: (i64, Option<i64>, Option<String>) = sqlx::query_as(
+        "SELECT pallets_enabled, pallet_box_capacity, pallet_template_id FROM shifts WHERE id = ?",
+    )
+    .bind(&id)
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(columns, (1, Some(25), Some(pallet.clone())));
+    // The audit row is the one a create without pallets writes.
+    let trail = audit_trail(&admin.app, "shift.create").await;
+    assert_eq!(
+        trail.last().unwrap(),
+        &device_row(
+            &station,
+            "shift.create",
+            &id,
+            json!({
+                "number": "OCT26-002/S", "productId": setup.product, "lineId": setup.line,
+                "productionDate": "2026-10-09"
+            })
+        )
+    );
+    // The same request again: the same shift, whatever the pallet fields say
+    // now, with nothing written; the capacity is the first one's.
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let shifts: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM shifts")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    wake.borrow_and_update();
+    for body in [
+        with_pallets(REQUEST, json!(7)),
+        device_create(&setup, REQUEST),
+    ] {
+        let (status, repeated) =
+            device_call(&admin, &admin.key, "POST", "/v1/device/shifts", Some(body)).await;
+        assert_eq!((status, repeated), (StatusCode::OK, created.clone()));
+    }
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert!(!wake.has_changed().unwrap());
+    let after: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM shifts")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(after, shifts);
+}
+
+/// `proto/fixtures/error-snapshot-too-large.json`, which the webview's
+/// `test/protocol.test.ts` reads too.
+fn snapshot_too_large_fixture() -> Value {
+    let path = format!(
+        "{}/../proto/fixtures/error-snapshot-too-large.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path}: {error}"));
+    serde_json::from_str(&text).unwrap()
+}
+
+/// A template of `purpose` for every group whose layout carries `filler`
+/// bytes of text in one element, a layout the host keeps up to 256 KB.
+async fn heavy_template(admin: &Admin, purpose: &str, filler: usize) -> String {
+    let (status, template) = admin
+        .call(
+            "POST",
+            "/v1/office/templates",
+            Some(json!({
+                "name": "Макет с запасом", "purpose": purpose, "enabled": true,
+                "spec": {
+                    "widthMm": 100, "heightMm": 150, "dpi": 203, "language": "zpl",
+                    "elements": [{ "kind": "text", "value": "x".repeat(filler) }]
+                }
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{}", template["error"]);
+    template["id"].as_str().unwrap().to_owned()
+}
+
+/// The size of the stored snapshot as the table's `CHECK` measures it.
+async fn stored_snapshot_bytes(admin: &Admin, shift: &Value) -> Option<i64> {
+    sqlx::query_scalar("SELECT length(CAST(snapshot AS BLOB)) FROM shifts WHERE id = ?")
+        .bind(shift["id"].as_str().unwrap())
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+}
+
+/// What is stored of a planned shift that nobody entered: its status, owner
+/// and opening time, and its participants.
+async fn unopened(admin: &Admin, shift: &Value) -> (String, Option<String>, Option<String>, usize) {
+    let (status, owner, opened_at): (String, Option<String>, Option<String>) =
+        sqlx::query_as("SELECT status, owner_device_id, opened_at FROM shifts WHERE id = ?")
+            .bind(shift["id"].as_str().unwrap())
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    (
+        status,
+        owner,
+        opened_at,
+        participants(admin, shift).await.len(),
+    )
+}
+
+/// A box layout and a pallet layout that are each within the template bound
+/// (256 KB) but together exceed the 320 KB the snapshot column keeps are no
+/// 500: the entry is a `conflict` on `snapshot_too_large`, the answer of
+/// `proto/fixtures/error-snapshot-too-large.json`, and writes nothing. The
+/// size is checked after the templates, and once the office points the shift
+/// at a small pallet template it opens.
+#[tokio::test]
+async fn two_layouts_too_large_together_keep_the_shift_planned() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let box_template = heavy_template(&admin, "box", 170_000).await;
+    let pallet = heavy_template(&admin, "pallet", 170_000).await;
+    let mut body = pallet_shift_body(&setup, &pallet);
+    body["boxTemplateId"] = json!(box_template);
+    let shift = plan_shift(&admin, body).await;
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let (status, refused) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(
+        (status, &refused),
+        (StatusCode::CONFLICT, &snapshot_too_large_fixture()),
+        "{}",
+        refused["error"]
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert!(audit_trail(&admin.app, "shift.open").await.is_empty());
+    assert_eq!(stored_snapshot_bytes(&admin, &shift).await, None);
+    assert_eq!(
+        unopened(&admin, &shift).await,
+        ("planned".to_owned(), None, None, 0)
+    );
+    // The pallet template is looked at before the size: one that no longer
+    // fits is named first, whatever its layout.
+    patch_template_by_id(&admin, &pallet, json!({ "enabled": false })).await;
+    assert_eq!(
+        refused_untouched(&admin, &admin.key, &shift).await,
+        (
+            StatusCode::CONFLICT,
+            json!({ "constraint": "pallet_template_not_fit" })
+        )
+    );
+    // A small pallet template brings the snapshot under the bound.
+    let small = pallet_template(&admin).await;
+    let (status, pointed) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/shifts/{}", shift["id"].as_str().unwrap()),
+            Some(json!({ "palletTemplateId": small, "expectedRev": shift["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{pointed}");
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{}", entered["error"]);
+    assert_eq!(entered["snapshot"]["palletTemplate"]["id"], json!(small));
+    assert_eq!(
+        entered["snapshot"]["boxTemplate"]["id"],
+        json!(box_template)
+    );
+    assert!(stored_snapshot_bytes(&admin, &shift).await.unwrap() < 327_680);
+    assert_eq!(
+        unopened(&admin, &shift).await.0,
+        "active",
+        "the entry opened the shift"
+    );
+}
+
+/// The entry of a pallet shift whose box layout is `box_filler` bytes of
+/// text and whose pallet layout is `pallet_filler`, on a host of its own:
+/// the answer's status and the size of the stored snapshot. Every host is
+/// made the same way, so the sizes differ by the fillers alone.
+async fn entry_with_layouts(box_filler: usize, pallet_filler: usize) -> (StatusCode, Option<i64>) {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let box_template = heavy_template(&admin, "box", box_filler).await;
+    let pallet = heavy_template(&admin, "pallet", pallet_filler).await;
+    let mut body = pallet_shift_body(&setup, &pallet);
+    body["boxTemplateId"] = json!(box_template);
+    let shift = plan_shift(&admin, body).await;
+    let (status, _) = enter(&admin, &admin.key, &shift).await;
+    (status, stored_snapshot_bytes(&admin, &shift).await)
+}
+
+/// The limit is the table's `CHECK`, 327 680 bytes of snapshot text: one that
+/// size opens the shift, one byte more is the clean refusal.
+#[tokio::test]
+async fn a_snapshot_of_exactly_the_limit_opens_the_shift_and_one_byte_more_does_not() {
+    const LIMIT: usize = 327_680;
+    let (status, measured) = entry_with_layouts(100_000, 100_000).await;
+    assert_eq!(status, StatusCode::OK);
+    let measured = usize::try_from(measured.expect("stored")).unwrap();
+    let room = LIMIT - measured;
+    assert_eq!(
+        entry_with_layouts(100_000, 100_000 + room).await,
+        (StatusCode::OK, Some(i64::try_from(LIMIT).unwrap()))
+    );
+    assert_eq!(
+        entry_with_layouts(100_000, 100_000 + room + 1).await,
+        (StatusCode::CONFLICT, None)
+    );
 }

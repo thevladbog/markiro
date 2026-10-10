@@ -116,7 +116,7 @@ describe("protocol schemas parse the shared Rust fixtures", () => {
     expect(errorBodySchema.parse(fixture("error-with-details.json")).error.details).toEqual({
       protocol: 7,
       minProtocol: 1,
-      maxProtocol: 2,
+      maxProtocol: 3,
     });
   });
 
@@ -257,6 +257,7 @@ const RESPONSES = [
   ["error-template-is-default.json", errorBodySchema],
   ["office-shift.json", officeShiftSchema],
   ["error-shift-busy.json", errorBodySchema],
+  ["error-snapshot-too-large.json", errorBodySchema],
   ["error-sscc-exhausted.json", errorBodySchema],
   ["device-shifts.json", deviceShiftsSchema],
   ["device-shift-entered.json", enteredShiftSchema],
@@ -288,6 +289,7 @@ const REQUESTS = [
   ["template-defaults-update.json", templateDefaultsUpdateSchema],
   ["bootstrap-request-templates.json", bootstrapRequestSchema],
   ["shift-create.json", shiftCreateSchema],
+  ["shift-create-pallets.json", shiftCreateSchema],
   ["shift-update.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
   ["device-shift-create.json", deviceShiftCreateSchema],
@@ -1259,6 +1261,8 @@ describe("shift shapes", () => {
       ownerDeviceId: ["42"],
       plannedQty: [0, 1.5, -1, "1200"],
       boxCapacity: [0, 1.5, null],
+      palletBoxCapacity: [0, 1.5, -1, "40"],
+      palletTemplateId: ["42"],
       productionDate: ["08.10.2026", "2026-10-8", 20261008, null],
       openedAt: ["yesterday"],
       rev: [1.5, null],
@@ -1288,6 +1292,33 @@ describe("shift shapes", () => {
       expect(shiftUpdateSchema.safeParse({ [field]: null, expectedRev: 71 }).success, field).toBe(
         true,
       );
+    }
+  });
+
+  it("read a shift with pallets: their capacity and their template", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    const pallets = {
+      ...shift,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f",
+    };
+    expect(officeShiftSchema.parse(pallets)).toEqual(pallets);
+  });
+
+  it("read a shift's pallets in its totals and refuse a count of pallets that is no whole number", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    const counted = { ...shift, totals: { ...shift.totals, closedPallets: 12, openPallets: 1 } };
+    expect(officeShiftSchema.parse(counted)).toEqual(counted);
+    for (const field of ["closedPallets", "openPallets"]) {
+      for (const value of [-1, 1.5, "1", null]) {
+        const totals = { ...shift.totals, [field]: value };
+        expect(officeShiftSchema.safeParse({ ...shift, totals }).success, field).toBe(false);
+      }
+      const totals = Object.fromEntries(
+        Object.entries(shift.totals).filter(([key]) => key !== field),
+      );
+      expect(officeShiftSchema.safeParse({ ...shift, totals }).success, field).toBe(false);
     }
   });
 
@@ -1345,6 +1376,8 @@ describe("shift shapes", () => {
       counterpartyId: ["42"],
       mode: ["boxes", null],
       palletsEnabled: ["no", null],
+      palletBoxCapacity: [0, -1, 1.5, "40", null],
+      palletTemplateId: ["42", null],
     };
     for (const [field, values] of Object.entries(refusedCreate)) {
       for (const value of values) {
@@ -1373,6 +1406,8 @@ describe("shift shapes", () => {
       counterpartyId: ["42"],
       mode: ["boxes"],
       palletsEnabled: ["no"],
+      palletBoxCapacity: [0, -1, 1.5, "40", null],
+      palletTemplateId: ["42", null],
       expectedRev: [1.5, "71", null],
     };
     for (const [field, values] of Object.entries(refusedUpdate)) {
@@ -1405,6 +1440,8 @@ describe("shift shapes", () => {
       openBoxes: 1,
       lastFactAt: "2026-10-08T09:41:07Z",
       deviceIds: ["7c9e6679-7425-40de-944b-e07fc1f90ae7"],
+      closedPallets: 0,
+      openPallets: 0,
     });
     const planned = {
       ...shift,
@@ -1418,6 +1455,8 @@ describe("shift shapes", () => {
         openBoxes: 0,
         lastFactAt: null,
         deviceIds: [],
+        closedPallets: 0,
+        openPallets: 0,
       },
     };
     expect(officeShiftSchema.parse(planned)).toEqual(planned);
@@ -1428,6 +1467,8 @@ describe("shift shapes", () => {
       openBoxes: [-1, 1.5, "1", null],
       lastFactAt: ["yesterday", 20261008],
       deviceIds: [["42"], "7c9e6679-7425-40de-944b-e07fc1f90ae7", null],
+      closedPallets: [-1, 1.5, "1", null],
+      openPallets: [-1, 1.5, "1", null],
     };
     for (const [field, values] of Object.entries(refused)) {
       for (const value of values) {
@@ -1458,7 +1499,7 @@ describe("shift shapes", () => {
     expect(newer.data?.totals.acceptedUnits).toBe(547);
   });
 
-  it("read the refusals of a busy shift and of a prefix with no serials left", () => {
+  it("read the refusals of a busy shift, of a prefix with no serials left and of layouts too large to open a shift", () => {
     expect(errorBodySchema.parse(fixture("error-shift-busy.json")).error).toMatchObject({
       code: "conflict",
       details: { constraint: "shift_busy" },
@@ -1466,6 +1507,10 @@ describe("shift shapes", () => {
     expect(errorBodySchema.parse(fixture("error-sscc-exhausted.json")).error).toMatchObject({
       code: "sscc_exhausted",
       details: { issuerPrefix: "460068200", extension: 0 },
+    });
+    expect(errorBodySchema.parse(fixture("error-snapshot-too-large.json")).error).toMatchObject({
+      code: "conflict",
+      details: { constraint: "snapshot_too_large" },
     });
   });
 });

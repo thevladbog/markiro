@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "conflict",
+    "message": "the shift's label layouts together are too large to open it",
+    "details": { "constraint": "snapshot_too_large" }
+  }
+}

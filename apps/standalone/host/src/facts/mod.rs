@@ -11,10 +11,15 @@
 //! database error is no receipt: it fails the whole batch, and the device
 //! sends it again.
 
+pub mod blocks;
 pub mod box_closed;
 pub mod box_label;
 pub mod boxes;
 pub mod exception;
+pub mod pallet_closed;
+pub mod pallet_exception;
+pub mod pallet_label;
+pub mod pallets;
 pub mod registry;
 pub mod rules;
 pub mod scan;
@@ -119,6 +124,8 @@ pub struct FactShift {
     pub gtin14: String,
     /// The SSCC issuer prefix the shift's snapshot froze.
     pub issuer_prefix: String,
+    /// Whether the shift works with pallets (plan ПЛ-Х); fixed once open.
+    pub pallets_enabled: bool,
 }
 
 /// What every kind's handler knows of its record.
@@ -334,6 +341,9 @@ async fn apply(
         FactKind::BoxLabel => box_label::apply(conn, &context, &record.data).await,
         FactKind::BoxException => exception::apply(conn, &context, &record.data).await,
         FactKind::ShiftClosed => shift_closed::apply(conn, &context, &record.data).await,
+        FactKind::PalletClosed => pallet_closed::apply(conn, &context, &record.data).await,
+        FactKind::PalletLabel => pallet_label::apply(conn, &context, &record.data).await,
+        FactKind::PalletException => pallet_exception::apply(conn, &context, &record.data).await,
     };
     let answer = match answer {
         Ok(applied) => {
@@ -373,10 +383,12 @@ async fn entered_shift(
         Option<String>,
         Option<String>,
         bool,
+        bool,
     );
     let row: Option<ShiftRow> = sqlx::query_as(
         "SELECT s.status, s.number_month_key, s.number_seq, s.created_from, \
          json_extract(s.snapshot, '$.product.gtin14'), json_extract(s.snapshot, '$.issuerPrefix'), \
+         s.pallets_enabled, \
          EXISTS (SELECT 1 FROM shift_participants p WHERE p.shift_id = s.id AND p.device_id = ?) \
          FROM shifts s WHERE s.id = ?",
     )
@@ -385,7 +397,17 @@ async fn entered_shift(
     .fetch_optional(&mut *conn)
     .await
     .map_err(ApiError::internal)?;
-    let Some((status, month_key, seq, created_from, gtin14, issuer_prefix, entered)) = row else {
+    let Some((
+        status,
+        month_key,
+        seq,
+        created_from,
+        gtin14,
+        issuer_prefix,
+        pallets_enabled,
+        entered,
+    )) = row
+    else {
         return Ok(None);
     };
     if !entered {
@@ -400,6 +422,7 @@ async fn entered_shift(
         status: status.parse().map_err(ApiError::internal)?,
         gtin14: gtin14.ok_or_else(snapshot)?,
         issuer_prefix: issuer_prefix.ok_or_else(snapshot)?,
+        pallets_enabled,
     })))
 }
 

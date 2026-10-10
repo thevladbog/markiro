@@ -368,10 +368,12 @@ pub async fn delete_template(
     if usage.organization || !usage.categories.is_empty() {
         return Err(templates::is_default(usage.organization, usage.categories));
     }
-    // A planned shift prints with this template once a station opens it;
-    // an open or closed shift has the layout in its snapshot.
+    // A planned shift prints its boxes or its pallets with this template once
+    // a station opens it; an open or closed shift has the layout in its
+    // snapshot.
     let planned: Vec<String> = sqlx::query_scalar(
-        "SELECT id FROM shifts WHERE box_template_id = ? AND status = 'planned' ORDER BY id",
+        "SELECT id FROM shifts WHERE (box_template_id = ?1 OR pallet_template_id = ?1) \
+         AND status = 'planned' ORDER BY id",
     )
     .bind(&id)
     .fetch_all(&mut *tx)

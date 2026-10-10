@@ -259,7 +259,7 @@ async fn only_a_station_gets_blocks_and_only_of_a_known_box_counter() {
             field("issuerPrefix"),
         ),
         (json!({ "issuerPrefix": "4600682" }), field("issuerPrefix")),
-        (json!({ "extension": 1 }), field("extension")),
+        (json!({ "extension": 2 }), field("extension")),
         (json!({ "requestId": "first" }), field("requestId")),
         (
             json!({ "requestId": FIRST.to_uppercase() }),
@@ -579,7 +579,7 @@ async fn an_issue_stores_the_block_whole_wakes_the_streams_and_touches_no_other_
     let (status, _) = ask(&admin, &admin.key, block_request(FIRST)).await;
     assert_eq!(status, StatusCode::OK);
     let mut bad = block_request(SECOND);
-    bad["extension"] = json!(1);
+    bad["extension"] = json!(2);
     let (status, _) = ask(&admin, &admin.key, bad).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(!wake.has_changed().unwrap());
@@ -797,4 +797,382 @@ async fn requests_arriving_together_get_disjoint_blocks_and_a_repeat_gets_the_sa
     assert_eq!(serials, vec![(1500, 3499), (3500, 5499), (5500, 7499)]);
     assert_eq!(box_counter(&admin).await["nextSerial"], json!(7500));
     assert_eq!(audit_trail(&admin.app, "sscc.block.issue").await.len(), 3);
+}
+
+/// The pallet counter of `PREFIX` as the office reads it.
+async fn pallet_counter(admin: &Admin) -> Value {
+    let (status, state) = admin.call("GET", "/v1/office/sscc", None).await;
+    assert_eq!(status, StatusCode::OK, "{state}");
+    state["counters"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|counter| counter["issuerPrefix"] == PREFIX && counter["extension"] == 1)
+        .cloned()
+        .expect("the wizard made the pallet counter")
+}
+
+fn pallet_request(request_id: &str) -> Value {
+    json!({ "requestId": request_id, "issuerPrefix": PREFIX, "extension": 1 })
+}
+
+/// A pallet block (extension 1) is the pallet counter's next
+/// `site.pallet_block_size` serials (200 by default), with its own revision,
+/// audit row and wake; the box counter and the box block size are not
+/// touched, nor the other way round.
+#[tokio::test]
+async fn a_pallet_block_takes_the_pallet_counter_and_the_pallet_block_size() {
+    let admin = admin().await;
+    let station = device_id(&admin, &admin.key).await;
+    let boxes = box_counter(&admin).await;
+    let mut wake = admin.app.state.revisions.subscribe();
+    // The wizard started the pallet counter at 40.
+    let (status, block) = ask(&admin, &admin.key, pallet_request(FIRST)).await;
+    assert_eq!(status, StatusCode::OK, "{block}");
+    assert_eq!(
+        block,
+        json!({
+            "id": block["id"], "issuerPrefix": PREFIX, "extension": 1,
+            "fromSerial": 40, "toSerial": 239
+        })
+    );
+    let counter = pallet_counter(&admin).await;
+    assert_eq!(
+        (counter["nextSerial"].clone(), counter["rev"].clone()),
+        (json!(240), json!(2))
+    );
+    assert_eq!(box_counter(&admin).await, boxes);
+    assert!(wake.has_changed().unwrap());
+    assert_eq!(*wake.borrow_and_update(), 2);
+    let mut row = issued(&station, &block);
+    row.6["extension"] = json!(1);
+    assert_eq!(audit_trail(&admin.app, "sscc.block.issue").await, vec![row]);
+    // The sizes change: a pallet block takes the pallet size, a box block
+    // the box size.
+    let (status, sizes) = admin
+        .call(
+            "PUT",
+            "/v1/office/sscc/block-sizes",
+            Some(json!({ "boxBlockSize": 7, "palletBlockSize": 3, "expectedRev": 1 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{sizes}");
+    let (status, pallets) = ask(&admin, &admin.key, pallet_request(SECOND)).await;
+    assert_eq!(
+        (
+            status,
+            pallets["fromSerial"].clone(),
+            pallets["toSerial"].clone()
+        ),
+        (StatusCode::OK, json!(240), json!(242))
+    );
+    let (status, boxes) = ask(&admin, &admin.key, block_request(THIRD)).await;
+    assert_eq!(
+        (
+            status,
+            boxes["fromSerial"].clone(),
+            boxes["toSerial"].clone()
+        ),
+        (StatusCode::OK, json!(1500), json!(1506))
+    );
+    assert_eq!(pallet_counter(&admin).await["nextSerial"], json!(243));
+}
+
+/// A request id names one block of one extension: the same id for the
+/// other extension is `validation_failed` on `requestId` and writes
+/// nothing, whichever way round; the same body answers its own block.
+#[tokio::test]
+async fn a_repeated_request_id_with_another_extension_is_refused() {
+    let admin = admin().await;
+    let (status, pallets) = ask(&admin, &admin.key, pallet_request(FIRST)).await;
+    assert_eq!(status, StatusCode::OK, "{pallets}");
+    let (status, boxes) = ask(&admin, &admin.key, block_request(SECOND)).await;
+    assert_eq!(status, StatusCode::OK, "{boxes}");
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let blocks = block_rows(&admin).await;
+    for body in [block_request(FIRST), pallet_request(SECOND)] {
+        let (status, refused) = ask(&admin, &admin.key, body.clone()).await;
+        assert_eq!(
+            (status, refused["error"]["details"].clone()),
+            (StatusCode::BAD_REQUEST, json!({ "field": "requestId" })),
+            "{body}"
+        );
+    }
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(block_rows(&admin).await, blocks);
+    let (status, again) = ask(&admin, &admin.key, pallet_request(FIRST)).await;
+    assert_eq!((status, again), (StatusCode::OK, pallets));
+    let (status, again) = ask(&admin, &admin.key, block_request(SECOND)).await;
+    assert_eq!((status, again), (StatusCode::OK, boxes));
+}
+
+/// The pallet counter ends like the box counter: the last serial is a
+/// block of one, then `sscc_exhausted` names the pallet extension.
+#[tokio::test]
+async fn the_last_pallet_serial_is_a_block_of_one_and_then_none_is_left() {
+    let admin = admin().await;
+    let path = format!("/v1/office/sscc/counters/{PREFIX}/1");
+    let counter = pallet_counter(&admin).await;
+    let (status, moved) = admin
+        .call(
+            "PUT",
+            &path,
+            Some(json!({ "nextSerial": 9_999_999, "expectedRev": counter["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    let (status, last) = ask(&admin, &admin.key, pallet_request(FIRST)).await;
+    assert_eq!(
+        (status, last["fromSerial"].clone(), last["toSerial"].clone()),
+        (StatusCode::OK, json!(9_999_999), json!(9_999_999))
+    );
+    let (status, refused) = ask(&admin, &admin.key, pallet_request(SECOND)).await;
+    assert_eq!(
+        (
+            status,
+            refused["error"]["code"].clone(),
+            refused["error"]["details"].clone()
+        ),
+        (
+            StatusCode::CONFLICT,
+            json!("sscc_exhausted"),
+            json!({ "issuerPrefix": PREFIX, "extension": 1 })
+        )
+    );
+    // The box counter still issues.
+    let (status, boxes) = ask(&admin, &admin.key, block_request(THIRD)).await;
+    assert_eq!(
+        (status, boxes["fromSerial"].clone()),
+        (StatusCode::OK, json!(1500))
+    );
+}
+
+/// Every block row with its extension, by extension and serial:
+/// `(extension, device, request, from, to)`.
+async fn block_rows_by_extension(admin: &Admin) -> Vec<(i64, String, String, i64, i64)> {
+    sqlx::query_as(
+        "SELECT extension, device_id, request_id, from_serial, to_serial FROM sscc_blocks \
+         ORDER BY extension, from_serial",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap()
+}
+
+/// Pallet blocks and box blocks of two stations, asked for in turn, never
+/// overlap within an extension and never take a serial of the other's
+/// counter; a repeat answers its own block whatever was issued since, and
+/// each counter ends exactly past its last block.
+#[tokio::test]
+async fn pallet_blocks_and_box_blocks_of_two_stations_never_overlap() {
+    let admin = admin().await;
+    let station = device_id(&admin, &admin.key).await;
+    let (colleague_id, colleague) = pair_device(&admin.app, "station").await;
+    // Pallets 40..239, boxes 1500..3499, the colleague's pallets 240..439
+    // under the same request id, boxes 3500..5499, pallets 440..639.
+    let mut answers = Vec::new();
+    for (key, body) in [
+        (&admin.key, pallet_request(FIRST)),
+        (&admin.key, block_request(SECOND)),
+        (&colleague, pallet_request(FIRST)),
+        (&colleague, block_request(SECOND)),
+        (&admin.key, pallet_request(THIRD)),
+    ] {
+        let (status, block) = ask(&admin, key, body).await;
+        assert_eq!(status, StatusCode::OK, "{block}");
+        answers.push((
+            block["extension"].clone(),
+            block["fromSerial"].clone(),
+            block["toSerial"].clone(),
+        ));
+    }
+    assert_eq!(
+        answers,
+        vec![
+            (json!(1), json!(40), json!(239)),
+            (json!(0), json!(1500), json!(3499)),
+            (json!(1), json!(240), json!(439)),
+            (json!(0), json!(3500), json!(5499)),
+            (json!(1), json!(440), json!(639)),
+        ]
+    );
+    assert_eq!(
+        block_rows_by_extension(&admin).await,
+        vec![
+            (0, station.clone(), SECOND.to_owned(), 1500, 3499),
+            (0, colleague_id.clone(), SECOND.to_owned(), 3500, 5499),
+            (1, station.clone(), FIRST.to_owned(), 40, 239),
+            (1, colleague_id.clone(), FIRST.to_owned(), 240, 439),
+            (1, station.clone(), THIRD.to_owned(), 440, 639),
+        ]
+    );
+    assert_eq!(pallet_counter(&admin).await["nextSerial"], json!(640));
+    assert_eq!(box_counter(&admin).await["nextSerial"], json!(5500));
+    // A repeat is its own block, writing nothing.
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let (status, again) = ask(&admin, &admin.key, pallet_request(FIRST)).await;
+    assert_eq!(
+        (
+            status,
+            again["fromSerial"].clone(),
+            again["toSerial"].clone()
+        ),
+        (StatusCode::OK, json!(40), json!(239))
+    );
+    let (status, again) = ask(&admin, &colleague, pallet_request(FIRST)).await;
+    assert_eq!(
+        (
+            status,
+            again["fromSerial"].clone(),
+            again["toSerial"].clone()
+        ),
+        (StatusCode::OK, json!(240), json!(439))
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(block_rows_by_extension(&admin).await.len(), 5);
+}
+
+/// The pallet counter ends at the prefix's last serial like the box counter:
+/// the last block is cut short there, then `sscc_exhausted` names the pallet
+/// extension, a refusal writes nothing, and the box counter still issues.
+#[tokio::test]
+async fn a_pallet_block_is_cut_short_at_the_end_of_the_prefix_and_then_exhausted() {
+    let admin = admin().await;
+    let counter = pallet_counter(&admin).await;
+    let (status, moved) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/sscc/counters/{PREFIX}/1"),
+            Some(json!({ "nextSerial": 9_999_900, "expectedRev": counter["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    let (status, block) = ask(&admin, &admin.key, pallet_request(FIRST)).await;
+    assert_eq!(
+        (
+            status,
+            block["extension"].clone(),
+            block["fromSerial"].clone(),
+            block["toSerial"].clone()
+        ),
+        (StatusCode::OK, json!(1), json!(9_999_900), json!(9_999_999)),
+        "{block}"
+    );
+    assert_eq!(
+        pallet_counter(&admin).await["nextSerial"],
+        json!(10_000_000)
+    );
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let blocks = block_rows_by_extension(&admin).await;
+    let (status, refused) = ask(&admin, &admin.key, pallet_request(SECOND)).await;
+    assert_eq!(
+        (
+            status,
+            refused["error"]["code"].clone(),
+            refused["error"]["details"].clone()
+        ),
+        (
+            StatusCode::CONFLICT,
+            json!("sscc_exhausted"),
+            json!({ "issuerPrefix": PREFIX, "extension": 1 })
+        )
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(block_rows_by_extension(&admin).await, blocks);
+    assert_eq!(
+        pallet_counter(&admin).await["nextSerial"],
+        json!(10_000_000)
+    );
+    // A box block does not see the pallet counter's end.
+    let (status, boxes) = ask(&admin, &admin.key, block_request(THIRD)).await;
+    assert_eq!(
+        (
+            status,
+            boxes["fromSerial"].clone(),
+            boxes["toSerial"].clone()
+        ),
+        (StatusCode::OK, json!(1500), json!(3499))
+    );
+}
+
+/// A pallet block is the station's business alone, and of a prefix that has a
+/// pallet counter: other kinds of device, a station revoked while the request
+/// waited, and a prefix with a box counter only are all refused, and
+/// nothing is written.
+#[tokio::test]
+async fn a_pallet_block_is_for_a_current_station_and_a_known_pallet_counter() {
+    let admin = admin().await;
+    let (office_id, office_pc) = pair_device(&admin.app, "office").await;
+    let handheld = pair_handheld(&admin).await;
+    let (colleague, _) = pair_device(&admin.app, "station").await;
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    for key in [&office_pc, &handheld] {
+        let (status, refused) = ask(&admin, key, pallet_request(FIRST)).await;
+        assert_eq!(
+            (status, refused["error"]["code"].clone()),
+            (StatusCode::FORBIDDEN, json!("forbidden"))
+        );
+    }
+    // The transaction reads the device again.
+    let (status, refused) = issue_as(
+        &admin,
+        &office_id,
+        DeviceKind::Station,
+        pallet_request(FIRST),
+    )
+    .await;
+    assert_eq!(
+        (status, refused["error"]["code"].clone()),
+        (StatusCode::FORBIDDEN, json!("forbidden"))
+    );
+    sqlx::query("UPDATE devices SET revoked_at = ? WHERE id = ?")
+        .bind(admin.app.state.timestamp())
+        .bind(&colleague)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let revision_revoked = host_revision(&admin.app).await;
+    let rows_revoked = audit_rows(&admin.app).await;
+    let (status, refused) = issue_as(
+        &admin,
+        &colleague,
+        DeviceKind::Station,
+        pallet_request(FIRST),
+    )
+    .await;
+    assert_eq!(
+        (status, refused["error"]["details"]["credential"].clone()),
+        (StatusCode::UNAUTHORIZED, json!("device"))
+    );
+    assert_eq!(host_revision(&admin.app).await, revision_revoked);
+    assert_eq!(audit_rows(&admin.app).await, rows_revoked);
+    assert_eq!(revision, revision_revoked);
+    assert_eq!(rows, rows_revoked);
+    // A prefix with a box counter only has no pallet block.
+    sqlx::query("DELETE FROM sscc_counters WHERE issuer_prefix = ? AND extension = 1")
+        .bind(PREFIX)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, refused) = ask(&admin, &admin.key, pallet_request(FIRST)).await;
+    assert_eq!(
+        (status, refused["error"]["details"].clone()),
+        (StatusCode::BAD_REQUEST, json!({ "field": "issuerPrefix" }))
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert!(block_rows_by_extension(&admin).await.is_empty());
+    let (status, boxes) = ask(&admin, &admin.key, block_request(FIRST)).await;
+    assert_eq!(
+        (status, boxes["extension"].clone()),
+        (StatusCode::OK, json!(0)),
+        "{boxes}"
+    );
 }

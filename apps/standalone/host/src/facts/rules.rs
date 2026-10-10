@@ -3,8 +3,10 @@
 //! (`box-digest.json`, the domain's `boxMembershipDigestV1`), the form of a
 //! device's instant (`device-instants.json`, what `Date.toISOString` writes)
 //! and when a station's close needs a reason (`shift-close-reasons.json`,
-//! the domain's `shiftCloseReasonRequired`). The digest of a record is the
-//! host's own: it keys idempotency.
+//! the domain's `shiftCloseReasonRequired`), and how the first 17 digits of
+//! a box's or a pallet's SSCC name its serial (`sscc-serials.json`, built by
+//! the domain's `buildSscc`). The digest of a record is the host's own: it
+//! keys idempotency.
 
 use aws_lc_rs::digest::{digest, SHA256};
 use serde_json::Value;
@@ -69,6 +71,20 @@ pub fn is_code_hash(text: &str) -> bool {
         && text
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// Whether `sscc` is the SSCC of `serial` under `issuer_prefix` and the
+/// extension digit `extension` (a box 0, a pallet 1), whatever its check
+/// digit: its first 17 digits are the extension, the prefix and the serial
+/// padded to the prefix's width, as the domain's `buildSscc` writes them. The
+/// check digit is a marking rule, the domain's (stage 2a spec, decision 13).
+/// Text shorter than that names no serial.
+pub fn names_serial(sscc: &str, extension: u8, issuer_prefix: &str, serial: u64) -> bool {
+    let width = 16 - issuer_prefix.len();
+    serial < crate::validate::serial_capacity(issuer_prefix)
+        && sscc
+            .get(..17)
+            .is_some_and(|body| body == format!("{extension}{issuer_prefix}{serial:0width$}"))
 }
 
 /// The domain's `shiftCloseReasonRequired`: a station's close needs one of

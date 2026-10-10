@@ -4,7 +4,7 @@ import { isBadgePhc, isPinPhc } from "../lib/credentials.js";
 import { PAIRING_CODE_ALPHABET, PAIRING_CODE_LENGTH } from "./pairing-code.js";
 
 /** Mirrors `markiro_proto::PROTOCOL_VERSION` (apps/standalone/proto). */
-export const PROTOCOL_VERSION = 2;
+export const PROTOCOL_VERSION = 3;
 /** Mirrors `markiro_proto::DEFAULT_PORT`. */
 export const DEFAULT_HOST_PORT = 45710;
 /** The host on this computer, when the app runs next to the service. */
@@ -553,6 +553,8 @@ export const shiftTotalsSchema = z.object({
   openBoxes: z.number().int().nonnegative(),
   lastFactAt: z.iso.datetime().nullable(),
   deviceIds: z.array(z.uuid()),
+  closedPallets: z.number().int().nonnegative(),
+  openPallets: z.number().int().nonnegative(),
 });
 export type ShiftTotals = z.infer<typeof shiftTotalsSchema>;
 
@@ -562,7 +564,8 @@ export type ShiftTotals = z.infer<typeof shiftTotalsSchema>;
  * products, lines, counterparties and devices from its own lists.
  * `closeReasonCode` is one of the domain's six codes of a station's close
  * (plan 2a2), read as text so a code a newer host adds does not fail the list;
- * `closeReasonText` is the office's words.
+ * `closeReasonText` is the office's words. The pallet capacity and template
+ * are set exactly when `palletsEnabled` (plan ПЛ-Х).
  */
 export const officeShiftSchema = z.object({
   id: z.uuid(),
@@ -578,6 +581,8 @@ export const officeShiftSchema = z.object({
   plannedQty: z.number().int().positive().nullable(),
   boxCapacity: z.number().int().positive(),
   boxTemplateId: z.uuid(),
+  palletBoxCapacity: z.number().int().positive().nullable(),
+  palletTemplateId: z.uuid().nullable(),
   ownerDeviceId: z.uuid().nullable(),
   openedAt: z.iso.datetime().nullable(),
   closedAt: z.iso.datetime().nullable(),
@@ -953,7 +958,9 @@ export type TemplateDefaultsUpdate = z.infer<typeof templateDefaultsUpdateSchema
 /**
  * `POST /v1/office/shifts`: a planned shift. The office always sends the box
  * capacity, `null` for no plan or no counterparty, and `mode` and
- * `palletsEnabled` as the only values stage 2a takes.
+ * `palletsEnabled`. A shift with pallets names its pallet template and may
+ * name its pallet capacity (the product's when left out); one without sends
+ * neither (plan ПЛ-Х).
  */
 export const shiftCreateSchema = z
   .object({
@@ -966,6 +973,8 @@ export const shiftCreateSchema = z
     counterpartyId: z.uuid().nullable().optional(),
     mode: shiftModeSchema.optional(),
     palletsEnabled: z.boolean().optional(),
+    palletBoxCapacity: z.number().int().positive().optional(),
+    palletTemplateId: z.uuid().optional(),
   })
   .strict();
 export type ShiftCreate = z.infer<typeof shiftCreateSchema>;
@@ -974,7 +983,8 @@ export type ShiftCreate = z.infer<typeof shiftCreateSchema>;
  * `PUT /v1/office/shifts/{id}`: only the fields sent change, over the loaded
  * revision. `plannedQty: null` and `counterpartyId: null` clear them; every
  * other field is left out or a value, never `null`, which the host would read
- * as «keep». The product never changes, so it is no field.
+ * as «keep». The product never changes, so it is no field. Pallets turned
+ * off clear their capacity and template, which the edit then does not send.
  */
 export const shiftUpdateSchema = z
   .object({
@@ -986,6 +996,8 @@ export const shiftUpdateSchema = z
     counterpartyId: z.uuid().nullable().optional(),
     mode: shiftModeSchema.optional(),
     palletsEnabled: z.boolean().optional(),
+    palletBoxCapacity: z.number().int().positive().optional(),
+    palletTemplateId: z.uuid().optional(),
     expectedRev: z.number().int(),
   })
   .strict();

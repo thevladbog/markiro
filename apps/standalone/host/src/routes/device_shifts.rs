@@ -3,8 +3,9 @@
 //! `POST /v1/device/shifts/{id}/enter`. A
 //! station reads its shifts at the moments it reads its device record
 //! (after it subscribes to the link and after every revision event), since a
-//! shift is no feed record: shifts are per line, and an open one carries a
-//! layout of up to 256 KB.
+//! shift is no feed record: shifts are per line, and an open one carries up
+//! to two layouts (a box's and, with pallets, a pallet's), its snapshot at
+//! most 320 KB.
 
 use axum::extract::State;
 use axum::Json;
@@ -33,8 +34,8 @@ const SELECT: &str = "SELECT s.id, s.number_month_key, s.number_seq, s.created_f
      COALESCE(json_extract(s.snapshot, '$.product.gtin14'), p.gtin14) AS product_gtin14, \
      CASE WHEN s.snapshot IS NULL THEN c.name \
          ELSE json_extract(s.snapshot, '$.counterpartyName') END AS counterparty_name, \
-     s.production_date, s.planned_qty, s.box_capacity, s.box_template_id, s.owner_device_id, \
-     s.opened_at, s.closed_at \
+     s.production_date, s.planned_qty, s.box_capacity, s.box_template_id, \
+     s.pallet_box_capacity, s.pallet_template_id, s.owner_device_id, s.opened_at, s.closed_at \
      FROM shifts s JOIN products p ON p.id = s.product_id \
      LEFT JOIN counterparties c ON c.id = s.counterparty_id";
 
@@ -56,6 +57,8 @@ struct ShiftRow {
     planned_qty: Option<u32>,
     box_capacity: u32,
     box_template_id: String,
+    pallet_box_capacity: Option<u32>,
+    pallet_template_id: Option<String>,
     owner_device_id: Option<String>,
     opened_at: Option<String>,
     closed_at: Option<String>,
@@ -79,6 +82,8 @@ fn record(row: ShiftRow) -> Result<DeviceShift, ApiError> {
         planned_qty: row.planned_qty,
         box_capacity: row.box_capacity,
         box_template_id: row.box_template_id,
+        pallet_box_capacity: row.pallet_box_capacity,
+        pallet_template_id: row.pallet_template_id,
         owner_device_id: row.owner_device_id,
         opened_at: row.opened_at,
         closed_at: row.closed_at,
@@ -154,9 +159,10 @@ pub fn line_conflict() -> ApiError {
 }
 
 /// `POST /v1/device/shifts`: a station creates a planned shift on its own
-/// line, under the rules of the office's plan; its number ends in `/S`. The
-/// same `requestId` again answers the shift it created, whatever the body
-/// says now, so a create retried after a lost answer makes no second shift.
+/// line, under the rules of the office's plan, pallets included; its number
+/// ends in `/S`. The same `requestId` again answers the shift it created,
+/// whatever the body says now, so a create retried after a lost answer makes
+/// no second shift.
 pub async fn create_device_shift(
     State(state): State<AppState>,
     device: AuthDevice,
@@ -164,6 +170,11 @@ pub async fn create_device_shift(
 ) -> Result<Json<DeviceShift>, ApiError> {
     require_station(&device)?;
     validate::client_uuid("requestId", &create.request_id)?;
+    let pallet_request = shifts::pallet_request(
+        create.pallets_enabled,
+        create.pallet_box_capacity,
+        create.pallet_template_id.as_deref(),
+    )?;
     let production_date = validate::civil_date("productionDate", &create.production_date)?;
     validate::count("plannedQty", create.planned_qty, validate::MAX_PLANNED_QTY)?;
     validate::count(
@@ -200,6 +211,7 @@ pub async fn create_device_shift(
         shifts::check_counterparty(&mut tx, counterparty_id).await?;
     }
     shifts::check_box_template(&mut tx, &create.box_template_id, product.group).await?;
+    let pallets = shifts::pallets(&mut tx, pallet_request, &product).await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     let id = shifts::insert(
         &mut tx,
@@ -214,6 +226,7 @@ pub async fn create_device_shift(
             planned_qty: create.planned_qty,
             box_capacity: create.box_capacity.unwrap_or(product.box_capacity),
             box_template_id: &create.box_template_id,
+            pallets,
         },
         &at,
         rev,
@@ -255,6 +268,7 @@ struct EntryRow {
     owner_device_id: Option<String>,
     product_id: String,
     box_template_id: String,
+    pallet_template_id: Option<String>,
     counterparty_id: Option<String>,
     snapshot: Option<String>,
     number_month_key: String,
@@ -267,8 +281,10 @@ struct EntryRow {
 /// owner) or enters again the active shift it opened; the answer carries the
 /// snapshot, so a station that lost its database gets it back. A closed
 /// shift is `shift_status`, another line `shift_line`, a shift another
-/// station opened `shift_busy`. Opening takes a revision, so the other
-/// stations of the line see the shift busy; entering again takes none.
+/// station opened `shift_busy`, and a plan whose layouts together would
+/// not fit the snapshot `snapshot_too_large`, once its templates fit. Opening
+/// takes a revision, so the other stations of the line see the shift busy;
+/// entering again takes none.
 pub async fn enter_shift(
     State(state): State<AppState>,
     device: AuthDevice,
@@ -279,8 +295,9 @@ pub async fn enter_shift(
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     device.require_station_in(&mut tx, STATION_ONLY).await?;
     let shift: Option<EntryRow> = sqlx::query_as(
-        "SELECT status, line_id, owner_device_id, product_id, box_template_id, counterparty_id, \
-         snapshot, number_month_key, number_seq, created_from FROM shifts WHERE id = ?",
+        "SELECT status, line_id, owner_device_id, product_id, box_template_id, \
+         pallet_template_id, counterparty_id, snapshot, number_month_key, number_seq, \
+         created_from FROM shifts WHERE id = ?",
     )
     .bind(&id)
     .fetch_optional(&mut *tx)
@@ -333,17 +350,20 @@ pub async fn enter_shift(
                 &mut tx,
                 &shift.product_id,
                 &shift.box_template_id,
+                shift.pallet_template_id.as_deref(),
                 shift.counterparty_id.as_deref(),
             )
             .await?
         }
     };
+    // After the templates, so a template that no longer fits is named first.
+    let text = shifts::snapshot_text(&snapshot)?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query(
         "UPDATE shifts SET status = 'active', snapshot = ?, opened_at = ?, owner_device_id = ?, \
          rev = ? WHERE id = ?",
     )
-    .bind(serde_json::to_string(&snapshot).map_err(ApiError::internal)?)
+    .bind(text)
     .bind(&at)
     .bind(&device.id)
     .bind(rev)
@@ -363,6 +383,15 @@ pub async fn enter_shift(
     .await
     .map_err(ApiError::internal)?;
     let origin = shift.created_from.parse().map_err(ApiError::internal)?;
+    let mut details = json!({
+        "number": shifts::format_number(&shift.number_month_key, shift.number_seq, origin),
+        "templateId": snapshot.box_template.id,
+        "templateRev": snapshot.box_template.rev,
+    });
+    if let Some(pallet_template) = &snapshot.pallet_template {
+        details["palletTemplateId"] = json!(pallet_template.id);
+        details["palletTemplateRev"] = json!(pallet_template.rev);
+    }
     audit::record(
         &mut tx,
         &at,
@@ -372,11 +401,7 @@ pub async fn enter_shift(
             target_type: Some("shift"),
             target_id: Some(&id),
             outcome: Outcome::Ok,
-            details: json!({
-                "number": shifts::format_number(&shift.number_month_key, shift.number_seq, origin),
-                "templateId": snapshot.box_template.id,
-                "templateRev": snapshot.box_template.rev,
-            }),
+            details,
         },
     )
     .await

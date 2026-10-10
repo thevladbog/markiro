@@ -1000,11 +1000,19 @@ change) build their bodies inline, field by field, as does the wizard; its
 `bootstrapRequestSchema`, against which `test/protocol.test.ts` parses
 `bootstrap-request-templates.json`. Raise `PROTOCOL_VERSION` for an incompatible
 change, a new fact kind or a new `data` field of a fact included (see Facts);
-the host keeps accepting the previous version. It is 2 since plan 2a1,
-with `MIN_PROTOCOL_VERSION` still 1: the host takes the stations of stage 1,
-and a station of stage 2a finds a host of stage 1 too old (`host_too_old` at
-the probe). `src/host/protocol.ts` mirrors it, and `test/protocol.test.ts`
-ties the mirror to `hello.json`. Response types, which
+the host keeps accepting the previous version. It is 3 since plan ПЛ-Х
+(pallets; 2 since plan 2a1), with `MIN_PROTOCOL_VERSION` still 1: the host
+takes the stations of stage 1 and of stage 2a, and a station that knows
+pallets finds a host of stage 1 or 2a too old (`host_too_old` at the probe).
+The host does not look at the protocol of a station that enters a shift (it
+records it at pairing only), so a station of protocol 2 could enter a shift
+the office planned with pallets and produce boxes without them. The pilot
+rules that out by installation, not by a refusal: every station of a site runs
+protocol 3, installed together with the host's update, and the installer's
+check of it is owed to the plan УСТ (it is not done yet; nothing here was run
+on a real station).
+`src/host/protocol.ts` mirrors it, and `test/protocol.test.ts` ties the
+mirror to `hello.json`. Response types, which
 devices of different versions read, tolerate unknown fields; request types,
 which the host parses, reject them with `deny_unknown_fields`. The feed records
 that grant access or carry the salt (`site`, `operators`, `operator_badges`) are
@@ -2162,10 +2170,17 @@ draft or an archived one is `conflict` on `product_inactive`, an unknown one
 none, a box template that fits the product (`templates::fits`: enabled, of
 the box purpose, covering the product's group), the production date, a box
 capacity (the product's when left out; at most `MAX_BOX_CAPACITY`) and a plan
-or none (at most `MAX_PLANNED_QTY`, 10 000 000). `mode` and `palletsEnabled`
-are the cloud's shape; stage 2a takes only `aggregation` and `false`
-(`validation_failed` on either otherwise), so stages 2b and 3 need no new
-shape. Every office role reads shifts (`GET /v1/office/shifts`, `GET …/{id}`);
+or none (at most `MAX_PLANNED_QTY`, 10 000 000). `mode` is the cloud's shape;
+only `aggregation` is taken (`validation_failed` on `mode` otherwise), so
+stage 3 needs no new shape. A shift with pallets (`palletsEnabled`, plan
+ПЛ-Х, migration `0012_pallets.sql`) names a pallet template that fits the
+product (`templates::fits` for the pallet purpose; `validation_failed` on
+`palletTemplateId` otherwise, a missing one included) and a pallet capacity of
+1–`MAX_PALLET_BOX_CAPACITY` (10 000; the product's when left out); a shift
+without pallets sends neither field (`validation_failed` on the one it
+sends). `OfficeShift` names `palletBoxCapacity` and `palletTemplateId`
+exactly when `palletsEnabled`, which two triggers of `0012` hold in the
+table. Every office role reads shifts (`GET /v1/office/shifts`, `GET …/{id}`);
 administrators and technologists write them (`planShifts`, «Writes»). The
 list without a period holds every planned and active shift and the closed
 ones produced in the last 31 days of the host's clock (UTC); `?from=&to=`
@@ -2187,11 +2202,18 @@ that changes is checked as at planning (a changed template also needs the
 product still in use); one that stays is kept even if it was archived,
 disabled or narrowed since, and the station's opening refuses it then
 (`template_not_fit`). `plannedQty: null` and `counterpartyId: null` clear
-them. Only a planned shift is deleted (`DELETE …/{id}`, 204; an open or a
-closed one is `shift_status`); the delete takes a revision with no row left to
+them. A planned shift turns pallets on (with a pallet template; the
+product's capacity unless the edit names one) or off, which clears the
+capacity and the template (sending either then is `validation_failed`);
+pallets that stay on keep what the edit does not send, a pallet template
+disabled since included, and a changed template is checked. An open shift
+keeps its pallets (`shift_status`). Only a planned shift is deleted
+(`DELETE …/{id}`, 204; an open or a closed one is `shift_status`); the delete
+takes a revision with no row left to
 stamp, and a delete repeated after a lost answer is `not_found`. A template a
-planned shift names is not deleted (`conflict` on `template_in_use`, with
-`details.shiftIds`), since the shift prints with it once a station opens it;
+planned shift names, for its boxes or its pallets, is not deleted (`conflict`
+on `template_in_use`, with `details.shiftIds`), since the shift prints with it
+once a station opens it;
 an open or closed shift has the layout in its snapshot. Disabling or narrowing
 such a template is not refused: the shift then does not open, and the office
 sees why.
@@ -2200,15 +2222,20 @@ A station reads its shifts with the device key (`GET /v1/device/shifts`;
 the shift routes of a device are a station's, and another kind of device is
 `forbidden`): the planned and active shifts of its line, and the shifts it
 entered that are active or closed within 30 days, by production date; a
-station without a line sees only the latter. It reads them when it reads its
-device record (after it subscribes to the link and after every revision
-event), not through the feed: shifts are per line, and an open one carries a
-layout of up to 256 KB. A shift's product name and GTIN and its
+station without a line sees only the latter. A shift with pallets also
+names `palletBoxCapacity` and `palletTemplateId`; a shift without leaves
+both out, so a station of stage 2a reads its list as before. It reads them
+when it reads its device record (after it subscribes to the link and after
+every revision event), not through the feed: shifts are per line, and an
+open one carries up to two layouts (a box's and, with pallets, a pallet's).
+A shift's product name and GTIN and its
 counterparty's name are the snapshot's once it is open and the records' before
 (the station keeps no copy of counterparties); `ownerDeviceId` names the
 station that opened it, and another station's id means the shift is busy. A
 station creates a shift on its own line while the host answers
-(`POST /v1/device/shifts`), under the office's rules; a station without a line
+(`POST /v1/device/shifts`), under the office's rules, pallets included
+(`palletsEnabled`, `palletBoxCapacity`, `palletTemplateId`, all optional and
+left out by a station of stage 2a); a station without a line
 is `conflict` on `shift_line`, and a line is no field of the request.
 `requestId`, a lower-case hyphenated UUID the station made up
 (`validate::client_uuid`), makes the create repeatable: the same request of
@@ -2223,15 +2250,22 @@ A planned shift opens: the host checks its product (`product_inactive`) and
 its template (`template_not_fit`) again, freezes the snapshot
 (`ShiftSnapshot`: the product's id, GTIN, names, group and shelf life; the box
 template's id, name, revision and whole layout; the issuer prefix of the
-organization's GLN; the counterparty's name), makes the station the shift's
+organization's GLN; the counterparty's name; with pallets the pallet
+template's id, name, revision and layout as `palletTemplate`, which a shift
+without pallets leaves out), makes the station the shift's
 owner, adds it to `shift_participants` and takes a revision, so the line's
 other stations see the shift busy. The owner enters again with no revision and
 gets the same snapshot back, so a station that lost its database recovers it;
-a change of the catalog, the template or the GLN never changes it. A closed
-shift is `shift_status` for every station, a shift of another line (or a
+a change of the catalog, the template or the GLN never changes it. A pallet
+template disabled or narrowed since the plan keeps the shift planned
+(`conflict` on `pallet_template_not_fit`, checked after the box template). A
+closed shift is `shift_status` for every station, a shift of another line (or a
 station without one) `shift_line`, a shift another station opened
 `shift_busy`: stage 2a puts one device on a shift. The snapshot is at most
-320 KB (a `CHECK` of `0009`), and the host never checks its layout: the station
+320 KB (a `CHECK` of `0009`, `shifts::MAX_SNAPSHOT_BYTES`): a box layout and a
+pallet layout that together exceed it keep the shift planned (`conflict` on
+`snapshot_too_large`, checked at the entry after the templates, before a
+revision is taken). The host never checks a layout's content: the station
 does, with `labelTemplateSpecSchema`, when it enters. The opening writes
 `shift.open`; a second device's first entry (`shift.enter`) comes with plan
 2b, since in stage 2a a station's first entry is the opening.
@@ -2266,10 +2300,12 @@ entered again.
 The audit rows of this part are six, all `ok`: `shift.create` (an office user,
 or a station as the device; target `shift`, details `{ number, productId,
 lineId, productionDate }`), `shift.update` (an office user; the update details
-of `lineId`, `productionDate`, `boxTemplateId`, `boxCapacity`, `plannedQty`
-and `counterpartyId`, no row when nothing changed), `shift.delete` (an office
+of `lineId`, `productionDate`, `boxTemplateId`, `boxCapacity`, `plannedQty`,
+`counterpartyId`, `palletsEnabled`, `palletBoxCapacity` and
+`palletTemplateId`, no row when nothing changed), `shift.delete` (an office
 user; `{ number }`), `shift.open` (the station; `{ number, templateId,
-templateRev }`), `shift.close` (an office user; `{ reason }`) and
+templateRev }`, plus `palletTemplateId` and `palletTemplateRev` for a shift
+with pallets), `shift.close` (an office user; `{ reason }`) and
 `sscc.block.issue` (a station; target `sscc_block`; `{ issuerPrefix,
 extension, fromSerial, toSerial }`). A refusal writes none.
 
@@ -2288,22 +2324,24 @@ office closed are taken and marked late.
 SSCC blocks: a station asks for a block of serials
 (`POST /v1/device/sscc/blocks`, `{ requestId, issuerPrefix, extension }`,
 stations only) when it has none for its shift's prefix or its newest is half
-used (plan 2a6). Stage 2a issues box blocks only (`validation_failed` on
-`extension` otherwise), of a prefix that has a counter (`validation_failed` on
-`issuerPrefix` otherwise). A block is the counter's next `site.box_block_size`
-serials (2000 by default, «SSCC → Размеры блоков»), fewer at the end of the
-prefix's serials, and then `sscc_exhausted` (409, with the prefix and the
-extension). The counter moves past the block with a new revision in the same
+used (plan 2a6). A block is of boxes (`extension` 0) or of pallets (1, plan
+ПЛ-Х; `validation_failed` on `extension` otherwise), of a prefix that has a
+counter for that extension (`validation_failed` on `issuerPrefix`
+otherwise). A block is the counter's next `site.box_block_size` serials (2000
+by default) or `site.pallet_block_size` (200; «SSCC → Размеры блоков»), fewer
+at the end of the prefix's serials, and then `sscc_exhausted` (409, with the
+prefix and the extension). The counter moves past the block with a new
+revision in the same
 transaction, so every issued serial lies below its counter, `sscc_below_floor`
 keeps it from being issued again, and a counter form opened before the issue
 meets `stale_revision`. The same `requestId` of the same station answers the
-same block, even after others were issued, but only for the same prefix: the
-id with another `issuerPrefix` is `validation_failed` on `requestId` and
-writes nothing. A correct station keeps the prefix beside the id and repeats
-its request whole, so a mismatch is its mistake, and the old block's serials
-must not be filed under a prefix they were not reserved for (a shift create
-is lenient the other way, since a station reads that shift from the answer;
-the extension is 0 on both sides until plan 2b). The device is read again
+same block, even after others were issued, but only for the same prefix and
+extension: the id with another `issuerPrefix` or `extension` is
+`validation_failed` on `requestId` and writes nothing. A correct station keeps
+the request beside the id and repeats it whole, so a mismatch is its mistake,
+and the old block's serials must not be filed under a prefix, or printed on
+labels, they were not reserved for (a shift create is lenient the other way,
+since a station reads that shift from the answer). The device is read again
 inside the write transaction (a station revoked while the request waited
 gets 401). A block's use (`consumed_through`) comes with the facts of plan
 2a2; revoking blocks and showing them per device with plan 2b. A counter the
@@ -2432,7 +2470,10 @@ the digest of a box's members (`box-digest.json`, the domain's
 what `Date.toISOString` writes, `YYYY-MM-DDTHH:MM:SS.sssZ`, 24 characters, so
 comparing the stored text orders the instants) and when a station's close
 needs a reason (`shift-close-reasons.json`, the domain's six
-`SHIFT_CLOSE_REASON_CODES` and `shiftCloseReasonRequired`). The codes of a
+`SHIFT_CLOSE_REASON_CODES` and `shiftCloseReasonRequired`) and how the first
+17 digits of an SSCC name its extension, prefix and serial
+(`sscc-serials.json`, `rules::names_serial`, built by the domain's
+`buildSscc`; the check digit is never read). The codes of a
 rejected receipt (`proto::receipt_codes`, `fact-receipt-codes.json`) and the
 reason codes of box exceptions (`proto::exception_reasons`,
 `exception-reasons.json`) are fixtures too; the webview reads them with the
@@ -2562,6 +2603,65 @@ batch's write transaction, so an office close that commits while the batch
 waits for the lock is seen. The office closing a shift the station closed
 finds it changed (`stale_revision`) or closed (`shift_status`).
 
+Pallets (plan ПЛ-Х; `facts/pallets.rs`, `facts/pallet_closed.rs`,
+`facts/blocks.rs`; migration `0012_pallets.sql`). In a shift with pallets a
+`box_closed` names the station's pallet the box joined as it closed
+(`palletId`); a shift without pallets answers it, and every pallet fact,
+`no_pallets`. The first closed box that names a pallet opens it on the host
+(`opened_at` is that box's `closedAt`); a pallet of another device or
+another shift is `pallet_unknown`. The pallet's state never refuses a box:
+the station put the box there, and a box whose close comes again under a
+new id after a refusal joins the pallet it named, closed or not. A box
+closed on one pallet and sent again on another, or without its pallet, is
+`box_already_closed`. A `pallet_closed` closes the pallet with an SSCC of 18
+digits (its form is checked before its serial is read, which looks at the
+first 17 characters only) whose first 17 are the pallet extension `1`, the
+snapshot's prefix and `serial`, where `serial` lies in a live pallet block
+(extension 1) that the host issued to this device (`sscc_not_issued`), and no
+other pallet carries the SSCC or is closed on that serial of that block
+(`sscc_taken`; the unique indexes `pallets_sscc` and `pallets_block_serial`
+back it, and a box's SSCC starts with `0` from a box block, so boxes and
+pallets never meet on one). It keeps the station's `openedAt`, `closedAt`,
+`boxCount` (`box_count_reported`) and operator and raises the pallet block's
+`consumed_through` (`blocks::consume`, shared with `box_closed`). A pallet
+none of whose boxes reached the host opens closed, so its printed SSCC is
+held. The same close again is accepted with nothing written; another SSCC
+is `pallet_already_closed`. Which boxes a pallet holds is derived — the
+closed boxes whose `pallet_id` names it, not taken apart — and never
+stored; `box_count_reported` is evidence beside it, which the reports of
+plan О-Х compare. One open pallet per station and shift is the station's
+rule, not the host's: a second open pallet of a device is kept, since a
+refusal would fail a batch the station can never get past. A `pallet_label`
+(`facts/pallet_label.rs`) records the check of a closed pallet's label as a
+box's (`pallet_state` for an open one, `pallet_unknown` for a pallet the host
+does not have), a pallet taken apart included. A `pallet_exception`
+(`facts/pallet_exception.rs`) is a `reprint` or a `disassemble` of a closed
+pallet not taken apart (`pallet_state` otherwise), always with a reason code
+of the box exceptions' list for its kind (`exception_reasons`) and words only
+for `other`; one row per record in `pallet_exceptions`. A disassembly sets
+`disassembled_at`; the pallet keeps its SSCC, its boxes keep their
+`pallet_id` and stay closed, and the pallet no longer counts.
+
+A pallet fact keeps what the station said, and the host orders nothing
+between a box and its pallet. `openedAt`, `closedAt` and `boxCount` are
+stored as sent; a consumer that needs a pallet's contents derives them from
+the box memberships, and `box_count_reported` is only a figure to compare
+with the derived count (plan О-Х). So a box whose `closedAt` is later than
+its pallet's `closedAt` (a late box on a pallet already closed) joins
+silently: the count mismatch is its only trace, and the office reports, the
+Honest Sign export (plan ЧЗ) and the printed forms (plan О-Ф) must flag such
+a box rather than assume the pallet's `closedAt` ends its membership. A close
+of an already closed pallet with the SSCC it holds is accepted and writes
+nothing even when its block has been revoked since, as a box's is (a record
+already answered keeps its receipt in any case), while a new close of an open
+pallet against a revoked block is `sscc_not_issued`. A `pallet_exception`
+names its kind in `exception`, not `kind`, which the record's envelope already
+has. A pallet that never closed has the `opened_at` of the first box the host
+received, not of the earliest box: a box resent after a refusal may arrive
+late, and `pallet_closed` replaces the field with the station's own. A
+consumer that needs the exact value derives it from the boxes (the smallest
+`closed_at` among them, plan О-Х).
+
 Any device asks whether a code is taken (`GET /v1/device/codes/{codeHash}`,
 `routes/codes.rs`; 64 lower-case hex digits, `validation_failed` on
 `codeHash` otherwise): `{ status: "free" }` or `{ status: "taken", owner }`
@@ -2609,16 +2709,21 @@ gap to `acceptedUnits`), `closedBoxes`
 (closed and not taken apart), `openBoxes` (open boxes that hold a live item: a
 box emptied by undos or by displacement is not counted), `lastFactAt` (the
 host's clock, whole seconds, at the last receipt of a record that named the
-shift and got past the entry check, refused ones included) and `deviceIds`
-(the shift's participants, first entry first, the id breaking a tie); the
+shift and got past the entry check, refused ones included), `deviceIds`
+(the shift's participants, first entry first, the id breaking a tie), and with
+plan ПЛ-Х `closedPallets` (pallets closed and not taken apart) and
+`openPallets` (open pallets that hold a box not taken apart: a pallet whose
+boxes were all taken apart is not counted, as an emptied box is not); the
 office's label for `lastFactAt` is «Последние данные со станции», and it is no
-measure of output or lateness. The six fields of `totals`, all required and in
-every `OfficeShift`: `acceptedUnits`, `unitsInClosedBoxes`, `closedBoxes`,
-`openBoxes` (non-negative integers), `lastFactAt` (an instant of the host's
-format or `null`) and `deviceIds` (an array of UUIDs). A planned shift's totals
-are zeros, `null` and `[]`. The subqueries run on the
+measure of output or lateness. The eight fields of `totals`, all required and
+in every `OfficeShift`: `acceptedUnits`, `unitsInClosedBoxes`, `closedBoxes`,
+`openBoxes`, `closedPallets`, `openPallets` (non-negative integers),
+`lastFactAt` (an instant of the host's format or `null`) and `deviceIds` (an
+array of UUIDs). A planned shift's totals are zeros, `null` and `[]`, and a
+shift without pallets has no pallet to count. The subqueries run on the
 indexes of `0010` (`boxes_shift`, the partial `box_items_live`,
-`fact_receipts_shift`); a new column the totals read needs its index in the
+`fact_receipts_shift`) and `0012` (`pallets_shift`, the partial
+`boxes_pallet`); a new column the totals read needs its index in the
 same change, since the list runs them once per shift listed.
 
 ## Marking rules
@@ -2635,7 +2740,8 @@ console stays silent), any hash or the TLS private key. A label template's
 layout is no secret, but at up to 256 KB it stays
 out of the log as it stays out of audit details; `no_secrets_in_logs.rs`
 walks a stock and an office layout through the template routes, the
-defaults and the feed, and a shift's snapshot that carries a layout through
+defaults and the feed, and a shift's snapshot that carries a layout (and,
+since plan ПЛ-Х, a pallet template's) through
 the plan, the station's entry and list, an SSCC block and the office's
 close. Nor do facts reach it (stage 2a spec §4.11): no code of marking, crypto
 tail, code hash, SSCC or reason words — a refused record is logged by the
@@ -2646,10 +2752,13 @@ the failing record's position in the batch (`position=1` is the second
 record), never the record or its id, which is device text.
 `no_secrets_in_logs.rs` sends every kind of fact, accepted and refused, with
 a code of marking that has a crypto tail, an 18-digit SSCC and reasons in
-words, a resend, a mismatched resend, a station's close of a shift and a
-late scan after it, a batch the host cannot write (a 500, its failing record
-second in the batch), the code check
-and the totals, and asks that the host kept them and the log has none. The
+words (the first shift has pallets since plan ПЛ-Х: a box on a pallet, the
+pallet's close under its SSCC of a pallet block, its label check, a reprint
+with words and a refused second close under another SSCC, answered
+`pallet_already_closed`), a resend, a mismatched resend, a station's close of a
+shift and a late scan after it, a batch the host cannot write (a 500, its
+failing record second in the batch), the code check and the totals, and asks
+that the host kept them and the log has none. The
 test sees `info` and above, what `tracing` writes to the file: `println!`,
 `eprintln!`, `dbg!` and `debug!`/`trace!` escape it, so its second test
 pins the source: the library prints nothing and the facts path holds exactly

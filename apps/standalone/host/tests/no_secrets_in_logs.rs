@@ -175,6 +175,21 @@ fn box_closed_data_under(
     data
 }
 
+/// The `data` of the pallet `pallet_id` closed with serial `serial` of the
+/// pallet block `block_id`, holding the box the first shift closes on it.
+fn pallet_closed_data(
+    pallet_id: &str,
+    block_id: &serde_json::Value,
+    serial: u64,
+    closed_at: &str,
+) -> serde_json::Value {
+    json!({
+        "palletId": pallet_id, "sscc": support::app::pallet_sscc(serial),
+        "blockId": block_id, "serial": serial,
+        "openedAt": device_at(21, 47), "closedAt": closed_at, "boxCount": 1
+    })
+}
+
 /// A batch of facts sent as the station of `key`; answers its receipts.
 async fn send_facts(
     client: &reqwest::Client,
@@ -652,6 +667,23 @@ async fn secrets_never_reach_the_process_log() {
         .json()
         .await
         .unwrap();
+    // The shift has pallets (plan ПЛ-Х): its pallet template's layout is
+    // frozen in the snapshot too.
+    let pallet_template: serde_json::Value = client
+        .post(format!("{base}/v1/office/templates"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({
+            "name": "Паллета 100×150", "purpose": "pallet", "enabled": true,
+            "spec": layout("layout-marker-pallet")
+        }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
     let shift: serde_json::Value = client
         .post(format!("{base}/v1/office/shifts"))
         .header(protocol.0, &protocol.1)
@@ -659,7 +691,8 @@ async fn secrets_never_reach_the_process_log() {
         .bearer_auth(&key)
         .json(&json!({
             "productId": milk["id"], "lineId": line_id, "productionDate": "2026-10-08",
-            "boxTemplateId": template_id
+            "boxTemplateId": template_id, "palletsEnabled": true,
+            "palletTemplateId": pallet_template["id"]
         }))
         .send()
         .await
@@ -721,14 +754,35 @@ async fn secrets_never_reach_the_process_log() {
         .unwrap();
     assert_eq!(block.status(), 200);
     let block: serde_json::Value = block.json().await.unwrap();
+    let pallet_block = client
+        .post(format!("{base}/v1/device/sscc/blocks"))
+        .header(protocol.0, &protocol.1)
+        .bearer_auth(&key)
+        .json(&json!({
+            "requestId": "5e4d3c2b-1a09-4f8e-9d7c-6b5a4f3e2d1c",
+            "issuerPrefix": "460068200", "extension": 1
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(pallet_block.status(), 200);
+    let pallet_block: serde_json::Value = pallet_block.json().await.unwrap();
 
     // Facts (plan 2a2): every kind, accepted and refused, through the real
     // server with production-like values: codes of marking with a crypto
     // tail and group separators, 18-digit SSCCs, reasons in words. None of
     // the codes, tails, hashes, SSCCs or words reaches the log; a refusal
-    // is logged by its record's id and its receipt code.
+    // is logged by its record's id and its receipt code. The first shift has
+    // pallets (plan ПЛ-Х): a box closes on a pallet, the pallet closes with
+    // its SSCC of a pallet block, its label is checked and reprinted, and a
+    // second close of it under another SSCC is refused.
     let from_serial = block["fromSerial"].as_u64().unwrap();
     let to_serial = block["toSerial"].as_u64().unwrap();
+    let pallet_serial = pallet_block["fromSerial"].as_u64().unwrap();
+    let pallet_one = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d";
+    let pallet_sscc = support::app::pallet_sscc(pallet_serial);
+    let other_pallet_sscc = support::app::pallet_sscc(pallet_serial + 1);
+    let pallet_words = "Этикетка паллеты смята, reason-marker-pallet-reprint";
     let sh = shift_id.as_str();
     let op = operator_id.as_str();
     let (box1, box2, ghost_box) = (
@@ -773,9 +827,17 @@ async fn secrets_never_reach_the_process_log() {
     let mut unreadable = scan_ok(21, &km_unreadable, box1, 40);
     unreadable["id"] = json!("not-a-record-id");
     let mut unknown_kind = scan_ok(22, &km_unknown_kind, box1, 41);
-    unknown_kind["kind"] = json!("pallet_closed");
+    unknown_kind["kind"] = json!("pallet_dispatched");
     let mut unknown_shift = scan_ok(23, &km_unknown_shift, box1, 42);
     unknown_shift["shiftId"] = json!("c14d5e6f-7a8b-4c9d-8e0f-3a4b5c6d7e8f");
+    let mut box1_on_pallet = box_closed_data(
+        box1,
+        &block["id"],
+        from_serial,
+        &[&km_a],
+        &device_at(21, 47),
+    );
+    box1_on_pallet["palletId"] = json!(pallet_one);
     let facts = vec![
         scan_ok(1, &km_a, box1, 2),
         scan_ok(2, &km_b, box1, 5),
@@ -895,19 +957,7 @@ async fn secrets_never_reach_the_process_log() {
                 &device_at(15, 29),
             ),
         ),
-        record(
-            &rid(14),
-            "box_closed",
-            sh,
-            op,
-            box_closed_data(
-                box1,
-                &block["id"],
-                from_serial,
-                &[&km_a],
-                &device_at(21, 47),
-            ),
-        ),
+        record(&rid(14), "box_closed", sh, op, box1_on_pallet),
         record(
             &rid(15),
             "box_closed",
@@ -985,6 +1035,47 @@ async fn secrets_never_reach_the_process_log() {
         unknown_kind,
         unknown_shift,
         scan_ok(24, &km_late_in_box, box1, 50),
+        record(
+            &rid(60),
+            "pallet_closed",
+            sh,
+            op,
+            pallet_closed_data(
+                pallet_one,
+                &pallet_block["id"],
+                pallet_serial,
+                &device_at(26, 0),
+            ),
+        ),
+        record(
+            &rid(61),
+            "pallet_label",
+            sh,
+            op,
+            json!({ "palletId": pallet_one, "outcome": "verified", "at": device_at(26, 30) }),
+        ),
+        record(
+            &rid(62),
+            "pallet_exception",
+            sh,
+            op,
+            json!({
+                "exception": "reprint", "palletId": pallet_one, "reasonCode": "other",
+                "reasonText": pallet_words, "occurredAt": device_at(27, 0)
+            }),
+        ),
+        record(
+            &rid(63),
+            "pallet_closed",
+            sh,
+            op,
+            pallet_closed_data(
+                pallet_one,
+                &pallet_block["id"],
+                pallet_serial + 1,
+                &device_at(26, 5),
+            ),
+        ),
     ];
     // (outcome, code) of each record's receipt.
     let expected = [
@@ -1013,6 +1104,10 @@ async fn secrets_never_reach_the_process_log() {
         ("rejected", Some("invalid_record")),
         ("rejected", Some("unknown_shift")),
         ("rejected", Some("box_closed")),
+        ("accepted", None),
+        ("accepted", None),
+        ("accepted", None),
+        ("rejected", Some("pallet_already_closed")),
     ];
     assert_eq!(facts.len(), expected.len());
     let receipts = send_facts(&client, &base, &protocol, &key, &facts).await;
@@ -1397,6 +1492,17 @@ async fn secrets_never_reach_the_process_log() {
             .fetch_all(&pool)
             .await
             .unwrap();
+    let kept_pallet_ssccs: Vec<String> =
+        sqlx::query_scalar("SELECT sscc FROM pallets WHERE sscc IS NOT NULL")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    let kept_pallet_words: Vec<String> = sqlx::query_scalar(
+        "SELECT reason_text FROM pallet_exceptions WHERE reason_text IS NOT NULL",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
     let receipt_digests: Vec<String> = sqlx::query_scalar("SELECT digest FROM fact_receipts")
         .fetch_all(&pool)
         .await
@@ -1479,6 +1585,7 @@ async fn secrets_never_reach_the_process_log() {
         "layout-marker-stock",
         "layout-marker-office-1",
         "layout-marker-office-2",
+        "layout-marker-pallet",
     ] {
         assert!(!log.contains(layout), "the process log contains {layout}");
     }
@@ -1493,6 +1600,12 @@ async fn secrets_never_reach_the_process_log() {
             .iter()
             .any(|snapshot| snapshot.contains("layout-marker-office-2")),
         "the shift never froze the layout"
+    );
+    assert!(
+        snapshots
+            .iter()
+            .any(|snapshot| snapshot.contains("layout-marker-pallet")),
+        "the shift never froze the pallet layout"
     );
 
     // The host kept what it accepted and logged the refusals by their
@@ -1527,9 +1640,11 @@ async fn secrets_never_reach_the_process_log() {
         assert!(kept_ssccs.contains(kept), "the host never kept an SSCC");
     }
     assert_eq!(kept_ssccs.len(), 3);
+    assert_eq!(kept_pallet_ssccs, vec![pallet_sscc.clone()]);
     for kept in [reprint_words, disassemble_words] {
         assert!(kept_words.iter().any(|words| words == kept));
     }
+    assert_eq!(kept_pallet_words, vec![pallet_words.to_owned()]);
     for rejected in [
         "gtin_mismatch",
         "payload_mismatch",
@@ -1540,10 +1655,11 @@ async fn secrets_never_reach_the_process_log() {
         "box_already_closed",
         "sscc_not_issued",
         "unknown_shift",
+        "pallet_already_closed",
     ] {
         assert!(log.contains(rejected), "the log never named {rejected}");
     }
-    for refused in [3, 7, 10, 11, 13, 15, 16, 22, 23, 24] {
+    for refused in [3, 7, 10, 11, 13, 15, 16, 22, 23, 24, 63] {
         assert!(
             log.contains(&rid(refused)),
             "the log never named the refused record {refused}"
@@ -1587,6 +1703,12 @@ async fn secrets_never_reach_the_process_log() {
         needles.push(sscc[..17].to_owned());
     }
     needles.push(support::app::sscc_under("460068200", from_serial + 2));
+    // The SSCCs of the pallets: the one closed and the one a second close
+    // named, whole and without their check digit.
+    for sscc in [&pallet_sscc, &other_pallet_sscc] {
+        needles.push(sscc.clone());
+        needles.push(sscc[..17].to_owned());
+    }
     // The refused SSCC of another issuer, and the hash a device sent in the
     // wrong case to the code check.
     needles.push(support::app::sscc_under("999999999", from_serial + 1));
@@ -1615,6 +1737,7 @@ async fn secrets_never_reach_the_process_log() {
     for words in [
         reprint_words,
         disassemble_words,
+        pallet_words,
         refused_state_words,
         "reason-marker",
         &overlong_words,
@@ -1694,5 +1817,8 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_three_audited_lines(
             );
         }
     }
-    assert_eq!(facts_files, 12);
+    // The facts path: the 12 files of 2a2 and the five pallet modules of
+    // plan ПЛ-Х (`blocks`, `pallets`, `pallet_closed`, `pallet_label`,
+    // `pallet_exception`); none of them logs.
+    assert_eq!(facts_files, 17);
 }

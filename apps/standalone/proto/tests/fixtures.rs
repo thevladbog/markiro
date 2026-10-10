@@ -11,10 +11,11 @@ use markiro_proto::{
     OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeShift,
     OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord,
     OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord,
-    PairResponse, PairingCode, PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate,
-    ProductGroup, ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict,
-    ShiftClose, ShiftClosedFact, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate,
-    SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
+    PairResponse, PairingCode, PairingCodeRequest, PalletClosedFact, PalletExceptionFact,
+    PalletExceptionKind, PalletLabelFact, PasswordChange, PasswordSet, ProductCreate, ProductGroup,
+    ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict, ShiftClose,
+    ShiftClosedFact, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord,
+    SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
     TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
@@ -76,16 +77,16 @@ fn error_fixtures_round_trip() {
 #[test]
 fn hello_ignores_fields_added_by_newer_hosts() {
     let hello: Hello = serde_json::from_value(fixture("hello-future.json")).unwrap();
-    assert_eq!(hello.protocol, 3);
+    assert_eq!(hello.protocol, 4);
     assert!(hello.initialized);
 }
 
 #[test]
 fn envelope_decides_compatibility_before_the_rest() {
     let future: HelloEnvelope = serde_json::from_value(fixture("hello-future.json")).unwrap();
-    assert_eq!(compatibility_for(1, &future), Compatibility::AppTooOld);
-    assert_eq!(compatibility_for(2, &future), Compatibility::Compatible);
-    assert_eq!(compatibility_for(4, &future), Compatibility::HostTooOld);
+    assert_eq!(compatibility_for(2, &future), Compatibility::AppTooOld);
+    assert_eq!(compatibility_for(3, &future), Compatibility::Compatible);
+    assert_eq!(compatibility_for(5, &future), Compatibility::HostTooOld);
     let current: HelloEnvelope = serde_json::from_value(fixture("hello.json")).unwrap();
     assert_eq!(compatibility(&current), Compatibility::Compatible);
 }
@@ -704,7 +705,7 @@ fn office_shift_fixtures_round_trip_and_a_plan_carries_no_number_or_status() {
     // A shift without facts still carries every field, the instant as `null`.
     let empty = serde_json::json!({
         "acceptedUnits": 0, "unitsInClosedBoxes": 0, "closedBoxes": 0, "openBoxes": 0,
-        "lastFactAt": null, "deviceIds": []
+        "lastFactAt": null, "deviceIds": [], "closedPallets": 0, "openPallets": 0
     });
     let read: markiro_proto::ShiftTotals = serde_json::from_value(empty.clone()).unwrap();
     assert_eq!(serde_json::to_value(&read).unwrap(), empty);
@@ -739,6 +740,24 @@ fn office_shift_fixtures_round_trip_and_a_plan_carries_no_number_or_status() {
             "{field}"
         );
     }
+    // Without pallets the pallet fields are left out, and stay out.
+    assert_eq!(
+        (shift.pallet_box_capacity, shift.pallet_template_id.clone()),
+        (None, None)
+    );
+    assert_eq!(
+        (bare.pallet_box_capacity, bare.pallet_template_id.clone()),
+        (None, None)
+    );
+    let pallets: ShiftCreate = round_trip("shift-create-pallets.json");
+    assert_eq!(
+        (
+            pallets.pallets_enabled,
+            pallets.pallet_box_capacity,
+            pallets.pallet_template_id.as_deref()
+        ),
+        (true, Some(40), Some("c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f"))
+    );
 }
 
 #[test]
@@ -768,6 +787,13 @@ fn a_shift_update_carries_only_what_changes_and_never_the_product() {
     let mut value = fixture("shift-update.json");
     value["productId"] = Value::String("f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b".into());
     assert!(serde_json::from_value::<ShiftUpdate>(value).is_err());
+    // Pallet fields go out only when sent.
+    let pallets = serde_json::json!({
+        "palletsEnabled": true, "palletBoxCapacity": 30,
+        "palletTemplateId": "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f", "expectedRev": 71
+    });
+    let typed: ShiftUpdate = serde_json::from_value(pallets.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&typed).unwrap(), pallets);
 }
 
 #[test]
@@ -846,6 +872,64 @@ fn an_entered_shift_carries_its_snapshot_and_the_list_never_does() {
         ),
         (codes::CONFLICT, Some("shift_busy"))
     );
+    let too_large: ErrorBody = round_trip("error-snapshot-too-large.json");
+    assert_eq!(
+        (
+            too_large.error.code.as_str(),
+            too_large.error.details.expect("details")["constraint"].as_str()
+        ),
+        (codes::CONFLICT, Some("snapshot_too_large"))
+    );
+}
+
+/// A station's shift with pallets names their capacity and template, and its
+/// entry freezes the pallet template; a shift without pallets names none of
+/// them, and a station of stage 2a sends no pallet field.
+#[test]
+fn a_shift_with_pallets_names_them_and_its_entry_freezes_the_pallet_template() {
+    let entered: DeviceShift = round_trip("device-shift-entered-pallets.json");
+    let snapshot = entered
+        .snapshot
+        .clone()
+        .expect("an entry carries the snapshot");
+    let pallet = snapshot
+        .pallet_template
+        .expect("a shift with pallets freezes its pallet template");
+    assert_eq!(
+        (
+            entered.pallets_enabled,
+            entered.pallet_box_capacity,
+            entered.pallet_template_id.as_deref()
+        ),
+        (true, Some(40), Some(pallet.id.as_str()))
+    );
+    let plain: DeviceShift = serde_json::from_value(fixture("device-shift-entered.json")).unwrap();
+    assert_eq!(
+        (
+            plain.pallet_box_capacity,
+            plain.pallet_template_id,
+            plain.snapshot.expect("snapshot").pallet_template
+        ),
+        (None, None, None)
+    );
+    let create: DeviceShiftCreate = round_trip("device-shift-create-pallets.json");
+    assert_eq!(
+        (
+            create.pallets_enabled,
+            create.pallet_box_capacity,
+            create.pallet_template_id.as_deref()
+        ),
+        (true, Some(40), Some(pallet.id.as_str()))
+    );
+    let bare: DeviceShiftCreate = round_trip("device-shift-create.json");
+    assert_eq!(
+        (
+            bare.pallets_enabled,
+            bare.pallet_box_capacity,
+            bare.pallet_template_id
+        ),
+        (false, None, None)
+    );
 }
 
 #[test]
@@ -917,6 +1001,118 @@ fn the_fact_code_fixtures_list_every_receipt_and_reason_code() {
     );
 }
 
+/// The pallet facts of a shift with pallets (plan ПЛ-Х), in their own
+/// fixture so a station of stage 2a reads `facts-request.json` as before: a
+/// box closed on the station's pallet, the pallet's close with the SSCC of
+/// the first serial of a pallet block, its label checked, then the pallet
+/// taken apart for a reason in words.
+#[test]
+fn pallet_fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
+    let batch: FactBatch = round_trip("facts-request-pallets.json");
+    let kinds: Vec<FactKind> = batch.records.iter().map(|record| record.kind).collect();
+    assert_eq!(
+        kinds,
+        vec![
+            FactKind::BoxClosed,
+            FactKind::PalletClosed,
+            FactKind::PalletLabel,
+            FactKind::PalletException
+        ]
+    );
+    let boxed: BoxClosedFact = typed(&batch.records[0].data);
+    assert_eq!(serde_json::to_value(&boxed).unwrap(), batch.records[0].data);
+    let closed: PalletClosedFact = typed(&batch.records[1].data);
+    assert_eq!(
+        serde_json::to_value(&closed).unwrap(),
+        batch.records[1].data
+    );
+    assert_eq!(boxed.pallet_id.as_deref(), Some(closed.pallet_id.as_str()));
+    assert_eq!(closed.opened_at, boxed.closed_at);
+    assert!(closed.sscc.starts_with("1460068200"));
+    // A box of a shift without pallets names none, and writes none back.
+    let plain: FactBatch = serde_json::from_value(fixture("facts-request.json")).unwrap();
+    let plain_box: BoxClosedFact = typed(&plain.records[2].data);
+    assert_eq!(plain_box.pallet_id, None);
+    assert!(serde_json::to_value(&plain_box)
+        .unwrap()
+        .get("palletId")
+        .is_none());
+    // The pallet's close is read strictly, as every request.
+    let mut extra = batch.records[1].data.clone();
+    extra["boxes"] = serde_json::json!([]);
+    assert!(serde_json::from_value::<PalletClosedFact>(extra).is_err());
+    let checked: PalletLabelFact = typed(&batch.records[2].data);
+    assert_eq!(
+        (&checked.pallet_id, checked.outcome),
+        (&closed.pallet_id, LabelOutcome::Verified)
+    );
+    let apart: PalletExceptionFact = typed(&batch.records[3].data);
+    assert_eq!(
+        (
+            apart.exception,
+            &apart.pallet_id,
+            apart.reason_code.as_str(),
+            apart.exception.as_str()
+        ),
+        (
+            PalletExceptionKind::Disassemble,
+            &closed.pallet_id,
+            markiro_proto::exception_reasons::OTHER,
+            "disassemble"
+        )
+    );
+    // A pallet exception always names a reason; `undo` and `clear` are a
+    // box's.
+    let mut without = batch.records[3].data.clone();
+    without.as_object_mut().unwrap().remove("reasonCode");
+    assert!(serde_json::from_value::<PalletExceptionFact>(without).is_err());
+    let mut undo = batch.records[3].data.clone();
+    undo["exception"] = serde_json::json!("undo");
+    assert!(serde_json::from_value::<PalletExceptionFact>(undo).is_err());
+}
+
+/// A pallet check and a pallet exception have exactly their own fields; the
+/// exception's two kinds and the check's two outcomes read by their names,
+/// and the two kinds of fact go by theirs.
+#[test]
+fn a_pallet_check_and_a_pallet_exception_have_exactly_their_fields() {
+    let batch: FactBatch = round_trip("facts-request-pallets.json");
+    let check = batch.records[2].data.clone();
+    let apart = batch.records[3].data.clone();
+    let mut extra_check = check.clone();
+    extra_check["boxCount"] = serde_json::json!(1);
+    assert!(serde_json::from_value::<PalletLabelFact>(extra_check).is_err());
+    let mut extra_exception = apart.clone();
+    extra_exception["boxId"] = serde_json::json!("x");
+    assert!(serde_json::from_value::<PalletExceptionFact>(extra_exception).is_err());
+    let mut skipped = check.clone();
+    skipped["outcome"] = serde_json::json!("skipped");
+    let skipped: PalletLabelFact = typed(&skipped);
+    assert_eq!(skipped.outcome, LabelOutcome::Skipped);
+    let mut seen = check;
+    seen["outcome"] = serde_json::json!("seen");
+    assert!(serde_json::from_value::<PalletLabelFact>(seen).is_err());
+    let mut reprint = apart.clone();
+    reprint["exception"] = serde_json::json!("reprint");
+    let reprint: PalletExceptionFact = typed(&reprint);
+    assert_eq!(
+        (reprint.exception, reprint.exception.as_str()),
+        (PalletExceptionKind::Reprint, "reprint")
+    );
+    let mut wordless = apart;
+    wordless["reasonText"] = Value::Null;
+    let wordless: PalletExceptionFact = typed(&wordless);
+    assert_eq!(wordless.reason_text, None);
+    for (kind, name) in [
+        (FactKind::PalletLabel, "pallet_label"),
+        (FactKind::PalletException, "pallet_exception"),
+    ] {
+        assert_eq!(kind.as_str(), name);
+        assert_eq!(serde_json::to_value(kind).unwrap(), serde_json::json!(name));
+        assert_eq!(name.parse::<FactKind>().unwrap(), kind);
+    }
+}
+
 /// A batch of facts and its receipts. The records' `data` stays JSON in the
 /// envelope (the host reads it by kind, record by record); each one reads
 /// as its kind's type and writes back unchanged.
@@ -949,6 +1145,15 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
             }
             FactKind::ShiftClosed => {
                 serde_json::to_value(typed::<ShiftClosedFact>(&record.data)).unwrap()
+            }
+            FactKind::PalletClosed => {
+                serde_json::to_value(typed::<PalletClosedFact>(&record.data)).unwrap()
+            }
+            FactKind::PalletLabel => {
+                serde_json::to_value(typed::<PalletLabelFact>(&record.data)).unwrap()
+            }
+            FactKind::PalletException => {
+                serde_json::to_value(typed::<PalletExceptionFact>(&record.data)).unwrap()
             }
         };
         assert_eq!(typed, record.data, "{}", record.id);
@@ -1049,4 +1254,38 @@ fn code_check_fixtures_round_trip_and_name_the_owner_as_a_conflict_does() {
     let winner: CodeOwner =
         typed(&Value::Object(receipts.receipts[1].details.clone().unwrap())["winner"]);
     assert_eq!(taken, CodeCheck::Taken { owner: winner });
+}
+
+/// A shift's totals carry both pallet counts (plan ПЛ-Х): each is required,
+/// a whole non-negative number, and keeps its own name and place.
+#[test]
+fn a_shifts_totals_carry_both_pallet_counts_as_required_whole_numbers() {
+    let totals = fixture("office-shift.json")["totals"].clone();
+    let mut counted = totals.clone();
+    counted["closedPallets"] = serde_json::json!(12);
+    counted["openPallets"] = serde_json::json!(1);
+    let read: markiro_proto::ShiftTotals = serde_json::from_value(counted.clone()).unwrap();
+    assert_eq!((read.closed_pallets, read.open_pallets), (12, 1));
+    assert_eq!(serde_json::to_value(&read).unwrap(), counted);
+    for field in ["closedPallets", "openPallets"] {
+        let mut without = totals.clone();
+        without.as_object_mut().unwrap().remove(field);
+        assert!(
+            serde_json::from_value::<markiro_proto::ShiftTotals>(without).is_err(),
+            "{field} left out"
+        );
+        for value in [
+            serde_json::json!(-1),
+            serde_json::json!(1.5),
+            serde_json::json!("1"),
+            serde_json::Value::Null,
+        ] {
+            let mut bad = totals.clone();
+            bad[field] = value.clone();
+            assert!(
+                serde_json::from_value::<markiro_proto::ShiftTotals>(bad).is_err(),
+                "{field}: {value}"
+            );
+        }
+    }
 }

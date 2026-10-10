@@ -1,5 +1,6 @@
 use markiro_host::facts::rules::{
-    box_membership_digest, close_reason_required, device_instant, is_code_hash, record_digest,
+    box_membership_digest, close_reason_required, device_instant, is_code_hash, names_serial,
+    record_digest,
 };
 use serde_json::{json, Value};
 
@@ -62,6 +63,47 @@ fn every_close_reason_case_of_the_fixture_matches() {
             case["required"].as_bool().unwrap(),
             "{case}"
         );
+    }
+}
+
+/// The first 17 digits of an SSCC are its extension, the issuer prefix and
+/// the serial padded to the prefix's width, as the domain's `buildSscc`
+/// writes them (`sscc-serials.json`, built by the domain, which
+/// `test/fact-rules.test.ts` checks); the 18th, the check digit, is the
+/// domain's and is never read here.
+#[test]
+fn an_sscc_names_its_extension_prefix_and_serial_as_the_domain_builds_it() {
+    let fixture = fixture("sscc-serials.json");
+    let cases = fixture["cases"].as_array().expect("cases");
+    assert_eq!(cases.len(), 7);
+    for case in cases {
+        let sscc = case["sscc"].as_str().unwrap();
+        let extension = u8::try_from(case["extension"].as_u64().unwrap()).unwrap();
+        let prefix = case["issuerPrefix"].as_str().unwrap();
+        let serial = case["serial"].as_u64().unwrap();
+        assert!(names_serial(sscc, extension, prefix, serial), "{case}");
+        assert!(!names_serial(sscc, 1 - extension, prefix, serial), "{case}");
+        assert!(!names_serial(sscc, extension, prefix, serial + 1), "{case}");
+        assert!(!names_serial(sscc, extension, prefix, serial ^ 1), "{case}");
+        let digit = (sscc.as_bytes()[17] - b'0' + 1) % 10;
+        let other_check_digit = format!("{}{digit}", &sscc[..17]);
+        assert!(
+            names_serial(&other_check_digit, extension, prefix, serial),
+            "{case}"
+        );
+    }
+    // Another prefix of the same length names another SSCC.
+    assert!(!names_serial("146006820000000409", 1, "460068201", 40));
+    // Text that is no SSCC names no serial, and never panics; the last one is
+    // 18 bytes with a two-byte letter across byte 17, where slicing `[..17]`
+    // would.
+    for text in [
+        "",
+        "1460068200000004",
+        "146006820000000é",
+        "1460068200000000é",
+    ] {
+        assert!(!names_serial(text, 1, "460068200", 40), "{text:?}");
     }
 }
 

@@ -497,6 +497,42 @@ pub fn shift_body(setup: &ShiftSetup) -> Value {
     })
 }
 
+/// A label template of `purpose` made through the office API, enabled or
+/// not, for the product groups `codes` (`Value::Null`: every group);
+/// returns its id.
+pub async fn office_template(admin: &Admin, purpose: &str, enabled: bool, codes: Value) -> String {
+    let (status, template) = admin
+        .call(
+            "POST",
+            "/v1/office/templates",
+            Some(serde_json::json!({
+                "name": "Паллета 100×150", "purpose": purpose, "enabled": enabled,
+                "chzProductGroupCodes": codes,
+                "spec": {
+                    "widthMm": 100, "heightMm": 150, "dpi": 203, "language": "zpl",
+                    "elements": []
+                }
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{template}");
+    template["id"].as_str().unwrap().to_owned()
+}
+
+/// An enabled pallet template for every product group; returns its id.
+pub async fn pallet_template(admin: &Admin) -> String {
+    office_template(admin, "pallet", true, Value::Null).await
+}
+
+/// `shift_body(setup)` with pallets of `template`, their capacity left to
+/// the product's 40.
+pub fn pallet_shift_body(setup: &ShiftSetup, template: &str) -> Value {
+    let mut body = shift_body(setup);
+    body["palletsEnabled"] = Value::Bool(true);
+    body["palletTemplateId"] = Value::String(template.to_owned());
+    body
+}
+
 /// Plan a shift of `body` as the administrator; returns the record.
 pub async fn plan_shift(admin: &Admin, body: Value) -> Value {
     let (status, shift) = admin.call("POST", "/v1/office/shifts", Some(body)).await;
@@ -517,6 +553,18 @@ pub struct Floor {
 /// that line and enter it from the station, so the shift is open and the
 /// station its owner.
 pub async fn open_floor(admin: &Admin, setup: &ShiftSetup, key: &str, line: &str) -> Floor {
+    open_floor_of(admin, key, line, shift_body(setup)).await
+}
+
+/// `open_floor` for a shift with pallets of a new pallet template, 40
+/// boxes a pallet (the product's).
+pub async fn open_pallet_floor(admin: &Admin, setup: &ShiftSetup, key: &str, line: &str) -> Floor {
+    let template = pallet_template(admin).await;
+    open_floor_of(admin, key, line, pallet_shift_body(setup, &template)).await
+}
+
+/// `open_floor` for a shift planned from `body`.
+async fn open_floor_of(admin: &Admin, key: &str, line: &str, mut body: Value) -> Floor {
     let (status, device) = admin
         .app
         .send(empty(with_device(request("GET", "/v1/device"), key)))
@@ -530,7 +578,6 @@ pub async fn open_floor(admin: &Admin, setup: &ShiftSetup, key: &str, line: &str
         ))
         .await;
     assert_eq!(status, StatusCode::OK, "{moved}");
-    let mut body = shift_body(setup);
     body["lineId"] = Value::String(line.to_owned());
     let shift = plan_shift(admin, body).await;
     let (status, entered) = admin
@@ -682,8 +729,21 @@ pub fn sscc(serial: u64) -> String {
 /// The SSCC of a box of `serial` under `prefix`, with its check digit: the
 /// serial fills what the prefix leaves of the 16 digits after the extension.
 pub fn sscc_under(prefix: &str, serial: u64) -> String {
+    sscc_of(0, prefix, serial)
+}
+
+/// The SSCC of pallet serial `serial` under the wizard's prefix, with its
+/// check digit (extension 1).
+pub fn pallet_sscc(serial: u64) -> String {
+    sscc_of(1, "460068200", serial)
+}
+
+/// The SSCC of `extension`, `prefix` and `serial`, with its GS1 check digit,
+/// as the domain's `buildSscc` writes it: the serial fills what the prefix
+/// leaves of the 16 digits after the extension.
+pub fn sscc_of(extension: u8, prefix: &str, serial: u64) -> String {
     let width = 16 - prefix.len();
-    let body = format!("0{prefix}{serial:0width$}");
+    let body = format!("{extension}{prefix}{serial:0width$}");
     let sum: u32 = body
         .bytes()
         .rev()
@@ -691,6 +751,44 @@ pub fn sscc_under(prefix: &str, serial: u64) -> String {
         .map(|(place, digit)| u32::from(digit - b'0') * if place % 2 == 0 { 3 } else { 1 })
         .sum();
     format!("{body}{}", (10 - sum % 10) % 10)
+}
+
+/// A block of pallet serials (extension 1) the station of `key` gets for
+/// request `request_id`; the wizard's pallet counter starts at 40 and a
+/// pallet block is 200 serials, so the first block is 40–239.
+pub async fn issue_pallet_block(app: &TestApp, key: &str, request_id: &str) -> Value {
+    let (status, block) = app
+        .send(json(
+            with_device(request("POST", "/v1/device/sscc/blocks"), key),
+            serde_json::json!({
+                "requestId": request_id, "issuerPrefix": "460068200", "extension": 1
+            }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{block}");
+    block
+}
+
+/// The id of pallet `n`, a canonical UUID.
+pub fn pallet_id(n: u32) -> String {
+    format!("a0000000-0000-4000-8000-{n:012}")
+}
+
+/// The `data` of a pallet closed at `closed_at` with serial `serial` of
+/// `block`, opened at `opened_at`, holding `boxes` boxes as the station
+/// counted them.
+pub fn pallet_closed(
+    pallet_id: &str,
+    block: &Value,
+    serial: u64,
+    boxes: u32,
+    opened_at: &str,
+    closed_at: &str,
+) -> Value {
+    serde_json::json!({
+        "palletId": pallet_id, "sscc": pallet_sscc(serial), "blockId": block["id"],
+        "serial": serial, "openedAt": opened_at, "closedAt": closed_at, "boxCount": boxes
+    })
 }
 
 /// The domain's digest of the codes `members` (`code_hash(n)` each).

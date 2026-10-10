@@ -6858,7 +6858,7 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
     let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
     let none = json!({
         "acceptedUnits": 0, "unitsInClosedBoxes": 0, "closedBoxes": 0, "openBoxes": 0,
-        "lastFactAt": null, "deviceIds": []
+        "lastFactAt": null, "deviceIds": [], "closedPallets": 0, "openPallets": 0
     });
     assert_eq!(totals(&admin, planned["id"].as_str().unwrap()).await, none);
     let mut entered = none.clone();
@@ -6954,7 +6954,8 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
         totals(&admin, shift).await,
         json!({
             "acceptedUnits": 5, "unitsInClosedBoxes": 3, "closedBoxes": 1, "openBoxes": 2,
-            "lastFactAt": first_batch, "deviceIds": [floor.station]
+            "lastFactAt": first_batch, "deviceIds": [floor.station],
+            "closedPallets": 0, "openPallets": 0
         })
     );
     // The number is a definition, not a side effect of the exceptions: an
@@ -7028,14 +7029,16 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
         totals(&admin, shift).await,
         json!({
             "acceptedUnits": 3, "unitsInClosedBoxes": 2, "closedBoxes": 1, "openBoxes": 1,
-            "lastFactAt": second_batch, "deviceIds": [floor.station]
+            "lastFactAt": second_batch, "deviceIds": [floor.station],
+            "closedPallets": 0, "openPallets": 0
         })
     );
     assert_eq!(
         totals(&admin, &colleague.shift).await,
         json!({
             "acceptedUnits": 2, "unitsInClosedBoxes": 0, "closedBoxes": 0, "openBoxes": 1,
-            "lastFactAt": second_batch, "deviceIds": [colleague.station]
+            "lastFactAt": second_batch, "deviceIds": [colleague.station],
+            "closedPallets": 0, "openPallets": 0
         })
     );
     // The devices come first entry first. A second device on a shift comes
@@ -7111,16 +7114,259 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
     );
     let colleagues = json!({
         "acceptedUnits": 3, "unitsInClosedBoxes": 1, "closedBoxes": 1, "openBoxes": 1,
-        "lastFactAt": third_batch, "deviceIds": [colleague.station]
+        "lastFactAt": third_batch, "deviceIds": [colleague.station],
+        "closedPallets": 0, "openPallets": 0
     });
     assert_eq!(totals(&admin, &colleague.shift).await, colleagues);
     let floors = json!({
         "acceptedUnits": 3, "unitsInClosedBoxes": 2, "closedBoxes": 1, "openBoxes": 1,
-        "lastFactAt": second_batch, "deviceIds": [other, floor.station]
+        "lastFactAt": second_batch, "deviceIds": [other, floor.station],
+        "closedPallets": 0, "openPallets": 0
     });
     assert_eq!(totals(&admin, shift).await, floors);
     // Every write of the office answers with the totals the list gives.
     let closed = close_from_office(&admin, shift, "Станция не отвечает").await;
     assert_eq!(closed["totals"], floors);
     assert_eq!(totals(&admin, shift).await, floors);
+}
+
+/// Migration `0012` applies to a host that already holds shifts, boxes and
+/// scans: the database as it stood before `0012` takes the rows of a planned
+/// and an open shift with a closed and an open box, and after the migration
+/// every row is as it was, `boxes.pallet_id` is empty, no reference is
+/// broken, and the new rules govern the old rows.
+#[tokio::test]
+async fn migration_0012_applies_to_a_host_that_already_holds_shifts_and_boxes() {
+    use sqlx::sqlite::SqliteConnectOptions;
+    use sqlx::{ConnectOptions, Connection};
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    plan_shift(&admin, shift_body(&setup)).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let shift = floor.shift.as_str();
+    // Box 1 (codes 1 and 2) is closed, box 2 (code 3) stays open.
+    let scans: Vec<Value> = [(1, 1), (2, 1), (3, 2)]
+        .into_iter()
+        .map(|(n, box_n)| {
+            fact(
+                &record_id(n),
+                "scan",
+                shift,
+                ok_scan(n, &box_id(box_n), &instant(n, 0)),
+            )
+        })
+        .collect();
+    receipts(&admin.app, &floor.key, &scans).await;
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(
+                &record_id(11),
+                "box_closed",
+                shift,
+                box_closed(
+                    &box_id(1),
+                    &block,
+                    1500,
+                    &[1, 2],
+                    &instant(0, 500),
+                    &instant(20, 0)
+                )
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(11))]
+    );
+    // The host's database as it is now, and an empty one at the schema
+    // before `0012`: the migrations of the directory, but the last.
+    let dir = tempfile::tempdir().unwrap();
+    let snapshot = dir.path().join("snapshot.db");
+    sqlx::query("VACUUM INTO ?")
+        .bind(snapshot.to_str().unwrap())
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let before_0012 = dir.path().join("migrations");
+    std::fs::create_dir(&before_0012).unwrap();
+    let applied = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
+    for entry in std::fs::read_dir(&applied).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_name().to_str().unwrap() < "0012" {
+            std::fs::copy(entry.path(), before_0012.join(entry.file_name())).unwrap();
+        }
+    }
+    let mut old = SqliteConnectOptions::new()
+        .filename(dir.path().join("old.db"))
+        .create_if_missing(true)
+        .foreign_keys(false)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator::new(before_0012.as_path())
+        .await
+        .unwrap()
+        .run(&mut old)
+        .await
+        .unwrap();
+    let new_objects: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE name IN ('pallets', 'pallet_exceptions', \
+         'shifts_pallets_insert', 'shifts_pallets_update', 'shifts_planned_pallet_template')",
+    )
+    .fetch_one(&mut old)
+    .await
+    .unwrap();
+    let pallet_columns: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM pragma_table_info('boxes') WHERE name = 'pallet_id'",
+    )
+    .fetch_one(&mut old)
+    .await
+    .unwrap();
+    assert_eq!((new_objects, pallet_columns), (0, 0));
+    // Every row of the host goes into it, table by table, column by column
+    // of the old schema (the reference rows the migrations insert are the
+    // same on both sides).
+    sqlx::query("ATTACH DATABASE ? AS source")
+        .bind(snapshot.to_str().unwrap())
+        .execute(&mut old)
+        .await
+        .unwrap();
+    let tables: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' \
+         AND name <> '_sqlx_migrations' ORDER BY name",
+    )
+    .fetch_all(&mut old)
+    .await
+    .unwrap();
+    for table in &tables {
+        let columns: Vec<String> =
+            sqlx::query_scalar("SELECT name FROM pragma_table_info(?) ORDER BY cid")
+                .bind(table)
+                .fetch_all(&mut old)
+                .await
+                .unwrap();
+        let columns = columns.join(", ");
+        sqlx::query(&format!(
+            "INSERT OR REPLACE INTO main.{table} ({columns}) SELECT {columns} FROM source.{table}"
+        ))
+        .execute(&mut old)
+        .await
+        .unwrap();
+    }
+    sqlx::query("DETACH DATABASE source")
+        .execute(&mut old)
+        .await
+        .unwrap();
+    // The rows are loaded with enforcement off, but the host opens its database
+    // with it on, so the migration itself runs with it on.
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut old)
+        .await
+        .unwrap();
+    async fn rows_of(old: &mut sqlx::SqliteConnection, tables: &[String]) -> Vec<(String, i64)> {
+        let mut counts = Vec::new();
+        for table in tables {
+            let count: i64 = sqlx::query_scalar(&format!("SELECT COUNT(*) FROM {table}"))
+                .fetch_one(&mut *old)
+                .await
+                .unwrap();
+            counts.push((table.clone(), count));
+        }
+        counts
+    }
+    async fn digest_of(old: &mut sqlx::SqliteConnection) -> (String, String) {
+        let shifts: String = sqlx::query_scalar(
+            "SELECT group_concat(id || '|' || number_seq || '|' || status || '|' || \
+             pallets_enabled || '|' || ifnull(pallet_box_capacity, '-') || '|' || \
+             ifnull(pallet_template_id, '-') || '|' || box_capacity || '|' || rev, ';') \
+             FROM (SELECT * FROM shifts ORDER BY id)",
+        )
+        .fetch_one(&mut *old)
+        .await
+        .unwrap();
+        let boxes: String = sqlx::query_scalar(
+            "SELECT group_concat(id || '|' || ifnull(sscc, '-') || '|' || ifnull(closed_at, '-') \
+             || '|' || ifnull(serial, '-') || '|' || ifnull(membership_digest, '-'), ';') \
+             FROM (SELECT * FROM boxes ORDER BY id)",
+        )
+        .fetch_one(&mut *old)
+        .await
+        .unwrap();
+        (shifts, boxes)
+    }
+    let counts = rows_of(&mut old, &tables).await;
+    let digest = digest_of(&mut old).await;
+    let count = |table: &str| counts.iter().find(|(name, _)| name == table).unwrap().1;
+    assert_eq!((count("shifts"), count("boxes"), count("scans")), (2, 2, 3));
+    // Now the migration.
+    markiro_host::db::MIGRATOR.run(&mut old).await.unwrap();
+    let migrated: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM _sqlx_migrations WHERE success")
+        .fetch_one(&mut old)
+        .await
+        .unwrap();
+    assert_eq!(
+        migrated,
+        i64::try_from(markiro_host::db::MIGRATOR.iter().count()).unwrap()
+    );
+    assert_eq!(rows_of(&mut old, &tables).await, counts);
+    assert_eq!(digest_of(&mut old).await, digest);
+    let (pallets, exceptions, linked): (i64, i64, i64) = sqlx::query_as(
+        "SELECT (SELECT COUNT(*) FROM pallets), (SELECT COUNT(*) FROM pallet_exceptions), \
+         (SELECT COUNT(*) FROM boxes WHERE pallet_id IS NOT NULL)",
+    )
+    .fetch_one(&mut old)
+    .await
+    .unwrap();
+    assert_eq!((pallets, exceptions, linked), (0, 0, 0));
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut old)
+        .await
+        .unwrap();
+    let broken = sqlx::query("PRAGMA foreign_key_check")
+        .fetch_all(&mut old)
+        .await
+        .unwrap();
+    let integrity: String = sqlx::query_scalar("PRAGMA integrity_check")
+        .fetch_one(&mut old)
+        .await
+        .unwrap();
+    assert_eq!((broken.len(), integrity.as_str()), (0, "ok"));
+    // The old rows live under the new rules: a closed box joins a pallet, an
+    // open one does not, and a planned shift cannot switch pallets on bare.
+    let (owner,): (String,) =
+        sqlx::query_as("SELECT owner_device_id FROM shifts WHERE status = 'active'")
+            .fetch_one(&mut old)
+            .await
+            .unwrap();
+    sqlx::query(
+        "INSERT INTO pallets (id, shift_id, device_id, opened_at, received_at) \
+         VALUES ('pallet-1', ?, ?, 'x', 'x')",
+    )
+    .bind(shift)
+    .bind(&owner)
+    .execute(&mut old)
+    .await
+    .unwrap();
+    let joined = sqlx::query("UPDATE boxes SET pallet_id = 'pallet-1' WHERE closed_at IS NOT NULL")
+        .execute(&mut old)
+        .await
+        .unwrap();
+    assert_eq!(joined.rows_affected(), 1);
+    let open_box = sqlx::query("UPDATE boxes SET pallet_id = 'pallet-1' WHERE closed_at IS NULL")
+        .execute(&mut old)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(open_box.contains("CHECK constraint failed"), "{open_box}");
+    let bare = sqlx::query("UPDATE shifts SET pallets_enabled = 1 WHERE status = 'planned'")
+        .execute(&mut old)
+        .await
+        .unwrap_err()
+        .to_string();
+    assert!(
+        bare.contains("shift pallets: capacity and template exactly when enabled"),
+        "{bare}"
+    );
+    old.close().await.unwrap();
 }

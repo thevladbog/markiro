@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 
 import {
   boxMembershipDigestV1,
+  buildSscc,
   SHIFT_CLOSE_REASON_CODES,
   shiftCloseReasonRequired,
 } from "@markiro/domain";
@@ -42,14 +43,37 @@ const INSTANTS = z
   .strictObject({ valid: z.array(z.string()), invalid: z.array(z.string()) })
   .parse(fixture("device-instants.json"));
 
+const SSCC_SERIALS = z
+  .strictObject({
+    cases: z.array(
+      z.strictObject({
+        extension: z.number().int(),
+        issuerPrefix: z.string(),
+        serial: z.number().int(),
+        sscc: z.string(),
+      }),
+    ),
+  })
+  .parse(fixture("sscc-serials.json"));
+
 describe("fact rules: the fixtures the host's facts answer too", () => {
-  it("holds 5 box digests, 6 close cases and 22 instants", () => {
+  it("holds 5 box digests, 6 close cases, 22 instants and 7 SSCCs", () => {
     expect([
       BOX_DIGEST.cases.length,
       CLOSE_REASONS.required.length,
       INSTANTS.valid.length + INSTANTS.invalid.length,
-    ]).toEqual([5, 6, 22]);
+      SSCC_SERIALS.cases.length,
+    ]).toEqual([5, 6, 22, 7]);
   });
+
+  // The host reads the first 17 digits of a box's or a pallet's SSCC as
+  // these three fields (`rules::names_serial`).
+  it.each(SSCC_SERIALS.cases)(
+    "builds the SSCC of extension $extension, prefix $issuerPrefix and serial $serial",
+    (entry) => {
+      expect(buildSscc(entry.extension, entry.issuerPrefix, entry.serial)).toBe(entry.sscc);
+    },
+  );
 
   it.each(BOX_DIGEST.cases)("digests the members $hashes as the domain does", (entry) => {
     expect(boxMembershipDigestV1(entry.hashes)).toBe(entry.digest);

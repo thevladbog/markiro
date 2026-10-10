@@ -1,0 +1,26 @@
+{
+  "cases": [
+    { "extension": 0, "issuerPrefix": "460068200", "serial": 1500, "sscc": "046006820000015000" },
+    {
+      "extension": 0,
+      "issuerPrefix": "460068200",
+      "serial": 9999999,
+      "sscc": "046006820099999991"
+    },
+    { "extension": 1, "issuerPrefix": "460068200", "serial": 0, "sscc": "146006820000000003" },
+    { "extension": 1, "issuerPrefix": "460068200", "serial": 40, "sscc": "146006820000000409" },
+    {
+      "extension": 1,
+      "issuerPrefix": "460068200",
+      "serial": 9999999,
+      "sscc": "146006820099999998"
+    },
+    {
+      "extension": 0,
+      "issuerPrefix": "4600682",
+      "serial": 123456789,
+      "sscc": "046006821234567891"
+    },
+    { "extension": 1, "issuerPrefix": "460068200000", "serial": 9999, "sscc": "146006820000099991" }
+  ]
+}

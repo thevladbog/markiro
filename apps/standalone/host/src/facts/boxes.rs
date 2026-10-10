@@ -15,6 +15,8 @@ pub struct OwnBox {
     pub closed_at: Option<String>,
     pub sscc: Option<String>,
     pub disassembled_at: Option<String>,
+    /// The pallet the box joined as it closed (plan ПЛ-Х).
+    pub pallet_id: Option<String>,
 }
 
 /// The box `id` when it is this device's in this shift, `None` when no box
@@ -31,9 +33,11 @@ pub async fn find(
         Option<String>,
         Option<String>,
         Option<String>,
+        Option<String>,
     );
     let row: Option<BoxRow> = sqlx::query_as(
-        "SELECT shift_id, device_id, closed_at, sscc, disassembled_at FROM boxes WHERE id = ?",
+        "SELECT shift_id, device_id, closed_at, sscc, disassembled_at, pallet_id FROM boxes \
+         WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(&mut *conn)
@@ -46,10 +50,11 @@ pub async fn find(
         {
             Err(Reject::new(receipt_codes::BOX_UNKNOWN).into())
         }
-        Some((_, _, closed_at, sscc, disassembled_at)) => Ok(Some(OwnBox {
+        Some((_, _, closed_at, sscc, disassembled_at, pallet_id)) => Ok(Some(OwnBox {
             closed_at,
             sscc,
             disassembled_at,
+            pallet_id,
         })),
     }
 }

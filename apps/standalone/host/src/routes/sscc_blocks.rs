@@ -1,13 +1,15 @@
 //! SSCC blocks (stage 2a spec §4.3): `POST /v1/device/sscc/blocks`, for
-//! stations only. A station asks for a block when it has none for its
-//! shift's prefix or its newest is half used; the host gives the next
-//! `site.box_block_size` serials of the counter (fewer at the end of the
-//! prefix's serials, then `sscc_exhausted`) and moves the counter past them
-//! with a new revision in the same transaction. A repeated `requestId` of
-//! the same station answers the same block, even after others were issued;
-//! with another issuer prefix in the body it is `validation_failed` on
-//! `requestId`, since the station would file the old block's serials under
-//! a prefix they were not reserved for.
+//! stations only. A station asks for a block of boxes (extension 0) or of
+//! pallets (extension 1, plan ПЛ-Х) when it has none for its shift's prefix
+//! or its newest is half used; the host gives the next `site.box_block_size`
+//! or `site.pallet_block_size` serials of the counter of that prefix and
+//! extension (fewer at the end of the prefix's serials, then
+//! `sscc_exhausted`) and moves the counter past them with a new revision in
+//! the same transaction. A repeated `requestId` of the same station answers
+//! the same block, even after others were issued; with another issuer prefix
+//! or extension in the body it is `validation_failed` on `requestId`, since
+//! the station would file the old block's serials under a prefix or for
+//! labels they were not reserved for.
 //! Revoking blocks and a screen of them per device are plan 2b's.
 
 use axum::extract::State;
@@ -59,28 +61,33 @@ pub async fn issue_block(
         return Err(ApiError::forbidden("only a station gets SSCC blocks"));
     }
     validate::client_uuid("requestId", &request.request_id)?;
-    // Pallets (extension 1) come with plan 2b.
-    if request.extension != 0 {
-        return Err(ApiError::validation(
-            "extension",
-            "only box blocks (extension 0) are issued for now",
-        ));
-    }
+    // Boxes take extension 0, pallets 1, each with its own counter and size.
+    let size_column = match request.extension {
+        0 => "box_block_size",
+        1 => "pallet_block_size",
+        _ => {
+            return Err(ApiError::validation(
+                "extension",
+                "a block is of boxes (0) or of pallets (1)",
+            ))
+        }
+    };
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     device
         .require_station_in(&mut tx, "only a station gets SSCC blocks")
         .await?;
     if let Some(block) = read(&mut tx, &device.id, &request.request_id).await? {
-        // A request id names one block of one prefix (the station keeps the
-        // prefix it asked for beside the id and repeats the same body). The
-        // same id for another prefix is a station's mistake, and answering
-        // the old block would hand it serials it files under the wrong
-        // prefix. Extension is 0 on both sides until plan 2b.
-        if block.issuer_prefix != request.issuer_prefix {
+        // A request id names one block of one prefix and extension (the
+        // station keeps what it asked for beside the id and repeats the same
+        // body). The same id for another prefix or extension is a station's
+        // mistake, and answering the old block would hand it serials it
+        // files under the wrong prefix, or prints on pallets that were
+        // reserved for boxes.
+        if block.issuer_prefix != request.issuer_prefix || block.extension != request.extension {
             return Err(ApiError::validation(
                 "requestId",
-                "this request id was used for another prefix",
+                "this request id was used for another prefix or extension",
             ));
         }
         // Nothing to write: the transaction rolls back when dropped.
@@ -96,7 +103,7 @@ pub async fn issue_block(
     .map_err(ApiError::internal)?;
     let next = next.ok_or_else(|| ApiError::validation("issuerPrefix", "no such SSCC counter"))?;
     let next = u64::try_from(next).map_err(ApiError::internal)?;
-    let size: i64 = sqlx::query_scalar("SELECT box_block_size FROM site WHERE id = 1")
+    let size: i64 = sqlx::query_scalar(&format!("SELECT {size_column} FROM site WHERE id = 1"))
         .fetch_one(&mut *tx)
         .await
         .map_err(ApiError::internal)?;

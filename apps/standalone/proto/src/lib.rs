@@ -13,8 +13,11 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-/// Protocol version this build speaks.
-pub const PROTOCOL_VERSION: u32 = 2;
+/// Protocol version this build speaks: 3 since plan ПЛ-Х (pallets: the
+/// shift's pallet fields, pallet blocks, the pallet facts and a box's
+/// `palletId`). A new fact kind or a new field of a fact's `data` raises it,
+/// because an older host refuses such a record for good.
+pub const PROTOCOL_VERSION: u32 = 3;
 /// Oldest protocol version this build still accepts from a client.
 pub const MIN_PROTOCOL_VERSION: u32 = 1;
 /// Request header carrying the client's protocol version.
@@ -97,16 +100,30 @@ pub mod receipt_codes {
     pub const BOX_UNKNOWN: &str = "box_unknown";
     /// A scan names a box that is closed.
     pub const BOX_CLOSED: &str = "box_closed";
-    /// A box closed with one SSCC is closed again with another.
+    /// A box closed with one SSCC (or on one pallet) is closed again with
+    /// another.
     pub const BOX_ALREADY_CLOSED: &str = "box_already_closed";
     /// The box is not in the state the record needs (an exception or a
     /// label check of an open box, an undo in a closed one).
     pub const BOX_STATE: &str = "box_state";
-    /// The SSCC is not of the shift's prefix, or its serial lies in no block
-    /// issued to this device.
+    /// The SSCC is not of the record's extension (a box 0, a pallet 1) and
+    /// the shift's prefix, or its serial lies in no live block of that
+    /// extension issued to this device.
     pub const SSCC_NOT_ISSUED: &str = "sscc_not_issued";
-    /// Another box carries the SSCC.
+    /// Another box (or pallet) carries the SSCC, or is closed on its serial
+    /// of its block.
     pub const SSCC_TAKEN: &str = "sscc_taken";
+    /// The shift works without pallets, and the record names a pallet.
+    pub const NO_PALLETS: &str = "no_pallets";
+    /// No pallet of this device and this shift has the id: another device's
+    /// or another shift's has it, or (for a label check or an exception) no
+    /// pallet at all.
+    pub const PALLET_UNKNOWN: &str = "pallet_unknown";
+    /// A pallet closed with one SSCC is closed again with another.
+    pub const PALLET_ALREADY_CLOSED: &str = "pallet_already_closed";
+    /// The pallet is not in the state the record needs (a label check or an
+    /// exception of an open pallet, an exception of one taken apart).
+    pub const PALLET_STATE: &str = "pallet_state";
 
     /// Every code above, for the parity fixture the webview also reads.
     pub const ALL: &[&str] = &[
@@ -121,6 +138,10 @@ pub mod receipt_codes {
         BOX_STATE,
         SSCC_NOT_ISSUED,
         SSCC_TAKEN,
+        NO_PALLETS,
+        PALLET_UNKNOWN,
+        PALLET_ALREADY_CLOSED,
+        PALLET_STATE,
     ];
 }
 
@@ -1440,6 +1461,10 @@ pub struct OfficeShift {
     pub planned_qty: Option<u32>,
     pub box_capacity: u32,
     pub box_template_id: String,
+    /// How many boxes a pallet holds and the pallet label template: both set
+    /// exactly when `palletsEnabled` (plan ПЛ-Х), `null` otherwise.
+    pub pallet_box_capacity: Option<u32>,
+    pub pallet_template_id: Option<String>,
     /// The station that opened the shift; `null` while it is planned.
     pub owner_device_id: Option<String>,
     pub opened_at: Option<String>,
@@ -1463,8 +1488,10 @@ pub struct OfficeShift {
 /// were not taken apart (the cloud office's «Кодов в закрытых коробах»; the
 /// rest are in boxes still open, so a shift closed with a box open shows the
 /// gap), boxes closed and not taken apart, open boxes that hold a unit, when
-/// the host last received a record of the shift, and the devices that
-/// entered it, first entry first.
+/// the host last received a record of the shift, the devices that entered
+/// it, first entry first, and (plan ПЛ-Х) pallets closed and not taken apart
+/// and open pallets that hold a box not taken apart; a shift without pallets
+/// has none.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShiftTotals {
@@ -1474,11 +1501,15 @@ pub struct ShiftTotals {
     pub open_boxes: u32,
     pub last_fact_at: Option<String>,
     pub device_ids: Vec<String>,
+    pub closed_pallets: u32,
+    pub open_pallets: u32,
 }
 
 /// `POST /v1/office/shifts`: a planned shift. `boxCapacity` left out is the
-/// product's; `mode` left out is aggregation and `palletsEnabled` false,
-/// the only values stage 2a takes.
+/// product's; `mode` left out is aggregation (the only mode taken) and
+/// `palletsEnabled` false. A shift with pallets names its pallet template
+/// and may name its pallet capacity (the product's when left out); one
+/// without sends neither.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ShiftCreate {
@@ -1496,6 +1527,10 @@ pub struct ShiftCreate {
     pub mode: ShiftMode,
     #[serde(default)]
     pub pallets_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_box_capacity: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_template_id: Option<String>,
 }
 
 /// `PUT /v1/office/shifts/{id}`: only the fields sent change, over
@@ -1503,7 +1538,9 @@ pub struct ShiftCreate {
 /// is no field here; an active one only `plannedQty` (another field sent
 /// with another value is `conflict` on `shift_status`); a closed one
 /// nothing. `plannedQty: null` and `counterpartyId: null` clear them; `null`
-/// in another field reads as «not sent» (see [`LineUpdate`]).
+/// in another field reads as «not sent» (see [`LineUpdate`]). Pallets turned
+/// off clear the pallet capacity and template (sending either then is
+/// `validation_failed`); turned on, they need a template.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ShiftUpdate {
@@ -1523,6 +1560,10 @@ pub struct ShiftUpdate {
     pub mode: Option<ShiftMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallets_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_box_capacity: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_template_id: Option<String>,
     pub expected_rev: i64,
 }
 
@@ -1559,6 +1600,12 @@ pub struct DeviceShift {
     pub planned_qty: Option<u32>,
     pub box_capacity: u32,
     pub box_template_id: String,
+    /// How many boxes a pallet holds and the pallet label template, only for
+    /// a shift with pallets (plan ПЛ-Х); left out otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_box_capacity: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_template_id: Option<String>,
     /// The station that opened the shift: another one's id means the shift
     /// is busy (stage 2a puts one device on a shift).
     pub owner_device_id: Option<String>,
@@ -1584,9 +1631,13 @@ pub struct ShiftSnapshot {
     pub product: ShiftSnapshotProduct,
     pub box_template: ShiftSnapshotTemplate,
     /// The SSCC issuer prefix of the organization's GLN when the shift
-    /// opened: the station asks for blocks of it.
+    /// opened: the station asks for blocks of it, of boxes and of pallets.
     pub issuer_prefix: String,
     pub counterparty_name: Option<String>,
+    /// The pallet label template as the shift froze it, its layout whole:
+    /// only for a shift with pallets (plan ПЛ-Х); left out otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_template: Option<ShiftSnapshotTemplate>,
 }
 
 /// The product as a shift froze it; only an active product opens a shift,
@@ -1602,9 +1653,10 @@ pub struct ShiftSnapshotProduct {
     pub shelf_life_days: Option<u32>,
 }
 
-/// The box template as a shift froze it, its layout whole. The host never
-/// checks a layout; the station checks it with `labelTemplateSpecSchema`
-/// when it enters the shift.
+/// A label template as a shift froze it (its box template, and its pallet
+/// template when it has pallets), its layout whole. The host never checks a
+/// layout; the station checks it with `labelTemplateSpecSchema` when it
+/// enters the shift.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShiftSnapshotTemplate {
@@ -1625,7 +1677,8 @@ pub struct DeviceShifts {
 /// `POST /v1/device/shifts`: a station creates a shift on its own line while
 /// the host answers. `requestId` (a lower-case hyphenated UUID the station
 /// made up) makes it repeatable: the same request of the same station
-/// answers the same shift.
+/// answers the same shift. Pallets follow the office's rules
+/// ([`ShiftCreate`]); a station of stage 2a sends none of their fields.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeviceShiftCreate {
@@ -1639,12 +1692,19 @@ pub struct DeviceShiftCreate {
     pub planned_qty: Option<u32>,
     #[serde(default)]
     pub counterparty_id: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pallets_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_box_capacity: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_template_id: Option<String>,
 }
 
 /// What a fact records (stage 2a spec §4.4): the kind tells the host how
 /// to read the record's `data`. A kind added later is a new variant; a host
 /// that does not know it answers the record `invalid_record`, for good, as it
-/// does a new `data` field: either raises `PROTOCOL_VERSION`.
+/// does a new `data` field: either raises `PROTOCOL_VERSION` (the pallet
+/// kinds came with protocol 3, plan ПЛ-Х).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactKind {
@@ -1653,6 +1713,9 @@ pub enum FactKind {
     BoxLabel,
     BoxException,
     ShiftClosed,
+    PalletClosed,
+    PalletLabel,
+    PalletException,
 }
 
 impl FactKind {
@@ -1663,6 +1726,9 @@ impl FactKind {
             FactKind::BoxLabel => "box_label",
             FactKind::BoxException => "box_exception",
             FactKind::ShiftClosed => "shift_closed",
+            FactKind::PalletClosed => "pallet_closed",
+            FactKind::PalletLabel => "pallet_label",
+            FactKind::PalletException => "pallet_exception",
         }
     }
 }
@@ -1800,7 +1866,9 @@ pub struct ScanFact {
 /// `serial` from block `blockId`, which the host issued to this station.
 /// `itemCount` and `membershipDigest` (the domain's `boxMembershipDigestV1`
 /// of the box's code hashes) are what the station saw; the host compares the
-/// digest with its own items and keeps the result.
+/// digest with its own items and keeps the result. In a shift with pallets
+/// `palletId` names the station's pallet the box joined as it closed (plan
+/// ПЛ-Х); a shift without pallets sends none.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct BoxClosedFact {
@@ -1812,6 +1880,69 @@ pub struct BoxClosedFact {
     pub closed_at: String,
     pub item_count: u32,
     pub membership_digest: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_id: Option<String>,
+}
+
+/// `data` of a `pallet_closed` fact (plan ПЛ-Х): the station closed its
+/// pallet, when it filled or early, with the SSCC of serial `serial` from
+/// the pallet block (extension 1) `blockId` the host issued to it.
+/// `openedAt` is when its first box closed, `boxCount` how many boxes the
+/// station counted on it; the pallet's boxes are the boxes whose
+/// `box_closed` named it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PalletClosedFact {
+    pub pallet_id: String,
+    pub sscc: String,
+    pub block_id: String,
+    pub serial: u64,
+    pub opened_at: String,
+    pub closed_at: String,
+    pub box_count: u32,
+}
+
+/// `data` of a `pallet_label` fact (plan ПЛ-Х): the check of a closed
+/// pallet's label, as a box's ([`BoxLabelFact`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PalletLabelFact {
+    pub pallet_id: String,
+    pub outcome: LabelOutcome,
+    pub at: String,
+}
+
+/// What a pallet exception does (the cloud station's two).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PalletExceptionKind {
+    /// Print a closed pallet's label again.
+    Reprint,
+    /// Take a closed pallet apart; its SSCC stays used and its boxes stay
+    /// as they are.
+    Disassemble,
+}
+
+impl PalletExceptionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PalletExceptionKind::Reprint => "reprint",
+            PalletExceptionKind::Disassemble => "disassemble",
+        }
+    }
+}
+
+/// `data` of a `pallet_exception` fact (plan ПЛ-Х): a reason code of
+/// [`exception_reasons`] for the kind (the box exceptions' lists), and
+/// words only with `other`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PalletExceptionFact {
+    pub exception: PalletExceptionKind,
+    pub pallet_id: String,
+    pub reason_code: String,
+    pub reason_text: Option<String>,
+    pub occurred_at: String,
 }
 
 /// How a box's printed label was checked.
@@ -2108,6 +2239,9 @@ mod tests {
             FactKind::BoxLabel,
             FactKind::BoxException,
             FactKind::ShiftClosed,
+            FactKind::PalletClosed,
+            FactKind::PalletLabel,
+            FactKind::PalletException,
         ];
         for kind in &kinds {
             match kind {
@@ -2115,7 +2249,10 @@ mod tests {
                 | FactKind::BoxClosed
                 | FactKind::BoxLabel
                 | FactKind::BoxException
-                | FactKind::ShiftClosed => {}
+                | FactKind::ShiftClosed
+                | FactKind::PalletClosed
+                | FactKind::PalletLabel
+                | FactKind::PalletException => {}
             }
         }
         kinds
