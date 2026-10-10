@@ -300,13 +300,26 @@ describe("the floor's status bar", () => {
   });
 
   it("names no shift of a pairing other than its own", async () => {
-    const local = await synced([ORG]);
-    await keepEnteredShift(local, PAIRING, ENTERED, "2026-10-09T06:00:00.000Z", 1_790_000_000_000);
+    const real = await synced([ORG]);
+    await keepEnteredShift(real, PAIRING, ENTERED, "2026-10-09T06:00:00.000Z", 1_790_000_000_000);
+    // The read of the shift's copy is watched, so that the assertion waits for its
+    // answer (and what the bar makes of it), not for a time that may be too short.
+    const reads: Promise<unknown>[] = [];
+    const local: LocalExecutor = {
+      query: (sql, params, row) => {
+        const read = real.query(sql, params, row);
+        if (sql.includes("FROM floor_shifts")) reads.push(read);
+        return read;
+      },
+      transaction: (statements) => real.transaction(statements),
+    };
     render(
       bar({ local, pairing: { hostId: HOST_ID, deviceId: OTHER_DEVICE }, shiftId: ENTERED.id }),
     );
+    await waitFor(() => expect(reads).toHaveLength(1));
     await act(async () => {
-      await new Promise<void>((resolve) => setTimeout(resolve, 20));
+      await Promise.all(reads);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
     });
     expect(screen.queryByText("OCT26-004")).toBeNull();
   });

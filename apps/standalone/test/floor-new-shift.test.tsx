@@ -648,11 +648,39 @@ function productButtons(): string[] {
   return screen.queryAllByRole("button", { name: /—/ }).map((button) => button.textContent ?? "");
 }
 
-/** A moment for work that must not happen to show it did not. */
-const settle = () =>
-  act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  });
+/**
+ * The executor with every call it served remembered. «Nothing more happens» is
+ * asserted after `quiet`: the screen asks it for nothing more and every answer
+ * it got has landed, whatever the machine's load, not after a fixed time that
+ * the work could outlast (and the assertion then pass for nothing).
+ */
+function watched(real: LocalExecutor) {
+  const calls: Promise<unknown>[] = [];
+  const local: LocalExecutor = {
+    query: (sql, params, row) => {
+      const answer = real.query(sql, params, row);
+      calls.push(answer.catch(() => undefined));
+      return answer;
+    },
+    transaction: (statements) => {
+      const answer = real.transaction(statements);
+      calls.push(answer.catch(() => undefined));
+      return answer;
+    },
+  };
+  /** Every call so far has answered and what it started has run, and nothing new was asked. */
+  async function quiet(): Promise<void> {
+    let seen = -1;
+    while (seen !== calls.length) {
+      seen = calls.length;
+      await act(async () => {
+        await Promise.all(calls);
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      });
+    }
+  }
+  return { local, calls, quiet };
+}
 
 function hanging() {
   let answer: (shift: DeviceShift) => void = () => undefined;
@@ -1066,15 +1094,19 @@ describe("a request to create a shift", () => {
 
   it("is dropped, answer and all, when the screen is gone before the host answers", async () => {
     const { create, answer } = hanging();
-    const { handlers, view } = renderNew(await copiesOf(CATALOG), { create });
+    const database = watched(await copiesOf(CATALOG));
+    const { handlers, view } = renderNew(database.local, { create });
     await chooseMilk();
     fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
     await screen.findByText("Создаём смену…");
     view.unmount();
+    const asked = database.calls.length;
     await act(async () => {
       answer(MADE);
     });
-    await settle();
+    await database.quiet();
+    // The host's shift was kept on this computer, and that is as far as it went.
+    expect(database.calls.length).toBeGreaterThan(asked);
     expect(handlers.enter).not.toHaveBeenCalled();
     expect(handlers.onEntered).not.toHaveBeenCalled();
   });
@@ -1087,15 +1119,19 @@ describe("a request to create a shift", () => {
           open = resolve;
         }),
     );
-    const { handlers, view } = renderNew(await copiesOf(CATALOG), { enter });
+    const database = watched(await copiesOf(CATALOG));
+    const { handlers, view } = renderNew(database.local, { enter });
     await chooseMilk();
     fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
     await screen.findByText("Открываем смену…");
     view.unmount();
+    const asked = database.calls.length;
     await act(async () => {
       open(OPENED);
     });
-    await settle();
+    await database.quiet();
+    // The host's answer was kept on this computer, and that is as far as it went.
+    expect(database.calls.length).toBeGreaterThan(asked);
     expect(handlers.onEntered).not.toHaveBeenCalled();
     expect(handlers.onHostError).not.toHaveBeenCalled();
   });
@@ -1243,13 +1279,14 @@ describe("a request to create a shift", () => {
     ["the capacity", { boxCapacity: 6 }],
     ["the plan", { plannedQty: 500 }],
   ] as const)("does not enter a shift that is not the form's in %s", async (_name, patch) => {
-    const { handlers } = renderNew(await copiesOf(CATALOG), {
+    const database = watched(await copiesOf(CATALOG));
+    const { handlers } = renderNew(database.local, {
       create: async () => ({ ...MADE, ...patch }),
     });
     await chooseMilk();
     fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
     expect(await screen.findByText(/Смена OCT26-005\/S уже была создана раньше/)).toBeTruthy();
-    await settle();
+    await database.quiet();
     expect(handlers.enter).not.toHaveBeenCalled();
     expect(handlers.onEntered).not.toHaveBeenCalled();
     // Nothing offers to make the shift again.

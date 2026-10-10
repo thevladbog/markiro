@@ -519,13 +519,30 @@ describe("the shifts of the station's line", () => {
   });
 
   it("does not take the focus back from a button when it reads its copies again", async () => {
-    const { executor } = await copiesOf([PLANNED]);
+    const { executor: real } = await copiesOf([PLANNED]);
+    // The reads of the copies are watched: the assertion is about what the SECOND one
+    // sets, so it waits for that read, not for a time that may be too short.
+    const reads: Promise<unknown>[] = [];
+    const local: LocalExecutor = {
+      query: (sql, params, row) => {
+        const read = real.query(sql, params, row);
+        if (sql.includes("FROM floor_shifts")) reads.push(read);
+        return read;
+      },
+      transaction: (statements) => real.transaction(statements),
+    };
     const handlers = handlersOf();
-    const view = render(listOf(executor, handlers, {}));
+    const view = render(listOf(local, handlers, {}));
     const open = await screen.findByRole("button", { name: "Открыть" });
     open.focus();
-    view.rerender(listOf(executor, handlers, { shiftReads: { done: 2, failed: false } }));
-    await screen.findByRole("button", { name: "Открыть" });
+    expect(reads).toHaveLength(1);
+    view.rerender(listOf(local, handlers, { shiftReads: { done: 2, failed: false } }));
+    await waitFor(() => expect(reads).toHaveLength(2));
+    await act(async () => {
+      await Promise.all(reads);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByRole("button", { name: "Открыть" })).toBe(open);
     expect(document.activeElement).toBe(open);
   });
 
@@ -685,7 +702,10 @@ describe("entering a shift without the host", () => {
       message: "other",
     });
     const enter = vi.fn(async () => Promise.reject(changed));
-    const result = await enterShift({ ...context(executor, true), enter }, await staleCopy(executor));
+    const result = await enterShift(
+      { ...context(executor, true), enter },
+      await staleCopy(executor),
+    );
     expect(result).toEqual({ kind: "rejected", error: changed });
     expect(enter).toHaveBeenCalledTimes(1);
   });
@@ -693,7 +713,10 @@ describe("entering a shift without the host", () => {
   it("calls a failure that is no answer of the host a plain failure, and does not fall back to the snapshot", async () => {
     const { executor } = await copiesOf([], [ENTERED_MINE]);
     const enter = vi.fn(async () => Promise.reject(new Error("boom")));
-    const result = await enterShift({ ...context(executor, true), enter }, await staleCopy(executor));
+    const result = await enterShift(
+      { ...context(executor, true), enter },
+      await staleCopy(executor),
+    );
     expect(result).toEqual({ kind: "refused", reason: "failed" });
   });
 
