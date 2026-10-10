@@ -63,13 +63,22 @@ export class HostError extends Error {
   }
 }
 
+/** The bounds of `timeoutMs`, as the shell checks them (`MIN_TIMEOUT_MS`, `MAX_TIMEOUT_MS`). */
+const MIN_TIMEOUT_MS = 100;
+const MAX_TIMEOUT_MS = 10_000;
+
 export interface HostRequestOptions<T> {
   body?: unknown;
   officeToken?: string;
   /**
-   * Limits this request to 100–10 000 ms instead of the shell's 10 s; past
-   * it the call fails with the transport code `timeout` (the scan pipeline's
-   * 300 ms code check).
+   * Limits this request to 100–10 000 ms instead of the shell's 10 s (the scan
+   * pipeline's 300 ms code check). When this limit ends the call first —
+   * connecting and the TLS handshake count — it fails with the transport code
+   * `timeout`; a limit above the shell's own 2 s to connect leaves a host that
+   * never connects to that 2 s, which is `unreachable`. A number that is not
+   * a whole number of milliseconds in the bounds fails with `invalid_request`
+   * before the shell is called (`NaN` and `Infinity` would otherwise reach it
+   * as JSON `null`, which means no limit).
    */
   timeoutMs?: number;
   /** Parses a 2xx body; a 204 answer parses as `null`. */
@@ -86,6 +95,16 @@ type Invoke = (command: string, args: Record<string, unknown>) => Promise<unknow
 export function createTauriHostClient(call: Invoke = invoke): HostClient {
   return {
     async request(method, path, { body, officeToken, timeoutMs, schema }) {
+      if (
+        timeoutMs !== undefined &&
+        !(Number.isInteger(timeoutMs) && timeoutMs >= MIN_TIMEOUT_MS && timeoutMs <= MAX_TIMEOUT_MS)
+      ) {
+        throw new HostError({
+          kind: "transport",
+          code: "invalid_request",
+          message: `${method} ${path}: timeoutMs ${String(timeoutMs)} is not a whole number of milliseconds from ${MIN_TIMEOUT_MS} to ${MAX_TIMEOUT_MS}`,
+        });
+      }
       let raw: unknown;
       try {
         raw = await call("host_request", {
