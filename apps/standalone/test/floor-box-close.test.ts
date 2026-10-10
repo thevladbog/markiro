@@ -7,6 +7,7 @@ import { z } from "zod";
 
 import { boxClosedRecord } from "../src/floor/facts.js";
 import {
+  boxIsFull,
   closeIfFull,
   closeOpenBox,
   readClosedBox,
@@ -289,6 +290,14 @@ describe("a full box", () => {
     );
     return context;
   }
+
+  it("calls a box full from its capacity on, the one rule the pipeline and the screen share", () => {
+    expect(boxIsFull(0, 12)).toBe(false);
+    expect(boxIsFull(11, 12)).toBe(false);
+    expect(boxIsFull(12, 12)).toBe(true);
+    expect(boxIsFull(13, 12)).toBe(true);
+    expect(boxIsFull(1, 1)).toBe(true);
+  });
 
   it("closes once it holds the shift's box capacity, and not one code before", async () => {
     const { db, executor } = openLocalDb();

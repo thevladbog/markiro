@@ -2695,8 +2695,9 @@ A box closes by itself once it holds the shift's capacity — the screen's
 `closeBox(true)` runs in front of every scan, after the scan that fills a box
 and when the screen opens, so a station stopped between the scan that filled a
 box and its close finds it full — and an incomplete one after the operator
-confirms. `closeIfFull` is the same rule for a caller outside the screen. A full
-box never takes another code: a close that leaves it open stops the line, and
+confirms. "Full" is one function, `boxIsFull(itemCount, capacity)` in
+`box-close.ts`, which the screen's close and `closeIfFull` (for a caller outside
+the screen) both ask. A full box never takes another code: a close that leaves it open stops the line, and
 the scan that finds a stop is refused. A close whose write threw may have been
 committed all the same; the next close reads the box back from `floor_boxes`
 (`readClosedBox`) before it looks for an open one, so that a box which did

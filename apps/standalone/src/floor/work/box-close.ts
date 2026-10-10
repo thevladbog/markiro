@@ -278,6 +278,16 @@ export async function closeOpenBox(
 }
 
 /**
+ * Whether a box holding `itemCount` codes is full under the shift's box
+ * `capacity`: from the capacity on. The one rule of "full" — `closeIfFull`
+ * (a caller outside the screen) and the work screen's close both ask it, so
+ * a plan that changes it changes it in one place.
+ */
+export function boxIsFull(itemCount: number, capacity: number): boolean {
+  return itemCount >= capacity;
+}
+
+/**
  * Closes the open box once it holds the shift's box capacity (stage 2a spec
  * §5.7.3, step 6): after every accepted scan, and when the work screen opens —
  * a station stopped between the scan that filled a box and its close finds
@@ -288,6 +298,6 @@ export async function closeIfFull(
   steps: readonly CloseStep[] = [],
 ): Promise<CloseResult | null> {
   const box = await readOpenBox(context.local, context.pairing, context.shift.copy.id);
-  if (box === null || box.itemCount < context.shift.copy.boxCapacity) return null;
+  if (box === null || !boxIsFull(box.itemCount, context.shift.copy.boxCapacity)) return null;
   return closeOpenBox(context, steps);
 }

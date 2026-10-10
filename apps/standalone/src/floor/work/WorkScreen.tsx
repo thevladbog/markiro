@@ -22,6 +22,7 @@ import type { WorkShift } from "../shifts/shift-copies.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 import { createBlockSupply, type BlockContext, type SupplyResult } from "./block-supply.js";
 import {
+  boxIsFull,
   closeOpenBox,
   readClosedBox,
   type BoxContext,
@@ -323,7 +324,7 @@ async function attemptClose(env: CloseEnv, full: boolean): Promise<CloseOutcome>
   const now = env.live.current;
   const open = await readOpenBox(now.local, pairingOf(now), now.shift.copy.id);
   if (open === null || open.itemCount === 0) return { kind: "nothing" };
-  if (full && open.itemCount < now.shift.copy.boxCapacity) return { kind: "nothing" };
+  if (full && !boxIsFull(open.itemCount, now.shift.copy.boxCapacity)) return { kind: "nothing" };
   const close = async (): Promise<CloseResult> => {
     try {
       return await closeOpenBox(boxContextOf(env.live), env.live.current.closeSteps);
@@ -580,7 +581,7 @@ export function WorkScreen(props: WorkScreenProps) {
       setLast(outcome);
       if (outcome.kind === "accepted") {
         show("ok", say("floor.work.signal.ok"), text);
-        if (outcome.itemCount >= boxCapacity) await closeBox(true);
+        if (boxIsFull(outcome.itemCount, boxCapacity)) await closeBox(true);
         const next = await refreshQuietly();
         const planned = live.current.shift.copy.plannedQty;
         if (next !== null && planned !== null && !planShown.current && next.accepted >= planned) {
