@@ -464,15 +464,19 @@ export function OperatorSignIn({
   return (
     <Card className="standalone-card" title={t("floor.title")} titleAs="h2">
       <div className="standalone-form">
+        {/* Heard once, by this region: its messages are not alerts of their own (`role="presentation"`). */}
         <div className="floor-sign-in__message" aria-live="polite">
           {message !== null ? (
             <Alert
               tone={message.kind === "refused" && message.reason === "not_ready" ? "warn" : "error"}
+              role="presentation"
             >
               {messageText(message)}
             </Alert>
           ) : notice !== null && !noticeDismissed ? (
-            <Alert tone="info">{t(NOTICE_KEY[notice])}</Alert>
+            <Alert tone="info" role="presentation">
+              {t(NOTICE_KEY[notice])}
+            </Alert>
           ) : null}
           {busy && <p>{t("floor.signIn.checking")}</p>}
         </div>

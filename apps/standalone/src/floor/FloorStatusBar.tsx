@@ -139,7 +139,15 @@ export function FloorStatusBar({
         )}
       </dl>
       <div className="floor-status__health">
-        <HostStatusLine status={link} sync={sync} />
+        {/*
+          While the refusal waits the link is torn down, but a refusal that came
+          from a call leaves the last status `online`: say it stopped (a stopped
+          link also hides the sync failure it can no longer retry).
+        */}
+        <HostStatusLine
+          status={refusalHeld && link !== null ? { ...link, state: "offline" } : link}
+          sync={sync}
+        />
         {/*
           Its own polite region, there before the warnings so that they are
           heard; the warnings are not alerts as well (`role="presentation"`

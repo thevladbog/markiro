@@ -106,7 +106,8 @@ export function FloorApp({
   // How many times an entry was turned back on the list: it reads its copies
   // again, for those it showed are the ones the entry found out of date.
   const [turnedBack, setTurnedBack] = useState(0);
-  const gate = useMemo(() => createWorkGate(), []);
+  // One gate for the life of the floor: `useMemo` may be recomputed, a state is kept.
+  const [gate] = useState(createWorkGate);
   const alive = useRef(true);
   useLayoutEffect(() => {
     alive.current = true;
@@ -142,10 +143,20 @@ export function FloorApp({
         finish(reason);
         return;
       }
-      if (standing.current !== null) {
+      const waiting = standing.current;
+      if (waiting !== null) {
         // A sign-out outranks the leave that waits (the idle lock fires once
-        // and then waits for nothing more): it is where that leave ends.
-        if (reason.kind === "sign_out" && standing.current.kind !== "sign_out") {
+        // and then waits for nothing more): it is where that leave ends. The
+        // office's close of the shift outranks a leave to the list without a
+        // reason or to another line, which would otherwise end without saying
+        // why the shift is gone.
+        if (reason.kind === "sign_out" && waiting.kind !== "sign_out") {
+          standing.current = reason;
+        } else if (
+          reason.kind === "list" &&
+          reason.notice !== null &&
+          (waiting.kind === "line_changed" || (waiting.kind === "list" && waiting.notice === null))
+        ) {
           standing.current = reason;
         }
         return;

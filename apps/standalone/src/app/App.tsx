@@ -47,6 +47,7 @@ import {
   deviceRejection,
   initialShellState,
   nextShellView,
+  type ShellView,
   shellActionFor,
   shellReducer,
   type FloorNotice,
@@ -147,9 +148,14 @@ export function App({
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
   const [probeAttempt, setProbeAttempt] = useState(0);
   const [repairState, setRepairState] = useState<"idle" | "busy" | DeviceErrorCode>("idle");
-  // A forget the shell refused for records not yet sent, and how many there are.
-  const [unsent, setUnsent] = useState<{ records: number | null } | null>(null);
+  // A forget the shell refused for records not yet sent, how many there are,
+  // and the screen it was asked on: the count is not another screen's.
+  const [unsent, setUnsent] = useState<{
+    records: number | null;
+    view: ShellView["kind"];
+  } | null>(null);
   const view = nextShellView(state, address);
+  const unsentHere = unsent !== null && unsent.view === view.kind ? unsent : null;
   const localName = t("device.localName");
   const pairedStatus = state.device.kind === "ready" ? state.device.status : null;
   // The pairing's host when it is not the one on this computer.
@@ -274,6 +280,7 @@ export function App({
   const forgetDeviceId = pairedStatus?.deviceId ?? null;
   const forget = useCallback(
     (keepUnsent: boolean) => {
+      const screenKind = view.kind;
       setRepairState("busy");
       deviceApi.forget(keepUnsent ? { keepUnsent: true } : undefined).then(
         () => {
@@ -293,7 +300,7 @@ export function App({
                 ? null
                 : { hostId: forgetHostId, deviceId: forgetDeviceId };
             void countUnsentRecords(localDb, pairing).then((records) => {
-              setUnsent({ records });
+              setUnsent({ records, view: screenKind });
               setRepairState("idle");
             });
             return;
@@ -304,7 +311,7 @@ export function App({
         },
       );
     },
-    [deviceApi, retryProbe, localDb, forgetHostId, forgetDeviceId],
+    [deviceApi, retryProbe, localDb, forgetHostId, forgetDeviceId, view.kind],
   );
   const repair = useCallback(() => forget(false), [forget]);
   const confirmRepair = useCallback(() => forget(true), [forget]);
@@ -477,7 +484,7 @@ export function App({
         <ConfigErrorScreen
           busy={repairBusy}
           error={repairError}
-          unsent={unsent}
+          unsent={unsentHere}
           onReset={repair}
           onConfirm={confirmRepair}
         />
@@ -516,7 +523,7 @@ export function App({
           remoteAddress={remoteAddress}
           busy={repairBusy}
           error={repairError}
-          unsent={unsent}
+          unsent={unsentHere}
           onRepair={repair}
           onConfirm={confirmRepair}
         />
@@ -526,7 +533,7 @@ export function App({
           hostAddress={view.hostAddress}
           busy={repairBusy}
           error={repairError}
-          unsent={unsent}
+          unsent={unsentHere}
           onRepair={repair}
           onConfirm={confirmRepair}
         />
