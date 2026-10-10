@@ -883,6 +883,547 @@ async fn the_schema_refuses_the_pallet_rows_no_fact_may_leave() {
     .unwrap();
 }
 
+/// Two closed pallets (1 with box 1, 2 with box 2), an open one (3 with
+/// box 3), as the floor's first facts.
+async fn three_pallets(admin: &Admin, floor: &Floor, block: &Value, pallets: &Value) {
+    let mut batch = Vec::new();
+    for n in 1..=3 {
+        batch.extend(boxed(floor, block, n, Some(&pallet_id(n))));
+    }
+    for n in 1..=2 {
+        batch.push(record(
+            floor,
+            200 + n,
+            "pallet_closed",
+            pallet_closed(
+                &pallet_id(n),
+                pallets,
+                39 + u64::from(n),
+                1,
+                &instant(100, 0),
+                &instant(150, 0),
+            ),
+        ));
+    }
+    let answered = receipts(&admin.app, &floor.key, &batch).await;
+    assert!(
+        answered.iter().all(|r| r["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+}
+
+/// A pallet's label checks and when it was taken apart: `(verified at,
+/// skipped at, disassembled at)`.
+async fn pallet_marks(admin: &Admin, id: &str) -> (Option<String>, Option<String>, Option<String>) {
+    sqlx::query_as(
+        "SELECT print_verified_at, print_skipped_at, disassembled_at FROM pallets WHERE id = ?",
+    )
+    .bind(id)
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap()
+}
+
+fn label(pallet: &str, outcome: &str, at: &str) -> Value {
+    json!({ "palletId": pallet, "outcome": outcome, "at": at })
+}
+
+fn pallet_exception(kind: &str, pallet: &str, reason: &str, text: Value, at: &str) -> Value {
+    json!({
+        "exception": kind, "palletId": pallet, "reasonCode": reason, "reasonText": text,
+        "occurredAt": at
+    })
+}
+
+/// A label check marks a closed pallet of this device and shift with the
+/// station's instant, `verified` or `skipped`, a later check again; an open
+/// pallet is `pallet_state`, an unknown one `pallet_unknown`.
+#[tokio::test]
+async fn a_pallet_label_check_marks_a_closed_pallet_of_its_own() {
+    let (admin, floor, block, pallets) = pallet_floor().await;
+    three_pallets(&admin, &floor, &block, &pallets).await;
+    let batch = vec![
+        record(
+            &floor,
+            301,
+            "pallet_label",
+            label(&pallet_id(1), "verified", &instant(160, 0)),
+        ),
+        record(
+            &floor,
+            302,
+            "pallet_label",
+            label(&pallet_id(2), "skipped", &instant(161, 0)),
+        ),
+        record(
+            &floor,
+            303,
+            "pallet_label",
+            label(&pallet_id(3), "verified", &instant(162, 0)),
+        ),
+        record(
+            &floor,
+            304,
+            "pallet_label",
+            label(&pallet_id(9), "verified", &instant(163, 0)),
+        ),
+        record(
+            &floor,
+            305,
+            "pallet_label",
+            label(&pallet_id(1), "verified", &instant(170, 0)),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        vec![
+            accepted(&record_id(301)),
+            accepted(&record_id(302)),
+            rejected(Some(&record_id(303)), "pallet_state", None),
+            rejected(Some(&record_id(304)), "pallet_unknown", None),
+            accepted(&record_id(305)),
+        ]
+    );
+    assert_eq!(
+        pallet_marks(&admin, &pallet_id(1)).await,
+        (Some(instant(170, 0)), None, None)
+    );
+    assert_eq!(
+        pallet_marks(&admin, &pallet_id(2)).await,
+        (None, Some(instant(161, 0)), None)
+    );
+    assert_eq!(
+        pallet_marks(&admin, &pallet_id(3)).await,
+        (None, None, None)
+    );
+    // Its form: the pallet's id and the instant.
+    let bad = vec![
+        record(
+            &floor,
+            306,
+            "pallet_label",
+            label("pallet-1", "verified", &instant(171, 0)),
+        ),
+        record(
+            &floor,
+            307,
+            "pallet_label",
+            label(&pallet_id(1), "verified", "2026-10-08T06:02:51Z"),
+        ),
+        record(
+            &floor,
+            308,
+            "pallet_label",
+            label(&pallet_id(1), "seen", &instant(171, 0)),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &bad).await,
+        vec![
+            rejected(
+                Some(&record_id(306)),
+                "invalid_record",
+                Some("data.palletId")
+            ),
+            rejected(Some(&record_id(307)), "invalid_record", Some("data.at")),
+            rejected(Some(&record_id(308)), "invalid_record", Some("data")),
+        ]
+    );
+}
+
+/// A reprint or a disassembly takes a closed pallet not taken apart and a
+/// reason code of its kind, with words only for `other`; a disassembly
+/// marks the pallet and leaves its boxes as they are; each is kept, field
+/// by field.
+#[tokio::test]
+async fn a_pallet_reprint_or_disassembly_needs_a_closed_pallet_and_a_reason() {
+    let (admin, floor, block, pallets) = pallet_floor().await;
+    three_pallets(&admin, &floor, &block, &pallets).await;
+    let exception = |n: u32, data: Value| record(&floor, n, "pallet_exception", data);
+    let batch = vec![
+        exception(
+            401,
+            pallet_exception(
+                "reprint",
+                &pallet_id(1),
+                "damaged_label",
+                Value::Null,
+                &instant(160, 0),
+            ),
+        ),
+        exception(
+            402,
+            pallet_exception(
+                "disassemble",
+                &pallet_id(1),
+                "other",
+                json!("  Перепутали товар  "),
+                &instant(161, 0),
+            ),
+        ),
+        exception(
+            403,
+            pallet_exception(
+                "reprint",
+                &pallet_id(1),
+                "damaged_label",
+                Value::Null,
+                &instant(162, 0),
+            ),
+        ),
+        exception(
+            404,
+            pallet_exception(
+                "disassemble",
+                &pallet_id(1),
+                "wrong_product",
+                Value::Null,
+                &instant(163, 0),
+            ),
+        ),
+        exception(
+            405,
+            pallet_exception(
+                "reprint",
+                &pallet_id(3),
+                "printer_jam",
+                Value::Null,
+                &instant(164, 0),
+            ),
+        ),
+        exception(
+            406,
+            pallet_exception(
+                "reprint",
+                &pallet_id(9),
+                "printer_jam",
+                Value::Null,
+                &instant(165, 0),
+            ),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        vec![
+            accepted(&record_id(401)),
+            accepted(&record_id(402)),
+            rejected(Some(&record_id(403)), "pallet_state", None),
+            rejected(Some(&record_id(404)), "pallet_state", None),
+            rejected(Some(&record_id(405)), "pallet_state", None),
+            rejected(Some(&record_id(406)), "pallet_unknown", None),
+        ]
+    );
+    assert_eq!(
+        pallet_marks(&admin, &pallet_id(1)).await,
+        (None, None, Some(instant(161, 0)))
+    );
+    // The pallet's box stays on it, closed and not taken apart; the SSCC
+    // stays the pallet's.
+    let (pallet, disassembled): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT pallet_id, disassembled_at FROM boxes WHERE id = ?")
+            .bind(box_id(1))
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!((pallet, disassembled), (Some(pallet_id(1)), None));
+    assert_eq!(
+        pallet_row(&admin, &pallet_id(1)).await.unwrap()[4],
+        json!(pallet_sscc(40))
+    );
+    type ExceptionRow = (
+        String,
+        String,
+        String,
+        Option<String>,
+        String,
+        String,
+        Option<String>,
+        String,
+        String,
+    );
+    let rows: Vec<ExceptionRow> = sqlx::query_as(
+        "SELECT record_id, kind, reason_code, reason_text, shift_id, device_id, operator_id, \
+         occurred_at, received_at FROM pallet_exceptions ORDER BY occurred_at",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let at = admin.app.state.timestamp();
+    assert_eq!(
+        rows,
+        vec![
+            (
+                record_id(401),
+                "reprint".to_owned(),
+                "damaged_label".to_owned(),
+                None,
+                floor.shift.clone(),
+                floor.station.clone(),
+                Some(OPERATOR.to_owned()),
+                instant(160, 0),
+                at.clone()
+            ),
+            (
+                record_id(402),
+                "disassemble".to_owned(),
+                "other".to_owned(),
+                Some("Перепутали товар".to_owned()),
+                floor.shift.clone(),
+                floor.station.clone(),
+                Some(OPERATOR.to_owned()),
+                instant(161, 0),
+                at
+            ),
+        ]
+    );
+    // The reason fits the kind; words go only with `other`.
+    let refused = vec![
+        exception(
+            411,
+            pallet_exception(
+                "reprint",
+                &pallet_id(2),
+                "wrong_product",
+                Value::Null,
+                &instant(170, 0),
+            ),
+        ),
+        exception(
+            412,
+            pallet_exception(
+                "disassemble",
+                &pallet_id(2),
+                "printer_jam",
+                Value::Null,
+                &instant(171, 0),
+            ),
+        ),
+        exception(
+            413,
+            pallet_exception(
+                "reprint",
+                &pallet_id(2),
+                "printer_jam",
+                json!("Застрял"),
+                &instant(172, 0),
+            ),
+        ),
+        exception(
+            414,
+            pallet_exception(
+                "reprint",
+                &pallet_id(2),
+                "other",
+                json!("   "),
+                &instant(173, 0),
+            ),
+        ),
+        exception(
+            415,
+            pallet_exception(
+                "reprint",
+                &pallet_id(2),
+                "other",
+                json!("я".repeat(201)),
+                &instant(174, 0),
+            ),
+        ),
+        exception(
+            416,
+            pallet_exception(
+                "reprint",
+                "pallet-2",
+                "printer_jam",
+                Value::Null,
+                &instant(175, 0),
+            ),
+        ),
+        exception(
+            417,
+            pallet_exception(
+                "reprint",
+                &pallet_id(2),
+                "printer_jam",
+                Value::Null,
+                "today",
+            ),
+        ),
+        exception(
+            418,
+            pallet_exception(
+                "undo",
+                &pallet_id(2),
+                "printer_jam",
+                Value::Null,
+                &instant(176, 0),
+            ),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &refused).await,
+        vec![
+            rejected(
+                Some(&record_id(411)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+            rejected(
+                Some(&record_id(412)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+            rejected(
+                Some(&record_id(413)),
+                "invalid_record",
+                Some("data.reasonText")
+            ),
+            rejected(
+                Some(&record_id(414)),
+                "invalid_record",
+                Some("data.reasonText")
+            ),
+            rejected(
+                Some(&record_id(415)),
+                "invalid_record",
+                Some("data.reasonText")
+            ),
+            rejected(
+                Some(&record_id(416)),
+                "invalid_record",
+                Some("data.palletId")
+            ),
+            rejected(
+                Some(&record_id(417)),
+                "invalid_record",
+                Some("data.occurredAt")
+            ),
+            rejected(Some(&record_id(418)), "invalid_record", Some("data")),
+        ]
+    );
+    // 200 characters of `other` are taken.
+    let longest = exception(
+        419,
+        pallet_exception(
+            "reprint",
+            &pallet_id(2),
+            "other",
+            json!("я".repeat(200)),
+            &instant(177, 0),
+        ),
+    );
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[longest]).await,
+        vec![accepted(&record_id(419))]
+    );
+    // A label check of the pallet taken apart is still taken (it is closed).
+    let check = record(
+        &floor,
+        420,
+        "pallet_label",
+        label(&pallet_id(1), "verified", &instant(180, 0)),
+    );
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[check]).await,
+        vec![accepted(&record_id(420))]
+    );
+}
+
+/// A shift without pallets answers a label check and an exception of a
+/// pallet `no_pallets`.
+#[tokio::test]
+async fn a_shift_without_pallets_answers_pallet_checks_and_exceptions_no_pallets() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let batch = vec![
+        record(
+            &floor,
+            301,
+            "pallet_label",
+            label(&pallet_id(1), "verified", &instant(160, 0)),
+        ),
+        record(
+            &floor,
+            401,
+            "pallet_exception",
+            pallet_exception(
+                "reprint",
+                &pallet_id(1),
+                "printer_jam",
+                Value::Null,
+                &instant(161, 0),
+            ),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        vec![
+            rejected(Some(&record_id(301)), "no_pallets", None),
+            rejected(Some(&record_id(401)), "no_pallets", None),
+        ]
+    );
+}
+
+/// The schema keeps a pallet exception whole: one row per record, a known
+/// kind, a reason code, and words only with `other`.
+#[tokio::test]
+async fn the_schema_refuses_the_pallet_exception_rows_no_fact_may_leave() {
+    let (admin, floor, block, pallets) = pallet_floor().await;
+    three_pallets(&admin, &floor, &block, &pallets).await;
+    let reprint = record(
+        &floor,
+        401,
+        "pallet_exception",
+        pallet_exception(
+            "reprint",
+            &pallet_id(1),
+            "printer_jam",
+            Value::Null,
+            &instant(160, 0),
+        ),
+    );
+    receipts(&admin.app, &floor.key, &[reprint]).await;
+    let insert = |record: &str, kind: &str, reason: &str, text: &str| {
+        format!(
+            "INSERT INTO pallet_exceptions (id, record_id, kind, pallet_id, reason_code, \
+             reason_text, shift_id, device_id, operator_id, occurred_at, received_at) \
+             SELECT '{record}-row', '{record}', '{kind}', pallet_id, '{reason}', {text}, \
+             shift_id, device_id, operator_id, occurred_at, received_at FROM pallet_exceptions"
+        )
+    };
+    for (sql, constraint) in [
+        (
+            insert(&record_id(401), "reprint", "printer_jam", "NULL"),
+            "UNIQUE",
+        ),
+        (
+            insert(&record_id(402), "undo", "printer_jam", "NULL"),
+            "CHECK",
+        ),
+        (
+            insert(&record_id(403), "reprint", "printer_jam", "'Застрял'"),
+            "CHECK",
+        ),
+    ] {
+        let message = sqlx::query(&sql)
+            .execute(&admin.app.state.pool)
+            .await
+            .err()
+            .unwrap_or_else(|| panic!("the schema took {sql:?}"))
+            .to_string();
+        assert!(message.contains(constraint), "{sql}: {message}");
+    }
+    sqlx::query(&insert(
+        &record_id(404),
+        "disassemble",
+        "other",
+        "'Перепутали'",
+    ))
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+}
+
 // Tests beyond the plan's own: the pallet's SSCC form, replays, overlapping
 // blocks, late closes, refused records that must leave no pallet, and the
 // station's counts kept as evidence.
@@ -1365,4 +1906,646 @@ async fn a_pallet_serial_in_a_block_of_another_issuer_prefix_is_not_issued() {
         pallet_row(&admin, &pallet_id(1)).await.unwrap()[3],
         Value::Null
     );
+}
+
+// Tests beyond the plan's own for the pallet label and exception facts
+// (plan ПЛ-Х task 5): the scope of a pallet, replays, the effect of a
+// disassembly, the form of the data and the batch's rollback.
+
+async fn pallet_exception_count(admin: &Admin) -> i64 {
+    sqlx::query_scalar("SELECT COUNT(*) FROM pallet_exceptions")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+}
+
+/// A pallet's marks: `(id, verified at, skipped at, disassembled at)`.
+type PalletMarks = (String, Option<String>, Option<String>, Option<String>);
+
+/// Every pallet's marks.
+async fn every_pallet_mark(admin: &Admin) -> Vec<PalletMarks> {
+    sqlx::query_as(
+        "SELECT id, print_verified_at, print_skipped_at, disassembled_at FROM pallets ORDER BY id",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap()
+}
+
+/// Every box as a pallet fact may leave it: `(id, pallet, closed at,
+/// disassembled at)`.
+async fn every_box(admin: &Admin) -> Vec<(String, Option<String>, Option<String>, Option<String>)> {
+    sqlx::query_as("SELECT id, pallet_id, closed_at, disassembled_at FROM boxes ORDER BY id")
+        .fetch_all(&admin.app.state.pool)
+        .await
+        .unwrap()
+}
+
+/// What a pallet fact never changes of a pallet: `(id, shift, device,
+/// closed at, sscc, block, serial, count reported, operator, received at)`.
+type PalletBody = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    Option<i64>,
+    Option<String>,
+    String,
+);
+
+async fn every_pallet_body(admin: &Admin) -> Vec<PalletBody> {
+    sqlx::query_as(
+        "SELECT id, shift_id, device_id, closed_at, sscc, block_id, serial, \
+         box_count_reported, operator_id, received_at FROM pallets ORDER BY id",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap()
+}
+
+/// A label check and an exception name a pallet of their own device and
+/// shift: a closed pallet of another shift of the same station, and one of
+/// another station, are `pallet_unknown` for both kinds, and nothing is
+/// marked or written; the same records are fine for the pallet's own shift.
+#[tokio::test]
+async fn a_pallet_label_or_exception_of_another_device_or_shift_is_unknown() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_pallet_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let pallets = issue_pallet_block(&admin.app, &floor.key, PALLET_REQUEST).await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let colleague = open_pallet_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
+    // A closed pallet of this station in a second shift of its line.
+    let second = open_pallet_floor(&admin, &setup, &floor.key, &setup.line).await;
+    let mut batch = Vec::new();
+    batch.extend(boxed(&second, &block, 2, Some(&pallet_id(70))));
+    batch.push(record(
+        &second,
+        270,
+        "pallet_closed",
+        pallet_closed(
+            &pallet_id(70),
+            &pallets,
+            40,
+            1,
+            &instant(100, 0),
+            &instant(150, 0),
+        ),
+    ));
+    let answered = receipts(&admin.app, &floor.key, &batch).await;
+    assert!(
+        answered.iter().all(|r| r["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+    // A closed pallet of the colleague's station in the colleague's shift.
+    sqlx::query(
+        "INSERT INTO pallets (id, shift_id, device_id, opened_at, closed_at, sscc, block_id, \
+         serial, box_count_reported, received_at) \
+         VALUES (?, ?, ?, '2026-10-08T06:00:00.000Z', '2026-10-08T06:30:00.000Z', ?, ?, 41, 1, \
+         '2026-10-08T06:30:00Z')",
+    )
+    .bind(pallet_id(80))
+    .bind(&colleague.shift)
+    .bind(&colleague.station)
+    .bind(pallet_sscc(41))
+    .bind(pallets["id"].as_str().unwrap())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let marks = every_pallet_mark(&admin).await;
+    let batch = vec![
+        record(
+            &floor,
+            301,
+            "pallet_label",
+            label(&pallet_id(70), "verified", &instant(160, 0)),
+        ),
+        record(
+            &floor,
+            302,
+            "pallet_label",
+            label(&pallet_id(80), "skipped", &instant(161, 0)),
+        ),
+        record(
+            &floor,
+            401,
+            "pallet_exception",
+            pallet_exception(
+                "disassemble",
+                &pallet_id(70),
+                "wrong_product",
+                Value::Null,
+                &instant(162, 0),
+            ),
+        ),
+        record(
+            &floor,
+            402,
+            "pallet_exception",
+            pallet_exception(
+                "reprint",
+                &pallet_id(80),
+                "printer_jam",
+                Value::Null,
+                &instant(163, 0),
+            ),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        vec![
+            rejected(Some(&record_id(301)), "pallet_unknown", None),
+            rejected(Some(&record_id(302)), "pallet_unknown", None),
+            rejected(Some(&record_id(401)), "pallet_unknown", None),
+            rejected(Some(&record_id(402)), "pallet_unknown", None),
+        ]
+    );
+    assert_eq!(every_pallet_mark(&admin).await, marks);
+    assert_eq!(pallet_exception_count(&admin).await, 0);
+    // The pallet's own shift takes the same check and exception.
+    let own = vec![
+        record(
+            &second,
+            303,
+            "pallet_label",
+            label(&pallet_id(70), "verified", &instant(160, 0)),
+        ),
+        record(
+            &second,
+            403,
+            "pallet_exception",
+            pallet_exception(
+                "reprint",
+                &pallet_id(70),
+                "printer_jam",
+                Value::Null,
+                &instant(163, 0),
+            ),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &own).await,
+        vec![accepted(&record_id(303)), accepted(&record_id(403))]
+    );
+}
+
+/// A check or an exception sent again gets the receipt it had and changes
+/// nothing, whatever was written since: an older check does not overwrite a
+/// later one, a disassembly keeps its instant, a refusal stays a refusal
+/// after the pallet became fit. Another body under a used id is a
+/// `payload_mismatch`; the same exception under a new id is a second one,
+/// refused as a second disassembly. Each kind is kept under its own name.
+#[tokio::test]
+async fn a_pallet_label_or_exception_comes_again_with_the_receipt_it_had() {
+    let (admin, floor, block, pallets) = pallet_floor().await;
+    three_pallets(&admin, &floor, &block, &pallets).await;
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let first = record(
+        &floor,
+        301,
+        "pallet_label",
+        label(&pallet_id(1), "verified", &instant(160, 0)),
+    );
+    let later = record(
+        &floor,
+        302,
+        "pallet_label",
+        label(&pallet_id(1), "verified", &instant(170, 0)),
+    );
+    let apart = record(
+        &floor,
+        401,
+        "pallet_exception",
+        pallet_exception(
+            "disassemble",
+            &pallet_id(1),
+            "other",
+            json!("Перепутали товар"),
+            &instant(180, 0),
+        ),
+    );
+    let early = record(
+        &floor,
+        402,
+        "pallet_exception",
+        pallet_exception(
+            "reprint",
+            &pallet_id(3),
+            "printer_jam",
+            Value::Null,
+            &instant(181, 0),
+        ),
+    );
+    let batch = [first, later, apart, early];
+    let expected = vec![
+        accepted(&record_id(301)),
+        accepted(&record_id(302)),
+        accepted(&record_id(401)),
+        rejected(Some(&record_id(402)), "pallet_state", None),
+    ];
+    assert_eq!(receipts(&admin.app, &floor.key, &batch).await, expected);
+    for (record, kind) in [
+        (301, "pallet_label"),
+        (302, "pallet_label"),
+        (401, "pallet_exception"),
+        (402, "pallet_exception"),
+    ] {
+        assert_eq!(
+            kept_receipt_kind(&admin, &record_id(record))
+                .await
+                .as_deref(),
+            Some(kind),
+            "record {record}"
+        );
+    }
+    // Pallet 3 closes now: a new reprint of it would be taken.
+    let closing = record(
+        &floor,
+        203,
+        "pallet_closed",
+        pallet_closed(
+            &pallet_id(3),
+            &pallets,
+            42,
+            1,
+            &instant(100, 0),
+            &instant(190, 0),
+        ),
+    );
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[closing]).await,
+        vec![accepted(&record_id(203))]
+    );
+    let (marks, kept) = (every_pallet_mark(&admin).await, receipt_count(&admin).await);
+    assert_eq!(
+        marks[0],
+        (
+            pallet_id(1),
+            Some(instant(170, 0)),
+            None,
+            Some(instant(180, 0))
+        )
+    );
+    assert_eq!(pallet_exception_count(&admin).await, 1);
+    // The same bytes: the same receipts, nothing new, the older check does
+    // not take the mark back, the refusal of the open pallet stands.
+    assert_eq!(receipts(&admin.app, &floor.key, &batch).await, expected);
+    assert_eq!(every_pallet_mark(&admin).await, marks);
+    assert_eq!(receipt_count(&admin).await, kept);
+    assert_eq!(pallet_exception_count(&admin).await, 1);
+    // Another body under a used id.
+    let changed_check = record(
+        &floor,
+        301,
+        "pallet_label",
+        label(&pallet_id(1), "skipped", &instant(160, 0)),
+    );
+    let changed_exception = record(
+        &floor,
+        401,
+        "pallet_exception",
+        pallet_exception(
+            "disassemble",
+            &pallet_id(1),
+            "other",
+            json!("Другие слова"),
+            &instant(180, 0),
+        ),
+    );
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[changed_check, changed_exception]).await,
+        vec![
+            rejected(Some(&record_id(301)), "payload_mismatch", None),
+            rejected(Some(&record_id(401)), "payload_mismatch", None)
+        ]
+    );
+    assert_eq!(every_pallet_mark(&admin).await, marks);
+    assert_eq!(pallet_exception_count(&admin).await, 1);
+    // The same exception under a new id is a second disassembly.
+    let again = record(
+        &floor,
+        410,
+        "pallet_exception",
+        pallet_exception(
+            "disassemble",
+            &pallet_id(1),
+            "other",
+            json!("Перепутали товар"),
+            &instant(180, 0),
+        ),
+    );
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[again]).await,
+        vec![rejected(Some(&record_id(410)), "pallet_state", None)]
+    );
+    assert_eq!(every_pallet_mark(&admin).await, marks);
+    assert_eq!(pallet_exception_count(&admin).await, 1);
+    // Pallet facts take no revision and write no audit row.
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+}
+
+/// A reprint changes nothing of the pallet (its `closedAt` stays the first
+/// close's); a disassembly sets one instant of the pallet and leaves the
+/// rest: its SSCC, block, serial and count, its boxes with their pallet,
+/// the other pallets and the block's use. The SSCC stays used: no other
+/// pallet takes it, and the close of the pallet sent again does not revive
+/// it. Reprints repeat; a label check of the pallet is still taken.
+#[tokio::test]
+async fn a_reprint_changes_nothing_and_a_disassembly_marks_only_its_pallet() {
+    let (admin, floor, block, pallets) = pallet_floor().await;
+    three_pallets(&admin, &floor, &block, &pallets).await;
+    let (rows, boxes, marks) = (
+        every_pallet_body(&admin).await,
+        every_box(&admin).await,
+        every_pallet_mark(&admin).await,
+    );
+    let used = consumed_through(&admin, &pallets).await;
+    let exception = |n: u32, kind: &str, pallet: u32, reason: &str, at: u32| {
+        record(
+            &floor,
+            n,
+            "pallet_exception",
+            pallet_exception(
+                kind,
+                &pallet_id(pallet),
+                reason,
+                Value::Null,
+                &instant(at, 0),
+            ),
+        )
+    };
+    // Two reprints, one of another pallet: nothing of any pallet changes.
+    let reprints = vec![
+        exception(401, "reprint", 1, "damaged_label", 160),
+        exception(402, "reprint", 1, "printer_jam", 161),
+        exception(403, "reprint", 2, "damaged_label", 162),
+    ];
+    let answered = receipts(&admin.app, &floor.key, &reprints).await;
+    assert!(
+        answered.iter().all(|r| r["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+    assert_eq!(every_pallet_body(&admin).await, rows);
+    assert_eq!(every_box(&admin).await, boxes);
+    assert_eq!(every_pallet_mark(&admin).await, marks);
+    assert_eq!(pallet_exception_count(&admin).await, 3);
+    // The disassembly of pallet 1.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[exception(404, "disassemble", 1, "wrong_product", 170)]
+        )
+        .await,
+        vec![accepted(&record_id(404))]
+    );
+    assert_eq!(every_pallet_body(&admin).await, rows);
+    assert_eq!(every_box(&admin).await, boxes);
+    let mut apart = marks.clone();
+    apart[0].3 = Some(instant(170, 0));
+    assert_eq!(every_pallet_mark(&admin).await, apart);
+    assert_eq!(consumed_through(&admin, &pallets).await, used);
+    assert_eq!(pallet_exception_count(&admin).await, 4);
+    // Its SSCC is taken for good.
+    let theirs = vec![
+        record(
+            &floor,
+            204,
+            "pallet_closed",
+            pallet_closed(
+                &pallet_id(4),
+                &pallets,
+                40,
+                1,
+                &instant(100, 0),
+                &instant(171, 0),
+            ),
+        ),
+        record(
+            &floor,
+            205,
+            "pallet_closed",
+            pallet_closed(
+                &pallet_id(1),
+                &pallets,
+                41,
+                1,
+                &instant(100, 0),
+                &instant(172, 0),
+            ),
+        ),
+        record(
+            &floor,
+            206,
+            "pallet_closed",
+            pallet_closed(
+                &pallet_id(1),
+                &pallets,
+                40,
+                1,
+                &instant(100, 0),
+                &instant(173, 0),
+            ),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &theirs).await,
+        vec![
+            rejected(Some(&record_id(204)), "sscc_taken", None),
+            rejected(Some(&record_id(205)), "pallet_already_closed", None),
+            accepted(&record_id(206)),
+        ]
+    );
+    assert_eq!(every_pallet_body(&admin).await, rows);
+    assert_eq!(every_pallet_mark(&admin).await, apart);
+    // The pallet taken apart takes no reprint and no second disassembly,
+    // but its label check.
+    let after = vec![
+        exception(405, "reprint", 1, "damaged_label", 180),
+        exception(406, "disassemble", 1, "wrong_product", 181),
+        record(
+            &floor,
+            301,
+            "pallet_label",
+            label(&pallet_id(1), "skipped", &instant(182, 0)),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &after).await,
+        vec![
+            rejected(Some(&record_id(405)), "pallet_state", None),
+            rejected(Some(&record_id(406)), "pallet_state", None),
+            accepted(&record_id(301)),
+        ]
+    );
+    apart[0].2 = Some(instant(182, 0));
+    assert_eq!(every_pallet_mark(&admin).await, apart);
+    assert_eq!(every_box(&admin).await, boxes);
+    assert_eq!(pallet_exception_count(&admin).await, 4);
+}
+
+/// The form of a pallet check and of a pallet exception: no field beyond
+/// the kind's, a reason code that is a string, words that are text.
+#[tokio::test]
+async fn a_pallet_check_and_a_pallet_exception_take_no_other_form() {
+    let (admin, floor, block, pallets) = pallet_floor().await;
+    three_pallets(&admin, &floor, &block, &pallets).await;
+    let marks = every_pallet_mark(&admin).await;
+    let mut extra_check = label(&pallet_id(1), "verified", &instant(160, 0));
+    extra_check["boxCount"] = json!(1);
+    let reprint = || {
+        pallet_exception(
+            "reprint",
+            &pallet_id(1),
+            "printer_jam",
+            Value::Null,
+            &instant(160, 0),
+        )
+    };
+    let mut extra_exception = reprint();
+    extra_exception["boxId"] = json!(box_id(1));
+    let mut no_reason = reprint();
+    no_reason.as_object_mut().unwrap().remove("reasonCode");
+    let mut null_reason = reprint();
+    null_reason["reasonCode"] = Value::Null;
+    let number_words = pallet_exception(
+        "reprint",
+        &pallet_id(1),
+        "other",
+        json!(7),
+        &instant(160, 0),
+    );
+    let empty_reason =
+        pallet_exception("reprint", &pallet_id(1), "", Value::Null, &instant(160, 0));
+    let batch = vec![
+        record(&floor, 301, "pallet_label", extra_check),
+        record(&floor, 401, "pallet_exception", extra_exception),
+        record(&floor, 402, "pallet_exception", no_reason),
+        record(&floor, 403, "pallet_exception", null_reason),
+        record(&floor, 404, "pallet_exception", number_words),
+        record(&floor, 405, "pallet_exception", empty_reason),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        vec![
+            rejected(Some(&record_id(301)), "invalid_record", Some("data")),
+            rejected(Some(&record_id(401)), "invalid_record", Some("data")),
+            rejected(Some(&record_id(402)), "invalid_record", Some("data")),
+            rejected(Some(&record_id(403)), "invalid_record", Some("data")),
+            rejected(Some(&record_id(404)), "invalid_record", Some("data")),
+            rejected(
+                Some(&record_id(405)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+        ]
+    );
+    assert_eq!(every_pallet_mark(&admin).await, marks);
+    assert_eq!(pallet_exception_count(&admin).await, 0);
+}
+
+/// A database error in a pallet check or exception fails the whole batch
+/// with a 500: what the batch wrote before it, a mark or an exception of
+/// another pallet, is gone, and the same batch goes through once the
+/// database is well.
+#[tokio::test]
+async fn a_pallet_check_or_exception_is_written_with_its_batch_or_not_at_all() {
+    let (admin, floor, block, pallets) = pallet_floor().await;
+    three_pallets(&admin, &floor, &block, &pallets).await;
+    let marks = every_pallet_mark(&admin).await;
+    let kept = receipt_count(&admin).await;
+    let check = |n: u32, pallet: u32, outcome: &str| {
+        record(
+            &floor,
+            n,
+            "pallet_label",
+            label(&pallet_id(pallet), outcome, &instant(160 + n % 100, 0)),
+        )
+    };
+    let exception = |n: u32, kind: &str, pallet: u32| {
+        record(
+            &floor,
+            n,
+            "pallet_exception",
+            pallet_exception(
+                kind,
+                &pallet_id(pallet),
+                if kind == "reprint" {
+                    "printer_jam"
+                } else {
+                    "wrong_product"
+                },
+                Value::Null,
+                &instant(160 + n % 100, 0),
+            ),
+        )
+    };
+    let cases = [
+        (
+            "the label mark of pallet 2",
+            "CREATE TRIGGER broken BEFORE UPDATE OF print_skipped_at ON pallets \
+             BEGIN SELECT RAISE(ABORT, 'broken'); END",
+            vec![check(301, 1, "verified"), check(302, 2, "skipped")],
+        ),
+        (
+            "the disassembly mark of pallet 2",
+            "CREATE TRIGGER broken BEFORE UPDATE OF disassembled_at ON pallets \
+             BEGIN SELECT RAISE(ABORT, 'broken'); END",
+            vec![
+                exception(403, "reprint", 1),
+                exception(404, "disassemble", 2),
+            ],
+        ),
+        (
+            "the exception row of pallet 2",
+            "CREATE TRIGGER broken BEFORE INSERT ON pallet_exceptions \
+             WHEN NEW.kind = 'disassemble' BEGIN SELECT RAISE(ABORT, 'broken'); END",
+            vec![
+                exception(405, "reprint", 1),
+                exception(406, "disassemble", 2),
+            ],
+        ),
+    ];
+    for (name, trigger, batch) in cases {
+        sqlx::query(trigger)
+            .execute(&admin.app.state.pool)
+            .await
+            .unwrap();
+        let (status, failed) = send_facts(&admin.app, &floor.key, &batch).await;
+        assert_eq!(
+            (status, failed["error"]["code"].clone()),
+            (StatusCode::INTERNAL_SERVER_ERROR, json!("internal")),
+            "{name}"
+        );
+        assert_eq!(every_pallet_mark(&admin).await, marks, "{name}");
+        assert_eq!(pallet_exception_count(&admin).await, 0, "{name}");
+        assert_eq!(receipt_count(&admin).await, kept, "{name}");
+        sqlx::query("DROP TRIGGER broken")
+            .execute(&admin.app.state.pool)
+            .await
+            .unwrap();
+        let answered = receipts(&admin.app, &floor.key, &batch).await;
+        assert!(
+            answered.iter().all(|r| r["outcome"] == "accepted"),
+            "{name}: {answered:?}"
+        );
+        // Start the next case from the same state.
+        for reset in [
+            "UPDATE pallets SET print_verified_at = NULL, print_skipped_at = NULL, \
+             disassembled_at = NULL",
+            "DELETE FROM pallet_exceptions",
+            "DELETE FROM fact_receipts WHERE kind IN ('pallet_label', 'pallet_exception')",
+        ] {
+            sqlx::query(reset)
+                .execute(&admin.app.state.pool)
+                .await
+                .unwrap();
+        }
+    }
 }

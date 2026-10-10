@@ -1710,6 +1710,8 @@ pub enum FactKind {
     BoxException,
     ShiftClosed,
     PalletClosed,
+    PalletLabel,
+    PalletException,
 }
 
 impl FactKind {
@@ -1721,6 +1723,8 @@ impl FactKind {
             FactKind::BoxException => "box_exception",
             FactKind::ShiftClosed => "shift_closed",
             FactKind::PalletClosed => "pallet_closed",
+            FactKind::PalletLabel => "pallet_label",
+            FactKind::PalletException => "pallet_exception",
         }
     }
 }
@@ -1892,6 +1896,49 @@ pub struct PalletClosedFact {
     pub opened_at: String,
     pub closed_at: String,
     pub box_count: u32,
+}
+
+/// `data` of a `pallet_label` fact (plan ПЛ-Х): the check of a closed
+/// pallet's label, as a box's ([`BoxLabelFact`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PalletLabelFact {
+    pub pallet_id: String,
+    pub outcome: LabelOutcome,
+    pub at: String,
+}
+
+/// What a pallet exception does (the cloud station's two).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PalletExceptionKind {
+    /// Print a closed pallet's label again.
+    Reprint,
+    /// Take a closed pallet apart; its SSCC stays used and its boxes stay
+    /// as they are.
+    Disassemble,
+}
+
+impl PalletExceptionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PalletExceptionKind::Reprint => "reprint",
+            PalletExceptionKind::Disassemble => "disassemble",
+        }
+    }
+}
+
+/// `data` of a `pallet_exception` fact (plan ПЛ-Х): a reason code of
+/// [`exception_reasons`] for the kind (the box exceptions' lists), and
+/// words only with `other`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PalletExceptionFact {
+    pub exception: PalletExceptionKind,
+    pub pallet_id: String,
+    pub reason_code: String,
+    pub reason_text: Option<String>,
+    pub occurred_at: String,
 }
 
 /// How a box's printed label was checked.
@@ -2189,6 +2236,8 @@ mod tests {
             FactKind::BoxException,
             FactKind::ShiftClosed,
             FactKind::PalletClosed,
+            FactKind::PalletLabel,
+            FactKind::PalletException,
         ];
         for kind in &kinds {
             match kind {
@@ -2197,7 +2246,9 @@ mod tests {
                 | FactKind::BoxLabel
                 | FactKind::BoxException
                 | FactKind::ShiftClosed
-                | FactKind::PalletClosed => {}
+                | FactKind::PalletClosed
+                | FactKind::PalletLabel
+                | FactKind::PalletException => {}
             }
         }
         kinds

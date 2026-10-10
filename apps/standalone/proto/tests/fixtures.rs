@@ -11,12 +11,12 @@ use markiro_proto::{
     OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeShift,
     OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord,
     OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord,
-    PairResponse, PairingCode, PairingCodeRequest, PalletClosedFact, PasswordChange, PasswordSet,
-    ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate, ScanFact,
-    ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate, ShiftMode, ShiftOrigin,
-    ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate,
-    SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT,
-    PROTOCOL_VERSION,
+    PairResponse, PairingCode, PairingCodeRequest, PalletClosedFact, PalletExceptionFact,
+    PalletExceptionKind, PalletLabelFact, PasswordChange, PasswordSet, ProductCreate, ProductGroup,
+    ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict, ShiftClose,
+    ShiftClosedFact, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord,
+    SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
+    TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -995,13 +995,22 @@ fn the_fact_code_fixtures_list_every_receipt_and_reason_code() {
 
 /// The pallet facts of a shift with pallets (plan ПЛ-Х), in their own
 /// fixture so a station of stage 2a reads `facts-request.json` as before: a
-/// box closed on the station's pallet, then the pallet's close with the SSCC
-/// of the first serial of a pallet block.
+/// box closed on the station's pallet, the pallet's close with the SSCC of
+/// the first serial of a pallet block, its label checked, then the pallet
+/// taken apart for a reason in words.
 #[test]
 fn pallet_fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
     let batch: FactBatch = round_trip("facts-request-pallets.json");
     let kinds: Vec<FactKind> = batch.records.iter().map(|record| record.kind).collect();
-    assert_eq!(kinds, vec![FactKind::BoxClosed, FactKind::PalletClosed]);
+    assert_eq!(
+        kinds,
+        vec![
+            FactKind::BoxClosed,
+            FactKind::PalletClosed,
+            FactKind::PalletLabel,
+            FactKind::PalletException
+        ]
+    );
     let boxed: BoxClosedFact = typed(&batch.records[0].data);
     assert_eq!(serde_json::to_value(&boxed).unwrap(), batch.records[0].data);
     let closed: PalletClosedFact = typed(&batch.records[1].data);
@@ -1024,6 +1033,76 @@ fn pallet_fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
     let mut extra = batch.records[1].data.clone();
     extra["boxes"] = serde_json::json!([]);
     assert!(serde_json::from_value::<PalletClosedFact>(extra).is_err());
+    let checked: PalletLabelFact = typed(&batch.records[2].data);
+    assert_eq!(
+        (&checked.pallet_id, checked.outcome),
+        (&closed.pallet_id, LabelOutcome::Verified)
+    );
+    let apart: PalletExceptionFact = typed(&batch.records[3].data);
+    assert_eq!(
+        (
+            apart.exception,
+            &apart.pallet_id,
+            apart.reason_code.as_str(),
+            apart.exception.as_str()
+        ),
+        (
+            PalletExceptionKind::Disassemble,
+            &closed.pallet_id,
+            markiro_proto::exception_reasons::OTHER,
+            "disassemble"
+        )
+    );
+    // A pallet exception always names a reason; `undo` and `clear` are a
+    // box's.
+    let mut without = batch.records[3].data.clone();
+    without.as_object_mut().unwrap().remove("reasonCode");
+    assert!(serde_json::from_value::<PalletExceptionFact>(without).is_err());
+    let mut undo = batch.records[3].data.clone();
+    undo["exception"] = serde_json::json!("undo");
+    assert!(serde_json::from_value::<PalletExceptionFact>(undo).is_err());
+}
+
+/// A pallet check and a pallet exception have exactly their own fields; the
+/// exception's two kinds and the check's two outcomes read by their names,
+/// and the two kinds of fact go by theirs.
+#[test]
+fn a_pallet_check_and_a_pallet_exception_have_exactly_their_fields() {
+    let batch: FactBatch = round_trip("facts-request-pallets.json");
+    let check = batch.records[2].data.clone();
+    let apart = batch.records[3].data.clone();
+    let mut extra_check = check.clone();
+    extra_check["boxCount"] = serde_json::json!(1);
+    assert!(serde_json::from_value::<PalletLabelFact>(extra_check).is_err());
+    let mut extra_exception = apart.clone();
+    extra_exception["boxId"] = serde_json::json!("x");
+    assert!(serde_json::from_value::<PalletExceptionFact>(extra_exception).is_err());
+    let mut skipped = check.clone();
+    skipped["outcome"] = serde_json::json!("skipped");
+    let skipped: PalletLabelFact = typed(&skipped);
+    assert_eq!(skipped.outcome, LabelOutcome::Skipped);
+    let mut seen = check;
+    seen["outcome"] = serde_json::json!("seen");
+    assert!(serde_json::from_value::<PalletLabelFact>(seen).is_err());
+    let mut reprint = apart.clone();
+    reprint["exception"] = serde_json::json!("reprint");
+    let reprint: PalletExceptionFact = typed(&reprint);
+    assert_eq!(
+        (reprint.exception, reprint.exception.as_str()),
+        (PalletExceptionKind::Reprint, "reprint")
+    );
+    let mut wordless = apart;
+    wordless["reasonText"] = Value::Null;
+    let wordless: PalletExceptionFact = typed(&wordless);
+    assert_eq!(wordless.reason_text, None);
+    for (kind, name) in [
+        (FactKind::PalletLabel, "pallet_label"),
+        (FactKind::PalletException, "pallet_exception"),
+    ] {
+        assert_eq!(kind.as_str(), name);
+        assert_eq!(serde_json::to_value(kind).unwrap(), serde_json::json!(name));
+        assert_eq!(name.parse::<FactKind>().unwrap(), kind);
+    }
 }
 
 /// A batch of facts and its receipts. The records' `data` stays JSON in the
@@ -1061,6 +1140,12 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
             }
             FactKind::PalletClosed => {
                 serde_json::to_value(typed::<PalletClosedFact>(&record.data)).unwrap()
+            }
+            FactKind::PalletLabel => {
+                serde_json::to_value(typed::<PalletLabelFact>(&record.data)).unwrap()
+            }
+            FactKind::PalletException => {
+                serde_json::to_value(typed::<PalletExceptionFact>(&record.data)).unwrap()
             }
         };
         assert_eq!(typed, record.data, "{}", record.id);

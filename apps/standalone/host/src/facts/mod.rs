@@ -17,6 +17,8 @@ pub mod box_label;
 pub mod boxes;
 pub mod exception;
 pub mod pallet_closed;
+pub mod pallet_exception;
+pub mod pallet_label;
 pub mod pallets;
 pub mod registry;
 pub mod rules;
@@ -340,6 +342,8 @@ async fn apply(
         FactKind::BoxException => exception::apply(conn, &context, &record.data).await,
         FactKind::ShiftClosed => shift_closed::apply(conn, &context, &record.data).await,
         FactKind::PalletClosed => pallet_closed::apply(conn, &context, &record.data).await,
+        FactKind::PalletLabel => pallet_label::apply(conn, &context, &record.data).await,
+        FactKind::PalletException => pallet_exception::apply(conn, &context, &record.data).await,
     };
     let answer = match answer {
         Ok(applied) => {

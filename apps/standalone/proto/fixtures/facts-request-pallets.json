@@ -31,6 +31,30 @@
         "closedAt": "2026-10-08T09:02:11.540Z",
         "boxCount": 40
       }
+    },
+    {
+      "id": "be8d4a6b-9c7f-4d3e-8a2b-6c8d0e2f4a76",
+      "kind": "pallet_label",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "palletId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+        "outcome": "verified",
+        "at": "2026-10-08T09:02:30.004Z"
+      }
+    },
+    {
+      "id": "cf9e5b7c-0d8a-4e4f-9b3c-7d9e1f3a5b87",
+      "kind": "pallet_exception",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "exception": "disassemble",
+        "palletId": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+        "reasonCode": "other",
+        "reasonText": "Паллета собрана не на тот заказ",
+        "occurredAt": "2026-10-08T09:40:00.000Z"
+      }
     }
   ]
 }

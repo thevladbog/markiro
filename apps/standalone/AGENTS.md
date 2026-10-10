@@ -2423,7 +2423,16 @@ closed boxes whose `pallet_id` names it, not taken apart — and never
 stored; `box_count_reported` is evidence beside it, which the reports of
 plan О-Х compare. One open pallet per station and shift is the station's
 rule, not the host's: a second open pallet of a device is kept, since a
-refusal would fail a batch the station can never get past.
+refusal would fail a batch the station can never get past. A `pallet_label`
+(`facts/pallet_label.rs`) records the check of a closed pallet's label as a
+box's (`pallet_state` for an open one, `pallet_unknown` for a pallet the host
+does not have), a pallet taken apart included. A `pallet_exception`
+(`facts/pallet_exception.rs`) is a `reprint` or a `disassemble` of a closed
+pallet not taken apart (`pallet_state` otherwise), always with a reason code
+of the box exceptions' list for its kind (`exception_reasons`) and words only
+for `other`; one row per record in `pallet_exceptions`. A disassembly sets
+`disassembled_at`; the pallet keeps its SSCC, its boxes keep their
+`pallet_id` and stay closed, and the pallet no longer counts.
 
 Any device asks whether a code is taken (`GET /v1/device/codes/{codeHash}`,
 `routes/codes.rs`; 64 lower-case hex digits, `validation_failed` on
