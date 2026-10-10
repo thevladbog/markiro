@@ -91,6 +91,50 @@ function scans(db: DatabaseSync, boxId: string, count: number, omitJournal = -1)
   return hashes;
 }
 
+interface RetainedGrantScan {
+  eventId: string;
+  raw: string;
+  scannedAt: string;
+  codeHash: string;
+  shiftId?: string;
+  boxId?: string;
+  storedCode?: number;
+  allowed?: boolean;
+  evidence?: boolean;
+}
+
+/** Load retained history, without replaying its original production side effects. */
+function retainedGrantScans(db: DatabaseSync, rows: RetainedGrantScan[]): void {
+  const trigger = db
+    .prepare("SELECT sql FROM sqlite_master WHERE name='offline_grant_scan_apply'")
+    .get();
+  if (typeof trigger?.sql !== "string") throw new Error("Missing scan trigger");
+  db.exec("DROP TRIGGER offline_grant_scan_apply");
+  try {
+    const command = db.prepare(
+      "INSERT INTO offline_grant_scan_commands(event_id,payload_json,stored_code) VALUES(?,?,?)",
+    );
+    const evidence = db.prepare("INSERT INTO offline_grant_event_evidence(event_id) VALUES(?)");
+    const decision = db.prepare(
+      "INSERT INTO offline_grant_decisions(event_id,event_digest,decision_json,result_json) VALUES(?,'digest',?,'{}')",
+    );
+    for (const row of rows) {
+      command.run(
+        row.eventId,
+        JSON.stringify({
+          event: { shiftId: row.shiftId ?? "shift-1", raw: row.raw, scannedAt: row.scannedAt },
+          code: { boxId: row.boxId ?? "b1", codeHash: row.codeHash },
+        }),
+        row.storedCode ?? 1,
+      );
+      if (row.evidence !== false) evidence.run(row.eventId);
+      decision.run(row.eventId, JSON.stringify({ allow: row.allowed ?? true }));
+    }
+  } finally {
+    db.exec(trigger.sql);
+  }
+}
+
 describe("closed-box reconciliation", () => {
   it("keeps the 201st due box for the next bounded request", async () => {
     const { db, exec } = fixture();
@@ -159,6 +203,108 @@ describe("closed-box reconciliation", () => {
         .get(),
     ).toEqual({ scan_pending: 0, outbox_id: 2 });
   });
+  it.each(["membership", "confirmation", "replay"] as const)(
+    "retires a paused 1000-unit reconciliation during %s and resumes the remaining boxes",
+    async (stage) => {
+      const { db, exec } = fixture();
+      for (let i = 0; i < 100; i++) {
+        box(db, `box-${i}`);
+        for (let j = 0; j < 10; j++) {
+          const raw = `010400638133393121B${i}S${j}`;
+          const code = canonicalizeKm(raw);
+          const at = new Date(Date.UTC(2026, 8, 23, 0, 0, i * 10 + j)).toISOString();
+          db.prepare(
+            `INSERT INTO codes_mirror(code_hash,shift_id,gtin14,serial,scanned_at,box_id)
+            VALUES(?,?,?,?,?,?)`,
+          ).run(kmHash(code), "shift-1", code.gtin14, code.serial, at, `box-${i}`);
+          db.prepare(
+            `INSERT INTO scan_events_mirror(shift_id,terminal_id,raw,verdict,scanned_at,operator_id)
+            VALUES(?,?,?,?,?,?)`,
+          ).run("shift-1", "dev-1", raw, "ok", at, "operator-1");
+        }
+      }
+      let pause: Promise<void> | undefined;
+      let membershipReads = 0;
+      let replayReads = 0;
+      let confirmations = 0;
+      let resumed = false;
+      const instrumented: SqlExecutor = {
+        ...exec,
+        async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+          const rows = await exec.all<T>(sql, params);
+          if (sql.includes("SELECT code_hash,gtin14,serial,scanned_at FROM codes_mirror")) {
+            membershipReads++;
+            if (stage === "membership" && !pause) pause = engine.pauseAndWaitForIdle();
+          }
+          if (sql.includes("SELECT command.event_id")) {
+            replayReads++;
+            if (stage === "replay" && !pause) pause = engine.pauseAndWaitForIdle();
+          }
+          return rows;
+        },
+        async atomic(statements) {
+          const result = await exec.atomic!(statements);
+          if (statements.some(({ sql }) => sql.includes("SET confirmed_revision="))) {
+            confirmations++;
+            if (stage === "confirmation" && !pause) pause = engine.pauseAndWaitForIdle();
+          }
+          return result;
+        },
+      };
+      const engine = createSyncEngine({
+        exec: instrumented,
+        machineId: "machine-1",
+        credentialGeneration: createCredentialGeneration("test-key"),
+        onState: () => {},
+        client: {
+          async post<T>(path: string, body?: unknown): Promise<T> {
+            if (path === "/station/codes/releases")
+              return { until: "0", releasedCodeHashes: [] } as T;
+            if (path === "/station/boxes/reconciliation") {
+              const { boxes } = body as { boxes: { boxId: string; itemCount: number }[] };
+              return {
+                results: boxes.map(({ boxId, itemCount }) => ({
+                  boxId,
+                  status: stage === "replay" && !resumed ? "replay_required" : "confirmed",
+                  reasonCode: stage === "replay" && !resumed ? "box_absent" : "matched",
+                  serverItemCount: itemCount,
+                })),
+              } as T;
+            }
+            throw new Error(`unexpected route ${path}`);
+          },
+        },
+      });
+      try {
+        engine.nudge();
+        await engine.idle();
+        expect(pause).toBeDefined();
+        await pause;
+        if (stage === "membership") expect(membershipReads).toBe(1);
+        if (stage === "replay") expect(replayReads).toBe(1);
+        expect(confirmations).toBe(stage === "confirmation" ? 1 : 0);
+        expect(await readBoxReconciliationSummary(exec, "shift-1")).toMatchObject({
+          localClosed: 100,
+          delivered: 100,
+          confirmed: stage === "confirmation" ? 1 : 0,
+          issues: 0,
+        });
+        expect(db.prepare("SELECT COUNT(*) n FROM outbox").get()).toEqual({ n: 0 });
+        expect(db.prepare("SELECT COUNT(*) n FROM codes_mirror").get()).toEqual({ n: 1000 });
+        resumed = true;
+        engine.resume();
+        await engine.idle();
+        expect(await readBoxReconciliationSummary(exec, "shift-1")).toMatchObject({
+          confirmed: 100,
+          pending: 0,
+          issues: 0,
+        });
+      } finally {
+        engine.stop();
+        db.close();
+      }
+    },
+  );
   it("runs the comparison inside the device-wide drain and resends a missing box with a fresh batch", async () => {
     const { db, exec } = fixture();
     box(db, "b1");
@@ -327,6 +473,124 @@ describe("closed-box reconciliation", () => {
     ]);
     expect((await readBoxReconciliationSummary(exec, "shift-1")).confirmed).toBe(1);
   });
+
+  it("reconstructs 1000 units against 20000 retained commands with one grant lookup", async () => {
+    const { db, exec } = fixture();
+    try {
+      box(db, "b1");
+      const hashes = scans(db, "b1", 1000);
+      const retained: RetainedGrantScan[] = Array.from({ length: 20000 }, (_, i) => ({
+        eventId: `old-${i}`,
+        raw: `OLD-${i}`,
+        scannedAt: "2026-01-01T00:00:00.000Z",
+        codeHash: `old-hash-${i}`,
+        shiftId: `old-shift-${i % 20}`,
+        boxId: `old-box-${i}`,
+      }));
+      for (let i = 0; i < 999; i++)
+        retained.push({
+          eventId: `event-${i}`,
+          raw: `010400638133393121S-${i}`,
+          scannedAt: new Date(Date.UTC(2026, 8, 23, 0, 1, i)).toISOString(),
+          codeHash: hashes[i]!,
+        });
+      // Every field exists individually, but this combination is not a scan.
+      retained.push({
+        eventId: "mixed-identity",
+        raw: "010400638133393121S-0",
+        scannedAt: "2026-09-23T00:01:01.000Z",
+        codeHash: hashes[1]!,
+      });
+      retainedGrantScans(db, retained);
+      let lookups = 0;
+      const measured: SqlExecutor = {
+        ...exec,
+        async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+          if (sql.includes("FROM offline_grant_scan_commands")) {
+            lookups++;
+            // Fail promptly on the old N full scans rather than spend minutes in them.
+            expect(lookups, "grant history must be read once per box").toBe(1);
+          }
+          return exec.all<T>(sql, params);
+        },
+      };
+      const facts = await readBoxReconciliationBatch(exec, "shift-1");
+      await applyBoxReconciliationResults(measured, facts, [
+        {
+          boxId: "b1",
+          status: "replay_required",
+          reasonCode: "box_absent",
+          serverItemCount: null,
+        },
+      ]);
+      expect(lookups).toBe(1);
+      const replay = db
+        .prepare("SELECT raw,scanned_at,code_hash,replay_event_id FROM outbox ORDER BY scanned_at")
+        .all();
+      expect(replay).toHaveLength(1000);
+      for (let i = 0; i < 1000; i++)
+        expect(replay[i]).toEqual({
+          raw: `010400638133393121S-${i}`,
+          scanned_at: new Date(Date.UTC(2026, 8, 23, 0, 1, i)).toISOString(),
+          code_hash: hashes[i],
+          replay_event_id: i < 999 ? `event-${i}` : null,
+        });
+      expect(db.prepare("SELECT COUNT(*) n FROM codes_mirror").get()).toEqual({ n: 1000 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each(["exact", "ambiguous"])(
+    "preserves exact grant matching with %s evidence",
+    async (kind) => {
+      const { db, exec } = fixture();
+      try {
+        box(db, "b1");
+        const [hash] = scans(db, "b1", 1);
+        if (!hash) throw new Error("Missing hash");
+        const match: RetainedGrantScan = {
+          eventId: "exact",
+          raw: "010400638133393121S-0",
+          scannedAt: "2026-09-23T00:01:00.000Z",
+          codeHash: hash,
+        };
+        retainedGrantScans(db, [
+          match,
+          { ...match, eventId: "shift", shiftId: "other" },
+          { ...match, eventId: "box", boxId: "other" },
+          { ...match, eventId: "raw", raw: "OTHER" },
+          { ...match, eventId: "time", scannedAt: "2026-09-23T00:02:00.000Z" },
+          { ...match, eventId: "hash", codeHash: "other" },
+          { ...match, eventId: "not-stored", storedCode: 0 },
+          { ...match, eventId: "denied", allowed: false },
+          { ...match, eventId: "no-evidence", evidence: false },
+          ...(kind === "ambiguous" ? [{ ...match, eventId: "second-exact" }] : []),
+        ]);
+        const facts = await readBoxReconciliationBatch(exec, "shift-1");
+        await applyBoxReconciliationResults(exec, facts, [
+          {
+            boxId: "b1",
+            status: "replay_required",
+            reasonCode: "box_absent",
+            serverItemCount: null,
+          },
+        ]);
+        expect(db.prepare("SELECT replay_event_id FROM outbox").all()).toEqual(
+          kind === "exact" ? [{ replay_event_id: "exact" }] : [],
+        );
+        expect((await readBoxReconciliationSummary(exec, "shift-1")).issues).toBe(
+          kind === "exact" ? 0 : 1,
+        );
+        if (kind === "ambiguous")
+          expect((await readBoxReconciliationIssues(exec))[0]?.reasonCode).toBe(
+            "replay_evidence_missing",
+          );
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   it("requeues a complete historic box, preserving exact raw and attribution", async () => {
     const { db, exec } = fixture();
