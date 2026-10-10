@@ -1694,5 +1694,8 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_three_audited_lines(
             );
         }
     }
-    assert_eq!(facts_files, 12);
+    // The facts path: the 12 files of 2a2 and the three pallet modules of
+    // plan ПЛ-Х task 4 (`blocks`, `pallets`, `pallet_closed`); none of them
+    // logs.
+    assert_eq!(facts_files, 15);
 }
