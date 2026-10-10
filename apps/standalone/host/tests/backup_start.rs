@@ -1,11 +1,15 @@
 //! The host starts its backup worker with itself (plan РК): a copy right
-//! after the start, and the worker stops with the host. Listens on
-//! 127.0.0.1, so it runs outside the sandbox.
+//! after the start, which the office reads, and the worker stops with the
+//! host. Listens on 127.0.0.1, so it runs outside the sandbox.
+
+mod support;
 
 use std::time::Duration;
 
 use markiro_host::config::HostPaths;
-use markiro_host::{start, StartOptions};
+use markiro_host::{start, RunningHost, StartOptions};
+use markiro_proto::{OFFICE_SESSION_HEADER, PROTOCOL_HEADER, PROTOCOL_VERSION};
+use serde_json::{json, Value};
 
 fn manifests(dir: &std::path::Path) -> usize {
     std::fs::read_dir(dir)
@@ -18,15 +22,19 @@ fn manifests(dir: &std::path::Path) -> usize {
         .count()
 }
 
-#[tokio::test]
-async fn a_started_host_copies_its_database_and_stops_its_worker() {
-    let dir = tempfile::tempdir().unwrap();
-    let paths = HostPaths::new(dir.path());
+async fn start_host(paths: &HostPaths) -> RunningHost {
     let options = StartOptions {
         port_override: None,
         bind: Some("127.0.0.1:0".parse().unwrap()),
     };
-    let host = start(&paths, options).await.unwrap();
+    start(paths, options).await.unwrap()
+}
+
+#[tokio::test]
+async fn a_started_host_copies_its_database_and_stops_its_worker() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(dir.path());
+    let host = start_host(&paths).await;
     let backups = paths.backups_dir();
     tokio::time::timeout(Duration::from_secs(10), async {
         while manifests(&backups) == 0 {
@@ -50,6 +58,71 @@ async fn a_started_host_copies_its_database_and_stops_its_worker() {
             .unwrap();
     assert_eq!(rows, [("system".to_owned(), "ok".to_owned())]);
     pool.close().await;
+}
+
+#[tokio::test]
+async fn the_office_of_a_started_host_reads_its_copies() {
+    let dir = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(dir.path());
+    let host = start_host(&paths).await;
+    let client = support::pinned_client(&host.fingerprint);
+    let base = format!("https://{}", host.addr);
+    let protocol = PROTOCOL_VERSION.to_string();
+    let paired: Value = client
+        .post(format!("{base}/v1/local-pair"))
+        .header(PROTOCOL_HEADER, &protocol)
+        .json(&json!({ "kind": "station", "name": "Станция", "appVersion": "0.1.0" }))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let key = paired["deviceKey"].as_str().unwrap().to_owned();
+    let booted: Value = client
+        .post(format!("{base}/v1/bootstrap"))
+        .header(PROTOCOL_HEADER, &protocol)
+        .bearer_auth(&key)
+        .json(&support::app::bootstrap_body())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let token = booted["session"]["token"].as_str().unwrap().to_owned();
+    let state = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let state: Value = client
+                .get(format!("{base}/v1/office/backups"))
+                .header(PROTOCOL_HEADER, &protocol)
+                .header(OFFICE_SESSION_HEADER, &token)
+                .bearer_auth(&key)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap();
+            assert!(state.get("error").is_none(), "{state}");
+            if state["local"]["copies"]
+                .as_array()
+                .is_some_and(|copies| !copies.is_empty())
+            {
+                return state;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the worker made a copy at start");
+    assert_eq!(
+        state["local"]["dir"],
+        json!(paths.backups_dir().display().to_string())
+    );
+    assert_eq!(state["local"]["lastAttempt"]["ok"], json!(true));
+    drop(client);
+    host.stop().await.unwrap();
 }
 
 fn names_ending(dir: &std::path::Path, suffix: &str) -> usize {

@@ -52,6 +52,8 @@ pub mod actions {
     /// A copy of the database, scheduled (the host's) or asked for in the
     /// office (plan РК); `failed` when a folder did not get it.
     pub const BACKUP_CREATE: &str = "backup.create";
+    /// An administrator set or cleared the second folder of copies.
+    pub const BACKUP_SETTINGS_UPDATE: &str = "backup.settings.update";
 }
 
 /// `details.reason` of a denied row: every denial names one.
