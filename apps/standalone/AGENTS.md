@@ -2138,8 +2138,8 @@ names `palletBoxCapacity` and `palletTemplateId`; a shift without leaves
 both out, so a station of stage 2a reads its list as before. It reads them
 when it reads its device record (after it subscribes to the link and after
 every revision event), not through the feed: shifts are per line, and an
-open one carries a
-layout of up to 256 KB. A shift's product name and GTIN and its
+open one carries up to two layouts (a box's and, with pallets, a pallet's).
+A shift's product name and GTIN and its
 counterparty's name are the snapshot's once it is open and the records' before
 (the station keeps no copy of counterparties); `ownerDeviceId` names the
 station that opened it, and another station's id means the shift is busy. A
@@ -2173,7 +2173,10 @@ template disabled or narrowed since the plan keeps the shift planned
 closed shift is `shift_status` for every station, a shift of another line (or a
 station without one) `shift_line`, a shift another station opened
 `shift_busy`: stage 2a puts one device on a shift. The snapshot is at most
-320 KB (a `CHECK` of `0009`), and the host never checks its layout: the station
+320 KB (a `CHECK` of `0009`, `shifts::MAX_SNAPSHOT_BYTES`): a box layout and a
+pallet layout that together exceed it keep the shift planned (`conflict` on
+`snapshot_too_large`, checked at the entry after the templates, before a
+revision is taken). The host never checks a layout's content: the station
 does, with `labelTemplateSpecSchema`, when it enters. The opening writes
 `shift.open`; a second device's first entry (`shift.enter`) comes with plan
 2b, since in stage 2a a station's first entry is the opening.
@@ -2420,8 +2423,8 @@ snapshot's prefix and `serial`, where `serial` lies in a live pallet block
 other pallet carries the SSCC or is closed on that serial of that block
 (`sscc_taken`; the unique indexes `pallets_sscc` and `pallets_block_serial`
 back it, and a box's SSCC starts with `0` from a box block, so boxes and
-pallets never meet on one). It keeps the station's `openedAt`, `closedAt`, `boxCount`
-(`box_count_reported`) and operator and raises the pallet block's
+pallets never meet on one). It keeps the station's `openedAt`, `closedAt`,
+`boxCount` (`box_count_reported`) and operator and raises the pallet block's
 `consumed_through` (`blocks::consume`, shared with `box_closed`). A pallet
 none of whose boxes reached the host opens closed, so its printed SSCC is
 held. The same close again is accepted with nothing written; another SSCC
@@ -2455,7 +2458,11 @@ nothing even when its block has been revoked since, as a box's is (a record
 already answered keeps its receipt in any case), while a new close of an open
 pallet against a revoked block is `sscc_not_issued`. A `pallet_exception`
 names its kind in `exception`, not `kind`, which the record's envelope already
-has.
+has. A pallet that never closed has the `opened_at` of the first box the host
+received, not of the earliest box: a box resent after a refusal may arrive
+late, and `pallet_closed` replaces the field with the station's own. A
+consumer that needs the exact value derives it from the boxes (the smallest
+`closed_at` among them, plan О-Х).
 
 Any device asks whether a code is taken (`GET /v1/device/codes/{codeHash}`,
 `routes/codes.rs`; 64 lower-case hex digits, `validation_failed` on
@@ -2550,10 +2557,10 @@ a code of marking that has a crypto tail, an 18-digit SSCC and reasons in
 words (the first shift has pallets since plan ПЛ-Х: a box on a pallet, the
 pallet's close under its SSCC of a pallet block, its label check, a reprint
 with words and a refused second close under another SSCC, answered
-`pallet_already_closed`), a resend, a mismatched resend, a station's close of a shift and a
-late scan after it, a batch the host cannot write (a 500, its failing record
-second in the batch), the code check
-and the totals, and asks that the host kept them and the log has none. The
+`pallet_already_closed`), a resend, a mismatched resend, a station's close of a
+shift and a late scan after it, a batch the host cannot write (a 500, its
+failing record second in the batch), the code check and the totals, and asks
+that the host kept them and the log has none. The
 test sees `info` and above, what `tracing` writes to the file: `println!`,
 `eprintln!`, `dbg!` and `debug!`/`trace!` escape it, so its second test
 pins the source: the library prints nothing and the facts path holds exactly

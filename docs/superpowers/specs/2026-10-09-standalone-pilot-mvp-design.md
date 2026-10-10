@@ -976,6 +976,8 @@ base64 с выравниванием и случайной солью на ст�
   получает `palletTemplate { id, name, rev, spec }` только у смены с паллетами; у смены без паллет
   поля нет. Неподходящий при открытии шаблон паллеты — `conflict` с отдельным
   `constraint: pallet_template_not_fit`.
+  Снимок, который с двумя макетами превысил бы 320 КБ (CHECK `0009`), не открывает смену: `conflict` с
+  `constraint: snapshot_too_large`, проверка при входе после шаблонов.
 - **Станция.** `DeviceShift` называет `palletBoxCapacity` и `palletTemplateId` только у смены с
   паллетами; `DeviceShiftCreate` принимает те же поля паллет, что и офис.
 - **Блоки.** Блок паллет — расширение 1 размером `site.pallet_block_size`. Повтор `requestId` с
