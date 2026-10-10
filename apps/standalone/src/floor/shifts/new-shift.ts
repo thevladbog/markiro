@@ -164,7 +164,8 @@ export function fittingTemplates(
  * was turned off or archived since the copies (`product_inactive`), the
  * template no longer fits it (`template`), another field it refused
  * (`invalid`), the station has no line (`no_line`), or anything else
- * (`failed`).
+ * (`failed`). A product the host does not know (`validation_failed` on
+ * `productId`) is `product_inactive`, a line it does not take is `no_line`.
  */
 export type CreateRefusal =
   "no_link" | "product_inactive" | "template" | "invalid" | "no_line" | "failed";
@@ -186,7 +187,7 @@ export interface CreateContext {
  * Creates the shift on the host (`POST /v1/device/shifts`) and keeps it with
  * the copies at once. The same `requestId` again answers the same shift, so a
  * retry after a lost answer makes no second one (and the answer is that first
- * shift, whatever the form says now). A copy this computer fails to keep is no
+ * shift, whatever the form says now: `isShiftOfRequest` tells). A copy this computer fails to keep is no
  * refusal: the shift is the host's, the next read of the list brings it, and
  * the entry that follows says so if this computer cannot write.
  */
@@ -208,6 +209,10 @@ export async function createStationShift(
       return { kind: "refused", reason: "failed" };
     }
     if (error.code === "validation_failed") {
+      // The product gone from the office or the station's line turned off are
+      // not fields the operator can mend: they are the refusals of their own.
+      if (error.field === "productId") return { kind: "refused", reason: "product_inactive" };
+      if (error.field === "lineId") return { kind: "refused", reason: "no_line" };
       return { kind: "refused", reason: error.field === "boxTemplateId" ? "template" : "invalid" };
     }
     return { kind: "refused", reason: "failed" };
@@ -216,6 +221,22 @@ export async function createStationShift(
     () => undefined,
   );
   return { kind: "created", shift };
+}
+
+/**
+ * Whether the shift the host answered is the one the form asked for. The host
+ * answers a repeated request id with the FIRST shift made for it and does not
+ * read the body again, so after a lost answer the answer may be a shift of
+ * other fields than the form shows now.
+ */
+export function isShiftOfRequest(shift: DeviceShift, input: DeviceShiftInput): boolean {
+  return (
+    shift.productId === input.productId &&
+    shift.boxTemplateId === input.boxTemplateId &&
+    shift.productionDate === input.productionDate &&
+    shift.boxCapacity === input.boxCapacity &&
+    shift.plannedQty === input.plannedQty
+  );
 }
 
 /** The copy of a shift the station has just created, to enter it at once. */

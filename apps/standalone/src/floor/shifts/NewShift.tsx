@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, Input } from "@markiro/ui";
 
 import type { DeviceShift, DeviceShiftCreate, EnteredShift } from "../../host/protocol.js";
+import type { DeviceShiftInput } from "../../host/requests.js";
 import { suggestBoxTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
 import { plannedQtyRule, shiftBoxCapacityRule, toCount } from "../../lib/rules.js";
@@ -15,6 +16,7 @@ import {
   createStationShift,
   findScannedProduct,
   fittingTemplates,
+  isShiftOfRequest,
   readNewShiftChoices,
   type CreateRefusal,
   type NewShiftChoices,
@@ -22,7 +24,7 @@ import {
 } from "./new-shift.js";
 import type { WorkShift } from "./shift-copies.js";
 import { enterShift, type EntryRefusal } from "./shift-entry.js";
-import { addCivilDays, formatCivilDate } from "./shift-text.js";
+import { addCivilDays, formatCivilDate, formatQuantity } from "./shift-text.js";
 
 /** At most this many products answer a search by name. */
 const RESULTS = 5;
@@ -64,11 +66,19 @@ interface Form {
   productionDate: string;
   plannedQty: string;
   boxCapacity: string;
+  /**
+   * The shift the host has answered for this form's request id. From then on
+   * the form is frozen (a repeated id brings this shift back whatever the form
+   * says) and the button only enters it. `matches` is whether it is the form's
+   * own: if not, an earlier request made it and the operator is told so.
+   */
+  created: { shift: DeviceShift; matches: boolean } | null;
 }
 
 type Problem =
   | { kind: "scan"; key: string; gtin: string | null }
   | { kind: "create"; reason: CreateRefusal }
+  | { kind: "existing"; shift: DeviceShift }
   | { kind: "enter"; number: string; reason: EntryRefusal };
 
 type Step = { kind: "product" } | { kind: "form"; form: Form };
@@ -161,6 +171,7 @@ export function NewShift({
           productionDate: civilToday(ready.timeZone, current.current.now()),
           plannedQty: "",
           boxCapacity: product.boxCapacity === null ? "" : String(product.boxCapacity),
+          created: null,
         },
       });
     },
@@ -196,8 +207,87 @@ export function NewShift({
       previous.kind === "form" ? { kind: "form", form: { ...previous.form, ...change } } : previous,
     );
 
+  /** One request at a time: `work` runs alone, with the busy line and no old problem on the screen. */
+  const run = async (kind: "creating" | "entering", work: () => Promise<void>) => {
+    running.current = true;
+    setBusy(kind);
+    setProblem(null);
+    try {
+      await work();
+    } finally {
+      running.current = false;
+      if (alive.current) setBusy(null);
+    }
+  };
+
+  /** Enters a shift the host has made, as it is. */
+  const open = async (shift: DeviceShift) => {
+    setBusy("entering");
+    const entry = await enterShift(
+      {
+        local,
+        pairing: { hostId, deviceId },
+        online: current.current.online,
+        enter,
+        now: () => current.current.now(),
+      },
+      createdCopy(shift),
+    );
+    if (!alive.current) return;
+    if (entry.kind === "entered") {
+      current.current.onEntered(entry.shift);
+      return;
+    }
+    if (entry.kind === "rejected") {
+      current.current.onHostError(entry.error);
+      return;
+    }
+    setProblem({ kind: "enter", number: shift.number, reason: entry.reason });
+  };
+
+  const make = async (input: DeviceShiftInput) => {
+    const created = await createStationShift(
+      {
+        local,
+        pairing: { hostId, deviceId },
+        create,
+        now: () => current.current.now().getTime(),
+      },
+      input,
+    );
+    if (!alive.current) return;
+    if (created.kind === "rejected") {
+      current.current.onHostError(created.error);
+      return;
+    }
+    if (created.kind === "refused") {
+      // The template the rule fixed is refused: the choice is the operator's
+      // now, among the templates that fit.
+      if (created.reason === "template") update({ templateId: null, templateFixed: false });
+      setProblem({ kind: "create", reason: created.reason });
+      return;
+    }
+    // From here the form is frozen: the shift is the host's, and the request
+    // id brings it back whatever the form says.
+    const matches = isShiftOfRequest(created.shift, input);
+    update({ created: { shift: created.shift, matches } });
+    if (!matches) {
+      // A repeated request id brought back an earlier shift of other fields:
+      // not the one on the screen, so not entered in silence.
+      setProblem({ kind: "existing", shift: created.shift });
+      return;
+    }
+    await open(created.shift);
+  };
+
   const submit = async (form: Form) => {
     if (running.current || form.templateId === null) return;
+    if (form.created !== null) {
+      // Made already, here or by an earlier request: only the entry is left.
+      const { shift } = form.created;
+      await run("entering", () => open(shift));
+      return;
+    }
     const plan = plannedQtyRule.safeParse(form.plannedQty);
     const capacity = shiftBoxCapacityRule.safeParse(form.boxCapacity);
     if (!plan.success || !capacity.success) {
@@ -208,60 +298,15 @@ export function NewShift({
       return;
     }
     setErrors({});
-    running.current = true;
-    setBusy("creating");
-    setProblem(null);
-    try {
-      const created = await createStationShift(
-        {
-          local,
-          pairing: { hostId, deviceId },
-          create,
-          now: () => current.current.now().getTime(),
-        },
-        {
-          requestId: form.requestId,
-          productId: form.product.id,
-          boxTemplateId: form.templateId,
-          productionDate: form.productionDate,
-          boxCapacity: toCount(capacity.data) ?? 0,
-          plannedQty: toCount(plan.data),
-        },
-      );
-      if (!alive.current) return;
-      if (created.kind === "rejected") {
-        current.current.onHostError(created.error);
-        return;
-      }
-      if (created.kind === "refused") {
-        setProblem({ kind: "create", reason: created.reason });
-        return;
-      }
-      setBusy("entering");
-      const entry = await enterShift(
-        {
-          local,
-          pairing: { hostId, deviceId },
-          online: current.current.online,
-          enter,
-          now: () => current.current.now(),
-        },
-        createdCopy(created.shift),
-      );
-      if (!alive.current) return;
-      if (entry.kind === "entered") {
-        current.current.onEntered(entry.shift);
-        return;
-      }
-      if (entry.kind === "rejected") {
-        current.current.onHostError(entry.error);
-        return;
-      }
-      setProblem({ kind: "enter", number: created.shift.number, reason: entry.reason });
-    } finally {
-      running.current = false;
-      if (alive.current) setBusy(null);
-    }
+    const input: DeviceShiftInput = {
+      requestId: form.requestId,
+      productId: form.product.id,
+      boxTemplateId: form.templateId,
+      productionDate: form.productionDate,
+      boxCapacity: toCount(capacity.data) ?? 0,
+      plannedQty: toCount(plan.data),
+    };
+    await run("creating", () => make(input));
   };
 
   const problemText = (shown: Problem): string => {
@@ -270,6 +315,16 @@ export function NewShift({
         return t(`floor.newShift.scan.${shown.key}`, { gtin: shown.gtin ?? "" });
       case "create":
         return t(`floor.newShift.refused.${shown.reason}`);
+      case "existing":
+        return t("floor.newShift.existing", {
+          number: shown.shift.number,
+          date: formatCivilDate(shown.shift.productionDate),
+          capacity: formatQuantity(shown.shift.boxCapacity),
+          plan:
+            shown.shift.plannedQty === null
+              ? t("floor.newShift.existingNoPlan")
+              : t("floor.newShift.existingPlan", { qty: formatQuantity(shown.shift.plannedQty) }),
+        });
       case "enter":
         return `${t("floor.newShift.notEntered", { number: shown.number })} ${t(
           `floor.shifts.refused.${shown.reason}`,
@@ -345,6 +400,8 @@ export function NewShift({
     const fitting = fittingTemplates(form.product, from.templates);
     const chosen = fitting.find((template) => template.id === form.templateId) ?? null;
     const zoneKnown = from.timeZone !== null && isKnownTimeZone(from.timeZone);
+    // Once the host has made the shift its fields are not the form's to change.
+    const frozen = busy !== null || form.created !== null;
     return (
       <>
         <p className="shift-card__product">
@@ -363,7 +420,7 @@ export function NewShift({
                 size="floor"
                 variant={template.id === form.templateId ? "primary" : "secondary"}
                 aria-pressed={template.id === form.templateId}
-                disabled={busy !== null}
+                disabled={frozen}
                 onClick={() => update({ templateId: template.id })}
               >
                 {template.name}
@@ -386,7 +443,7 @@ export function NewShift({
             <Button
               size="floor"
               variant="secondary"
-              disabled={busy !== null}
+              disabled={frozen}
               onClick={() => update({ productionDate: addCivilDays(form.productionDate, -1) })}
             >
               {t("floor.newShift.dayBefore")}
@@ -394,7 +451,7 @@ export function NewShift({
             <Button
               size="floor"
               variant="secondary"
-              disabled={busy !== null}
+              disabled={frozen}
               onClick={() => update({ productionDate: addCivilDays(form.productionDate, 1) })}
             >
               {t("floor.newShift.dayAfter")}
@@ -407,7 +464,7 @@ export function NewShift({
           hint={t("floor.newShift.optional")}
           inputMode="numeric"
           value={form.plannedQty}
-          disabled={busy !== null}
+          disabled={frozen}
           {...(errors.plannedQty === undefined ? {} : { error: errors.plannedQty })}
           onChange={(event) => update({ plannedQty: event.currentTarget.value })}
         />
@@ -416,7 +473,7 @@ export function NewShift({
           label={t("floor.newShift.boxCapacity")}
           inputMode="numeric"
           value={form.boxCapacity}
-          disabled={busy !== null}
+          disabled={frozen}
           {...(errors.boxCapacity === undefined ? {} : { error: errors.boxCapacity })}
           onChange={(event) => update({ boxCapacity: event.currentTarget.value })}
         />
@@ -427,7 +484,9 @@ export function NewShift({
             disabled={!online || form.templateId === null}
             onClick={() => void submit(form)}
           >
-            {t("floor.newShift.create")}
+            {form.created === null
+              ? t("floor.newShift.create")
+              : t("floor.newShift.openCreated", { number: form.created.shift.number })}
           </Button>
           <Button
             size="floor"
@@ -441,7 +500,9 @@ export function NewShift({
             {t("floor.newShift.otherProduct")}
           </Button>
         </div>
-        {!online && <p className="shift-card__hint">{t("floor.newShift.needsLink")}</p>}
+        {!online && form.created === null && (
+          <p className="shift-card__hint">{t("floor.newShift.needsLink")}</p>
+        )}
       </>
     );
   };

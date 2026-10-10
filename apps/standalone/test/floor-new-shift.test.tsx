@@ -45,12 +45,26 @@ const [, PLANNED] = deviceShiftsSchema.parse(fixture("device-shifts.json")).shif
   DeviceShift,
 ];
 const ENTERED: EnteredShift = enteredShiftSchema.parse(fixture("device-shift-entered.json"));
+/**
+ * The shift the host makes of `CREATED_BODY` (the form as it starts on `NOW`):
+ * what a create answers when the request is the first one for its id. The
+ * fixture's own shift (`PLANNED`) is another day's, so it is what a repeated
+ * id brings back after the form was changed.
+ */
+const MADE: DeviceShift = {
+  ...PLANNED,
+  productId: MILK,
+  boxTemplateId: MILK_TEMPLATE,
+  productionDate: "2026-10-10",
+  boxCapacity: 12,
+  plannedQty: null,
+};
 const OPENED: EnteredShift = {
   ...ENTERED,
   id: PLANNED.id,
   number: PLANNED.number,
   createdFrom: "station",
-  productionDate: "2026-10-09",
+  productionDate: "2026-10-10",
   plannedQty: null,
 };
 /** 9 October 2026, 22:30 UTC: already 10 October in Moscow, the organization's zone. */
@@ -116,7 +130,7 @@ function renderNew(local: LocalExecutor, options: Options = {}) {
   const ids = [REQUEST_ID, NEXT_REQUEST_ID];
   let drawn = 0;
   const handlers = {
-    create: vi.fn(options.create ?? (async () => PLANNED)),
+    create: vi.fn(options.create ?? (async () => MADE)),
     enter: vi.fn(options.enter ?? (async () => OPENED)),
     onEntered: vi.fn<(shift: WorkShift) => void>(),
     onHostError: vi.fn<(error: unknown) => void>(),
@@ -404,7 +418,7 @@ describe("a new shift on the station", () => {
     const create = vi
       .fn<(create: DeviceShiftCreate) => Promise<DeviceShift>>()
       .mockRejectedValueOnce(down)
-      .mockResolvedValue(PLANNED);
+      .mockResolvedValue(MADE);
     const { handlers } = renderNew(await copiesOf(CATALOG), { create });
     await chooseMilk();
     fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
@@ -474,7 +488,7 @@ describe("a new shift on the station", () => {
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
     expect(handlers.onBack).toHaveBeenCalledTimes(1);
     await act(async () => {
-      answer(PLANNED);
+      answer(MADE);
     });
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
   });
@@ -894,6 +908,26 @@ describe("a request to create a shift", () => {
     [
       new HostError({
         kind: "api",
+        code: "validation_failed",
+        status: 400,
+        message: "no",
+        details: { field: "productId" },
+      }),
+      "Товар выключен или в архиве: смену не создать. Обратитесь в офис.",
+    ],
+    [
+      new HostError({
+        kind: "api",
+        code: "validation_failed",
+        status: 400,
+        message: "no",
+        details: { field: "lineId" },
+      }),
+      "У станции нет линии: смену не создать.",
+    ],
+    [
+      new HostError({
+        kind: "api",
         code: "conflict",
         status: 409,
         message: "no",
@@ -953,7 +987,11 @@ describe("a request to create a shift", () => {
     expect(screen.getByLabelText("В коробе, шт.")).toHaveProperty("disabled", true);
     expect(screen.getByRole("button", { name: "Назад" })).toHaveProperty("disabled", false);
     await act(async () => {
-      answer(PLANNED);
+      answer({
+        ...MADE,
+        productId: uuid(4),
+        boxTemplateId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1b",
+      });
     });
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
   });
@@ -985,7 +1023,7 @@ describe("a request to create a shift", () => {
     await screen.findByText("Создаём смену…");
     view.unmount();
     await act(async () => {
-      answer(PLANNED);
+      answer(MADE);
     });
     await settle();
     expect(handlers.enter).not.toHaveBeenCalled();
@@ -1021,7 +1059,7 @@ describe("a request to create a shift", () => {
     await screen.findByText("Создаём смену…");
     later({ online: false });
     await act(async () => {
-      answer(PLANNED);
+      answer(MADE);
     });
     expect(
       await screen.findByText(
@@ -1040,7 +1078,7 @@ describe("a request to create a shift", () => {
     const newer = vi.fn<(shift: WorkShift) => void>();
     later({ onEntered: newer });
     await act(async () => {
-      answer(PLANNED);
+      answer(MADE);
     });
     await waitFor(() => expect(newer).toHaveBeenCalledTimes(1));
     expect(handlers.onEntered).not.toHaveBeenCalled();
@@ -1113,11 +1151,11 @@ describe("a request to create a shift", () => {
     expect(screen.queryByText(/Нет связи с хостом/)).toBeNull();
   });
 
-  it("makes no second shift when the answer was lost and the form was changed meanwhile", async () => {
+  it("does not enter another shift when the answer was lost and the form was changed meanwhile", async () => {
     const create = vi
       .fn<(create: DeviceShiftCreate) => Promise<DeviceShift>>()
       .mockRejectedValueOnce(new HostError({ kind: "transport", code: "timeout", message: "slow" }))
-      .mockResolvedValue(PLANNED);
+      .mockResolvedValue(MADE);
     const { handlers } = renderNew(await copiesOf(CATALOG), { create });
     await chooseMilk();
     fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
@@ -1128,21 +1166,113 @@ describe("a request to create a shift", () => {
         false,
       ),
     );
+    // The form stays the operator's after a lost answer, under the same id.
     fireEvent.change(screen.getByLabelText("План, шт."), { target: { value: "500" } });
     fireEvent.click(screen.getByRole("button", { name: "На день позже" }));
     fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
-    await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
     // The host answers the first shift for this id whatever the body says now;
-    // the id is the form's, so the form as it is now goes with it.
+    // that shift is not the form on the screen, so it is not entered in silence.
+    expect(
+      await screen.findByText(
+        "Смена OCT26-005/S уже была создана раньше: дата 10.10.2026, в коробе 12 шт., план не задан. Откройте её или выберите другой товар.",
+      ),
+    ).toBeTruthy();
     expect(create.mock.calls.map(([body]) => body.requestId)).toEqual([REQUEST_ID, REQUEST_ID]);
     expect(create.mock.calls[1]?.[0]).toMatchObject({
       plannedQty: 500,
       productionDate: "2026-10-11",
     });
+    expect(handlers.enter).not.toHaveBeenCalled();
+    expect(handlers.onEntered).not.toHaveBeenCalled();
     expect(screen.queryByText(/Нет связи с хостом/)).toBeNull();
   });
 
-  it("enters the shift it made when it could not open it, without making another", async () => {
+  it.each([
+    ["the product", { productId: uuid(77) }],
+    ["the template", { boxTemplateId: uuid(78) }],
+    ["the day", { productionDate: "2026-10-09" }],
+    ["the capacity", { boxCapacity: 6 }],
+    ["the plan", { plannedQty: 500 }],
+  ] as const)("does not enter a shift that is not the form's in %s", async (_name, patch) => {
+    const { handlers } = renderNew(await copiesOf(CATALOG), {
+      create: async () => ({ ...MADE, ...patch }),
+    });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    expect(await screen.findByText(/Смена OCT26-005\/S уже была создана раньше/)).toBeTruthy();
+    await settle();
+    expect(handlers.enter).not.toHaveBeenCalled();
+    expect(handlers.onEntered).not.toHaveBeenCalled();
+    // Nothing offers to make the shift again.
+    expect(screen.queryByRole("button", { name: "Создать и открыть" })).toBeNull();
+  });
+
+  it("says what the shift that was made before is, and opens it as it is on request", async () => {
+    const { handlers } = renderNew(await copiesOf(CATALOG), {
+      create: async () => ({
+        ...MADE,
+        productionDate: "2026-10-09",
+        boxCapacity: 6,
+        plannedQty: 500,
+      }),
+    });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    expect(
+      await screen.findByText(
+        "Смена OCT26-005/S уже была создана раньше: дата 09.10.2026, в коробе 6 шт., план 500 шт. Откройте её или выберите другой товар.",
+      ),
+    ).toBeTruthy();
+    // The form is the host's shift now, and stays still.
+    expect(screen.getByLabelText("План, шт.")).toHaveProperty("disabled", true);
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть смену OCT26-005/S" }));
+    await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
+    expect(handlers.enter.mock.calls).toEqual([[PLANNED.id]]);
+    expect(handlers.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("goes back to the choice of a product from the notice of a shift made before, and enters nothing", async () => {
+    const { handlers } = renderNew(await copiesOf(CATALOG), {
+      create: async () => ({ ...MADE, boxCapacity: 6 }),
+    });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await screen.findByText(/уже была создана раньше/);
+    fireEvent.click(await screen.findByRole("button", { name: "Другой товар" }));
+    expect(await screen.findByLabelText("Название товара")).toBeTruthy();
+    expect(screen.queryByText(/уже была создана раньше/)).toBeNull();
+    expect(handlers.enter).not.toHaveBeenCalled();
+    // A form of its own after that, with a request of its own.
+    await chooseMilk();
+    expect(screen.getByLabelText("В коробе, шт.")).toHaveProperty("disabled", false);
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(2));
+    expect(handlers.create.mock.calls.map(([body]) => body.requestId)).toEqual([
+      REQUEST_ID,
+      NEXT_REQUEST_ID,
+    ]);
+  });
+
+  it("enters in silence a shift that is the form's, whatever the form was changed to", async () => {
+    const { handlers } = renderNew(await copiesOf(CATALOG), {
+      create: async (body) => ({
+        ...MADE,
+        productionDate: body.productionDate,
+        boxCapacity: body.boxCapacity ?? MADE.boxCapacity,
+        plannedQty: body.plannedQty ?? null,
+      }),
+    });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "На день раньше" }));
+    fireEvent.change(screen.getByLabelText("План, шт."), { target: { value: "1200" } });
+    fireEvent.change(screen.getByLabelText("В коробе, шт."), { target: { value: "6" } });
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText(/уже была создана раньше/)).toBeNull();
+    expect(screen.queryByText(/создана, но не открыта/)).toBeNull();
+  });
+
+  it("keeps the shift it made when it could not open it: the form is frozen, and the button only opens", async () => {
     const busy = new HostError({
       kind: "api",
       code: "conflict",
@@ -1161,19 +1291,105 @@ describe("a request to create a shift", () => {
       "Смена OCT26-005/S создана, но не открыта. Эту смену уже открыла другая станция.",
     );
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Создать и открыть" })).toHaveProperty(
+      expect(screen.getByRole("button", { name: "Открыть смену OCT26-005/S" })).toHaveProperty(
         "disabled",
         false,
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    // The shift is made; the date, the capacity and the plan are its own now.
+    expect(screen.queryByRole("button", { name: "Создать и открыть" })).toBeNull();
+    for (const name of ["На день раньше", "На день позже"]) {
+      expect(screen.getByRole("button", { name })).toHaveProperty("disabled", true);
+    }
+    expect(screen.getByLabelText("План, шт.")).toHaveProperty("disabled", true);
+    expect(screen.getByLabelText("В коробе, шт.")).toHaveProperty("disabled", true);
+    fireEvent.click(screen.getByRole("button", { name: "Открыть смену OCT26-005/S" }));
     await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
-    expect(handlers.create.mock.calls.map(([body]) => body.requestId)).toEqual([
-      REQUEST_ID,
-      REQUEST_ID,
-    ]);
+    // The second press made nothing: it entered the shift that was kept.
+    expect(handlers.create).toHaveBeenCalledTimes(1);
     expect(enter.mock.calls).toEqual([[PLANNED.id], [PLANNED.id]]);
     expect(screen.queryByText(/создана, но не открыта/)).toBeNull();
+  });
+  it("freezes the choice of a template too once the shift is made", async () => {
+    const busy = new HostError({
+      kind: "api",
+      code: "conflict",
+      status: 409,
+      message: "no",
+      details: { constraint: "shift_busy" },
+    });
+    const { handlers } = renderNew(
+      await copiesOf([
+        ...changed("org_profile", { defaultBoxTemplateId: null }),
+        productItem(4, "Сметана 20%", GTINS[3], { chzProductGroupCode: 15 }),
+        boxTemplateItem("5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1b", "Короб 100×150"),
+      ]),
+      {
+        create: async (body) => ({
+          ...MADE,
+          productId: body.productId,
+          boxTemplateId: body.boxTemplateId,
+        }),
+        enter: async () => Promise.reject(busy),
+      },
+    );
+    fireEvent.change(await screen.findByLabelText("Название товара"), {
+      target: { value: "смет" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: `Сметана 20% — ${GTINS[3]}` }));
+    fireEvent.click(await screen.findByRole("button", { name: "Короб 100×150" }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await screen.findByText(/создана, но не открыта/);
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Открыть смену OCT26-005/S" })).toHaveProperty(
+        "disabled",
+        false,
+      ),
+    );
+    expect(screen.getByRole("button", { name: "Короб 100×150" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Коробка 58×40" })).toHaveProperty("disabled", true);
+    expect(handlers.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers the templates that fit when the host no longer takes the one the rule chose", async () => {
+    const stale = new HostError({
+      kind: "api",
+      code: "validation_failed",
+      status: 400,
+      message: "no",
+      details: { field: "boxTemplateId" },
+    });
+    const create = vi
+      .fn<(create: DeviceShiftCreate) => Promise<DeviceShift>>()
+      .mockRejectedValueOnce(stale)
+      .mockImplementation(async (body) => ({ ...MADE, boxTemplateId: body.boxTemplateId }));
+    const { handlers } = renderNew(await copiesOf(CATALOG), { create });
+    await chooseMilk();
+    // The rule fixed the template: there is nothing to choose, yet.
+    expect(screen.getByText("Шаблон этикетки короба: Молоко 58×40")).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Шаблон этикетки короба" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    expect(
+      await screen.findByText(
+        "Шаблон этикетки больше не подходит товару. Выберите другой шаблон или обратитесь в офис.",
+      ),
+    ).toBeTruthy();
+    // Now the operator can act: the choice is shown, with none taken.
+    const group = screen.getByRole("group", { name: "Шаблон этикетки короба" });
+    expect(screen.getByText("Выберите шаблон этикетки короба.")).toBeTruthy();
+    expect(within(group).getByRole("button", { name: "Молоко 58×40" })).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Создать и открыть" })).toHaveProperty(
+        "disabled",
+        true,
+      ),
+    );
+    fireEvent.click(within(group).getByRole("button", { name: "Коробка 58×40" }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
+    // Nothing was made by the refusal, so the id is the same.
+    expect(create.mock.calls.map(([body]) => body.requestId)).toEqual([REQUEST_ID, REQUEST_ID]);
+    expect(create.mock.calls[1]?.[0].boxTemplateId).not.toBe(MILK_TEMPLATE);
   });
 
   it("starts a form of its own, with a request of its own, for every product chosen", async () => {
@@ -1274,6 +1490,28 @@ describe("the creation of a shift, apart from its screen", () => {
         details: { field: "boxTemplateId" },
       }),
       "template",
+    ],
+    [
+      "a product that is gone",
+      new HostError({
+        kind: "api",
+        code: "validation_failed",
+        status: 400,
+        message: "x",
+        details: { field: "productId" },
+      }),
+      "product_inactive",
+    ],
+    [
+      "a line that is off",
+      new HostError({
+        kind: "api",
+        code: "validation_failed",
+        status: 400,
+        message: "x",
+        details: { field: "lineId" },
+      }),
+      "no_line",
     ],
     [
       "another field",
