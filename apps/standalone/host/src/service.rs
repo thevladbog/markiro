@@ -95,6 +95,10 @@ fn run(paths: &HostPaths) -> Result<(), BoxError> {
         ))?;
         host.stop().await
     });
+    // A write to an unreachable network folder may still block a thread; a
+    // plain drop of the runtime would wait for it while the service manager
+    // waits for the process (`crate::RUNTIME_SHUTDOWN_TIMEOUT`).
+    crate::shutdown_runtime(runtime);
 
     let exit_code = if result.is_ok() {
         ServiceExitCode::Win32(0)

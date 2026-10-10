@@ -8,6 +8,9 @@ use sqlx::SqliteConnection;
 /// the audit screen (plan 5) translates one list.
 pub mod actions {
     pub const HOST_BOOTSTRAP: &str = "host.bootstrap";
+    /// `markiro-host restore` put a copy back (plan РК); the host is the
+    /// actor.
+    pub const HOST_RESTORE: &str = "host.restore";
     pub const DEVICE_LOCAL_PAIR: &str = "device.local_pair";
     pub const OFFICE_LOGIN: &str = "office.login";
     pub const OFFICE_LOGOUT: &str = "office.logout";

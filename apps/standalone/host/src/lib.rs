@@ -14,6 +14,7 @@ pub mod logging;
 pub mod network;
 pub mod pairing_code;
 pub mod rate_limit;
+pub mod restore;
 pub mod routes;
 pub mod secrets;
 pub mod server;
@@ -34,6 +35,27 @@ pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// How long `stop` waits for open connections before aborting them.
 const SHUTDOWN_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// How long a process waits for blocking threads when its runtime ends
+/// (`main.rs` and `service.rs`). A plain drop of a runtime waits for them
+/// without limit, and a write to an unreachable network folder (the second
+/// folder of copies, a copy on a share) can block its thread for minutes with
+/// nothing to cancel it: the process would never exit, and the service
+/// manager would show a stopped host as still stopping. Five seconds after
+/// `RunningHost::stop` (which already gives the worker 10) fits Windows'
+/// 30-second stop hint; whatever still runs then is abandoned with the
+/// process.
+pub const RUNTIME_SHUTDOWN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// End `runtime`, waiting no longer than `limit` for its blocking threads.
+pub fn shutdown_runtime_within(runtime: tokio::runtime::Runtime, limit: std::time::Duration) {
+    runtime.shutdown_timeout(limit);
+}
+
+/// [`shutdown_runtime_within`] [`RUNTIME_SHUTDOWN_TIMEOUT`].
+pub fn shutdown_runtime(runtime: tokio::runtime::Runtime) {
+    shutdown_runtime_within(runtime, RUNTIME_SHUTDOWN_TIMEOUT);
+}
 
 /// How to start the host. The default listens on every interface at the
 /// configured port; tests bind `127.0.0.1:0`.
@@ -131,4 +153,52 @@ pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHo
         pool,
         _lock: lock,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    #[test]
+    fn a_blocking_thread_that_never_returns_cannot_hold_the_process_back() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let (started, running) = std::sync::mpsc::channel();
+        runtime.spawn_blocking(move || {
+            started.send(()).unwrap();
+            std::thread::sleep(Duration::from_secs(8));
+        });
+        running.recv().unwrap();
+        let begun = Instant::now();
+        shutdown_runtime_within(runtime, Duration::from_millis(200));
+        assert!(
+            begun.elapsed() < Duration::from_secs(4),
+            "the runtime waited for its blocking thread: {:?}",
+            begun.elapsed()
+        );
+    }
+
+    #[test]
+    fn the_process_waits_for_a_blocked_thread_for_the_documented_time_and_no_longer() {
+        assert_eq!(RUNTIME_SHUTDOWN_TIMEOUT, Duration::from_secs(5));
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let (started, running) = std::sync::mpsc::channel();
+        runtime.spawn_blocking(move || {
+            started.send(()).unwrap();
+            std::thread::sleep(RUNTIME_SHUTDOWN_TIMEOUT + Duration::from_secs(4));
+        });
+        running.recv().unwrap();
+        let begun = Instant::now();
+        shutdown_runtime(runtime);
+        let waited = begun.elapsed();
+        assert!(
+            waited >= RUNTIME_SHUTDOWN_TIMEOUT - Duration::from_millis(500),
+            "{waited:?}"
+        );
+        assert!(
+            waited < RUNTIME_SHUTDOWN_TIMEOUT + Duration::from_secs(2),
+            "the runtime waited for its blocking thread: {waited:?}"
+        );
+    }
 }
