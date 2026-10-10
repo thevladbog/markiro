@@ -13,10 +13,10 @@ use markiro_host::routes::facts::{receive_facts, IncomingFacts};
 use markiro_proto::DeviceKind;
 use serde_json::{json, Value};
 use support::app::{
-    accepted, admin, audit_rows, box_closed, box_id, code, code_hash, fact, fact_rows,
-    host_revision, instant, issue_block, members_digest, ok_scan, open_floor, pair_device,
-    plan_shift, receipts, record_id, rejected, request, send_facts, shift_body, shift_setup, sscc,
-    sscc_under, with_device, Admin, Floor,
+    accepted, admin, audit_rows, box_closed, box_exception, box_id, code, code_hash, fact,
+    fact_rows, host_revision, instant, issue_block, members_digest, ok_scan, open_floor,
+    pair_device, plan_shift, receipts, record_id, rejected, request, send_facts, shift_body,
+    shift_setup, sscc, sscc_under, with_device, Admin, Floor,
 };
 
 /// A scan of `verdict` at `at`, with no box; `code` and `source` as given.
@@ -1640,6 +1640,693 @@ async fn a_box_closes_only_with_an_sscc_issued_to_its_device_for_its_shift() {
     );
     assert_eq!(consumed_through(&admin, &block).await, Some(3499));
     assert_eq!(box_row(&admin, &box_id(3)).await[1], Value::Null);
+}
+
+/// A box's label checks: `(verified at, skipped at)`.
+async fn label_checks(admin: &Admin, id: &str) -> (Option<String>, Option<String>) {
+    sqlx::query_as("SELECT print_verified_at, print_skipped_at FROM boxes WHERE id = ?")
+        .bind(id)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_label_check_marks_a_closed_box_of_its_own() {
+    let (admin, floor) = floor().await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let shift = floor.shift.as_str();
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[
+            fact(
+                &record_id(1),
+                "scan",
+                shift,
+                ok_scan(1, &box_id(1), &instant(1, 0)),
+            ),
+            fact(
+                &record_id(2),
+                "scan",
+                shift,
+                ok_scan(2, &box_id(2), &instant(2, 0)),
+            ),
+            fact(
+                &record_id(3),
+                "box_closed",
+                shift,
+                box_closed(
+                    &box_id(1),
+                    &block,
+                    1500,
+                    &[1],
+                    &instant(1, 0),
+                    &instant(10, 0),
+                ),
+            ),
+        ],
+    )
+    .await;
+    let label = |n: u32, box_n: u32, outcome: &str, at: &str| {
+        fact(
+            &record_id(n),
+            "box_label",
+            shift,
+            json!({ "boxId": box_id(box_n), "outcome": outcome, "at": at }),
+        )
+    };
+    let kept = fact_rows(&admin.app).await;
+    let refused = vec![
+        label(10, 2, "verified", &instant(11, 0)),
+        label(11, 9, "verified", &instant(11, 0)),
+        label(12, 1, "printed", &instant(11, 0)),
+        label(13, 1, "verified", "2026-10-08T06:00:11Z"),
+        fact(
+            &record_id(14),
+            "box_label",
+            shift,
+            json!({ "boxId": "box", "outcome": "verified", "at": instant(11, 0) }),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &refused).await,
+        vec![
+            rejected(Some(&record_id(10)), "box_state", None),
+            rejected(Some(&record_id(11)), "box_unknown", None),
+            rejected(Some(&record_id(12)), "invalid_record", Some("data")),
+            rejected(Some(&record_id(13)), "invalid_record", Some("data.at")),
+            rejected(Some(&record_id(14)), "invalid_record", Some("data.boxId")),
+        ]
+    );
+    assert_eq!(label_checks(&admin, &box_id(1)).await, (None, None));
+    assert_eq!(label_checks(&admin, &box_id(2)).await, (None, None));
+    // A skip, then (after a reprint) a check that matched.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                label(20, 1, "skipped", &instant(12, 0)),
+                label(21, 1, "verified", &instant(13, 0))
+            ]
+        )
+        .await,
+        vec![accepted(&record_id(20)), accepted(&record_id(21))]
+    );
+    assert_eq!(
+        label_checks(&admin, &box_id(1)).await,
+        (Some(instant(13, 0)), Some(instant(12, 0)))
+    );
+    let mut grown = kept.clone();
+    grown["fact_receipts"] = json!(kept["fact_receipts"].as_i64().unwrap() + 7);
+    assert_eq!(fact_rows(&admin.app).await, grown);
+}
+
+/// The exceptions as the host keeps them: `(record, kind, box, code, scan
+/// instant, reason, words, operator, occurred)`.
+async fn exception_rows(admin: &Admin) -> Vec<Value> {
+    type ExceptionRow = (
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        String,
+    );
+    let rows: Vec<ExceptionRow> = sqlx::query_as(
+        "SELECT record_id, kind, box_id, code_hash, target_scanned_at, reason_code, \
+         reason_text, operator_id, occurred_at FROM box_exceptions ORDER BY record_id",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    rows.into_iter()
+        .map(|row| json!([row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8]))
+        .collect()
+}
+
+#[tokio::test]
+async fn an_undo_or_a_clear_takes_codes_out_of_an_open_box_and_frees_them() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let colleague = open_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let shift = floor.shift.as_str();
+    let scan = |n: u32, code: u32, box_n: u32, second: u32| {
+        fact(
+            &record_id(n),
+            "scan",
+            shift,
+            ok_scan(code, &box_id(box_n), &instant(second, 0)),
+        )
+    };
+    // Codes 1–3 in box 1; code 4 there too, but the colleague scanned it
+    // earlier.
+    receipts(
+        &admin.app,
+        &colleague.key,
+        &[fact(
+            &record_id(90),
+            "scan",
+            &colleague.shift,
+            ok_scan(4, &box_id(9), &instant(0, 0)),
+        )],
+    )
+    .await;
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[
+            scan(1, 1, 1, 1),
+            scan(2, 2, 1, 2),
+            scan(3, 3, 1, 3),
+            scan(4, 4, 1, 4),
+        ],
+    )
+    .await;
+    let undo = |n: u32, code: u32, second: u32| {
+        let mut data = box_exception("undo", &box_id(1), &instant(second, 0));
+        data["codeHash"] = json!(code_hash(code));
+        data["targetScannedAt"] = json!(instant(code, 0));
+        fact(&record_id(n), "box_exception", shift, data)
+    };
+    let mut undo_three = undo(10, 3, 20);
+    undo_three["operatorId"] = json!(OPERATOR);
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[undo_three, undo(11, 4, 21)]).await,
+        vec![accepted(&record_id(10)), accepted(&record_id(11))]
+    );
+    // Code 3 left the box and is free; the undo of code 4, whose scan lost
+    // the code, took nothing out, but is kept.
+    let check = |hash: String| {
+        let app = &admin.app;
+        let key = floor.key.clone();
+        async move {
+            app.send(support::app::empty(with_device(
+                request("GET", &format!("/v1/device/codes/{hash}")),
+                &key,
+            )))
+            .await
+            .1["status"]
+                .clone()
+        }
+    };
+    assert_eq!(check(code_hash(3)).await, json!("free"));
+    assert_eq!(check(code_hash(4)).await, json!("taken"));
+    assert_eq!(
+        items(&admin, &box_id(1)).await,
+        vec![
+            json!([record_id(1), code_hash(1), instant(1, 0), null, null]),
+            json!([record_id(2), code_hash(2), instant(2, 0), null, null]),
+            json!([
+                record_id(3),
+                code_hash(3),
+                instant(3, 0),
+                instant(20, 0),
+                null
+            ]),
+        ]
+    );
+    // Code 3 scanned again goes back in; the box closes with its live codes.
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[scan(12, 3, 1, 22)]).await,
+        vec![accepted(&record_id(12))]
+    );
+    assert_eq!(check(code_hash(3)).await, json!("taken"));
+    // A clear takes every live code out of box 2 and frees them.
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[scan(13, 5, 2, 23), scan(14, 6, 2, 24)],
+    )
+    .await;
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(
+                &record_id(15),
+                "box_exception",
+                shift,
+                box_exception("clear", &box_id(2), &instant(25, 0))
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(15))]
+    );
+    assert_eq!(check(code_hash(5)).await, json!("free"));
+    assert_eq!(check(code_hash(6)).await, json!("free"));
+    assert_eq!(
+        items(&admin, &box_id(2)).await,
+        vec![
+            json!([
+                record_id(13),
+                code_hash(5),
+                instant(23, 0),
+                instant(25, 0),
+                null
+            ]),
+            json!([
+                record_id(14),
+                code_hash(6),
+                instant(24, 0),
+                instant(25, 0),
+                null
+            ]),
+        ]
+    );
+    // The cleared box stays open for the next code.
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[scan(16, 7, 2, 26)]).await,
+        vec![accepted(&record_id(16))]
+    );
+    assert_eq!(
+        exception_rows(&admin).await,
+        vec![
+            json!([
+                record_id(10),
+                "undo",
+                box_id(1),
+                code_hash(3),
+                instant(3, 0),
+                null,
+                null,
+                OPERATOR,
+                instant(20, 0)
+            ]),
+            json!([
+                record_id(11),
+                "undo",
+                box_id(1),
+                code_hash(4),
+                instant(4, 0),
+                null,
+                null,
+                null,
+                instant(21, 0)
+            ]),
+            json!([
+                record_id(15),
+                "clear",
+                box_id(2),
+                null,
+                null,
+                null,
+                null,
+                null,
+                instant(25, 0)
+            ]),
+        ]
+    );
+    // Box 1 closes with the codes it holds now: the digest of 1, 2 and 3.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(
+                &record_id(17),
+                "box_closed",
+                shift,
+                box_closed(
+                    &box_id(1),
+                    &block,
+                    1500,
+                    &[1, 2, 3],
+                    &instant(1, 0),
+                    &instant(30, 0)
+                )
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(17))]
+    );
+    assert_eq!(box_row(&admin, &box_id(1)).await[7], json!(true));
+    // A closed box takes neither.
+    let kept = fact_rows(&admin.app).await;
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                undo(18, 1, 31),
+                fact(
+                    &record_id(19),
+                    "box_exception",
+                    shift,
+                    box_exception("clear", &box_id(1), &instant(32, 0))
+                )
+            ]
+        )
+        .await,
+        vec![
+            rejected(Some(&record_id(18)), "box_state", None),
+            rejected(Some(&record_id(19)), "box_state", None)
+        ]
+    );
+    let mut grown = kept.clone();
+    grown["fact_receipts"] = json!(kept["fact_receipts"].as_i64().unwrap() + 2);
+    assert_eq!(fact_rows(&admin.app).await, grown);
+}
+
+#[tokio::test]
+async fn a_reprint_or_a_disassembly_needs_a_closed_box_and_a_reason_code() {
+    let (admin, floor) = floor().await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let shift = floor.shift.as_str();
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[
+            fact(
+                &record_id(1),
+                "scan",
+                shift,
+                ok_scan(1, &box_id(1), &instant(1, 0)),
+            ),
+            fact(
+                &record_id(2),
+                "scan",
+                shift,
+                ok_scan(2, &box_id(1), &instant(2, 0)),
+            ),
+            fact(
+                &record_id(3),
+                "scan",
+                shift,
+                ok_scan(3, &box_id(2), &instant(3, 0)),
+            ),
+            fact(
+                &record_id(4),
+                "box_closed",
+                shift,
+                box_closed(
+                    &box_id(1),
+                    &block,
+                    1500,
+                    &[1, 2],
+                    &instant(1, 0),
+                    &instant(10, 0),
+                ),
+            ),
+        ],
+    )
+    .await;
+    let exception = |n: u32, kind: &str, box_n: u32, fields: Value| {
+        let mut data = box_exception(kind, &box_id(box_n), &instant(20 + n, 0));
+        for (key, value) in fields.as_object().unwrap() {
+            data[key] = value.clone();
+        }
+        fact(&record_id(n), "box_exception", shift, data)
+    };
+    let kept = fact_rows(&admin.app).await;
+    let refused = vec![
+        // The fields of each kind.
+        exception(10, "undo", 2, json!({ "targetScannedAt": instant(3, 0) })),
+        exception(11, "undo", 2, json!({ "codeHash": code_hash(3) })),
+        exception(
+            12,
+            "undo",
+            2,
+            json!({
+                "codeHash": code_hash(3), "targetScannedAt": instant(3, 0),
+                "reasonCode": "other"
+            }),
+        ),
+        exception(13, "clear", 2, json!({ "codeHash": code_hash(3) })),
+        exception(14, "clear", 2, json!({ "targetScannedAt": instant(3, 0) })),
+        exception(15, "clear", 2, json!({ "reasonText": "Неверный короб" })),
+        exception(16, "reprint", 1, json!({})),
+        exception(17, "reprint", 1, json!({ "reasonCode": "wrong_product" })),
+        exception(18, "disassemble", 1, json!({ "reasonCode": "printer_jam" })),
+        exception(
+            19,
+            "reprint",
+            1,
+            json!({ "reasonCode": "damaged_label", "reasonText": "Смята" }),
+        ),
+        exception(
+            20,
+            "reprint",
+            1,
+            json!({ "reasonCode": "other", "reasonText": "   " }),
+        ),
+        exception(
+            21,
+            "reprint",
+            1,
+            json!({ "reasonCode": "other", "reasonText": "Я".repeat(201) }),
+        ),
+        exception(
+            22,
+            "reprint",
+            1,
+            json!({ "reasonCode": "other", "reasonText": "Смята\tнаполовину" }),
+        ),
+        exception(
+            23,
+            "reprint",
+            1,
+            json!({ "reasonCode": "other", "codeHash": code_hash(1) }),
+        ),
+        exception(24, "teleport", 1, json!({})),
+        exception(
+            25,
+            "reprint",
+            1,
+            json!({ "reasonCode": "damaged_label", "occurredAt": "now" }),
+        ),
+        exception(
+            26,
+            "undo",
+            2,
+            json!({ "codeHash": "C0DE", "targetScannedAt": instant(3, 0) }),
+        ),
+        // An open box is reprinted or taken apart by no one.
+        exception(27, "reprint", 2, json!({ "reasonCode": "damaged_label" })),
+        exception(
+            28,
+            "disassemble",
+            2,
+            json!({ "reasonCode": "wrong_quantity" }),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &refused).await,
+        vec![
+            rejected(
+                Some(&record_id(10)),
+                "invalid_record",
+                Some("data.codeHash")
+            ),
+            rejected(
+                Some(&record_id(11)),
+                "invalid_record",
+                Some("data.targetScannedAt")
+            ),
+            rejected(
+                Some(&record_id(12)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+            rejected(
+                Some(&record_id(13)),
+                "invalid_record",
+                Some("data.codeHash")
+            ),
+            rejected(
+                Some(&record_id(14)),
+                "invalid_record",
+                Some("data.targetScannedAt")
+            ),
+            rejected(
+                Some(&record_id(15)),
+                "invalid_record",
+                Some("data.reasonText")
+            ),
+            rejected(
+                Some(&record_id(16)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+            rejected(
+                Some(&record_id(17)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+            rejected(
+                Some(&record_id(18)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+            rejected(
+                Some(&record_id(19)),
+                "invalid_record",
+                Some("data.reasonText")
+            ),
+            rejected(
+                Some(&record_id(20)),
+                "invalid_record",
+                Some("data.reasonText")
+            ),
+            rejected(
+                Some(&record_id(21)),
+                "invalid_record",
+                Some("data.reasonText")
+            ),
+            rejected(
+                Some(&record_id(22)),
+                "invalid_record",
+                Some("data.reasonText")
+            ),
+            rejected(
+                Some(&record_id(23)),
+                "invalid_record",
+                Some("data.codeHash")
+            ),
+            rejected(Some(&record_id(24)), "invalid_record", Some("data")),
+            rejected(
+                Some(&record_id(25)),
+                "invalid_record",
+                Some("data.occurredAt")
+            ),
+            rejected(
+                Some(&record_id(26)),
+                "invalid_record",
+                Some("data.codeHash")
+            ),
+            rejected(Some(&record_id(27)), "box_state", None),
+            rejected(Some(&record_id(28)), "box_state", None),
+        ]
+    );
+    let mut grown = kept.clone();
+    grown["fact_receipts"] = json!(kept["fact_receipts"].as_i64().unwrap() + 19);
+    assert_eq!(fact_rows(&admin.app).await, grown);
+
+    // A reprint with words for `other` (trimmed, 200 characters at most),
+    // then the box taken apart: its codes are free, its SSCC stays.
+    let words = format!("  {}  ", "Я".repeat(200));
+    let accepted_ones = vec![
+        exception(30, "reprint", 1, json!({ "reasonCode": "damaged_label" })),
+        exception(
+            31,
+            "reprint",
+            1,
+            json!({ "reasonCode": "other", "reasonText": words }),
+        ),
+        exception(
+            32,
+            "disassemble",
+            1,
+            json!({ "reasonCode": "wrong_quantity" }),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &accepted_ones).await,
+        vec![
+            accepted(&record_id(30)),
+            accepted(&record_id(31)),
+            accepted(&record_id(32))
+        ]
+    );
+    let taken_apart: (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT disassembled_at, sscc FROM boxes WHERE id = ?")
+            .bind(box_id(1))
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(taken_apart, (Some(instant(52, 0)), Some(sscc(1500))));
+    assert_eq!(
+        items(&admin, &box_id(1)).await,
+        vec![
+            json!([
+                record_id(1),
+                code_hash(1),
+                instant(1, 0),
+                instant(52, 0),
+                null
+            ]),
+            json!([
+                record_id(2),
+                code_hash(2),
+                instant(2, 0),
+                instant(52, 0),
+                null
+            ]),
+        ]
+    );
+    assert_eq!(
+        owners(&admin).await,
+        vec![json!([
+            code_hash(3),
+            record_id(3),
+            floor.shift,
+            floor.station,
+            box_id(2),
+            instant(3, 0)
+        ])]
+    );
+    let rows = exception_rows(&admin).await;
+    assert_eq!(
+        rows[1],
+        json!([
+            record_id(31),
+            "reprint",
+            box_id(1),
+            null,
+            null,
+            "other",
+            "Я".repeat(200),
+            null,
+            instant(51, 0)
+        ])
+    );
+    assert_eq!(rows.len(), 3);
+    // A box taken apart is reprinted and taken apart no more; its codes go
+    // into another box; its SSCC closes no other box.
+    let mut reuse = box_closed(
+        &box_id(2),
+        &block,
+        1500,
+        &[3],
+        &instant(3, 0),
+        &instant(60, 0),
+    );
+    reuse["sscc"] = json!(sscc(1500));
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                exception(40, "reprint", 1, json!({ "reasonCode": "damaged_label" })),
+                exception(
+                    41,
+                    "disassemble",
+                    1,
+                    json!({ "reasonCode": "wrong_quantity" })
+                ),
+                fact(
+                    &record_id(42),
+                    "scan",
+                    shift,
+                    ok_scan(1, &box_id(2), &instant(42, 0))
+                ),
+                fact(&record_id(43), "box_closed", shift, reuse),
+            ]
+        )
+        .await,
+        vec![
+            rejected(Some(&record_id(40)), "box_state", None),
+            rejected(Some(&record_id(41)), "box_state", None),
+            accepted(&record_id(42)),
+            rejected(Some(&record_id(43)), "sscc_taken", None),
+        ]
+    );
 }
 
 // Tests added beyond the plan's: each pins what a one-line mutant of the
@@ -3439,4 +4126,1035 @@ async fn a_close_is_written_with_its_batch_or_not_at_all() {
         vec![accepted(&record_id(11)), accepted(&record_id(12))]
     );
     assert_eq!(consumed_through(&admin, &block).await, Some(1501));
+}
+
+/// A closed box 1 (code 1) and an open box 2 (code 2) of the station on its
+/// first line, the way the exception tests below start.
+async fn closed_and_open_box(admin: &Admin, floor: &Floor, block: &Value) {
+    let shift = floor.shift.as_str();
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                fact(
+                    &record_id(1),
+                    "scan",
+                    shift,
+                    ok_scan(1, &box_id(1), &instant(1, 0))
+                ),
+                fact(
+                    &record_id(2),
+                    "scan",
+                    shift,
+                    ok_scan(2, &box_id(2), &instant(2, 0))
+                ),
+                fact(
+                    &record_id(3),
+                    "box_closed",
+                    shift,
+                    box_closed(
+                        &box_id(1),
+                        block,
+                        1500,
+                        &[1],
+                        &instant(1, 0),
+                        &instant(10, 0)
+                    )
+                ),
+            ]
+        )
+        .await,
+        vec![
+            accepted(&record_id(1)),
+            accepted(&record_id(2)),
+            accepted(&record_id(3))
+        ]
+    );
+}
+
+#[tokio::test]
+async fn an_exceptions_fields_are_checked_whole_before_the_box_and_every_listed_reason_is_taken() {
+    let (admin, floor) = floor().await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let shift = floor.shift.as_str();
+    closed_and_open_box(&admin, &floor, &block).await;
+    let exception = |n: u32, kind: &str, box_id: &str, fields: Value| {
+        let mut data = box_exception(kind, box_id, &instant(20 + n, 0));
+        for (key, value) in fields.as_object().unwrap() {
+            data[key] = value.clone();
+        }
+        fact(&record_id(n), "box_exception", shift, data)
+    };
+    let undo_fields =
+        |hash: String, target: &str| json!({ "codeHash": hash, "targetScannedAt": target });
+    let kept = fact_rows(&admin.app).await;
+    let refused = vec![
+        // The box id has the shape of a UUID (before the box is looked up).
+        exception(
+            10,
+            "reprint",
+            "box",
+            json!({ "reasonCode": "damaged_label" }),
+        ),
+        exception(
+            11,
+            "reprint",
+            &box_id(1).to_uppercase(),
+            json!({ "reasonCode": "damaged_label" }),
+        ),
+        // Instants as `toISOString` writes them, nothing else.
+        exception(
+            12,
+            "reprint",
+            &box_id(1),
+            json!({ "reasonCode": "damaged_label", "occurredAt": "2026-10-08T06:00:20Z" }),
+        ),
+        exception(
+            13,
+            "reprint",
+            &box_id(1),
+            json!({
+                "reasonCode": "damaged_label", "occurredAt": "2026-10-08T06:00:20.000+00:00"
+            }),
+        ),
+        exception(
+            14,
+            "undo",
+            &box_id(2),
+            undo_fields(code_hash(2), "2026-10-08T06:00:02Z"),
+        ),
+        exception(
+            15,
+            "undo",
+            &box_id(2),
+            undo_fields(code_hash(2), "2026-10-08T06:00:02.000+00:00"),
+        ),
+        // A code hash is 64 lower-case hex digits.
+        exception(
+            16,
+            "undo",
+            &box_id(2),
+            undo_fields(code_hash(0xabc).to_uppercase(), &instant(2, 0)),
+        ),
+        exception(
+            17,
+            "undo",
+            &box_id(2),
+            undo_fields(code_hash(2)[1..].to_owned(), &instant(2, 0)),
+        ),
+        // A reason is one of the kind's codes, spelled exactly.
+        exception(
+            18,
+            "reprint",
+            &box_id(1),
+            json!({ "reasonCode": "Damaged_label" }),
+        ),
+        exception(19, "reprint", &box_id(1), json!({ "reasonCode": "" })),
+        exception(
+            20,
+            "reprint",
+            &box_id(1),
+            json!({ "reasonCode": "wrong_product" }),
+        ),
+        exception(
+            21,
+            "disassemble",
+            &box_id(1),
+            json!({ "reasonCode": "damaged_label" }),
+        ),
+        // Words are text, and plain text.
+        exception(
+            22,
+            "reprint",
+            &box_id(1),
+            json!({ "reasonCode": "other", "reasonText": 5 }),
+        ),
+        exception(
+            23,
+            "reprint",
+            &box_id(1),
+            json!({ "reasonCode": "other", "reasonText": "в две\nстроки" }),
+        ),
+        exception(
+            24,
+            "reprint",
+            &box_id(1),
+            json!({ "reasonCode": "other", "reasonText": "" }),
+        ),
+        // A field the host does not know.
+        exception(
+            25,
+            "reprint",
+            &box_id(1),
+            json!({ "reasonCode": "other", "extra": 1 }),
+        ),
+        // The fields come before the box: a bad reason on an open box, a code
+        // on a clear of a closed one.
+        exception(26, "reprint", &box_id(2), json!({ "reasonCode": "bogus" })),
+        exception(27, "clear", &box_id(1), json!({ "codeHash": code_hash(1) })),
+        exception(
+            28,
+            "undo",
+            &box_id(9),
+            undo_fields("C0DE".to_owned(), &instant(1, 0)),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &refused).await,
+        vec![
+            rejected(Some(&record_id(10)), "invalid_record", Some("data.boxId")),
+            rejected(Some(&record_id(11)), "invalid_record", Some("data.boxId")),
+            rejected(
+                Some(&record_id(12)),
+                "invalid_record",
+                Some("data.occurredAt")
+            ),
+            rejected(
+                Some(&record_id(13)),
+                "invalid_record",
+                Some("data.occurredAt")
+            ),
+            rejected(
+                Some(&record_id(14)),
+                "invalid_record",
+                Some("data.targetScannedAt")
+            ),
+            rejected(
+                Some(&record_id(15)),
+                "invalid_record",
+                Some("data.targetScannedAt")
+            ),
+            rejected(
+                Some(&record_id(16)),
+                "invalid_record",
+                Some("data.codeHash")
+            ),
+            rejected(
+                Some(&record_id(17)),
+                "invalid_record",
+                Some("data.codeHash")
+            ),
+            rejected(
+                Some(&record_id(18)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+            rejected(
+                Some(&record_id(19)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+            rejected(
+                Some(&record_id(20)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+            rejected(
+                Some(&record_id(21)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+            rejected(Some(&record_id(22)), "invalid_record", Some("data")),
+            rejected(
+                Some(&record_id(23)),
+                "invalid_record",
+                Some("data.reasonText")
+            ),
+            rejected(
+                Some(&record_id(24)),
+                "invalid_record",
+                Some("data.reasonText")
+            ),
+            rejected(Some(&record_id(25)), "invalid_record", Some("data")),
+            rejected(
+                Some(&record_id(26)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+            rejected(
+                Some(&record_id(27)),
+                "invalid_record",
+                Some("data.codeHash")
+            ),
+            rejected(
+                Some(&record_id(28)),
+                "invalid_record",
+                Some("data.codeHash")
+            ),
+        ]
+    );
+    let mut grown = kept.clone();
+    grown["fact_receipts"] = json!(kept["fact_receipts"].as_i64().unwrap() + 19);
+    assert_eq!(fact_rows(&admin.app).await, grown);
+
+    // Each code of each list is taken, `other` also without words.
+    let reprints = [
+        "damaged_label",
+        "unreadable_label",
+        "printer_jam",
+        "quality_request",
+        "other",
+    ];
+    let disassemblies = [
+        "wrong_product",
+        "wrong_quantity",
+        "damaged_package",
+        "quality_rejected",
+        "other",
+    ];
+    // Boxes 3-7 close on their own code each, to be taken apart.
+    let mut setup_facts = Vec::new();
+    for (index, box_n) in (3u32..=7).enumerate() {
+        let n = u32::try_from(index).unwrap();
+        setup_facts.push(fact(
+            &record_id(100 + n),
+            "scan",
+            shift,
+            ok_scan(box_n, &box_id(box_n), &instant(30 + n, 0)),
+        ));
+        setup_facts.push(fact(
+            &record_id(110 + n),
+            "box_closed",
+            shift,
+            box_closed(
+                &box_id(box_n),
+                &block,
+                1501 + u64::from(n),
+                &[box_n],
+                &instant(30 + n, 0),
+                &instant(40 + n, 0),
+            ),
+        ));
+    }
+    assert!(receipts(&admin.app, &floor.key, &setup_facts)
+        .await
+        .iter()
+        .all(|receipt| receipt["outcome"] == "accepted"));
+    let mut taken = Vec::new();
+    for (index, reason) in reprints.iter().enumerate() {
+        let n = u32::try_from(index).unwrap();
+        taken.push(exception(
+            30 + n,
+            "reprint",
+            &box_id(1),
+            json!({ "reasonCode": reason }),
+        ));
+    }
+    for (index, reason) in disassemblies.iter().enumerate() {
+        let n = u32::try_from(index).unwrap();
+        let mut fields = json!({ "reasonCode": reason });
+        if *reason == "other" {
+            fields["reasonText"] = json!(" брак  ");
+        }
+        taken.push(exception(40 + n, "disassemble", &box_id(3 + n), fields));
+    }
+    let answered = receipts(&admin.app, &floor.key, &taken).await;
+    assert_eq!(
+        answered,
+        taken
+            .iter()
+            .map(|record| accepted(record["id"].as_str().unwrap()))
+            .collect::<Vec<_>>()
+    );
+    let reasons: Vec<(String, String, Option<String>, Option<String>)> = sqlx::query_as(
+        "SELECT record_id, kind, reason_code, reason_text FROM box_exceptions ORDER BY record_id",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let wanted: Vec<(String, String, Option<String>, Option<String>)> = reprints
+        .iter()
+        .enumerate()
+        .map(|(index, reason)| (30 + u32::try_from(index).unwrap(), "reprint", reason, None))
+        .chain(disassemblies.iter().enumerate().map(|(index, reason)| {
+            let words = (*reason == "other").then(|| "брак".to_owned());
+            (
+                40 + u32::try_from(index).unwrap(),
+                "disassemble",
+                reason,
+                words,
+            )
+        }))
+        .map(|(n, kind, reason, words)| {
+            (
+                record_id(n),
+                kind.to_owned(),
+                Some((*reason).to_owned()),
+                words,
+            )
+        })
+        .collect();
+    assert_eq!(reasons, wanted);
+}
+
+#[tokio::test]
+async fn an_exception_is_one_row_per_record_of_its_shift_and_device_whoever_sends_it_again() {
+    let (admin, floor) = floor().await;
+    let shift = floor.shift.as_str();
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[
+            fact(
+                &record_id(1),
+                "scan",
+                shift,
+                ok_scan(1, &box_id(1), &instant(1, 0)),
+            ),
+            fact(
+                &record_id(2),
+                "scan",
+                shift,
+                ok_scan(2, &box_id(1), &instant(2, 0)),
+            ),
+        ],
+    )
+    .await;
+    let clear = |n: u32, second: u32| {
+        fact(
+            &record_id(n),
+            "box_exception",
+            shift,
+            box_exception("clear", &box_id(1), &instant(second, 0)),
+        )
+    };
+    let mut other_clear = clear(10, 21);
+    other_clear["data"]["occurredAt"] = json!(instant(22, 0));
+    // The same record twice in a batch and again in the next, then the same
+    // id with other content, then a new record that clears the empty box.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[clear(10, 20), clear(10, 20), other_clear]
+        )
+        .await,
+        vec![
+            accepted(&record_id(10)),
+            accepted(&record_id(10)),
+            rejected(Some(&record_id(10)), "payload_mismatch", None)
+        ]
+    );
+    let rows_after_first = exception_rows(&admin).await;
+    assert_eq!(rows_after_first.len(), 1);
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[clear(10, 20)]).await,
+        vec![accepted(&record_id(10))]
+    );
+    assert_eq!(exception_rows(&admin).await, rows_after_first);
+    // A second clear of the emptied (still open) box is a record of its own:
+    // accepted and kept, taking nothing and keeping the first instants.
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[clear(11, 30)]).await,
+        vec![accepted(&record_id(11))]
+    );
+    let undo_one = {
+        let mut data = box_exception("undo", &box_id(1), &instant(31, 0));
+        data["codeHash"] = json!(code_hash(1));
+        data["targetScannedAt"] = json!(instant(1, 0));
+        fact(&record_id(12), "box_exception", shift, data)
+    };
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[undo_one]).await,
+        vec![accepted(&record_id(12))]
+    );
+    assert_eq!(exception_rows(&admin).await.len(), 3);
+    assert_eq!(
+        items(&admin, &box_id(1)).await,
+        vec![
+            json!([
+                record_id(1),
+                code_hash(1),
+                instant(1, 0),
+                instant(20, 0),
+                null
+            ]),
+            json!([
+                record_id(2),
+                code_hash(2),
+                instant(2, 0),
+                instant(20, 0),
+                null
+            ]),
+        ]
+    );
+    let kept: Vec<(String, String, String, i64)> = sqlx::query_as(
+        "SELECT record_id, shift_id, device_id, length(received_at) FROM box_exceptions \
+         ORDER BY record_id",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        kept,
+        [10, 11, 12]
+            .map(|n| (record_id(n), floor.shift.clone(), floor.station.clone(), 20))
+            .to_vec()
+    );
+    // The receipts are kept for the three records, the refused id not twice.
+    assert_eq!(fact_rows(&admin.app).await["fact_receipts"], json!(2 + 3));
+}
+
+#[tokio::test]
+async fn a_box_of_another_device_or_shift_is_unknown_to_a_label_check_and_to_every_exception() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let colleague = open_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    closed_and_open_box(&admin, &floor, &block).await;
+    // The colleague's open box 3 with code 3; a box of the colleague in
+    // this very shift (a second device on a shift comes with plan 2b).
+    receipts(
+        &admin.app,
+        &colleague.key,
+        &[fact(
+            &record_id(90),
+            "scan",
+            &colleague.shift,
+            ok_scan(3, &box_id(3), &instant(3, 0)),
+        )],
+    )
+    .await;
+    sqlx::query(
+        "INSERT INTO boxes (id, shift_id, device_id, opened_at, received_at) \
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(box_id(9))
+    .bind(&floor.shift)
+    .bind(&colleague.station)
+    .bind(instant(9, 0))
+    .bind(admin.app.state.timestamp())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let second = open_floor(&admin, &setup, &floor.key, &setup.line).await;
+    let aimed = |n: u32, shift: &str, kind: &str, box_n: u32, fields: Value| {
+        let mut data = box_exception(kind, &box_id(box_n), &instant(50 + n, 0));
+        for (key, value) in fields.as_object().unwrap() {
+            data[key] = value.clone();
+        }
+        fact(&record_id(n), "box_exception", shift, data)
+    };
+    let reason = json!({ "reasonCode": "damaged_label" });
+    let undo_three = json!({ "codeHash": code_hash(3), "targetScannedAt": instant(3, 0) });
+    let label = |n: u32, shift: &str, box_n: u32| {
+        fact(
+            &record_id(n),
+            "box_label",
+            shift,
+            json!({ "boxId": box_id(box_n), "outcome": "verified", "at": instant(60, 0) }),
+        )
+    };
+    let kept = fact_rows(&admin.app).await;
+    let batch = vec![
+        // The colleague's open box 3 from the station's own shift.
+        aimed(10, &floor.shift, "undo", 3, undo_three.clone()),
+        aimed(11, &floor.shift, "clear", 3, json!({})),
+        aimed(12, &floor.shift, "reprint", 3, reason.clone()),
+        aimed(
+            13,
+            &floor.shift,
+            "disassemble",
+            3,
+            json!({ "reasonCode": "wrong_product" }),
+        ),
+        label(14, &floor.shift, 3),
+        // The station's box 1 (closed) and box 2 (open) from another shift.
+        aimed(15, &second.shift, "reprint", 1, reason.clone()),
+        aimed(
+            16,
+            &second.shift,
+            "disassemble",
+            1,
+            json!({ "reasonCode": "wrong_product" }),
+        ),
+        aimed(17, &second.shift, "clear", 2, json!({})),
+        aimed(
+            18,
+            &second.shift,
+            "undo",
+            2,
+            json!({ "codeHash": code_hash(2), "targetScannedAt": instant(2, 0) }),
+        ),
+        label(19, &second.shift, 1),
+        // The colleague's box in this very shift.
+        aimed(20, &floor.shift, "clear", 9, json!({})),
+        aimed(21, &floor.shift, "reprint", 9, reason.clone()),
+        label(22, &floor.shift, 9),
+    ];
+    let expected: Vec<Value> = (10..=22)
+        .map(|n| rejected(Some(&record_id(n)), "box_unknown", None))
+        .collect();
+    assert_eq!(receipts(&admin.app, &floor.key, &batch).await, expected);
+    let mut grown = kept.clone();
+    grown["fact_receipts"] = json!(kept["fact_receipts"].as_i64().unwrap() + 13);
+    assert_eq!(fact_rows(&admin.app).await, grown);
+    assert_eq!(items(&admin, &box_id(3)).await.len(), 1);
+    assert_eq!(items(&admin, &box_id(3)).await[0][3], Value::Null);
+    assert_eq!(items(&admin, &box_id(2)).await[0][3], Value::Null);
+    assert_eq!(label_checks(&admin, &box_id(1)).await, (None, None));
+    assert_eq!(owners(&admin).await.len(), 3);
+}
+
+#[tokio::test]
+async fn a_code_freed_by_an_exception_is_claimed_again_by_the_earliest_scan_in_either_order() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let colleague = open_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let shift = floor.shift.as_str();
+    // Codes 1 and 2 in open box 1, code 3 in box 2, which closes.
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[
+            fact(
+                &record_id(1),
+                "scan",
+                shift,
+                ok_scan(1, &box_id(1), &instant(10, 0)),
+            ),
+            fact(
+                &record_id(2),
+                "scan",
+                shift,
+                ok_scan(2, &box_id(1), &instant(11, 0)),
+            ),
+            fact(
+                &record_id(3),
+                "scan",
+                shift,
+                ok_scan(3, &box_id(2), &instant(12, 0)),
+            ),
+            fact(
+                &record_id(4),
+                "box_closed",
+                shift,
+                box_closed(
+                    &box_id(2),
+                    &block,
+                    1500,
+                    &[3],
+                    &instant(12, 0),
+                    &instant(13, 0),
+                ),
+            ),
+        ],
+    )
+    .await;
+    // A clear frees 1 and 2; the disassembly of box 2 frees 3.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                fact(
+                    &record_id(5),
+                    "box_exception",
+                    shift,
+                    box_exception("clear", &box_id(1), &instant(14, 0))
+                ),
+                fact(&record_id(6), "box_exception", shift, {
+                    let mut data = box_exception("disassemble", &box_id(2), &instant(15, 0));
+                    data["reasonCode"] = json!("wrong_product");
+                    data
+                }),
+            ]
+        )
+        .await,
+        vec![accepted(&record_id(5)), accepted(&record_id(6))]
+    );
+    assert_eq!(owners(&admin).await, Vec::<Value>::new());
+    let scan = |floor: &Floor, n: u32, code: u32, box_n: u32, second: u32| {
+        fact(
+            &record_id(n),
+            "scan",
+            &floor.shift,
+            ok_scan(code, &box_id(box_n), &instant(second, 0)),
+        )
+    };
+    // Code 1: the colleague scans it late, then the station scans it at an
+    // earlier instant than that (and than the freed scan): the earliest wins.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &colleague.key,
+            &[scan(&colleague, 20, 1, 7, 50)]
+        )
+        .await,
+        vec![accepted(&record_id(20))]
+    );
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[scan(&floor, 21, 1, 3, 5)]).await,
+        vec![accepted(&record_id(21))]
+    );
+    // Code 2: the station scans it again, then the colleague's later scan
+    // loses.
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[scan(&floor, 22, 2, 3, 6)]).await,
+        vec![accepted(&record_id(22))]
+    );
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &colleague.key,
+            &[scan(&colleague, 23, 2, 7, 51)]
+        )
+        .await,
+        vec![json!({
+            "id": record_id(23), "outcome": "conflict",
+            "details": { "winner": {
+                "shiftId": floor.shift, "shiftNumber": floor.number,
+                "deviceId": floor.station, "scannedAt": instant(6, 0), "sameDevice": false
+            } }
+        })]
+    );
+    // Code 3, freed by a disassembly, goes to whoever scans it.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &colleague.key,
+            &[scan(&colleague, 24, 3, 7, 52)]
+        )
+        .await,
+        vec![accepted(&record_id(24))]
+    );
+    assert_eq!(
+        owners(&admin).await,
+        vec![
+            json!([
+                code_hash(1),
+                record_id(21),
+                floor.shift,
+                floor.station,
+                box_id(3),
+                instant(5, 0)
+            ]),
+            json!([
+                code_hash(2),
+                record_id(22),
+                floor.shift,
+                floor.station,
+                box_id(3),
+                instant(6, 0)
+            ]),
+            json!([
+                code_hash(3),
+                record_id(24),
+                colleague.shift,
+                colleague.station,
+                box_id(7),
+                instant(52, 0)
+            ]),
+        ]
+    );
+    // The colleague's scan of code 1 left its box when the earlier one took
+    // the code; the freed items of the exceptions stay removed.
+    let displaced = items(&admin, &box_id(7)).await;
+    assert_eq!(displaced.len(), 2);
+    assert_eq!(displaced[0][0], json!(record_id(20)));
+    assert!(displaced[0][4].is_string() && displaced[0][3].is_null());
+    assert_eq!(displaced[1][4], Value::Null);
+    assert_eq!(
+        items(&admin, &box_id(1))
+            .await
+            .iter()
+            .map(|item| item[3].clone())
+            .collect::<Vec<_>>(),
+        vec![json!(instant(14, 0)), json!(instant(14, 0))]
+    );
+}
+
+#[tokio::test]
+async fn an_exception_takes_out_only_live_items_of_its_own_box() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let colleague = open_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
+    let shift = floor.shift.as_str();
+    let scan = |n: u32, code: u32, box_n: u32, second: u32| {
+        fact(
+            &record_id(n),
+            "scan",
+            shift,
+            ok_scan(code, &box_id(box_n), &instant(second, 0)),
+        )
+    };
+    let undo = |n: u32, code: u32, box_n: u32, second: u32| {
+        let mut data = box_exception("undo", &box_id(box_n), &instant(second, 0));
+        data["codeHash"] = json!(code_hash(code));
+        data["targetScannedAt"] = json!(instant(code, 0));
+        fact(&record_id(n), "box_exception", shift, data)
+    };
+    // Box 1 holds codes 1-3, box 2 code 4, box 3 code 5; the colleague then
+    // scans code 5 at an earlier instant, which displaces the station's item.
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[
+            scan(1, 1, 1, 1),
+            scan(2, 2, 1, 2),
+            scan(3, 3, 1, 3),
+            scan(4, 4, 2, 4),
+            scan(5, 5, 3, 105),
+        ],
+    )
+    .await;
+    receipts(
+        &admin.app,
+        &colleague.key,
+        &[fact(
+            &record_id(90),
+            "scan",
+            &colleague.shift,
+            ok_scan(5, &box_id(9), &instant(5, 0)),
+        )],
+    )
+    .await;
+    let displaced = items(&admin, &box_id(3)).await;
+    assert!(displaced[0][4].is_string());
+    let owners_before = owners(&admin).await;
+    // An undo names a code of another open box of the station: kept, and
+    // nothing is taken out of either box.
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[undo(10, 4, 1, 20)]).await,
+        vec![accepted(&record_id(10))]
+    );
+    assert_eq!(items(&admin, &box_id(2)).await[0][3], Value::Null);
+    assert_eq!(owners(&admin).await, owners_before);
+    assert_eq!(exception_rows(&admin).await.len(), 1);
+    // Code 1 leaves box 1 at 21; the clear at 30 takes the rest and not it
+    // again.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                undo(11, 1, 1, 21),
+                fact(
+                    &record_id(12),
+                    "box_exception",
+                    shift,
+                    box_exception("clear", &box_id(1), &instant(30, 0))
+                )
+            ]
+        )
+        .await,
+        vec![accepted(&record_id(11)), accepted(&record_id(12))]
+    );
+    let removed: Vec<Value> = items(&admin, &box_id(1))
+        .await
+        .iter()
+        .map(|item| item[3].clone())
+        .collect();
+    assert_eq!(
+        removed,
+        vec![
+            json!(instant(21, 0)),
+            json!(instant(30, 0)),
+            json!(instant(30, 0))
+        ]
+    );
+    // A clear of box 3 does not touch the item the colleague's earlier scan
+    // displaced, and the colleague keeps the code.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(
+                &record_id(13),
+                "box_exception",
+                shift,
+                box_exception("clear", &box_id(3), &instant(31, 0))
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(13))]
+    );
+    assert_eq!(items(&admin, &box_id(3)).await, displaced);
+    // Box 2's item and the owners of codes 4 and 5 are as they were.
+    assert_eq!(items(&admin, &box_id(2)).await[0][3], Value::Null);
+    assert_eq!(
+        owners(&admin).await,
+        vec![
+            json!([
+                code_hash(4),
+                record_id(4),
+                floor.shift,
+                floor.station,
+                box_id(2),
+                instant(4, 0)
+            ]),
+            json!([
+                code_hash(5),
+                record_id(90),
+                colleague.shift,
+                colleague.station,
+                box_id(9),
+                instant(5, 0)
+            ]),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn a_reprint_changes_nothing_and_a_box_taken_apart_keeps_its_label_and_serial() {
+    let (admin, floor) = floor().await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let shift = floor.shift.as_str();
+    closed_and_open_box(&admin, &floor, &block).await;
+    let before = box_row(&admin, &box_id(1)).await;
+    let items_before = items(&admin, &box_id(1)).await;
+    let owners_before = owners(&admin).await;
+    let reprint = |n: u32| {
+        let mut data = box_exception("reprint", &box_id(1), &instant(20 + n, 0));
+        data["reasonCode"] = json!("printer_jam");
+        fact(&record_id(n), "box_exception", shift, data)
+    };
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[reprint(10), reprint(11)]).await,
+        vec![accepted(&record_id(10)), accepted(&record_id(11))]
+    );
+    let taken_apart = || async {
+        sqlx::query_scalar::<_, Option<String>>("SELECT disassembled_at FROM boxes WHERE id = ?")
+            .bind(box_id(1))
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap()
+    };
+    assert_eq!(taken_apart().await, None);
+    assert_eq!(box_row(&admin, &box_id(1)).await, before);
+    assert_eq!(items(&admin, &box_id(1)).await, items_before);
+    assert_eq!(owners(&admin).await, owners_before);
+    // The disassembly leaves the close as it was; the label of the box
+    // taken apart can still be checked (the box is closed), and its serial
+    // closes no other box whatever the check digit.
+    let mut disassemble = box_exception("disassemble", &box_id(1), &instant(30, 0));
+    disassemble["reasonCode"] = json!("damaged_package");
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                fact(&record_id(12), "box_exception", shift, disassemble),
+                fact(
+                    &record_id(13),
+                    "box_label",
+                    shift,
+                    json!({ "boxId": box_id(1), "outcome": "skipped", "at": instant(31, 0) })
+                )
+            ]
+        )
+        .await,
+        vec![accepted(&record_id(12)), accepted(&record_id(13))]
+    );
+    assert_eq!(taken_apart().await, Some(instant(30, 0)));
+    assert_eq!(box_row(&admin, &box_id(1)).await, before);
+    assert_eq!(
+        label_checks(&admin, &box_id(1)).await,
+        (None, Some(instant(31, 0)))
+    );
+    // The check marked that box and no other.
+    assert_eq!(label_checks(&admin, &box_id(2)).await, (None, None));
+    let mut off_by_a_digit = box_closed(
+        &box_id(2),
+        &block,
+        1500,
+        &[2],
+        &instant(2, 0),
+        &instant(40, 0),
+    );
+    off_by_a_digit["sscc"] = json!(sscc_off_by_a_digit(1500));
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(&record_id(14), "box_closed", shift, off_by_a_digit)]
+        )
+        .await,
+        vec![rejected(Some(&record_id(14)), "sscc_taken", None)]
+    );
+    assert_eq!(consumed_through(&admin, &block).await, Some(1500));
+    assert_eq!(box_row(&admin, &box_id(2)).await[1], Value::Null);
+}
+
+#[tokio::test]
+async fn an_exception_is_written_with_the_batch_or_not_at_all() {
+    let (admin, floor) = floor().await;
+    let shift = floor.shift.as_str();
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[
+            fact(
+                &record_id(1),
+                "scan",
+                shift,
+                ok_scan(1, &box_id(1), &instant(1, 0)),
+            ),
+            fact(
+                &record_id(2),
+                "scan",
+                shift,
+                ok_scan(2, &box_id(2), &instant(2, 0)),
+            ),
+        ],
+    )
+    .await;
+    sqlx::query(&format!(
+        "CREATE TRIGGER break_the_exception BEFORE INSERT ON box_exceptions \
+         WHEN NEW.record_id = '{}' BEGIN SELECT RAISE(ABORT, 'broken'); END",
+        record_id(11)
+    ))
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let clear = |n: u32, box_n: u32| {
+        fact(
+            &record_id(n),
+            "box_exception",
+            shift,
+            box_exception("clear", &box_id(box_n), &instant(20 + n, 0)),
+        )
+    };
+    // The second clear takes its items out and frees their codes before its
+    // exception row breaks: the first clear goes with it.
+    let batch = vec![clear(10, 1), clear(11, 2)];
+    let before_items = (
+        items(&admin, &box_id(1)).await,
+        items(&admin, &box_id(2)).await,
+    );
+    let before_owners = owners(&admin).await;
+    let empty = fact_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let (status, failed) = send_facts(&admin.app, &floor.key, &batch).await;
+    assert_eq!(
+        (status, failed["error"]["code"].clone()),
+        (StatusCode::INTERNAL_SERVER_ERROR, json!("internal"))
+    );
+    assert_eq!(fact_rows(&admin.app).await, empty);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(
+        (
+            items(&admin, &box_id(1)).await,
+            items(&admin, &box_id(2)).await
+        ),
+        before_items
+    );
+    assert_eq!(owners(&admin).await, before_owners);
+    sqlx::query("DROP TRIGGER break_the_exception")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        vec![accepted(&record_id(10)), accepted(&record_id(11))]
+    );
+    assert_eq!(owners(&admin).await, Vec::<Value>::new());
 }

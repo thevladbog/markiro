@@ -1628,6 +1628,8 @@ pub struct DeviceShiftCreate {
 pub enum FactKind {
     Scan,
     BoxClosed,
+    BoxLabel,
+    BoxException,
 }
 
 impl FactKind {
@@ -1635,6 +1637,8 @@ impl FactKind {
         match self {
             FactKind::Scan => "scan",
             FactKind::BoxClosed => "box_closed",
+            FactKind::BoxLabel => "box_label",
+            FactKind::BoxException => "box_exception",
         }
     }
 }
@@ -1784,6 +1788,66 @@ pub struct BoxClosedFact {
     pub closed_at: String,
     pub item_count: u32,
     pub membership_digest: String,
+}
+
+/// How a box's printed label was checked.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LabelOutcome {
+    /// The operator scanned the label's SSCC and it matched.
+    Verified,
+    /// The operator skipped the check.
+    Skipped,
+}
+
+/// `data` of a `box_label` fact: the check of a closed box's label.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BoxLabelFact {
+    pub box_id: String,
+    pub outcome: LabelOutcome,
+    pub at: String,
+}
+
+/// What a box exception does (the cloud's four kinds).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExceptionKind {
+    /// Take the last code out of an open box.
+    Undo,
+    /// Take every code out of an open box.
+    Clear,
+    /// Print a closed box's label again.
+    Reprint,
+    /// Take a closed box apart; its SSCC stays used.
+    Disassemble,
+}
+
+impl ExceptionKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            ExceptionKind::Undo => "undo",
+            ExceptionKind::Clear => "clear",
+            ExceptionKind::Reprint => "reprint",
+            ExceptionKind::Disassemble => "disassemble",
+        }
+    }
+}
+
+/// `data` of a `box_exception` fact, with the fields of each kind as the
+/// cloud's: `undo` names the code and its scan's instant and no reason;
+/// `clear` nothing; `reprint` and `disassemble` a reason code of
+/// [`exception_reasons`], and words only with `other`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct BoxExceptionFact {
+    pub exception: ExceptionKind,
+    pub box_id: String,
+    pub code_hash: Option<String>,
+    pub target_scanned_at: Option<String>,
+    pub reason_code: Option<String>,
+    pub reason_text: Option<String>,
+    pub occurred_at: String,
 }
 
 /// How the host answered a record.
@@ -1998,10 +2062,18 @@ mod tests {
 
     /// Every `FactKind`, listed the same way.
     fn fact_kinds() -> Vec<FactKind> {
-        let kinds = vec![FactKind::Scan, FactKind::BoxClosed];
+        let kinds = vec![
+            FactKind::Scan,
+            FactKind::BoxClosed,
+            FactKind::BoxLabel,
+            FactKind::BoxException,
+        ];
         for kind in &kinds {
             match kind {
-                FactKind::Scan | FactKind::BoxClosed => {}
+                FactKind::Scan
+                | FactKind::BoxClosed
+                | FactKind::BoxLabel
+                | FactKind::BoxException => {}
             }
         }
         kinds

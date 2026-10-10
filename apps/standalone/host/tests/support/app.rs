@@ -714,3 +714,12 @@ pub fn box_closed(
         "membershipDigest": members_digest(members)
     })
 }
+
+/// The `data` of a box exception of `kind` in `box_id` at `at`, with no
+/// code, scan instant or reason; a test sets the fields its kind needs.
+pub fn box_exception(kind: &str, box_id: &str, at: &str) -> Value {
+    serde_json::json!({
+        "exception": kind, "boxId": box_id, "codeHash": null, "targetScannedAt": null,
+        "reasonCode": null, "reasonText": null, "occurredAt": at
+    })
+}

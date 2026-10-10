@@ -1,21 +1,21 @@
 use markiro_proto::{
     category_default_id, certificate_fingerprint, codes, compatibility, compatibility_for,
     credentials, display_fingerprint, BadgeCreate, BadgeSalt, BlockSizesUpdate, BootstrapRequest,
-    BootstrapResponse, BoxClosedFact, CategoryTemplateDefault, ChangesResponse, ClaimRequest,
-    CodeCheck, CodeOwner, Compatibility, CounterpartyCreate, CounterpartyRecord,
-    CounterpartyUpdate, DeviceInfo, DeviceKind, DeviceLineRequest, DeviceRecord, DeviceShift,
-    DeviceShiftCreate, DeviceShifts, DeviceUpdate, ErrorBody, FactBatch, FactKind, FactOutcome,
-    FactReceipts, Hello, HelloEnvelope, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord,
-    LabelTemplateSummary, LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate,
-    LocalPairRequest, OfficeLine, OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole,
-    OfficeSession, OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
-    OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
-    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PasswordChange,
-    PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate,
-    ScanFact, ScanRawKind, ScanVerdict, ShiftClose, ShiftCreate, ShiftMode, ShiftOrigin,
-    ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate,
-    SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT,
-    PROTOCOL_VERSION,
+    BootstrapResponse, BoxClosedFact, BoxExceptionFact, BoxLabelFact, CategoryTemplateDefault,
+    ChangesResponse, ClaimRequest, CodeCheck, CodeOwner, Compatibility, CounterpartyCreate,
+    CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind, DeviceLineRequest,
+    DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts, DeviceUpdate, ErrorBody,
+    ExceptionKind, FactBatch, FactKind, FactOutcome, FactReceipts, Hello, HelloEnvelope,
+    LabelOutcome, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary,
+    LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine,
+    OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeShift,
+    OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord,
+    OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord,
+    PairResponse, PairingCode, PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate,
+    ProductGroup, ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict,
+    ShiftClose, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord,
+    SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
+    TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -903,13 +903,25 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
     let kinds: Vec<FactKind> = batch.records.iter().map(|record| record.kind).collect();
     assert_eq!(
         kinds,
-        vec![FactKind::Scan, FactKind::Scan, FactKind::BoxClosed]
+        vec![
+            FactKind::Scan,
+            FactKind::Scan,
+            FactKind::BoxClosed,
+            FactKind::BoxLabel,
+            FactKind::BoxException
+        ]
     );
     for record in &batch.records {
         let typed = match record.kind {
             FactKind::Scan => serde_json::to_value(typed::<ScanFact>(&record.data)).unwrap(),
             FactKind::BoxClosed => {
                 serde_json::to_value(typed::<BoxClosedFact>(&record.data)).unwrap()
+            }
+            FactKind::BoxLabel => {
+                serde_json::to_value(typed::<BoxLabelFact>(&record.data)).unwrap()
+            }
+            FactKind::BoxException => {
+                serde_json::to_value(typed::<BoxExceptionFact>(&record.data)).unwrap()
             }
         };
         assert_eq!(typed, record.data, "{}", record.id);
@@ -937,6 +949,25 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
     assert!(closed
         .sscc
         .starts_with(&format!("0{}", block.issuer_prefix)));
+    // Its label checked, then printed again for a reason in words.
+    let label: BoxLabelFact = typed(&batch.records[3].data);
+    assert_eq!(
+        (&label.box_id, label.outcome),
+        (&accepted_box, LabelOutcome::Verified)
+    );
+    let reprint: BoxExceptionFact = typed(&batch.records[4].data);
+    assert_eq!(
+        (
+            reprint.exception,
+            &reprint.box_id,
+            reprint.reason_code.as_deref()
+        ),
+        (
+            ExceptionKind::Reprint,
+            &accepted_box,
+            Some(markiro_proto::exception_reasons::OTHER)
+        )
+    );
     let receipts: FactReceipts = round_trip("facts-response.json");
     let outcomes: Vec<FactOutcome> = receipts.receipts.iter().map(|r| r.outcome).collect();
     assert_eq!(

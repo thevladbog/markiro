@@ -182,3 +182,14 @@ pub async fn claim(
         .map_err(ApiError::internal)?;
     Ok(Applied::accepted())
 }
+
+/// Free the code the scan `scan_id` owns, if it owns one: its item was
+/// taken out of its box.
+pub async fn release(conn: &mut SqliteConnection, scan_id: &str) -> Result<(), ApiError> {
+    sqlx::query("DELETE FROM code_owners WHERE scan_id = ?")
+        .bind(scan_id)
+        .execute(conn)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(())
+}

@@ -12,7 +12,9 @@
 //! sends it again.
 
 pub mod box_closed;
+pub mod box_label;
 pub mod boxes;
+pub mod exception;
 pub mod registry;
 pub mod rules;
 pub mod scan;
@@ -305,6 +307,8 @@ async fn apply(
     let answer = match record.kind {
         FactKind::Scan => scan::apply(conn, &context, &record.data).await,
         FactKind::BoxClosed => box_closed::apply(conn, &context, &record.data).await,
+        FactKind::BoxLabel => box_label::apply(conn, &context, &record.data).await,
+        FactKind::BoxException => exception::apply(conn, &context, &record.data).await,
     };
     let answer = match answer {
         Ok(applied) => Ok(applied),

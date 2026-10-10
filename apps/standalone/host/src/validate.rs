@@ -414,6 +414,19 @@ pub fn close_reason(field: &str, text: &str) -> Result<String, ApiError> {
     }
 }
 
+/// The words of a box exception's reason `other`: trimmed, 1-200 characters
+/// without control characters (the station sends none when the operator
+/// typed nothing).
+pub fn exception_reason_text(field: &str, text: &str) -> Result<String, ApiError> {
+    clean_text(
+        field,
+        text,
+        markiro_proto::exception_reasons::MAX_TEXT_CHARS,
+        "the reason",
+    )
+    .map(str::to_owned)
+}
+
 /// An identifier the client makes up (a station's request id): a UUID in
 /// its canonical form, lower-case and hyphenated, as `crypto.randomUUID()`
 /// writes it, so one id never has two spellings.
@@ -1317,5 +1330,25 @@ mod tests {
         assert!(!parses(nested_objects(124)));
         assert!(parses(nested_objects(MAX_SPEC_DEPTH)));
         assert!(MAX_SPEC_DEPTH <= 123);
+    }
+
+    /// The words of an exception's reason `other`: trimmed, 1-200 characters
+    /// (counted as characters, not bytes), no control character. (Literals,
+    /// not `MAX_TEXT_CHARS`, so that the test pins the bound itself.)
+    #[test]
+    fn the_words_of_an_exception_reason_are_trimmed_and_at_most_200_characters() {
+        let at = |text: &str| exception_reason_text("data.reasonText", text);
+        assert_eq!(at("  Смята  ").unwrap(), "Смята");
+        assert_eq!(at(&"Я".repeat(200)).unwrap(), "Я".repeat(200));
+        assert_eq!(
+            at(&format!(" {} ", "Я".repeat(200))).unwrap(),
+            "Я".repeat(200)
+        );
+        for refused in ["", "   ", "\t"] {
+            assert_eq!(field(at(refused)), "data.reasonText", "{refused:?}");
+        }
+        for refused in [&"Я".repeat(201), "в две\nстроки", "a\u{0}b"] {
+            assert_eq!(field(at(refused)), "data.reasonText", "{refused:?}");
+        }
     }
 }

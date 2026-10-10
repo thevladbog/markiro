@@ -1917,6 +1917,27 @@ the box's live items (neither removed nor displaced), keeping the result in
 `digest_matches` for the shift's card (stage 4): a mismatch refuses
 nothing.
 
+A `box_label` (`facts/box_label.rs`) records the check of a closed box's
+label (`box_state` for an open one): `verified` sets `print_verified_at`,
+`skipped` `print_skipped_at`, each to the station's instant (a reprint and a
+second check set them again). A `box_exception` (`facts/exception.rs`) has
+the fields of its kind as the cloud's (`box_exceptions_kind_payload_check`):
+`undo` names the code and its scan's instant, `clear` nothing, `reprint` and
+`disassemble` a reason code of `exception_reasons` for their kind, with
+words (`validate::exception_reason_text`, trimmed, 1–200 characters) only
+for `other`. `undo` and `clear` take an open box, `reprint` and
+`disassemble` a closed box not taken apart (`box_state` otherwise). The
+items an undo (the live item of its code in this box; none when that scan
+lost the code or the code sits in another box, and the exception is still
+kept; `targetScannedAt` is kept, not compared), a clear or a disassembly takes out
+get `removed_at` (the station's instant), and their codes leave the
+registry (`registry::release`), free for another scan; a disassembly sets
+`disassembled_at` and the box keeps its SSCC, which no other box takes. A
+reprint changes no state. An item an exception took out never comes back;
+an item an earlier scan displaced is not taken out by an exception of its
+box (it is no longer in the box). One exception row per record, kept with
+the record's shift, device and operator.
+
 Any device asks whether a code is taken (`GET /v1/device/codes/{codeHash}`,
 `routes/codes.rs`; 64 lower-case hex digits, `validation_failed` on
 `codeHash` otherwise): `{ status: "free" }` or `{ status: "taken", owner }`
