@@ -950,33 +950,40 @@ and exists only to discover a host before loopback, a person or a pairing
 code confirms it.
 
 `host_request`, the webview's generic way to reach the host, accepts `GET`,
-`POST`, `PUT` and `DELETE`, paths of `[A-Za-z0-9/_.~?=&-]` without `..`, `//`
-or a `.` segment, and only the routes `/v1/device[/…]` except
-`/v1/device/line`, `/v1/bootstrap`, `/v1/changes` (not `/v1/changes/stream`)
-and `/v1/office/…`. The line goes through `device_select_line`, which also
-keeps the host's answer in `device.json`, so the station opens on its line
-with the host away; `device_refresh` reads `GET /v1/device` again and keeps
-a line the office changed the same way; the change stream belongs to the
-connection task. `host_request` takes an optional `timeoutMs`, a whole number
-of 100–10 000 ms (`request_limit` in `src-tauri/src/device.rs`, plan 2a4):
-outside that range it answers `invalid_request` before any I/O, and before
-the pairing is looked at (an unpaired station answers `invalid_request`, not
-`not_paired`). A request that was connected and runs past the limit, in its
-headers or its body, answers `timeout`, a transport code of its own. A host
-that does not accept the connection within the client's own 2 s (the TLS
-handshake included) is `unreachable` even with a limit, and without one a
-request still ends at the client's 10 s as `unreachable`, which is what the
-stage 1 screens read. `src/host/client.ts` does not check that `timeoutMs` is
-a whole number: callers pass literals, and a fraction would come back as
-`unreachable` with Tauri's own text in the message (queued, not fixed).
-Pairing routes return a new device key, so they stay behind their own
-commands (`host_local_pair`, `host_claim`) and the key never reaches the
-webview. `%` is refused because an encoded `..` would slip past the route
-check; a `.` segment is refused for the same reason, since the URL parser
-would normalize it past the route checks. Add a route the webview needs to
-that list deliberately; never let a listed prefix cover a route whose response
-carries a credential the webview must never hold (a device key, a password
-hash, another session's token).
+`POST`, `PUT` and `DELETE`, paths of `[A-Za-z0-9/_.~?=&-]` without `..`, `//` or
+a `.` segment, and only the routes `/v1/device[/…]` except `/v1/device/line`,
+`/v1/bootstrap`, `/v1/changes` (not `/v1/changes/stream`) and `/v1/office/…`.
+The line goes through `device_select_line`, which also keeps the host's answer
+in `device.json`, so the station opens on its line with the host away;
+`device_refresh` reads `GET /v1/device` again and keeps a line the office
+changed the same way; the change stream belongs to the connection task.
+`host_request` takes an optional `timeoutMs`, a whole number of 100–10 000 ms
+(`request_limit` in `src-tauri/src/device.rs`, plan 2a4): outside that range it
+answers `invalid_request` before any I/O, and before the pairing is looked at
+(an unpaired station answers `invalid_request`, not `not_paired`).
+`src/host/client.ts` checks the same whole number and range and throws the same
+`invalid_request` without calling the shell: `NaN` and `Infinity` would reach
+the shell as JSON `null`, which means no limit, and a fraction or a negative
+number would come back as Tauri's own text, read as `unreachable`. `timeout`, a
+transport code of its own, follows the caller's limit: when it ends the request
+before anything else does, the answer is `timeout`, whether the request was
+still connecting, in the TLS handshake, waiting for the headers or reading the
+body. The client's own limits win only when they are shorter: a host that does
+not accept the connection (or finish the handshake) within the client's 2 s is
+`unreachable`, which only a limit above 2 s lets happen. So under a limit below
+2 s, such as the 300 ms code check of plan 2a6, a host that is off, behind a
+filter that drops packets or hung is `timeout`, and a refused port is
+`unreachable` at once; callers treat both as "no answer". Without a limit a
+request ends at the client's own limits, 2 s to connect and 10 s in all, as
+`unreachable`, which is what the stage 1 screens read;
+`tests/host_request_timeout.rs` pins that for a body that never ends too.
+Pairing routes return a new device key, so they stay behind their own commands
+(`host_local_pair`, `host_claim`) and the key never reaches the webview. `%` is
+refused because an encoded `..` would slip past the route check; a `.` segment
+is refused for the same reason, since the URL parser would normalize it past the
+route checks. Add a route the webview needs to that list deliberately; never let
+a listed prefix cover a route whose response carries a credential the webview
+must never hold (a device key, a password hash, another session's token).
 
 The webview's IPC contract — command names, argument names such as
 `officeToken`, the `{ status, body }` answer and bare-string rejections — is
@@ -1017,22 +1024,24 @@ names and arguments, refusals are bare codes, and the system's own words go
 to the shell's stderr only.
 
 - `print_bytes { target, payloadBase64 }` sends a label's bytes to
-  `{ kind: "tcp", host, port }`, `{ kind: "serial", port, baud }` or, on
-  Windows only, `{ kind: "usb", printer }` (a spooler queue, datatype RAW,
+  `{ kind: "tcp", host, port }`, `{ kind: "serial", port, baud }` or, on Windows
+  only, `{ kind: "usb", printer }` (a spooler queue, datatype RAW,
   `src-tauri/src/printer/spooler.rs`). The work runs on a thread for blocking
-  work, never on the IPC thread, with 5 s to connect (all the addresses of a
-  name together) and 5 s per write. The payload is standard base64 of 1 byte
-  to 32 MiB. It answers `null` or a bare code: `not_sent` (nothing left this
-  computer: the name did not resolve, or the connection, the COM port or the
-  queue did not open, or `StartDocPrinter` refused), `outcome_unknown` (the
-  failure came after the first write began: a write, a flush,
-  `StartPagePrinter`, `WritePrinter`, a short write, `EndPagePrinter`,
-  `EndDocPrinter`, or the send thread died), `invalid_target` (any other
-  shape, a host with a space, port or baud 0, an over-long name),
-  `invalid_payload` (not base64, empty, or over 32 MiB) and `unsupported`
-  (USB off Windows). A call that omits `target` or sends a payload that is
-  not a string is refused by Tauri before the command runs, with Tauri's text
-  and not a bare code; the wrapper always sends both. `list_usb_printers`
+  work, never on the IPC thread, with one 5 s budget to resolve a name and
+  connect (an IP address needs no lookup; the addresses of a name share what the
+  lookup left) and 5 s per write: the label goes out in chunks of at most 64 KiB
+  (`send_all`, TCP and COM alike), so each write has its own 5 s. The payload is
+  standard base64 of 1 byte to 32 MiB. It answers `null` or a bare code:
+  `not_sent` (nothing left this computer: the name did not resolve, or not
+  within the budget, or the connection, the COM port or the queue did not open,
+  or `StartDocPrinter` refused), `outcome_unknown` (the failure came after the
+  first write began: a write, a flush, `StartPagePrinter`, `WritePrinter`, a
+  short write, `EndPagePrinter`, `EndDocPrinter`, or the send thread died),
+  `invalid_target` (any other shape, a host with a space, port or baud 0, an
+  over-long name), `invalid_payload` (not base64, empty, or over 32 MiB) and
+  `unsupported` (USB off Windows). A call that omits `target` or sends a payload
+  that is not a string is refused by Tauri before the command runs, with Tauri's
+  text and not a bare code; the wrapper always sends both. `list_usb_printers`
   lists the installed queues (`EnumPrintersW`, local and connections), `USB…`
   ports first and none dropped, empty off Windows, and answers
   `spooler_unavailable` when the spooler does not answer (a printer added
@@ -1050,11 +1059,13 @@ to the shell's stderr only.
   reprint then doubles it; a spooler may take a job for a printer that is
   off. A status query before sending (ZPL `~HS`, a TSPL equivalent) is a
   language-specific decision left to plans 2a7 and `@markiro/domain`.
-  Other limits, all unverified on Windows: the 5 s write limit is per write
-  on POSIX but may bound the whole write call under Winsock, so a multi-MiB
-  label to a slow printer could answer `outcome_unknown`; a printer name that
-  needs DNS waits for the system's resolver (prefer an IP address); a silent
-  first address takes the whole connect budget; a spooler job is still ended
+  Other limits, all unverified on Windows: Winsock may count the 5 s over one
+  whole `send`, which is why a label goes out in 64 KiB chunks (a multi-MiB
+  label to a slow printer stays on the manual list); a printer name that
+  needs DNS is looked up on a helper thread and is `not_sent` once the budget
+  is spent, but the thread stays until the system's resolver gives up (prefer
+  an IP address); a silent first address takes the whole connect budget; a
+  spooler job is still ended
   after a failed write, so a half label can reach the printer (whether to
   abort it instead is an owner question); and a COM flush or a trickling
   printer keeps the webview's call pending, so plan 2a7 needs its own limit
@@ -1083,20 +1094,21 @@ to the shell's stderr only.
   2a5–2a7) must read it as unreadable, never as a badge or an identity to
   enrol. The GS byte and an AIM prefix (`]d2`, `]C1`) arrive untouched:
   `@markiro/domain` reads them.
-- Scans arrive as the event `standalone://scan` (the raw text) and every
-  change as `standalone://scanner-status`
-  `{ revision, scanners: [{ port, baud, status }] }`, `status` being
-  `connected` or `disconnected`. `revision` grows by 1 with each published
-  change, and every `configure_scanners` publishes, even an unchanged set;
+- Scans arrive as the event `standalone://scan` (the raw text) and every change
+  as `standalone://scanner-status`
+  `{ revision, scanners: [{ port, baud, status }] }`, `status` being `connected`
+  or `disconnected`. `revision` grows by 1 with each published change, and every
+  `configure_scanners` publishes, even an unchanged set;
   `get_scanner_connections` answers the latest snapshot, so `watchScanners`
   subscribes first, asks second and keeps only a newer `revision` (the first
-  snapshot of a fresh app is revision 0 with no scanners). The wrapper's
-  schemas are strict and it ignores an event they refuse without a word, so
-  a field added to the snapshot must change the shell and
-  `scannerSnapshotSchema` together. A scan emitted while the webview is
-  reloading or not listening is lost; a status is recovered by asking.
-  `list_serial_ports` names the system's ports or answers
-  `serial_unavailable`.
+  snapshot of a fresh app is revision 0 with no scanners). The wrapper's schemas
+  are strict and it ignores an event they refuse without a word, so a field
+  added to the snapshot must change the shell and `scannerSnapshotSchema`
+  together: `tests/hardware_shapes.rs` and `test/hardware.test.ts` both read
+  `tests/fixtures/hardware-shapes.json`, so a drift between the two sides fails
+  a test. A scan emitted while the webview is reloading or not listening is
+  lost; a status is recovered by asking. `list_serial_ports` names the system's
+  ports or answers `serial_unavailable`.
 - `set_system_awake { awake }` holds one Windows power request (display and
   system required) while `true`, and nothing off Windows; `true` twice holds
   one request, `false` always lets go, a poisoned lock included, and a
@@ -1106,11 +1118,13 @@ to the shell's stderr only.
   with the process (unverified). The request survives a webview reload, so
   plan 2a7 calls `setSystemAwake(false)` once when the webview starts; it is
   idempotent and never fails.
-- `run()` manages `SystemAwakeState` (the builder chain) and the scanner
-  manager (`setup`). `tests/ipc.rs` manages its own copies, so deleting
-  either line compiles and passes every test; at runtime every call of those
-  commands would then fail with Tauri's «state not managed» text. Check both
-  by hand on the first run.
+- `run()` manages every state through `manage_state` in `setup`: the device,
+  the local database, the connection status, the scanner manager, kiosk mode
+  and the awake lease. The mock runtime does not run `setup`, so
+  `tests/ipc.rs` calls `manage_state` on a mock app and checks that all six
+  are there and that `get_scanner_connections` and `set_system_awake` answer,
+  and a line deleted from it fails that test. The other mock apps manage
+  their own states, a pre-paired device or no database among them.
 - Wrapper failures other than `printBytes`: `HardwareError` with a `code`
   from `HARDWARE_ERROR_CODES`: the shell's `invalid_scanners`,
   `serial_unavailable`, `spooler_unavailable` and `power_request_failed`,
@@ -1134,27 +1148,27 @@ to the shell's stderr only.
   office sessions are deleted in the same transaction and its open change
   streams end. It stays in `GET /v1/office/devices` with `revokedAt`, and
   revoking it again changes nothing. `PUT /v1/office/devices/{id}` renames a
-  device or sets its line (`lineId: null` clears it; only a station's, only
-  an active line; re-sending the line the station is already on keeps it,
-  even if that line has been archived since, so a full-form save can still
-  rename the station). Devices have no `rev` and are not in the feed, so the
-  last office write wins. A change of a device's line takes one host
-  revision without a feed item, so open streams wake and the station reads
-  `GET /v1/device` again (`device_refresh`, see "App shell"); a rename, a
-  repeat of the same line and a revocation take none. How a line change
-  meets a running shift is plan 2a's decision; stage 1 has only the floor
-  stub. The station keeps the name the host has for it in `device.json`
-  (`deviceName`, and `DeviceStatus.deviceName` in the webview): the name it
-  paired under, without the padding the host strips, then whatever
-  `device_refresh` and `device_select_line` read from `GET /v1/device`. It is
-  `null` in a file written before plan 2a4, and a failed refresh keeps the
-  stored name (the test for an unreachable host checks the line only). A
-  rename in the office takes no host revision, so it reaches the station with
-  the next revision or reconnection. The file format change is one way:
-  `DeviceConfig` rejects unknown keys, so a shell from before plan 2a4 reads
-  a file that has `deviceName` as `config_unreadable` and the station must
-  pair again; this shell reads an old file and writes the name at the first
-  refresh that finds one. The product is unreleased.
+  device or sets its line (`lineId: null` clears it; only a station's, only an
+  active line; re-sending the line the station is already on keeps it, even if
+  that line has been archived since, so a full-form save can still rename the
+  station). Devices have no `rev` and are not in the feed, so the last office
+  write wins. A change of a device's line takes one host revision without a feed
+  item, so open streams wake and the station reads `GET /v1/device` again
+  (`device_refresh`, see "App shell"); a rename, a repeat of the same line and a
+  revocation take none. How a line change meets a running shift is plan 2a's
+  decision; stage 1 has only the floor stub. The station keeps the name the host
+  has for it in `device.json` (`deviceName`, and `DeviceStatus.deviceName` in
+  the webview): the name it paired under, without the padding the host strips,
+  then whatever `device_refresh` and `device_select_line` read from
+  `GET /v1/device`. It is `null` in a file written before plan 2a4, and a failed
+  refresh keeps the stored name, as does a refused key (`tests/line.rs` checks
+  the name in memory and in `device.json` for both). A rename in the office
+  takes no host revision, so it reaches the station with the next revision or
+  reconnection. The file format change is one way: `DeviceConfig` rejects
+  unknown keys, so a shell from before plan 2a4 reads a file that has
+  `deviceName` as `config_unreadable` and the station must pair again; this
+  shell reads an old file and writes the name at the first refresh that finds
+  one. The product is unreleased.
 - The office session token lives only in webview memory. «Выйти в цех» ends
   the session at once: the app returns to the floor, drops the token and
   tells the host in the background. There is no hidden session (owner
@@ -2034,13 +2048,15 @@ either; a file log is stage 5.
   service at runtime and kiosk mode still need a manual check on Windows; a
   run on macOS proves none of it.
 - The `windows-sys` features of kiosk mode, the spooler and the power request,
-  `serialport`, `base64` for every system and `libudev-dev` in
-  `standalone-rust` came with plan 2a4's owner step (its Task 1, which also
-  closed plan 1f2's). The shell's `cfg(windows)` code still compiles only in
+  `serialport`, `base64` for every system and `libudev-dev` in `standalone-rust`
+  came with plan 2a4's owner step (its Task 1, which also closed plan 1f2's).
+  The shell's `cfg(windows)` code still compiles only in
   `standalone-windows-build`, which has not run on this code: plan 2a4
-  type-checked `printer/spooler.rs` and `power/windows.rs` for
-  `x86_64-pc-windows-msvc` with probe crates kept outside the repository,
-  never the shell itself, whose `aws-lc-sys` needs the Windows SDK.
+  type-checked `printer.rs`, `printer/spooler.rs`, `power.rs`,
+  `power/windows.rs`, `scanner.rs`, `scanner/runtime.rs` and `lockdown.rs`, with
+  their module tests, for `x86_64-pc-windows-msvc` (`cargo check` and
+  `cargo clippy --tests -D warnings`) with a probe crate kept outside the
+  repository, never the shell itself, whose `aws-lc-sys` needs the Windows SDK.
 - Kiosk mode in tests: `src-tauri/tests/lockdown.rs` drives the commands and
   the close guard on Tauri's mock runtime, which accepts every window property
   and never calls a builder's window-event handler, so the test hands each
@@ -2094,38 +2110,39 @@ either; a file log is stage 5.
   - the layout of the name-search step and of the status bar, and the 64 px
     controls, on the real screen and touch panel (and the Windows on-screen
     keyboard for typing a name).
-- Hardware in tests: `tests/printer.rs` sends to stub TCP printers on
-  loopback (the whole label, every byte value, a long label to a slow
-  printer, a port that does not listen is `not_sent`, a connection cut
-  mid-label and a printer that stops reading are `outcome_unknown`), each
-  send on its own thread with a 10 s deadline, so a send that hangs fails
-  instead of hanging the suite; the spooler's call order is tested through a
-  recording fake on every system; `scanner/runtime_tests.rs` drives the
-  scanner runtime with fake ports; `tests/ipc.rs` drives every hardware
-  command and both scanner events through the mock runtime, the scanners over
-  a fake `COM3`, and on Windows its `set_system_awake` test asks for a real
-  power request (a CI runner's session may refuse it with
-  `power_request_failed`, and then the test cannot fail on a bug in the
-  request; letting go must succeed either way). No COM printer is stubbed:
-  macOS refuses a serial port's settings on a pseudo-terminal. The webview
-  side is `test/hardware.test.ts` (a fake `invoke` and `listen`) and
-  `test/hardware-tauri.test.ts` (Tauri's own defaults).
-- Three things stay green when broken: the two `.manage(...)` lines named in
-  "Hardware", the `cfg(windows)` code, and the Windows branch of the awake
-  test above.
+- Hardware in tests: `tests/printer.rs` sends to stub TCP printers on loopback
+  (the whole label, every byte value, a long label to a slow printer, a port
+  that does not listen is `not_sent`, a connection cut mid-label and a printer
+  that stops reading are `outcome_unknown`), each send on its own thread with a
+  10 s deadline, so a send that hangs fails instead of hanging the suite; the
+  spooler's call order is tested through a recording fake on every system;
+  `send_all` (chunks, and `outcome_unknown` from the first write on, for TCP and
+  COM) and the bounded name lookup are unit-tested in `printer.rs` with a fake
+  writer and a sleeping lookup; `scanner/runtime_tests.rs` drives the scanner
+  runtime with fake ports; `tests/ipc.rs` drives every hardware command and both
+  scanner events through the mock runtime, the scanners over a fake `COM3`, and
+  on Windows its `set_system_awake` test asks for a real power request (a CI
+  runner's session may refuse it with `power_request_failed`, and then the test
+  cannot fail on a bug in the request; letting go must succeed either way). No
+  COM printer is stubbed: macOS refuses a serial port's settings on a
+  pseudo-terminal. The webview side is `test/hardware.test.ts` (a fake `invoke`
+  and `listen`) and `test/hardware-tauri.test.ts` (Tauri's own defaults).
+- Two things stay green when broken: the `cfg(windows)` code, and the Windows
+  branch of the awake test above. The COM path of `print_bytes` has no
+  automated test that reaches a real port, only `send_all` behind it.
 - Hardware by hand, on Windows 10 and 11 (stage 2a spec §7). None of it has
   been run; check at least:
   - ZPL to a Zebra and TSPL to a TSC at 203 and 300 dpi over TCP 9100, a COM
     port and a USB spooler queue: the label matches the office preview, with
     Cyrillic, and its DataMatrix and SSCC read back; a label of several MiB
-    to a slow printer (the write limit under Winsock);
+    to a slow printer (the write limit under Winsock, chunks of 64 KiB);
   - `not_sent` and `outcome_unknown` on real failures: the printer off before
     and during a job, the cable pulled, a paused printer (the label prints
     when it resumes), the spooler service stopped (and `list_usb_printers`
     then answering `spooler_unavailable`); whether the spooler takes a job
     for a printer that is off (then `sent` is not printed), and what a job
     ended after a failed write leaves in the printer; a printer by name
-    against one by address with no DNS;
+    against one by address with no DNS (the lookup is `not_sent` after 5 s);
   - COM scanners: the port list, CR or LF framing and a scanner set to send
     no suffix, the GS byte, `]d2` and `]C1` prefixes, unplugging and plugging
     back mid-scan, two ports at once, a scan while the window reloads, and a
@@ -2133,8 +2150,6 @@ either; a file log is stage 5.
   - `set_system_awake`: `powercfg /requests` shows the request while awake
     and none after `false` and after the app exits, the domain's screen-lock
     policy, and the answer when the session refuses a request;
-  - a first run of the built app answers `get_scanner_connections` and
-    `set_system_awake` (the two `.manage(...)` lines);
   - a device renamed in the office shows its new name after the next
     revision or reconnection;
   - a forget with a corrupt database on Windows (the rename of the set), and
