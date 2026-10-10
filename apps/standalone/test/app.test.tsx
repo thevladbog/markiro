@@ -758,6 +758,37 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Сбросить всё равно" })).toBeNull();
   });
 
+  it("does not carry the count of one screen over to the screen of another refusal", async () => {
+    // The probe finds another host at the paired address: the device is refused (derived,
+    // the link goes on), and a later read of the feed finds the pairing's host elsewhere.
+    const swapped = observation(true);
+    swapped.hello.hostId = OTHER_HOST_ID;
+    const probe = { hello: vi.fn<HostProbe["hello"]>(async () => swapped) };
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.forget.mockRejectedValueOnce(new DeviceError("unsent_facts", "unsent"));
+    const host = fakeHost();
+    host.getChanges.mockResolvedValue(feedPage(7));
+    renderApp({
+      probe,
+      device,
+      host,
+      connection: link.connection,
+      local: withUnsentRecords(),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
+    expect(await screen.findByText(/не отправлено на хост записей смен: 2\./)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Сбросить всё равно" })).toBeTruthy();
+
+    host.getChanges.mockResolvedValue(feedPage(8, [], OTHER_HOST_ID));
+    await link.revision(8);
+    expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
+    // The count belongs to the refusal it was made for.
+    expect(screen.queryByText(/не отправлено на хост записей смен/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Сбросить всё равно" })).toBeNull();
+    expect(device.forget.mock.calls).toEqual([[undefined]]);
+  });
+
   it("shows a repair failure on the config-error screen and keeps it visible", async () => {
     const device = fakeDevice(new DeviceError("config_unreadable", "broken"));
     device.forget.mockRejectedValueOnce(new DeviceError("storage", "disk full"));
@@ -2555,7 +2586,9 @@ describe("the operator on the floor", () => {
     device.refresh.mockRejectedValueOnce(new DeviceError("key_rejected", "the key is refused"));
     await link.revision(43);
     expect(await within(bar).findByText(marker)).toBeTruthy();
-    expect(within(bar).getByText("На связи с хостом")).toBeTruthy();
+    // The link was torn down: the bar says so, not the status the link last had.
+    expect(within(bar).queryByText("На связи с хостом")).toBeNull();
+    expect(within(bar).getByText(/^Нет связи с хостом/)).toBeTruthy();
     await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
     expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));

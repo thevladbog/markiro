@@ -239,6 +239,41 @@ describe("the floor's status bar", () => {
     expect(within(region).queryByText("Смена")).toBeNull();
   });
 
+  it("shows the link as stopped while the host's refusal waits, whatever the link's last status says", async () => {
+    const local = await synced([ORG]);
+    const online: HostStatus = { state: "online", lastContactAt: null, lastError: null, seq: 1 };
+    const failing: SyncState = { ...SYNCED, kind: "failed", failure: "host" };
+    const view = render(bar({ local, link: online, sync: failing }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    expect(within(region).getByText("На связи с хостом")).toBeTruthy();
+    expect(
+      within(region).getByText("Справочники не обновились — повторим автоматически"),
+    ).toBeTruthy();
+    expect(within(region).queryByText("Нет связи с хостом")).toBeNull();
+
+    // The link is torn down already, but a refusal that came from a call left its status online.
+    view.rerender(bar({ local, link: online, sync: failing, refusalHeld: true }));
+    expect(within(region).queryByText("На связи с хостом")).toBeNull();
+    expect(within(region).getByText("Нет связи с хостом")).toBeTruthy();
+    // A sync that cannot run is not the news now: the refusal is.
+    expect(
+      within(region).queryByText("Справочники не обновились — повторим автоматически"),
+    ).toBeNull();
+
+    view.rerender(bar({ local, link: online, sync: failing, refusalHeld: false }));
+    expect(within(region).getByText("На связи с хостом")).toBeTruthy();
+  });
+
+  it("shows no link of its own while the refusal waits before the first status of the link", async () => {
+    const local = await synced([ORG]);
+    render(bar({ local, link: null, refusalHeld: true }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    expect(within(region).queryByText("Нет связи с хостом")).toBeNull();
+    expect(within(region).queryByText("На связи с хостом")).toBeNull();
+  });
+
   it("names no device for a pairing file that has no name", async () => {
     render(bar({ local: await synced([ORG]) }));
     expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();

@@ -1007,6 +1007,69 @@ describe("what a leave that waits for the work ends in", () => {
     expect(handlers.onSignOut).not.toHaveBeenCalled();
   });
 
+  it("says the office closed the shift when that comes after the operator asked to leave it", async () => {
+    const { local, work, handlers, again } = await inTheWork();
+    fireEvent.click(screen.getByRole("button", { name: WORK_BUTTON }));
+    await waitFor(() => expect(work.leaving.at(-1)).toBe(true));
+    // The plain leave waits for the work; the office's close lands meanwhile.
+    await officeCloses(local, SEEN + 1);
+    again({ shiftReads: { done: 2, failed: false } });
+    await settle();
+    await work.release();
+    expect(await screen.findByText(OFFICE_CLOSED)).toBeTruthy();
+    await settle();
+    expect(types(handlers).filter((type) => type === "work_left")).toHaveLength(1);
+    expect(handlers.onSignOut).not.toHaveBeenCalled();
+  });
+
+  it("says the office closed the shift when that comes after the move to another line began to wait", async () => {
+    const { local, work, handlers, again } = await inTheWork();
+    again({ lineChangePending: true });
+    await waitFor(() => expect(work.leaving.at(-1)).toBe(true));
+    await officeCloses(local, SEEN + 1);
+    again({ lineChangePending: true, shiftReads: { done: 2, failed: false } });
+    await settle();
+    await work.release();
+    expect(await screen.findByText(OFFICE_CLOSED)).toBeTruthy();
+    await settle();
+    expect(types(handlers).filter((type) => type === "work_left")).toHaveLength(1);
+    expect(handlers.onSignOut).not.toHaveBeenCalled();
+  });
+
+  it("keeps a sign-out that waits as it is when the office closes the shift meanwhile: no list, no notice", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const { local, work, handlers, again } = await inTheWork({ idleTimeoutMs: 30_000 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(30_500);
+    });
+    await waitFor(() => expect(work.leaving.at(-1)).toBe(true));
+    await officeCloses(local, SEEN + 1);
+    again({ shiftReads: { done: 2, failed: false } });
+    await settle();
+    await work.release();
+    await waitFor(() => expect(handlers.onSignOut).toHaveBeenCalledWith("idle"));
+    await settle();
+    expect(handlers.onSignOut).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText(OFFICE_CLOSED)).toBeNull();
+    expect(types(handlers).filter((type) => type === "work_left")).toHaveLength(1);
+  });
+
+  it("finishes one leave for two presses of «Выйти из смены» in one turn", async () => {
+    const { work, handlers } = await inTheWork();
+    const button = screen.getByRole("button", { name: WORK_BUTTON });
+    act(() => {
+      fireEvent.click(button);
+      fireEvent.click(button);
+    });
+    await waitFor(() => expect(work.leaving.at(-1)).toBe(true));
+    expect(types(handlers)).not.toContain("work_left");
+    await work.release();
+    expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
+    await settle();
+    expect(types(handlers).filter((type) => type === "work_left")).toHaveLength(1);
+    expect(handlers.onSignOut).not.toHaveBeenCalled();
+  });
+
   it("ends on the list, not on a work screen the shell no longer holds, when the move to another line is undone", async () => {
     const { work, handlers, again } = await inTheWork();
     again({ lineChangePending: true });
