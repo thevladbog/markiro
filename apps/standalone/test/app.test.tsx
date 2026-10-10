@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   act,
@@ -37,6 +39,7 @@ import type {
   DeviceStatus,
   EnteredShift,
   HostStatus,
+  SsccBlockRequest,
 } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import { ENTITY_SET } from "../src/local/reference-sync.js";
@@ -50,7 +53,7 @@ import {
   SESSION,
 } from "./support/fixtures.js";
 import { km, rows, unsentScans } from "./support/floor-work.js";
-import { openLocalDb } from "./support/local-db.js";
+import { openLocalDb, openLocalDbFile } from "./support/local-db.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
 
@@ -2952,6 +2955,194 @@ describe("the operator on the floor", () => {
     expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+  });
+
+  it("keeps scanning while the host is away, and sends every record in order once it is back", async () => {
+    const link = fakeConnection();
+    const database = openLocalDb();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    host.getDeviceShifts.mockResolvedValue([PLANNED]);
+    host.enterShift.mockResolvedValue(OPENED);
+    host.requestSsccBlock.mockImplementation(async (request) => ({
+      id: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+      issuerPrefix: request.issuerPrefix,
+      extension: request.extension,
+      fromSerial: 1500,
+      toSerial: 3499,
+    }));
+    host.sendFacts.mockRejectedValue(
+      new HostError({ kind: "transport", code: "unreachable", message: "host away" }),
+    );
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+      local: database.executor,
+    });
+    await screen.findByText(PROMPT);
+    scan("MRK-000742");
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+    expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
+    await link.status({ state: "offline", lastContactAt: 1, lastError: "unreachable", seq: 2 });
+    const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
+    const unsent = () => within(bar).getByText("Не отправлено").nextElementSibling?.textContent;
+    for (const serial of ["A1", "A2", "A3"]) {
+      scan(km(serial));
+      await screen.findByText(`Принято: в коробе ${serial.slice(1)} из 12.`);
+    }
+    await waitFor(() => expect(unsent()).toBe("3"));
+    host.sendFacts.mockImplementation(async (records) =>
+      records.map((record) => ({
+        id: (record as { id: string }).id,
+        outcome: "accepted" as const,
+      })),
+    );
+    // The three records waited in the outbox, unsent, in the order of the scans.
+    const kept = rows(database.db, "SELECT id FROM outbox ORDER BY seq").map((row) => row["id"]);
+    expect(kept).toHaveLength(3);
+    await link.status({ ...ONLINE, seq: 3 });
+    await waitFor(() => expect(unsent()).toBe("0"));
+    const sent = host.sendFacts.mock.calls.at(-1)?.[0] ?? [];
+    expect(
+      sent.map((record) => {
+        const { kind, data } = record as { kind: string; data: { code: { serial: string } } };
+        return [kind, data.code.serial];
+      }),
+    ).toEqual([
+      ["scan", "A1"],
+      ["scan", "A2"],
+      ["scan", "A3"],
+    ]);
+    // Exactly the records kept, each once, and each with the host's receipt.
+    expect(sent.map((record) => (record as { id: string }).id)).toEqual(kept);
+    expect(rows(database.db, "SELECT outcome FROM outbox ORDER BY seq")).toEqual([
+      { outcome: "accepted" },
+      { outcome: "accepted" },
+      { outcome: "accepted" },
+    ]);
+  });
+
+  it("finds its request, its full box and its records after a restart, and finishes the work once the host is back", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "markiro-app-restart-"));
+    try {
+      const path = join(dir, "station.db");
+      // The host issues a block once per request id; the first answer never arrives.
+      const asked: string[] = [];
+      const issue = async (request: SsccBlockRequest) => {
+        asked.push(request.requestId);
+        if (asked.length === 1) throw hostDown();
+        return {
+          id: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+          issuerPrefix: request.issuerPrefix,
+          extension: request.extension,
+          fromSerial: 1500,
+          toSerial: 3499,
+        };
+      };
+      const unsentOf = () => screen.getByText("Не отправлено").nextElementSibling?.textContent;
+
+      // ---- The first start: the host is there for the entry only.
+      const first = openLocalDbFile(path);
+      const link = fakeConnection();
+      const host = fakeHost();
+      host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+      host.getDeviceShifts.mockResolvedValue([PLANNED]);
+      host.enterShift.mockResolvedValue(OPENED);
+      host.requestSsccBlock.mockImplementation(issue);
+      host.sendFacts.mockRejectedValue(hostDown());
+      const view = renderApp({
+        probe: probeAnswering(true),
+        device: fakeDevice(DEVICE_STATUS),
+        host,
+        connection: link.connection,
+        local: first.executor,
+      });
+      await screen.findByText(PROMPT);
+      scan("MRK-000742");
+      fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+      expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
+      // The entry asked for serials; the request is kept for the answer that was lost.
+      await waitFor(() => expect(asked).toHaveLength(1));
+      await waitFor(() =>
+        expect(rows(first.db, "SELECT request_id FROM floor_block_requests")).toEqual([
+          { request_id: asked[0] },
+        ]),
+      );
+      await link.status({ state: "offline", lastContactAt: 1, lastError: "unreachable", seq: 2 });
+      for (let n = 1; n <= 12; n += 1) {
+        scan(km(`B${String(n).padStart(2, "0")}`));
+        await screen.findByText(`Принято: в коробе ${n} из 12.`);
+      }
+      // The twelfth fills the box; with no serial and no host the box stays open, and the screen says why.
+      expect(await screen.findByText("Нет номеров SSCC: короб не закрыт")).toBeTruthy();
+      await waitFor(() => expect(unsentOf()).toBe("12"));
+      expect(rows(first.db, "SELECT item_count, closed_at FROM floor_boxes")).toEqual([
+        { item_count: 12, closed_at: null },
+      ]);
+      // Nothing was acknowledged: the host did not take a record while it was away.
+      expect(rows(first.db, "SELECT count(*) AS n FROM outbox WHERE acked_at IS NULL")).toEqual([
+        { n: 12 },
+      ]);
+      view.unmount();
+      first.db.close();
+
+      // ---- The computer starts again over the same file; the host is back.
+      const second = openLocalDbFile(path);
+      const back = fakeConnection();
+      const host2 = fakeHost();
+      host2.getChanges.mockResolvedValue(feedPage(42));
+      host2.getDeviceShifts.mockResolvedValue([
+        { ...PLANNED, status: "active", ownerDeviceId: DEVICE_ID, openedAt: OPENED.openedAt },
+      ]);
+      host2.enterShift.mockResolvedValue(OPENED);
+      host2.requestSsccBlock.mockImplementation(issue);
+      host2.sendFacts.mockImplementation(async (records) =>
+        records.map((record) => ({
+          id: (record as { id: string }).id,
+          outcome: "accepted" as const,
+        })),
+      );
+      renderApp({
+        probe: probeAnswering(true),
+        device: fakeDevice(DEVICE_STATUS),
+        host: host2,
+        connection: back.connection,
+        local: second.executor,
+      });
+      await screen.findByText(PROMPT);
+      scan("MRK-000742");
+      fireEvent.click(await screen.findByRole("button", { name: "Продолжить" }));
+      expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
+      // The entry repeats the request it kept, whole, and closes the full box on the block it brings.
+      await waitFor(() => expect(asked).toHaveLength(2));
+      expect(asked[1]).toBe(asked[0]);
+      await waitFor(() =>
+        expect(rows(second.db, "SELECT serial, item_count FROM floor_boxes")).toEqual([
+          { serial: 1500, item_count: 12 },
+        ]),
+      );
+      expect(rows(second.db, "SELECT request_id FROM floor_block_requests")).toEqual([]);
+      expect(rows(second.db, "SELECT next_serial FROM floor_sscc_blocks")).toEqual([
+        { next_serial: 1501 },
+      ]);
+      // Everything the first start kept goes once, in order, and nothing waits any more.
+      await waitFor(() => expect(unsentOf()).toBe("0"));
+      const delivered = host2.sendFacts.mock.calls.flatMap(([records]) =>
+        records.map((record) => record as { id: string; kind: string }),
+      );
+      const stored = rows(second.db, "SELECT id, kind, outcome FROM outbox ORDER BY seq");
+      expect(delivered.map((record) => record.id)).toEqual(stored.map((row) => row["id"]));
+      expect(delivered.map((record) => record.kind)).toEqual([
+        ...Array.from({ length: 12 }, () => "scan"),
+        "box_closed",
+      ]);
+      expect(stored.every((row) => row["outcome"] === "accepted")).toBe(true);
+      second.db.close();
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
