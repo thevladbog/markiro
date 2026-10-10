@@ -1,10 +1,12 @@
 //! The registry of codes (stage 2a spec, decision 14): each code is owned by
-//! its earliest accepted scan, whatever order the scans arrive in. A scan
-//! earlier than the owner takes the code (the owner's item leaves its box,
-//! `displaced_at`); a later one is answered `conflict` with the owner. Both
-//! write a `code_conflicts` row; telling the displaced device and the
-//! office's review come with plan 2b. Exceptions release the codes their
-//! items owned.
+//! its earliest accepted scan since the code was last freed, whatever order
+//! the scans arrive in. A scan earlier than the owner takes the code (the
+//! owner's item leaves its box, `displaced_at`); a later one is answered
+//! `conflict` with the owner. Both write a `code_conflicts` row; telling the
+//! displaced device and the office's review come with plan 2b. Exceptions
+//! release the codes their items owned: after a release the next scan to
+//! ARRIVE owns the code, not an earlier displaced item or conflict loser
+//! (re-electing the earliest remaining claim is a plan 2b decision).
 
 use markiro_proto::{CodeOwner, FactOutcome, ShiftOrigin};
 use sqlx::SqliteConnection;
@@ -185,7 +187,8 @@ pub async fn claim(
 }
 
 /// Free the code the scan `scan_id` owns, if it owns one: its item was
-/// taken out of its box.
+/// taken out of its box. Nobody inherits the code: see the module's note on
+/// what the next scan to arrive finds.
 pub async fn release(conn: &mut SqliteConnection, scan_id: &str) -> Result<(), ApiError> {
     sqlx::query("DELETE FROM code_owners WHERE scan_id = ?")
         .bind(scan_id)

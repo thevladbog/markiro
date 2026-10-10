@@ -2,7 +2,8 @@
 //! facts, applied in one write transaction, each record on its own
 //! (`facts::receive`), answered with a receipt per record in their order.
 //! A database error is no receipt: nothing of the batch stays, and the
-//! device sends it again. Facts take no revision, but a station's close of
+//! device sends it again (the log names the device and the record's
+//! position in the batch). Facts take no revision, but a station's close of
 //! its shift and a closed shift's first late fact change the shift's row:
 //! the batch then takes one revision for all of them.
 

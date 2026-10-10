@@ -886,8 +886,9 @@ fn sscc_block_fixtures_round_trip_and_a_station_never_names_the_size() {
     assert_eq!(exhausted.error.code, codes::SSCC_EXHAUSTED);
 }
 
-/// The receipt codes and the reason codes, as the webview reads them from
-/// the same fixtures: a code added on one side only fails here.
+/// The receipt codes and the reason codes, as the webview will read them
+/// from the same fixtures (plans 2a6 and 2a8): a code added on one side only
+/// fails here.
 #[test]
 fn the_fact_code_fixtures_list_every_receipt_and_reason_code() {
     let codes = fixture("fact-receipt-codes.json");

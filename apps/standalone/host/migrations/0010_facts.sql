@@ -107,7 +107,9 @@ CREATE UNIQUE INDEX box_items_live ON box_items (box_id, code_hash)
   WHERE removed_at IS NULL AND displaced_at IS NULL;
 
 -- The registry of codes: the scan that owns each code now, the earliest
--- accepted scan of it that no exception removed.
+-- accepted scan since the code was last freed (an exception's release does
+-- not hand the code back to an earlier displaced item or a conflict loser:
+-- plan 2b).
 CREATE TABLE code_owners (
   code_hash TEXT PRIMARY KEY,
   scan_id TEXT NOT NULL UNIQUE REFERENCES scans (id),

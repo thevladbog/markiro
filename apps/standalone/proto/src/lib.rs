@@ -1643,7 +1643,8 @@ pub struct DeviceShiftCreate {
 
 /// What a fact records (stage 2a spec §4.4): the kind tells the host how
 /// to read the record's `data`. A kind added later is a new variant; a host
-/// that does not know it answers the record `invalid_record`.
+/// that does not know it answers the record `invalid_record`, for good, as it
+/// does a new `data` field: either raises `PROTOCOL_VERSION`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FactKind {

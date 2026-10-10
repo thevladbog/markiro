@@ -30,8 +30,10 @@ pub fn record_digest(record: &Value) -> String {
 
 /// The domain's `boxMembershipDigestV1`: SHA-256 of
 /// `markiro:box-members:v1\n` followed by the box's code hashes in byte
-/// order, joined by line feeds. The host's hashes are checked and distinct
-/// before they are stored, so it needs no check of its own here.
+/// order, joined by line feeds. It does not validate: its one caller reads
+/// the live `box_items` of a box, whose hashes passed `is_code_hash` on the
+/// way in and are distinct by `box_items_live`, and a station sends only the
+/// digest, so there is no input to refuse and no `Result`.
 pub fn box_membership_digest(code_hashes: &[String]) -> String {
     let mut sorted: Vec<&str> = code_hashes.iter().map(String::as_str).collect();
     sorted.sort_unstable();
