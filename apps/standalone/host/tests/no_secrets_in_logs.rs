@@ -4,8 +4,9 @@
 //! up to 256 KB it stays out of the log too, a shift's snapshot that carries
 //! one included. Nor does a fact's code of marking, its crypto tail, its
 //! hash, a box's SSCC or the words of a reason (stage 2a spec §4.11): a
-//! rejected record is logged by its id and its receipt code alone. Its own
-//! binary, because it installs the global tracing subscriber.
+//! rejected record is logged by its id and its receipt code alone; nor do the
+//! routes of a shift's exports, which answer with codes and SSCCs (plan ЧЗ).
+//! Its own binary, because it installs the global tracing subscriber.
 
 mod support;
 
@@ -1429,6 +1430,48 @@ async fn secrets_never_reach_the_process_log() {
         shift_two_read["totals"]["closedBoxes"], 1,
         "{shift_two_read}"
     );
+    // The office reads the shift's export source and its lists, which carry
+    // the codes and the SSCCs, and records an export (plan ЧЗ): none of them
+    // reaches the log either.
+    let office_get = |path: String| {
+        client
+            .get(format!("{base}{path}"))
+            .header(protocol.0, &protocol.1)
+            .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+            .bearer_auth(&key)
+            .send()
+    };
+    let source = office_get(format!("/v1/office/shifts/{shift_id}/export-source"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        source.contains(&pallet_sscc) && source.contains(&sscc_one),
+        "{source}"
+    );
+    for list in ["boxes", "pallets"] {
+        let listed = office_get(format!("/v1/office/shifts/{shift_id}/{list}"))
+            .await
+            .unwrap();
+        assert_eq!(listed.status(), 200);
+    }
+    let recorded = client
+        .post(format!("{base}/v1/office/shifts/{shift_id}/exports"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({
+            "formatId": "shift_txt_boxes", "formatVersion": 2, "maxLines": null,
+            "palletId": null, "documentId": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
+            "partCount": 1, "codeCount": 1, "boxCount": 1, "palletCount": 0,
+            "openPalletSuppressedBoxCount": 0
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(recorded.status(), 204);
 
     // A wrong device key and a wrong session token are both rejected...
     let wrong_device_key = "not-a-real-device-key";
