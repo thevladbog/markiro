@@ -1,3 +1,4 @@
+import { BarcodeIcon } from "../BarcodeIcon.js";
 import { useTranslation } from "react-i18next";
 import type { WarehouseJobView } from "../../lib/warehouse-reprint/types.js";
 export function ReprintStatus({
@@ -17,7 +18,7 @@ export function ReprintStatus({
       aria-live="polite"
       aria-atomic="true"
     >
-      <span className="warehouse-scan-mark" aria-hidden="true" />
+      <BarcodeIcon className="warehouse-scan-mark" />
       <h2>{t(`warehouse.status.${key}`)}</h2>
       <p>{t(`warehouse.hint.${key}`)}</p>
       {job ? (

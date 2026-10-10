@@ -272,6 +272,38 @@ afterEach(() => {
 });
 
 describe("TaskSelection inventory entry", () => {
+  it("keeps inventory primary and pauses barcode intake on additional operations", async () => {
+    const exec = executor();
+    await applyMigrations(exec);
+    const scan = scanner();
+    const { api, posts } = client();
+    const onReprint = vi.fn();
+    render(
+      <TaskSelection
+        client={api}
+        exec={exec}
+        source={scan.source}
+        operatorId="66666666-6666-4666-8666-666666666666"
+        currentLineName="Розлив №2"
+        onShiftSelected={() => {}}
+        onInventorySelected={() => {}}
+        onNew={() => {}}
+        onWarehouseReprint={onReprint}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: /Warehouse operations/ }));
+    expect(screen.queryByRole("button", { name: "Reprint labels" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Additional operations" }));
+    expect(scan.stopped()).toBe(true);
+    act(() => scan.scan(barcode));
+    expect(posts.filter(({ path }) => path.endsWith("resolve-barcode"))).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Back to inventory" }));
+    expect(await screen.findByRole("button", { name: "Continue INV-00047" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Additional operations" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reprint labels" }));
+    await waitFor(() => expect(onReprint).toHaveBeenCalledOnce());
+  });
+
   it.each([
     [
       "missing_grant",

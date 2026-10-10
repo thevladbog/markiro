@@ -234,6 +234,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
       listBoxLabelTemplates: sharedReadPolicy,
       listPalletLabelTemplates: sharedReadPolicy,
       listProductLabelTemplates: sharedReadPolicy,
+      getLabelTemplatePreview: sharedReadPolicy,
       getShiftSummary: sharedReadPolicy,
       getProductLabels: readPolicy,
       getProductLabelEvents: readPolicy,

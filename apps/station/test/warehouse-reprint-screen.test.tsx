@@ -45,6 +45,14 @@ export function warehouseTestCatalog() {
     templates: [box, unit],
   };
 }
+function warehouseCatalogGet(path: string, catalog = warehouseTestCatalog()) {
+  const url = new URL(path, "https://station.test");
+  if (url.pathname === "/shifts/box-label-templates")
+    return { items: [], defaultBoxLabelTemplateId: null, defaultSource: null };
+  const ids = url.searchParams.get("ids")?.split(",");
+  const templates = ids ? catalog.templates.filter((t) => ids.includes(t.id)) : catalog.templates;
+  return { ...catalog, revision: productLabelValueDigest(templates), templates };
+}
 it("selects independent templates and sends legacy and ordinary scans only once", async () => {
   await i18n.changeLanguage("ru");
   const db = new DatabaseSync(":memory:");
@@ -54,7 +62,7 @@ it("selects independent templates and sends legacy and ordinary scans only once"
   await seedWarehouseOperator(exec, i.operatorId);
   let listener: (raw: string) => void = () => {};
   const client = {
-    get: vi.fn().mockResolvedValue(warehouseTestCatalog()),
+    get: vi.fn(async (path: string) => warehouseCatalogGet(path)),
     post: vi.fn().mockResolvedValue({
       status: "found",
       source: warehouseBoxSource(),
@@ -62,6 +70,7 @@ it("selects independent templates and sends legacy and ordinary scans only once"
     }),
   } as unknown as StationClient;
   const print = vi.fn().mockResolvedValue(undefined);
+  const onExit = vi.fn();
   const view = render(
     <StrictMode>
       <WarehouseReprint
@@ -84,7 +93,7 @@ it("selects independent templates and sends legacy and ordinary scans only once"
           verifyPrintedLabel: false,
         }}
         print={print}
-        onExit={() => {}}
+        onExit={onExit}
       />
     </StrictMode>,
   );
@@ -115,11 +124,25 @@ it("selects independent templates and sends legacy and ordinary scans only once"
     act(() => listener(`!100${i.source.identity}`));
     await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(screen.getByText("Этикетка передана на принтер")).toBeTruthy());
+    expect(screen.queryByRole("combobox")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Напечатать ещё раз" }));
+    expect(screen.getByRole("dialog", { name: "Причина новой попытки" })).toBeTruthy();
+    await user.click(screen.getByRole("radio", { name: "Повреждена" }));
+    await user.click(screen.getByRole("button", { name: "Отмена" }));
+    expect(print).toHaveBeenCalledTimes(1);
     act(() => listener(`00${i.source.identity}`));
     await waitFor(() =>
       expect(screen.getByText("Этот код уже печатали в этом сеансе")).toBeTruthy(),
     );
     expect(print).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole("button", { name: "Завершить сеанс" }));
+    expect(onExit).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Завершить и к операциям" }));
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+    expect(
+      db.prepare("SELECT count(*) AS n FROM warehouse_reprint_session_closures").get()?.n,
+    ).toBe(1);
+    expect(db.prepare("SELECT count(*) AS n FROM warehouse_reprint_jobs").get()?.n).toBe(1);
   } finally {
     view.unmount();
     await new Promise((resolve) => setTimeout(resolve, 0));
@@ -151,7 +174,7 @@ it("prints a manually entered SSCC once, pauses scanner intake and rejects inval
   });
   let scanning = false;
   const client = {
-    get: vi.fn().mockResolvedValue(catalog),
+    get: vi.fn(async (path: string) => warehouseCatalogGet(path, catalog)),
     post: vi
       .fn()
       .mockResolvedValue({ status: "found", source: warehouseBoxSource(), repair: null }),
@@ -281,7 +304,7 @@ it("acknowledges the visible quarantine warning durably without accepting or del
   const props = {
     exec,
     client: {
-      get: vi.fn().mockResolvedValue(warehouseTestCatalog()),
+      get: vi.fn(async (path: string) => warehouseCatalogGet(path)),
       post: vi.fn(),
     } as unknown as StationClient,
     deviceId: i.deviceId,

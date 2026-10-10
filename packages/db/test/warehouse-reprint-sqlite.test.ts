@@ -28,6 +28,7 @@ describe("warehouse reprint runtime SQLite", () => {
         "warehouse_reprint_history_acknowledgements",
         "warehouse_reprint_jobs",
         "warehouse_reprint_local_boxes",
+        "warehouse_reprint_session_closures",
         "warehouse_reprint_sessions",
       ]);
       expect(() =>

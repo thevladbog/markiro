@@ -67,6 +67,7 @@ const documentedStationSurface = [
   ["GET", "/shifts/box-label-templates"],
   ["GET", "/shifts/pallet-label-templates"],
   ["GET", "/shifts/product-label-templates"],
+  ["GET", "/shifts/label-template-preview"],
   ["GET", "/shifts/planning-config"],
   ["GET", "/shifts/shift-1/bundle"],
   ["GET", "/shifts/shift-1/reference-bundle"],
@@ -115,6 +116,8 @@ describe("station CORS surface", () => {
   });
 
   it.each([
+    ["POST", "/shifts/label-template-preview"],
+    ["GET", "/shifts/label-template-preview/extra"],
     ["GET", "/station/pair"],
     ["GET", "/station/pair/recovery"],
     ["POST", "/station/pair/recovery/extra"],

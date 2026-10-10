@@ -19,6 +19,7 @@ import {
   Body,
   Controller,
   Delete,
+  ForbiddenException,
   Get,
   HttpCode,
   Param,
@@ -101,6 +102,10 @@ import {
   type ProductLabelTemplateProductQueryDto,
   shiftEntrySchema,
   type ShiftEntryDto,
+  shiftLabelTemplatePreviewQuerySchema,
+  shiftLabelTemplatePreviewSchema,
+  type ShiftLabelTemplatePreviewQueryDto,
+  type ShiftLabelTemplatePreviewDto,
 } from "./dto";
 import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
 import { renderShiftTaskFormHtml } from "./shift-task-form";
@@ -196,15 +201,14 @@ export class ShiftsController {
     return result;
   }
 
-  // Station-readable template summaries for the NewShift picker. Specs stay
-  // cabinet-only; the station receives a spec exclusively through the shift
-  // bundle after the snapshot exists (see docs/device-key-surface.md).
+  // Station-readable summaries retain their legacy response shapes. The
+  // separate product-scoped preview route exposes only an eligible selected spec.
   @Get("box-label-templates")
   @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @ApiOperation({
     summary: "List box label template options",
     description:
-      "Template summaries only; a station receives a template spec exclusively through the shift bundle. " +
+      "Template summaries only; selected specs are available through the product-scoped preview route. " +
       "With `productId` only templates eligible for that product's category are returned; without it, every enabled template.",
   })
   @ApiCabinetOrStationAuth()
@@ -225,7 +229,7 @@ export class ShiftsController {
   @ApiOperation({
     summary: "List pallet label template options",
     description:
-      "Template summaries only; a station receives a template spec exclusively through the shift bundle. " +
+      "Template summaries only; selected specs are available through the product-scoped preview route. " +
       "With `productId` only templates eligible for that product's category are returned; without it, every enabled template.",
   })
   @ApiCabinetOrStationAuth()
@@ -239,6 +243,29 @@ export class ShiftsController {
     query: BoxLabelTemplateProductQueryDto,
   ): Promise<ShiftPalletLabelTemplatesDto> {
     return this.shiftsService.listPalletLabelTemplates(req.tenantId!, query.productId);
+  }
+
+  @Get("label-template-preview")
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({
+    summary: "Read a selected label template for shift planning preview",
+    description:
+      "Returns the shared label spec, not a rendered image. The product and enabled template must belong to the authenticated tenant and match the requested purpose and product category. Handheld credentials are refused. Creating a shift still resolves and validates its own print snapshot.",
+  })
+  @ApiCabinetOrStationAuth()
+  @ApiZodQuery(shiftLabelTemplatePreviewQuerySchema)
+  @ApiOkResponse({ schema: zodApiSchema(shiftLabelTemplatePreviewSchema) })
+  @ApiZodValidationError()
+  @ApiHttpErrors(401, 403, 404, 429)
+  async getLabelTemplatePreview(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(shiftLabelTemplatePreviewQuerySchema))
+    query: ShiftLabelTemplatePreviewQueryDto,
+  ): Promise<ShiftLabelTemplatePreviewDto> {
+    if (req.authKind === "station" && req.deviceKind === "handheld") {
+      throw new ForbiddenException("Label template previews require a station device");
+    }
+    return this.shiftsService.getLabelTemplatePreview(req.tenantId!, query);
   }
 
   @Get(":id/reprocessings")

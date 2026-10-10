@@ -188,6 +188,34 @@ describe.skipIf(!ready)("station warehouse reprint lookup", () => {
       warehouseTemplateCatalogSchema.parse(other.body).templates.map((t) => t.id),
     ).not.toContain(h.boxTemplateId);
   });
+  it("checks selected template eligibility without returning the rest of the catalog", async () => {
+    const response = await request(h.app.getHttpServer())
+      .get("/station/warehouse-reprint/templates")
+      .query({ ids: [h.boxTemplateId, h.disabledTemplateId, randomUUID()].join(",") })
+      .set("x-api-key", h.a.apiKey)
+      .expect(200);
+    expect(Object.keys(response.body).sort()).toEqual(["protocol", "revision", "templates"]);
+    expect(warehouseTemplateCatalogSchema.parse(response.body).templates.map((t) => t.id)).toEqual([
+      h.boxTemplateId,
+    ]);
+    const foreign = await request(h.app.getHttpServer())
+      .get("/station/warehouse-reprint/templates")
+      .query({ ids: h.boxTemplateId })
+      .set("x-api-key", h.b.apiKey)
+      .expect(200);
+    expect(warehouseTemplateCatalogSchema.parse(foreign.body).templates).toEqual([]);
+    for (const ids of [
+      "",
+      "not-a-uuid",
+      Array.from({ length: 21 }, () => randomUUID()).join(","),
+    ]) {
+      await request(h.app.getHttpServer())
+        .get("/station/warehouse-reprint/templates")
+        .query({ ids })
+        .set("x-api-key", h.a.apiKey)
+        .expect(400);
+    }
+  });
   it("finds closed warehouse repack boxes and rejects invalidated packaging", async () => {
     const [shift] = await h.db.select().from(schema.shifts).where(eq(schema.shifts.id, h.shiftId));
     const [member] = await h.db

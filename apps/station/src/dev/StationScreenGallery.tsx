@@ -23,7 +23,12 @@ import {
 } from "react";
 import { Alert, Button, Card, Pager, PinPad, SignalOverlay } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
-import { SHIFT_CLOSE_REASON_CODES } from "@markiro/domain";
+import {
+  SHIFT_CLOSE_REASON_CODES,
+  buildDuplicateLabelTemplate,
+  buildDatedBoxLabelTemplates,
+  buildPalletLabelTemplates,
+} from "@markiro/domain";
 import type { StationInventoryBundleManifest } from "@markiro/domain";
 
 import { FloorChoiceGroup } from "../ui/FloorChoiceGroup.js";
@@ -518,6 +523,7 @@ function InventoryTaskSelectionFixture({ locale }: { locale: GalleryLocale }) {
         onShiftSelected={() => undefined}
         onInventorySelected={() => undefined}
         onNew={() => undefined}
+        onWarehouseReprint={() => undefined}
         // App.tsx passes both, so the footer carries setup and the conflicts list.
         onSetup={() => undefined}
         onConflicts={() => undefined}
@@ -1207,7 +1213,8 @@ function LoginFixture({ variant, locale }: { variant: string; locale: GalleryLoc
  */
 function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const root = useRef<HTMLDivElement>(null);
-  const aggregation = variant === "pallet-template" || variant === "pallets";
+  const aggregation =
+    variant === "template" || variant === "pallet-template" || variant === "pallets";
   // MKR-INS-01 shows the pallet choice on the demo product of the other printed
   // frames. The real form validates the check digit, so this GTIN is a valid one.
   const product =
@@ -1261,6 +1268,33 @@ function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale:
               "gallery-template",
           } as T);
         }
+        if (path.startsWith("/shifts/label-template-preview")) {
+          const query = new URL(path, "https://gallery.invalid").searchParams;
+          const purpose = query.get("purpose");
+          const template =
+            purpose === "pallet"
+              ? buildPalletLabelTemplates()[0]
+              : purpose === "box"
+                ? buildDatedBoxLabelTemplates()[0]
+                : null;
+          return Promise.resolve({
+            id: query.get("templateId"),
+            name:
+              purpose === "pallet"
+                ? locale === "ru"
+                  ? "Паллета 100×150"
+                  : "Pallet 100×150"
+                : purpose === "box"
+                  ? locale === "ru"
+                    ? "Короб 58×40"
+                    : "Box 58×40"
+                  : locale === "ru"
+                    ? "Внешняя этикетка"
+                    : "Outer label",
+            purpose,
+            spec: template?.spec ?? buildDuplicateLabelTemplate(),
+          } as T);
+        }
         if (path.startsWith("/shifts/planning-config"))
           return Promise.resolve({ validationPrintProtocol: "validation-dm-duplicate-v1" } as T);
         if (path.startsWith("/shifts/product-label-templates"))
@@ -1307,11 +1341,13 @@ function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale:
     let step = 0;
     const advance = () => {
       if (variant === "input") return;
-      if (variant === "pallet-template" || variant === "pallets") {
+      if (variant === "template" || variant === "pallet-template" || variant === "pallets") {
         const keys =
-          variant === "pallets"
-            ? ["shifts.modeAggregation", "shifts.palletsOn"]
-            : ["shifts.modeAggregation", "shifts.palletsOn", "shifts.start", "shifts.palletNext"];
+          variant === "template"
+            ? ["shifts.modeAggregation", "shifts.start"]
+            : variant === "pallets"
+              ? ["shifts.modeAggregation", "shifts.palletsOn"]
+              : ["shifts.modeAggregation", "shifts.palletsOn", "shifts.start", "shifts.palletNext"];
         const key = keys[step];
         if (!key) return;
         const label = i18n.getFixedT(locale)(key);
@@ -1337,6 +1373,13 @@ function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale:
         if (!input || input.disabled) return;
         step = 2;
         if (!input.checked) input.click();
+        return;
+      }
+      if (step === 3 && variant === "print-template") {
+        const choice = container.querySelector<HTMLButtonElement>(".label-template-option");
+        if (!choice || choice.disabled) return;
+        step = 4;
+        choice.click();
         return;
       }
       if (step === 2) {
@@ -1374,6 +1417,7 @@ function NewShiftFixture({ view, locale }: { view: string; locale: GalleryLocale
   if (
     view.startsWith("print-") ||
     view === "input" ||
+    view === "template" ||
     view === "pallets" ||
     view === "pallet-template"
   )

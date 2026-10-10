@@ -281,7 +281,15 @@ for (const verification of ["required", "none", "off"])
             dpi: spec.dpi,
           })),
         };
-      else if (path === "/shifts") {
+      else if (path === "/shifts/label-template-preview") {
+        const query = new URL(route.request().url()).searchParams;
+        expect(route.request().method()).toBe("GET");
+        expect(query.get("productId")).toBe("44444444-4444-4444-8444-444444444444");
+        expect(query.get("purpose")).toBe("product_duplicate");
+        const selected = templates.find((item) => item.id === query.get("templateId"));
+        if (!selected) throw new Error("Unknown preview template");
+        body = { ...selected, purpose: "product_duplicate" };
+      } else if (path === "/shifts") {
         writes.push(route.request().postDataJSON());
         body = { id: shiftId, productionDate: "2026-09-09" };
       } else if (path === `/shifts/${shiftId}/open`)
@@ -346,6 +354,9 @@ for (const verification of ["required", "none", "off"])
           }),
         ).toBeVisible();
       await page.getByRole("button", { name: template.name, exact: false }).click();
+      await expect(
+        page.getByRole("img", { name: `Предпросмотр: ${template.name}`, exact: true }),
+      ).toBeVisible();
       await page.screenshot({ path: info.outputPath(`station-template-${verification}.png`) });
       await expect(page.getByRole("button", { name: "Начать", exact: true })).toHaveCount(0);
       await page.getByRole("button", { name: "Применить", exact: true }).click();
@@ -586,7 +597,12 @@ for (const locale of ["ru", "en"])
         if (new URL(request.url()).pathname === "/__product_labels_sql")
           sqliteRequests.push(request.url());
       });
-      const template = { widthMm: 100, heightMm: 150, dpi: 203, language: "zpl" };
+      const { buildDatedBoxLabelTemplates, buildPalletLabelTemplates } =
+        await import("../../../packages/domain/dist/index.js");
+      const boxSpec = buildDatedBoxLabelTemplates()[0]?.spec;
+      const palletSpec = buildPalletLabelTemplates()[0]?.spec;
+      if (!boxSpec || !palletSpec) throw new Error("Missing stock label specs");
+      const palletName = locale === "en" ? "Pallet 100×150" : "Паллета 100×150";
       await page.addInitScript((theme) => localStorage.setItem("markiro.theme", theme), theme);
       await page.route(`${station}/__product_labels_api/**`, async (route) => {
         const path = new URL(route.request().url()).pathname.replace("/__product_labels_api", "");
@@ -606,21 +622,46 @@ for (const locale of ["ru", "en"])
           };
         else if (path === "/shifts/box-label-templates")
           body = {
-            items: [{ ...template, id: "box-label", name: "Этикетка короба" }],
+            items: [
+              {
+                id: "box-label",
+                name: "Этикетка короба",
+                widthMm: boxSpec.widthMm,
+                heightMm: boxSpec.heightMm,
+                dpi: boxSpec.dpi,
+                language: boxSpec.language,
+              },
+            ],
             defaultBoxLabelTemplateId: "box-label",
           };
         else if (path === "/shifts/pallet-label-templates")
           body = {
             items: [
               {
-                ...template,
                 id: "pallet-label",
-                name: locale === "en" ? "Pallet 100×150" : "Паллета 100×150",
+                name: palletName,
+                widthMm: palletSpec.widthMm,
+                heightMm: palletSpec.heightMm,
+                dpi: palletSpec.dpi,
+                language: palletSpec.language,
               },
             ],
             defaultPalletLabelTemplateId: "pallet-label",
           };
-        else if (path === "/shifts") {
+        else if (path === "/shifts/label-template-preview") {
+          const query = new URL(route.request().url()).searchParams;
+          expect(route.request().method()).toBe("GET");
+          expect(query.get("productId")).toBe("product");
+          const purpose = query.get("purpose");
+          expect(["box", "pallet"]).toContain(purpose);
+          expect(query.get("templateId")).toBe(`${purpose}-label`);
+          body = {
+            id: `${purpose}-label`,
+            name: purpose === "box" ? "Этикетка короба" : palletName,
+            purpose,
+            spec: purpose === "box" ? boxSpec : palletSpec,
+          };
+        } else if (path === "/shifts") {
           writes.push(route.request().postDataJSON());
           body = { id: "shift" };
         } else if (path === "/shifts/shift/open")
@@ -688,6 +729,12 @@ for (const locale of ["ru", "en"])
             name: locale === "en" ? /Pallet 100×150/ : /Паллета 100×150/,
           }),
         ).toHaveAttribute("aria-pressed", "true");
+        await expect(
+          page.getByRole("img", {
+            name: `${locale === "en" ? "Preview" : "Предпросмотр"}: ${palletName}`,
+            exact: true,
+          }),
+        ).toBeVisible();
         await page.screenshot({
           path: info.outputPath(`pallet-template-${viewport.width}-${locale}-${theme}.png`),
         });

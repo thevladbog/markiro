@@ -136,7 +136,7 @@ import { ConflictList } from "./pages/ConflictList.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
 import { WarehouseReprint } from "./pages/WarehouseReprint.js";
-import { TaskSelection } from "./pages/TaskSelection.js";
+import { TaskSelection, type TaskSelectionView } from "./pages/TaskSelection.js";
 import { NewShift, type NewShiftDraft } from "./pages/NewShift.js";
 import { WorkScreen } from "./pages/WorkScreen.js";
 import { InventoryWorkScreen } from "./pages/InventoryWorkScreen.js";
@@ -273,6 +273,7 @@ export function App() {
   const configTransitions = useRef(new ConfigTransitionCoordinator());
   const [operator, setOperator] = useState<OperatorMirrorRecord | null>(null);
   const [floorView, setFloorView] = useState<"select" | "new" | "reprint">("select");
+  const [taskSelectionView, setTaskSelectionView] = useState<TaskSelectionView>("production");
   const [activeFloorTask, setActiveFloorTask] = useState<ActiveFloorTask | null>(null);
   const [floorRouteReady, setFloorRouteReady] = useState(false);
   const shift = activeFloorTask?.kind === "production" ? activeFloorTask.shift : null;
@@ -2416,6 +2417,8 @@ export function App() {
         )
       ) : floorView === "select" ? (
         <TaskSelection
+          initialView={taskSelectionView}
+          onViewChange={setTaskSelectionView}
           client={activeClient}
           exec={tauriExecutor}
           acquireShiftEntry={acquireShiftEntry}

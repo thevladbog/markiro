@@ -1441,9 +1441,15 @@ describe("App", () => {
     render(<App />);
     await signInAsOperator();
     fireEvent.click(screen.getByRole("button", { name: /Warehouse operations/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Additional operations" }));
     fireEvent.click(await screen.findByRole("button", { name: "Reprint labels" }));
     await screen.findByRole("heading", { name: "Reprint labels" });
     expect(screen.getByRole("button", { name: "Enter code manually" })).toBeDefined();
+    const leave = screen.getByRole<HTMLButtonElement>("button", { name: "Back to operations" });
+    await waitFor(() => expect(leave.disabled).toBe(false));
+    fireEvent.click(leave);
+    await screen.findByRole("heading", { name: "Additional operations" });
+    expect(screen.queryByRole("heading", { name: "Shifts" })).toBeNull();
     expect(screen.queryByRole("heading", { name: "New shift" })).toBeNull();
     expect(hardwareMock.print).not.toHaveBeenCalled();
   });
