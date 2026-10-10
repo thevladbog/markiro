@@ -13,6 +13,7 @@ import {
   type CredentialGeneration,
 } from "../credential-recovery.js";
 import { AUTHORIZED_CREDENTIAL_OWNERS_SQL, deviceRecoveryAllowsWork } from "../device-recovery.js";
+import { stationOperatorIsCurrentlyActive } from "../offline-grants/admission.js";
 import { resolvePrinter } from "../printer-routing.js";
 import type { HardwareConfig } from "../hardware-config.js";
 import type { PrintTarget } from "../hardware.js";
@@ -110,10 +111,13 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
   const refresh = async (jobId?: string) => {
     const version = ++refreshVersion;
     const session = await resumeWarehouseSession(o.exec, owner);
+    const visibleJobId = jobId ?? state.job?.jobId;
     const job = await findWarehouseJobView(
       o.exec,
       owner,
-      jobId ? { jobId } : session ? { sessionId: session.sessionId } : {},
+      visibleJobId
+        ? { jobId: visibleJobId }
+        : { ...(session ? { sessionId: session.sessionId } : {}), unresolvedOnly: true },
     );
     const [problem] = await o.exec.all<NonNullable<typeof historyProblem>>(
       `SELECT e.owner,e.event_id,e.digest,e.rejection_code FROM warehouse_reprint_events e
@@ -153,11 +157,8 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
     return task;
   };
   const assertOperator = async () => {
-    const [operator] = await o.exec.all<{ operator_id: string }>(
-      "SELECT operator_id FROM operators_mirror WHERE operator_id=? AND active=1",
-      [o.operatorId],
-    );
-    if (!operator) throw new Error("WAREHOUSE_OPERATOR_DENIED");
+    if (!(await stationOperatorIsCurrentlyActive(o.exec, o.operatorId)))
+      throw new Error("WAREHOUSE_OPERATOR_DENIED");
   };
   const refreshTemplateCatalog = async (freshSession = false) => {
     const catalog = await loadWarehouseTemplates(o.client, guarded, owner);
@@ -291,6 +292,7 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
             };
         await saveWarehouseSession(guarded, session);
         await recoverWarehouseJobs(guarded, owner, o.operatorId);
+        publish({ job: null, duplicate: false, verification: false });
         await refresh();
         try {
           await refreshTemplateCatalog(freshSession);

@@ -734,6 +734,86 @@ it("polls and detects a duplicate without decoding every saved label in the sess
     db.close();
   }
 });
+it("prints and finishes after the operator roster switches to slot B", async () => {
+  const h = await templateWork();
+  try {
+    await h.work.initialize();
+    await h.work.start();
+    await h.exec.run("INSERT INTO operators_mirror_b SELECT * FROM operators_mirror");
+    await h.exec.run("INSERT INTO station_meta(key,value) VALUES('operators_slot','b')");
+    await h.exec.run("DELETE FROM operators_mirror");
+    await h.work.scan(h.input.source.identity);
+    expect(h.work.getSnapshot().error).toBeNull();
+    expect(h.work.getSnapshot().job?.state).toBe("sent");
+    expect(h.print).toHaveBeenCalledTimes(1);
+    expect(await h.work.finish()).toBe(true);
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+
+it.each(["inactive", "removed", "blocked"] as const)(
+  "rejects preparing a label if the current-slot operator becomes %s at commit",
+  async (status) => {
+    const h = await templateWork();
+    try {
+      await h.work.initialize();
+      await h.work.start();
+      await h.exec.run("INSERT INTO operators_mirror_b SELECT * FROM operators_mirror");
+      await h.exec.run("INSERT INTO station_meta(key,value) VALUES('operators_slot','b')");
+      const run = h.exec.run.bind(h.exec);
+      h.exec.run = async (sql, params) => {
+        if (sql.includes("INSERT INTO warehouse_reprint_commands")) {
+          if (status === "inactive") await run("UPDATE operators_mirror_b SET active=0");
+          if (status === "removed") await run("DELETE FROM operators_mirror_b");
+          if (status === "blocked")
+            await run("INSERT INTO station_meta(key,value) VALUES('operators_blocked','1')");
+        }
+        await run(sql, params);
+      };
+      await h.work.scan(h.input.source.identity);
+      expect(h.work.getSnapshot().error).toBe("WAREHOUSE_OPERATOR_DENIED");
+      expect(h.print).not.toHaveBeenCalled();
+      expect(await h.exec.all("SELECT * FROM warehouse_reprint_jobs")).toEqual([]);
+      expect(await h.exec.all("SELECT * FROM warehouse_reprint_events")).toEqual([]);
+    } finally {
+      await h.work.close();
+      h.db.close();
+    }
+  },
+);
+
+it("resumes in scan-ready state while retaining successful jobs for explicit duplicate detection", async () => {
+  const h = await templateWork();
+  try {
+    await h.work.initialize();
+    await h.work.start();
+    await h.work.scan(h.input.source.identity);
+    expect(h.work.getSnapshot().job?.state).toBe("sent");
+    await h.work.close();
+    const resumed = createWarehouseWork(h.options);
+    try {
+      await resumed.initialize();
+      expect(resumed.getSnapshot().job).toBeNull();
+      expect(resumed.getSnapshot().session?.sentCount).toBe(1);
+      await resumed.start();
+      await resumed.poll();
+      expect(resumed.getSnapshot().job).toBeNull();
+      expect(h.print).toHaveBeenCalledTimes(1);
+      await resumed.scan(h.input.source.identity);
+      expect(resumed.getSnapshot()).toMatchObject({ duplicate: true, job: { state: "sent" } });
+      expect(h.print).toHaveBeenCalledTimes(1);
+      expect((await h.exec.all("SELECT * FROM warehouse_reprint_jobs")).length).toBe(1);
+    } finally {
+      await resumed.close();
+    }
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+
 it("checks the current local operator roster before preparing a label", async () => {
   const db = new DatabaseSync(":memory:");
   const exec = makeRotatingExec([db, db]);

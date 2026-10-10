@@ -103,6 +103,42 @@ it("does not resurrect superseded inventory print triggers when replaying wareho
   }
 });
 
+it("installs the current-roster warehouse closure guard once and preserves it on restart", async () => {
+  const db = new DatabaseSync(":memory:");
+  const exec = nodeExecutor(db);
+  const run = exec.run.bind(exec);
+  let drops = 0;
+  exec.run = async (sql, params) => {
+    if (sql === "DROP TRIGGER IF EXISTS warehouse_reprint_session_close_guard;") drops++;
+    await run(sql, params);
+  };
+  try {
+    await applyMigrations(exec);
+    expect(drops).toBe(1);
+    const installed = await exec.all<{ sql: string }>(
+      "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='warehouse_reprint_session_close_guard'",
+    );
+    expect(installed[0]?.sql).toContain("operators_mirror_b");
+    await applyMigrations(exec);
+    expect(drops).toBe(1);
+    expect(
+      await exec.all<{ sql: string }>(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='warehouse_reprint_session_close_guard'",
+      ),
+    ).toEqual(installed);
+    await exec.run("DROP TRIGGER warehouse_reprint_session_close_guard");
+    await applyMigrations(exec);
+    expect(drops).toBe(2);
+    expect(
+      await exec.all<{ sql: string }>(
+        "SELECT sql FROM sqlite_master WHERE type='trigger' AND name='warehouse_reprint_session_close_guard'",
+      ),
+    ).toEqual(installed);
+  } finally {
+    db.close();
+  }
+});
+
 it("preserves a downloaded CHZ group code for offline labels and through a legacy bundle", async () => {
   const db = new DatabaseSync(":memory:");
   const exec = nodeExecutor(db);

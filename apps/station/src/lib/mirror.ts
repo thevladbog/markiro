@@ -247,17 +247,22 @@ const STATION_TRIGGER_REPLACEMENTS = new Map<
     "warehouse_reprint_safe_cleanup",
     { dropId: "station-sqlite-334", createId: "station-sqlite-335" },
   ],
+  [
+    "warehouse_reprint_session_close_guard",
+    { dropId: "station-sqlite-368", createId: "station-sqlite-369" },
+  ],
+  ["warehouse_reprint_prepare", { dropId: "station-sqlite-370", createId: "station-sqlite-371" }],
 ]);
 
 const canonicalTriggerSql = (value: string) =>
   value
     .trim()
     .replace(/;$/, "")
-    // Only this appended replacement is replay-skippable. Historical inventory
+    // Only these appended replacements are replay-skippable. Historical inventory
     // pairs must still run their DROP: earlier CREATEs recreate superseded v1s.
     .replace(
-      /^CREATE TRIGGER IF NOT EXISTS warehouse_reprint_safe_cleanup/i,
-      "CREATE TRIGGER warehouse_reprint_safe_cleanup",
+      /^CREATE TRIGGER IF NOT EXISTS (warehouse_reprint_safe_cleanup|warehouse_reprint_session_close_guard|warehouse_reprint_prepare)\b/i,
+      "CREATE TRIGGER $1",
     )
     .replace(/\s+/g, " ");
 

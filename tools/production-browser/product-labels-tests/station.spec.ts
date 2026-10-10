@@ -599,9 +599,10 @@ for (const locale of ["ru", "en"])
       });
       const { buildDatedBoxLabelTemplates, buildPalletLabelTemplates } =
         await import("../../../packages/domain/dist/index.js");
-      const boxSpec = buildDatedBoxLabelTemplates()[0]?.spec;
+      const originalBoxSpec = buildDatedBoxLabelTemplates()[0]?.spec;
       const palletSpec = buildPalletLabelTemplates()[0]?.spec;
-      if (!boxSpec || !palletSpec) throw new Error("Missing stock label specs");
+      if (!originalBoxSpec || !palletSpec) throw new Error("Missing stock label specs");
+      const boxSpec = { ...originalBoxSpec, widthMm: 75, heightMm: 120 };
       const palletName = locale === "en" ? "Pallet 100×150" : "Паллета 100×150";
       await page.addInitScript((theme) => localStorage.setItem("markiro.theme", theme), theme);
       await page.route(`${station}/__product_labels_api/**`, async (route) => {
@@ -721,6 +722,20 @@ for (const locale of ["ru", "en"])
         await page
           .getByRole("button", { name: locale === "ru" ? "Начать" : "Start", exact: true })
           .click();
+        const boxPreview = page.getByRole("img", {
+          name: `${locale === "en" ? "Preview" : "Предпросмотр"}: Этикетка короба`,
+          exact: true,
+        });
+        await expect(boxPreview).toBeVisible();
+        const boxBounds = await boxPreview.boundingBox();
+        if (!boxBounds) throw new Error("Missing box label bounds");
+        expect(boxBounds.width / boxBounds.height).toBeCloseTo(75 / 120, 2);
+        expect(
+          await boxPreview.evaluate((svg) => parseFloat(getComputedStyle(svg).borderTopWidth)),
+        ).toBeGreaterThanOrEqual(1);
+        await page.screenshot({
+          path: info.outputPath(`box-75x120-${viewport.width}-${locale}-${theme}.png`),
+        });
         await page
           .getByRole("button", { name: locale === "ru" ? "Далее" : "Next", exact: true })
           .click();
@@ -735,6 +750,12 @@ for (const locale of ["ru", "en"])
             exact: true,
           }),
         ).toBeVisible();
+        const palletBounds = await page.getByRole("img").boundingBox();
+        if (!palletBounds) throw new Error("Missing pallet label bounds");
+        expect(palletBounds.width / palletBounds.height).toBeCloseTo(
+          palletSpec.widthMm / palletSpec.heightMm,
+          2,
+        );
         await page.screenshot({
           path: info.outputPath(`pallet-template-${viewport.width}-${locale}-${theme}.png`),
         });

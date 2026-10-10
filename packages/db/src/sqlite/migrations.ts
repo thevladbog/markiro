@@ -4977,6 +4977,65 @@ export const STATION_MIGRATIONS: string[] = [
       json_object('bytesDigest',json_extract(job_json,'$.bytesDigest'),'dpi',json_extract(job_json,'$.preparedEvent.dpi')))
     WHERE json_extract(job_json,'$.preparedEvent.printFormat')='mono-raster-v1'
       AND json_type(projection_json,'$.raster') IS NULL;`,
+  // Upgrade already-installed closure guards to the same active-roster snapshot
+  // used by sign-in and offline admission. Never authorize from the inactive slot.
+  `DROP TRIGGER IF EXISTS warehouse_reprint_session_close_guard;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_session_close_guard
+    BEFORE INSERT ON warehouse_reprint_session_closures
+    WHEN NOT EXISTS(SELECT 1 FROM warehouse_reprint_session_closures
+      WHERE owner=NEW.owner AND session_id=NEW.session_id) BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_OPERATOR_DENIED') WHERE NOT EXISTS(
+        SELECT 1 FROM operators_mirror WHERE operator_id=NEW.operator_id AND active=1
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_slot'),'a')<>'b'
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_blocked'),'0')<>'1'
+        UNION ALL
+        SELECT 1 FROM operators_mirror_b WHERE operator_id=NEW.operator_id AND active=1
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_slot'),'a')='b'
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_blocked'),'0')<>'1');
+      SELECT RAISE(ABORT,'WAREHOUSE_RECOVERY_REQUIRED') WHERE EXISTS(
+        SELECT 1 FROM warehouse_reprint_jobs j
+        WHERE (j.owner=NEW.owner OR j.owner IN (
+          SELECT related.credential_hash FROM station_device_owners related
+          JOIN station_device_owners original ON original.owner_json=related.owner_json
+          WHERE original.credential_hash=NEW.owner))
+        AND j.state IN ('prepared','sending','delivery_unknown','failed_before_send'));
+    END;`,
+  `DROP TRIGGER IF EXISTS warehouse_reprint_prepare;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_prepare AFTER INSERT ON warehouse_reprint_commands
+    WHEN NEW.kind='prepare' BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_DUPLICATE') WHERE EXISTS (
+        SELECT 1 FROM warehouse_reprint_jobs WHERE owner=NEW.owner
+        AND session_id=json_extract(NEW.payload_json,'$.input.sessionId')
+        AND source_kind=json_extract(NEW.payload_json,'$.input.source.kind')
+        AND identity=json_extract(NEW.payload_json,'$.input.source.identity'));
+      SELECT RAISE(ABORT,'WAREHOUSE_BUSY') WHERE EXISTS (
+        SELECT 1 FROM warehouse_reprint_jobs WHERE owner=NEW.owner AND state IN ('prepared','sending','delivery_unknown','failed_before_send'));
+      SELECT RAISE(ABORT,'WAREHOUSE_SESSION_UNAVAILABLE') WHERE NOT EXISTS (
+        SELECT 1 FROM warehouse_reprint_sessions WHERE owner=NEW.owner
+        AND session_id=json_extract(NEW.payload_json,'$.input.sessionId') AND status='active'
+        AND operator_id=json_extract(NEW.payload_json,'$.input.operatorId'));
+      SELECT RAISE(ABORT,'WAREHOUSE_OPERATOR_DENIED') WHERE NOT EXISTS(
+        SELECT 1 FROM operators_mirror
+        WHERE operator_id=json_extract(NEW.payload_json,'$.input.operatorId') AND active=1
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_slot'),'a')<>'b'
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_blocked'),'0')<>'1'
+        UNION ALL
+        SELECT 1 FROM operators_mirror_b
+        WHERE operator_id=json_extract(NEW.payload_json,'$.input.operatorId') AND active=1
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_slot'),'a')='b'
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_blocked'),'0')<>'1');
+      INSERT INTO warehouse_reprint_jobs(owner,job_id,session_id,identity,source_kind,job_json,projection_json,state,latest_sequence,attempt_id,updated_at)
+        VALUES(NEW.owner,NEW.job_id,json_extract(NEW.payload_json,'$.input.sessionId'),
+        json_extract(NEW.payload_json,'$.input.source.identity'),json_extract(NEW.payload_json,'$.input.source.kind'),
+        json_extract(NEW.payload_json,'$.input'),json_extract(NEW.payload_json,'$.projection'),'prepared',1,
+        json_extract(NEW.payload_json,'$.input.preparedEvent.attemptId'),json_extract(NEW.payload_json,'$.input.preparedEvent.occurredAt'));
+      INSERT INTO warehouse_reprint_attempts(owner,job_id,attempt_id,attempt_no,state,reason)
+        VALUES(NEW.owner,NEW.job_id,json_extract(NEW.payload_json,'$.input.preparedEvent.attemptId'),1,'prepared',json_extract(NEW.payload_json,'$.input.reason'));
+      INSERT INTO warehouse_reprint_events(owner,event_id,job_id,sequence,event_json,digest)
+        VALUES(NEW.owner,json_extract(NEW.payload_json,'$.input.preparedEvent.eventId'),NEW.job_id,1,
+        json_extract(NEW.payload_json,'$.input.preparedEvent'),json_extract(NEW.payload_json,'$.eventDigest'));
+      DELETE FROM warehouse_reprint_commands WHERE owner=NEW.owner AND command_id=NEW.command_id;
+    END;`,
 ];
 
 export interface StationMigrationEntry {

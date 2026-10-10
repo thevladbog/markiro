@@ -54,6 +54,12 @@ export function LabelPreview({
           role="img"
           aria-label={t("warehouse.previewLabel", { name: template.name })}
           viewBox={`0 0 ${plan.widthDots} ${plan.heightDots}`}
+          width={plan.widthDots}
+          height={plan.heightDots}
+          style={{
+            width: `min(100%, calc(var(--label-preview-max-height) * ${plan.widthDots / plan.heightDots}))`,
+            aspectRatio: `${plan.widthDots} / ${plan.heightDots}`,
+          }}
           data-language={plan.language}
           data-dpi={plan.dpi}
         >
