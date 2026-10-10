@@ -129,7 +129,21 @@ const jobRow = z.object({
 /** Every field of the domain, each a string: what `boxLabelData` gives. */
 const fieldsSchema = z.record(z.enum(LABEL_FIELDS), z.string());
 
-/** A stored job this build cannot read: its printer profile or its fields are damaged. */
+/**
+ * A stored job this build cannot read: its printer profile or its fields are
+ * damaged (a downgrade below a printer-profile format change, or a damaged
+ * database).
+ *
+ * KNOWN LIMIT (an owner / plan 2b item, deliberately not worked around): every
+ * read of such a job throws, so the work screen's line of that shift stays on
+ * «Состояние этикетки не прочитано» until the operator leaves the shift, and
+ * `shiftLabelsSettled` counts the row, so the shift cannot be closed locally.
+ * Nothing is sent and nothing is lost, and another shift is not affected. The
+ * way out, once decided, is a dedicated stop with one action, «Продолжить без
+ * этикетки», carried out in SQL by the job id against the raw `state` and
+ * `attempts` columns, building the `box_label skipped` record from the plain
+ * columns (`shift_id`, `subject_id`) and never sending from it.
+ */
 export class UnreadableJobError extends Error {
   constructor(id: string) {
     super(`print job ${id} cannot be read`);

@@ -248,6 +248,18 @@ describe("the label of a box the work screen closes", () => {
     expect(shell.sends).toHaveLength(1);
   });
 
+  it("promises nothing the screen does not have when it asks to go on without a label", async () => {
+    const at = await printStation();
+    const shell = fakeHardware(async () => ({ sent: false, code: "not_sent" }));
+    const screenWork = work(at, { shell });
+    await fillBox(screenWork);
+    await screenWork.press("Продолжить без этикетки");
+    const body = screen.getByText(/^Короб уже закрыт/).textContent ?? "";
+    // «Исключения» arrive with plan 2a8: until then no text may send the operator there.
+    expect(body).not.toContain("Исключени");
+    expect(body).toContain("промаркировать");
+  });
+
   it("goes on without a label only after the operator confirms, with its record", async () => {
     const at = await printStation();
     const shell = fakeHardware(async () => ({ sent: false, code: "not_sent" }));
@@ -361,11 +373,8 @@ describe("a label a stop of the station left", () => {
     const screenWork = work(at);
     await screenWork.settled();
     expect(screen.getByText("Неизвестно, напечаталась ли этикетка")).toBeTruthy();
-    expect(
-      screen.getByText(
-        "Печать прервалась: программа или компьютер перезапустились. Посмотрите, вышла ли этикетка.",
-      ),
-    ).toBeTruthy();
+    expect(screen.getByText("Печать прервалась. Посмотрите, вышла ли этикетка.")).toBeTruthy();
+    expect(screen.queryByText(/перезапустились/)).toBeNull();
     expect(screenWork.shell.sends).toEqual([]);
   });
 
@@ -489,6 +498,7 @@ function endsSend(statements: readonly LocalStatement[]): boolean {
 
 const MIDDLE_FAILED = "Этикетка короба не напечатана";
 const UNKNOWN_TITLE = "Неизвестно, напечаталась ли этикетка";
+const STALLED_TITLE = "Итог отправки этикетки не записан";
 
 /** The alerts' polite region of the screen, there from the first paint. */
 function alertsRegion(): Element {
@@ -771,15 +781,90 @@ describe("a label whose state the screen could not read or write", () => {
     expect(jobRows(at.db)[0]).toMatchObject({ state: "sending", attempts: 1 });
     failing = false;
     await screenWork.press("Понятно");
-    // Still with the printer's queue as far as this session knows: nothing to decide, nothing sent.
-    expect(screen.getByText("Этикетка отправляется на принтер")).toBeTruthy();
+    // Nothing waits for an answer any more: it is said so, and nothing is sent by itself.
+    expect(screen.getByText(STALLED_TITLE)).toBeTruthy();
+    expect(screen.queryByText("Этикетка отправляется на принтер")).toBeNull();
     expect(shell.sends).toHaveLength(1);
+    expect(jobRows(at.db)[0]).toMatchObject({ state: "sending", attempts: 1 });
     // Entering the screen again reads the send that was cut as unknown, for the operator.
     screenWork.view.unmount();
     const again = work(at, { shell });
     await again.settled();
     expect(screen.getByText(UNKNOWN_TITLE)).toBeTruthy();
     expect(shell.sends).toHaveLength(1);
+  });
+
+  it("lets the operator check a send whose end was not written: the job turns unknown, the decisions follow, nothing is sent", async () => {
+    const at = await printStation();
+    let failing = true;
+    const recovering: number[] = [];
+    let pending = () => 0;
+    const local = around(at.local, {
+      transaction: (statements, run) => {
+        if (statements.some((statement) => statement.sql.includes("error_code = 'interrupted'"))) {
+          recovering.push(pending());
+        }
+        return failing && endsSend(statements)
+          ? Promise.reject(new LocalDbError("statement_failed", "disk"))
+          : run();
+      },
+    });
+    const shell = fakeHardware();
+    const screenWork = work({ ...at, local }, { shell });
+    pending = () => screenWork.gate.pending();
+    await fillBox(screenWork);
+    failing = false;
+    await screenWork.press("Понятно");
+    expect(screen.getByText(STALLED_TITLE)).toBeTruthy();
+    const recoveriesBefore = recovering.length;
+    await screenWork.press("Проверить, вышла ли этикетка");
+    // The recovery ran once more, as work the gate holds, and the job is unknown now.
+    expect(recovering).toHaveLength(recoveriesBefore + 1);
+    expect(recovering.at(-1)).toBeGreaterThan(0);
+    expect(jobRows(at.db)[0]).toMatchObject({
+      state: "unknown",
+      error_code: "interrupted",
+      attempts: 1,
+    });
+    expect(screen.getByText(UNKNOWN_TITLE)).toBeTruthy();
+    expect(screen.getByText("Печать прервалась. Посмотрите, вышла ли этикетка.")).toBeTruthy();
+    expect(screen.queryByText(STALLED_TITLE)).toBeNull();
+    expect(shell.sends).toHaveLength(1);
+    // The unknown label's own decisions: «Этикетка напечаталась» ends it, no new print.
+    await screenWork.press("Этикетка напечаталась");
+    expect(jobRows(at.db)[0]).toMatchObject({ state: "sent" });
+    expect(shell.sends).toHaveLength(1);
+    await screenWork.scan(km("P12"));
+    expect(scans(at)).toBe(13);
+  });
+
+  it("offers no check for a send this app still holds, nor for a label that was never sent", async () => {
+    const at = await printStation();
+    const shell = fakeHardware();
+    const runtime = createPrintRuntime(shell.hardware.printBytes);
+    const first = work(at, { shell, runtime });
+    await first.scanner.listening();
+    await first.settled();
+    for (let index = 0; index < 11; index += 1) await first.scan(km(`P${index}`));
+    shell.holdSends();
+    await act(async () => {
+      first.scanner.emit(km("P11"));
+    });
+    await waitFor(() => expect(shell.heldSends()).toBe(1));
+    first.view.unmount();
+    const second = work(at, { shell, runtime });
+    await act(async () => {
+      await flushPromises();
+    });
+    // The bytes are with the shell: the answer is still to come, and there is nothing to check.
+    expect(screen.getByText("Этикетка отправляется на принтер")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Проверить, вышла ли этикетка" })).toBeNull();
+    await act(async () => {
+      shell.releaseSend({ sent: true });
+      await second.gate.drain();
+      await first.gate.drain();
+    });
+    expect(jobRows(at.db)[0]).toMatchObject({ state: "sent", attempts: 1 });
   });
 
   it("leaves a send this app still holds as it is when the screen is entered again", async () => {
@@ -1256,6 +1341,8 @@ describe("a decision on the label that goes wrong, and the work after it", () =>
     expect(screenWork.shell.sends).toEqual([]);
     expect(screen.queryByText("Состояние этикетки не прочитано")).toBeNull();
     expect(screen.getByText("Этикетка отправляется на принтер")).toBeTruthy();
+    // Never sent: nothing to check, the next entry sends it.
+    expect(screen.queryByRole("button", { name: "Проверить, вышла ли этикетка" })).toBeNull();
   });
 
   it("closes the box a stopped station left full once the label's check passes, and prints its label", async () => {

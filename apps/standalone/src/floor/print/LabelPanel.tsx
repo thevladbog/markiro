@@ -34,6 +34,13 @@ export interface LabelPanelProps {
   onSkip: () => void;
   /** The workstation setup; absent where the floor gives none. */
   onSetup?: () => void;
+  /**
+   * Present only for a job left `sending` that no send of this app holds (its
+   * final write failed): the operator's own act, which asks the work screen to
+   * turn it into `unknown` so the decisions of an unknown label apply. It
+   * sends nothing.
+   */
+  onRecover?: () => void;
   /** Milliseconds from a clock that does not go back; the guard after a view change reads it. */
   clock?: () => number;
 }
@@ -125,6 +132,7 @@ export function LabelPanel({
   onPrinted,
   onSkip,
   onSetup,
+  onRecover,
   clock = realClock,
 }: LabelPanelProps) {
   const { t } = useTranslation();
@@ -298,8 +306,28 @@ export function LabelPanel({
         </div>
       </Alert>
     );
+  } else if (onRecover !== undefined) {
+    // The send's end was not written and no send of this app holds the bytes:
+    // nobody is going to answer. Only the operator's act (never an automatic one)
+    // turns it into an unknown label to decide on.
+    body = (
+      <Alert
+        tone="warn"
+        role="presentation"
+        title={t("floor.print.stalled.title")}
+        className="work-screen__label"
+      >
+        <p>{t("floor.print.stalled.body")}</p>
+        <p>{sscc}</p>
+        <div className="standalone-form__actions">
+          <Button size="floor" {...press(onRecover)}>
+            {t("floor.print.stalled.action")}
+          </Button>
+        </div>
+      </Alert>
+    );
   } else if (job.state === "prepared" || job.state === "sending") {
-    // On its way to the printer, or a send whose end was not written: nothing
+    // On its way to the printer, or a send whose answer is still to come: nothing
     // to decide yet (a restart reads a send left so as unknown).
     body = (
       <Alert

@@ -23,6 +23,7 @@ import {
   boxLabelStep,
   isOpenJob,
   readOpenJob,
+  readPrintJob,
   recoverInterruptedJobs,
   sendLabelJob,
   StaleJobError,
@@ -664,6 +665,16 @@ export function WorkScreen(props: WorkScreenProps) {
    * from the work queue. A send that was rejected says nothing of where it
    * stands: a stale one reads the job again, any other failure is the caller's
    * to show, whose dismissal comes back here and reads it.
+   *
+   * Known limits, left to the owner / plan 2b and to plan ПЛ-Ц:
+   * - A job this build cannot read (`UnreadableJobError`) makes this read
+   *   throw every time: that shift's line stays on the label system message
+   *   until the operator leaves the shift. There is no bypass here on purpose;
+   *   the proposal is in `UnreadableJobError`'s JSDoc.
+   * - The screen shows the shift's OLDEST open job and, after a decision on
+   *   it, trusts the decided job instead of reading the next waiting one. With
+   *   one box label per shift that is exact; once a pallet label can open in
+   *   the same close as its box's, a decision must call this function again.
    */
   const settleLabel = useCallback(async (): Promise<void> => {
     const now = live.current;
@@ -899,6 +910,20 @@ export function WorkScreen(props: WorkScreenProps) {
       .catch(() => setStop({ kind: "system_error", cause: "label" }))
       // The button pressed is gone with the panel it was in.
       .finally(refocus);
+  };
+
+  /**
+   * The operator's check of a job left `sending` whose final write failed:
+   * the recovery of interrupted sends, as one piece of the line's work (the
+   * queue holds no send of this app beside it; a send the runtime still holds
+   * is left alone), then the job read again. Sends nothing.
+   */
+  const recoverStalled = async (job: PrintJob): Promise<PrintJob> => {
+    await recoverInterruptedJobs(printContextOf(live));
+    const now = live.current;
+    const after = await readPrintJob(now.local, pairingOf(now), job.id);
+    if (after === null) throw new StaleJobError(job.id);
+    return after;
   };
 
   const decideAgain = (request: PrintAgain) =>
@@ -1183,6 +1208,9 @@ export function WorkScreen(props: WorkScreenProps) {
               onPrintAgain={decideAgain}
               onPrinted={() => decide((job) => confirmPrinted(printContextOf(live), job), false)}
               onSkip={() => decide((job) => skipLabel(printContextOf(live), job), false)}
+              {...(stop.job.state === "sending" && !props.printing.isInFlight(stop.job.id)
+                ? { onRecover: () => decide(recoverStalled, false) }
+                : {})}
               {...(props.onSetup === undefined ? {} : { onSetup: props.onSetup })}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
