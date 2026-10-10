@@ -1,5 +1,6 @@
 import type { RouteObject } from "react-router";
 
+import { BackupsPage } from "./backups/BackupsPage.js";
 import { CounterpartiesPage } from "./counterparties/CounterpartiesPage.js";
 import { DevicesPage } from "./devices/DevicesPage.js";
 import { LinesPage } from "./lines/LinesPage.js";
@@ -62,6 +63,7 @@ export const officeRoutes: RouteObject[] = [
           </RequireRole>
         ),
       },
+      { path: "backups", element: <BackupsPage /> },
     ],
   },
 ];

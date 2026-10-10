@@ -14,6 +14,7 @@ import { RasterUnavailableError } from "../../src/labels/rasterizer.js";
 import { Office, type OfficeProps } from "../../src/office/Office.js";
 import type { OfficeSessionValue } from "../../src/office/office-session.js";
 import type { LabelRendering } from "../../src/office/templates/label-rendering.js";
+import { HEALTHY_BACKUPS } from "./backups.js";
 import { SESSION } from "./fixtures.js";
 
 /** A `HostApi` of mocks. */
@@ -97,6 +98,13 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     requestSsccBlock: vi.fn<HostApi["requestSsccBlock"]>(() => unexpected("requestSsccBlock")),
     checkCode: vi.fn<HostApi["checkCode"]>(() => unexpected("checkCode")),
     sendFacts: vi.fn<HostApi["sendFacts"]>(() => unexpected("sendFacts")),
+    // «Обзор» reads the copies on every office test: healthy ones warn of nothing.
+    getBackups: vi.fn<HostApi["getBackups"]>(async () => HEALTHY_BACKUPS),
+    startBackup: vi.fn<HostApi["startBackup"]>(() => unexpected("startBackup")),
+    updateBackupSettings: vi.fn<HostApi["updateBackupSettings"]>(() =>
+      unexpected("updateBackupSettings"),
+    ),
+    resumeFacts: vi.fn<HostApi["resumeFacts"]>(() => unexpected("resumeFacts")),
     ...overrides,
   };
 }

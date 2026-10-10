@@ -606,3 +606,19 @@
   margin: 0;
   font: var(--floor-body-strong);
 }
+
+/*
+  A region that announces the copies' warnings to a screen reader is on the
+  page before any warning; empty, it takes no room in the page's grid.
+*/
+.backup-alerts {
+  display: grid;
+  gap: 16px;
+}
+
+.backup-alerts:empty {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}

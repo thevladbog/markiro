@@ -24,6 +24,8 @@ export const officeKeys = {
   products: ["office", "products"],
   templates: ["office", "templates"],
   templateDefaults: ["office", "template-defaults"],
+  /** The copies of the database in both folders (plan РК). */
+  backups: ["office", "backups"],
   /** Every list of shifts, whatever its period: a write reads them all again. */
   shifts: ["office", "shifts"],
   /** The list of shifts of a period of production dates, or the host's own list (`null`). */

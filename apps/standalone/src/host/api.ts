@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { backupStateSchema, type BackupSettingsUpdate, type BackupState } from "./backups.js";
 import type { HostClient } from "./client.js";
 import {
   badgeInfoSchema,
@@ -216,6 +217,16 @@ export interface HostApi {
    * again.
    */
   sendFacts: (records: readonly unknown[]) => Promise<FactReceipt[]>;
+  /** The copies in both folders (plan РК); every office role reads them. */
+  getBackups: (token: string) => Promise<BackupState>;
+  /**
+   * «Сделать копию сейчас»: `202` with the copy running; the host makes it on
+   * its own, and the office reads the state again until nothing runs.
+   */
+  startBackup: (token: string) => Promise<BackupState>;
+  updateBackupSettings: (token: string, update: BackupSettingsUpdate) => Promise<BackupState>;
+  /** End the hold of the stations' facts a restore set; without a hold it changes nothing. */
+  resumeFacts: (token: string) => Promise<BackupState>;
 }
 
 /** How long the scan pipeline waits for the host's code check (stage 2a spec, decision 16). */
@@ -500,6 +511,27 @@ export function createHostApi(client: HostClient): HostApi {
         body: close,
         officeToken: token,
         schema: officeShiftSchema,
+      }),
+    getBackups: (token) =>
+      client.request("GET", "/v1/office/backups", {
+        officeToken: token,
+        schema: backupStateSchema,
+      }),
+    startBackup: (token) =>
+      client.request("POST", "/v1/office/backups", {
+        officeToken: token,
+        schema: backupStateSchema,
+      }),
+    updateBackupSettings: (token, update) =>
+      client.request("PUT", "/v1/office/backups/settings", {
+        body: update,
+        officeToken: token,
+        schema: backupStateSchema,
+      }),
+    resumeFacts: (token) =>
+      client.request("POST", "/v1/office/backups/resume", {
+        officeToken: token,
+        schema: backupStateSchema,
       }),
   };
 }
