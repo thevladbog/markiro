@@ -3049,6 +3049,7 @@ export function WorkScreen({
                   await serializePrinterOutput(printer.target, () =>
                     dispatchWindowsDelivery(exec, retry.key, printer, retry.bytes),
                   );
+                  setPrinterDestinationRevision((value) => value + 1);
                   return undefined;
                 }
                 const reprintBytes = verification.bytes;

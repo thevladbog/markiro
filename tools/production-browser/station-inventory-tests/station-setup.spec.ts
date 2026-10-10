@@ -112,7 +112,6 @@ test("Windows driver mode preserves explicit RAW language and compact controls",
   await expect(page.getByText(/Установите драйвер принтера в Windows/)).toBeInViewport({
     ratio: 1,
   });
-  await page.screenshot({ path: "/tmp/station-windows-mode.png" });
   await mode.selectOption("raw");
   await expect(page.getByRole("radio", { name: "TSPL", exact: true })).toBeChecked();
   await mode.selectOption("windows_driver");

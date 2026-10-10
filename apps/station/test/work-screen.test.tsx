@@ -7,8 +7,9 @@ import i18n from "../src/i18n/index.js";
 import { readExceptions, type PendingException } from "../src/lib/box-exceptions-mirror.js";
 import type { CloseBoxResult } from "../src/lib/close-box.js";
 import { createFloorWorkRegistry, readSealedWorkSummary } from "../src/lib/credential-recovery.js";
-import type { PrinterLanguage } from "../src/lib/hardware-config.js";
-import type { PrintTarget } from "../src/lib/hardware.js";
+import { tauriWindowsPrinting, type PrintTarget } from "../src/lib/hardware.js";
+import * as rasterizer from "../src/lib/rasterizer.js";
+import type { PrinterProfile } from "../src/lib/printer-routing.js";
 import type { SqlExecutor } from "../src/lib/mirror.js";
 import type * as ProductImageCache from "../src/lib/product-image-cache.js";
 import {
@@ -327,11 +328,7 @@ interface RenderWorkOverrides extends RenderWorkScreenOverrides {
   closeCurrentBox?: (shiftId: string, operatorId: string | null) => Promise<CloseBoxResult>;
   onScan?: (raw: string) => void;
   verifyPrintedLabel?: boolean;
-  printing?: {
-    target: PrintTarget;
-    language: PrinterLanguage;
-    print: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
-  } | null;
+  printing?: WorkScreenProps["printing"];
   onOpenPrinterSetup?: () => void;
   onPrintRecoveryChange?: (blocked: boolean) => void;
   productShelfLifeDays?: number | null;
@@ -2647,6 +2644,67 @@ describe("WorkScreen box progress, closing and printing", () => {
     await waitFor(() => expect(close).toHaveBeenCalledTimes(2));
     expect(print).toHaveBeenCalledOnce();
     expect(await screen.findByText("Для смены не выбран шаблон этикетки короба")).toBeDefined();
+  });
+
+  it("refreshes the Windows queue receipt after verification reprint", async () => {
+    const exec = makeExec();
+    await seedLabelSpec(exec, "s1");
+    const profile: PrinterProfile = {
+      id: "windows",
+      name: "Queue",
+      target: { kind: "usb", printer: "Queue" },
+      mode: "windows_driver",
+      language: "zpl",
+      dpi: 203,
+    };
+    const close = vi.fn<() => Promise<CloseBoxResult>>().mockResolvedValue({
+      status: "closed",
+      sscc: SSCC,
+      itemCount: 10,
+      closedAt: CLOSED_AT,
+      pallet: null,
+    });
+    const text = vi.spyOn(rasterizer, "rasterizeDriverText").mockResolvedValue({
+      hex: "80",
+      bytesPerRow: 1,
+      totalBytes: 1,
+      width: 1,
+      height: 1,
+    });
+    const canvas = vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null);
+    const preflight = vi
+      .spyOn(tauriWindowsPrinting, "preflightWindowsRaster")
+      .mockResolvedValue({ ok: true });
+    let nextJobId = 41;
+    const send = vi
+      .spyOn(tauriWindowsPrinting, "printWindowsRaster")
+      .mockImplementation(async (queue, _, documentName) => ({
+        ok: true,
+        receipt: { queue, jobId: nextJobId++, documentName },
+      }));
+    const print = vi.fn(async () => {});
+    try {
+      renderWorkTracked({
+        exec,
+        boxCapacity: 10,
+        boxItemCount: 9,
+        closeCurrentBox: close,
+        verifyPrintedLabel: true,
+        printing: { profile, target: profile.target, language: "zpl", dpi: 203, print },
+      });
+      act(() => scan(KM));
+      await screen.findByText("Queue · #41");
+      fireEvent.click(screen.getByRole("button", { name: "Печатать заново" }));
+      await screen.findByText("Queue · #42");
+      expect(screen.queryByText("Queue · #41")).toBeNull();
+      expect(send).toHaveBeenCalledTimes(2);
+      expect(print).not.toHaveBeenCalled();
+    } finally {
+      text.mockRestore();
+      canvas.mockRestore();
+      preflight.mockRestore();
+      send.mockRestore();
+    }
   });
 
   it("logs only a fixed category when verification reprint transport rejects", async () => {

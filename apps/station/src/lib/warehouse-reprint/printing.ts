@@ -135,7 +135,7 @@ export async function printWarehouseJob(deps: WarehousePrintingDeps, jobId: stri
           ...(ownerChanged
             ? ({
                 kind: "failed_before_send",
-                errorCode: error.message === "owner_changed" ? "owner_changed" : "printer_changed",
+                errorCode: "owner_changed",
               } as const)
             : ({ kind: "delivery_unknown", errorCode: "transport_failed" } as const)),
         };

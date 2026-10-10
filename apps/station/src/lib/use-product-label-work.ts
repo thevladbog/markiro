@@ -1,4 +1,4 @@
-import { printerMode } from "./printer-routing.js";
+import { printerFormat, printerMode } from "./printer-routing.js";
 import { rasterizeDriverText } from "./rasterizer.js";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { DomainError, productLabelValueDigest, type ReprintReason } from "@markiro/domain";
@@ -339,7 +339,11 @@ export function createProductLabelWork(options: ProductLabelWorkOptions) {
         const selected = options
           .printers?.()
           .find((candidate) => JSON.stringify(candidate) === JSON.stringify(printer));
-        if (!selected || selected.language !== view.language || selected.dpi !== view.dpi)
+        if (
+          !selected ||
+          printerFormat(selected) !== (view.printFormat ?? view.language) ||
+          selected.dpi !== view.dpi
+        )
           throw new Error("Incompatible printer");
         await changePreparedProductLabelPrinter(
           exec,
