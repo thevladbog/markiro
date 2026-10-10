@@ -3,6 +3,14 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
+import {
+  CONFLICT_COUNT_SQL,
+  HEAD_RECORD_SQL,
+  REJECTED_COUNT_SQL,
+  SHIFT_PREFIX_SQL,
+  UNSENT_COUNT_SQL,
+} from "../src/floor/outbox-status.js";
+import { BLOCKS_WITH_ROOM_SQL } from "../src/floor/work/block-supply.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
 import { attemptStatement, receiptStatements, UNSENT_SQL } from "../src/local/facts-sender.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
@@ -610,17 +618,35 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(
       plan("SELECT id FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?"),
     ).toContain("floor_scans_shift");
-    // The status bar re-counts the outbox after every scan, as three counts
-    // (one FILTER scan would read every record, payload included).
-    expect(
-      plan("SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? AND acked_at IS NULL"),
-    ).toContain("outbox_unsent");
-    for (const outcome of ["rejected", "conflict"]) {
+    // The status bar re-counts the outbox after every scan, as three counts (one
+    // FILTER scan would read every record, payload included), reads the oldest
+    // record not delivered while a send fails, and the serials left of the shift's
+    // prefix. The statements are the bar's own (`src/floor/outbox-status.ts`).
+    expect(plan(UNSENT_COUNT_SQL)).toContain("outbox_unsent");
+    for (const sql of [REJECTED_COUNT_SQL, CONFLICT_COUNT_SQL]) {
+      expect(plan(sql)).toContain("outbox_settled (host_id=? AND device_id=? AND outcome=?)");
+    }
+    expect(plan(HEAD_RECORD_SQL)).toContain("outbox_unsent (host_id=? AND device_id=?)");
+    expect(plan(SHIFT_PREFIX_SQL)).toContain(
+      "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
+    );
+    expect(plan(BLOCKS_WITH_ROOM_SQL)).toContain(
+      "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+    );
+    for (const sql of [
+      UNSENT_COUNT_SQL,
+      REJECTED_COUNT_SQL,
+      CONFLICT_COUNT_SQL,
+      HEAD_RECORD_SQL,
+      SHIFT_PREFIX_SQL,
+      BLOCKS_WITH_ROOM_SQL,
+    ]) {
       expect(
-        plan(
-          `SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? AND outcome = '${outcome}'`,
-        ),
-      ).toContain("outbox_settled (host_id=? AND device_id=? AND outcome=?)");
+        plan(sql)
+          .split("\n")
+          .filter((step) => step.startsWith("SCAN ") || step.includes("TEMP B-TREE")),
+        sql,
+      ).toEqual([]);
     }
     // The totals of the work screen: the codes and the closed boxes of a shift,
     // and the last SSCC.
@@ -767,6 +793,23 @@ describe("the shape of the production tables (migration 0006)", () => {
       }
     }
     expect(plan(UNSENT_SQL)).toContain("outbox_unsent");
+  });
+
+  // The same for what the status bar reads.
+  it("are pinned on the shell's SQLite with the status bar's own statements", () => {
+    const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
+      // A line continuation of a Rust string drops the newline and the next line's indent.
+      .replace(/\\\n\s*/g, "");
+    const statements = [
+      UNSENT_COUNT_SQL,
+      REJECTED_COUNT_SQL,
+      CONFLICT_COUNT_SQL,
+      HEAD_RECORD_SQL,
+      SHIFT_PREFIX_SQL,
+      BLOCKS_WITH_ROOM_SQL,
+    ];
+    expect(new Set(statements).size).toBe(6);
+    for (const sql of statements) expect(source).toContain(`"${sql}"`);
   });
 
   // The shell's list (`tests/local_db.rs`) is written by hand: it must hold the

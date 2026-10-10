@@ -579,6 +579,8 @@ export function App({
             deviceName={pairedStatus.deviceName}
             shiftId={state.floorWork?.shiftId ?? null}
             deviceNotSaved={state.deviceNotSaved}
+            outboxVersion={state.outboxVersion}
+            factsFailure={state.factsFailure}
             refusalHeld={state.pendingRejection !== null}
           />
           {view.kind === "floor" ? (

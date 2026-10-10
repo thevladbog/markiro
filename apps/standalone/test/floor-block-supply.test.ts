@@ -465,6 +465,44 @@ describe("the half rule at its edges", () => {
     await expect(remainingSerials(executor, PAIRING, PREFIX)).resolves.toBe(0);
     await expect(remainingSerials(executor, PAIRING, PREFIX, 1)).resolves.toBe(10);
   });
+
+  it("counts no serial past the prefix's last one, which no box can carry", async () => {
+    const { db, executor } = openLocalDb();
+    // The prefix 460068200 leaves seven digits for the serial: 0 to 9 999 999.
+    seedBlock(db, { blockId: OLD_BLOCK, from: 9_999_000, to: 10_000_500, next: 9_999_990 });
+    await expect(remainingSerials(executor, PAIRING, PREFIX)).resolves.toBe(10);
+    // A block wholly beyond it has nothing, and takes nothing from the others.
+    seedBlock(db, { blockId: NEWER_BLOCK, from: 10_001_000, to: 10_002_000 });
+    await expect(remainingSerials(executor, PAIRING, PREFIX)).resolves.toBe(10);
+    // The last serial itself is a serial.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 9999999 WHERE block_id = ?").run(
+      OLD_BLOCK,
+    );
+    await expect(remainingSerials(executor, PAIRING, PREFIX)).resolves.toBe(1);
+  });
+
+  it("counts a serial that two kept blocks cover once, whatever order they were kept in", async () => {
+    const { db, executor } = openLocalDb();
+    // Not a state the host makes (its counter only grows, and a block that shares a serial is
+    // never kept), but one a restored host could leave: a box carries a serial only once.
+    seedBlock(db, { blockId: OLD_BLOCK, from: 80, to: 200, next: 80 });
+    seedBlock(db, { blockId: NEWER_BLOCK, from: 1, to: 100, next: 50 });
+    seedBlock(db, {
+      blockId: "8a7b6c5d-4e3f-4a2b-8c1d-0e9f8a7b6c5d",
+      from: 60,
+      to: 70,
+      next: 60,
+    });
+    await expect(remainingSerials(executor, PAIRING, PREFIX)).resolves.toBe(151);
+    // Blocks that follow each other lose and gain nothing.
+    seedBlock(db, {
+      blockId: "9b8c7d6e-5f4a-4b3c-9d2e-1f0a9b8c7d6e",
+      from: 201,
+      to: 300,
+      next: 201,
+    });
+    await expect(remainingSerials(executor, PAIRING, PREFIX)).resolves.toBe(251);
+  });
 });
 
 describe("a request that waits", () => {
@@ -891,11 +929,7 @@ describe("the statements a top-up repeats", () => {
     const expected: [string, number, string | null][] = [
       ["SELECT from_serial, to_serial, next_serial FROM floor_sscc_blocks", 2, prefixIndex],
       ["SELECT 1 AS n FROM floor_sscc_blocks", 1, prefixIndex],
-      [
-        "SELECT coalesce(sum(to_serial + 1 - next_serial), 0) AS n FROM floor_sscc_blocks",
-        1,
-        prefixIndex,
-      ],
+      ["SELECT next_serial, to_serial FROM floor_sscc_blocks", 1, prefixIndex],
       // The table holds at most one request per pairing and prefix: read whole, no index.
       ["SELECT request_id, issuer_prefix, extension FROM floor_block_requests", 2, null],
       [

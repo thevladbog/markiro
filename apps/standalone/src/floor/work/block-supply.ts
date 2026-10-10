@@ -1,3 +1,4 @@
+import { ssccSerialCapacity } from "@markiro/domain";
 import { z } from "zod";
 
 import { HostError } from "../../host/client.js";
@@ -36,22 +37,47 @@ export type SupplyResult =
   | { kind: "exhausted" }
   | { kind: "failed" };
 
-const remainingRow = z.object({ n: z.number().int().nonnegative() });
+/** The blocks with room, as a box's close takes them (its text is pinned in both query-plan lists). */
+export const BLOCKS_WITH_ROOM_SQL =
+  "SELECT next_serial, to_serial FROM floor_sscc_blocks " +
+  "WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ? " +
+  "AND next_serial <= to_serial";
 
-/** The serials this pairing still has for the prefix and the extension, in all its blocks. */
+const spanRow = z.object({ next_serial: z.number().int(), to_serial: z.number().int() });
+
+/**
+ * The serials this pairing still has for the prefix and the extension, as a
+ * box's close takes them (`closeOpenBox`): the blocks with room, from each
+ * block's cursor to its end, and no further than the prefix's last serial
+ * (a serial past it is lost, not used). A serial that two kept blocks both
+ * cover is counted once, as only one box can carry it. The host numbers its
+ * blocks from a counter that only grows, so the blocks do not overlap and
+ * stay inside the capacity; the count does not rely on it.
+ */
 export async function remainingSerials(
   local: LocalExecutor,
   pairing: Pairing,
   issuerPrefix: string,
   extension: number = BOX_EXTENSION,
 ): Promise<number> {
-  const [row] = await local.query(
-    "SELECT coalesce(sum(to_serial + 1 - next_serial), 0) AS n FROM floor_sscc_blocks " +
-      "WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ?",
+  const blocks = await local.query(
+    BLOCKS_WITH_ROOM_SQL,
     [pairing.hostId, pairing.deviceId, issuerPrefix, extension],
-    remainingRow,
+    spanRow,
   );
-  return row?.n ?? 0;
+  const last = ssccSerialCapacity(issuerPrefix) - 1;
+  const spans = blocks
+    .map((block) => ({ from: block.next_serial, to: Math.min(block.to_serial, last) }))
+    .sort((a, b) => a.from - b.from);
+  let left = 0;
+  let counted = -1;
+  for (const span of spans) {
+    const from = Math.max(span.from, counted + 1);
+    if (span.to < from) continue;
+    left += span.to - from + 1;
+    counted = span.to;
+  }
+  return left;
 }
 
 const newestRow = z.object({

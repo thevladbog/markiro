@@ -842,15 +842,23 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 27] = [
+    let reads: [(&str, &str); 29] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
             "outbox_unsent",
         ),
+        // The status bar's three counts (`src/floor/outbox-status.ts`; `test/floor-schema.test.ts`
+        // checks the texts agree) and the oldest record not delivered, read while a send fails.
         (
-            "SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? AND acked_at IS NULL",
+            "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? \
+             AND acked_at IS NULL",
             "outbox_unsent",
+        ),
+        (
+            "SELECT attempts, sent_at, created_at FROM outbox WHERE host_id = ? AND device_id = ? \
+             AND acked_at IS NULL ORDER BY seq LIMIT 1",
+            "outbox_unsent (host_id=? AND device_id=?)",
         ),
         // The forget's count, as `src/local_db.rs` writes it.
         (
@@ -858,12 +866,12 @@ async fn the_floors_repeating_reads_search_an_index() {
             "outbox_unsent",
         ),
         (
-            "SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? \
+            "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? \
              AND outcome = 'rejected'",
             "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
         ),
         (
-            "SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? \
+            "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? \
              AND outcome = 'conflict'",
             "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
         ),
@@ -976,9 +984,15 @@ async fn the_floors_repeating_reads_search_an_index() {
             "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
         ),
         (
-            "SELECT coalesce(sum(to_serial + 1 - next_serial), 0) AS n FROM floor_sscc_blocks \
-             WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ?",
+            "SELECT next_serial, to_serial FROM floor_sscc_blocks \
+             WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ? \
+             AND next_serial <= to_serial",
             "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+        ),
+        (
+            "SELECT snapshot ->> 'issuerPrefix' AS prefix FROM floor_shifts \
+             WHERE host_id = ? AND device_id = ? AND id = ?",
+            "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
         ),
         (
             "SELECT 1 AS n FROM floor_sscc_blocks WHERE host_id = ? AND device_id = ? \

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 
 import { act, render, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { ThemeProvider } from "@markiro/ui";
 
@@ -13,6 +13,7 @@ import { enteredShiftSchema, type ChangeItem, type HostStatus } from "../src/hos
 import type { LocalExecutor } from "../src/local/executor.js";
 import { syncReferences } from "../src/local/reference-sync.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
+import { seedBlock, unsentScans } from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
@@ -24,6 +25,7 @@ const ENTERED = enteredShiftSchema.parse(
 );
 const PAIRING = { hostId: HOST_ID, deviceId: DEVICE_ID };
 const OTHER_DEVICE = "1d2e3f4a-5b6c-4d7e-8f90-a1b2c3d4e5f6";
+const OTHER_HOST = "7c6b5a49-3827-4165-9403-f2e1d0c9b8a7";
 const OTHER_LINE_ID = "00000000-6a3e-4b9f-9d3c-2b1a0e8f7d61";
 const SYNCED: SyncState = { kind: "done", synced: 1, failure: null, quarantined: 0 };
 const ORG: ChangeItem = {
@@ -67,6 +69,8 @@ function bar(props: Partial<FloorStatusBarProps> & { local: LocalExecutor }) {
         shiftId={null}
         deviceNotSaved={false}
         refusalHeld={false}
+        outboxVersion={0}
+        factsFailure={null}
         {...props}
       />
     </ThemeProvider>
@@ -302,8 +306,9 @@ describe("the floor's status bar", () => {
   it("names no shift of a pairing other than its own", async () => {
     const real = await synced([ORG]);
     await keepEnteredShift(real, PAIRING, ENTERED, "2026-10-09T06:00:00.000Z", 1_790_000_000_000);
-    // The read of the shift's copy is watched, so that the assertion waits for its
-    // answer (and what the bar makes of it), not for a time that may be too short.
+    // The reads of the shift's copy and of its snapshot's prefix (for the serials) are
+    // watched, so that the assertion waits for their answers (and what the bar makes
+    // of them), not for a time that may be too short.
     const reads: Promise<unknown>[] = [];
     const local: LocalExecutor = {
       query: (sql, params, row) => {
@@ -316,7 +321,7 @@ describe("the floor's status bar", () => {
     render(
       bar({ local, pairing: { hostId: HOST_ID, deviceId: OTHER_DEVICE }, shiftId: ENTERED.id }),
     );
-    await waitFor(() => expect(reads).toHaveLength(1));
+    await waitFor(() => expect(reads).toHaveLength(2));
     await act(async () => {
       await Promise.all(reads);
       await new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -372,5 +377,568 @@ describe("the floor's status bar", () => {
     expect(screen.getByText(/не удалось сохранить на этом компьютере/)).toBeTruthy();
     view.rerender(bar({ local, refusalHeld: false, deviceNotSaved: true }));
     expect(screen.queryByText(marker)).toBeNull();
+  });
+});
+
+describe("the outbox and the serials on the floor's status bar", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** The value the bar shows under `label`, or `null` when it shows no such item. */
+  function shown(label: string): string | null {
+    const term = screen.queryByText(label);
+    return term === null ? null : (term.nextElementSibling?.textContent ?? null);
+  }
+
+  /** The polite live regions of the bar, before anything is warned of. */
+  function politeRegions(): Set<Element> {
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    return new Set(region.querySelectorAll('[aria-live="polite"]'));
+  }
+
+  /** The element sits in one of those regions, and the bar has no alert of its own. */
+  function heardOnce(regions: Set<Element>, element: HTMLElement): boolean {
+    const region = element.closest('[aria-live="polite"]');
+    const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
+    return (
+      region !== null && regions.has(region) && within(bar).queryAllByRole("alert").length === 0
+    );
+  }
+
+  /** An executor whose first read that `matches` waits for `release()`; the answer is the one it had. */
+  function holdingFirstRead(real: LocalExecutor, matches: (sql: string) => boolean) {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let held = false;
+    const executor: LocalExecutor = {
+      query: (sql, params, row) => {
+        const result = real.query(sql, params, row);
+        if (held || !matches(sql)) return result;
+        held = true;
+        return gate.then(() => result);
+      },
+      transaction: (statements) => real.transaction(statements),
+    };
+    return { executor, started: () => held, release: () => release() };
+  }
+
+  const clock = () => new Date();
+
+  /** Lets the effects the last render scheduled run (a timer a bar sets is set by one). */
+  async function flushEffects(): Promise<void> {
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+  }
+
+  const isUnsentCount = (sql: string): boolean =>
+    sql.includes("count(*)") && sql.includes("IS NULL");
+  const isHeadRecord = (sql: string): boolean => sql.includes("sent_at, created_at FROM outbox");
+  const isSerialsRead = (sql: string): boolean => sql.includes("next_serial, to_serial FROM");
+
+  it("counts this pairing's records not sent, refused and in conflict, and reads them again on a change", async () => {
+    const { db, executor } = openLocalDb();
+    const ids = await unsentScans(executor, 5);
+    await unsentScans(executor, 2, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 100);
+    await unsentScans(executor, 1, { hostId: OTHER_HOST, deviceId: DEVICE_ID }, 200);
+    const answer = db.prepare(
+      "UPDATE outbox SET outcome = ?, outcome_code = ?, acked_at = '2026-10-08T06:20:00.000Z' WHERE id = ?",
+    );
+    answer.run("accepted", null, ids[0] ?? "");
+    answer.run("rejected", "invalid_record", ids[1] ?? "");
+    const view = render(bar({ local: executor }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("3"));
+    expect(shown("Отклонено хостом")).toBe("1");
+    expect(shown("Конфликтов")).toBeNull();
+    answer.run("conflict", null, ids[2] ?? "");
+    view.rerender(bar({ local: executor, outboxVersion: 1 }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("2"));
+    expect(shown("Конфликтов")).toBe("1");
+  });
+
+  it("shows every count with the thousands separator", async () => {
+    const { db, executor } = openLocalDb();
+    const fill = db.prepare(
+      "WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < ?) " +
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, acked_at) " +
+        "SELECT ? || i, ?, ?, 'scan', 's', '{}', '2026-10-08T06:20:00.000Z', ?, " +
+        "CASE WHEN ? IS NULL THEN NULL ELSE '2026-10-08T06:30:00.000Z' END FROM n",
+    );
+    fill.run(1234, "u", HOST_ID, DEVICE_ID, null, null);
+    fill.run(1111, "r", HOST_ID, DEVICE_ID, "rejected", "rejected");
+    fill.run(2222, "c", HOST_ID, DEVICE_ID, "conflict", "conflict");
+    render(bar({ local: executor }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("1\u00a0234"));
+    expect(shown("Отклонено хостом")).toBe("1\u00a0111");
+    expect(shown("Конфликтов")).toBe("2\u00a0222");
+  });
+
+  it("shows the serials left for the boxes of the shift the operator works in, and none outside it", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1500, to: 3499 });
+    const view = render(bar({ local: executor, shiftId: ENTERED.id }));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
+    // Nothing written yet: nothing to send, refused or in conflict.
+    expect([shown("Не отправлено"), shown("Отклонено хостом"), shown("Конфликтов")]).toEqual([
+      "0",
+      null,
+      null,
+    ]);
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1501").run();
+    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("1\u00a0999"));
+    view.rerender(bar({ local: executor, shiftId: null, outboxVersion: 1 }));
+    expect(shown("Номеров SSCC")).toBeNull();
+  });
+
+  it("leaves the counts out when this computer cannot read the outbox", async () => {
+    const { executor } = openLocalDb();
+    const failing: LocalExecutor = {
+      query: (sql, params, row) =>
+        sql.includes("FROM outbox")
+          ? Promise.reject(new Error("disk"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    render(bar({ local: failing }));
+    expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    expect(shown("Не отправлено")).toBeNull();
+  });
+
+  it("forgets the counts the outbox gave when its next read fails", async () => {
+    const { executor } = openLocalDb();
+    await unsentScans(executor, 2);
+    let failing = false;
+    const local: LocalExecutor = {
+      query: (sql, params, row) =>
+        failing && sql.includes("FROM outbox")
+          ? Promise.reject(new Error("disk"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    const view = render(bar({ local }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("2"));
+    failing = true;
+    view.rerender(bar({ local, outboxVersion: 1 }));
+    await waitFor(() => expect(shown("Не отправлено")).toBeNull());
+  });
+
+  it("leaves the serials out when this computer cannot read them, and for a shift it has no snapshot of", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
+    let failing = false;
+    const local: LocalExecutor = {
+      query: (sql, params, row) =>
+        failing && sql.includes("floor_sscc_blocks")
+          ? Promise.reject(new Error("disk"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    const view = render(bar({ local, shiftId: ENTERED.id }));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
+    failing = true;
+    view.rerender(bar({ local, shiftId: ENTERED.id, outboxVersion: 1 }));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBeNull());
+    failing = false;
+    view.rerender(bar({ local, shiftId: ENTERED.id, outboxVersion: 2 }));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
+    // A shift this pairing has no copy of names no serials.
+    view.rerender(
+      bar({ local, shiftId: "4e7a1c9d-2b5f-4d8e-a3c6-9f0b1e2d3c4a", outboxVersion: 2 }),
+    );
+    await waitFor(() => expect(shown("Номеров SSCC")).toBeNull());
+  });
+
+  it("warns, in the polite region that was there before, when the serials run out, and says so at zero", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    // 101 left: 1..1000 with the cursor at 900.
+    seedBlock(db, {
+      blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+      from: 1,
+      to: 1000,
+      next: 900,
+    });
+    const low = (n: string) =>
+      `Номера SSCC на исходе: осталось ${n}. Новые номера выдаёт хост, станция должна быть с ним на связи.`;
+    const none =
+      "Номера SSCC закончились: короб не закрыть, пока хост не выдаст станции новый блок. Нужна связь с хостом.";
+    const view = render(bar({ local: executor, shiftId: ENTERED.id }));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("101"));
+    const before = politeRegions();
+    expect(screen.queryByText(/Номера SSCC на исходе/)).toBeNull();
+    expect(screen.queryByText(none)).toBeNull();
+
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 901").run();
+    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
+    const warning = await screen.findByText(low("100"));
+    expect(heardOnce(before, warning)).toBe(true);
+    expect(screen.queryByText(none)).toBeNull();
+
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1000").run();
+    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 2 }));
+    expect(await screen.findByText(low("1"))).toBeTruthy();
+
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1001").run();
+    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 3 }));
+    const gone = await screen.findByText(none);
+    expect(heardOnce(before, gone)).toBe(true);
+    expect(screen.queryByText(/Номера SSCC на исходе/)).toBeNull();
+    expect(shown("Номеров SSCC")).toBe("0");
+
+    // A block arrives: the warnings go.
+    seedBlock(db, { blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b", from: 1001, to: 3000 });
+    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 4 }));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
+    expect(screen.queryByText(none)).toBeNull();
+    expect(screen.queryByText(/Номера SSCC на исходе/)).toBeNull();
+  });
+
+  it("says nothing of serials outside a shift, though the pairing has none", async () => {
+    const { executor } = openLocalDb();
+    render(bar({ local: executor, shiftId: null }));
+    expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    expect(screen.queryByText(/Номера SSCC/)).toBeNull();
+    expect(shown("Номеров SSCC")).toBeNull();
+  });
+
+  it("says in the polite region when the host or this computer, not the link, fails the outbox's delivery", async () => {
+    const { executor } = openLocalDb();
+    const view = render(bar({ local: executor, factsFailure: "offline" }));
+    expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
+    const before = politeRegions();
+    expect(screen.queryByText(/Хост не принимает записи смены/)).toBeNull();
+    expect(screen.queryByText(/Ответ хоста не удалось записать/)).toBeNull();
+    view.rerender(bar({ local: executor, factsFailure: "host" }));
+    const host = screen.getByText(
+      "Хост не принимает записи смены: на хосте ошибка. Станция повторяет отправку, записи хранятся на этом компьютере.",
+    );
+    expect(heardOnce(before, host)).toBe(true);
+    expect(screen.queryByText(/Ответ хоста не удалось записать/)).toBeNull();
+    view.rerender(bar({ local: executor, factsFailure: "local" }));
+    const local = screen.getByText(
+      "Ответ хоста не удалось записать в базу этого компьютера. Станция повторяет отправку.",
+    );
+    expect(heardOnce(before, local)).toBe(true);
+    expect(screen.queryByText(/Хост не принимает записи смены/)).toBeNull();
+    view.rerender(bar({ local: executor, factsFailure: null }));
+    expect(screen.queryByText(/Станция повторяет отправку/)).toBeNull();
+  });
+
+  it("does not say the host fails the delivery, or that the link is up, while the host's refusal waits", async () => {
+    const { executor } = openLocalDb();
+    await unsentScans(executor, 2);
+    const online: HostStatus = { state: "online", lastContactAt: null, lastError: null, seq: 1 };
+    const view = render(bar({ local: executor, link: online, factsFailure: "host", now: clock }));
+    expect(await screen.findByText(/Хост не принимает записи смены/)).toBeTruthy();
+    expect(await screen.findByText(/Самая старая запись ждёт/)).toBeTruthy();
+    expect(screen.getByText("На связи с хостом")).toBeTruthy();
+    view.rerender(
+      bar({
+        local: executor,
+        link: online,
+        factsFailure: "host",
+        refusalHeld: true,
+        now: clock,
+      }),
+    );
+    expect(screen.getByText(/Хост отказал этой станции/)).toBeTruthy();
+    expect(screen.queryByText(/Хост не принимает записи смены/)).toBeNull();
+    expect(screen.queryByText(/Самая старая запись ждёт/)).toBeNull();
+    expect(screen.queryByText("На связи с хостом")).toBeNull();
+    view.rerender(
+      bar({
+        local: executor,
+        link: online,
+        factsFailure: "local",
+        refusalHeld: true,
+        now: clock,
+      }),
+    );
+    expect(screen.queryByText(/Ответ хоста не удалось записать/)).toBeNull();
+  });
+  /** A moment of 2026-10-08 on this computer's clock: the bar's waits are differences, never clock times. */
+  const at = (hour: number, minute: number, second = 0): Date =>
+    new Date(2026, 9, 8, hour, minute, second);
+
+  /** Three records: one delivered, then the head the sender retries first, then one behind it. */
+  async function waitingRecords() {
+    const { db, executor } = openLocalDb();
+    const [done, head, behind] = await unsentScans(executor, 3);
+    const set = db.prepare(
+      "UPDATE outbox SET created_at = ?, attempts = ?, sent_at = ? WHERE id = ?",
+    );
+    set.run(at(6, 0).toISOString(), 1, at(6, 1).toISOString(), done ?? "");
+    db.prepare(
+      "UPDATE outbox SET outcome = 'accepted', acked_at = '2026-10-08T06:01:00.000Z' WHERE id = ?",
+    ).run(done ?? "");
+    // The head is not the newest by time, nor the most sent.
+    set.run(at(9, 41).toISOString(), 5, at(9, 50, 30).toISOString(), head ?? "");
+    set.run(at(9, 30).toISOString(), 9, at(9, 52, 55).toISOString(), behind ?? "");
+    return { db, executor, head: head ?? "" };
+  }
+
+  it("says how long the oldest undelivered record has waited and how often it was sent, while a send fails", async () => {
+    const { db, executor, head } = await waitingRecords();
+    const now = () => at(9, 53);
+    const view = render(bar({ local: executor, factsFailure: "host", now }));
+    const waiting = await screen.findByText(
+      "Самая старая запись ждёт отправки уже 12 мин, попыток отправки: 5, последняя — 2 мин назад.",
+    );
+    // Said by the polite region that was there before, and not as an alert of its own as well.
+    expect(heardOnce(politeRegions(), waiting)).toBe(true);
+
+    // Never sent yet: nothing to say of a last attempt.
+    db.prepare("UPDATE outbox SET attempts = 0, sent_at = NULL WHERE id = ?").run(head);
+    view.rerender(bar({ local: executor, factsFailure: "host", now, outboxVersion: 1 }));
+    expect(
+      await screen.findByText("Самая старая запись ждёт отправки уже 12 мин, попыток отправки: 0."),
+    ).toBeTruthy();
+
+    // Hours, and a count with a thousands separator.
+    db.prepare("UPDATE outbox SET created_at = ?, attempts = 1234, sent_at = ? WHERE id = ?").run(
+      at(7, 48).toISOString(),
+      at(9, 52, 59).toISOString(),
+      head,
+    );
+    view.rerender(bar({ local: executor, factsFailure: "host", now, outboxVersion: 2 }));
+    expect(
+      await screen.findByText(
+        "Самая старая запись ждёт отправки уже 2 ч 5 мин, попыток отправки: 1 234, последняя — меньше минуты назад.",
+      ),
+    ).toBeTruthy();
+
+    // A clock set back reads as no wait at all, never a negative one.
+    view.rerender(
+      bar({ local: executor, factsFailure: "host", now: () => at(6, 0), outboxVersion: 3 }),
+    );
+    expect(
+      await screen.findByText(
+        "Самая старая запись ждёт отправки уже меньше минуты, попыток отправки: 1 234, последняя — меньше минуты назад.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("says it for a failure of the link, of the host and of this computer, and not when nothing fails or nothing waits", async () => {
+    const { db, executor } = await waitingRecords();
+    const now = () => at(9, 53);
+    const stuck = /Самая старая запись ждёт отправки уже 12 мин/;
+    const view = render(bar({ local: executor, factsFailure: "offline", now }));
+    expect(await screen.findByText(stuck)).toBeTruthy();
+    view.rerender(bar({ local: executor, factsFailure: "local", now }));
+    expect(await screen.findByText(stuck)).toBeTruthy();
+    view.rerender(bar({ local: executor, factsFailure: null, now }));
+    await waitFor(() => expect(screen.queryByText(stuck)).toBeNull());
+    // The failure comes back: the line is read again, not the one shown before.
+    db.prepare("UPDATE outbox SET created_at = ? WHERE acked_at IS NULL AND attempts = 5").run(
+      at(9, 33).toISOString(),
+    );
+    view.rerender(bar({ local: executor, factsFailure: "host", now }));
+    expect(await screen.findByText(/ждёт отправки уже 20 мин/)).toBeTruthy();
+    // Nothing waits any more: a failure that nothing explains is not dressed up as a wait.
+    db.prepare(
+      "UPDATE outbox SET outcome = 'accepted', acked_at = '2026-10-08T06:20:00.000Z' WHERE acked_at IS NULL",
+    ).run();
+    view.rerender(bar({ local: executor, factsFailure: "host", now, outboxVersion: 1 }));
+    await waitFor(() => expect(screen.queryByText(/Самая старая запись/)).toBeNull());
+    expect(screen.getByText(/Хост не принимает записи смены/)).toBeTruthy();
+  });
+
+  it("keeps the stuck line out of the bar when the outbox's head cannot be read, and says the rest", async () => {
+    const { executor } = await waitingRecords();
+    const failing: LocalExecutor = {
+      query: (sql, params, row) =>
+        isHeadRecord(sql) ? Promise.reject(new Error("disk")) : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    render(bar({ local: failing, factsFailure: "host", now: () => at(9, 53) }));
+    expect(await screen.findByText(/Хост не принимает записи смены/)).toBeTruthy();
+    await waitFor(() => expect(shown("Не отправлено")).toBe("2"));
+    await act(async () => {
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    expect(screen.queryByText(/Самая старая запись/)).toBeNull();
+  });
+
+  it("forgets the wait it showed when the next read of the oldest record fails", async () => {
+    const { executor } = await waitingRecords();
+    let broken = false;
+    const local: LocalExecutor = {
+      query: (sql, params, row) =>
+        broken && isHeadRecord(sql)
+          ? Promise.reject(new Error("disk"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    const now = () => at(9, 53);
+    const view = render(bar({ local, factsFailure: "host", now }));
+    expect(await screen.findByText(/Самая старая запись ждёт/)).toBeTruthy();
+    broken = true;
+    view.rerender(bar({ local, factsFailure: "host", now, outboxVersion: 1 }));
+    await waitFor(() => expect(screen.queryByText(/Самая старая запись/)).toBeNull());
+    expect(screen.getByText(/Хост не принимает записи смены/)).toBeTruthy();
+  });
+
+  it("reads the oldest record again by itself every ten seconds while a send fails, and stops with the failure", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"], shouldAdvanceTime: true });
+    const { db, executor, head } = await waitingRecords();
+    const now = () => at(9, 53);
+    const view = render(bar({ local: executor, factsFailure: "host", now }));
+    expect(await screen.findByText(/попыток отправки: 5,/)).toBeTruthy();
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(1);
+
+    db.prepare("UPDATE outbox SET attempts = 6 WHERE id = ?").run(head);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9_000);
+    });
+    expect(screen.getByText(/попыток отправки: 5,/)).toBeTruthy();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+    });
+    expect(await screen.findByText(/попыток отправки: 6,/)).toBeTruthy();
+
+    // The failure goes: nothing is read on a timer for it any more.
+    view.rerender(bar({ local: executor, factsFailure: null, now }));
+    await waitFor(() => expect(screen.queryByText(/Самая старая запись/)).toBeNull());
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("starts no timer while nothing is wrong, and none outlives the bar", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"], shouldAdvanceTime: true });
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
+    const quiet = render(bar({ local: executor, shiftId: ENTERED.id }));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(0);
+    quiet.unmount();
+
+    const failing = render(bar({ local: executor, factsFailure: "local" }));
+    expect(await screen.findByText(/Ответ хоста не удалось записать/)).toBeTruthy();
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(1);
+    failing.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+
+    // And the same for a station running out of serials.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1951").run();
+    const low = render(bar({ local: executor, shiftId: ENTERED.id }));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("50"));
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(1);
+    // A block arrives with no record written: the bar finds out on its own.
+    seedBlock(db, { blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b", from: 2001, to: 4000 });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(9_000);
+    });
+    expect(shown("Номеров SSCC")).toBe("50");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_500);
+    });
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0050"));
+    expect(screen.queryByText(/Номера SSCC на исходе/)).toBeNull();
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(0);
+    low.unmount();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it("keeps reading the serials by itself exactly while the warning stands", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"], shouldAdvanceTime: true });
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
+    // 101 left: no warning, no timer.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1900").run();
+    const view = render(bar({ local: executor, shiftId: ENTERED.id }));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("101"));
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(0);
+    // 100 left: the warning stands, and so does the timer.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1901").run();
+    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("100"));
+    expect(await screen.findByText(/Номера SSCC на исходе: осталось 100\./)).toBeTruthy();
+    // (Not inside `waitFor`: its own polling is a timer too.)
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("keeps the counts of the newest read when an older one lands late", async () => {
+    const { db, executor } = openLocalDb();
+    await unsentScans(executor, 3);
+    const held = holdingFirstRead(executor, isUnsentCount);
+    const view = render(bar({ local: held.executor }));
+    await waitFor(() => expect(held.started()).toBe(true));
+    await unsentScans(executor, 1, PAIRING, 50);
+    view.rerender(bar({ local: held.executor, outboxVersion: 1 }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("4"));
+    await act(async () => {
+      held.release();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(shown("Не отправлено")).toBe("4");
+    expect(db.prepare("SELECT count(*) AS n FROM outbox").get()).toEqual({ n: 4 });
+  });
+
+  it("keeps the serials of the newest read when an older one lands late", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
+    const held = holdingFirstRead(executor, isSerialsRead);
+    const view = render(bar({ local: held.executor, shiftId: ENTERED.id }));
+    await waitFor(() => expect(held.started()).toBe(true));
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 501").run();
+    view.rerender(bar({ local: held.executor, shiftId: ENTERED.id, outboxVersion: 1 }));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("1\u00a0500"));
+    await act(async () => {
+      held.release();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(shown("Номеров SSCC")).toBe("1\u00a0500");
+  });
+
+  it("keeps the wait of the newest read when an older one lands late", async () => {
+    const { db, executor, head } = await waitingRecords();
+    const now = () => at(9, 53);
+    const held = holdingFirstRead(executor, isHeadRecord);
+    const view = render(bar({ local: held.executor, factsFailure: "host", now }));
+    await waitFor(() => expect(held.started()).toBe(true));
+    db.prepare("UPDATE outbox SET attempts = 7 WHERE id = ?").run(head);
+    view.rerender(bar({ local: held.executor, factsFailure: "host", now, outboxVersion: 1 }));
+    expect(await screen.findByText(/попыток отправки: 7,/)).toBeTruthy();
+    await act(async () => {
+      held.release();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.getByText(/попыток отправки: 7,/)).toBeTruthy();
+  });
+
+  it("does not show a wait read for a failure that has ended when it lands", async () => {
+    const { executor } = await waitingRecords();
+    const now = () => at(9, 53);
+    const held = holdingFirstRead(executor, isHeadRecord);
+    const view = render(bar({ local: held.executor, factsFailure: "host", now }));
+    await waitFor(() => expect(held.started()).toBe(true));
+    view.rerender(bar({ local: held.executor, factsFailure: null, now }));
+    await act(async () => {
+      held.release();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByText(/Самая старая запись/)).toBeNull();
   });
 });

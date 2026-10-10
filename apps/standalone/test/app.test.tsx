@@ -3174,4 +3174,59 @@ describe("the outbox in the app", () => {
     );
     expect(host.sendFacts).toHaveBeenCalledTimes(1);
   });
+
+  /** The value the floor's status bar shows under `label`, or `null` when it shows no such item. */
+  function barValue(label: string): string | null {
+    const term = screen.queryByText(label);
+    return term === null ? null : (term.nextElementSibling?.textContent ?? null);
+  }
+
+  it("shows the floor's status bar what waits, what the host refused and what conflicts, as the host answers", async () => {
+    const database = openLocalDb();
+    const [first, second, third] = await unsentScans(database.executor, 3);
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.sendFacts.mockImplementation(async (records) => {
+      expect(records.map((record) => (record as { id: string }).id)).toEqual([
+        first,
+        second,
+        third,
+      ]);
+      return [
+        { id: first ?? "", outcome: "accepted" },
+        { id: second ?? "", outcome: "rejected", code: "unknown_shift" },
+        { id: third ?? "", outcome: "conflict", code: "code_taken" },
+      ];
+    });
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+      local: database.executor,
+    });
+    await waitFor(() => expect(barValue("Отклонено хостом")).toBe("1"));
+    expect(barValue("Конфликтов")).toBe("1");
+    expect(barValue("Не отправлено")).toBe("0");
+  });
+
+  it("tells the floor's status bar when the host fails the delivery, and how long the record has waited", async () => {
+    const database = openLocalDb();
+    await unsentScans(database.executor, 2);
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.sendFacts.mockRejectedValue(
+      new HostError({ kind: "api", code: "internal_error", status: 500, message: "boom" }),
+    );
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+      local: database.executor,
+    });
+    expect(await screen.findByText(/Хост не принимает записи смены/)).toBeTruthy();
+    expect(await screen.findByText(/Самая старая запись ждёт отправки уже/)).toBeTruthy();
+    expect(barValue("Не отправлено")).toBe("2");
+  });
 });
