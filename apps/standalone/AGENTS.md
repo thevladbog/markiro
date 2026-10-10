@@ -2000,6 +2000,20 @@ receipt is kept, and the same record sent again is not looked at again, so a
 fact refused for a reason that later changes (a scan of a shift the device had
 not entered yet, say) can only be sent again under a new id.
 
+Every `OfficeShift` — the list, `GET …/{id}` and the answer of every office
+write — carries `totals` (`ShiftTotals`), read from the facts by subqueries
+of `routes/office_shifts.rs` and never stored: `acceptedUnits` (box items
+neither removed nor displaced, in open and closed boxes alike), `closedBoxes`
+(closed and not taken apart), `openBoxes` (open boxes that hold a live item: a
+box emptied by undos or by displacement is not counted), `lastFactAt` (the
+host's clock, whole seconds, at the last receipt of a record that named the
+shift and got past the entry check, refused ones included) and `deviceIds`
+(the shift's participants, first entry first, the id breaking a tie). A
+planned shift's totals are zeros, `null` and `[]`. The subqueries run on the
+indexes of `0010` (`boxes_shift`, the partial `box_items_live`,
+`fact_receipts_shift`); a new column the totals read needs its index in the
+same change, since the list runs them once per shift listed.
+
 ## Marking rules
 
 GS1, KM, SSCC and label rules stay in `@markiro/domain`; the host stores and

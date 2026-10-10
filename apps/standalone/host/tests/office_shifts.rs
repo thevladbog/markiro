@@ -9,7 +9,7 @@ use support::app::{
 };
 
 /// The record of `shift_body(setup)` planned at `rev`: the product's box
-/// capacity, no plan and no counterparty.
+/// capacity, no plan and no counterparty, and no facts yet.
 fn planned(id: &str, number: &str, setup: &ShiftSetup, rev: i64) -> Value {
     json!({
         "id": id, "number": number, "status": "planned", "mode": "aggregation",
@@ -18,7 +18,11 @@ fn planned(id: &str, number: &str, setup: &ShiftSetup, rev: i64) -> Value {
         "plannedQty": null, "boxCapacity": 12, "boxTemplateId": setup.template,
         "ownerDeviceId": null, "openedAt": null, "closedAt": null, "closeReasonCode": null,
         "closeReasonText": null, "lateDataAt": null, "createdAt": "2026-09-21T14:13:20Z",
-        "rev": rev
+        "rev": rev,
+        "totals": {
+            "acceptedUnits": 0, "closedBoxes": 0, "openBoxes": 0, "lastFactAt": null,
+            "deviceIds": []
+        }
     })
 }
 

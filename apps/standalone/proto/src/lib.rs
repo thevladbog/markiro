@@ -1422,7 +1422,7 @@ impl std::str::FromStr for ShiftMode {
 /// A shift as the office sees it (`GET /v1/office/shifts`, `GET …/{id}` and
 /// the answer of every office write). `number` is the host's
 /// (`OCT26-004`, `/S` for a station's). Names come from the office's own
-/// lists of products, lines and counterparties.
+/// lists of products, lines and counterparties; `totals` from the facts.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OfficeShift {
@@ -1453,6 +1453,23 @@ pub struct OfficeShift {
     pub late_data_at: Option<String>,
     pub created_at: String,
     pub rev: i64,
+    /// What the facts of the shift add up to (plan 2a2), in every answer.
+    pub totals: ShiftTotals,
+}
+
+/// A shift's numbers as its facts give them (stage 2a spec §4.5): units
+/// accepted (items in a box, neither taken out by an exception nor taken by
+/// an earlier scan elsewhere), boxes closed and not taken apart, open boxes
+/// that hold a unit, when the host last received a record of the shift, and
+/// the devices that entered it, first entry first.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftTotals {
+    pub accepted_units: u64,
+    pub closed_boxes: u32,
+    pub open_boxes: u32,
+    pub last_fact_at: Option<String>,
+    pub device_ids: Vec<String>,
 }
 
 /// `POST /v1/office/shifts`: a planned shift. `boxCapacity` left out is the

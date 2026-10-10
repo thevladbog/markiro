@@ -6618,3 +6618,268 @@ async fn a_close_is_checked_whole_and_a_refusal_leaves_the_shift_open() {
     grown["fact_receipts"] = json!(kept["fact_receipts"].as_i64().unwrap() + 14);
     assert_eq!(fact_rows(&admin.app).await, grown);
 }
+
+/// The office's totals of `shift`: by `GET …/{id}`, and the same in the list.
+async fn totals(admin: &Admin, shift: &str) -> Value {
+    let (status, read) = admin
+        .call("GET", &format!("/v1/office/shifts/{shift}"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{read}");
+    let (status, list) = admin.call("GET", "/v1/office/shifts", None).await;
+    assert_eq!(status, StatusCode::OK, "{list}");
+    let listed = list
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|listed| listed["id"] == json!(shift))
+        .expect("the list holds the shift");
+    assert_eq!(listed["totals"], read["totals"]);
+    read["totals"].clone()
+}
+
+#[tokio::test]
+async fn the_office_reads_a_shifts_totals_from_its_facts() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let colleague = open_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
+    let planned = plan_shift(&admin, shift_body(&setup)).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let none = json!({
+        "acceptedUnits": 0, "closedBoxes": 0, "openBoxes": 0, "lastFactAt": null,
+        "deviceIds": []
+    });
+    assert_eq!(totals(&admin, planned["id"].as_str().unwrap()).await, none);
+    let mut entered = none.clone();
+    entered["deviceIds"] = json!([floor.station]);
+    assert_eq!(totals(&admin, &floor.shift).await, entered);
+    let shift = floor.shift.as_str();
+    let scan = |n: u32, box_n: u32| {
+        fact(
+            &record_id(n),
+            "scan",
+            shift,
+            ok_scan(n, &box_id(box_n), &instant(n, 0)),
+        )
+    };
+    let undo = |n: u32, code: u32, box_n: u32| {
+        let mut data = box_exception("undo", &box_id(box_n), &instant(100 + n, 0));
+        data["codeHash"] = json!(code_hash(code));
+        data["targetScannedAt"] = json!(instant(code, 0));
+        fact(&record_id(n), "box_exception", shift, data)
+    };
+    // Box 1 holds 1–3 and closes; box 2 holds 4 and 5, and 5 is undone; box
+    // 3 holds 6, undone, so it is open but empty; box 4 holds 7, closes and
+    // is taken apart; box 5 holds 9, which the colleague's earlier scan takes
+    // below; a scan that is no code counts nothing.
+    let batch = vec![
+        scan(1, 1),
+        scan(2, 1),
+        scan(3, 1),
+        fact(
+            &record_id(20),
+            "box_closed",
+            shift,
+            box_closed(
+                &box_id(1),
+                &block,
+                1500,
+                &[1, 2, 3],
+                &instant(1, 0),
+                &instant(10, 0),
+            ),
+        ),
+        scan(4, 2),
+        scan(5, 2),
+        undo(21, 5, 2),
+        scan(6, 3),
+        undo(22, 6, 3),
+        scan(7, 4),
+        scan(9, 5),
+        fact(
+            &record_id(23),
+            "box_closed",
+            shift,
+            box_closed(
+                &box_id(4),
+                &block,
+                1501,
+                &[7],
+                &instant(7, 0),
+                &instant(11, 0),
+            ),
+        ),
+        fact(&record_id(24), "box_exception", shift, {
+            let mut data = box_exception("disassemble", &box_id(4), &instant(12, 0));
+            data["reasonCode"] = json!("wrong_quantity");
+            data
+        }),
+        fact(
+            &record_id(25),
+            "scan",
+            shift,
+            other_scan(
+                "invalid",
+                "unknown",
+                Value::Null,
+                Value::Null,
+                &instant(13, 0),
+            ),
+        ),
+    ];
+    admin.app.clock.advance(time::Duration::minutes(5));
+    let first_batch = admin.app.state.timestamp();
+    let answered = receipts(&admin.app, &floor.key, &batch).await;
+    assert!(
+        answered
+            .iter()
+            .all(|receipt| receipt["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+    assert_eq!(
+        totals(&admin, shift).await,
+        json!({
+            "acceptedUnits": 5, "closedBoxes": 1, "openBoxes": 2, "lastFactAt": first_batch,
+            "deviceIds": [floor.station]
+        })
+    );
+    // The colleague's earlier scans of codes 2 and 9 take them out of boxes 1
+    // and 5, which is open and empty then; a record the host refuses still
+    // tells when the station last sent one.
+    admin.app.clock.advance(time::Duration::minutes(5));
+    let second_batch = admin.app.state.timestamp();
+    let taken = receipts(
+        &admin.app,
+        &colleague.key,
+        &[
+            fact(
+                &record_id(30),
+                "scan",
+                &colleague.shift,
+                ok_scan(2, &box_id(9), &instant(0, 0)),
+            ),
+            fact(
+                &record_id(32),
+                "scan",
+                &colleague.shift,
+                ok_scan(9, &box_id(9), &instant(0, 0)),
+            ),
+        ],
+    )
+    .await;
+    assert!(
+        taken.iter().all(|receipt| receipt["outcome"] == "accepted"),
+        "{taken:?}"
+    );
+    let mut wrong = ok_scan(8, &box_id(2), &instant(8, 0));
+    wrong["code"]["gtin14"] = json!("04600682000099");
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(&record_id(31), "scan", shift, wrong)]
+        )
+        .await,
+        vec![rejected(Some(&record_id(31)), "gtin_mismatch", None)]
+    );
+    assert_eq!(
+        totals(&admin, shift).await,
+        json!({
+            "acceptedUnits": 3, "closedBoxes": 1, "openBoxes": 1, "lastFactAt": second_batch,
+            "deviceIds": [floor.station]
+        })
+    );
+    assert_eq!(
+        totals(&admin, &colleague.shift).await,
+        json!({
+            "acceptedUnits": 2, "closedBoxes": 0, "openBoxes": 1, "lastFactAt": second_batch,
+            "deviceIds": [colleague.station]
+        })
+    );
+    // The devices come first entry first. A second device on a shift comes
+    // with plan 2b, so its entry is put in directly: a device whose id sorts
+    // after the station's, entered before it, so that first entry first is
+    // neither the order of the ids nor the order of the rows.
+    let mut other = colleague.station.clone();
+    for _ in 0..64 {
+        if other > floor.station {
+            break;
+        }
+        other = pair_device(&admin.app, "station").await.0;
+    }
+    assert!(other > floor.station);
+    sqlx::query(
+        "INSERT INTO shift_participants (shift_id, device_id, first_entered_at, last_entered_at) \
+         VALUES (?, ?, '2026-09-21T14:00:00Z', '2026-09-21T14:00:00Z')",
+    )
+    .bind(shift)
+    .bind(&other)
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        totals(&admin, shift).await["deviceIds"],
+        json!([other, floor.station])
+    );
+    // A record without a readable shift belongs to no shift's totals.
+    admin.app.clock.advance(time::Duration::minutes(5));
+    let mut unknown = scan(40, 2);
+    unknown["shiftId"] = json!("5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b");
+    receipts(&admin.app, &floor.key, &[unknown]).await;
+    assert_eq!(
+        totals(&admin, shift).await["lastFactAt"],
+        json!(second_batch)
+    );
+    // The colleague's later facts, a box closed among them, change nothing in
+    // this shift's totals but the numbers they are about: the colleague's own.
+    let theirs = issue_block(&admin.app, &colleague.key, BLOCK_REQUEST).await;
+    admin.app.clock.advance(time::Duration::minutes(5));
+    let third_batch = admin.app.state.timestamp();
+    let answered = receipts(
+        &admin.app,
+        &colleague.key,
+        &[
+            fact(
+                &record_id(50),
+                "scan",
+                &colleague.shift,
+                ok_scan(50, &box_id(10), &instant(50, 0)),
+            ),
+            fact(
+                &record_id(51),
+                "box_closed",
+                &colleague.shift,
+                box_closed(
+                    &box_id(10),
+                    &theirs,
+                    theirs["fromSerial"].as_u64().unwrap(),
+                    &[50],
+                    &instant(50, 0),
+                    &instant(51, 0),
+                ),
+            ),
+        ],
+    )
+    .await;
+    assert!(
+        answered
+            .iter()
+            .all(|receipt| receipt["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+    let colleagues = json!({
+        "acceptedUnits": 3, "closedBoxes": 1, "openBoxes": 1, "lastFactAt": third_batch,
+        "deviceIds": [colleague.station]
+    });
+    assert_eq!(totals(&admin, &colleague.shift).await, colleagues);
+    let floors = json!({
+        "acceptedUnits": 3, "closedBoxes": 1, "openBoxes": 1, "lastFactAt": second_batch,
+        "deviceIds": [other, floor.station]
+    });
+    assert_eq!(totals(&admin, shift).await, floors);
+    // Every write of the office answers with the totals the list gives.
+    let closed = close_from_office(&admin, shift, "Станция не отвечает").await;
+    assert_eq!(closed["totals"], floors);
+    assert_eq!(totals(&admin, shift).await, floors);
+}

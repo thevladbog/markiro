@@ -686,6 +686,25 @@ fn office_shift_fixtures_round_trip_and_a_plan_carries_no_number_or_status() {
             ShiftOrigin::Office
         )
     );
+    // The owner entered it, so it is among the shift's devices.
+    assert_eq!(
+        shift.totals.device_ids,
+        vec![shift.owner_device_id.clone().unwrap()]
+    );
+    // A shift without facts still carries every field, the instant as `null`.
+    let mut empty = shift.totals.clone();
+    empty.accepted_units = 0;
+    empty.closed_boxes = 0;
+    empty.open_boxes = 0;
+    empty.last_fact_at = None;
+    empty.device_ids.clear();
+    assert_eq!(
+        serde_json::to_value(&empty).unwrap(),
+        serde_json::json!({
+            "acceptedUnits": 0, "closedBoxes": 0, "openBoxes": 0, "lastFactAt": null,
+            "deviceIds": []
+        })
+    );
     let create: ShiftCreate = round_trip("shift-create.json");
     assert_eq!(
         (&create.product_id, &create.line_id, &create.box_template_id),
