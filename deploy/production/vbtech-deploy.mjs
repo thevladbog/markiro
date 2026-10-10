@@ -6,6 +6,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { isMainModule } from "./cli-main.mjs";
+import { releaseRecordKeys, validReleaseScope } from "./release-scope.mjs";
 import { productionComposeArgs, PRODUCTION_COMPOSE_PROJECT } from "./compose-files.mjs";
 import { loopbackTlsRequest } from "./loopback-tls-request.mjs";
 import { runPrivateVbtechSmoke } from "./vbtech-private-smoke.mjs";
@@ -569,9 +570,7 @@ function validatedInput(options, paths) {
 }
 
 function exactMarkiroRecordKeys(value) {
-  return value?.vbtech === undefined
-    ? "apiDigest,createdAt,edgeDigest,previousTag,state,tag"
-    : "apiDigest,createdAt,edgeDigest,previousTag,state,tag,vbtech";
+  return releaseRecordKeys(value ?? {});
 }
 
 function validMarkiroRecord(value, file) {
@@ -581,6 +580,7 @@ function validMarkiroRecord(value, file) {
     (value.previousTag !== null && !RELEASE_SHA_PATTERN.test(value.previousTag)) ||
     !imageReference(API_REPOSITORY, value.apiDigest) ||
     !imageReference(EDGE_REPOSITORY, value.edgeDigest) ||
+    !validReleaseScope(value) ||
     !["pending", "healthy", "failed"].includes(value.state) ||
     !isCanonicalIsoDate(value.createdAt)
   )
@@ -616,6 +616,9 @@ function sameMarkiroRelease(left, right) {
     left?.previousTag === right?.previousTag &&
     left?.apiDigest === right?.apiDigest &&
     left?.edgeDigest === right?.edgeDigest &&
+    left?.scope === right?.scope &&
+    left?.edgeReleaseSha === right?.edgeReleaseSha &&
+    left?.edgeContainerId === right?.edgeContainerId &&
     sameVbtechRelease(left?.vbtech, right?.vbtech) &&
     left?.state === right?.state &&
     left?.createdAt === right?.createdAt
@@ -829,6 +832,7 @@ function commandEnvironment(input, active, vbtech) {
     MARKIRO_COMPOSE_PROJECT: PRODUCTION_COMPOSE_PROJECT,
     MARKIRO_ENV_FILE: active.environmentFile,
     MARKIRO_IMAGE_TAG: active.release.tag,
+    MARKIRO_EDGE_RELEASE_SHA: active.release.edgeReleaseSha ?? active.release.tag,
     MARKIRO_API_IMAGE_DIGEST: digestFromReference(API_REPOSITORY, active.release.apiDigest),
     MARKIRO_EDGE_IMAGE_DIGEST: digestFromReference(EDGE_REPOSITORY, active.release.edgeDigest),
     MARKIRO_DOMAIN: markiroDomain,

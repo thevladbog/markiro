@@ -19,6 +19,27 @@ runner, deployment controller и rehearsal workflow не участвуют.
 SHA. Workflow проверяет успешный release run и manifest, затем вызывает
 `deploy/yandex/remote-deploy.mjs`.
 
+Input `scope` выбирает `full` (по умолчанию) или `api-only`. В `api-only`
+применяются все ожидающие миграции выбранного API image и обновляется только
+сервис `api`. Кабинет, SaaS admin, kiosk и landing продолжают работать из текущего
+`edge`; `vbtech-web` также не пересоздаётся. Публикация verified image bundle
+по-прежнему создаёт оба candidate image, но новый `edge` в этом режиме не выкатывается.
+IndexNow для неизменённого landing не вызывается.
+
+Для `api-only` нужен предыдущий healthy release. Перед миграциями проверяются
+реальный running container `edge` и его digest; после переключения API проверяется,
+что container не изменился. В pending/healthy/failed record сохраняются отдельно
+API `tag`, прежний `edgeReleaseSha`, прежний edge digest и container ID. Public smoke
+проверяет прежний web SHA и доступность маршрутов через сохранённый edge.
+Не подменяйте старый web SHA новым API SHA. При API-only rollback восстанавливается
+только предыдущий API image; миграции не откатываются. Последующий full rollout и
+откат на mixed release используют сохранённые digest и web SHA.
+
+Scope ограничивает сервисы, а не Git commits: API image включает все изменения
+выбранного SHA и всех workspace-зависимостей. Перед запуском сравните выбранный
+source SHA с установленной версией. Station публикуется отдельным beta/stable
+workflow после проверки серверного выпуска; `scope=api-only` не выпускает её.
+
 Удалённая последовательность неизменна: transfer, prepare, migrations, start,
 readiness, public smoke, finalize. При ошибке после prepare выполняется один
 bounded rollback к предыдущему healthy release только пока выполнены границы

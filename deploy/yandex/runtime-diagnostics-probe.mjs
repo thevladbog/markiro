@@ -281,6 +281,13 @@ function validReleaseRecord(value) {
     ["pending", "healthy", "failed"].includes(value.state) &&
     MARKIRO_IMAGE_REF.test(value.apiDigest) &&
     MARKIRO_IMAGE_REF.test(value.edgeDigest) &&
+    // This probe is streamed as a standalone module; keep its identity checks self-contained.
+    ((value.scope === undefined &&
+      value.edgeReleaseSha === undefined &&
+      value.edgeContainerId === undefined) ||
+      (value.scope === "api-only" &&
+        RELEASE_SHA.test(value.edgeReleaseSha) &&
+        /^[0-9a-f]{64}$/.test(value.edgeContainerId))) &&
     typeof value.createdAt === "string" &&
     new Date(value.createdAt).toISOString() === value.createdAt
   );
@@ -679,9 +686,8 @@ function releaseForDigest(service, repoDigest, markiroRecords, vbtechRecords) {
     return matches[0]?.releaseSha ?? "unknown";
   }
   const digestKey = service === "api" ? "apiDigest" : "edgeDigest";
-  return (
-    newestRecord(markiroRecords, (record) => record[digestKey] === repoDigest)?.tag ?? "unknown"
-  );
+  const record = newestRecord(markiroRecords, (record) => record[digestKey] === repoDigest);
+  return (service === "edge" ? (record?.edgeReleaseSha ?? record?.tag) : record?.tag) ?? "unknown";
 }
 
 async function inspectService(service, markiroRecords, vbtechRecords, dependencies) {

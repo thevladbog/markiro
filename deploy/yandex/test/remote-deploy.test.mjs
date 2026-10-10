@@ -600,6 +600,45 @@ function systemFixture() {
   };
 }
 
+test("API-only adapter keeps edge smoke on preserved SHA and sends scope to remote preparation", async () => {
+  const fixture = systemFixture();
+  const edgeSha = "f".repeat(40);
+  const mixed = {
+    ...CANDIDATE,
+    previousTag: edgeSha,
+    scope: "api-only",
+    edgeReleaseSha: edgeSha,
+    edgeContainerId: "9".repeat(64),
+  };
+  const run = fixture.system.run;
+  fixture.system.run = async (command, args, options) => {
+    const result = await run(command, args, options);
+    if (args.includes("prepare")) return JSON.stringify(mixed);
+    if (args.includes("finalize")) return JSON.stringify({ ...mixed, state: "healthy" });
+    return result;
+  };
+  let smoke;
+  fixture.system.smoke = async (options) => {
+    smoke = options;
+  };
+  await runRemoteDeployment(environment({ MARKIRO_DEPLOY_SCOPE: "api-only" }), fixture.system);
+  assert.equal(smoke.expectedReleaseSha, edgeSha);
+  assert.ok(
+    fixture.commands
+      .find(({ args }) => args.includes("prepare"))
+      .args.includes("MARKIRO_DEPLOY_SCOPE=api-only"),
+  );
+});
+
+test("invalid direct scope fails before host mutation", async () => {
+  const fixture = systemFixture();
+  await assert.rejects(
+    runRemoteDeployment(environment({ MARKIRO_DEPLOY_SCOPE: "other" }), fixture.system),
+  );
+  assert.equal(fixture.commands.length, 0);
+  assert.equal(fixture.events.length, 0);
+});
+
 test("real direct adapter uses pinned SSH and job-scoped registry credentials only", async () => {
   const fixture = systemFixture();
   const result = await runRemoteDeployment(environment(), fixture.system);
