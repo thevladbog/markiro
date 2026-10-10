@@ -11,9 +11,11 @@ const MAX_GIT_BYTES = 1024 * 1024;
 const MAX_HIGHLIGHTS_BYTES = 8 * 1024;
 const MAX_ENTRIES = 10_000;
 const SHA = /^[0-9a-f]{40}$/;
-// Token formats are secrets wherever they appear. Credential prose (an API key
-// header, a pairing code) is only barred from text the notes actually publish.
+// Published text rejects credential markers as well as values. Unpublished
+// bodies may explain bare prefixes or variable names, but not credential values.
 const SECRET_TOKEN = /ghp_|github_pat_|TAURI_SIGNING_PRIVATE_KEY/i;
+const BODY_SECRET_TOKEN =
+  /ghp_[a-z0-9_]|github_pat_[a-z0-9_]|TAURI_SIGNING_PRIVATE_KEY["'\x60]?\s*[:=]\s*\S/i;
 const SECRET_PROSE = /api[_ -]?key|pairing_code/i;
 const SECRET_TEXT = new RegExp(`${SECRET_TOKEN.source}|${SECRET_PROSE.source}`, "i");
 const UNSAFE_CONTROL_TEXT = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
@@ -134,7 +136,7 @@ function normalizedEntry(entry, { allowSecretText = false } = {}) {
   ensureText(entry.subject, { secretPattern: rawSecretPattern, maxBytes: 16 * 1024 });
   ensureText(entry.body, {
     allowEmpty: true,
-    secretPattern: rawSecretPattern,
+    secretPattern: allowSecretText ? null : BODY_SECRET_TOKEN,
     maxBytes: 64 * 1024,
   });
   if (

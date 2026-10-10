@@ -134,8 +134,27 @@ test("allows credential prose in the unpublished body of a Station release entry
   assert.doesNotMatch(notes, /api[_ -]?key|pairing_code/i);
 });
 
-test("still rejects secret tokens anywhere in a Station release entry", () => {
-  for (const token of ["ghp_example", "github_pat_example", "TAURI_SIGNING_PRIVATE_KEY"]) {
+test("allows bare credential markers in the unpublished body of a Station release entry", () => {
+  const notes = buildStableChangelog(
+    validInput({
+      entries: [
+        {
+          ...validInput().entries[0],
+          body: "Token formats (ghp_, github_pat_, TAURI_SIGNING_PRIVATE_KEY) are checked. Only the subject is published.",
+        },
+      ],
+    }),
+  );
+  assert.match(notes, /feat\(station\): add scan queue/);
+  assert.doesNotMatch(notes, /ghp_|github_pat_|TAURI_SIGNING_PRIVATE_KEY/);
+});
+
+test("still rejects credential values anywhere in a Station release entry", () => {
+  for (const token of [
+    "ghp_example",
+    "github_pat_example",
+    "TAURI_SIGNING_PRIVATE_KEY=synthetic-key",
+  ]) {
     for (const entry of [
       { ...validInput().entries[0], body: `Leaked ${token} by mistake.` },
       { ...validInput().entries[0], subject: `feat(station): add ${token}` },
@@ -152,6 +171,38 @@ test("still rejects secret tokens anywhere in a Station release entry", () => {
         `${token}: ${entry.subject}`,
       );
     }
+  }
+});
+
+test("rejects bare credential markers in every published display line", () => {
+  for (const marker of ["ghp_", "github_pat_", "TAURI_SIGNING_PRIVATE_KEY"]) {
+    for (const entry of [
+      { ...validInput().entries[0], subject: `feat(station): document ${marker}` },
+      {
+        ...validInput().entries[0],
+        subject: "Merge pull request #42 from example/scan",
+        body: `fix(station): document ${marker}\n\nDetails`,
+      },
+    ]) {
+      assert.throws(
+        () => buildStableChangelog(validInput({ entries: [entry] })),
+        /invalid station stable changelog/,
+      );
+    }
+  }
+});
+
+test("rejects quoted and multiline signing key assignments in unpublished bodies", () => {
+  for (const body of [
+    '"TAURI_SIGNING_PRIVATE_KEY": "synthetic-key"',
+    "'TAURI_SIGNING_PRIVATE_KEY'=synthetic-key",
+    "`TAURI_SIGNING_PRIVATE_KEY` = synthetic-key",
+    "TAURI_SIGNING_PRIVATE_KEY:\nsynthetic-key",
+  ]) {
+    assert.throws(
+      () => buildStableChangelog(validInput({ entries: [{ ...validInput().entries[0], body }] })),
+      /invalid station stable changelog/,
+    );
   }
 });
 
