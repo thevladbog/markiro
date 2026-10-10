@@ -461,3 +461,50 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
+
+/* The shifts of the line: cards one under another, each with its 64 px action. */
+.shift-list {
+  width: min(720px, 100%);
+}
+
+.shift-list__cards {
+  display: grid;
+  gap: 16px;
+}
+
+.shift-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+}
+
+.shift-card p {
+  margin: 0;
+}
+
+.shift-card__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.shift-card__number {
+  font: var(--floor-lg);
+}
+
+.shift-card__product {
+  font: var(--floor-body-strong);
+}
+
+.shift-card__facts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.shift-card__hint {
+  color: var(--fg-2);
+}
