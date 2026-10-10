@@ -276,45 +276,64 @@ async function reconstructBox(
     matches.push(event);
     byHash.set(hash, matches);
   }
-  const replay: Record<string, string | null>[] = [];
+  const matched: { member: MemberRow; event: EventRow }[] = [];
   for (const member of members) {
-    if (!isCurrent()) return null;
     const matches = (byHash.get(member.code_hash) ?? []).filter(
       (event) => event.scanned_at === member.scanned_at,
     );
     if (matches.length !== 1) return null;
-    const event = matches[0]!;
-    const grantEvidence = await exec.all<{ event_id: string }>(
-      `SELECT command.event_id
-      FROM offline_grant_scan_commands command
-      JOIN offline_grant_event_evidence evidence ON evidence.event_id=command.event_id
-      JOIN offline_grant_decisions decision ON decision.event_id=command.event_id
-      WHERE json_extract(command.payload_json,'$.event.shiftId')=?
-        AND json_extract(command.payload_json,'$.event.raw')=?
-        AND json_extract(command.payload_json,'$.event.scannedAt')=?
-        AND json_extract(command.payload_json,'$.code.codeHash')=?
-        AND json_extract(command.payload_json,'$.code.boxId')=?
-        AND command.stored_code=1
-        AND json_extract(decision.decision_json,'$.allow')=1
-      LIMIT 2`,
-      [fact.shiftId, event.raw, event.scanned_at, member.code_hash, fact.boxId],
-    );
-    if (grantEvidence.length > 1) return null;
-    replay.push({
-      shiftId: fact.shiftId,
-      terminalId: event.terminal_id,
-      raw: event.raw,
-      verdict: event.verdict,
-      scannedAt: event.scanned_at,
-      codeHash: member.code_hash,
-      gtin14: member.gtin14,
-      serial: member.serial,
-      boxId: fact.boxId,
-      operatorId: event.operator_id,
-      replayEventId: grantEvidence[0]?.event_id ?? null,
-    });
+    matched.push({ member, event: matches[0]! });
   }
-  return replay;
+  if (!isCurrent()) return null;
+  // This history has no JSON expression index. A per-member lookup rescans
+  // every retained command for every unit. An uncorrelated tuple set lets
+  // SQLite scan the history once for the entire box, preserving exact identity.
+  const grantEvidence = await exec.all<{ event_id: string; code_hash: string }>(
+    `SELECT command.event_id,json_extract(command.payload_json,'$.code.codeHash') AS code_hash
+    FROM offline_grant_scan_commands command
+    JOIN offline_grant_event_evidence evidence ON evidence.event_id=command.event_id
+    JOIN offline_grant_decisions decision ON decision.event_id=command.event_id
+    WHERE json_extract(command.payload_json,'$.event.shiftId')=?
+      AND json_extract(command.payload_json,'$.code.boxId')=?
+      AND command.stored_code=1
+      AND json_extract(decision.decision_json,'$.allow')=1
+      AND (json_extract(command.payload_json,'$.event.raw'),
+           json_extract(command.payload_json,'$.event.scannedAt'),
+           json_extract(command.payload_json,'$.code.codeHash')) IN (
+        SELECT json_extract(value,'$.raw'),json_extract(value,'$.scannedAt'),json_extract(value,'$.codeHash')
+        FROM json_each(?)
+      )`,
+    [
+      fact.shiftId,
+      fact.boxId,
+      JSON.stringify(
+        matched.map(({ member, event }) => ({
+          raw: event.raw,
+          scannedAt: event.scanned_at,
+          codeHash: member.code_hash,
+        })),
+      ),
+    ],
+  );
+  if (!isCurrent()) return null;
+  const grantIds = new Map<string, string>();
+  for (const evidence of grantEvidence) {
+    if (grantIds.has(evidence.code_hash)) return null;
+    grantIds.set(evidence.code_hash, evidence.event_id);
+  }
+  return matched.map(({ member, event }) => ({
+    shiftId: fact.shiftId,
+    terminalId: event.terminal_id,
+    raw: event.raw,
+    verdict: event.verdict,
+    scannedAt: event.scanned_at,
+    codeHash: member.code_hash,
+    gtin14: member.gtin14,
+    serial: member.serial,
+    boxId: fact.boxId,
+    operatorId: event.operator_id,
+    replayEventId: grantIds.get(member.code_hash) ?? null,
+  }));
 }
 
 async function recordIssue(

@@ -91,6 +91,50 @@ function scans(db: DatabaseSync, boxId: string, count: number, omitJournal = -1)
   return hashes;
 }
 
+interface RetainedGrantScan {
+  eventId: string;
+  raw: string;
+  scannedAt: string;
+  codeHash: string;
+  shiftId?: string;
+  boxId?: string;
+  storedCode?: number;
+  allowed?: boolean;
+  evidence?: boolean;
+}
+
+/** Load retained history, without replaying its original production side effects. */
+function retainedGrantScans(db: DatabaseSync, rows: RetainedGrantScan[]): void {
+  const trigger = db
+    .prepare("SELECT sql FROM sqlite_master WHERE name='offline_grant_scan_apply'")
+    .get();
+  if (typeof trigger?.sql !== "string") throw new Error("Missing scan trigger");
+  db.exec("DROP TRIGGER offline_grant_scan_apply");
+  try {
+    const command = db.prepare(
+      "INSERT INTO offline_grant_scan_commands(event_id,payload_json,stored_code) VALUES(?,?,?)",
+    );
+    const evidence = db.prepare("INSERT INTO offline_grant_event_evidence(event_id) VALUES(?)");
+    const decision = db.prepare(
+      "INSERT INTO offline_grant_decisions(event_id,event_digest,decision_json,result_json) VALUES(?,'digest',?,'{}')",
+    );
+    for (const row of rows) {
+      command.run(
+        row.eventId,
+        JSON.stringify({
+          event: { shiftId: row.shiftId ?? "shift-1", raw: row.raw, scannedAt: row.scannedAt },
+          code: { boxId: row.boxId ?? "b1", codeHash: row.codeHash },
+        }),
+        row.storedCode ?? 1,
+      );
+      if (row.evidence !== false) evidence.run(row.eventId);
+      decision.run(row.eventId, JSON.stringify({ allow: row.allowed ?? true }));
+    }
+  } finally {
+    db.exec(trigger.sql);
+  }
+}
+
 describe("closed-box reconciliation", () => {
   it("keeps the 201st due box for the next bounded request", async () => {
     const { db, exec } = fixture();
@@ -429,6 +473,124 @@ describe("closed-box reconciliation", () => {
     ]);
     expect((await readBoxReconciliationSummary(exec, "shift-1")).confirmed).toBe(1);
   });
+
+  it("reconstructs 1000 units against 20000 retained commands with one grant lookup", async () => {
+    const { db, exec } = fixture();
+    try {
+      box(db, "b1");
+      const hashes = scans(db, "b1", 1000);
+      const retained: RetainedGrantScan[] = Array.from({ length: 20000 }, (_, i) => ({
+        eventId: `old-${i}`,
+        raw: `OLD-${i}`,
+        scannedAt: "2026-01-01T00:00:00.000Z",
+        codeHash: `old-hash-${i}`,
+        shiftId: `old-shift-${i % 20}`,
+        boxId: `old-box-${i}`,
+      }));
+      for (let i = 0; i < 999; i++)
+        retained.push({
+          eventId: `event-${i}`,
+          raw: `010400638133393121S-${i}`,
+          scannedAt: new Date(Date.UTC(2026, 8, 23, 0, 1, i)).toISOString(),
+          codeHash: hashes[i]!,
+        });
+      // Every field exists individually, but this combination is not a scan.
+      retained.push({
+        eventId: "mixed-identity",
+        raw: "010400638133393121S-0",
+        scannedAt: "2026-09-23T00:01:01.000Z",
+        codeHash: hashes[1]!,
+      });
+      retainedGrantScans(db, retained);
+      let lookups = 0;
+      const measured: SqlExecutor = {
+        ...exec,
+        async all<T>(sql: string, params: unknown[] = []): Promise<T[]> {
+          if (sql.includes("FROM offline_grant_scan_commands")) {
+            lookups++;
+            // Fail promptly on the old N full scans rather than spend minutes in them.
+            expect(lookups, "grant history must be read once per box").toBe(1);
+          }
+          return exec.all<T>(sql, params);
+        },
+      };
+      const facts = await readBoxReconciliationBatch(exec, "shift-1");
+      await applyBoxReconciliationResults(measured, facts, [
+        {
+          boxId: "b1",
+          status: "replay_required",
+          reasonCode: "box_absent",
+          serverItemCount: null,
+        },
+      ]);
+      expect(lookups).toBe(1);
+      const replay = db
+        .prepare("SELECT raw,scanned_at,code_hash,replay_event_id FROM outbox ORDER BY scanned_at")
+        .all();
+      expect(replay).toHaveLength(1000);
+      for (let i = 0; i < 1000; i++)
+        expect(replay[i]).toEqual({
+          raw: `010400638133393121S-${i}`,
+          scanned_at: new Date(Date.UTC(2026, 8, 23, 0, 1, i)).toISOString(),
+          code_hash: hashes[i],
+          replay_event_id: i < 999 ? `event-${i}` : null,
+        });
+      expect(db.prepare("SELECT COUNT(*) n FROM codes_mirror").get()).toEqual({ n: 1000 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it.each(["exact", "ambiguous"])(
+    "preserves exact grant matching with %s evidence",
+    async (kind) => {
+      const { db, exec } = fixture();
+      try {
+        box(db, "b1");
+        const [hash] = scans(db, "b1", 1);
+        if (!hash) throw new Error("Missing hash");
+        const match: RetainedGrantScan = {
+          eventId: "exact",
+          raw: "010400638133393121S-0",
+          scannedAt: "2026-09-23T00:01:00.000Z",
+          codeHash: hash,
+        };
+        retainedGrantScans(db, [
+          match,
+          { ...match, eventId: "shift", shiftId: "other" },
+          { ...match, eventId: "box", boxId: "other" },
+          { ...match, eventId: "raw", raw: "OTHER" },
+          { ...match, eventId: "time", scannedAt: "2026-09-23T00:02:00.000Z" },
+          { ...match, eventId: "hash", codeHash: "other" },
+          { ...match, eventId: "not-stored", storedCode: 0 },
+          { ...match, eventId: "denied", allowed: false },
+          { ...match, eventId: "no-evidence", evidence: false },
+          ...(kind === "ambiguous" ? [{ ...match, eventId: "second-exact" }] : []),
+        ]);
+        const facts = await readBoxReconciliationBatch(exec, "shift-1");
+        await applyBoxReconciliationResults(exec, facts, [
+          {
+            boxId: "b1",
+            status: "replay_required",
+            reasonCode: "box_absent",
+            serverItemCount: null,
+          },
+        ]);
+        expect(db.prepare("SELECT replay_event_id FROM outbox").all()).toEqual(
+          kind === "exact" ? [{ replay_event_id: "exact" }] : [],
+        );
+        expect((await readBoxReconciliationSummary(exec, "shift-1")).issues).toBe(
+          kind === "exact" ? 0 : 1,
+        );
+        if (kind === "ambiguous")
+          expect((await readBoxReconciliationIssues(exec))[0]?.reasonCode).toBe(
+            "replay_evidence_missing",
+          );
+      } finally {
+        db.close();
+      }
+    },
+  );
 
   it("requeues a complete historic box, preserving exact raw and attribution", async () => {
     const { db, exec } = fixture();
