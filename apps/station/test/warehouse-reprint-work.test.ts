@@ -140,6 +140,94 @@ it("preselects the cabinet box default and sole enabled unit and refreshes expli
   }
 });
 
+it.each([
+  ["offline", "refresh"],
+  ["offline", "resume"],
+  ["catalog error", "refresh"],
+  ["catalog error", "resume"],
+  ["empty catalog", "refresh"],
+  ["empty catalog", "resume"],
+] as const)("fills never-selected templates after %s on %s", async (initial, action) => {
+  const h = await templateWork();
+  let work = h.work;
+  try {
+    if (initial === "offline") h.get.mockRejectedValueOnce(new TypeError("offline"));
+    else if (initial === "catalog error")
+      h.get.mockRejectedValueOnce(new StationApiError(500, "catalog failed"));
+    else h.setCatalog([]);
+    await work.initialize();
+    const session = work.getSnapshot().session;
+    if (!session) throw new Error("session missing");
+    expect(session).toMatchObject({ unitTemplate: null, boxTemplate: null });
+    h.setCatalog([h.unit, h.box]);
+    if (action === "resume") {
+      await work.close();
+      work = createWarehouseWork(h.options);
+      await work.initialize();
+    } else await work.refreshCatalog();
+    expect(work.getSnapshot().session).toMatchObject({
+      sessionId: session.sessionId,
+      unitTemplate: { id: h.unit.id },
+      boxTemplate: { id: h.box.id },
+    });
+    await work.start();
+    expect(work.getSnapshot().session?.status).toBe("active");
+  } finally {
+    await work.close();
+    h.db.close();
+  }
+});
+
+it("does not treat a reason-only update as clearing never-selected templates", async () => {
+  const h = await templateWork();
+  try {
+    h.get.mockRejectedValueOnce(new TypeError("offline"));
+    await h.work.initialize();
+    await h.work.configure("lost", null, null);
+    await h.work.refreshCatalog();
+    expect(h.work.getSnapshot().session).toMatchObject({
+      reason: "lost",
+      unitTemplate: { id: h.unit.id },
+      boxTemplate: { id: h.box.id },
+    });
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+
+it.each(["unit", "box"] as const)(
+  "fills an initially empty %s choice while leaving the other invalidated choice empty",
+  async (kind) => {
+    const h = await templateWork();
+    try {
+      h.setCatalog(kind === "unit" ? [h.box] : [h.unit]);
+      await h.work.initialize();
+      const nextUnit = changedTemplate(h.unit, { id: crypto.randomUUID() });
+      const nextBox = changedTemplate(h.box, { id: crypto.randomUUID() });
+      h.setCatalog([nextUnit, nextBox]);
+      h.setDefault(nextBox.id);
+      await h.work.refreshCatalog();
+      const expected = {
+        unitTemplate: kind === "unit" ? nextUnit : null,
+        boxTemplate: kind === "box" ? nextBox : null,
+      };
+      expect(h.work.getSnapshot().session).toMatchObject(expected);
+      await h.work.close();
+      const resumed = createWarehouseWork(h.options);
+      try {
+        await resumed.initialize();
+        expect(resumed.getSnapshot().session).toMatchObject(expected);
+      } finally {
+        await resumed.close();
+      }
+    } finally {
+      await h.work.close();
+      h.db.close();
+    }
+  },
+);
+
 it("checks only a fresh job's selected template and saves its current spec and digest, while reprints replay bytes", async () => {
   const h = await templateWork();
   try {
@@ -226,6 +314,37 @@ it("does not substitute retired choices when opening or cancelling selection or 
       await resumed.configure("lost", nextUnit, nextBox);
       await resumed.start();
       expect(resumed.getSnapshot().session?.status).toBe("active");
+    } finally {
+      await resumed.close();
+    }
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+
+it("requires a manual choice after a scan invalidates the selected box template, including on resume", async () => {
+  const h = await templateWork();
+  try {
+    await h.work.initialize();
+    await h.work.start();
+    const nextBox = changedTemplate(h.box, { id: crypto.randomUUID(), name: "New default" });
+    h.setCatalog([h.unit, nextBox]);
+    h.setDefault(nextBox.id);
+    await h.work.scan(h.input.source.identity);
+    expect(h.work.getSnapshot().error).toBe("WAREHOUSE_TEMPLATE_UNAVAILABLE");
+    expect(h.work.getSnapshot().session?.boxTemplate).toBeNull();
+    await h.work.close();
+    const resumed = createWarehouseWork(h.options);
+    try {
+      await resumed.initialize();
+      expect(resumed.getSnapshot().session).toMatchObject({
+        unitTemplate: { id: h.unit.id },
+        boxTemplate: null,
+      });
+      await resumed.start();
+      expect(resumed.getSnapshot().error).toBe("WAREHOUSE_TEMPLATES_REQUIRED");
+      expect(h.print).not.toHaveBeenCalled();
     } finally {
       await resumed.close();
     }

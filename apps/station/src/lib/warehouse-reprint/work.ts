@@ -164,6 +164,10 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
     if (!current()) throw new Error("WAREHOUSE_OWNER_CHANGED");
     const session = state.session;
     if (session) {
+      const autoSelectUnit =
+        freshSession || (session.unitTemplate === null && !session.unitTemplateNeedsSelection);
+      const autoSelectBox =
+        freshSession || (session.boxTemplate === null && !session.boxTemplateNeedsSelection);
       const unitTemplate = resolveWarehouseTemplateSelection(
         catalog,
         "unit",
@@ -182,12 +186,20 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
         );
       await saveWarehouseSession(guarded, {
         ...session,
-        // Defaults may initialize a new session, never replace an existing
-        // choice as a side effect of opening or cancelling the picker.
+        // Fill initial empty choices when the catalog becomes available, but
+        // persist invalidation so refresh/Cancel/restart never substitutes a choice.
         unitTemplate:
-          freshSession || unitTemplate?.id === session.unitTemplate?.id ? unitTemplate : null,
+          autoSelectUnit || unitTemplate?.id === session.unitTemplate?.id ? unitTemplate : null,
         boxTemplate:
-          freshSession || boxTemplate?.id === session.boxTemplate?.id ? boxTemplate : null,
+          autoSelectBox || boxTemplate?.id === session.boxTemplate?.id ? boxTemplate : null,
+        unitTemplateNeedsSelection:
+          !autoSelectUnit &&
+          (session.unitTemplateNeedsSelection === true ||
+            unitTemplate?.id !== session.unitTemplate?.id),
+        boxTemplateNeedsSelection:
+          !autoSelectBox &&
+          (session.boxTemplateNeedsSelection === true ||
+            boxTemplate?.id !== session.boxTemplate?.id),
       });
     }
     if (!current()) throw new Error("WAREHOUSE_OWNER_CHANGED");
@@ -334,6 +346,14 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
           reason,
           unitTemplate,
           boxTemplate,
+          unitTemplateNeedsSelection:
+            unitTemplate === null &&
+            (state.session.unitTemplate !== null ||
+              state.session.unitTemplateNeedsSelection === true),
+          boxTemplateNeedsSelection:
+            boxTemplate === null &&
+            (state.session.boxTemplate !== null ||
+              state.session.boxTemplateNeedsSelection === true),
         });
         await refresh();
       }),
@@ -424,7 +444,9 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
         const template = catalog.templates.find((t) => t.id === selected.id && t.enabled) ?? null;
         await saveWarehouseSession(guarded, {
           ...session,
-          ...(found.source.kind === "box" ? { boxTemplate: template } : { unitTemplate: template }),
+          ...(found.source.kind === "box"
+            ? { boxTemplate: template, boxTemplateNeedsSelection: template === null }
+            : { unitTemplate: template, unitTemplateNeedsSelection: template === null }),
         });
         publish({ catalog });
         await refresh();
@@ -499,6 +521,8 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
           sessionId: crypto.randomUUID(),
           status: "paused",
           sentCount: 0,
+          unitTemplateNeedsSelection: false,
+          boxTemplateNeedsSelection: false,
           boxTemplate:
             (state.catalog
               ? resolveWarehouseTemplateSelection(state.catalog, "box", null, state.defaultBoxId)

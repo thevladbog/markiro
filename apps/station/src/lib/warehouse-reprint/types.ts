@@ -17,6 +17,9 @@ export const warehouseSessionSchema = z.strictObject({
   status: z.enum(["active", "paused"]),
   unitTemplate: warehouseTemplateSchema.nullable(),
   boxTemplate: warehouseTemplateSchema.nullable(),
+  // Persist invalidated/cleared choices separately from an initially empty session.
+  unitTemplateNeedsSelection: z.boolean().optional(),
+  boxTemplateNeedsSelection: z.boolean().optional(),
   sentCount: z.number().int().nonnegative().default(0),
 });
 export type WarehouseSession = z.output<typeof warehouseSessionSchema>;
