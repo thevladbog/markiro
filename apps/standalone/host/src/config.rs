@@ -89,6 +89,13 @@ impl HostPaths {
         Ok(())
     }
 
+    /// Written by `markiro-host restore` before it moves the first file of
+    /// the database and removed after the last (plan РК): while it is there
+    /// the host does not start.
+    pub fn restore_intent_file(&self) -> PathBuf {
+        self.data_dir.join("host.restore-intent")
+    }
+
     pub fn lock_file(&self) -> PathBuf {
         self.data_dir.join("host.lock")
     }
@@ -146,6 +153,14 @@ impl HostConfig {
         Ok(config)
     }
 
+    /// Host data a new identity would orphan: a database or a TLS identity
+    /// in a folder without `host.json`.
+    pub fn would_orphan_host_data(paths: &HostPaths) -> bool {
+        paths.database_file().exists()
+            || paths.tls_dir().join("cert.der").exists()
+            || paths.tls_dir().join("key.der").exists()
+    }
+
     /// Load `host.json`, creating it with a fresh host id and the default port
     /// on first start. `port_override` (`--port`) is persisted for the next
     /// start. A corrupt file is reported, never replaced. Refuses to invent a
@@ -167,10 +182,7 @@ impl HostConfig {
                 (config, false)
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                if paths.database_file().exists()
-                    || paths.tls_dir().join("cert.der").exists()
-                    || paths.tls_dir().join("key.der").exists()
-                {
+                if Self::would_orphan_host_data(paths) {
                     return Err(ConfigError::Invalid {
                         path,
                         reason: "host.json is missing but host data exists; restore it from a backup instead of starting a new host identity".into(),

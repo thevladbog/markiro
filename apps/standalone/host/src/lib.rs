@@ -112,6 +112,10 @@ impl RunningHost {
 pub async fn start(paths: &HostPaths, options: StartOptions) -> Result<RunningHost, BoxError> {
     paths.ensure()?;
     let lock = paths.lock()?;
+    // A restore cut off between its renames left its marker: the database
+    // in place may lack its WAL, or be missing (an empty one would be made
+    // here). The next `markiro-host restore` finishes it first.
+    restore::refuse_unfinished(paths)?;
     let config = HostConfig::load_or_create(paths, options.port_override)?;
     let pool = db::open(&paths.database_file()).await?;
     // Build the unknown-login verifier now, off the async threads, so the

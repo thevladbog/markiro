@@ -10,14 +10,16 @@ use axum::http::StatusCode;
 use markiro_host::backup::copy::{make_copy, manifest_path, sha256_file, Manifest};
 use markiro_host::config::HostPaths;
 use markiro_host::restore::{
-    restore, summary, verify_copy, Current, SHIFT_NUMBER_MARGIN, UNREADABLE_CURRENT_MARGIN,
+    restore, restore_crashing, summary, verify_copy, Carried, CrashPoint, Current, Interrupted,
+    SHIFT_NUMBER_MARGIN, UNREADABLE_CURRENT_MARGIN,
 };
+use markiro_host::StartOptions;
 use markiro_proto::backup::BackupTrigger;
 use serde_json::{json, Value};
 use sqlx::{ConnectOptions, Connection, SqlitePool};
 use support::app::{
-    admin, json as json_request, plan_shift, request, shift_body, shift_setup, with_device, Admin,
-    TestApp,
+    add_operator, admin, json as json_request, login, pair_device, plan_shift, request,
+    seed_office_user, shift_body, shift_setup, with_device, Admin, TestApp,
 };
 use support::backup::{at, latest_migration, names, worker_conn};
 
@@ -196,10 +198,12 @@ async fn a_restore_puts_the_copy_back_and_lifts_every_counter_above_both_databas
     .fetch_one(&pool)
     .await
     .unwrap();
-    // A station keeps a record only if its revision is newer than the one it
-    // holds: the host goes above every revision the live database reached.
-    assert_eq!((rev, counter_revs), (live_rev + 1, live_rev + 1));
-    assert_eq!(report.revision, live_rev + 1);
+    // The revision goes back to the copy's next one, BELOW the live
+    // database's: a station whose cursor passed it gets `rev < since` and
+    // starts its copies again from zero (`src/local/reference-sync.ts`).
+    assert_eq!((rev, counter_revs), (copy_rev + 1, copy_rev + 1));
+    assert!(rev < live_rev, "the host went back: {rev} < {live_rev}");
+    assert_eq!(report.revision, copy_rev + 1);
     let restore_row: i64 =
         sqlx::query_scalar("SELECT id FROM audit_log WHERE action = 'host.restore'")
             .fetch_one(&pool)
@@ -253,6 +257,8 @@ async fn a_restore_puts_the_copy_back_and_lifts_every_counter_above_both_databas
                 { "monthKey": "OCT26", "from": 1, "to": 12 },
                 { "monthKey": "SEP26", "from": null, "to": 10 },
             ],
+            "carried": { "devices": 0, "operators": 0, "badges": 0, "officeUsers": 0 },
+            "sessionsEnded": 1,
         })
     );
     assert_eq!(
@@ -261,6 +267,10 @@ async fn a_restore_puts_the_copy_back_and_lifts_every_counter_above_both_databas
         "the copy itself is untouched"
     );
     assert!(!paths.data_dir.join("host.db.partial").exists());
+    assert!(
+        !paths.restore_intent_file().exists(),
+        "the marker goes with the last rename"
+    );
     assert_eq!(
         summary(&report),
         [
@@ -269,16 +279,19 @@ async fn a_restore_puts_the_copy_back_and_lifts_every_counter_above_both_databas
                 copy_path.display(),
                 manifest.sha256
             ),
+            format!("data folder: {}", paths.data_dir.display()),
             format!("the previous database is in {}", aside.display()),
+            "revocations carried over from the previous database: 0 devices, 0 operators, 0 badges, 0 office users".to_owned(),
+            "every office session was ended: everyone signs in to the office again".to_owned(),
             format!("SSCC {PREFIX}/0: 3500 -> 9500"),
             format!("SSCC {PREFIX}/1: 40 -> 440"),
             "shift numbers OCT26: 1 -> 12".to_owned(),
             "shift numbers SEP26: - -> 10".to_owned(),
             format!(
-                "restore epoch {}: stations register their SSCC blocks again when they connect",
+                "restore epoch {}: the stations do not register their SSCC blocks again yet; follow the runbook before they print new boxes",
                 report.epoch
             ),
-            "the stations' facts wait: resume them in the office (Резервные копии) once every station gave its blocks back".to_owned(),
+            "the stations' facts wait: resume them in the office (Резервные копии) once the runbook's checks are done".to_owned(),
             "start the host again: sc start MarkiroHost".to_owned(),
         ]
     );
@@ -371,23 +384,38 @@ async fn an_unreadable_current_database_leaves_the_margins_over_the_copy() {
         b"what is left of a dead disk"
     );
     let pool = reopen(&paths).await;
+    // The copy's highest numbers are 1500 and 40: 100 000 above each, rounded
+    // up to the next 10 000.
     assert_eq!(
         counters(&pool).await,
-        [(PREFIX.to_owned(), 0, 5500), (PREFIX.to_owned(), 1, 440)]
+        [
+            (PREFIX.to_owned(), 0, 110_000),
+            (PREFIX.to_owned(), 1, 110_000)
+        ]
     );
-    assert!(summary(&report).contains(
-        &"the previous database could not be read: SSCC counters rose by the margin only"
-            .to_owned()
-    ));
-    // What the dead database reached is unknown: revisions and audit ids
-    // jump far above the copy's.
+    let lines = summary(&report);
+    assert!(lines.contains(
+        &"the previous database could not be read: every SSCC counter is at least 100000 above the copy's highest number".to_owned()
+    ), "{lines:#?}");
+    assert!(lines.contains(
+        &"the previous database was not read: devices, operators, badges and office users revoked after 2026-09-21T14:13:20Z are active again: check them in the office".to_owned()
+    ), "{lines:#?}");
+    let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM office_sessions")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(sessions, 0, "no office session survives a restore");
+    assert_eq!((report.carried, report.sessions_ended), (None, 1));
+    // The revision is the copy's next one; the audit ids, which are never
+    // issued twice, jump far above the copy's (what the dead database
+    // issued is unknown).
     let (rev, restore_row): (i64, i64) = sqlx::query_as(
         "SELECT (SELECT rev FROM host_revision), (SELECT id FROM audit_log WHERE action = 'host.restore')",
     )
     .fetch_one(&pool)
     .await
     .unwrap();
-    assert_eq!(rev, copy_rev + UNREADABLE_CURRENT_MARGIN);
+    assert_eq!(rev, copy_rev + 1);
     assert_eq!(restore_row, copy_audit + UNREADABLE_CURRENT_MARGIN + 1);
     assert_eq!(
         shift_numbers(&pool).await,
@@ -401,6 +429,10 @@ async fn an_unreadable_current_database_leaves_the_margins_over_the_copy() {
 #[tokio::test]
 async fn a_new_computer_gets_the_copy_and_a_new_identity() {
     let admin = admin().await;
+    let copy_rev: i64 = sqlx::query_scalar("SELECT rev FROM host_revision")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
     let (copy_path, _) = copy(&admin.app).await;
     let fresh = tempfile::tempdir().unwrap();
     let paths = HostPaths::new(fresh.path());
@@ -415,9 +447,17 @@ async fn a_new_computer_gets_the_copy_and_a_new_identity() {
     let pool = reopen(&paths).await;
     assert_eq!(
         counters(&pool).await,
-        [(PREFIX.to_owned(), 0, 5500), (PREFIX.to_owned(), 1, 440)]
+        [
+            (PREFIX.to_owned(), 0, 110_000),
+            (PREFIX.to_owned(), 1, 110_000)
+        ]
     );
     assert!(summary(&report).contains(&"there was no previous database".to_owned()));
+    assert!(report.new_identity);
+    assert!(summary(&report).contains(&format!(
+        "a new host identity was created in {}: every device pairs with this host again",
+        paths.config_file().display()
+    )));
     // The copy is of another host: the stations pair with this one again.
     assert!(report.other_host);
     assert!(summary(&report).contains(
@@ -427,7 +467,7 @@ async fn a_new_computer_gets_the_copy_and_a_new_identity() {
         .fetch_one(&pool)
         .await
         .unwrap();
-    assert!(rev >= UNREADABLE_CURRENT_MARGIN, "an unknown past: {rev}");
+    assert_eq!(rev, copy_rev + 1);
 }
 
 /// The data folder's names, and the bytes of the database and its WAL.
@@ -523,7 +563,7 @@ async fn a_running_host_keeps_its_data_folder() {
 }
 
 #[tokio::test]
-async fn a_failure_after_the_move_puts_the_current_database_back() {
+async fn a_failure_while_the_new_database_is_built_changes_nothing() {
     let admin = admin().await;
     // The copy carries a trigger that stops the restore's own transaction;
     // the current database has none.
@@ -596,7 +636,10 @@ async fn a_second_restore_of_the_same_copy_goes_above_the_first() {
     );
     assert_eq!(second.current, Current::Read);
     assert_ne!(first.epoch, second.epoch);
-    assert!(second.revision > first.revision);
+    assert_eq!(
+        second.revision, first.revision,
+        "each restore goes back to the copy's next revision"
+    );
     let pool = reopen(&paths).await;
     // 3500 (the copy) -> 7500 -> 11500: the second restore sees the first.
     assert_eq!(
@@ -692,9 +735,13 @@ async fn a_copy_of_an_older_schema_is_migrated_forward_before_the_counters_are_r
         versions.contains(&11) && versions.contains(&12),
         "{versions:?}"
     );
+    // No current database: 100 000 above the copy's 3500 and 40, rounded up.
     assert_eq!(
         counters(&pool).await,
-        [(PREFIX.to_owned(), 0, 7500), (PREFIX.to_owned(), 1, 440)]
+        [
+            (PREFIX.to_owned(), 0, 110_000),
+            (PREFIX.to_owned(), 1, 110_000)
+        ]
     );
     assert_eq!(
         shift_numbers(&pool).await,
@@ -865,4 +912,703 @@ async fn the_commits_an_interrupted_restore_left_in_a_wal_are_not_replayed_into_
     .unwrap();
     assert_eq!(junk, 0);
     assert_eq!(counters(&pool).await.len(), 2);
+}
+
+/// The files of `admin`'s running host copied as a host that lost its power
+/// leaves them (the latest commits are in the WAL only), with its
+/// `host.json`, in a new folder.
+fn crashed_folder(admin: &Admin) -> tempfile::TempDir {
+    let crashed = tempfile::tempdir().unwrap();
+    for suffix in ["", "-wal", "-shm"] {
+        let name = format!("host.db{suffix}");
+        std::fs::copy(admin.app.dir().join(&name), crashed.path().join(&name)).unwrap();
+    }
+    std::fs::write(
+        crashed.path().join("host.json"),
+        json!({ "hostId": admin.app.state.host_id, "port": 45710 }).to_string(),
+    )
+    .unwrap();
+    crashed
+}
+
+/// `markiro_host::start` on `paths`: it must refuse while a restore is
+/// unfinished (it refuses before it binds anything).
+async fn start_refused(paths: &HostPaths) -> String {
+    let started = markiro_host::start(
+        paths,
+        StartOptions {
+            port_override: None,
+            bind: Some("127.0.0.1:0".parse().unwrap()),
+        },
+    )
+    .await;
+    match started {
+        Ok(host) => {
+            host.stop().await.unwrap();
+            panic!("the host started beside an unfinished restore");
+        }
+        Err(error) => error.to_string(),
+    }
+}
+
+fn assert_waits_for_the_restore(error: &str) {
+    assert!(
+        error.contains("interrupted") && error.contains("markiro-host restore"),
+        "{error}"
+    );
+}
+
+#[tokio::test]
+async fn a_restore_cut_off_after_the_wal_left_is_rolled_back_by_the_next_and_the_host_waits() {
+    let admin = admin().await;
+    let (copy_path, _) = copy(&admin.app).await;
+    // 1500..3499, in the WAL only.
+    ask_block(&admin, "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    let crashed = crashed_folder(&admin);
+    let paths = HostPaths::new(crashed.path());
+
+    restore_crashing(&paths, &copy_path, false, at(NOW), CrashPoint::WalAside)
+        .await
+        .unwrap();
+
+    // The power went: the database is there without its WAL.
+    assert!(paths.restore_intent_file().exists());
+    assert!(paths.database_file().exists());
+    assert!(!crashed.path().join("host.db-wal").exists());
+    assert_waits_for_the_restore(&start_refused(&paths).await);
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(report.interrupted, Some(Interrupted::RolledBack));
+    assert_eq!(report.current, Current::Read);
+    assert!(!paths.restore_intent_file().exists());
+    let pool = reopen(&paths).await;
+    // The WAL's block counts: 3500, two blocks of 2000 above it.
+    assert_eq!(
+        counters(&pool).await,
+        [(PREFIX.to_owned(), 0, 7500), (PREFIX.to_owned(), 1, 440)]
+    );
+    let saved = report.saved_as.clone().unwrap();
+    assert!(saved.join("host.db").exists() && saved.join("host.db-wal").exists());
+    assert_eq!(
+        restore_dirs(&paths.data_dir),
+        ["restore-20261009T150000Z"],
+        "the cut-off restore's folder was emptied and removed"
+    );
+    assert!(summary(&report).contains(
+        &"an interrupted restore was found: the previous database was put back first".to_owned()
+    ));
+}
+
+#[tokio::test]
+async fn a_restore_cut_off_after_the_database_left_is_rolled_back_by_the_next() {
+    let admin = admin().await;
+    let (copy_path, _) = copy(&admin.app).await;
+    let lost = ask_block(&admin, "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    assert_eq!(lost["toSerial"], json!(3499));
+    let paths = stop(&admin.app).await;
+
+    restore_crashing(
+        &paths,
+        &copy_path,
+        false,
+        at(NOW),
+        CrashPoint::DatabaseAside,
+    )
+    .await
+    .unwrap();
+
+    assert!(!paths.database_file().exists());
+    assert_waits_for_the_restore(&start_refused(&paths).await);
+    assert!(
+        !paths.database_file().exists(),
+        "start made no empty database in its place"
+    );
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(report.interrupted, Some(Interrupted::RolledBack));
+    assert_eq!(
+        report.current,
+        Current::Read,
+        "the database set aside counts"
+    );
+    let pool = reopen(&paths).await;
+    assert_eq!(
+        counters(&pool).await,
+        [(PREFIX.to_owned(), 0, 7500), (PREFIX.to_owned(), 1, 440)]
+    );
+    assert!(!paths.restore_intent_file().exists());
+}
+
+#[tokio::test]
+async fn a_restore_cut_off_after_the_new_database_took_its_place_is_finished_by_the_next() {
+    let admin = admin().await;
+    let (copy_path, _) = copy(&admin.app).await;
+    ask_block(&admin, "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    let paths = stop(&admin.app).await;
+
+    restore_crashing(
+        &paths,
+        &copy_path,
+        false,
+        at(NOW),
+        CrashPoint::NewDatabaseInPlace,
+    )
+    .await
+    .unwrap();
+
+    assert!(paths.restore_intent_file().exists());
+    assert!(!paths.data_dir.join("host.db.partial").exists());
+    assert_waits_for_the_restore(&start_refused(&paths).await);
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(report.interrupted, Some(Interrupted::Finished));
+    assert_eq!(report.current, Current::Read);
+    assert!(!paths.restore_intent_file().exists());
+    let pool = reopen(&paths).await;
+    // 3500 (live) -> 7500 (the cut-off restore) -> 11500.
+    assert_eq!(
+        counters(&pool).await,
+        [(PREFIX.to_owned(), 0, 11500), (PREFIX.to_owned(), 1, 840)]
+    );
+    assert_eq!(
+        restore_dirs(&paths.data_dir),
+        ["restore-20261009T150000Z", "restore-20261009T150000Z-2"]
+    );
+    assert!(
+        summary(&report).contains(&"an interrupted restore was found: it had finished".to_owned())
+    );
+}
+
+#[tokio::test]
+async fn a_marker_beside_neither_database_is_refused_and_left_for_support() {
+    let admin = admin().await;
+    let (copy_path, _) = copy(&admin.app).await;
+    let paths = stop(&admin.app).await;
+    restore_crashing(
+        &paths,
+        &copy_path,
+        false,
+        at(NOW),
+        CrashPoint::DatabaseAside,
+    )
+    .await
+    .unwrap();
+    std::fs::remove_file(paths.data_dir.join("host.db.partial")).unwrap();
+    let before = names(&paths.data_dir);
+
+    let error = restore(&paths, &copy_path, false, at(NOW))
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("restore-20261009T150000Z"), "{error}");
+    assert!(error.contains("call support"), "{error}");
+    assert_eq!(names(&paths.data_dir), before);
+    assert!(paths
+        .data_dir
+        .join("restore-20261009T150000Z")
+        .join("host.db")
+        .exists());
+}
+
+#[tokio::test]
+async fn a_database_left_aside_counts_even_without_a_marker() {
+    let admin = admin().await;
+    let (copy_path, _) = copy(&admin.app).await;
+    // 1500..3499, in the WAL only.
+    ask_block(&admin, "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    let crashed = crashed_folder(&admin);
+    // As an older build's cut-off restore left it: the crashed database and
+    // its WAL in an aside folder, and in its place a database that knows
+    // less (the copy itself).
+    let aside = crashed.path().join("restore-20261001T000000Z");
+    std::fs::create_dir(&aside).unwrap();
+    for suffix in ["", "-wal", "-shm"] {
+        let name = format!("host.db{suffix}");
+        std::fs::rename(crashed.path().join(&name), aside.join(&name)).unwrap();
+    }
+    std::fs::copy(&copy_path, crashed.path().join("host.db")).unwrap();
+    let paths = HostPaths::new(crashed.path());
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(report.current, Current::Read);
+    // The aside database's WAL issued to 3499: two blocks above 3500.
+    assert_eq!(
+        counters(&reopen(&paths).await).await,
+        [(PREFIX.to_owned(), 0, 7500), (PREFIX.to_owned(), 1, 440)]
+    );
+    assert_eq!(names(&aside), ["host.db", "host.db-shm", "host.db-wal"]);
+}
+
+/// A badge verifier with the site's salt (the host checks its shape only).
+async fn badge_phc(admin: &Admin) -> String {
+    use base64::Engine;
+    let (status, body) = admin.call("GET", "/v1/office/badge-salt", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    format!(
+        "pbkdf2$sha256$100000${}${}",
+        body["badgeSalt"].as_str().unwrap(),
+        base64::engine::general_purpose::STANDARD.encode([7u8; 32])
+    )
+}
+
+#[tokio::test]
+async fn revocations_made_after_the_copy_stay_revoked_and_no_office_session_survives() {
+    let admin = admin().await;
+    let (station, _) = pair_device(&admin.app, "station").await;
+    let (office, _) = pair_device(&admin.app, "office").await;
+    let (turned_off, turned_off_rev) = add_operator(&admin, "0042").await;
+    let (kept, _) = add_operator(&admin, "0043").await;
+    let (status, badge) = admin
+        .call(
+            "POST",
+            &format!("/v1/office/operators/{kept}/badges"),
+            Some(json!({ "badgePhc": badge_phc(&admin).await })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{badge}");
+    let badge = badge["id"].as_str().unwrap().to_owned();
+    let tech = seed_office_user(&admin.app, "tech", "technologist", "technologist password").await;
+    login(&admin.app, &admin.key, "tech", "technologist password").await;
+    // Revoked and turned off before the copy already: the copy's own
+    // revocation stays as it was, and is not counted as carried.
+    let (old_device, _) = pair_device(&admin.app, "office").await;
+    let (status, body) = admin
+        .call(
+            "POST",
+            &format!("/v1/office/devices/{old_device}/revoke"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (old_operator, old_operator_rev) = add_operator(&admin, "0045").await;
+    let (status, body) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/operators/{old_operator}"),
+            Some(json!({ "active": false, "expectedRev": old_operator_rev })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (old_revoked_at, old_operator_rev): (String, i64) = sqlx::query_as(
+        "SELECT (SELECT revoked_at FROM devices WHERE id = ?1), (SELECT rev FROM operators WHERE id = ?2)",
+    )
+    .bind(&old_device)
+    .bind(&old_operator)
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    // The revocations after the copy happen later: other times.
+    admin.app.clock.advance(time::Duration::minutes(5));
+    let copy_rev: i64 = sqlx::query_scalar("SELECT rev FROM host_revision")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (copy_path, _) = copy(&admin.app).await;
+    // After the copy: a device revoked, an operator turned off, a badge
+    // revoked, an office user turned off, and an operator the copy never had.
+    let (status, body) = admin
+        .call(
+            "POST",
+            &format!("/v1/office/devices/{station}/revoke"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, body) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/operators/{turned_off}"),
+            Some(json!({ "active": false, "expectedRev": turned_off_rev })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let (status, _) = admin
+        .call(
+            "DELETE",
+            &format!("/v1/office/operators/{kept}/badges/{badge}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    sqlx::query("UPDATE office_users SET active = 0 WHERE id = ?")
+        .bind(&tech)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (newcomer, _) = add_operator(&admin, "0044").await;
+    let (device_revoked_at, badge_revoked_at): (String, String) = sqlx::query_as(
+        "SELECT (SELECT revoked_at FROM devices WHERE id = ?1), \
+         (SELECT revoked_at FROM operator_badges WHERE id = ?2)",
+    )
+    .bind(&station)
+    .bind(&badge)
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let paths = stop(&admin.app).await;
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(
+        report.carried,
+        Some(Carried {
+            devices: 1,
+            operators: 1,
+            badges: 1,
+            office_users: 1,
+        })
+    );
+    assert_eq!(
+        report.sessions_ended, 2,
+        "the administrator's and the technologist's"
+    );
+    let pool = reopen(&paths).await;
+    let revoked: Vec<(String, Option<String>)> =
+        sqlx::query_as("SELECT id, revoked_at FROM devices WHERE id IN (?, ?) ORDER BY kind DESC")
+            .bind(&station)
+            .bind(&office)
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        revoked,
+        [
+            (station.clone(), Some(device_revoked_at)),
+            (office.clone(), None)
+        ]
+    );
+    let old: (Option<String>, i64) = sqlx::query_as(
+        "SELECT (SELECT revoked_at FROM devices WHERE id = ?1), (SELECT rev FROM operators WHERE id = ?2)",
+    )
+    .bind(&old_device)
+    .bind(&old_operator)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(old, (Some(old_revoked_at), old_operator_rev));
+    let operators: Vec<(String, bool, i64)> = sqlx::query_as(
+        "SELECT id, active, rev FROM operators WHERE login <> '0045' ORDER BY login",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        operators.len(),
+        2,
+        "the operator the copy never had stays out"
+    );
+    assert!(!operators.iter().any(|(id, _, _)| *id == newcomer));
+    assert_eq!(operators[0], (turned_off.clone(), false, copy_rev + 1));
+    assert!(operators[1].1, "an operator nobody turned off stays on");
+    let badge_now: (Option<String>, i64) =
+        sqlx::query_as("SELECT revoked_at, rev FROM operator_badges WHERE id = ?")
+            .bind(&badge)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(badge_now.0.as_deref(), Some(badge_revoked_at.as_str()));
+    let rev = report.revision;
+    assert_eq!(badge_now.1, rev);
+    assert_eq!(operators[0].2, rev);
+    let mut tombstones: Vec<(String, String, i64)> =
+        sqlx::query_as("SELECT entity, id, rev FROM tombstones")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    tombstones.sort();
+    let mut expected = vec![
+        ("operator_badges".to_owned(), badge.clone(), rev),
+        ("operators".to_owned(), turned_off.clone(), rev),
+        (
+            "operators".to_owned(),
+            old_operator.clone(),
+            old_operator_rev,
+        ),
+    ];
+    expected.sort();
+    assert_eq!(tombstones, expected);
+    let users: Vec<(String, bool)> =
+        sqlx::query_as("SELECT login, active FROM office_users ORDER BY login")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        users,
+        [("admin".to_owned(), true), ("tech".to_owned(), false)]
+    );
+    let sessions: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM office_sessions")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(sessions, 0);
+    assert!(summary(&report).contains(
+        &"revocations carried over from the previous database: 1 devices, 1 operators, 1 badges, 1 office users".to_owned()
+    ));
+    let details: String =
+        sqlx::query_scalar("SELECT details FROM audit_log WHERE action = 'host.restore'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let details: Value = serde_json::from_str(&details).unwrap();
+    assert_eq!(
+        (details["carried"].clone(), details["sessionsEnded"].clone()),
+        (
+            json!({ "devices": 1, "operators": 1, "badges": 1, "officeUsers": 1 }),
+            json!(2)
+        )
+    );
+}
+
+#[tokio::test]
+async fn a_copy_with_its_wal_beside_it_is_restored_with_the_wal_folded_in() {
+    let admin = admin().await;
+    // 1500..3499, in the WAL only.
+    ask_block(&admin, "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    // The way back after a bad restore: `restore-<time>/host.db` of a host
+    // that had crashed, its WAL beside it.
+    let crashed = crashed_folder(&admin);
+    let aside = crashed.path().join("restore-20261001T000000Z");
+    std::fs::create_dir(&aside).unwrap();
+    for suffix in ["", "-wal", "-shm"] {
+        let name = format!("host.db{suffix}");
+        std::fs::rename(crashed.path().join(&name), aside.join(&name)).unwrap();
+    }
+    let source = aside.join("host.db");
+    let wal = aside.join("host.db-wal");
+    // A manifest describes the file alone: with a WAL beside, it no longer
+    // describes the copy.
+    let (size_bytes, sha256) = sha256_file(&source).unwrap();
+    let manifest = Manifest {
+        format: 1,
+        file: "host.db".to_owned(),
+        created_at: NOW.to_owned(),
+        trigger: BackupTrigger::Scheduled,
+        host_id: admin.app.state.host_id.clone(),
+        schema_version: latest_migration(),
+        size_bytes,
+        sha256,
+    };
+    std::fs::write(
+        manifest_path(&source),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+    let error = verify_copy(&source, false).await.unwrap_err().to_string();
+    assert!(error.contains("WAL beside it"), "{error}");
+    std::fs::remove_file(manifest_path(&source)).unwrap();
+    let before = (
+        names(&aside),
+        std::fs::read(&source).unwrap(),
+        std::fs::read(&wal).unwrap(),
+    );
+    assert!(!before.2.is_empty());
+
+    let verified = verify_copy(&source, true).await.unwrap();
+    assert!(verified.wal_folded);
+    assert_eq!(verified.schema_version, latest_migration());
+    let fresh = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(fresh.path());
+    let report = restore(&paths, &source, true, at(NOW)).await.unwrap();
+
+    assert!(report.copy.wal_folded);
+    let blocks: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM sscc_blocks")
+        .fetch_one(&reopen(&paths).await)
+        .await
+        .unwrap();
+    assert_eq!(blocks, 1, "the block that was in the WAL only is there");
+    assert!(summary(&report)[0].ends_with(", its WAL folded in)"));
+    assert_eq!(
+        (
+            names(&aside),
+            std::fs::read(&source).unwrap(),
+            std::fs::read(&wal).unwrap()
+        ),
+        before,
+        "the copy and its WAL are untouched"
+    );
+}
+
+#[tokio::test]
+async fn a_copy_damaged_inside_is_refused_even_without_its_manifest() {
+    let admin = admin().await;
+    let (copy_path, _) = copy(&admin.app).await;
+    let paths = stop(&admin.app).await;
+    let (page_size, root): (i64, i64) = {
+        let mut conn = ConnectOptions::connect(
+            &sqlx::sqlite::SqliteConnectOptions::new()
+                .filename(&copy_path)
+                .read_only(true)
+                .immutable(true),
+        )
+        .await
+        .unwrap();
+        let found = sqlx::query_as(
+            "SELECT (SELECT page_size FROM pragma_page_size), \
+             (SELECT rootpage FROM sqlite_master WHERE name = 'audit_log_at')",
+        )
+        .fetch_one(&mut conn)
+        .await
+        .unwrap();
+        conn.close().await.unwrap();
+        found
+    };
+    // The last byte of the index's page: the row id of one of its entries.
+    // The file still opens and reads; only the index no longer matches.
+    let mut bytes = std::fs::read(&copy_path).unwrap();
+    let last = usize::try_from(root * page_size).unwrap() - 1;
+    bytes[last] ^= 0x01;
+    std::fs::write(&copy_path, &bytes).unwrap();
+
+    let error = verify_copy(&copy_path, true).await.unwrap_err().to_string();
+    assert!(error.contains("the copy is damaged"), "{error}");
+    let error = refused(&paths, &copy_path, true).await;
+    assert!(error.contains("the copy is damaged"), "{error}");
+}
+
+#[tokio::test]
+async fn a_current_database_another_program_holds_is_waited_for_then_refused() {
+    let admin = admin().await;
+    let (copy_path, _) = copy(&admin.app).await;
+    let paths = stop(&admin.app).await;
+    let mut holder = markiro_host::db::options(&paths.database_file())
+        .connect()
+        .await
+        .unwrap();
+    for statement in [
+        "PRAGMA locking_mode = EXCLUSIVE",
+        "UPDATE host_revision SET rev = rev",
+    ] {
+        sqlx::query(statement).execute(&mut holder).await.unwrap();
+    }
+
+    let error = refused(&paths, &copy_path, false).await;
+
+    assert!(error.contains("another program"), "{error}");
+    assert!(error.contains("Nothing was changed"), "{error}");
+    holder.close().await.unwrap();
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+    assert_eq!(report.current, Current::Read);
+}
+
+#[tokio::test]
+async fn a_failure_in_a_new_folder_says_what_it_created_and_makes_no_identity() {
+    let admin = admin().await;
+    sqlx::query(
+        "CREATE TRIGGER no_epoch BEFORE UPDATE OF restore_epoch ON site \
+         BEGIN SELECT RAISE(ABORT, 'no epoch here'); END",
+    )
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let (copy_path, _) = copy(&admin.app).await;
+    let fresh = tempfile::tempdir().unwrap();
+    let typo = fresh.path().join("Hots");
+    let paths = HostPaths::new(&typo);
+
+    let error = restore(&paths, &copy_path, false, at(NOW))
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("no epoch here"), "{error}");
+    assert!(!error.contains("Nothing was changed"), "{error}");
+    assert!(
+        error.contains(&format!(
+            "this run only created the data folder {}",
+            typo.display()
+        )),
+        "{error}"
+    );
+    assert!(!paths.config_file().exists(), "no identity for no restore");
+    assert!(!paths.database_file().exists());
+}
+
+#[tokio::test]
+async fn without_a_manifest_the_months_run_from_the_copys_own_newest_time() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    plan_shift(&admin, shift_body(&setup)).await;
+    let (copy_path, _) = copy(&admin.app).await;
+    let fresh = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(fresh.path());
+
+    restore(&paths, &copy_path, true, at("2026-12-15T10:00:00Z"))
+        .await
+        .unwrap();
+
+    // The copy's newest audit row is of 2026-09-21: every month from the day
+    // before it to the restore's day after.
+    assert_eq!(
+        shift_numbers(&reopen(&paths).await).await,
+        [
+            ("DEC26".to_owned(), 10),
+            ("NOV26".to_owned(), 10),
+            ("OCT26".to_owned(), 11),
+            ("SEP26".to_owned(), 10),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn the_new_database_of_an_interrupted_restore_is_no_copy() {
+    let admin = admin().await;
+    let (copy_path, _) = copy(&admin.app).await;
+    let paths = stop(&admin.app).await;
+    let staged = paths.data_dir.join("host.db.partial");
+    std::fs::copy(&copy_path, &staged).unwrap();
+
+    let error = refused(&paths, &staged, true).await;
+
+    assert!(error.contains("own database"), "{error}");
+    assert!(staged.exists());
+}
+
+#[tokio::test]
+async fn a_rollback_stands_when_the_restore_after_it_fails() {
+    let admin = admin().await;
+    let (good_copy, _) = copy(&admin.app).await;
+    sqlx::query(
+        "CREATE TRIGGER no_epoch BEFORE UPDATE OF restore_epoch ON site \
+         BEGIN SELECT RAISE(ABORT, 'no epoch here'); END",
+    )
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    admin.app.clock.advance(time::Duration::seconds(1));
+    let (bad_copy, _) = copy(&admin.app).await;
+    sqlx::query("DROP TRIGGER no_epoch")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let paths = stop(&admin.app).await;
+    let current = std::fs::read(paths.database_file()).unwrap();
+    restore_crashing(
+        &paths,
+        &good_copy,
+        false,
+        at(NOW),
+        CrashPoint::DatabaseAside,
+    )
+    .await
+    .unwrap();
+
+    let error = restore(&paths, &bad_copy, false, at(NOW))
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("no epoch here"), "{error}");
+    assert!(error.contains("was rolled back"), "{error}");
+    assert!(!error.contains("Nothing was changed"), "{error}");
+    assert_eq!(std::fs::read(paths.database_file()).unwrap(), current);
+    assert!(
+        !paths.restore_intent_file().exists(),
+        "the host may start on the database put back"
+    );
+    assert!(restore_dirs(&paths.data_dir).is_empty());
 }

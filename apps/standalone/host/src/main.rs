@@ -202,10 +202,13 @@ fn verify_copy(copy: PathBuf, without_manifest: bool) -> Result<(), BoxError> {
     let result = runtime.block_on(markiro_host::restore::verify_copy(&copy, without_manifest));
     markiro_host::shutdown_runtime(runtime);
     let verified = result?;
-    let made = verified.manifest.as_ref().map_or_else(
+    let mut made = verified.manifest.as_ref().map_or_else(
         || "the manifest was not checked".to_owned(),
         |manifest| format!("made {}", manifest.created_at),
     );
+    if verified.wal_folded {
+        made.push_str(", the WAL beside it folded in");
+    }
     println!(
         "{}: ok ({} bytes, sha256 {}, migration {}, {made})",
         verified.path.display(),
