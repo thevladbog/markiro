@@ -508,3 +508,10 @@
 .shift-card__hint {
   color: var(--fg-2);
 }
+
+/* A new shift: the template choice and the production date's two steps. */
+.new-shift__choice,
+.new-shift__date {
+  display: grid;
+  gap: 8px;
+}

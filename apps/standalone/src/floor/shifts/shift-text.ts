@@ -12,3 +12,17 @@ const QUANTITY = new Intl.NumberFormat("ru-RU");
 export function formatQuantity(quantity: number): string {
   return QUANTITY.format(quantity);
 }
+
+/**
+ * The civil date `days` after `date` (before it, for a negative count), by
+ * the calendar alone, never by a clock or a zone. `Date.UTC` would read the
+ * years 0–99 as 1900–1999; `setUTCFullYear` does not.
+ */
+export function addCivilDays(date: string, days: number): string {
+  const [year, month, day] = date.split("-").map(Number);
+  if (year === undefined || month === undefined || day === undefined) return date;
+  const moment = new Date(0);
+  moment.setUTCFullYear(year, month - 1, day + days);
+  const pad = (value: number, width: number) => String(value).padStart(width, "0");
+  return `${pad(moment.getUTCFullYear(), 4)}-${pad(moment.getUTCMonth() + 1, 2)}-${pad(moment.getUTCDate(), 2)}`;
+}
