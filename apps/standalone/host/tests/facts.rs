@@ -94,6 +94,40 @@ async fn items(admin: &Admin, box_id: &str) -> Vec<Value> {
         .collect()
 }
 
+/// The registry's `(code hash, owner's record)` pairs, sorted.
+async fn owned(admin: &Admin) -> Vec<(String, String)> {
+    sorted(
+        owners(admin)
+            .await
+            .iter()
+            .map(|row| {
+                (
+                    row[0].as_str().unwrap().to_owned(),
+                    row[1].as_str().unwrap().to_owned(),
+                )
+            })
+            .collect(),
+    )
+}
+
+fn sorted(mut pairs: Vec<(String, String)>) -> Vec<(String, String)> {
+    pairs.sort();
+    pairs
+}
+
+/// What `GET /v1/device/codes/{hash}` says about code `n`.
+async fn code_status(admin: &Admin, key: &str, n: u32) -> Value {
+    admin
+        .app
+        .send(support::app::empty(with_device(
+            request("GET", &format!("/v1/device/codes/{}", code_hash(n))),
+            key,
+        )))
+        .await
+        .1["status"]
+        .clone()
+}
+
 /// The conflicts: `(code hash, winner's record, loser's record, detected)`.
 async fn conflicts(admin: &Admin) -> Vec<Value> {
     let rows: Vec<(String, String, String, String)> = sqlx::query_as(
@@ -1839,6 +1873,16 @@ async fn an_undo_or_a_clear_takes_codes_out_of_an_open_box_and_frees_them() {
     };
     assert_eq!(check(code_hash(3)).await, json!("free"));
     assert_eq!(check(code_hash(4)).await, json!("taken"));
+    // The undo freed code 3 only: codes 1 and 2 keep their scans, and
+    // code 4 its colleague's.
+    assert_eq!(
+        owned(&admin).await,
+        sorted(vec![
+            (code_hash(1), record_id(1)),
+            (code_hash(2), record_id(2)),
+            (code_hash(4), record_id(90)),
+        ])
+    );
     assert_eq!(
         items(&admin, &box_id(1)).await,
         vec![
@@ -5157,4 +5201,251 @@ async fn an_exception_is_written_with_the_batch_or_not_at_all() {
         vec![accepted(&record_id(10)), accepted(&record_id(11))]
     );
     assert_eq!(owners(&admin).await, Vec::<Value>::new());
+}
+
+/// An undo of code `n` aimed at the scan of `target`, as the station would
+/// write it again under a new id.
+fn undo_of(record: u32, shift: &str, box_n: u32, n: u32, target: u32, at: u32) -> Value {
+    let mut data = box_exception("undo", &box_id(box_n), &instant(at, 0));
+    data["codeHash"] = json!(code_hash(n));
+    data["targetScannedAt"] = json!(instant(target, 0));
+    fact(&record_id(record), "box_exception", shift, data)
+}
+
+fn clear_of(record: u32, shift: &str, box_n: u32, at: u32) -> Value {
+    fact(
+        &record_id(record),
+        "box_exception",
+        shift,
+        box_exception("clear", &box_id(box_n), &instant(at, 0)),
+    )
+}
+
+fn scan_of(record: u32, shift: &str, n: u32, box_n: u32, at: u32) -> Value {
+    fact(
+        &record_id(record),
+        "scan",
+        shift,
+        ok_scan(n, &box_id(box_n), &instant(at, 0)),
+    )
+}
+
+#[tokio::test]
+async fn a_late_undo_never_takes_out_a_code_scanned_again_after_it() {
+    let (admin, floor) = floor().await;
+    let shift = floor.shift.as_str();
+    let key = &floor.key;
+    // Code 1 is scanned at 1 and 2 is scanned at 2; a clear at 3 frees
+    // both; code 1 is scanned again at 5, code 2 not.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            key,
+            &[
+                scan_of(1, shift, 1, 1, 1),
+                scan_of(2, shift, 2, 1, 2),
+                clear_of(3, shift, 1, 3),
+                scan_of(4, shift, 1, 1, 5),
+            ]
+        )
+        .await,
+        (1..=4).map(|n| accepted(&record_id(n))).collect::<Vec<_>>()
+    );
+    // The undo of the first scan of code 1, sent again under a new id long
+    // after the re-scan: accepted, kept, and it takes nothing out.
+    assert_eq!(
+        receipts(&admin.app, key, &[undo_of(10, shift, 1, 1, 1, 7)]).await,
+        vec![accepted(&record_id(10))]
+    );
+    assert_eq!(
+        items(&admin, &box_id(1)).await,
+        vec![
+            json!([
+                record_id(1),
+                code_hash(1),
+                instant(1, 0),
+                instant(3, 0),
+                null
+            ]),
+            json!([
+                record_id(2),
+                code_hash(2),
+                instant(2, 0),
+                instant(3, 0),
+                null
+            ]),
+            json!([record_id(4), code_hash(1), instant(5, 0), null, null]),
+        ]
+    );
+    // The re-scan still owns the code: it is taken, and its scan is the owner.
+    assert_eq!(owned(&admin).await, vec![(code_hash(1), record_id(4))]);
+    assert_eq!(code_status(&admin, key, 1).await, json!("taken"));
+    assert_eq!(code_status(&admin, key, 2).await, json!("free"));
+    // An undo whose target names no live item of the code takes nothing
+    // either, and the exception is kept all the same.
+    assert_eq!(
+        receipts(&admin.app, key, &[undo_of(11, shift, 1, 1, 4, 8)]).await,
+        vec![accepted(&record_id(11))]
+    );
+    assert_eq!(owned(&admin).await, vec![(code_hash(1), record_id(4))]);
+    assert_eq!(items(&admin, &box_id(1)).await.len(), 3);
+    assert_eq!(exception_rows(&admin).await.len(), 3);
+    // The undo that names the live scan's own instant takes it out.
+    assert_eq!(
+        receipts(&admin.app, key, &[undo_of(12, shift, 1, 1, 5, 9)]).await,
+        vec![accepted(&record_id(12))]
+    );
+    assert_eq!(owned(&admin).await, Vec::<(String, String)>::new());
+    assert_eq!(code_status(&admin, key, 1).await, json!("free"));
+    // The other arrival order, in one batch: the stale undo comes first
+    // and the re-scan after it.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            key,
+            &[
+                scan_of(20, shift, 3, 2, 11),
+                clear_of(21, shift, 2, 13),
+                undo_of(22, shift, 2, 3, 11, 14),
+                scan_of(23, shift, 3, 2, 15),
+            ]
+        )
+        .await,
+        (20..=23)
+            .map(|n| accepted(&record_id(n)))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        items(&admin, &box_id(2)).await,
+        vec![
+            json!([
+                record_id(20),
+                code_hash(3),
+                instant(11, 0),
+                instant(13, 0),
+                null
+            ]),
+            json!([record_id(23), code_hash(3), instant(15, 0), null, null]),
+        ]
+    );
+    assert_eq!(owned(&admin).await, vec![(code_hash(3), record_id(23))]);
+    assert_eq!(code_status(&admin, key, 3).await, json!("taken"));
+    // Two codes scanned at one instant: an undo names its own code, not the
+    // instant alone.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            key,
+            &[
+                scan_of(30, shift, 5, 3, 20),
+                scan_of(31, shift, 6, 3, 20),
+                undo_of(32, shift, 3, 5, 20, 21),
+            ]
+        )
+        .await,
+        (30..=32)
+            .map(|n| accepted(&record_id(n)))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        items(&admin, &box_id(3)).await,
+        vec![
+            json!([
+                record_id(30),
+                code_hash(5),
+                instant(20, 0),
+                instant(21, 0),
+                null
+            ]),
+            json!([record_id(31), code_hash(6), instant(20, 0), null, null]),
+        ]
+    );
+    assert_eq!(code_status(&admin, key, 6).await, json!("taken"));
+}
+
+#[tokio::test]
+async fn a_late_clear_never_takes_out_a_code_scanned_after_it() {
+    let (admin, floor) = floor().await;
+    let shift = floor.shift.as_str();
+    let key = &floor.key;
+    // Code 1 at 1 is cleared at 3; code 2 is scanned at 6; the clear is sent
+    // again (a new id) with its own instant 4: it takes nothing.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            key,
+            &[
+                scan_of(1, shift, 1, 1, 1),
+                clear_of(2, shift, 1, 3),
+                scan_of(3, shift, 2, 1, 6),
+                clear_of(4, shift, 1, 4),
+            ]
+        )
+        .await,
+        (1..=4).map(|n| accepted(&record_id(n))).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        items(&admin, &box_id(1)).await,
+        vec![
+            json!([
+                record_id(1),
+                code_hash(1),
+                instant(1, 0),
+                instant(3, 0),
+                null
+            ]),
+            json!([record_id(3), code_hash(2), instant(6, 0), null, null]),
+        ]
+    );
+    assert_eq!(owned(&admin).await, vec![(code_hash(2), record_id(3))]);
+    assert_eq!(code_status(&admin, key, 2).await, json!("taken"));
+    // The other arrival order, in one batch: the late clear first, then the
+    // scan it must not touch (and one scanned before it, which it takes).
+    assert_eq!(
+        receipts(
+            &admin.app,
+            key,
+            &[
+                scan_of(10, shift, 3, 1, 8),
+                clear_of(11, shift, 1, 9),
+                scan_of(12, shift, 4, 1, 12),
+                clear_of(13, shift, 1, 10),
+            ]
+        )
+        .await,
+        (10..=13)
+            .map(|n| accepted(&record_id(n)))
+            .collect::<Vec<_>>()
+    );
+    // The first of them cleared 2 and 3 (scanned at 6 and 8 <= 9); the
+    // second one, instant 10, left code 4 (12) alone.
+    assert_eq!(
+        items(&admin, &box_id(1)).await[1..],
+        [
+            json!([
+                record_id(3),
+                code_hash(2),
+                instant(6, 0),
+                instant(9, 0),
+                null
+            ]),
+            json!([
+                record_id(10),
+                code_hash(3),
+                instant(8, 0),
+                instant(9, 0),
+                null
+            ]),
+            json!([record_id(12), code_hash(4), instant(12, 0), null, null]),
+        ]
+    );
+    assert_eq!(owned(&admin).await, vec![(code_hash(4), record_id(12))]);
+    // A clear exactly at an item's instant takes it out (the cutoff is
+    // inclusive); one after takes the rest.
+    assert_eq!(
+        receipts(&admin.app, key, &[clear_of(14, shift, 1, 12)]).await,
+        vec![accepted(&record_id(14))]
+    );
+    assert_eq!(owned(&admin).await, Vec::<(String, String)>::new());
+    assert_eq!(code_status(&admin, key, 4).await, json!("free"));
 }

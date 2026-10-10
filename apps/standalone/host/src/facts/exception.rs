@@ -75,20 +75,37 @@ pub async fn apply(
     if !fits {
         return Err(Reject::new(receipt_codes::BOX_STATE).into());
     }
-    // The live items the exception takes out: the code an undo names (none
-    // when its scan lost the code), every item of a clear or a disassembly.
+    // The live items the exception takes out, as the cloud takes them: an
+    // undo the item of its code added at the very instant of the scan it
+    // names (none when that scan lost the code, or the code was scanned
+    // again since), a clear every item added up to its own instant (never
+    // one scanned after it), a disassembly every item (a closed box takes
+    // no scans). So an exception sent again late never takes out a code
+    // scanned after it.
+    let live = "SELECT scan_id FROM box_items WHERE box_id = ? \
+                AND removed_at IS NULL AND displaced_at IS NULL";
     let taken_out: Vec<String> = match exception.exception {
         ExceptionKind::Reprint => Vec::new(),
-        _ => sqlx::query_scalar(
-            "SELECT scan_id FROM box_items WHERE box_id = ? \
-             AND removed_at IS NULL AND displaced_at IS NULL AND (? IS NULL OR code_hash = ?)",
-        )
-        .bind(&exception.box_id)
-        .bind(&exception.code_hash)
-        .bind(&exception.code_hash)
-        .fetch_all(&mut *conn)
-        .await
-        .map_err(ApiError::internal)?,
+        ExceptionKind::Undo => {
+            sqlx::query_scalar(&format!("{live} AND code_hash = ? AND added_at = ?"))
+                .bind(&exception.box_id)
+                .bind(&exception.code_hash)
+                .bind(&exception.target_scanned_at)
+                .fetch_all(&mut *conn)
+                .await
+                .map_err(ApiError::internal)?
+        }
+        ExceptionKind::Clear => sqlx::query_scalar(&format!("{live} AND added_at <= ?"))
+            .bind(&exception.box_id)
+            .bind(&exception.occurred_at)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?,
+        ExceptionKind::Disassemble => sqlx::query_scalar(live)
+            .bind(&exception.box_id)
+            .fetch_all(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?,
     };
     for scan_id in &taken_out {
         sqlx::query("UPDATE box_items SET removed_at = ? WHERE scan_id = ?")

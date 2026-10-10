@@ -1927,11 +1927,18 @@ the fields of its kind as the cloud's (`box_exceptions_kind_payload_check`):
 words (`validate::exception_reason_text`, trimmed, 1–200 characters) only
 for `other`. `undo` and `clear` take an open box, `reprint` and
 `disassemble` a closed box not taken apart (`box_state` otherwise). The
-items an undo (the live item of its code in this box; none when that scan
-lost the code or the code sits in another box, and the exception is still
-kept; `targetScannedAt` is kept, not compared), a clear or a disassembly takes out
-get `removed_at` (the station's instant), and their codes leave the
-registry (`registry::release`), free for another scan; a disassembly sets
+items taken out get `removed_at` (the station's instant): an undo takes the
+live item of its code in this box that was added at exactly its
+`targetScannedAt` (none when that scan lost the code, the code sits in
+another box, or the code was scanned again since: the exception is still
+kept, `accepted`); a clear takes the live items added up to its own
+`occurredAt` (inclusive, canonical text comparison), never one scanned
+after it; a disassembly takes every item. So an exception sent again late
+(a new id) never takes out a code scanned after it, and the station's
+undo and clear records must carry the exact `targetScannedAt` and
+`occurredAt` of the scan and the moment they refer to. The codes of
+the items taken out leave the registry (`registry::release`, scoped to the
+item's own scan), free for another scan; a disassembly sets
 `disassembled_at` and the box keeps its SSCC, which no other box takes. A
 reprint changes no state. An item an exception took out never comes back;
 an item an earlier scan displaced is not taken out by an exception of its
