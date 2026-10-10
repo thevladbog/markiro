@@ -131,6 +131,31 @@ describe("the station's copies of its shifts", () => {
     });
   });
 
+  it("keep an entered shift the host closed after it has left the list, with its snapshot and entry time", async () => {
+    const { executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, AT, SEEN);
+    await replaceShiftCopies(
+      executor,
+      PAIRING,
+      [{ ...ACTIVE, status: "closed", closedAt: "2026-10-08T18:00:00Z" }],
+      SEEN + 1,
+    );
+    // The host lists a closed shift for a while only; then the list is empty.
+    await replaceShiftCopies(executor, PAIRING, [], SEEN + 2);
+    expect(await stored(executor, ENTERED.id)).toEqual([
+      {
+        status: "closed",
+        snapshot: JSON.stringify(ENTERED.snapshot),
+        entered_at: AT,
+        seen_at: SEEN + 1,
+      },
+    ]);
+    expect(await readStoredWork(executor, PAIRING, ENTERED.id)).toMatchObject({
+      kind: "ready",
+      shift: { copy: { status: "closed", entered: true } },
+    });
+  });
+
   it("keep the first entry's time and never take an entered shift back to planned", async () => {
     const { executor } = openLocalDb();
     await keepEnteredShift(executor, PAIRING, ENTERED, AT, SEEN);
@@ -381,6 +406,21 @@ describe("a shift's status only goes forward", () => {
     ]);
   });
 
+  it("from a stale list of two shifts, the one behind listed second: a not-yet-entered row is not taken backwards", async () => {
+    const { executor } = openLocalDb();
+    const otherActive = { ...PLANNED, status: "active" as const, openedAt: ACTIVE.openedAt };
+    await replaceShiftCopies(executor, PAIRING, [ACTIVE, otherActive], SEEN);
+    // Both stale lists name the shift that is behind second, the pair in either order.
+    await replaceShiftCopies(executor, PAIRING, [ACTIVE, PLANNED], SEEN + 1);
+    await replaceShiftCopies(executor, PAIRING, [otherActive, planned], SEEN + 2);
+    expect(await stored(executor, ACTIVE.id)).toMatchObject([{ status: "active" }]);
+    expect(await stored(executor, PLANNED.id)).toMatchObject([{ status: "active" }]);
+    expect(await readShiftCopy(executor, PAIRING, PLANNED.id)).toMatchObject({
+      status: "active",
+      openedAt: ACTIVE.openedAt,
+    });
+  });
+
   it("from a replayed create: an entered, active shift stays as the entry left it", async () => {
     const { executor } = openLocalDb();
     await keepEnteredShift(executor, PAIRING, ENTERED, AT, SEEN);
@@ -401,27 +441,44 @@ describe("a shift's status only goes forward", () => {
   });
 });
 
-describe("a snapshot, once taken", () => {
-  it("is the first one: a later answer of an entry, with other contents, does not replace it", async () => {
+describe("a snapshot", () => {
+  it("is replaced by a re-entry's answer, which may carry what the stored text lost; the entry time stays", async () => {
     const { executor } = openLocalDb();
+    // The stored text is this build's reading of the host's answer: a build
+    // that dropped a field stores a text without it.
     await keepEnteredShift(executor, PAIRING, ENTERED, AT, SEEN);
-    const other: EnteredShift = {
+    const richer: EnteredShift = {
       ...ENTERED,
       snapshot: {
         ...ENTERED.snapshot,
-        issuerPrefix: "460068299",
-        boxTemplate: { ...ENTERED.snapshot.boxTemplate, rev: 99 },
+        boxTemplate: {
+          ...ENTERED.snapshot.boxTemplate,
+          spec: { ...ENTERED.snapshot.boxTemplate.spec, futureKey: { pallets: ["Кириллица"] } },
+        },
       },
     };
-    await keepEnteredShift(executor, PAIRING, other, "2026-10-09T09:00:00.000Z", SEEN + 1);
-    expect(await stored(executor, ENTERED.id)).toMatchObject([
-      { snapshot: JSON.stringify(ENTERED.snapshot), entered_at: AT },
+    expect(JSON.stringify(richer.snapshot)).not.toBe(JSON.stringify(ENTERED.snapshot));
+    await keepEnteredShift(executor, PAIRING, richer, "2026-10-09T09:00:00.000Z", SEEN + 1);
+    expect(await stored(executor, ENTERED.id)).toEqual([
+      {
+        status: "active",
+        snapshot: JSON.stringify(richer.snapshot),
+        entered_at: AT,
+        seen_at: SEEN + 1,
+      },
     ]);
-    const work = await readStoredWork(executor, PAIRING, ENTERED.id);
-    expect(work).toMatchObject({
-      kind: "ready",
-      shift: { snapshot: { issuerPrefix: "460068200", boxTemplate: { rev: 62 } } },
-    });
+    expect(await readStoredWork(executor, PAIRING, ENTERED.id)).toMatchObject({ kind: "ready" });
+  });
+
+  it("is never touched by a list, whatever the list carries", async () => {
+    const { executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, AT, SEEN);
+    for (const listed of [[ACTIVE], [], [PLANNED], [{ ...ACTIVE, productName: "Другое" }]]) {
+      await replaceShiftCopies(executor, PAIRING, listed, SEEN + 1);
+      expect(await stored(executor, ENTERED.id)).toMatchObject([
+        { snapshot: JSON.stringify(ENTERED.snapshot), entered_at: AT },
+      ]);
+    }
   });
 
   it("is refused before it is stored when this build cannot work from it", async () => {

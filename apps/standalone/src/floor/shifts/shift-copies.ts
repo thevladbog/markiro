@@ -121,10 +121,14 @@ const UPSERT =
 
 /**
  * This pairing's shifts the host no longer lists and this station never
- * entered: planned shifts the office deleted or moved to another line, and
- * shifts another station opened. A shift this station entered stays, with its
- * snapshot, whatever the list says: its facts name it (plan 2a8 decides when
- * it goes). Parameters: host id, device id, the listed shifts.
+ * entered: planned shifts the office deleted or moved to another line, the
+ * old line's shifts after the station was moved, and shifts the office closed
+ * before this station entered them (the host lists the line's active shifts,
+ * whoever owns them, so another station's open shift stays as a busy copy). A
+ * shift this station entered stays, with its snapshot, whatever the list says,
+ * a host-closed one too, which the host stops listing after a while: its facts
+ * name it (plan 2a8 decides when it goes). Parameters: host id, device id, the
+ * listed shifts.
  */
 const DROP_UNLISTED =
   "DELETE FROM floor_shifts WHERE host_id = ? AND device_id = ? AND entered_at IS NULL " +
@@ -132,26 +136,32 @@ const DROP_UNLISTED =
 
 /**
  * What the station keeps when it enters: the host's fields, the snapshot and
- * the time of the first entry. A later entry keeps both: the snapshot is the
- * one the host froze when the shift opened, and a shift this station has
- * printed boxes of is not worked from another one. The host's fields of an
- * answer that is behind the stored status (a late answer of an entry the
- * office closed the shift meanwhile) are not taken, but the snapshot and the
- * entry are always kept. Parameters: host id, device id, seen at, the
- * snapshot, the time of the entry, the shift (a one-item array).
+ * the time of the first entry. A later entry (the owner's re-entry) takes the
+ * answer's snapshot again and keeps the first entry time. The host freezes the
+ * snapshot when the shift opens and returns that same one on every re-entry,
+ * but the stored text is this build's reading of it, which drops what the
+ * build does not know (`shiftSnapshotSchema`): a re-entry brings back a field
+ * the stored copy lost, for instance after an upgrade in the middle of a
+ * shift. The host's fields of an answer that is behind the stored status (a
+ * late answer of an entry the office closed the shift meanwhile) are not
+ * taken, but the snapshot and the entry time are. Parameters: host id, device
+ * id, seen at, the snapshot, the time of the entry, the shift (a one-item
+ * array).
  */
 const KEEP_ENTERED =
   `INSERT INTO floor_shifts (host_id, device_id, ${COLUMNS}, seen_at, snapshot, entered_at) ` +
   `SELECT ?, ?, ${VALUES}, ?, ?, ? FROM json_each(?) WHERE true ` +
   `ON CONFLICT (host_id, device_id, id) DO UPDATE SET ${KEPT_UPDATES}, ` +
   "seen_at = excluded.seen_at, " +
-  "snapshot = coalesce(floor_shifts.snapshot, excluded.snapshot), " +
+  "snapshot = excluded.snapshot, " +
   "entered_at = coalesce(floor_shifts.entered_at, excluded.entered_at)";
 
 /**
  * Replaces this pairing's copies with the host's list (`GET /v1/device/shifts`)
- * in one transaction (stage 2a spec §5.4). Another pairing's rows, kept by a
- * forget with records not yet sent, are never touched.
+ * in one transaction (stage 2a spec §5.4). `shifts` must be the host's whole
+ * parsed answer, never a fallback or a partial list: an empty array drops every
+ * copy this station has not entered. Another pairing's rows, kept by a forget
+ * with records not yet sent, are never touched.
  */
 export async function replaceShiftCopies(
   local: LocalExecutor,
@@ -184,8 +194,9 @@ export async function keepCreatedShift(
  * path stores one this build cannot work from; the entry screen checks first
  * and tells the operator why). The stored text is the answer's snapshot as
  * this build parsed it, the layout as the host sent it: a field a newer host
- * added to the product is dropped. The first snapshot and the first entry
- * time stay.
+ * added to the product is dropped. A re-entry replaces the stored text with
+ * the answer's (it may carry a field the stored one lost); the first entry
+ * time stays.
  */
 export async function keepEnteredShift(
   local: LocalExecutor,
@@ -303,7 +314,12 @@ export async function readShiftCopy(
   return row === undefined ? null : toCopy(row);
 }
 
-/** A stored shift to work: there, not entered here, or entered with a snapshot this build does not read. */
+/**
+ * A stored shift to work: there, not entered here, or entered with a snapshot
+ * this build does not read. `ready` says only that the snapshot is readable:
+ * the copy may be host-closed (`status`) or closed here (`localState`), and
+ * the caller decides what a closed shift is offered (plan 2a5 Tasks 5 and 7).
+ */
 export type StoredWork =
   | { kind: "ready"; shift: WorkShift }
   | { kind: "missing" }
