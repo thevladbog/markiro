@@ -21,7 +21,8 @@
   "createdAt": "2026-10-07T15:30:00Z",
   "rev": 71,
   "totals": {
-    "acceptedUnits": 540,
+    "acceptedUnits": 547,
+    "unitsInClosedBoxes": 540,
     "closedBoxes": 45,
     "openBoxes": 1,
     "lastFactAt": "2026-10-08T09:41:07Z",

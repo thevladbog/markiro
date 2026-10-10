@@ -34,6 +34,9 @@ const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, sta
      (SELECT COUNT(*) FROM box_items i JOIN boxes b ON b.id = i.box_id \
       WHERE b.shift_id = shifts.id AND i.removed_at IS NULL AND i.displaced_at IS NULL) \
       AS accepted_units, \
+     (SELECT COUNT(*) FROM box_items i JOIN boxes b ON b.id = i.box_id \
+      WHERE b.shift_id = shifts.id AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL \
+      AND i.removed_at IS NULL AND i.displaced_at IS NULL) AS units_in_closed_boxes, \
      (SELECT COUNT(*) FROM boxes b WHERE b.shift_id = shifts.id \
       AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL) AS closed_boxes, \
      (SELECT COUNT(*) FROM boxes b WHERE b.shift_id = shifts.id AND b.closed_at IS NULL \
@@ -70,6 +73,7 @@ struct ShiftRow {
     created_at: String,
     rev: i64,
     accepted_units: i64,
+    units_in_closed_boxes: i64,
     closed_boxes: i64,
     open_boxes: i64,
     last_fact_at: Option<String>,
@@ -103,6 +107,8 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
         rev: row.rev,
         totals: ShiftTotals {
             accepted_units: u64::try_from(row.accepted_units).map_err(ApiError::internal)?,
+            units_in_closed_boxes: u64::try_from(row.units_in_closed_boxes)
+                .map_err(ApiError::internal)?,
             closed_boxes: u32::try_from(row.closed_boxes).map_err(ApiError::internal)?,
             open_boxes: u32::try_from(row.open_boxes).map_err(ApiError::internal)?,
             last_fact_at: row.last_fact_at,

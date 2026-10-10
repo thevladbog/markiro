@@ -40,15 +40,26 @@ pub async fn receive_facts(
             format!("1-{MAX_RECORDS} records"),
         ));
     }
-    let received_at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
     // A device revoked while the batch waited for the lock sends nothing.
     device.require_live_in(&mut tx).await?;
+    // What the batch writes is stamped with the moment it holds the lock,
+    // not the moment it arrived: a batch that waited behind the office's
+    // close of its shift must not mark the shift late before that close.
+    let received_at = state.timestamp();
     let mut receipts = Vec::with_capacity(batch.records.len());
     let mut revision = None;
-    for record in &batch.records {
-        receipts
-            .push(facts::receive(&mut tx, &device.id, record, &received_at, &mut revision).await?);
+    for (position, record) in batch.records.iter().enumerate() {
+        match facts::receive(&mut tx, &device.id, record, &received_at, &mut revision).await {
+            Ok(receipt) => receipts.push(receipt),
+            Err(error) => {
+                // The station sends the same batch again, so support must
+                // learn which record the host could not write: its place in
+                // the batch, never the record (its id is device text).
+                tracing::error!(device = %device.id, position, "a fact batch failed");
+                return Err(error);
+            }
+        }
     }
     // A batch that closed a shift or marked one late took a revision, so
     // the streams wake and stations read their shifts again.

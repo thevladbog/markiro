@@ -1459,13 +1459,17 @@ pub struct OfficeShift {
 
 /// A shift's numbers as its facts give them (stage 2a spec §4.5): units
 /// accepted (items in a box, neither taken out by an exception nor taken by
-/// an earlier scan elsewhere), boxes closed and not taken apart, open boxes
-/// that hold a unit, when the host last received a record of the shift, and
-/// the devices that entered it, first entry first.
+/// an earlier scan elsewhere), the units among them in closed boxes that
+/// were not taken apart (the cloud office's «Кодов в закрытых коробах»; the
+/// rest are in boxes still open, so a shift closed with a box open shows the
+/// gap), boxes closed and not taken apart, open boxes that hold a unit, when
+/// the host last received a record of the shift, and the devices that
+/// entered it, first entry first.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShiftTotals {
     pub accepted_units: u64,
+    pub units_in_closed_boxes: u64,
     pub closed_boxes: u32,
     pub open_boxes: u32,
     pub last_fact_at: Option<String>,
