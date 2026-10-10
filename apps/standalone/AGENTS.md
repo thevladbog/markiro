@@ -92,7 +92,13 @@ and a template's `spec`: they are named in `changed` without a value
 because it may be 256 KB. A station's writes (shift create and open, SSCC
 blocks) carry the device as the actor (`Actor::Device`), and a request a
 station repeats (a create, a re-entry, a block) writes no row.
-Details never hold pairing codes, keys, tokens, passwords, salts or hashes, and
+Backups (plan РК) write `backup.create` (the host or the office user who asked;
+`failed` when a folder did not get the copy), `backup.settings.update`,
+`host.restore` (the host), `host.restore.resume` and `sscc.block.register`
+(the station).
+Details never hold pairing codes, keys, tokens, passwords, salts or hashes (the
+SHA-256 of a copy's file in `backup.create` and `host.restore` is a checksum to
+compare with the manifest, not a credential hash), and
 a refused login never records the typed login. An attempt refused by a rate
 limiter writes no row, so a flood cannot fill the log. An office write the host
 refuses (`validation_failed`, `forbidden`, `not_found`, `stale_revision`,
@@ -966,8 +972,13 @@ A feed from another host than the paired one stops the sync with
 `other_host` and applies nothing. `createSyncScheduler` runs one sync at a time: triggers during a
 run ask for exactly one more, and a failed run waits for the next trigger;
 `run` must report its own failure, since the scheduler swallows every
-rejection. A host restored from a copy that has already passed the
-device's revision goes unnoticed until the feed carries an epoch (plan 5).
+rejection. A host restored from a copy answers the revision of the copy plus
+one (`markiro-host restore`, plan РК), below what the station last read, so a
+station whose cursor passed it sees `rev < since` and starts again from zero;
+that is best effort. A station whose cursor is at or below the copy's next
+revision does not notice, nor does one that reconnects only after the host's
+later writes passed its cursor. The station does not read `hello.restoreEpoch`
+yet: the epoch wipe is plan РК-С's, written after plans 2a5 and 2a6.
 
 ## Protocol
 
@@ -2909,6 +2920,175 @@ box whose lost answer was not read back before the operator left is closed in
 the database and told to nobody, so the print recovery of plan 2a7 finds such
 boxes in `floor_boxes`. Printing the box's label is plan 2a7; the exceptions and
 the shift's close are plan 2a8.
+
+## Backups and restore
+
+Plan РК (`docs/superpowers/plans/2026-10-09-standalone-rk-backups.md`, the
+pilot spec's §11 and §19; the procedure is
+`docs/runbooks/standalone-backup-restore.md`). One worker task
+(`backup/worker.rs`, started by `crate::start`) makes every copy of the
+master database, one at a time, on a connection of its own:
+
+- a copy is `VACUUM INTO <name>.db.partial` while the host runs (a reader:
+  it waits for no writer and holds no uncommitted change), then
+  `PRAGMA integrity_check` on that file opened read-only and immutable, its
+  size and SHA-256, the rename to `markiro-host-<UTC time>-<tag>.db` and a
+  manifest `<name>.json` beside it (`backup/copy.rs`); a failure leaves
+  nothing of the copy behind, and a copy never replaces one of its name. On
+  Unix the copy, the manifest and the second folder's replica are `0600`
+  (they hold what `host.db` holds: PIN and badge hashes, pairing keys); on
+  Windows they take the folder's ACL, which is the installer's job for the
+  data folder and the administrator's for the second folder;
+- scheduled: at most one copy per UTC hour, in the first minute of an hour
+  in which the database changed since the last good copy
+  (`PRAGMA data_version` of the worker's connection, which the worker's own
+  audit row does not move) or in which today (UTC) has no copy yet;
+  a host that starts copies at once; «Сделать копию сейчас» wakes the worker
+  at once. One attempt per hour: a failed hour is not retried before the next.
+  A clock that goes back starts the schedule over without a copy of its own;
+- the local folder is `<data dir>/backups`; the second folder is the office
+  setting `backup_settings.second_dir` (`0011`). A copy reaches the second
+  folder only after the local one checked out: copied as `.partial`, synced,
+  read back and compared with the manifest by size and SHA-256, then renamed;
+  the host never creates the second folder, so an unplugged drive or a share
+  that is off is `destination_unavailable`, not a new folder somewhere. A
+  failing replica removes only what it wrote, never a replica already there;
+- each folder keeps the newest 24 copies, the newest copy of each of the 14
+  newest days and of each of the 12 newest months (UTC; `backup/retention.rs`),
+  and loses only names that start with `markiro-host-`. Rotation runs only
+  after a verified copy joined the folder. A `.partial` file and a `.db`
+  without its manifest are leftovers of a broken copy; the worker removes them
+  before each copy, in both folders (the only caller of `folder::clean`, and
+  one task, so it never meets a copy in flight). Retention is relative to the
+  copies' own times: a clock set back by more than 24 newer copies can make
+  the fresh copy the first to go (open; the runbook says not to set the clock
+  back);
+- a run's outcome per folder is in memory (`Backups::state`, the office's
+  `GET /v1/office/backups`: gone after a restart until the first copy) and in
+  one `backup.create` audit row (the host as the actor for a scheduled copy,
+  the office user for a manual one; `failed` when any folder did not get the
+  copy; `details` hold the failure codes, never an error text). A run is a
+  task of its own, so a panic is that run's `internal` failure and the worker
+  goes on; a host that stops waits up to 10 s for a copy in progress, and
+  `shutdown_runtime` (`main.rs`, `service.rs`) then waits at most 5 s more for
+  a blocking thread stuck on a dead share. The host does not check free space
+  (it would need a dependency): a full disk is a `disk_full` failure of that
+  copy.
+
+The office (`routes/backups.rs`): every role reads the state; administrators
+ask for a copy (`202`, `conflict` on `backup_running` while one runs or
+waits; the request itself writes no audit row, the worker's run does; the
+running state is read from `GET`) and set or clear the second folder with
+`expectedRev`. A folder is tried before it is saved, off the async threads and
+for at most 8 s: missing, not a folder, no right to write, unwritable, timed
+out, or inside the data folder is a `conflict` on `backup_dir` with
+`details.reason`; a path that is not absolute, has a control character, a `..`
+part or a Windows device namespace (`\\?\`, `\\.\`) is `validation_failed` on
+`secondDir` (so a share is named `\\PC\Share`, never `\\?\UNC\…`), and the path
+is never echoed back. A service sees no mapped drive letters, so a share is
+named by its UNC path. A probe thread stuck on a dead share cannot be cancelled.
+«Резервные копии» (`src/office/backups/`) shows both folders, the copies on
+the host and the held restore; it reads the state with its own polling loop
+(1 s while a copy runs, slower when idle, paused while the window is hidden)
+and writes times in the organization's zone. «Обзор» repeats the warnings (a
+held restore, a failed copy, no copy, a newest copy older than 26 hours by the
+host's clock, no second folder, a copy running for more than 30 minutes). No
+station code keeps count of returned blocks, so neither does the page.
+
+`markiro-host restore <copy> [--data-dir] [--without-manifest]` runs with the
+service stopped (the data folder's lock says so; the lock is let go slightly
+before the process ends, so the runbook waits for `STATE: STOPPED`) and
+changes nothing until the copy checked out: the manifest's size and SHA-256,
+`integrity_check`, every migration known to this build with its checksum, a
+finished wizard (a copy with a WAL beside it is refused with a manifest and
+read with the WAL folded in, in a private folder, without one). It reads the
+current database read-only if it opens (retrying a lock; a WAL a stopped host
+left counts too; a `-wal` or `-shm` that reading created is removed again; a
+database another program holds is refused, not treated as lost), and every
+`restore-*/host.db` too. Then it builds the new database BESIDE the current
+one (`host.db.partial`: the copy, migrated by this build, changed in one
+transaction on one connection that is closed before the swap):
+
+- every SSCC counter is raised to two blocks of its extension above the
+  highest serial either database knew (counter, block ends, box and pallet
+  serials; never past the prefix's last serial); when the current database was
+  not read it is also at least 100 000 above the copy's, rounded up to 10 000
+  (about 1 % of a 9-digit prefix's serials per restore); every month's shift
+  number is raised by 10 above both, from the copy's month to the current one;
+- the revision is the copy's next one, BELOW what the current database
+  reached: a station whose cursor passed it sees the host go back and starts
+  again from zero. Best effort until the stations read the epoch. The audit
+  sequence is raised above both databases (an audit id never names two
+  events);
+- the revocations of the current database are carried over (a device and a
+  badge stay revoked, an operator and an office user stay turned off; nothing
+  the copy lacks comes back); every office session is ended; a password
+  changed after the copy is not carried; the copy's devices are not revoked
+  when it came from another host. When the current database was not read, the
+  summary says what is active again;
+- a new `site.restore_epoch` (a UUID), `site.facts_held_since`, one
+  `host.restore` row (the host as the actor; `carried` and `sessionsEnded` are
+  part of its details).
+
+The intent marker `host.restore-intent` is written (synced) after the new
+database is checked and before the first rename, and removed after the last.
+The swap moves the current files into `restore-<UTC time>/` (never deleted),
+renames the new database into place (each rename retried against a virus
+scanner, the folders synced) and puts everything back if a rename fails.
+`crate::start` refuses while the marker is there (`restore::refuse_unfinished`,
+before the database opens): the next `restore` rolls back, finishes or, when
+the files fit neither, refuses and leaves them for support. A data folder
+without `host.json` gets a new identity after the new database is checked:
+every device pairs again. `markiro-host verify-copy` runs the same checks.
+`restore_crashing` and `CrashPoint` are `#[doc(hidden)]` test hooks that stop
+the real restore dead after a rename; production passes `None`.
+
+`hello` names `restoreEpoch` once there was a restore. A station that sees it
+change is meant to send every block it holds to `POST
+/v1/device/sscc/blocks/known` (`routes/known_blocks.rs`): a block the host
+has is `known`, or `refused` `block_mismatch` if it differs; a lost one is
+`registered` under the station with its own id as the request id and moves its
+counter forward, unless it names no counter (`prefix_unknown`; an extension
+above 9, which no serial can carry, is `range_invalid`), is no range of its
+prefix (`range_invalid`) or shares a serial with any block, revoked ones
+included (`block_overlap`). One revision when anything was registered, one
+`sscc.block.register` row per block; the station is marked for the epoch
+(`devices.known_blocks_epoch`) whatever became of each block. Only a station,
+only after a restore (`conflict` on `no_restore`), 1-64 blocks.
+
+A receipt is kept for good (plan 2a2), and a copy may lack the shift, the
+participant row or the block a station's fact names. So from a restore until
+an administrator resumes (`POST /v1/office/backups/resume`, «Возобновить
+приём данных станций»), a layer over the whole router answers
+`POST /v1/device/facts` and `GET /v1/device/codes/{…}` with `restore_pending`
+(503, `Retry-After: 60`, `details.since`) before any route or device check,
+and the station sends them again later (the station's own retry backs off to
+60 s; it does not read `Retry-After`); blocks, shifts and the feed are not
+held. The office lists every unrevoked station and whether it sent its blocks
+back; resuming is the administrator's call, behind a dialog that asks for an
+explicit confirmation of the runbook's SSCC checks (a station on a dead
+computer never returns blocks), and writes one `host.restore.resume` row with
+how many did.
+
+The station's side is NOT written. Plan РК-С, written after plans 2a5 and 2a6
+(plan 2a6 leaves it to plan РК), is to: keep the last seen epoch; on a new one
+sync the copies from zero, send every block it holds in parts of 64 before it
+resumes delivery, honour `Retry-After`, and show refused blocks and the hold in
+the status bar. Until then no station returns a block, `reconciled` stays 0,
+the epoch wipe of the copies is best effort (above), and a shift a station
+opened or created after the copy has no re-registration (its facts are refused
+once the facts resume: `unknown_shift`, `not_entered`). The checks that make up
+for it are the runbook's, done by a person before the resume.
+
+Migration `0011` may be applied after `0012` on a database that already had
+it (sqlx accepts a lower version not yet applied; the test builds a
+`Migrator` from doc-hidden fields, which a sqlx upgrade may touch).
+
+What no automated test shows: the Windows service and its account writing to
+another PC's share, UNC and USB behaviour, antivirus against a rename, folder
+flush and ACL inheritance, `sc start` refusing while the marker is there, a
+really full disk, WebView2 for the page. The runbook's last section lists them
+as the manual test.
 
 ## Marking rules
 
