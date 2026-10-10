@@ -76,6 +76,19 @@
         "reasonText": "Этикетка смята на аппликаторе",
         "occurredAt": "2026-10-08T06:24:10.881Z"
       }
+    },
+    {
+      "id": "ad7c3f5a-8b6e-4c2d-9f0a-5b7c9d1e3f65",
+      "kind": "shift_closed",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "c4a1e2b3-5d6f-4a7b-8c9d-0e1f2a3b4c5d",
+      "data": {
+        "plannedQtySnapshot": 1200,
+        "actualQty": 1188,
+        "closedBoxCount": 99,
+        "reasonCode": "material_shortage",
+        "closedAt": "2026-10-08T14:02:31.775Z"
+      }
     }
   ]
 }

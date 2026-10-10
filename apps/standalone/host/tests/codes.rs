@@ -176,6 +176,7 @@ async fn a_check_never_waits_for_a_batch_being_written() {
             ok_scan(1, &box_id(1), &instant(1, 0)),
         ),
         &admin.app.state.timestamp(),
+        &mut None,
     )
     .await
     .unwrap();

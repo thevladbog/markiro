@@ -1883,7 +1883,8 @@ and an operator by a UUID or `null`, kept as evidence without a foreign key.
 A record is checked whole before its first write, so a refusal leaves
 nothing but its receipt; a database error is no receipt, it fails the batch
 (500, `internal`), and the device sends the batch again. Facts are
-production data: they take no revision and write no audit row.
+production data: they take no revision and write no audit row, but for a
+station's close of its shift (below).
 
 A `scan` (`facts/scan.rs`) is a journal row (`scans`) whatever its verdict;
 an `invalid` one keeps no code, only what it looked like (`rawKind`) and its
@@ -1944,6 +1945,30 @@ reprint changes no state. An item an exception took out never comes back;
 an item an earlier scan displaced is not taken out by an exception of its
 box (it is no longer in the box). One exception row per record, kept with
 the record's shift, device and operator.
+
+A `shift_closed` (`facts/shift_closed.rs`) is a station's close of its
+shift, the summary it showed (`plannedQtySnapshot`, `actualQty`,
+`closedBoxCount`) and a reason code of `shift_close_reasons`, required when
+the plan it saw was set and differs from the fact
+(`rules::close_reason_required`; `invalid_record` on `data.reasonCode`); a
+reason the plan did not call for is kept, as in the cloud. An active shift
+closes: `status = closed`, `closed_at` the station's instant in the host's
+format (whole seconds), `closed_by_kind = device`, `closed_by` the station,
+`close_reason_code`, and the audit row `shift.close` with the station as
+actor and `{ actualQty, plannedQty, closedBoxCount, reasonCode }`. A shift
+the office closed first answers `accepted` with `details.alreadyClosed:
+true`. Every close is kept in `shift_close_events` (`accepted` or
+`already_closed`). Any other fact accepted (or `conflict`) for a closed
+shift is taken and marks it late once (`late_data_at`, the host's clock); a
+refused one marks nothing. Closing a shift and marking it late change the
+shift's row, so the batch takes one host revision for all such changes
+(taken on first need, stamped on each changed row) and commits through
+`commit_with_revision`, which wakes the streams; a batch that changes no
+shift takes none. Only a device that entered the shift closes it (`not_entered`
+otherwise, and so for a shift only planned); the shift is read inside the
+batch's write transaction, so an office close that commits while the batch
+waits for the lock is seen. The office closing a shift the station closed
+finds it changed (`stale_revision`) or closed (`shift_status`).
 
 Any device asks whether a code is taken (`GET /v1/device/codes/{codeHash}`,
 `routes/codes.rs`; 64 lower-case hex digits, `validation_failed` on

@@ -120,6 +120,7 @@ pub async fn claim(
             return Ok(Applied {
                 outcome: FactOutcome::Conflict,
                 details: Some(serde_json::json!({ "winner": winner })),
+                close: None,
             });
         }
         Some(owner) => {

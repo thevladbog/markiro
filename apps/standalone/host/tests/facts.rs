@@ -13,10 +13,10 @@ use markiro_host::routes::facts::{receive_facts, IncomingFacts};
 use markiro_proto::DeviceKind;
 use serde_json::{json, Value};
 use support::app::{
-    accepted, admin, audit_rows, box_closed, box_exception, box_id, code, code_hash, fact,
-    fact_rows, host_revision, instant, issue_block, members_digest, ok_scan, open_floor,
-    pair_device, plan_shift, receipts, record_id, rejected, request, send_facts, shift_body,
-    shift_setup, sscc, sscc_under, with_device, Admin, Floor,
+    accepted, admin, audit_rows, audit_trail, box_closed, box_exception, box_id, close_from_office,
+    code, code_hash, fact, fact_rows, host_revision, instant, issue_block, members_digest, ok_scan,
+    open_floor, pair_device, plan_shift, receipts, record_id, rejected, request, send_facts,
+    shift_body, shift_closed, shift_setup, sscc, sscc_under, with_device, Admin, Floor,
 };
 
 /// A scan of `verdict` at `at`, with no box; `code` and `source` as given.
@@ -1192,6 +1192,7 @@ async fn a_batch_waiting_for_the_write_lock_sees_the_record_that_held_it() {
         &floor.station,
         &record,
         &admin.app.state.timestamp(),
+        &mut None,
     )
     .await
     .unwrap();
@@ -2370,6 +2371,480 @@ async fn a_reprint_or_a_disassembly_needs_a_closed_box_and_a_reason_code() {
             accepted(&record_id(42)),
             rejected(Some(&record_id(43)), "sscc_taken", None),
         ]
+    );
+}
+
+/// A shift's close as the host keeps it: `(status, closed at, closed by
+/// kind, closed by, reason code, late data at, rev)`.
+async fn shift_state(admin: &Admin, shift: &str) -> Value {
+    type ShiftRow = (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+        i64,
+    );
+    let row: ShiftRow = sqlx::query_as(
+        "SELECT status, closed_at, closed_by_kind, closed_by, close_reason_code, late_data_at, \
+         rev FROM shifts WHERE id = ?",
+    )
+    .bind(shift)
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    json!([row.0, row.1, row.2, row.3, row.4, row.5, row.6])
+}
+
+/// The station closes kept: `(record, device, operator, plan, fact, boxes,
+/// reason, closed at, outcome, received at)`.
+async fn close_events(admin: &Admin) -> Vec<Value> {
+    type CloseRow = (
+        String,
+        String,
+        Option<String>,
+        Option<i64>,
+        i64,
+        i64,
+        Option<String>,
+        String,
+        String,
+        String,
+    );
+    let rows: Vec<CloseRow> = sqlx::query_as(
+        "SELECT record_id, device_id, operator_id, planned_qty_snapshot, actual_qty, \
+         closed_box_count, reason_code, closed_at, outcome, received_at \
+         FROM shift_close_events ORDER BY record_id",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    rows.into_iter()
+        .map(|row| json!([row.0, row.1, row.2, row.3, row.4, row.5, row.6, row.7, row.8, row.9]))
+        .collect()
+}
+
+#[tokio::test]
+async fn a_station_closes_its_shift_once_and_the_office_sees_it_closed() {
+    let (admin, floor) = floor().await;
+    let shift = floor.shift.as_str();
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[fact(
+            &record_id(1),
+            "scan",
+            shift,
+            ok_scan(1, &box_id(1), &instant(1, 0)),
+        )],
+    )
+    .await;
+    admin.app.clock.advance(time::Duration::minutes(10));
+    let received = admin.app.state.timestamp();
+    let revision = host_revision(&admin.app).await;
+    let mut wake = admin.app.state.revisions.subscribe();
+    wake.borrow_and_update();
+    let mut close = fact(
+        &record_id(2),
+        "shift_closed",
+        shift,
+        shift_closed(None, 1, 0, None, &instant(1800, 250)),
+    );
+    close["operatorId"] = json!(OPERATOR);
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[close]).await,
+        vec![accepted(&record_id(2))]
+    );
+    // The shift closed at the station's instant, in whole seconds, with the
+    // batch's revision; the streams woke with it.
+    assert_eq!(host_revision(&admin.app).await, revision + 1);
+    assert!(wake.has_changed().unwrap());
+    assert_eq!(*wake.borrow_and_update(), revision + 1);
+    assert_eq!(
+        shift_state(&admin, shift).await,
+        json!([
+            "closed",
+            "2026-10-08T06:30:00Z",
+            "device",
+            floor.station,
+            null,
+            null,
+            revision + 1
+        ])
+    );
+    assert_eq!(
+        audit_trail(&admin.app, "shift.close").await,
+        vec![(
+            "device".to_owned(),
+            Some(floor.station.clone()),
+            "shift.close".to_owned(),
+            Some("shift".to_owned()),
+            Some(floor.shift.clone()),
+            "ok".to_owned(),
+            json!({ "actualQty": 1, "plannedQty": null, "closedBoxCount": 0, "reasonCode": null })
+        )]
+    );
+    assert_eq!(
+        close_events(&admin).await,
+        vec![json!([
+            record_id(2),
+            floor.station,
+            OPERATOR,
+            null,
+            1,
+            0,
+            null,
+            instant(1800, 250),
+            "accepted",
+            received
+        ])]
+    );
+    let (status, office) = admin
+        .call("GET", &format!("/v1/office/shifts/{shift}"), None)
+        .await;
+    assert_eq!(
+        (
+            status,
+            office["status"].clone(),
+            office["closedAt"].clone(),
+            office["rev"].clone()
+        ),
+        (
+            StatusCode::OK,
+            json!("closed"),
+            json!("2026-10-08T06:30:00Z"),
+            json!(revision + 1)
+        )
+    );
+    // A second close (another record) finds the shift closed: accepted with
+    // `alreadyClosed`, kept, and nothing else changes; the station's own
+    // close is no late data.
+    admin.app.clock.advance(time::Duration::minutes(1));
+    let rows = audit_rows(&admin.app).await;
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(
+                &record_id(3),
+                "shift_closed",
+                shift,
+                shift_closed(None, 1, 0, None, &instant(1900, 0))
+            )]
+        )
+        .await,
+        vec![
+            json!({ "id": record_id(3), "outcome": "accepted", "details": { "alreadyClosed": true } })
+        ]
+    );
+    assert_eq!(host_revision(&admin.app).await, revision + 1);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(
+        shift_state(&admin, shift).await,
+        json!([
+            "closed",
+            "2026-10-08T06:30:00Z",
+            "device",
+            floor.station,
+            null,
+            null,
+            revision + 1
+        ])
+    );
+    assert_eq!(close_events(&admin).await[1][8], json!("already_closed"));
+    // The station's list shows it closed; it opens no more.
+    let (status, listed) = admin
+        .app
+        .send(support::app::empty(with_device(
+            request("GET", "/v1/device/shifts"),
+            &floor.key,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{listed}");
+    assert_eq!(listed["shifts"][0]["status"], json!("closed"));
+}
+
+#[tokio::test]
+async fn a_close_names_a_reason_when_the_fact_differs_from_the_plan() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let other = open_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
+    let shift = floor.shift.as_str();
+    let close = |n: u32, data: Value| fact(&record_id(n), "shift_closed", shift, data);
+    let at = instant(3600, 0);
+    let kept = fact_rows(&admin.app).await;
+    let before = shift_state(&admin, shift).await;
+    let refused = vec![
+        close(1, shift_closed(Some(250), 249, 20, None, &at)),
+        close(2, shift_closed(Some(250), 251, 21, Some("broken"), &at)),
+        close(3, shift_closed(Some(0), 0, 0, None, &at)),
+        close(
+            4,
+            shift_closed(Some(10_000_001), 1, 0, Some("equipment_stop"), &at),
+        ),
+        close(
+            5,
+            shift_closed(
+                Some(250),
+                249,
+                20,
+                Some("equipment_stop"),
+                "2026-10-08T07:00:00Z",
+            ),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &refused).await,
+        vec![
+            rejected(
+                Some(&record_id(1)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+            rejected(
+                Some(&record_id(2)),
+                "invalid_record",
+                Some("data.reasonCode")
+            ),
+            rejected(
+                Some(&record_id(3)),
+                "invalid_record",
+                Some("data.plannedQtySnapshot")
+            ),
+            rejected(
+                Some(&record_id(4)),
+                "invalid_record",
+                Some("data.plannedQtySnapshot")
+            ),
+            rejected(Some(&record_id(5)), "invalid_record", Some("data.closedAt")),
+        ]
+    );
+    assert_eq!(shift_state(&admin, shift).await, before);
+    let mut grown = kept.clone();
+    grown["fact_receipts"] = json!(kept["fact_receipts"].as_i64().unwrap() + 5);
+    assert_eq!(fact_rows(&admin.app).await, grown);
+    // A fact that matches the plan needs no reason, and the largest plan is
+    // a plan; a fact that differs takes one of the six codes.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[close(
+                6,
+                shift_closed(Some(10_000_000), 10_000_000, 1, None, &at)
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(6))]
+    );
+    // A reason the plan did not call for is kept, as in the cloud.
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &other.key,
+            &[fact(
+                &record_id(7),
+                "shift_closed",
+                &other.shift,
+                shift_closed(None, 5, 1, Some("material_shortage"), &at)
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(7))]
+    );
+    assert_eq!(
+        shift_state(&admin, &other.shift).await[4],
+        json!("material_shortage")
+    );
+    let third = open_floor(&admin, &setup, &floor.key, &setup.line).await;
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(
+                &record_id(8),
+                "shift_closed",
+                &third.shift,
+                shift_closed(Some(250), 249, 20, Some("equipment_stop"), &at)
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(8))]
+    );
+    assert_eq!(
+        shift_state(&admin, &third.shift).await[4],
+        json!("equipment_stop")
+    );
+}
+
+#[tokio::test]
+async fn facts_of_a_closed_shift_are_taken_and_mark_it_late_once() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let shift = floor.shift.as_str();
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[fact(
+            &record_id(1),
+            "scan",
+            shift,
+            ok_scan(1, &box_id(1), &instant(1, 0)),
+        )],
+    )
+    .await;
+    // The office closes the shift while the station is still away.
+    let closed = close_from_office(&admin, shift, "Станция не отвечает").await;
+    admin.app.clock.advance(time::Duration::minutes(30));
+    let late_at = admin.app.state.timestamp();
+    let revision = host_revision(&admin.app).await;
+    // A refused record of the closed shift marks nothing.
+    let mut wrong = ok_scan(9, &box_id(1), &instant(9, 0));
+    wrong["code"]["gtin14"] = json!("04600682000099");
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(&record_id(2), "scan", shift, wrong)]
+        )
+        .await,
+        vec![rejected(Some(&record_id(2)), "gtin_mismatch", None)]
+    );
+    assert_eq!(shift_state(&admin, shift).await[5], Value::Null);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    // The station sends what it did meanwhile: it is taken, and marks the
+    // shift late once, with one revision for the batch.
+    let mut wake = admin.app.state.revisions.subscribe();
+    wake.borrow_and_update();
+    let late = vec![
+        fact(
+            &record_id(3),
+            "scan",
+            shift,
+            ok_scan(2, &box_id(1), &instant(2, 0)),
+        ),
+        fact(
+            &record_id(4),
+            "box_closed",
+            shift,
+            box_closed(
+                &box_id(1),
+                &block,
+                1500,
+                &[1, 2],
+                &instant(1, 0),
+                &instant(20, 0),
+            ),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &late).await,
+        vec![accepted(&record_id(3)), accepted(&record_id(4))]
+    );
+    assert_eq!(host_revision(&admin.app).await, revision + 1);
+    assert_eq!(*wake.borrow_and_update(), revision + 1);
+    let after = shift_state(&admin, shift).await;
+    assert_eq!(
+        after,
+        json!([
+            "closed",
+            closed["closedAt"],
+            "office_user",
+            admin.id,
+            null,
+            late_at,
+            revision + 1
+        ])
+    );
+    // Later facts and the station's own close mark nothing more.
+    admin.app.clock.advance(time::Duration::minutes(5));
+    let more = vec![
+        fact(
+            &record_id(5),
+            "box_label",
+            shift,
+            json!({ "boxId": box_id(1), "outcome": "skipped", "at": instant(21, 0) }),
+        ),
+        fact(
+            &record_id(6),
+            "shift_closed",
+            shift,
+            shift_closed(None, 2, 1, None, &instant(30, 0)),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &more).await,
+        vec![
+            accepted(&record_id(5)),
+            json!({ "id": record_id(6), "outcome": "accepted", "details": { "alreadyClosed": true } })
+        ]
+    );
+    assert_eq!(shift_state(&admin, shift).await, after);
+    assert_eq!(host_revision(&admin.app).await, revision + 1);
+    assert!(audit_trail(&admin.app, "shift.close")
+        .await
+        .iter()
+        .all(|row| row.0 == "office_user"));
+}
+
+/// A station's close and a fact after it in one batch: the fact is late, and
+/// the batch takes one revision for both changes of the shift.
+#[tokio::test]
+async fn a_batch_that_closes_its_shift_takes_one_revision() {
+    let (admin, floor) = floor().await;
+    let shift = floor.shift.as_str();
+    let revision = host_revision(&admin.app).await;
+    let batch = vec![
+        fact(
+            &record_id(1),
+            "scan",
+            shift,
+            ok_scan(1, &box_id(1), &instant(1, 0)),
+        ),
+        fact(
+            &record_id(2),
+            "shift_closed",
+            shift,
+            shift_closed(None, 1, 0, None, &instant(60, 0)),
+        ),
+        fact(
+            &record_id(3),
+            "scan",
+            shift,
+            other_scan(
+                "invalid",
+                "unknown",
+                Value::Null,
+                Value::Null,
+                &instant(61, 0),
+            ),
+        ),
+    ];
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        vec![
+            accepted(&record_id(1)),
+            accepted(&record_id(2)),
+            accepted(&record_id(3))
+        ]
+    );
+    assert_eq!(host_revision(&admin.app).await, revision + 1);
+    assert_eq!(
+        shift_state(&admin, shift).await,
+        json!([
+            "closed",
+            "2026-10-08T06:01:00Z",
+            "device",
+            floor.station,
+            null,
+            admin.app.state.timestamp(),
+            revision + 1
+        ])
     );
 }
 
@@ -5448,4 +5923,698 @@ async fn a_late_clear_never_takes_out_a_code_scanned_after_it() {
     );
     assert_eq!(owned(&admin).await, Vec::<(String, String)>::new());
     assert_eq!(code_status(&admin, key, 4).await, json!("free"));
+}
+
+/// The audit row `shift.close` of a station: the device as actor, the shift
+/// as target.
+fn station_close_row(floor: &Floor, details: Value) -> support::app::AuditRow {
+    (
+        "device".to_owned(),
+        Some(floor.station.clone()),
+        "shift.close".to_owned(),
+        Some("shift".to_owned()),
+        Some(floor.shift.clone()),
+        "ok".to_owned(),
+        details,
+    )
+}
+
+/// The words of a closed shift (`close_reason_text`): the office's, never a
+/// station's.
+async fn reason_text(admin: &Admin, shift: &str) -> Option<String> {
+    sqlx::query_scalar("SELECT close_reason_text FROM shifts WHERE id = ?")
+        .bind(shift)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
+async fn a_close_is_kept_as_the_station_sent_it_whatever_its_reason_and_instant() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let shift = floor.shift.as_str();
+    let revision = host_revision(&admin.app).await;
+    admin.app.clock.advance(time::Duration::minutes(3));
+    let received = admin.app.state.timestamp();
+    let mut close = fact(
+        &record_id(1),
+        "shift_closed",
+        shift,
+        // 999 ms: the host keeps whole seconds, cut and not rounded.
+        shift_closed(
+            Some(250),
+            249,
+            20,
+            Some("equipment_stop"),
+            &instant(5400, 999),
+        ),
+    );
+    close["operatorId"] = json!(OPERATOR);
+    assert_eq!(
+        receipts(&admin.app, &floor.key, std::slice::from_ref(&close)).await,
+        vec![accepted(&record_id(1))]
+    );
+    assert_eq!(
+        shift_state(&admin, shift).await,
+        json!([
+            "closed",
+            "2026-10-08T07:30:00Z",
+            "device",
+            floor.station,
+            "equipment_stop",
+            null,
+            revision + 1
+        ])
+    );
+    // The station's close names no words: they are the office's.
+    assert_eq!(reason_text(&admin, shift).await, None);
+    assert_eq!(
+        audit_trail(&admin.app, "shift.close").await,
+        vec![station_close_row(
+            &floor,
+            json!({
+                "actualQty": 249, "plannedQty": 250, "closedBoxCount": 20,
+                "reasonCode": "equipment_stop"
+            })
+        )]
+    );
+    assert_eq!(
+        close_events(&admin).await,
+        vec![json!([
+            record_id(1),
+            floor.station,
+            OPERATOR,
+            250,
+            249,
+            20,
+            "equipment_stop",
+            instant(5400, 999),
+            "accepted",
+            received
+        ])]
+    );
+    let (status, office) = admin
+        .call("GET", &format!("/v1/office/shifts/{shift}"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{office}");
+    assert_eq!(
+        [
+            &office["status"],
+            &office["closedAt"],
+            &office["closeReasonCode"],
+            &office["closeReasonText"],
+            &office["lateDataAt"],
+        ],
+        [
+            &json!("closed"),
+            &json!("2026-10-08T07:30:00Z"),
+            &json!("equipment_stop"),
+            &Value::Null,
+            &Value::Null
+        ]
+    );
+    // The same record again, later: the same receipt, nothing written; the
+    // same id with other content is `payload_mismatch`, kept nowhere.
+    admin.app.clock.advance(time::Duration::minutes(1));
+    let (rows, audit, revision) = (
+        fact_rows(&admin.app).await,
+        audit_rows(&admin.app).await,
+        host_revision(&admin.app).await,
+    );
+    let mut wake = admin.app.state.revisions.subscribe();
+    wake.borrow_and_update();
+    let mut other = close.clone();
+    other["data"]["actualQty"] = json!(250);
+    other["data"]["reasonCode"] = json!(null);
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[close.clone(), other]).await,
+        vec![
+            accepted(&record_id(1)),
+            rejected(Some(&record_id(1)), "payload_mismatch", None)
+        ]
+    );
+    assert_eq!(fact_rows(&admin.app).await, rows);
+    assert_eq!(audit_rows(&admin.app).await, audit);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert!(!wake.has_changed().unwrap());
+    // Each of the six reason codes closes a shift whose fact differs.
+    for (n, code) in [
+        "production_defect",
+        "material_shortage",
+        "equipment_stop",
+        "production_order_changed",
+        "planned_quantity_error",
+        "other_production_deviation",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let next = open_floor(&admin, &setup, &floor.key, &setup.line).await;
+        let n = u32::try_from(n).unwrap() + 10;
+        assert_eq!(
+            receipts(
+                &admin.app,
+                &floor.key,
+                &[fact(
+                    &record_id(n),
+                    "shift_closed",
+                    &next.shift,
+                    shift_closed(Some(250), 249, 20, Some(code), &instant(7200, 0))
+                )]
+            )
+            .await,
+            vec![accepted(&record_id(n))]
+        );
+        assert_eq!(
+            shift_state(&admin, &next.shift).await[4],
+            json!(code),
+            "{code}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn only_the_station_that_entered_an_open_shift_closes_it() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let planned = plan_shift(&admin, shift_body(&setup)).await;
+    let planned = planned["id"].as_str().unwrap();
+    let shift = floor.shift.as_str();
+    let close = |n: u32, shift: &str| {
+        fact(
+            &record_id(n),
+            "shift_closed",
+            shift,
+            shift_closed(None, 1, 0, None, &instant(60, 0)),
+        )
+    };
+    let (open, waiting) = (
+        shift_state(&admin, shift).await,
+        shift_state(&admin, planned).await,
+    );
+    let (audit, revision) = (
+        audit_rows(&admin.app).await,
+        host_revision(&admin.app).await,
+    );
+    let kept = fact_rows(&admin.app).await;
+    // A colleague that never entered the shift, a shift only planned, a
+    // shift nobody made and a shift that is no id: none of them closes
+    // anything, and the refusals are kept as receipts only.
+    assert_eq!(
+        receipts(&admin.app, &colleague_key, &[close(1, shift)]).await,
+        vec![rejected(Some(&record_id(1)), "not_entered", None)]
+    );
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[
+                close(2, planned),
+                close(3, "00000000-0000-4000-8000-0000000000ff"),
+                close(4, "nope")
+            ]
+        )
+        .await,
+        vec![
+            rejected(Some(&record_id(2)), "not_entered", None),
+            rejected(Some(&record_id(3)), "unknown_shift", None),
+            rejected(Some(&record_id(4)), "invalid_record", Some("shiftId")),
+        ]
+    );
+    assert_eq!(shift_state(&admin, shift).await, open);
+    assert_eq!(shift_state(&admin, planned).await, waiting);
+    assert_eq!(audit_rows(&admin.app).await, audit);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let mut grown = kept.clone();
+    grown["fact_receipts"] = json!(kept["fact_receipts"].as_i64().unwrap() + 4);
+    assert_eq!(fact_rows(&admin.app).await, grown);
+    // The office closes it; the colleague's facts for it are still refused
+    // and mark nothing, where the owner's would mark it late.
+    close_from_office(&admin, shift, "Станция не отвечает").await;
+    let closed = shift_state(&admin, shift).await;
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &colleague_key,
+            &[
+                close(5, shift),
+                fact(
+                    &record_id(6),
+                    "scan",
+                    shift,
+                    ok_scan(1, &box_id(1), &instant(1, 0))
+                )
+            ]
+        )
+        .await,
+        vec![
+            rejected(Some(&record_id(5)), "not_entered", None),
+            rejected(Some(&record_id(6)), "not_entered", None)
+        ]
+    );
+    assert_eq!(shift_state(&admin, shift).await, closed);
+    assert_eq!(closed[5], Value::Null);
+    assert_eq!(close_events(&admin).await, Vec::<Value>::new());
+}
+
+#[tokio::test]
+async fn the_office_closing_after_the_station_finds_the_shift_changed_and_closed() {
+    let (admin, floor) = floor().await;
+    let shift = floor.shift.as_str();
+    let path = format!("/v1/office/shifts/{shift}");
+    let (_, before) = admin.call("GET", &path, None).await;
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(
+                &record_id(1),
+                "shift_closed",
+                shift,
+                shift_closed(None, 1, 0, None, &instant(60, 0))
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(1))]
+    );
+    let closed = shift_state(&admin, shift).await;
+    let revision = host_revision(&admin.app).await;
+    // An office form opened before the station's close is stale ...
+    let (status, refused) = admin
+        .call(
+            "POST",
+            &format!("{path}/close"),
+            Some(json!({ "reason": "Станция не отвечает", "expectedRev": before["rev"] })),
+        )
+        .await;
+    assert_eq!(
+        (
+            status,
+            refused["error"]["code"].clone(),
+            refused["error"]["details"].clone()
+        ),
+        (
+            StatusCode::CONFLICT,
+            json!("stale_revision"),
+            json!({ "currentRev": revision })
+        )
+    );
+    // ... and a fresh one finds the shift closed.
+    let (status, refused) = admin
+        .call(
+            "POST",
+            &format!("{path}/close"),
+            Some(json!({ "reason": "Станция не отвечает", "expectedRev": revision })),
+        )
+        .await;
+    assert_eq!(
+        (
+            status,
+            refused["error"]["code"].clone(),
+            refused["error"]["details"].clone()
+        ),
+        (
+            StatusCode::CONFLICT,
+            json!("conflict"),
+            json!({ "constraint": "shift_status", "status": "closed" })
+        )
+    );
+    assert_eq!(shift_state(&admin, shift).await, closed);
+    assert_eq!(reason_text(&admin, shift).await, None);
+    assert_eq!(audit_trail(&admin.app, "shift.close").await.len(), 1);
+    assert_eq!(host_revision(&admin.app).await, revision);
+}
+
+/// The office closes the shift while a station's batch waits for the write
+/// lock: the batch reads the shift once it holds the lock, so it finds the
+/// shift closed (the close is `alreadyClosed`, nothing of the office's is
+/// overwritten, the batch takes no revision).
+#[tokio::test]
+async fn a_batch_waiting_for_the_lock_finds_the_shift_the_office_closed_meanwhile() {
+    let (admin, floor) = floor().await;
+    let shift = floor.shift.as_str();
+    let revision = host_revision(&admin.app).await;
+    let audit = audit_rows(&admin.app).await;
+    let mut holder = begin_write(&admin.app.state.pool).await.unwrap();
+    let records = [
+        fact(
+            &record_id(1),
+            "shift_closed",
+            shift,
+            shift_closed(None, 1, 0, None, &instant(60, 0)),
+        ),
+        fact(
+            &record_id(2),
+            "scan",
+            shift,
+            ok_scan(1, &box_id(1), &instant(61, 0)),
+        ),
+    ];
+    let batch = send_facts(&admin.app, &floor.key, &records);
+    let office = async {
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        let rev = markiro_host::db::next_revision(&mut holder).await.unwrap();
+        sqlx::query(
+            "UPDATE shifts SET status = 'closed', closed_at = ?, closed_by_kind = 'office_user', \
+             closed_by = ?, close_reason_text = 'Станция не отвечает', rev = ? WHERE id = ?",
+        )
+        .bind("2026-10-08T06:05:00Z")
+        .bind(&admin.id)
+        .bind(rev)
+        .bind(shift)
+        .execute(&mut *holder)
+        .await
+        .unwrap();
+        holder.commit().await.unwrap();
+    };
+    let ((status, body), ()) = tokio::join!(batch, office);
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["receipts"],
+        json!([
+            { "id": record_id(1), "outcome": "accepted", "details": { "alreadyClosed": true } },
+            accepted(&record_id(2))
+        ])
+    );
+    // The scan is late, in the revision of the batch.
+    let state = shift_state(&admin, shift).await;
+    assert_eq!(
+        state,
+        json!([
+            "closed",
+            "2026-10-08T06:05:00Z",
+            "office_user",
+            admin.id,
+            null,
+            admin.app.state.timestamp(),
+            revision + 2
+        ])
+    );
+    assert_eq!(host_revision(&admin.app).await, revision + 2);
+    assert_eq!(
+        reason_text(&admin, shift).await.as_deref(),
+        Some("Станция не отвечает")
+    );
+    assert_eq!(close_events(&admin).await[0][8], json!("already_closed"));
+    assert_eq!(audit_rows(&admin.app).await, audit);
+}
+
+#[tokio::test]
+async fn late_data_marks_a_shift_once_in_the_batch_that_brings_it_and_only_that_shift() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let (_, colleague_key) = pair_device(&admin.app, "station").await;
+    let other = open_floor(&admin, &setup, &colleague_key, &setup.other_line).await;
+    let shift = floor.shift.as_str();
+    // The colleague scanned code 7 first.
+    receipts(
+        &admin.app,
+        &colleague_key,
+        &[fact(
+            &record_id(50),
+            "scan",
+            &other.shift,
+            ok_scan(7, &box_id(50), &instant(1, 0)),
+        )],
+    )
+    .await;
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[fact(
+            &record_id(1),
+            "scan",
+            shift,
+            ok_scan(1, &box_id(1), &instant(2, 0)),
+        )],
+    )
+    .await;
+    close_from_office(&admin, shift, "Станция не отвечает").await;
+    let (open_one, closed) = (
+        shift_state(&admin, &other.shift).await,
+        shift_state(&admin, shift).await,
+    );
+    let revision = host_revision(&admin.app).await;
+    let mut wake = admin.app.state.revisions.subscribe();
+    wake.borrow_and_update();
+    // A record already received comes again after the close: its stored
+    // receipt, no new fact, so no mark.
+    admin.app.clock.advance(time::Duration::minutes(2));
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(
+                &record_id(1),
+                "scan",
+                shift,
+                ok_scan(1, &box_id(1), &instant(2, 0))
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(1))]
+    );
+    assert_eq!(shift_state(&admin, shift).await, closed);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert!(!wake.has_changed().unwrap());
+    // A scan that loses its code to the colleague is a `conflict` and a
+    // fact of the closed shift all the same: it marks the shift late, and
+    // only this shift.
+    let lost = receipts(
+        &admin.app,
+        &floor.key,
+        &[fact(
+            &record_id(2),
+            "scan",
+            shift,
+            ok_scan(7, &box_id(1), &instant(3, 0)),
+        )],
+    )
+    .await;
+    assert_eq!(lost[0]["outcome"], json!("conflict"));
+    let marked = admin.app.state.timestamp();
+    assert_eq!(
+        shift_state(&admin, shift).await,
+        json!([
+            "closed",
+            closed[1],
+            "office_user",
+            admin.id,
+            null,
+            marked,
+            revision + 1
+        ])
+    );
+    assert_eq!(shift_state(&admin, &other.shift).await, open_one);
+    assert_eq!(*wake.borrow_and_update(), revision + 1);
+    // Another batch, another minute: the first mark stays and the shift's
+    // revision does not move.
+    admin.app.clock.advance(time::Duration::minutes(1));
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(
+                &record_id(3),
+                "scan",
+                shift,
+                ok_scan(2, &box_id(1), &instant(4, 0))
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(3))]
+    );
+    assert_eq!(host_revision(&admin.app).await, revision + 1);
+    assert_eq!(shift_state(&admin, shift).await[5], json!(marked));
+    // The data is in the office's reading, too.
+    let (_, office) = admin
+        .call("GET", &format!("/v1/office/shifts/{shift}"), None)
+        .await;
+    assert_eq!(office["lateDataAt"], json!(marked));
+    assert_eq!(office["rev"], json!(revision + 1));
+}
+
+#[tokio::test]
+async fn facts_after_the_stations_own_close_come_late_in_a_batch_of_their_own() {
+    let (admin, floor) = floor().await;
+    let shift = floor.shift.as_str();
+    let revision = host_revision(&admin.app).await;
+    receipts(
+        &admin.app,
+        &floor.key,
+        &[fact(
+            &record_id(1),
+            "shift_closed",
+            shift,
+            shift_closed(None, 1, 0, None, &instant(60, 0)),
+        )],
+    )
+    .await;
+    assert_eq!(host_revision(&admin.app).await, revision + 1);
+    assert_eq!(shift_state(&admin, shift).await[5], Value::Null);
+    admin.app.clock.advance(time::Duration::minutes(9));
+    let late_at = admin.app.state.timestamp();
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[fact(
+                &record_id(2),
+                "scan",
+                shift,
+                ok_scan(1, &box_id(1), &instant(50, 0))
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(2))]
+    );
+    // The close and the late mark are two batches, two revisions.
+    assert_eq!(
+        shift_state(&admin, shift).await,
+        json!([
+            "closed",
+            "2026-10-08T06:01:00Z",
+            "device",
+            floor.station,
+            null,
+            late_at,
+            revision + 2
+        ])
+    );
+    assert_eq!(host_revision(&admin.app).await, revision + 2);
+}
+
+#[tokio::test]
+async fn a_batch_that_closes_a_shift_is_written_whole_or_not_at_all() {
+    let (admin, floor) = floor().await;
+    let shift = floor.shift.as_str();
+    sqlx::query(&format!(
+        "CREATE TRIGGER break_the_receipt BEFORE INSERT ON fact_receipts \
+         WHEN NEW.record_id = '{}' BEGIN SELECT RAISE(ABORT, 'broken'); END",
+        record_id(2)
+    ))
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    // The close is written, then the fact after it marks the shift late,
+    // then its receipt breaks.
+    let batch = vec![
+        fact(
+            &record_id(1),
+            "shift_closed",
+            shift,
+            shift_closed(None, 1, 0, None, &instant(60, 0)),
+        ),
+        fact(
+            &record_id(2),
+            "scan",
+            shift,
+            ok_scan(1, &box_id(1), &instant(61, 0)),
+        ),
+    ];
+    let (state, rows, audit, revision) = (
+        shift_state(&admin, shift).await,
+        fact_rows(&admin.app).await,
+        audit_rows(&admin.app).await,
+        host_revision(&admin.app).await,
+    );
+    let mut wake = admin.app.state.revisions.subscribe();
+    wake.borrow_and_update();
+    let (status, failed) = send_facts(&admin.app, &floor.key, &batch).await;
+    assert_eq!(
+        (status, failed["error"]["code"].clone()),
+        (StatusCode::INTERNAL_SERVER_ERROR, json!("internal"))
+    );
+    assert_eq!(shift_state(&admin, shift).await, state);
+    assert_eq!(fact_rows(&admin.app).await, rows);
+    assert_eq!(audit_rows(&admin.app).await, audit);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert!(!wake.has_changed().unwrap());
+    sqlx::query("DROP TRIGGER break_the_receipt")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        vec![accepted(&record_id(1)), accepted(&record_id(2))]
+    );
+    assert_eq!(host_revision(&admin.app).await, revision + 1);
+    assert_eq!(audit_trail(&admin.app, "shift.close").await.len(), 1);
+}
+
+#[tokio::test]
+async fn a_close_is_checked_whole_and_a_refusal_leaves_the_shift_open() {
+    let (admin, floor) = floor().await;
+    let shift = floor.shift.as_str();
+    let close = |n: u32, data: Value| fact(&record_id(n), "shift_closed", shift, data);
+    let good = || shift_closed(Some(250), 249, 20, Some("equipment_stop"), &instant(60, 0));
+    let with = |key: &str, value: Value| {
+        let mut data = good();
+        data[key] = value;
+        data
+    };
+    let mut extra = good();
+    extra["operatorNote"] = json!("x");
+    let mut no_instant = good();
+    no_instant.as_object_mut().unwrap().remove("closedAt");
+    let mut bad_operator = close(14, good());
+    bad_operator["operatorId"] = json!("nope");
+    let batch = vec![
+        close(1, extra),
+        close(2, with("actualQty", json!(-1))),
+        close(3, with("actualQty", json!(1.5))),
+        close(4, with("actualQty", json!("249"))),
+        close(5, with("closedBoxCount", json!(-1))),
+        close(6, no_instant),
+        close(7, with("closedAt", json!("2026-10-08T06:01:00Z"))),
+        close(8, with("closedAt", json!("2026-10-08T06:01:00.000+00:00"))),
+        close(9, with("closedAt", json!("2026-10-08T06:01:00.000z"))),
+        close(10, with("reasonCode", json!(" equipment_stop"))),
+        close(11, with("reasonCode", json!("EQUIPMENT_STOP"))),
+        close(12, with("reasonCode", json!(""))),
+        close(13, with("reasonCode", json!(null))),
+        bad_operator,
+    ];
+    let before = (
+        shift_state(&admin, shift).await,
+        audit_rows(&admin.app).await,
+        host_revision(&admin.app).await,
+    );
+    let kept = fact_rows(&admin.app).await;
+    let field = |n: u32, field: &str| rejected(Some(&record_id(n)), "invalid_record", Some(field));
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        vec![
+            field(1, "data"),
+            field(2, "data"),
+            field(3, "data"),
+            field(4, "data"),
+            field(5, "data"),
+            field(6, "data"),
+            field(7, "data.closedAt"),
+            field(8, "data.closedAt"),
+            field(9, "data.closedAt"),
+            field(10, "data.reasonCode"),
+            field(11, "data.reasonCode"),
+            field(12, "data.reasonCode"),
+            field(13, "data.reasonCode"),
+            field(14, "operatorId"),
+        ]
+    );
+    assert_eq!(
+        (
+            shift_state(&admin, shift).await,
+            audit_rows(&admin.app).await,
+            host_revision(&admin.app).await
+        ),
+        before
+    );
+    let mut grown = kept.clone();
+    grown["fact_receipts"] = json!(kept["fact_receipts"].as_i64().unwrap() + 14);
+    assert_eq!(fact_rows(&admin.app).await, grown);
 }

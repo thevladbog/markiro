@@ -18,6 +18,7 @@ pub mod exception;
 pub mod registry;
 pub mod rules;
 pub mod scan;
+pub mod shift_closed;
 
 use markiro_proto::{
     receipt_codes, FactKind, FactOutcome, FactReceipt, FactRecord, ShiftOrigin, ShiftStatus,
@@ -25,6 +26,8 @@ use markiro_proto::{
 use serde_json::Value;
 use sqlx::SqliteConnection;
 
+use crate::audit::{self, actions, Actor, Entry, Outcome};
+use crate::db::next_revision;
 use crate::error::ApiError;
 use crate::shifts;
 use crate::validate;
@@ -76,11 +79,14 @@ impl From<ApiError> for Failure {
 }
 
 /// What an applied record answers: `accepted`, or `conflict` with its
-/// details.
+/// details; and the close of its shift, when the record is a station's
+/// close of an active shift (the batch writes it, with the batch's
+/// revision).
 #[derive(Debug, Clone, PartialEq)]
 pub struct Applied {
     pub outcome: FactOutcome,
     pub details: Option<Value>,
+    pub close: Option<CloseShift>,
 }
 
 impl Applied {
@@ -88,8 +94,19 @@ impl Applied {
         Self {
             outcome: FactOutcome::Accepted,
             details: None,
+            close: None,
         }
     }
+}
+
+/// A station's close of an active shift.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CloseShift {
+    /// The station's instant in the host's format (whole seconds).
+    pub closed_at: String,
+    pub reason_code: Option<String>,
+    /// The details of the `shift.close` audit row.
+    pub audit: Value,
 }
 
 /// The shift a record names, as the device entered it.
@@ -137,11 +154,17 @@ fn object(details: Option<Value>) -> Option<serde_json::Map<String, Value>> {
 /// `payload_mismatch` (kept nowhere) when it is not; otherwise the record is
 /// applied and its receipt kept. A record without a readable id is answered
 /// `invalid_record` and nothing of it is kept.
+///
+/// A record that closes its shift, or the first fact accepted for a closed
+/// shift (which marks it `late_data_at`), changes the shift's row: the batch
+/// takes one host revision for all of them (`revision`, taken on first need)
+/// and stamps it on the row, so the caller commits with it.
 pub async fn receive(
     conn: &mut SqliteConnection,
     device_id: &str,
     value: &Value,
     received_at: &str,
+    revision: &mut Option<i64>,
 ) -> Result<FactReceipt, ApiError> {
     let id = value
         .get("id")
@@ -166,7 +189,7 @@ pub async fn receive(
             ));
         }
     }
-    let applying = apply(conn, device_id, value, received_at).await?;
+    let applying = apply(conn, device_id, value, received_at, revision).await?;
     let receipt = match applying.answer {
         Ok(applied) => FactReceipt {
             id: id.clone(),
@@ -266,6 +289,7 @@ async fn apply(
     device_id: &str,
     value: &Value,
     received_at: &str,
+    revision: &mut Option<i64>,
 ) -> Result<Applying, ApiError> {
     let Ok(record) = serde_json::from_value::<FactRecord>(value.clone()) else {
         return Ok(Applying::refused(
@@ -309,9 +333,21 @@ async fn apply(
         FactKind::BoxClosed => box_closed::apply(conn, &context, &record.data).await,
         FactKind::BoxLabel => box_label::apply(conn, &context, &record.data).await,
         FactKind::BoxException => exception::apply(conn, &context, &record.data).await,
+        FactKind::ShiftClosed => shift_closed::apply(conn, &context, &record.data).await,
     };
     let answer = match answer {
-        Ok(applied) => Ok(applied),
+        Ok(applied) => {
+            match &applied.close {
+                Some(close) => close_shift(conn, &context, close, revision).await?,
+                None if shift.status == ShiftStatus::Closed
+                    && record.kind != FactKind::ShiftClosed =>
+                {
+                    mark_late(conn, &context, revision).await?
+                }
+                None => {}
+            }
+            Ok(applied)
+        }
         Err(Failure::Reject(reject)) => Err(reject),
         Err(Failure::Internal(error)) => return Err(error),
     };
@@ -365,4 +401,83 @@ async fn entered_shift(
         gtin14: gtin14.ok_or_else(snapshot)?,
         issuer_prefix: issuer_prefix.ok_or_else(snapshot)?,
     })))
+}
+
+/// The batch's revision, taken on first need: one revision for every shift
+/// row the batch changes.
+async fn batch_revision(
+    conn: &mut SqliteConnection,
+    revision: &mut Option<i64>,
+) -> Result<i64, ApiError> {
+    match revision {
+        Some(rev) => Ok(*rev),
+        None => {
+            let rev = next_revision(conn).await.map_err(ApiError::internal)?;
+            *revision = Some(rev);
+            Ok(rev)
+        }
+    }
+}
+
+/// A station's close of its active shift: the shift closes with the
+/// station's instant and reason code, and the audit row names the station.
+async fn close_shift(
+    conn: &mut SqliteConnection,
+    context: &Context<'_>,
+    close: &CloseShift,
+    revision: &mut Option<i64>,
+) -> Result<(), ApiError> {
+    let rev = batch_revision(&mut *conn, revision).await?;
+    sqlx::query(
+        "UPDATE shifts SET status = 'closed', closed_at = ?, closed_by_kind = 'device', \
+         closed_by = ?, close_reason_code = ?, rev = ? WHERE id = ?",
+    )
+    .bind(&close.closed_at)
+    .bind(context.device_id)
+    .bind(&close.reason_code)
+    .bind(rev)
+    .bind(&context.shift.id)
+    .execute(&mut *conn)
+    .await
+    .map_err(ApiError::internal)?;
+    audit::record(
+        conn,
+        context.received_at,
+        Entry {
+            actor: Actor::Device(context.device_id),
+            action: actions::SHIFT_CLOSE,
+            target_type: Some("shift"),
+            target_id: Some(&context.shift.id),
+            outcome: Outcome::Ok,
+            details: close.audit.clone(),
+        },
+    )
+    .await
+    .map_err(ApiError::internal)
+}
+
+/// The first fact accepted for a closed shift marks it late, once.
+async fn mark_late(
+    conn: &mut SqliteConnection,
+    context: &Context<'_>,
+    revision: &mut Option<i64>,
+) -> Result<(), ApiError> {
+    let unmarked: Option<i64> =
+        sqlx::query_scalar("SELECT 1 FROM shifts WHERE id = ? AND late_data_at IS NULL")
+            .bind(&context.shift.id)
+            .fetch_optional(&mut *conn)
+            .await
+            .map_err(ApiError::internal)?;
+    if unmarked.is_none() {
+        return Ok(());
+    }
+    let rev = batch_revision(&mut *conn, revision).await?;
+    sqlx::query("UPDATE shifts SET late_data_at = ?, rev = ? WHERE id = ?")
+        .bind(context.received_at)
+        .bind(rev)
+        .bind(&context.shift.id)
+        .execute(conn)
+        .await
+        .map_err(ApiError::internal)?;
+    Ok(())
 }

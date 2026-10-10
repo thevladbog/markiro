@@ -1630,6 +1630,7 @@ pub enum FactKind {
     BoxClosed,
     BoxLabel,
     BoxException,
+    ShiftClosed,
 }
 
 impl FactKind {
@@ -1639,6 +1640,7 @@ impl FactKind {
             FactKind::BoxClosed => "box_closed",
             FactKind::BoxLabel => "box_label",
             FactKind::BoxException => "box_exception",
+            FactKind::ShiftClosed => "shift_closed",
         }
     }
 }
@@ -1848,6 +1850,22 @@ pub struct BoxExceptionFact {
     pub reason_code: Option<String>,
     pub reason_text: Option<String>,
     pub occurred_at: String,
+}
+
+/// `data` of a `shift_closed` fact: a station closed its shift. The numbers
+/// are the station's summary; a reason of [`shift_close_reasons`] is needed
+/// when the plan the station saw (`plannedQtySnapshot`) was set and differs
+/// from `actualQty` (the domain's `shiftCloseReasonRequired`). The answer to
+/// the close of a shift the office closed first is `accepted` with
+/// `details.alreadyClosed: true`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShiftClosedFact {
+    pub planned_qty_snapshot: Option<u32>,
+    pub actual_qty: u32,
+    pub closed_box_count: u32,
+    pub reason_code: Option<String>,
+    pub closed_at: String,
 }
 
 /// How the host answered a record.
@@ -2067,13 +2085,15 @@ mod tests {
             FactKind::BoxClosed,
             FactKind::BoxLabel,
             FactKind::BoxException,
+            FactKind::ShiftClosed,
         ];
         for kind in &kinds {
             match kind {
                 FactKind::Scan
                 | FactKind::BoxClosed
                 | FactKind::BoxLabel
-                | FactKind::BoxException => {}
+                | FactKind::BoxException
+                | FactKind::ShiftClosed => {}
             }
         }
         kinds

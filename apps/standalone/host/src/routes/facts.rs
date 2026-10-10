@@ -2,7 +2,9 @@
 //! facts, applied in one write transaction, each record on its own
 //! (`facts::receive`), answered with a receipt per record in their order.
 //! A database error is no receipt: nothing of the batch stays, and the
-//! device sends it again.
+//! device sends it again. Facts take no revision, but a station's close of
+//! its shift and a closed shift's first late fact change the shift's row:
+//! the batch then takes one revision for all of them.
 
 use axum::extract::State;
 use axum::Json;
@@ -11,7 +13,7 @@ use serde::Deserialize;
 use serde_json::Value;
 
 use crate::auth::AuthDevice;
-use crate::db::begin_write;
+use crate::db::{begin_write, commit_with_revision};
 use crate::error::{ApiError, ApiJson};
 use crate::facts;
 use crate::server::AppState;
@@ -43,9 +45,17 @@ pub async fn receive_facts(
     // A device revoked while the batch waited for the lock sends nothing.
     device.require_live_in(&mut tx).await?;
     let mut receipts = Vec::with_capacity(batch.records.len());
+    let mut revision = None;
     for record in &batch.records {
-        receipts.push(facts::receive(&mut tx, &device.id, record, &received_at).await?);
+        receipts
+            .push(facts::receive(&mut tx, &device.id, record, &received_at, &mut revision).await?);
     }
-    tx.commit().await.map_err(ApiError::internal)?;
+    // A batch that closed a shift or marked one late took a revision, so
+    // the streams wake and stations read their shifts again.
+    match revision {
+        Some(rev) => commit_with_revision(tx, &state.revisions, rev).await,
+        None => tx.commit().await,
+    }
+    .map_err(ApiError::internal)?;
     Ok(Json(FactReceipts { receipts }))
 }

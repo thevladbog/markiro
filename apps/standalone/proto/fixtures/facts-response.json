@@ -34,6 +34,13 @@
       "id": "8a5f1c3d-6e4b-4fa0-8d9c-3b5e7f9a1c43",
       "outcome": "rejected",
       "code": "not_entered"
+    },
+    {
+      "id": "ad7c3f5a-8b6e-4c2d-9f0a-5b7c9d1e3f65",
+      "outcome": "accepted",
+      "details": {
+        "alreadyClosed": true
+      }
     }
   ]
 }

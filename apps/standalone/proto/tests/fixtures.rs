@@ -13,8 +13,8 @@ use markiro_proto::{
     OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord,
     PairResponse, PairingCode, PairingCodeRequest, PasswordChange, PasswordSet, ProductCreate,
     ProductGroup, ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict,
-    ShiftClose, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord,
-    SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
+    ShiftClose, ShiftClosedFact, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate,
+    SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
     TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
@@ -908,7 +908,8 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
             FactKind::Scan,
             FactKind::BoxClosed,
             FactKind::BoxLabel,
-            FactKind::BoxException
+            FactKind::BoxException,
+            FactKind::ShiftClosed
         ]
     );
     for record in &batch.records {
@@ -922,6 +923,9 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
             }
             FactKind::BoxException => {
                 serde_json::to_value(typed::<BoxExceptionFact>(&record.data)).unwrap()
+            }
+            FactKind::ShiftClosed => {
+                serde_json::to_value(typed::<ShiftClosedFact>(&record.data)).unwrap()
             }
         };
         assert_eq!(typed, record.data, "{}", record.id);
@@ -968,6 +972,17 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
             Some(markiro_proto::exception_reasons::OTHER)
         )
     );
+    // The shift closed with fewer units than planned, and a reason.
+    let closed: ShiftClosedFact = typed(&batch.records[5].data);
+    assert_eq!(
+        (
+            closed.planned_qty_snapshot,
+            closed.actual_qty,
+            closed.reason_code.as_deref()
+        ),
+        (Some(1200), 1188, Some("material_shortage"))
+    );
+    assert!(markiro_proto::shift_close_reasons::ALL.contains(&"material_shortage"));
     let receipts: FactReceipts = round_trip("facts-response.json");
     let outcomes: Vec<FactOutcome> = receipts.receipts.iter().map(|r| r.outcome).collect();
     assert_eq!(
@@ -977,13 +992,19 @@ fn fact_fixtures_round_trip_and_each_record_reads_as_its_kind() {
             FactOutcome::Conflict,
             FactOutcome::Rejected,
             FactOutcome::Rejected,
-            FactOutcome::Rejected
+            FactOutcome::Rejected,
+            FactOutcome::Accepted
         ]
     );
     let winner: CodeOwner =
         typed(&Value::Object(receipts.receipts[1].details.clone().unwrap())["winner"]);
     assert!(!winner.same_device);
-    for receipt in &receipts.receipts[2..] {
+    // The close of a shift the office closed first.
+    assert_eq!(
+        receipts.receipts[5].details.clone().map(Value::Object),
+        Some(serde_json::json!({ "alreadyClosed": true }))
+    );
+    for receipt in &receipts.receipts[2..5] {
         assert!(markiro_proto::receipt_codes::ALL.contains(&receipt.code.as_deref().unwrap()));
     }
     // A record names no field the host does not read, and a receipt of a

@@ -723,3 +723,34 @@ pub fn box_exception(kind: &str, box_id: &str, at: &str) -> Value {
         "reasonCode": null, "reasonText": null, "occurredAt": at
     })
 }
+
+/// The `data` of a station's close of its shift at `closed_at`.
+pub fn shift_closed(
+    planned: Option<u32>,
+    actual: u32,
+    boxes: u32,
+    reason: Option<&str>,
+    closed_at: &str,
+) -> Value {
+    serde_json::json!({
+        "plannedQtySnapshot": planned, "actualQty": actual, "closedBoxCount": boxes,
+        "reasonCode": reason, "closedAt": closed_at
+    })
+}
+
+/// Close the open shift `shift` from the office, as the administrator, with
+/// `reason`.
+pub async fn close_from_office(admin: &Admin, shift: &str, reason: &str) -> Value {
+    let path = format!("/v1/office/shifts/{shift}");
+    let (status, current) = admin.call("GET", &path, None).await;
+    assert_eq!(status, StatusCode::OK, "{current}");
+    let (status, closed) = admin
+        .call(
+            "POST",
+            &format!("{path}/close"),
+            Some(serde_json::json!({ "reason": reason, "expectedRev": current["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{closed}");
+    closed
+}
