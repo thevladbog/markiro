@@ -4,13 +4,16 @@ import {
   applySavedScanners,
   DEFAULT_WORKSTATION_SETTINGS,
   InvalidSettingsError,
+  MAX_SCANNERS,
   parsePrinters,
   parsePrintTarget,
   printerTargetKey,
+  parseScanners,
   readWorkstationSettings,
   resolvePrinter,
   saveWorkstationSettings,
   soundLevel,
+  sharedSerialPort,
   type PrinterProfile,
   type WorkstationSettings,
 } from "../src/floor/setup/workstation-settings.js";
@@ -242,6 +245,50 @@ describe("the printers of the settings", () => {
     expect(read.printers).toEqual([ZEBRA, { ...TSC, id: "tsc-3" }]);
     // `tsc` was dropped (600 dpi): its purpose is unassigned, never guessed.
     expect(read.assignments).toEqual({ box: "zebra", pallet: null, duplicate: "tsc-3" });
+  });
+});
+
+describe("the scanners the shell would take", () => {
+  it("read a port name as the shell takes it: no control character, at most 256 characters", () => {
+    expect(parseScanners([{ port: "COM\n3", baud: 9600 }])).toEqual([]);
+    expect(parseScanners([{ port: "COM\u00853", baud: 9600 }])).toEqual([]);
+    expect(parseScanners([{ port: "C".repeat(257), baud: 9600 }])).toEqual([]);
+    expect(parseScanners([{ port: "C".repeat(256), baud: 9600 }])).toHaveLength(1);
+  });
+
+  it("keep at most as many scanners as the shell takes, and refuse to store more", async () => {
+    const many = Array.from({ length: MAX_SCANNERS + 1 }, (_, index) => ({
+      port: `COM${index + 1}`,
+      baud: 9600,
+    }));
+    expect(parseScanners(many)).toHaveLength(MAX_SCANNERS);
+    const { db, executor } = openLocalDb();
+    await expect(
+      saveWorkstationSettings(executor, { ...DEFAULT_WORKSTATION_SETTINGS, scanners: many }),
+    ).rejects.toBeInstanceOf(InvalidSettingsError);
+    await saveWorkstationSettings(executor, {
+      ...DEFAULT_WORKSTATION_SETTINGS,
+      scanners: many.slice(0, MAX_SCANNERS),
+    });
+    expect(rows(db, "SELECT count(*) AS n FROM workstation_settings")).toEqual([{ n: 4 }]);
+  });
+
+  it("name a COM port that a serial printer and a scanner would both open, in whatever case", () => {
+    expect(sharedSerialPort([ZEBRA, TSC], [{ port: "COM3", baud: 9600 }])).toBeNull();
+    expect(sharedSerialPort([ZEBRA, TSC], [{ port: "COM4", baud: 9600 }])).toBe("COM4");
+    expect(sharedSerialPort([TSC], [{ port: "com4", baud: 115200 }])).toBe("COM4");
+    expect(sharedSerialPort([], [{ port: "COM4", baud: 9600 }])).toBeNull();
+  });
+
+  it("refuse to store a scanner on the port of a serial printer, and write nothing", async () => {
+    const { db, executor } = openLocalDb();
+    await expect(
+      saveWorkstationSettings(executor, {
+        ...SETTINGS,
+        scanners: [{ port: "COM4", baud: 9600 }],
+      }),
+    ).rejects.toBeInstanceOf(InvalidSettingsError);
+    expect(rows(db, "SELECT count(*) AS n FROM workstation_settings")).toEqual([{ n: 0 }]);
   });
 });
 

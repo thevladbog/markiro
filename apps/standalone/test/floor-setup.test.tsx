@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { sampleLabelData } from "@markiro/domain";
@@ -12,10 +12,13 @@ import { NEW_PRINTER, profileOf } from "../src/floor/setup/printer-draft.js";
 import { makeTestCode, scannedTestCode, testLabelSpec } from "../src/floor/setup/test-label.js";
 import { WorkstationSetup } from "../src/floor/setup/WorkstationSetup.js";
 import {
+  DEFAULT_WORKSTATION_SETTINGS,
   InvalidSettingsError,
   readWorkstationSettings,
+  saveWorkstationSettings,
   type WorkstationSettings,
 } from "../src/floor/setup/workstation-settings.js";
+import { playSignalTone } from "../src/floor/work/signal-sound.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb } from "./support/local-db.js";
@@ -32,6 +35,12 @@ import {
   ZEBRA,
 } from "./support/printing.js";
 import { PAIRING } from "./support/floor-work.js";
+
+// The setup's «Проверить звук» plays the floor's own tone function.
+vi.mock("../src/floor/work/signal-sound.js", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  playSignalTone: vi.fn(),
+}));
 
 function fakeSource() {
   let listener: ScanListener | null = null;
@@ -720,5 +729,657 @@ describe("the list of Windows printers", () => {
     click("Добавить принтер");
     fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "usb" } });
     expect(await screen.findByText("Принтеров Windows не найдено.")).toBeTruthy();
+  });
+});
+
+describe("the scanners, the sound and the label check of the setup", () => {
+  it("adds a COM scanner, gives the shell the whole set on save, and shows its connection", async () => {
+    const { local, shell } = await setup();
+    type("COM-порт сканера", "com3");
+    click("Добавить сканер");
+    expect(screen.getByText("COM3, 9600 бод")).toBeTruthy();
+    expect(screen.getByText("Подключится после сохранения.")).toBeTruthy();
+    expect(shell.hardware.configureScanners).not.toHaveBeenCalled();
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText("Настройки сохранены.");
+    expect(shell.hardware.configureScanners).toHaveBeenCalledWith([{ port: "COM3", baud: 9600 }]);
+    expect((await readWorkstationSettings(local)).scanners).toEqual([{ port: "COM3", baud: 9600 }]);
+    act(() => {
+      shell.scannerStatus({
+        revision: 1,
+        scanners: [{ port: "COM3", baud: 9600, status: "disconnected" }],
+      });
+    });
+    expect(screen.getByText("Нет связи: проверьте кабель и порт.")).toBeTruthy();
+    act(() => {
+      shell.scannerStatus({
+        revision: 2,
+        scanners: [{ port: "COM3", baud: 9600, status: "connected" }],
+      });
+    });
+    expect(screen.getByText("Подключён.")).toBeTruthy();
+    // Removed and saved: the shell gets the empty set, which closes the port.
+    click("Удалить сканер COM3");
+    await act(async () => {
+      click("Сохранить");
+    });
+    await waitFor(() => expect(shell.hardware.configureScanners).toHaveBeenLastCalledWith([]));
+  });
+
+  it("refuses a scanner without a port, with a wrong speed or on a port it has", async () => {
+    await setup();
+    click("Добавить сканер");
+    expect(screen.getByText("Укажите COM-порт.")).toBeTruthy();
+    type("COM-порт сканера", "COM3");
+    type("Скорость сканера, бод", "0");
+    click("Добавить сканер");
+    expect(screen.getByText("Скорость — целое число больше нуля.")).toBeTruthy();
+    type("Скорость сканера, бод", "9600");
+    click("Добавить сканер");
+    type("COM-порт сканера", "com3");
+    click("Добавить сканер");
+    expect(screen.getByText("Сканер на COM3 уже есть.")).toBeTruthy();
+  });
+
+  it("lists the computer's COM ports on request, and says when they cannot be read", async () => {
+    const shell = fakeHardware();
+    vi.mocked(shell.hardware.listSerialPorts)
+      .mockResolvedValueOnce(["COM3", "COM4"])
+      .mockRejectedValueOnce(new Error("serial_unavailable"));
+    await setup({ shell });
+    click("Показать COM-порты");
+    expect(await screen.findByText("COM-порты этого компьютера: COM3, COM4.")).toBeTruthy();
+    click("Показать COM-порты");
+    expect(await screen.findByText("Список COM-портов не прочитался.")).toBeTruthy();
+  });
+
+  it("keeps the saved settings when the shell refuses the scanners, and says so", async () => {
+    const shell = fakeHardware();
+    vi.mocked(shell.hardware.configureScanners).mockRejectedValueOnce(
+      new Error("invalid_scanners"),
+    );
+    const { local, onSaved } = await setup({ shell });
+    type("COM-порт сканера", "COM3");
+    click("Добавить сканер");
+    await act(async () => {
+      click("Сохранить");
+    });
+    expect(
+      await screen.findByText(
+        "Настройки сохранены, но оболочка не приняла сканеры. Проверьте COM-порты.",
+      ),
+    ).toBeTruthy();
+    expect((await readWorkstationSettings(local)).scanners).toEqual([{ port: "COM3", baud: 9600 }]);
+    expect(onSaved).toHaveBeenCalledTimes(1);
+  });
+
+  it("sets the tones' level and the label check, tries the sound, and stores both", async () => {
+    const local = openLocalDb().executor;
+    const shell = fakeHardware();
+    const playTone = vi.fn<(level: number) => void>();
+    const scanner = fakeSource();
+    render(
+      <ThemeProvider>
+        <WorkstationSetup
+          local={local}
+          hardware={shell.hardware}
+          printing={manualRuntime(shell.hardware).runtime}
+          source={scanner.source}
+          playTone={playTone}
+          onSaved={vi.fn()}
+          onBack={vi.fn()}
+        />
+      </ThemeProvider>,
+    );
+    expect(await screen.findByText("Громкость сигналов: 80 %.")).toBeTruthy();
+    click("Тише");
+    click("Тише");
+    expect(screen.getByText("Громкость сигналов: 60 %.")).toBeTruthy();
+    click("Проверить звук");
+    expect(playTone).toHaveBeenLastCalledWith(0.6);
+    click("Без звука");
+    expect(screen.getByText("Сигналы без звука.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Тише" }).getAttribute("aria-disabled")).toBe("true");
+    click("Проверить звук");
+    expect(playTone).toHaveBeenLastCalledWith(0);
+    expect(screen.getByText("Проверка этикетки выключена.")).toBeTruthy();
+    click("Проверять этикетку короба");
+    expect(
+      screen
+        .getByRole("button", { name: "Проверять этикетку короба" })
+        .getAttribute("aria-pressed"),
+    ).toBe("true");
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText("Настройки сохранены.");
+    const stored = await readWorkstationSettings(local);
+    expect(stored.sound).toEqual({ muted: true, volume: 60 });
+    expect(stored.verifyPrintedLabel).toBe(true);
+  });
+});
+
+function later<T>() {
+  let resolve: (value: T) => void = () => undefined;
+  let reject: (error: Error) => void = () => undefined;
+  const promise = new Promise<T>((done, fail) => {
+    resolve = done;
+    reject = fail;
+  });
+  return { promise, resolve, reject };
+}
+
+describe("a COM port is one thing's at a time", () => {
+  it("refuses a scanner on the port of a serial printer, and a serial printer on a scanner's port", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local, { scanners: [{ port: "COM3", baud: 9600 }] });
+    await setup({ local });
+    type("COM-порт сканера", "com4");
+    click("Добавить сканер");
+    expect(
+      screen.getByText("Порт COM4 занят принтером «TSC на COM4»: сканер и принтер не делят порт."),
+    ).toBeTruthy();
+    expect(screen.queryByText("COM4, 9600 бод")).toBeNull();
+    type("COM-порт сканера", "");
+    click("Добавить принтер");
+    type("Название", "Второй TSC");
+    fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "serial" } });
+    type("COM-порт", "com3");
+    click("Готово");
+    expect(
+      screen.getByText("Порт COM3 занят сканером: принтер и сканер не делят порт."),
+    ).toBeTruthy();
+    type("COM-порт", "COM5");
+    click("Готово");
+    expect(screen.getByText("COM5, 9600 бод · ZPL · 203 dpi")).toBeTruthy();
+  });
+
+  it("frees the port of a printer that was removed, for a scanner", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    await setup({ local });
+    click("Удалить принтер «TSC на COM4»");
+    type("COM-порт сканера", "COM4");
+    click("Добавить сканер");
+    expect(screen.getByText("COM4, 9600 бод")).toBeTruthy();
+  });
+});
+
+describe("what the shell would refuse is refused here first", () => {
+  it("refuses a port name the shell would not take, and more scanners than it takes", async () => {
+    const local = openLocalDb().executor;
+    await saveWorkstationSettings(local, {
+      ...DEFAULT_WORKSTATION_SETTINGS,
+      scanners: Array.from({ length: 32 }, (_, index) => ({ port: `COM${index + 1}`, baud: 9600 })),
+    });
+    await setup({ local });
+    type("COM-порт сканера", "COM\u00853");
+    click("Добавить сканер");
+    expect(
+      screen.getByText("Название порта — до 256 символов, без служебных знаков."),
+    ).toBeTruthy();
+    type("COM-порт сканера", "C".repeat(257));
+    click("Добавить сканер");
+    expect(
+      screen.getByText("Название порта — до 256 символов, без служебных знаков."),
+    ).toBeTruthy();
+    type("COM-порт сканера", "COM33");
+    click("Добавить сканер");
+    expect(screen.getByText("Сканеров может быть не больше 32.")).toBeTruthy();
+    expect(screen.queryByText("COM33, 9600 бод")).toBeNull();
+  });
+
+  it("does not save a port that was typed but never added, and says so", async () => {
+    const { local, shell } = await setup();
+    type("COM-порт сканера", "COM3");
+    const save = screen.getByRole("button", { name: "Сохранить" });
+    expect(save.getAttribute("aria-disabled")).toBeNull();
+    await act(async () => {
+      fireEvent.click(save);
+    });
+    expect(
+      screen.getByText(
+        "Нажмите «Добавить сканер» или очистите поле порта: сканер ещё не добавлен.",
+      ),
+    ).toBeTruthy();
+    expect(shell.hardware.configureScanners).not.toHaveBeenCalled();
+    expect((await readWorkstationSettings(local)).scanners).toEqual([]);
+    type("COM-порт сканера", "");
+    expect(
+      screen.queryByText(
+        "Нажмите «Добавить сканер» или очистите поле порта: сканер ещё не добавлен.",
+      ),
+    ).toBeNull();
+  });
+
+  it("keeps a scanner that works while a refused set is not stored, and writes nothing then", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local, { scanners: [{ port: "COM3", baud: 9600 }] });
+    const refusing: LocalExecutor = {
+      ...local,
+      transaction: async () => {
+        throw new InvalidSettingsError("scanners");
+      },
+    };
+    const { shell } = await setup({ local: refusing });
+    click("Удалить сканер COM3");
+    type("COM-порт сканера", "COM7");
+    click("Добавить сканер");
+    await act(async () => {
+      click("Сохранить");
+    });
+    expect(
+      await screen.findByText("Настройки не сохранены: проверьте принтеры и сканеры."),
+    ).toBeTruthy();
+    // The shell was not asked: the scanner that worked is still the one it runs.
+    expect(shell.hardware.configureScanners).not.toHaveBeenCalled();
+  });
+});
+
+describe("the connection of a scanner, as far as it is known", () => {
+  it("says a scanner is not the shell's until it is saved, and for a changed speed too", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local, { scanners: [{ port: "COM3", baud: 9600 }] });
+    const { shell } = await setup({ local });
+    act(() => {
+      shell.scannerStatus({
+        revision: 1,
+        scanners: [{ port: "COM3", baud: 9600, status: "connected" }],
+      });
+    });
+    expect(screen.getByText("Подключён.")).toBeTruthy();
+    click("Удалить сканер COM3");
+    type("COM-порт сканера", "COM3");
+    type("Скорость сканера, бод", "19200");
+    click("Добавить сканер");
+    expect(screen.getByText("COM3, 19200 бод")).toBeTruthy();
+    expect(screen.getByText("Подключится после сохранения.")).toBeTruthy();
+    expect(screen.queryByText("Подключён.")).toBeNull();
+  });
+
+  it("says it is asking until the first answer, and that it could not ask when it cannot", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local, { scanners: [{ port: "COM3", baud: 9600 }] });
+    const shell = fakeHardware();
+    const first = later<() => void>();
+    vi.mocked(shell.hardware.watchScanners).mockReturnValueOnce(first.promise);
+    await setup({ local, shell });
+    expect(screen.getByText("Проверяем связь…")).toBeTruthy();
+    cleanup();
+    vi.mocked(shell.hardware.watchScanners).mockRejectedValueOnce(new Error("invalid_response"));
+    await setup({ local, shell });
+    expect(await screen.findByText("Состояние связи не прочиталось.")).toBeTruthy();
+    expect(screen.queryByText(/invalid_response/)).toBeNull();
+  });
+
+  it("offers to give the shell a saved scanner it never got, and does so without rewriting the settings", async () => {
+    const { executor } = openLocalDb();
+    await setUpPrinting(executor, { scanners: [{ port: "COM3", baud: 9600 }] });
+    const batches: number[] = [];
+    const counting: LocalExecutor = {
+      ...executor,
+      transaction: (batch) => {
+        batches.push(batch.length);
+        return executor.transaction(batch);
+      },
+    };
+    const { shell } = await setup({ local: counting });
+    expect(
+      screen.getByText("Оболочка ещё не открыла этот порт. Нажмите «Сохранить»."),
+    ).toBeTruthy();
+    const save = screen.getByRole("button", { name: "Сохранить" });
+    expect(save.getAttribute("aria-disabled")).toBeNull();
+    await act(async () => {
+      fireEvent.click(save);
+    });
+    await screen.findByText("Настройки сохранены.");
+    expect(shell.hardware.configureScanners).toHaveBeenCalledWith([{ port: "COM3", baud: 9600 }]);
+    expect(batches).toEqual([]);
+    // Given: what is left is the shell's own snapshot, and nothing more to press.
+    expect(screen.getByText("Оболочка ещё не открыла этот порт.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Сохранить" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+  });
+
+  it("lets the operator give the shell the scanners again after it refused them", async () => {
+    const { executor } = openLocalDb();
+    const batches: number[] = [];
+    const counting: LocalExecutor = {
+      ...executor,
+      transaction: (batch) => {
+        batches.push(batch.length);
+        return executor.transaction(batch);
+      },
+    };
+    const shell = fakeHardware();
+    vi.mocked(shell.hardware.configureScanners).mockRejectedValueOnce(
+      new Error("invalid_scanners"),
+    );
+    await setup({ local: counting, shell });
+    type("COM-порт сканера", "COM3");
+    click("Добавить сканер");
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText(
+      "Настройки сохранены, но оболочка не приняла сканеры. Проверьте COM-порты.",
+    );
+    expect(screen.queryByText(/invalid_scanners/)).toBeNull();
+    const save = screen.getByRole("button", { name: "Сохранить" });
+    expect(save.getAttribute("aria-disabled")).toBeNull();
+    await act(async () => {
+      fireEvent.click(save);
+    });
+    await screen.findByText("Настройки сохранены.");
+    expect(shell.hardware.configureScanners).toHaveBeenCalledTimes(2);
+    // The settings were written once: the second press only asked the shell again.
+    expect(batches).toEqual([4]);
+    act(() => {
+      shell.scannerStatus({
+        revision: 1,
+        scanners: [{ port: "COM3", baud: 9600, status: "connected" }],
+      });
+    });
+    expect(screen.getByRole("button", { name: "Сохранить" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+  });
+
+  it("lets the operator give the shell the scanners again when its state cannot be read either", async () => {
+    const shell = fakeHardware();
+    vi.mocked(shell.hardware.watchScanners).mockRejectedValue(new Error("invalid_response"));
+    vi.mocked(shell.hardware.configureScanners).mockRejectedValueOnce(new Error("unknown"));
+    await setup({ shell });
+    type("COM-порт сканера", "COM3");
+    click("Добавить сканер");
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText(
+      "Настройки сохранены, но оболочка не приняла сканеры. Проверьте COM-порты.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Сохранить" }).getAttribute("aria-disabled"),
+    ).toBeNull();
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText("Настройки сохранены.");
+    expect(screen.getByRole("button", { name: "Сохранить" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+  });
+
+  it("asks the shell once for two presses of «Сохранить», and gives it the set that was saved", async () => {
+    const shell = fakeHardware();
+    const answer = later<undefined>();
+    vi.mocked(shell.hardware.configureScanners).mockReturnValueOnce(answer.promise);
+    const { onBack } = await setup({ shell });
+    type("COM-порт сканера", "COM3");
+    click("Добавить сканер");
+    const save = screen.getByRole("button", { name: "Сохранить" });
+    await act(async () => {
+      fireEvent.click(save);
+      fireEvent.click(save);
+    });
+    expect(shell.hardware.configureScanners).toHaveBeenCalledTimes(1);
+    // A scanner added while the shell still answers is not the saved set.
+    type("COM-порт сканера", "COM4");
+    click("Добавить сканер");
+    expect(shell.hardware.configureScanners).toHaveBeenLastCalledWith([
+      { port: "COM3", baud: 9600 },
+    ]);
+    // Leaving is never held by the shell's answer.
+    click("Назад без сохранения");
+    expect(onBack).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      answer.resolve(undefined);
+    });
+  });
+
+  it("stops listening to the shell when it is left, even if the first answer was still on its way", async () => {
+    const shell = fakeHardware();
+    const first = later<() => void>();
+    vi.mocked(shell.hardware.watchScanners).mockReturnValueOnce(first.promise);
+    await setup({ shell });
+    cleanup();
+    const stop = vi.fn();
+    await act(async () => {
+      first.resolve(stop);
+    });
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops listening when the screen goes away after the first answer too", async () => {
+    const shell = fakeHardware();
+    const stop = vi.fn();
+    vi.mocked(shell.hardware.watchScanners).mockResolvedValueOnce(stop);
+    await setup({ shell });
+    cleanup();
+    expect(stop).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("the list of COM ports", () => {
+  it("says it is asking, and hears only the newest answer", async () => {
+    const shell = fakeHardware();
+    const first = later<string[]>();
+    const second = later<string[]>();
+    vi.mocked(shell.hardware.listSerialPorts)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    await setup({ shell });
+    click("Показать COM-порты");
+    expect(screen.getByText("Спрашиваем у системы список COM-портов…")).toBeTruthy();
+    click("Показать COM-порты");
+    await act(async () => {
+      second.resolve(["COM8"]);
+    });
+    expect(await screen.findByText("COM-порты этого компьютера: COM8.")).toBeTruthy();
+    expect(screen.queryByText("Спрашиваем у системы список COM-портов…")).toBeNull();
+    await act(async () => {
+      first.resolve(["COM1"]);
+    });
+    expect(screen.getByText("COM-порты этого компьютера: COM8.")).toBeTruthy();
+  });
+
+  it("does not let an old failure undo a newer list, and says when there is no port", async () => {
+    const shell = fakeHardware();
+    const first = later<string[]>();
+    const second = later<string[]>();
+    vi.mocked(shell.hardware.listSerialPorts)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    await setup({ shell });
+    click("Показать COM-порты");
+    click("Показать COM-порты");
+    await act(async () => {
+      second.resolve([]);
+    });
+    expect(await screen.findByText("COM-портов не найдено.")).toBeTruthy();
+    await act(async () => {
+      first.reject(new Error("serial_unavailable"));
+    });
+    expect(screen.queryByText("Список COM-портов не прочитался.")).toBeNull();
+    expect(screen.getByText("COM-портов не найдено.")).toBeTruthy();
+  });
+});
+
+describe("the tones' level and the check of a label", () => {
+  it("plays the floor's own tone at the draft's level when no tone is given", async () => {
+    const local = openLocalDb().executor;
+    await saveWorkstationSettings(local, {
+      ...DEFAULT_WORKSTATION_SETTINGS,
+      sound: { muted: false, volume: 30 },
+    });
+    render(
+      <ThemeProvider>
+        <WorkstationSetup
+          local={local}
+          hardware={fakeHardware().hardware}
+          printing={manualRuntime(fakeHardware().hardware).runtime}
+          source={fakeSource().source}
+          onSaved={vi.fn()}
+          onBack={vi.fn()}
+        />
+      </ThemeProvider>,
+    );
+    await screen.findByText("Громкость сигналов: 30 %.");
+    vi.mocked(playSignalTone).mockClear();
+    click("Проверить звук");
+    expect(playSignalTone).toHaveBeenLastCalledWith("ok", undefined, 0.3);
+    click("Громче");
+    click("Проверить звук");
+    expect(playSignalTone).toHaveBeenLastCalledWith("ok", undefined, 0.4);
+    click("Без звука");
+    click("Проверить звук");
+    expect(playSignalTone).toHaveBeenLastCalledWith("ok", undefined, 0);
+  });
+
+  it("steps the level between silence and full, never past them, and keeps the focus on its button", async () => {
+    const local = openLocalDb().executor;
+    await saveWorkstationSettings(local, {
+      ...DEFAULT_WORKSTATION_SETTINGS,
+      sound: { muted: false, volume: 10 },
+    });
+    await setup({ local });
+    // The screen's own focus effect has run, so it cannot take the focus back.
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("Принтеры"));
+    const quieter = screen.getByRole("button", { name: "Тише" });
+    quieter.focus();
+    fireEvent.click(quieter);
+    expect(screen.getByText("Сигналы без звука.")).toBeTruthy();
+    expect(quieter.getAttribute("aria-disabled")).toBe("true");
+    // A press at silence does nothing, and the button does not leave the keyboard.
+    fireEvent.click(quieter);
+    expect(screen.getByText("Сигналы без звука.")).toBeTruthy();
+    expect(document.activeElement).toBe(quieter);
+    const louder = screen.getByRole("button", { name: "Громче" });
+    for (let step = 0; step < 12; step += 1) fireEvent.click(louder);
+    expect(screen.getByText("Громкость сигналов: 100 %.")).toBeTruthy();
+    expect(louder.getAttribute("aria-disabled")).toBe("true");
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText("Настройки сохранены.");
+    expect((await readWorkstationSettings(local)).sound).toEqual({ muted: false, volume: 100 });
+  });
+
+  it("leaves the level alone while the sound is muted, and brings it back when it is not", async () => {
+    await setup();
+    click("Без звука");
+    expect(screen.getByText("Сигналы без звука.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Громче" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
+    click("Громче");
+    click("Без звука");
+    expect(screen.getByRole("button", { name: "Без звука" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+    expect(screen.getByText("Громкость сигналов: 80 %.")).toBeTruthy();
+  });
+
+  it("says a level of nothing is no sound, as a muted one is", async () => {
+    const local = openLocalDb().executor;
+    await saveWorkstationSettings(local, {
+      ...DEFAULT_WORKSTATION_SETTINGS,
+      sound: { muted: false, volume: 0 },
+    });
+    await setup({ local });
+    expect(screen.getByText("Сигналы без звука.")).toBeTruthy();
+  });
+
+  it("turns the label check on and off with a button that says which it is, and says what it changes", async () => {
+    const local = openLocalDb().executor;
+    await saveWorkstationSettings(local, {
+      ...DEFAULT_WORKSTATION_SETTINGS,
+      verifyPrintedLabel: true,
+    });
+    await setup({ local });
+    const toggle = screen.getByRole("button", { name: "Проверять этикетку короба" });
+    expect(toggle.getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByText("Проверка этикетки включена.")).toBeTruthy();
+    expect(
+      screen.getByText("Действует для этикеток, которые будут напечатаны после сохранения."),
+    ).toBeTruthy();
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-pressed")).toBe("false");
+    expect(screen.getByText("Проверка этикетки выключена.")).toBeTruthy();
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText("Настройки сохранены.");
+    expect((await readWorkstationSettings(local)).verifyPrintedLabel).toBe(false);
+  });
+});
+
+describe("saving what is not about the printers", () => {
+  it("leaves the label that waits as it was: its printer, its bytes and its check", async () => {
+    const station = await printStation();
+    const job = await closeBoxWithLabel(station);
+    const before = jobRows(station.db);
+    const { shell } = await setup({ local: station.local });
+    type("COM-порт сканера", "COM3");
+    click("Добавить сканер");
+    click("Без звука");
+    click("Проверять этикетку короба");
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText("Настройки сохранены.");
+    const settings = await readWorkstationSettings(station.local);
+    expect(settings.verifyPrintedLabel).toBe(true);
+    expect(settings.scanners).toEqual([{ port: "COM3", baud: 9600 }]);
+    expect(shell.hardware.configureScanners).toHaveBeenCalledWith([{ port: "COM3", baud: 9600 }]);
+    expect(jobRows(station.db)).toEqual(before);
+    expect(await readPrintJob(station.local, PAIRING, "job-1")).toEqual(job);
+    expect(printerForAgain(job, settings, null)?.id).toBe("zebra");
+  });
+});
+
+describe("what the scanners, the sound and the check say to a reader of them", () => {
+  it("keeps every message in a polite region with no alert of its own, and every button at the floor's size", async () => {
+    const shell = fakeHardware();
+    vi.mocked(shell.hardware.listSerialPorts).mockResolvedValue(["COM3"]);
+    await setup({ shell });
+    click("Добавить сканер");
+    const empty = screen.getByText("Укажите COM-порт.");
+    expect(empty.closest('[aria-live="polite"]')).not.toBeNull();
+    expect(empty.closest('[role="alert"]')).toBeNull();
+    expect(empty.closest("[role]")?.getAttribute("role")).toBe("presentation");
+    click("Показать COM-порты");
+    const ports = await screen.findByText("COM-порты этого компьютера: COM3.");
+    expect(ports.closest('[aria-live="polite"]')).not.toBeNull();
+    expect(screen.getByText("Громкость сигналов: 80 %.").getAttribute("aria-live")).toBe("polite");
+    expect(screen.getByText("Проверка этикетки выключена.").getAttribute("aria-live")).toBe(
+      "polite",
+    );
+    type("COM-порт сканера", "COM3");
+    click("Добавить сканер");
+    const status = screen.getByText("Подключится после сохранения.");
+    expect(status.closest('[aria-live="polite"]')).not.toBeNull();
+    // With a scanner on the list too: its «Удалить» and every other button.
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.className).toContain("mk-btn--floor");
+    }
+  });
+
+  it("hands the focus to the scanners' heading when the scanner it was on is removed", async () => {
+    const local = openLocalDb().executor;
+    await saveWorkstationSettings(local, {
+      ...DEFAULT_WORKSTATION_SETTINGS,
+      scanners: [{ port: "COM3", baud: 9600 }],
+    });
+    await setup({ local });
+    await waitFor(() => expect(document.activeElement?.textContent).toBe("Принтеры"));
+    const remove = screen.getByRole("button", { name: "Удалить сканер COM3" });
+    remove.focus();
+    fireEvent.click(remove);
+    expect(screen.queryByRole("button", { name: "Удалить сканер COM3" })).toBeNull();
+    expect(document.activeElement?.textContent).toBe("Сканеры COM-портов");
   });
 });

@@ -91,6 +91,26 @@ function wholeNumber(value: unknown, min: number, max: number): number | null {
     : null;
 }
 
+/** The most COM scanners one set may name (`MAX_SCANNERS` of `src-tauri/src/scanner/runtime.rs`). */
+export const MAX_SCANNERS = 32;
+
+/** The longest port name, in characters (`MAX_PORT_NAME_CHARS` of the shell). */
+export const MAX_PORT_NAME_CHARS = 256;
+
+/**
+ * A port name as the shell takes it: not empty, at most `MAX_PORT_NAME_CHARS`
+ * characters, no control character (`char::is_control`: C0, DEL and C1). A set
+ * with one name it refuses is refused as a whole, so every scanner would stay
+ * closed: the webview never stores such a name.
+ */
+export function isPortName(port: string): boolean {
+  if (port === "" || [...port].length > MAX_PORT_NAME_CHARS) return false;
+  return ![...port].some((character) => {
+    const code = character.codePointAt(0) ?? 0;
+    return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
+  });
+}
+
 /** COM names are case-insensitive (`com3` is `COM3`); other port names are kept as they are. */
 export function canonicalPort(port: string): string {
   const trimmed = port.trim();
@@ -201,11 +221,32 @@ export function parseScanners(value: unknown): ScannerConfig[] {
     const baud = wholeNumber(row?.["baud"], 1, 4_294_967_295);
     if (port === null || baud === null) continue;
     const canonical = canonicalPort(port);
-    if (seen.has(canonical)) continue;
+    if (!isPortName(canonical) || seen.has(canonical)) continue;
+    // The shell takes no more: the rest would make it refuse the whole set.
+    if (scanners.length >= MAX_SCANNERS) break;
     seen.add(canonical);
     scanners.push({ port: canonical, baud });
   }
   return scanners;
+}
+
+/**
+ * The COM port a serial printer and a scanner would both open, or `null`.
+ * A scanner holds its port open for as long as it is configured, so a send to
+ * a printer on that port could never get it, and the scanner would never
+ * connect while the printer holds it: the two are never stored together.
+ */
+export function sharedSerialPort(
+  printers: readonly PrinterProfile[],
+  scanners: readonly ScannerConfig[],
+): string | null {
+  const scanned = new Set(scanners.map((scanner) => canonicalPort(scanner.port)));
+  for (const printer of printers) {
+    if (printer.target.kind !== "serial") continue;
+    const port = canonicalPort(printer.target.port);
+    if (scanned.has(port)) return port;
+  }
+  return null;
 }
 
 /** The sound settings; a value this build cannot read is the default. */
@@ -285,8 +326,10 @@ function upsert(key: string, value: unknown): LocalStatement {
 /**
  * Stores the settings in one transaction. What is stored is exactly what
  * `readWorkstationSettings` reads back: settings it would read otherwise (a
- * profile it would drop, a purpose naming no profile, a scanner twice) are
- * refused with `InvalidSettingsError` before anything is written.
+ * profile it would drop, a purpose naming no profile, a scanner twice, a port
+ * name or a number of scanners the shell would refuse, one COM port for a
+ * serial printer and a scanner) are refused with `InvalidSettingsError`
+ * before anything is written.
  */
 export async function saveWorkstationSettings(
   local: LocalExecutor,
@@ -296,6 +339,9 @@ export async function saveWorkstationSettings(
   if (!readsBack(printers, parsePrinters)) throw new InvalidSettingsError("printers");
   if (!readsBack(settings.scanners, parseScanners)) throw new InvalidSettingsError("scanners");
   if (!readsBack(settings.sound, parseSound)) throw new InvalidSettingsError("sound");
+  if (sharedSerialPort(settings.printers, settings.scanners) !== null) {
+    throw new InvalidSettingsError("a port of a printer and of a scanner");
+  }
   await local.transaction([
     upsert(SETTING_KEYS.printers, printers),
     upsert(SETTING_KEYS.scanners, settings.scanners),

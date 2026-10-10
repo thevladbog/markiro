@@ -4,33 +4,52 @@ import { useTranslation } from "react-i18next";
 
 import { Alert, Button, Card, Input, Select } from "@markiro/ui";
 
-import type { HardwareApi, UsbPrinter } from "../../hardware/hardware.js";
+import type {
+  HardwareApi,
+  ScannerConfig,
+  ScannerSnapshot,
+  UsbPrinter,
+} from "../../hardware/hardware.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import { renderLabel } from "../print/label-render.js";
 import { settleOutcome, type PrintJobCode, type RenderLabel } from "../print/print-jobs.js";
 import type { PrintRuntime } from "../print/print-runtime.js";
 import type { ScanSource } from "../scan-source.js";
+import { playSignalTone } from "../work/signal-sound.js";
 import { draftOf, NEW_PRINTER, profileOf, type PrinterDraft } from "./printer-draft.js";
 import { makeTestCode, scannedTestCode, testLabelSpec } from "./test-label.js";
 import {
+  canonicalPort,
   InvalidSettingsError,
+  isPortName,
+  MAX_SCANNERS,
   PRINT_PURPOSES,
   printerTargetKey,
   readWorkstationSettings,
   saveWorkstationSettings,
+  sharedSerialPort,
+  soundLevel,
   type PrinterProfile,
   type PrintPurpose,
   type WorkstationSettings,
 } from "./workstation-settings.js";
 
+/** The steps of the tones' level: 0, 10, … 100. */
+const VOLUME_STEP = 10;
+
 export interface WorkstationSetupProps {
   local: LocalExecutor;
-  hardware: Pick<HardwareApi, "listUsbPrinters">;
+  hardware: Pick<
+    HardwareApi,
+    "listUsbPrinters" | "listSerialPorts" | "configureScanners" | "watchScanners"
+  >;
   printing: PrintRuntime;
   /** The floor's scanner: the code of a test label is scanned back here. */
   source: ScanSource;
   /** How the test label is rendered; the app's by default. */
   render?: RenderLabel;
+  /** «Проверить звук»: the floor's own tone at this level (0–1); the generated tone by default. */
+  playTone?: (level: number) => void;
   /** The settings were stored: the floor reads them again. */
   onSaved: (settings: WorkstationSettings) => void;
   onBack: () => void;
@@ -45,7 +64,19 @@ type TestState =
   | { kind: "match" }
   | { kind: "mismatch"; name: string; code: string };
 
-type Status = { kind: "saved" } | { kind: "save_failed" } | { kind: "invalid" };
+type Status =
+  | { kind: "saved" }
+  | { kind: "save_failed" }
+  | { kind: "invalid" }
+  | { kind: "scanners_failed" }
+  | { kind: "scanner_unadded" };
+
+/** The scanner as the shell lists it. */
+function listed(snapshot: ScannerSnapshot, config: ScannerConfig) {
+  return snapshot.scanners.some(
+    (candidate) => candidate.port === config.port && candidate.baud === config.baud,
+  );
+}
 
 /** A button that waits for an answer: still on the keyboard, and a press that does nothing. */
 const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
@@ -53,9 +84,13 @@ const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
 /**
  * The workstation setup (stage 2a spec §5.7.8): the printers of this
  * computer — where each is, its language and resolution — which one prints
- * which label, and a test print whose code is scanned back. Nothing is
- * stored until «Сохранить»; «Назад» leaves at once and says when it drops a
- * change, so the setup never holds the operator.
+ * which label, and a test print whose code is scanned back; the COM scanners
+ * with their connection as the shell reports it; the tones' level; the check
+ * of a printed label. Nothing is stored until «Сохранить», which then gives
+ * the shell the whole set of scanners — a set it would refuse is never
+ * stored, so a scanner that works is not dropped for a bad one; «Назад»
+ * leaves at once and says when it drops a change, so the setup never holds
+ * the operator.
  */
 export function WorkstationSetup({
   local,
@@ -63,6 +98,7 @@ export function WorkstationSetup({
   printing,
   source,
   render = renderLabel,
+  playTone = (level) => playSignalTone("ok", undefined, level),
   onSaved,
   onBack,
 }: WorkstationSetupProps) {
@@ -80,6 +116,41 @@ export function WorkstationSetup({
   const [saving, setSaving] = useState(false);
   // Two presses in one render see the same `saving`: the ref is the one that holds.
   const savingNow = useRef(false);
+  const [snapshot, setSnapshot] = useState<ScannerSnapshot | null>(null);
+  const [watchFailed, setWatchFailed] = useState(false);
+  // The shell refused the saved scanners (`unapplied`), or this screen has not yet
+  // given it the ones it found saved (neither): «Сохранить» gives them again.
+  // `applied`: the shell took them, and its next snapshot lists them.
+  const [unapplied, setUnapplied] = useState(false);
+  const [applied, setApplied] = useState(false);
+  const [serialPorts, setSerialPorts] = useState<string[] | null>(null);
+  const [serialFailed, setSerialFailed] = useState(false);
+  const [serialAsking, setSerialAsking] = useState(false);
+  const [scanner, setScanner] = useState({ port: "", baud: "9600" });
+  const [scannerError, setScannerError] = useState<string | null>(null);
+
+  // The configured COM scanners and their connection, as the shell reports it.
+  useEffect(() => {
+    let stop: (() => void) | null = null;
+    let cancelled = false;
+    hardware
+      .watchScanners((next) => {
+        if (!cancelled) setSnapshot(next);
+      })
+      .then(
+        (stopWatching) => {
+          if (cancelled) stopWatching();
+          else stop = stopWatching;
+        },
+        () => {
+          if (!cancelled) setWatchFailed(true);
+        },
+      );
+    return () => {
+      cancelled = true;
+      stop?.();
+    };
+  }, [hardware]);
 
   useEffect(() => {
     let cancelled = false;
@@ -153,6 +224,30 @@ export function WorkstationSetup({
     );
   };
 
+  // Only the newest ask is heard here too.
+  const serialAsk = useRef(0);
+  const refreshSerial = () => {
+    const ask = serialAsk.current + 1;
+    serialAsk.current = ask;
+    setSerialFailed(false);
+    setSerialAsking(true);
+    hardware.listSerialPorts().then(
+      (ports) => {
+        if (serialAsk.current !== ask) return;
+        setSerialAsking(false);
+        setSerialPorts(ports);
+      },
+      () => {
+        if (serialAsk.current !== ask) return;
+        setSerialAsking(false);
+        setSerialPorts([]);
+        setSerialFailed(true);
+      },
+    );
+  };
+
+  const scannersHeading = useRef<HTMLHeadingElement>(null);
+
   const change = (next: WorkstationSettings) => {
     setDraft(next);
     setStatus(null);
@@ -182,6 +277,15 @@ export function WorkstationSetup({
   }
 
   const dirty = JSON.stringify(draft) !== JSON.stringify(stored);
+  // A saved scanner the shell does not list, though nothing was given it since: it never
+  // got it (the app started before the setup was saved, or refused the set).
+  const unopened =
+    !applied &&
+    snapshot !== null &&
+    !watchFailed &&
+    stored.scanners.some((saved) => !listed(snapshot, saved));
+  const typedPort = scanner.port.trim() !== "";
+  const canSave = dirty || unapplied || unopened || typedPort;
 
   const applyEditor = () => {
     if (editor === null) return;
@@ -198,6 +302,11 @@ export function WorkstationSetup({
     );
     if (clash !== undefined) {
       setEditorError(t("floor.setup.printers.errors.duplicate", { name: clash.name }));
+      return;
+    }
+    const scanned = sharedSerialPort([profile], draft.scanners);
+    if (scanned !== null) {
+      setEditorError(t("floor.setup.printers.errors.scannerPort", { port: scanned }));
       return;
     }
     const exists = draft.printers.some((printer) => printer.id === profile.id);
@@ -244,19 +353,41 @@ export function WorkstationSetup({
   };
 
   const save = async () => {
-    if (savingNow.current || !dirty || editor !== null) return;
+    if (savingNow.current || editor !== null) return;
+    // A port typed and never added would be lost in silence: say so instead.
+    if (typedPort) {
+      setStatus({ kind: "scanner_unadded" });
+      return;
+    }
+    if (!canSave) return;
     savingNow.current = true;
     setSaving(true);
     setStatus(null);
     try {
-      await saveWorkstationSettings(local, draft);
-      setStored(draft);
-      setStatus({ kind: "saved" });
-      onSaved(draft);
-    } catch (error) {
-      setStatus(
-        error instanceof InvalidSettingsError ? { kind: "invalid" } : { kind: "save_failed" },
-      );
+      if (dirty) {
+        try {
+          await saveWorkstationSettings(local, draft);
+        } catch (error) {
+          setStatus(
+            error instanceof InvalidSettingsError ? { kind: "invalid" } : { kind: "save_failed" },
+          );
+          return;
+        }
+        setStored(draft);
+        onSaved(draft);
+      }
+      try {
+        // The whole set at once: the shell checks it before it changes anything,
+        // and a removed scanner's port is closed too.
+        await hardware.configureScanners(draft.scanners);
+        setUnapplied(false);
+        setApplied(true);
+        setStatus({ kind: "saved" });
+      } catch {
+        setUnapplied(true);
+        setApplied(false);
+        setStatus({ kind: "scanners_failed" });
+      }
     } finally {
       savingNow.current = false;
       setSaving(false);
@@ -440,6 +571,60 @@ export function WorkstationSetup({
     );
   };
 
+  const addScanner = () => {
+    const port = canonicalPort(scanner.port);
+    const baud = /^[0-9]+$/.test(scanner.baud.trim()) ? Number(scanner.baud.trim()) : 0;
+    const taken = draft.printers.find(
+      (printer) => printer.target.kind === "serial" && canonicalPort(printer.target.port) === port,
+    );
+    if (port === "") {
+      setScannerError(t("floor.setup.scanners.errors.port"));
+    } else if (!isPortName(port)) {
+      setScannerError(t("floor.setup.scanners.errors.portName"));
+    } else if (baud < 1 || baud > 4_294_967_295) {
+      setScannerError(t("floor.setup.scanners.errors.baud"));
+    } else if (draft.scanners.some((existing) => existing.port === port)) {
+      setScannerError(t("floor.setup.scanners.errors.duplicate", { port }));
+    } else if (taken !== undefined) {
+      setScannerError(t("floor.setup.scanners.errors.printerPort", { port, name: taken.name }));
+    } else if (draft.scanners.length >= MAX_SCANNERS) {
+      setScannerError(t("floor.setup.scanners.errors.tooMany", { max: MAX_SCANNERS }));
+    } else {
+      change({ ...draft, scanners: [...draft.scanners, { port, baud }] });
+      setScanner({ port: "", baud: "9600" });
+      setScannerError(null);
+    }
+  };
+
+  const connection = (configured: ScannerConfig): string => {
+    const saved = stored.scanners.some(
+      (candidate) => candidate.port === configured.port && candidate.baud === configured.baud,
+    );
+    if (!saved) return t("floor.setup.scanners.notApplied");
+    if (watchFailed) return t("floor.setup.scanners.watchFailed");
+    if (snapshot === null) return t("floor.setup.scanners.checking");
+    const known = snapshot.scanners.find(
+      (candidate) => candidate.port === configured.port && candidate.baud === configured.baud,
+    );
+    if (known === undefined) {
+      return t(
+        unapplied || unopened
+          ? "floor.setup.scanners.notOpenedRetry"
+          : "floor.setup.scanners.notOpened",
+      );
+    }
+    return t(
+      known.status === "connected"
+        ? "floor.setup.scanners.connected"
+        : "floor.setup.scanners.disconnected",
+    );
+  };
+
+  const silent = soundLevel(draft.sound) === 0;
+  const setVolume = (volume: number) => {
+    change({ ...draft, sound: { ...draft.sound, volume: Math.min(100, Math.max(0, volume)) } });
+  };
+
   const purposeOptions = [
     { value: "", label: t("floor.setup.printers.purposes.none") },
     ...draft.printers.map((printer) => ({ value: printer.id, label: printer.name })),
@@ -524,6 +709,168 @@ export function WorkstationSetup({
             ))}
           </>
         )}
+        {editor === null && (
+          <>
+            <h3 ref={scannersHeading} tabIndex={-1}>
+              {t("floor.setup.scanners.title")}
+            </h3>
+            {draft.scanners.length === 0 ? (
+              <p>{t("floor.setup.scanners.empty")}</p>
+            ) : (
+              <ul className="workstation-setup__list">
+                {draft.scanners.map((configured) => (
+                  <li key={configured.port}>
+                    <strong>
+                      {t("floor.setup.scanners.summary", {
+                        port: configured.port,
+                        baud: configured.baud,
+                      })}
+                    </strong>
+                    <span aria-live="polite">{connection(configured)}</span>
+                    <div className="standalone-form__actions">
+                      <Button
+                        size="floor"
+                        variant="secondary"
+                        aria-label={t("floor.setup.scanners.removeFor", { port: configured.port })}
+                        onClick={() => {
+                          change({
+                            ...draft,
+                            scanners: draft.scanners.filter((s) => s.port !== configured.port),
+                          });
+                          // The button that was here is gone: the keyboard stays in the section.
+                          scannersHeading.current?.focus();
+                        }}
+                      >
+                        {t("floor.setup.scanners.remove")}
+                      </Button>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <Input
+              size="floor"
+              label={t("floor.setup.scanners.port")}
+              value={scanner.port}
+              onChange={(event) => {
+                setScanner({ ...scanner, port: event.target.value });
+                setScannerError(null);
+                setStatus((now) => (now?.kind === "scanner_unadded" ? null : now));
+              }}
+            />
+            <Input
+              size="floor"
+              inputMode="numeric"
+              label={t("floor.setup.scanners.baud")}
+              value={scanner.baud}
+              onChange={(event) => {
+                setScanner({ ...scanner, baud: event.target.value });
+                setScannerError(null);
+              }}
+            />
+            <div className="workstation-setup__live" aria-live="polite">
+              {scannerError !== null && (
+                <Alert tone="error" role="presentation">
+                  {scannerError}
+                </Alert>
+              )}
+            </div>
+            <div className="standalone-form__actions">
+              <Button size="floor" variant="secondary" onClick={addScanner}>
+                {t("floor.setup.scanners.add")}
+              </Button>
+              <Button size="floor" variant="secondary" onClick={refreshSerial}>
+                {t("floor.setup.scanners.listPorts")}
+              </Button>
+            </div>
+            <div className="workstation-setup__live" aria-live="polite">
+              {serialAsking ? (
+                <p>{t("floor.setup.scanners.portsAsking")}</p>
+              ) : (
+                serialPorts !== null && (
+                  <p>
+                    {serialFailed
+                      ? t("floor.setup.scanners.portsFailed")
+                      : serialPorts.length === 0
+                        ? t("floor.setup.scanners.portsNone")
+                        : t("floor.setup.scanners.ports", { ports: serialPorts.join(", ") })}
+                  </p>
+                )
+              )}
+            </div>
+            <p>{t("floor.setup.scanners.keyboard")}</p>
+
+            <h3>{t("floor.setup.sound.title")}</h3>
+            <p aria-live="polite">
+              {silent
+                ? t("floor.setup.sound.mutedNow")
+                : t("floor.setup.sound.level", { volume: draft.sound.volume })}
+            </p>
+            <div className="standalone-form__actions">
+              {/* At a limit a button stays on the keyboard and does nothing: one that vanished would take the focus. */}
+              <Button
+                size="floor"
+                variant="secondary"
+                {...(draft.sound.muted || draft.sound.volume <= 0
+                  ? { "aria-disabled": true, style: WAITING_STYLE }
+                  : {})}
+                onClick={() => {
+                  if (!draft.sound.muted && draft.sound.volume > 0) {
+                    setVolume(draft.sound.volume - VOLUME_STEP);
+                  }
+                }}
+              >
+                {t("floor.setup.sound.quieter")}
+              </Button>
+              <Button
+                size="floor"
+                variant="secondary"
+                {...(draft.sound.muted || draft.sound.volume >= 100
+                  ? { "aria-disabled": true, style: WAITING_STYLE }
+                  : {})}
+                onClick={() => {
+                  if (!draft.sound.muted && draft.sound.volume < 100) {
+                    setVolume(draft.sound.volume + VOLUME_STEP);
+                  }
+                }}
+              >
+                {t("floor.setup.sound.louder")}
+              </Button>
+              <Button
+                size="floor"
+                variant="secondary"
+                aria-pressed={draft.sound.muted}
+                onClick={() =>
+                  change({ ...draft, sound: { ...draft.sound, muted: !draft.sound.muted } })
+                }
+              >
+                {t("floor.setup.sound.mute")}
+              </Button>
+              <Button
+                size="floor"
+                variant="secondary"
+                onClick={() => playTone(soundLevel(draft.sound))}
+              >
+                {t("floor.setup.sound.try")}
+              </Button>
+            </div>
+
+            <h3>{t("floor.setup.check.title")}</h3>
+            <p>{t("floor.setup.check.body")}</p>
+            <p>{t("floor.setup.check.later")}</p>
+            <Button
+              size="floor"
+              variant="secondary"
+              aria-pressed={draft.verifyPrintedLabel}
+              onClick={() => change({ ...draft, verifyPrintedLabel: !draft.verifyPrintedLabel })}
+            >
+              {t("floor.setup.check.toggle")}
+            </Button>
+            <p aria-live="polite">
+              {t(draft.verifyPrintedLabel ? "floor.setup.check.on" : "floor.setup.check.off")}
+            </p>
+          </>
+        )}
         <div className="workstation-setup__live" aria-live="polite">
           {status !== null && (
             <Alert tone={status.kind === "saved" ? "ok" : "error"} role="presentation">
@@ -536,7 +883,7 @@ export function WorkstationSetup({
           <Button
             size="floor"
             disabled={editor !== null}
-            {...(!dirty || saving ? { "aria-disabled": true, style: WAITING_STYLE } : {})}
+            {...(!canSave || saving ? { "aria-disabled": true, style: WAITING_STYLE } : {})}
             onClick={() => void save()}
           >
             {t("floor.setup.save")}

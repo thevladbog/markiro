@@ -925,6 +925,61 @@ describe("the level of the verdict tones", () => {
   });
 });
 
+describe("the level the setup's own sound controls give the tones", () => {
+  function Tones(props: WorkScreenProps) {
+    return (
+      <>
+        <button type="button" onClick={() => props.signal?.("error")}>
+          Сигнал
+        </button>
+        <button type="button" onClick={props.onSetup}>
+          Настроить принтер
+        </button>
+      </>
+    );
+  }
+
+  it("is the level chosen there and saved, and silence for «Без звука»", async () => {
+    const local = await floorCopies();
+    vi.mocked(playSignalTone).mockClear();
+    render(floorOf(local, handlersOf(), { workScreen: Tones }));
+    await settle();
+    await enterPlanned();
+    fireEvent.click(await screen.findByRole("button", { name: "Настроить принтер" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Тише" }));
+    fireEvent.click(screen.getByRole("button", { name: "Тише" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    });
+    await screen.findByText("Настройки сохранены.");
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сигнал" }));
+    expect(vi.mocked(playSignalTone).mock.lastCall).toEqual(["error", undefined, 0.6]);
+    fireEvent.click(screen.getByRole("button", { name: "Настроить принтер" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Без звука" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    });
+    await screen.findByText("Настройки сохранены.");
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сигнал" }));
+    expect(vi.mocked(playSignalTone).mock.lastCall).toEqual(["error", undefined, 0]);
+  });
+
+  it("is not changed by a setup that was left without saving", async () => {
+    const local = await floorCopies();
+    vi.mocked(playSignalTone).mockClear();
+    render(floorOf(local, handlersOf(), { workScreen: Tones }));
+    await settle();
+    await enterPlanned();
+    fireEvent.click(await screen.findByRole("button", { name: "Настроить принтер" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Без звука" }));
+    fireEvent.click(screen.getByRole("button", { name: "Назад без сохранения" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сигнал" }));
+    expect(vi.mocked(playSignalTone).mock.lastCall).toEqual(["error", undefined, 0.8]);
+  });
+});
+
 describe("the operator a sign-in hands over", () => {
   it("is a new object of identity fields only each time, never the credential's row", async () => {
     const context = {
