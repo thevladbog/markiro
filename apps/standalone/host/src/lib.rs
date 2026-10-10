@@ -3,6 +3,7 @@
 
 pub mod audit;
 pub mod auth;
+pub mod backup;
 pub mod clock;
 pub mod config;
 pub mod db;

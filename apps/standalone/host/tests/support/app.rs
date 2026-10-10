@@ -79,6 +79,11 @@ impl TestApp {
     pub async fn send(&self, request: Request<Body>) -> (StatusCode, Value) {
         self.send_from(LOOPBACK, request).await
     }
+
+    /// The temporary data folder: `host.db` is in it.
+    pub fn dir(&self) -> &std::path::Path {
+        self._dir.path()
+    }
 }
 
 /// A request builder with the protocol header already set.
