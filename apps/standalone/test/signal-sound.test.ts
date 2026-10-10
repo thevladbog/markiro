@@ -29,7 +29,7 @@ function fakeAudio(state: AudioContextState = "running") {
     createOscillator: () => oscillator,
     createGain: () => gain,
   };
-  return { audio, oscillator, frequency };
+  return { audio, oscillator, frequency, gain };
 }
 
 afterEach(() => {
@@ -60,6 +60,32 @@ describe("the tone of a verdict", () => {
     const { audio } = fakeAudio("running");
     playSignalTone("ok", () => audio as unknown as AudioContext);
     expect(audio.resume).not.toHaveBeenCalled();
+  });
+
+  it("plays at the workstation's level, and not at all when muted", () => {
+    const quiet = fakeAudio();
+    playSignalTone("ok", () => quiet.audio as unknown as AudioContext, 0.4);
+    expect(quiet.gain.gain.setValueAtTime).toHaveBeenCalledWith(0.4, 10);
+    const full = fakeAudio();
+    playSignalTone("ok", () => full.audio as unknown as AudioContext);
+    expect(full.gain.gain.setValueAtTime).toHaveBeenCalledWith(1, 10);
+    const muted = fakeAudio();
+    const asked = vi.fn(() => muted.audio as unknown as AudioContext);
+    playSignalTone("error", asked, 0);
+    expect(asked).not.toHaveBeenCalled();
+    expect(muted.oscillator.start).not.toHaveBeenCalled();
+  });
+
+  it("never plays louder than full, and not at all at an unreadable level", () => {
+    const loud = fakeAudio();
+    playSignalTone("ok", () => loud.audio as unknown as AudioContext, 3);
+    expect(loud.gain.gain.setValueAtTime).toHaveBeenCalledWith(1, 10);
+    for (const level of [Number.NaN, -0.5]) {
+      const none = fakeAudio();
+      const asked = vi.fn(() => none.audio as unknown as AudioContext);
+      playSignalTone("ok", asked, level);
+      expect(asked).not.toHaveBeenCalled();
+    }
   });
 
   it("is silent, and throws nothing, without sound", () => {

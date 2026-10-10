@@ -5,7 +5,7 @@ import type { SignalTone } from "@markiro/ui";
  * `signal-sound.ts`): generated, not loaded — the station has no audio
  * files and fetches nothing — and distinct enough that the sound alone tells
  * a duplicate from an error while the operator watches the line, not the
- * screen. The volume and muting of the workstation's setup are plan 2a7's.
+ * screen. Its level is the workstation's sound setting (`soundLevel`).
  */
 export const TONES: Record<SignalTone, { hz: number; seconds: number; type: OscillatorType }> = {
   ok: { hz: 880, seconds: 0.12, type: "sine" },
@@ -28,13 +28,16 @@ function audioContext(): AudioContext | null {
 }
 
 /**
- * Plays a verdict's tone. Never throws: a station without working sound
- * keeps scanning, and the screen says the verdict in words and colour too.
+ * Plays a verdict's tone at `level` (0–1; 0 — muted, nothing plays). Never
+ * throws: a station without working sound keeps scanning, and the screen
+ * says the verdict in words and colour too.
  */
 export function playSignalTone(
   tone: SignalTone,
   context: () => AudioContext | null = audioContext,
+  level = 1,
 ): void {
+  if (!(level > 0)) return;
   try {
     const audio = context();
     if (audio === null) return;
@@ -48,7 +51,7 @@ export function playSignalTone(
     const gain = audio.createGain();
     oscillator.type = spec.type;
     oscillator.frequency.setValueAtTime(spec.hz, audio.currentTime);
-    gain.gain.setValueAtTime(1, audio.currentTime);
+    gain.gain.setValueAtTime(Math.min(level, 1), audio.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.0001, audio.currentTime + spec.seconds);
     oscillator.connect(gain);
     gain.connect(audio.destination);

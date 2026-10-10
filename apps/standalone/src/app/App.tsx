@@ -10,6 +10,7 @@ import {
   mergeScanSources,
   type ScanSource,
 } from "../floor/scan-source.js";
+import { applySavedScanners } from "../floor/setup/workstation-settings.js";
 import type { FloorOperator } from "../floor/sign-in.js";
 import { createTauriHardware, type HardwareApi } from "../hardware/hardware.js";
 
@@ -158,6 +159,11 @@ export function App({
       mergeScanSources(createKeyboardWedgeSource(), createComScanSource(hardwareApi.onScan)),
     [scanSource, hardwareApi],
   );
+  // The COM scanners the workstation's settings name, once the app starts;
+  // the setup gives the shell a changed set itself.
+  useEffect(() => {
+    void applySavedScanners(localDb, hardwareApi.configureScanners);
+  }, [localDb, hardwareApi]);
   const kiosk = useMemo(
     () => lockdown ?? createLockdownLifecycle({ dev: import.meta.env.DEV }),
     [lockdown],

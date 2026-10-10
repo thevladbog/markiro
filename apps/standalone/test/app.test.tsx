@@ -26,6 +26,10 @@ import {
 import type { FloorNotice } from "../src/app/shell.js";
 import type { FloorAppProps } from "../src/floor/FloorApp.js";
 import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
+import {
+  DEFAULT_WORKSTATION_SETTINGS,
+  saveWorkstationSettings,
+} from "../src/floor/setup/workstation-settings.js";
 import type { HardwareApi } from "../src/hardware/hardware.js";
 import type { HostApi } from "../src/host/api.js";
 import { HostError } from "../src/host/client.js";
@@ -53,6 +57,7 @@ import {
   SESSION,
 } from "./support/fixtures.js";
 import { km, rows, unsentScans } from "./support/floor-work.js";
+import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb, openLocalDbFile } from "./support/local-db.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
@@ -2351,6 +2356,25 @@ describe("the operator on the floor", () => {
     await waitFor(() => expect(shell.subscriptions.length).toBeGreaterThan(0));
     scan("MRK-000742");
     expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
+  });
+
+  it("gives the shell the COM scanners of the workstation's settings when it starts", async () => {
+    const { executor } = openLocalDb();
+    await saveWorkstationSettings(executor, {
+      ...DEFAULT_WORKSTATION_SETTINGS,
+      scanners: [{ port: "COM3", baud: 9600 }],
+    });
+    const { hardware } = fakeHardware();
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host: fakeHost(),
+      local: executor,
+      hardware,
+    });
+    await waitFor(() =>
+      expect(hardware.configureScanners).toHaveBeenCalledWith([{ port: "COM3", baud: 9600 }]),
+    );
   });
 
   it("starts the wait again on a touch of the screen, not only on a key", async () => {
