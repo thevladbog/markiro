@@ -32,6 +32,8 @@ export interface ShiftListProps {
   onHostError: (error: unknown) => void;
   onNew: () => void;
   onSignOut: () => void;
+  /** The workstation setup (plan 2a7); none — no button. */
+  onSetup?: () => void;
 }
 
 type Copies = { kind: "loading" } | { kind: "failed" } | { kind: "ready"; copies: ShiftCopy[] };
@@ -63,6 +65,7 @@ export function ShiftList({
   onHostError,
   onNew,
   onSignOut,
+  onSetup,
 }: ShiftListProps) {
   const { t } = useTranslation();
   const { hostId, deviceId } = pairing;
@@ -212,6 +215,11 @@ export function ShiftList({
           <Button size="floor" disabled={busy || !online} onClick={onNew}>
             {t("floor.shifts.new")}
           </Button>
+          {onSetup !== undefined && (
+            <Button size="floor" variant="secondary" disabled={busy} onClick={onSetup}>
+              {t("floor.shifts.setup")}
+            </Button>
+          )}
           {/* Never held by an entry: one that never settles must not trap the station here. */}
           <Button size="floor" variant="secondary" onClick={onSignOut}>
             {t("floor.operator.signOut")}

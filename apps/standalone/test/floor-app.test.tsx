@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useEffect, type ComponentType } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -16,7 +16,12 @@ import {
   readShiftCopy,
   replaceShiftCopies,
 } from "../src/floor/shifts/shift-copies.js";
+import {
+  readWorkstationSettings,
+  saveWorkstationSettings,
+} from "../src/floor/setup/workstation-settings.js";
 import { readOperatorCopy, signInWithPin } from "../src/floor/sign-in.js";
+import { playSignalTone } from "../src/floor/work/signal-sound.js";
 import { WorkScreen, type WorkScreenProps } from "../src/floor/work/WorkScreen.js";
 import { createSystemAwake } from "../src/hardware/awake.js";
 import { HostError } from "../src/host/client.js";
@@ -40,6 +45,12 @@ import { DEVICE_ID, DEVICE_STATUS, HOST_ID } from "./support/fixtures.js";
 import { enteredShift } from "./support/floor-work.js";
 import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb } from "./support/local-db.js";
+
+// The tones are the work screen's; the floor only gives them a level.
+vi.mock("../src/floor/work/signal-sound.js", async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  playSignalTone: vi.fn(),
+}));
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
 const testModuleUrl = import.meta.url;
@@ -144,6 +155,7 @@ function floorOf(
         requestFacts={handlers.requestFacts}
         source={options.source ?? SILENT_SOURCE}
         printing={handlers.printing}
+        hardware={handlers.hardware}
         awake={handlers.awake}
         {...(options.idleTimeoutMs === undefined ? {} : { idleTimeoutMs: options.idleTimeoutMs })}
         {...(options.workScreen === undefined ? {} : { workScreen: options.workScreen })}
@@ -173,6 +185,7 @@ function handlersOf(
     })),
     requestFacts: vi.fn(),
     printing: createPrintRuntime(fakeHardware().hardware.printBytes),
+    hardware: fakeHardware().hardware,
     awake: createSystemAwake(vi.fn(async () => undefined)),
     dispatch: vi.fn<(action: ShellAction) => void>(),
     onSignOut: vi.fn<(notice: FloorNotice | null) => void>(),
@@ -663,6 +676,252 @@ describe("the work screen's product", () => {
     await enterPlanned();
     expect(await screen.findByText("Молоко из снимка · GTIN 04600682000013")).toBeTruthy();
     expect(screen.queryByText(/Молоко 3,2% 0,9 л/)).toBeNull();
+  });
+});
+
+describe("the workstation setup on the floor", () => {
+  it("opens from the list of shifts and comes back to it", async () => {
+    const handlers = handlersOf();
+    render(floorOf(await floorCopies(), handlers));
+    fireEvent.click(await screen.findByRole("button", { name: "Рабочее место" }));
+    expect(await screen.findByRole("heading", { name: "Принтеры" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(await screen.findByRole("button", { name: "Открыть" })).toBeTruthy();
+    expect(types(handlers)).not.toContain("work_entered");
+  });
+
+  it("opens from a label's recovery once the work settled, and comes back to the same shift", async () => {
+    const handlers = handlersOf();
+    const work = holdingWork();
+    function Work(props: WorkScreenProps) {
+      return (
+        <>
+          <work.Work {...props} />
+          <button type="button" onClick={props.onSetup}>
+            Настроить принтер
+          </button>
+        </>
+      );
+    }
+    render(floorOf(await floorCopies(), handlers, { workScreen: Work }));
+    await enterPlanned();
+    await screen.findByRole("button", { name: "Работа OCT26-005/S" });
+    await work.tracked();
+    fireEvent.click(screen.getByRole("button", { name: "Настроить принтер" }));
+    await settle();
+    // The work it handed over holds the setup back, as it holds any leave.
+    expect(screen.queryByRole("heading", { name: "Принтеры" })).toBeNull();
+    expect(work.leaving.at(-1)).toBe(true);
+    await work.release();
+    expect(await screen.findByRole("heading", { name: "Принтеры" })).toBeTruthy();
+    const workActions = () => types(handlers).filter((type) => type.startsWith("work_"));
+    expect(workActions()).toEqual(["work_entered", "work_left"]);
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(await screen.findByRole("button", { name: "Работа OCT26-005/S" })).toBeTruthy();
+    expect(workActions()).toEqual(["work_entered", "work_left", "work_entered"]);
+    expect(handlers.dispatch).toHaveBeenLastCalledWith({
+      type: "work_entered",
+      sessionId: 1,
+      shiftId: PLANNED.id,
+    });
+  });
+});
+
+/** A work screen that holds nothing and has the «Настроить принтер» entry of a label's recovery. */
+function WorkWithSetup(props: WorkScreenProps) {
+  return (
+    <>
+      <p>{`Смена ${props.shift.copy.number}`}</p>
+      <button type="button" onClick={props.onSetup}>
+        Настроить принтер
+      </button>
+    </>
+  );
+}
+
+describe("what the workstation setup does to the floor around it", () => {
+  async function inTheSetupFromTheWork(options: Options = {}) {
+    const local = await floorCopies();
+    const handlers = handlersOf();
+    const view = render(floorOf(local, handlers, { workScreen: WorkWithSetup, ...options }));
+    await enterPlanned();
+    fireEvent.click(await screen.findByRole("button", { name: "Настроить принтер" }));
+    await screen.findByRole("heading", { name: "Принтеры" });
+    return { local, handlers, view };
+  }
+
+  it("reads the shift again on the way back: one the office closed meanwhile is not entered", async () => {
+    const { local, handlers } = await inTheSetupFromTheWork();
+    await replaceShiftCopies(
+      local,
+      PAIRING,
+      [{ ...OPENED, status: "closed", closedAt: "2026-10-09T18:00:00Z" }],
+      SEEN + 1,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(await screen.findByText("Смену OCT26-005/S закрыли в офисе.")).toBeTruthy();
+    expect(screen.queryByText("Смена OCT26-005/S")).toBeNull();
+    expect(types(handlers).filter((type) => type === "work_entered")).toHaveLength(1);
+  });
+
+  it("goes back to the list when the shift cannot be read again, and enters nothing", async () => {
+    const { local, handlers, view } = await inTheSetupFromTheWork();
+    const broken: LocalExecutor = {
+      ...local,
+      query: (sql, params, row) =>
+        sql.includes("snapshot")
+          ? Promise.reject(new Error("disk I/O error"))
+          : local.query(sql, params, row),
+    };
+    view.rerender(floorOf(broken, handlers, { workScreen: WorkWithSetup }));
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
+    expect(types(handlers).filter((type) => type === "work_entered")).toHaveLength(1);
+  });
+
+  it("enters the shift once however many times «Назад» is pressed", async () => {
+    const { handlers } = await inTheSetupFromTheWork();
+    const back = screen.getByRole("button", { name: "Назад" });
+    await act(async () => {
+      fireEvent.click(back);
+      fireEvent.click(back);
+    });
+    expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
+    expect(types(handlers).filter((type) => type === "work_entered")).toHaveLength(2);
+  });
+
+  it("tells the shell the work ended before the setup shows, and not again on the list's setup", async () => {
+    const { handlers } = await inTheSetupFromTheWork();
+    expect(types(handlers).filter((type) => type === "work_left")).toHaveLength(1);
+    const local = await floorCopies();
+    const fromList = handlersOf();
+    render(floorOf(local, fromList));
+    fireEvent.click(await screen.findByRole("button", { name: "Рабочее место" }));
+    await screen.findByRole("heading", { name: "Принтеры" });
+    expect(types(fromList).filter((type) => type.startsWith("work_"))).toEqual([]);
+  });
+
+  it("lets the office's close of the shift outrank a setup that still waits for the work", async () => {
+    const local = await floorCopies();
+    const handlers = handlersOf();
+    const work = holdingWork();
+    function Work(props: WorkScreenProps) {
+      return (
+        <>
+          <work.Work {...props} />
+          <button type="button" onClick={props.onSetup}>
+            Настроить принтер
+          </button>
+        </>
+      );
+    }
+    const view = render(floorOf(local, handlers, { workScreen: Work }));
+    await enterPlanned();
+    await screen.findByRole("button", { name: "Работа OCT26-005/S" });
+    await work.tracked();
+    fireEvent.click(screen.getByRole("button", { name: "Настроить принтер" }));
+    await settle();
+    await replaceShiftCopies(
+      local,
+      PAIRING,
+      [{ ...OPENED, status: "closed", closedAt: "2026-10-09T18:00:00Z" }],
+      SEEN + 1,
+    );
+    view.rerender(
+      floorOf(local, handlers, { workScreen: Work, shiftReads: { done: 2, failed: false } }),
+    );
+    await settle();
+    await work.release();
+    expect(await screen.findByText("Смену OCT26-005/S закрыли в офисе.")).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Принтеры" })).toBeNull();
+  });
+
+  it("signs the operator out as idle in the setup as on the list", async () => {
+    const local = await floorCopies();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const handlers = handlersOf();
+    render(floorOf(local, handlers, { idleTimeoutMs: 3_000 }));
+    fireEvent.click(await screen.findByRole("button", { name: "Рабочее место" }));
+    await screen.findByRole("heading", { name: "Принтеры" });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_100);
+    });
+    expect(handlers.onSignOut).toHaveBeenCalledWith("idle");
+  });
+
+  it("signs the operator out of a setup opened from the work, after the work", async () => {
+    const { handlers } = await inTheSetupFromTheWork({ idleTimeoutMs: 3_000 });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    fireEvent.pointerDown(window);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_100);
+    });
+    expect(handlers.onSignOut).toHaveBeenCalledWith("idle");
+  });
+});
+
+describe("the level of the verdict tones", () => {
+  function Tones(props: WorkScreenProps) {
+    return (
+      <>
+        <button type="button" onClick={() => props.signal?.("ok")}>
+          Сигнал
+        </button>
+        <button type="button" onClick={props.onSetup}>
+          Настроить принтер
+        </button>
+      </>
+    );
+  }
+
+  async function inTheWork(sound?: { muted: boolean; volume: number }) {
+    const local = await floorCopies();
+    if (sound !== undefined) {
+      const settings = await readWorkstationSettings(local);
+      await saveWorkstationSettings(local, { ...settings, sound });
+    }
+    vi.mocked(playSignalTone).mockClear();
+    render(floorOf(local, handlersOf(), { workScreen: Tones }));
+    await enterPlanned();
+    await screen.findByRole("button", { name: "Сигнал" });
+    await settle();
+    return local;
+  }
+
+  const lastLevel = () => vi.mocked(playSignalTone).mock.lastCall;
+
+  it("plays at the default level on a computer with no sound setting", async () => {
+    await inTheWork();
+    fireEvent.click(screen.getByRole("button", { name: "Сигнал" }));
+    expect(lastLevel()).toEqual(["ok", undefined, 0.8]);
+  });
+
+  it("plays at the stored level, and none when the sound is muted", async () => {
+    await inTheWork({ muted: false, volume: 30 });
+    fireEvent.click(screen.getByRole("button", { name: "Сигнал" }));
+    expect(lastLevel()).toEqual(["ok", undefined, 0.3]);
+    cleanup();
+    await inTheWork({ muted: true, volume: 30 });
+    fireEvent.click(screen.getByRole("button", { name: "Сигнал" }));
+    expect(lastLevel()).toEqual(["ok", undefined, 0]);
+  });
+
+  it("takes the level the setup stored, at once, back in the shift", async () => {
+    const local = await inTheWork();
+    const settings = await readWorkstationSettings(local);
+    await saveWorkstationSettings(local, { ...settings, sound: { muted: false, volume: 40 } });
+    fireEvent.click(screen.getByRole("button", { name: "Настроить принтер" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Добавить принтер" }));
+    fireEvent.change(screen.getByLabelText("Название"), { target: { value: "Zebra" } });
+    fireEvent.change(screen.getByLabelText("Адрес принтера"), { target: { value: "zebra" } });
+    fireEvent.click(screen.getByRole("button", { name: "Готово" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Сохранить" }));
+    });
+    await screen.findByText("Настройки сохранены.");
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сигнал" }));
+    expect(lastLevel()).toEqual(["ok", undefined, 0.4]);
   });
 });
 
@@ -1453,6 +1712,7 @@ describe("the operator the copies hold, read after every sync", () => {
           requestFacts={handlers.requestFacts}
           source={SILENT_SOURCE}
           printing={handlers.printing}
+          hardware={handlers.hardware}
           awake={handlers.awake}
           dispatch={handlers.dispatch}
           onSignOut={handlers.onSignOut}

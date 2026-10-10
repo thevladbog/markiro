@@ -635,6 +635,7 @@ export function App({
               requestFacts={requestFacts}
               source={scanner}
               printing={printing}
+              hardware={hardwareApi}
               awake={awake}
               {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
               dispatch={dispatch}

@@ -1,0 +1,724 @@
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+
+import { sampleLabelData } from "@markiro/domain";
+import { ThemeProvider } from "@markiro/ui";
+
+import { renderLabel } from "../src/floor/print/label-render.js";
+import { readPrintJob, type RenderLabel } from "../src/floor/print/print-jobs.js";
+import { printerForAgain } from "../src/floor/print/print-resolution.js";
+import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
+import { NEW_PRINTER, profileOf } from "../src/floor/setup/printer-draft.js";
+import { makeTestCode, scannedTestCode, testLabelSpec } from "../src/floor/setup/test-label.js";
+import { WorkstationSetup } from "../src/floor/setup/WorkstationSetup.js";
+import {
+  InvalidSettingsError,
+  readWorkstationSettings,
+  type WorkstationSettings,
+} from "../src/floor/setup/workstation-settings.js";
+import type { LocalExecutor } from "../src/local/executor.js";
+import { fakeHardware } from "./support/hardware.js";
+import { openLocalDb } from "./support/local-db.js";
+import {
+  closeBoxWithLabel,
+  fakeRaster,
+  fakeRender,
+  jobRows,
+  manualRuntime,
+  printingSettings,
+  printStation,
+  setUpPrinting,
+  TSC,
+  ZEBRA,
+} from "./support/printing.js";
+import { PAIRING } from "./support/floor-work.js";
+
+function fakeSource() {
+  let listener: ScanListener | null = null;
+  const source: ScanSource = {
+    start(next) {
+      listener = next;
+      return () => {
+        listener = null;
+      };
+    },
+    clearPendingInput: () => undefined,
+    setManualTextEntryActive: () => undefined,
+  };
+  return {
+    source,
+    read: (raw: string) =>
+      act(() => {
+        listener?.(raw);
+      }),
+  };
+}
+
+interface Options {
+  local?: LocalExecutor;
+  shell?: ReturnType<typeof fakeHardware>;
+  render?: RenderLabel;
+  /** The runtime whose limit the test runs out by hand. */
+  runtime?: ReturnType<typeof manualRuntime>;
+}
+
+async function setup(options: Options = {}) {
+  const local = options.local ?? openLocalDb().executor;
+  const shell = options.shell ?? fakeHardware();
+  const scanner = fakeSource();
+  const onSaved = vi.fn<(settings: WorkstationSettings) => void>();
+  const onBack = vi.fn();
+  render(
+    <ThemeProvider>
+      <WorkstationSetup
+        local={local}
+        hardware={shell.hardware}
+        printing={(options.runtime ?? manualRuntime(shell.hardware)).runtime}
+        source={scanner.source}
+        render={options.render ?? fakeRender}
+        onSaved={onSaved}
+        onBack={onBack}
+      />
+    </ThemeProvider>,
+  );
+  await screen.findByRole("heading", { name: "Принтеры" });
+  return { local, shell, scanner, onSaved, onBack };
+}
+
+/** The real render over a rasterizer that needs no canvas: the test label is ASCII and never asks it. */
+const realRender: RenderLabel = (spec, fields, printer) =>
+  renderLabel(spec, fields, printer, fakeRaster);
+
+function type(label: string, value: string): void {
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+}
+
+function click(name: string): void {
+  fireEvent.click(screen.getByRole("button", { name }));
+}
+
+describe("the printer form", () => {
+  it("describes a profile, or names the first thing wrong", () => {
+    const newId = () => "new-1";
+    expect(
+      profileOf(
+        { ...NEW_PRINTER, name: " Zebra ", host: " 192.168.1.50 ", tcpPort: "9100" },
+        newId,
+      ),
+    ).toEqual({
+      profile: {
+        id: "new-1",
+        name: "Zebra",
+        target: { kind: "tcp", host: "192.168.1.50", port: 9100 },
+        language: "zpl",
+        dpi: 203,
+      },
+    });
+    expect(
+      profileOf(
+        { ...NEW_PRINTER, id: "tsc", name: "TSC", kind: "serial", serialPort: "com4", dpi: "300" },
+        newId,
+      ),
+    ).toEqual({
+      profile: {
+        id: "tsc",
+        name: "TSC",
+        target: { kind: "serial", port: "COM4", baud: 9600 },
+        language: "zpl",
+        dpi: 300,
+      },
+    });
+    const wrong = (patch: Partial<typeof NEW_PRINTER>) =>
+      profileOf({ ...NEW_PRINTER, name: "Zebra", host: "zebra", ...patch }, newId);
+    expect(wrong({ name: " " })).toEqual({ error: "name" });
+    expect(wrong({ host: "" })).toEqual({ error: "host" });
+    expect(wrong({ tcpPort: "0" })).toEqual({ error: "port" });
+    expect(wrong({ tcpPort: "65536" })).toEqual({ error: "port" });
+    expect(wrong({ tcpPort: "91a" })).toEqual({ error: "port" });
+    expect(wrong({ kind: "serial", serialPort: "" })).toEqual({ error: "serialPort" });
+    expect(wrong({ kind: "serial", serialPort: "COM4", baud: "0" })).toEqual({ error: "baud" });
+    expect(wrong({ kind: "usb", usbPrinter: "" })).toEqual({ error: "usbPrinter" });
+  });
+});
+
+describe("the test label", () => {
+  it("is a random code of unmistakable letters, all ASCII, read back without the scanner's prefix", () => {
+    const code = makeTestCode((bytes) => bytes.set([0, 1, 2, 19, 20, 39]));
+    expect(code).toBe("MKR-347Y3Y");
+    expect(makeTestCode()).toMatch(/^MKR-[34789ACDEFHKMNPRTWXY]{6}$/);
+    const spec = testLabelSpec(code, "tspl");
+    expect(spec).toMatchObject({ widthMm: 58, heightMm: 40, language: "tspl" });
+    expect(JSON.stringify(spec)).toMatch(/^[\x20-\x7e]*$/);
+    expect(scannedTestCode(` ]C0${code}\r`)).toBe(code);
+  });
+});
+
+describe("the workstation setup", () => {
+  it("adds a network printer, gives it the box label and stores the settings only on save", async () => {
+    const { local, onSaved } = await setup();
+    expect(screen.getByText("Принтеров пока нет.")).toBeTruthy();
+    click("Добавить принтер");
+    type("Название", "Zebra у линии");
+    type("Адрес принтера", "192.168.1.50");
+    click("Готово");
+    expect(screen.getByText("Сеть: 192.168.1.50:9100 · ZPL · 203 dpi")).toBeTruthy();
+    const box = screen.getByLabelText("Этикетка короба");
+    fireEvent.change(box, {
+      target: {
+        value: within(box).getByRole("option", { name: "Zebra у линии" }).getAttribute("value"),
+      },
+    });
+    expect((await readWorkstationSettings(local)).printers).toEqual([]);
+    expect(screen.getByRole("button", { name: "Назад без сохранения" })).toBeTruthy();
+    await act(async () => {
+      click("Сохранить");
+    });
+    expect(await screen.findByText("Настройки сохранены.")).toBeTruthy();
+    const stored = await readWorkstationSettings(local);
+    expect(stored.printers).toEqual([
+      expect.objectContaining({
+        name: "Zebra у линии",
+        target: { kind: "tcp", host: "192.168.1.50", port: 9100 },
+        language: "zpl",
+        dpi: 203,
+      }),
+    ]);
+    expect(stored.assignments.box).toBe(stored.printers[0]?.id);
+    expect(onSaved).toHaveBeenCalledWith(stored);
+    expect(screen.getByRole("button", { name: "Назад" })).toBeTruthy();
+  });
+
+  it("refuses a form with a mistake, and a second profile of one printer", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    await setup({ local });
+    click("Добавить принтер");
+    type("Название", "Ещё Zebra");
+    type("Адрес принтера", "192.168.1.50");
+    type("Порт", "70000");
+    click("Готово");
+    expect(screen.getByText("Порт — целое число от 1 до 65 535.")).toBeTruthy();
+    type("Порт", "9100");
+    click("Готово");
+    expect(screen.getByText("Этот принтер уже есть в списке: «Zebra у линии».")).toBeTruthy();
+    click("Отмена");
+    expect(screen.queryByText("Новый принтер")).toBeNull();
+  });
+
+  it("edits a printer, and a removed printer prints nothing any more", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local, {
+      assignments: { box: "zebra", pallet: "zebra", duplicate: "tsc" },
+    });
+    await setup({ local });
+    click("Изменить принтер «TSC на COM4»");
+    fireEvent.change(screen.getByLabelText("Разрешение"), { target: { value: "203" } });
+    click("Готово");
+    expect(screen.getByText("COM4, 9600 бод · TSPL · 203 dpi")).toBeTruthy();
+    click("Удалить принтер «Zebra у линии»");
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText("Настройки сохранены.");
+    expect(await readWorkstationSettings(local)).toEqual(
+      printingSettings({
+        printers: [{ ...TSC, dpi: 203 }],
+        assignments: { box: null, pallet: null, duplicate: "tsc" },
+      }),
+    );
+  });
+
+  it("lists the Windows queues for a USB printer, and says when the spooler does not answer", async () => {
+    const shell = fakeHardware();
+    vi.mocked(shell.hardware.listUsbPrinters)
+      .mockResolvedValueOnce([{ name: "ZDesigner GK420d", port: "USB001" }])
+      .mockRejectedValueOnce(new Error("spooler_unavailable"));
+    await setup({ shell });
+    click("Добавить принтер");
+    type("Название", "Zebra USB");
+    fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "usb" } });
+    await screen.findByRole("option", { name: "ZDesigner GK420d" });
+    type("Принтер Windows", "ZDesigner GK420d");
+    click("Обновить список принтеров");
+    expect(await screen.findByText("Служба печати Windows не ответила.")).toBeTruthy();
+    click("Готово");
+    expect(screen.getByText("Принтер Windows: ZDesigner GK420d · ZPL · 203 dpi")).toBeTruthy();
+  });
+
+  it("prints a test label and checks its code by the scanner, never showing another scan", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    // The real render: the test label is ASCII, so no text goes to the rasterizer.
+    const render = vi.fn<RenderLabel>((spec, fields, printer) =>
+      renderLabel(spec, fields, printer, fakeRaster),
+    );
+    const { shell, scanner } = await setup({ local, render });
+    await act(async () => {
+      click("Пробная печать на «Zebra у линии»");
+    });
+    expect(
+      await screen.findByText("Пробная этикетка ушла на «Zebra у линии». Отсканируйте её код."),
+    ).toBeTruthy();
+    const spec = render.mock.calls[0]?.[0];
+    const code = JSON.stringify(spec).match(/MKR-[A-Z0-9]{6}/)?.[0] ?? "";
+    expect(spec).toEqual(testLabelSpec(code, "zpl"));
+    expect(render.mock.calls[0]?.[2]).toEqual(ZEBRA);
+    expect(shell.sends).toEqual([
+      { target: ZEBRA.target, text: expect.stringContaining(`^FD${code}^FS`) },
+    ]);
+    await scanner.read("0042-badge-secret");
+    expect(screen.getByText("Это не код пробной этикетки. Отсканируйте её код.")).toBeTruthy();
+    expect(screen.queryByText(/badge-secret/)).toBeNull();
+    // The check stays open for the right code.
+    await scanner.read(`]C0${code}`);
+    expect(screen.getByText("Код совпал: принтер и сканер работают.")).toBeTruthy();
+  });
+
+  it("says why a test label did not print", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    const shell = fakeHardware(async () => ({ sent: false, code: "not_sent" }));
+    await setup({ local, shell });
+    await act(async () => {
+      click("Пробная печать на «TSC на COM4»");
+    });
+    expect(
+      await screen.findByText(
+        "Пробная этикетка не напечатана. Принтер не принял задание: этикетка не напечатана.",
+      ),
+    ).toBeTruthy();
+  });
+
+  it("leaves at once, dropping what was not saved", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    const { onBack } = await setup({ local });
+    click("Удалить принтер «TSC на COM4»");
+    click("Назад без сохранения");
+    expect(onBack).toHaveBeenCalledTimes(1);
+    expect((await readWorkstationSettings(local)).printers).toEqual([ZEBRA, TSC]);
+  });
+
+  it("says when the settings cannot be read, and lets the operator go back", async () => {
+    const { executor } = openLocalDb();
+    const broken: LocalExecutor = {
+      ...executor,
+      query: async () => {
+        throw new Error("disk I/O error");
+      },
+    };
+    const onBack = vi.fn();
+    render(
+      <ThemeProvider>
+        <WorkstationSetup
+          local={broken}
+          hardware={fakeHardware().hardware}
+          printing={manualRuntime(fakeHardware().hardware).runtime}
+          source={fakeSource().source}
+          onSaved={vi.fn()}
+          onBack={onBack}
+        />
+      </ThemeProvider>,
+    );
+    expect(
+      await screen.findByText(
+        "Настройки рабочего места не прочитались. Вернитесь и откройте их снова.",
+      ),
+    ).toBeTruthy();
+    click("Назад");
+    expect(onBack).toHaveBeenCalledTimes(1);
+  });
+
+  it("says a failed save and keeps the changes on the screen", async () => {
+    const { executor } = openLocalDb();
+    const failing: LocalExecutor = {
+      ...executor,
+      transaction: async () => {
+        throw new Error("database or disk is full");
+      },
+    };
+    await setup({ local: failing });
+    click("Добавить принтер");
+    type("Название", "Zebra");
+    type("Адрес принтера", "zebra.local");
+    click("Готово");
+    await act(async () => {
+      click("Сохранить");
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByText("Настройки не сохранились: база этого компьютера не ответила."),
+      ).toBeTruthy(),
+    );
+    expect(screen.getByText("Сеть: zebra.local:9100 · ZPL · 203 dpi")).toBeTruthy();
+  });
+});
+
+describe("the test label is a sample, never a label of the line", () => {
+  it("holds no SSCC, GTIN or code of a product, only its own test code", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    const { shell } = await setup({ local, render: realRender });
+    await act(async () => {
+      click("Пробная печать на «Zebra у линии»");
+    });
+    await screen.findByText(/Пробная этикетка ушла/);
+    const text = shell.sends[0]?.text ?? "";
+    expect(text).toContain("^FDMKR-");
+    // The sample data of the model is handed over, but no element reads a field of it.
+    expect(text).not.toContain(sampleLabelData().sscc);
+    expect(text).not.toMatch(/[0-9]{14}/);
+  });
+});
+
+describe("the test print and the limit of a send", () => {
+  it("does not start a second test label while one is on its way, and never holds the leaving", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    const shell = fakeHardware();
+    shell.holdSends();
+    const prepared = vi.fn<RenderLabel>(fakeRender);
+    const { onBack } = await setup({ local, shell, render: prepared });
+    const test = screen.getByRole("button", { name: "Пробная печать на «Zebra у линии»" });
+    await act(async () => {
+      fireEvent.click(test);
+      fireEvent.click(test);
+    });
+    await waitFor(() => expect(shell.heldSends()).toBe(1));
+    expect(shell.sends).toHaveLength(1);
+    // Still on the keyboard, and told in words; a press does nothing.
+    expect(test.getAttribute("aria-disabled")).toBe("true");
+    expect((test as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.getByText("Пробная этикетка отправляется…")).toBeTruthy();
+    fireEvent.click(test);
+    expect(prepared).toHaveBeenCalledTimes(1);
+    click("Назад");
+    expect(onBack).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      shell.releaseSend({ sent: true });
+    });
+    expect(await screen.findByText(/Пробная этикетка ушла/)).toBeTruthy();
+    expect(test.getAttribute("aria-disabled")).toBeNull();
+    // A second label queued behind the first would go out now: there is none.
+    expect(shell.sends).toHaveLength(1);
+    expect(prepared).toHaveBeenCalledTimes(1);
+  });
+
+  it("says a send that did not answer in time is unknown, and one that never started is busy", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    const shell = fakeHardware();
+    shell.holdSends();
+    const runtime = manualRuntime(shell.hardware);
+    await setup({ local, shell, runtime });
+    await act(async () => {
+      click("Пробная печать на «Zebra у линии»");
+    });
+    await waitFor(() => expect(shell.heldSends()).toBe(1));
+    await act(async () => {
+      runtime.expire();
+    });
+    expect(
+      await screen.findByText(
+        "Неизвестно, напечаталась ли пробная этикетка. Принтер не ответил вовремя. Посмотрите, вышла ли этикетка.",
+      ),
+    ).toBeTruthy();
+    // The stuck call still has the printer: the next test label waits behind it, is never given to the shell.
+    await act(async () => {
+      click("Пробная печать на «Zebra у линии»");
+    });
+    await act(async () => {
+      runtime.expire();
+    });
+    expect(await screen.findByText(/Принтер ещё занят предыдущим заданием/)).toBeTruthy();
+    expect(screen.getByText(/Пробная этикетка не напечатана\./)).toBeTruthy();
+    expect(shell.sends).toHaveLength(1);
+  });
+
+  it("says a test label that could not be prepared, and sends nothing", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    const shell = fakeHardware();
+    await setup({
+      local,
+      shell,
+      render: async () => {
+        throw new Error("canvas");
+      },
+    });
+    await act(async () => {
+      click("Пробная печать на «Zebra у линии»");
+    });
+    expect(await screen.findByText("Пробную этикетку не удалось подготовить.")).toBeTruthy();
+    expect(shell.sends).toEqual([]);
+  });
+
+  it("asks nothing of a scan before a test label went, and ignores a scan after its code matched", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    const { scanner, shell } = await setup({ local, render: realRender });
+    await scanner.read("0042-badge-secret");
+    expect(screen.queryByText(/Это не код пробной этикетки/)).toBeNull();
+    await act(async () => {
+      click("Пробная печать на «Zebra у линии»");
+    });
+    await screen.findByText(/Пробная этикетка ушла/);
+    const code = /\^FD(MKR-[A-Z0-9]{6})\^FS/.exec(shell.sends[0]?.text ?? "")?.[1] ?? "";
+    await scanner.read(code);
+    expect(screen.getByText("Код совпал: принтер и сканер работают.")).toBeTruthy();
+    await scanner.read("0042-badge-secret");
+    expect(screen.getByText("Код совпал: принтер и сканер работают.")).toBeTruthy();
+    expect(screen.queryByText(/badge-secret/)).toBeNull();
+  });
+});
+
+describe("what a change of the purposes leaves alone", () => {
+  it("keeps the printer of a label that waits: another printer for boxes reroutes nothing", async () => {
+    const station = await printStation();
+    const job = await closeBoxWithLabel(station);
+    expect(job.printer?.id).toBe("zebra");
+    const before = jobRows(station.db);
+    await setup({ local: station.local });
+    fireEvent.change(screen.getByLabelText("Этикетка короба"), { target: { value: "tsc" } });
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText("Настройки сохранены.");
+    const settings = await readWorkstationSettings(station.local);
+    expect(settings.assignments.box).toBe("tsc");
+    expect(jobRows(station.db)).toEqual(before);
+    const kept = await readPrintJob(station.local, PAIRING, "job-1");
+    expect(kept).toEqual(job);
+    // And a print again of that label goes where it was made for, not to the new box printer.
+    expect(printerForAgain(job, settings, null)?.id).toBe("zebra");
+  });
+});
+
+describe("what the screen says to a reader of it", () => {
+  it("keeps its live regions in the page from the start, and puts no alert of its own in them", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    await setup({ local });
+    const regions = () => [...document.querySelectorAll('[aria-live="polite"]')];
+    expect(regions().length).toBeGreaterThanOrEqual(2);
+    expect(regions().every((region) => region.childElementCount === 0)).toBe(true);
+    await act(async () => {
+      click("Пробная печать на «Zebra у линии»");
+    });
+    const sent = await screen.findByText(/Пробная этикетка ушла/);
+    const region = sent.closest('[aria-live="polite"]');
+    expect(region).not.toBeNull();
+    // `role="presentation"`: inside a polite region an alert would be read twice.
+    expect(sent.closest("[role]")?.getAttribute("role")).toBe("presentation");
+    expect(sent.closest('[role="alert"]')).toBeNull();
+    fireEvent.change(screen.getByLabelText("Этикетка паллеты"), { target: { value: "tsc" } });
+    await act(async () => {
+      click("Сохранить");
+    });
+    const saved = await screen.findByText("Настройки сохранены.");
+    expect(saved.closest('[aria-live="polite"]')).not.toBeNull();
+    expect(saved.closest('[role="alert"]')).toBeNull();
+    expect(saved.closest("[role]")?.getAttribute("role")).toBe("presentation");
+  });
+
+  it("puts the focus on the section it shows, and gives it back when the form closes", async () => {
+    await setup();
+    expect(document.activeElement?.textContent).toBe("Принтеры");
+    click("Добавить принтер");
+    expect(document.activeElement?.textContent).toBe("Новый принтер");
+    click("Отмена");
+    expect(document.activeElement?.textContent).toBe("Принтеры");
+  });
+
+  it("keeps all its buttons at the floor's size", async () => {
+    await setup();
+    click("Добавить принтер");
+    for (const button of screen.getAllByRole("button")) {
+      expect(button.className).toContain("mk-btn--floor");
+    }
+    const selects = [...document.querySelectorAll("select")];
+    expect(selects.length).toBeGreaterThan(0);
+    for (const select of selects) {
+      expect(select.style.height).toBe("var(--control-floor)");
+    }
+  });
+});
+
+describe("saving", () => {
+  it("does nothing with nothing to save, and once while a save runs, and still lets the operator leave", async () => {
+    const { executor } = openLocalDb();
+    const statements: unknown[] = [];
+    let finish: () => void = () => undefined;
+    const slow: LocalExecutor = {
+      ...executor,
+      transaction: (batch) => {
+        statements.push(batch);
+        return new Promise((resolve) => {
+          finish = () => resolve(executor.transaction(batch));
+        });
+      },
+    };
+    const { onBack } = await setup({ local: slow });
+    const save = screen.getByRole("button", { name: "Сохранить" });
+    expect(save.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(save);
+    expect(statements).toHaveLength(0);
+    click("Добавить принтер");
+    type("Название", "Zebra");
+    type("Адрес принтера", "zebra.local");
+    // The form is open: nothing is saved from under it.
+    expect((save as HTMLButtonElement).disabled).toBe(true);
+    click("Готово");
+    expect(save.getAttribute("aria-disabled")).toBeNull();
+    await act(async () => {
+      fireEvent.click(save);
+      fireEvent.click(save);
+    });
+    expect(statements).toHaveLength(1);
+    expect(save.getAttribute("aria-disabled")).toBe("true");
+    click("Назад без сохранения");
+    expect(onBack).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      finish();
+    });
+    expect(await screen.findByText("Настройки сохранены.")).toBeTruthy();
+  });
+
+  it("takes «Настройки сохранены» back once something is changed again", async () => {
+    const local = openLocalDb().executor;
+    await setUpPrinting(local);
+    await setup({ local });
+    fireEvent.change(screen.getByLabelText("Этикетка паллеты"), { target: { value: "tsc" } });
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText("Настройки сохранены.");
+    fireEvent.change(screen.getByLabelText("Дубль кода"), { target: { value: "tsc" } });
+    expect(screen.queryByText("Настройки сохранены.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Назад без сохранения" })).toBeTruthy();
+  });
+
+  it("writes every key in one transaction", async () => {
+    const { executor } = openLocalDb();
+    const batches: number[] = [];
+    const counting: LocalExecutor = {
+      ...executor,
+      transaction: (batch) => {
+        batches.push(batch.length);
+        return executor.transaction(batch);
+      },
+    };
+    await setup({ local: counting });
+    click("Добавить принтер");
+    type("Название", "Zebra");
+    type("Адрес принтера", "zebra.local");
+    click("Готово");
+    await act(async () => {
+      click("Сохранить");
+    });
+    await screen.findByText("Настройки сохранены.");
+    expect(batches).toEqual([4]);
+  });
+
+  it("says settings the build would not read back are refused, and keeps the changes", async () => {
+    const { executor } = openLocalDb();
+    const refusing: LocalExecutor = {
+      ...executor,
+      transaction: async () => {
+        throw new InvalidSettingsError("printers");
+      },
+    };
+    await setup({ local: refusing });
+    click("Добавить принтер");
+    type("Название", "Zebra");
+    type("Адрес принтера", "zebra.local");
+    click("Готово");
+    await act(async () => {
+      click("Сохранить");
+    });
+    expect(
+      await screen.findByText("Настройки не сохранены: проверьте принтеры и сканеры."),
+    ).toBeTruthy();
+    expect(screen.getByText("Сеть: zebra.local:9100 · ZPL · 203 dpi")).toBeTruthy();
+  });
+});
+
+describe("the list of Windows printers", () => {
+  function later<T>() {
+    let resolve: (value: T) => void = () => undefined;
+    let reject: (error: Error) => void = () => undefined;
+    const promise = new Promise<T>((done, fail) => {
+      resolve = done;
+      reject = fail;
+    });
+    return { promise, resolve, reject };
+  }
+
+  it("says it is asking, and hears only the newest answer", async () => {
+    const shell = fakeHardware();
+    const first = later<{ name: string; port: string }[]>();
+    const second = later<{ name: string; port: string }[]>();
+    vi.mocked(shell.hardware.listUsbPrinters)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    await setup({ shell });
+    click("Добавить принтер");
+    fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "usb" } });
+    expect(screen.getByText("Спрашиваем у Windows список принтеров…")).toBeTruthy();
+    click("Обновить список принтеров");
+    await act(async () => {
+      second.resolve([{ name: "Новый", port: "USB002" }]);
+    });
+    await screen.findByRole("option", { name: "Новый" });
+    expect(screen.queryByText("Спрашиваем у Windows список принтеров…")).toBeNull();
+    // The first, slower answer is stale: it must not replace the newer list.
+    await act(async () => {
+      first.resolve([{ name: "Старый", port: "USB001" }]);
+    });
+    expect(screen.queryByRole("option", { name: "Старый" })).toBeNull();
+    expect(screen.getByRole("option", { name: "Новый" })).toBeTruthy();
+  });
+
+  it("does not let an old failure undo a newer list", async () => {
+    const shell = fakeHardware();
+    const first = later<{ name: string; port: string }[]>();
+    const second = later<{ name: string; port: string }[]>();
+    vi.mocked(shell.hardware.listUsbPrinters)
+      .mockReturnValueOnce(first.promise)
+      .mockReturnValueOnce(second.promise);
+    await setup({ shell });
+    click("Добавить принтер");
+    fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "usb" } });
+    click("Обновить список принтеров");
+    await act(async () => {
+      second.resolve([{ name: "Новый", port: "USB002" }]);
+    });
+    await screen.findByRole("option", { name: "Новый" });
+    await act(async () => {
+      first.reject(new Error("spooler_unavailable"));
+    });
+    expect(screen.queryByText("Служба печати Windows не ответила.")).toBeNull();
+    expect(screen.getByRole("option", { name: "Новый" })).toBeTruthy();
+  });
+
+  it("keeps the printer that was chosen when the spooler stops answering, and says so", async () => {
+    const shell = fakeHardware();
+    vi.mocked(shell.hardware.listUsbPrinters).mockRejectedValue(new Error("spooler_unavailable"));
+    await setup({ shell });
+    click("Добавить принтер");
+    type("Название", "Zebra USB");
+    fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "usb" } });
+    expect(await screen.findByText("Служба печати Windows не ответила.")).toBeTruthy();
+    expect(screen.queryByText("Спрашиваем у Windows список принтеров…")).toBeNull();
+    click("Готово");
+    expect(screen.getByText("Выберите принтер Windows.")).toBeTruthy();
+  });
+
+  it("says when Windows has no printer at all", async () => {
+    const shell = fakeHardware();
+    await setup({ shell });
+    click("Добавить принтер");
+    fireEvent.change(screen.getByLabelText("Подключение"), { target: { value: "usb" } });
+    expect(await screen.findByText("Принтеров Windows не найдено.")).toBeTruthy();
+  });
+});

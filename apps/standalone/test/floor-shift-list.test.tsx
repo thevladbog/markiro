@@ -65,6 +65,8 @@ interface Options {
   shiftReads?: { done: number; failed: boolean };
   notice?: ShiftListNotice | null;
   enter?: (id: string) => Promise<EnteredShift>;
+  /** The workstation setup's entry (plan 2a7); none — no button. */
+  onSetup?: () => void;
 }
 
 function listOf(local: LocalExecutor, handlers: ReturnType<typeof handlersOf>, options: Options) {
@@ -83,6 +85,7 @@ function listOf(local: LocalExecutor, handlers: ReturnType<typeof handlersOf>, o
         onHostError={handlers.onHostError}
         onNew={handlers.onNew}
         onSignOut={handlers.onSignOut}
+        {...(options.onSetup === undefined ? {} : { onSetup: options.onSetup })}
       />
     </ThemeProvider>
   );
@@ -761,5 +764,32 @@ describe("entering a shift without the host", () => {
       if (stored === null) throw new Error("no stored copy");
       return stored;
     }
+  });
+});
+
+describe("the workstation setup's entry", () => {
+  it("has no button when the floor gives no setup", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    renderList(executor);
+    await screen.findByRole("button", { name: "Открыть" });
+    expect(screen.queryByRole("button", { name: "Рабочее место" })).toBeNull();
+  });
+
+  it("opens the setup at the floor's size, and waits while a shift is being entered", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    const onSetup = vi.fn();
+    renderList(executor, { onSetup, enter: () => new Promise<EnteredShift>(() => undefined) });
+    const setup = await screen.findByRole("button", { name: "Рабочее место" });
+    expect(setup.className).toContain("mk-btn--floor");
+    fireEvent.click(setup);
+    expect(onSetup).toHaveBeenCalledTimes(1);
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+    await screen.findByText("Открываем смену…");
+    expect(setup).toHaveProperty("disabled", true);
+    // Leaving is never held by an entry that does not answer.
+    expect(screen.getByRole("button", { name: "Сменить оператора" })).toHaveProperty(
+      "disabled",
+      false,
+    );
   });
 });

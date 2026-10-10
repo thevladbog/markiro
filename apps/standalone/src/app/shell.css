@@ -615,6 +615,33 @@
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+/* The workstation setup (plan 2a7): one printer a row, its actions under it. */
+.workstation-setup {
+  width: min(880px, 100%);
+}
+
+.workstation-setup__list {
+  display: grid;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workstation-setup__list li {
+  display: grid;
+  gap: 8px;
+}
+
+.workstation-setup__editor h3 {
+  margin: 0;
+}
+
+/* A live region is in the page even when empty: no gap for it then. */
+.workstation-setup__live:empty {
+  margin-top: -16px;
+}
+
 .work-screen__leaving {
   margin: 0;
 }

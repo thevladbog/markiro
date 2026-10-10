@@ -8,6 +8,8 @@ import {
   type ComponentType,
 } from "react";
 
+import type { SignalTone } from "@markiro/ui";
+
 import {
   shellActionFor,
   type FloorNotice,
@@ -26,28 +28,42 @@ import type {
   SsccBlockRequest,
 } from "../host/protocol.js";
 import type { SystemAwake } from "../hardware/awake.js";
+import type { HardwareApi } from "../hardware/hardware.js";
 import type { LocalExecutor } from "../local/executor.js";
 import { createOperatorIdleLock, OPERATOR_IDLE_TIMEOUT_MS } from "./idle-lock.js";
 import type { RenderLabel } from "./print/print-jobs.js";
 import type { PrintRuntime } from "./print/print-runtime.js";
 import type { ScanSource } from "./scan-source.js";
+import { WorkstationSetup } from "./setup/WorkstationSetup.js";
+import {
+  DEFAULT_SOUND,
+  readWorkstationSettings,
+  soundLevel,
+} from "./setup/workstation-settings.js";
 import { NewShift } from "./shifts/NewShift.js";
-import { readShiftCopy, type WorkShift } from "./shifts/shift-copies.js";
+import { readShiftCopy, readStoredWork, type WorkShift } from "./shifts/shift-copies.js";
 import { ShiftList, type ShiftListNotice } from "./shifts/ShiftList.js";
 import { readOperatorCopy } from "./sign-in.js";
 import { createWorkGate } from "./work-gate.js";
+import { playSignalTone } from "./work/signal-sound.js";
 import { WorkScreen, type WorkScreenProps } from "./work/WorkScreen.js";
 
-/** Why the operator leaves the shift: back to the list, the office closed it, a sign-out, another line. */
+/**
+ * Why the operator leaves the shift: back to the list, the office closed it,
+ * a sign-out, another line, or the workstation setup from a label's recovery
+ * (plan 2a7), which comes back to the shift.
+ */
 type Leave =
   | { kind: "list"; notice: ShiftListNotice | null }
   | { kind: "sign_out"; notice: FloorNotice | null }
-  | { kind: "line_changed" };
+  | { kind: "line_changed" }
+  | { kind: "setup"; shift: WorkShift };
 
 type FloorView =
   | { kind: "list"; notice: ShiftListNotice | null }
   | { kind: "new_shift" }
-  | { kind: "work"; shift: WorkShift; leaving: boolean };
+  | { kind: "work"; shift: WorkShift; leaving: boolean }
+  | { kind: "setup"; back: WorkShift | null };
 
 export interface FloorAppProps {
   operator: FloorSession;
@@ -80,6 +96,8 @@ export interface FloorAppProps {
   source: ScanSource;
   /** The app's printers (plan 2a7). */
   printing: PrintRuntime;
+  /** The shell's printers and scanners, for the workstation setup. */
+  hardware: HardwareApi;
   /** Keeps the computer awake while a work screen is open. */
   awake: SystemAwake;
   /** How a label is rendered; tests give their own. */
@@ -123,6 +141,7 @@ export function FloorApp({
   requestFacts,
   source,
   printing,
+  hardware,
   awake,
   render,
   idleTimeoutMs = OPERATOR_IDLE_TIMEOUT_MS,
@@ -171,6 +190,10 @@ export function FloorApp({
     // station and ended the session, which takes this floor away, unless the
     // office moved the station back meanwhile. The shell then no longer holds
     // the operator in a shift, and the screen must not show one.
+    if (leave.kind === "setup") {
+      setView({ kind: "setup", back: leave.shift });
+      return;
+    }
     setView({ kind: "list", notice: leave.kind === "list" ? leave.notice : null });
   }, []);
 
@@ -187,14 +210,16 @@ export function FloorApp({
         // A sign-out outranks the leave that waits (the idle lock fires once
         // and then waits for nothing more): it is where that leave ends. The
         // office's close of the shift outranks a leave to the list without a
-        // reason or to another line, which would otherwise end without saying
-        // why the shift is gone.
+        // reason, to another line or to the setup, which would otherwise end
+        // without saying why the shift is gone.
         if (reason.kind === "sign_out" && waiting.kind !== "sign_out") {
           standing.current = reason;
         } else if (
           reason.kind === "list" &&
           reason.notice !== null &&
-          (waiting.kind === "line_changed" || (waiting.kind === "list" && waiting.notice === null))
+          (waiting.kind === "line_changed" ||
+            waiting.kind === "setup" ||
+            (waiting.kind === "list" && waiting.notice === null))
         ) {
           standing.current = reason;
         }
@@ -302,6 +327,53 @@ export function FloorApp({
     },
     [sessionId],
   );
+  // The level of the verdict tones: the workstation's sound setting, read
+  // when the floor opens and again after the setup stores it. The work screen
+  // asks it when a tone plays, so a change is heard at once.
+  const toneLevel = useRef(soundLevel(DEFAULT_SOUND));
+  useEffect(() => {
+    let cancelled = false;
+    readWorkstationSettings(local).then(
+      (settings) => {
+        if (!cancelled) toneLevel.current = soundLevel(settings.sound);
+      },
+      // Unreadable settings keep the default level: the tones stay audible.
+      () => undefined,
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [local]);
+  const signal = useCallback((tone: SignalTone) => {
+    playSignalTone(tone, undefined, toneLevel.current);
+  }, []);
+
+  // Back from the setup to the shift it was opened from. The shift is read
+  // again: the office may have closed it meanwhile, and the setup has no
+  // eyes on the host's list. A shift that cannot be read again is left for the list.
+  const returning = useRef(false);
+  const backFromSetup = useCallback(
+    (back: WorkShift | null) => {
+      if (back === null) {
+        setView({ kind: "list", notice: null });
+        return;
+      }
+      if (returning.current) return;
+      returning.current = true;
+      void readStoredWork(local, { hostId, deviceId }, back.copy.id)
+        .then(
+          (stored) => (stored.kind === "ready" ? stored.shift : null),
+          () => null,
+        )
+        .then((shift) => {
+          returning.current = false;
+          if (!alive.current) return;
+          if (shift === null) setView({ kind: "list", notice: null });
+          else entered(shift);
+        });
+    },
+    [local, hostId, deviceId, entered],
+  );
   const hostError = useCallback((error: unknown) => {
     const action = shellActionFor(error, null);
     if (action !== null) current.current.dispatch(action);
@@ -312,6 +384,23 @@ export function FloorApp({
     requestFacts();
   }, [requestFacts]);
 
+  if (view.kind === "setup") {
+    const { back } = view;
+    return (
+      <WorkstationSetup
+        local={local}
+        hardware={hardware}
+        printing={printing}
+        source={source}
+        {...(render === undefined ? {} : { render })}
+        onSaved={(settings) => {
+          toneLevel.current = soundLevel(settings.sound);
+        }}
+        // Back to the shift the setup was opened from, or to the list.
+        onBack={() => backFromSetup(back)}
+      />
+    );
+  }
   if (view.kind === "work") {
     return (
       <Work
@@ -333,6 +422,8 @@ export function FloorApp({
         onRecorded={recorded}
         printing={printing}
         awake={awake}
+        signal={signal}
+        onSetup={() => leave({ kind: "setup", shift: view.shift })}
         {...(render === undefined ? {} : { render })}
       />
     );
@@ -369,6 +460,7 @@ export function FloorApp({
       onEntered={entered}
       onHostError={hostError}
       onNew={() => setView({ kind: "new_shift" })}
+      onSetup={() => setView({ kind: "setup", back: null })}
       onSignOut={() => leave({ kind: "sign_out", notice: null })}
     />
   );
