@@ -110,6 +110,7 @@ const expected = [
   ["/shifts/product-label-templates", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/box-label-templates", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/pallet-label-templates", "GET", "content-type,x-api-key,x-station-capabilities"],
+  ["/shifts/label-template-preview", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/cors-probe/open", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/cors-probe/enter", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/cors-probe/sscc/top-up", "POST", "content-type,x-api-key,x-station-capabilities"],

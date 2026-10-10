@@ -538,6 +538,7 @@ function assertAuthorityContract(adapted, { alb }) {
       "/shifts/product-label-templates",
       "/shifts/box-label-templates",
       "/shifts/pallet-label-templates",
+      "/shifts/label-template-preview",
       "/products",
       "/products/gtin-check",
       "/lines",
@@ -548,6 +549,7 @@ function assertAuthorityContract(adapted, { alb }) {
       "/shifts/product-label-templates",
       "/shifts/box-label-templates",
       "/shifts/pallet-label-templates",
+      "/shifts/label-template-preview",
       "/products",
       "/products/gtin-check",
       "/lines",
@@ -1448,6 +1450,7 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
     "/shifts",
     "/shifts/planning-config",
     "/shifts/product-label-templates",
+    "/shifts/label-template-preview",
     "/products",
     // Opening /lines to the handheld must not take the cabinet's own page away
     // from the SPA: the Station match is gated on the api key, not the path.
@@ -1487,6 +1490,11 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
     {
       method: "GET",
       path: "/shifts/pallet-label-templates",
+      headers: { "x-api-key": "station-test-key" },
+    },
+    {
+      method: "GET",
+      path: "/shifts/label-template-preview",
       headers: { "x-api-key": "station-test-key" },
     },
     {
@@ -1546,6 +1554,7 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
     { method: "OPTIONS", path: "/shifts/product-label-templates" },
     { method: "OPTIONS", path: "/shifts/box-label-templates" },
     { method: "OPTIONS", path: "/shifts/pallet-label-templates" },
+    { method: "OPTIONS", path: "/shifts/label-template-preview" },
     { method: "OPTIONS", path: "/products" },
     { method: "OPTIONS", path: "/products/gtin-check" },
     { method: "OPTIONS", path: "/shifts/shift-1/open" },
