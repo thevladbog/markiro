@@ -1320,6 +1320,24 @@ fn saving_office_files_answers_through_the_ipc_shapes() {
         ),
         Err(json!("invalid_request"))
     );
+    // A way out of the office's folder is refused before anything is looked
+    // at, though the folder it leads to exists.
+    assert_eq!(
+        invoke(
+            &webview,
+            "open_office_folder",
+            json!({ "segments": ["Выгрузки", ".."] }),
+        ),
+        Err(json!("invalid_request"))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "save_office_files",
+            json!({ "segments": segments, "files": [{ "name": "Молоко.csv.bat", "contentBase64": "" }] }),
+        ),
+        Err(json!("invalid_request"))
+    );
     if !cfg!(windows) {
         assert_eq!(
             invoke(

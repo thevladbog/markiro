@@ -10,9 +10,14 @@
 //! the folder it made. `open_office_folder` shows such a folder in Windows
 //! Explorer. A failure is logged by its code and the I/O error's kind,
 //! never by a path, which names the Windows user.
+//!
+//! A name holds letters and digits of any script, spaces and `-_.()` only,
+//! and a file's name ends in an extension the office writes: nothing that
+//! Explorer's command line, a shell or the eye could misread, and nothing
+//! that runs when it is opened.
 
 #[cfg(any(windows, test))]
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -34,6 +39,21 @@ pub const MAX_TOTAL_BYTES: usize = 256 * 1024 * 1024;
 
 /// The longest name of a folder or a file, in characters.
 pub const MAX_NAME_CHARS: usize = 150;
+
+/// The characters of the suffix a folder gets when its name is taken
+/// (« (99)»): the last segment of a call leaves room for it, so a folder
+/// the call made always has a name that can be opened.
+const SUFFIX_CHARS: usize = 5;
+
+/// The longest path of a file, in UTF-16 units, counted with the longest
+/// suffix: under Windows' 260, so that Explorer, a browser's file dialog and
+/// 1С can open what was written.
+pub const MAX_PATH_UNITS: usize = 240;
+
+/// The extensions of the files the office writes: the parts of an export
+/// and a form's HTML. A file of another kind (a script, a shortcut, a
+/// program) is never written, whatever the webview asks.
+pub const FILE_EXTENSIONS: [&str; 4] = ["csv", "txt", "xml", "html"];
 
 /// The most segments of one path, the root among them.
 pub const MAX_SEGMENTS: usize = 8;
@@ -116,47 +136,48 @@ impl OfficeFilesState {
     }
 }
 
-/// Characters that hide or reorder text on screen (zero-width ones, line and
-/// paragraph separators, bidirectional overrides and isolates, the byte order
-/// mark, the Arabic letter mark): a name with one looks like another name.
-fn hides_text(c: char) -> bool {
-    matches!(
-        c,
-        '\u{61c}'
-            | '\u{200b}'..='\u{200f}'
-            | '\u{2028}'..='\u{202e}'
-            | '\u{2060}'..='\u{2064}'
-            | '\u{2066}'..='\u{2069}'
-            | '\u{feff}'
-    )
+/// A character a name may hold: a letter or a digit of any script (Cyrillic
+/// among them), a space, and `-_.()`. Everything else is out: the characters
+/// Windows forbids, those that split Explorer's command line (`,` `;`), those
+/// the shell expands (`%` `&` `^` `~` `$`), and every one that hides or
+/// reorders text (zero-width ones, line separators, bidirectional controls,
+/// the byte order mark), none of which is a letter or a digit.
+fn is_name_char(c: char) -> bool {
+    c.is_alphabetic() || c.is_numeric() || matches!(c, ' ' | '-' | '_' | '.' | '(' | ')')
 }
 
-/// A Windows name of one folder or file: not empty, at most
-/// [`MAX_NAME_CHARS`] characters, no control character or one that hides
-/// text, none of `<>:"/\|?*`, not `.` or `..`, not ending in a dot or a
-/// space, and no device name (`CON`, `PRN`, `AUX`, `NUL`, `CONIN$`,
-/// `CONOUT$`, `COM1`–`COM9` and `LPT1`–`LPT9`, the superscript digits
-/// `¹²³` too), with an extension or without, and with spaces before the
-/// extension or without.
+/// A name of one folder or file: not empty, at most [`MAX_NAME_CHARS`]
+/// characters, only [`is_name_char`] characters, not `.` or `..`, not ending
+/// in a dot or a space, and no Windows device name (`CON`, `PRN`, `AUX`,
+/// `NUL`, `COM1`–`COM9` and `LPT1`–`LPT9`, the superscript digits `¹²³`
+/// too), with an extension or without, and with spaces before the extension
+/// or without.
 pub fn is_plain_name(name: &str) -> bool {
     let reserved = |stem: &str| {
         let upper = stem.trim_end_matches(' ').to_ascii_uppercase();
         let chars: Vec<char> = upper.chars().collect();
-        ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"].contains(&upper.as_str())
+        ["CON", "PRN", "AUX", "NUL"].contains(&upper.as_str())
             || (chars.len() == 4
                 && (upper.starts_with("COM") || upper.starts_with("LPT"))
                 && matches!(chars[3], '1'..='9' | '\u{b9}' | '\u{b2}' | '\u{b3}'))
     };
     !name.is_empty()
         && name.chars().count() <= MAX_NAME_CHARS
-        && !name
-            .chars()
-            .any(|c| c.is_control() || hides_text(c) || "<>:\"/\\|?*".contains(c))
+        && name.chars().all(is_name_char)
         && name != "."
         && name != ".."
         && !name.ends_with('.')
         && !name.ends_with(' ')
         && !reserved(name.split('.').next().unwrap_or(name))
+}
+
+/// The name of a file: a plain name with a stem and one of
+/// [`FILE_EXTENSIONS`], in any case.
+pub fn is_plain_file_name(name: &str) -> bool {
+    is_plain_name(name)
+        && name.rsplit_once('.').is_some_and(|(stem, extension)| {
+            !stem.is_empty() && FILE_EXTENSIONS.contains(&extension.to_ascii_lowercase().as_str())
+        })
 }
 
 fn check_segments(segments: &[String]) -> Result<(), OfficeFilesError> {
@@ -197,7 +218,7 @@ fn decode_with(
     let mut decoded = Vec::with_capacity(files.len());
     for file in files {
         // Windows names differ only by case at most once in one folder.
-        if !is_plain_name(&file.name)
+        if !is_plain_file_name(&file.name)
             || !seen.insert(file.name.to_lowercase())
             || file.content_base64.len() > encoded_cap(max_total)
         {
@@ -213,6 +234,22 @@ fn decode_with(
         decoded.push((file.name.clone(), bytes));
     }
     Ok(decoded)
+}
+
+/// Whether the longest path this call can write fits [`MAX_PATH_UNITS`]:
+/// the root, every segment, the longest suffix a folder gets and the longest
+/// file name, with a separator before each, in UTF-16 units (the unit
+/// Windows counts in; a character outside the basic plane is two).
+fn path_fits(
+    root: &Path,
+    segments: &[String],
+    files: &[(String, Vec<u8>)],
+    max_units: usize,
+) -> bool {
+    let units = |text: &str| text.encode_utf16().count();
+    let folders: usize = segments.iter().map(|segment| 1 + units(segment)).sum();
+    let longest = files.iter().map(|(name, _)| units(name)).max().unwrap_or(0);
+    units(&root.to_string_lossy()) + folders + SUFFIX_CHARS + 1 + longest <= max_units
 }
 
 /// Logs an I/O failure by its kind (a path names the Windows user) and says
@@ -287,6 +324,23 @@ fn new_folder(parent: &Path, last: &str) -> Result<(String, PathBuf), OfficeFile
     Err(OfficeFilesError::Storage)
 }
 
+/// Takes back the folder of a call that failed, with `remove`. When it
+/// cannot (a lock held by an antivirus or a sync client), a partial export
+/// stays where the user can find it: the kind of that failure is logged, and
+/// returned.
+fn take_back<R>(folder: &Path, remove: R) -> Option<std::io::ErrorKind>
+where
+    R: FnOnce(&Path) -> std::io::Result<()>,
+{
+    remove(folder).err().map(|error| {
+        eprintln!(
+            "standalone: save_office_files cleanup left a partial folder: {:?}",
+            error.kind()
+        );
+        error.kind()
+    })
+}
+
 /// Writes every file into `folder`, which this call made; on a failure the
 /// folder goes, with whatever was written into it.
 pub fn write_into(folder: &Path, files: &[(String, Vec<u8>)]) -> Result<(), OfficeFilesError> {
@@ -296,7 +350,7 @@ pub fn write_into(folder: &Path, files: &[(String, Vec<u8>)]) -> Result<(), Offi
         file.sync_all()
     });
     if let Err(error) = written {
-        let _ = fs::remove_dir_all(folder);
+        take_back(folder, |path: &Path| fs::remove_dir_all(path));
         return Err(storage("save_office_files", &error));
     }
     Ok(())
@@ -327,6 +381,13 @@ where
     let (last, parents) = segments
         .split_last()
         .ok_or(OfficeFilesError::InvalidRequest)?;
+    // The folder of this call may get « (99)»: its name must stay one that
+    // `open_office_folder` takes, and its files' paths ones Windows opens.
+    if last.chars().count() > MAX_NAME_CHARS - SUFFIX_CHARS
+        || !path_fits(root, segments, &decoded, MAX_PATH_UNITS)
+    {
+        return Err(OfficeFilesError::InvalidRequest);
+    }
     let parent = ensure_folders(root, parents)?;
     let (name, folder) = new_folder(&parent, last)?;
     write(&folder, &decoded)?;
@@ -355,22 +416,52 @@ pub fn existing_folder(root: &Path, segments: &[String]) -> Result<PathBuf, Offi
     Ok(folder)
 }
 
-/// Windows Explorer by its place in the system folder: started by name, the
-/// system would look in the application's folder and the current directory
-/// first.
+/// How Explorer is started to show a folder: its program, the one argument
+/// and the directory it starts in.
 #[cfg(any(windows, test))]
-fn explorer_exe(system_root: Option<&OsStr>) -> PathBuf {
-    system_root
-        .map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from)
-        .join("explorer.exe")
+#[derive(Debug, PartialEq, Eq)]
+struct ExplorerLaunch {
+    program: PathBuf,
+    argument: OsString,
+    current_dir: PathBuf,
+}
+
+/// The launch of Windows Explorer for `folder`. The program is
+/// `%SystemRoot%\explorer.exe` by its place: started by name, the system would
+/// look in the application's folder and the current directory first. The
+/// argument is the folder in double quotes, always: Explorer does not read
+/// its command line by the usual rules but splits it at commas, so a folder
+/// named `x,y` unquoted would be two arguments. It starts in the system
+/// folder, not in the application's or in the folder it shows, which holds
+/// what the webview wrote. A folder whose path has a double quote (no
+/// Windows path has) is no launch.
+#[cfg(any(windows, test))]
+fn explorer_launch(folder: &Path, system_root: Option<&OsStr>) -> Option<ExplorerLaunch> {
+    if folder.as_os_str().to_string_lossy().contains('"') {
+        return None;
+    }
+    let system = system_root.map_or_else(|| PathBuf::from(r"C:\Windows"), PathBuf::from);
+    let mut argument = OsString::from("\"");
+    argument.push(folder);
+    argument.push("\"");
+    Some(ExplorerLaunch {
+        program: system.join("explorer.exe"),
+        argument,
+        current_dir: system,
+    })
 }
 
 #[cfg(windows)]
 fn show_in_explorer(folder: &Path) -> Result<(), OfficeFilesError> {
+    use std::os::windows::process::CommandExt;
+
+    let launch = explorer_launch(folder, std::env::var_os("SystemRoot").as_deref())
+        .ok_or(OfficeFilesError::InvalidRequest)?;
     // Explorer answers 1 even when it opened the folder: only a failure to
-    // start it counts.
-    std::process::Command::new(explorer_exe(std::env::var_os("SystemRoot").as_deref()))
-        .arg(folder)
+    // start it counts. `raw_arg` hands the quoted text over as it is.
+    std::process::Command::new(&launch.program)
+        .raw_arg(&launch.argument)
+        .current_dir(&launch.current_dir)
         .spawn()
         .map(|_| ())
         .map_err(|error| storage("open_office_folder", &error))
@@ -603,6 +694,27 @@ mod tests {
             existing_folder(root.path(), &segments(&["Выгрузки", "..", "run"])),
             Err(OfficeFilesError::InvalidRequest)
         );
+        // Shapes whose walk would succeed without the name check, each on a
+        // folder that exists: only the guard refuses them.
+        for shape in [
+            &["Выгрузки", ".."][..],
+            &["Выгрузки", "..", ".."],
+            &["Выгрузки", "."],
+            &["Выгрузки", "OCT26-004", "run", ".."],
+            &["Выгрузки", "OCT26-004/.."],
+            &["Выгрузки", "/"],
+            &["Выгрузки", "OCT26-004", "run", "..", ".."],
+            &["Выгрузки"],
+            &["Формы", "OCT26-004"],
+            &["Markiro", "Выгрузки"],
+        ] {
+            assert!(root.path().join("Выгрузки").join("..").is_dir());
+            assert_eq!(
+                existing_folder(root.path(), &segments(shape)),
+                Err(OfficeFilesError::InvalidRequest),
+                "{shape:?}"
+            );
+        }
         if !cfg!(windows) {
             assert_eq!(
                 show_in_explorer(root.path()),
@@ -813,7 +925,7 @@ mod tests {
     /// bound and one past it, whatever the padding of the last group.
     #[test]
     fn the_caps_on_files_and_bytes_hold_at_the_bound() {
-        let two = [file("a", &[1; 3]), file("b", &[2; 3])];
+        let two = [file("a.txt", &[1; 3]), file("b.txt", &[2; 3])];
         assert!(decode_with(&two, 2, 6).is_ok());
         assert_eq!(
             decode_with(&two, 1, 6),
@@ -824,7 +936,7 @@ mod tests {
             Err(OfficeFilesError::InvalidRequest)
         );
         for size in 1..=7usize {
-            let one = [file("a", &vec![1; size])];
+            let one = [file("a.txt", &vec![1; size])];
             assert!(decode_with(&one, 1, size).is_ok(), "{size}");
             assert_eq!(
                 decode_with(&one, 1, size - 1),
@@ -842,32 +954,38 @@ mod tests {
         }
     }
 
-    /// Explorer is started from the system folder, not found by a search of
-    /// the current directory or the application's.
+    /// Explorer is started from the system folder with the folder in double
+    /// quotes, always, so that a comma, a space or a Cyrillic letter in the
+    /// path is no part of Explorer's own command line; it starts in the
+    /// system folder; a path with a double quote is no launch.
     #[test]
-    fn explorer_is_started_from_the_system_folder() {
-        let from_env = explorer_exe(Some(std::ffi::OsStr::new("SYS")));
-        assert_eq!(from_env.file_name().unwrap(), "explorer.exe");
-        assert_eq!(from_env.parent().unwrap(), Path::new("SYS"));
-        let fallback = explorer_exe(None);
-        assert_eq!(fallback.file_name().unwrap(), "explorer.exe");
-        assert!(fallback.to_string_lossy().starts_with("C:"));
-    }
-
-    /// Every character that hides or reorders text is refused, at both ends
-    /// of each range; the real characters beside the ranges are not.
-    #[test]
-    fn the_ranges_of_hiding_characters_hold_at_their_ends() {
-        for c in [
-            '\u{61c}', '\u{200b}', '\u{200f}', '\u{2028}', '\u{2029}', '\u{202a}', '\u{202e}',
-            '\u{2060}', '\u{2064}', '\u{2066}', '\u{2069}', '\u{feff}',
-        ] {
-            assert!(!is_plain_name(&format!("a{c}b")), "{:x}", u32::from(c));
-        }
-        for c in [
-            '\u{61b}', '\u{200a}', '\u{2027}', '\u{202f}', '\u{205f}', '\u{2070}',
-        ] {
-            assert!(is_plain_name(&format!("a{c}b")), "{:x}", u32::from(c));
+    fn explorer_is_started_from_the_system_folder_with_a_quoted_path() {
+        let folder = Path::new(r"C:\Users\Иван Петров\Документы\Markiro\Выгрузки\x,y (2)");
+        let launch = explorer_launch(folder, Some(OsStr::new(r"D:\Win"))).unwrap();
+        assert_eq!(
+            launch,
+            ExplorerLaunch {
+                program: PathBuf::from(r"D:\Win").join("explorer.exe"),
+                argument: OsString::from(
+                    "\"C:\\Users\\Иван Петров\\Документы\\Markiro\\Выгрузки\\x,y (2)\""
+                ),
+                current_dir: PathBuf::from(r"D:\Win"),
+            }
+        );
+        // No space in the path: quoted all the same.
+        let plain = explorer_launch(Path::new(r"C:\a,b"), Some(OsStr::new("SYS"))).unwrap();
+        assert_eq!(plain.argument, OsString::from("\"C:\\a,b\""));
+        assert_eq!(plain.program.file_name().unwrap(), "explorer.exe");
+        assert_eq!(plain.program.parent().unwrap(), Path::new("SYS"));
+        assert_eq!(plain.current_dir, PathBuf::from("SYS"));
+        let fallback = explorer_launch(Path::new("x"), None).unwrap();
+        assert_eq!(
+            fallback.program,
+            PathBuf::from(r"C:\Windows").join("explorer.exe")
+        );
+        assert_eq!(fallback.current_dir, PathBuf::from(r"C:\Windows"));
+        for quoted in [r#"C:\a"b"#, r#"C:\a" /root,C:\"#, "\"", "x\""] {
+            assert_eq!(explorer_launch(Path::new(quoted), None), None, "{quoted}");
         }
     }
 
@@ -911,5 +1029,267 @@ mod tests {
         ] {
             assert!(serde_json::from_str::<OfficeFile>(bad).is_err(), "{bad}");
         }
+    }
+
+    /// A name holds letters and digits of any script, spaces and `-_.()`
+    /// and nothing else: not a character Explorer's command line, a shell or
+    /// the eye misreads, whichever script, width or plane it comes from.
+    #[test]
+    fn a_name_holds_only_letters_digits_and_a_few_marks() {
+        for name in [
+            "Молоко",
+            "Ёё",
+            "漢字",
+            "Ünï",
+            "٣٤",
+            "𠀀",
+            "run.v1",
+            "a (2)",
+            "a-b_c",
+        ] {
+            assert!(is_plain_name(name), "{name:?}");
+        }
+        for c in [
+            ',',
+            ';',
+            '&',
+            '%',
+            '~',
+            '$',
+            '!',
+            '#',
+            '\'',
+            '@',
+            '+',
+            '=',
+            '[',
+            ']',
+            '{',
+            '}',
+            '^',
+            '`',
+            '\u{a0}',
+            '\u{3000}',
+            '\u{200a}',
+            '\u{180e}',
+            '\u{34f}',
+            '\u{e0041}',
+            '\u{200b}',
+            '\u{200f}',
+            '\u{202e}',
+            '\u{2028}',
+            '\u{2066}',
+            '\u{feff}',
+            '\u{61c}',
+            '\u{7f}',
+            '\u{85}',
+            '\u{1f600}',
+            '\n',
+            '\0',
+        ] {
+            assert!(!is_plain_name(&format!("a{c}b")), "{:x}", u32::from(c));
+        }
+        // A token that would split or expand in Explorer's command line.
+        for name in ["x,C:\\Windows\\notepad.exe", "%ComSpec%", "a;b", "a&calc"] {
+            assert!(!is_plain_name(name), "{name:?}");
+        }
+    }
+
+    /// A file's name ends in an extension the office writes, in any case; a
+    /// double extension counts by its last part, and a stem is needed.
+    #[test]
+    fn a_file_name_ends_in_an_extension_the_office_writes() {
+        assert_eq!(FILE_EXTENSIONS, ["csv", "txt", "xml", "html"]);
+        for name in [
+            "a.csv",
+            "a.txt",
+            "a.xml",
+            "a.html",
+            "A.TXT",
+            "a.Xml",
+            "Молоко (2).csv",
+        ] {
+            assert!(is_plain_file_name(name), "{name}");
+        }
+        for name in [
+            "a",
+            "a.bat",
+            "a.exe",
+            "a.lnk",
+            "a.url",
+            "a.hta",
+            "a.js",
+            "a.csv.bat",
+            "Молоко.csv.exe",
+            "a.txt.lnk",
+            "a. txt",
+            "a.htm",
+            ".txt",
+            "csv",
+            "a.csv.",
+            "con.txt",
+            "a,b.txt",
+        ] {
+            assert!(!is_plain_file_name(name), "{name:?}");
+        }
+        // A folder segment is no file: it may have any dots it likes.
+        assert!(is_plain_name("run.v1") && !is_plain_file_name("run.v1"));
+        let root = tempfile::tempdir().unwrap();
+        let path = segments(&["Выгрузки", "OCT26-004", "run"]);
+        for bad in ["Молоко.csv.bat", "run", "x.exe", "a,b.csv"] {
+            assert_eq!(
+                save_files(root.path(), &path, &[file("ok.txt", b"1"), file(bad, b"x")]),
+                Err(OfficeFilesError::InvalidRequest),
+                "{bad}"
+            );
+        }
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    /// Every name the domain's exporters make is a name the shell takes:
+    /// the file names of every format of the parity fixture (the cloud's own
+    /// golden: every shift format, the pallet exports, parts and the pallets'
+    /// SSCCs) and the folders the export dialog makes for
+    /// each format (`exportFolder`: root, shift number, stamp and format).
+    #[test]
+    fn the_names_the_domain_makes_are_taken() {
+        let golden: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../packages/domain/test/fixtures/shift-export-parity/golden.json"
+        ))
+        .unwrap();
+        let mut names = std::collections::BTreeSet::new();
+        let mut formats = std::collections::BTreeSet::new();
+        for (key, outcome) in golden.as_object().unwrap() {
+            // `case/format@version/run`
+            let format = key.split('/').nth(1).unwrap().split('@').next().unwrap();
+            formats.insert(format.to_owned());
+            for part in outcome["parts"].as_array().into_iter().flatten() {
+                names.insert(part["filename"].as_str().unwrap().to_owned());
+            }
+        }
+        assert!(names.len() >= 80, "{}", names.len());
+        assert!(formats.len() >= 11, "{formats:?}");
+        for name in &names {
+            assert!(is_plain_file_name(name), "{name}");
+        }
+        let root = tempfile::tempdir().unwrap();
+        let all: Vec<OfficeFile> = names.iter().map(|name| file(name, b"x")).collect();
+        for format in &formats {
+            for number in ["OCT26-004", "OCT26-005_S", "Смена_7"] {
+                let path =
+                    segments(&["Выгрузки", number, &format!("2026-10-08_18-30-00_{format}")]);
+                let saved = save_files(root.path(), &path, &all[..3]).unwrap();
+                assert_eq!(saved.segments[..2], path[..2]);
+                assert!(
+                    existing_folder(root.path(), &saved.segments).is_ok(),
+                    "{path:?}"
+                );
+            }
+        }
+    }
+
+    /// The last segment leaves room for « (99)»: 145 characters are taken,
+    /// 146 are not, and the folder made at the end of the suffix range has a
+    /// name `open_office_folder` takes.
+    #[test]
+    fn the_last_segment_leaves_room_for_the_suffix() {
+        let root = tempfile::tempdir().unwrap();
+        let longest = "я".repeat(MAX_NAME_CHARS - SUFFIX_CHARS);
+        let path = |last: &str| segments(&["Выгрузки", "OCT26-004", last]);
+        assert_eq!(SUFFIX_CHARS, " (99)".chars().count());
+        assert_eq!(
+            save_files(
+                root.path(),
+                &path(&format!("{longest}я")),
+                &[file("a.xml", b"x")]
+            ),
+            Err(OfficeFilesError::InvalidRequest)
+        );
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+        let parent = root.path().join("Выгрузки").join("OCT26-004");
+        fs::create_dir_all(&parent).unwrap();
+        fs::create_dir(parent.join(&longest)).unwrap();
+        for n in 2..=98 {
+            fs::create_dir(parent.join(format!("{longest} ({n})"))).unwrap();
+        }
+        let saved = save_files(root.path(), &path(&longest), &[file("a.xml", b"x")]).unwrap();
+        assert_eq!(saved.segments[2], format!("{longest} (99)"));
+        assert_eq!(saved.segments[2].chars().count(), MAX_NAME_CHARS);
+        assert!(existing_folder(root.path(), &saved.segments).is_ok());
+    }
+
+    /// The path of the longest file counts in UTF-16 units, root, separators,
+    /// the longest suffix and all: the bound is exact, a character outside
+    /// the basic plane is two units.
+    #[test]
+    fn a_path_is_counted_in_utf16_units_with_the_suffix() {
+        let files = [
+            ("c.txt".to_owned(), Vec::new()),
+            ("b.t".to_owned(), Vec::new()),
+        ];
+        // "R" 1, "/Выгрузки" 9, "/𠀀" 3, " (99)" 5, "/c.txt" 6.
+        let segs = segments(&["Выгрузки", "\u{20000}"]);
+        assert!(path_fits(Path::new("R"), &segs, &files, 24));
+        assert!(!path_fits(Path::new("R"), &segs, &files, 23));
+        // The longest of several files counts, not the first or the last.
+        let longer = [
+            ("a.t".to_owned(), Vec::new()),
+            ("longest.txt".to_owned(), Vec::new()),
+            ("b.t".to_owned(), Vec::new()),
+        ];
+        assert!(path_fits(Path::new("R"), &segs, &longer, 30));
+        assert!(!path_fits(Path::new("R"), &segs, &longer, 29));
+        // A longer root costs its units.
+        assert!(!path_fits(Path::new("RRR"), &segs, &files, 24));
+        // The bound itself, with the real limit (Windows' 260 less room for
+        // a prefix and a terminator): a path of exactly `MAX_PATH_UNITS`
+        // units is written, one unit more is not.
+        assert_eq!(MAX_PATH_UNITS, 240);
+        let root = tempfile::tempdir().unwrap();
+        let used = root.path().to_string_lossy().encode_utf16().count();
+        // root + "/Выгрузки" (9) + "/" and 100 + "/" and `rest` + " (99)" (5)
+        // + "/a.xml" (6)
+        let rest = MAX_PATH_UNITS - used - 9 - 101 - 1 - SUFFIX_CHARS - 6;
+        assert!(
+            (1..=MAX_NAME_CHARS - SUFFIX_CHARS).contains(&rest),
+            "{used}"
+        );
+        let at_bound = segments(&["Выгрузки", &"a".repeat(100), &"b".repeat(rest)]);
+        assert!(save_files(root.path(), &at_bound, &[file("a.xml", b"x")]).is_ok());
+        let past = segments(&["Выгрузки", &"a".repeat(100), &"b".repeat(rest + 1)]);
+        assert_eq!(
+            save_files(root.path(), &past, &[file("a.xml", b"x")]),
+            Err(OfficeFilesError::InvalidRequest)
+        );
+        // A call whose path is far over the bound writes nothing.
+        let root = tempfile::tempdir().unwrap();
+        let deep = segments(&["Выгрузки", &"a".repeat(140), &"b".repeat(140)]);
+        assert_eq!(
+            save_files(root.path(), &deep, &[file("a.xml", b"x")]),
+            Err(OfficeFilesError::InvalidRequest)
+        );
+        assert_eq!(fs::read_dir(root.path()).unwrap().count(), 0);
+    }
+
+    /// A folder that cannot be taken back is logged by the kind of the
+    /// failure and reported; one that goes is neither.
+    #[test]
+    fn a_folder_that_cannot_be_taken_back_is_reported() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("run");
+        fs::create_dir(&folder).unwrap();
+        fn busy(_: &Path) -> std::io::Result<()> {
+            Err(std::io::Error::from(std::io::ErrorKind::PermissionDenied))
+        }
+        assert_eq!(
+            take_back(&folder, busy),
+            Some(std::io::ErrorKind::PermissionDenied)
+        );
+        assert!(folder.exists());
+        assert_eq!(
+            take_back(&folder, |path: &Path| fs::remove_dir_all(path)),
+            None
+        );
+        assert!(!folder.exists());
     }
 }
