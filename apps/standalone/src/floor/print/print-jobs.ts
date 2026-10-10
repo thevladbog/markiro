@@ -384,7 +384,14 @@ const SEND_FROM: readonly PrintJobState[] = ["prepared", "failed", "unknown", "s
 
 /** What a send changes besides the state: another printer's profile and bytes, the reprint's records. */
 export interface SendOptions {
-  /** The job's new printer and the bytes rendered for it, written with `sending`. */
+  /**
+   * The job's new printer and the bytes rendered for it, written with `sending`.
+   * They replace the old ones: after an `unknown` on one printer a label may
+   * exist there, and the row no longer says so — the caller's `extra` (the
+   * reprint's exception) must name the former printer, and the bytes must be
+   * rendered from the snapshot's template revision (`template_id`/`template_rev`),
+   * which this layer neither re-renders nor checks against the printer's language.
+   */
   rebind?: { printer: PrinterProfile; bytesBase64: string };
   /** Written in the same transaction as `sending`: a reprint's exception and its record. */
   extra?: readonly LocalStatement[];
@@ -402,6 +409,16 @@ export interface SendOptions {
  * read (`StaleJobError` otherwise), so a late answer never overwrites a job
  * the recovery or the operator moved on. Nothing here ever sends a job
  * again by itself: every send after the first is the operator's.
+ *
+ * This layer does not decide whether a send is allowed to repeat a label that
+ * may already exist: `unknown` and `sent` are accepted here with no reason.
+ * The caller (`printAgain`, plan 2a7 task 5, and the reprints of plan 2a8) must
+ * refuse them without a reprint reason, and reprint a settled box through a
+ * new job rather than through this path.
+ *
+ * `bytes_base64` of a job is not bounded in size here (a raster-heavy label
+ * near the canvas cap is several MB of base64 across the IPC on every
+ * write, read and send); the retention of plan 2a8 removes old rows.
  */
 export async function sendLabelJob(
   context: PrintContext,
@@ -480,6 +497,15 @@ export async function sendLabelJob(
  * send's end was lost, after the bytes may have gone. Run when the work
  * screen opens and before it reads a job to decide on; the runtime's jobs in
  * flight are left as they are. Answers how many jobs it moved.
+ *
+ * A hard rule for every caller: never run it concurrently with a
+ * `sendLabelJob` of this app — only from the work queue, one thing at a time.
+ * `sendLabelJob` commits `sending` first and registers the job with the
+ * runtime only after that commit; a recovery whose in-flight snapshot falls
+ * between the two would turn a job whose bytes are about to go into
+ * `unknown`, and the send's own final write would then be refused
+ * (`StaleJobError`). That is a spurious `unknown` the operator decides, never
+ * a second send — but it is avoidable by keeping the two serialised.
  */
 export async function recoverInterruptedJobs(context: PrintContext): Promise<number> {
   const { local, pairing, runtime } = context;

@@ -33,6 +33,7 @@ import {
   seedBlock,
   SHIFT_ID,
 } from "./support/floor-work.js";
+import type { PrintResult } from "../src/hardware/hardware.js";
 import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb } from "./support/local-db.js";
 import {
@@ -280,6 +281,8 @@ describe("the send of a print job", () => {
     await expect(
       sendLabelJob(printContext(at.local, runtime), await job(at)),
     ).resolves.toMatchObject({ state: "unknown", errorCode: "outcome_unknown", attempts: 1 });
+    // A label that may exist is not sent a second time by the program.
+    expect(shell.hardware.printBytes).toHaveBeenCalledTimes(1);
   });
 
   it("ends unknown, never sent, when the shell does not answer within the limit", async () => {
@@ -292,11 +295,16 @@ describe("the send of a print job", () => {
     const sending = sendLabelJob(printContext(at.local, runtime), await job(at));
     await vi.waitFor(() => expect(shell.heldSends()).toBe(1));
     expire();
-    await expect(sending).resolves.toMatchObject({ state: "unknown", errorCode: "timeout" });
-    // The answer that comes late changes nothing.
+    await flushPromises();
+    // The limit ran out: nothing sends the bytes again, not even queued behind the stuck call.
+    expect(shell.sends).toHaveLength(1);
     shell.releaseSend({ sent: true });
     await flushPromises();
+    expect(shell.sends).toHaveLength(1);
+    await expect(sending).resolves.toMatchObject({ state: "unknown", errorCode: "timeout" });
+    // The answer that came late changed nothing.
     expect(jobRows(at.db)[0]).toMatchObject({ state: "unknown", error_code: "timeout" });
+    expect(shell.sends).toHaveLength(1);
   });
 
   it("refuses a job moved on meanwhile, and leaves it as it was moved", async () => {
@@ -738,9 +746,12 @@ describe("two sends to one printer", () => {
     await flushPromises();
     expire();
     await expect(first).resolves.toMatchObject({ state: "unknown", errorCode: "timeout" });
-    await expect(second).resolves.toMatchObject({ state: "failed", errorCode: "printer_busy" });
+    await flushPromises();
+    // The stuck call settles at last, with a send of the queued job still possible: it must not go.
     shell.releaseSend({ sent: true });
     await flushPromises();
+    expect(shell.sends).toHaveLength(1);
+    await expect(second).resolves.toMatchObject({ state: "failed", errorCode: "printer_busy" });
     expect(shell.sends).toHaveLength(1);
     expect(rows(at.db, "SELECT id, state, error_code FROM floor_print_jobs ORDER BY id")).toEqual([
       { id: "job-1", state: "unknown", error_code: "timeout" },
@@ -839,6 +850,107 @@ describe("a job that waits", () => {
       printer: JSON.stringify(TSC),
       verify: 1,
       bytes_base64: renderedBase64(TSC, SSCC),
+    });
+  });
+});
+
+describe("the program never sends a label again by itself", () => {
+  const answers: [string, PrintResult, "failed" | "unknown", string][] = [
+    ["outcome_unknown", { sent: false, code: "outcome_unknown" }, "unknown", "outcome_unknown"],
+    ["not_sent", { sent: false, code: "not_sent" }, "failed", "not_sent"],
+    ["unsupported", { sent: false, code: "unsupported" }, "failed", "unsupported"],
+    ["invalid_target", { sent: false, code: "invalid_target" }, "failed", "invalid_target"],
+    ["invalid_payload", { sent: false, code: "invalid_payload" }, "failed", "invalid_payload"],
+  ];
+
+  for (const [name, answer, state, code] of answers) {
+    it(`gives the shell the bytes once when it answers ${name}, whatever the time or the recovery`, async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "setInterval"] });
+      try {
+        const at = await station();
+        await setUpPrinting(at.local);
+        await closeWithLabel(at);
+        const shell = fakeHardware(async () => answer);
+        const { runtime } = manualRuntime(shell.hardware);
+        const context = printContext(at.local, runtime);
+        const sending = sendLabelJob(context, await job(at));
+        // Ten minutes pass: a retry loop with a delay would have fired by now.
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        await flushPromises();
+        expect(shell.sends).toHaveLength(1);
+        await expect(sending).resolves.toMatchObject({ state, errorCode: code, attempts: 1 });
+        // The recovery of interrupted jobs reads and sends nothing of a settled job.
+        await expect(recoverInterruptedJobs(context)).resolves.toBe(0);
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        await flushPromises();
+        expect(shell.sends).toHaveLength(1);
+        expect(shell.hardware.printBytes).toHaveBeenCalledTimes(1);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
+
+  it("gives the shell the bytes once when the call itself fails", async () => {
+    const at = await station();
+    await setUpPrinting(at.local);
+    await closeWithLabel(at);
+    const shell = fakeHardware();
+    const printBytes = vi.fn(shell.hardware.printBytes).mockRejectedValue(new Error("ipc gone"));
+    const { runtime } = manualRuntime({ printBytes });
+    await expect(
+      sendLabelJob(printContext(at.local, runtime), await job(at)),
+    ).resolves.toMatchObject({ state: "unknown", errorCode: "outcome_unknown", attempts: 1 });
+    await flushPromises();
+    expect(printBytes).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends a job the operator sends again exactly once more, and nothing else", async () => {
+    const at = await station();
+    await setUpPrinting(at.local);
+    await closeWithLabel(at);
+    const shell = fakeHardware(async () => ({ sent: false, code: "outcome_unknown" }));
+    const { runtime } = manualRuntime(shell.hardware);
+    const context = printContext(at.local, runtime);
+    await sendLabelJob(context, await job(at));
+    expect(shell.sends).toHaveLength(1);
+    await sendLabelJob(context, await job(at));
+    expect(shell.sends).toHaveLength(2);
+    await flushPromises();
+    expect(shell.sends).toHaveLength(2);
+    expect(jobRows(at.db)[0]).toMatchObject({ state: "unknown", attempts: 2 });
+  });
+});
+
+describe("a printer still held by a stuck call", () => {
+  it("is not given the next job until the stuck call has really answered, however long ago the limit ran out", async () => {
+    const at = await station();
+    await setUpPrinting(at.local);
+    await closeWithLabel(at);
+    cloneJob(at, "job-2");
+    const shell = fakeHardware();
+    shell.holdSends();
+    const { runtime, expire } = manualRuntime(shell.hardware);
+    const context = printContext(at.local, runtime);
+    const first = sendLabelJob(context, await job(at, "job-1"));
+    await vi.waitFor(() => expect(shell.heldSends()).toBe(1));
+    expire();
+    await expect(first).resolves.toMatchObject({ state: "unknown", errorCode: "timeout" });
+    // The operator sends the next label to the same printer: its limit runs on, but
+    // the printer is still the stuck call's, so the bytes wait.
+    const second = sendLabelJob(context, await job(at, "job-2"));
+    await flushPromises();
+    expect(shell.sends).toHaveLength(1);
+    expect(jobRows(at.db).find((row) => row["id"] === "job-2")).toMatchObject({
+      state: "sending",
+    });
+    // The stuck call answers at last; only now do the next bytes go.
+    shell.releaseSend({ sent: false, code: "outcome_unknown" });
+    await expect(second).resolves.toMatchObject({ state: "sent", attempts: 1 });
+    expect(shell.sends).toHaveLength(2);
+    expect(jobRows(at.db).find((row) => row["id"] === "job-1")).toMatchObject({
+      state: "unknown",
+      error_code: "timeout",
     });
   });
 });

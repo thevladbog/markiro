@@ -7,6 +7,11 @@ import { printerTargetKey } from "../setup/workstation-settings.js";
  * COM port's flush or a spooler call can block past its own limit, and the
  * call then never answers (plan 2a4's notes): the work screen must not wait
  * for it forever.
+ *
+ * The limit counts from the moment of asking, queue wait included: a label
+ * queued behind a slow but healthy send gets only what is left of it and can
+ * end as `timeout` or `busy`. Rare while an open job stops the next box; it
+ * grows once pallet labels share the box printer (plan ПЛ-Ц).
  */
 export const PRINT_SEND_LIMIT_MS = 20_000;
 
@@ -32,6 +37,12 @@ const realTimer: StartTimer = (ms, fire) => {
  * The printers of this app: one send at a time per address (the cloud
  * station's `serializePrinterOutput`), each answered within
  * `PRINT_SEND_LIMIT_MS`, and the jobs whose bytes the shell holds right now.
+ *
+ * A shell call that never returns holds its address until the app restarts:
+ * every later send to that printer ends `busy` (`failed` `printer_busy`, the
+ * bytes never given over — safe) and the stuck call's job stays in flight, so
+ * the recovery never frees it. The way out is another printer or a restart;
+ * the screens' `printer_busy` text must say so.
  */
 export interface PrintRuntime {
   /**

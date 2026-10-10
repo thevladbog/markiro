@@ -104,10 +104,18 @@ describe("the printers' runtime", () => {
     timers.expire();
     await expect(stuck).resolves.toEqual({ kind: "timeout" });
     expect(runtime.isInFlight("job-1")).toBe(true);
-    // A late answer changes nothing that was said, and ends the flight.
+    // The limit ran out, the call did not: the printer is still the stuck call's.
+    const next = runtime.send("job-2", ZEBRA, BYTES);
+    await flush();
+    expect(shell.calls).toHaveLength(1);
+    expect(runtime.isInFlight("job-2")).toBe(true);
+    // A late answer changes nothing that was said, ends the flight, and only then lets the next go.
     shell.calls[0]?.answer({ sent: true });
     await flush();
     expect(runtime.isInFlight("job-1")).toBe(false);
+    expect(shell.calls).toHaveLength(2);
+    shell.calls[1]?.answer({ sent: true });
+    await expect(next).resolves.toEqual({ kind: "answered", result: { sent: true } });
   });
 
   it("never gives the shell bytes whose limit ran out while an earlier send held the printer", async () => {
@@ -242,4 +250,76 @@ describe("the printers' runtime, beyond a single send", () => {
       vi.useRealTimers();
     }
   });
+});
+
+describe("the printers' runtime, a stuck call and the clock", () => {
+  it("keeps every later send of the address behind a call that outlives its limit, by the clock", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const shell = heldPrinter();
+      const runtime = createPrintRuntime(shell.printBytes, { limitMs: 1_000 });
+      const stuck = runtime.send("job-1", ZEBRA, BYTES);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(stuck).resolves.toEqual({ kind: "timeout" });
+      // A second send a minute after: its own limit runs out while the first call is stuck.
+      await vi.advanceTimersByTimeAsync(60_000);
+      const second = runtime.send("job-2", ZEBRA, BYTES);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(second).resolves.toEqual({ kind: "busy" });
+      expect(shell.calls).toHaveLength(1);
+      // The second one's limit running out does not free the printer for a third.
+      const third = runtime.send("job-2b", ZEBRA, BYTES);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(shell.calls).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(third).resolves.toEqual({ kind: "busy" });
+      expect(shell.calls).toHaveLength(1);
+      expect(runtime.inFlight()).toEqual(["job-1", "job-2", "job-2b"]);
+      // Another printer is not held by it.
+      const other = runtime.send("job-3", TSC, BYTES);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(shell.calls.map((call) => call.target)).toEqual([ZEBRA, TSC]);
+      shell.calls[1]?.answer({ sent: true });
+      await expect(other).resolves.toEqual({ kind: "answered", result: { sent: true } });
+      // The stuck call settles: the expired bytes do not go, the printer is free.
+      shell.calls[0]?.answer({ sent: true });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(shell.calls).toHaveLength(2);
+      expect(runtime.inFlight()).toEqual([]);
+      const next = runtime.send("job-4", ZEBRA, BYTES);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(shell.calls).toHaveLength(3);
+      shell.calls[2]?.answer({ sent: true });
+      await expect(next).resolves.toEqual({ kind: "answered", result: { sent: true } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("the printers' runtime never sends the same bytes again", () => {
+  const answers: [string, () => Promise<PrintResult>][] = [
+    ["outcome_unknown", async () => ({ sent: false, code: "outcome_unknown" })],
+    ["not_sent", async () => ({ sent: false, code: "not_sent" })],
+    ["a failed call", async () => Promise.reject(new Error("ipc gone"))],
+  ];
+
+  for (const [name, answer] of answers) {
+    it(`gives the shell the bytes once after ${name}, with the clock running on`, async () => {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval"] });
+      try {
+        const printBytes = vi.fn<HardwareApi["printBytes"]>(answer);
+        const runtime = createPrintRuntime(printBytes);
+        const sent = runtime.send("job-1", ZEBRA, BYTES);
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        await sent;
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        await flush();
+        expect(printBytes).toHaveBeenCalledTimes(1);
+        expect(runtime.inFlight()).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+  }
 });
