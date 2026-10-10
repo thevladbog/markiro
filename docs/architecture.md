@@ -201,6 +201,21 @@ aggregation, and saved historical reports and generated exports remain unchanged
   the server snapshots the product's current value when creating the shift.
   The pallet template picker reads tenant/category-filtered summaries through
   `GET /shifts/pallet-label-templates`, with category then organisation defaults.
+- Editable pallet A4 templates use strict JSON V2 (`pallet_sheet`), independent
+  defaults and revision-checked cabinet CRUD. Rendering remains client-side.
+  An opted-in Windows Station snapshots the selected full spec with its revision
+  and digest in the shift and signed offline scope; legacy clients receive V1
+  projections. Actual handheld kind cannot acquire sheet capability by a header.
+  Windows A4 paper profiles are pallet-only and require a native capability probe.
+  Native DEVMODE requests standard A4, orientation, simplex, scale100/copies1;
+  actual printable bounds and an effective geometry fingerprint are checked before
+  StartDoc. Source raster300 is replicated only at device300/600/1200, without fit.
+  Each delivery freezes facts, template, renderer version, private mono branding
+  and geometry atomically with bytes. Unknown output never resends automatically;
+  explicit replay retains bytes, while proven non-send permits a new geometry
+  attempt from the saved resources. Historical resources remain tenant/key-bound.
+  See [V2 JSON](labels/pallet-sheet-json-v2.md) and
+  [physical acceptance](acceptance/validation-pallet-a4-printing.md).
 - Product snapshots carry an optional private image descriptor. Device mirrors
   treat an absent `image` field as a legacy/unknown value and retain any
   already-published local pointer; only explicit `image: null` clears it. This

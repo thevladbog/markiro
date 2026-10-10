@@ -8,6 +8,7 @@ import {
   buildWarehouseCodeOnlyLabelTemplate,
   buildWarehouseCodeOnlyBoxTemplate,
   buildPalletLabelTemplates,
+  buildPalletSheetPresets,
   PALLET_LABEL_58X40_TEMPLATE_NAME,
   PALLET_LABEL_TEMPLATE_NAME,
 } from "@markiro/domain";
@@ -291,6 +292,9 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
         id: schema.labelTemplates.id,
         name: schema.labelTemplates.name,
         purpose: schema.labelTemplates.purpose,
+        format: schema.labelTemplates.format,
+        revision: schema.labelTemplates.revision,
+        seedKey: schema.labelTemplates.seedKey,
         spec: schema.labelTemplates.spec,
       })
       .from(schema.labelTemplates)
@@ -342,12 +346,12 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ id: schema.labelTemplates.id })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    // 17 box + 3 product_duplicate + 2 pallet (06d + spec 2026-09-18 §8).
-    expect(after).toHaveLength(22);
+    // 17 box + 3 product_duplicate + 2 legacy pallet + 3 editable A4 sheets.
+    expect(after).toHaveLength(25);
     // Selection order is not guaranteed without ORDER BY; sort by name so the
     // comparison is deterministic regardless of physical row order.
     const pallets = templates
-      .filter((t) => t.purpose === "pallet")
+      .filter((t) => t.purpose === "pallet" && t.format === "label_v1")
       .sort((a, b) => a.name.localeCompare(b.name));
     expect(pallets).toEqual([
       expect.objectContaining({
@@ -359,6 +363,18 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
         spec: buildPalletLabelTemplates()[1]!.spec,
       }),
     ]);
+    const sheets = templates.filter((t) => t.format === "pallet_sheet_v2");
+    expect(sheets).toHaveLength(3);
+    for (const preset of buildPalletSheetPresets())
+      expect(sheets).toContainEqual(
+        expect.objectContaining({
+          name: preset.name,
+          spec: preset.spec,
+          seedKey: preset.key,
+          purpose: "pallet",
+          revision: 1,
+        }),
+      );
     const duplicates = templates.filter((t) => t.purpose === "product_duplicate");
     expect(duplicates).toHaveLength(3);
     expect(duplicates).toContainEqual(

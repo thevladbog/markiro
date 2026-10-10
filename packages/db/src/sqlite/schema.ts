@@ -17,6 +17,27 @@ export const stationMeta = sqliteTable("station_meta", {
   value: text("value"),
 });
 
+/** A complete validated branding publication, isolated by tenant and device-key owner. */
+export const stationOrganizationBranding = sqliteTable(
+  "station_organization_branding",
+  {
+    tenantId: text("tenant_id").notNull(),
+    ownerDigest: text("owner_digest").notNull(),
+    snapshotJson: text("snapshot_json").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.ownerDigest] }),
+    check(
+      "station_organization_branding_owner_check",
+      sql`length(${t.ownerDigest})=64 AND ${t.ownerDigest} NOT GLOB '*[^0-9a-f]*'`,
+    ),
+    check(
+      "station_organization_branding_snapshot_check",
+      sql`length(${t.snapshotJson})<=131072 AND CASE WHEN NOT json_valid(${t.snapshotJson}) THEN 0 ELSE COALESCE(json_extract(${t.snapshotJson},'$.schemaVersion')=1 AND json_extract(${t.snapshotJson},'$.tenantId')=${t.tenantId} AND json_extract(${t.snapshotJson},'$.ownerDigest')=${t.ownerDigest},0) END`,
+    ),
+  ],
+);
+
 /** Printer snapshots are local metadata, excluded from print-event digests and sync. */
 export const printerDestinations = sqliteTable(
   "printer_destinations",
@@ -123,6 +144,8 @@ export const shiftMirror = sqliteTable(
     boxLabelTemplateSpec: text("box_label_template_spec"),
     /** The PALLET label's own template spec; null for a shift without pallets. */
     palletLabelTemplateSpec: text("pallet_label_template_spec"),
+    palletSheetTemplateId: text("pallet_sheet_template_id"),
+    palletSheetTemplateSnapshot: text("pallet_sheet_template_snapshot"),
     // Human-readable shift number (`AUG26-003`, `/S` = station-created) --
     // composed server-side; see migrations.ts's trailing ALTER.
     number: text("number"),
@@ -132,6 +155,19 @@ export const shiftMirror = sqliteTable(
     executionScopeJson: text("execution_scope_json"),
   },
   (table) => [
+    check(
+      "shift_mirror_pallet_sheet_snapshot_json_check",
+      sql`CASE
+      WHEN ${table.palletSheetTemplateSnapshot} IS NULL THEN ${table.palletSheetTemplateId} IS NULL
+      WHEN NOT json_valid(${table.palletSheetTemplateSnapshot}) THEN 0
+      ELSE COALESCE(json_extract(${table.palletSheetTemplateSnapshot},'$.id') = ${table.palletSheetTemplateId}
+        AND json_type(${table.palletSheetTemplateSnapshot},'$.revision') = 'integer'
+        AND json_extract(${table.palletSheetTemplateSnapshot},'$.revision') > 0
+        AND json_extract(${table.palletSheetTemplateSnapshot},'$.spec.schemaVersion') = 2
+        AND json_extract(${table.palletSheetTemplateSnapshot},'$.spec.kind') = 'pallet_sheet'
+        AND length(json_extract(${table.palletSheetTemplateSnapshot},'$.digest')) = 64
+        AND json_extract(${table.palletSheetTemplateSnapshot},'$.digest') NOT GLOB '*[^0-9a-f]*',0) END`,
+    ),
     check(
       "shift_mirror_validation_print_context_json_check",
       sql`${table.validationPrintContext} IS NULL OR json_valid(${table.validationPrintContext})`,
@@ -1600,6 +1636,7 @@ export const printerDeliveries = sqliteTable(
     state: text("state").notNull(),
     profileJson: text("profile_json").notNull(),
     artifactDigest: text("artifact_digest").notNull(),
+    renderSnapshotJson: text("render_snapshot_json"),
     artifactBase64: text("artifact_base64"),
     documentName: text("document_name").notNull(),
     receiptJson: text("receipt_json"),
@@ -1620,6 +1657,10 @@ export const printerDeliveries = sqliteTable(
     check(
       "printer_deliveries_json_check",
       sql`json_valid(${t.profileJson}) AND (${t.receiptJson} IS NULL OR json_valid(${t.receiptJson}))`,
+    ),
+    check(
+      "printer_deliveries_render_snapshot_check",
+      sql`${t.renderSnapshotJson} IS NULL OR (length(${t.renderSnapshotJson})<=700000 AND json_valid(${t.renderSnapshotJson}))`,
     ),
     check(
       "printer_deliveries_artifact_check",

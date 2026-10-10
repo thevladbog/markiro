@@ -37,12 +37,16 @@
  * byte reaches either document unescaped.
  */
 
-import type { LabelTemplatePurpose, LabelTemplateSpec } from "@markiro/domain";
+import {
+  serializeStoredLabelJson,
+  type LabelTemplatePurpose,
+  type StoredLabelTemplateSpec,
+} from "@markiro/domain";
 
 export interface LabelTemplateJsonPayload {
   name: string;
   purpose: LabelTemplatePurpose;
-  spec: LabelTemplateSpec;
+  spec: StoredLabelTemplateSpec;
 }
 
 /**
@@ -56,8 +60,7 @@ export interface LabelTemplateJsonPayload {
  * spec.
  */
 export function buildJsonBlob(payload: LabelTemplateJsonPayload): Blob {
-  const ordered = { name: payload.name, purpose: payload.purpose, spec: payload.spec };
-  return new Blob([`${JSON.stringify(ordered, null, 2)}\n`], { type: "application/json" });
+  return new Blob([serializeStoredLabelJson(payload)], { type: "application/json" });
 }
 
 /**

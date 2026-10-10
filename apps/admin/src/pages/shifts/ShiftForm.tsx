@@ -66,6 +66,7 @@ const shiftFormSchema = z.object({
   boxLabelTemplateSelection: z.string(),
   /** "" means "let the server resolve the category/organisation pallet default". */
   palletLabelTemplateId: z.string(),
+  palletSheetTemplateSelection: z.string().optional(),
   boxCapacity: z
     .string()
     .trim()
@@ -134,6 +135,7 @@ const EMPTY_VALUES: ShiftFormValues = {
   ssccIssuerCounterpartyId: "",
   boxLabelTemplateSelection: BOX_TEMPLATE_SELECTION.organization,
   palletLabelTemplateId: "",
+  palletSheetTemplateSelection: "",
   boxCapacity: "",
   palletBoxCapacity: "",
   palletsEnabled: false,
@@ -199,6 +201,7 @@ export function ShiftForm({
   const boxLabelTemplateSelection = watch("boxLabelTemplateSelection");
   const palletsEnabled = watch("palletsEnabled");
   const palletLabelTemplateId = watch("palletLabelTemplateId");
+  const palletSheetSelection = watch("palletSheetTemplateSelection") ?? "";
   const activeEdit = formMode === "edit" && editStatus === "active";
   /**
    * Locked only while the box is OFF. A shift planned back when the tenant
@@ -246,10 +249,15 @@ export function ShiftForm({
   const eligibleTemplates = !hasProduct
     ? []
     : selectedProduct
-      ? formContext.labelTemplates.filter((template) =>
-          isBoxLabelTemplateEligible(template, productGroupCode),
+      ? formContext.labelTemplates.filter(
+          (template) =>
+            template.format !== "pallet_sheet_v2" &&
+            isBoxLabelTemplateEligible(template, productGroupCode),
         )
-      : formContext.labelTemplates.filter((template) => template.purpose !== "product_duplicate");
+      : formContext.labelTemplates.filter(
+          (template) =>
+            template.format !== "pallet_sheet_v2" && template.purpose !== "product_duplicate",
+        );
 
   /**
    * Pallet templates are a separate, non-overlapping pool: the server rejects
@@ -258,8 +266,10 @@ export function ShiftForm({
    * only produce a save the operator cannot explain. Same enabled +
    * category-scope rule as the box pool, via the shared domain predicate.
    */
-  const eligiblePalletTemplates = formContext.labelTemplates.filter((template) =>
-    isPalletLabelTemplateEligible(template, productGroupCode),
+  const eligiblePalletTemplates = formContext.labelTemplates.filter(
+    (template) =>
+      template.format !== "pallet_sheet_v2" &&
+      isPalletLabelTemplateEligible(template, productGroupCode),
   );
   /**
    * A saved template that no longer qualifies (disabled, or re-scoped away
@@ -285,6 +295,27 @@ export function ShiftForm({
   ];
 
   const isDirtyRef = useRef(false);
+  const sheetTemplates = formContext.labelTemplates.filter(
+    (template) =>
+      template.format === "pallet_sheet_v2" &&
+      isPalletLabelTemplateEligible(template, productGroupCode),
+  );
+  const sheetOptions: SelectOption[] = [
+    { value: "", label: t("pages.shifts.form.sheetDefault") },
+    { value: "none", label: t("pages.shifts.form.sheetNone") },
+    ...sheetTemplates.map((template) => ({ value: template.id, label: template.name })),
+    ...(palletSheetSelection &&
+    palletSheetSelection !== "none" &&
+    !sheetTemplates.some((template) => template.id === palletSheetSelection)
+      ? [
+          {
+            value: palletSheetSelection,
+            label: t("pages.shifts.form.boxLabelTemplateUnavailable"),
+            disabled: true,
+          },
+        ]
+      : []),
+  ];
 
   useEffect(() => {
     isDirtyRef.current = isDirty;
@@ -445,6 +476,23 @@ export function ShiftForm({
       return;
     }
     clearErrors("boxLabelTemplateSelection");
+    let sheetDefaultId = planning.data?.defaultPalletSheetTemplateId;
+    if (
+      formMode === "edit" &&
+      values.palletsEnabled &&
+      dirtyFields.palletSheetTemplateSelection === true &&
+      values.palletSheetTemplateSelection === ""
+    ) {
+      if (planning.isFetching || planning.isError || sheetDefaultId === undefined)
+        sheetDefaultId = (await planning.refetch()).data?.defaultPalletSheetTemplateId;
+      if (sheetDefaultId === undefined) {
+        setError("palletSheetTemplateSelection", {
+          type: "manual",
+          message: "pages.shifts.form.sheetDefaultUnavailable",
+        });
+        return;
+      }
+    }
     await onSubmit(
       toPayload(
         values,
@@ -462,8 +510,10 @@ export function ShiftForm({
           productionDate: dirtyFields.productionDate === true,
           boxLabelTemplate: dirtyFields.boxLabelTemplateSelection === true,
           palletLabelTemplate: dirtyFields.palletLabelTemplateId === true,
+          palletSheetTemplate: dirtyFields.palletSheetTemplateSelection === true,
         },
         reprocessingSupported,
+        sheetDefaultId,
       ),
     );
   });
@@ -966,6 +1016,17 @@ export function ShiftForm({
                       setValue("palletLabelTemplateId", value, { shouldDirty: true })
                     }
                   />
+                  {planning.data?.palletSheetProtocol === "pallet-sheet-v2" ? (
+                    <Select
+                      label={t("pages.shifts.form.sheetLabel")}
+                      hint={t("pages.shifts.form.sheetHint")}
+                      options={sheetOptions}
+                      value={palletSheetSelection}
+                      onValueChange={(value) =>
+                        setValue("palletSheetTemplateSelection", value, { shouldDirty: true })
+                      }
+                    />
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -1016,7 +1077,7 @@ export function ShiftForm({
  *   of the update payload entirely rather than sending a value the server
  *   would just ignore.
  */
-function toPayload(
+export function toPayload(
   values: ShiftFormValues,
   formMode: "create" | "edit",
   touched: {
@@ -1032,6 +1093,7 @@ function toPayload(
     productionDate: boolean;
     boxLabelTemplate: boolean;
     palletLabelTemplate: boolean;
+    palletSheetTemplate?: boolean;
   } = {
     lineId: true,
     plannedQty: true,
@@ -1039,8 +1101,10 @@ function toPayload(
     productionDate: true,
     boxLabelTemplate: true,
     palletLabelTemplate: true,
+    palletSheetTemplate: true,
   },
   reprocessingSupported = false,
+  resolvedPalletSheetDefaultId: string | null | undefined = undefined,
 ): CreateShiftInput | UpdateShiftInput {
   const plannedQty = values.plannedQty?.trim();
   const plannedDate = values.plannedDate?.trim();
@@ -1051,8 +1115,23 @@ function toPayload(
   const boxCapacity = values.boxCapacity?.trim();
   const palletBoxCapacity = values.palletBoxCapacity?.trim();
   const palletLabelTemplateId = values.palletLabelTemplateId.trim();
+  const sheetSelection = values.palletSheetTemplateSelection?.trim();
+  const sheetPatch =
+    values.palletsEnabled &&
+    sheetSelection !== undefined &&
+    (sheetSelection !== "" ||
+      (formMode === "edit" && resolvedPalletSheetDefaultId !== undefined)) &&
+    (formMode === "create" || changed.palletSheetTemplate === true)
+      ? {
+          palletSheetTemplateId:
+            sheetSelection === "none"
+              ? null
+              : sheetSelection || (resolvedPalletSheetDefaultId ?? null),
+        }
+      : {};
 
   const payload: UpdateShiftInput = {
+    ...sheetPatch,
     mode: values.mode,
     lineId: lineId ? lineId : null,
     plannedQty: plannedQty ? Number(plannedQty) : null,
@@ -1077,7 +1156,7 @@ function toPayload(
     if (changed.palletLabelTemplate && values.palletsEnabled && palletLabelTemplateId) {
       activePayload.palletLabelTemplateId = palletLabelTemplateId;
     }
-    return activePayload;
+    return { ...activePayload, ...sheetPatch };
   }
 
   if (values.validationPrintMode !== undefined) {

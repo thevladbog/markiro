@@ -57,6 +57,12 @@ const CABINET_GUARDS = ["TenantGuard", "AuthorizationGuard", "SubscriptionAccess
 const KIOSK_GUARDS = ["KioskDeviceGuard", "SubscriptionAccessGuard"] as const;
 const STATION_GUARDS = ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"] as const;
 const CABINET_STATION_GUARDS = [...CABINET_GUARDS, "StationOnlyGuard"] as const;
+const STATION_BRANDING_GUARDS = [
+  "TenantGuard",
+  "AuthorizationGuard",
+  "StationOnlyGuard",
+  "SubscriptionAccessGuard",
+] as const;
 
 const customerContract = (
   guards: readonly string[],
@@ -112,6 +118,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     contract: customerContract(CABINET_GUARDS, { mode: "read_only_allowed", reason: "read" }),
     routes: [
       "GET /access/entitlements (AccessController.entitlementSnapshot)",
+      "GET /org/profile/print-branding (CabinetPrintBrandingController.read)",
+      "GET /org/profile/print-branding/logo/:revision (CabinetPrintBrandingController.logo)",
       "GET /support-chat/episodes (SupportChatController.list)",
       "GET /billing/requests/:id/transcript (SupportChatTranscriptController.read)",
       "POST /support-chat/episodes (SupportChatController.create)",
@@ -215,6 +223,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "GET /shifts/planning-config (ShiftsController.getPlanningConfig)",
       "GET /shifts/box-label-templates (ShiftsController.listBoxLabelTemplates)",
       "GET /shifts/pallet-label-templates (ShiftsController.listPalletLabelTemplates)",
+      "GET /shifts/pallet-sheet-templates (ShiftsController.listPalletSheetTemplates)",
+      "GET /shifts/pallet-sheet-template-preview (ShiftsController.getPalletSheetTemplatePreview)",
       "GET /shifts/product-label-templates (ShiftsController.listProductLabelTemplates)",
       "GET /shifts/label-template-preview (ShiftsController.getLabelTemplatePreview)",
       "GET /shifts/:id (ShiftsController.getShift)",
@@ -490,6 +500,16 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
     routes: [
       "GET /station/writeoff-bootstrap (StationWriteoffsController.bootstrap)",
       "GET /station/box-registry (StationWriteoffsController.boxRegistry)",
+    ],
+  },
+  {
+    contract: customerContract(STATION_BRANDING_GUARDS, {
+      mode: "read_only_allowed",
+      reason: "read",
+    }),
+    routes: [
+      "GET /station/branding (StationBrandingController.read)",
+      "GET /station/branding/logo/:revision (StationBrandingController.logo)",
     ],
   },
   {
@@ -1147,26 +1167,28 @@ describe("registered subscription route inventory", () => {
           route.controller.name === "StationWriteoffsController" ||
           route.controller.name === "StationPalletsController";
         const expected =
-          route.controller.name === "KioskController" ||
-          route.controller.name === "KioskGrantsController"
-            ? ["KioskDeviceGuard", "SubscriptionAccessGuard"]
-            : route.controller.name === "StationScansController" ||
-                route.controller.name === "StationInventoriesController" ||
-                route.controller.name === "StationWarehouseReprintController" ||
-                route.controller.name === "StationProductImagesController" ||
-                route.controller.name === "StationShiftProgressController" ||
-                route.controller.name === "DeviceGrantsController" ||
-                route.controller.name === "DeviceReplacementReadinessController" ||
-                route.controller.name === "ReplacementRecoveryReadinessController"
-              ? ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"]
-              : stationOnlyCabinetRoute
-                ? [
-                    "TenantGuard",
-                    "AuthorizationGuard",
-                    "SubscriptionAccessGuard",
-                    "StationOnlyGuard",
-                  ]
-                : ["TenantGuard", "AuthorizationGuard", "SubscriptionAccessGuard"];
+          route.controller.name === "StationBrandingController"
+            ? STATION_BRANDING_GUARDS
+            : route.controller.name === "KioskController" ||
+                route.controller.name === "KioskGrantsController"
+              ? ["KioskDeviceGuard", "SubscriptionAccessGuard"]
+              : route.controller.name === "StationScansController" ||
+                  route.controller.name === "StationInventoriesController" ||
+                  route.controller.name === "StationWarehouseReprintController" ||
+                  route.controller.name === "StationProductImagesController" ||
+                  route.controller.name === "StationShiftProgressController" ||
+                  route.controller.name === "DeviceGrantsController" ||
+                  route.controller.name === "DeviceReplacementReadinessController" ||
+                  route.controller.name === "ReplacementRecoveryReadinessController"
+                ? ["TenantGuard", "StationOnlyGuard", "SubscriptionAccessGuard"]
+                : stationOnlyCabinetRoute
+                  ? [
+                      "TenantGuard",
+                      "AuthorizationGuard",
+                      "SubscriptionAccessGuard",
+                      "StationOnlyGuard",
+                    ]
+                  : ["TenantGuard", "AuthorizationGuard", "SubscriptionAccessGuard"];
         expect(names, `${routeKey(route)} changed its exact identity/authorization chain`).toEqual(
           expected,
         );

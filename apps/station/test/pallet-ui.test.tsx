@@ -21,6 +21,8 @@ import type { SqlExecutor } from "../src/lib/mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { addRange } from "../src/lib/sscc-pool.js";
 import { WorkScreen, type WorkScreenProps } from "../src/pages/WorkScreen.js";
+import * as palletSheets from "../src/lib/pallet-sheet-printing.js";
+import { createCredentialGeneration } from "../src/lib/credential-recovery.js";
 
 /**
  * This test file predates neither the interfaces nor the RU/EN copy it
@@ -370,6 +372,71 @@ describe("PalletContents", () => {
 });
 
 describe("PalletClose", () => {
+  it("shows physical confirmation immediately after A4 IPC becomes unknown, without a restart or resend", async () => {
+    const exec = makeExec();
+    await seedShift(exec, {
+      shiftId: "s1",
+      palletBoxCapacity: 12,
+      palletLabelTemplateSpec: PALLET_LABEL_SPEC,
+    });
+    await seedPallet(exec, {
+      palletId: "p1",
+      shiftId: "s1",
+      terminalId: "dev-1",
+      boxCount: 3,
+      closedAt: "2026-07-29T09:20:00.000Z",
+      sscc: "103460068200000099",
+      printState: "pending",
+      printErrorCode: "transport_failed",
+    });
+    const send = vi
+      .spyOn(palletSheets, "printPalletSheet")
+      .mockRejectedValue(new Error("PRINT_DELIVERY_REQUIRES_RECOVERY"));
+    const profile = {
+      id: "office",
+      name: "Office",
+      mode: "windows_driver" as const,
+      paper: "a4" as const,
+      dpi: 300 as const,
+      language: "zpl" as const,
+      target: { kind: "usb" as const, printer: "Queue" },
+    };
+    render(
+      <WorkScreen
+        exec={exec}
+        shiftId="s1"
+        terminalId="dev-1"
+        tenantId="tenant"
+        operatorId="operator-1"
+        credentialGeneration={createCredentialGeneration("test-a4-key")}
+        verifyPrintedLabel={false}
+        expectedGtin14="04600000000015"
+        productName="Water"
+        source={manualSource()}
+        sound={{ muted: true, volume: 1 }}
+        onExit={() => {}}
+        pendingSync={0}
+        issuerPrefix={TEST_ISSUER_PREFIX}
+        boxCapacity={null}
+        palletBoxCapacity={12}
+        palletPrinting={{ ...profile, profile, print: async () => {} }}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: i18n.t("pallet.retry") }));
+    const confirm = await screen.findByRole("button", { name: i18n.t("pallet.confirmPrinted") });
+    expect(send).toHaveBeenCalledTimes(1);
+    fireEvent.click(confirm);
+    await waitFor(async () =>
+      expect(
+        (
+          await exec.all<{ print_verified_at: string | null }>(
+            "SELECT print_verified_at FROM pallets_mirror WHERE pallet_id='p1'",
+          )
+        )[0]?.print_verified_at,
+      ).toBeTruthy(),
+    );
+    expect(send).toHaveBeenCalledTimes(1);
+  });
   const SSCC = "103460068200000004";
 
   it("names the pallet and its SSCC while its label is printing", () => {

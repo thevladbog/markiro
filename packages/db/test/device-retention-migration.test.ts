@@ -85,6 +85,8 @@ describe.skipIf(!databaseUrl)("working device retention forward migration", () =
         ? rows.map((row: Record<string, unknown>) => ({
             ...row,
             allow_previously_accepted_codes: false,
+            pallet_sheet_template_id: null,
+            pallet_sheet_template_snapshot: null,
           }))
         : rows,
     );

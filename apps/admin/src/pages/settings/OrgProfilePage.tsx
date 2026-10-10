@@ -46,9 +46,10 @@ import {
   useDeleteOrganizationLogo,
   type PutOrgProfileInput,
 } from "./api.js";
+import { PalletSheetDefaultsForm } from "./PalletSheetDefaults.js";
 import { OPERATIONAL_TIME_ZONES } from "./time-zones.js";
 import { useChzProductGroups } from "../catalog/api.js";
-import { useLabelTemplates } from "../labels/api.js";
+import { useLabelTemplates, isLegacyTemplateSummary } from "../labels/api.js";
 
 /** A GS1 GLN is always exactly 13 digits; the issuer prefix is its first 9 -- mirrors the server's `deriveIssuerPrefix`. */
 const GLN_PATTERN = /^\d{13}$/;
@@ -243,7 +244,7 @@ function toProfileFormValues(profile: {
 export function OrgProfilePage() {
   const { t } = useTranslation();
   const profileQuery = useOrgProfile();
-  const labelTemplatesQuery = useLabelTemplates();
+  const labelTemplatesQuery = useLabelTemplates({ includeSheets: true });
   const updateProfile = useUpdateOrgProfile();
 
   const {
@@ -271,7 +272,7 @@ export function OrgProfilePage() {
     ...OPERATIONAL_TIME_ZONES,
     ...(OPERATIONAL_TIME_ZONES.some((option) => option === timeZone) ? [] : [timeZone]),
   ].map((option) => ({ value: option, label: option }));
-  const labelTemplates = labelTemplatesQuery.data ?? [];
+  const labelTemplates = (labelTemplatesQuery.data ?? []).filter(isLegacyTemplateSummary);
   const groupsQuery = useChzProductGroups();
   const groups = groupsQuery.data ?? [];
   const categoryDefaults = watchProfile("categoryDefaults");
@@ -659,6 +660,7 @@ export function OrgProfilePage() {
             </form>
           </Card>
 
+          <PalletSheetDefaultsForm profile={profileQuery.data} templates={labelTemplatesQuery} />
           <PickupPolicyCard enabled={profileQuery.data.pickupLimitsEnabled} />
           <OrganizationLogoCard logoUrl={profileQuery.data.logoUrl} />
 

@@ -5036,6 +5036,29 @@ export const STATION_MIGRATIONS: string[] = [
         json_extract(NEW.payload_json,'$.input.preparedEvent'),json_extract(NEW.payload_json,'$.eventDigest'));
       DELETE FROM warehouse_reprint_commands WHERE owner=NEW.owner AND command_id=NEW.command_id;
     END;`,
+  `ALTER TABLE shift_mirror ADD COLUMN pallet_sheet_template_id TEXT;`,
+  `ALTER TABLE shift_mirror ADD COLUMN pallet_sheet_template_snapshot TEXT
+    CONSTRAINT shift_mirror_pallet_sheet_snapshot_json_check CHECK (CASE
+      WHEN pallet_sheet_template_snapshot IS NULL THEN pallet_sheet_template_id IS NULL
+      WHEN NOT json_valid(pallet_sheet_template_snapshot) THEN 0
+      ELSE COALESCE(json_extract(pallet_sheet_template_snapshot,'$.id') = pallet_sheet_template_id
+        AND json_type(pallet_sheet_template_snapshot,'$.revision') = 'integer'
+        AND json_extract(pallet_sheet_template_snapshot,'$.revision') > 0
+        AND json_extract(pallet_sheet_template_snapshot,'$.spec.schemaVersion') = 2
+        AND json_extract(pallet_sheet_template_snapshot,'$.spec.kind') = 'pallet_sheet'
+        AND length(json_extract(pallet_sheet_template_snapshot,'$.digest')) = 64
+        AND json_extract(pallet_sheet_template_snapshot,'$.digest') NOT GLOB '*[^0-9a-f]*',0) END);`,
+  `CREATE TABLE IF NOT EXISTS station_organization_branding (
+    tenant_id TEXT NOT NULL,
+    owner_digest TEXT NOT NULL CHECK(length(owner_digest)=64 AND owner_digest NOT GLOB '*[^0-9a-f]*'),
+    snapshot_json TEXT NOT NULL CHECK(length(snapshot_json)<=131072 AND CASE
+      WHEN NOT json_valid(snapshot_json) THEN 0
+      ELSE COALESCE(json_extract(snapshot_json,'$.schemaVersion')=1
+        AND json_extract(snapshot_json,'$.tenantId')=tenant_id
+        AND json_extract(snapshot_json,'$.ownerDigest')=owner_digest,0) END),
+    PRIMARY KEY(tenant_id,owner_digest)
+  );`,
+  `ALTER TABLE printer_deliveries ADD COLUMN render_snapshot_json TEXT CHECK(render_snapshot_json IS NULL OR (length(render_snapshot_json)<=700000 AND json_valid(render_snapshot_json)));`,
 ];
 
 export interface StationMigrationEntry {

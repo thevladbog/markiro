@@ -6,6 +6,7 @@ export type PrintPurpose = (typeof PRINT_PURPOSES)[number];
 export interface PrinterProfile {
   id: string;
   mode?: "raw" | "windows_driver";
+  paper?: "a4";
   name: string;
   target: PrintTarget;
   language: PrinterLanguage;
@@ -81,6 +82,11 @@ export function parsePrinterProfile(value: unknown): PrinterProfile | null {
   if (row.dpi !== null && row.dpi !== 203 && row.dpi !== 300) return null;
   if (row.mode !== undefined && row.mode !== "raw" && row.mode !== "windows_driver") return null;
   if (row.mode === "windows_driver" && (target.kind !== "usb" || row.dpi === null)) return null;
+  if (
+    row.paper !== undefined &&
+    (row.paper !== "a4" || row.mode !== "windows_driver" || row.dpi !== 300)
+  )
+    return null;
   return {
     id,
     name,
@@ -88,6 +94,7 @@ export function parsePrinterProfile(value: unknown): PrinterProfile | null {
     language: row.language,
     dpi: row.dpi,
     ...(row.mode === undefined ? {} : { mode: row.mode }),
+    ...(row.paper === "a4" ? { paper: "a4" as const } : {}),
   };
 }
 
@@ -113,6 +120,11 @@ export function parsePrinterRouting(value: unknown): PrinterRouting {
   for (const purpose of PRINT_PURPOSES) {
     const id = stored?.[purpose];
     assignments[purpose] = typeof id === "string" ? (aliases.get(id) ?? null) : null;
+    if (
+      purpose !== "pallet" &&
+      printers.some((printer) => printer.id === assignments[purpose] && printer.paper === "a4")
+    )
+      assignments[purpose] = null;
   }
   return { printers, assignments };
 }
@@ -137,7 +149,13 @@ export function resolvePrinter(
   purpose: PrintPurpose,
 ): PrinterProfile | null {
   const routing = configuredPrinterRouting(config);
-  return routing.printers.find((printer) => printer.id === routing.assignments[purpose]) ?? null;
+  return (
+    routing.printers.find(
+      (printer) =>
+        printer.id === routing.assignments[purpose] &&
+        (purpose === "pallet" || printer.paper !== "a4"),
+    ) ?? null
+  );
 }
 
 export function configuredPrinterOutput(

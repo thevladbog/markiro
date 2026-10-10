@@ -32,10 +32,11 @@
  */
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 
 import {
   EGAIS_PRODUCT_GROUP_CODE,
+  isPalletSheetSpec,
   assertDuplicateTemplate,
   buildDuplicateLabelTemplate,
   buildPalletLabelTemplates,
@@ -70,6 +71,7 @@ import {
 import { ImportCodeDialog } from "./ImportCodeDialog.js";
 import type { ImportAnalysis } from "./import-analysis.js";
 import { PreviewPane } from "./PreviewPane.js";
+import { SheetTemplatePage } from "./sheet/SheetTemplatePage.js";
 import { useSpecState } from "./useSpecState.js";
 
 const DEFAULT_SPEC: LabelTemplateSpec = {
@@ -143,6 +145,7 @@ export function LabelEditorPage({
   const { t } = useTranslation();
   const { id: routeId } = useParams<{ id?: string }>();
   const id = routeId ?? null;
+  const [searchParams] = useSearchParams();
   const templateQuery = useLabelTemplate(id);
 
   if (id !== null) {
@@ -160,6 +163,24 @@ export function LabelEditorPage({
         </div>
       );
     }
+    if (isPalletSheetSpec(templateQuery.data.spec)) {
+      if (templateQuery.data.revision === undefined)
+        return <Alert tone="error">{t("pages.labels.sheet.missingRevision")}</Alert>;
+      return (
+        <SheetTemplatePage
+          rasterizeText={rasterizeText}
+          key={id}
+          template={{
+            id,
+            name: templateQuery.data.name,
+            spec: templateQuery.data.spec,
+            revision: templateQuery.data.revision,
+            enabled: templateQuery.data.enabled,
+            chzProductGroupCodes: templateQuery.data.chzProductGroupCodes,
+          }}
+        />
+      );
+    }
     return (
       <LabelEditorContent
         key={id}
@@ -175,6 +196,14 @@ export function LabelEditorPage({
       />
     );
   }
+
+  if (searchParams.get("format") === "pallet_sheet_v2")
+    return (
+      <SheetTemplatePage
+        rasterizeText={rasterizeText}
+        initialPresetKey={searchParams.get("preset") ?? "pallet-a4-portrait"}
+      />
+    );
 
   return (
     <LabelEditorContent

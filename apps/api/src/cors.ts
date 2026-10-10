@@ -69,10 +69,17 @@ function isStationRequest(req: Request): boolean {
       (path === "/station/identity" ||
         path === "/station/operators" ||
         path === "/station/warehouse-reprint/templates" ||
+        path === "/station/branding" ||
         path === "/station/device-replacement-intent/v1")) ||
     ((method === "GET" || method === "POST") && path === "/shifts") ||
     (method === "GET" && path === "/shifts/box-label-templates") ||
     (method === "GET" && path === "/shifts/pallet-label-templates") ||
+    (method === "GET" && path === "/shifts/pallet-sheet-templates") ||
+    (method === "GET" && path === "/shifts/pallet-sheet-template-preview") ||
+    (method === "GET" &&
+      /^\/station\/branding\/logo\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        path,
+      )) ||
     (method === "GET" && path === "/shifts/product-label-templates") ||
     (method === "GET" && path === "/shifts/label-template-preview") ||
     (method === "GET" && path === "/shifts/planning-config") ||

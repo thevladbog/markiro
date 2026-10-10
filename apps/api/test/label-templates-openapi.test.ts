@@ -14,6 +14,7 @@ type JsonSchema = {
   required?: string[];
   properties?: Record<string, JsonSchema>;
   items?: JsonSchema;
+  oneOf?: JsonSchema[];
 };
 
 type Method = "get" | "post";
@@ -39,7 +40,7 @@ function responseSchema(
 }
 
 function property(schema: JsonSchema, name: string): JsonSchema {
-  const value = schema.properties?.[name];
+  const value = schema.properties?.[name] ?? schema.oneOf?.[0]?.properties?.[name];
   if (!value) throw new Error(`Missing property ${name}`);
   return value;
 }
@@ -117,6 +118,30 @@ describe("label-templates OpenAPI contract", () => {
         new DocumentBuilder().setTitle("contract test").setVersion("test").build(),
       );
       const single = responseSchema(document, "/label-templates/{id}", "get", "200");
+      // Every recursive reference must resolve in the produced document, including
+      // schemas embedded in request/response bodies (no dangling #/definitions).
+      const visit = (value: unknown): void => {
+        if (!value || typeof value !== "object") return;
+        if (Array.isArray(value)) {
+          value.forEach(visit);
+          return;
+        }
+        for (const [key, child] of Object.entries(value)) {
+          if (key === "$ref" && typeof child === "string" && child.startsWith("#/")) {
+            let target: unknown = document;
+            for (const segment of child.slice(2).split("/")) {
+              if (!target || typeof target !== "object")
+                throw new Error(`Unresolved reference ${child}`);
+              target = Reflect.get(target, segment);
+            }
+            expect(target, child).toBeDefined();
+          } else visit(child);
+        }
+      };
+      visit(document);
+      expect(single.oneOf).toHaveLength(2);
+      expect(single.oneOf?.[1]?.properties?.format?.enum).toEqual(["pallet_sheet_v2"]);
+      expect(single.oneOf?.[1]?.required).toContain("revision");
       expect(property(single, "purpose")).toMatchObject({
         type: "string",
         enum: EXPECTED_PURPOSE_ENUM,

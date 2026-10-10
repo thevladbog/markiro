@@ -33,6 +33,8 @@ import { InventoryDocumentFormatsController } from "../src/modules/inventories/i
 import { StationInventoriesController } from "../src/modules/inventories/station-inventories.controller";
 import { OperatorsController } from "../src/modules/operators/operators.controller";
 import { OrgProfileController } from "../src/modules/org-profile/org-profile.controller";
+import { CabinetPrintBrandingController } from "../src/modules/org-profile/cabinet-print-branding.controller";
+import { StationBrandingController } from "../src/modules/org-profile/station-branding.controller";
 import { StationOperatorsController } from "../src/modules/operators/station-operators.controller";
 import { PickupOrdersController } from "../src/modules/pickup-orders/pickup-orders.controller";
 import { PickupReasonsController } from "../src/modules/pickup-reasons/pickup-reasons.controller";
@@ -96,6 +98,8 @@ const OPERATIONAL_CONTROLLERS: readonly [
   Readonly<Record<string, RouteAccessPolicy>>,
 ][] = [
   [DashboardController, { overview: readPolicy }],
+  [CabinetPrintBrandingController, { read: readPolicy, logo: readPolicy }],
+  [StationBrandingController, { read: sharedReadPolicy, logo: sharedReadPolicy }],
   [DevicesController, { listDevices: readPolicy }],
   [BoxesController, { listBoxes: readPolicy, getSellCodes: readPolicy }],
   [BoxExceptionsController, { listBoxExceptions: readPolicy }],
@@ -233,6 +237,8 @@ const OPERATIONAL_CONTROLLERS: readonly [
       getPlanningConfig: sharedReadPolicy,
       listBoxLabelTemplates: sharedReadPolicy,
       listPalletLabelTemplates: sharedReadPolicy,
+      listPalletSheetTemplates: sharedReadPolicy,
+      getPalletSheetTemplatePreview: sharedReadPolicy,
       listProductLabelTemplates: sharedReadPolicy,
       getLabelTemplatePreview: sharedReadPolicy,
       getShiftSummary: sharedReadPolicy,

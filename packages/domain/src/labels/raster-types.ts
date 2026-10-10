@@ -61,6 +61,8 @@ export interface RasterizeTextOptions {
   maxWidthPx?: number | undefined;
   /** Maximum number of wrapped lines; defaults to 1 (single line, clipped). */
   maxLines?: number;
+  /** V2 sheets reject overflow; legacy labels keep ellipsis by default. */
+  overflow?: "error" | "ellipsis";
 }
 
 /**
