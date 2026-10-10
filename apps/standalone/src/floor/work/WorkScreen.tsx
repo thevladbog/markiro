@@ -173,6 +173,8 @@ export interface WorkScreenProps {
   onSetup?: () => void;
   /** How a label is rendered; the app's rasterizer by default. */
   render?: RenderLabel;
+  /** The label panel's clock (milliseconds, never going back); tests drive it. */
+  labelClock?: () => number;
 }
 
 /** What stops the scanning until the operator acts (stage 2a spec §5.7.3). */
@@ -1182,6 +1184,7 @@ export function WorkScreen(props: WorkScreenProps) {
               onPrinted={() => decide((job) => confirmPrinted(printContextOf(live), job), false)}
               onSkip={() => decide((job) => skipLabel(printContextOf(live), job), false)}
               {...(props.onSetup === undefined ? {} : { onSetup: props.onSetup })}
+              {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
           )}
         </div>

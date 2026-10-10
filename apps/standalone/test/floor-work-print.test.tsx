@@ -36,6 +36,8 @@ const SESSION: FloorSession = {
   sessionId: 1,
 };
 const SECOND_SSCC = buildSscc(0, PREFIX, 1501);
+/** Longer than the panel's guard after a view change. */
+const PRESS_PAUSE_MS = 1000;
 
 /** A scanner the test reads codes into. */
 function fakeSource() {
@@ -80,6 +82,8 @@ function work(at: Station, options: Options = {}) {
   const shell = options.shell ?? fakeHardware();
   const runtime = options.runtime ?? manualRuntime(shell.hardware).runtime;
   const power = vi.fn(async (_awake: boolean) => undefined);
+  // The panel's clock: a press waits out the guard after a view change only when the test lets time pass.
+  const clock = { now: 0 };
   const props: WorkScreenProps = {
     shift: at.shift,
     operator: SESSION,
@@ -104,6 +108,7 @@ function work(at: Station, options: Options = {}) {
     signal: vi.fn<(tone: SignalTone) => void>(),
     printing: runtime,
     awake: createSystemAwake(power),
+    labelClock: () => clock.now,
     render:
       options.render ??
       (async (spec, fields, printer) => {
@@ -127,6 +132,7 @@ function work(at: Station, options: Options = {}) {
     scanner,
     shell,
     power,
+    clock,
     settled: () =>
       act(async () => {
         await gate.drain();
@@ -138,6 +144,8 @@ function work(at: Station, options: Options = {}) {
       }),
     press: (name: string) =>
       act(async () => {
+        // An operator's deliberate press, well after the view appeared.
+        clock.now += PRESS_PAUSE_MS;
         fireEvent.click(screen.getByRole("button", { name }));
         await gate.drain();
       }),
@@ -860,12 +868,24 @@ describe("what the panel tells the operator", () => {
     screenWork.view.unmount();
     const again = work(at, { shell: screenWork.shell });
     await again.settled();
+    const gone =
+      "Принтер «Zebra у линии» удалён из настройки. Печать пойдёт на принтер: TSC на COM4 · TSPL · 300 dpi; этикетка, возможно, лежит у прежнего.";
+    // Said on the label's own view already, before anything is pressed.
+    expect(await screen.findByText(gone)).toBeTruthy();
     await again.press("Напечатать снова");
+    expect(await screen.findByText(gone)).toBeTruthy();
+  });
+
+  it("names the printer on the view of a label that failed, where «Напечатать снова» sends at once", async () => {
+    const at = await printStation();
+    const shell = fakeHardware(async () => ({ sent: false, code: "not_sent" }));
+    const screenWork = work(at, { shell });
+    await fillBox(screenWork);
+    expect(screen.getByText(MIDDLE_FAILED)).toBeTruthy();
     expect(
-      await screen.findByText(
-        "Принтер «Zebra у линии» удалён из настройки. Печать пойдёт на принтер: TSC на COM4 · TSPL · 300 dpi; этикетка, возможно, лежит у прежнего.",
-      ),
+      await screen.findByText("Печать пойдёт на принтер: Zebra у линии · ZPL · 203 dpi."),
     ).toBeTruthy();
+    expect(shell.sends).toHaveLength(1);
   });
 
   it("builds the reason of a reprint from its buttons alone", async () => {
@@ -953,12 +973,123 @@ describe("the label panel for keyboards, readers and gloves", () => {
     expect(document.activeElement).not.toBe(document.body);
   });
 
-  it("moves the focus into the view the operator opened", async () => {
+  it("moves the focus into the view the operator opened, onto a control that sends nothing", async () => {
     const { screenWork } = await unknownLabel();
     await screenWork.press("Напечатать снова");
-    expect(document.activeElement?.textContent).toBe("Этикетка повреждена");
+    // Not on a reason: a second Space press must not choose one.
+    expect(document.activeElement?.textContent).toBe("Назад");
     await screenWork.press("Назад");
-    expect(document.activeElement?.textContent).toBe("Этикетка напечаталась");
+    // Not on «Этикетка напечаталась» either: the panel itself holds the focus.
+    expect(document.activeElement).toBe(document.querySelector("[data-label-panel]"));
+    await screenWork.press("Другой принтер");
+    await screen.findByRole("button", { name: "TSC на COM4 · TSPL · 300 dpi" });
+    expect(document.activeElement?.textContent).toBe("Назад");
+    await screenWork.press("Назад");
+    await screenWork.press("Продолжить без этикетки");
+    expect(document.activeElement?.textContent).toBe("Назад");
+  });
+
+  it("does not take the second press of a double activation for a reason nobody chose", async () => {
+    const { at, shell, screenWork } = await unknownLabel();
+    await screenWork.press("Напечатать снова");
+    expect(screen.getByText("Почему печатаете снова?")).toBeTruthy();
+    // The same Space press again, on whatever holds the focus now.
+    await act(async () => {
+      fireEvent.click(document.activeElement as Element);
+      await screenWork.gate.drain();
+    });
+    expect(screen.getByText("Почему печатаете снова?")).toBeTruthy();
+    // A gloved double tap: the second tap lands on the button now under the finger.
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Этикетка не читается" }));
+      await screenWork.gate.drain();
+    });
+    expect(shell.sends).toHaveLength(1);
+    expect(rows(at.db, "SELECT count(*) AS n FROM floor_exceptions")).toEqual([{ n: 0 }]);
+    expect(jobRows(at.db)[0]).toMatchObject({ state: "unknown", attempts: 1 });
+  });
+
+  it("takes a press on the reason again once the guard after the view has run out, and not before", async () => {
+    const { at, shell, screenWork } = await unknownLabel();
+    await screenWork.press("Напечатать снова");
+    screenWork.clock.now += 399;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Замятие в принтере" }));
+      await screenWork.gate.drain();
+    });
+    expect(shell.sends).toHaveLength(1);
+    screenWork.clock.now += 1;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Замятие в принтере" }));
+      await screenWork.gate.drain();
+    });
+    expect(shell.sends).toHaveLength(2);
+    expect(rows(at.db, "SELECT reason_code FROM floor_exceptions")).toEqual([
+      { reason_code: "printer_jam" },
+    ]);
+  });
+
+  it("is not held by a clock that went back: the guard ends, it does not stand for ever", async () => {
+    const { shell, screenWork } = await unknownLabel();
+    screenWork.clock.now = 50_000;
+    await screenWork.press("Напечатать снова");
+    screenWork.clock.now = 100;
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Замятие в принтере" }));
+      await screenWork.gate.drain();
+    });
+    expect(shell.sends).toHaveLength(2);
+  });
+
+  it("does not take the second tap for a printer nobody chose, nor for a decision the view before it hid", async () => {
+    const at = await printStation();
+    const shell = fakeHardware(async () => ({ sent: false, code: "not_sent" }));
+    const screenWork = work(at, { shell });
+    await fillBox(screenWork);
+    await screenWork.press("Другой принтер");
+    await screen.findByRole("button", { name: "TSC на COM4 · TSPL · 300 dpi" });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "TSC на COM4 · TSPL · 300 dpi" }));
+      await screenWork.gate.drain();
+    });
+    expect(shell.sends).toHaveLength(1);
+    expect(screen.getByText("На какой принтер печатать?")).toBeTruthy();
+    // Back to the label's own view: the tap that follows decides nothing either.
+    await screenWork.press("Назад");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Напечатать снова" }));
+      await screenWork.gate.drain();
+    });
+    expect(shell.sends).toHaveLength(1);
+    expect(jobRows(at.db)[0]).toMatchObject({ state: "failed", attempts: 1 });
+  });
+
+  it("does not take the second tap for the skip of a label", async () => {
+    const { at, screenWork } = await unknownLabel();
+    await screenWork.press("Продолжить без этикетки");
+    expect(screen.getByText("Продолжить без этикетки?")).toBeTruthy();
+    await act(async () => {
+      // The confirmation's own button, under the finger that pressed the first one.
+      fireEvent.click(screen.getByRole("button", { name: "Продолжить без этикетки" }));
+      await screenWork.gate.drain();
+    });
+    expect(jobRows(at.db)[0]).toMatchObject({ state: "unknown" });
+    expect(rows(at.db, "SELECT count(*) AS n FROM outbox WHERE kind = 'box_label'")).toEqual([
+      { n: 0 },
+    ]);
+    expect(screen.getByText("Продолжить без этикетки?")).toBeTruthy();
+  });
+
+  it("does not take «Этикетка напечаталась» for the second tap of a «Назад»", async () => {
+    const { at, screenWork } = await unknownLabel();
+    await screenWork.press("Напечатать снова");
+    await screenWork.press("Назад");
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Этикетка напечаталась" }));
+      await screenWork.gate.drain();
+    });
+    expect(jobRows(at.db)[0]).toMatchObject({ state: "unknown", attempts: 1 });
+    expect(screen.getByText(UNKNOWN_TITLE)).toBeTruthy();
   });
 
   it("tells a verified label by the tone and the lit line only, and a wrong one by a flash that lets taps through", async () => {

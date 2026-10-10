@@ -34,7 +34,20 @@ export interface LabelPanelProps {
   onSkip: () => void;
   /** The workstation setup; absent where the floor gives none. */
   onSetup?: () => void;
+  /** Milliseconds from a clock that does not go back; the guard after a view change reads it. */
+  clock?: () => number;
 }
+
+/**
+ * How long a press on the panel is ignored after it changed its view. A
+ * second Space press, or the second tap of a gloved double tap, lands on
+ * whatever the new view put under the finger: a reason nobody chose, a printer
+ * nobody chose, a decision on the label. 400 ms is longer than a double tap
+ * and shorter than an operator reading the view.
+ */
+export const VIEW_GUARD_MS = 400;
+
+const realClock = () => performance.now();
 
 type Mode =
   | { kind: "main" }
@@ -112,12 +125,15 @@ export function LabelPanel({
   onPrinted,
   onSkip,
   onSetup,
+  clock = realClock,
 }: LabelPanelProps) {
   const { t } = useTranslation();
   const [mode, setMode] = useState<Mode>({ kind: "main" });
   const [settings, setSettings] = useState<Settings>({ kind: "loading" });
   const root = useRef<HTMLDivElement>(null);
   const shownMode = useRef(mode.kind);
+  // When the view last changed: presses are ignored for `VIEW_GUARD_MS` after.
+  const viewChangedAt = useRef<number>(Number.NEGATIVE_INFINITY);
   const checking = awaitsCheck(job);
   // A label that may already be on a box: a second one needs a reason.
   const mayExist = checking || job.state === "unknown";
@@ -140,33 +156,48 @@ export function LabelPanel({
   }, [loadSettings]);
 
   // The button that was pressed is gone when the panel changes its view: the
-  // focus goes to the first button of the new one, not to the page.
+  // focus goes to a control that decides nothing — «Назад» of a view that
+  // asks, the panel itself when it is back at its first view — never to a
+  // button that sends, which a second press would activate.
   useEffect(() => {
     if (shownMode.current === mode.kind) return;
     shownMode.current = mode.kind;
-    root.current?.querySelector("button")?.focus();
+    const target =
+      mode.kind === "main"
+        ? root.current
+        : root.current?.querySelector<HTMLElement>("[data-panel-back]");
+    target?.focus();
   }, [mode.kind]);
 
-  /** Props of a button: while a decision runs it stays on the keyboard and does nothing. */
+  /** Opens a view, and starts the guard against the press that follows the one that opened it. */
+  const show = (next: Mode) => {
+    viewChangedAt.current = clock();
+    setMode(next);
+  };
+
+  /** Props of a button: while a decision runs, or a view has just opened, it does nothing. */
   const press = (action: () => void) => ({
     "aria-disabled": busy ? true : undefined,
     style: busy ? WAITING_STYLE : undefined,
     onClick: () => {
-      if (!busy) action();
+      if (busy) return;
+      const since = clock() - viewChangedAt.current;
+      if (since >= 0 && since < VIEW_GUARD_MS) return;
+      action();
     },
   });
 
   const again = (printer: PrinterProfile | null) => {
     if (mayExist) {
-      setMode({ kind: "reason", printer });
+      show({ kind: "reason", printer });
       return;
     }
-    setMode({ kind: "main" });
+    show({ kind: "main" });
     onPrintAgain({ reason: null, printer });
   };
 
   const choosePrinter = () => {
-    setMode({ kind: "printers", printers: null });
+    show({ kind: "printers", printers: null });
     loadSettings().then(
       (loaded) =>
         setMode((now) =>
@@ -177,7 +208,12 @@ export function LabelPanel({
   };
 
   const back = (
-    <Button size="floor" variant="secondary" {...press(() => setMode({ kind: "main" }))}>
+    <Button
+      size="floor"
+      variant="secondary"
+      data-panel-back=""
+      {...press(() => show({ kind: "main" }))}
+    >
       {t("floor.print.back")}
     </Button>
   );
@@ -201,7 +237,7 @@ export function LabelPanel({
               key={reason}
               size="floor"
               {...press(() => {
-                setMode({ kind: "main" });
+                show({ kind: "main" });
                 onPrintAgain({ reason, printer: mode.printer });
               })}
             >
@@ -253,7 +289,7 @@ export function LabelPanel({
           <Button
             size="floor"
             {...press(() => {
-              setMode({ kind: "main" });
+              show({ kind: "main" });
               onSkip();
             })}
           >
@@ -327,12 +363,16 @@ export function LabelPanel({
               {t("floor.print.setup")}
             </Button>
           )}
-          <Button size="floor" variant="secondary" {...press(() => setMode({ kind: "skip" }))}>
+          <Button size="floor" variant="secondary" {...press(() => show({ kind: "skip" }))}>
             {t("floor.print.skip")}
           </Button>
         </div>
       </Alert>
     );
   }
-  return <div ref={root}>{body}</div>;
+  return (
+    <div ref={root} tabIndex={-1} data-label-panel="" style={{ outline: "none" }}>
+      {body}
+    </div>
+  );
 }
