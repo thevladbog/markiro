@@ -27,6 +27,7 @@ import {
   officeShiftSchema,
   shiftExportRowsSchema,
   boxReportRowsSchema,
+  palletReportRowsSchema,
   ssccCounterSchema,
   ssccStateSchema,
   templateDefaultsSchema,
@@ -77,6 +78,7 @@ import {
   type ShiftExportRecord,
   type ShiftExportRows,
   type BoxReportRows,
+  type PalletReportRows,
   type ShiftUpdate,
   type SsccCounter,
   type SsccCounterUpdate,
@@ -200,6 +202,11 @@ export interface HostApi {
   recordShiftExport: (token: string, id: string, record: ShiftExportRecord) => Promise<void>;
   /** What «Состав короба» prints of the box, in one snapshot (plan О-Ф); every office role. */
   getBoxReportRows: (token: string, id: string) => Promise<BoxReportRows>;
+  /**
+   * What «Состав паллеты» and «Ярлык паллеты» print of the shift's pallets, in
+   * one snapshot (plan О-Ф); every office role. A shift without pallets has none.
+   */
+  getPalletReportRows: (token: string, id: string) => Promise<PalletReportRows>;
   /**
    * The station's shifts, with the device key only: the planned and active
    * shifts of its line and those it entered, active or closed within 30
@@ -507,6 +514,11 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", `/v1/office/boxes/${id}/report-data`, {
         officeToken: token,
         schema: boxReportRowsSchema,
+      }),
+    getPalletReportRows: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/pallet-report-data`, {
+        officeToken: token,
+        schema: palletReportRowsSchema,
       }),
   };
 }

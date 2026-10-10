@@ -710,6 +710,45 @@ export const boxReportRowsSchema = z.object({
 export type BoxReportRows = z.infer<typeof boxReportRowsSchema>;
 
 /**
+ * Mirrors `markiro_proto::PalletReportRows`: `GET
+ * /v1/office/shifts/{id}/pallet-report-data` (plan О-Ф), what «Состав паллеты»
+ * and «Ярлык паллеты» print of the shift's pallets, in one snapshot: the
+ * shift's number, date and product now, and every pallet opened first first
+ * with every box that stood on it closed first first, the boxes taken apart
+ * too; a box's `units` are its live items now.
+ */
+export const palletReportRowsSchema = z.object({
+  shift: z.object({
+    id: z.uuid(),
+    number: z.string().min(1),
+    productionDate: civilDateTextSchema,
+    productName: z.string(),
+    gtin14: z.string(),
+    shelfLifeDays: z.number().int().positive().nullable(),
+  }),
+  organization: z.object({ name: z.string(), inn: z.string().nullable() }),
+  pallets: z.array(
+    z.object({
+      id: z.string(),
+      sscc: z.string().nullable(),
+      openedAt: z.iso.datetime(),
+      closedAt: z.iso.datetime().nullable(),
+      disassembledAt: z.iso.datetime().nullable(),
+      boxes: z.array(
+        z.object({
+          id: z.string(),
+          sscc: z.string().nullable(),
+          closedAt: z.iso.datetime(),
+          disassembledAt: z.iso.datetime().nullable(),
+          units: z.number().int().nonnegative(),
+        }),
+      ),
+    }),
+  ),
+});
+export type PalletReportRows = z.infer<typeof palletReportRowsSchema>;
+
+/**
  * The product as a shift froze it when a station opened it
  * (`markiro_proto::ShiftSnapshotProduct`); only an active product opens a
  * shift, so it has a group.

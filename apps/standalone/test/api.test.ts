@@ -444,6 +444,16 @@ const CASES: Case[] = [
     { method: "GET", path: `/v1/office/boxes/${BOX_ID}/report-data`, body: undefined },
   ],
   [
+    "getPalletReportRows",
+    fixture("pallet-report-rows.json"),
+    (api) => api.getPalletReportRows(TOKEN, SHIFT_ID),
+    {
+      method: "GET",
+      path: `/v1/office/shifts/${SHIFT_ID}/pallet-report-data`,
+      body: undefined,
+    },
+  ],
+  [
     "setUserPassword",
     null,
     (api) => api.setUserPassword(TOKEN, USER_ID, { password: "a new long password" }),

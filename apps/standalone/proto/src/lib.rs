@@ -2292,6 +2292,60 @@ pub struct BoxReportItem {
     pub canonical: String,
 }
 
+/// `GET /v1/office/shifts/{id}/pallet-report-data` (plan О-Ф): what
+/// «Состав паллеты» and «Ярлык паллеты» print of the shift's pallets, read
+/// in one snapshot, so the placards of the whole shift agree with each
+/// other. `pallets` are every pallet of the shift, opened first first;
+/// each pallet's `boxes` every box that ever stood on it, closed first first
+/// (then by id), boxes taken apart included, as the cloud's forms list them;
+/// a box's `units` are its live items now (a box taken apart has none: the
+/// forms print it without a count and count it nowhere).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PalletReportRows {
+    pub shift: ReportShift,
+    pub organization: ExportOrganization,
+    pub pallets: Vec<ReportPallet>,
+}
+
+/// The shift of [`PalletReportRows`]: its number, its production date and
+/// its product now (name, GTIN, shelf life), as the cloud's forms join the
+/// live product.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportShift {
+    pub id: String,
+    pub number: String,
+    pub production_date: String,
+    pub product_name: String,
+    pub gtin14: String,
+    pub shelf_life_days: Option<u32>,
+}
+
+/// A pallet of the shift with the boxes that stood on it; the device's
+/// instants as it sent them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportPallet {
+    pub id: String,
+    pub sscc: Option<String>,
+    pub opened_at: String,
+    pub closed_at: Option<String>,
+    pub disassembled_at: Option<String>,
+    pub boxes: Vec<ReportPalletBox>,
+}
+
+/// A box that stood on a pallet: it joined at its close, so it is closed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportPalletBox {
+    pub id: String,
+    pub sscc: Option<String>,
+    pub closed_at: String,
+    pub disassembled_at: Option<String>,
+    pub units: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

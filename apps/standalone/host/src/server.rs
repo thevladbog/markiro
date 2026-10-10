@@ -290,6 +290,10 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::office_exports::record_export),
         )
         .route(
+            "/v1/office/shifts/{id}/pallet-report-data",
+            get(crate::routes::office_reports::pallet_report),
+        )
+        .route(
             "/v1/office/boxes/{id}/report-data",
             get(crate::routes::office_reports::box_report),
         )

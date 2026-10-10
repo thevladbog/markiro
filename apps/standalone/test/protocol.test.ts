@@ -45,6 +45,7 @@ import {
   officeUserCreateSchema,
   officeUserRecordSchema,
   officeUserSchema,
+  palletReportRowsSchema,
   officeUserUpdateSchema,
   operatorBadgeRecordSchema,
   operatorCreateSchema,
@@ -266,6 +267,7 @@ const RESPONSES = [
   ["office-shift.json", officeShiftSchema],
   ["shift-export-rows.json", shiftExportRowsSchema],
   ["box-report-rows.json", boxReportRowsSchema],
+  ["pallet-report-rows.json", palletReportRowsSchema],
   ["error-shift-busy.json", errorBodySchema],
   ["error-snapshot-too-large.json", errorBodySchema],
   ["error-sscc-exhausted.json", errorBodySchema],
@@ -2171,5 +2173,143 @@ describe("a box's form data (plan О-Ф)", () => {
     ]) {
       expect(refused({ ...base, items: [item] })).toBe(true);
     }
+  });
+});
+
+describe("a shift's pallet form data (plan О-Ф)", () => {
+  type Report = ReturnType<typeof palletReportRowsSchema.parse>;
+  const report = (): Report => palletReportRowsSchema.parse(fixture("pallet-report-rows.json"));
+  const refused = (value: unknown): boolean => !palletReportRowsSchema.safeParse(value).success;
+  const without = <T extends object>(value: T, field: string): object =>
+    Object.fromEntries(Object.entries(value).filter(([key]) => key !== field));
+
+  it("reads a shift without pallets, an open pallet, a pallet taken apart and a box taken apart", () => {
+    const base = report();
+    const pallet = base.pallets[0]!;
+    const box = pallet.boxes[0]!;
+    const bare: Report = {
+      ...base,
+      shift: { ...base.shift, shelfLifeDays: null },
+      organization: { name: "ИП Иванов", inn: null },
+      pallets: [],
+    };
+    expect(palletReportRowsSchema.parse(bare)).toEqual(bare);
+    const open: Report = {
+      ...base,
+      pallets: [{ ...pallet, sscc: null, closedAt: null, disassembledAt: null, boxes: [] }],
+    };
+    expect(palletReportRowsSchema.parse(open)).toEqual(open);
+    const apart: Report = {
+      ...base,
+      pallets: [
+        {
+          ...pallet,
+          disassembledAt: "2026-10-08T07:00:00.000Z",
+          boxes: [
+            { ...box, disassembledAt: "2026-10-08T06:30:00.000Z", units: 0 },
+            { ...box, sscc: null },
+            box,
+          ],
+        },
+      ],
+    };
+    expect(palletReportRowsSchema.parse(apart)).toEqual(apart);
+  });
+
+  it("reads an id or an SSCC the domain will refuse as plain text", () => {
+    const base = report();
+    const odd: Report = {
+      ...base,
+      pallets: [
+        {
+          ...base.pallets[0]!,
+          id: "pallet-1",
+          sscc: "12345",
+          boxes: [{ ...base.pallets[0]!.boxes[0]!, id: "box-1", sscc: "67890" }],
+        },
+      ],
+    };
+    expect(palletReportRowsSchema.parse(odd)).toEqual(odd);
+  });
+
+  it("refuses a missing field at every level", () => {
+    const base = report();
+    for (const field of Object.keys(base)) {
+      expect(refused(without(base, field)), field).toBe(true);
+    }
+    for (const field of Object.keys(base.shift)) {
+      expect(refused({ ...base, shift: without(base.shift, field) }), `shift.${field}`).toBe(true);
+    }
+    for (const field of Object.keys(base.organization)) {
+      const organization = without(base.organization, field);
+      expect(refused({ ...base, organization }), `organization.${field}`).toBe(true);
+    }
+    const pallet = base.pallets[0]!;
+    for (const field of Object.keys(pallet)) {
+      expect(refused({ ...base, pallets: [without(pallet, field)] }), `pallets.${field}`).toBe(
+        true,
+      );
+    }
+    for (const field of Object.keys(pallet.boxes[0]!)) {
+      const boxes = [without(pallet.boxes[0]!, field)];
+      expect(refused({ ...base, pallets: [{ ...pallet, boxes }] }), `boxes.${field}`).toBe(true);
+    }
+  });
+
+  it("refuses a value of the wrong kind", () => {
+    const base = report();
+    const pallet = base.pallets[0]!;
+    const box = pallet.boxes[0]!;
+    const badShift: [string, unknown][] = [
+      ["id", "not-a-uuid"],
+      ["id", null],
+      ["number", ""],
+      ["number", null],
+      ["productionDate", "2026-10-8"],
+      ["productionDate", null],
+      ["productName", null],
+      ["gtin14", 4600682000013],
+      ["shelfLifeDays", 0],
+      ["shelfLifeDays", 1.5],
+      ["shelfLifeDays", "10"],
+    ];
+    for (const [field, value] of badShift) {
+      const shift = { ...base.shift, [field]: value };
+      expect(refused({ ...base, shift }), `shift.${field}: ${JSON.stringify(value)}`).toBe(true);
+    }
+    const badPallet: [string, unknown][] = [
+      ["id", null],
+      ["sscc", 1460068200],
+      ["openedAt", "yesterday"],
+      ["openedAt", null],
+      ["closedAt", "2026-10-08"],
+      ["disassembledAt", 5],
+      ["boxes", null],
+    ];
+    for (const [field, value] of badPallet) {
+      const row = { ...pallet, [field]: value };
+      expect(refused({ ...base, pallets: [row] }), `pallets.${field}`).toBe(true);
+    }
+    const badBox: [string, unknown][] = [
+      ["id", null],
+      ["sscc", 4600682],
+      ["closedAt", "yesterday"],
+      ["closedAt", null],
+      ["disassembledAt", "2026-10-08"],
+      ["units", -1],
+      ["units", 1.5],
+      ["units", "2"],
+      ["units", null],
+    ];
+    for (const [field, value] of badBox) {
+      const boxes = [{ ...box, [field]: value }];
+      expect(
+        refused({ ...base, pallets: [{ ...pallet, boxes }] }),
+        `boxes.${field}: ${JSON.stringify(value)}`,
+      ).toBe(true);
+    }
+    expect(refused({ ...base, organization: { name: null, inn: null } })).toBe(true);
+    expect(refused({ ...base, organization: { name: "ООО", inn: 7701234567 } })).toBe(true);
+    expect(refused({ ...base, pallets: null })).toBe(true);
   });
 });

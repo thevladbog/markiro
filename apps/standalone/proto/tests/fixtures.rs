@@ -12,12 +12,12 @@ use markiro_proto::{
     OfficeSession, OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
     OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
     OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PalletClosedFact,
-    PalletExceptionFact, PalletExceptionKind, PalletLabelFact, PasswordChange, PasswordSet,
-    ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate, ScanFact,
-    ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate, ShiftExportRecord,
-    ShiftExportRows, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock,
-    SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults, TemplateDefaultsUpdate,
-    TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
+    PalletExceptionFact, PalletExceptionKind, PalletLabelFact, PalletReportRows, PasswordChange,
+    PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate,
+    ScanFact, ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate,
+    ShiftExportRecord, ShiftExportRows, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate,
+    SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
+    TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -1401,6 +1401,58 @@ fn box_report_rows_round_trip_and_agree_with_the_export_source() {
             item.canonical
                 .starts_with(&format!("01{}21{}\u{1d}", item.gtin14, item.serial)),
             "{item:?}"
+        );
+    }
+}
+
+/// The pallets' forms data (plan О-Ф) round-trips and agrees with the
+/// office's lists and the export source of the same shift: the same pallets
+/// opened first first, each box the export source puts on the pallet, closed
+/// first first, with the live units the box list counts, and a pallet's
+/// boxes and units not taken apart are the list's.
+#[test]
+fn pallet_report_rows_round_trip_and_agree_with_the_lists() {
+    let report: PalletReportRows = round_trip("pallet-report-rows.json");
+    let rows: ShiftExportRows = serde_json::from_value(fixture("shift-export-rows.json")).unwrap();
+    let boxes: Vec<OfficeBox> = serde_json::from_value(fixture("office-boxes.json")).unwrap();
+    let pallets: Vec<OfficePallet> =
+        serde_json::from_value(fixture("office-pallets.json")).unwrap();
+    assert_eq!(report.shift.id, rows.shift.id);
+    assert_eq!(report.shift.number, rows.shift.number);
+    assert_eq!(report.shift.production_date, rows.shift.production_date);
+    assert_eq!(report.shift.product_name, rows.shift.product_name);
+    assert_eq!(report.organization, rows.organization);
+    assert_eq!(
+        report.pallets.iter().map(|p| &p.id).collect::<Vec<_>>(),
+        pallets.iter().map(|p| &p.id).collect::<Vec<_>>()
+    );
+    for (pallet, listed) in report.pallets.iter().zip(&pallets) {
+        assert_eq!(
+            (&pallet.sscc, &pallet.closed_at, &pallet.disassembled_at),
+            (&listed.sscc, &listed.closed_at, &listed.disassembled_at)
+        );
+        let mut on: Vec<&OfficeBox> = boxes
+            .iter()
+            .filter(|b| b.pallet_id.as_deref() == Some(&pallet.id))
+            .collect();
+        on.sort_by(|a, b| (&a.closed_at, &a.id).cmp(&(&b.closed_at, &b.id)));
+        assert_eq!(
+            pallet.boxes.iter().map(|b| &b.id).collect::<Vec<_>>(),
+            on.iter().map(|b| &b.id).collect::<Vec<_>>()
+        );
+        for (printed, listed_box) in pallet.boxes.iter().zip(&on) {
+            assert_eq!(printed.units, listed_box.units, "{printed:?}");
+            assert_eq!(Some(&printed.closed_at), listed_box.closed_at.as_ref());
+        }
+        let standing: Vec<_> = pallet
+            .boxes
+            .iter()
+            .filter(|b| b.disassembled_at.is_none())
+            .collect();
+        assert_eq!(usize::try_from(listed.boxes).unwrap(), standing.len());
+        assert_eq!(
+            listed.units,
+            standing.iter().map(|b| u64::from(b.units)).sum::<u64>()
         );
     }
 }
