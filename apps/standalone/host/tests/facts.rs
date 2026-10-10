@@ -7258,6 +7258,12 @@ async fn migration_0012_applies_to_a_host_that_already_holds_shifts_and_boxes() 
         .execute(&mut old)
         .await
         .unwrap();
+    // The rows are loaded with enforcement off, but the host opens its database
+    // with it on, so the migration itself runs with it on.
+    sqlx::query("PRAGMA foreign_keys = ON")
+        .execute(&mut old)
+        .await
+        .unwrap();
     async fn rows_of(old: &mut sqlx::SqliteConnection, tables: &[String]) -> Vec<(String, i64)> {
         let mut counts = Vec::new();
         for table in tables {
