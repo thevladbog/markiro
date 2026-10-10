@@ -842,7 +842,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 15] = [
+    let reads: [(&str, &str); 19] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -908,6 +908,30 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             "UPDATE floor_boxes SET item_count = item_count + 1 \
              WHERE id = ? AND host_id = ? AND device_id = ? AND closed_at IS NULL",
+            "sqlite_autoindex_floor_boxes_1 (id=?)",
+        ),
+        // The close of a box: the next serial of the earliest block with room, whether
+        // a box already holds the SSCC, the cursor's compare-and-set by the block's key
+        // and the box's own close by its key.
+        (
+            "SELECT block_id, next_serial FROM floor_sscc_blocks WHERE host_id = ? \
+             AND device_id = ? AND issuer_prefix = ? AND extension = ? \
+             AND next_serial <= to_serial ORDER BY from_serial, block_id LIMIT 1",
+            "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+        ),
+        (
+            "SELECT 1 AS n FROM floor_boxes WHERE sscc = ? LIMIT 1",
+            "floor_boxes_sscc (sscc=?)",
+        ),
+        (
+            "UPDATE floor_sscc_blocks SET next_serial = next_serial + 1 \
+             WHERE block_id = ? AND next_serial = ?",
+            "sqlite_autoindex_floor_sscc_blocks_1 (block_id=?)",
+        ),
+        (
+            "UPDATE floor_boxes SET closed_at = ?, sscc = ?, block_id = ?, serial = ?, \
+             closed_by = ? WHERE id = ? AND host_id = ? AND device_id = ? \
+             AND closed_at IS NULL AND item_count = ?",
             "sqlite_autoindex_floor_boxes_1 (id=?)",
         ),
         (

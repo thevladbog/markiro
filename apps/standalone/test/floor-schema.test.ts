@@ -660,6 +660,34 @@ describe("the shape of the production tables (migration 0006)", () => {
           "WHERE id = ? AND host_id = ? AND device_id = ? AND closed_at IS NULL",
       ),
     ).toContain("sqlite_autoindex_floor_boxes_1 (id=?)");
+    // The close of a box: the next serial of the earliest block with room (a
+    // few blocks of the prefix, ordered after the search), whether a box already
+    // holds the SSCC (the global unique key), the cursor's compare-and-set by the
+    // block's key and the box's own close by its key.
+    expect(
+      plan(
+        "SELECT block_id, next_serial FROM floor_sscc_blocks WHERE host_id = ? AND device_id = ? " +
+          "AND issuer_prefix = ? AND extension = ? AND next_serial <= to_serial " +
+          "ORDER BY from_serial, block_id LIMIT 1",
+      ),
+    ).toContain(
+      "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+    );
+    expect(plan("SELECT 1 AS n FROM floor_boxes WHERE sscc = ? LIMIT 1")).toContain(
+      "floor_boxes_sscc (sscc=?)",
+    );
+    expect(
+      plan(
+        "UPDATE floor_sscc_blocks SET next_serial = next_serial + 1 " +
+          "WHERE block_id = ? AND next_serial = ?",
+      ),
+    ).toContain("sqlite_autoindex_floor_sscc_blocks_1 (block_id=?)");
+    expect(
+      plan(
+        "UPDATE floor_boxes SET closed_at = ?, sscc = ?, block_id = ?, serial = ?, closed_by = ? " +
+          "WHERE id = ? AND host_id = ? AND device_id = ? AND closed_at IS NULL AND item_count = ?",
+      ),
+    ).toContain("sqlite_autoindex_floor_boxes_1 (id=?)");
     // What the sender writes stays on the unsent index and the record's own key.
     expect(
       plan(

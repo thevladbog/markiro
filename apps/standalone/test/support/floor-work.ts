@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import type { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 
 import { vi } from "vitest";
 
@@ -96,11 +96,15 @@ export function scanContext(
   };
 }
 
-/** Every row of `sql`, as node:sqlite reads it. */
-export function rows(db: DatabaseSync, sql: string): Record<string, unknown>[] {
+/** Every row of `sql` with `params`, as node:sqlite reads it. */
+export function rows(
+  db: DatabaseSync,
+  sql: string,
+  ...params: SQLInputValue[]
+): Record<string, unknown>[] {
   return db
     .prepare(sql)
-    .all()
+    .all(...params)
     .map((row) => ({ ...row }));
 }
 
@@ -153,4 +157,41 @@ export function failingWrites(local: LocalExecutor): LocalExecutor {
       throw new LocalDbError("statement_failed", "database or disk is full");
     },
   };
+}
+
+/** A second active shift of the same product this station entered, for two boxes at once. */
+export const SECOND: EnteredShift = {
+  ...ENTERED,
+  id: "4e7a1c9d-2b5f-4d8e-a3c6-9f0b1e2d3c4a",
+  number: "OCT26-005/S",
+};
+
+export interface SeededBlock {
+  blockId: string;
+  from: number;
+  to: number;
+  next?: number;
+  prefix?: string;
+  extension?: number;
+  hostId?: string;
+  deviceId?: string;
+  receivedAt?: string;
+}
+
+/** A block of SSCC serials this station holds, written as the block request keeps one. */
+export function seedBlock(db: DatabaseSync, block: SeededBlock): void {
+  db.prepare(
+    "INSERT INTO floor_sscc_blocks (block_id, host_id, device_id, issuer_prefix, extension, " +
+      "from_serial, to_serial, next_serial, received_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  ).run(
+    block.blockId,
+    block.hostId ?? PAIRING.hostId,
+    block.deviceId ?? PAIRING.deviceId,
+    block.prefix ?? PREFIX,
+    block.extension ?? 0,
+    block.from,
+    block.to,
+    block.next ?? block.from,
+    block.receivedAt ?? "2026-10-08T06:00:00.000Z",
+  );
 }
