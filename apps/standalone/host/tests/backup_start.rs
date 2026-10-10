@@ -105,9 +105,13 @@ async fn the_office_of_a_started_host_reads_its_copies() {
                 .await
                 .unwrap();
             assert!(state.get("error").is_none(), "{state}");
+            // The worker puts the copy into the folder before it records the
+            // attempt, so a copy in the listing does not yet mean a
+            // `lastAttempt`: wait for both.
             if state["local"]["copies"]
                 .as_array()
                 .is_some_and(|copies| !copies.is_empty())
+                && !state["local"]["lastAttempt"].is_null()
             {
                 return state;
             }
@@ -115,7 +119,7 @@ async fn the_office_of_a_started_host_reads_its_copies() {
         }
     })
     .await
-    .expect("the worker made a copy at start");
+    .expect("the worker made a copy at start and recorded the attempt");
     assert_eq!(
         state["local"]["dir"],
         json!(paths.backups_dir().display().to_string())
