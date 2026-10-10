@@ -145,8 +145,12 @@ the counts; those screens are not reachable from a working floor (they come only
 when the host refused the device or its config is unreadable), and kiosk mode
 (plan 1f2, see "App shell") leaves them reachable on purpose. A refusal that
 arrives while an operator works in a shift waits for them to leave it (see
-"Shifts"), so these screens never replace a shift's work screen. While this
-device holds shift records the host has not acknowledged, the shell refuses
+"Shifts"), so the device-rejected screen never replaces a shift's work screen.
+The other-host screen still does: another host found by the sync
+(`sync_finished` with `other_host`) drops the operator and the work at once,
+and the forget it offers can appear while a write is in flight, a window
+carried to plan 2a6's gate task (see "Shifts"). While this device holds shift
+records the host has not acknowledged, the shell refuses
 that forget (`unsent_facts`); since plan 2a5 those screens then say how many
 records there are (`countUnsentRecords`, `src/local/outbox.ts`: the pairing's,
 or every pairing's when the pairing file is unreadable; a count that cannot be
@@ -301,7 +305,11 @@ pins these rules on node:sqlite, and the repeating reads' query plans exist
 twice, because the shell ships SQLite 3.46 and Vitest's `node:sqlite` is 3.53:
 in that file and in `tests/local_db.rs`
 (`the_floors_repeating_reads_search_an_index`). A new repeated read of a floor
-table gets a line in both lists.
+table gets a line in both lists. The header of `0006` says that codes and boxes
+have no retention at all; plan 2a8's `RETAINED_TABLES` deletes a shift's codes
+and boxes 30 days after the host took its close, so the header is out of date on
+that point. It is left as written: sqlx stores a checksum of the migration file,
+and a changed header would refuse a database that already applied `0006`.
 
 ## Writes
 
@@ -1344,7 +1352,12 @@ refused key ends the link as everywhere; any other failure keeps the copies. A
 read of the device whose answer could not be kept in `device.json` (`storage`:
 the line or the name changed and the file could not be written) sets
 `deviceNotSaved`, which the next read of the device that lands clears: the
-station works on with the line it has, and the status bar says so.
+station works on with the line it has, and the status bar says so. One known
+limit of that edge case (an unwritable `device.json`, usually a full disk): the
+host lists the device's new line already, so the next read of the shifts drops
+the old line's planned copies that were never entered, and the list, which still
+asks for the old line, shows only the copies of it that were entered. A new
+shift is made on the host's new line. The status bar's warning is the only sign.
 
 The floor's status bar (`src/floor/FloorStatusBar.tsx`, plan 1f2) sits above
 the sign-in screen and the shifts, inside one `.floor-frame`, as a labelled
@@ -1364,10 +1377,14 @@ screen before either appears, two warnings: while `deviceNotSaved`, and, while
 a refusal of the device waits for the operator to leave the shift
 (`ShellState.pendingRejection`, the `refusalHeld` prop), «Хост отказал этой
 станции: записи не отправляются. Выйдите из смены и подключите станцию
-заново». A refusal that comes from a call (an entry, a creation, a read of the
-shifts) stops the link without a status of its own, so `ShellState.link` keeps
-its last one, and `HostStatusLine` goes on saying that the host is online next
-to that warning; making it say otherwise is open.
+заново». A refusal that comes from a call (a read of the device, the sync or a
+read of the shifts; with plan 2a6, a call of the work screen) stops the link
+without a status of its own, so `ShellState.link` keeps its last one (an entry
+or a creation is not one of those calls: the work screen alone is mounted while
+the refusal is held). While `refusalHeld` the bar gives `HostStatusLine` the
+link as `offline`, so it says «Нет связи с хостом …» next to the warning
+instead of «На связи с хостом», and shows no failed-sync line (that one is
+shown only while the host answers).
 
 Kiosk mode (plan 1f2). `src-tauri/src/lockdown.rs` ports the cloud station's
 `enter_lockdown` and `exit_lockdown`: no frame, no taskbar button, above every
@@ -2341,9 +2358,12 @@ tracks (`createWorkGate`, `src/floor/work-gate.ts`: a failed piece of work
 does not hold it, work tracked while it waits does), then tells the shell
 (`work_left`). One leave waits at a time: a sign-out outranks a leave that
 already waits (the idle lock fires once and then waits for nothing more, so
-the wait ends in the sign-out); any other leave that comes meanwhile is
-ignored, an office close included, which then shows no notice. A leave for
-another line ends on the list when the move was undone: a later read of the
+the wait ends in the sign-out), and the office's close of the shift upgrades a
+plain leave to the list or a move to another line that already waits, so the
+list says «Смену … закрыли в офисе» (a waiting sign-out keeps its ending, an
+office close included, which then shows no notice); any other leave that comes
+meanwhile is ignored. A leave for another line ends on the list when the move
+was undone: a later read of the
 device that puts the station back on its line clears `pendingDevice`, so
 `work_left` changes nothing and the floor shows the list, where a move that
 stands takes the floor away at `work_left`. While the operator works in a
