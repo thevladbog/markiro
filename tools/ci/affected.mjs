@@ -97,6 +97,9 @@ function isRootToolchainPath(path) {
 
 function jobsForPath(path) {
   if (isDocumentation(path)) return [];
+  // This protected deployment workflow is covered by the bundle's production
+  // and Yandex contract suites. CI policy and other workflows still fail closed.
+  if (path === ".github/workflows/deploy-production.yml") return ["production_bundle"];
   if (isRootToolchainPath(path)) return HEAVY_JOBS;
 
   if (

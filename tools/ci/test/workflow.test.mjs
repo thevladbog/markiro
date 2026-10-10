@@ -176,6 +176,15 @@ test("every heavy job keeps its id and is gated by its classifier output", () =>
   }
 });
 
+test("production bundle retains both contract suites owning the deployment workflow", () => {
+  const job = workflow.jobs["production-bundle"];
+  for (const command of ["pnpm test:production-bundle:contract", "pnpm test:yandex-runtime"])
+    assert.ok(
+      job.steps.some((step) => step.run === command),
+      `missing deployment gate: ${command}`,
+    );
+});
+
 test("inventory database suites receive the migrated CI database through Turbo", () => {
   const job = workflow.jobs["verify-api-tests"];
   assert.equal(job.env.INVENTORY_TEST_DATABASE_URL, job.env.DATABASE_URL);

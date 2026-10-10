@@ -259,8 +259,39 @@ test("root toolchain and workflow changes select the complete workflow", () => {
     "eslint.config.mjs",
     ".prettierrc.json",
     ".github/workflows/ci.yml",
+    ".github/workflows/new-workflow.yml",
+    ".github/workflows/deploy-production.yaml",
+    "tools/ci/affected.mjs",
+    "tools/ci/required-results.mjs",
+    "tools/ci/test/affected.test.mjs",
   ]) {
     const result = classifyChangedFiles([path]);
+    assert.equal(result.full, true, path);
+    assert.deepEqual(enabledJobs(result), jobNames, path);
+  }
+});
+
+test("production deployment workflow changes select only the bundle owning its contracts", () => {
+  const result = classifyChangedFiles([".github/workflows/deploy-production.yml"]);
+  assert.equal(result.full, false);
+  assert.deepEqual(enabledJobs(result), ["production_bundle"]);
+});
+
+test("deployment workflow does not hide other changed areas or full-run requirements", () => {
+  const workflow = ".github/workflows/deploy-production.yml";
+  assert.deepEqual(enabledJobs(classifyChangedFiles([workflow, "apps/api/src/main.ts"])), [
+    "verify_static",
+    "verify_api_tests",
+    "tenant_team_infrastructure",
+    "production_bundle",
+  ]);
+  for (const path of [
+    ".github/workflows/ci.yml",
+    "pnpm-lock.yaml",
+    "tools/ci/affected.mjs",
+    "services/new-worker/src/index.ts",
+  ]) {
+    const result = classifyChangedFiles([workflow, path]);
     assert.equal(result.full, true, path);
     assert.deepEqual(enabledJobs(result), jobNames, path);
   }

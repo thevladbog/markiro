@@ -84,6 +84,32 @@ function vbtechClaimFileName(kind, generation, record = VBTECH_PENDING) {
   return `.vbtech-release-state.${record.releaseSha}-${record.imageDigest.slice(7)}.${kind}-${generation}.claim`;
 }
 
+test("diagnostics retain the web release identity after an API-only deployment", async () => {
+  const dependencies = fixtureDependencies();
+  const edgeSha = "f".repeat(40);
+  for (const [path, content] of dependencies.fileContents) {
+    let record;
+    try {
+      record = JSON.parse(content);
+    } catch {
+      continue;
+    }
+    if (record.tag === CURRENT && record.state === "healthy")
+      dependencies.fileContents.set(
+        path,
+        JSON.stringify({
+          ...record,
+          scope: "api-only",
+          edgeReleaseSha: edgeSha,
+          edgeContainerId: "9".repeat(64),
+        }),
+      );
+  }
+  const snapshot = await collectRuntimeSnapshot(dependencies);
+  assert.equal(snapshot.api.release, CURRENT);
+  assert.equal(snapshot.edge.release, edgeSha);
+});
+
 function fixtureDependencies(overrides = {}) {
   const calls = [];
   const resourceCalls = [];

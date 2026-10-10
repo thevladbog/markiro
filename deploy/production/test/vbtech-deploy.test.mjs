@@ -677,6 +677,21 @@ test("rejects a regular active-release path before mutation", async (t) => {
   assert.deepEqual(context.calls.filter(isComposeMutation), []);
 });
 
+test("v-b deployment retains the edge SHA after an API-only Markiro release", async (t) => {
+  const edgeSha = "f".repeat(40);
+  const context = await fixture(t, {
+    markiroRecord: {
+      scope: "api-only",
+      edgeReleaseSha: edgeSha,
+      edgeContainerId: activeContainerIds.edge,
+    },
+  });
+  await deployVbtechRelease({ environment: environment() }, context.dependencies);
+  const edge = context.calls.find(({ args }) => args.includes("up") && args.at(-1) === "edge");
+  assert.equal(edge.environment.MARKIRO_EDGE_RELEASE_SHA, edgeSha);
+  assert.equal(edge.environment.MARKIRO_EDGE_IMAGE_DIGEST, edgeImageDigest);
+});
+
 test("requires exactly one matching healthy active Markiro record", async (t) => {
   const context = await fixture(t);
   const duplicate = markiroRecord({ createdAt: "2026-08-21T10:20:31.000Z" });

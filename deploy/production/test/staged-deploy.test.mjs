@@ -12,6 +12,7 @@ const API_DIGEST = `sha256:${"a".repeat(64)}`;
 const EDGE_DIGEST = `sha256:${"b".repeat(64)}`;
 const PREVIOUS_API = `ghcr.io/thevladbog/markiro-api@sha256:${"c".repeat(64)}`;
 const PREVIOUS_EDGE = `ghcr.io/thevladbog/markiro-edge@sha256:${"d".repeat(64)}`;
+const EDGE_CONTAINER = "9".repeat(64);
 const VBTECH_SHA = "e".repeat(40);
 const VBTECH_DIGEST = `sha256:${"5".repeat(64)}`;
 const VBTECH_IMAGE_REF = `ghcr.io/thevladbog/vbtech-web@${VBTECH_DIGEST}`;
@@ -105,6 +106,10 @@ async function fixture({ failure, previousVbtech, withPrevious = true } = {}) {
       }
       if (args.includes("/opt/markiro/working-device-compatibility.mjs"))
         return { code: 0, stdout: "working-device-assignments-v1\n", stderr: "" };
+      if (args.includes("ps") && args.at(-1) === "edge")
+        return { code: 0, stdout: EDGE_CONTAINER, stderr: "" };
+      if (args.includes("inspect") && args.at(-1) === EDGE_CONTAINER)
+        return { code: 0, stdout: JSON.stringify(PREVIOUS_EDGE), stderr: "" };
       if (args.includes("inspect"))
         return { code: 0, stdout: JSON.stringify([args.at(-1)]), stderr: "" };
       return { code: 0, stdout: "", stderr: "" };
@@ -140,6 +145,160 @@ async function fixture({ failure, previousVbtech, withPrevious = true } = {}) {
   };
   return { calls, dependencies, previous, releaseDirectory, running };
 }
+
+test("API-only release preserves the running edge and records its separate identity", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture();
+  const candidate = await prepareRelease(
+    { scope: "api-only", environment: ENVIRONMENT, releaseDirectory },
+    dependencies,
+  );
+  assert.equal(candidate.scope, "api-only");
+  assert.equal(candidate.apiDigest, `ghcr.io/thevladbog/markiro-api@${API_DIGEST}`);
+  assert.equal(candidate.edgeDigest, PREVIOUS_EDGE);
+  assert.equal(candidate.edgeReleaseSha, PREVIOUS_TAG);
+  assert.equal(candidate.edgeContainerId, EDGE_CONTAINER);
+  assert.deepEqual(
+    calls.filter(({ args }) => args.includes("pull")).map(({ args }) => args.slice(-2)),
+    [["pull", "api"]],
+  );
+  assert.deepEqual(
+    calls.filter(({ args }) => args.includes("up")).map(({ args }) => args.at(-1)),
+    ["api"],
+  );
+  assert.equal(
+    calls.some(({ args }) => args.includes("migrate")),
+    true,
+  );
+  await finalizePreparedRelease({ candidate, releaseDirectory });
+  assert.equal(
+    (await records(releaseDirectory)).find(
+      ({ value }) => value.tag === TAG && value.state === "healthy",
+    ).value.edgeReleaseSha,
+    PREVIOUS_TAG,
+  );
+});
+
+test("API-only rollback restores API without recreating edge or v-b", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture({
+    previousVbtech: VBTECH_SELECTOR,
+  });
+  dependencies.latestHealthyVbtechRelease = async () => VBTECH_HEALTHY;
+  const candidate = await prepareRelease(
+    {
+      scope: "api-only",
+      environment: ENVIRONMENT,
+      releaseDirectory,
+      vbtechReleaseDirectory: VBTECH_RELEASE_DIRECTORY,
+    },
+    dependencies,
+  );
+  const start = calls.length;
+  await rollbackPreparedRelease(
+    { candidate, environment: ENVIRONMENT, releaseDirectory },
+    dependencies,
+  );
+  const rollback = calls.slice(start);
+  assert.deepEqual(
+    rollback.filter(({ args }) => args.includes("up")).map(({ args }) => args.at(-1)),
+    ["api"],
+  );
+  assert.deepEqual(
+    rollback.filter(({ args }) => args.includes("pull")).map(({ args }) => args.slice(-2)),
+    [["pull", "api"]],
+  );
+  assert.equal(
+    rollback.find(({ args }) => args.includes("up")).environment.MARKIRO_API_IMAGE_DIGEST,
+    PREVIOUS_API.split("@")[1],
+  );
+});
+
+test("API-only first deployment and invalid scope fail before any Docker mutation", async () => {
+  for (const scope of ["api-only", "other"]) {
+    const { calls, dependencies, releaseDirectory } = await fixture({ withPrevious: false });
+    await assert.rejects(
+      prepareRelease({ scope, environment: ENVIRONMENT, releaseDirectory }, dependencies),
+    );
+    assert.equal(calls.length, 0);
+  }
+});
+
+test("API-only rejects drifted edge before migration or API switch", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture();
+  const original = dependencies.runner.run;
+  dependencies.runner.run = async (command, args, environment, timeout) => {
+    const result = await original(command, args, environment, timeout);
+    return args.at(-1) === EDGE_CONTAINER
+      ? { ...result, stdout: JSON.stringify(`ghcr.io/thevladbog/markiro-edge@${EDGE_DIGEST}`) }
+      : result;
+  };
+  await assert.rejects(
+    prepareRelease({ scope: "api-only", environment: ENVIRONMENT, releaseDirectory }, dependencies),
+    /preserved edge/,
+  );
+  assert.equal(
+    calls.some(({ args }) => args.includes("migrate") || args.includes("up")),
+    false,
+  );
+});
+
+test("later full deployment can roll back to a mixed release with the original web SHA", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture();
+  const mixed = await prepareRelease(
+    { scope: "api-only", environment: ENVIRONMENT, releaseDirectory },
+    dependencies,
+  );
+  await finalizePreparedRelease({ candidate: mixed, releaseDirectory });
+  dependencies.now = () => new Date("2026-08-06T10:20:30.000Z");
+  const nextEnvironment = { ...ENVIRONMENT, MARKIRO_IMAGE_TAG: "8".repeat(40) };
+  const next = await prepareRelease(
+    { environment: nextEnvironment, releaseDirectory },
+    dependencies,
+  );
+  assert.equal(next.previousTag, TAG);
+  const start = calls.length;
+  await rollbackPreparedRelease(
+    { candidate: next, environment: nextEnvironment, releaseDirectory },
+    dependencies,
+  );
+  const edge = calls.slice(start).find(({ args }) => args.includes("up") && args.at(-1) === "edge");
+  assert.equal(edge.environment.MARKIRO_IMAGE_TAG, TAG);
+  assert.equal(edge.environment.MARKIRO_EDGE_RELEASE_SHA, PREVIOUS_TAG);
+  assert.equal(edge.environment.MARKIRO_EDGE_IMAGE_DIGEST, PREVIOUS_EDGE.split("@")[1]);
+});
+
+test("full deployment replaces a stale preserved web SHA with the selected release SHA", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture();
+  await prepareRelease(
+    { environment: { ...ENVIRONMENT, MARKIRO_EDGE_RELEASE_SHA: PREVIOUS_TAG }, releaseDirectory },
+    dependencies,
+  );
+  const edge = calls.find(({ args }) => args.includes("up") && args.at(-1) === "edge");
+  assert.equal(edge.environment.MARKIRO_EDGE_RELEASE_SHA, TAG);
+});
+
+test("API-only local readiness failure rolls back API and retains the exact edge", async () => {
+  const { calls, dependencies, releaseDirectory } = await fixture();
+  let checks = 0;
+  dependencies.isReady = async () => ++checks > 1;
+  await assert.rejects(
+    prepareRelease(
+      { scope: "api-only", environment: ENVIRONMENT, releaseDirectory, readinessAttempts: 1 },
+      dependencies,
+    ),
+    /API readiness failed/,
+  );
+  assert.deepEqual(
+    calls.filter(({ args }) => args.includes("up")).map(({ args }) => args.at(-1)),
+    ["api", "api"],
+  );
+  assert.equal(calls.filter(({ args }) => args.includes("migrate")).length, 1);
+  assert.equal(
+    (await records(releaseDirectory)).find(
+      ({ value }) => value.tag === TAG && value.state === "failed",
+    ).value.edgeReleaseSha,
+    PREVIOUS_TAG,
+  );
+});
 
 async function records(directory) {
   return Promise.all(

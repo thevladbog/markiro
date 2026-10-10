@@ -20,6 +20,7 @@ import { productionComposeArgs } from "./compose-files.mjs";
 import { runPreflight } from "./preflight.mjs";
 import { landingDemoSubmissionState, productionBaseUrls, runSmoke } from "./smoke.mjs";
 import { latestHealthyVbtechRelease, validateVbtechSelector } from "./vbtech-release-state.mjs";
+import { releaseRecordKeys, validReleaseScope } from "./release-scope.mjs";
 
 const apiRepository = "ghcr.io/thevladbog/markiro-api";
 const edgeRepository = "ghcr.io/thevladbog/markiro-edge";
@@ -336,6 +337,7 @@ function isHealthyRelease(release, filename, metadata) {
     (release.previousTag === null || /^[0-9a-f]{40}$/.test(release.previousTag)) &&
     isDigestFor(apiRepository, release.apiDigest) &&
     isDigestFor(edgeRepository, release.edgeDigest) &&
+    validReleaseScope(release) &&
     (release.vbtech === undefined || isVbtechRelease(release.vbtech)) &&
     isValidIsoDate(release.createdAt) &&
     (filename === releaseFileName(release.createdAt, release.tag) ||
@@ -351,6 +353,9 @@ function sameRelease(left, right) {
     left?.previousTag === right?.previousTag &&
     left?.apiDigest === right?.apiDigest &&
     left?.edgeDigest === right?.edgeDigest &&
+    left?.scope === right?.scope &&
+    left?.edgeReleaseSha === right?.edgeReleaseSha &&
+    left?.edgeContainerId === right?.edgeContainerId &&
     sameVbtechRelease(left?.vbtech, right?.vbtech) &&
     left?.state === right?.state &&
     left?.createdAt === right?.createdAt
@@ -366,12 +371,10 @@ function isStagedRelease(release, state) {
     (release.previousTag === null || /^[0-9a-f]{40}$/.test(release.previousTag)) &&
     isDigestFor(apiRepository, release.apiDigest) &&
     isDigestFor(edgeRepository, release.edgeDigest) &&
+    validReleaseScope(release) &&
     (release.vbtech === undefined || isVbtechRelease(release.vbtech)) &&
     isValidIsoDate(release.createdAt) &&
-    Object.keys(release).sort().join(",") ===
-      (release.vbtech === undefined
-        ? "apiDigest,createdAt,edgeDigest,previousTag,state,tag"
-        : "apiDigest,createdAt,edgeDigest,previousTag,state,tag,vbtech")
+    Object.keys(release).sort().join(",") === releaseRecordKeys(release)
   );
 }
 
@@ -602,10 +605,40 @@ async function markPreparedReleaseFailed(releaseDirectory, candidate) {
   return writeStagedRelease(releaseDirectory, { ...candidate, state: "failed" }, "failed");
 }
 
+async function requirePreservedEdge(dependencies, compose, environment, edgeDigest, expectedId) {
+  const listed = await mustRun(
+    dependencies,
+    "docker",
+    [...compose, "ps", "-q", "edge"],
+    environment,
+    dependencies.timeouts.command,
+  );
+  const id = listed.stdout.trim();
+  if (!/^[0-9a-f]{64}$/.test(id) || (expectedId !== undefined && id !== expectedId))
+    throw new Error("preserved edge container changed or is unavailable");
+  const inspected = await mustRun(
+    dependencies,
+    "docker",
+    ["inspect", "--format", "{{json .Config.Image}}", id],
+    environment,
+    dependencies.timeouts.command,
+  );
+  if (inspected.stdout.trim() !== JSON.stringify(edgeDigest))
+    throw new Error("preserved edge image does not match healthy release");
+  return id;
+}
+
 /**
  * Pull, migrate, and switch a digest-backed candidate, stopping after local API and edge readiness.
  */
 export async function prepareRelease(options, supplied = {}) {
+  const scope = options.scope ?? "full";
+  if (!["full", "api-only"].includes(scope)) throw new Error("invalid deployment scope");
+  const apiOnly = scope === "api-only";
+  const baseline = apiOnly
+    ? await latestHealthyReleaseRecord(options.releaseDirectory || ".markiro-releases")
+    : undefined;
+  if (apiOnly && !baseline) throw new Error("previous healthy release is unavailable");
   const dependencies = deploymentDependencies(options, supplied);
   const preservedLifecycle = options.vbtechReleaseDirectory
     ? await dependencies.latestHealthyVbtechRelease(options.vbtechReleaseDirectory)
@@ -617,7 +650,20 @@ export async function prepareRelease(options, supplied = {}) {
     vbtechInputKeys.some((key) => options.environment[key] !== undefined)
   )
     throw new Error("caller v-b selector conflicts with preserved release");
-  const effectiveEnvironment = environmentWithVbtech(options.environment, preserved);
+  const effectiveEnvironment = environmentWithVbtech(
+    {
+      ...options.environment,
+      MARKIRO_EDGE_RELEASE_SHA: apiOnly
+        ? (baseline.edgeReleaseSha ?? baseline.tag)
+        : options.environment.MARKIRO_IMAGE_TAG,
+      ...(apiOnly
+        ? {
+            MARKIRO_EDGE_IMAGE_DIGEST: baseline.edgeDigest.slice(`${edgeRepository}@`.length),
+          }
+        : {}),
+    },
+    preserved,
+  );
   dependencies.log("preflight");
   const preflight = await dependencies.runPreflight(effectiveEnvironment);
   const vbtech = vbtechReleaseFromPreflight(preflight);
@@ -635,7 +681,7 @@ export async function prepareRelease(options, supplied = {}) {
   const compose = productionComposeArgs(environment);
   const approvedApiImage = `${apiRepository}@${preflight.apiImageDigest}`;
   const approvedEdgeImage = `${edgeRepository}@${preflight.edgeImageDigest}`;
-  const services = ["api", "edge", ...(vbtech ? ["vbtech-web"] : [])];
+  const services = apiOnly ? ["api"] : ["api", "edge", ...(vbtech ? ["vbtech-web"] : [])];
   let candidate;
   let switched = false;
 
@@ -650,13 +696,19 @@ export async function prepareRelease(options, supplied = {}) {
       throw new Error("first deployment requires no previous healthy release");
     if (options.requirePreviousHealthy && !previous)
       throw new Error("previous healthy release is unavailable");
-    await mustRun(
-      dependencies,
-      "docker",
-      ["image", "prune", "--all", "--force"],
-      environment,
-      dependencies.timeouts.pull,
-    );
+    if (apiOnly && !sameRelease(previous, baseline))
+      throw new Error("previous healthy release changed");
+    const edgeContainerId = apiOnly
+      ? await requirePreservedEdge(dependencies, compose, environment, baseline.edgeDigest)
+      : undefined;
+    if (!apiOnly)
+      await mustRun(
+        dependencies,
+        "docker",
+        ["image", "prune", "--all", "--force"],
+        environment,
+        dependencies.timeouts.pull,
+      );
     await mustRun(
       dependencies,
       "docker",
@@ -693,6 +745,9 @@ export async function prepareRelease(options, supplied = {}) {
       previousTag: previous?.tag ?? null,
       apiDigest: requireApprovedDigest(approvedApiImage, api.stdout.trim()),
       edgeDigest: requireApprovedDigest(approvedEdgeImage, edge.stdout.trim()),
+      ...(apiOnly
+        ? { scope, edgeReleaseSha: baseline.edgeReleaseSha ?? baseline.tag, edgeContainerId }
+        : {}),
       ...(vbtech
         ? {
             vbtech: {
@@ -723,7 +778,7 @@ export async function prepareRelease(options, supplied = {}) {
       dependencies.timeouts.service,
     );
     await waitForApi(dependencies, options, compose, environment);
-    if (vbtech)
+    if (vbtech && !apiOnly)
       await mustRun(
         dependencies,
         "docker",
@@ -731,14 +786,23 @@ export async function prepareRelease(options, supplied = {}) {
         environment,
         dependencies.timeouts.service,
       );
-    await mustRun(
-      dependencies,
-      "docker",
-      [...compose, "up", "-d", ...(vbtech ? [] : ["--no-deps"]), "edge"],
-      environment,
-      dependencies.timeouts.service,
-    );
+    if (!apiOnly)
+      await mustRun(
+        dependencies,
+        "docker",
+        [...compose, "up", "-d", ...(vbtech ? [] : ["--no-deps"]), "edge"],
+        environment,
+        dependencies.timeouts.service,
+      );
     await waitForEdgeTls(dependencies, options);
+    if (apiOnly)
+      await requirePreservedEdge(
+        dependencies,
+        compose,
+        environment,
+        candidate.edgeDigest,
+        candidate.edgeContainerId,
+      );
     dependencies.log("release prepared");
     return candidate;
   } catch (error) {
@@ -816,18 +880,32 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
       MARKIRO_IMAGE_TAG: previous.tag,
       MARKIRO_API_IMAGE_DIGEST: previous.apiDigest.slice(`${apiRepository}@`.length),
       MARKIRO_EDGE_IMAGE_DIGEST: previous.edgeDigest.slice(`${edgeRepository}@`.length),
+      MARKIRO_EDGE_RELEASE_SHA: previous.edgeReleaseSha ?? previous.tag,
     }),
     candidate.vbtech,
   );
   const compose = productionComposeArgs(environment);
+  const apiOnly = candidate.scope === "api-only";
+  if (apiOnly)
+    await requirePreservedEdge(
+      dependencies,
+      compose,
+      environment,
+      candidate.edgeDigest,
+      candidate.edgeContainerId,
+    );
   await mustRun(
     dependencies,
     "docker",
-    [...compose, "pull", "api", "edge", ...(candidate.vbtech ? ["vbtech-web"] : [])],
+    [
+      ...compose,
+      "pull",
+      ...(apiOnly ? ["api"] : ["api", "edge", ...(candidate.vbtech ? ["vbtech-web"] : [])]),
+    ],
     environment,
     dependencies.timeouts.pull,
   );
-  if (candidate.vbtech) {
+  if (candidate.vbtech && !apiOnly) {
     const vbtechImage = await mustRun(
       dependencies,
       "docker",
@@ -846,7 +924,7 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
     dependencies.timeouts.service,
   );
   await waitForApi(dependencies, options, compose, environment);
-  if (candidate.vbtech)
+  if (candidate.vbtech && !apiOnly)
     await mustRun(
       dependencies,
       "docker",
@@ -854,14 +932,23 @@ export async function rollbackPreparedRelease(options, supplied = {}) {
       environment,
       dependencies.timeouts.service,
     );
-  await mustRun(
-    dependencies,
-    "docker",
-    [...compose, "up", "-d", ...(candidate.vbtech ? [] : ["--no-deps"]), "edge"],
-    environment,
-    dependencies.timeouts.service,
-  );
+  if (!apiOnly)
+    await mustRun(
+      dependencies,
+      "docker",
+      [...compose, "up", "-d", ...(candidate.vbtech ? [] : ["--no-deps"]), "edge"],
+      environment,
+      dependencies.timeouts.service,
+    );
   await waitForEdgeTls(dependencies, options);
+  if (apiOnly)
+    await requirePreservedEdge(
+      dependencies,
+      compose,
+      environment,
+      candidate.edgeDigest,
+      candidate.edgeContainerId,
+    );
   dependencies.log("release rolled back");
   return markPreparedReleaseFailed(options.releaseDirectory, candidate);
 }
@@ -1117,6 +1204,7 @@ if (isMainModule(import.meta.url)) {
       const candidate = await prepareRelease(
         {
           environment: process.env,
+          scope: process.env.MARKIRO_DEPLOY_SCOPE ?? "full",
           releaseDirectory: cliReleaseDirectory(),
           vbtechReleaseDirectory: defaultVbtechReleaseDirectory,
           requirePreviousHealthy: process.env.MARKIRO_REQUIRE_PREVIOUS_HEALTHY === "1",
