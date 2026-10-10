@@ -1,16 +1,7 @@
-import {
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useReducer,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
+import { useCallback, useEffect, useMemo, useReducer, useState, useSyncExternalStore } from "react";
 import { useTranslation } from "react-i18next";
 
-import { FloorOperatorScreen } from "../floor/FloorOperatorScreen.js";
+import { FloorApp } from "../floor/FloorApp.js";
 import { FloorStatusBar } from "../floor/FloorStatusBar.js";
 import { OperatorSignIn } from "../floor/OperatorSignIn.js";
 import { createKeyboardWedgeSource, type ScanSource } from "../floor/scan-source.js";
@@ -34,6 +25,7 @@ import {
   type OfficeLoginRequest,
 } from "../host/protocol.js";
 import { createTauriLocalExecutor, type LocalExecutor } from "../local/executor.js";
+import { countUnsentRecords } from "../local/outbox.js";
 import { Office } from "../office/Office.js";
 import { OfficeLogin } from "../office/OfficeLogin.js";
 import type { OfficeSessionValue } from "../office/office-session.js";
@@ -55,6 +47,7 @@ import {
   deviceRejection,
   initialShellState,
   nextShellView,
+  type ShellView,
   shellActionFor,
   shellReducer,
   type FloorNotice,
@@ -155,15 +148,27 @@ export function App({
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
   const [probeAttempt, setProbeAttempt] = useState(0);
   const [repairState, setRepairState] = useState<"idle" | "busy" | DeviceErrorCode>("idle");
+  // A forget the shell refused for records not yet sent, how many there are,
+  // and the screen it was asked on: the count is not another screen's.
+  const [unsent, setUnsent] = useState<{
+    records: number | null;
+    view: ShellView["kind"];
+  } | null>(null);
   const view = nextShellView(state, address);
+  const unsentHere = unsent !== null && unsent.view === view.kind ? unsent : null;
   const localName = t("device.localName");
   const pairedStatus = state.device.kind === "ready" ? state.device.status : null;
   // The pairing's host when it is not the one on this computer.
   const remoteAddress =
     pairedStatus !== null && pairedStatus.hostAddress !== address ? pairedStatus.hostAddress : null;
 
+  // A refusal that waits for the operator to leave the shift (question В8)
+  // already stops the link: nothing more reaches a host that refused us.
   const linked =
-    pairedStatus !== null && state.rejection === null && state.sync.kind !== "other_host"
+    pairedStatus !== null &&
+    state.rejection === null &&
+    state.pendingRejection === null &&
+    state.sync.kind !== "other_host"
       ? pairedStatus
       : null;
   const requestSync = useHostLink({
@@ -173,6 +178,7 @@ export function App({
     local: localDb,
     changes: hostApi.getChanges,
     refresh: deviceApi.refresh,
+    deviceShifts: hostApi.getDeviceShifts,
     dispatch,
   });
 
@@ -270,21 +276,45 @@ export function App({
     setProbeAttempt((attempt) => attempt + 1);
   }, []);
 
-  const repair = useCallback(() => {
-    setRepairState("busy");
-    deviceApi.forget().then(
-      () => {
-        setRepairState("idle");
-        dispatch({ type: "forgotten" });
-        retryProbe();
-      },
-      (error: unknown) => {
-        // The config could not be removed; this screen stays and offers the
-        // same action again, now explaining why it did not work.
-        setRepairState(error instanceof DeviceError ? error.code : "unreachable");
-      },
-    );
-  }, [deviceApi, retryProbe]);
+  const forgetHostId = pairedStatus?.hostId ?? null;
+  const forgetDeviceId = pairedStatus?.deviceId ?? null;
+  const forget = useCallback(
+    (keepUnsent: boolean) => {
+      const screenKind = view.kind;
+      setRepairState("busy");
+      deviceApi.forget(keepUnsent ? { keepUnsent: true } : undefined).then(
+        () => {
+          setRepairState("idle");
+          setUnsent(null);
+          dispatch({ type: "forgotten" });
+          retryProbe();
+        },
+        (error: unknown) => {
+          if (error instanceof DeviceError && error.code === "unsent_facts") {
+            // A rejected device can send nothing more, so a person decides,
+            // knowing how many (question В7): the records stay on this PC. The
+            // pairing's own, or every pairing's when the file is unreadable,
+            // as the shell counts them.
+            const pairing =
+              forgetHostId === null || forgetDeviceId === null
+                ? null
+                : { hostId: forgetHostId, deviceId: forgetDeviceId };
+            void countUnsentRecords(localDb, pairing).then((records) => {
+              setUnsent({ records, view: screenKind });
+              setRepairState("idle");
+            });
+            return;
+          }
+          // The config could not be removed; this screen stays and offers the
+          // same action again, now explaining why it did not work.
+          setRepairState(error instanceof DeviceError ? error.code : "unreachable");
+        },
+      );
+    },
+    [deviceApi, retryProbe, localDb, forgetHostId, forgetDeviceId, view.kind],
+  );
+  const repair = useCallback(() => forget(false), [forget]);
+  const confirmRepair = useCallback(() => forget(true), [forget]);
 
   const unpaired = state.device.kind === "ready" && state.device.status === null;
   const bootstrap = useCallback(
@@ -341,38 +371,28 @@ export function App({
   const operatorSignedIn = useCallback(
     (operator: FloorOperator, lineId: string | null) => {
       if (pairedDeviceId !== null) {
-        // A copy, and the reducer stores a fresh object of its own, so each
-        // sign-in is a session of its own: the sign-out below tells a session
-        // from the next one of the same operator by the STORED object, never
-        // by the operator's id.
+        // The reducer gives the sign-in a new session number.
         dispatch({
           type: "operator_signed_in",
           deviceId: pairedDeviceId,
           lineId,
           address,
-          operator: { ...operator },
+          operator,
         });
       }
     },
     [pairedDeviceId, address],
   );
-  // The operator of the session on screen, as the last commit has it.
-  const signedIn = state.operator;
-  const currentOperator = useRef<FloorOperator | null>(null);
-  useLayoutEffect(() => {
-    currentOperator.current = signedIn;
-  }, [signedIn]);
-  // Bound to ONE session (`signedIn` is the object that session's sign-in
-  // made): a late idle timer or copy check of an earlier session of the same
-  // operator must not end the session that followed it. The callback changes
-  // only with the session, so the screen's idle timer is not restarted by
-  // every event of the link.
+  // Bound to ONE session by its number: a late idle timer or copy check of an
+  // earlier session of the same operator ends nothing (the reducer compares
+  // the number). The callback changes only with the session, so the screen's
+  // idle timer is not restarted by every event of the link or a new name.
+  const sessionId = state.operator?.sessionId ?? null;
   const operatorSignedOut = useCallback(
     (notice: FloorNotice | null) => {
-      if (signedIn === null || currentOperator.current !== signedIn) return;
-      dispatch({ type: "operator_signed_out", operatorId: signedIn.id, notice });
+      if (sessionId !== null) dispatch({ type: "operator_signed_out", sessionId, notice });
     },
-    [signedIn],
+    [sessionId],
   );
 
   const session = view.kind === "office" ? view.session : null;
@@ -461,7 +481,13 @@ export function App({
     <main className="standalone-screen">
       {view.kind === "loading" && <WaitScreen messageKey="shell.loading" />}
       {view.kind === "config_error" && (
-        <ConfigErrorScreen busy={repairBusy} error={repairError} onReset={repair} />
+        <ConfigErrorScreen
+          busy={repairBusy}
+          error={repairError}
+          unsent={unsentHere}
+          onReset={repair}
+          onConfirm={confirmRepair}
+        />
       )}
       {view.kind === "host_missing" && (
         <HostMissingScreen
@@ -497,7 +523,9 @@ export function App({
           remoteAddress={remoteAddress}
           busy={repairBusy}
           error={repairError}
+          unsent={unsentHere}
           onRepair={repair}
+          onConfirm={confirmRepair}
         />
       )}
       {view.kind === "other_host" && (
@@ -505,7 +533,9 @@ export function App({
           hostAddress={view.hostAddress}
           busy={repairBusy}
           error={repairError}
+          unsent={unsentHere}
           onRepair={repair}
+          onConfirm={confirmRepair}
         />
       )}
       {view.kind === "line_select" && (
@@ -527,6 +557,10 @@ export function App({
             operator={view.kind === "floor_operator" ? view.operator : null}
             link={state.link}
             sync={state.sync}
+            deviceName={pairedStatus.deviceName}
+            shiftId={state.floorWork?.shiftId ?? null}
+            deviceNotSaved={state.deviceNotSaved}
+            refusalHeld={state.pendingRejection !== null}
           />
           {view.kind === "floor" ? (
             <OperatorSignIn
@@ -543,12 +577,21 @@ export function App({
               onOffice={() => dispatch({ type: "office_requested" })}
             />
           ) : (
-            <FloorOperatorScreen
+            <FloorApp
+              // One session's screen: nothing of it outlives the sign-out.
+              key={`${pairedStatus.hostId}:${pairedStatus.deviceId}:${view.operator.sessionId}`}
               operator={view.operator}
               local={localDb}
-              pairing={pairedStatus}
+              device={pairedStatus}
+              link={state.link}
               sync={state.sync}
+              shiftReads={state.shiftReads}
+              lineChangePending={state.pendingDevice !== null}
+              enter={hostApi.enterShift}
+              create={hostApi.createDeviceShift}
+              source={scanner}
               {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
+              dispatch={dispatch}
               onSignOut={operatorSignedOut}
             />
           )}

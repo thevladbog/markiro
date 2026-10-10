@@ -100,9 +100,10 @@ function checked<T extends Record<string, unknown>>(
  * of defence for whatever else might write an older record. Operators and
  * their badges carry it, since an older record would bring back access, and
  * the catalog's copies too (products, templates, category defaults), since an
- * older layout or default must not take the place the delete emptied. Not
- * `org_profile`, `site` and `lines` (plan 2a): `site`'s salt never changes
- * after the wizard.
+ * older layout or default must not take the place the delete emptied, and
+ * the organization and the lines since plan 2a5, whose floor names them and
+ * reads the organization's zone and default template. Not `site`: its salt
+ * never changes after the wizard.
  */
 function notQuarantinedNewer(entity: string): string {
   return (
@@ -123,11 +124,13 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
         "INSERT INTO ref_org (id, name, inn, gln, gs1_prefixes, time_zone, " +
         "default_box_template_id, default_pallet_template_id, default_duplicate_template_id, " +
         "rev) " +
-        "SELECT value ->> 'id', value ->> 'name', value ->> 'inn', value ->> 'gln', " +
-        "value ->> 'gs1Prefixes', value ->> 'timeZone', value ->> 'defaultBoxTemplateId', " +
-        "value ->> 'defaultPalletTemplateId', value ->> 'defaultDuplicateTemplateId', " +
-        "value ->> 'rev' " +
-        "FROM json_each(?) WHERE true " +
+        "SELECT r.value ->> 'id', r.value ->> 'name', r.value ->> 'inn', r.value ->> 'gln', " +
+        "r.value ->> 'gs1Prefixes', r.value ->> 'timeZone', r.value ->> 'defaultBoxTemplateId', " +
+        "r.value ->> 'defaultPalletTemplateId', r.value ->> 'defaultDuplicateTemplateId', " +
+        "r.value ->> 'rev' " +
+        "FROM json_each(?) AS r " +
+        notQuarantinedNewer("org_profile") +
+        " " +
         "ON CONFLICT (id) DO UPDATE SET name = excluded.name, inn = excluded.inn, " +
         "gln = excluded.gln, gs1_prefixes = excluded.gs1_prefixes, " +
         "time_zone = excluded.time_zone, " +
@@ -162,8 +165,10 @@ const ENTITIES: ReadonlyMap<string, EntityTable> = new Map([
       check: (item) => checked(lineRecordSchema, item),
       upsert:
         "INSERT INTO ref_lines (id, name, archived, rev) " +
-        "SELECT value ->> 'id', value ->> 'name', value ->> 'archived', value ->> 'rev' " +
-        "FROM json_each(?) WHERE true " +
+        "SELECT r.value ->> 'id', r.value ->> 'name', r.value ->> 'archived', r.value ->> 'rev' " +
+        "FROM json_each(?) AS r " +
+        notQuarantinedNewer("lines") +
+        " " +
         "ON CONFLICT (id) DO UPDATE SET name = excluded.name, archived = excluded.archived, " +
         "rev = excluded.rev " +
         "WHERE excluded.rev > ref_lines.rev",

@@ -870,6 +870,27 @@ describe("the screen's answers", () => {
     expect(onSignedIn).not.toHaveBeenCalled();
   });
 
+  it("says a refusal and a notice in the polite region and in no alert of their own", async () => {
+    const view = renderSignIn({
+      local: await synced([SITE, OPERATOR, BADGE]),
+      notice: "idle",
+    });
+    await screen.findByText(BADGE_PROMPT);
+    const region = view.container.querySelector<HTMLElement>(".floor-sign-in__message");
+    expect(region?.getAttribute("aria-live")).toBe("polite");
+    expect(region?.textContent).toContain("Оператор вышел по бездействию.");
+    // Heard once, by the region: an alert inside it would be read a second time.
+    expect(region?.querySelectorAll('[role="alert"]')).toHaveLength(0);
+    expect(screen.queryAllByRole("alert")).toEqual([]);
+
+    act(() => scan("MRK-000743"));
+    const refusal = await screen.findByText(/^Бейдж не найден\./);
+    expect(region?.contains(refusal)).toBe(true);
+    expect(refusal.closest(".mk-alert--error")).not.toBeNull();
+    expect(region?.querySelectorAll('[role="alert"]')).toHaveLength(0);
+    expect(screen.queryAllByRole("alert")).toEqual([]);
+  });
+
   it("warns, rather than fails, when a scan finds the copies not ready, and asks for a sync", async () => {
     const { executor } = openLocalDb();
     const { onSync } = renderSignIn({ local: executor, sync: { ...SYNCED, synced: 0 } });

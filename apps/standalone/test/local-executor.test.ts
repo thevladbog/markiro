@@ -102,7 +102,7 @@ describe("Tauri local executor", () => {
 });
 
 describe("local database on node:sqlite", () => {
-  it("has exactly the shell's reference tables", async () => {
+  it("has exactly the shell's tables", async () => {
     const { executor } = openLocalDb();
     const tables = await executor.query(
       "SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name",
@@ -110,7 +110,15 @@ describe("local database on node:sqlite", () => {
       z.object({ name: z.string() }),
     );
     expect(tables.map((table) => table.name)).toEqual([
+      "floor_block_requests",
+      "floor_boxes",
+      "floor_codes",
+      "floor_exceptions",
+      "floor_scans",
+      "floor_shifts",
       "floor_sign_in_failures",
+      "floor_sscc_blocks",
+      "outbox",
       "ref_lines",
       "ref_operator_badges",
       "ref_operators",

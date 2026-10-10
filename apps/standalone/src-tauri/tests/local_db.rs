@@ -7,7 +7,7 @@ use markiro_standalone_lib::local_db::{
 };
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
-use sqlx::{ConnectOptions, Connection};
+use sqlx::{ConnectOptions, Connection, Row};
 
 const INSERT_LINE: &str = "INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, ?, ?, ?)";
 // A genuine no-op write: SQLite's `sqlite3_changes()` (`rows_affected()`)
@@ -66,7 +66,15 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
     assert_eq!(
         names,
         [
+            "floor_block_requests",
+            "floor_boxes",
+            "floor_codes",
+            "floor_exceptions",
+            "floor_scans",
+            "floor_shifts",
             "floor_sign_in_failures",
+            "floor_sscc_blocks",
+            "outbox",
             "ref_lines",
             "ref_operator_badges",
             "ref_operators",
@@ -444,17 +452,36 @@ async fn every_table_has_a_forget_class() {
         listed, tables,
         "TABLE_CLASSES names each table of the migrations once, and nothing else"
     );
-    // Until plan 2a5 brings the first records of the device's own, every
-    // table is a copy or this pairing's bookkeeping.
-    assert!(TABLE_CLASSES
+    // This device's own records are the production tables of `0006`; the
+    // sign-in lockouts stay with the copies (an open owner question).
+    let device_data: Vec<&str> = TABLE_CLASSES
         .iter()
-        .all(|(_, class)| *class == TableClass::Disposable));
+        .filter(|(_, class)| *class == TableClass::DeviceData)
+        .map(|(table, _)| *table)
+        .collect();
+    assert_eq!(
+        device_data,
+        [
+            "floor_block_requests",
+            "floor_boxes",
+            "floor_codes",
+            "floor_exceptions",
+            "floor_scans",
+            "floor_shifts",
+            "floor_sscc_blocks",
+            "outbox"
+        ]
+    );
+    assert_eq!(
+        table_class("floor_sign_in_failures"),
+        Some(TableClass::Disposable)
+    );
 }
 
 /// Forgetting the device (`device_forget`) empties every disposable table and
-/// nothing else: a table outside that class (here two a later migration might
-/// add, one of this device's records and one of the workstation's settings)
-/// keeps its rows, and so does sqlx's migration journal.
+/// nothing else: every table of this device's own records (`0006`) keeps its
+/// row, and so does a workstation's table (here one plan 2a7 might add) and
+/// sqlx's migration journal.
 #[tokio::test]
 async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
     let (dir, db) = open().await;
@@ -513,43 +540,61 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
     ])
     .await
     .unwrap();
-    // Tables as a later migration might add them; the webview may not create
-    // tables, so a raw connection does.
-    let mut raw = SqliteConnectOptions::new()
-        .filename(dir.path().join(FILE_NAME))
-        .connect()
-        .await
-        .unwrap();
-    for sql in [
-        "CREATE TABLE kept_device_records (id TEXT PRIMARY KEY)",
-        "CREATE TABLE kept_workstation_settings (key TEXT PRIMARY KEY)",
-        "INSERT INTO kept_device_records (id) VALUES ('scan-1')",
-        "INSERT INTO kept_workstation_settings (key) VALUES ('printers')",
-    ] {
-        sqlx::query(sql).execute(&mut raw).await.unwrap();
-    }
-    raw.close().await.unwrap();
+    // One record in each table of this device's own (`0006`).
+    db.transaction(device_records()).await.unwrap();
+    // A table of the workstation's settings as plan 2a7 will add it; the
+    // webview may not create tables, so a raw connection does.
+    run_raw(
+        dir.path(),
+        &[
+            "CREATE TABLE kept_workstation_settings (key TEXT PRIMARY KEY)",
+            "INSERT INTO kept_workstation_settings (key) VALUES ('printers')",
+        ],
+    )
+    .await;
     let journal = "SELECT count(*) AS n FROM _sqlx_migrations";
     let migrations = db.query(journal, vec![]).await.unwrap();
 
     assert_eq!(db.clear_copies(UnsentGuard::Ignore).await, Ok(()));
 
-    for (table, _) in TABLE_CLASSES {
+    for (table, class) in TABLE_CLASSES {
         let left = db
             .query(&format!("SELECT count(*) AS n FROM {table}"), vec![])
             .await
             .unwrap();
-        assert_eq!(Value::Object(left[0].clone()), json!({ "n": 0 }), "{table}");
+        let expected = if *class == TableClass::Disposable {
+            0
+        } else {
+            1
+        };
+        assert_eq!(
+            Value::Object(left[0].clone()),
+            json!({ "n": expected }),
+            "{table}"
+        );
+    }
+    // The rows of this device's own stay whatever `TABLE_CLASSES` says, named
+    // here once more so the check does not follow the list it checks.
+    for table in [
+        "floor_block_requests",
+        "floor_boxes",
+        "floor_codes",
+        "floor_exceptions",
+        "floor_scans",
+        "floor_shifts",
+        "floor_sscc_blocks",
+        "outbox",
+    ] {
+        assert_eq!(count(&db, table).await, json!(1), "{table} keeps its row");
     }
     let kept = db
         .query(
-            "SELECT (SELECT count(*) FROM kept_device_records) \
-             + (SELECT count(*) FROM kept_workstation_settings) AS n",
+            "SELECT count(*) AS n FROM kept_workstation_settings",
             vec![],
         )
         .await
         .unwrap();
-    assert_eq!(Value::Object(kept[0].clone()), json!({ "n": 2 }));
+    assert_eq!(Value::Object(kept[0].clone()), json!({ "n": 1 }));
     assert_eq!(db.query(journal, vec![]).await.unwrap(), migrations);
     // The database takes writes afterwards as before.
     assert_eq!(
@@ -568,8 +613,7 @@ const DEVICE: &str = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 const OTHER_DEVICE: &str = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
 
 /// Runs `statements` on a raw connection, as a later migration would: the
-/// webview may not create tables. `outbox` here stands for plan 2a5's table
-/// with only the columns a forget reads; plan 2a5 replaces it with its own.
+/// webview may not create tables.
 async fn run_raw(dir: &std::path::Path, statements: &[&str]) {
     let mut raw = SqliteConnectOptions::new()
         .filename(dir.join(FILE_NAME))
@@ -582,8 +626,85 @@ async fn run_raw(dir: &std::path::Path, statements: &[&str]) {
     raw.close().await.unwrap();
 }
 
-const OUTBOX: &str = "CREATE TABLE outbox (id TEXT PRIMARY KEY, host_id TEXT NOT NULL, \
-    device_id TEXT NOT NULL, acked_at TEXT)";
+/// The SQL of an outbox record of the pairing `(host, device)`, acknowledged
+/// at `acked` (an `accepted` receipt) or not yet, for a raw connection.
+fn outbox_sql(id: &str, host: &str, device: &str, acked: Option<&str>) -> String {
+    let (outcome, acked_at) = match acked {
+        Some(at) => ("'accepted'".to_string(), format!("'{at}'")),
+        None => ("NULL".to_string(), "NULL".to_string()),
+    };
+    format!(
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, acked_at) VALUES ('{id}', '{host}', '{device}', 'scan', 'shift-1', '{{}}', \
+         '2026-10-09T08:00:00.000Z', {outcome}, {acked_at})"
+    )
+}
+
+/// An outbox record of the pairing `(host, device)`, acknowledged at `acked`
+/// (an `accepted` receipt) or not yet.
+fn outbox_record(id: &str, host: &str, device: &str, acked: Option<&str>) -> LocalStatement {
+    statement(
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, acked_at) VALUES (?, ?, ?, 'scan', 'shift-1', '{}', \
+         '2026-10-09T08:00:00.000Z', ?, ?)",
+        json!([id, host, device, acked.map(|_| "accepted"), acked]),
+    )
+}
+
+/// One row in each table of this device's own records (migration `0006`),
+/// each of the pairing `(HOST, DEVICE)`, as the floor's writers will write
+/// them through `local_transaction`.
+fn device_records() -> Vec<LocalStatement> {
+    vec![
+        statement(
+            "INSERT INTO floor_shifts (host_id, device_id, id, number, status, mode, \
+             pallets_enabled, created_from, line_id, product_id, product_name, product_gtin14, \
+             production_date, box_capacity, box_template_id, owner_device_id, opened_at, \
+             snapshot, entered_at, seen_at) VALUES (?, ?, 'shift-1', 'OCT26-004', 'active', \
+             'aggregation', 0, 'office', ?, 'product-1', 'Молоко', '04600682000013', \
+             '2026-10-08', 12, 'template-1', ?, '2026-10-08T06:02:00Z', '{}', \
+             '2026-10-08T06:02:01.000Z', 1790000000000)",
+            json!([HOST, DEVICE, LINE_1, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO floor_sscc_blocks (block_id, host_id, device_id, issuer_prefix, \
+             extension, from_serial, to_serial, next_serial, received_at) \
+             VALUES ('block-1', ?, ?, '460068200', 0, 1, 2000, 1, '2026-10-08T06:02:02.000Z')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO floor_block_requests (request_id, host_id, device_id, issuer_prefix, \
+             extension, requested_at) VALUES ('request-1', ?, ?, '460068200', 0, \
+             '2026-10-08T06:02:02.000Z')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO floor_boxes (id, host_id, device_id, shift_id, opened_at, item_count) \
+             VALUES ('box-1', ?, ?, 'shift-1', '2026-10-08T06:03:00.000Z', 1)",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO floor_codes (host_id, device_id, code_hash, shift_id, box_id, scan_id, \
+             scanned_at) VALUES (?, ?, 'hash-1', 'shift-1', 'box-1', 'scan-1', \
+             '2026-10-08T06:03:00.000Z')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO floor_scans (id, host_id, device_id, shift_id, box_id, verdict, \
+             raw_kind, raw_length, code_hash, gtin14, serial, canonical, scanned_at) \
+             VALUES ('scan-1', ?, ?, 'shift-1', 'box-1', 'ok', 'km', 31, 'hash-1', \
+             '04600682000013', 'abc', 'code', '2026-10-08T06:03:00.000Z')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO floor_exceptions (id, host_id, device_id, shift_id, kind, box_id, \
+             occurred_at) VALUES ('exception-1', ?, ?, 'shift-1', 'clear', 'box-1', \
+             '2026-10-08T06:04:00.000Z')",
+            json!([HOST, DEVICE]),
+        ),
+        outbox_record("record-1", HOST, DEVICE, None),
+    ]
+}
 
 async fn count(db: &LocalDb, table: &str) -> Value {
     let rows = db
@@ -601,17 +722,20 @@ async fn count(db: &LocalDb, table: &str) -> Value {
 /// from this pairing's.
 #[tokio::test]
 async fn a_forget_refuses_while_unsent_records_remain() {
-    let (dir, db) = open().await;
+    let (_dir, db) = open().await;
     db.transaction(vec![statement(
         INSERT_LINE,
         json!([LINE_1, "Линия 1", 0, 3]),
     )])
     .await
     .unwrap();
-    let mine = format!("INSERT INTO outbox VALUES ('a', '{HOST}', '{DEVICE}', NULL)");
-    let other_device = format!("INSERT INTO outbox VALUES ('b', '{HOST}', '{OTHER_DEVICE}', NULL)");
-    let other_host = format!("INSERT INTO outbox VALUES ('c', '{OTHER_HOST}', '{DEVICE}', NULL)");
-    run_raw(dir.path(), &[OUTBOX, &mine, &other_device, &other_host]).await;
+    db.transaction(vec![
+        outbox_record("a", HOST, DEVICE, None),
+        outbox_record("b", HOST, OTHER_DEVICE, None),
+        outbox_record("c", OTHER_HOST, DEVICE, None),
+    ])
+    .await
+    .unwrap();
 
     assert_eq!(
         db.clear_copies(UnsentGuard::Pairing(HOST, DEVICE)).await,
@@ -633,23 +757,23 @@ async fn a_forget_refuses_while_unsent_records_remain() {
 }
 
 /// Records with a receipt, and another pairing's, do not stop this
-/// pairing's forget; nor does a database without an outbox yet (before plan
-/// 2a5's migration). Once every record has a receipt, no pairing's forget is
-/// stopped, `AnyPairing` included.
+/// pairing's forget; nor does an empty outbox. Once every record has a
+/// receipt, no pairing's forget is stopped, `AnyPairing` included.
 #[tokio::test]
 async fn sent_records_and_other_pairings_do_not_stop_a_forget() {
-    let (dir, db) = open().await;
+    let (_dir, db) = open().await;
     assert_eq!(
         db.clear_copies(UnsentGuard::Pairing(HOST, DEVICE)).await,
         Ok(())
     );
     assert_eq!(db.clear_copies(UnsentGuard::AnyPairing).await, Ok(()));
 
-    let acked = format!(
-        "INSERT INTO outbox VALUES ('a', '{HOST}', '{DEVICE}', '2026-10-09T08:00:00.000Z')"
-    );
-    let others = format!("INSERT INTO outbox VALUES ('b', '{HOST}', '{OTHER_DEVICE}', NULL)");
-    run_raw(dir.path(), &[OUTBOX, &acked, &others]).await;
+    db.transaction(vec![
+        outbox_record("a", HOST, DEVICE, Some("2026-10-09T08:00:00.000Z")),
+        outbox_record("b", HOST, OTHER_DEVICE, None),
+    ])
+    .await
+    .unwrap();
     assert_eq!(
         db.clear_copies(UnsentGuard::Pairing(HOST, DEVICE)).await,
         Ok(())
@@ -661,7 +785,8 @@ async fn sent_records_and_other_pairings_do_not_stop_a_forget() {
     assert_eq!(count(&db, "outbox").await, json!(2));
 
     db.transaction(vec![statement(
-        "UPDATE outbox SET acked_at = '2026-10-09T08:01:00.000Z' WHERE id = 'b'",
+        "UPDATE outbox SET outcome = 'accepted', acked_at = '2026-10-09T08:01:00.000Z' \
+         WHERE id = 'b'",
         json!([]),
     )])
     .await
@@ -681,7 +806,16 @@ async fn an_outbox_that_cannot_be_counted_stops_a_forget() {
     )])
     .await
     .unwrap();
-    run_raw(dir.path(), &["CREATE TABLE outbox (id TEXT PRIMARY KEY)"]).await;
+    // An outbox without the columns a forget reads: a damaged or foreign
+    // table (no build of this app ever made one), so it cannot be counted.
+    run_raw(
+        dir.path(),
+        &[
+            "DROP TABLE outbox",
+            "CREATE TABLE outbox (id TEXT PRIMARY KEY)",
+        ],
+    )
+    .await;
 
     for guard in [UnsentGuard::Pairing(HOST, DEVICE), UnsentGuard::AnyPairing] {
         assert_eq!(
@@ -692,6 +826,107 @@ async fn an_outbox_that_cannot_be_counted_stops_a_forget() {
     assert_eq!(count(&db, "ref_lines").await, json!(1), "nothing cleared");
     // A confirmed forget does not read the outbox at all.
     assert_eq!(db.clear_copies(UnsentGuard::Ignore).await, Ok(()));
+}
+
+/// The reads the floor repeats on every scan and box close search an index
+/// instead of reading every row of the pairing (migration `0006`). The plans
+/// are those of the SQLite the shell bundles; `test/floor-schema.test.ts`
+/// pins the same reads on the Node runtime's SQLite, which is newer.
+#[tokio::test]
+async fn the_floors_repeating_reads_search_an_index() {
+    let (dir, db) = open().await;
+    drop(db);
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    // (the read, the index its plan must name)
+    let reads: [(&str, &str); 12] = [
+        (
+            "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
+             AND acked_at IS NULL ORDER BY seq LIMIT ?",
+            "outbox_unsent",
+        ),
+        (
+            "SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? AND acked_at IS NULL",
+            "outbox_unsent",
+        ),
+        // The forget's count, as `src/local_db.rs` writes it.
+        (
+            "SELECT count(*) FROM outbox WHERE acked_at IS NULL AND host_id = ? AND device_id = ?",
+            "outbox_unsent",
+        ),
+        (
+            "SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? \
+             AND outcome = 'rejected'",
+            "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+        ),
+        (
+            "SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? \
+             AND outcome = 'conflict'",
+            "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+        ),
+        (
+            "UPDATE outbox SET outcome = r.value ->> 'outcome', acked_at = ? \
+             FROM json_each(?) AS r WHERE outbox.id = r.value ->> 'id' \
+             AND outbox.host_id = ? AND outbox.device_id = ? AND outbox.acked_at IS NULL",
+            "outbox_unsent",
+        ),
+        (
+            "SELECT count(*) FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_codes_shift (host_id=? AND device_id=? AND shift_id=?)",
+        ),
+        (
+            "SELECT count(*) FROM floor_boxes WHERE host_id = ? AND device_id = ? \
+             AND shift_id = ? AND closed_at IS NOT NULL AND disassembled_at IS NULL",
+            "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "SELECT sscc FROM floor_boxes WHERE host_id = ? AND device_id = ? AND shift_id = ? \
+             AND closed_at IS NOT NULL ORDER BY closed_at DESC, serial DESC LIMIT 1",
+            "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "SELECT code_hash FROM floor_codes WHERE host_id = ? AND device_id = ? \
+             AND box_id = ? ORDER BY code_hash",
+            "floor_codes_box (host_id=? AND device_id=? AND box_id=?)",
+        ),
+        (
+            "SELECT id FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_scans_shift",
+        ),
+        (
+            "SELECT id FROM floor_shifts WHERE host_id = ? AND device_id = ? AND line_id = ?",
+            "floor_shifts_line",
+        ),
+    ];
+    for (sql, index) in reads {
+        let placeholders = sql.matches('?').count();
+        let text = format!("EXPLAIN QUERY PLAN {sql}");
+        let mut explain = sqlx::query(&text);
+        for _ in 0..placeholders {
+            explain = explain.bind("x");
+        }
+        let plan: Vec<String> = explain
+            .fetch_all(&mut raw)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect();
+        assert!(
+            plan.iter().any(|step| step.contains(index)),
+            "{sql}\n  should search {index}, its plan is {plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|step| step.starts_with("SCAN ")
+                && !step.contains("json_each")
+                && !step.starts_with("SCAN r ")),
+            "{sql}\n  scans a table: {plan:?}"
+        );
+    }
+    raw.close().await.unwrap();
 }
 
 /// The count and the clear are one transaction: a record that arrives while
@@ -715,7 +950,6 @@ async fn a_record_arriving_while_a_forget_waits_is_counted_not_wiped() {
     )])
     .await
     .unwrap();
-    run_raw(dir.path(), &[OUTBOX]).await;
     let mut raw = SqliteConnectOptions::new()
         .filename(dir.path().join(FILE_NAME))
         .connect()
@@ -735,12 +969,10 @@ async fn a_record_arriving_while_a_forget_waits_is_counted_not_wiped() {
     // (the busy timeout is 5 s).
     tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
     assert!(!forget.is_finished(), "the forget waits for the write lock");
-    sqlx::query(&format!(
-        "INSERT INTO outbox VALUES ('late', '{HOST}', '{DEVICE}', NULL)"
-    ))
-    .execute(&mut raw)
-    .await
-    .unwrap();
+    sqlx::query(&outbox_sql("late", HOST, DEVICE, None))
+        .execute(&mut raw)
+        .await
+        .unwrap();
     sqlx::query("COMMIT").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
 
@@ -1100,12 +1332,10 @@ async fn setting_a_corrupt_database_aside_clears_its_recorded_failure() {
 #[tokio::test]
 async fn a_database_that_did_not_open_is_counted_without_being_changed() {
     let dir = tempfile::tempdir().unwrap();
-    let mine = format!("INSERT INTO outbox VALUES ('a', '{HOST}', '{DEVICE}', NULL)");
-    let other_device = format!("INSERT INTO outbox VALUES ('b', '{HOST}', '{OTHER_DEVICE}', NULL)");
-    let sent = format!(
-        "INSERT INTO outbox VALUES ('c', '{HOST}', '{DEVICE}', '2026-10-09T08:00:00.000Z')"
-    );
-    database_file(dir.path(), &[OUTBOX, &mine, &other_device, &sent]).await;
+    let mine = outbox_sql("a", HOST, DEVICE, None);
+    let other_device = outbox_sql("b", HOST, OTHER_DEVICE, None);
+    let sent = outbox_sql("c", HOST, DEVICE, Some("2026-10-09T08:00:00.000Z"));
+    database_file(dir.path(), &[&mine, &other_device, &sent]).await;
     corrupt_the_migrations_table(dir.path()).await;
     let local = LocalDbState::open(dir.path()).await;
     assert_eq!(local.open_failure(), Some(OpenFailure::Corrupt));
@@ -1146,9 +1376,10 @@ async fn a_database_that_did_not_open_is_counted_without_being_changed() {
         Ok(0)
     );
 
-    // Readable, but with no outbox yet: nothing to protect.
+    // Readable, but with no outbox (a database an older build left): nothing
+    // to protect.
     let bare = tempfile::tempdir().unwrap();
-    database_file(bare.path(), &[]).await;
+    database_file(bare.path(), &["DROP TABLE outbox"]).await;
     corrupt_the_migrations_table(bare.path()).await;
     let local = LocalDbState::open(bare.path()).await;
     assert_eq!(
@@ -1160,7 +1391,10 @@ async fn a_database_that_did_not_open_is_counted_without_being_changed() {
     let unreadable = tempfile::tempdir().unwrap();
     database_file(
         unreadable.path(),
-        &["CREATE TABLE outbox (id TEXT PRIMARY KEY)"],
+        &[
+            "DROP TABLE outbox",
+            "CREATE TABLE outbox (id TEXT PRIMARY KEY)",
+        ],
     )
     .await;
     corrupt_the_migrations_table(unreadable.path()).await;

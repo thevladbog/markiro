@@ -1,0 +1,120 @@
+import { HostError } from "../../host/client.js";
+import type { EnteredShift } from "../../host/protocol.js";
+import type { LocalExecutor } from "../../local/executor.js";
+import type { Pairing } from "../../local/reference-sync.js";
+import { shellActionFor } from "../../app/shell.js";
+import {
+  keepEnteredShift,
+  readStoredWork,
+  type ShiftCopy,
+  type WorkShift,
+} from "./shift-copies.js";
+import { checkShiftSnapshot } from "./shift-snapshot.js";
+
+/**
+ * Why the station did not enter a shift: the host is away and the shift is
+ * not one this station entered before (`no_link`); the host refused it
+ * (`busy`: another station opened it, `closed`, `other_line`, `not_found`:
+ * deleted, `product_inactive`, `template_not_fit`); its layout is one this
+ * build does not read (`unreadable`); this computer could not keep it
+ * (`local`); or anything else (`failed`).
+ */
+export type EntryRefusal =
+  | "no_link"
+  | "busy"
+  | "closed"
+  | "other_line"
+  | "not_found"
+  | "product_inactive"
+  | "template_not_fit"
+  | "unreadable"
+  | "local"
+  | "failed";
+
+export type EntryResult =
+  | { kind: "entered"; shift: WorkShift; offline: boolean }
+  | { kind: "refused"; reason: EntryRefusal }
+  /** The host refused this device's key or showed another certificate: the shell's to handle. */
+  | { kind: "rejected"; error: unknown };
+
+export interface EntryContext {
+  local: LocalExecutor;
+  pairing: Pairing;
+  /** The link to the host is online now. */
+  online: boolean;
+  /** `HostApi.enterShift`. */
+  enter: (shiftId: string) => Promise<EnteredShift>;
+  now: () => Date;
+}
+
+/** The refusals of `POST /v1/device/shifts/{id}/enter` by `details.constraint` (stage 2a spec §4.8). */
+const CONFLICTS: Readonly<Record<string, EntryRefusal>> = {
+  shift_busy: "busy",
+  shift_status: "closed",
+  shift_line: "other_line",
+  product_inactive: "product_inactive",
+  template_not_fit: "template_not_fit",
+};
+
+/**
+ * The stored shift to work without the host, or why there is none. Only an
+ * active shift: `readStoredWork` also answers `ready` for one the office closed
+ * or this station closed (the work screen needs those to finish them), which
+ * the list never enters.
+ */
+async function storedWork(context: EntryContext, shiftId: string): Promise<EntryResult> {
+  const stored = await readStoredWork(context.local, context.pairing, shiftId);
+  switch (stored.kind) {
+    case "ready":
+      if (stored.shift.copy.status !== "active" || stored.shift.copy.localState !== null) {
+        return { kind: "refused", reason: "closed" };
+      }
+      return { kind: "entered", shift: stored.shift, offline: true };
+    case "missing":
+      return { kind: "refused", reason: "no_link" };
+    case "unreadable":
+      return { kind: "refused", reason: "unreadable" };
+  }
+}
+
+/**
+ * Enters `copy` (stage 2a spec §5.4). With the link online the host opens a
+ * planned shift or answers the snapshot of one this station opened, which is
+ * checked (`checkShiftSnapshot`) and kept before the station works from it;
+ * a snapshot this build does not read is neither kept nor worked from. With
+ * the link down, or a request that never reached the host, only an active
+ * shift this station entered before is entered, from its stored snapshot.
+ * Opening a planned shift and freezing its snapshot are the host's, so a
+ * station on a PC away from the host enters its planned shifts while the
+ * link is up and works them later without it.
+ */
+export async function enterShift(context: EntryContext, copy: ShiftCopy): Promise<EntryResult> {
+  if (copy.localState !== null) return { kind: "refused", reason: "closed" };
+  if (!context.online) return storedWork(context, copy.id);
+  let answer: EnteredShift;
+  try {
+    answer = await context.enter(copy.id);
+  } catch (error) {
+    if (shellActionFor(error, null) !== null) return { kind: "rejected", error };
+    if (!(error instanceof HostError)) return { kind: "refused", reason: "failed" };
+    // No answer at all: the link said online, but the request found no host.
+    if (error.kind === "transport") return storedWork(context, copy.id);
+    if (error.code === "not_found") return { kind: "refused", reason: "not_found" };
+    const constraint = error.details["constraint"];
+    const refusal =
+      error.code === "conflict" && typeof constraint === "string"
+        ? CONFLICTS[constraint]
+        : undefined;
+    return { kind: "refused", reason: refusal ?? "failed" };
+  }
+  if (!checkShiftSnapshot(answer.snapshot).ok) return { kind: "refused", reason: "unreadable" };
+  try {
+    const at = context.now();
+    await keepEnteredShift(context.local, context.pairing, answer, at.toISOString(), at.getTime());
+    const stored = await readStoredWork(context.local, context.pairing, copy.id);
+    if (stored.kind !== "ready") return { kind: "refused", reason: "local" };
+    return { kind: "entered", shift: stored.shift, offline: false };
+  } catch {
+    return { kind: "refused", reason: "local" };
+  }
+}

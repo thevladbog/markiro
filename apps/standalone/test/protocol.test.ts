@@ -18,7 +18,11 @@ import {
   credentialSchema,
   deviceInfoSchema,
   deviceRecordSchema,
+  deviceShiftCreateSchema,
+  deviceShiftSchema,
+  deviceShiftsSchema,
   deviceUpdateSchema,
+  enteredShiftSchema,
   errorBodySchema,
   helloSchema,
   labelTemplateRecordSchema,
@@ -69,6 +73,7 @@ import {
   badgeCreate,
   counterpartyCreate,
   counterpartyUpdate,
+  deviceShiftCreate,
   deviceUpdate,
   lineCreate,
   lineUpdate,
@@ -253,6 +258,8 @@ const RESPONSES = [
   ["office-shift.json", officeShiftSchema],
   ["error-shift-busy.json", errorBodySchema],
   ["error-sscc-exhausted.json", errorBodySchema],
+  ["device-shifts.json", deviceShiftsSchema],
+  ["device-shift-entered.json", enteredShiftSchema],
 ] as const;
 
 const REQUESTS = [
@@ -283,6 +290,7 @@ const REQUESTS = [
   ["shift-create.json", shiftCreateSchema],
   ["shift-update.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
+  ["device-shift-create.json", deviceShiftCreateSchema],
 ] as const;
 
 function extended(name: string): Record<string, unknown> {
@@ -576,6 +584,43 @@ describe("request builders produce their fixtures exactly", () => {
     ).toStrictEqual(fixture("shift-update.json"));
     expect(shiftClose("Станция линии 2 вышла из строя", shift.rev)).toStrictEqual(
       fixture("shift-close.json"),
+    );
+  });
+
+  it("a station's new shift, with no counterparty, of which the station keeps no copy", () => {
+    const shift = deviceShiftCreateSchema.parse(fixture("device-shift-create.json"));
+    // The screen holds more than the builder names: the product's name must not go.
+    const typed = {
+      requestId: shift.requestId,
+      productId: shift.productId,
+      boxTemplateId: shift.boxTemplateId,
+      productionDate: shift.productionDate,
+      boxCapacity: 12,
+      plannedQty: null,
+      productName: "Молоко 3,2% 0,9 л",
+    };
+    expect(deviceShiftCreate(typed)).toStrictEqual(fixture("device-shift-create.json"));
+    expect(deviceShiftCreate({ ...typed, plannedQty: 1200 })).toStrictEqual({
+      ...shift,
+      plannedQty: 1200,
+    });
+  });
+
+  it("sends the capacity, the date and every id the operator chose, not the fixture's", () => {
+    const chosen = {
+      requestId: "11111111-2222-4333-8444-555555555555",
+      productId: "66666666-7777-4888-9999-aaaaaaaaaaaa",
+      boxTemplateId: "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
+      productionDate: "2026-12-31",
+      boxCapacity: 24,
+      plannedQty: 480,
+    };
+    const created = deviceShiftCreate(chosen);
+    expect(created).toStrictEqual({ ...chosen, counterpartyId: null });
+    // The wire body is what the host's strict body takes, field for field.
+    expect(deviceShiftCreateSchema.parse(created)).toStrictEqual(created);
+    expect(Object.keys(created).sort()).toStrictEqual(
+      Object.keys(chosen).concat("counterpartyId").sort(),
     );
   });
 
@@ -1422,6 +1467,266 @@ describe("shift shapes", () => {
       code: "sscc_exhausted",
       details: { issuerPrefix: "460068200", extension: 0 },
     });
+  });
+});
+
+describe("a station's shifts", () => {
+  const listed = deviceShiftsSchema.parse(fixture("device-shifts.json")).shifts;
+  const first = listed[0];
+  const entered = enteredShiftSchema.parse(fixture("device-shift-entered.json"));
+  const plain = (name: string): Record<string, unknown> =>
+    JSON.parse(JSON.stringify(fixture(name))) as Record<string, unknown>;
+
+  /** Every key of `object` dropped in turn, to a parse that must fail. */
+  function withoutEach(
+    object: Record<string, unknown>,
+    parse: (value: unknown) => { success: boolean },
+    where: string,
+  ): void {
+    for (const field of Object.keys(object)) {
+      const without = Object.fromEntries(Object.entries(object).filter(([key]) => key !== field));
+      expect(parse(without).success, `${where} without ${field}`).toBe(false);
+    }
+  }
+
+  it("take a list of the fixture's two shifts, one open and one planned", () => {
+    expect(
+      listed.map((shift) => [shift.number, shift.status, shift.ownerDeviceId === null]),
+    ).toEqual([
+      ["OCT26-004", "active", false],
+      ["OCT26-005/S", "planned", true],
+    ]);
+    expect(deviceShiftsSchema.parse({ shifts: [] })).toEqual({ shifts: [] });
+    expect(deviceShiftsSchema.safeParse({}).success).toBe(false);
+    expect(deviceShiftsSchema.safeParse({ shifts: null }).success).toBe(false);
+    expect(deviceShiftsSchema.safeParse(listed).success).toBe(false);
+  });
+
+  it("refuse a shift that lacks a field, and one whose field has the wrong form", () => {
+    if (first === undefined) throw new Error("the fixture lists no shift");
+    withoutEach(first, (value) => deviceShiftSchema.safeParse(value), "shift");
+    const refused: Record<string, unknown[]> = {
+      id: ["42", null],
+      number: ["", null, 4],
+      status: ["paused", null],
+      mode: ["boxes", null],
+      palletsEnabled: ["no", null],
+      createdFrom: ["cloud", null],
+      lineId: ["42", null],
+      productId: ["42", null],
+      productName: [null, 5],
+      productGtin14: [null, 5],
+      counterpartyName: [5],
+      productionDate: ["08.10.2026", "2026-10-8", 20261008, null],
+      plannedQty: [0, -1, 1.5, "1200"],
+      boxCapacity: [0, -1, 1.5, "12", null],
+      boxTemplateId: ["42", null],
+      ownerDeviceId: ["42"],
+      openedAt: ["yesterday", 5],
+      closedAt: ["yesterday", 5],
+    };
+    for (const [field, values] of Object.entries(refused)) {
+      for (const value of values) {
+        const result = deviceShiftSchema.safeParse({ ...first, [field]: value });
+        expect(result.success, `${field}: ${JSON.stringify(value)}`).toBe(false);
+      }
+    }
+  });
+
+  it("take null where a planned shift has nothing yet, and a plan of one unit", () => {
+    const planned = listed[1];
+    if (planned === undefined) throw new Error("the fixture lists no second shift");
+    for (const field of [
+      "counterpartyName",
+      "plannedQty",
+      "ownerDeviceId",
+      "openedAt",
+      "closedAt",
+    ]) {
+      expect(planned).toHaveProperty(field, null);
+      expect(deviceShiftSchema.safeParse({ ...planned, [field]: null }).success, field).toBe(true);
+    }
+    const later = {
+      ...planned,
+      status: "closed",
+      mode: "validation",
+      palletsEnabled: true,
+      plannedQty: 1,
+      closedAt: "2026-10-09T18:00:00Z",
+    };
+    expect(deviceShiftSchema.safeParse(later).success).toBe(true);
+  });
+
+  it("read the list leniently and drop what a newer host adds, in a shift and in the snapshot", () => {
+    const list = plain("device-shifts.json") as { shifts: Record<string, unknown>[] };
+    for (const shift of list.shifts) shift["addedLater"] = { deep: true };
+    const parsed = deviceShiftsSchema.parse(list);
+    expect(parsed).toEqual(deviceShiftsSchema.parse(fixture("device-shifts.json")));
+    for (const shift of parsed.shifts) expect(shift).not.toHaveProperty("addedLater");
+
+    const answer = plain("device-shift-entered.json") as {
+      snapshot: {
+        product: Record<string, unknown>;
+        boxTemplate: Record<string, unknown>;
+        addedLater?: boolean;
+      };
+    };
+    answer.snapshot.addedLater = true;
+    answer.snapshot.product["vatRate"] = 10;
+    answer.snapshot.boxTemplate["author"] = "office";
+    const read = enteredShiftSchema.parse(answer);
+    expect(read).toEqual(entered);
+    expect(read.snapshot).not.toHaveProperty("addedLater");
+    expect(read.snapshot.product).not.toHaveProperty("vatRate");
+    expect(read.snapshot.boxTemplate).not.toHaveProperty("author");
+  });
+
+  it("answer a shift's entry with its snapshot whole, and refuse one that lacks any part of it", () => {
+    const answer = plain("device-shift-entered.json") as Record<string, unknown> & {
+      snapshot: Record<string, unknown> & {
+        product: Record<string, unknown>;
+        boxTemplate: Record<string, unknown>;
+      };
+    };
+    expect(entered.snapshot).toEqual(answer.snapshot);
+    withoutEach(answer, (value) => enteredShiftSchema.safeParse(value), "entered shift");
+    withoutEach(
+      answer.snapshot,
+      (value) => enteredShiftSchema.safeParse({ ...answer, snapshot: value }),
+      "snapshot",
+    );
+    withoutEach(
+      answer.snapshot.product,
+      (value) =>
+        enteredShiftSchema.safeParse({
+          ...answer,
+          snapshot: { ...answer.snapshot, product: value },
+        }),
+      "snapshot product",
+    );
+    withoutEach(
+      answer.snapshot.boxTemplate,
+      (value) =>
+        enteredShiftSchema.safeParse({
+          ...answer,
+          snapshot: { ...answer.snapshot, boxTemplate: value },
+        }),
+      "snapshot template",
+    );
+    for (const snapshot of [null, "frozen", [], 5]) {
+      expect(enteredShiftSchema.safeParse({ ...answer, snapshot }).success).toBe(false);
+    }
+  });
+
+  it("refuse a snapshot field of the wrong form, and take null where a product has nothing", () => {
+    const answer = plain("device-shift-entered.json") as Record<string, unknown> & {
+      snapshot: Record<string, unknown> & {
+        product: Record<string, unknown>;
+        boxTemplate: Record<string, unknown>;
+      };
+    };
+    const parse = (part: "snapshot" | "product" | "boxTemplate", field: string, value: unknown) => {
+      const { snapshot } = answer;
+      const changed =
+        part === "snapshot"
+          ? { ...snapshot, [field]: value }
+          : { ...snapshot, [part]: { ...snapshot[part], [field]: value } };
+      return enteredShiftSchema.safeParse({ ...answer, snapshot: changed }).success;
+    };
+    const refused: [Parameters<typeof parse>[0], string, unknown[]][] = [
+      ["snapshot", "issuerPrefix", [null, 460068200]],
+      ["snapshot", "counterpartyName", [5]],
+      ["product", "id", ["42", null]],
+      ["product", "gtin14", [null, 4600682000013]],
+      ["product", "name", [null, 5]],
+      ["product", "printName", [5]],
+      ["product", "chzProductGroupCode", [-1, 1.5, "8", null]],
+      ["product", "shelfLifeDays", [0, -1, 1.5, "10"]],
+      ["boxTemplate", "id", ["42", null]],
+      ["boxTemplate", "name", [null, 5]],
+      ["boxTemplate", "rev", [1.5, "62", null]],
+      ["boxTemplate", "spec", [null, "tspl", 5, [], [{ widthMm: 58 }]]],
+    ];
+    for (const [part, field, values] of refused) {
+      for (const value of values) {
+        expect(parse(part, field, value), `${part}.${field}: ${JSON.stringify(value)}`).toBe(false);
+      }
+    }
+    for (const [part, field, value] of [
+      ["snapshot", "counterpartyName", null],
+      ["product", "printName", null],
+      ["product", "shelfLifeDays", null],
+      ["product", "chzProductGroupCode", 0],
+      ["boxTemplate", "rev", 0],
+      ["boxTemplate", "rev", -1],
+    ] as const) {
+      expect(parse(part, field, value), `${part}.${field}: ${String(value)}`).toBe(true);
+    }
+  });
+
+  it("hold a layout as one opaque object, as large as the host keeps, without copying it", () => {
+    // The host keeps at most 256 KiB of layout (`MAX_SPEC_BYTES`); the snapshot
+    // schema neither measures nor rebuilds it: the domain's schema reads it
+    // once, where the station enters the shift.
+    const filler = "я".repeat(120_000);
+    const spec = {
+      widthMm: 58,
+      heightMm: 40,
+      dpi: 203,
+      language: "tspl",
+      elements: [],
+      note: filler,
+    };
+    expect(JSON.stringify(spec).length).toBeGreaterThan(100_000);
+    const answer = plain("device-shift-entered.json") as Record<string, unknown> & {
+      snapshot: { boxTemplate: Record<string, unknown> };
+    };
+    answer.snapshot.boxTemplate["spec"] = spec;
+    const read = enteredShiftSchema.parse(answer);
+    expect(read.snapshot.boxTemplate.spec).toBe(spec);
+    // Whatever keys a layout has stay (no strict or stripping parse of it).
+    const odd = { anything: [1, { deep: null }], "": 1 };
+    answer.snapshot.boxTemplate["spec"] = odd;
+    expect(enteredShiftSchema.parse(answer).snapshot.boxTemplate.spec).toEqual(odd);
+  });
+
+  it("send a new shift with the four required fields and no other than the host's seven", () => {
+    const create = deviceShiftCreateSchema.parse(fixture("device-shift-create.json"));
+    for (const field of ["requestId", "productId", "boxTemplateId", "productionDate"]) {
+      const without = Object.fromEntries(Object.entries(create).filter(([key]) => key !== field));
+      expect(deviceShiftCreateSchema.safeParse(without).success, `without ${field}`).toBe(false);
+    }
+    const { requestId, productId, boxTemplateId, productionDate } = create;
+    expect(
+      deviceShiftCreateSchema.safeParse({ requestId, productId, boxTemplateId, productionDate })
+        .success,
+    ).toBe(true);
+    expect(
+      deviceShiftCreateSchema.safeParse({ ...create, plannedQty: 1200, counterpartyId: productId })
+        .success,
+    ).toBe(true);
+    // The line is the station's own: a body that names one is another form.
+    for (const extra of ["lineId", "mode", "palletsEnabled", "ownerDeviceId"]) {
+      expect(
+        deviceShiftCreateSchema.safeParse({ ...create, [extra]: productId }).success,
+        extra,
+      ).toBe(false);
+    }
+    const refused: Record<string, unknown[]> = {
+      requestId: ["42", "", null, 5],
+      productId: ["42", null],
+      boxTemplateId: ["42", null],
+      productionDate: [20261009, null],
+      boxCapacity: [0, -1, 1.5, "12", null],
+      plannedQty: [0, -1, 1.5, "1200"],
+      counterpartyId: ["42", 5],
+    };
+    for (const [field, values] of Object.entries(refused)) {
+      for (const value of values) {
+        const result = deviceShiftCreateSchema.safeParse({ ...create, [field]: value });
+        expect(result.success, `${field}: ${JSON.stringify(value)}`).toBe(false);
+      }
+    }
   });
 });
 

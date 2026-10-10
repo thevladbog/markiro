@@ -630,10 +630,24 @@ fn forgetting_the_device_keeps_the_pairing_while_an_unopened_database_stays() {
     assert_eq!(kept.len(), 2, "{aside:?}");
 }
 
-/// `outbox` as plan 2a5's migration will create it, with only the columns a
-/// forget reads; plan 2a5 replaces it with its own table here.
-const OUTBOX: &str = "CREATE TABLE outbox (id TEXT PRIMARY KEY, host_id TEXT NOT NULL, \
-    device_id TEXT NOT NULL, acked_at TEXT)";
+/// An outbox record without a receipt of the pairing `(host, device)`, in
+/// the table of migration `0006`.
+fn unsent_record(id: &str, host: &str, device: &str) -> String {
+    format!(
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) \
+         VALUES ('{id}', '{host}', '{device}', 'scan', 'shift-1', '{{}}', \
+         '2026-10-09T08:00:00.000Z')"
+    )
+}
+
+/// The same with an `accepted` receipt.
+fn acked_record(id: &str, host: &str, device: &str) -> String {
+    format!(
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, acked_at) VALUES ('{id}', '{host}', '{device}', 'scan', 'shift-1', '{{}}', \
+         '2026-10-09T08:00:00.000Z', 'accepted', '2026-10-09T08:00:01.000Z')"
+    )
+}
 const PAIRED_HOST: &str = "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
 const PAIRED_DEVICE: &str = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
 
@@ -647,12 +661,10 @@ fn forgetting_the_device_waits_for_this_pairings_unsent_records() {
     let config = app_dir.path().join("device.json");
     save_pairing(app_dir.path());
     let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
-    let unsent =
-        format!("INSERT INTO outbox VALUES ('r1', '{PAIRED_HOST}', '{PAIRED_DEVICE}', NULL)");
+    let unsent = unsent_record("r1", PAIRED_HOST, PAIRED_DEVICE);
     run_raw(
         app_dir.path(),
         &[
-            OUTBOX,
             &unsent,
             "INSERT INTO sync_state (key, value) VALUES ('last_rev', '1')",
         ],
@@ -699,10 +711,7 @@ fn with_an_unreadable_pairing_any_unsent_record_stops_a_forget() {
     let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
     run_raw(
         app_dir.path(),
-        &[
-            OUTBOX,
-            "INSERT INTO outbox VALUES ('r1', 'another-host', 'another-device', NULL)",
-        ],
+        &[&unsent_record("r1", "another-host", "another-device")],
     );
     let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
 
@@ -728,8 +737,7 @@ fn without_a_pairing_unsent_records_do_not_stop_a_forget() {
     run_raw(
         app_dir.path(),
         &[
-            OUTBOX,
-            "INSERT INTO outbox VALUES ('r1', 'another-host', 'another-device', NULL)",
+            &unsent_record("r1", "another-host", "another-device"),
             "INSERT INTO sync_state (key, value) VALUES ('last_rev', '1')",
         ],
     );
@@ -798,9 +806,9 @@ fn corrupt_the_migrations_table(dir: &std::path::Path) {
     std::fs::write(&path, bytes).unwrap();
 }
 
-/// A row of a record nobody sent, with a marker to find in the file.
+/// A row of a record nobody sent, with a marker to find in the file (its id).
 fn unsent_row(host: &str, device: &str) -> String {
-    format!("INSERT INTO outbox VALUES ('unsent-record-marker', '{host}', '{device}', NULL)")
+    unsent_record("unsent-record-marker", host, device)
 }
 
 /// Whether the file at `path` holds `marker` anywhere.
@@ -826,7 +834,6 @@ fn a_database_that_fails_to_open_for_another_reason_is_never_set_aside() {
     database_file(
         app_dir.path(),
         &[
-            OUTBOX,
             &unsent_row(PAIRED_HOST, PAIRED_DEVICE),
             "INSERT INTO _sqlx_migrations (version, description, success, checksum, \
              execution_time) VALUES (9999, 'newer', 1, x'00', 0)",
@@ -860,10 +867,7 @@ fn a_corrupt_database_with_unsent_records_waits_for_a_confirmation() {
     let app_dir = tempfile::tempdir().unwrap();
     let config = app_dir.path().join("device.json");
     save_pairing(app_dir.path());
-    database_file(
-        app_dir.path(),
-        &[OUTBOX, &unsent_row(PAIRED_HOST, PAIRED_DEVICE)],
-    );
+    database_file(app_dir.path(), &[&unsent_row(PAIRED_HOST, PAIRED_DEVICE)]);
     corrupt_the_migrations_table(app_dir.path());
     let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
     assert!(local.get().is_err(), "a corrupt table does not open");
@@ -910,15 +914,11 @@ fn a_corrupt_database_without_this_pairings_unsent_records_is_set_aside() {
     let app_dir = tempfile::tempdir().unwrap();
     let config = app_dir.path().join("device.json");
     save_pairing(app_dir.path());
-    let acked = format!(
-        "INSERT INTO outbox VALUES ('a', '{PAIRED_HOST}', '{PAIRED_DEVICE}', '2026-10-09T08:00:00.000Z')"
-    );
     database_file(
         app_dir.path(),
         &[
-            OUTBOX,
-            &acked,
-            "INSERT INTO outbox VALUES ('b', 'another-host', 'another-device', NULL)",
+            &acked_record("a", PAIRED_HOST, PAIRED_DEVICE),
+            &unsent_record("b", "another-host", "another-device"),
         ],
     );
     corrupt_the_migrations_table(app_dir.path());
@@ -943,7 +943,7 @@ fn with_an_unreadable_pairing_a_corrupt_database_with_any_unsent_record_waits() 
     std::fs::write(&config, "{").unwrap();
     database_file(
         app_dir.path(),
-        &[OUTBOX, &unsent_row("another-host", "another-device")],
+        &[&unsent_row("another-host", "another-device")],
     );
     corrupt_the_migrations_table(app_dir.path());
     let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
@@ -972,9 +972,14 @@ fn a_corrupt_database_whose_outbox_cannot_be_counted_waits_for_a_confirmation() 
     let app_dir = tempfile::tempdir().unwrap();
     let config = app_dir.path().join("device.json");
     save_pairing(app_dir.path());
+    // An outbox without the columns a forget reads: a damaged or foreign
+    // table (no build of this app ever made one), so it cannot be counted.
     database_file(
         app_dir.path(),
-        &["CREATE TABLE outbox (id TEXT PRIMARY KEY)"],
+        &[
+            "DROP TABLE outbox",
+            "CREATE TABLE outbox (id TEXT PRIMARY KEY)",
+        ],
     );
     corrupt_the_migrations_table(app_dir.path());
     let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));

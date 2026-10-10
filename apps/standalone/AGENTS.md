@@ -143,7 +143,22 @@ Whoever can reach a «Подключить заново» or «Сбросить 
 (the device-rejected, other-host and config-error screens) therefore wipes
 the counts; those screens are not reachable from a working floor (they come only
 when the host refused the device or its config is unreadable), and kiosk mode
-(plan 1f2, see "App shell") leaves them reachable on purpose.
+(plan 1f2, see "App shell") leaves them reachable on purpose. A refusal that
+arrives while an operator works in a shift waits for them to leave it (see
+"Shifts"), so the device-rejected screen never replaces a shift's work screen.
+The other-host screen still does: another host found by the sync
+(`sync_finished` with `other_host`) drops the operator and the work at once,
+and the forget it offers can appear while a write is in flight, a window
+carried to plan 2a6's gate task (see "Shifts"). While this device holds shift
+records the host has not acknowledged, the shell refuses
+that forget (`unsent_facts`); since plan 2a5 those screens then say how many
+records there are (`countUnsentRecords`, `src/local/outbox.ts`: the pairing's,
+or every pairing's when the pairing file is unreadable; a count that cannot be
+read says only that there are some) and offer «Сбросить всё равно», which
+forgets with `keepUnsent: true` (question В7, exit Б): a rejected device can
+send nothing more, so waiting would trap it. The confirmation deletes nothing:
+the records stay on this PC's disk, but they carry the old `host_id` and
+`device_id`, so they cannot be sent for a new pairing, and the screen says so.
 
 The webview reaches it only through `LocalExecutor` (`src/local/executor.ts`);
 Vitest runs the same migrations on node:sqlite behind the same interface
@@ -172,9 +187,9 @@ Every table of `src-tauri/migrations` has a class in `TABLE_CLASSES`
 `sync_quarantine` and `floor_sign_in_failures`; `DeviceData` — what the
 device records itself (plans 2a5–2a8: shifts, boxes, scans, the outbox), each
 row tagged with the pairing that wrote it; `Workstation` — the PC's own
-settings (plan 2a7), which outlive any pairing. All 11 tables are
-`Disposable` today; the other two classes stay empty until those plans add
-tables. `tests/local_db.rs` fails on a table without a class and on a class
+settings (plan 2a7), which outlive any pairing. Of the 19 tables 11 are
+`Disposable` and the 8 of migration `0006` are `DeviceData` (below);
+`Workstation` stays empty until plan 2a7 adds tables. `tests/local_db.rs` fails on a table without a class and on a class
 that names no table, so a plan that adds a table classes it in the same
 change. The same file forbids any foreign key between local tables
 (`no_table_has_a_foreign_key`): a plain key fails the forget at its `DELETE`,
@@ -189,10 +204,10 @@ current pairing (`host_id` and `device_id`), or of any pairing while
 record refuses the forget with `unsent_facts` and changes nothing, until the
 records are sent or a person confirms with `keepUnsent: true` (question В7);
 the records stay on disk either way. An `outbox` that exists but cannot be
-counted fails the forget (`storage`) and is never read as 0. No `outbox`
-exists yet: plan 2a5's migration adds it (`host_id`, `device_id`,
-`acked_at`), and until then the tests create a table of that shape in a
-scratch database. The headers of the applied migrations `0001`–`0005` still
+counted fails the forget (`storage`) and is never read as 0. `outbox`
+(migration `0006`, plan 2a5) exists in every database that opened; only a
+database that did not open can lack it, an older build's, which the read-only
+count skips. The headers of the applied migrations `0001`–`0005` still
 say that `clear_copies` takes every table; an applied migration is never
 edited.
 
@@ -242,21 +257,59 @@ refusal logs its count of unsent records to stderr.
 
 Two windows stay by design. A fact written between the clear's commit and the
 removal of `device.json` belongs to the pairing that is still current but was
-not counted, so it loses its link with no confirmation: plan 2a5's forget
-screen is offered only with no open shift and with the fact writer stopped.
-And the records kept by `keepUnsent: true` carry the old `host_id` and
-`device_id`: plan 2a5's fact sender reads only the current pairing's `outbox`
-rows and must never send them to a new host. That plan also adds the
-confirm control that calls `forget({ keepUnsent: true })` (today the repair
-screens call `forget()` without options, so a refusal is only a message) and
-shows the count with the same predicate as `unsent_records`, not a second
-query. The sync's wipe for another pairing (`WIPE` in
+not counted, so it loses its link with no confirmation: the forget screens
+must be offered only with no open shift and with the fact writer stopped. A
+refusal of the device meets the first condition since plan 2a5 (it waits in
+`pendingRejection` until the operator leaves the shift, see "Shifts"); another
+host found by the sync does not yet, and the second condition becomes real
+with plan 2a6, which writes the facts. And the records kept by
+`keepUnsent: true` carry the old `host_id` and `device_id`: plan 2a6's fact
+sender reads only the current pairing's `outbox` rows and must never send them
+to a new host. The confirm control that calls `forget({ keepUnsent: true })`
+is plan 2a5's (above); the count it shows has the predicate of the shell's
+`unsent_records` (`acked_at IS NULL`, the pairing's or every pairing's) in a
+query of its own, `countUnsentRecords`. The sync's wipe for another pairing (`WIPE` in
 `src/local/reference-sync.ts`) names only the copies, the quarantine and
 `sync_state`, and leaves `floor_sign_in_failures` alone on purpose, because
 it is no copy of the host's data and a wipe is no sign-in; no test pins that
 half. A forget on Windows has never run there: the rename of a corrupt
 database that was opened and closed, and a forget while another process
 holds a file, need a manual check.
+
+This device's own records (`src-tauri/migrations/0006_floor_production.sql`,
+plan 2a5; all `DeviceData`): `floor_shifts`, `floor_sscc_blocks`,
+`floor_block_requests`, `floor_boxes`, `floor_codes`, `floor_scans`,
+`floor_exceptions` and `outbox`. Every row carries the pairing it was written
+under (`host_id`, `device_id`), and the floor reads only the current
+pairing's rows, so records a forget kept stay on disk for support without
+reaching another pairing's screens (`floor_shifts` is keyed by pairing too,
+and `floor_codes` as well: a re-pair to the same host sees the same shift
+ids). The schema holds what the facts protocol (plan 2a2) needs: an `invalid`
+scan keeps no text, only its length and what it looked like (the table has no
+column for the text, and `CHECK`s tie the verdict to the kind, decision 15); a
+box is open without an SSCC or closed with its SSCC, block and serial; one
+open box per shift and pairing; an SSCC on one box under any pairing (a
+second box with a printed number is a duplicate label); a block's cursor
+(`next_serial`) stays within the block, and its writer (plan 2a6) moves it by
+a compare-and-set in the transaction that closes a box; an exception carries
+the fields of its kind; an outbox record has its outcome and its receipt
+together or neither. `snapshot`, `payload` and `outcome_details` are JSON
+objects only, and a single-column text key says `NOT NULL` (SQLite takes NULL
+in a plain `TEXT PRIMARY KEY`). `outbox.kind` has no `CHECK`, since the
+pilot's pallets add kinds and a SQLite `CHECK` changes only by rebuilding the
+table; `seq` is a rowid alias, not `AUTOINCREMENT`, which would add the
+unclassified `sqlite_sequence`. Besides the keys there are four read indexes
+(`outbox_settled`, `floor_codes_box`, `floor_codes_shift`, `floor_boxes_shift`)
+for reads the floor repeats on every scan or box close. `test/floor-schema.test.ts`
+pins these rules on node:sqlite, and the repeating reads' query plans exist
+twice, because the shell ships SQLite 3.46 and Vitest's `node:sqlite` is 3.53:
+in that file and in `tests/local_db.rs`
+(`the_floors_repeating_reads_search_an_index`). A new repeated read of a floor
+table gets a line in both lists. The header of `0006` says that codes and boxes
+have no retention at all; plan 2a8's `RETAINED_TABLES` deletes a shift's codes
+and boxes 30 days after the host took its close, so the header is out of date on
+that point. It is left as written: sqlx stores a checksum of the migration file,
+and a changed header would refuse a database that already applied `0006`.
 
 ## Writes
 
@@ -577,13 +630,19 @@ whatever its revision (fail-closed).
   the step into a notice, the screen left, a name was chosen) cannot leave the
   scanner deaf; `toStage` only drops the pending keys.
 - The signed-in operator lives only in the shell's memory
-  (`ShellState.operator`): identity, never a hash. The reducer stores a fresh
-  object per sign-in, and the sign-out callbacks (the idle timer, the check
-  after a sync, «Сменить оператора») are bound to that stored object, so a
-  late timer of an earlier session of the same operator cannot end the next
-  one. The session ends when the office opens (any way in,
-  the bootstrap wizard's too), on a new pairing, a forget, a rejected device,
-  another host, a change of the station's line, and on any host probe
+  (`ShellState.operator`): identity, never a hash, and the number of the
+  session (`sessionId`, plan 2a5, decision 26): the reducer gives every
+  sign-in the next number (`lastSessionId + 1`), and the sign-out callbacks
+  (the idle timer, the check after a sync, «Сменить оператора») name the
+  session they belong to, so a late timer of an earlier session of the same
+  operator ends nothing (`operator_signed_out` compares the number). The
+  check after a sync also brings a new name or role from the copies
+  (`operator_refreshed`, the same session), so the screens show what the
+  office changed without a new session. The session ends when the office
+  opens (any way in, the bootstrap wizard's too), on a new pairing, a forget,
+  a rejected device, another host, a change of the station's line (a refusal
+  of the device and another line wait while the operator works in a shift,
+  see "Shifts"), and on any host probe
   (`host_probed`, which runs only at start-up, on a retry and after a forget:
   a blocked version screen never leaves a session behind); and by
   «Сменить оператора», after ten minutes without a touch
@@ -596,10 +655,8 @@ whatever its revision (fail-closed).
   device id, the line id the check began on and the address; the reducer
   refuses it when the device or the line differs, the view is not a floor, an
   operator is signed in already, the device is rejected or on another host
-  or the office is open, so a late answer signs nobody in. What an operator
-  may do on the line is plan 2a's; stage 1 shows a stub, which shows the name
-  and role as of sign-in (a later sync that changes them is not reflected;
-  plan 2a refreshes them together with an explicit session counter).
+  or the office is open, so a late answer signs nobody in. Any operator
+  signed in may enter and create shifts (question В10, "Shifts").
 
 The precondition plan 1d4 named holds: the sync's guard is scoped to the
 pairing (`pairingGuard`, see «Reference sync»), so a page fetched before a
@@ -857,7 +914,9 @@ templates and category defaults) also skip a record whose newer revision
 waits in the quarantine (`notQuarantinedNewer`): the insert would otherwise
 bring back what the quarantine's fail-closed delete took away, an access
 for a person or an older layout or default for the catalog. The
-`org_profile`, `site` and `lines` upserts have no such guard (plan 2a).
+`org_profile` and `lines` upserts carry the same guard since plan 2a5 (the
+floor names them and reads the organization's zone and default template);
+`site` has none: its salt never changes after the wizard.
 The feed never sends an older revision after a newer one; a stale run's
 page could (one fetched before `device_forget` that lands after a new
 pairing with the same host), and `pairingGuard` (below) stops it since plan
@@ -1045,9 +1104,9 @@ each revision and never opens the stream itself.
 The shell's printers, COM scanners and power request (plan 2a4, ported from
 the cloud station's `printer.rs`, `scanner.rs` and `power.rs`) are reached
 only through `src/hardware/hardware.ts` (`createTauriHardware`); nothing in
-the app calls it before plans 2a5–2a7. `src-tauri/tests/ipc.rs` pins the
-names and arguments, refusals are bare codes, and the system's own words go
-to the shell's stderr only.
+the app calls it yet (plan 2a5's floor does not; plans 2a6–2a7 will).
+`src-tauri/tests/ipc.rs` pins the names and arguments, refusals are bare
+codes, and the system's own words go to the shell's stderr only.
 
 - `print_bytes { target, payloadBase64 }` sends a label's bytes to
   `{ kind: "tcp", host, port }`, `{ kind: "serial", port, baud }` or, on Windows
@@ -1181,8 +1240,8 @@ to the shell's stderr only.
   write wins. A change of a device's line takes one host revision without a feed
   item, so open streams wake and the station reads `GET /v1/device` again
   (`device_refresh`, see "App shell"); a rename, a repeat of the same line and a
-  revocation take none. How a line change meets a running shift is plan 2a's
-  decision; stage 1 has only the floor stub. The station keeps the name the host
+  revocation take none. A line change while an operator works in a shift
+  waits until they leave it (question В9, "Shifts"). The station keeps the name the host
   has for it in `device.json` (`deviceName`, and `DeviceStatus.deviceName` in
   the webview): the name it paired under, without the padding the host strips,
   then whatever `device_refresh` and `device_select_line` read from
@@ -1216,8 +1275,8 @@ to the shell's stderr only.
 in a fixed order: the device config, pairing, a rejected device, another
 host, the local host's version and identity, then the office or the floor.
 The floor is the operator sign-in (`floor`), or, with an operator signed in,
-stage 1's stub (`floor_operator`, `src/floor/FloorOperatorScreen.tsx`); see
-«Operators and badges» for both.
+the operator's shifts (`floor_operator`, `src/floor/FloorApp.tsx`, plan 2a5);
+see «Operators and badges» and «Shifts».
 While a host is paired, `useHostLink` (`src/app/host-link.ts`) follows the
 shell's link and syncs reference data at start and after every revision
 event; it stops when the pairing ends, is rejected or turns out to belong
@@ -1291,8 +1350,25 @@ failure once, not again at every retry. There is no
 blocking overlay while the host is away: office pages explain their own failed
 requests and offer a retry.
 
+`useHostLink` also reads the station's shifts (`HostApi.getDeviceShifts`, plan
+2a5) at the moments it reads the device: once it has subscribed, after every
+revision event and on request, one read at a time, retried like the device's
+read with a failure count of its own; the answer replaces this pairing's
+copies (`replaceShiftCopies`), and `shifts_read` counts the reads that landed
+(`ShellState.shiftReads`), so the list reads its copies again after each. A
+refused key ends the link as everywhere; any other failure keeps the copies. A
+read of the device whose answer could not be kept in `device.json` (`storage`:
+the line or the name changed and the file could not be written) sets
+`deviceNotSaved`, which the next read of the device that lands clears: the
+station works on with the line it has, and the status bar says so. One known
+limit of that edge case (an unwritable `device.json`, usually a full disk): the
+host lists the device's new line already, so the next read of the shifts drops
+the old line's planned copies that were never entered, and the list, which still
+asks for the old line, shows only the copies of it that were entered. A new
+shift is made on the host's new line. The status bar's warning is the only sign.
+
 The floor's status bar (`src/floor/FloorStatusBar.tsx`, plan 1f2) sits above
-the sign-in screen and the stub, inside one `.floor-frame`, as a labelled
+the sign-in screen and the shifts, inside one `.floor-frame`, as a labelled
 region (`section` with an `aria-label`: inside the app's `main` a `header`
 would not be a landmark). It shows the organization and the station's line by
 name from this pairing's copies (`readFloorPlace` in
@@ -1301,9 +1377,22 @@ is still named, since the station works on it until the office moves it; read
 again after every sync, and a failed read leaves the names out), the operator
 signed in or «Никто не вошёл», and `HostStatusLine`, which the floor screens
 no longer show themselves. It holds nothing to press, so the 64 px rule has
-nothing to apply to. The device's own name is not in it: `DeviceStatus` has
-none, and adding one is a shell change (`device.rs`, the `device.json` format)
-outside plan 1f2.
+nothing to apply to. Since plan 2a5 it also names the device
+(`DeviceStatus.deviceName`, left out for an older pairing file), the number of
+the shift the operator works in (read from the copies, by
+`ShellState.floorWork`) and, in a polite region of its own that is on the
+screen before either appears, two warnings: while `deviceNotSaved`, and, while
+a refusal of the device waits for the operator to leave the shift
+(`ShellState.pendingRejection`, the `refusalHeld` prop), «Хост отказал этой
+станции: записи не отправляются. Выйдите из смены и подключите станцию
+заново». A refusal that comes from a call (a read of the device, the sync or a
+read of the shifts; with plan 2a6, a call of the work screen) stops the link
+without a status of its own, so `ShellState.link` keeps its last one (an entry
+or a creation is not one of those calls: the work screen alone is mounted while
+the refusal is held). While `refusalHeld` the bar gives `HostStatusLine` the
+link as `offline`, so it says «Нет связи с хостом …» next to the warning
+instead of «На связи с хостом», and shows no failed-sync line (that one is
+shown only while the host answers).
 
 Kiosk mode (plan 1f2). `src-tauri/src/lockdown.rs` ports the cloud station's
 `enter_lockdown` and `exit_lockdown`: no frame, no taskbar button, above every
@@ -2223,6 +2312,115 @@ on the office's «SSCC» page, a box counter and a pallet counter alike, as
 «Номера закончились», with no change offered: no number could be valid there
 (`isExhausted`, `src/office/sscc/counter-kind.ts`).
 
+The station's side (plan 2a5). After a sign-in the floor is `FloorApp`, a small
+machine of its own like the cloud station's: the line's shifts
+(`src/floor/shifts/ShiftList.tsx`), a new shift (`NewShift.tsx`) and the work
+screen of the shift entered (`src/floor/work/WorkScreen.tsx`, a placeholder
+that plan 2a6 fills). `App` keys it by the pairing and the session, so nothing
+of one operator's screen outlives their sign-out. Any operator signed in may
+enter and create shifts (question В10): the station checks no role. The list
+shows this pairing's copies of the line's planned and active shifts and one
+this station is closing (`readShiftCopies`), never a closed one, so it stays
+on screen with the host away. Every read of the host's list replaces the
+copies (`replaceShiftCopies`): a shift this station never entered goes when
+the host stops listing it, and one it entered stays with its snapshot whatever
+the list says and never goes back to `planned` (a list read before the
+entry). Opening a planned shift and creating one need the host: it freezes
+the snapshot and numbers the shift. «Открыть» and «Новая смена» are therefore
+disabled without the link, with the reason on screen; «Продолжить» enters an
+active shift of this station from its stored snapshot without the host (a
+station that keeps no snapshot of it needs the host too), and with the host
+re-enters through it and keeps the answer; a shift another station opened is
+shown busy, with nothing to press. An entry checks the snapshot
+(`checkShiftSnapshot`: the domain's `labelTemplateSpecSchema`, a GTIN-14, the
+nine digits of the issuer prefix) and neither keeps nor works one this build
+does not read; a request that finds no host although the link was online falls
+back to the stored snapshot; the host's refusals (`shift_busy`,
+`shift_status`, `shift_line`, `product_inactive`, `template_not_fit`,
+`not_found`) are said in words, and a refused key goes to the shell. A station
+on a PC away from the host (the pilot spec's variant А) enters its planned
+shifts while the link is up and works them later without it. One entry and one
+request run at a time, «Сменить оператора» and «Назад» are never held by them,
+and an answer that lands after its screen is gone is dropped (`FloorApp`
+unmounts `NewShift` on «Назад»).
+
+What `FloorApp` does with an entry is a gate of its own, beyond the entry's
+result: `readStoredWork` answers `ready` for any entered shift with a
+readable snapshot, a host-closed one (`copy.status === 'closed'`) or one this
+station is closing (`localState !== null`) too, so its callers decide. The
+offline path of `enterShift` refuses such a copy as `closed`; the online path
+can still return `entered` for a copy that reads back closed (a late answer
+over an office close). `FloorApp` therefore turns any shift whose copy is not
+active, or has a `localState`, back to the list (with «Смену N закрыли в
+офисе.» when the office closed it) and tells the shell nothing: no
+`work_entered`, so no scan can be taken in it.
+
+A new shift takes its product from a scan (a GTIN or a code of marking,
+`classifyScan`; two products in use with one GTIN are not guessed between) or
+a search by name among the products in use, its box template by the rule of
+decision 7 (`suggestBoxTemplate`, with a choice only when the rule leaves
+several), the production date as today in the organization's zone (moved by
+whole days, never typed), an optional plan and the product's capacity. The
+`requestId` is one per chosen product: choosing a product, also again after
+«Другой товар», mints a new id, and retries of that form repeat it, so a lost
+answer makes no second shift. Once the host has answered for it the form is
+frozen (fields disabled, the button only enters that shift), because a
+repeated id brings the first shift back whatever the form says now; the
+returned shift is compared with the request (`isShiftOfRequest`: product,
+template, production date, capacity, plan), and one of other fields, an
+earlier request's, is not entered in silence: a notice says it existed
+already, with its number, date, capacity and plan, and the button opens it.
+A matching shift is entered at once. The id is not kept across a restart of
+the app: a repeat then makes a second planned shift (`/S`), which the office
+deletes.
+
+Leaving the shift — back to the list, a sign-out (the operator's own, idle,
+removed), the office's close of the shift (seen in the copies after a read:
+«Смену … закрыли в офисе»), another line — waits for the work the screen
+tracks (`createWorkGate`, `src/floor/work-gate.ts`: a failed piece of work
+does not hold it, work tracked while it waits does), then tells the shell
+(`work_left`). One leave waits at a time: a sign-out outranks a leave that
+already waits (the idle lock fires once and then waits for nothing more, so
+the wait ends in the sign-out), and the office's close of the shift upgrades a
+plain leave to the list or a move to another line that already waits, so the
+list says «Смену … закрыли в офисе» (a waiting sign-out keeps its ending, an
+office close included, which then shows no notice); any other leave that comes
+meanwhile is ignored. A leave for another line ends on the list when the move
+was undone: a later read of the
+device that puts the station back on its line clears `pendingDevice`, so
+`work_left` changes nothing and the floor shows the list, where a move that
+stands takes the floor away at `work_left`. While the operator works in a
+shift (`ShellState.floorWork`, set by `work_entered`), a refusal of this
+device (`key_rejected`, `certificate_mismatch`, from the link or a call) waits
+in `pendingRejection` (question В8) and another line in `pendingDevice`
+(question В9): the link stops at once (`App` treats a waiting refusal as a
+refusal for the link), the line finishes its box, and the refusal or the move
+takes the floor at `work_left` (a refusal first). The floor leaves the shift
+by itself for another line; for a refusal it waits for the operator, and the
+status bar shows the held refusal (see "App shell"). A second refusal held
+meanwhile replaces the first. The idle wait runs for the whole session, and
+`touch` restarts it for a scan that presses no key (a COM scanner, plan 2a6).
+
+Plan 2a6 replaces the body of `WorkScreen` and keeps its props
+(`WorkScreenProps`), which it owes the floor (the JSDoc of the type is the
+contract; the floor cannot check any of it): every write to the local
+database, send to the host and job for the printer goes to `track` before it
+starts; no scan is accepted while `leaving`; tracked work is bounded, because
+the gate has no timeout of its own (a local write ends in about 35 s at the
+most, the shell's hand-over to the printer in 5 s, a code check at the host in
+300 ms), so work that can wait longer must not be one tracked piece; and the
+way back to the list stays on the keyboard while the leave waits
+(`aria-disabled`, not `disabled`, or the focus moves to the wait text). Two
+things carry to plan 2a6's gate task: another host found by the sync
+(`sync_finished` with `other_host`) still drops the operator and the work at
+once, without the gate, so once writes are tracked the other-host screen and
+its forget can appear while a write is in flight (hold it behind the gate like
+`pendingRejection`, or make the forget wait for `drain`; a host replaced at
+the same address in the middle of a shift is plan 2b's); and when 2a6 calls
+`countUnsentRecords` repeatedly, its exact text (`acked_at IS NULL AND host_id
+= ? AND device_id = ?`, not the order the Node list pins) joins both
+query-plan lists.
+
 ## Facts
 
 Stage 2a, plan 2a2 (`host/src/facts`). A station sends what happened on the
@@ -2480,6 +2678,18 @@ either; a file log is stage 5.
   row, `host_revision` reads the revision. Add a helper there before copying
   one into a second test file.
 - `pnpm --filter @markiro/standalone test`, `typecheck`, `lint`, `build`.
+- The floor's shifts (plan 2a5) by hand, on Windows 10 and 11: the list, the
+  new shift and the work screen on the real screen and touch panel (64 px
+  controls, a long product name on a card); a product scanned on the new
+  shift with the keyboard wedge (its code of marking with a GS) under the RU
+  and EN layouts; the Windows on-screen keyboard over the name search in kiosk
+  mode; with the host on another PC over Wi-Fi, a planned shift entered while
+  the link is up, then the access point switched off, «Продолжить» from the
+  stored snapshot, and the shift's work and leave; the office moving the
+  station to another line and revoking it while the operator is in a shift.
+  Until then these have run only under jsdom, with node:sqlite behind
+  `LocalExecutor` and a fake `HostApi`: no WebView2, no real host, no scanner
+  and no Windows has shown the list, the new shift, the entry or the leave.
 - The Windows service and DPAPI run only in the `standalone-windows-build`
   job: it compiles the service and the Tauri app for Windows, and its cargo
   tests round-trip a key through DPAPI. A real Windows user profile, the
@@ -2603,9 +2813,10 @@ either; a file log is stage 5.
   ICU lacks (`isKnownTimeZone`); `Intl` output in WebView2 against Node's
   (the no-break space in «1 200», `toLocaleLowerCase("ru")` in the search, the
   `ru` collator behind the name order); a shift planned in the office and
-  opened by a real station (the station's side is plan 2a5); a station moved
-  to another line while it works on a shift (the dialog's sentence describes
-  what plan 2a5 builds); and the list against a host with months of shifts or
-  a period of 366 days. The «Итоги» window and the «Выпуск» column have run
-  only against fixture totals: never against a host's subqueries over real
-  facts, nor with the time of the last fact written by WebView2's `Intl`.
+  opened by a real station (the station's side, plan 2a5, ran only against a
+  fake `HostApi`); a station moved to another line while it works on a shift
+  (the dialog's sentence describes what plan 2a5 builds, which no real station
+  has shown); and the list against a host with months of shifts or a period
+  of 366 days. The «Итоги» window and the «Выпуск» column have run only
+  against fixture totals: never against a host's subqueries over real facts,
+  nor with the time of the last fact written by WebView2's `Intl`.

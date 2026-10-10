@@ -590,6 +590,84 @@ export const officeShiftSchema = z.object({
 });
 export type OfficeShift = z.infer<typeof officeShiftSchema>;
 
+/**
+ * The product as a shift froze it when a station opened it
+ * (`markiro_proto::ShiftSnapshotProduct`); only an active product opens a
+ * shift, so it has a group.
+ */
+export const shiftSnapshotProductSchema = z.object({
+  id: z.uuid(),
+  gtin14: z.string(),
+  name: z.string(),
+  printName: z.string().nullable(),
+  chzProductGroupCode: z.number().int().nonnegative(),
+  shelfLifeDays: z.number().int().positive().nullable(),
+});
+
+/**
+ * The box template as a shift froze it, with its whole layout: opaque here,
+ * as in the feed (`templateSpecSchema`), and checked with the domain's
+ * `labelTemplateSpecSchema` where the station enters the shift
+ * (`checkShiftSnapshot`, `src/floor/shifts/shift-snapshot.ts`).
+ */
+export const shiftSnapshotTemplateSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  rev: z.number().int(),
+  spec: templateSpecSchema,
+});
+
+/**
+ * What a shift freezes when a station opens it (`markiro_proto::ShiftSnapshot`):
+ * the station prints and reprints from this alone. A response type, so a
+ * field a newer host adds is tolerated (and dropped).
+ */
+export const shiftSnapshotSchema = z.object({
+  product: shiftSnapshotProductSchema,
+  boxTemplate: shiftSnapshotTemplateSchema,
+  issuerPrefix: z.string(),
+  counterpartyName: z.string().nullable(),
+});
+export type ShiftSnapshot = z.infer<typeof shiftSnapshotSchema>;
+
+/**
+ * A shift as a station sees it (`GET /v1/device/shifts`,
+ * `markiro_proto::DeviceShift`): named by the snapshot once open and by the
+ * records before; `ownerDeviceId` is the station that opened it, and another
+ * station's id means the shift is busy.
+ */
+export const deviceShiftSchema = z.object({
+  id: z.uuid(),
+  number: z.string().min(1),
+  status: shiftStatusSchema,
+  mode: shiftModeSchema,
+  palletsEnabled: z.boolean(),
+  createdFrom: shiftOriginSchema,
+  lineId: z.uuid(),
+  productId: z.uuid(),
+  productName: z.string(),
+  productGtin14: z.string(),
+  counterpartyName: z.string().nullable(),
+  productionDate: civilDateTextSchema,
+  plannedQty: z.number().int().positive().nullable(),
+  boxCapacity: z.number().int().positive(),
+  boxTemplateId: z.uuid(),
+  ownerDeviceId: z.uuid().nullable(),
+  openedAt: z.iso.datetime().nullable(),
+  closedAt: z.iso.datetime().nullable(),
+});
+export type DeviceShift = z.infer<typeof deviceShiftSchema>;
+
+/** `GET /v1/device/shifts`: the station's shifts, without snapshots. */
+export const deviceShiftsSchema = z.object({ shifts: z.array(deviceShiftSchema) });
+
+/**
+ * The answer of `POST /v1/device/shifts/{id}/enter`: the shift, now active and
+ * this station's, with its snapshot (the same one on every re-entry).
+ */
+export const enteredShiftSchema = deviceShiftSchema.extend({ snapshot: shiftSnapshotSchema });
+export type EnteredShift = z.infer<typeof enteredShiftSchema>;
+
 // --- Request bodies (strict) ---
 
 export const officeLoginRequestSchema = z
@@ -918,3 +996,21 @@ export const shiftCloseSchema = z
   .object({ reason: z.string(), expectedRev: z.number().int() })
   .strict();
 export type ShiftClose = z.infer<typeof shiftCloseSchema>;
+
+/**
+ * `POST /v1/device/shifts` (`markiro_proto::DeviceShiftCreate`): a station's
+ * planned shift on its own line. `requestId`, a UUID the station made up,
+ * makes it repeatable: the same request answers the shift it created.
+ */
+export const deviceShiftCreateSchema = z
+  .object({
+    requestId: z.uuid(),
+    productId: z.uuid(),
+    boxTemplateId: z.uuid(),
+    productionDate: z.string(),
+    boxCapacity: z.number().int().positive().optional(),
+    plannedQty: z.number().int().positive().nullable().optional(),
+    counterpartyId: z.uuid().nullable().optional(),
+  })
+  .strict();
+export type DeviceShiftCreate = z.infer<typeof deviceShiftCreateSchema>;

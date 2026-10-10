@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import {
   act,
   fireEvent,
@@ -20,7 +22,7 @@ import {
   type LockdownLifecycle,
 } from "../src/app/lockdown.js";
 import type { FloorNotice } from "../src/app/shell.js";
-import type { FloorOperatorScreenProps } from "../src/floor/FloorOperatorScreen.js";
+import type { FloorAppProps } from "../src/floor/FloorApp.js";
 import type { ScanListener, ScanSource } from "../src/floor/scan-source.js";
 import type { HostApi } from "../src/host/api.js";
 import { HostError } from "../src/host/client.js";
@@ -30,7 +32,9 @@ import { HostProbeError, type HostProbe } from "../src/host/probe.js";
 import type {
   ChangeItem,
   ChangesResponse,
+  DeviceShift,
   DeviceStatus,
+  EnteredShift,
   HostStatus,
 } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
@@ -55,18 +59,26 @@ import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
  */
 const signOutHandles = vi.hoisted(() => [] as Array<(notice: FloorNotice | null) => void>);
 
-vi.mock("../src/floor/FloorOperatorScreen.js", async (importOriginal) => {
-  const actual = await importOriginal<{
-    FloorOperatorScreen: ComponentType<FloorOperatorScreenProps>;
-  }>();
+vi.mock("../src/floor/FloorApp.js", async (importOriginal) => {
+  const actual = await importOriginal<{ FloorApp: ComponentType<FloorAppProps> }>();
   return {
     ...actual,
-    FloorOperatorScreen: (props: FloorOperatorScreenProps) => {
+    FloorApp: (props: FloorAppProps) => {
       if (signOutHandles.at(-1) !== props.onSignOut) signOutHandles.push(props.onSignOut);
-      return <actual.FloorOperatorScreen {...props} />;
+      return <actual.FloorApp {...props} />;
     },
   };
 });
+
+// See test/protocol.test.ts: bind import.meta.url before building the URL.
+const testModuleUrl = import.meta.url;
+
+/** The products, templates and organization the shifts of the floor are made of. */
+const CATALOG = (
+  JSON.parse(
+    readFileSync(new URL("../proto/fixtures/changes-catalog.json", testModuleUrl), "utf8"),
+  ) as ChangesResponse
+).items;
 
 const ADDRESS = "https://127.0.0.1:45710";
 const REMOTE_ADDRESS = "https://192.168.1.10:45710";
@@ -100,10 +112,14 @@ function hostDown(): HostError {
  */
 function fakeConnection() {
   let handlers: ConnectionHandlers | null = null;
+  // The handlers of the last subscription, kept after it stopped: an event of
+  // the link that was already on its way when the app stopped listening.
+  let latest: ConnectionHandlers | null = null;
   const stop = vi.fn();
   const connection: ConnectionApi = {
     watch: vi.fn(async (next: ConnectionHandlers) => {
       handlers = next;
+      latest = next;
       next.onStatus(ONLINE);
       return () => {
         handlers = null;
@@ -131,6 +147,19 @@ function fakeConnection() {
       await act(async () => {
         handlers?.onRevision(rev);
       });
+    },
+    // Events delivered to the subscription that stopped.
+    late: {
+      status: async (status: HostStatus) => {
+        await act(async () => {
+          latest?.onStatus(status);
+        });
+      },
+      revision: async (rev: number) => {
+        await act(async () => {
+          latest?.onRevision(rev);
+        });
+      },
     },
   };
 }
@@ -572,6 +601,192 @@ describe("App", () => {
     expect(await screen.findByText("Цех")).toBeTruthy();
     expect(device.forget).toHaveBeenCalledTimes(1);
     expect(device.pairLocally).toHaveBeenCalledTimes(1);
+  });
+
+  /** Outbox records without a receipt: two of this pairing's and one of another's. */
+  function withUnsentRecords() {
+    const { db, executor } = openLocalDb();
+    const insert = db.prepare(
+      "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) " +
+        "VALUES (?, ?, ?, 'scan', 'shift-1', '{}', '2026-10-09T08:00:00.000Z')",
+    );
+    insert.run("a", HOST_ID, DEVICE_ID);
+    insert.run("b", HOST_ID, DEVICE_ID);
+    insert.run("c", HOST_ID, OTHER_HOST_ID);
+    return executor;
+  }
+
+  it("asks before it forgets a rejected device with records not yet sent, and keeps them", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.forget.mockRejectedValueOnce(new DeviceError("unsent_facts", "unsent"));
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: fakeHost(),
+      connection: link.connection,
+      local: withUnsentRecords(),
+    });
+    await screen.findByText("Цех");
+    await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
+    fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
+    expect(
+      await screen.findByText(
+        "На этом компьютере не отправлено на хост записей смен: 2. После сброса подключения они останутся на диске этого ПК, но отправить их на хост будет нельзя.",
+      ),
+    ).toBeTruthy();
+    expect(device.forget.mock.calls).toEqual([[undefined]]);
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
+  });
+
+  it("counts the records of every pairing when the device config cannot be read", async () => {
+    const device = fakeDevice(new DeviceError("config_unreadable", "broken"));
+    device.forget.mockRejectedValueOnce(new DeviceError("unsent_facts", "unsent"));
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: fakeHost(),
+      local: withUnsentRecords(),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Сбросить подключение" }));
+    expect(await screen.findByText(/не отправлено на хост записей смен: 3\./)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
+  });
+
+  it("asks the same of a device paired to another host than the one that answers, counting its own records", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.forget.mockRejectedValueOnce(new DeviceError("unsent_facts", "unsent"));
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(7, [], OTHER_HOST_ID));
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host,
+      connection: link.connection,
+      local: withUnsentRecords(),
+    });
+    expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Подключить заново" }));
+    expect(await screen.findByText(/не отправлено на хост записей смен: 2\./)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
+  });
+
+  it("says there are records not yet sent, without a number, when this computer cannot count them", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.forget.mockRejectedValueOnce(new DeviceError("unsent_facts", "unsent"));
+    const real = withUnsentRecords();
+    const local: LocalExecutor = {
+      query: (sql, params, row) =>
+        sql.includes("FROM outbox")
+          ? Promise.reject(new Error("disk"))
+          : real.query(sql, params, row),
+      transaction: (statements) => real.transaction(statements),
+    };
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: fakeHost(),
+      connection: link.connection,
+      local,
+    });
+    await screen.findByText("Цех");
+    await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
+    fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
+    expect(
+      await screen.findByText(
+        "На этом компьютере есть записи смен, не отправленные на хост. После сброса подключения они останутся на диске этого ПК, но отправить их на хост будет нельзя.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+  });
+
+  it("keeps the confirmation on screen with the reason when the confirmed reset fails too", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.forget
+      .mockRejectedValueOnce(new DeviceError("unsent_facts", "unsent"))
+      .mockRejectedValueOnce(new DeviceError("storage", "disk full"));
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: fakeHost(),
+      connection: link.connection,
+      local: withUnsentRecords(),
+    });
+    await screen.findByText("Цех");
+    await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
+    fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сбросить всё равно" }));
+    expect(
+      await screen.findByText("Не удалось изменить настройки подключения на этом компьютере."),
+    ).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Сбросить всё равно" })).toHaveProperty(
+      "disabled",
+      false,
+    );
+    expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
+  });
+
+  it("does not carry a confirmation over to the next refusal of the reconnected device", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.forget.mockRejectedValueOnce(new DeviceError("unsent_facts", "unsent"));
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: fakeHost(),
+      connection: link.connection,
+      local: withUnsentRecords(),
+    });
+    await screen.findByText("Цех");
+    await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
+    fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сбросить всё равно" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    await link.status({ ...ONLINE, lastError: "key_rejected", seq: 3 });
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+    expect(screen.queryByText(/не отправлено на хост записей смен/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Сбросить всё равно" })).toBeNull();
+  });
+
+  it("does not carry the count of one screen over to the screen of another refusal", async () => {
+    // The probe finds another host at the paired address: the device is refused (derived,
+    // the link goes on), and a later read of the feed finds the pairing's host elsewhere.
+    const swapped = observation(true);
+    swapped.hello.hostId = OTHER_HOST_ID;
+    const probe = { hello: vi.fn<HostProbe["hello"]>(async () => swapped) };
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.forget.mockRejectedValueOnce(new DeviceError("unsent_facts", "unsent"));
+    const host = fakeHost();
+    host.getChanges.mockResolvedValue(feedPage(7));
+    renderApp({
+      probe,
+      device,
+      host,
+      connection: link.connection,
+      local: withUnsentRecords(),
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
+    expect(await screen.findByText(/не отправлено на хост записей смен: 2\./)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Сбросить всё равно" })).toBeTruthy();
+
+    host.getChanges.mockResolvedValue(feedPage(8, [], OTHER_HOST_ID));
+    await link.revision(8);
+    expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
+    // The count belongs to the refusal it was made for.
+    expect(screen.queryByText(/не отправлено на хост записей смен/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Сбросить всё равно" })).toBeNull();
+    expect(device.forget.mock.calls).toEqual([[undefined]]);
   });
 
   it("shows a repair failure on the config-error screen and keeps it visible", async () => {
@@ -1817,7 +2032,7 @@ describe("the operator on the floor", () => {
     return { link, host };
   }
 
-  it("shows the status bar above the sign-in and the stub, with the line and the operator", async () => {
+  it("shows the status bar above the sign-in and the shifts, with the line and the operator", async () => {
     const host = fakeHost();
     host.getChanges.mockResolvedValueOnce(
       feedPage(43, [...PEOPLE, lineItem(43, "Линия розлива 2")]),
@@ -1836,7 +2051,7 @@ describe("the operator on the floor", () => {
     ).toBeTruthy();
   });
 
-  it("signs an operator in with a badge without asking the host, shows the floor's stub and signs out on request", async () => {
+  it("signs an operator in with a badge without asking the host, shows the line's shifts and signs out on request", async () => {
     const { host } = await onTheFloor();
     scan("MRK-000742");
     expect(await screen.findByText(SIGNED_IN)).toBeTruthy();
@@ -2225,6 +2440,315 @@ describe("the operator on the floor", () => {
     expect(screen.queryByRole("button", { name: "Сменить оператора" })).toBeNull();
     expect(screen.getByText(PROMPT)).toBeTruthy();
   });
+
+  /** The line's planned shift as the host lists it, and as it answers its opening. */
+  const PLANNED: DeviceShift = {
+    id: "4e7a1c9d-2b5f-4d8e-a3c6-9f0b1e2d3c4a",
+    number: "OCT26-005/S",
+    status: "planned",
+    mode: "aggregation",
+    palletsEnabled: false,
+    createdFrom: "station",
+    lineId: LINE_ID,
+    productId: "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
+    productName: "Молоко 3,2% 0,9 л",
+    productGtin14: "04600682000013",
+    counterpartyName: null,
+    productionDate: "2026-10-09",
+    plannedQty: null,
+    boxCapacity: 12,
+    boxTemplateId: "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+    ownerDeviceId: null,
+    openedAt: null,
+    closedAt: null,
+  };
+  const OPENED: EnteredShift = {
+    ...PLANNED,
+    status: "active",
+    ownerDeviceId: DEVICE_ID,
+    openedAt: "2026-10-09T06:00:00Z",
+    snapshot: {
+      product: {
+        id: PLANNED.productId,
+        gtin14: "04600682000013",
+        name: "Молоко 3,2% 0,9 л",
+        printName: null,
+        chzProductGroupCode: 8,
+        shelfLifeDays: 10,
+      },
+      boxTemplate: {
+        id: PLANNED.boxTemplateId,
+        name: "Молоко 58×40",
+        rev: 62,
+        spec: { widthMm: 58, heightMm: 40, dpi: 203, language: "tspl", elements: [] },
+      },
+      issuerPrefix: "460068200",
+      counterpartyName: null,
+    },
+  };
+
+  /** Anna signed in, in the line's shift, on a station whose host lists it. */
+  async function inTheShift() {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    host.getDeviceShifts.mockResolvedValue([PLANNED]);
+    host.enterShift.mockResolvedValue(OPENED);
+    renderApp({ probe: probeAnswering(true), device, host, connection: link.connection });
+    await screen.findByText(PROMPT);
+    scan("MRK-000742");
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+    expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
+    return { link, device, host };
+  }
+
+  it("shows the shifts the host lists for the line and opens one into its work screen", async () => {
+    const { host } = await inTheShift();
+    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id);
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
+    expect(screen.getByText(SIGNED_IN)).toBeTruthy();
+  });
+
+  it("keeps the operator in the shift when the host refuses the key, and refuses the device once they leave", async () => {
+    const { link } = await inTheShift();
+    await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
+    // The link stops at once: nothing more reaches a host that refused us.
+    await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
+    expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+  });
+
+  it("moves the station to the office's new line only after the operator's work, and says so", async () => {
+    const { link, device, host } = await inTheShift();
+    // The sync that the event sets off keeps the operator: it is the move, not a removal, that ends the session.
+    host.getChanges.mockResolvedValue(feedPage(42, PEOPLE));
+    device.refresh.mockResolvedValue({
+      ...DEVICE_STATUS,
+      lineId: "5d1f6a52-0b7e-4c0e-8f51-3a4b9c2d7e10",
+    });
+    await link.revision(43);
+    expect(await screen.findByText("Станция перешла на другую линию. Войдите снова.")).toBeTruthy();
+    expect(screen.queryByText("Смена OCT26-005/S")).toBeNull();
+  });
+
+  it("shows a name the office changed without ending the operator's session", async () => {
+    const { link, host } = await inTheShift();
+    host.getChanges.mockResolvedValueOnce(
+      feedPage(43, [
+        {
+          entity: "operators",
+          id: ANNA,
+          rev: 43,
+          deleted: false,
+          data: { login: "0042", name: "Анна Петрова", role: null, pinPhc: PIN_PHC },
+        },
+      ]),
+    );
+    await link.revision(43);
+    const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
+    expect(await within(bar).findByText("Анна Петрова, табельный номер 0042")).toBeTruthy();
+    expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
+  });
+
+  it("sends nothing to a host that refused the key, however the link goes on, and keeps the operator in the shift", async () => {
+    const { link, device, host } = await inTheShift();
+    await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
+    await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
+    const reached = () => [
+      host.getChanges.mock.calls.length,
+      device.refresh.mock.calls.length,
+      host.getDeviceShifts.mock.calls.length,
+    ];
+    const before = reached();
+    // Events of the stopped link, and time for any retry, reach no call.
+    await link.late.revision(44);
+    await link.late.status({ ...ONLINE, seq: 3 });
+    await flush();
+    expect(reached()).toEqual(before);
+    expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+    expect(reached()).toEqual(before);
+  });
+
+  it("says in the status bar that the host refused the station while the operator is still in the shift, whichever way the refusal came", async () => {
+    // The refusal comes from a CALL (the device read), not from the link's status: the
+    // link goes down while its last status stays «online», so the bar must say it.
+    const { link, device } = await inTheShift();
+    const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
+    const marker =
+      "Хост отказал этой станции: записи не отправляются. Выйдите из смены и подключите станцию заново.";
+    expect(within(bar).queryByText(marker)).toBeNull();
+    device.refresh.mockRejectedValueOnce(new DeviceError("key_rejected", "the key is refused"));
+    await link.revision(43);
+    expect(await within(bar).findByText(marker)).toBeTruthy();
+    // The link was torn down: the bar says so, not the status the link last had.
+    expect(within(bar).queryByText("На связи с хостом")).toBeNull();
+    expect(within(bar).getByText(/^Нет связи с хостом/)).toBeTruthy();
+    await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
+    expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+  });
+
+  it("names the device and the shift in the status bar, and drops the shift when the operator leaves it", async () => {
+    await inTheShift();
+    const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
+    expect(within(bar).getByText("Станция на линии 1")).toBeTruthy();
+    expect(await within(bar).findByText("OCT26-005/S")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
+    expect(within(bar).queryByText("OCT26-005/S")).toBeNull();
+    expect(within(bar).getByText("Станция на линии 1")).toBeTruthy();
+  });
+
+  it("warns in the status bar that the office's change of the device was not saved, until a read is saved", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    const host = fakeHost();
+    host.getChanges.mockResolvedValue(feedPage(42, PEOPLE));
+    renderApp({ probe: probeAnswering(true), device, host, connection: link.connection });
+    await screen.findByText(PROMPT);
+    const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
+    expect(within(bar).queryByText(/не удалось сохранить на этом компьютере/)).toBeNull();
+    device.refresh.mockRejectedValueOnce(new DeviceError("storage", "disk full"));
+    await link.revision(43);
+    expect(await within(bar).findByText(/не удалось сохранить на этом компьютере/)).toBeTruthy();
+    await link.revision(44);
+    await waitFor(() =>
+      expect(within(bar).queryByText(/не удалось сохранить на этом компьютере/)).toBeNull(),
+    );
+  });
+
+  it("lists a shift the host announces after the operator signed in", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValue(feedPage(42, PEOPLE));
+    host.getDeviceShifts.mockResolvedValue([]);
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+    });
+    await screen.findByText(PROMPT);
+    scan("MRK-000742");
+    expect(
+      await screen.findByText(
+        "Открытых смен на линии нет. Создайте смену или дождитесь плана из офиса.",
+      ),
+    ).toBeTruthy();
+    host.getDeviceShifts.mockResolvedValue([PLANNED]);
+    await link.revision(43);
+    expect(await screen.findByRole("button", { name: "Открыть" })).toBeTruthy();
+    expect(screen.getByText("OCT26-005/S")).toBeTruthy();
+  });
+
+  it("refuses the device at once when the key is refused outside a shift", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    host.getDeviceShifts.mockResolvedValue([PLANNED]);
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+    });
+    await screen.findByText(PROMPT);
+    scan("MRK-000742");
+    await screen.findByRole("button", { name: "Открыть" });
+    await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+    await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
+  });
+
+  it("turns back an entry whose shift the office closed on the way, and holds nothing for the shell", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValue(feedPage(42, PEOPLE));
+    host.getDeviceShifts.mockResolvedValue([PLANNED]);
+    let answer: (shift: EnteredShift) => void = () => undefined;
+    host.enterShift.mockImplementation(
+      () =>
+        new Promise<EnteredShift>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+    });
+    await screen.findByText(PROMPT);
+    scan("MRK-000742");
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+    await waitFor(() => expect(host.enterShift).toHaveBeenCalledTimes(1));
+    // The host's list that says «closed» lands before the answer of the entry.
+    host.getDeviceShifts.mockResolvedValue([
+      { ...PLANNED, status: "closed", closedAt: "2026-10-09T18:00:00Z" },
+    ]);
+    await link.revision(43);
+    await act(async () => {
+      answer(OPENED);
+    });
+    expect(await screen.findByText("Смену OCT26-005/S закрыли в офисе.")).toBeTruthy();
+    expect(screen.queryByText("Выйти из смены")).toBeNull();
+    // Nothing waits for work that never began: a refused key takes the floor at once.
+    await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+  });
+
+  it("makes a shift of a scanned product through the host and works in it", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(67, [...PEOPLE, ...CATALOG]));
+    host.createDeviceShift.mockImplementation(async (body) => ({
+      ...PLANNED,
+      productId: body.productId,
+      boxTemplateId: body.boxTemplateId,
+      productionDate: body.productionDate,
+      boxCapacity: body.boxCapacity ?? PLANNED.boxCapacity,
+      plannedQty: body.plannedQty ?? null,
+    }));
+    host.enterShift.mockResolvedValue(OPENED);
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host,
+      connection: link.connection,
+    });
+    await screen.findByText(PROMPT);
+    scan("MRK-000742");
+    fireEvent.click(await screen.findByRole("button", { name: "Новая смена" }));
+    // The scanner listens once the form's effect has run.
+    await screen.findByLabelText("Название товара");
+    await flush();
+    scan("4600682000013");
+    expect(await screen.findByText("Молоко 3,2% 0,9 л, GTIN 04600682000013")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
+    expect(host.createDeviceShift).toHaveBeenCalledTimes(1);
+    expect(host.createDeviceShift.mock.calls[0]?.[0]).toMatchObject({
+      productId: PLANNED.productId,
+      boxTemplateId: PLANNED.boxTemplateId,
+      boxCapacity: 12,
+      plannedQty: null,
+      counterpartyId: null,
+    });
+    expect(host.enterShift).toHaveBeenCalledWith(PLANNED.id);
+    // A refusal that comes now waits for the operator to leave this shift.
+    await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
+    await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+  });
 });
 
 /**
@@ -2479,6 +3003,7 @@ describe("useHostLink", () => {
           local: executor,
           changes,
           refresh,
+          deviceShifts: async () => [],
           dispatch,
         }),
       { initialProps: { deviceId: DEVICE_ID } },
