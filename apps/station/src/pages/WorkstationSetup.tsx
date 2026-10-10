@@ -1,3 +1,7 @@
+import {
+  acquireCredentialCommitLease,
+  type CredentialGeneration,
+} from "../lib/credential-recovery.js";
 import { WindowsDeliveryStatus } from "../ui/WindowsDeliveryStatus.js";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -20,7 +24,7 @@ import {
   type PrinterLanguage,
 } from "../lib/hardware-config.js";
 import { renderPrintArtifact } from "../lib/print-artifact.js";
-import { dispatchWindowsDelivery } from "../lib/print-deliveries.js";
+import { dispatchWindowsDelivery, resolvePrintDelivery } from "../lib/print-deliveries.js";
 import { tauriWindowsPrinting } from "../lib/hardware.js";
 import { LabelRasterPreview } from "../ui/LabelRasterPreview.js";
 import { rasterizeText, rasterizeDriverText } from "../lib/rasterizer.js";
@@ -43,6 +47,7 @@ import { makeSetupTestCode, type SetupCheckResult } from "../ui/setup/test-code.
 
 export interface WorkstationSetupProps {
   printScope?: string;
+  credentialGeneration?: CredentialGeneration;
   hw: HardwareContract;
   exec: SqlExecutor;
   sound: SoundSettings;
@@ -80,6 +85,7 @@ type ConfigResult = { ok: true; config: HardwareConfig } | { ok: false; error: s
 /** Sole owner of setup state, persistence, and hardware side effects. */
 export function WorkstationSetup({
   printScope = "workstation-test",
+  credentialGeneration,
   hw,
   exec,
   sound,
@@ -608,7 +614,21 @@ export function WorkstationSetup({
                 scope={printScope}
                 purpose="test"
                 revision={String(busy)}
-                allowAcknowledge
+                onAcknowledge={async (key) => {
+                  const lease = credentialGeneration
+                    ? acquireCredentialCommitLease(credentialGeneration)
+                    : null;
+                  if (credentialGeneration && !lease) throw new Error("Credential is retired");
+                  try {
+                    await resolvePrintDelivery(exec, key);
+                    await exec.run(
+                      "DELETE FROM printer_deliveries WHERE scope=? AND purpose='test' AND resolved_at IS NOT NULL AND state<>'sending'",
+                      [printScope],
+                    );
+                  } finally {
+                    lease?.release();
+                  }
+                }}
               />
             )}
             <PrinterSetupPanel

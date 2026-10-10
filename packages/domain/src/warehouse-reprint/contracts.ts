@@ -170,12 +170,23 @@ const warehouseOtherEventSchema = z.discriminatedUnion("kind", [
   }),
   eventBase.extend({
     kind: z.literal("failed_before_send"),
-    errorCode: z.enum(["printer_unconfigured", "printer_changed", "owner_changed"]),
+    errorCode: z.enum([
+      "printer_unconfigured",
+      "printer_changed",
+      "owner_changed",
+      "driver_rejected",
+    ]),
   }),
   eventBase.extend({
     kind: z.literal("reprint_prepared"),
     attemptNo: positive,
     reason: warehouseReasonSchema,
+    rerender: z
+      .strictObject({
+        bytesDigest: digest,
+        dpi: z.union([z.literal(203), z.literal(300)]),
+      })
+      .optional(),
   }),
 ]);
 export const warehouseEventSchema = z.union([

@@ -8,7 +8,10 @@ import {
   readPrintDelivery,
   recordPrintDeliveryResult,
   recoverPrintDeliveries,
+  prepareWindowsReprint,
+  resolvePrintDelivery,
 } from "../src/lib/print-deliveries.js";
+import { bindPrintDestination } from "../src/lib/print-destinations.js";
 import type { PrinterProfile } from "../src/lib/printer-routing.js";
 const profile: PrinterProfile = {
   id: "p",
@@ -82,6 +85,77 @@ it("preserves a late receipt after recovery without turning uncertainty into suc
       state: "delivery_unknown",
       receipt_json: JSON.stringify(receipt),
     });
+  } finally {
+    w.close();
+  }
+});
+
+it("releases settled raster payloads but preserves uncertain output and receipt metadata", async () => {
+  const w = await openProductLabelWork();
+  try {
+    const row = await preparePrintDelivery(w.exec, key, profile, bytes);
+    await claimPrintDelivery(w.exec, key);
+    await recordPrintDeliveryResult(w.exec, key, {
+      ok: false,
+      error: {
+        code: "driver_failure",
+        phase: "delivery_unknown",
+      },
+    });
+    expect((await readPrintDelivery(w.exec, key))?.artifact_base64).toBeTruthy();
+    await resolvePrintDelivery(w.exec, key);
+    expect(await readPrintDelivery(w.exec, key)).toMatchObject({
+      artifact_base64: "",
+      artifact_digest: row.artifact_digest,
+      state: "delivery_unknown",
+    });
+    const sentKey = { ...key, jobId: "sent" };
+    const sent = await preparePrintDelivery(w.exec, sentKey, profile, bytes);
+    await claimPrintDelivery(w.exec, sentKey);
+    await recordPrintDeliveryResult(w.exec, sentKey, {
+      ok: true,
+      receipt: { queue: "Queue", jobId: 1, documentName: sent.document_name },
+    });
+    expect(await readPrintDelivery(w.exec, sentKey)).toMatchObject({
+      artifact_base64: "",
+      artifact_digest: sent.artifact_digest,
+      state: "sent",
+    });
+  } finally {
+    w.close();
+  }
+});
+
+it("allows rerender at corrected DPI only after a proven before-send failure", async () => {
+  const key = { scope: "owner", purpose: "box" as const, jobId: "box", attemptId: "attempt" };
+  const w = await openProductLabelWork();
+  try {
+    await bindPrintDestination(w.exec, key, profile);
+    await preparePrintDelivery(w.exec, key, profile, bytes);
+    await claimPrintDelivery(w.exec, key);
+    await recordPrintDeliveryResult(w.exec, key, {
+      ok: false,
+      error: {
+        code: "geometry_mismatch",
+        phase: "before_start",
+      },
+    });
+    const corrected = { ...profile, dpi: 300 as const };
+    const newBytes = encodeMonoRaster({
+      format: "mono-raster-v1",
+      widthMm: 10,
+      heightMm: 10,
+      dpi: 300,
+      widthDots: 118,
+      heightDots: 118,
+      stride: 15,
+      requiredBounds: { left: 0, top: 0, right: 0, bottom: 0 },
+      pixels: new Uint8Array(1770),
+    });
+    const retry = await prepareWindowsReprint(w.exec, key, corrected, async () => newBytes);
+    expect(retry?.bytes).toEqual(newBytes);
+    expect(retry?.key.attemptId).not.toBe(key.attemptId);
+    expect((await readPrintDelivery(w.exec, key))?.resolved_at).toBeTruthy();
   } finally {
     w.close();
   }

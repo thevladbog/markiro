@@ -34,6 +34,7 @@ export const warehouseReprintJobs = sqliteTable(
     identity: text("identity").notNull(),
     sourceKind: text("source_kind").notNull(),
     jobJson: text("job_json").notNull(),
+    rasterJson: text("raster_json"),
     projectionJson: text("projection_json").notNull(),
     state: text("state").notNull(),
     latestSequence: integer("latest_sequence").notNull(),
@@ -42,6 +43,7 @@ export const warehouseReprintJobs = sqliteTable(
   },
   (t) => [
     primaryKey({ columns: [t.owner, t.jobId] }),
+    check("warehouse_raster_json", sql`${t.rasterJson} IS NULL OR json_valid(${t.rasterJson})`),
     uniqueIndex("warehouse_session_identity").on(t.owner, t.sessionId, t.sourceKind, t.identity),
     index("warehouse_reprint_jobs_source_idx").on(t.owner, t.sourceKind, t.identity),
   ],

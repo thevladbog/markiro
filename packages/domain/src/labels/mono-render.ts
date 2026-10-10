@@ -116,9 +116,11 @@ function drawBarcode(
 ): void {
   const format = e.element.format;
   const moduleDots =
-    format === "qr" || format === "datamatrix"
-      ? mmToDots(e.element.sizeMm, dpi)
-      : mmToDots(e.element.moduleWidthMm ?? (2 * 25.4) / dpi, dpi);
+    format === "qr"
+      ? Math.max(1, Math.min(10, mmToDots(e.element.sizeMm, dpi)))
+      : format === "datamatrix"
+        ? mmToDots(e.element.sizeMm, dpi)
+        : mmToDots(e.element.moduleWidthMm ?? (2 * 25.4) / dpi, dpi);
   if (moduleDots < 1) invalid();
   let symbols: ReturnType<typeof bwipjs.raw>;
   try {

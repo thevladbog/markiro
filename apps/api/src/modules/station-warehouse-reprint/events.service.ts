@@ -67,6 +67,19 @@ export class WarehouseEventsService {
           let projection: WarehouseReprintProjection | null = saved
             ? (saved.projection as unknown as WarehouseReprintProjection)
             : null;
+          // Older driver-capable Stations stored no raster metadata in the projection.
+          // Recover it from the immutable prepared event, never from current configuration.
+          if (
+            projection &&
+            !projection.raster &&
+            saved?.prepared.printFormat === "mono-raster-v1"
+          ) {
+            const initial = saved.prepared as Extract<WarehouseReprintEvent, { kind: "prepared" }>;
+            projection = {
+              ...projection,
+              raster: { bytesDigest: projection.bytesDigest, dpi: initial.dpi },
+            };
+          }
           if (!rejection && !saved) {
             if (event.kind !== "prepared") rejection = "parent_missing";
             else {
@@ -170,7 +183,10 @@ export class WarehouseEventsService {
                 templateId: initial.templateId,
                 templateDigest: initial.templateDigest,
                 payloadDigest: initial.payloadDigest,
-                bytesDigest: initial.bytesDigest,
+                bytesDigest: projection.bytesDigest,
+                ...(projection.raster
+                  ? { dpi: projection.raster.dpi, printFormat: "mono-raster-v1" }
+                  : {}),
                 repair: initial.repair,
                 scanDigest: initial.scanDigest,
                 reason,

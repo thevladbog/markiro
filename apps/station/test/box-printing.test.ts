@@ -1,3 +1,8 @@
+import { decodeMonoRaster } from "@markiro/domain";
+import { openProductLabelWork } from "./support/product-label-work.js";
+import { readPrintDestination, replacePrintDestination } from "../src/lib/print-destinations.js";
+import { tauriWindowsPrinting } from "../src/lib/hardware.js";
+import type { PrinterProfile } from "../src/lib/printer-routing.js";
 import { describe, expect, it, vi } from "vitest";
 import type { LabelTemplateSpec } from "@markiro/domain";
 import { attemptBoxPrint, type BoxPrintInput } from "../src/lib/box-printing.js";
@@ -135,3 +140,68 @@ describe("attemptBoxPrint", () => {
     );
   });
 });
+
+it.each(["box", "pallet"] as const)(
+  "prints a %s after correcting a preflight DPI mismatch",
+  async (purpose) => {
+    const w = await openProductLabelWork();
+    const old: PrinterProfile = {
+      id: "win",
+      name: "Queue",
+      target: { kind: "usb", printer: "Queue" },
+      language: "zpl",
+      mode: "windows_driver",
+      dpi: 300,
+    };
+    const corrected: PrinterProfile = { ...old, dpi: 203 };
+    const key = { scope: "shift", purpose, jobId: "sscc", attemptId: "label" };
+    const preflight = vi
+      .spyOn(tauriWindowsPrinting, "preflightWindowsRaster")
+      .mockImplementation(async (_, bytes) =>
+        decodeMonoRaster(bytes).dpi === 203
+          ? { ok: true }
+          : { ok: false, error: { code: "geometry_mismatch", phase: "before_start" } },
+      );
+    const send = vi
+      .spyOn(tauriWindowsPrinting, "printWindowsRaster")
+      .mockImplementation(async (queue, bytes, documentName) => {
+        expect(decodeMonoRaster(bytes).dpi).toBe(203);
+        return { ok: true, receipt: { queue, jobId: 1, documentName } };
+      });
+    try {
+      const input = {
+        ...configuredInput(),
+        destination: { exec: w.exec, key },
+        printing: {
+          target: old.target,
+          profile: old,
+          language: old.language,
+          dpi: old.dpi,
+          print: vi.fn(),
+        },
+      };
+      expect(await attemptBoxPrint(input)).toEqual({ kind: "failed", code: "transport_failed" });
+      expect(send).not.toHaveBeenCalled();
+      const saved = await readPrintDestination(w.exec, key);
+      expect(saved).toEqual(old);
+      if (!saved) throw new Error("Saved destination missing");
+      expect(await replacePrintDestination(w.exec, key, saved, corrected)).toBe(true);
+      expect(
+        await attemptBoxPrint({
+          ...input,
+          explicitRetry: true,
+          printing: { ...input.printing, profile: corrected, dpi: corrected.dpi },
+        }),
+      ).toMatchObject({ kind: "printed" });
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(await w.exec.all("SELECT state FROM printer_deliveries ORDER BY rowid")).toEqual([
+        { state: "failed_before_send" },
+        { state: "sent" },
+      ]);
+    } finally {
+      preflight.mockRestore();
+      send.mockRestore();
+      w.close();
+    }
+  },
+);

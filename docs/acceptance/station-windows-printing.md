@@ -27,6 +27,22 @@ unknown result, never an automatic retry. Reprints require an operator action;
 product duplicates keep their existing reason and full-code verification rules.
 Old ZPL/TSPL jobs replay their original bytes on a compatible RAW profile.
 
+Box and pallet attempts regenerate from their label model after proven pre-send failure
+or after a successful send whose payload has been retired. Unknown delivery retains
+its original raster and requires a compatible DPI. The sidecar retains digest, receipt
+and state but clears settled raster payloads; SQLite can reuse the freed pages.
+
+For warehouse driver jobs only, a proven `failed_before_send` permits an explicit
+new attempt at corrected DPI from the saved source fields and template. The original
+prepared snapshot remains immutable. The new raster and `reprint_prepared.rerender`
+event commit atomically, and server history/audit records the new digest and DPI.
+Sent/unknown warehouse jobs and product-duplicate jobs still replay their frozen bytes.
+Deploy this expanded warehouse event contract on the API before Station.
+
+Status widgets do not recover or clean journals on mount. They read metadata and load
+the saved raster only when the operator opens the preview. Setup acknowledgement is
+an explicit controller action under the current credential lease.
+
 The local receipt contains queue, job ID and a unique document name. A queue lookup
 checks all three. “Absent” is only a spooler observation; scan the paper label to
 confirm the result. Review an unknown result at the physical printer before
@@ -58,6 +74,9 @@ network-installed queues, plus RAW ZPL and TSPL controls.
    product Data Matrix including group separators and crypto tail.
 3. Measure label size; scan the codes independently and compare exact payloads.
 4. Wrong DPI/paper/printable margins must fail before document submission.
+   Correct a failed box/pallet destination and retry. For warehouse jobs, correct the
+   DPI and explicitly request a new attempt; confirm the original attempt remains in
+   history and a changed DPI is still rejected after unknown delivery.
 5. Offline/stopped queue, service interruption and Station restart during sending
    must expose uncertainty without an unsolicited extra label.
 6. Change current catalog/template/printer settings, then reprint a saved product
@@ -106,3 +125,17 @@ C toolchain lacked the Windows SDK headers required by `ring`. The Windows-targe
 printer-core check does not replace that build. Windows CI, real driver/queue
 behavior, printed dimensions and independent physical scanning remain required.
 No release, deployment or physical printing was performed during this validation.
+
+## Review follow-up validation on 2026-10-10
+
+- Station: 152 files / 2091 tests; domain: 74 files / 1022 tests.
+- SQLite schema and upgrade checks: 77 tests; warehouse API history: 12 tests
+  against task-owned PostgreSQL, including legacy projection recovery and exact audit.
+- Lint, typecheck and build for Station, domain, DB and API passed through Turbo;
+  five browser setup checks and repository formatting also passed.
+- Regression tests cover corrected-DPI box/pallet printing, immutable warehouse
+  source/template history, interrupted commit responses, retained unknown output,
+  lazy read-only status, one product preflight and QR sizing parity.
+- Broad DB/API runs were not repeated; their initial timeout limitations above
+  remain open. Native Rust was unchanged. Real Windows-driver and paper acceptance
+  remain unrun in this macOS environment.

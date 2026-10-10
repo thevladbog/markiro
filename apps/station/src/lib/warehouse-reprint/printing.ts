@@ -1,3 +1,6 @@
+import { renderWarehouseLabel } from "./prepare.js";
+import { rasterizeDriverText } from "../rasterizer.js";
+import type { RasterizeTextFn } from "@markiro/domain";
 import {
   dispatchWindowsDelivery,
   resolvePrintDelivery,
@@ -46,6 +49,7 @@ export interface WarehousePrintingDeps {
   profile: PrinterProfile | null;
   print(target: PrintTarget, bytes: Uint8Array): Promise<void>;
   isCurrent(): boolean;
+  rasterizeText?: RasterizeTextFn;
 }
 function base(job: WarehouseJob, operatorId: string) {
   return {
@@ -128,14 +132,13 @@ export async function printWarehouseJob(deps: WarehousePrintingDeps, jobId: stri
         else await deps.print(profile.target, bytes);
         outcome = { ...base(sending, deps.operatorId), kind: "sent" };
       } catch (error) {
-        const ownerChanged =
-          error instanceof PrintDeliveryBeforeSendError && error.message === "owner_changed";
+        const beforeSend = error instanceof PrintDeliveryBeforeSendError;
         outcome = {
           ...base(sending, deps.operatorId),
-          ...(ownerChanged
+          ...(beforeSend
             ? ({
                 kind: "failed_before_send",
-                errorCode: "owner_changed",
+                errorCode: error.message === "owner_changed" ? "owner_changed" : "driver_rejected",
               } as const)
             : ({ kind: "delivery_unknown", errorCode: "transport_failed" } as const)),
         };
@@ -197,12 +200,32 @@ export async function reprintWarehouseJob(
 ): Promise<void> {
   if (!deps.isCurrent()) throw new Error("WAREHOUSE_OWNER_CHANGED");
   const job = await readWarehouseJob(deps.exec, deps.owner, jobId);
+  const profile = deps.profile;
+  const rerender =
+    job.projection.state === "failed_before_send" &&
+    printerFormat(job.printer) === "mono-raster-v1" &&
+    profile?.mode === "windows_driver" &&
+    profile.dpi !== null &&
+    profile.dpi !== job.printer.dpi;
   if (
-    !deps.profile ||
-    printerFormat(deps.profile) !== printerFormat(job.printer) ||
-    deps.profile.dpi !== job.printer.dpi
+    !profile ||
+    printerFormat(profile) !== printerFormat(job.printer) ||
+    (!rerender && profile.dpi !== job.printer.dpi)
   )
     throw new Error("WAREHOUSE_PRINTER_CHANGED");
+  const replacement =
+    rerender && profile.dpi
+      ? {
+          ...(await renderWarehouseLabel(
+            job.source,
+            job.template,
+            profile,
+            deps.rasterizeText ?? rasterizeDriverText,
+          )),
+          dpi: profile.dpi,
+        }
+      : undefined;
+  if (!deps.isCurrent()) throw new Error("WAREHOUSE_OWNER_CHANGED");
   const attemptId = crypto.randomUUID();
   await bindPrintDestination(
     deps.exec,
@@ -212,15 +235,29 @@ export async function reprintWarehouseJob(
       jobId,
       attemptId,
     },
-    deps.profile,
+    profile,
   );
-  await appendWarehouseEvent(deps.exec, deps.owner, {
-    ...base(job, deps.operatorId),
-    kind: "reprint_prepared",
-    attemptId,
-    attemptNo: job.projection.attemptNo + 1,
-    reason,
-  });
+  await appendWarehouseEvent(
+    deps.exec,
+    deps.owner,
+    {
+      ...base(job, deps.operatorId),
+      kind: "reprint_prepared",
+      attemptId,
+      attemptNo: job.projection.attemptNo + 1,
+      reason,
+      ...(replacement
+        ? { rerender: { bytesDigest: replacement.bytesDigest, dpi: replacement.dpi } }
+        : {}),
+    },
+    replacement
+      ? {
+          bytesBase64: replacement.bytesBase64,
+          bytesDigest: replacement.bytesDigest,
+          dpi: replacement.dpi,
+        }
+      : undefined,
+  );
   await resolvePrintDelivery(deps.exec, {
     scope: job.owner,
     purpose: job.source.kind === "box" ? "box" : "duplicate",

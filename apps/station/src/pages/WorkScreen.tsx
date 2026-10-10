@@ -1,4 +1,3 @@
-import { dispatchWindowsDelivery, prepareWindowsReprint } from "../lib/print-deliveries.js";
 import { printerMode } from "../lib/printer-routing.js";
 import type { LabelField } from "@markiro/domain";
 import { cacheWarehouseClosedBox } from "../lib/warehouse-reprint/sources.js";
@@ -3035,20 +3034,8 @@ export function WorkScreen({
                 const output = printTransport ?? printing?.print;
                 if (!printer || !output) return "printer_unconfigured";
                 if (printerMode(printer) === "windows_driver") {
-                  const retry = await prepareWindowsReprint(
-                    exec,
-                    {
-                      scope: JSON.stringify([shiftId, terminalId]),
-                      purpose: "box",
-                      jobId: verification.sscc,
-                      attemptId: "label",
-                    },
-                    printer,
-                  );
-                  if (!retry) return "persistence_failed";
-                  await serializePrinterOutput(printer.target, () =>
-                    dispatchWindowsDelivery(exec, retry.key, printer, retry.bytes),
-                  );
+                  const attempt = await attemptClosedBoxPrint(verification, true);
+                  if (attempt.kind === "failed") return attempt.code;
                   setPrinterDestinationRevision((value) => value + 1);
                   return undefined;
                 }

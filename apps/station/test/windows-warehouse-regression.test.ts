@@ -174,7 +174,7 @@ it("retains an unresolved sidecar without aborting the warehouse retention sweep
   }
 });
 
-it("records a pre-StartDoc rejection locally while retaining conservative claimed journal semantics", async () => {
+it("records a proven pre-StartDoc rejection as failed before send in both journals", async () => {
   const w = await setup();
   try {
     w.send.mockResolvedValue({
@@ -184,8 +184,130 @@ it("records a pre-StartDoc rejection locally while retaining conservative claime
     await printWarehouseJob(w.deps, w.input.jobId);
     expect((await readPrintDelivery(w.exec, w.key))?.state).toBe("failed_before_send");
     expect((await readWarehouseJob(w.exec, w.input.owner, w.input.jobId)).projection.state).toBe(
-      "delivery_unknown",
+      "failed_before_send",
     );
+  } finally {
+    w.db.close();
+  }
+});
+
+it("classifies a driver preflight rejection before send and rerenders a corrected-DPI attempt", async () => {
+  const w = await setup();
+  try {
+    vi.mocked(tauriWindowsPrinting.preflightWindowsRaster).mockResolvedValueOnce({
+      ok: false,
+      error: { code: "geometry_mismatch", phase: "before_start" },
+    });
+    await printWarehouseJob(w.deps, w.input.jobId);
+    const failed = await readWarehouseJob(w.exec, w.input.owner, w.input.jobId);
+    expect(failed.projection.state).toBe("failed_before_send");
+    expect(w.send).not.toHaveBeenCalled();
+    await reprintWarehouseJob(
+      {
+        ...w.deps,
+        profile: { ...w.input.printer, dpi: 300 },
+        rasterizeText: async () => ({
+          hex: "80",
+          bytesPerRow: 1,
+          totalBytes: 1,
+          width: 1,
+          height: 1,
+        }),
+      },
+      w.input.jobId,
+      "not_printed",
+    );
+    const next = await readWarehouseJob(w.exec, w.input.owner, w.input.jobId);
+    expect(next.projection.state).toBe("sent");
+    expect(next.printer.dpi).toBe(300);
+    expect(next.bytesDigest).not.toBe(failed.bytesDigest);
+    expect(next.preparedEvent.bytesDigest).toBe(failed.preparedEvent.bytesDigest);
+    expect(next.fields).toEqual(failed.fields);
+    expect(next.template).toEqual(failed.template);
+    expect(w.send).toHaveBeenCalledTimes(1);
+    expect(await w.exec.all("SELECT attempt_id FROM warehouse_reprint_attempts")).toHaveLength(2);
+  } finally {
+    w.db.close();
+  }
+});
+
+it("never changes the saved raster or DPI after uncertain warehouse delivery", async () => {
+  const w = await setup();
+  try {
+    w.send.mockResolvedValueOnce({
+      ok: false,
+      error: { code: "driver_failure", phase: "delivery_unknown" },
+    });
+    await printWarehouseJob(w.deps, w.input.jobId);
+    await expect(
+      reprintWarehouseJob(
+        { ...w.deps, profile: { ...w.input.printer, dpi: 300 } },
+        w.input.jobId,
+        "not_printed",
+      ),
+    ).rejects.toThrow("WAREHOUSE_PRINTER_CHANGED");
+    const saved = await readWarehouseJob(w.exec, w.input.owner, w.input.jobId);
+    expect(saved.projection.state).toBe("delivery_unknown");
+    expect(saved.bytesBase64).toBe(w.input.bytesBase64);
+    expect(saved.projection.attemptNo).toBe(1);
+    expect(w.send).toHaveBeenCalledTimes(1);
+  } finally {
+    w.db.close();
+  }
+});
+
+it("recovers a committed corrected-DPI attempt after its database response is lost", async () => {
+  const w = await setup();
+  try {
+    vi.mocked(tauriWindowsPrinting.preflightWindowsRaster).mockResolvedValueOnce({
+      ok: false,
+      error: { code: "geometry_mismatch", phase: "before_start" },
+    });
+    await printWarehouseJob(w.deps, w.input.jobId);
+    const corrected = { ...w.input.printer, dpi: 300 as const };
+    const faulty: typeof w.exec = {
+      all: w.exec.all,
+      run: async (sql, params) => {
+        await w.exec.run(sql, params);
+        if (sql.includes("INSERT INTO warehouse_reprint_commands"))
+          throw new Error("Lost commit response");
+      },
+    };
+    await expect(
+      reprintWarehouseJob(
+        {
+          ...w.deps,
+          exec: faulty,
+          profile: corrected,
+          rasterizeText: async () => ({
+            hex: "80",
+            bytesPerRow: 1,
+            totalBytes: 1,
+            width: 1,
+            height: 1,
+          }),
+        },
+        w.input.jobId,
+        "not_printed",
+      ),
+    ).rejects.toThrow("Lost commit response");
+    const restored = await readWarehouseJob(w.exec, w.input.owner, w.input.jobId);
+    expect(restored.projection).toMatchObject({
+      state: "prepared",
+      attemptNo: 2,
+      raster: { dpi: 300, bytesDigest: restored.bytesDigest },
+    });
+    expect(w.send).not.toHaveBeenCalled();
+    await printWarehouseJob({ ...w.deps, profile: corrected }, w.input.jobId);
+    expect((await readWarehouseJob(w.exec, w.input.owner, w.input.jobId)).projection.state).toBe(
+      "sent",
+    );
+    expect(w.send).toHaveBeenCalledTimes(1);
+    expect(
+      await w.exec.all(
+        "SELECT event_id FROM warehouse_reprint_events WHERE json_extract(event_json,'$.kind')='reprint_prepared'",
+      ),
+    ).toHaveLength(1);
   } finally {
     w.db.close();
   }

@@ -1586,6 +1586,7 @@ export function App() {
     if (showSetup) {
       return withWindowChrome(
         <WorkstationSetup
+          {...(credentialGeneration ? { credentialGeneration } : {})}
           printScope={JSON.stringify([
             "setup",
             config.tenantId ?? null,
@@ -2037,6 +2038,7 @@ export function App() {
         />
       ) : showSetup ? (
         <WorkstationSetup
+          {...(credentialGeneration ? { credentialGeneration } : {})}
           printScope={JSON.stringify([
             "setup",
             config.tenantId ?? null,

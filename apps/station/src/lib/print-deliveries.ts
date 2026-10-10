@@ -7,6 +7,10 @@ import {
   type WindowsPrinting,
 } from "./hardware.js";
 import { parsePrinterProfile, printerMode, type PrinterProfile } from "./printer-routing.js";
+export interface WindowsDeliveryPreflight {
+  profileJson: string;
+  bytes: Uint8Array;
+}
 export class PrintDeliveryBeforeSendError extends Error {}
 export interface DeliveryKey {
   scope: string;
@@ -121,11 +125,17 @@ export async function dispatchWindowsDelivery(
   bytes: Uint8Array,
   hardware: WindowsPrinting = tauriWindowsPrinting,
   isCurrent: () => boolean = () => true,
+  preflighted?: WindowsDeliveryPreflight,
 ): Promise<void> {
   const row = await preparePrintDelivery(exec, key, profile, bytes);
   if (row.state !== "prepared") throw new Error("PRINT_DELIVERY_REQUIRES_RECOVERY");
   if (profile.target.kind !== "usb") throw new Error("Windows queue required");
-  const preflight = await hardware.preflightWindowsRaster(profile.target.printer, bytes);
+  // Reuse only the exact in-memory page and printer snapshot checked by this caller.
+  // Native print still validates geometry before StartDoc.
+  const preflight =
+    preflighted?.bytes === bytes && preflighted.profileJson === JSON.stringify(profile)
+      ? { ok: true as const }
+      : await hardware.preflightWindowsRaster(profile.target.printer, bytes);
   if (!preflight.ok) {
     await exec.run(
       `UPDATE printer_deliveries SET state='failed_before_send',error_code=?,updated_at=? WHERE ${where} AND state='prepared'`,
@@ -187,11 +197,12 @@ export async function resolvePrintDelivery(exec: SqlExecutor, key: DeliveryKey):
   );
 }
 
-/** The explicit retry button creates a new attempt and replays the prior frozen page. */
+/** Unknown delivery replays frozen bytes; proven non-sends and settled boxes may regenerate. */
 export async function prepareWindowsReprint(
   exec: SqlExecutor,
   key: DeliveryKey,
   profile: PrinterProfile,
+  render?: () => Promise<Uint8Array>,
 ): Promise<{ key: DeliveryKey; bytes: Uint8Array } | null> {
   await recoverPrintDeliveries(exec);
   const [previous] = await exec.all<PrintDeliveryRow>(
@@ -200,13 +211,20 @@ export async function prepareWindowsReprint(
   );
   if (!previous) return null;
   if (previous.state === "sending") throw new Error("Print is still active");
-  if (!previous.artifact_base64) throw new Error("Saved raster unavailable");
-  const bytes = Uint8Array.from(atob(previous.artifact_base64), (c) => c.charCodeAt(0));
+  let bytes: Uint8Array;
   if (
-    productLabelBytesDigest(bytes) !== previous.artifact_digest ||
-    decodeMonoRaster(bytes).dpi !== profile.dpi
-  )
-    throw new Error("Incompatible saved raster");
+    previous.state === "failed_before_send" ||
+    (previous.state === "sent" && !previous.artifact_base64)
+  ) {
+    if (!render) throw new Error("Label regeneration required");
+    bytes = await render();
+  } else {
+    if (!previous.artifact_base64) throw new Error("Saved raster unavailable");
+    bytes = Uint8Array.from(atob(previous.artifact_base64), (c) => c.charCodeAt(0));
+    if (productLabelBytesDigest(bytes) !== previous.artifact_digest)
+      throw new Error("Saved raster changed");
+  }
+  if (decodeMonoRaster(bytes).dpi !== profile.dpi) throw new Error("Incompatible saved raster");
   const next = { ...key, attemptId: crypto.randomUUID() };
   await exec.run(
     `INSERT INTO printer_destinations(scope,purpose,job_id,attempt_id,profile_json) VALUES(?,?,?,?,?)`,

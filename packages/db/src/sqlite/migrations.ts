@@ -4876,6 +4876,51 @@ export const STATION_MIGRATIONS: string[] = [
     WHEN json_extract(NEW.projection_json,'$.attemptId')<>json_extract(OLD.projection_json,'$.attemptId')
     BEGIN UPDATE printer_deliveries SET resolved_at=NEW.updated_at WHERE scope=NEW.credential_ownership AND purpose='duplicate' AND job_id=NEW.job_id
       AND attempt_id=json_extract(OLD.projection_json,'$.attemptId') AND state<>'sending'; END;`,
+  // Empty payload is a tombstone; keep digest/receipt/state for audit and diagnostics.
+  // Uncertain or in-flight output retains the original bytes until explicit resolution.
+  `CREATE TRIGGER IF NOT EXISTS printer_deliveries_release_raster AFTER UPDATE OF state,resolved_at ON printer_deliveries
+    WHEN NEW.purpose<>'duplicate' AND NEW.artifact_base64<>'' AND
+      (NEW.state IN ('sent','failed_before_send') OR (NEW.resolved_at IS NOT NULL AND NEW.state<>'sending'))
+    BEGIN UPDATE printer_deliveries SET artifact_base64='' WHERE scope=NEW.scope AND purpose=NEW.purpose
+      AND job_id=NEW.job_id AND attempt_id=NEW.attempt_id; END;`,
+  `UPDATE printer_deliveries SET artifact_base64='' WHERE purpose<>'duplicate'
+    AND (state IN ('sent','failed_before_send') OR (resolved_at IS NOT NULL AND state<>'sending'));`,
+
+  `ALTER TABLE warehouse_reprint_jobs ADD COLUMN raster_json TEXT CHECK(raster_json IS NULL OR json_valid(raster_json));`,
+  `DROP TRIGGER IF EXISTS warehouse_reprint_event;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_event AFTER INSERT ON warehouse_reprint_commands
+    WHEN NEW.kind='event' BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_STALE_EVENT') WHERE NOT EXISTS (
+        SELECT 1 FROM warehouse_reprint_jobs WHERE owner=NEW.owner AND job_id=NEW.job_id
+        AND latest_sequence=json_extract(NEW.payload_json,'$.previousSequence')
+        AND state=json_extract(NEW.payload_json,'$.previousState')
+        AND session_id=json_extract(NEW.payload_json,'$.event.sessionId'));
+      SELECT RAISE(ABORT,'WAREHOUSE_EVENT_REPLAY_MISMATCH') WHERE EXISTS (
+        SELECT 1 FROM warehouse_reprint_events WHERE owner=NEW.owner AND event_id=NEW.command_id);
+      INSERT INTO warehouse_reprint_events(owner,event_id,job_id,sequence,event_json,digest)
+        VALUES(NEW.owner,NEW.command_id,NEW.job_id,json_extract(NEW.payload_json,'$.event.sequence'),
+        json_extract(NEW.payload_json,'$.event'),json_extract(NEW.payload_json,'$.eventDigest'));
+      INSERT INTO warehouse_reprint_attempts(owner,job_id,attempt_id,attempt_no,state,reason)
+        SELECT NEW.owner,NEW.job_id,json_extract(NEW.payload_json,'$.event.attemptId'),
+        json_extract(NEW.payload_json,'$.event.attemptNo'),'prepared',json_extract(NEW.payload_json,'$.event.reason')
+        WHERE json_extract(NEW.payload_json,'$.event.kind')='reprint_prepared';
+      UPDATE warehouse_reprint_attempts SET state=json_extract(NEW.payload_json,'$.projection.state')
+        WHERE owner=NEW.owner AND job_id=NEW.job_id AND attempt_id=json_extract(NEW.payload_json,'$.event.attemptId');
+      UPDATE warehouse_reprint_jobs SET raster_json=COALESCE(json_extract(NEW.payload_json,'$.raster'),raster_json),
+        projection_json=json_extract(NEW.payload_json,'$.projection'),
+        state=json_extract(NEW.payload_json,'$.projection.state'),latest_sequence=json_extract(NEW.payload_json,'$.event.sequence'),
+        attempt_id=json_extract(NEW.payload_json,'$.event.attemptId'),updated_at=json_extract(NEW.payload_json,'$.event.occurredAt')
+        WHERE owner=NEW.owner AND job_id=NEW.job_id;
+      UPDATE warehouse_reprint_sessions SET sent_count=sent_count+1 WHERE owner=NEW.owner
+        AND session_id=json_extract(NEW.payload_json,'$.event.sessionId')
+        AND (json_extract(NEW.payload_json,'$.event.kind')='sent' OR
+        (json_extract(NEW.payload_json,'$.event.kind')='verified' AND json_extract(NEW.payload_json,'$.previousState')='delivery_unknown'));
+      DELETE FROM warehouse_reprint_commands WHERE owner=NEW.owner AND command_id=NEW.command_id;
+    END;`,
+  `UPDATE warehouse_reprint_jobs SET projection_json=json_set(projection_json,'$.raster',
+      json_object('bytesDigest',json_extract(job_json,'$.bytesDigest'),'dpi',json_extract(job_json,'$.preparedEvent.dpi')))
+    WHERE json_extract(job_json,'$.preparedEvent.printFormat')='mono-raster-v1'
+      AND json_type(projection_json,'$.raster') IS NULL;`,
 ];
 
 export interface StationMigrationEntry {

@@ -2890,3 +2890,41 @@ describe("device replacement drain SQLite", () => {
     db.close();
   });
 });
+
+it("upgrades saved delivery artifacts without discarding unresolved output or receipt metadata", () => {
+  const db = new DatabaseSync(":memory:");
+  try {
+    const boundary = STATION_MIGRATIONS.findIndex((sql) =>
+      sql.includes("CREATE TRIGGER IF NOT EXISTS printer_deliveries_release_raster"),
+    );
+    expect(boundary).toBeGreaterThan(0);
+    applyStatements(db, STATION_MIGRATIONS.slice(0, boundary));
+    for (const state of ["prepared", "sending", "sent", "failed_before_send", "delivery_unknown"]) {
+      db.prepare(
+        `INSERT INTO printer_deliveries(scope,purpose,job_id,attempt_id,state,profile_json,
+        artifact_digest,artifact_base64,document_name,receipt_json,updated_at)
+        VALUES('scope','test',?, 'a',?,'{}','digest','saved-bytes','document','{"jobId":1}','2026-10-10')`,
+      ).run(state, state);
+    }
+    // New migration statements must all succeed; no errors are ignored here.
+    for (const sql of STATION_MIGRATIONS.slice(boundary)) db.exec(sql);
+    const rows = db
+      .prepare("SELECT state,artifact_base64,artifact_digest,receipt_json FROM printer_deliveries")
+      .all();
+    for (const row of rows) {
+      expect(row.artifact_base64).toBe(
+        ["sent", "failed_before_send"].includes(String(row.state)) ? "" : "saved-bytes",
+      );
+      expect(row.artifact_digest).toBe("digest");
+      expect(row.receipt_json).toBe('{"jobId":1}');
+    }
+    expect(
+      db
+        .prepare("PRAGMA table_info(warehouse_reprint_jobs)")
+        .all()
+        .some((row) => row.name === "raster_json"),
+    ).toBe(true);
+  } finally {
+    db.close();
+  }
+});

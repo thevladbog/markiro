@@ -65,12 +65,20 @@ export async function attemptBoxPrint(input: BoxPrintInput): Promise<BoxPrintAtt
   const print = input.destination?.print ?? input.printing?.print;
   if (!printer || !print) return { kind: "failed", code: "printer_unconfigured" };
 
+  const template = input.template;
   let bytes: Uint8Array;
   let deliveryKey: DeliveryKey | undefined = input.destination?.key;
   try {
+    const render = async () =>
+      (await renderPrintArtifact(template, input.fields, printer, rasterizeDriverText)).bytes;
     const retry =
       input.explicitRetry && input.destination && printerMode(printer) === "windows_driver"
-        ? await prepareWindowsReprint(input.destination.exec, input.destination.key, printer)
+        ? await prepareWindowsReprint(
+            input.destination.exec,
+            input.destination.key,
+            printer,
+            render,
+          )
         : null;
     if (retry) {
       bytes = retry.bytes;

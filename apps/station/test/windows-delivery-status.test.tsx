@@ -9,6 +9,7 @@ import {
   recordPrintDeliveryResult,
   recoverPrintDeliveries,
   readPrintDelivery,
+  resolvePrintDelivery,
 } from "../src/lib/print-deliveries.js";
 import { tauriWindowsPrinting } from "../src/lib/hardware.js";
 import type { PrinterProfile } from "../src/lib/printer-routing.js";
@@ -54,10 +55,28 @@ it("warns before a repeat and keeps unknown after the spooler no longer lists th
     const observe = vi
       .spyOn(tauriWindowsPrinting, "getWindowsPrintJob")
       .mockResolvedValue({ state: "absent" });
+    const writes = vi.spyOn(w.exec, "run");
+    writes.mockClear();
     view = render(
-      <WindowsDeliveryStatus exec={w.exec} scope="owner" purpose="test" allowAcknowledge />,
+      <WindowsDeliveryStatus
+        exec={w.exec}
+        scope="owner"
+        purpose="test"
+        onAcknowledge={async (key) => {
+          await resolvePrintDelivery(w.exec, key);
+        }}
+      />,
     );
     await screen.findByText(/Исходное задание ещё может выйти из очереди/);
+    expect(writes).not.toHaveBeenCalled();
+    expect(screen.queryByRole("img")).toBeNull();
+    const summary = screen.getByText("Сохранённая этикетка");
+    const details = summary.closest("details");
+    if (!details) throw new Error("Preview control unavailable");
+    details.open = true;
+    fireEvent(details, new Event("toggle"));
+    await screen.findByRole("img");
+    expect(writes).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole("button", { name: "Проверить очередь" }));
     await screen.findByText("Задания нет в очереди. Это не подтверждает физическую печать.");
     expect(observe).toHaveBeenCalledWith({
@@ -70,7 +89,9 @@ it("warns before a repeat and keeps unknown after the spooler no longer lists th
     fireEvent.click(
       screen.getByRole("button", { name: "Проверено оператором — закрыть уведомление" }),
     );
-    await waitFor(async () => expect(await readPrintDelivery(w.exec, key)).toBeNull());
+    await waitFor(async () =>
+      expect((await readPrintDelivery(w.exec, key))?.resolved_at).toBeTruthy(),
+    );
   } finally {
     view?.unmount();
     w.close();

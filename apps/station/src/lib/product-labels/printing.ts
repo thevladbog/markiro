@@ -3,6 +3,7 @@ import {
   dispatchWindowsDelivery,
   resolvePrintDelivery,
   preparePrintDelivery,
+  type WindowsDeliveryPreflight,
 } from "../print-deliveries.js";
 import { z } from "zod";
 import {
@@ -89,6 +90,7 @@ async function sendPreparedBody(
     return presentProductLabelJob(await requireProductLabelJob(exec, credentialOwnership, jobId));
   }
   const frozenBytes = Uint8Array.from(atob(job.bytesBase64), (char) => char.charCodeAt(0));
+  let preflighted: WindowsDeliveryPreflight | undefined;
   if (printerFormat(printer) === "mono-raster-v1") {
     const key = {
       scope: job.credentialOwnership,
@@ -102,7 +104,10 @@ async function sendPreparedBody(
         ready = (
           await tauriWindowsPrinting.preflightWindowsRaster(printer.target.printer, frozenBytes)
         ).ok;
-      if (ready) await preparePrintDelivery(exec, key, printer, frozenBytes);
+      if (ready) {
+        await preparePrintDelivery(exec, key, printer, frozenBytes);
+        preflighted = { profileJson: JSON.stringify(printer), bytes: frozenBytes };
+      }
     } catch {
       ready = false;
     }
@@ -140,7 +145,7 @@ async function sendPreparedBody(
     claimedPrinter.dpi !== job.projection.dpi
   )
     throw new Error("Saved print destination unavailable");
-  const bytes = Uint8Array.from(atob(job.bytesBase64), (char) => char.charCodeAt(0));
+  const bytes = frozenBytes;
   try {
     await serializePrinterOutput(claimedPrinter.target, () =>
       printerFormat(claimedPrinter) === "mono-raster-v1"
@@ -154,6 +159,9 @@ async function sendPreparedBody(
             },
             claimedPrinter,
             bytes,
+            undefined,
+            undefined,
+            preflighted,
           )
         : deps.print(claimedPrinter.target, bytes),
     );

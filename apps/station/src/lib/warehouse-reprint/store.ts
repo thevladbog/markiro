@@ -1,4 +1,4 @@
-import { productLabelPrintFormat } from "@markiro/domain";
+import { decodeMonoRaster, productLabelPrintFormat } from "@markiro/domain";
 import { printerFormat } from "../printer-routing.js";
 import { AUTHORIZED_CREDENTIAL_OWNERS_SQL } from "../device-recovery.js";
 import { readPrintDestination } from "../print-destinations.js";
@@ -40,6 +40,9 @@ const projectionSchema = z.strictObject({
   bytesDigest: z.string(),
   payloadDigest: z.string(),
   templateDigest: z.string(),
+  raster: z
+    .strictObject({ bytesDigest: z.string(), dpi: z.union([z.literal(203), z.literal(300)]) })
+    .optional(),
 });
 function json(raw: string): unknown {
   try {
@@ -121,24 +124,47 @@ export async function readWarehouseJob(
   const [row] = await exec.all<{
     owner: string;
     job_json: string;
+    raster_json: string | null;
     projection_json: string;
     updated_at: string;
     state: string;
     latest_sequence: number;
     attempt_id: string;
   }>(
-    `SELECT owner,job_json,projection_json,updated_at,state,latest_sequence,attempt_id FROM warehouse_reprint_jobs WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND job_id=?`,
+    `SELECT owner,job_json,raster_json,projection_json,updated_at,state,latest_sequence,attempt_id FROM warehouse_reprint_jobs WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND job_id=?`,
     [owner, jobId],
   );
   if (!row) throw new Error("WAREHOUSE_REPRINT_JOB_MISSING");
   const input = parseWarehousePreparedInput(json(row.job_json));
   const projection = projectionSchema.parse(json(row.projection_json));
+  const replacement = row.raster_json
+    ? z
+        .strictObject({
+          bytesBase64: z.string().min(1),
+          bytesDigest: z.string(),
+          dpi: z.union([z.literal(203), z.literal(300)]),
+        })
+        .parse(json(row.raster_json))
+    : null;
+  const currentBytes = replacement ?? input;
+  if (replacement) {
+    const bytes = Uint8Array.from(atob(replacement.bytesBase64), (c) => c.charCodeAt(0));
+    if (
+      input.preparedEvent.printFormat !== "mono-raster-v1" ||
+      productLabelBytesDigest(bytes) !== replacement.bytesDigest ||
+      decodeMonoRaster(bytes).dpi !== replacement.dpi ||
+      projection.raster?.dpi !== replacement.dpi ||
+      projection.raster.bytesDigest !== replacement.bytesDigest
+    )
+      throw new Error("WAREHOUSE_REPRINT_STORAGE_INVALID");
+  }
+  const currentPrinter = replacement ? { ...input.printer, dpi: replacement.dpi } : input.printer;
   if (
     input.owner !== row.owner ||
     input.jobId !== jobId ||
     projection.jobId !== jobId ||
     projection.sessionId !== input.sessionId ||
-    projection.bytesDigest !== input.bytesDigest ||
+    projection.bytesDigest !== currentBytes.bytesDigest ||
     projection.payloadDigest !== input.source.payloadDigest ||
     projection.templateDigest !== input.template.digest ||
     projection.state !== row.state ||
@@ -154,11 +180,18 @@ export async function readWarehouseJob(
   });
   if (
     destination &&
-    (printerFormat(destination) !== printerFormat(input.printer) ||
-      destination.dpi !== input.printer.dpi)
+    (printerFormat(destination) !== printerFormat(currentPrinter) ||
+      destination.dpi !== currentPrinter.dpi)
   )
     throw new Error("WAREHOUSE_REPRINT_PRINTER_INVALID");
-  return { ...input, printer: destination ?? input.printer, projection, updatedAt: row.updated_at };
+  return {
+    ...input,
+    bytesBase64: currentBytes.bytesBase64,
+    bytesDigest: currentBytes.bytesDigest,
+    printer: destination ?? currentPrinter,
+    projection,
+    updatedAt: row.updated_at,
+  };
 }
 export function warehouseJobView(job: WarehouseJob): WarehouseJobView {
   return {
@@ -284,6 +317,7 @@ export async function appendWarehouseEvent(
   exec: SqlExecutor,
   owner: string,
   input: WarehouseReprintEvent,
+  raster?: { bytesBase64: string; bytesDigest: string; dpi: 203 | 300 },
 ): Promise<"applied" | "replay"> {
   const event = warehouseEventSchema.parse(input);
   const eventDigest = productLabelValueDigest(event);
@@ -296,6 +330,20 @@ export async function appendWarehouseEvent(
     return "replay";
   }
   const job = await readWarehouseJob(exec, owner, event.jobId);
+  if (event.kind === "reprint_prepared" && event.rerender) {
+    if (
+      !raster ||
+      raster.bytesDigest !== event.rerender.bytesDigest ||
+      raster.dpi !== event.rerender.dpi
+    )
+      throw new Error("WAREHOUSE_RASTER_MISSING");
+    const bytes = Uint8Array.from(atob(raster.bytesBase64), (c) => c.charCodeAt(0));
+    if (
+      productLabelBytesDigest(bytes) !== raster.bytesDigest ||
+      decodeMonoRaster(bytes).dpi !== raster.dpi
+    )
+      throw new Error("WAREHOUSE_RASTER_INVALID");
+  } else if (raster) throw new Error("WAREHOUSE_RASTER_UNEXPECTED");
   const projection = applyWarehouseReprintEvent(job.projection, event);
   try {
     await exec.run(
@@ -310,6 +358,7 @@ export async function appendWarehouseEvent(
           eventDigest,
           previousSequence: job.projection.latestSequence,
           previousState: job.projection.state,
+          ...(raster ? { raster } : {}),
         }),
       ],
     );

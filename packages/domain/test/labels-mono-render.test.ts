@@ -106,3 +106,34 @@ describe("complete monochrome labels", () => {
     });
   });
 });
+
+it.each([203, 300] as const)(
+  "clamps QR modules to the preview/ZPL maximum at %i dpi",
+  async (dpi) => {
+    const qr = (sizeMm: number): domain.LabelTemplateSpec => ({
+      ...spec,
+      widthMm: 100,
+      heightMm: 100,
+      dpi,
+      elements: [
+        {
+          id: "qr",
+          kind: "barcode",
+          format: "qr",
+          data: { literal: "ABC" },
+          sizeMm,
+          xMm: 10,
+          yMm: 10,
+        },
+      ],
+    });
+    const expected = await domain.renderMonoLabel(
+      qr((10 * 25.4) / dpi),
+      domain.sampleLabelData(),
+      text,
+    );
+    const actual = await domain.renderMonoLabel(qr(1.5), domain.sampleLabelData(), text);
+    expect(actual.requiredBounds).toEqual(expected.requiredBounds);
+    expect(actual.pixels).toEqual(expected.pixels);
+  },
+);

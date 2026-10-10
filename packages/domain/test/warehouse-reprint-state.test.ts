@@ -115,3 +115,54 @@ describe("warehouse reprint state", () => {
       ).toThrow("Invalid warehouse print transition");
   });
 });
+
+it("permits raster regeneration only for a proven non-send and keeps earlier attempt identities", () => {
+  const { language, ...raw } = warehousePreparedEvent();
+  void language;
+  const first = { ...raw, printFormat: "mono-raster-v1" as const };
+  const prepared = applyWarehouseReprintEvent(null, first);
+  const base = {
+    eventId,
+    jobId: first.jobId,
+    sessionId: first.sessionId,
+    attemptId: first.attemptId,
+    operatorId: first.operatorId,
+    occurredAt: now,
+  };
+  const sending = applyWarehouseReprintEvent(prepared, { ...base, kind: "sending", sequence: 2 });
+  const failed = applyWarehouseReprintEvent(sending, {
+    ...base,
+    kind: "failed_before_send",
+    errorCode: "driver_rejected",
+    sequence: 3,
+  });
+  const replacement: WarehouseReprintEvent = {
+    ...base,
+    kind: "reprint_prepared",
+    sequence: 4,
+    attemptId,
+    attemptNo: 2,
+    reason: "not_printed",
+    rerender: { bytesDigest: "a".repeat(64), dpi: 300 },
+  };
+  const next = applyWarehouseReprintEvent(failed, replacement);
+  expect(next).toMatchObject({
+    bytesDigest: "a".repeat(64),
+    raster: { dpi: 300 },
+    attemptNo: 2,
+    attemptIds: [first.attemptId, attemptId],
+    payloadDigest: first.payloadDigest,
+    templateDigest: first.templateDigest,
+  });
+  for (const kind of ["sent", "delivery_unknown"] as const) {
+    const resolved = applyWarehouseReprintEvent(
+      sending,
+      kind === "sent"
+        ? { ...base, kind, sequence: 3 }
+        : { ...base, kind, sequence: 3, errorCode: "transport_failed" },
+    );
+    expect(() => applyWarehouseReprintEvent(resolved, replacement)).toThrow(
+      "Invalid warehouse print transition",
+    );
+  }
+});

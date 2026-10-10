@@ -71,6 +71,7 @@ describe("Windows duplicate output", () => {
       expect((await sendPreparedProductLabel(deps, w.input.jobId)).attemptState).toBe("sent");
       await sendPreparedProductLabel(deps, w.input.jobId);
       expect(send).toHaveBeenCalledTimes(1);
+      expect(tauriWindowsPrinting.preflightWindowsRaster).toHaveBeenCalledTimes(1);
       expect(w.print).not.toHaveBeenCalled();
       const attemptId = await prepareProductLabelReprint(w.exec, {
         ...w.actor,
