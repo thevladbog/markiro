@@ -2101,6 +2101,50 @@ pub enum CodeCheck {
     Taken { owner: CodeOwner },
 }
 
+/// A box of a shift as the office lists it (`GET
+/// /v1/office/shifts/{id}/boxes`, plan ЧЗ for the card of plan О-Ф): the
+/// device's instants as it sent them; `units` the box's live items now;
+/// `itemCountReported` and `digestMatches` what the station's close said
+/// and how it compared at that moment (stale once the box is taken apart);
+/// the label check's instants as the station sent them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeBox {
+    pub id: String,
+    pub device_id: String,
+    pub sscc: Option<String>,
+    pub opened_at: String,
+    pub closed_at: Option<String>,
+    pub disassembled_at: Option<String>,
+    pub pallet_id: Option<String>,
+    pub units: u32,
+    pub item_count_reported: Option<u32>,
+    pub digest_matches: Option<bool>,
+    pub print_verified_at: Option<String>,
+    pub print_skipped_at: Option<String>,
+}
+
+/// A pallet of a shift as the office lists it (`GET
+/// /v1/office/shifts/{id}/pallets`, plan ЧЗ for plan О-Ф): `boxes` its closed
+/// boxes not taken apart and `units` their live items, both derived as the
+/// cloud's pallet card derives them; `boxCountReported` what the station's
+/// close counted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficePallet {
+    pub id: String,
+    pub device_id: String,
+    pub sscc: Option<String>,
+    pub opened_at: String,
+    pub closed_at: Option<String>,
+    pub disassembled_at: Option<String>,
+    pub boxes: u32,
+    pub units: u64,
+    pub box_count_reported: Option<u32>,
+    pub print_verified_at: Option<String>,
+    pub print_skipped_at: Option<String>,
+}
+
 /// `GET /v1/office/shifts/{id}/export-source` (plan ЧЗ): what a shift's
 /// exports are built from, read in one snapshot. The office ports the
 /// cloud's source rules (`shift-export-source.service.ts`) over these rows

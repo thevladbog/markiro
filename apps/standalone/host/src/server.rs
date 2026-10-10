@@ -274,6 +274,14 @@ fn protected_routes() -> Router<AppState> {
             post(crate::routes::office_shifts::close_shift),
         )
         .route(
+            "/v1/office/shifts/{id}/boxes",
+            get(crate::routes::office_boxes::list_boxes),
+        )
+        .route(
+            "/v1/office/shifts/{id}/pallets",
+            get(crate::routes::office_boxes::list_pallets),
+        )
+        .route(
             "/v1/office/shifts/{id}/export-source",
             get(crate::routes::office_exports::export_source),
         )

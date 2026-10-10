@@ -646,6 +646,49 @@ export const shiftExportRowsSchema = z.object({
 export type ShiftExportRows = z.infer<typeof shiftExportRowsSchema>;
 
 /**
+ * Mirrors `markiro_proto::OfficeBox`: a box of `GET /v1/office/shifts/{id}/boxes`
+ * (plan ЧЗ, for the shift's card of plan О-Ф). `units` are its live items
+ * now; `itemCountReported` and `digestMatches` are what the station's close
+ * said and how it compared then, stale once the box is taken apart.
+ */
+export const officeBoxSchema = z.object({
+  id: z.string(),
+  deviceId: z.uuid(),
+  sscc: z.string().nullable(),
+  openedAt: z.iso.datetime(),
+  closedAt: z.iso.datetime().nullable(),
+  disassembledAt: z.iso.datetime().nullable(),
+  palletId: z.string().nullable(),
+  units: z.number().int().nonnegative(),
+  itemCountReported: z.number().int().nonnegative().nullable(),
+  digestMatches: z.boolean().nullable(),
+  printVerifiedAt: z.iso.datetime().nullable(),
+  printSkippedAt: z.iso.datetime().nullable(),
+});
+export type OfficeBox = z.infer<typeof officeBoxSchema>;
+
+/**
+ * Mirrors `markiro_proto::OfficePallet`: a pallet of `GET
+ * /v1/office/shifts/{id}/pallets` (plan ЧЗ, for plan О-Ф). `boxes` are its
+ * closed boxes not taken apart and `units` their live items, derived when
+ * read; `boxCountReported` is what the station's close counted.
+ */
+export const officePalletSchema = z.object({
+  id: z.string(),
+  deviceId: z.uuid(),
+  sscc: z.string().nullable(),
+  openedAt: z.iso.datetime(),
+  closedAt: z.iso.datetime().nullable(),
+  disassembledAt: z.iso.datetime().nullable(),
+  boxes: z.number().int().nonnegative(),
+  units: z.number().int().nonnegative(),
+  boxCountReported: z.number().int().positive().nullable(),
+  printVerifiedAt: z.iso.datetime().nullable(),
+  printSkippedAt: z.iso.datetime().nullable(),
+});
+export type OfficePallet = z.infer<typeof officePalletSchema>;
+
+/**
  * The product as a shift froze it when a station opened it
  * (`markiro_proto::ShiftSnapshotProduct`); only an active product opens a
  * shift, so it has a group.

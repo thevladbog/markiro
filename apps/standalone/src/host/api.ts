@@ -13,8 +13,10 @@ import {
   enteredShiftSchema,
   labelTemplateSchema,
   labelTemplateSummarySchema,
+  officeBoxSchema,
   officeLineSchema,
   officeOperatorSchema,
+  officePalletSchema,
   officeProductSchema,
   officeSessionSchema,
   officeUserRecordSchema,
@@ -46,9 +48,11 @@ import {
   type LabelTemplateSummary,
   type LineCreate,
   type LineUpdate,
+  type OfficeBox,
   type OfficeLine,
   type OfficeLoginRequest,
   type OfficeOperator,
+  type OfficePallet,
   type OfficeProduct,
   type OfficeSession,
   type OfficeShift,
@@ -185,6 +189,10 @@ export interface HostApi {
    * (plan ЧЗ); every office role. A planned shift answers with empty lists.
    */
   getShiftExportSource: (token: string, id: string) => Promise<ShiftExportRows>;
+  /** Every box of the shift, opened first first, with its live units (plan ЧЗ, for plan О-Ф). */
+  listShiftBoxes: (token: string, id: string) => Promise<OfficeBox[]>;
+  /** Every pallet of the shift, opened first first, with what stands on it (plan ЧЗ). */
+  listShiftPallets: (token: string, id: string) => Promise<OfficePallet[]>;
   /**
    * The station's shifts, with the device key only: the planned and active
    * shifts of its line and those it entered, active or closed within 30
@@ -470,6 +478,16 @@ export function createHostApi(client: HostClient): HostApi {
       client.request("GET", `/v1/office/shifts/${id}/export-source`, {
         officeToken: token,
         schema: shiftExportRowsSchema,
+      }),
+    listShiftBoxes: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/boxes`, {
+        officeToken: token,
+        schema: z.array(officeBoxSchema),
+      }),
+    listShiftPallets: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/pallets`, {
+        officeToken: token,
+        schema: z.array(officePalletSchema),
       }),
   };
 }

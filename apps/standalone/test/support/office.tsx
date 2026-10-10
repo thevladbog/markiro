@@ -92,6 +92,8 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     getShiftExportSource: vi.fn<HostApi["getShiftExportSource"]>(() =>
       unexpected("getShiftExportSource"),
     ),
+    listShiftBoxes: vi.fn<HostApi["listShiftBoxes"]>(() => unexpected("listShiftBoxes")),
+    listShiftPallets: vi.fn<HostApi["listShiftPallets"]>(() => unexpected("listShiftPallets")),
     // The floor reads its shifts whenever it reads its device record; a test
     // about something else gets none.
     getDeviceShifts: vi.fn<HostApi["getDeviceShifts"]>(async () => []),

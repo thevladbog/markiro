@@ -7,16 +7,17 @@ use markiro_proto::{
     DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts, DeviceUpdate, ErrorBody,
     ExceptionKind, FactBatch, FactKind, FactOutcome, FactReceipts, Hello, HelloEnvelope,
     LabelOutcome, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary,
-    LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine,
-    OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeShift,
-    OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord,
-    OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord,
-    PairResponse, PairingCode, PairingCodeRequest, PalletClosedFact, PalletExceptionFact,
-    PalletExceptionKind, PalletLabelFact, PasswordChange, PasswordSet, ProductCreate, ProductGroup,
-    ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict, ShiftClose,
-    ShiftClosedFact, ShiftCreate, ShiftExportRows, ShiftMode, ShiftOrigin, ShiftStatus,
-    ShiftUpdate, SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState,
-    TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
+    LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeBox,
+    OfficeLine, OfficeLoginRequest, OfficeOperator, OfficePallet, OfficeProduct, OfficeRole,
+    OfficeSession, OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
+    OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
+    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PalletClosedFact,
+    PalletExceptionFact, PalletExceptionKind, PalletLabelFact, PasswordChange, PasswordSet,
+    ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate, ScanFact,
+    ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate, ShiftExportRows, ShiftMode,
+    ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord, SsccBlock, SsccBlockRequest,
+    SsccCounterUpdate, SsccState, TemplateDefaults, TemplateDefaultsUpdate, TemplatePurpose,
+    HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
@@ -1288,6 +1289,37 @@ fn shift_export_rows_round_trip_and_hang_together() {
         Some("2026-10-08T14:00:07.412Z")
     );
     assert!(rows.codes.iter().all(|c| c.canonical.contains('\u{1d}')));
+}
+
+/// The office's lists of a shift's boxes and pallets (plan ЧЗ) round-trip
+/// and agree with the export source of the same shift: the same boxes and
+/// pallets, a box's live units are its live items there, and a pallet's
+/// boxes and units are those of its closed boxes not taken apart.
+#[test]
+fn office_box_and_pallet_lists_round_trip_and_agree_with_the_export_source() {
+    let boxes: Vec<OfficeBox> = round_trip("office-boxes.json");
+    let pallets: Vec<OfficePallet> = round_trip("office-pallets.json");
+    let rows: ShiftExportRows = serde_json::from_value(fixture("shift-export-rows.json")).unwrap();
+    assert_eq!(
+        boxes.iter().map(|b| &b.id).collect::<Vec<_>>(),
+        rows.boxes.iter().map(|b| &b.id).collect::<Vec<_>>()
+    );
+    for b in &boxes {
+        let live = rows.items.iter().filter(|i| i.box_id == b.id).count();
+        assert_eq!(usize::try_from(b.units).unwrap(), live, "{b:?}");
+    }
+    for p in &pallets {
+        let on: Vec<&OfficeBox> = boxes
+            .iter()
+            .filter(|b| b.pallet_id.as_deref() == Some(&p.id) && b.disassembled_at.is_none())
+            .collect();
+        assert_eq!(usize::try_from(p.boxes).unwrap(), on.len(), "{p:?}");
+        assert_eq!(
+            p.units,
+            on.iter().map(|b| u64::from(b.units)).sum::<u64>(),
+            "{p:?}"
+        );
+    }
 }
 
 /// A shift's totals carry both pallet counts (plan ПЛ-Х): each is required,

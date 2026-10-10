@@ -417,6 +417,18 @@ const CASES: Case[] = [
     { method: "GET", path: `/v1/office/shifts/${SHIFT_ID}/export-source`, body: undefined },
   ],
   [
+    "listShiftBoxes",
+    fixture("office-boxes.json"),
+    (api) => api.listShiftBoxes(TOKEN, SHIFT_ID),
+    { method: "GET", path: `/v1/office/shifts/${SHIFT_ID}/boxes`, body: undefined },
+  ],
+  [
+    "listShiftPallets",
+    fixture("office-pallets.json"),
+    (api) => api.listShiftPallets(TOKEN, SHIFT_ID),
+    { method: "GET", path: `/v1/office/shifts/${SHIFT_ID}/pallets`, body: undefined },
+  ],
+  [
     "setUserPassword",
     null,
     (api) => api.setUserPassword(TOKEN, USER_ID, { password: "a new long password" }),

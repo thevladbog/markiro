@@ -31,9 +31,11 @@ import {
   lineCreateSchema,
   lineRecordSchema,
   lineUpdateSchema,
+  officeBoxSchema,
   officeLineSchema,
   officeLoginRequestSchema,
   officeOperatorSchema,
+  officePalletSchema,
   officeProductSchema,
   officeSessionSchema,
   officeShiftSchema,
@@ -300,6 +302,90 @@ const REQUESTS = [
 function extended(name: string): Record<string, unknown> {
   return { ...(fixture(name) as Record<string, unknown>), addedLater: true };
 }
+
+describe.each([
+  ["office-boxes.json", officeBoxSchema],
+  ["office-pallets.json", officePalletSchema],
+] as const)("list fixture %s (plan ЧЗ)", (name, schema) => {
+  it("parses without losing a field", () => {
+    expect(schema.array().parse(fixture(name))).toEqual(fixture(name));
+  });
+
+  it("tolerates a field added by a newer host", () => {
+    const rows = fixture(name) as Record<string, unknown>[];
+    expect(
+      schema.array().safeParse(rows.map((row) => ({ ...row, addedLater: true }))).success,
+    ).toBe(true);
+  });
+});
+
+describe("the office's box and pallet lists (plan ЧЗ)", () => {
+  const boxes = fixture("office-boxes.json") as Record<string, unknown>[];
+  const pallets = fixture("office-pallets.json") as Record<string, unknown>[];
+  const box = boxes[0] as Record<string, unknown>;
+  const pallet = pallets[0] as Record<string, unknown>;
+
+  it("reads an open pallet, one taken apart, and a box taken apart, as the host writes them", () => {
+    const open = {
+      ...pallet,
+      sscc: null,
+      closedAt: null,
+      boxCountReported: null,
+      printVerifiedAt: null,
+    };
+    expect(officePalletSchema.parse(open)).toEqual(open);
+    const apart = { ...pallet, disassembledAt: "2026-10-08T06:30:00.000Z", printSkippedAt: null };
+    expect(officePalletSchema.parse(apart)).toEqual(apart);
+    const taken = {
+      ...box,
+      disassembledAt: "2026-10-08T06:30:00.000Z",
+      units: 0,
+      digestMatches: false,
+    };
+    expect(officeBoxSchema.parse(taken)).toEqual(taken);
+  });
+
+  it.each([
+    ["a missing digest verdict", { ...box, digestMatches: undefined }],
+    ["a missing reported count", { ...box, itemCountReported: undefined }],
+    ["a negative unit count", { ...box, units: -1 }],
+    ["a fractional unit count", { ...box, units: 1.5 }],
+    ["a device that is no UUID", { ...box, deviceId: "station" }],
+    ["an opening instant that is no instant", { ...box, openedAt: "yesterday" }],
+    ["a closing instant that is no instant", { ...box, closedAt: "2026-10-08" }],
+    ["a taken-apart instant that is no instant", { ...box, disassembledAt: "late" }],
+    ["a label instant that is no instant", { ...box, printVerifiedAt: "2026-10-08" }],
+    ["a skip instant that is no instant", { ...box, printSkippedAt: "2026-10-08" }],
+    ["a negative reported count", { ...box, itemCountReported: -1 }],
+    ["a fractional reported count", { ...box, itemCountReported: 1.5 }],
+    ["a missing pallet link", { ...box, palletId: undefined }],
+  ])("refuses a box with %s", (_, row) => {
+    expect(officeBoxSchema.safeParse(row).success).toBe(false);
+  });
+
+  it.each([
+    ["a missing SSCC", { ...pallet, sscc: undefined }],
+    ["a negative box count", { ...pallet, boxes: -1 }],
+    ["a negative unit count", { ...pallet, units: -1 }],
+    ["a fractional box count", { ...pallet, boxes: 0.5 }],
+    ["a fractional unit count", { ...pallet, units: 1.5 }],
+    ["a fractional reported count", { ...pallet, boxCountReported: 1.5 }],
+    ["a reported count of zero", { ...pallet, boxCountReported: 0 }],
+    ["a missing reported count", { ...pallet, boxCountReported: undefined }],
+    ["a device that is no UUID", { ...pallet, deviceId: "station" }],
+    ["an opening instant that is no instant", { ...pallet, openedAt: "yesterday" }],
+    ["a closing instant that is no instant", { ...pallet, closedAt: "2026-10-08" }],
+    ["a taken-apart instant that is no instant", { ...pallet, disassembledAt: "late" }],
+    ["a skip instant that is no instant", { ...pallet, printSkippedAt: "2026-10-08" }],
+    ["a check instant that is no instant", { ...pallet, printVerifiedAt: "2026-10-08" }],
+  ])("refuses a pallet with %s", (_, row) => {
+    expect(officePalletSchema.safeParse(row).success).toBe(false);
+  });
+
+  it("does not cap a pallet's unit count at 32 bits (the host counts them in 64)", () => {
+    expect(officePalletSchema.safeParse({ ...pallet, units: 5_000_000_000 }).success).toBe(true);
+  });
+});
 
 describe.each(RESPONSES)("response fixture %s", (name, schema) => {
   it("parses without losing a field", () => {
