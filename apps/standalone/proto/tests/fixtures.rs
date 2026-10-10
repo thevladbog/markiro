@@ -691,20 +691,23 @@ fn office_shift_fixtures_round_trip_and_a_plan_carries_no_number_or_status() {
         shift.totals.device_ids,
         vec![shift.owner_device_id.clone().unwrap()]
     );
-    // A shift without facts still carries every field, the instant as `null`.
-    let mut empty = shift.totals.clone();
-    empty.accepted_units = 0;
-    empty.closed_boxes = 0;
-    empty.open_boxes = 0;
-    empty.last_fact_at = None;
-    empty.device_ids.clear();
+    // The card's two unit numbers are the cloud office's: the units the
+    // facts accepted, and those of them in closed boxes (a full closed box
+    // each here; the open box holds the rest).
+    let totals = &fixture("office-shift.json")["totals"];
+    assert_eq!(totals["acceptedUnits"], 547);
+    assert_eq!(totals["unitsInClosedBoxes"], 540);
     assert_eq!(
-        serde_json::to_value(&empty).unwrap(),
-        serde_json::json!({
-            "acceptedUnits": 0, "closedBoxes": 0, "openBoxes": 0, "lastFactAt": null,
-            "deviceIds": []
-        })
+        totals["unitsInClosedBoxes"].as_u64().unwrap(),
+        totals["closedBoxes"].as_u64().unwrap() * u64::from(shift.box_capacity)
     );
+    // A shift without facts still carries every field, the instant as `null`.
+    let empty = serde_json::json!({
+        "acceptedUnits": 0, "unitsInClosedBoxes": 0, "closedBoxes": 0, "openBoxes": 0,
+        "lastFactAt": null, "deviceIds": []
+    });
+    let read: markiro_proto::ShiftTotals = serde_json::from_value(empty.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&read).unwrap(), empty);
     let create: ShiftCreate = round_trip("shift-create.json");
     assert_eq!(
         (&create.product_id, &create.line_id, &create.box_template_id),

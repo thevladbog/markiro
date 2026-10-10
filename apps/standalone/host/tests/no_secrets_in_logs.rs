@@ -1210,7 +1210,10 @@ async fn secrets_never_reach_the_process_log() {
         .post(format!("{base}/v1/device/facts"))
         .header(protocol.0, &protocol.1)
         .bearer_auth(&key)
-        .json(&json!({ "records": [scan_ok(40, &km_failing, "c36f7081-92a3-4b4c-8d5e-6f708192a3b4", 33)] }))
+        .json(&json!({ "records": [
+            { "not": "a fact" },
+            scan_ok(40, &km_failing, "c36f7081-92a3-4b4c-8d5e-6f708192a3b4", 33)
+        ] }))
         .send()
         .await
         .unwrap();
@@ -1546,8 +1549,21 @@ async fn secrets_never_reach_the_process_log() {
             "the log never named the refused record {refused}"
         );
     }
-    // The 500 names the database's own failure.
+    // The 500 names the database's own failure, and the batch's line names
+    // the device and the failing record's position in the batch (here the
+    // second record, after one the host refused), never the record.
     assert!(log.contains("request failed") && log.contains("UNIQUE constraint failed"));
+    let failed_batches: Vec<&str> = log
+        .lines()
+        .filter(|line| line.contains("a fact batch failed"))
+        .collect();
+    assert_eq!(failed_batches.len(), 1, "{failed_batches:?}");
+    assert!(
+        failed_batches[0].contains(&format!("device={station_id}"))
+            && failed_batches[0].contains("position=1"),
+        "{}",
+        failed_batches[0]
+    );
     let mut needles: Vec<String> = Vec::new();
     for code in [
         &km_a,
@@ -1632,10 +1648,12 @@ fn rust_files(dir: &std::path::Path, found: &mut Vec<std::path::PathBuf>) {
 /// when someone lowers the filter). So the source holds the line: the
 /// host's library prints nothing, and the facts path (the facts, the codes
 /// and the totals) has exactly the two `warn!` calls `facts::receive` makes
-/// for a refusal, by the record's id and the receipt's code. A new logging
-/// call there is a decision for this test and the walk, not a quiet line.
+/// for a refusal, by the record's id and the receipt's code, and the one
+/// `error!` of the batch route for a record that failed in the database, by
+/// the device and the record's position. A new logging call there is a
+/// decision for this test and the walk, not a quiet line.
 #[test]
-fn the_host_prints_nothing_and_the_facts_path_logs_only_its_two_audited_lines() {
+fn the_host_prints_nothing_and_the_facts_path_logs_only_its_three_audited_lines() {
     let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut files = Vec::new();
     rust_files(&src, &mut files);
@@ -1664,7 +1682,11 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_two_audited_lines() 
         }
         if relative.starts_with("facts/") || facts_path.contains(&relative.as_str()) {
             facts_files += 1;
-            let audited = if relative == "facts/mod.rs" { 2 } else { 0 };
+            let audited = match relative.as_str() {
+                "facts/mod.rs" => 2,
+                "routes/facts.rs" => 1,
+                _ => 0,
+            };
             assert_eq!(
                 text.matches("tracing::").count(),
                 audited,

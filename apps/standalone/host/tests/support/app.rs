@@ -679,10 +679,11 @@ pub fn sscc(serial: u64) -> String {
     sscc_under("460068200", serial)
 }
 
-/// The SSCC of a box of `serial` under `prefix` (9 digits), with its check
-/// digit.
+/// The SSCC of a box of `serial` under `prefix`, with its check digit: the
+/// serial fills what the prefix leaves of the 16 digits after the extension.
 pub fn sscc_under(prefix: &str, serial: u64) -> String {
-    let body = format!("0{prefix}{serial:07}");
+    let width = 16 - prefix.len();
+    let body = format!("0{prefix}{serial:0width$}");
     let sum: u32 = body
         .bytes()
         .rev()

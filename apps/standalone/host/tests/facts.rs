@@ -1108,6 +1108,65 @@ async fn the_earliest_scan_owns_a_code_whatever_order_the_scans_arrive_in() {
     assert_eq!(live, 1);
 }
 
+/// The registry compares the scans' instants to the millisecond, not to the
+/// second: two scans of one code within one second still have an earlier.
+#[tokio::test]
+async fn the_registry_orders_scans_within_one_second_by_the_millisecond() {
+    let (admin, floor) = floor().await;
+    let scan = |n: u32, box_n: u32, milli: u32| {
+        fact(
+            &record_id(n),
+            "scan",
+            &floor.shift,
+            ok_scan(7, &box_id(box_n), &instant(60, milli)),
+        )
+    };
+    let owner_at = |n: u32, box_n: u32, milli: u32| {
+        json!([
+            code_hash(7),
+            record_id(n),
+            floor.shift,
+            floor.station,
+            box_id(box_n),
+            instant(60, milli)
+        ])
+    };
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[scan(1, 1, 500)]).await,
+        vec![accepted(&record_id(1))]
+    );
+    // One millisecond earlier, in the same second, takes the code.
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &[scan(2, 2, 499)]).await,
+        vec![accepted(&record_id(2))]
+    );
+    assert_eq!(owners(&admin).await, vec![owner_at(2, 2, 499)]);
+    let first = items(&admin, &box_id(1)).await;
+    assert_eq!(first.len(), 1);
+    assert_eq!(first[0][0], json!(record_id(1)));
+    assert_ne!(first[0][4], Value::Null, "the first item left its box");
+    // The scan that was first is later now, and so are one at the owner's
+    // instant (a tie keeps the owner) and one a millisecond after it.
+    let loses = json!({
+        "winner": {
+            "shiftId": floor.shift, "shiftNumber": floor.number, "deviceId": floor.station,
+            "scannedAt": instant(60, 499), "sameDevice": true
+        }
+    });
+    let conflict = |n: u32| json!({ "id": record_id(n), "outcome": "conflict", "details": loses });
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[scan(3, 1, 500), scan(4, 1, 499), scan(5, 1, 999)]
+        )
+        .await,
+        vec![conflict(3), conflict(4), conflict(5)]
+    );
+    assert_eq!(owners(&admin).await, vec![owner_at(2, 2, 499)]);
+    assert_eq!(items(&admin, &box_id(2)).await[0][4], Value::Null);
+}
+
 /// A database error is no receipt: the whole batch fails, nothing of it
 /// stays, and the device sends it again.
 #[tokio::test]
@@ -4328,6 +4387,90 @@ async fn one_serial_of_a_block_closes_one_box_whatever_the_check_digits_say() {
 }
 
 #[tokio::test]
+async fn one_sscc_closes_one_box_whichever_block_and_prefix_it_comes_from() {
+    // The same 18 digits can come from two different `(block, serial)` pairs:
+    // when the issuer prefix changes from 9 to 8 digits the serial widths
+    // differ by one, and serial 1500 of either renders the same string. The
+    // pair does not see it; the string must, or the unique SSCC would raise a
+    // database error and the station's outbox would wedge on a 500.
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let floor = open_floor(&admin, &setup, &admin.key.clone(), &setup.line).await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    scan_into(&admin, &floor, &[(1, 1), (2, 2)]).await;
+    assert_eq!(
+        receipts(
+            &admin.app,
+            &floor.key,
+            &[close_in(
+                &floor,
+                10,
+                box_closed(
+                    &box_id(1),
+                    &block,
+                    1500,
+                    &[1],
+                    &instant(1, 0),
+                    &instant(40, 0)
+                )
+            )]
+        )
+        .await,
+        vec![accepted(&record_id(10))]
+    );
+    // The shift froze the 8-digit prefix, and the station holds a block of
+    // it that covers serial 1500.
+    let other_block = "2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f";
+    sqlx::query(
+        "INSERT INTO sscc_counters (issuer_prefix, extension, next_serial, rev) \
+         VALUES ('46006820', 0, 2000, 1)",
+    )
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    sqlx::query("UPDATE shifts SET snapshot = json_set(snapshot, '$.issuerPrefix', '46006820')")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "INSERT INTO sscc_blocks (id, issuer_prefix, extension, device_id, request_id, \
+         from_serial, to_serial, issued_at) VALUES (?, '46006820', 0, ?, ?, 1000, 1999, ?)",
+    )
+    .bind(other_block)
+    .bind(&floor.station)
+    .bind("3d4e5f6a-7b8c-4d9e-8f10-2b3c4d5e6f70")
+    .bind(admin.app.state.timestamp())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let colliding = sscc_under("46006820", 1500);
+    assert_eq!(colliding, sscc(1500));
+    let mut data = box_closed(
+        &box_id(2),
+        &json!({ "id": other_block }),
+        1500,
+        &[2],
+        &instant(2, 0),
+        &instant(41, 0),
+    );
+    data["sscc"] = json!(colliding);
+    let (status, body) = send_facts(&admin.app, &floor.key, &[close_in(&floor, 11, data)]).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        body["receipts"],
+        json!([rejected(Some(&record_id(11)), "sscc_taken", None)])
+    );
+    // The box stays open and the other block is not touched.
+    let row = box_row(&admin, &box_id(2)).await;
+    assert_eq!((&row[1], &row[2]), (&Value::Null, &Value::Null));
+    assert_eq!(consumed_through(&admin, &block).await, Some(1500));
+    assert_eq!(
+        consumed_through(&admin, &json!({ "id": other_block })).await,
+        None
+    );
+}
+
+#[tokio::test]
 async fn a_serial_of_a_block_is_unique_among_closed_boxes_in_the_database_itself() {
     // Defence in depth under the handler's refusal: no code path may leave
     // two closed boxes on one serial of a block.
@@ -6251,8 +6394,10 @@ async fn the_office_closing_after_the_station_finds_the_shift_changed_and_closed
 
 /// The office closes the shift while a station's batch waits for the write
 /// lock: the batch reads the shift once it holds the lock, so it finds the
-/// shift closed (the close is `alreadyClosed`, nothing of the office's is
-/// overwritten, the batch takes no revision).
+/// shift closed (the batch's close is `alreadyClosed` and nothing of the
+/// office's is overwritten; the batch's late scan takes the batch's one
+/// revision). The batch is called directly and proved to wait at the lock
+/// before the office writes, so no sleep decides which of them comes first.
 #[tokio::test]
 async fn a_batch_waiting_for_the_lock_finds_the_shift_the_office_closed_meanwhile() {
     let (admin, floor) = floor().await;
@@ -6274,24 +6419,27 @@ async fn a_batch_waiting_for_the_lock_finds_the_shift_the_office_closed_meanwhil
             ok_scan(1, &box_id(1), &instant(61, 0)),
         ),
     ];
-    let batch = send_facts(&admin.app, &floor.key, &records);
-    let office = async {
-        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
-        let rev = markiro_host::db::next_revision(&mut holder).await.unwrap();
-        sqlx::query(
-            "UPDATE shifts SET status = 'closed', closed_at = ?, closed_by_kind = 'office_user', \
-             closed_by = ?, close_reason_text = 'Станция не отвечает', rev = ? WHERE id = ?",
-        )
-        .bind("2026-10-08T06:05:00Z")
-        .bind(&admin.id)
-        .bind(rev)
-        .bind(shift)
-        .execute(&mut *holder)
-        .await
-        .unwrap();
-        holder.commit().await.unwrap();
-    };
-    let ((status, body), ()) = tokio::join!(batch, office);
+    let mut batch = Box::pin(receive_as(&admin, &floor.station, &records));
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(200), &mut batch)
+            .await
+            .is_err(),
+        "the batch answered while the office held the lock"
+    );
+    let rev = markiro_host::db::next_revision(&mut holder).await.unwrap();
+    sqlx::query(
+        "UPDATE shifts SET status = 'closed', closed_at = ?, closed_by_kind = 'office_user', \
+         closed_by = ?, close_reason_text = 'Станция не отвечает', rev = ? WHERE id = ?",
+    )
+    .bind("2026-10-08T06:05:00Z")
+    .bind(&admin.id)
+    .bind(rev)
+    .bind(shift)
+    .execute(&mut *holder)
+    .await
+    .unwrap();
+    holder.commit().await.unwrap();
+    let (status, body) = batch.await;
     assert_eq!(status, StatusCode::OK, "{body}");
     assert_eq!(
         body["receipts"],
@@ -6321,6 +6469,68 @@ async fn a_batch_waiting_for_the_lock_finds_the_shift_the_office_closed_meanwhil
     );
     assert_eq!(close_events(&admin).await[0][8], json!("already_closed"));
     assert_eq!(audit_rows(&admin.app).await, audit);
+}
+
+/// What a batch writes carries the moment it held the lock, not the moment
+/// it arrived: a batch that waited behind the office's close is stamped
+/// after that close, so its late mark never precedes the close it follows.
+#[tokio::test]
+async fn a_batch_is_stamped_when_it_holds_the_lock_not_when_it_arrived() {
+    let (admin, floor) = floor().await;
+    let shift = floor.shift.as_str();
+    let mut holder = begin_write(&admin.app.state.pool).await.unwrap();
+    let closed_at = admin.app.state.timestamp();
+    let rev = markiro_host::db::next_revision(&mut holder).await.unwrap();
+    sqlx::query(
+        "UPDATE shifts SET status = 'closed', closed_at = ?, closed_by_kind = 'office_user', \
+         closed_by = ?, close_reason_text = 'Станция не отвечает', rev = ? WHERE id = ?",
+    )
+    .bind(&closed_at)
+    .bind(&admin.id)
+    .bind(rev)
+    .bind(shift)
+    .execute(&mut *holder)
+    .await
+    .unwrap();
+    let records = [fact(
+        &record_id(1),
+        "scan",
+        shift,
+        ok_scan(1, &box_id(1), &instant(61, 0)),
+    )];
+    let mut batch = Box::pin(receive_as(&admin, &floor.station, &records));
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(200), &mut batch)
+            .await
+            .is_err(),
+        "the batch answered while the office held the lock"
+    );
+    // The batch has arrived and waits; a minute passes before it gets in.
+    admin.app.clock.advance(time::Duration::minutes(1));
+    let held_at = admin.app.state.timestamp();
+    assert_ne!(held_at, closed_at);
+    holder.commit().await.unwrap();
+    let (status, body) = batch.await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["receipts"], json!([accepted(&record_id(1))]));
+    let stamped: Vec<(String, String)> = sqlx::query_as(
+        "SELECT 'receipt', received_at FROM fact_receipts UNION ALL \
+         SELECT 'scan', received_at FROM scans",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        stamped,
+        vec![
+            ("receipt".to_owned(), held_at.clone()),
+            ("scan".to_owned(), held_at.clone())
+        ]
+    );
+    let state = shift_state(&admin, shift).await;
+    assert_eq!(state[1], json!(closed_at));
+    assert_eq!(state[5], json!(held_at));
+    assert!(held_at > closed_at, "the late mark precedes the close");
 }
 
 #[tokio::test]
@@ -6647,8 +6857,8 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
     let planned = plan_shift(&admin, shift_body(&setup)).await;
     let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
     let none = json!({
-        "acceptedUnits": 0, "closedBoxes": 0, "openBoxes": 0, "lastFactAt": null,
-        "deviceIds": []
+        "acceptedUnits": 0, "unitsInClosedBoxes": 0, "closedBoxes": 0, "openBoxes": 0,
+        "lastFactAt": null, "deviceIds": []
     });
     assert_eq!(totals(&admin, planned["id"].as_str().unwrap()).await, none);
     let mut entered = none.clone();
@@ -6672,7 +6882,10 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
     // Box 1 holds 1–3 and closes; box 2 holds 4 and 5, and 5 is undone; box
     // 3 holds 6, undone, so it is open but empty; box 4 holds 7, closes and
     // is taken apart; box 5 holds 9, which the colleague's earlier scan takes
-    // below; a scan that is no code counts nothing.
+    // below; a scan that is no code counts nothing. The units are the shift's
+    // live items (5: boxes 1, 2 and 5), and those among them in a closed box
+    // that was not taken apart (3: box 1) are what the office's card calls
+    // the codes in closed boxes.
     let batch = vec![
         scan(1, 1),
         scan(2, 1),
@@ -6740,13 +6953,41 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
     assert_eq!(
         totals(&admin, shift).await,
         json!({
-            "acceptedUnits": 5, "closedBoxes": 1, "openBoxes": 2, "lastFactAt": first_batch,
-            "deviceIds": [floor.station]
+            "acceptedUnits": 5, "unitsInClosedBoxes": 3, "closedBoxes": 1, "openBoxes": 2,
+            "lastFactAt": first_batch, "deviceIds": [floor.station]
         })
     );
+    // The number is a definition, not a side effect of the exceptions: an
+    // item still live in a box taken apart (no fact leaves one) would be a
+    // unit but never a code in a closed box.
+    let removed: String = sqlx::query_scalar("SELECT removed_at FROM box_items WHERE box_id = ?")
+        .bind(box_id(4))
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE box_items SET removed_at = NULL WHERE box_id = ?")
+        .bind(box_id(4))
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let revived = totals(&admin, shift).await;
+    assert_eq!(
+        (
+            &revived["acceptedUnits"],
+            &revived["unitsInClosedBoxes"],
+            &revived["closedBoxes"]
+        ),
+        (&json!(6), &json!(3), &json!(1))
+    );
+    sqlx::query("UPDATE box_items SET removed_at = ? WHERE box_id = ?")
+        .bind(removed)
+        .bind(box_id(4))
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
     // The colleague's earlier scans of codes 2 and 9 take them out of boxes 1
-    // and 5, which is open and empty then; a record the host refuses still
-    // tells when the station last sent one.
+    // (closed, 2 codes left) and 5, which is open and empty then; a record
+    // the host refuses still tells when the station last sent one.
     admin.app.clock.advance(time::Duration::minutes(5));
     let second_batch = admin.app.state.timestamp();
     let taken = receipts(
@@ -6786,15 +7027,15 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
     assert_eq!(
         totals(&admin, shift).await,
         json!({
-            "acceptedUnits": 3, "closedBoxes": 1, "openBoxes": 1, "lastFactAt": second_batch,
-            "deviceIds": [floor.station]
+            "acceptedUnits": 3, "unitsInClosedBoxes": 2, "closedBoxes": 1, "openBoxes": 1,
+            "lastFactAt": second_batch, "deviceIds": [floor.station]
         })
     );
     assert_eq!(
         totals(&admin, &colleague.shift).await,
         json!({
-            "acceptedUnits": 2, "closedBoxes": 0, "openBoxes": 1, "lastFactAt": second_batch,
-            "deviceIds": [colleague.station]
+            "acceptedUnits": 2, "unitsInClosedBoxes": 0, "closedBoxes": 0, "openBoxes": 1,
+            "lastFactAt": second_batch, "deviceIds": [colleague.station]
         })
     );
     // The devices come first entry first. A second device on a shift comes
@@ -6869,13 +7110,13 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
         "{answered:?}"
     );
     let colleagues = json!({
-        "acceptedUnits": 3, "closedBoxes": 1, "openBoxes": 1, "lastFactAt": third_batch,
-        "deviceIds": [colleague.station]
+        "acceptedUnits": 3, "unitsInClosedBoxes": 1, "closedBoxes": 1, "openBoxes": 1,
+        "lastFactAt": third_batch, "deviceIds": [colleague.station]
     });
     assert_eq!(totals(&admin, &colleague.shift).await, colleagues);
     let floors = json!({
-        "acceptedUnits": 3, "closedBoxes": 1, "openBoxes": 1, "lastFactAt": second_batch,
-        "deviceIds": [other, floor.station]
+        "acceptedUnits": 3, "unitsInClosedBoxes": 2, "closedBoxes": 1, "openBoxes": 1,
+        "lastFactAt": second_batch, "deviceIds": [other, floor.station]
     });
     assert_eq!(totals(&admin, shift).await, floors);
     // Every write of the office answers with the totals the list gives.

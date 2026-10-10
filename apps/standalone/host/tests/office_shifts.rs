@@ -20,8 +20,8 @@ fn planned(id: &str, number: &str, setup: &ShiftSetup, rev: i64) -> Value {
         "closeReasonText": null, "lateDataAt": null, "createdAt": "2026-09-21T14:13:20Z",
         "rev": rev,
         "totals": {
-            "acceptedUnits": 0, "closedBoxes": 0, "openBoxes": 0, "lastFactAt": null,
-            "deviceIds": []
+            "acceptedUnits": 0, "unitsInClosedBoxes": 0, "closedBoxes": 0, "openBoxes": 0,
+            "lastFactAt": null, "deviceIds": []
         }
     })
 }
