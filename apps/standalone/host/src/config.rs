@@ -69,8 +69,18 @@ impl HostPaths {
         self.data_dir.join("logs")
     }
 
+    /// The local folder of copies of the database (plan РК).
+    pub fn backups_dir(&self) -> PathBuf {
+        self.data_dir.join("backups")
+    }
+
     pub fn ensure(&self) -> Result<(), ConfigError> {
-        for dir in [self.data_dir.clone(), self.tls_dir(), self.logs_dir()] {
+        for dir in [
+            self.data_dir.clone(),
+            self.tls_dir(),
+            self.logs_dir(),
+            self.backups_dir(),
+        ] {
             fs::create_dir_all(&dir).map_err(|source| ConfigError::Io {
                 path: dir.clone(),
                 source,

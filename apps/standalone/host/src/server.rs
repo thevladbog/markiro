@@ -321,9 +321,11 @@ pub async fn protocol_guard(mut request: Request, next: Next) -> Result<Response
 }
 
 async fn hello(State(state): State<AppState>) -> Result<Json<markiro_proto::Hello>, ApiError> {
-    let initialized = crate::db::is_initialized(&state.pool)
-        .await
-        .map_err(ApiError::internal)?;
+    let (initialized, restore_epoch): (bool, Option<String>) =
+        sqlx::query_as("SELECT initialized_at IS NOT NULL, restore_epoch FROM site WHERE id = 1")
+            .fetch_one(&state.pool)
+            .await
+            .map_err(ApiError::internal)?;
     Ok(Json(markiro_proto::Hello {
         product: markiro_proto::HOST_PRODUCT.to_owned(),
         protocol: markiro_proto::PROTOCOL_VERSION,
@@ -332,6 +334,7 @@ async fn hello(State(state): State<AppState>) -> Result<Json<markiro_proto::Hell
         version: env!("CARGO_PKG_VERSION").to_owned(),
         time: state.timestamp(),
         initialized,
+        restore_epoch,
     }))
 }
 

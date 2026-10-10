@@ -1,0 +1,12 @@
+{
+  "now": "2026-10-09T14:20:00Z",
+  "local": {
+    "dir": "/var/lib/markiro/backups",
+    "lastAttempt": null,
+    "copies": []
+  },
+  "second": null,
+  "settingsRev": 0,
+  "running": { "trigger": "manual", "startedAt": "2026-10-09T14:19:58Z" },
+  "restoreHold": null
+}

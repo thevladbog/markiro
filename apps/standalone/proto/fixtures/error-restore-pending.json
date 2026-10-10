@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "restore_pending",
+    "message": "the host was restored from a copy: facts wait until the office resumes them",
+    "details": { "since": "2026-10-09T15:00:00Z" }
+  }
+}

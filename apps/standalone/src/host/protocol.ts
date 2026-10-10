@@ -35,6 +35,8 @@ export const helloSchema = z
     version: z.string().min(1),
     time: z.iso.datetime(),
     initialized: z.boolean(),
+    /** A new UUID at every restore of the host from a copy (plan РК); absent before the first. */
+    restoreEpoch: z.uuid().optional(),
   })
   .strict();
 export type Hello = z.infer<typeof helloSchema>;
