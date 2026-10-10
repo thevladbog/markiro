@@ -29,7 +29,8 @@ use crate::validate;
 /// subquery over the shift's facts, served by the indexes of `0010`.
 const SELECT: &str = "SELECT id, number_month_key, number_seq, created_from, status, mode, \
      pallets_enabled, product_id, line_id, counterparty_id, production_date, planned_qty, \
-     box_capacity, box_template_id, owner_device_id, opened_at, closed_at, close_reason_code, \
+     box_capacity, box_template_id, pallet_box_capacity, pallet_template_id, owner_device_id, \
+     opened_at, closed_at, close_reason_code, \
      close_reason_text, late_data_at, created_at, rev, \
      (SELECT COUNT(*) FROM box_items i JOIN boxes b ON b.id = i.box_id \
       WHERE b.shift_id = shifts.id AND i.removed_at IS NULL AND i.displaced_at IS NULL) \
@@ -64,6 +65,8 @@ struct ShiftRow {
     planned_qty: Option<u32>,
     box_capacity: u32,
     box_template_id: String,
+    pallet_box_capacity: Option<u32>,
+    pallet_template_id: Option<String>,
     owner_device_id: Option<String>,
     opened_at: Option<String>,
     closed_at: Option<String>,
@@ -97,6 +100,8 @@ fn record(row: ShiftRow) -> Result<OfficeShift, ApiError> {
         planned_qty: row.planned_qty,
         box_capacity: row.box_capacity,
         box_template_id: row.box_template_id,
+        pallet_box_capacity: row.pallet_box_capacity,
+        pallet_template_id: row.pallet_template_id,
         owner_device_id: row.owner_device_id,
         opened_at: row.opened_at,
         closed_at: row.closed_at,
@@ -203,33 +208,33 @@ pub async fn get_shift(
         .ok_or_else(|| ApiError::not_found("no such shift"))
 }
 
-/// Stage 2a takes only aggregation without pallets (spec decision 6): the
-/// fields are there so stages 2b and 3 need no new shape.
-pub fn check_mode(mode: ShiftMode, pallets_enabled: bool) -> Result<(), ApiError> {
+/// Only aggregation is taken (spec decision 6), with or without pallets
+/// (plan ПЛ-Х): validation (stage 3) needs no new shape.
+pub fn check_mode(mode: ShiftMode) -> Result<(), ApiError> {
     if mode != ShiftMode::Aggregation {
         return Err(ApiError::validation(
             "mode",
             "only aggregation shifts are taken for now",
         ));
     }
-    if pallets_enabled {
-        return Err(ApiError::validation(
-            "palletsEnabled",
-            "shifts with pallets are not taken for now",
-        ));
-    }
     Ok(())
 }
 
 /// `POST /v1/office/shifts`: a planned shift of an active product on an
-/// active line, with a box template that fits the product.
+/// active line, with a box template that fits the product, and with pallets
+/// a pallet template that fits it too (`shifts::pallet_request`).
 pub async fn create_shift(
     State(state): State<AppState>,
     context: OfficeContext,
     ApiJson(create): ApiJson<ShiftCreate>,
 ) -> Result<Json<OfficeShift>, ApiError> {
     context.require_shift_planning()?;
-    check_mode(create.mode, create.pallets_enabled)?;
+    check_mode(create.mode)?;
+    let pallet_request = shifts::pallet_request(
+        create.pallets_enabled,
+        create.pallet_box_capacity,
+        create.pallet_template_id.as_deref(),
+    )?;
     let production_date = validate::civil_date("productionDate", &create.production_date)?;
     validate::count("plannedQty", create.planned_qty, validate::MAX_PLANNED_QTY)?;
     validate::count(
@@ -246,6 +251,7 @@ pub async fn create_shift(
         shifts::check_counterparty(&mut tx, counterparty_id).await?;
     }
     shifts::check_box_template(&mut tx, &create.box_template_id, product.group).await?;
+    let pallets = shifts::pallets(&mut tx, pallet_request, &product).await?;
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     let id = shifts::insert(
         &mut tx,
@@ -260,6 +266,7 @@ pub async fn create_shift(
             planned_qty: create.planned_qty,
             box_capacity: create.box_capacity.unwrap_or(product.box_capacity),
             box_template_id: &create.box_template_id,
+            pallets,
         },
         &at,
         rev,
@@ -298,7 +305,9 @@ pub async fn create_shift(
 /// neither its label nor its snapshot shows; a closed one nothing. A line, a
 /// template or a counterparty that changes is checked as at planning; one that
 /// stays is kept even if it was archived, disabled or narrowed since (the
-/// station's open then refuses the template: `template_not_fit`).
+/// station's open then refuses the template: `template_not_fit`). Pallets
+/// turned on need a pallet template and take the product's capacity unless
+/// the edit names one; turned off, the shift keeps neither.
 pub async fn update_shift(
     State(state): State<AppState>,
     context: OfficeContext,
@@ -306,9 +315,11 @@ pub async fn update_shift(
     ApiJson(update): ApiJson<ShiftUpdate>,
 ) -> Result<Json<OfficeShift>, ApiError> {
     context.require_shift_planning()?;
-    check_mode(
-        update.mode.unwrap_or_default(),
-        update.pallets_enabled.unwrap_or(false),
+    check_mode(update.mode.unwrap_or_default())?;
+    validate::count(
+        "palletBoxCapacity",
+        update.pallet_box_capacity,
+        validate::MAX_PALLET_BOX_CAPACITY,
     )?;
     let production_date = update
         .production_date
@@ -348,13 +359,52 @@ pub async fn update_shift(
         .counterparty_id
         .clone()
         .unwrap_or_else(|| current.counterparty_id.clone());
+    // Pallets that stay on keep what the edit does not send; turned off, the
+    // edit sends neither field.
+    let pallets_enabled = update.pallets_enabled.unwrap_or(current.pallets_enabled);
+    let pallet_request = if pallets_enabled {
+        shifts::pallet_request(
+            true,
+            update.pallet_box_capacity.or(current.pallet_box_capacity),
+            update
+                .pallet_template_id
+                .as_deref()
+                .or(current.pallet_template_id.as_deref()),
+        )?
+    } else {
+        shifts::pallet_request(
+            false,
+            update.pallet_box_capacity,
+            update.pallet_template_id.as_deref(),
+        )?
+    };
+    let (mut pallet_box_capacity, pallet_template_id) = match pallet_request {
+        shifts::PalletRequest::Off => (None, None),
+        shifts::PalletRequest::On {
+            box_capacity,
+            template_id,
+        } => (box_capacity, Some(template_id.to_owned())),
+    };
     let fixed_changed = line_id != current.line_id
         || production_date != current.production_date
         || box_template_id != current.box_template_id
         || box_capacity != current.box_capacity
-        || counterparty_id != current.counterparty_id;
+        || counterparty_id != current.counterparty_id
+        || pallets_enabled != current.pallets_enabled
+        || pallet_box_capacity != current.pallet_box_capacity
+        || pallet_template_id != current.pallet_template_id;
     match current.status {
         ShiftStatus::Planned => {
+            // A changed pallet template is checked; pallets just turned on
+            // (the only way to have a template and no capacity yet) take the
+            // product's capacity.
+            if let Some(template_id) = &pallet_template_id {
+                if pallet_template_id != current.pallet_template_id {
+                    let product = shifts::shift_product(&mut tx, &current.product_id).await?;
+                    shifts::check_pallet_template(&mut tx, template_id, product.group).await?;
+                    pallet_box_capacity.get_or_insert(product.pallet_box_capacity);
+                }
+            }
             if line_id != current.line_id {
                 require_active_line(&mut tx, &line_id).await?;
             }
@@ -394,6 +444,21 @@ pub async fn update_shift(
             json!(current.counterparty_id),
             json!(counterparty_id),
         ),
+        (
+            "palletsEnabled",
+            json!(current.pallets_enabled),
+            json!(pallets_enabled),
+        ),
+        (
+            "palletBoxCapacity",
+            json!(current.pallet_box_capacity),
+            json!(pallet_box_capacity),
+        ),
+        (
+            "palletTemplateId",
+            json!(current.pallet_template_id),
+            json!(pallet_template_id),
+        ),
     ]) else {
         // Nothing actually changed: report the shift as-is without bumping
         // the revision, writing a row nobody changed, or auditing a no-op.
@@ -402,7 +467,8 @@ pub async fn update_shift(
     let rev = next_revision(&mut tx).await.map_err(ApiError::internal)?;
     sqlx::query(
         "UPDATE shifts SET line_id = ?, production_date = ?, box_template_id = ?, \
-         box_capacity = ?, planned_qty = ?, counterparty_id = ?, rev = ? WHERE id = ?",
+         box_capacity = ?, planned_qty = ?, counterparty_id = ?, pallets_enabled = ?, \
+         pallet_box_capacity = ?, pallet_template_id = ?, rev = ? WHERE id = ?",
     )
     .bind(&line_id)
     .bind(&production_date)
@@ -410,6 +476,9 @@ pub async fn update_shift(
     .bind(box_capacity)
     .bind(planned_qty)
     .bind(&counterparty_id)
+    .bind(pallets_enabled)
+    .bind(pallet_box_capacity)
+    .bind(&pallet_template_id)
     .bind(rev)
     .bind(&id)
     .execute(&mut *tx)

@@ -739,6 +739,24 @@ fn office_shift_fixtures_round_trip_and_a_plan_carries_no_number_or_status() {
             "{field}"
         );
     }
+    // Without pallets the pallet fields are left out, and stay out.
+    assert_eq!(
+        (shift.pallet_box_capacity, shift.pallet_template_id.clone()),
+        (None, None)
+    );
+    assert_eq!(
+        (bare.pallet_box_capacity, bare.pallet_template_id.clone()),
+        (None, None)
+    );
+    let pallets: ShiftCreate = round_trip("shift-create-pallets.json");
+    assert_eq!(
+        (
+            pallets.pallets_enabled,
+            pallets.pallet_box_capacity,
+            pallets.pallet_template_id.as_deref()
+        ),
+        (true, Some(40), Some("c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f"))
+    );
 }
 
 #[test]
@@ -768,6 +786,13 @@ fn a_shift_update_carries_only_what_changes_and_never_the_product() {
     let mut value = fixture("shift-update.json");
     value["productId"] = Value::String("f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b".into());
     assert!(serde_json::from_value::<ShiftUpdate>(value).is_err());
+    // Pallet fields go out only when sent.
+    let pallets = serde_json::json!({
+        "palletsEnabled": true, "palletBoxCapacity": 30,
+        "palletTemplateId": "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f", "expectedRev": 71
+    });
+    let typed: ShiftUpdate = serde_json::from_value(pallets.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&typed).unwrap(), pallets);
 }
 
 #[test]

@@ -497,6 +497,42 @@ pub fn shift_body(setup: &ShiftSetup) -> Value {
     })
 }
 
+/// A label template of `purpose` made through the office API, enabled or
+/// not, for the product groups `codes` (`Value::Null`: every group);
+/// returns its id.
+pub async fn office_template(admin: &Admin, purpose: &str, enabled: bool, codes: Value) -> String {
+    let (status, template) = admin
+        .call(
+            "POST",
+            "/v1/office/templates",
+            Some(serde_json::json!({
+                "name": "Паллета 100×150", "purpose": purpose, "enabled": enabled,
+                "chzProductGroupCodes": codes,
+                "spec": {
+                    "widthMm": 100, "heightMm": 150, "dpi": 203, "language": "zpl",
+                    "elements": []
+                }
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{template}");
+    template["id"].as_str().unwrap().to_owned()
+}
+
+/// An enabled pallet template for every product group; returns its id.
+pub async fn pallet_template(admin: &Admin) -> String {
+    office_template(admin, "pallet", true, Value::Null).await
+}
+
+/// `shift_body(setup)` with pallets of `template`, their capacity left to
+/// the product's 40.
+pub fn pallet_shift_body(setup: &ShiftSetup, template: &str) -> Value {
+    let mut body = shift_body(setup);
+    body["palletsEnabled"] = Value::Bool(true);
+    body["palletTemplateId"] = Value::String(template.to_owned());
+    body
+}
+
 /// Plan a shift of `body` as the administrator; returns the record.
 pub async fn plan_shift(admin: &Admin, body: Value) -> Value {
     let (status, shift) = admin.call("POST", "/v1/office/shifts", Some(body)).await;

@@ -281,6 +281,7 @@ const REQUESTS = [
   ["template-defaults-update.json", templateDefaultsUpdateSchema],
   ["bootstrap-request-templates.json", bootstrapRequestSchema],
   ["shift-create.json", shiftCreateSchema],
+  ["shift-create-pallets.json", shiftCreateSchema],
   ["shift-update.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
 ] as const;
@@ -1214,6 +1215,8 @@ describe("shift shapes", () => {
       ownerDeviceId: ["42"],
       plannedQty: [0, 1.5, -1, "1200"],
       boxCapacity: [0, 1.5, null],
+      palletBoxCapacity: [0, 1.5, -1, "40"],
+      palletTemplateId: ["42"],
       productionDate: ["08.10.2026", "2026-10-8", 20261008, null],
       openedAt: ["yesterday"],
       rev: [1.5, null],
@@ -1244,6 +1247,17 @@ describe("shift shapes", () => {
         true,
       );
     }
+  });
+
+  it("read a shift with pallets: their capacity and their template", () => {
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    const pallets = {
+      ...shift,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f",
+    };
+    expect(officeShiftSchema.parse(pallets)).toEqual(pallets);
   });
 
   it("read a mode and a close reason code this build does not know, and a plan of one unit", () => {
@@ -1300,6 +1314,8 @@ describe("shift shapes", () => {
       counterpartyId: ["42"],
       mode: ["boxes", null],
       palletsEnabled: ["no", null],
+      palletBoxCapacity: [0, -1, 1.5, "40", null],
+      palletTemplateId: ["42", null],
     };
     for (const [field, values] of Object.entries(refusedCreate)) {
       for (const value of values) {
@@ -1328,6 +1344,8 @@ describe("shift shapes", () => {
       counterpartyId: ["42"],
       mode: ["boxes"],
       palletsEnabled: ["no"],
+      palletBoxCapacity: [0, -1, 1.5, "40", null],
+      palletTemplateId: ["42", null],
       expectedRev: [1.5, "71", null],
     };
     for (const [field, values] of Object.entries(refusedUpdate)) {

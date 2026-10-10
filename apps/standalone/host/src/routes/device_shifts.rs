@@ -214,6 +214,7 @@ pub async fn create_device_shift(
             planned_qty: create.planned_qty,
             box_capacity: create.box_capacity.unwrap_or(product.box_capacity),
             box_template_id: &create.box_template_id,
+            pallets: None,
         },
         &at,
         rev,

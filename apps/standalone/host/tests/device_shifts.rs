@@ -926,6 +926,24 @@ async fn a_station_create_takes_every_field_it_names() {
     assert_eq!(status, StatusCode::OK, "{office}");
     assert_eq!(office["counterpartyId"], counterparty["id"]);
     assert_eq!(office["lineId"], json!(setup.line));
+    // A station's shift has no pallets: neither the record nor the row
+    // carries a pallet field.
+    assert_eq!(
+        [
+            office["palletsEnabled"].clone(),
+            office["palletBoxCapacity"].clone(),
+            office["palletTemplateId"].clone()
+        ],
+        [json!(false), Value::Null, Value::Null]
+    );
+    let columns: (i64, Option<i64>, Option<String>) = sqlx::query_as(
+        "SELECT pallets_enabled, pallet_box_capacity, pallet_template_id FROM shifts WHERE id = ?",
+    )
+    .bind(created["id"].as_str().unwrap())
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(columns, (0, None, None));
 }
 
 /// The status and `details` of an entry that is refused.

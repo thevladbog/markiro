@@ -1460,6 +1460,10 @@ pub struct OfficeShift {
     pub planned_qty: Option<u32>,
     pub box_capacity: u32,
     pub box_template_id: String,
+    /// How many boxes a pallet holds and the pallet label template: both set
+    /// exactly when `palletsEnabled` (plan ПЛ-Х), `null` otherwise.
+    pub pallet_box_capacity: Option<u32>,
+    pub pallet_template_id: Option<String>,
     /// The station that opened the shift; `null` while it is planned.
     pub owner_device_id: Option<String>,
     pub opened_at: Option<String>,
@@ -1497,8 +1501,10 @@ pub struct ShiftTotals {
 }
 
 /// `POST /v1/office/shifts`: a planned shift. `boxCapacity` left out is the
-/// product's; `mode` left out is aggregation and `palletsEnabled` false,
-/// the only values stage 2a takes.
+/// product's; `mode` left out is aggregation (the only mode taken) and
+/// `palletsEnabled` false. A shift with pallets names its pallet template
+/// and may name its pallet capacity (the product's when left out); one
+/// without sends neither.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ShiftCreate {
@@ -1516,6 +1522,10 @@ pub struct ShiftCreate {
     pub mode: ShiftMode,
     #[serde(default)]
     pub pallets_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_box_capacity: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_template_id: Option<String>,
 }
 
 /// `PUT /v1/office/shifts/{id}`: only the fields sent change, over
@@ -1523,7 +1533,9 @@ pub struct ShiftCreate {
 /// is no field here; an active one only `plannedQty` (another field sent
 /// with another value is `conflict` on `shift_status`); a closed one
 /// nothing. `plannedQty: null` and `counterpartyId: null` clear them; `null`
-/// in another field reads as «not sent» (see [`LineUpdate`]).
+/// in another field reads as «not sent» (see [`LineUpdate`]). Pallets turned
+/// off clear the pallet capacity and template (sending either then is
+/// `validation_failed`); turned on, they need a template.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ShiftUpdate {
@@ -1543,6 +1555,10 @@ pub struct ShiftUpdate {
     pub mode: Option<ShiftMode>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pallets_enabled: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_box_capacity: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_template_id: Option<String>,
     pub expected_rev: i64,
 }
 

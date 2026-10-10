@@ -2074,10 +2074,17 @@ draft or an archived one is `conflict` on `product_inactive`, an unknown one
 none, a box template that fits the product (`templates::fits`: enabled, of
 the box purpose, covering the product's group), the production date, a box
 capacity (the product's when left out; at most `MAX_BOX_CAPACITY`) and a plan
-or none (at most `MAX_PLANNED_QTY`, 10 000 000). `mode` and `palletsEnabled`
-are the cloud's shape; stage 2a takes only `aggregation` and `false`
-(`validation_failed` on either otherwise), so stages 2b and 3 need no new
-shape. Every office role reads shifts (`GET /v1/office/shifts`, `GET …/{id}`);
+or none (at most `MAX_PLANNED_QTY`, 10 000 000). `mode` is the cloud's shape;
+only `aggregation` is taken (`validation_failed` on `mode` otherwise), so
+stage 3 needs no new shape. A shift with pallets (`palletsEnabled`, plan
+ПЛ-Х, migration `0012_pallets.sql`) names a pallet template that fits the
+product (`templates::fits` for the pallet purpose; `validation_failed` on
+`palletTemplateId` otherwise, a missing one included) and a pallet capacity of
+1–`MAX_PALLET_BOX_CAPACITY` (10 000; the product's when left out); a shift
+without pallets sends neither field (`validation_failed` on the one it
+sends). `OfficeShift` names `palletBoxCapacity` and `palletTemplateId`
+exactly when `palletsEnabled`, which two triggers of `0012` hold in the
+table. Every office role reads shifts (`GET /v1/office/shifts`, `GET …/{id}`);
 administrators and technologists write them (`planShifts`, «Writes»). The
 list without a period holds every planned and active shift and the closed
 ones produced in the last 31 days of the host's clock (UTC); `?from=&to=`
@@ -2099,11 +2106,18 @@ that changes is checked as at planning (a changed template also needs the
 product still in use); one that stays is kept even if it was archived,
 disabled or narrowed since, and the station's opening refuses it then
 (`template_not_fit`). `plannedQty: null` and `counterpartyId: null` clear
-them. Only a planned shift is deleted (`DELETE …/{id}`, 204; an open or a
-closed one is `shift_status`); the delete takes a revision with no row left to
+them. A planned shift turns pallets on (with a pallet template; the
+product's capacity unless the edit names one) or off, which clears the
+capacity and the template (sending either then is `validation_failed`);
+pallets that stay on keep what the edit does not send, a pallet template
+disabled since included, and a changed template is checked. An open shift
+keeps its pallets (`shift_status`). Only a planned shift is deleted
+(`DELETE …/{id}`, 204; an open or a closed one is `shift_status`); the delete
+takes a revision with no row left to
 stamp, and a delete repeated after a lost answer is `not_found`. A template a
-planned shift names is not deleted (`conflict` on `template_in_use`, with
-`details.shiftIds`), since the shift prints with it once a station opens it;
+planned shift names, for its boxes or its pallets, is not deleted (`conflict`
+on `template_in_use`, with `details.shiftIds`), since the shift prints with it
+once a station opens it;
 an open or closed shift has the layout in its snapshot. Disabling or narrowing
 such a template is not refused: the shift then does not open, and the office
 sees why.
@@ -2178,8 +2192,9 @@ entered again.
 The audit rows of this part are six, all `ok`: `shift.create` (an office user,
 or a station as the device; target `shift`, details `{ number, productId,
 lineId, productionDate }`), `shift.update` (an office user; the update details
-of `lineId`, `productionDate`, `boxTemplateId`, `boxCapacity`, `plannedQty`
-and `counterpartyId`, no row when nothing changed), `shift.delete` (an office
+of `lineId`, `productionDate`, `boxTemplateId`, `boxCapacity`, `plannedQty`,
+`counterpartyId`, `palletsEnabled`, `palletBoxCapacity` and
+`palletTemplateId`, no row when nothing changed), `shift.delete` (an office
 user; `{ number }`), `shift.open` (the station; `{ number, templateId,
 templateRev }`), `shift.close` (an office user; `{ reason }`) and
 `sscc.block.issue` (a station; target `sscc_block`; `{ issuerPrefix,

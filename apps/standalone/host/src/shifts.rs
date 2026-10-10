@@ -68,12 +68,14 @@ pub fn format_number(month_key: &str, seq: i64, origin: ShiftOrigin) -> String {
     format!("{month_key}-{seq:03}{station}")
 }
 
-/// What a new shift's product gives it: the product group its box template
-/// must cover, and the box capacity a shift takes when it names none.
+/// What a new shift's product gives it: the product group its templates
+/// must cover, and the capacities a shift takes when it names none (an
+/// active product has both).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ShiftProduct {
     pub group: u32,
     pub box_capacity: u32,
+    pub pallet_box_capacity: u32,
 }
 
 /// `conflict` on `product_inactive`: the product is a draft or archived.
@@ -99,24 +101,34 @@ pub async fn shift_product(
     conn: &mut SqliteConnection,
     id: &str,
 ) -> Result<ShiftProduct, ApiError> {
-    let row: Option<(String, bool, Option<u32>, Option<u32>)> = sqlx::query_as(
-        "SELECT status, archived, chz_group_code, box_capacity FROM products WHERE id = ?",
+    type ProductRow = (String, bool, Option<u32>, Option<u32>, Option<u32>);
+    let row: Option<ProductRow> = sqlx::query_as(
+        "SELECT status, archived, chz_group_code, box_capacity, pallet_box_capacity \
+         FROM products WHERE id = ?",
     )
     .bind(id)
     .fetch_optional(conn)
     .await
     .map_err(ApiError::internal)?;
-    let (status, archived, group, box_capacity) =
+    let (status, archived, group, box_capacity, pallet_box_capacity) =
         row.ok_or_else(|| ApiError::validation("productId", "no such product"))?;
     match (
         status.parse::<ProductStatus>(),
         archived,
         group,
         box_capacity,
+        pallet_box_capacity,
     ) {
-        (Ok(ProductStatus::Active), false, Some(group), Some(box_capacity)) => Ok(ShiftProduct {
+        (
+            Ok(ProductStatus::Active),
+            false,
+            Some(group),
+            Some(box_capacity),
+            Some(pallet_box_capacity),
+        ) => Ok(ShiftProduct {
             group,
             box_capacity,
+            pallet_box_capacity,
         }),
         _ => Err(product_inactive()),
     }
@@ -152,6 +164,101 @@ pub async fn check_box_template(
     templates::check_slot(conn, "boxTemplateId", id, TemplatePurpose::Box, Some(group)).await
 }
 
+/// `validation_failed` on `palletTemplateId` unless `id` names a pallet
+/// template that fits a product of `group` (`templates::fits`: enabled, of
+/// the pallet purpose, covering the group).
+pub async fn check_pallet_template(
+    conn: &mut SqliteConnection,
+    id: &str,
+    group: u32,
+) -> Result<(), ApiError> {
+    templates::check_slot(
+        conn,
+        "palletTemplateId",
+        id,
+        TemplatePurpose::Pallet,
+        Some(group),
+    )
+    .await
+}
+
+/// A shift's pallets: how many boxes a pallet holds and the pallet label
+/// template. A shift without pallets has none of them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pallets {
+    pub box_capacity: u32,
+    pub template_id: String,
+}
+
+/// What a request to plan or create a shift asks of pallets, after its own
+/// checks: nothing, or pallets with a template and perhaps a capacity.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PalletRequest<'a> {
+    Off,
+    On {
+        box_capacity: Option<u32>,
+        template_id: &'a str,
+    },
+}
+
+/// The pallet fields of a new shift on their own: a shift without pallets
+/// sends neither (`validation_failed` on the one it sends), a shift with
+/// pallets needs its template (`validation_failed` on `palletTemplateId`),
+/// and a capacity is 1 to `MAX_PALLET_BOX_CAPACITY`.
+pub fn pallet_request<'a>(
+    enabled: bool,
+    box_capacity: Option<u32>,
+    template_id: Option<&'a str>,
+) -> Result<PalletRequest<'a>, ApiError> {
+    crate::validate::count(
+        "palletBoxCapacity",
+        box_capacity,
+        crate::validate::MAX_PALLET_BOX_CAPACITY,
+    )?;
+    match (enabled, box_capacity, template_id) {
+        (false, Some(_), _) => Err(ApiError::validation(
+            "palletBoxCapacity",
+            "only a shift with pallets has a pallet capacity",
+        )),
+        (false, None, Some(_)) => Err(ApiError::validation(
+            "palletTemplateId",
+            "only a shift with pallets has a pallet template",
+        )),
+        (false, None, None) => Ok(PalletRequest::Off),
+        (true, _, None) => Err(ApiError::validation(
+            "palletTemplateId",
+            "a shift with pallets needs a pallet template",
+        )),
+        (true, box_capacity, Some(template_id)) => Ok(PalletRequest::On {
+            box_capacity,
+            template_id,
+        }),
+    }
+}
+
+/// The pallets a new shift of `product` gets: its pallet template fits the
+/// product's group, and its capacity is the product's when the request names
+/// none.
+pub async fn pallets(
+    conn: &mut SqliteConnection,
+    request: PalletRequest<'_>,
+    product: &ShiftProduct,
+) -> Result<Option<Pallets>, ApiError> {
+    match request {
+        PalletRequest::Off => Ok(None),
+        PalletRequest::On {
+            box_capacity,
+            template_id,
+        } => {
+            check_pallet_template(conn, template_id, product.group).await?;
+            Ok(Some(Pallets {
+                box_capacity: box_capacity.unwrap_or(product.pallet_box_capacity),
+                template_id: template_id.to_owned(),
+            }))
+        }
+    }
+}
+
 /// A new shift after the request's own checks and the references' checks.
 pub struct NewShift<'a> {
     pub origin: ShiftOrigin,
@@ -166,6 +273,7 @@ pub struct NewShift<'a> {
     pub planned_qty: Option<u32>,
     pub box_capacity: u32,
     pub box_template_id: &'a str,
+    pub pallets: Option<Pallets>,
 }
 
 /// Insert a planned shift at `rev` and return its id. The number is the
@@ -194,7 +302,8 @@ pub async fn insert(
         "INSERT INTO shifts (id, number_month_key, number_seq, created_from, created_by_kind, \
          created_by, create_request_id, status, mode, pallets_enabled, product_id, line_id, \
          counterparty_id, production_date, planned_qty, box_capacity, box_template_id, \
-         created_at, rev) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         pallet_box_capacity, pallet_template_id, created_at, rev) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&key)
@@ -205,6 +314,7 @@ pub async fn insert(
     .bind(shift.request_id)
     .bind(ShiftStatus::Planned.as_str())
     .bind(ShiftMode::Aggregation.as_str())
+    .bind(shift.pallets.is_some())
     .bind(shift.product_id)
     .bind(shift.line_id)
     .bind(shift.counterparty_id)
@@ -212,6 +322,13 @@ pub async fn insert(
     .bind(shift.planned_qty)
     .bind(shift.box_capacity)
     .bind(shift.box_template_id)
+    .bind(shift.pallets.as_ref().map(|pallets| pallets.box_capacity))
+    .bind(
+        shift
+            .pallets
+            .as_ref()
+            .map(|pallets| pallets.template_id.as_str()),
+    )
     .bind(at)
     .bind(rev)
     .execute(&mut *conn)

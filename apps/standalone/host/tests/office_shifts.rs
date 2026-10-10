@@ -3,9 +3,9 @@ mod support;
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
-    admin, audit_row, audit_rows, audit_trail, empty, host_revision, plan_shift, request,
-    seed_office_user, shift_body, shift_setup, turn_the_user_off_at_the_next_activity, with_device,
-    Admin, ShiftSetup,
+    admin, audit_row, audit_rows, audit_trail, empty, host_revision, office_template, pair_device,
+    pallet_shift_body, pallet_template, plan_shift, request, seed_office_user, shift_body,
+    shift_setup, turn_the_user_off_at_the_next_activity, with_device, Admin, ShiftSetup,
 };
 
 /// The record of `shift_body(setup)` planned at `rev`: the product's box
@@ -16,6 +16,7 @@ fn planned(id: &str, number: &str, setup: &ShiftSetup, rev: i64) -> Value {
         "palletsEnabled": false, "createdFrom": "office", "productId": setup.product,
         "lineId": setup.line, "counterpartyId": null, "productionDate": "2026-10-08",
         "plannedQty": null, "boxCapacity": 12, "boxTemplateId": setup.template,
+        "palletBoxCapacity": null, "palletTemplateId": null,
         "ownerDeviceId": null, "openedAt": null, "closedAt": null, "closeReasonCode": null,
         "closeReasonText": null, "lateDataAt": null, "createdAt": "2026-09-21T14:13:20Z",
         "rev": rev,
@@ -197,6 +198,33 @@ async fn a_box_template_scoped_to_the_products_group_fits_it() {
         body["boxTemplateId"] = template["id"].clone();
         let shift = plan_shift(&admin, body).await;
         assert_eq!(shift["boxTemplateId"], template["id"], "{codes}");
+    }
+}
+
+/// A pallet template scoped to the product's own group fits it, planned or
+/// switched on by an edit (a template that covers only another group does
+/// not: `a_plan_with_pallets_needs_a_fitting_pallet_template_and_one_without_sends_neither`).
+#[tokio::test]
+async fn a_pallet_template_scoped_to_the_products_group_fits_it() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    for codes in [json!([8]), json!([8, 15])] {
+        let template = office_template(&admin, "pallet", true, codes.clone()).await;
+        let planned = plan_shift(&admin, pallet_shift_body(&setup, &template)).await;
+        assert_eq!(planned["palletTemplateId"], json!(template), "{codes}");
+        let plain = plan_shift(&admin, shift_body(&setup)).await;
+        let (status, on) = admin
+            .call(
+                "PUT",
+                &path(&plain),
+                Some(json!({
+                    "palletsEnabled": true, "palletTemplateId": template,
+                    "expectedRev": plain["rev"]
+                })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{codes}: {on}");
+        assert_eq!(on["palletTemplateId"], json!(template), "{codes}");
     }
 }
 
@@ -477,7 +505,7 @@ async fn a_plan_needs_an_active_product_an_active_line_and_a_fitting_template() 
         (json!({ "boxCapacity": 0 }), field("boxCapacity")),
         (json!({ "boxCapacity": 100_001 }), field("boxCapacity")),
         (json!({ "mode": "validation" }), field("mode")),
-        (json!({ "palletsEnabled": true }), field("palletsEnabled")),
+        (json!({ "palletsEnabled": true }), field("palletTemplateId")),
     ] {
         let mut body = shift_body(&setup);
         for (key, value) in change.as_object().unwrap() {
@@ -842,7 +870,7 @@ async fn an_edit_checks_a_changed_line_template_or_counterparty_and_keeps_unchan
         (json!({ "plannedQty": 0 }), field("plannedQty")),
         (json!({ "boxCapacity": 100_001 }), field("boxCapacity")),
         (json!({ "mode": "validation" }), field("mode")),
-        (json!({ "palletsEnabled": true }), field("palletsEnabled")),
+        (json!({ "palletsEnabled": true }), field("palletTemplateId")),
     ] {
         let mut body = change.clone();
         body["expectedRev"] = json!(rev);
@@ -1968,4 +1996,1116 @@ async fn a_shift_row_that_breaks_its_lifecycle_is_refused_by_the_schema() {
     .execute(&admin.app.state.pool)
     .await
     .unwrap();
+}
+
+fn field(name: &str) -> (Value, Value) {
+    (json!("validation_failed"), json!({ "field": name }))
+}
+
+/// A shift with pallets names its pallet template and takes the product's
+/// pallet capacity unless it names its own; a shift without pallets names
+/// neither. The plan's audit row is the same with pallets or without.
+#[tokio::test]
+async fn a_shift_with_pallets_takes_its_template_and_the_products_capacity() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let pallet = pallet_template(&admin).await;
+    let shift = plan_shift(&admin, pallet_shift_body(&setup, &pallet)).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    let mut expected = planned(&id, "OCT26-001", &setup, shift["rev"].as_i64().unwrap());
+    expected["palletsEnabled"] = json!(true);
+    expected["palletBoxCapacity"] = json!(40);
+    expected["palletTemplateId"] = json!(pallet);
+    assert_eq!(shift, expected);
+    let (status, read_back) = admin.call("GET", &path(&shift), None).await;
+    assert_eq!((status, read_back), (StatusCode::OK, expected));
+    let mut body = pallet_shift_body(&setup, &pallet);
+    body["palletBoxCapacity"] = json!(10_000);
+    let named = plan_shift(&admin, body).await;
+    assert_eq!(
+        (
+            named["palletsEnabled"].clone(),
+            named["palletBoxCapacity"].clone(),
+            named["palletTemplateId"].clone()
+        ),
+        (json!(true), json!(10_000), json!(pallet))
+    );
+    let plain = plan_shift(&admin, shift_body(&setup)).await;
+    assert_eq!(
+        (
+            plain["palletsEnabled"].clone(),
+            plain["palletBoxCapacity"].clone(),
+            plain["palletTemplateId"].clone()
+        ),
+        (json!(false), Value::Null, Value::Null)
+    );
+    assert_eq!(
+        audit_trail(&admin.app, "shift.create").await[0],
+        admin.row(
+            "shift.create",
+            "shift",
+            &id,
+            json!({
+                "number": "OCT26-001", "productId": setup.product, "lineId": setup.line,
+                "productionDate": "2026-10-08"
+            })
+        )
+    );
+}
+
+/// A plan with pallets needs a pallet template that fits the product: an
+/// enabled one of the pallet purpose covering its group. A plan without
+/// pallets sends no pallet field. A refusal writes nothing.
+#[tokio::test]
+async fn a_plan_with_pallets_needs_a_fitting_pallet_template_and_one_without_sends_neither() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let pallet = pallet_template(&admin).await;
+    let disabled = office_template(&admin, "pallet", false, Value::Null).await;
+    let other_group = office_template(&admin, "pallet", true, json!([15])).await;
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    for (change, expected) in [
+        (
+            json!({ "palletsEnabled": false, "palletBoxCapacity": 40 }),
+            field("palletBoxCapacity"),
+        ),
+        (
+            json!({ "palletTemplateId": pallet }),
+            field("palletTemplateId"),
+        ),
+        (json!({ "palletsEnabled": true }), field("palletTemplateId")),
+        (
+            json!({ "palletsEnabled": true, "palletBoxCapacity": 40 }),
+            field("palletTemplateId"),
+        ),
+        (
+            json!({ "palletsEnabled": true, "palletTemplateId": pallet, "palletBoxCapacity": 0 }),
+            field("palletBoxCapacity"),
+        ),
+        (
+            json!({
+                "palletsEnabled": true, "palletTemplateId": pallet, "palletBoxCapacity": 10_001
+            }),
+            field("palletBoxCapacity"),
+        ),
+        (
+            json!({ "palletsEnabled": true, "palletTemplateId": setup.template }),
+            field("palletTemplateId"),
+        ),
+        (
+            json!({ "palletsEnabled": true, "palletTemplateId": disabled }),
+            field("palletTemplateId"),
+        ),
+        (
+            json!({ "palletsEnabled": true, "palletTemplateId": other_group }),
+            field("palletTemplateId"),
+        ),
+        (
+            json!({ "palletsEnabled": true, "palletTemplateId": "no-such-template" }),
+            field("palletTemplateId"),
+        ),
+    ] {
+        let mut body = shift_body(&setup);
+        for (key, value) in change.as_object().unwrap() {
+            body[key] = value.clone();
+        }
+        let (status, refused) = admin.call("POST", "/v1/office/shifts", Some(body)).await;
+        assert_eq!(
+            (status, refusal(&refused)),
+            (StatusCode::BAD_REQUEST, expected),
+            "{change}"
+        );
+    }
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let (_, list) = admin.call("GET", "/v1/office/shifts", None).await;
+    assert_eq!(list, json!([]));
+}
+
+/// A planned shift turns pallets on (with a template; the capacity is the
+/// product's), changes their capacity or template, and turns them off,
+/// which clears both; each change is audited field by field.
+#[tokio::test]
+async fn a_planned_shift_turns_pallets_on_changes_them_and_turns_them_off() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let pallet = pallet_template(&admin).await;
+    let other = pallet_template(&admin).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    let mut rev = shift["rev"].clone();
+    let mut expected_trail = Vec::new();
+    for (change, after, details) in [
+        (
+            json!({ "palletsEnabled": true, "palletTemplateId": pallet }),
+            (json!(true), json!(40), json!(pallet)),
+            json!({
+                "changed": ["palletsEnabled", "palletBoxCapacity", "palletTemplateId"],
+                "palletsEnabled": { "from": false, "to": true },
+                "palletBoxCapacity": { "from": null, "to": 40 },
+                "palletTemplateId": { "from": null, "to": pallet },
+            }),
+        ),
+        (
+            json!({ "palletBoxCapacity": 30 }),
+            (json!(true), json!(30), json!(pallet)),
+            json!({
+                "changed": ["palletBoxCapacity"],
+                "palletBoxCapacity": { "from": 40, "to": 30 },
+            }),
+        ),
+        (
+            json!({ "palletTemplateId": other }),
+            (json!(true), json!(30), json!(other)),
+            json!({
+                "changed": ["palletTemplateId"],
+                "palletTemplateId": { "from": pallet, "to": other },
+            }),
+        ),
+        (
+            json!({ "palletsEnabled": false }),
+            (json!(false), Value::Null, Value::Null),
+            json!({
+                "changed": ["palletsEnabled", "palletBoxCapacity", "palletTemplateId"],
+                "palletsEnabled": { "from": true, "to": false },
+                "palletBoxCapacity": { "from": 30, "to": null },
+                "palletTemplateId": { "from": other, "to": null },
+            }),
+        ),
+    ] {
+        let mut body = change.clone();
+        body["expectedRev"] = rev.clone();
+        let (status, updated) = admin.call("PUT", &path(&shift), Some(body)).await;
+        assert_eq!(status, StatusCode::OK, "{change}: {updated}");
+        assert_eq!(
+            (
+                updated["palletsEnabled"].clone(),
+                updated["palletBoxCapacity"].clone(),
+                updated["palletTemplateId"].clone()
+            ),
+            after,
+            "{change}"
+        );
+        let (_, read_back) = admin.call("GET", &path(&shift), None).await;
+        assert_eq!(read_back, updated, "{change}");
+        rev = updated["rev"].clone();
+        expected_trail.push(admin.row("shift.update", "shift", &id, details));
+    }
+    assert_eq!(
+        audit_trail(&admin.app, "shift.update").await,
+        expected_trail
+    );
+}
+
+/// An edit keeps the pallet fields it does not send, even a template
+/// disabled since, and checks a template it changes; pallets turned on need
+/// a template, and a shift without pallets takes no pallet field.
+#[tokio::test]
+async fn an_edit_keeps_unsent_pallet_fields_and_checks_what_it_changes() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let pallet = pallet_template(&admin).await;
+    let disabled = office_template(&admin, "pallet", false, Value::Null).await;
+    let with_pallets = plan_shift(&admin, pallet_shift_body(&setup, &pallet)).await;
+    let plain = plan_shift(&admin, shift_body(&setup)).await;
+    // The shift's template is disabled after it was planned.
+    let (status, template) = admin
+        .call("GET", &format!("/v1/office/templates/{pallet}"), None)
+        .await;
+    assert_eq!(status, StatusCode::OK, "{template}");
+    let (status, turned_off) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/templates/{pallet}"),
+            Some(json!({ "enabled": false, "expectedRev": template["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{turned_off}");
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    for (shift, change, expected) in [
+        (
+            &with_pallets,
+            json!({ "palletTemplateId": setup.template }),
+            field("palletTemplateId"),
+        ),
+        (
+            &with_pallets,
+            json!({ "palletTemplateId": disabled }),
+            field("palletTemplateId"),
+        ),
+        (
+            &with_pallets,
+            json!({ "palletsEnabled": false, "palletBoxCapacity": 20 }),
+            field("palletBoxCapacity"),
+        ),
+        (
+            &with_pallets,
+            json!({ "palletsEnabled": false, "palletTemplateId": pallet }),
+            field("palletTemplateId"),
+        ),
+        (
+            &with_pallets,
+            json!({ "palletBoxCapacity": 10_001 }),
+            field("palletBoxCapacity"),
+        ),
+        (
+            &plain,
+            json!({ "palletsEnabled": true }),
+            field("palletTemplateId"),
+        ),
+        (
+            &plain,
+            json!({ "palletBoxCapacity": 20 }),
+            field("palletBoxCapacity"),
+        ),
+        (
+            &plain,
+            json!({ "palletTemplateId": pallet }),
+            field("palletTemplateId"),
+        ),
+    ] {
+        let mut body = change.clone();
+        body["expectedRev"] = shift["rev"].clone();
+        let (status, refused) = admin.call("PUT", &path(shift), Some(body)).await;
+        assert_eq!(
+            (status, refusal(&refused)),
+            (StatusCode::BAD_REQUEST, expected),
+            "{change}"
+        );
+    }
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    // A bad capacity is refused before the shift is looked up.
+    let (status, refused) = admin
+        .call(
+            "PUT",
+            "/v1/office/shifts/no-such-shift",
+            Some(json!({ "palletBoxCapacity": 0, "expectedRev": 1 })),
+        )
+        .await;
+    assert_eq!(
+        (status, refusal(&refused)),
+        (StatusCode::BAD_REQUEST, field("palletBoxCapacity"))
+    );
+    // The disabled template stays while the edit does not change it.
+    let (status, updated) = admin
+        .call(
+            "PUT",
+            &path(&with_pallets),
+            Some(json!({ "palletBoxCapacity": 25, "expectedRev": with_pallets["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(
+        (
+            updated["palletBoxCapacity"].clone(),
+            updated["palletTemplateId"].clone()
+        ),
+        (json!(25), json!(pallet))
+    );
+    // The same value again changes nothing: no revision, no audit row.
+    let revision = host_revision(&admin.app).await;
+    let (status, same) = admin
+        .call(
+            "PUT",
+            &path(&with_pallets),
+            Some(json!({
+                "palletsEnabled": true, "palletTemplateId": pallet, "palletBoxCapacity": 25,
+                "expectedRev": updated["rev"]
+            })),
+        )
+        .await;
+    assert_eq!((status, same), (StatusCode::OK, updated));
+    assert_eq!(host_revision(&admin.app).await, revision);
+}
+
+/// An open shift keeps its pallets: an edit that sends them unchanged
+/// passes with its plan, one that changes them is `shift_status`.
+#[tokio::test]
+async fn an_active_shift_keeps_its_pallets() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let pallet = pallet_template(&admin).await;
+    let other = pallet_template(&admin).await;
+    let shift = plan_shift(&admin, pallet_shift_body(&setup, &pallet)).await;
+    let plain = plan_shift(&admin, shift_body(&setup)).await;
+    open_directly(&admin, &shift).await;
+    open_directly(&admin, &plain).await;
+    let (_, current) = admin.call("GET", &path(&shift), None).await;
+    let (_, current_plain) = admin.call("GET", &path(&plain), None).await;
+    let active = || {
+        (
+            StatusCode::CONFLICT,
+            (
+                json!("conflict"),
+                json!({ "constraint": "shift_status", "status": "active" }),
+            ),
+        )
+    };
+    for (shift, change) in [
+        (&current, json!({ "palletsEnabled": false })),
+        (&current, json!({ "palletBoxCapacity": 30 })),
+        (&current, json!({ "palletTemplateId": other })),
+        (
+            &current_plain,
+            json!({ "palletsEnabled": true, "palletTemplateId": pallet }),
+        ),
+    ] {
+        let mut body = change.clone();
+        body["expectedRev"] = shift["rev"].clone();
+        let (status, refused) = admin.call("PUT", &path(shift), Some(body)).await;
+        assert_eq!((status, refusal(&refused)), active(), "{change}");
+    }
+    let (status, updated) = admin
+        .call(
+            "PUT",
+            &path(&current),
+            Some(json!({
+                "palletsEnabled": true, "palletBoxCapacity": 40, "palletTemplateId": pallet,
+                "plannedQty": 800, "expectedRev": current["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{updated}");
+    assert_eq!(
+        (
+            updated["plannedQty"].clone(),
+            updated["palletBoxCapacity"].clone(),
+            updated["palletTemplateId"].clone()
+        ),
+        (json!(800), json!(40), json!(pallet))
+    );
+}
+
+/// A pallet template a planned shift names is not deleted either; once the
+/// shift is open its layout lives in the snapshot.
+#[tokio::test]
+async fn a_pallet_template_a_planned_shift_names_is_not_deleted() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let pallet = pallet_template(&admin).await;
+    let shift = plan_shift(&admin, pallet_shift_body(&setup, &pallet)).await;
+    let template = format!("/v1/office/templates/{pallet}");
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let (status, refused) = admin.call("DELETE", &template, None).await;
+    assert_eq!(
+        (status, refusal(&refused)),
+        (
+            StatusCode::CONFLICT,
+            (
+                json!("conflict"),
+                json!({ "constraint": "template_in_use", "shiftIds": [shift["id"]] })
+            )
+        )
+    );
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+    open_directly(&admin, &shift).await;
+    let (status, body) = admin.call("DELETE", &template, None).await;
+    assert_eq!((status, body), (StatusCode::NO_CONTENT, Value::Null));
+}
+
+/// The pallet columns of `shifts` go together: a shift with pallets names
+/// their capacity and template, a shift without names neither (two
+/// triggers of `0012`, since `0009` takes no new CHECK).
+#[tokio::test]
+async fn the_schema_keeps_a_shifts_pallet_fields_together() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let pallet = pallet_template(&admin).await;
+    let with_pallets = plan_shift(&admin, pallet_shift_body(&setup, &pallet)).await;
+    let plain = plan_shift(&admin, shift_body(&setup)).await;
+    for (shift, set) in [
+        (&plain, "pallets_enabled = 1".to_owned()),
+        (
+            &plain,
+            "pallets_enabled = 1, pallet_box_capacity = 40".to_owned(),
+        ),
+        (
+            &plain,
+            format!("pallets_enabled = 1, pallet_template_id = '{pallet}'"),
+        ),
+        (&plain, "pallet_box_capacity = 40".to_owned()),
+        (&plain, format!("pallet_template_id = '{pallet}'")),
+        (&with_pallets, "pallets_enabled = 0".to_owned()),
+        (&with_pallets, "pallet_box_capacity = NULL".to_owned()),
+        (&with_pallets, "pallet_template_id = NULL".to_owned()),
+    ] {
+        let message = schema_refuses(&admin, shift, &set).await;
+        assert!(
+            message.contains("shift pallets: capacity and template exactly when enabled"),
+            "{set}: {message}"
+        );
+    }
+    // A new row is held the same way.
+    let copy = |enabled: i64, capacity: &str, template: &str| {
+        format!(
+            "INSERT INTO shifts (id, number_month_key, number_seq, created_from, \
+             created_by_kind, created_by, status, mode, pallets_enabled, product_id, line_id, \
+             production_date, box_capacity, box_template_id, pallet_box_capacity, \
+             pallet_template_id, created_at, rev) \
+             SELECT 'copy', number_month_key, number_seq + 100, created_from, created_by_kind, \
+             created_by, status, mode, {enabled}, product_id, line_id, production_date, \
+             box_capacity, box_template_id, {capacity}, {template}, created_at, rev \
+             FROM shifts WHERE id = ?"
+        )
+    };
+    let quoted = format!("'{pallet}'");
+    for (enabled, capacity, template) in [
+        (1, "NULL", quoted.as_str()),
+        (1, "40", "NULL"),
+        (0, "40", "NULL"),
+        (0, "NULL", quoted.as_str()),
+    ] {
+        let outcome = sqlx::query(&copy(enabled, capacity, template))
+            .bind(plain["id"].as_str().unwrap())
+            .execute(&admin.app.state.pool)
+            .await;
+        let message = outcome
+            .err()
+            .unwrap_or_else(|| panic!("the schema took {enabled} {capacity} {template}"))
+            .to_string();
+        assert!(
+            message.contains("shift pallets: capacity and template exactly when enabled"),
+            "{message}"
+        );
+    }
+    // Together, either way, the rows are taken.
+    sqlx::query(&copy(1, "40", &quoted))
+        .bind(plain["id"].as_str().unwrap())
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    sqlx::query(&format!(
+        "UPDATE shifts SET pallets_enabled = 1, pallet_box_capacity = 40, \
+         pallet_template_id = '{pallet}' WHERE id = ?"
+    ))
+    .bind(plain["id"].as_str().unwrap())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "UPDATE shifts SET pallets_enabled = 0, pallet_box_capacity = NULL, \
+         pallet_template_id = NULL WHERE id = ?",
+    )
+    .bind(with_pallets["id"].as_str().unwrap())
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
+}
+
+/// What a shift's pallet columns hold in the table itself: the flag, the
+/// capacity and the template.
+async fn pallet_columns(admin: &Admin, shift: &Value) -> (i64, Option<i64>, Option<String>) {
+    sqlx::query_as(
+        "SELECT pallets_enabled, pallet_box_capacity, pallet_template_id FROM shifts WHERE id = ?",
+    )
+    .bind(shift["id"].as_str().unwrap())
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap()
+}
+
+/// A shift without pallets records no pallet field anywhere: not in its
+/// row, not in its create or update audit rows, not when an edit turns its
+/// pallets off or repeats `palletsEnabled: false`.
+#[tokio::test]
+async fn a_shift_without_pallets_records_no_pallet_field_anywhere() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let pallet = pallet_template(&admin).await;
+    let plain = plan_shift(&admin, shift_body(&setup)).await;
+    let mut explicit_body = shift_body(&setup);
+    explicit_body["palletsEnabled"] = json!(false);
+    let explicit = plan_shift(&admin, explicit_body).await;
+    let with_pallets = plan_shift(&admin, pallet_shift_body(&setup, &pallet)).await;
+    let created = |shift: &Value, number: &str| {
+        admin.row(
+            "shift.create",
+            "shift",
+            shift["id"].as_str().unwrap(),
+            json!({
+                "number": number, "productId": setup.product, "lineId": setup.line,
+                "productionDate": "2026-10-08"
+            }),
+        )
+    };
+    assert_eq!(
+        audit_trail(&admin.app, "shift.create").await,
+        vec![
+            created(&plain, "OCT26-001"),
+            created(&explicit, "OCT26-002"),
+            created(&with_pallets, "OCT26-003")
+        ]
+    );
+    for shift in [&plain, &explicit] {
+        assert_eq!(pallet_columns(&admin, shift).await, (0, None, None));
+    }
+    assert_eq!(
+        pallet_columns(&admin, &with_pallets).await,
+        (1, Some(40), Some(pallet.clone()))
+    );
+    // An edit that leaves the pallets alone writes no pallet field.
+    let (status, edited) = admin
+        .call(
+            "PUT",
+            &path(&plain),
+            Some(json!({ "plannedQty": 900, "expectedRev": plain["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{edited}");
+    assert_eq!(
+        audit_trail(&admin.app, "shift.update").await,
+        vec![admin.row(
+            "shift.update",
+            "shift",
+            plain["id"].as_str().unwrap(),
+            json!({ "changed": ["plannedQty"], "plannedQty": { "from": null, "to": 900 } })
+        )]
+    );
+    assert_eq!(pallet_columns(&admin, &plain).await, (0, None, None));
+    // `palletsEnabled: false` on a shift without pallets changes nothing.
+    let revision = host_revision(&admin.app).await;
+    let (status, same) = admin
+        .call(
+            "PUT",
+            &path(&edited),
+            Some(json!({ "palletsEnabled": false, "expectedRev": edited["rev"] })),
+        )
+        .await;
+    assert_eq!((status, same), (StatusCode::OK, edited.clone()));
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_trail(&admin.app, "shift.update").await.len(), 1);
+    // Turning the pallets off leaves nothing of them in the table.
+    let (status, off) = admin
+        .call(
+            "PUT",
+            &path(&with_pallets),
+            Some(json!({ "palletsEnabled": false, "expectedRev": with_pallets["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{off}");
+    assert_eq!(pallet_columns(&admin, &with_pallets).await, (0, None, None));
+}
+
+/// Pallets turned on by an edit take the capacity the edit names, not the
+/// product's, and a capacity without a template is refused; the largest
+/// capacity is taken, and a closed shift keeps its pallets.
+#[tokio::test]
+async fn pallets_turned_on_take_the_capacity_the_edit_names_and_a_closed_shift_keeps_them() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let pallet = pallet_template(&admin).await;
+    let plain = plan_shift(&admin, shift_body(&setup)).await;
+    let id = plain["id"].as_str().unwrap().to_owned();
+    let (status, refused) = admin
+        .call(
+            "PUT",
+            &path(&plain),
+            Some(json!({
+                "palletsEnabled": true, "palletBoxCapacity": 25, "expectedRev": plain["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(
+        (status, refusal(&refused)),
+        (StatusCode::BAD_REQUEST, field("palletTemplateId"))
+    );
+    assert_eq!(pallet_columns(&admin, &plain).await, (0, None, None));
+    let (status, on) = admin
+        .call(
+            "PUT",
+            &path(&plain),
+            Some(json!({
+                "palletsEnabled": true, "palletTemplateId": pallet, "palletBoxCapacity": 25,
+                "expectedRev": plain["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{on}");
+    assert_eq!(
+        (
+            on["palletsEnabled"].clone(),
+            on["palletBoxCapacity"].clone(),
+            on["palletTemplateId"].clone()
+        ),
+        (json!(true), json!(25), json!(pallet))
+    );
+    assert_eq!(
+        audit_trail(&admin.app, "shift.update").await,
+        vec![admin.row(
+            "shift.update",
+            "shift",
+            &id,
+            json!({
+                "changed": ["palletsEnabled", "palletBoxCapacity", "palletTemplateId"],
+                "palletsEnabled": { "from": false, "to": true },
+                "palletBoxCapacity": { "from": null, "to": 25 },
+                "palletTemplateId": { "from": null, "to": pallet },
+            })
+        )]
+    );
+    let (status, largest) = admin
+        .call(
+            "PUT",
+            &path(&on),
+            Some(json!({ "palletBoxCapacity": 10_000, "expectedRev": on["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{largest}");
+    assert_eq!(largest["palletBoxCapacity"], json!(10_000));
+    close_directly(&admin, &largest).await;
+    let (_, closed) = admin.call("GET", &path(&largest), None).await;
+    for change in [
+        json!({ "palletBoxCapacity": 30 }),
+        json!({ "palletsEnabled": false }),
+        json!({ "palletTemplateId": pallet_template(&admin).await }),
+    ] {
+        let mut body = change.clone();
+        body["expectedRev"] = closed["rev"].clone();
+        let (status, refused) = admin.call("PUT", &path(&closed), Some(body)).await;
+        assert_eq!(
+            (status, refusal(&refused)),
+            (
+                StatusCode::CONFLICT,
+                (
+                    json!("conflict"),
+                    json!({ "constraint": "shift_status", "status": "closed" })
+                )
+            ),
+            "{change}"
+        );
+    }
+    assert_eq!(
+        pallet_columns(&admin, &closed).await,
+        (1, Some(10_000), Some(pallet))
+    );
+}
+
+/// A statement the schema refuses; the message names the kind of guard.
+async fn refused(admin: &Admin, sql: &str, guard: &str) {
+    let outcome = sqlx::query(sql).execute(&admin.app.state.pool).await;
+    let message = outcome
+        .err()
+        .unwrap_or_else(|| panic!("the schema took {sql}"))
+        .to_string();
+    assert!(message.contains(guard), "{sql}: {message}");
+}
+
+/// A statement the schema takes (the control of the refusals around it).
+async fn taken(admin: &Admin, sql: &str) {
+    sqlx::query(sql)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap_or_else(|error| panic!("{sql}: {error}"));
+}
+
+/// An `INSERT` into `table` of `base` with `over` set or added; every value
+/// is an SQL literal.
+fn insert_into(table: &str, base: &[(&str, &str)], over: &[(&str, &str)]) -> String {
+    let mut columns: Vec<(String, String)> = base
+        .iter()
+        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+        .collect();
+    for (name, value) in over {
+        match columns.iter_mut().find(|(column, _)| column == name) {
+            Some(slot) => slot.1 = (*value).to_owned(),
+            None => columns.push(((*name).to_owned(), (*value).to_owned())),
+        }
+    }
+    let names: Vec<&str> = columns.iter().map(|(name, _)| name.as_str()).collect();
+    let values: Vec<&str> = columns.iter().map(|(_, value)| value.as_str()).collect();
+    format!(
+        "INSERT INTO {table} ({}) VALUES ({})",
+        names.join(", "),
+        values.join(", ")
+    )
+}
+
+/// The SSCC of a pallet of serial `n` under the prefix 460068200 (extension
+/// 1, a placeholder check digit: the schema reads only the shape).
+fn pallet_sscc(n: u32) -> String {
+    format!("1460068200{n:08}")
+}
+
+/// The tables of `0012` refuse the rows no fact may leave. Every refusal
+/// breaks one rule and is paired with a control that differs in one thing.
+#[tokio::test]
+async fn the_pallet_tables_refuse_the_rows_no_fact_may_leave() {
+    const CLOSED: &str = "'2026-10-08T08:30:00.000Z'";
+    const AT: &str = "'2026-10-08T08:00:00.000Z'";
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let shift = plan_shift(&admin, shift_body(&setup)).await;
+    let shift = format!("'{}'", shift["id"].as_str().unwrap());
+    let device = format!("'{}'", station_id(&admin).await);
+    let (colleague, _) = pair_device(&admin.app, "station").await;
+    let colleague = format!("'{colleague}'");
+    for (extension, request) in [(1, "pallet-block"), (0, "box-block")] {
+        taken(
+            &admin,
+            &format!(
+                "INSERT INTO sscc_blocks (id, issuer_prefix, extension, device_id, request_id, \
+                 from_serial, to_serial, issued_at) VALUES ('{request}', '460068200', \
+                 {extension}, {device}, '{request}', 0, 199, {AT})"
+            ),
+        )
+        .await;
+    }
+    let ids: Vec<String> = (0..=30).map(|n| format!("'pallet-{n}'")).collect();
+    let open = [
+        ("shift_id", shift.as_str()),
+        ("device_id", device.as_str()),
+        ("opened_at", AT),
+        ("received_at", AT),
+    ];
+    let serial = |n: u32| n.to_string();
+    let sscc_literal = |n: u32| format!("'{}'", pallet_sscc(n));
+    // A closed pallet: its SSCC, block, serial and count come together.
+    let closed = |n: u32| -> Vec<(&str, String)> {
+        vec![
+            ("id", ids[n as usize].clone()),
+            ("closed_at", CLOSED.to_owned()),
+            ("sscc", sscc_literal(n)),
+            ("block_id", "'pallet-block'".to_owned()),
+            ("serial", serial(n)),
+            ("box_count_reported", "3".to_owned()),
+        ]
+    };
+    let pallet = |n: u32, over: &[(&str, &str)]| -> String {
+        let mut columns: Vec<(&str, &str)> = open.to_vec();
+        let named = closed(n);
+        for (name, value) in &named {
+            columns.push((name, value.as_str()));
+        }
+        insert_into("pallets", &columns, over)
+    };
+    let open_pallet = |n: u32, over: &[(&str, &str)]| -> String {
+        let mut columns: Vec<(&str, &str)> = open.to_vec();
+        columns.push(("id", ids[n as usize].as_str()));
+        insert_into("pallets", &columns, over)
+    };
+    // Controls: a closed pallet, a pallet taken apart, an open pallet, and a
+    // second and third open pallet of the same station and shift (one open
+    // pallet is the station's rule, not the table's).
+    taken(&admin, &pallet(1, &[])).await;
+    taken(&admin, &pallet(2, &[("disassembled_at", CLOSED)])).await;
+    taken(&admin, &open_pallet(3, &[])).await;
+    taken(&admin, &open_pallet(4, &[])).await;
+    taken(&admin, &open_pallet(5, &[])).await;
+    let check = "CHECK constraint failed";
+    for (n, over, guard) in [
+        // A closed pallet lacks one of the four things that come with it.
+        (10, vec![("sscc", "NULL")], check),
+        (11, vec![("block_id", "NULL")], check),
+        (12, vec![("serial", "NULL")], check),
+        (13, vec![("box_count_reported", "NULL")], check),
+        // An open pallet has one of them.
+        (
+            14,
+            vec![
+                ("closed_at", "NULL"),
+                ("block_id", "NULL"),
+                ("serial", "NULL"),
+                ("box_count_reported", "NULL"),
+            ],
+            check,
+        ),
+        (
+            15,
+            vec![
+                ("closed_at", "NULL"),
+                ("sscc", "NULL"),
+                ("serial", "NULL"),
+                ("box_count_reported", "NULL"),
+            ],
+            check,
+        ),
+        (
+            16,
+            vec![
+                ("closed_at", "NULL"),
+                ("sscc", "NULL"),
+                ("block_id", "NULL"),
+                ("box_count_reported", "NULL"),
+            ],
+            check,
+        ),
+        (
+            17,
+            vec![
+                ("closed_at", "NULL"),
+                ("sscc", "NULL"),
+                ("block_id", "NULL"),
+                ("serial", "NULL"),
+            ],
+            check,
+        ),
+        // A count of boxes is positive; an open pallet is not taken apart.
+        (18, vec![("box_count_reported", "0")], check),
+        (
+            19,
+            vec![
+                ("closed_at", "NULL"),
+                ("sscc", "NULL"),
+                ("block_id", "NULL"),
+                ("serial", "NULL"),
+                ("box_count_reported", "NULL"),
+                ("disassembled_at", CLOSED),
+            ],
+            check,
+        ),
+        // The SSCC of a pallet: 18 digits, the extension 1 first.
+        (20, vec![("sscc", "'14600682000000020'")], check),
+        (21, vec![("sscc", "'1460068200000000211'")], check),
+        (22, vec![("sscc", "'046006820000000022'")], check),
+        // One SSCC is one pallet; one serial of a block is one label.
+        (
+            23,
+            vec![("sscc", "'146006820000000001'")],
+            "UNIQUE constraint failed",
+        ),
+        (24, vec![("serial", "1")], "UNIQUE constraint failed"),
+        // The references.
+        (
+            25,
+            vec![("shift_id", "'no-such-shift'")],
+            "FOREIGN KEY constraint failed",
+        ),
+        (
+            26,
+            vec![("device_id", "'no-such-device'")],
+            "FOREIGN KEY constraint failed",
+        ),
+        (
+            27,
+            vec![("block_id", "'no-such-block'")],
+            "FOREIGN KEY constraint failed",
+        ),
+        (
+            28,
+            vec![("opened_at", "NULL")],
+            "NOT NULL constraint failed",
+        ),
+        (
+            29,
+            vec![("received_at", "NULL")],
+            "NOT NULL constraint failed",
+        ),
+    ] {
+        refused(&admin, &pallet(n, &over), guard).await;
+    }
+    // The same serial of another block is another label: a control for the
+    // pair, and the SSCC of an open pallet may not be set without the rest.
+    taken(
+        &admin,
+        &pallet(6, &[("block_id", "'box-block'"), ("serial", "1")]),
+    )
+    .await;
+    refused(
+        &admin,
+        &open_pallet(7, &[("sscc", "'146006820000000007'")]),
+        check,
+    )
+    .await;
+    // A pallet may not go back to its open state, nor be taken apart open.
+    refused(
+        &admin,
+        "UPDATE pallets SET closed_at = NULL WHERE id = 'pallet-1'",
+        check,
+    )
+    .await;
+    refused(
+        &admin,
+        "UPDATE pallets SET disassembled_at = 'x' WHERE id = 'pallet-3'",
+        check,
+    )
+    .await;
+    taken(
+        &admin,
+        "UPDATE pallets SET disassembled_at = 'x' WHERE id = 'pallet-1'",
+    )
+    .await;
+
+    // Exceptions of a pallet.
+    let exception = |n: u32, device: &str, over: &[(&str, &str)]| -> String {
+        let id = format!("'exception-{n}'");
+        let record = format!("'record-{n}'");
+        insert_into(
+            "pallet_exceptions",
+            &[
+                ("id", id.as_str()),
+                ("record_id", record.as_str()),
+                ("kind", "'reprint'"),
+                ("pallet_id", "'pallet-1'"),
+                ("reason_code", "'damaged'"),
+                ("shift_id", shift.as_str()),
+                ("device_id", device),
+                ("occurred_at", AT),
+                ("received_at", AT),
+            ],
+            over,
+        )
+    };
+    taken(&admin, &exception(1, &device, &[])).await;
+    taken(&admin, &exception(2, &device, &[("kind", "'disassemble'")])).await;
+    taken(
+        &admin,
+        &exception(
+            3,
+            &device,
+            &[("reason_code", "'other'"), ("reason_text", "'torn'")],
+        ),
+    )
+    .await;
+    // Another device may use a record id the first one used.
+    taken(
+        &admin,
+        &insert_into(
+            "pallet_exceptions",
+            &[
+                ("id", "'exception-4'"),
+                ("record_id", "'record-1'"),
+                ("kind", "'reprint'"),
+                ("pallet_id", "'pallet-1'"),
+                ("reason_code", "'damaged'"),
+                ("shift_id", shift.as_str()),
+                ("device_id", colleague.as_str()),
+                ("occurred_at", AT),
+                ("received_at", AT),
+            ],
+            &[],
+        ),
+    )
+    .await;
+    for (n, over, guard) in [
+        (10, vec![("kind", "'other'")], check),
+        (11, vec![("kind", "NULL")], "NOT NULL constraint failed"),
+        (12, vec![("reason_text", "'torn'")], check),
+        (
+            13,
+            vec![("reason_code", "NULL")],
+            "NOT NULL constraint failed",
+        ),
+        (
+            14,
+            vec![("pallet_id", "'no-such-pallet'")],
+            "FOREIGN KEY constraint failed",
+        ),
+        (
+            15,
+            vec![("shift_id", "'no-such-shift'")],
+            "FOREIGN KEY constraint failed",
+        ),
+        (
+            16,
+            vec![("device_id", "'no-such-device'")],
+            "FOREIGN KEY constraint failed",
+        ),
+        (
+            17,
+            vec![("record_id", "'record-1'")],
+            "UNIQUE constraint failed",
+        ),
+    ] {
+        refused(&admin, &exception(n, &device, &over), guard).await;
+    }
+
+    // A box joins a pallet only once it is closed.
+    let box_row = |id: &str, over: &[(&str, &str)]| -> String {
+        let quoted = format!("'{id}'");
+        insert_into(
+            "boxes",
+            &[
+                ("id", quoted.as_str()),
+                ("shift_id", shift.as_str()),
+                ("device_id", device.as_str()),
+                ("opened_at", AT),
+                ("received_at", AT),
+            ],
+            over,
+        )
+    };
+    // A closed box: its SSCC, block, serial and digest verdict come together.
+    let box_with = |id: &str, serial: u32, over: &[(&str, &str)]| -> String {
+        let sscc = format!("'0460068200{serial:07}0'");
+        let serial = serial.to_string();
+        let mut all: Vec<(&str, &str)> = vec![
+            ("closed_at", CLOSED),
+            ("sscc", sscc.as_str()),
+            ("block_id", "'box-block'"),
+            ("serial", serial.as_str()),
+            ("digest_matches", "1"),
+        ];
+        all.extend_from_slice(over);
+        box_row(id, &all)
+    };
+    taken(&admin, &box_with("box-1", 10, &[])).await;
+    taken(
+        &admin,
+        &box_with("box-2", 11, &[("pallet_id", "'pallet-1'")]),
+    )
+    .await;
+    taken(&admin, &box_row("box-3", &[])).await;
+    refused(
+        &admin,
+        &box_row("box-4", &[("pallet_id", "'pallet-1'")]),
+        check,
+    )
+    .await;
+    refused(
+        &admin,
+        &box_with("box-5", 12, &[("pallet_id", "'no-such-pallet'")]),
+        "FOREIGN KEY constraint failed",
+    )
+    .await;
+    refused(
+        &admin,
+        "UPDATE boxes SET pallet_id = 'pallet-1' WHERE id = 'box-3'",
+        check,
+    )
+    .await;
+    taken(
+        &admin,
+        "UPDATE boxes SET pallet_id = 'pallet-1' WHERE id = 'box-1'",
+    )
+    .await;
+
+    // The indexes: the lookups of the pallet tables and the deletion guard of
+    // a pallet template, which reads a planned shift's pallet template.
+    let indexes: Vec<String> = sqlx::query_scalar(
+        "SELECT name FROM sqlite_master WHERE type = 'index' AND name IN \
+         ('pallets_sscc', 'pallets_block_serial', 'pallets_shift', 'boxes_pallet', \
+          'pallet_exceptions_record', 'pallet_exceptions_pallet', \
+          'shifts_planned_pallet_template') ORDER BY name",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        indexes,
+        [
+            "boxes_pallet",
+            "pallet_exceptions_pallet",
+            "pallet_exceptions_record",
+            "pallets_block_serial",
+            "pallets_shift",
+            "pallets_sscc",
+            "shifts_planned_pallet_template"
+        ]
+    );
+    let guard: String = sqlx::query_scalar(
+        "SELECT sql FROM sqlite_master WHERE name = 'shifts_planned_pallet_template'",
+    )
+    .fetch_one(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert!(
+        guard.contains("ON shifts (pallet_template_id)")
+            && guard.ends_with("WHERE status = 'planned'"),
+        "{guard}"
+    );
 }
