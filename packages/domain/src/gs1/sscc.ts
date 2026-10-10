@@ -34,11 +34,17 @@ export function isValidSscc(code: string): boolean {
  * the 18 digits alone, so this is the one place that knows about the wrappers.
  * Returns null rather than throwing: a non-SSCC scan is an ordinary event here,
  * not an error.
+ * `allowLegacyBangOnePrefix` opts into reading misprinted labels with a literal
+ * `!1` before the payload. Length and check-digit validation still apply.
  */
-export function parseScannedSscc(raw: string): string | null {
-  if (raw.length > 25) return null;
+export function parseScannedSscc(
+  raw: string,
+  { allowLegacyBangOnePrefix = false }: { allowLegacyBangOnePrefix?: boolean } = {},
+): string | null {
+  if (raw.length > (allowLegacyBangOnePrefix ? 27 : 25)) return null;
   let rest = raw;
   if (rest.startsWith("]C1")) rest = rest.slice(3);
+  if (allowLegacyBangOnePrefix && rest.startsWith("!1")) rest = rest.slice(2);
   if (rest.startsWith("(00)")) rest = rest.slice(4);
   else if (rest.length === 20 && rest.startsWith("00")) rest = rest.slice(2);
   return isValidSscc(rest) ? rest : null;
