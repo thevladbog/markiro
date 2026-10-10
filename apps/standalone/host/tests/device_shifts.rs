@@ -2038,3 +2038,165 @@ async fn a_station_create_with_pallets_keeps_what_it_names_and_repeats_as_the_sa
         .unwrap();
     assert_eq!(after, shifts);
 }
+
+/// `proto/fixtures/error-snapshot-too-large.json`, which the webview's
+/// `test/protocol.test.ts` reads too.
+fn snapshot_too_large_fixture() -> Value {
+    let path = format!(
+        "{}/../proto/fixtures/error-snapshot-too-large.json",
+        env!("CARGO_MANIFEST_DIR")
+    );
+    let text =
+        std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("read {path}: {error}"));
+    serde_json::from_str(&text).unwrap()
+}
+
+/// A template of `purpose` for every group whose layout carries `filler`
+/// bytes of text in one element, a layout the host keeps up to 256 KB.
+async fn heavy_template(admin: &Admin, purpose: &str, filler: usize) -> String {
+    let (status, template) = admin
+        .call(
+            "POST",
+            "/v1/office/templates",
+            Some(json!({
+                "name": "Макет с запасом", "purpose": purpose, "enabled": true,
+                "spec": {
+                    "widthMm": 100, "heightMm": 150, "dpi": 203, "language": "zpl",
+                    "elements": [{ "kind": "text", "value": "x".repeat(filler) }]
+                }
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{}", template["error"]);
+    template["id"].as_str().unwrap().to_owned()
+}
+
+/// The size of the stored snapshot as the table's `CHECK` measures it.
+async fn stored_snapshot_bytes(admin: &Admin, shift: &Value) -> Option<i64> {
+    sqlx::query_scalar("SELECT length(CAST(snapshot AS BLOB)) FROM shifts WHERE id = ?")
+        .bind(shift["id"].as_str().unwrap())
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+}
+
+/// What is stored of a planned shift that nobody entered: its status, owner
+/// and opening time, and its participants.
+async fn unopened(admin: &Admin, shift: &Value) -> (String, Option<String>, Option<String>, usize) {
+    let (status, owner, opened_at): (String, Option<String>, Option<String>) =
+        sqlx::query_as("SELECT status, owner_device_id, opened_at FROM shifts WHERE id = ?")
+            .bind(shift["id"].as_str().unwrap())
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    (
+        status,
+        owner,
+        opened_at,
+        participants(admin, shift).await.len(),
+    )
+}
+
+/// A box layout and a pallet layout that are each within the template bound
+/// (256 KB) but together exceed the 320 KB the snapshot column keeps are no
+/// 500: the entry is a `conflict` on `snapshot_too_large`, the answer of
+/// `proto/fixtures/error-snapshot-too-large.json`, and writes nothing. The
+/// size is checked after the templates, and once the office points the shift
+/// at a small pallet template it opens.
+#[tokio::test]
+async fn two_layouts_too_large_together_keep_the_shift_planned() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let box_template = heavy_template(&admin, "box", 170_000).await;
+    let pallet = heavy_template(&admin, "pallet", 170_000).await;
+    let mut body = pallet_shift_body(&setup, &pallet);
+    body["boxTemplateId"] = json!(box_template);
+    let shift = plan_shift(&admin, body).await;
+    let revision = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let (status, refused) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(
+        (status, &refused),
+        (StatusCode::CONFLICT, &snapshot_too_large_fixture()),
+        "{}",
+        refused["error"]
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert!(audit_trail(&admin.app, "shift.open").await.is_empty());
+    assert_eq!(stored_snapshot_bytes(&admin, &shift).await, None);
+    assert_eq!(
+        unopened(&admin, &shift).await,
+        ("planned".to_owned(), None, None, 0)
+    );
+    // The pallet template is looked at before the size: one that no longer
+    // fits is named first, whatever its layout.
+    patch_template_by_id(&admin, &pallet, json!({ "enabled": false })).await;
+    assert_eq!(
+        refused_untouched(&admin, &admin.key, &shift).await,
+        (
+            StatusCode::CONFLICT,
+            json!({ "constraint": "pallet_template_not_fit" })
+        )
+    );
+    // A small pallet template brings the snapshot under the bound.
+    let small = pallet_template(&admin).await;
+    let (status, pointed) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/shifts/{}", shift["id"].as_str().unwrap()),
+            Some(json!({ "palletTemplateId": small, "expectedRev": shift["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{pointed}");
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{}", entered["error"]);
+    assert_eq!(entered["snapshot"]["palletTemplate"]["id"], json!(small));
+    assert_eq!(
+        entered["snapshot"]["boxTemplate"]["id"],
+        json!(box_template)
+    );
+    assert!(stored_snapshot_bytes(&admin, &shift).await.unwrap() < 327_680);
+    assert_eq!(
+        unopened(&admin, &shift).await.0,
+        "active",
+        "the entry opened the shift"
+    );
+}
+
+/// The entry of a pallet shift whose box layout is `box_filler` bytes of
+/// text and whose pallet layout is `pallet_filler`, on a host of its own:
+/// the answer's status and the size of the stored snapshot. Every host is
+/// made the same way, so the sizes differ by the fillers alone.
+async fn entry_with_layouts(box_filler: usize, pallet_filler: usize) -> (StatusCode, Option<i64>) {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let box_template = heavy_template(&admin, "box", box_filler).await;
+    let pallet = heavy_template(&admin, "pallet", pallet_filler).await;
+    let mut body = pallet_shift_body(&setup, &pallet);
+    body["boxTemplateId"] = json!(box_template);
+    let shift = plan_shift(&admin, body).await;
+    let (status, _) = enter(&admin, &admin.key, &shift).await;
+    (status, stored_snapshot_bytes(&admin, &shift).await)
+}
+
+/// The limit is the table's `CHECK`, 327 680 bytes of snapshot text: one that
+/// size opens the shift, one byte more is the clean refusal.
+#[tokio::test]
+async fn a_snapshot_of_exactly_the_limit_opens_the_shift_and_one_byte_more_does_not() {
+    const LIMIT: usize = 327_680;
+    let (status, measured) = entry_with_layouts(100_000, 100_000).await;
+    assert_eq!(status, StatusCode::OK);
+    let measured = usize::try_from(measured.expect("stored")).unwrap();
+    let room = LIMIT - measured;
+    assert_eq!(
+        entry_with_layouts(100_000, 100_000 + room).await,
+        (StatusCode::OK, Some(i64::try_from(LIMIT).unwrap()))
+    );
+    assert_eq!(
+        entry_with_layouts(100_000, 100_000 + room + 1).await,
+        (StatusCode::CONFLICT, None)
+    );
+}

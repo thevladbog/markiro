@@ -872,6 +872,14 @@ fn an_entered_shift_carries_its_snapshot_and_the_list_never_does() {
         ),
         (codes::CONFLICT, Some("shift_busy"))
     );
+    let too_large: ErrorBody = round_trip("error-snapshot-too-large.json");
+    assert_eq!(
+        (
+            too_large.error.code.as_str(),
+            too_large.error.details.expect("details")["constraint"].as_str()
+        ),
+        (codes::CONFLICT, Some("snapshot_too_large"))
+    );
 }
 
 /// A station's shift with pallets names their capacity and template, and its

@@ -252,6 +252,7 @@ const RESPONSES = [
   ["error-template-is-default.json", errorBodySchema],
   ["office-shift.json", officeShiftSchema],
   ["error-shift-busy.json", errorBodySchema],
+  ["error-snapshot-too-large.json", errorBodySchema],
   ["error-sscc-exhausted.json", errorBodySchema],
 ] as const;
 
@@ -1453,7 +1454,7 @@ describe("shift shapes", () => {
     expect(newer.data?.totals.acceptedUnits).toBe(547);
   });
 
-  it("read the refusals of a busy shift and of a prefix with no serials left", () => {
+  it("read the refusals of a busy shift, of a prefix with no serials left and of layouts too large to open a shift", () => {
     expect(errorBodySchema.parse(fixture("error-shift-busy.json")).error).toMatchObject({
       code: "conflict",
       details: { constraint: "shift_busy" },
@@ -1461,6 +1462,10 @@ describe("shift shapes", () => {
     expect(errorBodySchema.parse(fixture("error-sscc-exhausted.json")).error).toMatchObject({
       code: "sscc_exhausted",
       details: { issuerPrefix: "460068200", extension: 0 },
+    });
+    expect(errorBodySchema.parse(fixture("error-snapshot-too-large.json")).error).toMatchObject({
+      code: "conflict",
+      details: { constraint: "snapshot_too_large" },
     });
   });
 });
