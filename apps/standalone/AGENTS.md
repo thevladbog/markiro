@@ -2126,15 +2126,20 @@ A station reads its shifts with the device key (`GET /v1/device/shifts`;
 the shift routes of a device are a station's, and another kind of device is
 `forbidden`): the planned and active shifts of its line, and the shifts it
 entered that are active or closed within 30 days, by production date; a
-station without a line sees only the latter. It reads them when it reads its
-device record (after it subscribes to the link and after every revision
-event), not through the feed: shifts are per line, and an open one carries a
+station without a line sees only the latter. A shift with pallets also
+names `palletBoxCapacity` and `palletTemplateId`; a shift without leaves
+both out, so a station of stage 2a reads its list as before. It reads them
+when it reads its device record (after it subscribes to the link and after
+every revision event), not through the feed: shifts are per line, and an
+open one carries a
 layout of up to 256 KB. A shift's product name and GTIN and its
 counterparty's name are the snapshot's once it is open and the records' before
 (the station keeps no copy of counterparties); `ownerDeviceId` names the
 station that opened it, and another station's id means the shift is busy. A
 station creates a shift on its own line while the host answers
-(`POST /v1/device/shifts`), under the office's rules; a station without a line
+(`POST /v1/device/shifts`), under the office's rules, pallets included
+(`palletsEnabled`, `palletBoxCapacity`, `palletTemplateId`, all optional and
+left out by a station of stage 2a); a station without a line
 is `conflict` on `shift_line`, and a line is no field of the request.
 `requestId`, a lower-case hyphenated UUID the station made up
 (`validate::client_uuid`), makes the create repeatable: the same request of
@@ -2149,12 +2154,16 @@ A planned shift opens: the host checks its product (`product_inactive`) and
 its template (`template_not_fit`) again, freezes the snapshot
 (`ShiftSnapshot`: the product's id, GTIN, names, group and shelf life; the box
 template's id, name, revision and whole layout; the issuer prefix of the
-organization's GLN; the counterparty's name), makes the station the shift's
+organization's GLN; the counterparty's name; with pallets the pallet
+template's id, name, revision and layout as `palletTemplate`, which a shift
+without pallets leaves out), makes the station the shift's
 owner, adds it to `shift_participants` and takes a revision, so the line's
 other stations see the shift busy. The owner enters again with no revision and
 gets the same snapshot back, so a station that lost its database recovers it;
-a change of the catalog, the template or the GLN never changes it. A closed
-shift is `shift_status` for every station, a shift of another line (or a
+a change of the catalog, the template or the GLN never changes it. A pallet
+template disabled or narrowed since the plan keeps the shift planned
+(`conflict` on `pallet_template_not_fit`, checked after the box template). A
+closed shift is `shift_status` for every station, a shift of another line (or a
 station without one) `shift_line`, a shift another station opened
 `shift_busy`: stage 2a puts one device on a shift. The snapshot is at most
 320 KB (a `CHECK` of `0009`), and the host never checks its layout: the station
@@ -2196,7 +2205,8 @@ of `lineId`, `productionDate`, `boxTemplateId`, `boxCapacity`, `plannedQty`,
 `counterpartyId`, `palletsEnabled`, `palletBoxCapacity` and
 `palletTemplateId`, no row when nothing changed), `shift.delete` (an office
 user; `{ number }`), `shift.open` (the station; `{ number, templateId,
-templateRev }`), `shift.close` (an office user; `{ reason }`) and
+templateRev }`, plus `palletTemplateId` and `palletTemplateRev` for a shift
+with pallets), `shift.close` (an office user; `{ reason }`) and
 `sscc.block.issue` (a station; target `sscc_block`; `{ issuerPrefix,
 extension, fromSerial, toSerial }`). A refusal writes none.
 
@@ -2215,22 +2225,24 @@ office closed are taken and marked late.
 SSCC blocks: a station asks for a block of serials
 (`POST /v1/device/sscc/blocks`, `{ requestId, issuerPrefix, extension }`,
 stations only) when it has none for its shift's prefix or its newest is half
-used (plan 2a6). Stage 2a issues box blocks only (`validation_failed` on
-`extension` otherwise), of a prefix that has a counter (`validation_failed` on
-`issuerPrefix` otherwise). A block is the counter's next `site.box_block_size`
-serials (2000 by default, «SSCC → Размеры блоков»), fewer at the end of the
-prefix's serials, and then `sscc_exhausted` (409, with the prefix and the
-extension). The counter moves past the block with a new revision in the same
+used (plan 2a6). A block is of boxes (`extension` 0) or of pallets (1, plan
+ПЛ-Х; `validation_failed` on `extension` otherwise), of a prefix that has a
+counter for that extension (`validation_failed` on `issuerPrefix`
+otherwise). A block is the counter's next `site.box_block_size` serials (2000
+by default) or `site.pallet_block_size` (200; «SSCC → Размеры блоков»), fewer
+at the end of the prefix's serials, and then `sscc_exhausted` (409, with the
+prefix and the extension). The counter moves past the block with a new
+revision in the same
 transaction, so every issued serial lies below its counter, `sscc_below_floor`
 keeps it from being issued again, and a counter form opened before the issue
 meets `stale_revision`. The same `requestId` of the same station answers the
-same block, even after others were issued, but only for the same prefix: the
-id with another `issuerPrefix` is `validation_failed` on `requestId` and
-writes nothing. A correct station keeps the prefix beside the id and repeats
-its request whole, so a mismatch is its mistake, and the old block's serials
-must not be filed under a prefix they were not reserved for (a shift create
-is lenient the other way, since a station reads that shift from the answer;
-the extension is 0 on both sides until plan 2b). The device is read again
+same block, even after others were issued, but only for the same prefix and
+extension: the id with another `issuerPrefix` or `extension` is
+`validation_failed` on `requestId` and writes nothing. A correct station keeps
+the request beside the id and repeats it whole, so a mismatch is its mistake,
+and the old block's serials must not be filed under a prefix, or printed on
+labels, they were not reserved for (a shift create is lenient the other way,
+since a station reads that shift from the answer). The device is read again
 inside the write transaction (a station revoked while the request waited
 gets 401). A block's use (`consumed_through`) comes with the facts of plan
 2a2; revoking blocks and showing them per device with plan 2b. A counter the

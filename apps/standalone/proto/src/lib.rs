@@ -1595,6 +1595,12 @@ pub struct DeviceShift {
     pub planned_qty: Option<u32>,
     pub box_capacity: u32,
     pub box_template_id: String,
+    /// How many boxes a pallet holds and the pallet label template, only for
+    /// a shift with pallets (plan ПЛ-Х); left out otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_box_capacity: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_template_id: Option<String>,
     /// The station that opened the shift: another one's id means the shift
     /// is busy (stage 2a puts one device on a shift).
     pub owner_device_id: Option<String>,
@@ -1620,9 +1626,13 @@ pub struct ShiftSnapshot {
     pub product: ShiftSnapshotProduct,
     pub box_template: ShiftSnapshotTemplate,
     /// The SSCC issuer prefix of the organization's GLN when the shift
-    /// opened: the station asks for blocks of it.
+    /// opened: the station asks for blocks of it, of boxes and of pallets.
     pub issuer_prefix: String,
     pub counterparty_name: Option<String>,
+    /// The pallet label template as the shift froze it, its layout whole:
+    /// only for a shift with pallets (plan ПЛ-Х); left out otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_template: Option<ShiftSnapshotTemplate>,
 }
 
 /// The product as a shift froze it; only an active product opens a shift,
@@ -1638,9 +1648,10 @@ pub struct ShiftSnapshotProduct {
     pub shelf_life_days: Option<u32>,
 }
 
-/// The box template as a shift froze it, its layout whole. The host never
-/// checks a layout; the station checks it with `labelTemplateSpecSchema`
-/// when it enters the shift.
+/// A label template as a shift froze it (its box template, and its pallet
+/// template when it has pallets), its layout whole. The host never checks a
+/// layout; the station checks it with `labelTemplateSpecSchema` when it
+/// enters the shift.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ShiftSnapshotTemplate {
@@ -1661,7 +1672,8 @@ pub struct DeviceShifts {
 /// `POST /v1/device/shifts`: a station creates a shift on its own line while
 /// the host answers. `requestId` (a lower-case hyphenated UUID the station
 /// made up) makes it repeatable: the same request of the same station
-/// answers the same shift.
+/// answers the same shift. Pallets follow the office's rules
+/// ([`ShiftCreate`]); a station of stage 2a sends none of their fields.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DeviceShiftCreate {
@@ -1675,6 +1687,12 @@ pub struct DeviceShiftCreate {
     pub planned_qty: Option<u32>,
     #[serde(default)]
     pub counterparty_id: Option<String>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub pallets_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_box_capacity: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pallet_template_id: Option<String>,
 }
 
 /// What a fact records (stage 2a spec §4.4): the kind tells the host how

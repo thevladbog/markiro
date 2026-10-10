@@ -362,15 +362,45 @@ pub fn template_not_fit() -> ApiError {
     )
 }
 
+/// `conflict` on `pallet_template_not_fit`: the planned shift's pallet
+/// template is disabled now, or no longer covers the product's group.
+pub fn pallet_template_not_fit() -> ApiError {
+    ApiError::conflict(
+        "pallet_template_not_fit",
+        "the shift's pallet template no longer fits its product",
+    )
+}
+
+/// A template as a shift freezes it: its name, revision and whole layout.
+async fn frozen_template(
+    conn: &mut SqliteConnection,
+    id: &str,
+) -> Result<ShiftSnapshotTemplate, ApiError> {
+    let (name, spec, rev): (String, String, i64) =
+        sqlx::query_as("SELECT name, spec, rev FROM label_templates WHERE id = ?")
+            .bind(id)
+            .fetch_one(conn)
+            .await
+            .map_err(ApiError::internal)?;
+    Ok(ShiftSnapshotTemplate {
+        id: id.to_owned(),
+        name,
+        rev,
+        spec: serde_json::from_str(&spec).map_err(ApiError::internal)?,
+    })
+}
+
 /// The snapshot a planned shift freezes when a station opens it: its product
 /// (still active and not archived, or `product_inactive`), its box template
 /// (still enabled and covering the product's group, or `template_not_fit`)
-/// with the whole layout, the issuer prefix of the organization's current
-/// GLN, and the counterparty's name.
+/// with the whole layout, with pallets its pallet template the same way
+/// (`pallet_template_not_fit`), the issuer prefix of the organization's
+/// current GLN, and the counterparty's name.
 pub async fn snapshot(
     conn: &mut SqliteConnection,
     product_id: &str,
     template_id: &str,
+    pallet_template_id: Option<&str>,
     counterparty_id: Option<&str>,
 ) -> Result<ShiftSnapshot, ApiError> {
     type ProductRow = (
@@ -400,12 +430,17 @@ pub async fn snapshot(
         Some(scope) if templates::fits(&scope, TemplatePurpose::Box, Some(group)) => {}
         _ => return Err(template_not_fit()),
     }
-    let (template_name, spec, template_rev): (String, String, i64) =
-        sqlx::query_as("SELECT name, spec, rev FROM label_templates WHERE id = ?")
-            .bind(template_id)
-            .fetch_one(&mut *conn)
-            .await
-            .map_err(ApiError::internal)?;
+    if let Some(pallet_template_id) = pallet_template_id {
+        match templates::scope(conn, pallet_template_id).await? {
+            Some(scope) if templates::fits(&scope, TemplatePurpose::Pallet, Some(group)) => {}
+            _ => return Err(pallet_template_not_fit()),
+        }
+    }
+    let box_template = frozen_template(&mut *conn, template_id).await?;
+    let pallet_template = match pallet_template_id {
+        Some(id) => Some(frozen_template(&mut *conn, id).await?),
+        None => None,
+    };
     let gln: Option<String> = sqlx::query_scalar("SELECT gln FROM org_profile WHERE id = 1")
         .fetch_optional(&mut *conn)
         .await
@@ -430,13 +465,9 @@ pub async fn snapshot(
             chz_product_group_code: group,
             shelf_life_days,
         },
-        box_template: ShiftSnapshotTemplate {
-            id: template_id.to_owned(),
-            name: template_name,
-            rev: template_rev,
-            spec: serde_json::from_str(&spec).map_err(ApiError::internal)?,
-        },
+        box_template,
         issuer_prefix: crate::validate::issuer_prefix(&gln).to_owned(),
         counterparty_name,
+        pallet_template,
     })
 }

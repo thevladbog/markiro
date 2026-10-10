@@ -873,6 +873,56 @@ fn an_entered_shift_carries_its_snapshot_and_the_list_never_does() {
     );
 }
 
+/// A station's shift with pallets names their capacity and template, and its
+/// entry freezes the pallet template; a shift without pallets names none of
+/// them, and a station of stage 2a sends no pallet field.
+#[test]
+fn a_shift_with_pallets_names_them_and_its_entry_freezes_the_pallet_template() {
+    let entered: DeviceShift = round_trip("device-shift-entered-pallets.json");
+    let snapshot = entered
+        .snapshot
+        .clone()
+        .expect("an entry carries the snapshot");
+    let pallet = snapshot
+        .pallet_template
+        .expect("a shift with pallets freezes its pallet template");
+    assert_eq!(
+        (
+            entered.pallets_enabled,
+            entered.pallet_box_capacity,
+            entered.pallet_template_id.as_deref()
+        ),
+        (true, Some(40), Some(pallet.id.as_str()))
+    );
+    let plain: DeviceShift = serde_json::from_value(fixture("device-shift-entered.json")).unwrap();
+    assert_eq!(
+        (
+            plain.pallet_box_capacity,
+            plain.pallet_template_id,
+            plain.snapshot.expect("snapshot").pallet_template
+        ),
+        (None, None, None)
+    );
+    let create: DeviceShiftCreate = round_trip("device-shift-create-pallets.json");
+    assert_eq!(
+        (
+            create.pallets_enabled,
+            create.pallet_box_capacity,
+            create.pallet_template_id.as_deref()
+        ),
+        (true, Some(40), Some(pallet.id.as_str()))
+    );
+    let bare: DeviceShiftCreate = round_trip("device-shift-create.json");
+    assert_eq!(
+        (
+            bare.pallets_enabled,
+            bare.pallet_box_capacity,
+            bare.pallet_template_id
+        ),
+        (false, None, None)
+    );
+}
+
 #[test]
 fn a_shift_close_carries_the_reason_and_the_revision() {
     let close: ShiftClose = round_trip("shift-close.json");
