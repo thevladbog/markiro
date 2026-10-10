@@ -2,6 +2,7 @@ import { isShiftCloseReasonCode } from "@markiro/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { Link } from "react-router";
 
 import {
   Alert,
@@ -175,7 +176,15 @@ export function ShiftsPage() {
       key: "number",
       title: t("office.shifts.table.number"),
       mono: true,
-      render: (shift) => shift.number,
+      // The number opens the shift's card (plan О-Ф).
+      render: (shift) => (
+        <Link
+          to={`/shifts/${shift.id}`}
+          aria-label={t("office.shifts.cardNamed", { number: shift.number })}
+        >
+          {shift.number}
+        </Link>
+      ),
     },
     {
       key: "productionDate",

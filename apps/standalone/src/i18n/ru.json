@@ -624,6 +624,7 @@
       "exportNamed": "Выгрузка смены {{number}}",
       "totalsAction": "Итоги",
       "totalsNamed": "Итоги смены {{number}}",
+      "cardNamed": "Карточка смены {{number}}",
       "createTitle": "Новая смена",
       "create": "Запланировать",
       "created": "Смена {{number}} запланирована.",
@@ -700,6 +701,66 @@
         "nowActive": "Смену уже открыли на станции: теперь у неё можно изменить только план. Список смен обновлён.",
         "nowClosed": "Смена уже закрыта. Список смен обновлён.",
         "notOpen": "Смена ещё не открыта на станции. Список смен обновлён."
+      }
+    },
+    "shiftCard": {
+      "back": "← Смены",
+      "title": "Смена {{number}}",
+      "counterparty": "Контрагент",
+      "boxCapacity": "Вместимость короба, шт",
+      "pallets": {
+        "title": "Паллеты",
+        "table": "Список паллет",
+        "empty": "Паллет ещё нет",
+        "sscc": "SSCC",
+        "boxes": "Коробов",
+        "units": "Кодов",
+        "closedAt": "Закрыта",
+        "state": "Состояние"
+      },
+      "palletsFact": "Паллеты",
+      "noPallets": "Не собираются",
+      "palletCapacity": "По {{boxes}} кор.",
+      "openedAt": "Открыта",
+      "closedAt": "Закрыта",
+      "noSscc": "Без SSCC",
+      "unknownPallet": "Паллета не найдена",
+      "palletsUnread": "Паллеты не загружены",
+      "openPallet": "Открытая",
+      "disassembledAt": "{{at}}",
+      "boxMismatch": "Состав при закрытии не сошёлся",
+      "palletMismatch": "Счёт коробов станции другой",
+      "lateBox": "Закрыт после закрытия паллеты",
+      "boxState": {
+        "open": "Открыт",
+        "closed": "Закрыт",
+        "disassembled": "Расформирован"
+      },
+      "palletState": {
+        "open": "Открыта",
+        "closed": "Закрыта",
+        "disassembled": "Расформирована"
+      },
+      "label": {
+        "verified": "Проверена",
+        "skipped": "Пропущена",
+        "none": "Не проверялась"
+      },
+      "boxes": {
+        "title": "Короба",
+        "table": "Список коробов",
+        "tail": "Последние цифры SSCC",
+        "tailHint": "Только цифры: короба, чей SSCC ими кончается",
+        "found": "Показано {{shown}} из {{total}}",
+        "empty": "Коробов ещё нет",
+        "none": "Нет коробов с таким окончанием SSCC",
+        "pager": "Страницы коробов",
+        "sscc": "SSCC",
+        "units": "Кодов",
+        "closedAt": "Закрыт",
+        "pallet": "Паллета",
+        "state": "Состояние",
+        "label": "Этикетка"
       }
     },
     "exports": {

@@ -39,6 +39,8 @@ export const officeKeys = {
   shiftExportSource: (id: string) => ["office", "shift-export-source", id],
   /** A shift's pallets with what the station counted (`GET /v1/office/shifts/{id}/pallets`, plan ЧЗ). */
   shiftPallets: (id: string) => ["office", "shift-pallets", id],
+  /** A shift's boxes for its card (`GET /v1/office/shifts/{id}/boxes`, plan О-Ф); the pallets are `shiftPallets`. */
+  shiftBoxes: (id: string) => ["office", "shift-boxes", id],
   /** One template with its layout (`GET /v1/office/templates/{id}`). */
   template: (id: string) => ["office", "template", id],
   /**
