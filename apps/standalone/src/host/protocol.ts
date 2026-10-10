@@ -668,6 +668,82 @@ export const deviceShiftsSchema = z.object({ shifts: z.array(deviceShiftSchema) 
 export const enteredShiftSchema = deviceShiftSchema.extend({ snapshot: shiftSnapshotSchema });
 export type EnteredShift = z.infer<typeof enteredShiftSchema>;
 
+/**
+ * The scan that owns a code on the host (`markiro_proto::CodeOwner`): the
+ * earliest accepted scan of it. `sameDevice` says the scan is this
+ * station's own. A `conflict` receipt names its winner in this shape too.
+ */
+export const codeOwnerSchema = z.object({
+  shiftId: z.uuid(),
+  shiftNumber: z.string(),
+  deviceId: z.uuid(),
+  scannedAt: z.string(),
+  sameDevice: z.boolean(),
+});
+export type CodeOwner = z.infer<typeof codeOwnerSchema>;
+
+/** `GET /v1/device/codes/{codeHash}` (`markiro_proto::CodeCheck`): whether an accepted scan owns the code. */
+export const codeCheckSchema = z.discriminatedUnion("status", [
+  z.object({ status: z.literal("free") }),
+  z.object({ status: z.literal("taken"), owner: codeOwnerSchema }),
+]);
+export type CodeCheck = z.infer<typeof codeCheckSchema>;
+
+/**
+ * The answer of `POST /v1/device/sscc/blocks` (`markiro_proto::SsccBlock`):
+ * the serials `fromSerial`-`toSerial`, both ends included, of one issuer
+ * prefix and extension, issued to this station.
+ */
+export const ssccBlockSchema = z.object({
+  id: z.uuid(),
+  issuerPrefix: z.string(),
+  extension: z.number().int().min(0).max(9),
+  fromSerial: z.number().int().nonnegative(),
+  toSerial: z.number().int().nonnegative(),
+});
+export type SsccBlock = z.infer<typeof ssccBlockSchema>;
+
+/** How the host answered a fact (`markiro_proto::FactOutcome`). */
+export const FACT_OUTCOMES = ["accepted", "conflict", "rejected"] as const;
+export type FactOutcome = (typeof FACT_OUTCOMES)[number];
+
+/**
+ * The codes of a `rejected` receipt (`markiro_proto::receipt_codes`,
+ * `proto/fixtures/fact-receipt-codes.json`). A receipt carries its code as
+ * text: a code a newer host adds does not fail the batch.
+ */
+export const FACT_RECEIPT_CODES = [
+  "invalid_record",
+  "payload_mismatch",
+  "unknown_shift",
+  "not_entered",
+  "gtin_mismatch",
+  "box_unknown",
+  "box_closed",
+  "box_already_closed",
+  "box_state",
+  "sscc_not_issued",
+  "sscc_taken",
+] as const;
+
+/**
+ * The host's answer to one record (`markiro_proto::FactReceipt`): `id` is the
+ * record's, or `null` when the host could not read it (the receipt then
+ * matches its record by its place in the batch); a `rejected` one names its
+ * code; `details` carries the field of an `invalid_record`, the winner of a
+ * `conflict` and `alreadyClosed` of a shift's close.
+ */
+export const factReceiptSchema = z.object({
+  id: z.string().nullable(),
+  outcome: z.enum(FACT_OUTCOMES),
+  code: z.string().optional(),
+  details: z.record(z.string(), z.unknown()).optional(),
+});
+export type FactReceipt = z.infer<typeof factReceiptSchema>;
+
+/** The answer of `POST /v1/device/facts`: a receipt per record, in the records' order. */
+export const factReceiptsSchema = z.object({ receipts: z.array(factReceiptSchema) });
+
 // --- Request bodies (strict) ---
 
 export const officeLoginRequestSchema = z
@@ -1014,3 +1090,127 @@ export const deviceShiftCreateSchema = z
   })
   .strict();
 export type DeviceShiftCreate = z.infer<typeof deviceShiftCreateSchema>;
+
+/**
+ * `POST /v1/device/sscc/blocks` (`markiro_proto::SsccBlockRequest`): a block
+ * of the shift's issuer prefix and an extension (0, a box). The station keeps
+ * the request (`floor_block_requests`) and repeats it whole until it has the
+ * block: the same `requestId` answers the same block.
+ */
+export const ssccBlockRequestSchema = z
+  .object({
+    requestId: z.uuid(),
+    issuerPrefix: z.string(),
+    extension: z.number().int().min(0).max(9),
+  })
+  .strict();
+export type SsccBlockRequest = z.infer<typeof ssccBlockRequestSchema>;
+
+/** The verdict of a scan (`markiro_proto::ScanVerdict`). */
+export const SCAN_VERDICTS = ["ok", "duplicate", "wrong_gtin", "invalid"] as const;
+export type ScanVerdict = (typeof SCAN_VERDICTS)[number];
+
+/** What the domain's `classifyScan` read a scan as (`markiro_proto::ScanRawKind`). */
+export const SCAN_RAW_KINDS = ["km", "gtin", "sscc", "unknown"] as const;
+export type ScanRawKind = (typeof SCAN_RAW_KINDS)[number];
+
+/**
+ * A code of marking as the domain read it (`markiro_proto::ScannedCode`):
+ * `codeHash` is `kmHash`, `canonical` the text `canonicalizeKm` kept, its
+ * group separators and crypto tail included.
+ */
+export const scannedCodeSchema = z
+  .object({ codeHash: z.string(), gtin14: z.string(), serial: z.string(), canonical: z.string() })
+  .strict();
+export type ScannedCode = z.infer<typeof scannedCodeSchema>;
+
+/**
+ * `data` of a `scan` fact (`markiro_proto::ScanFact`). Every instant of a fact
+ * is exactly what `Date.toISOString` writes (`device-instants.json`); the
+ * host refuses any other form.
+ */
+export const scanFactSchema = z
+  .object({
+    scannedAt: z.string(),
+    verdict: z.enum(SCAN_VERDICTS),
+    duplicateSource: z.enum(["local", "host"]).nullable(),
+    rawKind: z.enum(SCAN_RAW_KINDS),
+    rawLength: z.number().int().nonnegative(),
+    code: scannedCodeSchema.nullable(),
+    boxId: z.uuid().nullable(),
+  })
+  .strict();
+export type ScanFact = z.infer<typeof scanFactSchema>;
+
+/** `data` of a `box_closed` fact (`markiro_proto::BoxClosedFact`). */
+export const boxClosedFactSchema = z
+  .object({
+    boxId: z.uuid(),
+    sscc: z.string(),
+    blockId: z.uuid(),
+    serial: z.number().int().nonnegative(),
+    openedAt: z.string(),
+    closedAt: z.string(),
+    itemCount: z.number().int().positive(),
+    membershipDigest: z.string(),
+  })
+  .strict();
+export type BoxClosedFact = z.infer<typeof boxClosedFactSchema>;
+
+/** `data` of a `box_label` fact (`markiro_proto::BoxLabelFact`). */
+export const boxLabelFactSchema = z
+  .object({ boxId: z.uuid(), outcome: z.enum(["verified", "skipped"]), at: z.string() })
+  .strict();
+export type BoxLabelFact = z.infer<typeof boxLabelFactSchema>;
+
+/** `data` of a `box_exception` fact (`markiro_proto::BoxExceptionFact`); the fields of each kind are the host's rule. */
+export const boxExceptionFactSchema = z
+  .object({
+    exception: z.enum(["undo", "clear", "reprint", "disassemble"]),
+    boxId: z.uuid(),
+    codeHash: z.string().nullable(),
+    targetScannedAt: z.string().nullable(),
+    reasonCode: z.string().nullable(),
+    reasonText: z.string().nullable(),
+    occurredAt: z.string(),
+  })
+  .strict();
+export type BoxExceptionFact = z.infer<typeof boxExceptionFactSchema>;
+
+/** `data` of a `shift_closed` fact (`markiro_proto::ShiftClosedFact`). */
+export const shiftClosedFactSchema = z
+  .object({
+    plannedQtySnapshot: z.number().int().positive().nullable(),
+    actualQty: z.number().int().nonnegative(),
+    closedBoxCount: z.number().int().nonnegative(),
+    reasonCode: z.string().nullable(),
+    closedAt: z.string(),
+  })
+  .strict();
+export type ShiftClosedFact = z.infer<typeof shiftClosedFactSchema>;
+
+/** The envelope of every record: its own id, the shift and the operator signed in, or `null`. */
+const factHead = { id: z.uuid(), shiftId: z.uuid(), operatorId: z.uuid().nullable() };
+
+/**
+ * One record of the outbox (`markiro_proto::FactRecord`): the envelope and
+ * `data` read by `kind`. The outbox keeps it whole as its `payload`, and it is
+ * sent as kept.
+ */
+export const factRecordSchema = z.discriminatedUnion("kind", [
+  z.object({ ...factHead, kind: z.literal("scan"), data: scanFactSchema }).strict(),
+  z.object({ ...factHead, kind: z.literal("box_closed"), data: boxClosedFactSchema }).strict(),
+  z.object({ ...factHead, kind: z.literal("box_label"), data: boxLabelFactSchema }).strict(),
+  z
+    .object({ ...factHead, kind: z.literal("box_exception"), data: boxExceptionFactSchema })
+    .strict(),
+  z.object({ ...factHead, kind: z.literal("shift_closed"), data: shiftClosedFactSchema }).strict(),
+]);
+export type FactRecord = z.infer<typeof factRecordSchema>;
+export type FactKind = FactRecord["kind"];
+
+/** `POST /v1/device/facts` (`markiro_proto::FactBatch`): 1-100 records, in the outbox's order. */
+export const MAX_FACT_BATCH = 100;
+export const factBatchSchema = z
+  .object({ records: z.array(factRecordSchema).min(1).max(MAX_FACT_BATCH) })
+  .strict();

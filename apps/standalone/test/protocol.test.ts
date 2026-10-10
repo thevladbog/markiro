@@ -12,6 +12,7 @@ import {
   canonicalSaltSchema,
   categoryTemplateDefaultSchema,
   changesResponseSchema,
+  codeCheckSchema,
   counterpartyCreateSchema,
   counterpartyRecordSchema,
   counterpartyUpdateSchema,
@@ -24,6 +25,11 @@ import {
   deviceUpdateSchema,
   enteredShiftSchema,
   errorBodySchema,
+  FACT_OUTCOMES,
+  FACT_RECEIPT_CODES,
+  factBatchSchema,
+  factReceiptsSchema,
+  factRecordSchema,
   helloSchema,
   labelTemplateRecordSchema,
   labelTemplateSchema,
@@ -59,7 +65,11 @@ import {
   shiftCloseSchema,
   shiftCreateSchema,
   shiftUpdateSchema,
+  SCAN_RAW_KINDS,
+  SCAN_VERDICTS,
   siteRecordSchema,
+  ssccBlockRequestSchema,
+  ssccBlockSchema,
   ssccCounterUpdateSchema,
   ssccStateSchema,
   stockTemplateSchema,
@@ -260,6 +270,10 @@ const RESPONSES = [
   ["error-sscc-exhausted.json", errorBodySchema],
   ["device-shifts.json", deviceShiftsSchema],
   ["device-shift-entered.json", enteredShiftSchema],
+  ["sscc-block.json", ssccBlockSchema],
+  ["code-check-free.json", codeCheckSchema],
+  ["code-check-taken.json", codeCheckSchema],
+  ["facts-response.json", factReceiptsSchema],
 ] as const;
 
 const REQUESTS = [
@@ -291,6 +305,8 @@ const REQUESTS = [
   ["shift-update.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
   ["device-shift-create.json", deviceShiftCreateSchema],
+  ["sscc-block-request.json", ssccBlockRequestSchema],
+  ["facts-request.json", factBatchSchema],
 ] as const;
 
 function extended(name: string): Record<string, unknown> {
@@ -1734,5 +1750,349 @@ describe("unauthorized errors", () => {
   it("name the rejected credential", () => {
     const body = errorBodySchema.parse(fixture("error-unauthorized.json"));
     expect(credentialSchema.parse(body.error.details?.credential)).toBe("session");
+  });
+});
+
+describe("facts of the floor", () => {
+  const RECORDS = factBatchSchema.parse(fixture("facts-request.json")).records;
+  const NOT_UUID = ["42", "", null, 5, "8E1F2A3B-4C5D-4E6F-8A9B-0C1D2E3F4A5B ", true];
+
+  /** The `index`-th record of facts-request.json, as the host's JSON. */
+  function raw(index: number): { data: Record<string, unknown> } & Record<string, unknown> {
+    return structuredClone(
+      (fixture("facts-request.json") as { records: never[] }).records[index],
+    ) as never;
+  }
+
+  /** `object` without `key`. */
+  function without(object: Record<string, unknown>, key: string): Record<string, unknown> {
+    return Object.fromEntries(Object.entries(object).filter(([name]) => name !== key));
+  }
+
+  it("know every receipt code of the host", () => {
+    expect(fixture("fact-receipt-codes.json")).toEqual({ codes: [...FACT_RECEIPT_CODES] });
+  });
+
+  it("send 1 to 100 records in a batch", () => {
+    const [first] = RECORDS;
+    expect(factBatchSchema.safeParse({ records: [] }).success).toBe(false);
+    expect(factBatchSchema.safeParse({ records: Array(1).fill(first) }).success).toBe(true);
+    expect(factBatchSchema.safeParse({ records: Array(100).fill(first) }).success).toBe(true);
+    expect(factBatchSchema.safeParse({ records: Array(101).fill(first) }).success).toBe(false);
+    expect(factBatchSchema.safeParse({}).success).toBe(false);
+    // One record the build cannot read fails the batch it is put into.
+    expect(
+      factBatchSchema.safeParse({ records: [first, { ...first, kind: "pallet" }] }).success,
+    ).toBe(false);
+  });
+
+  it("read a record's data by its kind, and no other", () => {
+    const [scan, , closed] = RECORDS;
+    expect(factRecordSchema.safeParse({ ...scan, kind: "box_closed" }).success).toBe(false);
+    expect(factRecordSchema.safeParse({ ...closed, kind: "scan" }).success).toBe(false);
+    expect(factRecordSchema.safeParse({ ...scan, kind: "pallet_closed" }).success).toBe(false);
+    expect(factRecordSchema.safeParse({ ...scan, operatorId: null }).success).toBe(true);
+    expect(factRecordSchema.safeParse({ ...scan, operatorId: "0042" }).success).toBe(false);
+  });
+
+  it("read every record of the fixture, one of each kind, without losing a field", () => {
+    expect(RECORDS.map((record) => record.kind)).toEqual([
+      "scan",
+      "scan",
+      "box_closed",
+      "box_label",
+      "box_exception",
+      "shift_closed",
+    ]);
+    RECORDS.forEach((record, index) => {
+      expect(factRecordSchema.parse(raw(index))).toEqual(raw(index));
+      expect(record).toEqual(raw(index));
+    });
+  });
+
+  it("refuse a field the record or its data does not have, like the host", () => {
+    for (let index = 0; index < RECORDS.length; index++) {
+      const record = raw(index);
+      expect(factRecordSchema.safeParse({ ...record, addedLater: 1 }).success, `${index}`).toBe(
+        false,
+      );
+      const data = { ...record.data, addedLater: 1 };
+      expect(factRecordSchema.safeParse({ ...record, data }).success, `${index}.data`).toBe(false);
+    }
+    const scan = raw(0) as { data: { code: Record<string, unknown> } };
+    const code = { ...scan.data.code, addedLater: 1 };
+    expect(factRecordSchema.safeParse({ ...scan, data: { ...scan.data, code } }).success).toBe(
+      false,
+    );
+  });
+
+  it("need every field of the envelope and of the data, null where the host takes null", () => {
+    for (let index = 0; index < RECORDS.length; index++) {
+      const record = raw(index);
+      for (const key of Object.keys(record)) {
+        const rest = without(record, key);
+        expect(factRecordSchema.safeParse(rest).success, `${index}: no ${key}`).toBe(false);
+      }
+      for (const key of Object.keys(record.data)) {
+        const data = without(record.data, key);
+        expect(factRecordSchema.safeParse({ ...record, data }).success, `${index}: no ${key}`).toBe(
+          false,
+        );
+      }
+    }
+    const scan = raw(0) as { data: { code: Record<string, unknown> } };
+    for (const key of Object.keys(scan.data.code)) {
+      const code = without(scan.data.code, key);
+      expect(
+        factRecordSchema.safeParse({ ...scan, data: { ...scan.data, code } }).success,
+        `code: no ${key}`,
+      ).toBe(false);
+    }
+  });
+
+  it("refuse a value of the wrong type or range in every field, as the host does", () => {
+    // [record index, path in the record, values that must be refused]
+    const refused: Array<[number, string, unknown[]]> = [
+      [0, "id", NOT_UUID],
+      [0, "shiftId", NOT_UUID],
+      [0, "operatorId", ["42", "", 5, true]],
+      [0, "data.scannedAt", [5, null, true]],
+      [0, "data.verdict", ["maybe", "OK", "wrong-gtin", null, 1]],
+      [0, "data.duplicateSource", ["remote", "LOCAL", 1, true]],
+      [0, "data.rawKind", ["barcode", "KM", null, 1]],
+      [0, "data.rawLength", [-1, 1.5, "83", null, true]],
+      [0, "data.code", ["text", 5, []]],
+      [0, "data.code.codeHash", [5, null, true]],
+      [0, "data.code.gtin14", [5, null, true]],
+      [0, "data.code.serial", [5, null, true]],
+      [0, "data.code.canonical", [5, null, true]],
+      [0, "data.boxId", NOT_UUID.filter((value) => value !== null)],
+      [2, "data.boxId", NOT_UUID],
+      [2, "data.sscc", [46006820000015000, null, true]],
+      [2, "data.blockId", NOT_UUID],
+      [2, "data.serial", [-1, 1.5, "1500", null, true]],
+      [2, "data.openedAt", [5, null, true]],
+      [2, "data.closedAt", [5, null, true]],
+      [2, "data.itemCount", [0, -1, 1.5, "12", null, true]],
+      [2, "data.membershipDigest", [5, null, true]],
+      [3, "data.boxId", NOT_UUID],
+      [3, "data.outcome", ["lost", "VERIFIED", "", null, true]],
+      [3, "data.at", [5, null, true]],
+      [4, "data.exception", ["redo", "UNDO", "", null, 1]],
+      [4, "data.boxId", NOT_UUID],
+      [4, "data.codeHash", [5, true]],
+      [4, "data.targetScannedAt", [5, true]],
+      [4, "data.reasonCode", [5, true]],
+      [4, "data.reasonText", [5, true]],
+      [4, "data.occurredAt", [5, null, true]],
+      [5, "data.plannedQtySnapshot", [0, -1, 1.5, "1200", true]],
+      [5, "data.actualQty", [-1, 1.5, "1188", null, true]],
+      [5, "data.closedBoxCount", [-1, 1.5, "99", null, true]],
+      [5, "data.reasonCode", [5, true]],
+      [5, "data.closedAt", [5, null, true]],
+    ];
+    for (const [index, path, values] of refused) {
+      for (const value of values) {
+        const record = raw(index);
+        const keys = path.split(".");
+        const last = keys.pop() ?? "";
+        const holder = keys.reduce(
+          (node, key) => node[key] as Record<string, unknown>,
+          record as Record<string, unknown>,
+        );
+        holder[last] = value;
+        const result = factRecordSchema.safeParse(record);
+        expect(result.success, `${index} ${path} = ${JSON.stringify(value)}`).toBe(false);
+      }
+    }
+  });
+
+  it("know the verdicts and the kinds of a scan the host knows, and no other", () => {
+    // Mirrors `markiro_proto::ScanVerdict` and `ScanRawKind` (snake_case names).
+    expect([...SCAN_VERDICTS]).toEqual(["ok", "duplicate", "wrong_gtin", "invalid"]);
+    expect([...SCAN_RAW_KINDS]).toEqual(["km", "gtin", "sscc", "unknown"]);
+  });
+
+  it("take the edges of a field and the null where the host takes null", () => {
+    const edge = (index: number, path: string, value: unknown) => {
+      const record = raw(index);
+      const keys = path.split(".");
+      const last = keys.pop() ?? "";
+      const holder = keys.reduce(
+        (node, key) => node[key] as Record<string, unknown>,
+        record as Record<string, unknown>,
+      );
+      holder[last] = value;
+      return factRecordSchema.safeParse(record).success;
+    };
+    expect(edge(0, "data.rawLength", 0)).toBe(true);
+    expect(edge(0, "data.verdict", "duplicate")).toBe(true);
+    expect(edge(0, "data.verdict", "wrong_gtin")).toBe(true);
+    expect(edge(0, "data.duplicateSource", "local")).toBe(true);
+    expect(edge(0, "data.duplicateSource", "host")).toBe(true);
+    expect(edge(0, "data.rawKind", "gtin")).toBe(true);
+    expect(edge(0, "data.rawKind", "sscc")).toBe(true);
+    expect(edge(0, "data.code", null)).toBe(true);
+    expect(edge(0, "data.boxId", null)).toBe(true);
+    expect(edge(2, "data.serial", 0)).toBe(true);
+    expect(edge(2, "data.itemCount", 1)).toBe(true);
+    expect(edge(3, "data.outcome", "skipped")).toBe(true);
+    for (const exception of ["undo", "clear", "reprint", "disassemble"]) {
+      expect(edge(4, "data.exception", exception), exception).toBe(true);
+    }
+    expect(edge(4, "data.reasonCode", null)).toBe(true);
+    expect(edge(4, "data.reasonText", null)).toBe(true);
+    expect(edge(4, "data.codeHash", "3f6c0f1e2d8b4a5c")).toBe(true);
+    expect(edge(4, "data.targetScannedAt", "2026-10-08T06:15:02.418Z")).toBe(true);
+    expect(edge(5, "data.plannedQtySnapshot", null)).toBe(true);
+    expect(edge(5, "data.plannedQtySnapshot", 1)).toBe(true);
+    expect(edge(5, "data.actualQty", 0)).toBe(true);
+    expect(edge(5, "data.closedBoxCount", 0)).toBe(true);
+    expect(edge(5, "data.reasonCode", null)).toBe(true);
+  });
+
+  it("take a receipt code a newer host adds, and refuse a taken code without its owner", () => {
+    const later = { receipts: [{ id: null, outcome: "rejected", code: "added_later" }] };
+    expect(factReceiptsSchema.parse(later)).toEqual(later);
+    expect(
+      factReceiptsSchema.safeParse({ receipts: [{ id: null, outcome: "lost" }] }).success,
+    ).toBe(false);
+    expect(codeCheckSchema.safeParse({ status: "taken" }).success).toBe(false);
+  });
+
+  it("know the three outcomes of the host, and a receipt of each shape", () => {
+    expect([...FACT_OUTCOMES]).toEqual(["accepted", "conflict", "rejected"]);
+    for (const outcome of ["pending", "ACCEPTED", "", null, 1]) {
+      expect(
+        factReceiptsSchema.safeParse({ receipts: [{ id: null, outcome }] }).success,
+        String(outcome),
+      ).toBe(false);
+    }
+    const parse = (receipt: unknown) => factReceiptsSchema.safeParse({ receipts: [receipt] });
+    for (const outcome of FACT_OUTCOMES) {
+      expect(parse({ id: "x", outcome }).success, outcome).toBe(true);
+      expect(parse({ id: null, outcome }).success, outcome).toBe(true);
+    }
+    // `id`, `outcome` are the receipt's own and must be there; `code` and `details` may not.
+    expect(parse({ outcome: "accepted" }).success).toBe(false);
+    expect(parse({ id: "x" }).success).toBe(false);
+    for (const id of [5, true, {}, []]) {
+      expect(parse({ id, outcome: "accepted" }).success, JSON.stringify(id)).toBe(false);
+    }
+    for (const code of [5, null, true]) {
+      expect(parse({ id: "x", outcome: "rejected", code }).success, JSON.stringify(code)).toBe(
+        false,
+      );
+    }
+    for (const details of ["alreadyClosed", 5, null, [], [1]]) {
+      expect(
+        parse({ id: "x", outcome: "accepted", details }).success,
+        JSON.stringify(details),
+      ).toBe(false);
+    }
+    expect(parse({ id: "x", outcome: "accepted", details: {} }).success).toBe(true);
+    // A later host may add fields to a receipt, and to the batch's answer.
+    expect(parse({ id: "x", outcome: "accepted", addedLater: 1 }).success).toBe(true);
+    expect(factReceiptsSchema.safeParse({ receipts: [], addedLater: 1 }).success).toBe(true);
+    expect(factReceiptsSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("keep a receipt's details whole, its winner included", () => {
+    const [, conflict, , , , closed] = factReceiptsSchema.parse(
+      fixture("facts-response.json"),
+    ).receipts;
+    expect(conflict?.details).toEqual({
+      winner: {
+        shiftId: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+        shiftNumber: "OCT26-003",
+        deviceId: "2b3c4d5e-6f7a-4b8c-9d0e-1f2a3b4c5d6e",
+        scannedAt: "2026-10-08T05:58:41.090Z",
+        sameDevice: false,
+      },
+    });
+    expect(closed?.details).toEqual({ alreadyClosed: true });
+  });
+
+  it("read the code check by its status, with the owner of a taken code in full", () => {
+    expect(codeCheckSchema.parse({ status: "free" })).toEqual({ status: "free" });
+    const taken = fixture("code-check-taken.json") as { owner: Record<string, unknown> };
+    for (const status of ["maybe", "FREE", "", null, 1]) {
+      expect(codeCheckSchema.safeParse({ ...taken, status }).success, String(status)).toBe(false);
+    }
+    expect(codeCheckSchema.safeParse({}).success).toBe(false);
+    // A later host may add fields to the owner or to a free answer.
+    expect(
+      codeCheckSchema.safeParse({ ...taken, owner: { ...taken.owner, addedLater: 1 } }).success,
+    ).toBe(true);
+    expect(codeCheckSchema.safeParse({ status: "free", addedLater: 1 }).success).toBe(true);
+    const owner = taken.owner;
+    for (const [key, values] of Object.entries({
+      shiftId: NOT_UUID,
+      shiftNumber: [5, null, true],
+      deviceId: NOT_UUID,
+      scannedAt: [5, null, true],
+      sameDevice: ["false", 0, null],
+    })) {
+      expect(
+        codeCheckSchema.safeParse({ status: "taken", owner: { ...owner, [key]: undefined } })
+          .success,
+        `no ${key}`,
+      ).toBe(false);
+      for (const value of values) {
+        expect(
+          codeCheckSchema.safeParse({ status: "taken", owner: { ...owner, [key]: value } }).success,
+          `${key} = ${JSON.stringify(value)}`,
+        ).toBe(false);
+      }
+    }
+  });
+
+  it("read a block of serials, in full and in range", () => {
+    const block = fixture("sscc-block.json") as Record<string, unknown>;
+    const refused: Record<string, unknown[]> = {
+      id: NOT_UUID,
+      issuerPrefix: [460068200, null, true],
+      extension: [-1, 10, 0.5, "0", null],
+      fromSerial: [-1, 1.5, "1500", null],
+      toSerial: [-1, 1.5, "3499", null],
+    };
+    for (const [key, values] of Object.entries(refused)) {
+      expect(ssccBlockSchema.safeParse({ ...block, [key]: undefined }).success, `no ${key}`).toBe(
+        false,
+      );
+      for (const value of values) {
+        expect(
+          ssccBlockSchema.safeParse({ ...block, [key]: value }).success,
+          `${key} = ${JSON.stringify(value)}`,
+        ).toBe(false);
+      }
+    }
+    for (const extension of [0, 9]) {
+      expect(ssccBlockSchema.safeParse({ ...block, extension }).success, `${extension}`).toBe(true);
+    }
+    expect(ssccBlockSchema.safeParse({ ...block, fromSerial: 0, toSerial: 0 }).success).toBe(true);
+  });
+
+  it("send a block request that names its id, prefix and an extension of 0 to 9", () => {
+    const request = fixture("sscc-block-request.json") as Record<string, unknown>;
+    const refused: Record<string, unknown[]> = {
+      requestId: NOT_UUID,
+      issuerPrefix: [460068200, null, true],
+      extension: [-1, 10, 0.5, "0", null],
+    };
+    for (const [key, values] of Object.entries(refused)) {
+      expect(ssccBlockRequestSchema.safeParse({ ...request, [key]: undefined }).success).toBe(
+        false,
+      );
+      for (const value of values) {
+        expect(
+          ssccBlockRequestSchema.safeParse({ ...request, [key]: value }).success,
+          `${key} = ${JSON.stringify(value)}`,
+        ).toBe(false);
+      }
+    }
+    for (const extension of [0, 9]) {
+      expect(ssccBlockRequestSchema.safeParse({ ...request, extension }).success).toBe(true);
+    }
   });
 });
