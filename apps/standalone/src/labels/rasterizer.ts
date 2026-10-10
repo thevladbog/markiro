@@ -28,7 +28,36 @@ export class RasterUnavailableError extends Error {
   }
 }
 
+/**
+ * The largest canvas side the rasterizer draws, in dots (stage 2a spec,
+ * decision 22): 4096 is 13.6 inches at 300 dpi, longer than any label, and a
+ * webview may refuse a larger canvas or run out of memory on one.
+ */
+export const MAX_RASTER_DOTS = 4096;
+
+/**
+ * A text that would need a canvas larger than `MAX_RASTER_DOTS` on a side:
+ * a font far too large for the label, or a line with no width to wrap in.
+ * Typed, so a print says «cannot render» (`render_failed`) and the office's
+ * preview keeps the element's own drawing.
+ */
+export class RasterTooLargeError extends Error {
+  readonly width: number;
+  readonly height: number;
+
+  constructor(width: number, height: number) {
+    super(`a ${width} x ${height} canvas exceeds ${MAX_RASTER_DOTS} dots on a side`);
+    this.name = "RasterTooLargeError";
+    this.width = width;
+    this.height = height;
+  }
+}
+
 function canvas2d(width: number, height: number): CanvasRenderingContext2D {
+  // Before the canvas exists: a webview asked for a huge one may hang or crash.
+  if (width > MAX_RASTER_DOTS || height > MAX_RASTER_DOTS) {
+    throw new RasterTooLargeError(width, height);
+  }
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;

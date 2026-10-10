@@ -10,7 +10,13 @@ import {
   FONT_SUBSET_URLS,
   sampleCoveredByFont,
 } from "../src/labels/font-coverage.js";
-import { mapFontFamily, RasterUnavailableError, rasterizeText } from "../src/labels/rasterizer.js";
+import {
+  mapFontFamily,
+  MAX_RASTER_DOTS,
+  RasterTooLargeError,
+  RasterUnavailableError,
+  rasterizeText,
+} from "../src/labels/rasterizer.js";
 
 /** A real, serializable font of `.notdef` and one glyph per character: no outlines, no file. */
 function syntheticFont(chars: readonly string[]): Font {
@@ -179,6 +185,45 @@ describe("the text rasterizer", () => {
 
 describe("the text rasterizer's drawing", () => {
   const font = "400 21px IBM Plex Sans, sans-serif";
+
+  it("draws a canvas of up to 4096 dots on a side, and refuses a larger one before making it", async () => {
+    const fits = fakeCanvases({ charWidth: 1 });
+    await rasterizeText("Ш".repeat(MAX_RASTER_DOTS), {
+      fontFamily: "sans-serif",
+      fontSizePx: 21,
+      bold: false,
+    });
+    expect(fits.map((s) => s.width)).toEqual([1, 4096]);
+
+    const wide = fakeCanvases({ charWidth: 1 });
+    const tooWide = rasterizeText("Ш".repeat(MAX_RASTER_DOTS + 1), {
+      fontFamily: "sans-serif",
+      fontSizePx: 21,
+      bold: false,
+    });
+    await expect(tooWide).rejects.toBeInstanceOf(RasterTooLargeError);
+    await expect(tooWide).rejects.toMatchObject({ width: 4097, height: 32 });
+    // Only the 1x1 measuring canvas was made.
+    expect(wide.map((s) => [s.width, s.height])).toEqual([[1, 1]]);
+
+    // 2731 px of font is a line of ceil(2731 x 1.5) = 4097 dots.
+    const tall = fakeCanvases();
+    await expect(
+      rasterizeText("Ш", { fontFamily: "sans-serif", fontSizePx: 2731, bold: false }),
+    ).rejects.toMatchObject({ name: "RasterTooLargeError", height: 4097 });
+    expect(tall).toHaveLength(1);
+    // Sixteen lines of a 171 px font: 16 x 257 = 4112 dots.
+    fakeCanvases({ charWidth: 100 });
+    await expect(
+      rasterizeText("а б в г д е ж з и к л м н о п р", {
+        fontFamily: "sans-serif",
+        fontSizePx: 171,
+        bold: false,
+        maxWidthPx: 150,
+        maxLines: 16,
+      }),
+    ).rejects.toMatchObject({ height: 4112 });
+  });
 
   it("draws one unbounded line black on white and packs exactly what it read back", async () => {
     const surfaces = fakeCanvases();
