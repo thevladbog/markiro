@@ -967,6 +967,152 @@
       "pallets": [],
       "maxLines": [null],
       "palletRuns": []
+    },
+    {
+      "name": "removed-item-moved",
+      "shift": {
+        "id": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+        "status": "closed",
+        "productionDate": "2026-10-08",
+        "monthKey": "OCT26",
+        "seq": 4,
+        "createdFrom": "office",
+        "closedAt": "2026-10-08T16:00:00.412Z",
+        "closedBy": "station",
+        "productName": "Молоко 3,2% 0,9 л",
+        "palletsEnabled": false
+      },
+      "organization": {
+        "name": "ООО «Атолл»",
+        "inn": "7701234567"
+      },
+      "codes": [
+        {
+          "codeHash": "0101010101010101010101010101010101010101010101010101010101010101",
+          "scannedAt": "2026-10-08T06:00:10.000Z",
+          "canonical": "010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz"
+        },
+        {
+          "codeHash": "0202020202020202020202020202020202020202020202020202020202020202",
+          "scannedAt": "2026-10-08T06:00:20.000Z",
+          "canonical": "010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz"
+        }
+      ],
+      "boxes": [
+        {
+          "id": "b0000000-0000-4000-8000-000000000001",
+          "sscc": "046006820000015062",
+          "openedAt": "2026-10-08T06:00:10.000Z",
+          "closedAt": "2026-10-08T06:00:15.000Z",
+          "disassembledAt": null,
+          "palletId": null
+        },
+        {
+          "id": "b0000000-0000-4000-8000-000000000002",
+          "sscc": "046006820000015079",
+          "openedAt": "2026-10-08T06:00:20.000Z",
+          "closedAt": "2026-10-08T06:00:25.000Z",
+          "disassembledAt": null,
+          "palletId": null
+        }
+      ],
+      "items": [
+        {
+          "boxId": "b0000000-0000-4000-8000-000000000001",
+          "codeHash": "0101010101010101010101010101010101010101010101010101010101010101",
+          "removed": false,
+          "displaced": false
+        },
+        {
+          "boxId": "b0000000-0000-4000-8000-000000000001",
+          "codeHash": "0202020202020202020202020202020202020202020202020202020202020202",
+          "removed": true,
+          "displaced": false
+        },
+        {
+          "boxId": "b0000000-0000-4000-8000-000000000002",
+          "codeHash": "0202020202020202020202020202020202020202020202020202020202020202",
+          "removed": false,
+          "displaced": false
+        }
+      ],
+      "pallets": [],
+      "maxLines": [null],
+      "palletRuns": []
+    },
+    {
+      "name": "open-box-on-pallet",
+      "shift": {
+        "id": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+        "status": "closed",
+        "productionDate": "2026-10-08",
+        "monthKey": "OCT26",
+        "seq": 4,
+        "createdFrom": "office",
+        "closedAt": "2026-10-08T16:00:00.412Z",
+        "closedBy": "station",
+        "productName": "Молоко 3,2% 0,9 л",
+        "palletsEnabled": true
+      },
+      "organization": {
+        "name": "ООО «Атолл»",
+        "inn": "7701234567"
+      },
+      "codes": [
+        {
+          "codeHash": "0101010101010101010101010101010101010101010101010101010101010101",
+          "scannedAt": "2026-10-08T06:00:10.000Z",
+          "canonical": "010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz"
+        },
+        {
+          "codeHash": "0202020202020202020202020202020202020202020202020202020202020202",
+          "scannedAt": "2026-10-08T06:00:20.000Z",
+          "canonical": "010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz"
+        }
+      ],
+      "boxes": [
+        {
+          "id": "b0000000-0000-4000-8000-000000000001",
+          "sscc": "046006820000015086",
+          "openedAt": "2026-10-08T06:00:10.000Z",
+          "closedAt": "2026-10-08T06:00:15.000Z",
+          "disassembledAt": null,
+          "palletId": "a0000000-0000-4000-8000-000000000001"
+        },
+        {
+          "id": "b0000000-0000-4000-8000-000000000002",
+          "sscc": "046006820000015093",
+          "openedAt": "2026-10-08T06:00:20.000Z",
+          "closedAt": null,
+          "disassembledAt": null,
+          "palletId": "a0000000-0000-4000-8000-000000000001"
+        }
+      ],
+      "items": [
+        {
+          "boxId": "b0000000-0000-4000-8000-000000000001",
+          "codeHash": "0101010101010101010101010101010101010101010101010101010101010101",
+          "removed": false,
+          "displaced": false
+        },
+        {
+          "boxId": "b0000000-0000-4000-8000-000000000002",
+          "codeHash": "0202020202020202020202020202020202020202020202020202020202020202",
+          "removed": false,
+          "displaced": false
+        }
+      ],
+      "pallets": [
+        {
+          "id": "a0000000-0000-4000-8000-000000000001",
+          "sscc": "146006820000000423",
+          "openedAt": "2026-10-08T06:00:15.000Z",
+          "closedAt": "2026-10-08T07:00:00.000Z",
+          "disassembledAt": null
+        }
+      ],
+      "maxLines": [null],
+      "palletRuns": ["a0000000-0000-4000-8000-000000000001"]
     }
   ]
 }

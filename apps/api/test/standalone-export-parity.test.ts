@@ -424,6 +424,13 @@ describe("the cloud's exports over the parity cases (plan ЧЗ of apps/standalon
       }
     }
     if (process.env.EXPORT_PARITY_WRITE === "1") {
+      // The write mode compares the golden with itself, so it can never fail:
+      // it is a developer's tool and must never be on in CI.
+      if (process.env.CI) {
+        throw new Error(
+          "EXPORT_PARITY_WRITE=1 is refused when CI is set: the golden is regenerated locally and committed",
+        );
+      }
       writeFileSync(join(FIXTURES, "golden.json"), `${JSON.stringify(outcomes, null, 2)}\n`);
     }
     const golden = z.record(z.string(), outcomeSchema).parse(read("golden.json"));

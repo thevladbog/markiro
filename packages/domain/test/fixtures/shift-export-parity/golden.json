@@ -1943,5 +1943,164 @@
   },
   "no-close-instant/shift_xml_gismt_pallet_boxes@1/-": {
     "error": "SHIFT_HAS_NO_PALLETS"
+  },
+  "removed-item-moved/shift_txt_flat@1/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_2pcs_2026-10-08.txt",
+        "codeCount": 2,
+        "boxCount": 0,
+        "palletCount": 0,
+        "physicalLineCount": 2,
+        "bytes": 172,
+        "sha256": "d27999bd71f2539350f0651ae0b7b3282f11b625b0100be749f7fcce9a777f0d",
+        "text": "010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n"
+      }
+    ]
+  },
+  "removed-item-moved/shift_txt_boxes@2/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_2pcs_2box_2026-10-08.txt",
+        "codeCount": 2,
+        "boxCount": 2,
+        "palletCount": 0,
+        "physicalLineCount": 6,
+        "bytes": 216,
+        "sha256": "eee769c3b719a145bd29d58fc3323d0f0d061888055788a82ba16b1ee3267fcc",
+        "text": "00046006820000015062\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n00046006820000015079\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n"
+      }
+    ]
+  },
+  "removed-item-moved/shift_csv_flat@1/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_2pcs_2026-10-08.csv",
+        "codeCount": 2,
+        "boxCount": 0,
+        "palletCount": 0,
+        "physicalLineCount": 3,
+        "bytes": 183,
+        "sha256": "aa663e16a68830a013c14a727b4c20b857d9ed081b198a674415354e18b16e4f",
+        "text": "﻿code\r\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\r\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\r\n"
+      }
+    ]
+  },
+  "removed-item-moved/shift_csv_boxes@2/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_2pcs_2box_2026-10-08.csv",
+        "codeCount": 2,
+        "boxCount": 2,
+        "palletCount": 0,
+        "physicalLineCount": 3,
+        "bytes": 234,
+        "sha256": "f8ec70b0d8fb34750289dde3c78fd43d689e6075d870db3702f30d65fb0feecf",
+        "text": "﻿box_sscc;code\r\n00046006820000015062;010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\r\n00046006820000015079;010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\r\n"
+      }
+    ]
+  },
+  "removed-item-moved/shift_xml_gismt_aggregation@1/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_2pcs_2box_2026-10-08.xml",
+        "codeCount": 2,
+        "boxCount": 2,
+        "palletCount": 0,
+        "physicalLineCount": 18,
+        "bytes": 794,
+        "sha256": "715909cbbbb935516125c2ecd4e8ad838eaeed476b26dde5c931a787821a695b",
+        "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<unit_pack document_id=\"5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f\" VerForm=\"1.03\" file_date_time=\"2026-10-08T15:30:00.123Z\" action_id=\"30\" version=\"1\">\n    <Document operation_date_time=\"2026-10-08T16:00:00.412Z\" document_number=\"OCT26-004\">\n        <organisation>\n            <id_info>\n                <LP_info org_name=\"ООО «Атолл»\" LP_TIN=\"7701234567\" />\n            </id_info>\n        </organisation>\n        <pack_content>\n            <pack_code>00046006820000015062</pack_code>\n            <cis>010460068200001321Kq8vT2mXc5Rz1</cis>\n        </pack_content>\n        <pack_content>\n            <pack_code>00046006820000015079</pack_code>\n            <cis>010460068200001321Pw3nY7hLd9Fs2</cis>\n        </pack_content>\n    </Document>\n</unit_pack>\n"
+      }
+    ]
+  },
+  "removed-item-moved/shift_txt_pallets@1/-": {
+    "error": "SHIFT_HAS_NO_PALLETS"
+  },
+  "removed-item-moved/shift_csv_pallets@1/-": {
+    "error": "SHIFT_HAS_NO_PALLETS"
+  },
+  "removed-item-moved/shift_xml_gismt_aggregation_pallets@1/-": {
+    "error": "SHIFT_HAS_NO_PALLETS"
+  },
+  "removed-item-moved/shift_txt_pallet_boxes@1/-": {
+    "error": "SHIFT_HAS_NO_PALLETS"
+  },
+  "removed-item-moved/shift_xml_gismt_pallet_boxes@1/-": {
+    "error": "SHIFT_HAS_NO_PALLETS"
+  },
+  "open-box-on-pallet/shift_txt_flat@1/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_2pcs_2026-10-08.txt",
+        "codeCount": 2,
+        "boxCount": 0,
+        "palletCount": 0,
+        "physicalLineCount": 2,
+        "bytes": 172,
+        "sha256": "d27999bd71f2539350f0651ae0b7b3282f11b625b0100be749f7fcce9a777f0d",
+        "text": "010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n"
+      }
+    ]
+  },
+  "open-box-on-pallet/shift_txt_boxes@2/-": {
+    "error": "BOX_COVERAGE_INCOMPLETE"
+  },
+  "open-box-on-pallet/shift_csv_flat@1/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_2pcs_2026-10-08.csv",
+        "codeCount": 2,
+        "boxCount": 0,
+        "palletCount": 0,
+        "physicalLineCount": 3,
+        "bytes": 183,
+        "sha256": "aa663e16a68830a013c14a727b4c20b857d9ed081b198a674415354e18b16e4f",
+        "text": "﻿code\r\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\r\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\r\n"
+      }
+    ]
+  },
+  "open-box-on-pallet/shift_csv_boxes@2/-": {
+    "error": "BOX_COVERAGE_INCOMPLETE"
+  },
+  "open-box-on-pallet/shift_xml_gismt_aggregation@1/-": {
+    "error": "BOX_COVERAGE_INCOMPLETE"
+  },
+  "open-box-on-pallet/shift_txt_pallets@1/-": {
+    "error": "BOX_COVERAGE_INCOMPLETE"
+  },
+  "open-box-on-pallet/shift_csv_pallets@1/-": {
+    "error": "BOX_COVERAGE_INCOMPLETE"
+  },
+  "open-box-on-pallet/shift_xml_gismt_aggregation_pallets@1/-": {
+    "error": "BOX_COVERAGE_INCOMPLETE"
+  },
+  "open-box-on-pallet/shift_txt_pallet_boxes@1/-": {
+    "error": "BOX_COVERAGE_INCOMPLETE"
+  },
+  "open-box-on-pallet/shift_xml_gismt_pallet_boxes@1/-": {
+    "error": "BOX_COVERAGE_INCOMPLETE"
+  },
+  "open-box-on-pallet/pallet_xml_gismt_aggregation@1/a0000000-0000-4000-8000-000000000001": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_2026-10-08_паллета_00146006820000000423_1_коробов.xml",
+        "codeCount": 0,
+        "boxCount": 1,
+        "palletCount": 1,
+        "physicalLineCount": 14,
+        "bytes": 636,
+        "sha256": "59b1f291d6a302b2e6f76d060c69f360bb99d0818aa70bf6835fa4323483cc2c",
+        "text": "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<unit_pack document_id=\"5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f\" VerForm=\"1.03\" file_date_time=\"2026-10-08T15:30:00.123Z\" action_id=\"30\" version=\"1\">\n    <Document operation_date_time=\"2026-10-08T07:00:00.000Z\" document_number=\"00146006820000000423\">\n        <organisation>\n            <id_info>\n                <LP_info org_name=\"ООО «Атолл»\" LP_TIN=\"7701234567\" />\n            </id_info>\n        </organisation>\n        <pack_content>\n            <pack_code>00146006820000000423</pack_code>\n            <cis>00046006820000015086</cis>\n        </pack_content>\n    </Document>\n</unit_pack>\n"
+      }
+    ]
   }
 }
