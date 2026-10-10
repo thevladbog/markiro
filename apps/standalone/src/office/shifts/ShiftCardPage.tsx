@@ -1,4 +1,4 @@
-import { isShiftCloseReasonCode } from "@markiro/domain";
+import { isShiftCloseReasonCode, type PlacardFormat } from "@markiro/domain";
 import { useQueryClient } from "@tanstack/react-query";
 import { lazy, Suspense, useEffect, useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -20,7 +20,10 @@ import {
 
 import type { OfficeBox, OfficePallet, OfficeShift, ShiftStatus } from "../../host/protocol.js";
 import { useCan } from "../access.js";
+import { hasPlacard } from "../forms/form-data.js";
+import { PrintFormDialog, type FormTarget } from "../forms/PrintFormDialog.js";
 import { formTimeZone } from "../forms/render-form.js";
+import { taskFormInputs } from "../forms/task-inputs.js";
 import { officeKeys, useOfficeQuery } from "../office-query.js";
 import { OfficePager } from "../OfficePager.js";
 import { LoadError, PageLoading } from "../page-state.js";
@@ -71,9 +74,12 @@ type CardDialog = "totals" | "export" | "close";
  * The card of a shift (plan О-Ф, pilot spec §7), opened from «Смены» by the
  * shift's number: what the shift is, its boxes and its pallets as the host
  * derives them now, and what the office does with it — the figures
- * («Итоги»), the exports («Выгрузка», plan ЧЗ) and the close. Every role
- * reads it; closing stays with `planShifts`. Times are written in the
- * organization's zone, as the forms write them.
+ * («Итоги»), the exports («Выгрузка», plan ЧЗ), the close and the printed
+ * forms: «Бланк смены» until the shift closes, «Состав короба» of a box,
+ * «Состав паллеты» and «Ярлык паллеты» of a pallet, «Ярлыки паллет смены»
+ * (pilot spec §5.5). Every role reads it and prints; closing stays with
+ * `planShifts`. Times are written in the organization's zone, as the forms
+ * write them.
  */
 export function ShiftCardPage() {
   const { t } = useTranslation();
@@ -81,6 +87,8 @@ export function ShiftCardPage() {
   const canPlan = useCan("planShifts");
   const queryClient = useQueryClient();
   const [dialog, setDialog] = useState<CardDialog | null>(null);
+  const [form, setForm] = useState<FormTarget | null>(null);
+  const [paper, setPaper] = useState<PlacardFormat>("a4");
   const [notice, setNotice] = useState<string | null>(null);
   const noticeId = useId();
   const shift = useOfficeQuery(officeKeys.shift(id), (api, token) => api.getShift(token, id));
@@ -90,6 +98,15 @@ export function ShiftCardPage() {
     api.listCounterparties(token),
   );
   const org = useOfficeQuery(officeKeys.org, (api, token) => api.getOrg(token));
+  const palletList = useOfficeQuery(
+    officeKeys.shiftPallets(id),
+    (api, token) => api.listShiftPallets(token, id),
+    {
+      // A planned shift has no pallets, and no placards to offer.
+      enabled:
+        shift.data !== undefined && shift.data.palletsEnabled && shift.data.status !== "planned",
+    },
+  );
 
   useEffect(() => {
     if (notice !== null) document.getElementById(noticeId)?.focus();
@@ -134,6 +151,18 @@ export function ShiftCardPage() {
   });
   const at = (instant: string | null) =>
     instant === null ? t("office.common.none") : time.format(new Date(instant));
+  // «Бланк смены» waits for every record it names, as the cloud reads them in one query.
+  const taskInputs = taskFormInputs(
+    current,
+    products.data,
+    lines.data,
+    counterparties.data,
+    org.isSuccess ? org.data : undefined,
+  );
+  // The cloud offers the shift's placards only when a pallet has one to print.
+  const placards =
+    palletList.data?.some((pallet) => hasPlacard(pallet) && pallet.disassembledAt === null) ===
+    true;
 
   return (
     <div className="shift-card">
@@ -155,6 +184,16 @@ export function ShiftCardPage() {
             {canPlan && current.status === "active" && (
               <Button variant="secondary" onClick={() => setDialog("close")}>
                 {t("office.shifts.close")}
+              </Button>
+            )}
+            {current.status !== "closed" && (
+              <Button variant="secondary" onClick={() => setForm({ kind: "task" })}>
+                {t("office.shiftCard.taskForm")}
+              </Button>
+            )}
+            {current.status !== "planned" && placards && (
+              <Button variant="secondary" onClick={() => setForm({ kind: "placards" })}>
+                {t("office.shiftCard.placards")}
               </Button>
             )}
           </RowActions>
@@ -246,9 +285,20 @@ export function ShiftCardPage() {
           },
         ]}
       />
-      {current.status !== "planned" && <ShiftBoxes shift={current} at={at} />}
+      {current.status !== "planned" && <ShiftBoxes shift={current} at={at} onForm={setForm} />}
       {current.status !== "planned" && current.palletsEnabled && (
-        <ShiftPallets shift={current} at={at} />
+        <ShiftPallets shift={current} at={at} onForm={setForm} />
+      )}
+      {form !== null && (
+        <PrintFormDialog
+          shift={current}
+          target={form}
+          taskInputs={taskInputs}
+          timeZone={zone}
+          format={paper}
+          onFormat={setPaper}
+          onClose={() => setForm(null)}
+        />
       )}
       {dialog === "totals" && <ShiftTotalsDialog shift={current} onClose={() => setDialog(null)} />}
       {dialog === "export" && (
@@ -310,10 +360,12 @@ interface SectionProps {
   shift: OfficeShift;
   /** An instant in the organization's zone, or «—». */
   at: (instant: string | null) => string;
+  /** Opens a form of a box or a pallet. */
+  onForm: (target: FormTarget) => void;
 }
 
 /** The shift's boxes, opened first first, a page at a time, filtered by the SSCC's last digits. */
-function ShiftBoxes({ shift, at }: SectionProps) {
+function ShiftBoxes({ shift, at, onForm }: SectionProps) {
   const { t } = useTranslation();
   const titleId = useId();
   const [tail, setTail] = useState("");
@@ -392,6 +444,23 @@ function ShiftBoxes({ shift, at }: SectionProps) {
           ? t("office.common.none")
           : t(`office.shiftCard.label.${labelState(box)}`),
     },
+    {
+      key: "forms",
+      title: t("office.shiftCard.forms"),
+      render: (box) => {
+        const label = box.sscc === null ? t("office.shiftCard.noSscc") : ssccText(box.sscc);
+        return (
+          <Button
+            variant="secondary"
+            size="compact"
+            aria-label={t("office.shiftCard.boxContentsNamed", { label })}
+            onClick={() => onForm({ kind: "box", boxId: box.id, label })}
+          >
+            {t("office.shiftCard.contents")}
+          </Button>
+        );
+      },
+    },
   ];
 
   const content = () => {
@@ -450,7 +519,7 @@ function ShiftBoxes({ shift, at }: SectionProps) {
 }
 
 /** The shift's pallets, opened first first, with what stands on each now. */
-function ShiftPallets({ shift, at }: SectionProps) {
+function ShiftPallets({ shift, at, onForm }: SectionProps) {
   const { t } = useTranslation();
   const titleId = useId();
   const pallets = useOfficeQuery(officeKeys.shiftPallets(shift.id), (api, token) =>
@@ -493,6 +562,35 @@ function ShiftPallets({ shift, at }: SectionProps) {
       title: t("office.shiftCard.pallets.state"),
       wrap: true,
       render: (pallet) => <PackStateCell pack={pallet} kind="pallet" at={at} />,
+    },
+    {
+      key: "forms",
+      title: t("office.shiftCard.forms"),
+      render: (pallet) => {
+        const label = pallet.sscc === null ? t("office.shiftCard.noSscc") : ssccText(pallet.sscc);
+        return (
+          <RowActions>
+            <Button
+              variant="secondary"
+              size="compact"
+              aria-label={t("office.shiftCard.palletContentsNamed", { label })}
+              onClick={() => onForm({ kind: "pallet", palletId: pallet.id, label })}
+            >
+              {t("office.shiftCard.contents")}
+            </Button>
+            {hasPlacard(pallet) && (
+              <Button
+                variant="secondary"
+                size="compact"
+                aria-label={t("office.shiftCard.placardNamed", { label })}
+                onClick={() => onForm({ kind: "placard", palletId: pallet.id, label })}
+              >
+                {t("office.shiftCard.placard")}
+              </Button>
+            )}
+          </RowActions>
+        );
+      },
     },
   ];
 

@@ -53,19 +53,32 @@ function paper(format: PlacardFormat): string {
 }
 
 /**
- * The form drawn by `@markiro/domain`, or `null` when the cloud would refuse
- * it: a pallet the rows lack, a placard of a pallet not closed or without
- * an SSCC (`PALLET_NOT_CLOSED`), a shift with no pallet to placard
- * (`SHIFT_HAS_NO_PALLETS`), the blank of a closed shift
- * (`SHIFT_TASK_FORM_CLOSED`).
+ * A form whose data the cloud accepts, with its HTML still to draw: `draw`
+ * is the heavy part (the domain's markup and barcodes, long for a pallet of
+ * hundreds of boxes or a shift of hundreds of pallets), so a caller that
+ * wants to show progress or to let go of the window first prepares, yields,
+ * then draws.
  */
-export function renderForm(request: FormRequest): RenderedForm | null {
+export interface PreparedForm {
+  kind: FormKind;
+  fileName: string;
+  draw: () => string;
+}
+
+/**
+ * The form's data and file name, or `null` when the cloud would refuse it:
+ * a pallet the rows lack, a placard of a pallet not closed or without an
+ * SSCC (`PALLET_NOT_CLOSED`), a shift with no pallet to placard
+ * (`SHIFT_HAS_NO_PALLETS`), the blank of a closed shift
+ * (`SHIFT_TASK_FORM_CLOSED`). Nothing is drawn yet.
+ */
+export function prepareForm(request: FormRequest): PreparedForm | null {
   switch (request.kind) {
     case "box": {
       const data = boxReportData(request.rows);
       return {
         kind: "box",
-        html: renderBoxReportHtml(data, request.timeZone),
+        draw: () => renderBoxReportHtml(data, request.timeZone),
         fileName: `Состав короба ${request.rows.sscc ?? "без SSCC"}.html`,
       };
     }
@@ -75,7 +88,7 @@ export function renderForm(request: FormRequest): RenderedForm | null {
       const sscc = request.rows.pallets.find((each) => each.id === request.palletId)?.sscc;
       return {
         kind: "pallet",
-        html: renderPalletReportHtml(data, request.timeZone),
+        draw: () => renderPalletReportHtml(data, request.timeZone),
         fileName: `Состав паллеты ${sscc ?? "без SSCC"}.html`,
       };
     }
@@ -85,7 +98,7 @@ export function renderForm(request: FormRequest): RenderedForm | null {
       const sscc = request.rows.pallets.find((each) => each.id === request.palletId)?.sscc;
       return {
         kind: "placard",
-        html: renderPalletPlacardHtml(data, request.format),
+        draw: () => renderPalletPlacardHtml(data, request.format),
         fileName: `Ярлык паллеты ${sscc ?? ""} ${paper(request.format)}.html`,
       };
     }
@@ -94,7 +107,7 @@ export function renderForm(request: FormRequest): RenderedForm | null {
       if (data === null) return null;
       return {
         kind: "placards",
-        html: renderShiftPlacardsHtml(data.pallets, request.format, data.shiftNumber),
+        draw: () => renderShiftPlacardsHtml(data.pallets, request.format, data.shiftNumber),
         fileName: `Ярлыки паллет смены ${paper(request.format)}.html`,
       };
     }
@@ -103,9 +116,20 @@ export function renderForm(request: FormRequest): RenderedForm | null {
       if (data === null) return null;
       return {
         kind: "task",
-        html: renderShiftTaskFormHtml(data),
+        draw: () => renderShiftTaskFormHtml(data),
         fileName: "Бланк смены.html",
       };
     }
   }
+}
+
+/**
+ * The form drawn by `@markiro/domain`, or `null` when the cloud would refuse
+ * it (see `prepareForm`).
+ */
+export function renderForm(request: FormRequest): RenderedForm | null {
+  const prepared = prepareForm(request);
+  return prepared === null
+    ? null
+    : { kind: prepared.kind, html: prepared.draw(), fileName: prepared.fileName };
 }
