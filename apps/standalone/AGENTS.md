@@ -945,6 +945,13 @@ the host keeps accepting the previous version. It is 3 since plan ПЛ-Х
 (pallets; 2 since plan 2a1), with `MIN_PROTOCOL_VERSION` still 1: the host
 takes the stations of stage 1 and of stage 2a, and a station that knows
 pallets finds a host of stage 1 or 2a too old (`host_too_old` at the probe).
+The host does not look at the protocol of a station that enters a shift (it
+records it at pairing only), so a station of protocol 2 could enter a shift
+the office planned with pallets and produce boxes without them. The pilot
+rules that out by installation, not by a refusal: every station of a site runs
+protocol 3, installed together with the host's update, and the installer's
+check of it is owed to the plan УСТ (it is not done yet; nothing here was run
+on a real station).
 `src/host/protocol.ts` mirrors it, and `test/protocol.test.ts` ties the
 mirror to `hello.json`. Response types, which
 devices of different versions read, tolerate unknown fields; request types,
@@ -2407,13 +2414,13 @@ new id after a refusal joins the pallet it named, closed or not. A box
 closed on one pallet and sent again on another, or without its pallet, is
 `box_already_closed`. A `pallet_closed` closes the pallet with an SSCC of 18
 digits (its form is checked before its serial is read, which looks at the
-first 17 characters only) whose first 17 are the pallet extension `1`, the snapshot's prefix
-and `serial`, where `serial` lies in a live pallet block (extension 1) that
-the host issued to this device (`sscc_not_issued`), and no other pallet
-carries the SSCC or is closed on that serial of that block (`sscc_taken`;
-the unique indexes `pallets_sscc` and `pallets_block_serial` back it, and a
-box's SSCC starts with `0` from a box block, so boxes and pallets never meet
-on one). It keeps the station's `openedAt`, `closedAt`, `boxCount`
+first 17 characters only) whose first 17 are the pallet extension `1`, the
+snapshot's prefix and `serial`, where `serial` lies in a live pallet block
+(extension 1) that the host issued to this device (`sscc_not_issued`), and no
+other pallet carries the SSCC or is closed on that serial of that block
+(`sscc_taken`; the unique indexes `pallets_sscc` and `pallets_block_serial`
+back it, and a box's SSCC starts with `0` from a box block, so boxes and
+pallets never meet on one). It keeps the station's `openedAt`, `closedAt`, `boxCount`
 (`box_count_reported`) and operator and raises the pallet block's
 `consumed_through` (`blocks::consume`, shared with `box_closed`). A pallet
 none of whose boxes reached the host opens closed, so its printed SSCC is
@@ -2433,6 +2440,22 @@ of the box exceptions' list for its kind (`exception_reasons`) and words only
 for `other`; one row per record in `pallet_exceptions`. A disassembly sets
 `disassembled_at`; the pallet keeps its SSCC, its boxes keep their
 `pallet_id` and stay closed, and the pallet no longer counts.
+
+A pallet fact keeps what the station said, and the host orders nothing
+between a box and its pallet. `openedAt`, `closedAt` and `boxCount` are
+stored as sent; a consumer that needs a pallet's contents derives them from
+the box memberships, and `box_count_reported` is only a figure to compare
+with the derived count (plan О-Х). So a box whose `closedAt` is later than
+its pallet's `closedAt` (a late box on a pallet already closed) joins
+silently: the count mismatch is its only trace, and the office reports, the
+Honest Sign export (plan ЧЗ) and the printed forms (plan О-Ф) must flag such
+a box rather than assume the pallet's `closedAt` ends its membership. A close
+of an already closed pallet with the SSCC it holds is accepted and writes
+nothing even when its block has been revoked since, as a box's is (a record
+already answered keeps its receipt in any case), while a new close of an open
+pallet against a revoked block is `sscc_not_issued`. A `pallet_exception`
+names its kind in `exception`, not `kind`, which the record's envelope already
+has.
 
 Any device asks whether a code is taken (`GET /v1/device/codes/{codeHash}`,
 `routes/codes.rs`; 64 lower-case hex digits, `validation_failed` on
@@ -2512,7 +2535,8 @@ console stays silent), any hash or the TLS private key. A label template's
 layout is no secret, but at up to 256 KB it stays
 out of the log as it stays out of audit details; `no_secrets_in_logs.rs`
 walks a stock and an office layout through the template routes, the
-defaults and the feed, and a shift's snapshot that carries a layout through
+defaults and the feed, and a shift's snapshot that carries a layout (and,
+since plan ПЛ-Х, a pallet template's) through
 the plan, the station's entry and list, an SSCC block and the office's
 close. Nor do facts reach it (stage 2a spec §4.11): no code of marking, crypto
 tail, code hash, SSCC or reason words — a refused record is logged by the
@@ -2523,7 +2547,10 @@ the failing record's position in the batch (`position=1` is the second
 record), never the record or its id, which is device text.
 `no_secrets_in_logs.rs` sends every kind of fact, accepted and refused, with
 a code of marking that has a crypto tail, an 18-digit SSCC and reasons in
-words, a resend, a mismatched resend, a station's close of a shift and a
+words (the first shift has pallets since plan ПЛ-Х: a box on a pallet, the
+pallet's close under its SSCC of a pallet block, its label check, a reprint
+with words and a refused second close under another SSCC, answered
+`pallet_already_closed`), a resend, a mismatched resend, a station's close of a shift and a
 late scan after it, a batch the host cannot write (a 500, its failing record
 second in the batch), the code check
 and the totals, and asks that the host kept them and the log has none. The
