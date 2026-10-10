@@ -842,7 +842,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 29] = [
+    let reads: [(&str, &str); 30] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -931,6 +931,13 @@ async fn the_floors_repeating_reads_search_an_index() {
             "SELECT code_hash FROM floor_codes WHERE host_id = ? AND device_id = ? \
              AND box_id = ? ORDER BY code_hash",
             "floor_codes_box (host_id=? AND device_id=? AND box_id=?)",
+        ),
+        // A box closed whose answer was lost, read back by its own key (`readClosedBox`).
+        (
+            "SELECT shift_id, sscc, block_id, serial, opened_at, closed_at, item_count, closed_by \
+             FROM floor_boxes WHERE id = ? AND host_id = ? AND device_id = ? \
+             AND closed_at IS NOT NULL",
+            "sqlite_autoindex_floor_boxes_1 (id=?)",
         ),
         // The scan pipeline's own reads and its one UPDATE, on every scan: the
         // station's registry of a code, the open box of a shift, and the open

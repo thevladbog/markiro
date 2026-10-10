@@ -128,6 +128,19 @@ export interface ShellState {
   pendingRejection: RejectionReason | null;
   pendingDevice: DeviceStatus | null;
   /**
+   * A sync found another host at the paired address while the operator works
+   * in a shift. Like a refusal it waits for them to leave: the work screen
+   * writes to the local database, and the screens that follow — this host is
+   * not ours, forget the pairing — assume nothing is being written (the
+   * shell's `device_forget`). The link is stopped meanwhile (`App`).
+   */
+  pendingOtherHost: boolean;
+  /**
+   * The answer of a probe of the host on this computer that landed while the
+   * operator works in a shift; it takes the floor when they leave.
+   */
+  pendingProbe: LocalHostState | null;
+  /**
    * The station's reads of its shifts (`GET /v1/device/shifts`): how many
    * landed in the copies since the pairing, so a screen reading them knows
    * when to read again, and whether the last one failed.
@@ -225,6 +238,8 @@ const NO_FLOOR_SESSION = {
   floorWork: null,
   pendingRejection: null,
   pendingDevice: null,
+  pendingOtherHost: false,
+  pendingProbe: null,
 } as const;
 
 export const initialShellState: ShellState = {
@@ -242,6 +257,8 @@ export const initialShellState: ShellState = {
   floorWork: null,
   pendingRejection: null,
   pendingDevice: null,
+  pendingOtherHost: false,
+  pendingProbe: null,
   shiftReads: NO_SHIFT_READS,
   deviceNotSaved: false,
   outboxVersion: 0,
@@ -328,14 +345,28 @@ function changeLine(state: ShellState, status: DeviceStatus): ShellState {
 
 /**
  * The operator left the shift: what waited for that happens now, a refused
- * device first (it ends everything), then another line.
+ * device first (it ends everything), then another host (the same), then the
+ * answer of a probe, then another line.
  */
 function endWork(state: ShellState): ShellState {
-  const left = { ...state, floorWork: null, pendingRejection: null, pendingDevice: null };
+  const left = {
+    ...state,
+    floorWork: null,
+    pendingRejection: null,
+    pendingDevice: null,
+    pendingOtherHost: false,
+    pendingProbe: null,
+    localHost: state.pendingProbe ?? state.localHost,
+    // What the held sync found is a fact whichever screen comes first.
+    sync: state.pendingOtherHost ? { ...state.sync, kind: "other_host" as const } : state.sync,
+  };
   if (state.pendingRejection !== null) {
     return { ...left, rejection: state.pendingRejection, office: CLOSED_OFFICE, operator: null };
   }
+  if (state.pendingOtherHost) return { ...left, office: CLOSED_OFFICE, ...NO_FLOOR_SESSION };
   if (state.pendingDevice !== null) return changeLine(left, state.pendingDevice);
+  // A probe's answer ends the session as it would have at once.
+  if (state.pendingProbe !== null) return { ...left, ...NO_FLOOR_SESSION };
   return left;
 }
 
@@ -359,7 +390,12 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       // A probe runs only at start-up, on a retry and after a forget: a
       // session must not outlive a screen that is not the floor, nor come back
       // after it (a blocked version screen, another host). Losing the link
-      // is not a probe, and keeps the operator.
+      // is not a probe, and keeps the operator. The start-up probe has a
+      // timeout of seconds, so its answer can land after the operator
+      // entered a shift: it waits for them to leave it (the last answer
+      // counts), as the work screen's writes must not be cut off by a screen
+      // that offers to forget the pairing.
+      if (state.floorWork !== null) return { ...state, pendingProbe: action.localHost };
       return { ...state, localHost: action.localHost, ...NO_FLOOR_SESSION };
     case "pairing_started":
       return { ...state, pairing: { kind: "pairing" } };
@@ -482,16 +518,20 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
     case "host_revision":
       return { ...state, hostRevision: action.rev };
     case "sync_started":
-      // Absorbing: `other_host` only a new pairing clears (`paired`,
-      // `forgotten`). Second line of defence — `useHostLink` also stops the
-      // scheduler as soon as a run finds `other_host` or a rejection, but a
-      // run already queued by a revision can still land here first. A
-      // retry keeps the last failure, so the warning does not flicker.
-      if (state.sync.kind === "other_host") return state;
+      // Absorbing: `other_host` (also the one that waits for the operator to
+      // leave the shift) only a new pairing clears (`paired`, `forgotten`).
+      // Second line of defence — `useHostLink` also stops the scheduler as
+      // soon as a run finds `other_host` or a rejection, but a run already
+      // queued by a revision can still land here first. A retry keeps the
+      // last failure, so the warning does not flicker.
+      if (state.sync.kind === "other_host" || state.pendingOtherHost) return state;
       return { ...state, sync: { ...state.sync, kind: "running" } };
     case "sync_finished":
-      if (state.sync.kind === "other_host") return state;
+      if (state.sync.kind === "other_host" || state.pendingOtherHost) return state;
       if (action.result.kind === "other_host") {
+        // The operator in a shift keeps working until they leave it: the
+        // screens that follow assume no write is in flight.
+        if (state.floorWork !== null) return { ...state, pendingOtherHost: true };
         // Office requests would reach a host this device was never paired with.
         return {
           ...state,
@@ -510,7 +550,7 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
         },
       };
     case "sync_failed":
-      if (state.sync.kind === "other_host") return state;
+      if (state.sync.kind === "other_host" || state.pendingOtherHost) return state;
       return {
         ...state,
         sync: {

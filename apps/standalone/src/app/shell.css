@@ -532,3 +532,46 @@
   display: grid;
   gap: 8px;
 }
+
+/* The work screen of a shift: the box and the shift in big numbers, the last
+   scan in words, and the 64 px actions under them. */
+.work-screen {
+  width: min(880px, 100%);
+}
+
+.work-screen__facts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+.work-screen__facts dt {
+  color: var(--fg-2);
+}
+
+.work-screen__facts dd {
+  margin: 0;
+  font: var(--floor-lg);
+}
+
+.work-screen__last {
+  min-height: 64px;
+  margin: 0;
+  font: var(--floor-body-strong);
+}
+
+/* The stops of the line, in a polite region that is on the screen from the start. */
+.work-screen__alerts {
+  display: grid;
+  gap: 16px;
+}
+
+.work-screen__confirm {
+  display: grid;
+  gap: 16px;
+}
+
+.work-screen__leaving {
+  margin: 0;
+}

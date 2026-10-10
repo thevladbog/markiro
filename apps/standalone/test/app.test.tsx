@@ -49,7 +49,7 @@ import {
   observation,
   SESSION,
 } from "./support/fixtures.js";
-import { rows, unsentScans } from "./support/floor-work.js";
+import { km, rows, unsentScans } from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
 import { fakeHostApi, ORG_PROFILE } from "./support/office.js";
 import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
@@ -2612,14 +2612,14 @@ describe("the operator on the floor", () => {
   };
 
   /** Anna signed in, in the line's shift, on a station whose host lists it. */
-  async function inTheShift() {
+  async function inTheShift(probe: HostProbe = probeAnswering(true)) {
     const link = fakeConnection();
     const device = fakeDevice(DEVICE_STATUS);
     const host = fakeHost();
     host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
     host.getDeviceShifts.mockResolvedValue([PLANNED]);
     host.enterShift.mockResolvedValue(OPENED);
-    renderApp({ probe: probeAnswering(true), device, host, connection: link.connection });
+    renderApp({ probe, device, host, connection: link.connection });
     await screen.findByText(PROMPT);
     scan("MRK-000742");
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
@@ -2697,6 +2697,86 @@ describe("the operator on the floor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
     expect(reached()).toEqual(before);
+  });
+
+  it("takes a code of the product in the work screen, asks the host about it, and delivers the record", async () => {
+    const { host } = await inTheShift();
+    // The screen listens from the commit that also asks for serials on entry.
+    await waitFor(() => expect(host.requestSsccBlock).toHaveBeenCalled());
+    host.checkCode.mockResolvedValue({ status: "free" });
+    host.requestSsccBlock.mockRejectedValue(new Error("not wanted here"));
+    host.sendFacts.mockImplementation(async (records) =>
+      records.map((record) => ({
+        id: (record as { id: string }).id,
+        outcome: "accepted" as const,
+      })),
+    );
+    scan(km("APP1"));
+    await waitFor(() => expect(host.checkCode).toHaveBeenCalledTimes(1));
+    expect(host.checkCode.mock.calls[0]?.[0]).toMatch(/^[0-9a-f]{64}$/);
+    const value = (label: string) => screen.getByText(label).nextElementSibling?.textContent;
+    await waitFor(() => expect(value("Принято в смене")).toBe("1"));
+    // The write asked the link to deliver at once, and the receipt came back.
+    await waitFor(() => expect(host.sendFacts).toHaveBeenCalled());
+    const sent = host.sendFacts.mock.calls.flatMap(([records]) => records);
+    expect(sent).toContainEqual(expect.objectContaining({ kind: "scan", shiftId: PLANNED.id }));
+    await waitFor(() => expect(value("Не отправлено")).toBe("0"));
+    // The screen asked the host for serials on entry (the station had no block).
+    expect(host.requestSsccBlock).toHaveBeenCalled();
+  });
+
+  it("keeps the operator in the shift when a sync finds another host, and shows that host once they leave", async () => {
+    const { link, host } = await inTheShift();
+    const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
+    const marker =
+      "По адресу хоста отвечает другой хост: записи не отправляются. Выйдите из смены и подключите станцию заново.";
+    expect(within(bar).queryByText(marker)).toBeNull();
+    host.getChanges.mockResolvedValue(feedPage(43, [], OTHER_HOST_ID));
+    await link.revision(43);
+    // The link stops at once: nothing more reaches a host that is not ours.
+    await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
+    expect(await within(bar).findByText(marker)).toBeTruthy();
+    expect(within(bar).queryByText("На связи с хостом")).toBeNull();
+    // The shift is still on the screen: a write in flight is not cut off by the forget screen.
+    expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
+    expect(screen.queryByText("Устройство подключено к другому хосту")).toBeNull();
+    const reached = host.getChanges.mock.calls.length;
+    await link.late.revision(44);
+    await link.late.status({ ...ONLINE, seq: 3 });
+    expect(host.getChanges.mock.calls.length).toBe(reached);
+    // The line goes on, offline-first: the code is taken, and the other host is asked nothing.
+    host.checkCode.mockClear();
+    scan(km("OTHER1"));
+    await waitFor(() =>
+      expect(screen.getByText("Принято в смене").nextElementSibling?.textContent).toBe("1"),
+    );
+    expect(host.checkCode).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
+    expect(screen.queryByText("Смена OCT26-005/S")).toBeNull();
+  });
+
+  it("keeps the operator in the shift when the start-up probe answers late, and applies its answer once they leave", async () => {
+    const swapped = observation(true);
+    swapped.hello.hostId = OTHER_HOST_ID;
+    let answer: (found: typeof swapped) => void = () => undefined;
+    const probe: HostProbe = {
+      hello: vi.fn<HostProbe["hello"]>(
+        () =>
+          new Promise((resolve) => {
+            answer = resolve;
+          }),
+      ),
+    };
+    await inTheShift(probe);
+    await act(async () => {
+      answer(swapped);
+    });
+    // Not the probe's screen, in the middle of the work.
+    expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
+    expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
   });
 
   it("says in the status bar that the host refused the station while the operator is still in the shift, whichever way the refusal came", async () => {

@@ -1,7 +1,8 @@
 import { boxMembershipDigestV1, buildSscc, DomainError } from "@markiro/domain";
 import { z } from "zod";
 
-import { LocalDbError, type LocalStatement } from "../../local/executor.js";
+import { LocalDbError, type LocalExecutor, type LocalStatement } from "../../local/executor.js";
+import type { Pairing } from "../../local/reference-sync.js";
 import { boxClosedRecord, outboxStatement } from "../facts.js";
 import type { ScanContext } from "./scan-pipeline.js";
 import { readOpenBox } from "./work-reads.js";
@@ -25,7 +26,7 @@ export interface ClosingBox {
   openedAt: string;
   closedAt: string;
   itemCount: number;
-  /** The box's codes (`kmHash`), in their order. */
+  /** The box's codes (`kmHash`), sorted by hash (the order the digest takes). */
   codeHashes: readonly string[];
   operatorId: string;
 }
@@ -72,6 +73,69 @@ export type CloseResult =
   | { kind: "stale" };
 
 const codeRow = z.object({ code_hash: z.string() });
+
+/** The codes of a box, in the order the digest takes them (pinned in both query-plan lists). */
+export const BOX_CODES_SQL =
+  "SELECT code_hash FROM floor_codes WHERE host_id = ? AND device_id = ? AND box_id = ? " +
+  "ORDER BY code_hash";
+
+/** A box of the pairing that is closed, by its key (pinned in both query-plan lists). */
+export const CLOSED_BOX_SQL =
+  "SELECT shift_id, sscc, block_id, serial, opened_at, closed_at, item_count, closed_by " +
+  "FROM floor_boxes WHERE id = ? AND host_id = ? AND device_id = ? AND closed_at IS NOT NULL";
+
+const closedBoxRow = z.object({
+  shift_id: z.string(),
+  sscc: z.string(),
+  block_id: z.string(),
+  serial: z.number().int().nonnegative(),
+  opened_at: z.string(),
+  closed_at: z.string(),
+  item_count: z.number().int().nonnegative(),
+  closed_by: z.string().nullable(),
+});
+
+/**
+ * A box of this pairing as its close left it, or `null` when it is not closed
+ * (still open, unknown, or another pairing's). The work screen reads the box
+ * back when a close ended without an answer: the write may have been
+ * committed all the same, and the retry finds no open box to close. Whoever
+ * follows a close — plan 2a7's label and its print job — must not be skipped
+ * for that, so the box comes back in the shape `closeOpenBox` gives it.
+ * `fallbackOperatorId` names the operator for a box whose closer is not
+ * recorded.
+ */
+export async function readClosedBox(
+  local: LocalExecutor,
+  pairing: Pairing,
+  boxId: string,
+  fallbackOperatorId: string,
+): Promise<ClosingBox | null> {
+  const [row] = await local.query(
+    CLOSED_BOX_SQL,
+    [boxId, pairing.hostId, pairing.deviceId],
+    closedBoxRow,
+  );
+  if (row === undefined) return null;
+  const codes = await local.query(
+    BOX_CODES_SQL,
+    [pairing.hostId, pairing.deviceId, boxId],
+    codeRow,
+  );
+  return {
+    boxId,
+    shiftId: row.shift_id,
+    sscc: row.sscc,
+    blockId: row.block_id,
+    serial: row.serial,
+    openedAt: row.opened_at,
+    closedAt: row.closed_at,
+    itemCount: row.item_count,
+    codeHashes: codes.map((code) => code.code_hash),
+    operatorId: row.closed_by ?? fallbackOperatorId,
+  };
+}
+
 const blockRow = z.object({ block_id: z.string(), next_serial: z.number().int().nonnegative() });
 const heldRow = z.object({ n: z.literal(1) });
 
@@ -127,8 +191,7 @@ export async function closeOpenBox(
   const box = await readOpenBox(local, pairing, shift.copy.id);
   if (box === null || box.itemCount === 0) return { kind: "empty" };
   const codes = await local.query(
-    "SELECT code_hash FROM floor_codes WHERE host_id = ? AND device_id = ? AND box_id = ? " +
-      "ORDER BY code_hash",
+    BOX_CODES_SQL,
     [pairing.hostId, pairing.deviceId, box.id],
     codeRow,
   );

@@ -28,6 +28,7 @@ const OTHER_DEVICE = "1d2e3f4a-5b6c-4d7e-8f90-a1b2c3d4e5f6";
 const OTHER_HOST = "7c6b5a49-3827-4165-9403-f2e1d0c9b8a7";
 const OTHER_LINE_ID = "00000000-6a3e-4b9f-9d3c-2b1a0e8f7d61";
 const SYNCED: SyncState = { kind: "done", synced: 1, failure: null, quarantined: 0 };
+const ONLINE_LINK: HostStatus = { state: "online", lastContactAt: null, lastError: null, seq: 1 };
 const ORG: ChangeItem = {
   entity: "org_profile",
   id: "1",
@@ -377,6 +378,31 @@ describe("the floor's status bar", () => {
     expect(screen.getByText(/не удалось сохранить на этом компьютере/)).toBeTruthy();
     view.rerender(bar({ local, refusalHeld: false, deviceNotSaved: true }));
     expect(screen.queryByText(marker)).toBeNull();
+  });
+
+  it("says, in the same region, that another host answers when that is what waits for the operator", async () => {
+    const local = await synced([ORG]);
+    const view = render(bar({ local }));
+    expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
+    const region = screen.getByRole("region", { name: "Строка состояния цеха" });
+    const before = politeRegions(region);
+    const refused =
+      "Хост отказал этой станции: записи не отправляются. Выйдите из смены и подключите станцию заново.";
+    const other =
+      "По адресу хоста отвечает другой хост: записи не отправляются. Выйдите из смены и подключите станцию заново.";
+    view.rerender(bar({ local, link: ONLINE_LINK, refusalHeld: true, otherHostHeld: true }));
+    const shown = screen.getByText(other);
+    expect(isIn(before, shown)).toBe(true);
+    expect(within(region).queryAllByRole("alert")).toEqual([]);
+    // It is not the host's refusal, and the link is not called up either.
+    expect(screen.queryByText(refused)).toBeNull();
+    expect(within(region).queryByText("На связи с хостом")).toBeNull();
+    view.rerender(bar({ local, link: ONLINE_LINK, refusalHeld: true }));
+    expect(screen.getByText(refused)).toBeTruthy();
+    expect(screen.queryByText(other)).toBeNull();
+    // A flag without the hold says nothing.
+    view.rerender(bar({ local, refusalHeld: false, otherHostHeld: true }));
+    expect(screen.queryByText(other)).toBeNull();
   });
 });
 

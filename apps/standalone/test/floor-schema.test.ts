@@ -11,6 +11,7 @@ import {
   UNSENT_COUNT_SQL,
 } from "../src/floor/outbox-status.js";
 import { BLOCKS_WITH_ROOM_SQL } from "../src/floor/work/block-supply.js";
+import { BOX_CODES_SQL, CLOSED_BOX_SQL } from "../src/floor/work/box-close.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
 import { attemptStatement, receiptStatements, UNSENT_SQL } from "../src/local/facts-sender.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
@@ -665,13 +666,13 @@ describe("the shape of the production tables (migration 0006)", () => {
           "AND closed_at IS NOT NULL ORDER BY closed_at DESC, serial DESC LIMIT 1",
       ),
     ).toContain("floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?");
-    // The digest of a closing box reads its codes.
-    expect(
-      plan(
-        "SELECT code_hash FROM floor_codes WHERE host_id = ? AND device_id = ? AND box_id = ? " +
-          "ORDER BY code_hash",
-      ),
-    ).toContain("floor_codes_box (host_id=? AND device_id=? AND box_id=?)");
+    // The digest of a closing box reads its codes (the statement is the close's own).
+    expect(plan(BOX_CODES_SQL)).toContain(
+      "floor_codes_box (host_id=? AND device_id=? AND box_id=?)",
+    );
+    expect(plan(BOX_CODES_SQL)).not.toContain("TEMP B-TREE");
+    // A box closed whose answer was lost is read back by its own key.
+    expect(plan(CLOSED_BOX_SQL)).toContain("sqlite_autoindex_floor_boxes_1 (id=?)");
     // The scan pipeline's own reads and its one UPDATE, on every scan: the
     // station's registry of a code (the key of `floor_codes`), the open box of
     // a shift, and the open box's count by the box's own key.
@@ -796,7 +797,7 @@ describe("the shape of the production tables (migration 0006)", () => {
   });
 
   // The same for what the status bar reads.
-  it("are pinned on the shell's SQLite with the status bar's own statements", () => {
+  it("are pinned on the shell's SQLite with the status bar's and the work screen's own statements", () => {
     const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
       // A line continuation of a Rust string drops the newline and the next line's indent.
       .replace(/\\\n\s*/g, "");
@@ -807,8 +808,10 @@ describe("the shape of the production tables (migration 0006)", () => {
       HEAD_RECORD_SQL,
       SHIFT_PREFIX_SQL,
       BLOCKS_WITH_ROOM_SQL,
+      CLOSED_BOX_SQL,
+      BOX_CODES_SQL,
     ];
-    expect(new Set(statements).size).toBe(6);
+    expect(new Set(statements).size).toBe(8);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
   });
 

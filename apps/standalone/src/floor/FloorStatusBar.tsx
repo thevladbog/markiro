@@ -46,6 +46,12 @@ export interface FloorStatusBarProps {
    */
   refusalHeld: boolean;
   /**
+   * What waits is not a refusal but another host answering at the paired
+   * address (`ShellState.pendingOtherHost`); `refusalHeld` is set with it, and
+   * only the warning's words differ.
+   */
+  otherHostHeld?: boolean;
+  /**
    * `ShellState.outboxVersion`: the counts of the outbox and the serials left
    * are read again whenever it changes, so whoever writes the floor's work
    * (a record, a block of serials) moves it.
@@ -123,6 +129,7 @@ export function FloorStatusBar({
   shiftId,
   deviceNotSaved,
   refusalHeld,
+  otherHostHeld = false,
   outboxVersion,
   factsFailure,
   now = systemClock,
@@ -309,7 +316,7 @@ export function FloorStatusBar({
         <div className="floor-status__alerts" aria-live="polite">
           {refusalHeld && (
             <Alert tone="error" role="presentation">
-              {t("floor.status.refusalHeld")}
+              {t(otherHostHeld ? "floor.status.otherHostHeld" : "floor.status.refusalHeld")}
             </Alert>
           )}
           {deviceNotSaved && (

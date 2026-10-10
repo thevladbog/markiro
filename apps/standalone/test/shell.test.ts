@@ -1410,20 +1410,26 @@ describe("the operator's session, the shift's work and what waits for it", () =>
   });
 
   it("drops the work and what waits for it with the operator: the office, a new pairing, a forget", () => {
-    const waiting = shellReducer(
-      shellReducer(working(), { type: "device_refreshed", status: MOVED }),
+    const holds: ShellAction[] = [
+      { type: "device_refreshed", status: MOVED },
       { type: "device_rejected", reason: "key_rejected" },
-    );
+      { type: "sync_finished", result: { kind: "other_host" } },
+      { type: "host_probed", localHost: { kind: "missing", reason: "host_too_old" } },
+    ];
+    const waiting = holds.reduce(shellReducer, working());
+    expect(waiting.pendingOtherHost).toBe(true);
+    expect(waiting.pendingProbe).not.toBeNull();
     for (const action of [
       { type: "office_requested" },
       { type: "paired", status: DEVICE_STATUS },
       { type: "forgotten" },
-      { type: "host_probed", localHost: { kind: "probing" } },
     ] satisfies ShellAction[]) {
       const after = shellReducer(waiting, action);
       expect(after.floorWork).toBeNull();
       expect(after.pendingRejection).toBeNull();
       expect(after.pendingDevice).toBeNull();
+      expect(after.pendingOtherHost).toBe(false);
+      expect(after.pendingProbe).toBeNull();
     }
   });
 
@@ -1626,16 +1632,116 @@ describe("the operator's session, the shift's work and what waits for it", () =>
     }
   });
 
-  it("does not hold the work of an operator whose host was replaced: the floor goes at once", () => {
-    const after = shellReducer(working(), {
-      type: "sync_finished",
-      result: { kind: "other_host" },
+  it("holds the work of an operator whose host was replaced, like a refusal, until they leave", () => {
+    const before = working();
+    const held = shellReducer(before, { type: "sync_finished", result: { kind: "other_host" } });
+    // Nothing but the wait changes: the line goes on, the shift is still entered.
+    expect(held.operator).toEqual({ ...ANNA, sessionId: 1 });
+    expect(held.floorWork).toEqual({ sessionId: 1, shiftId: SHIFT_ID });
+    expect(held.pendingOtherHost).toBe(true);
+    expect(held.sync).toEqual(before.sync);
+    expect(nextShellView(held, ADDRESS)).toEqual({
+      kind: "floor_operator",
+      operator: { ...ANNA, sessionId: 1 },
+    });
+    const left = shellReducer(held, { type: "work_left", sessionId: 1 });
+    expect(left.operator).toBeNull();
+    expect(left.floorWork).toBeNull();
+    expect(left.pendingOtherHost).toBe(false);
+    expect(left.sync.kind).toBe("other_host");
+    expect(left.office).toEqual({ kind: "closed" });
+    expect(nextShellView(left, ADDRESS).kind).toBe("other_host");
+    // A sign-out in the middle of the work ends it, and the screen comes then.
+    const out = shellReducer(held, { type: "operator_signed_out", sessionId: 1, notice: "idle" });
+    expect(nextShellView(out, ADDRESS).kind).toBe("other_host");
+    expect(out.operator).toBeNull();
+    // Nobody in a shift: the screen at once, as before.
+    const floor = shellReducer(paired(), signIn);
+    const at = shellReducer(floor, { type: "sync_finished", result: { kind: "other_host" } });
+    expect(at.operator).toBeNull();
+    expect(at.pendingOtherHost).toBe(false);
+    expect(nextShellView(at, ADDRESS).kind).toBe("other_host");
+  });
+
+  it("takes no sync for the held host: a late run of it counts for nothing", () => {
+    const held = shellReducer(working(), { type: "sync_finished", result: { kind: "other_host" } });
+    for (const action of [
+      { type: "sync_started" },
+      { type: "sync_finished", result: { kind: "synced", rev: 4, quarantined: 0 } },
+      { type: "sync_failed", failure: "host", quarantined: 3 },
+    ] satisfies ShellAction[]) {
+      expect(shellReducer(held, action), action.type).toBe(held);
+    }
+  });
+
+  it("lets a refused device win over a replaced host when the work ends, and keeps both views right", () => {
+    const both = shellReducer(
+      shellReducer(working(), { type: "sync_finished", result: { kind: "other_host" } }),
+      { type: "device_rejected", reason: "key_rejected" },
+    );
+    expect(both.pendingRejection).toBe("key_rejected");
+    expect(both.pendingOtherHost).toBe(true);
+    const left = shellReducer(both, { type: "work_left", sessionId: 1 });
+    expect(left.rejection).toBe("key_rejected");
+    expect(left.sync.kind).toBe("other_host");
+    expect(nextShellView(left, ADDRESS)).toEqual({
+      kind: "device_rejected",
+      reason: "key_rejected",
+    });
+  });
+
+  it("holds the answer of a probe that lands while the operator works, and applies it when they leave", () => {
+    const working0 = shellReducer(
+      shellReducer(paired({ localHost: { kind: "probing" } }), signIn),
+      { type: "work_entered", sessionId: 1, shiftId: SHIFT_ID },
+    );
+    const replaced = observation(true);
+    replaced.hello.hostId = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
+    const held = shellReducer(working0, {
+      type: "host_probed",
+      localHost: { kind: "found", observation: replaced },
+    });
+    expect(held.localHost).toEqual({ kind: "probing" });
+    expect(held.pendingProbe).toEqual({ kind: "found", observation: replaced });
+    expect(held.operator).toEqual({ ...ANNA, sessionId: 1 });
+    expect(held.floorWork).toEqual({ sessionId: 1, shiftId: SHIFT_ID });
+    expect(nextShellView(held, ADDRESS).kind).toBe("floor_operator");
+    // The last answer is the one that counts.
+    const later = shellReducer(held, {
+      type: "host_probed",
+      localHost: { kind: "missing", reason: "host_too_old" },
+    });
+    expect(later.pendingProbe).toEqual({ kind: "missing", reason: "host_too_old" });
+    const left = shellReducer(later, { type: "work_left", sessionId: 1 });
+    expect(left.localHost).toEqual({ kind: "missing", reason: "host_too_old" });
+    expect(left.pendingProbe).toBeNull();
+    expect(left.operator).toBeNull();
+    expect(left.floorWork).toBeNull();
+    expect(nextShellView(left, ADDRESS)).toEqual({ kind: "host_missing", reason: "host_too_old" });
+    // The probe that found another host decides the same way, once the work is over.
+    const swapped = shellReducer(held, { type: "work_left", sessionId: 1 });
+    expect(nextShellView(swapped, ADDRESS)).toEqual({
+      kind: "device_rejected",
+      reason: "host_changed",
+    });
+    // A move to another line that waited comes out after the probe's answer.
+    const moved = shellReducer(held, { type: "device_refreshed", status: MOVED });
+    const both = shellReducer(moved, { type: "work_left", sessionId: 1 });
+    expect(both.device).toEqual({ kind: "ready", status: MOVED });
+    expect(both.localHost).toEqual({ kind: "found", observation: replaced });
+    expect(both.operator).toBeNull();
+    expect(both.floorNotice).toBe("line_changed");
+  });
+
+  it("applies a probe that nobody holds at once: outside a shift the session ends with it", () => {
+    const floor = shellReducer(paired({ localHost: { kind: "probing" } }), signIn);
+    const after = shellReducer(floor, {
+      type: "host_probed",
+      localHost: { kind: "missing", reason: "host_too_old" },
     });
     expect(after.operator).toBeNull();
-    expect(after.floorWork).toBeNull();
-    expect(after.pendingRejection).toBeNull();
-    expect(after.pendingDevice).toBeNull();
-    expect(nextShellView(after, ADDRESS).kind).toBe("other_host");
+    expect(after.pendingProbe).toBeNull();
+    expect(after.localHost).toEqual({ kind: "missing", reason: "host_too_old" });
   });
 
   it("counts the reads of the shifts without touching the session or its work", () => {

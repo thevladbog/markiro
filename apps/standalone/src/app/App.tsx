@@ -180,16 +180,18 @@ export function App({
   const remoteAddress =
     pairedStatus !== null && pairedStatus.hostAddress !== address ? pairedStatus.hostAddress : null;
 
-  // A refusal that waits for the operator to leave the shift (question В8)
-  // already stops the link: nothing more reaches a host that refused us.
+  // A refusal that waits for the operator to leave the shift (question В8), and
+  // another host that waits the same way, already stop the link: nothing more
+  // reaches a host that refused us or is not ours.
   const linked =
     pairedStatus !== null &&
     state.rejection === null &&
     state.pendingRejection === null &&
+    !state.pendingOtherHost &&
     state.sync.kind !== "other_host"
       ? pairedStatus
       : null;
-  const { requestSync } = useHostLink({
+  const { requestSync, requestFacts } = useHostLink({
     hostId: linked?.hostId ?? null,
     deviceId: linked?.deviceId ?? null,
     connection: connectionApi,
@@ -581,7 +583,8 @@ export function App({
             deviceNotSaved={state.deviceNotSaved}
             outboxVersion={state.outboxVersion}
             factsFailure={state.factsFailure}
-            refusalHeld={state.pendingRejection !== null}
+            refusalHeld={state.pendingRejection !== null || state.pendingOtherHost}
+            otherHostHeld={state.pendingRejection === null && state.pendingOtherHost}
           />
           {view.kind === "floor" ? (
             <OperatorSignIn
@@ -608,8 +611,12 @@ export function App({
               sync={state.sync}
               shiftReads={state.shiftReads}
               lineChangePending={state.pendingDevice !== null}
+              rejectionPending={state.pendingRejection !== null || state.pendingOtherHost}
               enter={hostApi.enterShift}
               create={hostApi.createDeviceShift}
+              checkCode={hostApi.checkCode}
+              requestBlock={hostApi.requestSsccBlock}
+              requestFacts={requestFacts}
               source={scanner}
               {...(idleTimeoutMs === undefined ? {} : { idleTimeoutMs })}
               dispatch={dispatch}

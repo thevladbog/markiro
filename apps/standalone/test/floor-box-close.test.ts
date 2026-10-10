@@ -9,6 +9,7 @@ import { boxClosedRecord } from "../src/floor/facts.js";
 import {
   closeIfFull,
   closeOpenBox,
+  readClosedBox,
   type ClosingBox,
   type CloseStep,
 } from "../src/floor/work/box-close.js";
@@ -828,5 +829,58 @@ describe("the statements a close repeats", () => {
     expect(rows(db, "SELECT count(*) AS n FROM floor_boxes WHERE closed_at IS NOT NULL")).toEqual([
       { n: 1 },
     ]);
+  });
+});
+
+describe("the read of a box that is closed", () => {
+  it("gives the box exactly as its close wrote it, whoever asks later", async () => {
+    const { db, local, shift } = await station();
+    seedBlock(db, { blockId: BLOCK_A, from: 1500, to: 3499 });
+    const context = scanContext(local, shift);
+    await fill(context, ["R1", "R2", "R3"]);
+    const result = await closeOpenBox(context);
+    if (result.kind !== "closed") throw new Error(`the close went ${result.kind}`);
+    await expect(readClosedBox(local, PAIRING, result.box.boxId, OPERATOR_ID)).resolves.toEqual(
+      result.box,
+    );
+  });
+
+  it("is nothing for a box still open, an unknown one and a box of another pairing", async () => {
+    const { db, local, shift } = await station();
+    seedBlock(db, { blockId: BLOCK_A, from: 1500, to: 3499 });
+    const context = scanContext(local, shift);
+    await fill(context, ["S1"]);
+    const open = rows(db, "SELECT id FROM floor_boxes WHERE closed_at IS NULL")[0]?.["id"];
+    await expect(readClosedBox(local, PAIRING, String(open), OPERATOR_ID)).resolves.toBeNull();
+    await expect(readClosedBox(local, PAIRING, OTHER_BOX, OPERATOR_ID)).resolves.toBeNull();
+    const result = await closeOpenBox(context);
+    if (result.kind !== "closed") throw new Error(`the close went ${result.kind}`);
+    // The same box id under another host or device is no box of this pairing.
+    for (const other of [
+      { hostId: OTHER_HOST, deviceId: PAIRING.deviceId },
+      { hostId: PAIRING.hostId, deviceId: OTHER_DEVICE },
+    ]) {
+      await expect(readClosedBox(local, other, result.box.boxId, OPERATOR_ID)).resolves.toBeNull();
+    }
+    await expect(
+      readClosedBox(local, PAIRING, result.box.boxId, OPERATOR_ID),
+    ).resolves.not.toBeNull();
+  });
+
+  it("names the operator who closed it, and the asking one only when the box does not", async () => {
+    const { db, local, shift } = await station();
+    seedBlock(db, { blockId: BLOCK_A, from: 1500, to: 3499 });
+    const context = scanContext(local, shift);
+    await fill(context, ["T1"]);
+    const result = await closeOpenBox(context);
+    if (result.kind !== "closed") throw new Error(`the close went ${result.kind}`);
+    const asked = "5e6f7a8b-9c0d-4e1f-8a2b-4c5d6e7f8a9b";
+    await expect(readClosedBox(local, PAIRING, result.box.boxId, asked)).resolves.toMatchObject({
+      operatorId: OPERATOR_ID,
+    });
+    db.prepare("UPDATE floor_boxes SET closed_by = NULL WHERE id = ?").run(result.box.boxId);
+    await expect(readClosedBox(local, PAIRING, result.box.boxId, asked)).resolves.toMatchObject({
+      operatorId: asked,
+    });
   });
 });
