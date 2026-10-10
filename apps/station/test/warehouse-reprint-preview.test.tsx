@@ -16,6 +16,24 @@ function template(spec: LabelTemplateSpec) {
   void digest;
   return { ...snapshot, digest: productLabelValueDigest(snapshot) };
 }
+it.each([
+  [75, 120],
+  [120, 75],
+  [100, 100],
+] as const)("gives the label canvas intrinsic %s × %s dimensions", async (widthMm, heightMm) => {
+  const view = render(
+    <LabelPreview
+      template={template({ language: "tspl", dpi: 203, widthMm, heightMm, elements: [] })}
+    />,
+  );
+  await waitFor(() => expect(view.container.querySelector("svg[role='img']")).toBeTruthy());
+  const svg = view.container.querySelector("svg[role='img']");
+  const [, , width, height] = svg?.getAttribute("viewBox")?.split(" ").map(Number) ?? [];
+  expect(svg?.getAttribute("width")).toBe(String(width));
+  expect(svg?.getAttribute("height")).toBe(String(height));
+  expect(svg?.getAttribute("style")).toContain(`aspect-ratio: ${width} / ${height}`);
+});
+
 it("uses the print bitmap for bounded ASCII captions instead of separate native wrapping", async () => {
   const spec: LabelTemplateSpec = {
     language: "tspl",

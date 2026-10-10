@@ -168,7 +168,11 @@ it("drains a removed controller before remount recovery without replacing its tr
         await sending;
       });
       await waitFor(() => expect(remounted.result.current.state.initialized).toBe(true));
-      expect(remounted.result.current.state.job?.state).toBe("sent");
+      expect(remounted.result.current.state.job).toBeNull();
+      expect(remounted.result.current.state.session?.sentCount).toBe(1);
+      expect((await readWarehouseJob(f.exec, f.input.owner, f.input.jobId)).projection.state).toBe(
+        "sent",
+      );
       expect(remounted.result.current.state.error).toBeNull();
       expect(f.calls()).toBe(1);
       expect(

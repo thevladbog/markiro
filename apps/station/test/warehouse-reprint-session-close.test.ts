@@ -193,6 +193,39 @@ it.each(["prepared", "sending", "delivery_unknown", "failed_before_send"] as con
   },
 );
 
+it.each(["active", "inactive", "removed", "blocked"] as const)(
+  "finishes against the current roster slot B when the operator is %s",
+  async (status) => {
+    const f = await fixture();
+    try {
+      await f.exec.run("INSERT INTO operators_mirror_b SELECT * FROM operators_mirror");
+      await f.exec.run("INSERT INTO station_meta(key,value) VALUES('operators_slot','b')");
+      if (status === "active") await f.exec.run("DELETE FROM operators_mirror");
+      if (status === "inactive") await f.exec.run("UPDATE operators_mirror_b SET active=0");
+      if (status === "removed") await f.exec.run("DELETE FROM operators_mirror_b");
+      if (status === "blocked")
+        await f.exec.run("INSERT INTO station_meta(key,value) VALUES('operators_blocked','1')");
+      expect(await f.work.finish()).toBe(status === "active");
+      const closures = await f.exec.all(
+        "SELECT owner,session_id,operator_id FROM warehouse_reprint_session_closures",
+      );
+      expect(closures).toEqual(
+        status === "active"
+          ? [{ owner: f.owner, session_id: f.session.sessionId, operator_id: f.input.operatorId }]
+          : [],
+      );
+      if (status !== "active") {
+        expect(f.work.getSnapshot().error).toBe("WAREHOUSE_OPERATOR_DENIED");
+        expect((await resumeWarehouseSession(f.exec, f.owner))?.sessionId).toBe(
+          f.session.sessionId,
+        );
+      }
+    } finally {
+      await f.dispose();
+    }
+  },
+);
+
 it("keeps ordinary pause/leave resumable", async () => {
   const f = await fixture();
   try {

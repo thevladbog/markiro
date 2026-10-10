@@ -6026,6 +6026,7 @@ body,
   background: var(--ok-bg);
 }
 .warehouse-label-preview {
+  --label-preview-max-height: 320px;
   margin: 0;
   padding: var(--sp-5);
   display: grid;
@@ -6035,10 +6036,12 @@ body,
   border-radius: var(--r-3);
   background: var(--surface-card);
 }
-.warehouse-label-preview svg {
-  width: 100%;
-  max-height: 320px;
-  border: 1px solid var(--line);
+.warehouse-label-preview > svg {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  max-height: var(--label-preview-max-height);
+  border: 2px solid var(--fg-3);
   background: white;
 }
 .warehouse-label-preview figcaption {

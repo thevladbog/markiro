@@ -27,8 +27,14 @@ export function warehousePreparedJobInput(): WarehousePreparedJobInput {
 }
 
 export async function seedWarehouseOperator(exec: SqlExecutor, operatorId: string): Promise<void> {
+  const [slot] = await exec.all<{ value: string }>(
+    "SELECT value FROM station_meta WHERE key='operators_slot'",
+  );
+  const table = slot?.value === "b" ? "operators_mirror_b" : "operators_mirror";
   await exec.run(
-    "INSERT INTO operators_mirror(operator_id,name,role,pin_hash,active) VALUES(?,'Sample Operator','operator','synthetic-verifier',1) ON CONFLICT(operator_id) DO UPDATE SET active=1",
+    `INSERT INTO ${table}(operator_id,name,role,pin_hash,active) VALUES(?,'Sample Operator','operator','synthetic-verifier',1) ON CONFLICT(operator_id) DO UPDATE SET active=1`,
     [operatorId],
   );
+  // Recovery fixtures seed a usable current roster, as a successful roster refresh does.
+  await exec.run("UPDATE station_meta SET value='0' WHERE key='operators_blocked'");
 }
