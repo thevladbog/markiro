@@ -99,6 +99,15 @@ export const tauriHardware: HardwareContract = {
     invoke<void>("print_bytes", { target, payloadBase64: bytesToBase64(bytes) }),
 };
 
+/** Only callers that persist unknown delivery may release a stalled USB send. */
+export function tauriWarehousePrint(target: PrintTarget, bytes: Uint8Array): Promise<void> {
+  return invoke<void>("print_bytes", {
+    target,
+    payloadBase64: bytesToBase64(bytes),
+    deliveryUnknownOnTimeout: true,
+  });
+}
+
 /**
  * Adapts the hardware contract to the same `ScanSource` seam the keyboard
  * wedge implements, so the work screen is identical either way.

@@ -6,6 +6,7 @@ import { and, desc, eq, inArray, like } from "drizzle-orm";
 import { createDb, schema, type PlatformRole } from "@markiro/db";
 import {
   buildDefaultLabelTemplates,
+  buildWarehouseCodeOnlyBoxTemplate,
   buildDuplicateLabelTemplate,
   DEFAULT_BOX_LABEL_TEMPLATE_NAME,
 } from "@markiro/domain";
@@ -472,9 +473,13 @@ describe.skipIf(!ready)("platform tenant management", () => {
     const boxes = templates.filter((template) => template.purpose === "box");
     expect(
       boxes.map(({ name, spec }) => ({ name, spec })).sort((a, b) => a.name.localeCompare(b.name)),
-    ).toEqual(buildDefaultLabelTemplates().sort((a, b) => a.name.localeCompare(b.name)));
+    ).toEqual(
+      [...buildDefaultLabelTemplates(), buildWarehouseCodeOnlyBoxTemplate()].sort((a, b) =>
+        a.name.localeCompare(b.name),
+      ),
+    );
     const duplicates = templates.filter((template) => template.purpose === "product_duplicate");
-    expect(duplicates).toHaveLength(2);
+    expect(duplicates).toHaveLength(3);
     expect(duplicates).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -486,6 +491,11 @@ describe.skipIf(!ready)("platform tenant management", () => {
         expect.objectContaining({
           name: "Дубликат Data Matrix 58×40 [Краткое наименование]",
           spec: buildDuplicateLabelTemplate(),
+          enabled: true,
+          chzProductGroupCodes: null,
+        }),
+        expect.objectContaining({
+          name: "Код Data Matrix 30×30",
           enabled: true,
           chzProductGroupCodes: null,
         }),

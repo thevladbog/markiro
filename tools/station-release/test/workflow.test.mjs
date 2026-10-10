@@ -686,6 +686,17 @@ test("the workflow CORS gate pins the production API and Windows webview origin"
     ],
     ["/station/shifts/cors-probe/progress", "GET", "content-type,x-api-key,x-station-capabilities"],
     ["/station/shift-closures", "POST", "content-type,x-api-key,x-station-capabilities"],
+    ["/station/warehouse-reprint/lookup", "POST", "content-type,x-api-key,x-station-capabilities"],
+    [
+      "/station/warehouse-reprint/templates",
+      "GET",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
+    [
+      "/station/warehouse-reprint/event-batches",
+      "POST",
+      "content-type,x-api-key,x-station-capabilities",
+    ],
     ["/shifts", "GET", "content-type,x-api-key,x-station-capabilities"],
     ["/shifts", "POST", "content-type,x-api-key,x-station-capabilities"],
     ["/shifts/planning-config", "GET", "content-type,x-api-key,x-station-capabilities"],

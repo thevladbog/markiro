@@ -543,6 +543,9 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       "POST /station/codes/releases (StationScansController.codeReleases)",
       "POST /station/boxes/reconciliation (StationScansController.reconcileBoxes)",
       "POST /station/scans (StationScansController.ingest)",
+      "POST /station/warehouse-reprint/lookup (StationWarehouseReprintController.lookup)",
+      "POST /station/warehouse-reprint/event-batches (StationWarehouseReprintController.receive)",
+      "GET /station/warehouse-reprint/templates (StationWarehouseReprintController.templates)",
       "POST /station/grants/v1/evidence/scans (DeviceGrantsController.evidenceScans)",
       "POST /station/grants/v1/evidence/shift-closures (DeviceGrantsController.evidenceShiftClose)",
       "POST /station/grants/v1/evidence/inventories/:id/event-batches (DeviceGrantsController.evidenceInventoryEvents)",
@@ -1148,6 +1151,7 @@ describe("registered subscription route inventory", () => {
             ? ["KioskDeviceGuard", "SubscriptionAccessGuard"]
             : route.controller.name === "StationScansController" ||
                 route.controller.name === "StationInventoriesController" ||
+                route.controller.name === "StationWarehouseReprintController" ||
                 route.controller.name === "StationProductImagesController" ||
                 route.controller.name === "StationShiftProgressController" ||
                 route.controller.name === "DeviceGrantsController" ||

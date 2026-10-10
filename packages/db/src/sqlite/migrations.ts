@@ -5,6 +5,8 @@
  * (test/sqlite-schema.test.ts) applies these and round-trips a row to catch
  * drift. `drizzle.sqlite.config.ts` exists for regeneration parity only.
  */
+import { WAREHOUSE_REPRINT_SOURCE_MIGRATIONS } from "./warehouse-reprint-source-migrations.js";
+import { WAREHOUSE_REPRINT_MIGRATIONS } from "./warehouse-reprint-migrations.js";
 export const STATION_MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS station_meta (
      key TEXT PRIMARY KEY,
@@ -4811,6 +4813,31 @@ export const STATION_MIGRATIONS: string[] = [
   // Issues an older station left on boxes it had already taken apart.
   `DELETE FROM box_reconciliation_issues
     WHERE box_id IN (SELECT box_id FROM boxes_mirror WHERE disassembled_at IS NOT NULL);`,
+  ...WAREHOUSE_REPRINT_MIGRATIONS,
+  `ALTER TABLE product_mirror ADD COLUMN chz_product_group_code INTEGER CHECK(chz_product_group_code IS NULL OR (typeof(chz_product_group_code)='integer' AND chz_product_group_code>=0));`,
+  `DROP TRIGGER IF EXISTS warehouse_reprint_safe_cleanup;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_safe_cleanup BEFORE DELETE ON warehouse_reprint_jobs BEGIN
+    SELECT RAISE(ABORT,'WAREHOUSE_RETENTION_BLOCKED') WHERE OLD.state NOT IN ('sent','verified')
+      OR EXISTS(SELECT 1 FROM warehouse_reprint_events WHERE owner=OLD.owner AND job_id=OLD.job_id AND receive_status<>'accepted')
+      OR NOT EXISTS(SELECT 1 FROM warehouse_reprint_sessions s WHERE s.owner=OLD.owner AND s.session_id=OLD.session_id AND s.status='paused'
+        AND s.rowid<(SELECT MAX(rowid) FROM warehouse_reprint_sessions WHERE owner=OLD.owner));
+    DELETE FROM warehouse_reprint_events WHERE owner=OLD.owner AND job_id=OLD.job_id;
+    DELETE FROM warehouse_reprint_attempts WHERE owner=OLD.owner AND job_id=OLD.job_id;
+    DELETE FROM printer_destinations WHERE scope=OLD.owner AND job_id=OLD.job_id AND purpose=CASE OLD.source_kind WHEN 'box' THEN 'box' ELSE 'duplicate' END;
+  END;`,
+  ...WAREHOUSE_REPRINT_SOURCE_MIGRATIONS,
+  `CREATE TABLE IF NOT EXISTS warehouse_reprint_history_acknowledgements (
+    owner TEXT NOT NULL, event_id TEXT NOT NULL, digest TEXT NOT NULL,
+    rejection_code TEXT NOT NULL, operator_id TEXT NOT NULL, acknowledged_at TEXT NOT NULL,
+    PRIMARY KEY(owner,event_id),
+    FOREIGN KEY(owner,event_id) REFERENCES warehouse_reprint_events(owner,event_id) ON DELETE CASCADE);`,
+  `ALTER TABLE warehouse_reprint_local_boxes ADD COLUMN group_override_json TEXT;`,
+  `CREATE INDEX IF NOT EXISTS warehouse_reprint_jobs_source_idx ON warehouse_reprint_jobs(owner,source_kind,identity);`,
+  `ALTER TABLE warehouse_reprint_local_boxes ADD COLUMN cached_at TEXT NOT NULL DEFAULT '';`,
+  // Unknown historical ages start at the upgrade; never rewrite original fields.
+  `UPDATE warehouse_reprint_local_boxes SET cached_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE cached_at='';`,
+  `CREATE INDEX IF NOT EXISTS warehouse_reprint_local_boxes_retention_idx ON warehouse_reprint_local_boxes(owner,cached_at);`,
+  `CREATE INDEX IF NOT EXISTS inventory_repack_boxes_mirror_reprint_source_idx ON inventory_repack_boxes_mirror(box_id,new_sscc);`,
 ];
 
 export interface StationMigrationEntry {

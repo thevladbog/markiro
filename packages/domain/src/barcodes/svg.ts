@@ -40,9 +40,13 @@ export function renderQrSvg(text: string): string {
   return bwipjs.toSVG({ bcid: "qrcode", text, scale: 3 });
 }
 
-export function renderCode128Svg(text: string, options: { includeText?: boolean } = {}): string {
+/** GS1 mode accepts human-readable AI notation, e.g. `(00)` followed by an SSCC. */
+export function renderCode128Svg(
+  text: string,
+  options: { includeText?: boolean; gs1?: boolean } = {},
+): string {
   return bwipjs.toSVG({
-    bcid: "code128",
+    bcid: options.gs1 ? "gs1-128" : "code128",
     text,
     scale: 2,
     height: 10,

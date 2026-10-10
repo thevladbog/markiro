@@ -14,6 +14,7 @@ import {
 } from "./model.js";
 import { buildGfaCommand, rasterAlignOffsetDots, type RasterizeTextFn } from "./raster-types.js";
 import { needsImageRendering } from "./text.js";
+import { buildZplBox, buildZplDocument } from "./printer-commands.js";
 
 export { buildGfaCommand, rasterAlignOffsetDots } from "./raster-types.js";
 export type { RasterResult, RasterizeTextFn } from "./raster-types.js";
@@ -242,10 +243,11 @@ function barWidthCommand(element: LabelBarcodeElement, dpi: LabelTemplateSpec["d
   return `^BY${moduleDots}`;
 }
 
-function renderBarcodeElement(
+export function renderZplBarcodeElement(
   element: LabelBarcodeElement,
   data: Record<LabelField, string>,
   dpi: LabelTemplateSpec["dpi"],
+  options: { ean13IncludeText?: boolean } = {},
 ): string {
   const x = mmToDots(element.xMm, dpi);
   const y = mmToDots(element.yMm, dpi);
@@ -276,7 +278,7 @@ function renderBarcodeElement(
     case "ean13": {
       const heightDots = mmToDots(element.sizeMm, dpi);
       const { fh, data: escaped } = escapeFdData(value);
-      return `^FO${x},${y}${barWidthCommand(element, dpi)}^BEN,${heightDots}${fh}^FD${escaped}^FS`;
+      return `^FO${x},${y}${barWidthCommand(element, dpi)}^BEN,${heightDots}${options.ean13IncludeText === false ? ",N" : ""}${fh}^FD${escaped}^FS`;
     }
     case "datamatrix": {
       const moduleDots = mmToDots(element.sizeMm, dpi);
@@ -325,7 +327,7 @@ function renderLineElement(element: LabelLineElement, dpi: LabelTemplateSpec["dp
   const heightDots = Math.max(spanYDots, thicknessDots);
   const originXDots = mmToDots(Math.min(element.xMm, element.x2Mm), dpi);
   const originYDots = mmToDots(Math.min(element.yMm, element.y2Mm), dpi);
-  return `^FO${originXDots},${originYDots}^GB${widthDots},${heightDots},${thicknessDots}^FS`;
+  return buildZplBox(originXDots, originYDots, widthDots, heightDots, thicknessDots);
 }
 
 function renderBoxElement(element: LabelBoxElement, dpi: LabelTemplateSpec["dpi"]): string {
@@ -334,7 +336,7 @@ function renderBoxElement(element: LabelBoxElement, dpi: LabelTemplateSpec["dpi"
   const widthDots = mmToDots(element.widthMm, dpi);
   const heightDots = mmToDots(element.heightMm, dpi);
   const thicknessDots = mmToDots(element.thicknessMm, dpi);
-  return `^FO${x},${y}^GB${widthDots},${heightDots},${thicknessDots}^FS`;
+  return buildZplBox(x, y, widthDots, heightDots, thicknessDots);
 }
 
 /**
@@ -353,7 +355,7 @@ export async function generateZpl(
   const widthDots = mmToDots(spec.widthMm, spec.dpi);
   const heightDots = mmToDots(spec.heightMm, spec.dpi);
 
-  const lines: string[] = ["^XA", `^PW${widthDots}`, `^LL${heightDots}`];
+  const lines: string[] = [];
 
   // Sequential (not Promise.all): keeps element order deterministic in the
   // emitted document regardless of how fast/slow individual rasterizeText
@@ -387,7 +389,7 @@ export async function generateZpl(
             `^FO${mmToDots(element.xMm, spec.dpi)},${mmToDots(element.yMm, spec.dpi)}${buildGfaCommand(raster)}^FS`,
           );
         } else {
-          lines.push(renderBarcodeElement(element, data, spec.dpi));
+          lines.push(renderZplBarcodeElement(element, data, spec.dpi));
         }
         break;
       case "line":
@@ -399,6 +401,5 @@ export async function generateZpl(
     }
   }
 
-  lines.push("^XZ");
-  return lines.join("\n") + "\n";
+  return buildZplDocument(widthDots, heightDots, lines);
 }

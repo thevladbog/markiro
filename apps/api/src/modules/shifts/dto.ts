@@ -300,12 +300,9 @@ export interface ShiftPalletLabelTemplatesDto {
 /**
  * Legacy fields retained only on station bundles during a rolling deployment.
  *
- * `chzProductGroupCode` is deliberately omitted: the Station stores the group
- * as text in its SQLite mirror and has no use for the code, and
- * `stationBundleProductOpenApiSchema` is `additionalProperties: false`, so
- * adding it here would break bundle validation for no gain.
+ * The numeric group accompanies its display name for offline label eligibility.
  */
-export type StationBundleProductDto = Omit<ProductDto, "chzProductGroupCode"> & {
+export type StationBundleProductDto = ProductDto & {
   defaultLabelTemplateId: null;
 };
 
@@ -761,6 +758,7 @@ const stationBundleProductOpenApiSchema = {
     gtin14: { type: "string" },
     name: { type: "string" },
     productGroup: { type: "string", nullable: true },
+    chzProductGroupCode: { type: "integer", minimum: 0, nullable: true },
     boxCapacity: nullablePositiveIntegerOpenApiSchema,
     palletBoxCapacity: nullablePositiveIntegerOpenApiSchema,
     status: { type: "string", enum: ["draft", "active"] },

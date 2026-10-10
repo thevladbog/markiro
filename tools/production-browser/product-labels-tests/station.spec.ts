@@ -42,12 +42,19 @@ test("required verification blocks the next unit; full tail and restart use the 
   await page.waitForFunction(() => window.__productLabels?.ready());
   await expect(dialog).toBeVisible();
   expect((await page.evaluate(() => window.__productLabels.inspect())).prints).toBe(1);
+  // The success signal lasts 650 ms and can overlap the instrument readout.
+  // Hold its timer and assert the unique signal rather than a transient global count.
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
   await page.evaluate(() => window.__productLabels.scan());
-  await expect(page.getByText("Этикетка подтверждена", { exact: true })).toHaveCount(1);
+  await expect(
+    page.getByRole("alert").getByText("Этикетка подтверждена", { exact: true }),
+  ).toHaveCount(1);
   await expect(dialog).toHaveCount(0);
   const state = await page.evaluate(() => window.__productLabels.inspect());
   expect(state.accepted).toBe(1);
   expect(state.events.at(-1)).toBe("verified");
+  await page.clock.runFor(650);
   await page.screenshot({ path: info.outputPath("station-verified.png") });
 });
 
@@ -574,6 +581,11 @@ for (const locale of ["ru", "en"])
     }, info) => {
       const writes: Record<string, unknown>[] = [];
       const unexpected: string[] = [];
+      const sqliteRequests: string[] = [];
+      page.on("request", (request) => {
+        if (new URL(request.url()).pathname === "/__product_labels_sql")
+          sqliteRequests.push(request.url());
+      });
       const template = { widthMm: 100, heightMm: 150, dpi: 203, language: "zpl" };
       await page.addInitScript((theme) => localStorage.setItem("markiro.theme", theme), theme);
       await page.route(`${station}/__product_labels_api/**`, async (route) => {
@@ -697,6 +709,7 @@ for (const locale of ["ru", "en"])
         expect(write).not.toHaveProperty("boxCapacity");
       }
       expect(unexpected).toEqual([]);
+      expect(sqliteRequests).toEqual([]);
     });
 
 for (const width of [1024, 1280])

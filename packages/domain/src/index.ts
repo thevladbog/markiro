@@ -41,6 +41,26 @@ export {
 } from "./gs1/sscc.js";
 export type { ParsedSscc } from "./gs1/sscc.js";
 export { classifyScan } from "./scan/classify.js";
+export {
+  resolveWarehouseReprintScan,
+  compareWarehouseReprintLabel,
+} from "./warehouse-reprint/scan.js";
+export type { WarehouseReprintScan, WarehouseScanRepair } from "./warehouse-reprint/scan.js";
+export * from "./warehouse-reprint/contracts.js";
+export { applyWarehouseReprintEvent } from "./warehouse-reprint/state.js";
+export {
+  buildWarehouseCodeOnlyBoxTemplate,
+  buildWarehouseCodeOnlyLabelTemplate,
+} from "./warehouse-reprint/template.js";
+export type {
+  WarehouseReprintState,
+  WarehouseReprintProjection,
+} from "./warehouse-reprint/state.js";
+export {
+  warehouseBoxSource,
+  warehouseBoxTemplate,
+  warehousePreparedEvent,
+} from "./warehouse-reprint/fixtures.js";
 export type { ScanInput } from "./scan/classify.js";
 export { validatePickupKm } from "./scan/pickup.js";
 export type { PickupKmResult } from "./scan/pickup.js";
@@ -370,3 +390,10 @@ export * from "./offline-grants/jws.js";
 export * from "./offline-grants/clock.js";
 export * from "./offline-grants/decision.js";
 export * from "./offline-grants/budgets.js";
+
+export {
+  createLabelRenderPlan,
+  emitLabelRenderPlan,
+  labelRasterSvgPath,
+} from "./labels/render-plan.js";
+export type { LabelRenderPlan, LabelRenderElement } from "./labels/render-plan.js";

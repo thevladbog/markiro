@@ -13,6 +13,10 @@ use serde::{Deserialize, Serialize};
 /// it used to be a synchronous Tauri command, the whole UI) for that long.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Bounds the IPC wait for Windows spooler RPCs, which have no reliable
+/// cancellation once running. Expiry means unknown delivery, never known unsent.
+const USB_PRINT_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Where the label bytes go. Industrial ZPL/TSPL printers accept raw payloads
 /// over a serial port or TCP 9100; USB printers go through the Windows print
 /// spooler (`spooler::print_raw`) and are Windows-only.
@@ -288,18 +292,146 @@ fn print_to_target(target: PrintTarget, bytes: &[u8]) -> Result<(), String> {
 /// on whichever async worker thread Tauri picked for this command and starve
 /// every other async task scheduled on it for as long as the OS takes.
 /// `spawn_blocking` moves the entire dispatch onto a thread dedicated to
-/// blocking work, and this command just awaits the result.
+/// blocking work. Callers that persist unknown delivery may opt into a bounded
+/// USB result wait; existing production callers keep their wait semantics, and
+/// serial/TCP keep their existing I/O limits.
 #[tauri::command]
-pub async fn print_bytes(target: PrintTarget, payload_base64: String) -> Result<(), String> {
+pub async fn print_bytes(
+    target: PrintTarget,
+    payload_base64: String,
+    delivery_unknown_on_timeout: Option<bool>,
+) -> Result<(), String> {
     let bytes = decode_payload(&payload_base64)?;
-    tauri::async_runtime::spawn_blocking(move || print_to_target(target, &bytes))
-        .await
-        .map_err(|e| e.to_string())?
+    let wait_timeout = print_wait_timeout(&target, delivery_unknown_on_timeout);
+    let task = tauri::async_runtime::spawn_blocking(move || print_to_target(target, &bytes));
+    await_print_transport(task, wait_timeout).await
+}
+
+fn print_wait_timeout(
+    target: &PrintTarget,
+    delivery_unknown_on_timeout: Option<bool>,
+) -> Option<Duration> {
+    (delivery_unknown_on_timeout == Some(true) && matches!(target, PrintTarget::Usb { .. }))
+        .then_some(USB_PRINT_TIMEOUT)
+}
+
+async fn await_print_transport(
+    mut task: tauri::async_runtime::JoinHandle<Result<(), String>>,
+    wait_timeout: Option<Duration>,
+) -> Result<(), String> {
+    let result = if let Some(limit) = wait_timeout {
+        match tokio::time::timeout(limit, &mut task).await {
+            Ok(result) => result,
+            Err(_) => {
+                // Abort can prevent a queued blocking task from starting, but
+                // cannot stop a running Win32 call. It may still print later.
+                // Return an error for the caller's delivery_unknown path;
+                // do not retry or claim that no bytes reached the printer.
+                task.abort();
+                return Err("USB print spooler timed out; delivery is unknown".to_string());
+            }
+        }
+    } else {
+        task.await
+    };
+    result.map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
 mod tests {
     use super::{decode_payload, resolve_socket_addr};
+
+    #[test]
+    fn usb_deadline_requires_explicit_unknown_delivery_opt_in() {
+        let usb = super::PrintTarget::Usb {
+            printer: "TSC 210".to_string(),
+        };
+        assert_eq!(super::print_wait_timeout(&usb, None), None);
+        assert_eq!(super::print_wait_timeout(&usb, Some(false)), None);
+        assert_eq!(
+            super::print_wait_timeout(&usb, Some(true)),
+            Some(super::USB_PRINT_TIMEOUT)
+        );
+        for target in [
+            super::PrintTarget::Tcp {
+                host: "127.0.0.1".to_string(),
+                port: 9100,
+            },
+            super::PrintTarget::Serial {
+                port: "COM1".to_string(),
+                baud: 9600,
+            },
+        ] {
+            assert_eq!(super::print_wait_timeout(&target, Some(true)), None);
+        }
+    }
+
+    #[test]
+    fn stalled_usb_transport_returns_unknown_delivery_before_blocking_work_finishes() {
+        let (release, wait_for_release) = std::sync::mpsc::channel();
+        let (started, wait_for_start) = tokio::sync::oneshot::channel();
+        let (finished, wait_for_finish) = std::sync::mpsc::channel();
+        tauri::async_runtime::block_on(async {
+            let task = tauri::async_runtime::spawn_blocking(move || {
+                started.send(()).unwrap();
+                wait_for_release.recv().unwrap();
+                finished.send(()).unwrap();
+                Ok(())
+            });
+            wait_for_start.await.unwrap();
+            let result = tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                super::await_print_transport(task, Some(std::time::Duration::from_millis(10))),
+            )
+            .await;
+            let still_running = wait_for_finish.try_recv().is_err();
+            release.send(()).unwrap();
+            wait_for_finish.recv().unwrap();
+            let error = result
+                .expect("USB transport must return before stalled blocking work finishes")
+                .unwrap_err();
+            assert!(
+                still_running,
+                "timeout must not claim the native call stopped"
+            );
+            assert!(error.contains("delivery is unknown"), "{error}");
+        });
+    }
+
+    #[test]
+    fn usb_transport_preserves_success_and_native_error_before_the_deadline() {
+        tauri::async_runtime::block_on(async {
+            for expected in [Ok(()), Err("WritePrinter failed".to_string())] {
+                let outcome = expected.clone();
+                let task = tauri::async_runtime::spawn_blocking(move || outcome);
+                assert_eq!(
+                    super::await_print_transport(task, Some(std::time::Duration::from_secs(1)))
+                        .await,
+                    expected
+                );
+            }
+        });
+    }
+
+    #[test]
+    fn non_usb_transport_keeps_waiting_for_its_existing_io_result() {
+        tauri::async_runtime::block_on(async {
+            let (release, wait_for_release) = std::sync::mpsc::channel();
+            let task = tauri::async_runtime::spawn_blocking(move || {
+                wait_for_release.recv().unwrap();
+                Err("serial write failed".to_string())
+            });
+            let release_task = tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                release.send(()).unwrap();
+            });
+            assert_eq!(
+                super::await_print_transport(task, None).await,
+                Err("serial write failed".to_string())
+            );
+            release_task.await.unwrap();
+        });
+    }
 
     #[test]
     fn decodes_base64_into_exact_bytes() {

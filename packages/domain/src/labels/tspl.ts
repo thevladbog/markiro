@@ -58,6 +58,7 @@ import {
 } from "./model.js";
 import { buildBitmapCommand, rasterAlignOffsetDots, type RasterizeTextFn } from "./raster-types.js";
 import { needsImageRendering } from "./text.js";
+import { buildTsplBar, buildTsplBox, buildTsplDocument } from "./printer-commands.js";
 import { rasterizeGs1DataMatrix } from "../barcodes/gs1-data-matrix.js";
 import { estimatedTextWidthMm, LINE_HEIGHT_EM, ptToMm, wrapTextToWidth } from "./wrap.js";
 
@@ -382,7 +383,7 @@ function barWidthParams(element: LabelBarcodeElement, dpi: LabelTemplateSpec["dp
   return `${narrow},${narrow}`;
 }
 
-function renderBarcodeElement(
+export function renderTsplBarcodeElement(
   element: LabelBarcodeElement,
   data: Record<LabelField, string>,
   dpi: LabelTemplateSpec["dpi"],
@@ -433,7 +434,7 @@ function renderLineElement(element: LabelLineElement, dpi: LabelTemplateSpec["dp
   const heightDots = Math.max(spanYDots, thicknessDots);
   const originXDots = mmToDots(Math.min(element.xMm, element.x2Mm), dpi);
   const originYDots = mmToDots(Math.min(element.yMm, element.y2Mm), dpi);
-  return `BAR ${originXDots},${originYDots},${widthDots},${heightDots}`;
+  return buildTsplBar(originXDots, originYDots, widthDots, heightDots);
 }
 
 /**
@@ -448,10 +449,10 @@ function renderLineElement(element: LabelLineElement, dpi: LabelTemplateSpec["dp
 function renderBoxElement(element: LabelBoxElement, dpi: LabelTemplateSpec["dpi"]): string {
   const x = mmToDots(element.xMm, dpi);
   const y = mmToDots(element.yMm, dpi);
-  const xEnd = x + mmToDots(element.widthMm, dpi);
-  const yEnd = y + mmToDots(element.heightMm, dpi);
+  const widthDots = mmToDots(element.widthMm, dpi);
+  const heightDots = mmToDots(element.heightMm, dpi);
   const thicknessDots = mmToDots(element.thicknessMm, dpi);
-  return `BOX ${x},${y},${xEnd},${yEnd},${thicknessDots}`;
+  return buildTsplBox(x, y, widthDots, heightDots, thicknessDots);
 }
 
 /**
@@ -474,12 +475,7 @@ export async function generateTspl(
   data: Record<LabelField, string>,
   deps: GenerateTsplDeps = {},
 ): Promise<string> {
-  const lines: string[] = [
-    `SIZE ${spec.widthMm} mm, ${spec.heightMm} mm`,
-    "GAP 2 mm, 0 mm",
-    "DIRECTION 1",
-    "CLS",
-  ];
+  const lines: string[] = [];
 
   // Sequential (not Promise.all) — see generateZpl's identical rationale:
   // deterministic element order in the document and predictable mock
@@ -517,7 +513,7 @@ export async function generateTspl(
             ),
           );
         } else {
-          lines.push(renderBarcodeElement(element, data, spec.dpi));
+          lines.push(renderTsplBarcodeElement(element, data, spec.dpi));
         }
         break;
       case "line":
@@ -529,6 +525,5 @@ export async function generateTspl(
     }
   }
 
-  lines.push("PRINT 1");
-  return lines.join("\n") + "\n";
+  return buildTsplDocument(spec.widthMm, spec.heightMm, lines);
 }

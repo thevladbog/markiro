@@ -225,7 +225,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     expect(bundle.body.operators[0].pinHash).toMatch(/^pbkdf2\$sha256\$100000\$/);
   });
 
-  it("sends the product group as its resolved name and never leaks the code", async () => {
+  it("sends the resolved product group name and its code for offline template eligibility", async () => {
     const agent = request.agent(app!.getHttpServer());
     const orgId = await signUpAndActivate(agent);
     const productId = await seedProduct(orgId, {
@@ -243,7 +243,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     expect(bundle.body.product.productGroup).toBe(
       "Пиво, напитки, изготавливаемые на основе пива, слабоалкогольные напитки",
     );
-    expect(bundle.body.product).not.toHaveProperty("chzProductGroupCode");
+    expect(bundle.body.product.chzProductGroupCode).toBe(15);
   });
 
   it("GET /shifts/:id/bundle resolves the box snapshot without an item-template fallback", async () => {

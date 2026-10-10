@@ -17,6 +17,7 @@ import { DevicesModule } from "./modules/devices/devices.module";
 import { DeviceLicensingModule } from "./modules/device-licensing/device-licensing.module";
 import { StationPairingModule } from "./modules/station-pairing/station-pairing.module";
 import { StationScansModule } from "./modules/station-scans/station-scans.module";
+import { StationWarehouseReprintModule } from "./modules/station-warehouse-reprint/station-warehouse-reprint.module";
 import { EmployeesModule } from "./modules/employees/employees.module";
 import { OperatorsModule } from "./modules/operators/operators.module";
 import { KiosksModule } from "./modules/kiosks/kiosks.module";
@@ -151,6 +152,7 @@ export class AppModule {
         DeviceLicensingModule,
         StationPairingModule,
         StationScansModule,
+        StationWarehouseReprintModule,
         EmployeesModule,
         OperatorsModule,
         KiosksModule,

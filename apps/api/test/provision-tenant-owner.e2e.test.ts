@@ -5,6 +5,8 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { createDb, schema } from "@markiro/db";
 import {
   buildDuplicateLabelTemplate,
+  buildWarehouseCodeOnlyLabelTemplate,
+  buildWarehouseCodeOnlyBoxTemplate,
   buildPalletLabelTemplates,
   PALLET_LABEL_58X40_TEMPLATE_NAME,
   PALLET_LABEL_TEMPLATE_NAME,
@@ -300,6 +302,7 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
         .sort(),
     ).toEqual(
       [
+        buildWarehouseCodeOnlyBoxTemplate().name,
         "Коробка 58×40",
         "Коробка 75×120",
         "Коробка 100×100",
@@ -339,8 +342,8 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ id: schema.labelTemplates.id })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    // 16 box + 2 product_duplicate + 2 pallet (06d + spec 2026-09-18 §8).
-    expect(after).toHaveLength(20);
+    // 17 box + 3 product_duplicate + 2 pallet (06d + spec 2026-09-18 §8).
+    expect(after).toHaveLength(22);
     // Selection order is not guaranteed without ORDER BY; sort by name so the
     // comparison is deterministic regardless of physical row order.
     const pallets = templates
@@ -357,7 +360,10 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       }),
     ]);
     const duplicates = templates.filter((t) => t.purpose === "product_duplicate");
-    expect(duplicates).toHaveLength(2);
+    expect(duplicates).toHaveLength(3);
+    expect(duplicates).toContainEqual(
+      expect.objectContaining(buildWarehouseCodeOnlyLabelTemplate()),
+    );
     expect(duplicates).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

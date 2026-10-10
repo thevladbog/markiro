@@ -1,3 +1,4 @@
+import { WarehouseReprintGallery } from "./WarehouseReprintGallery.js";
 import { PalletClose } from "../components/PalletClose.js";
 import { PalletContents } from "../components/PalletContents.js";
 import { PalletExceptions } from "../components/PalletExceptions.js";
@@ -220,6 +221,7 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
     fixture.kind === "setup" ||
     fixture.kind === "shift" ||
     fixture.kind === "new-shift" ||
+    fixture.kind === "warehouse-reprint" ||
     fixture.kind === "inventory" ||
     rendersActiveShiftWorkScreen;
   // App.tsx turns the printer summary into the «Принтеры N / 3» button only
@@ -234,6 +236,7 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
   // App.tsx names a shift in the header only while one is active, so the
   // shift list and the new-shift form carry no shift label.
   const rendersNoShift =
+    fixture.kind === "warehouse-reprint" ||
     fixture.kind === "inventory" ||
     fixture.kind === "setup" ||
     fixture.kind === "shift" ||
@@ -315,6 +318,8 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
 
 function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: GalleryLocale }) {
   switch (fixture.kind) {
+    case "warehouse-reprint":
+      return <WarehouseReprintGallery variant={fixture.variant} />;
     case "system":
       return <SystemFixture locale={locale} />;
     case "credential-recovery":

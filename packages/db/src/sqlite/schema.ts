@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+export * from "./warehouse-reprint-schema.js";
 import {
   check,
   foreignKey,
@@ -145,6 +146,7 @@ export const productMirror = sqliteTable("product_mirror", {
   name: text("name").notNull(),
   printName: text("print_name"),
   productGroup: text("product_group"),
+  chzProductGroupCode: integer("chz_product_group_code"),
   boxCapacity: integer("box_capacity"),
   /** Units-valued predecessor, left in place and unread — see `shift_mirror`. */
   palletCapacity: integer("pallet_capacity"),
@@ -762,6 +764,7 @@ export const inventoryRepackBoxesMirror = sqliteTable(
       table.ownerDeviceId,
       table.state,
     ),
+    index("inventory_repack_boxes_mirror_reprint_source_idx").on(table.boxId, table.newSscc),
   ],
 );
 

@@ -1,3 +1,9 @@
+import type { LabelField } from "@markiro/domain";
+import { cacheWarehouseClosedBox } from "../lib/warehouse-reprint/sources.js";
+import {
+  acquireCredentialCommitLease,
+  credentialGenerationOwnership,
+} from "../lib/credential-recovery.js";
 import { SavedPrinterDestination } from "../ui/PrinterDestination.js";
 import { FloorChoiceGroup } from "../ui/FloorChoiceGroup.js";
 import {
@@ -1622,7 +1628,7 @@ export function WorkScreen({
     sscc: string;
     itemCount: number;
     closedAt: string;
-  }): Record<string, string> {
+  }): Record<LabelField, string> {
     return boxLabelFields({
       sscc: result.sscc,
       itemCount: result.itemCount,
@@ -1646,6 +1652,28 @@ export function WorkScreen({
   }) {
     await labelSpecReady.current;
     const currentPrinting = printingRef.current;
+    if (credentialGeneration) {
+      const owner = await credentialGenerationOwnership(credentialGeneration);
+      const lease = acquireCredentialCommitLease(credentialGeneration);
+      if (lease) {
+        try {
+          const [closed] = await exec.all<{ box_id: string }>(
+            "SELECT box_id FROM boxes_mirror WHERE sscc=? AND shift_id=? AND closed_at IS NOT NULL AND disassembled_at IS NULL",
+            [result.sscc, shiftId],
+          );
+          if (closed && owner)
+            await cacheWarehouseClosedBox(exec, owner, {
+              sourceId: closed.box_id,
+              sourceShiftId: shiftId,
+              fields: fieldsForClosedBox(result),
+            });
+        } catch {
+          console.warn("station: warehouse closed-box copy unavailable");
+        } finally {
+          lease.release();
+        }
+      }
+    }
     return attemptBoxPrint({
       destination: {
         exec,
