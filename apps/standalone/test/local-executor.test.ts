@@ -114,6 +114,7 @@ describe("local database on node:sqlite", () => {
       "floor_boxes",
       "floor_codes",
       "floor_exceptions",
+      "floor_print_jobs",
       "floor_scans",
       "floor_shifts",
       "floor_sign_in_failures",
@@ -129,6 +130,7 @@ describe("local database on node:sqlite", () => {
       "ref_templates",
       "sync_quarantine",
       "sync_state",
+      "workstation_settings",
     ]);
   });
 

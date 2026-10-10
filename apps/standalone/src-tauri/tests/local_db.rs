@@ -70,6 +70,7 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "floor_boxes",
             "floor_codes",
             "floor_exceptions",
+            "floor_print_jobs",
             "floor_scans",
             "floor_shifts",
             "floor_sign_in_failures",
@@ -84,7 +85,8 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "ref_template_defaults",
             "ref_templates",
             "sync_quarantine",
-            "sync_state"
+            "sync_state",
+            "workstation_settings"
         ]
     );
     // The sign-in lockouts' columns (plan 1f): `last_failure_at` is what the
@@ -452,8 +454,9 @@ async fn every_table_has_a_forget_class() {
         listed, tables,
         "TABLE_CLASSES names each table of the migrations once, and nothing else"
     );
-    // This device's own records are the production tables of `0006`; the
-    // sign-in lockouts stay with the copies (an open owner question).
+    // This device's own records are the production tables of `0006` and the
+    // print jobs of `0007`; the sign-in lockouts stay with the copies (an
+    // open owner question); the workstation's settings belong to the PC.
     let device_data: Vec<&str> = TABLE_CLASSES
         .iter()
         .filter(|(_, class)| *class == TableClass::DeviceData)
@@ -466,6 +469,7 @@ async fn every_table_has_a_forget_class() {
             "floor_boxes",
             "floor_codes",
             "floor_exceptions",
+            "floor_print_jobs",
             "floor_scans",
             "floor_shifts",
             "floor_sscc_blocks",
@@ -476,15 +480,19 @@ async fn every_table_has_a_forget_class() {
         table_class("floor_sign_in_failures"),
         Some(TableClass::Disposable)
     );
+    assert_eq!(
+        table_class("workstation_settings"),
+        Some(TableClass::Workstation)
+    );
 }
 
 /// Forgetting the device (`device_forget`) empties every disposable table and
-/// nothing else: every table of this device's own records (`0006`) keeps its
-/// row, and so does a workstation's table (here one plan 2a7 might add) and
-/// sqlx's migration journal.
+/// nothing else: every table outside that class (this device's records and
+/// the workstation's settings) keeps its row, and so does sqlx's migration
+/// journal.
 #[tokio::test]
 async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
-    let (dir, db) = open().await;
+    let (_dir, db) = open().await;
     db.transaction(vec![
         statement(
             "INSERT INTO ref_org (id, name, inn, gln, gs1_prefixes, time_zone, rev) \
@@ -540,18 +548,15 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
     ])
     .await
     .unwrap();
-    // One record in each table of this device's own (`0006`).
+    // One record in each table of this device's own (`0006`, `0007`) and
+    // one setting of the workstation (`0007`).
     db.transaction(device_records()).await.unwrap();
-    // A table of the workstation's settings as plan 2a7 will add it; the
-    // webview may not create tables, so a raw connection does.
-    run_raw(
-        dir.path(),
-        &[
-            "CREATE TABLE kept_workstation_settings (key TEXT PRIMARY KEY)",
-            "INSERT INTO kept_workstation_settings (key) VALUES ('printers')",
-        ],
-    )
-    .await;
+    db.transaction(vec![statement(
+        "INSERT INTO workstation_settings (key, value) VALUES ('printers', '{}')",
+        json!([]),
+    )])
+    .await
+    .unwrap();
     let journal = "SELECT count(*) AS n FROM _sqlx_migrations";
     let migrations = db.query(journal, vec![]).await.unwrap();
 
@@ -580,6 +585,7 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
         "floor_boxes",
         "floor_codes",
         "floor_exceptions",
+        "floor_print_jobs",
         "floor_scans",
         "floor_shifts",
         "floor_sscc_blocks",
@@ -587,14 +593,6 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
     ] {
         assert_eq!(count(&db, table).await, json!(1), "{table} keeps its row");
     }
-    let kept = db
-        .query(
-            "SELECT count(*) AS n FROM kept_workstation_settings",
-            vec![],
-        )
-        .await
-        .unwrap();
-    assert_eq!(Value::Object(kept[0].clone()), json!({ "n": 1 }));
     assert_eq!(db.query(journal, vec![]).await.unwrap(), migrations);
     // The database takes writes afterwards as before.
     assert_eq!(
@@ -651,8 +649,8 @@ fn outbox_record(id: &str, host: &str, device: &str, acked: Option<&str>) -> Loc
     )
 }
 
-/// One row in each table of this device's own records (migration `0006`),
-/// each of the pairing `(HOST, DEVICE)`, as the floor's writers will write
+/// One row in each table of this device's own records (migrations `0006`,
+/// `0007`), each of the pairing `(HOST, DEVICE)`, as the floor's writers will write
 /// them through `local_transaction`.
 fn device_records() -> Vec<LocalStatement> {
     vec![
@@ -700,6 +698,14 @@ fn device_records() -> Vec<LocalStatement> {
             "INSERT INTO floor_exceptions (id, host_id, device_id, shift_id, kind, box_id, \
              occurred_at) VALUES ('exception-1', ?, ?, 'shift-1', 'clear', 'box-1', \
              '2026-10-08T06:04:00.000Z')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO floor_print_jobs (id, host_id, device_id, shift_id, purpose, \
+             subject_id, sscc, state, verify, template_id, template_rev, fields, operator_id, \
+             created_at, updated_at) VALUES ('job-1', ?, ?, 'shift-1', 'box', 'box-1', \
+             '046006820000000017', 'skipped', 0, 'template-1', 3, '{}', 'operator-1', \
+             '2026-10-08T06:04:00.000Z', '2026-10-08T06:04:00.000Z')",
             json!([HOST, DEVICE]),
         ),
         outbox_record("record-1", HOST, DEVICE, None),

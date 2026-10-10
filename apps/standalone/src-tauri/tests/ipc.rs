@@ -377,7 +377,10 @@ fn forgetting_the_device_clears_the_local_copies_first() {
     // delete on its own, instead of one transaction, would leave
     // `ref_lines` empty here.
     assert_eq!(
-        TABLE_CLASSES.last(),
+        TABLE_CLASSES
+            .iter()
+            .filter(|(_, class)| *class == TableClass::Disposable)
+            .last(),
         Some(&("sync_state", TableClass::Disposable))
     );
     run_raw(app_dir.path(), &[STUCK_SYNC_STATE]);

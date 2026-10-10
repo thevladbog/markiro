@@ -71,6 +71,7 @@ pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
     ("floor_boxes", TableClass::DeviceData),
     ("floor_codes", TableClass::DeviceData),
     ("floor_exceptions", TableClass::DeviceData),
+    ("floor_print_jobs", TableClass::DeviceData),
     ("floor_scans", TableClass::DeviceData),
     ("floor_shifts", TableClass::DeviceData),
     ("floor_sign_in_failures", TableClass::Disposable),
@@ -86,6 +87,7 @@ pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
     ("ref_templates", TableClass::Disposable),
     ("sync_quarantine", TableClass::Disposable),
     ("sync_state", TableClass::Disposable),
+    ("workstation_settings", TableClass::Workstation),
 ];
 
 /// The class of `table`, `None` for a table [`TABLE_CLASSES`] does not name.
@@ -883,8 +885,8 @@ mod tests {
         }
     }
 
-    /// `TABLE_CLASSES` holds no workstation table until plan 2a7, so the
-    /// class filter itself is pinned here too, on tables of all three classes.
+    /// The class filter itself is pinned here too, on probe tables of all
+    /// three classes, whatever `TABLE_CLASSES` holds.
     #[tokio::test]
     async fn a_forget_empties_the_disposable_tables_and_keeps_the_other_classes() {
         use sqlx::{ConnectOptions, Connection};

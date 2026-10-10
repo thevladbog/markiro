@@ -23,12 +23,13 @@ const testModuleUrl = import.meta.url;
 const OTHER_DEVICE = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
 const AT = "2026-10-09T08:00:00.000Z";
 
-/** The tables of this device's own records (migration `0006`, `TableClass::DeviceData`). */
+/** The tables of this device's own records (migrations `0006`, `0007`; `TableClass::DeviceData`). */
 const DEVICE_TABLES = [
   "floor_block_requests",
   "floor_boxes",
   "floor_codes",
   "floor_exceptions",
+  "floor_print_jobs",
   "floor_scans",
   "floor_shifts",
   "floor_sscc_blocks",
@@ -509,6 +510,27 @@ const COLUMNS: Record<string, string[]> = {
     "occurred_at TEXT NOT NULL",
     "operator_id TEXT",
   ],
+  floor_print_jobs: [
+    "id TEXT NOT NULL PK1",
+    "host_id TEXT NOT NULL",
+    "device_id TEXT NOT NULL",
+    "shift_id TEXT NOT NULL",
+    "purpose TEXT NOT NULL",
+    "subject_id TEXT NOT NULL",
+    "sscc TEXT NOT NULL",
+    "state TEXT NOT NULL",
+    "verify INTEGER NOT NULL",
+    "template_id TEXT NOT NULL",
+    "template_rev INTEGER NOT NULL",
+    "fields TEXT NOT NULL",
+    "printer TEXT",
+    "bytes_base64 TEXT",
+    "error_code TEXT",
+    "attempts INTEGER NOT NULL DEFAULT 0",
+    "operator_id TEXT NOT NULL",
+    "created_at TEXT NOT NULL",
+    "updated_at TEXT NOT NULL",
+  ],
   outbox: [
     "seq INTEGER PK1",
     "id TEXT NOT NULL",
@@ -575,6 +597,18 @@ describe("the shape of the production tables (migration 0006)", () => {
       { tableName: "floor_boxes", name: "floor_boxes_sscc", isUnique: 1, isPartial: 1 },
       { tableName: "floor_codes", name: "floor_codes_box", isUnique: 0, isPartial: 0 },
       { tableName: "floor_codes", name: "floor_codes_shift", isUnique: 0, isPartial: 0 },
+      {
+        tableName: "floor_print_jobs",
+        name: "floor_print_jobs_open",
+        isUnique: 1,
+        isPartial: 1,
+      },
+      {
+        tableName: "floor_print_jobs",
+        name: "floor_print_jobs_shift",
+        isUnique: 0,
+        isPartial: 0,
+      },
       { tableName: "floor_scans", name: "floor_scans_shift", isUnique: 0, isPartial: 0 },
       { tableName: "floor_shifts", name: "floor_shifts_line", isUnique: 0, isPartial: 0 },
       {
