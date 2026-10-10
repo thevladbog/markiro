@@ -1,10 +1,17 @@
-import type { RasterizeTextFn } from "@markiro/domain";
+import { buildSscc, type RasterizeTextFn } from "@markiro/domain";
 import type { DatabaseSync } from "node:sqlite";
 
 import { vi } from "vitest";
 
 import { latin1ToBytes } from "../../src/floor/print/label-render.js";
-import type { RenderLabel } from "../../src/floor/print/print-jobs.js";
+import {
+  boxLabelStep,
+  readPrintJob,
+  type PrintContext,
+  type PrintJob,
+  type RenderLabel,
+} from "../../src/floor/print/print-jobs.js";
+import type { ResolveContext } from "../../src/floor/print/print-resolution.js";
 import { createPrintRuntime, type StartTimer } from "../../src/floor/print/print-runtime.js";
 import {
   DEFAULT_WORKSTATION_SETTINGS,
@@ -12,9 +19,23 @@ import {
   type PrinterProfile,
   type WorkstationSettings,
 } from "../../src/floor/setup/workstation-settings.js";
+import type { PrintRuntime } from "../../src/floor/print/print-runtime.js";
+import type { WorkShift } from "../../src/floor/shifts/shift-copies.js";
+import { closeOpenBox } from "../../src/floor/work/box-close.js";
+import { processScan } from "../../src/floor/work/scan-pipeline.js";
 import type { HardwareApi } from "../../src/hardware/hardware.js";
 import type { LocalExecutor } from "../../src/local/executor.js";
-import { rows } from "./floor-work.js";
+import {
+  enteredShift,
+  km,
+  OPERATOR_ID,
+  PAIRING,
+  PREFIX,
+  rows,
+  scanContext,
+  seedBlock,
+} from "./floor-work.js";
+import { openLocalDb } from "./local-db.js";
 
 /** A rasterizer that draws every text as the same 8 x 2 bitmap: jsdom has no canvas. */
 export const fakeRaster: RasterizeTextFn = async () => ({
@@ -146,4 +167,67 @@ export async function flushPromises(): Promise<void> {
 /** A shell spy for one test: `vi.fn` over a real answer. */
 export function spyRender(render: RenderLabel = fakeRender) {
   return vi.fn<RenderLabel>(render);
+}
+
+/** The block of the printing tests: serials from 1500. */
+export const PRINT_BLOCK = "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a";
+/** The SSCC of the first box the printing tests close. */
+export const FIRST_SSCC = buildSscc(0, PREFIX, 1500);
+
+/** A station with the shift entered, a block of serials and these workstation settings. */
+export async function printStation(overrides: Partial<WorkstationSettings> = {}) {
+  const { db, executor } = openLocalDb();
+  const shift: WorkShift = await enteredShift(executor);
+  seedBlock(db, { blockId: PRINT_BLOCK, from: 1500, to: 3499 });
+  const settings = await setUpPrinting(executor, overrides);
+  return { db, local: executor, shift, settings };
+}
+
+/**
+ * Accepts three codes and closes the box with its print job `job-1`, as the
+ * work screen does; answers the stored job.
+ */
+export async function closeBoxWithLabel(
+  at: { local: LocalExecutor; shift: WorkShift },
+  render: RenderLabel = fakeRender,
+): Promise<PrintJob> {
+  const filling = scanContext(at.local, at.shift, { newId: () => crypto.randomUUID() });
+  for (const serial of ["A1", "A2", "A3"]) await processScan(filling, km(serial));
+  const closed = await closeOpenBox(scanContext(at.local, at.shift), [
+    boxLabelStep({
+      local: at.local,
+      pairing: PAIRING,
+      shift: at.shift,
+      operatorName: "Анна Кузнецова",
+      newId: () => "job-1",
+      render,
+    }),
+  ]);
+  if (closed.kind !== "closed") throw new Error(`the box did not close: ${closed.kind}`);
+  const job = await readPrintJob(at.local, PAIRING, "job-1");
+  if (job === null) throw new Error("the box closed without its job");
+  return job;
+}
+
+/** A send's and a decision's context over `local`: a clock one second a reading from 06:30, counting ids. */
+export function resolveContext(local: LocalExecutor, runtime: PrintRuntime): ResolveContext {
+  let tick = Date.parse("2026-10-08T06:30:00.000Z");
+  let id = 100;
+  const context: PrintContext = {
+    local,
+    pairing: PAIRING,
+    runtime,
+    now: () => {
+      tick += 1_000;
+      return new Date(tick);
+    },
+  };
+  return {
+    ...context,
+    operatorId: OPERATOR_ID,
+    newId: () => {
+      id += 1;
+      return `00000000-0000-4000-8000-${String(id).padStart(12, "0")}`;
+    },
+  };
 }
