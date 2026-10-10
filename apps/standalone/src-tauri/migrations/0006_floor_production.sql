@@ -17,6 +17,22 @@
 -- purpose: the pallets of the pilot add kinds, and a SQLite CHECK changes
 -- only by rebuilding its table. A single-column `TEXT PRIMARY KEY` would take
 -- NULL in SQLite (a legacy quirk of rowid tables), so those keys say NOT NULL.
+--
+-- JSON columns (`snapshot`, `payload`, `outcome_details`) hold an object, never
+-- another kind of JSON: `json_valid(x) AND json_type(x) = 'object'`, with
+-- `json_valid` first so that malformed text is a plain constraint failure.
+--
+-- Indexes: besides the keys, each one serves a read the floor repeats on every
+-- scan or box close (plan 2a6), so that the cost does not grow with the
+-- history the station keeps (acknowledged facts stay for 30 days, codes and
+-- boxes have no retention at all): `outbox_settled` (the status bar's counts
+-- of rejected and conflicting records), `floor_codes_box` (the digest of a
+-- box being closed), `floor_codes_shift` and `floor_boxes_shift` (the totals
+-- of the work screen). The status bar counts the outbox as three separate
+-- counts: one `count(*) FILTER (…)` reads every row, payload included.
+-- `outbox_settled` is partial on purpose: a plain
+-- `(host_id, device_id, outcome)` index would attract the unsent count too,
+-- which is cheaper on `outbox_unsent`.
 
 -- What the host lists in `GET /v1/device/shifts` (`DeviceShift`), as the last
 -- read saw it, plus what this station keeps of a shift it entered: the
@@ -45,7 +61,7 @@ CREATE TABLE floor_shifts (
   owner_device_id TEXT,
   opened_at TEXT,
   closed_at TEXT,
-  snapshot TEXT CHECK (snapshot IS NULL OR json_valid(snapshot)),
+  snapshot TEXT CHECK (snapshot IS NULL OR (json_valid(snapshot) AND json_type(snapshot) = 'object')),
   entered_at TEXT,
   local_state TEXT CHECK (local_state IN ('closing', 'closed')),
   seen_at INTEGER NOT NULL,
@@ -118,6 +134,9 @@ CREATE UNIQUE INDEX floor_boxes_sscc ON floor_boxes (sscc) WHERE sscc IS NOT NUL
 CREATE UNIQUE INDEX floor_boxes_open
   ON floor_boxes (host_id, device_id, shift_id) WHERE closed_at IS NULL;
 
+-- The closed boxes of a shift and the last SSCC (the work screen's totals).
+CREATE INDEX floor_boxes_shift ON floor_boxes (host_id, device_id, shift_id, closed_at);
+
 -- The codes this station accepted and still holds in a box: its own check for
 -- duplicates (`kmHash`), within the pairing. An exception that takes a code
 -- out of a box deletes its row.
@@ -131,6 +150,11 @@ CREATE TABLE floor_codes (
   scanned_at TEXT NOT NULL,
   PRIMARY KEY (host_id, device_id, code_hash)
 );
+
+-- The codes of a box (the digest when it closes; the delete of an exception)
+-- and the accepted count of a shift.
+CREATE INDEX floor_codes_box ON floor_codes (host_id, device_id, box_id, code_hash);
+CREATE INDEX floor_codes_shift ON floor_codes (host_id, device_id, shift_id);
 
 -- Every scan of the work screen, accepted or not (a `scan` fact). A scan that
 -- is no code of marking keeps only its length and what it looked like, never
@@ -201,16 +225,22 @@ CREATE TABLE outbox (
   device_id TEXT NOT NULL,
   kind TEXT NOT NULL,
   shift_id TEXT NOT NULL,
-  payload TEXT NOT NULL CHECK (json_valid(payload)),
+  payload TEXT NOT NULL CHECK (json_valid(payload) AND json_type(payload) = 'object'),
   created_at TEXT NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0 CHECK (attempts >= 0),
   sent_at TEXT,
   outcome TEXT CHECK (outcome IN ('accepted', 'conflict', 'rejected')),
   outcome_code TEXT,
-  outcome_details TEXT CHECK (outcome_details IS NULL OR json_valid(outcome_details)),
+  outcome_details TEXT CHECK (
+    outcome_details IS NULL OR (json_valid(outcome_details) AND json_type(outcome_details) = 'object')
+  ),
   acked_at TEXT,
   CHECK ((outcome IS NULL) = (acked_at IS NULL)),
   CHECK (outcome IS NOT NULL OR (outcome_code IS NULL AND outcome_details IS NULL))
 );
 
 CREATE INDEX outbox_unsent ON outbox (host_id, device_id, seq) WHERE acked_at IS NULL;
+
+-- The records the host settled with a verdict that needs a person's eye: the
+-- status bar counts `rejected` and `conflict`.
+CREATE INDEX outbox_settled ON outbox (host_id, device_id, outcome) WHERE outcome IS NOT NULL;

@@ -7,7 +7,7 @@ use markiro_standalone_lib::local_db::{
 };
 use serde_json::{json, Value};
 use sqlx::sqlite::SqliteConnectOptions;
-use sqlx::{ConnectOptions, Connection};
+use sqlx::{ConnectOptions, Connection, Row};
 
 const INSERT_LINE: &str = "INSERT INTO ref_lines (id, name, archived, rev) VALUES (?, ?, ?, ?)";
 // A genuine no-op write: SQLite's `sqlite3_changes()` (`rows_affected()`)
@@ -806,7 +806,8 @@ async fn an_outbox_that_cannot_be_counted_stops_a_forget() {
     )])
     .await
     .unwrap();
-    // An outbox without the columns a forget reads, as an older build left it.
+    // An outbox without the columns a forget reads: a damaged or foreign
+    // table (no build of this app ever made one), so it cannot be counted.
     run_raw(
         dir.path(),
         &[
@@ -825,6 +826,107 @@ async fn an_outbox_that_cannot_be_counted_stops_a_forget() {
     assert_eq!(count(&db, "ref_lines").await, json!(1), "nothing cleared");
     // A confirmed forget does not read the outbox at all.
     assert_eq!(db.clear_copies(UnsentGuard::Ignore).await, Ok(()));
+}
+
+/// The reads the floor repeats on every scan and box close search an index
+/// instead of reading every row of the pairing (migration `0006`). The plans
+/// are those of the SQLite the shell bundles; `test/floor-schema.test.ts`
+/// pins the same reads on the Node runtime's SQLite, which is newer.
+#[tokio::test]
+async fn the_floors_repeating_reads_search_an_index() {
+    let (dir, db) = open().await;
+    drop(db);
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    // (the read, the index its plan must name)
+    let reads: [(&str, &str); 12] = [
+        (
+            "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
+             AND acked_at IS NULL ORDER BY seq LIMIT ?",
+            "outbox_unsent",
+        ),
+        (
+            "SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? AND acked_at IS NULL",
+            "outbox_unsent",
+        ),
+        // The forget's count, as `src/local_db.rs` writes it.
+        (
+            "SELECT count(*) FROM outbox WHERE acked_at IS NULL AND host_id = ? AND device_id = ?",
+            "outbox_unsent",
+        ),
+        (
+            "SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? \
+             AND outcome = 'rejected'",
+            "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+        ),
+        (
+            "SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? \
+             AND outcome = 'conflict'",
+            "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+        ),
+        (
+            "UPDATE outbox SET outcome = r.value ->> 'outcome', acked_at = ? \
+             FROM json_each(?) AS r WHERE outbox.id = r.value ->> 'id' \
+             AND outbox.host_id = ? AND outbox.device_id = ? AND outbox.acked_at IS NULL",
+            "outbox_unsent",
+        ),
+        (
+            "SELECT count(*) FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_codes_shift (host_id=? AND device_id=? AND shift_id=?)",
+        ),
+        (
+            "SELECT count(*) FROM floor_boxes WHERE host_id = ? AND device_id = ? \
+             AND shift_id = ? AND closed_at IS NOT NULL AND disassembled_at IS NULL",
+            "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "SELECT sscc FROM floor_boxes WHERE host_id = ? AND device_id = ? AND shift_id = ? \
+             AND closed_at IS NOT NULL ORDER BY closed_at DESC, serial DESC LIMIT 1",
+            "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "SELECT code_hash FROM floor_codes WHERE host_id = ? AND device_id = ? \
+             AND box_id = ? ORDER BY code_hash",
+            "floor_codes_box (host_id=? AND device_id=? AND box_id=?)",
+        ),
+        (
+            "SELECT id FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_scans_shift",
+        ),
+        (
+            "SELECT id FROM floor_shifts WHERE host_id = ? AND device_id = ? AND line_id = ?",
+            "floor_shifts_line",
+        ),
+    ];
+    for (sql, index) in reads {
+        let placeholders = sql.matches('?').count();
+        let text = format!("EXPLAIN QUERY PLAN {sql}");
+        let mut explain = sqlx::query(&text);
+        for _ in 0..placeholders {
+            explain = explain.bind("x");
+        }
+        let plan: Vec<String> = explain
+            .fetch_all(&mut raw)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect();
+        assert!(
+            plan.iter().any(|step| step.contains(index)),
+            "{sql}\n  should search {index}, its plan is {plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|step| step.starts_with("SCAN ")
+                && !step.contains("json_each")
+                && !step.starts_with("SCAN r ")),
+            "{sql}\n  scans a table: {plan:?}"
+        );
+    }
+    raw.close().await.unwrap();
 }
 
 /// The count and the clear are one transaction: a record that arrives while

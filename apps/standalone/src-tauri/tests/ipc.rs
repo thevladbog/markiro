@@ -972,7 +972,8 @@ fn a_corrupt_database_whose_outbox_cannot_be_counted_waits_for_a_confirmation() 
     let app_dir = tempfile::tempdir().unwrap();
     let config = app_dir.path().join("device.json");
     save_pairing(app_dir.path());
-    // An outbox without the columns a forget reads, as an older build left it.
+    // An outbox without the columns a forget reads: a damaged or foreign
+    // table (no build of this app ever made one), so it cannot be counted.
     database_file(
         app_dir.path(),
         &[

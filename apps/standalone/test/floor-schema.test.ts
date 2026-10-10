@@ -556,7 +556,10 @@ describe("the shape of the production tables (migration 0006)", () => {
     );
     expect(indexes).toEqual([
       { tableName: "floor_boxes", name: "floor_boxes_open", isUnique: 1, isPartial: 1 },
+      { tableName: "floor_boxes", name: "floor_boxes_shift", isUnique: 0, isPartial: 0 },
       { tableName: "floor_boxes", name: "floor_boxes_sscc", isUnique: 1, isPartial: 1 },
+      { tableName: "floor_codes", name: "floor_codes_box", isUnique: 0, isPartial: 0 },
+      { tableName: "floor_codes", name: "floor_codes_shift", isUnique: 0, isPartial: 0 },
       { tableName: "floor_scans", name: "floor_scans_shift", isUnique: 0, isPartial: 0 },
       { tableName: "floor_shifts", name: "floor_shifts_line", isUnique: 0, isPartial: 0 },
       {
@@ -565,16 +568,21 @@ describe("the shape of the production tables (migration 0006)", () => {
         isUnique: 0,
         isPartial: 0,
       },
+      { tableName: "outbox", name: "outbox_settled", isUnique: 0, isPartial: 1 },
       { tableName: "outbox", name: "outbox_unsent", isUnique: 0, isPartial: 1 },
     ]);
   });
 
+  // The plans are those of node:sqlite (SQLite 3.53 in the test runtime); the
+  // shell bundles SQLite 3.46, whose planner can differ. The same reads are
+  // pinned on the shell's own SQLite in `tests/local_db.rs`
+  // (`the_floors_repeating_reads_search_an_index`): keep the two lists alike.
   it("serve the reads the floor makes from an index", () => {
     const { db } = openLocalDb();
     const plan = (sql: string): string =>
       db
         .prepare(`EXPLAIN QUERY PLAN ${sql}`)
-        .all(HOST_ID, DEVICE_ID, "x")
+        .all(...Array.from({ length: sql.split("?").length - 1 }, () => "x"))
         .map((step) => String(step["detail"]))
         .join("\n");
     // The sender and the forget's count read a pairing's unsent records in order.
@@ -585,11 +593,67 @@ describe("the shape of the production tables (migration 0006)", () => {
       ),
     ).toContain("outbox_unsent");
     expect(
+      plan(
+        "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? " +
+          "AND acked_at IS NULL ORDER BY seq LIMIT ?",
+      ),
+    ).toContain("outbox_unsent");
+    expect(
       plan("SELECT id FROM floor_shifts WHERE host_id = ? AND device_id = ? AND line_id = ?"),
     ).toContain("floor_shifts_line");
     expect(
       plan("SELECT id FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?"),
     ).toContain("floor_scans_shift");
+    // The status bar re-counts the outbox after every scan, as three counts
+    // (one FILTER scan would read every record, payload included).
+    expect(
+      plan("SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? AND acked_at IS NULL"),
+    ).toContain("outbox_unsent");
+    for (const outcome of ["rejected", "conflict"]) {
+      expect(
+        plan(
+          `SELECT count(*) FROM outbox WHERE host_id = ? AND device_id = ? AND outcome = '${outcome}'`,
+        ),
+      ).toContain("outbox_settled (host_id=? AND device_id=? AND outcome=?)");
+    }
+    // The totals of the work screen: the codes and the closed boxes of a shift,
+    // and the last SSCC.
+    expect(
+      plan("SELECT count(*) FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?"),
+    ).toContain("floor_codes_shift (host_id=? AND device_id=? AND shift_id=?)");
+    expect(
+      plan(
+        "SELECT count(*) FROM floor_boxes WHERE host_id = ? AND device_id = ? AND shift_id = ? " +
+          "AND closed_at IS NOT NULL AND disassembled_at IS NULL",
+      ),
+    ).toContain("floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?");
+    expect(
+      plan(
+        "SELECT sscc FROM floor_boxes WHERE host_id = ? AND device_id = ? AND shift_id = ? " +
+          "AND closed_at IS NOT NULL ORDER BY closed_at DESC, serial DESC LIMIT 1",
+      ),
+    ).toContain("floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?");
+    // The digest of a closing box reads its codes.
+    expect(
+      plan(
+        "SELECT code_hash FROM floor_codes WHERE host_id = ? AND device_id = ? AND box_id = ? " +
+          "ORDER BY code_hash",
+      ),
+    ).toContain("floor_codes_box (host_id=? AND device_id=? AND box_id=?)");
+    // What the sender writes stays on the unsent index and the record's own key.
+    expect(
+      plan(
+        "UPDATE outbox SET attempts = attempts + 1, sent_at = ? " +
+          "WHERE host_id = ? AND device_id = ? AND id IN (SELECT value FROM json_each(?))",
+      ),
+    ).toContain("sqlite_autoindex_outbox_1");
+    expect(
+      plan(
+        "UPDATE outbox SET outcome = r.value ->> 'outcome', acked_at = ? FROM json_each(?) AS r " +
+          "WHERE outbox.id = r.value ->> 'id' AND outbox.host_id = ? AND outbox.device_id = ? " +
+          "AND outbox.acked_at IS NULL",
+      ),
+    ).toContain("outbox_unsent");
   });
 });
 
@@ -823,6 +887,49 @@ describe("the rules of the production tables the first examples leave open", () 
     await refused(executor, record("attempts", { attempts: -1 }));
     await refused(executor, record("no-payload", { payload: null }));
     await accepted(executor, record("tried", { attempts: 3, sent_at: AT }));
+  });
+
+  it("keep a record, a snapshot and receipt details as objects only", async () => {
+    const { executor } = openLocalDb();
+    const real = {
+      id: "record-1",
+      kind: "scan",
+      shiftId: "shift-1",
+      operatorId: null,
+      data: { codeHash: "ab" },
+    };
+    const snapshot = {
+      issuerPrefix: "4600682",
+      product: { name: "Молоко", gtin14: "04600682000013" },
+    };
+    // Valid JSON that is no object: an array, a string, a number, a null.
+    const notObjects = ["[]", "[1]", '"x"', "5", "null", "true"];
+    await accepted(executor, record("empty", { payload: "{}" }));
+    await accepted(executor, record("real", { payload: JSON.stringify(real) }));
+    await accepted(
+      executor,
+      shift("entered", { snapshot: JSON.stringify(snapshot), entered_at: AT, status: "active" }),
+    );
+    await accepted(
+      executor,
+      record("details", {
+        outcome: "conflict",
+        acked_at: AT,
+        outcome_details: JSON.stringify({ winner: "box-1" }),
+      }),
+    );
+    await accepted(
+      executor,
+      record("details-empty", { outcome: "accepted", acked_at: AT, outcome_details: "{}" }),
+    );
+    for (const [index, value] of notObjects.entries()) {
+      await refused(executor, record(`payload-${index}`, { payload: value }));
+      await refused(executor, shift(`snapshot-${index}`, { snapshot: value, entered_at: AT }));
+      await refused(
+        executor,
+        record(`details-${index}`, { outcome: "conflict", acked_at: AT, outcome_details: value }),
+      );
+    }
   });
 
   it("keep the whole record in the payload, as long as the host takes it", async () => {
