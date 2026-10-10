@@ -146,10 +146,12 @@ when the host refused the device or its config is unreadable), and kiosk mode
 (plan 1f2, see "App shell") leaves them reachable on purpose. A refusal that
 arrives while an operator works in a shift waits for them to leave it (see
 "Shifts"), so the device-rejected screen never replaces a shift's work screen.
-The other-host screen still does: another host found by the sync
-(`sync_finished` with `other_host`) drops the operator and the work at once,
-and the forget it offers can appear while a write is in flight, a window
-carried to plan 2a6's gate task (see "Shifts"). While this device holds shift
+Another host found by the sync (`sync_finished` with `other_host`) waits the
+same way since plan 2a6: while an operator works in a shift it is held
+(`pendingOtherHost`), the link is stopped and the status bar says why, and the
+other-host screen and the forget it offers come only after the operator left
+the shift and the work gate drained, so a forget never appears while a write
+is in flight (see "Shifts"). While this device holds shift
 records the host has not acknowledged, the shell refuses
 that forget (`unsent_facts`); since plan 2a5 those screens then say how many
 records there are (`countUnsentRecords`, `src/local/outbox.ts`: the pairing's,
@@ -641,10 +643,12 @@ whatever its revision (fail-closed).
   office changed without a new session. The session ends when the office
   opens (any way in, the bootstrap wizard's too), on a new pairing, a forget,
   a rejected device, another host, a change of the station's line (a refusal
-  of the device and another line wait while the operator works in a shift,
-  see "Shifts"), and on any host probe
+  of the device, another host and another line wait while the operator works
+  in a shift, see "Shifts"), and on any host probe
   (`host_probed`, which runs only at start-up, on a retry and after a forget:
-  a blocked version screen never leaves a session behind); and by
+  a blocked version screen never leaves a session behind; while the operator
+  works in a shift its answer is held, the last one counts, and it is applied
+  when they leave the shift, which then ends the session); and by
   «Сменить оператора», after ten minutes without a touch
   (`OPERATOR_IDLE_TIMEOUT_MS`, the cloud station's) and after a sync that
   leaves the operator out of the copies (the host turned them off, or their
@@ -2408,18 +2412,30 @@ database, send to the host and job for the printer goes to `track` before it
 starts; no scan is accepted while `leaving`; tracked work is bounded, because
 the gate has no timeout of its own (a local write ends in about 35 s at the
 most, the shell's hand-over to the printer in 5 s, a code check at the host in
-300 ms), so work that can wait longer must not be one tracked piece; and the
-way back to the list stays on the keyboard while the leave waits
-(`aria-disabled`, not `disabled`, or the focus moves to the wait text). Two
-things carry to plan 2a6's gate task: another host found by the sync
-(`sync_finished` with `other_host`) still drops the operator and the work at
-once, without the gate, so once writes are tracked the other-host screen and
-its forget can appear while a write is in flight (hold it behind the gate like
-`pendingRejection`, or make the forget wait for `drain`; a host replaced at
-the same address in the middle of a shift is plan 2b's); and when 2a6 calls
-`countUnsentRecords` repeatedly, its exact text (`acked_at IS NULL AND host_id
-= ? AND device_id = ?`, not the order the Node list pins) joins both
-query-plan lists.
+300 ms, a request for a block in up to two host calls of 10 s each), so work
+that can wait longer must not be one tracked piece; and the way back to the
+list stays on the keyboard while the leave waits (`aria-disabled`, not
+`disabled`, or the focus moves to the wait text). A leave that a timer or an
+answer started is known to the screen at once through `isLeaving` (the
+render's `leaving` lags behind it); both refuse a scan and a close the
+operator presses.
+
+Plan 2a6's gate task holds the two things that used to drop the work at once:
+another host found by the sync (`sync_finished` with `other_host`) and every
+`host_probed` answer wait while the operator works in a shift
+(`pendingOtherHost`, `pendingProbe`) and are applied by `endWork` when they
+leave it, after the gate drained: a refusal of the device first, then the
+other host, then the probe's answer (the last one counts, and it signs the
+operator out), then another line. The held other host stops the link
+(`linked = null` in `App`, `FloorApp.rejectionPending`), so nothing is
+delivered for the rest of the shift and the status bar says why; the operator
+keeps working offline. Records made under a replaced host can be delivered
+only if the original host returns, otherwise only through the forget's
+«Сбросить всё равно» (a host replaced at the same address in the middle of a
+shift is plan 2b's). The status bar reads its own three outbox statements, so
+`countUnsentRecords` is still called once per forget (`App`); a plan that
+calls it repeatedly adds its exact text (`acked_at IS NULL AND host_id = ? AND
+device_id = ?`, not the order the Node list pins) to both query-plan lists.
 
 ## Facts
 
