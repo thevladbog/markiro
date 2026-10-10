@@ -640,6 +640,26 @@ describe("the shape of the production tables (migration 0006)", () => {
           "ORDER BY code_hash",
       ),
     ).toContain("floor_codes_box (host_id=? AND device_id=? AND box_id=?)");
+    // The scan pipeline's own reads and its one UPDATE, on every scan: the
+    // station's registry of a code (the key of `floor_codes`), the open box of
+    // a shift, and the open box's count by the box's own key.
+    expect(
+      plan(
+        "SELECT scanned_at FROM floor_codes WHERE host_id = ? AND device_id = ? AND code_hash = ?",
+      ),
+    ).toContain("sqlite_autoindex_floor_codes_1 (host_id=? AND device_id=? AND code_hash=?)");
+    expect(
+      plan(
+        "SELECT id, opened_at, item_count FROM floor_boxes WHERE host_id = ? AND device_id = ? " +
+          "AND shift_id = ? AND closed_at IS NULL",
+      ),
+    ).toContain("floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?");
+    expect(
+      plan(
+        "UPDATE floor_boxes SET item_count = item_count + 1 " +
+          "WHERE id = ? AND host_id = ? AND device_id = ? AND closed_at IS NULL",
+      ),
+    ).toContain("sqlite_autoindex_floor_boxes_1 (id=?)");
     // What the sender writes stays on the unsent index and the record's own key.
     expect(
       plan(

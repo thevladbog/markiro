@@ -842,7 +842,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 12] = [
+    let reads: [(&str, &str); 15] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -891,6 +891,24 @@ async fn the_floors_repeating_reads_search_an_index() {
             "SELECT code_hash FROM floor_codes WHERE host_id = ? AND device_id = ? \
              AND box_id = ? ORDER BY code_hash",
             "floor_codes_box (host_id=? AND device_id=? AND box_id=?)",
+        ),
+        // The scan pipeline's own reads and its one UPDATE, on every scan: the
+        // station's registry of a code, the open box of a shift, and the open
+        // box's count by the box's own key.
+        (
+            "SELECT scanned_at FROM floor_codes WHERE host_id = ? AND device_id = ? \
+             AND code_hash = ?",
+            "sqlite_autoindex_floor_codes_1 (host_id=? AND device_id=? AND code_hash=?)",
+        ),
+        (
+            "SELECT id, opened_at, item_count FROM floor_boxes WHERE host_id = ? \
+             AND device_id = ? AND shift_id = ? AND closed_at IS NULL",
+            "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "UPDATE floor_boxes SET item_count = item_count + 1 \
+             WHERE id = ? AND host_id = ? AND device_id = ? AND closed_at IS NULL",
+            "sqlite_autoindex_floor_boxes_1 (id=?)",
         ),
         (
             "SELECT id FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?",
