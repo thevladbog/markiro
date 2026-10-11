@@ -338,6 +338,149 @@ describe("what a batch leaves alone", () => {
     expect(rows(db, "SELECT needs_fix FROM floor_boxes")).toEqual([{ needs_fix: 0 }]);
   });
 
+  it("takes the conflict off a scan and its box once the same record is accepted, and keeps the box marked while another scan of it is in conflict (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    const newId = countingIds();
+    const shift = await enteredShift(executor);
+    const context = scanContext(executor, shift, { newId });
+    await processScan(context, km("A1"));
+    await processScan(context, km("A2"));
+    await processScan(context, km("A3"));
+    const ids = rows(db, "SELECT id FROM outbox ORDER BY seq").map((row) => String(row["id"]));
+    const [first = "", second = "", third = ""] = ids;
+    await sendFactBatch(
+      executor,
+      PAIRING,
+      vi.fn(async (): Promise<FactReceipt[]> => [
+        { id: first, outcome: "conflict", details: { winner: WINNER } },
+        { id: second, outcome: "conflict", details: { winner: WINNER } },
+        { id: third, outcome: "accepted" },
+      ]),
+      steppingClock(),
+    );
+    expect(rows(db, "SELECT needs_fix FROM floor_boxes")).toEqual([{ needs_fix: 1 }]);
+    // A restore of the host sends the two again (plan РК-С); the restored host takes the first.
+    db.prepare(
+      "UPDATE outbox SET outcome = NULL, outcome_code = NULL, outcome_details = NULL, " +
+        "acked_at = NULL WHERE id IN (?, ?)",
+    ).run(first, second);
+    await sendFactBatch(
+      executor,
+      PAIRING,
+      vi.fn(async (): Promise<FactReceipt[]> => [
+        { id: first, outcome: "accepted" },
+        { id: second, outcome: "conflict", details: { winner: WINNER } },
+      ]),
+      steppingClock(),
+    );
+    expect(rows(db, "SELECT id FROM floor_scans WHERE conflict = 1")).toEqual([{ id: second }]);
+    expect(rows(db, "SELECT needs_fix FROM floor_boxes")).toEqual([{ needs_fix: 1 }]);
+    db.prepare(
+      "UPDATE outbox SET outcome = NULL, outcome_code = NULL, outcome_details = NULL, " +
+        "acked_at = NULL WHERE id = ?",
+    ).run(second);
+    await sendFactBatch(executor, PAIRING, acceptingAll(), steppingClock());
+    expect(rows(db, "SELECT count(*) AS n FROM floor_scans WHERE conflict = 1")).toEqual([
+      { n: 0 },
+    ]);
+    expect(rows(db, "SELECT needs_fix FROM floor_boxes")).toEqual([{ needs_fix: 0 }]);
+  });
+
+  it("takes the conflict off only the box of the accepted scan, not another box in conflict", async () => {
+    const { db, executor } = openLocalDb();
+    const newId = countingIds();
+    const shiftA = await enteredShift(executor);
+    const shiftB = await enteredShift(executor, SECOND);
+    const contextA = scanContext(executor, shiftA, { newId });
+    const contextB = scanContext(executor, shiftB, { newId });
+    await processScan(contextA, km("A1"));
+    await processScan(contextB, km("B1"));
+    const [a = "", b = ""] = rows(db, "SELECT id FROM outbox ORDER BY seq").map((row) =>
+      String(row["id"]),
+    );
+    await sendFactBatch(
+      executor,
+      PAIRING,
+      vi.fn(async (): Promise<FactReceipt[]> => [
+        { id: a, outcome: "conflict", details: { winner: WINNER } },
+        { id: b, outcome: "conflict", details: { winner: WINNER } },
+      ]),
+      steppingClock(),
+    );
+    db.prepare(
+      "UPDATE outbox SET outcome = NULL, outcome_code = NULL, outcome_details = NULL, " +
+        "acked_at = NULL WHERE id = ?",
+    ).run(a);
+    await sendFactBatch(executor, PAIRING, acceptingAll(), steppingClock());
+    expect(rows(db, "SELECT needs_fix FROM floor_boxes WHERE shift_id = ?", SHIFT_ID)).toEqual([
+      { needs_fix: 0 },
+    ]);
+    expect(rows(db, "SELECT needs_fix FROM floor_boxes WHERE shift_id = ?", SECOND.id)).toEqual([
+      { needs_fix: 1 },
+    ]);
+    expect(rows(db, "SELECT id FROM floor_scans WHERE conflict = 1")).toEqual([{ id: b }]);
+  });
+
+  it("keeps a box marked by a scan in conflict while the other boxes of its shift clear theirs (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    const shift = await enteredShift(executor);
+    const context = scanContext(executor, shift, { newId: countingIds() });
+    await processScan(context, km("A1"));
+    await processScan(context, km("A2"));
+    const [first = "", second = ""] = rows(db, "SELECT id FROM outbox ORDER BY seq").map((row) =>
+      String(row["id"]),
+    );
+    // The second scan sits in a closed box of its own, in the same shift.
+    db.prepare(
+      "INSERT INTO floor_boxes (id, host_id, device_id, shift_id, opened_at, closed_at, sscc, " +
+        "block_id, serial, item_count, closed_by) SELECT 'box-2', host_id, device_id, shift_id, " +
+        "opened_at, opened_at, '000000000000000001', 'block', 1, 1, 'op' FROM floor_boxes",
+    ).run();
+    db.prepare("UPDATE floor_scans SET box_id = 'box-2' WHERE id = ?").run(second);
+    await sendFactBatch(
+      executor,
+      PAIRING,
+      vi.fn(async (): Promise<FactReceipt[]> => [
+        { id: first, outcome: "conflict", details: { winner: WINNER } },
+        { id: second, outcome: "conflict", details: { winner: WINNER } },
+      ]),
+      steppingClock(),
+    );
+    expect(rows(db, "SELECT count(*) AS n FROM floor_boxes WHERE needs_fix = 1")).toEqual([
+      { n: 2 },
+    ]);
+    db.prepare(
+      "UPDATE outbox SET outcome = NULL, outcome_code = NULL, outcome_details = NULL, " +
+        "acked_at = NULL WHERE id = ?",
+    ).run(second);
+    await sendFactBatch(executor, PAIRING, acceptingAll(), steppingClock());
+    expect(rows(db, "SELECT needs_fix FROM floor_boxes WHERE id = 'box-2'")).toEqual([
+      { needs_fix: 0 },
+    ]);
+    expect(rows(db, "SELECT needs_fix FROM floor_boxes WHERE id <> 'box-2'")).toEqual([
+      { needs_fix: 1 },
+    ]);
+    expect(rows(db, "SELECT id FROM floor_scans WHERE conflict = 1")).toEqual([{ id: first }]);
+  });
+
+  it("names no refused close a person resolved (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    const shift = await enteredShift(executor);
+    const context = scanContext(executor, shift, { newId: countingIds() });
+    const result = await closeShift(context, "production_order_changed");
+    expect(result.kind).toBe("closed");
+    db.prepare(
+      "UPDATE outbox SET outcome = 'rejected', outcome_code = 'box_state', acked_at = ? " +
+        "WHERE kind = 'shift_closed'",
+    ).run("2026-10-11T08:00:00.000Z");
+    expect([...(await readRefusedCloses(executor, PAIRING)).keys()]).toEqual([SHIFT_ID]);
+    db.prepare(
+      "UPDATE outbox SET resolution = 'resent', resent_as = 'x', resolved_at = ?, " +
+        "resolved_by = 'op-1' WHERE kind = 'shift_closed'",
+    ).run("2026-10-11T08:01:00.000Z");
+    expect((await readRefusedCloses(executor, PAIRING)).size).toBe(0);
+  });
+
   it("writes the receipts and the marks of a conflict in one transaction", async () => {
     const { db, executor } = openLocalDb();
     const shift = await enteredShift(executor);

@@ -146,12 +146,15 @@ function retireStatement(pairing: Pairing, ids: string): LocalStatement {
  * never sent. A receipt and its outcome come and go together (a CHECK of
  * `outbox`), so `outcome IS NOT NULL` changes no row — it lets the search
  * use the pairing's settled records (`outbox_settled`) instead of reading
- * the whole table. Parameters: host id, device id, the instant (as
- * `Date.toISOString` writes `acked_at`).
+ * the whole table. A record a person resolved (plan ОЧ) stays settled: a
+ * refusal sent again under a new id would otherwise reach the host twice, and
+ * one taken off was meant never to go. Parameters: host id, device id, the
+ * instant (as `Date.toISOString` writes `acked_at`).
  */
 export const REOPEN_SQL =
   "UPDATE outbox SET outcome = NULL, outcome_code = NULL, outcome_details = NULL, " +
-  "acked_at = NULL WHERE host_id = ? AND device_id = ? AND outcome IS NOT NULL AND acked_at >= ?";
+  "acked_at = NULL WHERE host_id = ? AND device_id = ? AND outcome IS NOT NULL AND acked_at >= ? " +
+  "AND resolved_at IS NULL";
 
 function reopenStatement(pairing: Pairing, since: string): LocalStatement {
   return { sql: REOPEN_SQL, values: [pairing.hostId, pairing.deviceId, since] };

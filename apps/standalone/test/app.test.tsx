@@ -3447,8 +3447,11 @@ describe("the operator on the floor", () => {
     db.prepare("UPDATE floor_shifts SET local_state = 'closed'").run();
     const insert = db.prepare(
       "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, " +
-        "outcome, acked_at) VALUES (?, ?, ?, ?, ?, '{}', ?, ?, ?)",
+        "outcome, acked_at, resolution, resolved_at, resolved_by) " +
+        "VALUES (?, ?, ?, ?, ?, '{}', ?, ?, ?, ?, ?, ?)",
     );
+    // A refusal waits for a person (plan ОЧ): this one was taken off the queue, so the shift is
+    // done with. The bar does not count it any more.
     insert.run(
       crypto.randomUUID(),
       HOST_ID,
@@ -3458,6 +3461,9 @@ describe("the operator on the floor", () => {
       ackedAt,
       "rejected",
       ackedAt,
+      "dismissed",
+      ackedAt,
+      "op-1",
     );
     insert.run(
       crypto.randomUUID(),
@@ -3468,21 +3474,27 @@ describe("the operator on the floor", () => {
       ackedAt,
       "accepted",
       ackedAt,
+      null,
+      null,
+      null,
     );
-    // The purge waits until the status bar has counted the refused record, so that the bar's
-    // new count can only come from the app being told the outbox changed.
+    // The purge waits until the status bar has made its first count, so that the bar's next
+    // count can only come from the app being told the outbox changed.
     let release: () => void = () => undefined;
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
+    let counts = 0;
     const gated: LocalExecutor = {
-      query: (sql, params, row) => executor.query(sql, params, row),
+      query: (sql, params, row) => {
+        if (sql === UNSENT_COUNT_SQL) counts += 1;
+        return executor.query(sql, params, row);
+      },
       transaction: async (statements) => {
         if (statements[0]?.sql.startsWith("DELETE FROM floor_shifts")) await gate;
         return executor.transaction(statements);
       },
     };
-    const refused = () => screen.queryByText("Отклонено хостом")?.nextElementSibling?.textContent;
     const host = fakeHost();
     host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
     renderApp({
@@ -3491,14 +3503,17 @@ describe("the operator on the floor", () => {
       host,
       local: gated,
     });
-    await waitFor(() => expect(refused()).toBe("1"));
+    await screen.findByText(PROMPT);
+    await waitFor(() => expect(counts).toBeGreaterThan(0));
+    await flush();
+    const before = counts;
     release();
     await waitFor(() =>
       expect({ ...db.prepare("SELECT count(*) AS n FROM floor_shifts").get() }).toEqual({ n: 0 }),
     );
     expect({ ...db.prepare("SELECT count(*) AS n FROM outbox").get() }).toEqual({ n: 0 });
     // The list and the bar read their copies again: the purge counts as a change of the outbox.
-    await waitFor(() => expect(refused() ?? "0").toBe("0"));
+    await waitFor(() => expect(counts).toBeGreaterThan(before));
   });
 
   it("does not tell the app the outbox changed when the pass deleted nothing", async () => {

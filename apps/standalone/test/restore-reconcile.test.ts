@@ -748,6 +748,35 @@ describe("the records sent again", () => {
     ]);
   });
 
+  it("leaves a record a person resolved settled: a refusal sent again or taken off goes no second time (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    const [resent = "", dismissed = "", open = ""] = await unsentScans(executor, 3);
+    const inWindow = new Date(NOW.getTime() - 60_000).toISOString();
+    db.prepare(
+      "UPDATE outbox SET outcome = 'rejected', outcome_code = 'not_entered', acked_at = ?",
+    ).run(inWindow);
+    db.prepare(
+      "UPDATE outbox SET resolution = 'resent', resent_as = 'y', resolved_at = ?, " +
+        "resolved_by = 'op-1' WHERE id = ?",
+    ).run(inWindow, resent);
+    db.prepare(
+      "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = 'op-1' " +
+        "WHERE id = ?",
+    ).run(inWindow, dismissed);
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: answering(),
+      now: () => NOW,
+    });
+    expect(rows(db, "SELECT id, outcome, outcome_code FROM outbox ORDER BY seq")).toEqual([
+      { id: resent, outcome: "rejected", outcome_code: "not_entered" },
+      { id: dismissed, outcome: "rejected", outcome_code: "not_entered" },
+      { id: open, outcome: null, outcome_code: null },
+    ]);
+  });
+
   it("leaves the records of another pairing as they are", async () => {
     const { db, executor } = openLocalDb();
     const otherDevice = { ...PAIRING, deviceId: OTHER_DEVICE };

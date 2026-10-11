@@ -316,3 +316,22 @@ describe("the serials left for a shift", () => {
     await expect(readSerialsLeft(executor, PAIRING, ENTERED.id)).resolves.toBeNull();
   });
 });
+
+describe("resolved records (plan ОЧ)", () => {
+  it("count neither as refused nor as in conflict once a person resolved them", async () => {
+    const { db, executor } = openLocalDb();
+    put(db, PAIRING, 3, "rejected");
+    put(db, PAIRING, 2, "conflict");
+    db.prepare(
+      "UPDATE outbox SET resolution = 'dismissed', resolved_at = '2026-10-11T08:00:00.000Z', " +
+        "resolved_by = 'op-1' WHERE id IN (SELECT id FROM outbox WHERE outcome = 'rejected' " +
+        "ORDER BY seq LIMIT 2) OR id IN (SELECT id FROM outbox WHERE outcome = 'conflict' " +
+        "ORDER BY seq LIMIT 1)",
+    ).run();
+    await expect(readOutboxStatus(executor, PAIRING)).resolves.toEqual({
+      unsent: 0,
+      rejected: 1,
+      conflicts: 1,
+    });
+  });
+});

@@ -309,6 +309,168 @@ describe("the retention of a shift's records on the station", () => {
     expect(kept(at, THIRD.id)).toEqual(NONE);
   });
 
+  it("keeps a shift while a refused or conflicting record of it waits for a person, and purges it once each is resolved (plan ОЧ)", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "01", "2026-10-01T12:00:00.000Z");
+    const scans = rows(
+      at.db,
+      "SELECT id FROM outbox WHERE shift_id = ? AND kind = 'scan' ORDER BY seq",
+      ENTERED.id,
+    ).map((row) => String(row["id"]));
+    const [refusedScan = "", conflictScan = ""] = scans;
+    expect(new Set([refusedScan, conflictScan]).size).toBe(2);
+    at.db
+      .prepare(
+        "UPDATE outbox SET outcome = 'rejected', outcome_code = 'gtin_mismatch' WHERE id = ?",
+      )
+      .run(refusedScan);
+    at.db.prepare("UPDATE outbox SET outcome = 'conflict' WHERE id = ?").run(conflictScan);
+    // The reading itself leaves the shift out (the guarded delete would hide a reading too wide).
+    expect(await dueIds(at)).toEqual([]);
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(0);
+    expect(kept(at, ENTERED.id)).toEqual(WHOLE);
+    const resolve = at.db.prepare(
+      "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = 'op-1' WHERE id = ?",
+    );
+    resolve.run("2026-10-02T12:00:00.000Z", refusedScan);
+    expect(await dueIds(at)).toEqual([]);
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(0);
+    expect(kept(at, ENTERED.id)).toEqual(WHOLE);
+    resolve.run("2026-10-02T12:00:00.000Z", conflictScan);
+    expect(await dueIds(at)).toEqual([ENTERED.id]);
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    expect(kept(at, ENTERED.id)).toEqual(NONE);
+  });
+
+  it("keeps a shift whose refusal is of another kind than a scan, and one whose refusal was resolved by being sent again, until its new record is answered (plan ОЧ)", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "01", "2026-10-01T12:00:00.000Z");
+    const [box = ""] = rows(
+      at.db,
+      "SELECT id FROM outbox WHERE shift_id = ? AND kind <> 'scan' AND kind <> 'shift_closed' ORDER BY seq",
+      ENTERED.id,
+    ).map((row) => String(row["id"]));
+    expect(box).not.toBe("");
+    at.db
+      .prepare("UPDATE outbox SET outcome = 'rejected', outcome_code = 'box_state' WHERE id = ?")
+      .run(box);
+    expect(await dueIds(at)).toEqual([]);
+    // Sent again: the old record is resolved, the new one has no receipt yet.
+    at.db
+      .prepare(
+        "UPDATE outbox SET resolution = 'resent', resent_as = 'new-id', resolved_at = ?, resolved_by = 'op-1' WHERE id = ?",
+      )
+      .run("2026-10-02T12:00:00.000Z", box);
+    at.db
+      .prepare(
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) " +
+          "VALUES ('new-id', ?, ?, 'box_closed', ?, '{}', '2026-10-02T12:00:00.000Z')",
+      )
+      .run(PAIRING.hostId, PAIRING.deviceId, ENTERED.id);
+    expect(await dueIds(at)).toEqual([]);
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(0);
+    expect(kept(at, ENTERED.id)).toEqual({ ...WHOLE, outbox: Number(WHOLE.outbox) + 1 });
+  });
+
+  it("holds only the shift a refusal belongs to, not the others of the pairing (plan ОЧ)", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-09-01T00:00:00.000Z");
+    await finished(at, THIRD, "C", "2026-09-01T00:00:00.000Z");
+    at.db
+      .prepare(
+        "UPDATE outbox SET outcome = 'rejected', outcome_code = 'box_state' WHERE id = " +
+          "(SELECT id FROM outbox WHERE shift_id = ? AND kind = 'scan' ORDER BY seq LIMIT 1)",
+      )
+      .run(THIRD.id);
+    expect(await dueIds(at)).toEqual([ENTERED.id]);
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    expect(kept(at, ENTERED.id)).toEqual(NONE);
+    expect(kept(at, THIRD.id)).toEqual(WHOLE);
+  });
+
+  it("is not held by a refusal of another pairing that lands between the reading and the delete (plan ОЧ)", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-09-01T00:00:00.000Z");
+    let first = true;
+    const racing = {
+      query: at.local.query.bind(at.local),
+      transaction: async (statements: Parameters<typeof at.local.transaction>[0]) => {
+        if (first) {
+          first = false;
+          // The same shift id, refused and unresolved, under another device and under another host.
+          const insert = at.db.prepare(
+            "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, " +
+              "outcome, outcome_code, acked_at) VALUES (?, ?, ?, 'scan', ?, '{}', " +
+              "'2026-09-01T00:00:00.000Z', ?, 'x', '2026-09-01T00:00:00.000Z')",
+          );
+          insert.run(
+            "other-device",
+            OTHER_PAIRING.hostId,
+            OTHER_PAIRING.deviceId,
+            ENTERED.id,
+            "rejected",
+          );
+          insert.run(
+            "other-host",
+            OTHER_HOST_PAIRING.hostId,
+            PAIRING.deviceId,
+            ENTERED.id,
+            "rejected",
+          );
+        }
+        return at.local.transaction(statements);
+      },
+    };
+    expect(await purgeAcknowledged(racing, PAIRING, NOW)).toBe(1);
+    expect(keptFor(at, PAIRING, ENTERED.id)).toEqual(NONE);
+    expect(rows(at.db, "SELECT count(*) AS n FROM outbox WHERE id LIKE 'other-%'")).toEqual([
+      { n: 2 },
+    ]);
+  });
+
+  it("keeps a shift that took a refusal between its reading and its delete, and lets another pairing's unresolved refusal hold nothing of this one (plan ОЧ)", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-09-01T00:00:00.000Z");
+    await finished(at, THIRD, "C", "2026-09-01T00:00:00.000Z");
+    // The same shift id under another device, refused and unresolved: not this pairing's.
+    at.db
+      .prepare(
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, " +
+          "outcome_code, acked_at) VALUES ('foreign', ?, ?, 'scan', ?, '{}', " +
+          "'2026-09-01T00:00:00.000Z', 'rejected', 'x', '2026-09-01T00:00:00.000Z')",
+      )
+      .run(OTHER_PAIRING.hostId, OTHER_PAIRING.deviceId, ENTERED.id);
+    // ... and under another host (the host's id differs, the device's and the shift's do not).
+    at.db
+      .prepare(
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, " +
+          "outcome_code, acked_at) VALUES ('foreign-host', ?, ?, 'scan', ?, '{}', " +
+          "'2026-09-01T00:00:00.000Z', 'conflict', NULL, '2026-09-01T00:00:00.000Z')",
+      )
+      .run(OTHER_HOST_PAIRING.hostId, PAIRING.deviceId, ENTERED.id);
+    expect(await dueIds(at)).toEqual([ENTERED.id, THIRD.id].sort());
+    let first = true;
+    const racing = {
+      query: at.local.query.bind(at.local),
+      transaction: async (statements: Parameters<typeof at.local.transaction>[0]) => {
+        if (first) {
+          first = false;
+          // Another write lands first: a record of the shift the host refused.
+          at.db
+            .prepare(
+              "UPDATE outbox SET outcome = 'rejected', outcome_code = 'box_state' WHERE id = (SELECT id FROM outbox WHERE shift_id = ? AND kind = 'scan' AND host_id = ? AND device_id = ? ORDER BY seq LIMIT 1)",
+            )
+            .run(ENTERED.id, PAIRING.hostId, PAIRING.deviceId);
+        }
+        return at.local.transaction(statements);
+      },
+    };
+    // Whichever shift the pass takes first, the one that took a refusal stays, whole.
+    expect(await purgeAcknowledged(racing, PAIRING, NOW)).toBe(1);
+    expect(keptFor(at, PAIRING, ENTERED.id)).toEqual(WHOLE);
+    expect(keptFor(at, PAIRING, THIRD.id)).toEqual(NONE);
+  });
+
   it("deletes a shift's pallets and their exceptions with it (plan ПЛ-Ц)", async () => {
     const at = await palletStation({ capacity: 1 });
     const closed = await closeBoxOnPallet(at, ["A1"]);

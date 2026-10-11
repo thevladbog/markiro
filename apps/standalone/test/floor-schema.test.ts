@@ -1022,7 +1022,7 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(plan(attempt.sql)).toContain(
       "SEARCH outbox USING INDEX sqlite_autoindex_outbox_1 (id=?)",
     );
-    const [settle, mark, fix, close] = receiptStatements(pairing, "[]", "x");
+    const [settle, mark, fix, unmark, unfix, close] = receiptStatements(pairing, "[]", "x");
     expect(plan(settle?.sql ?? "")).toContain(
       "SEARCH outbox USING INDEX sqlite_autoindex_outbox_1 (id=?)",
     );
@@ -1035,6 +1035,21 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(plan(fix?.sql ?? "")).toContain(
       "SEARCH floor_scans USING INDEX sqlite_autoindex_floor_scans_1 (id=?)",
     );
+    // An accepted scan takes its conflict off, and its box's mark once no scan of it is in
+    // conflict (plan ОЧ): the scan by its own key; the box by its key, the accepted scan found by
+    // its key and the box's other scans by the box's shift, never by the pairing's whole table.
+    expect(plan(unmark?.sql ?? "")).toContain(
+      "SEARCH floor_scans USING INDEX sqlite_autoindex_floor_scans_1 (id=?)",
+    );
+    expect(plan(unfix?.sql ?? "")).toContain(
+      "SEARCH floor_boxes USING INDEX sqlite_autoindex_floor_boxes_1 (id=?)",
+    );
+    expect(plan(unfix?.sql ?? "")).toContain(
+      "SEARCH floor_scans USING INDEX sqlite_autoindex_floor_scans_1 (id=?)",
+    );
+    expect(plan(unfix?.sql ?? "")).toContain(
+      "SEARCH c USING INDEX floor_scans_shift (host_id=? AND device_id=? AND shift_id=?)",
+    );
     // The close a receipt gives its shift (plan 2a8) looks the batch's records up by their key
     // too: the planner would rather walk `outbox_settled`, every settled record of the pairing.
     expect(plan(close?.sql ?? "")).toContain(
@@ -1043,7 +1058,7 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(plan(close?.sql ?? "")).toContain(
       "SEARCH floor_shifts USING INDEX sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
     );
-    for (const statement of [attempt, settle, mark, fix, close]) {
+    for (const statement of [attempt, settle, mark, fix, unmark, close]) {
       for (const slow of [
         "outbox_unsent",
         "outbox_settled",
@@ -1053,6 +1068,16 @@ describe("the shape of the production tables (migration 0006)", () => {
         expect(plan(statement?.sql ?? "")).not.toContain(slow);
       }
     }
+    // The box's other scans are looked up by the box's shift (`floor_scans_shift`), once per box
+    // the accepted scans name that is still marked: never by a walk over a table.
+    for (const slow of ["outbox_unsent", "outbox_settled", "floor_boxes_shift"]) {
+      expect(plan(unfix?.sql ?? "")).not.toContain(slow);
+    }
+    expect(
+      plan(unfix?.sql ?? "")
+        .split("\n")
+        .filter((step) => step.startsWith("SCAN ") && !step.includes("json_each")),
+    ).toEqual([]);
     expect(plan(UNSENT_SQL)).toContain("outbox_unsent");
     // Every record the floor writes (each scan too) is written by `outboxStatement`, whose
     // guard looks the shift of the pairing up to see whether this station has closed it
@@ -1091,8 +1116,13 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(due.filter((step) => step.includes("outbox_settled"))).toHaveLength(1);
     expect(due.filter((step) => step.startsWith("SCAN "))).toEqual([]);
     expect(due.filter((step) => step.includes("TEMP"))).toEqual(["USE TEMP B-TREE FOR DISTINCT"]);
+    // The unresolved refusals of a due shift (plan ОЧ) are found by the shift's key, never by a scan.
+    expect(due.filter((step) => step.startsWith("SCAN "))).toEqual([]);
     for (const key of [
       "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at=?)",
+      // The shift's unresolved refusals (plan ОЧ): the shift's own records through the same
+      // index, `r` apart from the walk of `o`; `outbox_settled` stays the one step of `o`.
+      "SEARCH r USING INDEX outbox_shift (shift_id=? AND host_id=? AND device_id=?)",
       "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
       "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
     ]) {
@@ -1105,6 +1135,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
       "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at<?)",
       "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at=?)",
+      "SEARCH r USING INDEX outbox_shift (shift_id=? AND host_id=? AND device_id=?)",
       "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
     ]) {
       expect(purge, key).toContain(key);
@@ -1208,8 +1239,14 @@ describe("the shape of the production tables (migration 0006)", () => {
       attemptStatement(pairing, "[]", "x").sql,
       ...receiptStatements(pairing, "[]", "x").map((statement) => statement.sql),
     ];
-    expect(statements).toHaveLength(6);
+    expect(statements).toHaveLength(8);
+    expect(new Set(statements).size).toBe(8);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
+    // The box's mark is taken off by one text planned twice (the box by its key, then the scans
+    // by the box's shift; plan ОЧ): both entries must keep the text, not one of them.
+    const unfix = receiptStatements(pairing, "[]", "x")[4]?.sql ?? "";
+    expect(unfix).toContain("needs_fix = 0");
+    expect(source.split(`"${unfix}"`)).toHaveLength(3);
   });
 
   // What a station owes a restored host (plan РК-С; `src/local/restore-reconcile.ts`): the

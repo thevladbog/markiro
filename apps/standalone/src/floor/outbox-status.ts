@@ -26,10 +26,13 @@ export interface OutboxStatus {
  */
 export const UNSENT_COUNT_SQL =
   "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? AND acked_at IS NULL";
+// A record a person resolved on the queue screen (plan ОЧ) is no longer counted.
 export const REJECTED_COUNT_SQL =
-  "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? AND outcome = 'rejected'";
+  "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? AND outcome = 'rejected' " +
+  "AND resolved_at IS NULL";
 export const CONFLICT_COUNT_SQL =
-  "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? AND outcome = 'conflict'";
+  "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? AND outcome = 'conflict' " +
+  "AND resolved_at IS NULL";
 
 const countRow = z.object({ n: z.number().int().nonnegative() });
 

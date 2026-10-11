@@ -70,7 +70,8 @@ export function attemptStatement(pairing: Pairing, ids: string, sentAt: string):
  * The write of a batch's receipts, as ONE transaction (`answers` is a JSON
  * array of `{ id, kind, outcome, code?, details? }`, one per record sent):
  * the outcome on every record that still waits for its receipt, and the
- * marks a `conflict` of a scan leaves on the scan and on its box, and the
+ * marks a `conflict` of a scan leaves on the scan and on its box (and takes
+ * off again once the same record is accepted, plan ОЧ), and the
  * `closed` a receipt of the station's close gives its shift (plan 2a8).
  *
  * The unary pluses on `host_id`, `device_id` and `acked_at` are deliberate
@@ -115,6 +116,26 @@ export function receiptStatements(
         "WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'conflict'))",
       values: [hostId, deviceId, hostId, deviceId, answers],
     },
+    // An accepted scan was answered `conflict` before (a restore sent it again,
+    // plan РК-С): its mark goes, and its box's once no scan of it is in conflict.
+    {
+      sql:
+        "UPDATE floor_scans SET conflict = 0 WHERE +host_id = ? AND +device_id = ? AND conflict = 1 " +
+        "AND id IN (SELECT value ->> 'id' FROM json_each(?) " +
+        "WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'accepted')",
+      values: [hostId, deviceId, answers],
+    },
+    {
+      sql:
+        "UPDATE floor_boxes SET needs_fix = 0 WHERE +host_id = ? AND +device_id = ? AND needs_fix = 1 " +
+        "AND id IN (SELECT box_id FROM floor_scans WHERE +host_id = ? AND +device_id = ? " +
+        "AND box_id IS NOT NULL AND id IN (SELECT value ->> 'id' FROM json_each(?) " +
+        "WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'accepted')) " +
+        "AND NOT EXISTS (SELECT 1 FROM floor_scans c WHERE c.host_id = floor_boxes.host_id " +
+        "AND c.device_id = floor_boxes.device_id AND c.shift_id = floor_boxes.shift_id " +
+        "AND c.box_id = floor_boxes.id AND c.conflict = 1)",
+      values: [hostId, deviceId, hostId, deviceId, answers],
+    },
     {
       sql:
         "UPDATE floor_shifts SET local_state = 'closed' WHERE host_id = ? AND device_id = ? " +
@@ -136,6 +157,7 @@ export function receiptStatements(
  * transaction through `json_each`: the outcome, its code and details, and
  * the time on every record; a `conflict` of a scan marks the scan and its
  * box for review (`floor_scans.conflict`, `floor_boxes.needs_fix`); an
+ * `accepted` of a scan in conflict before clears both (plan ОЧ); an
  * `accepted` `shift_closed` — `alreadyClosed` too, a shift the office closed
  * first — makes this station's close `closed` (plan 2a8); a `rejected`
  * record stays in the outbox with its code, for the queue screen, and a

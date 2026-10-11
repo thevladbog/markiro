@@ -1411,19 +1411,24 @@ const DUE_SHIFTS: &str =
      (SELECT 1 FROM floor_shifts s WHERE s.host_id = o.host_id AND s.device_id = o.device_id \
      AND s.id = o.shift_id) AND NOT EXISTS (SELECT 1 FROM outbox u WHERE u.host_id = \
      o.host_id AND u.device_id = o.device_id AND u.shift_id = o.shift_id AND u.acked_at IS \
-     NULL) AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = o.host_id AND \
-     j.device_id = o.device_id AND j.shift_id = o.shift_id AND (state IN ('prepared', \
-     'sending', 'failed', 'unknown') OR (state = 'sent' AND verify = 1)))";
+     NULL) AND NOT EXISTS (SELECT 1 FROM outbox r WHERE r.host_id = o.host_id AND \
+     r.device_id = o.device_id AND r.shift_id = o.shift_id AND r.outcome IN ('rejected', \
+     'conflict') AND r.resolved_at IS NULL) AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j \
+     WHERE j.host_id = o.host_id AND j.device_id = o.device_id AND j.shift_id = o.shift_id \
+     AND (state IN ('prepared', 'sending', 'failed', 'unknown') OR (state = 'sent' AND \
+     verify = 1)))";
 const PURGE_COPY: &str =
     "DELETE FROM floor_shifts AS s WHERE s.id = ? AND s.host_id = ? AND s.device_id = ? \
      AND EXISTS (SELECT 1 FROM outbox o WHERE o.host_id = s.host_id AND o.device_id = \
      s.device_id AND o.shift_id = s.id AND o.kind = 'shift_closed' AND o.outcome = \
      'accepted' AND o.acked_at <= ?) AND NOT EXISTS (SELECT 1 FROM outbox o WHERE \
      o.host_id = s.host_id AND o.device_id = s.device_id AND o.shift_id = s.id AND \
-     o.acked_at IS NULL) AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE \
-     j.host_id = s.host_id AND j.device_id = s.device_id AND j.shift_id = s.id AND \
-     (state IN ('prepared', 'sending', 'failed', 'unknown') OR (state = 'sent' AND \
-     verify = 1)))";
+     o.acked_at IS NULL) AND NOT EXISTS (SELECT 1 FROM outbox r WHERE r.host_id = \
+     s.host_id AND r.device_id = s.device_id AND r.shift_id = s.id AND r.outcome IN \
+     ('rejected', 'conflict') AND r.resolved_at IS NULL) AND NOT EXISTS (SELECT 1 FROM \
+     floor_print_jobs j WHERE j.host_id = s.host_id AND j.device_id = s.device_id AND \
+     j.shift_id = s.id AND (state IN ('prepared', 'sending', 'failed', 'unknown') OR \
+     (state = 'sent' AND verify = 1)))";
 
 /// The shift list's read of the refused closes (`readRefusedCloses` in `src/floor/close/shift-close.ts`,
 /// plan 2a8): it runs again on every bump of the outbox while the list is shown, a reconnect's every
@@ -1431,7 +1436,7 @@ const PURGE_COPY: &str =
 /// checks that it appears here word for word.
 const REFUSED_CLOSES: &str =
     "SELECT shift_id, outcome_code AS code FROM outbox WHERE host_id = ? AND device_id = ? \
-     AND kind = 'shift_closed' AND outcome = 'rejected' ORDER BY seq";
+     AND kind = 'shift_closed' AND outcome = 'rejected' AND resolved_at IS NULL ORDER BY seq";
 
 /// What a station owes a host restored from a copy (`src/local/restore-reconcile.ts`, plan РК-С):
 /// the obligation, read on every bump of the status bar, the blocks the station sends back, the
@@ -1452,7 +1457,8 @@ const RESTORE_RETIRE: &str =
      AND block_id IN (SELECT value FROM json_each(?))";
 const RESTORE_REOPEN: &str =
     "UPDATE outbox SET outcome = NULL, outcome_code = NULL, outcome_details = NULL, acked_at = \
-     NULL WHERE host_id = ? AND device_id = ? AND outcome IS NOT NULL AND acked_at >= ?";
+     NULL WHERE host_id = ? AND device_id = ? AND outcome IS NOT NULL AND acked_at >= ? \
+     AND resolved_at IS NULL";
 /// The stuck line's clamp after a restore (`src/floor/outbox-status.ts`): when the pairing last
 /// settled one, read with every status of a failing delivery.
 const RESTORE_RECONCILED_AT: &str =
@@ -1564,7 +1570,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 87] = [
+    let reads: [(&str, &str); 92] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1589,12 +1595,12 @@ async fn the_floors_repeating_reads_search_an_index() {
         ),
         (
             "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? \
-             AND outcome = 'rejected'",
+             AND outcome = 'rejected' AND resolved_at IS NULL",
             "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
         ),
         (
             "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? \
-             AND outcome = 'conflict'",
+             AND outcome = 'conflict' AND resolved_at IS NULL",
             "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
         ),
         // What the sender writes, in the exact text it runs (`src/local/facts-sender.ts`;
@@ -1634,6 +1640,34 @@ async fn the_floors_repeating_reads_search_an_index() {
              AND box_id IS NOT NULL AND id IN (SELECT value ->> 'id' FROM json_each(?) \
              WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'conflict'))",
             "sqlite_autoindex_floor_scans_1 (id=?)",
+        ),
+        // Plan ОЧ: an accepted scan takes its conflict off, and its box's mark once no scan of it
+        // is in conflict; each by the records' own key, the box's other scans by its shift.
+        (
+            "UPDATE floor_scans SET conflict = 0 WHERE +host_id = ? AND +device_id = ? AND conflict = 1 \
+             AND id IN (SELECT value ->> 'id' FROM json_each(?) \
+             WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'accepted')",
+            "sqlite_autoindex_floor_scans_1 (id=?)",
+        ),
+        (
+            "UPDATE floor_boxes SET needs_fix = 0 WHERE +host_id = ? AND +device_id = ? AND needs_fix = 1 \
+             AND id IN (SELECT box_id FROM floor_scans WHERE +host_id = ? AND +device_id = ? \
+             AND box_id IS NOT NULL AND id IN (SELECT value ->> 'id' FROM json_each(?) \
+             WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'accepted')) \
+             AND NOT EXISTS (SELECT 1 FROM floor_scans c WHERE c.host_id = floor_boxes.host_id \
+             AND c.device_id = floor_boxes.device_id AND c.shift_id = floor_boxes.shift_id \
+             AND c.box_id = floor_boxes.id AND c.conflict = 1)",
+            "sqlite_autoindex_floor_boxes_1 (id=?)",
+        ),
+        (
+            "UPDATE floor_boxes SET needs_fix = 0 WHERE +host_id = ? AND +device_id = ? AND needs_fix = 1 \
+             AND id IN (SELECT box_id FROM floor_scans WHERE +host_id = ? AND +device_id = ? \
+             AND box_id IS NOT NULL AND id IN (SELECT value ->> 'id' FROM json_each(?) \
+             WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'accepted')) \
+             AND NOT EXISTS (SELECT 1 FROM floor_scans c WHERE c.host_id = floor_boxes.host_id \
+             AND c.device_id = floor_boxes.device_id AND c.shift_id = floor_boxes.shift_id \
+             AND c.box_id = floor_boxes.id AND c.conflict = 1)",
+            "floor_scans_shift (host_id=? AND device_id=? AND shift_id=?)",
         ),
         // The close a receipt gives its shift (plan 2a8): by the records' own key, not through
         // `outbox_settled`, which holds every settled record of the pairing.
@@ -1807,6 +1841,8 @@ async fn the_floors_repeating_reads_search_an_index() {
             DUE_SHIFTS,
             "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at=?)",
         ),
+        // The shift's unresolved refusals (plan ОЧ): its own records through `outbox_shift`.
+        (DUE_SHIFTS, "SEARCH r USING INDEX outbox_shift (shift_id=? AND host_id=? AND device_id=?)"),
         (DUE_SHIFTS, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
         (DUE_SHIFTS, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
         (PURGE_COPY, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"),
@@ -1817,6 +1853,10 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             PURGE_COPY,
             "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at=?)",
+        ),
+        (
+            PURGE_COPY,
+            "SEARCH r USING INDEX outbox_shift (shift_id=? AND host_id=? AND device_id=?)",
         ),
         (PURGE_COPY, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
         (REFUSED_CLOSES, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),

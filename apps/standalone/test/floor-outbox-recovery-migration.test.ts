@@ -34,6 +34,11 @@ function migrate(db: DatabaseSync, from: string, to: string): void {
   for (const name of files) db.exec(readFileSync(new URL(name, MIGRATIONS), "utf8"));
 }
 
+/**
+ * The plans of the statements the station ran before the migration. The reads that count,
+ * name or reopen unresolved records (plan ОЧ task 2) name `resolved_at`: they cannot be planned
+ * on a database without the column, and their plans are pinned in `floor-schema.test.ts`.
+ */
 function plans(db: DatabaseSync): Record<string, string> {
   const statements = [
     UNSENT_SQL,
@@ -46,7 +51,7 @@ function plans(db: DatabaseSync): Record<string, string> {
     DUE_SHIFTS_SQL,
     PURGE_COPY_SQL,
     ...RETAINED_TABLES.map(purgeTableSql),
-  ];
+  ].filter((sql) => !sql.includes("resolved_at"));
   return Object.fromEntries(
     statements.map((sql) => [
       sql,
