@@ -365,12 +365,26 @@ pallet under any pairing (`floor_pallets_sscc`); a pallet's exception is a
 that name it and are not taken apart. The migration has one index the plan did
 not list, `floor_pallets_shift (host_id, device_id, shift_id)`, for the
 retention's delete and the exceptions screen's read of a shift's pallets;
-`floor_pallet_exceptions` has none, on purpose (see «Floor pallets», known
-limits). Additive only, `0007` rows stay as they were (a test on Node's SQLite
+`floor_pallet_exceptions` got its index by shift with migration `0010` (plan
+ХП, below). Additive only, `0007` rows stay as they were (a test on Node's SQLite
 and one on the shell's own `Migrator` apply `0008` over a database of `0007`).
 `test/floor-pallet-schema.test.ts` pins these rules; `test/floor-schema.test.ts`
 and `tests/local_db.rs` pin the columns, the indexes and the query plans of the
 pallets' reads on both SQLite engines (Node's and the shell's older one).
+
+Migration `0010_shift_indexes` (plan ХП) adds three indexes by shift for the
+retention's deletes: `outbox_shift (shift_id, host_id, device_id, acked_at)`,
+`floor_exceptions_shift (shift_id, host_id, device_id)` and
+`floor_pallet_exceptions_shift (shift_id, host_id, device_id)`. The shift leads
+each on purpose: an index led by `(host_id, device_id)` becomes the first step
+of the hourly due select on SQLite 3.53 (a walk of every record of the pairing
+instead of `outbox_settled`), and with `acked_at` after the shift the status
+bar's count of unsent records too. `acked_at` ends the outbox's index, so the
+retention's check for an unsent record of a shift reads the index alone.
+Additive only: `test/floor-shift-indexes.test.ts` (Node's SQLite) and
+`migration_0010_adds_the_shift_indexes_and_keeps_every_row` (`tests/local_db.rs`,
+the shell's own `Migrator`) apply it over a database of `0009`. Every delete of
+`RETAINED_TABLES` searches an index by shift, pinned in both lists of plans.
 
 ## Writes
 
@@ -3418,16 +3432,13 @@ them. That is a known limit, not a bug of the pass.
 
 Known limits of the retention, and who carries each:
 
-- The delete of a purged shift reads `outbox` and `floor_exceptions` whole
-  (there is no index by `shift_id`; measured 176 ms against 37 ms with one),
-  and, with `secure_delete` on, the WAL grows by about 31 MB per 1000 deleted
-  print jobs. A migration with `outbox (host_id, device_id, shift_id)` and
-  `floor_exceptions (host_id, device_id, shift_id)` would remove both. Plan
-  ПЛ-Ц's migration `0008_floor_pallets` did not add them (it adds only
-  `floor_pallets_shift`), and plan РК, which brought the backups, added no station
-  migration either: the owner decides. `floor_pallet_exceptions`
-  is read whole by the delete in the same way, and its scan is pinned in both
-  engines' plan lists.
+- Every delete of a purged shift searches an index by shift (migration `0010`,
+  plan ХП; before it `outbox`, `floor_exceptions` and `floor_pallet_exceptions`
+  were read whole: 176 ms against 37 ms at 600 000 outbox rows). What stays is
+  the cost of `secure_delete`: the WAL grows by about 31 MB per 1000 deleted
+  print jobs (138 ms on NVMe; on eMMC or SATA under `synchronous = FULL` likely
+  0.5–2 s of stalled floor writes, once or twice a day, with no risk to data).
+  The zeroing is kept: it is what takes deleted codes off the disk.
 - A refused or conflicting record of a shift whose close was accepted is
   purged with it after 30 days: what `rejected` and `quarantined` records
   should keep is a decision for plan ОЧ and the owner (hold the shift, or state
@@ -3486,13 +3497,16 @@ lacks the capacity or the layout, and the work screen then stops
   the close answers `invalid_serial`; the next close takes the next serial. In
   a box's close such a serial leaves the full pallet open and unspent (the box
   still closes and joins), and the pallet closes through `closePalletIfFull`,
-  which loses it; the screen's `settlePallet` retries up to three lost serials
-  in a row and then waits with «Номер SSCC паллеты не подошёл и пропущен» —
-  never a stop of the line.
+  which loses it. The screen's full-pallet close (`settlePallet`) and the early
+  close both lose up to three serials in a row (`closeLosingBadSerials`, plan
+  ХП): the full pallet then waits with «Номер SSCC паллеты не подошёл и
+  пропущен» — never a stop of the line —, the early close stops with
+  «Повторить».
 - No pallet serial left: the full pallet stays open, the next boxes join it,
   the work screen says «Паллета заполнена, но не закрыта», and it closes as
   soon as serials come (`closePalletIfFull`: on entry, after a box, when a
-  pallet block arrives). The message is derived (`palletWaitsNow`): it shows
+  pallet block arrives — the block a box's top-up brings queues the close as a
+  turn of its own, plan ХП). The message is derived (`palletWaitsNow`): it shows
   only while the open pallet holds at least the capacity, so it goes with the
   pallet's close or when a box is taken off. Pallet blocks are asked for by the
   half rule like box blocks (the block supply with `extension` 1, its own
@@ -3501,8 +3515,8 @@ lacks the capacity or the layout, and the work screen then stops
 - «Закрыть паллету досрочно» (`closeOpenPallet`), after a confirmation,
   closes the open pallet with the boxes it holds; an empty one — no box, or
   every box taken apart — is refused before a serial is spent. No serial
-  stops the work with its reason (`pallet_no_serials`); an `invalid_serial` is
-  the stop `pallet_failed` with «Повторить». The button is off while any stop
+  stops the work with its reason (`pallet_no_serials`); three `invalid_serial`
+  in a row are the stop `pallet_failed` with «Повторить». The button is off while any stop
   stands or the floor is leaving.
 - Labels: `settleLabel` sends every label written and not sent, the box's
   before its pallet's (`readOpenJob` orders jobs of one moment by purpose);
@@ -3571,19 +3585,18 @@ Known limits of the pallets, and who carries each:
   jsdom with `node:sqlite` behind `LocalExecutor` and a fake `HostApi`; the host
   met the station's records only through the scenario (`floor_scenario.rs`).
   The by-hand list is under «Verification».
-- `floor_pallet_exceptions` has no shift index: no read of it by pallet or shift
-  exists (it is only written), and the retention's delete scans it whole, as it
-  scans `floor_exceptions` and `outbox`. A read by pallet or shift needs a new
-  migration and moves the table off the two pinned scan lists.
 - The intention to close the shift is not kept across a pallet stop (no serial,
   a lost serial, a label error): the operator presses again (question ВЦ3 of
   the plan, recommended answer). After a pallet stop of «Закрыть паллету и
   смену» the shift stays open, and the stop says so («Смена не закрыта…»; the
   stop carries `fromClose`, which «Повторить» and the link-back keep).
-- A full pallet waiting for serials asks the host for them, inside the work
-  queue, on every box close while the link is up: up to 2 × 10 s when the host
-  hangs, during which the work queue waits, as a box close waiting for box
-  serials does.
+- A full pallet waiting for serials never holds the work queue (plan ХП): the
+  top-up after each box close asks the host in the background, and a block
+  that comes queues the pallet's close (`palletArrived`). The early close
+  («Закрыть паллету досрочно», «Закрыть паллету и смену») still asks the host
+  inside the queue when no serial is left — up to 2 × 10 s with a hung host, as
+  a box close waiting for box serials does: the operator pressed it and waits
+  for its answer.
 - Pallets of several stations on one shift and the revocation of pallet blocks
   are stage 2b (plan ПЛ-Х, «Перенесено»).
 
@@ -3920,7 +3933,8 @@ prefix (`range_invalid`) or shares a serial with any block, revoked ones
 included (`block_overlap`). One revision when anything was registered, one
 `sscc.block.register` row per block; the station is marked for the epoch
 (`devices.known_blocks_epoch`) whatever became of each block. Only a station,
-only after a restore (`conflict` on `no_restore`), 1-64 blocks.
+only after a restore (`conflict` on `no_restore`), 0-64 blocks: an empty list
+(a station that never took a block, plan ХП) only marks the station.
 
 A receipt is kept for good (plan 2a2), and a copy may lack the shift, the
 participant row or the block a station's fact names. So from a restore until
@@ -3979,10 +3993,10 @@ many.
 
 Left open, none of it hidden by a green test:
 
-- A pairing without blocks never calls the route (the host asks for 1–64
-  blocks), so the office lists it «Не вернула» although nothing is owed; the
-  station says nothing. The follow-up is the host's: accept an empty list, or
-  expose whether the station ever had blocks (`hasBlocks`).
+- A pairing without blocks sends one empty request (plan ХП), so it is marked
+  «Вернула» once it reaches the host. A station paired again leaves its former
+  device's row (from the copy) «Не вернула» until that device is revoked; the
+  office's texts say so (`blocksNote`, `confirmNotReturned`).
 - The host sets `reconciled` on the FIRST part it answers, even when it
   refused every block of it (refusals show only on the station's status bar),
   and the oldest blocks go first, so «Вернула» can show before the newest
