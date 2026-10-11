@@ -99,6 +99,12 @@ const expected = [
   ["/station/shift-closures", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/station/warehouse-reprint/lookup", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/station/warehouse-reprint/templates", "GET", "content-type,x-api-key,x-station-capabilities"],
+  ["/station/branding", "GET", "content-type,x-api-key,x-station-capabilities"],
+  [
+    "/station/branding/logo/a1111111-1111-4111-8111-111111111111",
+    "GET",
+    "x-api-key,x-station-capabilities",
+  ],
   [
     "/station/warehouse-reprint/event-batches",
     "POST",
@@ -110,6 +116,8 @@ const expected = [
   ["/shifts/product-label-templates", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/box-label-templates", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/pallet-label-templates", "GET", "content-type,x-api-key,x-station-capabilities"],
+  ["/shifts/pallet-sheet-templates", "GET", "content-type,x-api-key,x-station-capabilities"],
+  ["/shifts/pallet-sheet-template-preview", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/label-template-preview", "GET", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/cors-probe/open", "POST", "content-type,x-api-key,x-station-capabilities"],
   ["/shifts/cors-probe/enter", "POST", "content-type,x-api-key,x-station-capabilities"],
