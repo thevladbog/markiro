@@ -1252,6 +1252,34 @@ codes, and the system's own words go to the shell's stderr only.
   not cancelled by that: the runtime keeps its address busy until the call
   really ends, so later sends to it end `printer_busy`, and a call that never
   ends keeps it busy until the webview starts again.
+- Driver printing (plan ДРВ, `src-tauri/src/printer/{raster,driver,driver_commands}.rs`,
+  ported from the cloud station's #696): `supports_windows_printing` answers
+  `true` exactly on Windows; `print_windows_raster { queue, payloadBase64, documentName }`
+  prints one `mono-raster-v1` page (`@markiro/domain` `encodeMonoRaster`; magic
+  `MKRMNO1\0`, 203 or 300 dpi, 10–300 mm, at most 2 MiB, black dots only inside the
+  required bounds) to a Windows queue as the document `Markiro:<uuid>`: the driver's
+  DEVMODE is set to user paper of the page's millimetres, portrait, one copy, 100 %,
+  the page's resolution, and the device context must report that resolution on both
+  axes, the paper within one dot and the required bounds inside the printable area
+  (`geometry_mismatch` otherwise), then GDI draws it 1:1 (`StretchDIBits`). It always
+  answers `{ ok: true, receipt: { queue, jobId, documentName } }` or
+  `{ ok: false, error: { code, phase, receipt? } }`: `before_start` (nothing reached the
+  spooler: `unsupported_platform`, `invalid_artifact`, `queue_unavailable`,
+  `geometry_mismatch`, `driver_failure`) or `delivery_unknown` (`StartDocW` was called —
+  its answer can be lost after the spooler took the job — or a later call failed and the
+  document was aborted; a label may come out). `get_windows_print_job { receipt }` answers
+  `present` with `statusFlags`, `absent`, `identity_mismatch` or `unavailable` — never a
+  printed label. Each runs on a blocking thread with a 30 s limit (`delivery_unknown` /
+  `unavailable` past it; the Win32 call is not cancelled). The order of the GDI calls lives
+  in `submit` over `WindowsPrintApi` and is tested on every OS; `mod native` is
+  `cfg(windows)` (feature `Win32_Storage_Xps` for `StartDocW`) and compiles only in
+  `standalone-windows-build` — plan ДРВ type-checked it with a probe crate outside the
+  repository, and it has never been run. `tests/fixtures/hardware-shapes.json` pins the
+  answers for both sides (`windowsPrintOutcomeSchema`, `windowsJobObservationSchema`). The
+  wrapper (`createTauriWindowsPrinting`, `windowsPrintResult`) never throws: `before_start`
+  maps to `unsupported`, `invalid_payload`, `queue_unavailable`, `geometry_mismatch` and
+  `driver_not_started`; a delivery in doubt, a failed IPC call, an answer of no known shape
+  and a receipt naming another queue or document (dropped) are `driver_unknown`.
 - `configure_scanners { scanners: [{ port, baud }] }` replaces the whole set
   of COM scanners. The argument is read as JSON, so a missing or misshapen
   one is `invalid_scanners` too, and so are more than 32 scanners, a name of
@@ -3160,6 +3188,36 @@ shift (`update_shift`, `host/src/routes/office_shifts.rs` lines 398–432:
 number is drawn at creation and never updated, and each job stores its `fields`
 (date and expiry included), which a reprint replays. So a printed fact is never
 recalculated and a box keeps the SSCC and date it was closed with.
+
+A printer profile prints RAW (the printer's language) or through the Windows driver (plan
+ДРВ): `mode: "windows_driver"` in the profile's JSON of the `printers` setting, allowed only
+for a Windows queue; a profile without `mode` — every profile before the plan and every RAW
+one since, the form writes the field only for the driver — is RAW, so stored profiles and
+the printer snapshots of jobs read as before (no migration). A driver profile keeps its
+last RAW language for switching back, and its resolution is required: the job's bytes are a
+`mono-raster-v1` page of the snapshot's template at that resolution (`renderMonoLabel` +
+`encodeMonoRaster` in the emitters' chunk) drawn with `rasterizeDriverText`, which refuses
+(`render_failed`) rather than freeze a fallback face. The print runtime sends it through
+the same per-address queue and 20 s limit as RAW, as `print_windows_raster` with a fresh
+`Markiro:<uuid>`; the job walks the same states: `failed` for the driver's `before_start`
+codes (`queue_unavailable`, `geometry_mismatch`, `driver_not_started`, `unsupported`,
+`invalid_payload`), `unknown` `driver_unknown` for a delivery in doubt, and nothing is
+ever sent again without the operator. The spooler receipt of a job's newest driver send is
+kept in memory by the runtime (one that answered after the limit too; a new send forgets
+it, a restart loses it) for «Проверить очередь Windows» on the label panel (unknown, or a
+check waiting; driver printers only), whose answer is diagnostic and decides nothing.
+`printAgain` renders again when the way of printing changes, even at one language and
+resolution. The setup offers «Способ печати» for a Windows queue only where
+`supports_windows_printing` is `true` (or the profile is already in driver mode), hides the
+language in driver mode, says the driver's paper and resolution must match, and prints its
+test label either way; the screens name a driver profile's format «Драйвер Windows»
+(`printerFormatText`). Not done (plan ДРВ «Перенесено»): receipts in the database, the
+saved raster's preview, a separate preflight, A4 sheets (plan A4). Not verified (never run
+on Windows or a real printer): the spooler and GDI calls, real drivers' behaviour with
+user-size paper and their reported resolution, IBM Plex loading through `document.fonts`
+in WebView2 (`rasterizeDriverText` refuses if it does not load), and the ≥64 px
+production-browser contract of the new setup controls; the manual list is in
+`docs/runbooks/standalone-install.md`.
 
 A job (`floor_print_jobs`, `print-jobs.ts`) walks `prepared → sending → sent`,
 then `verified` or `skipped` when the job asks for the label check (`verify`, the
