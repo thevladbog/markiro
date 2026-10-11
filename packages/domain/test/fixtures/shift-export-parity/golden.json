@@ -29,6 +29,21 @@
       }
     ]
   },
+  "boxes/shift_txt_boxes_reversed@1/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_6pcs_3box_2026-10-08.txt",
+        "codeCount": 6,
+        "boxCount": 3,
+        "palletCount": 0,
+        "physicalLineCount": 12,
+        "bytes": 488,
+        "sha256": "2ed40292075120505234b21dcb26ee1afaa54b97ae49b64ef98aa754ca161e8b",
+        "text": "010460068200001321Gt5kR1wQe8Uv4\u001d93Ab1Z\n010460068200001321Hs;q\"7Lp0Nm2X\u001d93Ab1Z\n00046006820000015000\n\n010460068200001321Jr2pW5zKa6Bt6\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015017\n\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Ab&<9\"'x>Zq1M\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015024\n\n"
+      }
+    ]
+  },
   "boxes/shift_csv_flat@1/-": {
     "openPalletSuppressedBoxCount": 0,
     "parts": [
@@ -125,6 +140,9 @@
     ]
   },
   "boxes/shift_txt_boxes@2/2": {
+    "error": "BOX_EXCEEDS_LINE_LIMIT"
+  },
+  "boxes/shift_txt_boxes_reversed@1/2": {
     "error": "BOX_EXCEEDS_LINE_LIMIT"
   },
   "boxes/shift_csv_flat@1/2": {
@@ -273,6 +291,41 @@
       }
     ]
   },
+  "boxes/shift_txt_boxes_reversed@1/5": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_2pcs_1box_2026-10-08_часть_1.txt",
+        "codeCount": 2,
+        "boxCount": 1,
+        "palletCount": 0,
+        "physicalLineCount": 4,
+        "bytes": 100,
+        "sha256": "f0d721f1ff4ab58b03aa2f5babb57a3a358d50a9ba87ba64b716b1fd280a77de",
+        "text": "010460068200001321Gt5kR1wQe8Uv4\u001d93Ab1Z\n010460068200001321Hs;q\"7Lp0Nm2X\u001d93Ab1Z\n00046006820000015000\n\n"
+      },
+      {
+        "filename": "Молоко_3_2_0_9_л_1pcs_1box_2026-10-08_часть_2.txt",
+        "codeCount": 1,
+        "boxCount": 1,
+        "palletCount": 0,
+        "physicalLineCount": 3,
+        "bytes": 108,
+        "sha256": "19feb1a381ad101a0ccdba492fe14951c8eae863cd3f95686c71e68f147cd641",
+        "text": "010460068200001321Jr2pW5zKa6Bt6\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015017\n\n"
+      },
+      {
+        "filename": "Молоко_3_2_0_9_л_3pcs_1box_2026-10-08_часть_3.txt",
+        "codeCount": 3,
+        "boxCount": 1,
+        "palletCount": 0,
+        "physicalLineCount": 5,
+        "bytes": 280,
+        "sha256": "35da244e5a32aae1e6d38251ab1fdab766c54bf01439b6c565acc89aedbc0e53",
+        "text": "010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Ab&<9\"'x>Zq1M\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015024\n\n"
+      }
+    ]
+  },
   "boxes/shift_csv_flat@1/5": {
     "openPalletSuppressedBoxCount": 0,
     "parts": [
@@ -368,6 +421,21 @@
         "bytes": 488,
         "sha256": "d82461be846a1152a6f235292c4009e8f7e65a879c6e8877fe161a2e9c7c0e8c",
         "text": "00046006820000015000\n010460068200001321Gt5kR1wQe8Uv4\u001d93Ab1Z\n010460068200001321Hs;q\"7Lp0Nm2X\u001d93Ab1Z\n\n00046006820000015017\n010460068200001321Jr2pW5zKa6Bt6\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n00046006820000015024\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Ab&<9\"'x>Zq1M\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n"
+      }
+    ]
+  },
+  "boxes/shift_txt_boxes_reversed@1/16": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_6pcs_3box_2026-10-08.txt",
+        "codeCount": 6,
+        "boxCount": 3,
+        "palletCount": 0,
+        "physicalLineCount": 12,
+        "bytes": 488,
+        "sha256": "2ed40292075120505234b21dcb26ee1afaa54b97ae49b64ef98aa754ca161e8b",
+        "text": "010460068200001321Gt5kR1wQe8Uv4\u001d93Ab1Z\n010460068200001321Hs;q\"7Lp0Nm2X\u001d93Ab1Z\n00046006820000015000\n\n010460068200001321Jr2pW5zKa6Bt6\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015017\n\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Ab&<9\"'x>Zq1M\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015024\n\n"
       }
     ]
   },
@@ -481,6 +549,21 @@
       }
     ]
   },
+  "boxes/shift_txt_boxes_reversed@1/20": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_6pcs_3box_2026-10-08.txt",
+        "codeCount": 6,
+        "boxCount": 3,
+        "palletCount": 0,
+        "physicalLineCount": 12,
+        "bytes": 488,
+        "sha256": "2ed40292075120505234b21dcb26ee1afaa54b97ae49b64ef98aa754ca161e8b",
+        "text": "010460068200001321Gt5kR1wQe8Uv4\u001d93Ab1Z\n010460068200001321Hs;q\"7Lp0Nm2X\u001d93Ab1Z\n00046006820000015000\n\n010460068200001321Jr2pW5zKa6Bt6\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015017\n\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Ab&<9\"'x>Zq1M\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015024\n\n"
+      }
+    ]
+  },
   "boxes/shift_csv_flat@1/20": {
     "openPalletSuppressedBoxCount": 0,
     "parts": [
@@ -578,6 +661,21 @@
         "bytes": 795,
         "sha256": "4766d0c370699f90ae78f2b71af50a1eeee3bc61ddb20c3efb38dbcca41a7dbc",
         "text": "00046006820000015000\n010460068200001321Ab9xZq1MnB3c4\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n00046006820000015017\n010460068200001321Gt5kR1wQe8Uv4\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n00046006820000015024\n010460068200001321Jr2pW5zKa6Bt6\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n00046006820000015031\n010460068200001321Hs7Lp0Nm2Xc5Q\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n00046006820000015048\n010460068200001321Lm4nQ8rTy2Ux7\u001d93Ab1Z\n\n00046006820000015055\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n00046006820000015086\n010460068200001321Nv6bS3dFg7Hj9\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n"
+      }
+    ]
+  },
+  "pallets/shift_txt_boxes_reversed@1/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_8pcs_7box_2026-10-08.txt",
+        "codeCount": 8,
+        "boxCount": 7,
+        "palletCount": 0,
+        "physicalLineCount": 22,
+        "bytes": 795,
+        "sha256": "c5135f9d3bf08779d8825f5f9d0c8c74ddc8a98d7f2759cdc3204b84b660fddf",
+        "text": "010460068200001321Ab9xZq1MnB3c4\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015000\n\n010460068200001321Gt5kR1wQe8Uv4\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015017\n\n010460068200001321Jr2pW5zKa6Bt6\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015024\n\n010460068200001321Hs7Lp0Nm2Xc5Q\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015031\n\n010460068200001321Lm4nQ8rTy2Ux7\u001d93Ab1Z\n00046006820000015048\n\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015055\n\n010460068200001321Nv6bS3dFg7Hj9\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015086\n\n"
       }
     ]
   },
@@ -737,6 +835,9 @@
     ]
   },
   "pallets/shift_txt_boxes@2/3": {
+    "error": "BOX_EXCEEDS_LINE_LIMIT"
+  },
+  "pallets/shift_txt_boxes_reversed@1/3": {
     "error": "BOX_EXCEEDS_LINE_LIMIT"
   },
   "pallets/shift_csv_flat@1/3": {
@@ -914,6 +1015,51 @@
         "bytes": 108,
         "sha256": "be5a7d75b4f6efb94f95f0a369b7db891b05f79ce952f624c2a970a68ce18e9f",
         "text": "00046006820000015086\n010460068200001321Nv6bS3dFg7Hj9\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n"
+      }
+    ]
+  },
+  "pallets/shift_txt_boxes_reversed@1/8": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_2pcs_2box_2026-10-08_часть_1.txt",
+        "codeCount": 2,
+        "boxCount": 2,
+        "palletCount": 0,
+        "physicalLineCount": 6,
+        "bytes": 216,
+        "sha256": "241a44d6c72bca27770947f80a7f27f708d9fa6b45494fa10ef9cfe231d67c83",
+        "text": "010460068200001321Ab9xZq1MnB3c4\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015000\n\n010460068200001321Gt5kR1wQe8Uv4\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015017\n\n"
+      },
+      {
+        "filename": "Молоко_3_2_0_9_л_2pcs_2box_2026-10-08_часть_2.txt",
+        "codeCount": 2,
+        "boxCount": 2,
+        "palletCount": 0,
+        "physicalLineCount": 6,
+        "bytes": 216,
+        "sha256": "5366cc85fdb61ad28e4daadba10e5584280c6a39bbe47afa7fa1f5990b015d6b",
+        "text": "010460068200001321Jr2pW5zKa6Bt6\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015024\n\n010460068200001321Hs7Lp0Nm2Xc5Q\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015031\n\n"
+      },
+      {
+        "filename": "Молоко_3_2_0_9_л_3pcs_2box_2026-10-08_часть_3.txt",
+        "codeCount": 3,
+        "boxCount": 2,
+        "palletCount": 0,
+        "physicalLineCount": 7,
+        "bytes": 255,
+        "sha256": "48f751ac7d0be561bcb25b8b8038f5241a2a15b89cfe95019d963f30b166b713",
+        "text": "010460068200001321Lm4nQ8rTy2Ux7\u001d93Ab1Z\n00046006820000015048\n\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015055\n\n"
+      },
+      {
+        "filename": "Молоко_3_2_0_9_л_1pcs_1box_2026-10-08_часть_4.txt",
+        "codeCount": 1,
+        "boxCount": 1,
+        "palletCount": 0,
+        "physicalLineCount": 3,
+        "bytes": 108,
+        "sha256": "695efb60208fc3ce4a1845f2c45e478c94e8a60bb5523a8abe573b25b4988236",
+        "text": "010460068200001321Nv6bS3dFg7Hj9\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015086\n\n"
       }
     ]
   },
@@ -1098,6 +1244,21 @@
         "bytes": 795,
         "sha256": "4766d0c370699f90ae78f2b71af50a1eeee3bc61ddb20c3efb38dbcca41a7dbc",
         "text": "00046006820000015000\n010460068200001321Ab9xZq1MnB3c4\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n00046006820000015017\n010460068200001321Gt5kR1wQe8Uv4\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n00046006820000015024\n010460068200001321Jr2pW5zKa6Bt6\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n00046006820000015031\n010460068200001321Hs7Lp0Nm2Xc5Q\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n00046006820000015048\n010460068200001321Lm4nQ8rTy2Ux7\u001d93Ab1Z\n\n00046006820000015055\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n00046006820000015086\n010460068200001321Nv6bS3dFg7Hj9\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n"
+      }
+    ]
+  },
+  "pallets/shift_txt_boxes_reversed@1/30": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_8pcs_7box_2026-10-08.txt",
+        "codeCount": 8,
+        "boxCount": 7,
+        "palletCount": 0,
+        "physicalLineCount": 22,
+        "bytes": 795,
+        "sha256": "c5135f9d3bf08779d8825f5f9d0c8c74ddc8a98d7f2759cdc3204b84b660fddf",
+        "text": "010460068200001321Ab9xZq1MnB3c4\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015000\n\n010460068200001321Gt5kR1wQe8Uv4\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015017\n\n010460068200001321Jr2pW5zKa6Bt6\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015024\n\n010460068200001321Hs7Lp0Nm2Xc5Q\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015031\n\n010460068200001321Lm4nQ8rTy2Ux7\u001d93Ab1Z\n00046006820000015048\n\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015055\n\n010460068200001321Nv6bS3dFg7Hj9\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015086\n\n"
       }
     ]
   },
@@ -1311,6 +1472,9 @@
   "coverage/shift_txt_boxes@2/-": {
     "error": "BOX_COVERAGE_INCOMPLETE"
   },
+  "coverage/shift_txt_boxes_reversed@1/-": {
+    "error": "BOX_COVERAGE_INCOMPLETE"
+  },
   "coverage/shift_csv_flat@1/-": {
     "openPalletSuppressedBoxCount": 0,
     "parts": [
@@ -1374,6 +1538,21 @@
         "bytes": 108,
         "sha256": "093ff9f6cc809930fa12e6c4168521fabc42d99b9c0cc342eb880e58cae8c17d",
         "text": "00046006820000015000\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n"
+      }
+    ]
+  },
+  "station-number/shift_txt_boxes_reversed@1/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_1pcs_1box_2026-10-08.txt",
+        "codeCount": 1,
+        "boxCount": 1,
+        "palletCount": 0,
+        "physicalLineCount": 3,
+        "bytes": 108,
+        "sha256": "5bcc7e6ee27872978f4a7fab537f9f0863e6ce0df24c3aaaab33608d362c94de",
+        "text": "010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015000\n\n"
       }
     ]
   },
@@ -1467,6 +1646,21 @@
       }
     ]
   },
+  "inn-12/shift_txt_boxes_reversed@1/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_1pcs_1box_2026-10-08.txt",
+        "codeCount": 1,
+        "boxCount": 1,
+        "palletCount": 0,
+        "physicalLineCount": 3,
+        "bytes": 108,
+        "sha256": "5bcc7e6ee27872978f4a7fab537f9f0863e6ce0df24c3aaaab33608d362c94de",
+        "text": "010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015000\n\n"
+      }
+    ]
+  },
   "inn-12/shift_csv_flat@1/-": {
     "openPalletSuppressedBoxCount": 0,
     "parts": [
@@ -1545,6 +1739,21 @@
       }
     ]
   },
+  "no-inn/shift_txt_boxes_reversed@1/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_1pcs_1box_2026-10-08.txt",
+        "codeCount": 1,
+        "boxCount": 1,
+        "palletCount": 0,
+        "physicalLineCount": 3,
+        "bytes": 108,
+        "sha256": "5bcc7e6ee27872978f4a7fab537f9f0863e6ce0df24c3aaaab33608d362c94de",
+        "text": "010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015000\n\n"
+      }
+    ]
+  },
   "no-inn/shift_csv_flat@1/-": {
     "openPalletSuppressedBoxCount": 0,
     "parts": [
@@ -1599,6 +1808,9 @@
   "not-closed/shift_txt_boxes@2/-": {
     "error": "SHIFT_NOT_CLOSED"
   },
+  "not-closed/shift_txt_boxes_reversed@1/-": {
+    "error": "SHIFT_NOT_CLOSED"
+  },
   "not-closed/shift_csv_flat@1/-": {
     "error": "SHIFT_NOT_CLOSED"
   },
@@ -1642,6 +1854,9 @@
     "error": "SHIFT_HAS_NO_CODES"
   },
   "no-codes/shift_txt_boxes@2/-": {
+    "error": "SHIFT_HAS_NO_CODES"
+  },
+  "no-codes/shift_txt_boxes_reversed@1/-": {
     "error": "SHIFT_HAS_NO_CODES"
   },
   "no-codes/shift_csv_flat@1/-": {
@@ -1695,6 +1910,21 @@
         "bytes": 125,
         "sha256": "cb5a1ec4324753ab9467504ec73d238783a52350bf1938f8e0d5f005bbd492ce",
         "text": "00046006820000015000\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n0104600682000013\n\n"
+      }
+    ]
+  },
+  "bad-cis/shift_txt_boxes_reversed@1/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Вода_Родник_0_5_л_ПЭТ_2pcs_1box_2026-10-08.txt",
+        "codeCount": 2,
+        "boxCount": 1,
+        "palletCount": 0,
+        "physicalLineCount": 4,
+        "bytes": 125,
+        "sha256": "fb52b9b08bb532048f25478f76ee14821ea356a21feddd05225d50f92dfcb9b7",
+        "text": "010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n0104600682000013\n00046006820000015000\n\n"
       }
     ]
   },
@@ -1764,6 +1994,9 @@
   "double-membership/shift_txt_boxes@2/-": {
     "error": "BOX_COVERAGE_INCOMPLETE"
   },
+  "double-membership/shift_txt_boxes_reversed@1/-": {
+    "error": "BOX_COVERAGE_INCOMPLETE"
+  },
   "double-membership/shift_csv_flat@1/-": {
     "openPalletSuppressedBoxCount": 0,
     "parts": [
@@ -1816,6 +2049,9 @@
     ]
   },
   "disassembled-live/shift_txt_boxes@2/-": {
+    "error": "BOX_COVERAGE_INCOMPLETE"
+  },
+  "disassembled-live/shift_txt_boxes_reversed@1/-": {
     "error": "BOX_COVERAGE_INCOMPLETE"
   },
   "disassembled-live/shift_csv_flat@1/-": {
@@ -1881,6 +2117,21 @@
         "bytes": 108,
         "sha256": "093ff9f6cc809930fa12e6c4168521fabc42d99b9c0cc342eb880e58cae8c17d",
         "text": "00046006820000015000\n010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n\n"
+      }
+    ]
+  },
+  "no-close-instant/shift_txt_boxes_reversed@1/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_1pcs_1box_2026-10-08.txt",
+        "codeCount": 1,
+        "boxCount": 1,
+        "palletCount": 0,
+        "physicalLineCount": 3,
+        "bytes": 108,
+        "sha256": "5bcc7e6ee27872978f4a7fab537f9f0863e6ce0df24c3aaaab33608d362c94de",
+        "text": "010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015000\n\n"
       }
     ]
   },
@@ -1974,6 +2225,21 @@
       }
     ]
   },
+  "removed-item-moved/shift_txt_boxes_reversed@1/-": {
+    "openPalletSuppressedBoxCount": 0,
+    "parts": [
+      {
+        "filename": "Молоко_3_2_0_9_л_2pcs_2box_2026-10-08.txt",
+        "codeCount": 2,
+        "boxCount": 2,
+        "palletCount": 0,
+        "physicalLineCount": 6,
+        "bytes": 216,
+        "sha256": "6bd0c2aa2eedc6ad9e82065b2513376891eadb897ce979b88609304052b66809",
+        "text": "010460068200001321Kq8vT2mXc5Rz1\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015062\n\n010460068200001321Pw3nY7hLd9Fs2\u001d91EE10\u001d92ZkF5dGhpcyBpcyBhIGNyeXB0byB0YWlsIDQ0IGNoYXJz\n00046006820000015079\n\n"
+      }
+    ]
+  },
   "removed-item-moved/shift_csv_flat@1/-": {
     "openPalletSuppressedBoxCount": 0,
     "parts": [
@@ -2050,6 +2316,9 @@
     ]
   },
   "open-box-on-pallet/shift_txt_boxes@2/-": {
+    "error": "BOX_COVERAGE_INCOMPLETE"
+  },
+  "open-box-on-pallet/shift_txt_boxes_reversed@1/-": {
     "error": "BOX_COVERAGE_INCOMPLETE"
   },
   "open-box-on-pallet/shift_csv_flat@1/-": {

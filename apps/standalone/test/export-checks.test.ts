@@ -36,10 +36,11 @@ function uncovered(): ShiftExportRows {
 }
 
 describe("the formats the dialog offers (plan ЧЗ)", () => {
-  it("are every format for a shift with pallets, the five without pallets for one without", () => {
+  it("are every format for a shift with pallets, the six without pallets for one without", () => {
     expect(formatOffers(rows(), FORMED_AT).map((offer) => offer.format.id)).toEqual([
       "shift_txt_flat",
       "shift_txt_boxes",
+      "shift_txt_boxes_reversed",
       "shift_csv_flat",
       "shift_csv_boxes",
       "shift_xml_gismt_aggregation",
@@ -53,6 +54,7 @@ describe("the formats the dialog offers (plan ЧЗ)", () => {
     expect(formatOffers(without, FORMED_AT).map((offer) => offer.format.id)).toEqual([
       "shift_txt_flat",
       "shift_txt_boxes",
+      "shift_txt_boxes_reversed",
       "shift_csv_flat",
       "shift_csv_boxes",
       "shift_xml_gismt_aggregation",
@@ -66,6 +68,7 @@ describe("the formats the dialog offers (plan ЧЗ)", () => {
     ).toEqual([
       ["shift_txt_flat", null],
       ["shift_txt_boxes", "BOX_COVERAGE_INCOMPLETE"],
+      ["shift_txt_boxes_reversed", "BOX_COVERAGE_INCOMPLETE"],
       ["shift_csv_flat", null],
       ["shift_csv_boxes", "BOX_COVERAGE_INCOMPLETE"],
       ["shift_xml_gismt_aggregation", "BOX_COVERAGE_INCOMPLETE"],

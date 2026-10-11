@@ -48,12 +48,13 @@ describe("a format's check (plan ЧЗ, the dialog's one pass)", () => {
     ]);
   });
 
-  it("offers a shift without pallets the five formats that need none", () => {
+  it("offers a shift without pallets the six formats that need none", () => {
     const shift = rows();
     shift.shift.palletsEnabled = false;
     expect(offeredFormats(shift).map((format) => format.id)).toEqual([
       "shift_txt_flat",
       "shift_txt_boxes",
+      "shift_txt_boxes_reversed",
       "shift_csv_flat",
       "shift_csv_boxes",
       "shift_xml_gismt_aggregation",
@@ -84,10 +85,10 @@ describe("the dialog's plan (plan ЧЗ), made in turns", () => {
         warnings: palletWarnings(shift, pallet.palletId),
       })),
     });
-    // Counts, ten formats, the pallets: twelve turns, a pause before each, progress after each.
-    expect(made.pause).toHaveBeenCalledTimes(12);
+    // Counts, eleven formats, the pallets: thirteen turns, a pause before each, progress after each.
+    expect(made.pause).toHaveBeenCalledTimes(13);
     expect(made.steps).toEqual(
-      Array.from({ length: 12 }, (_, index) => ({ done: index + 1, total: 12 })),
+      Array.from({ length: 13 }, (_, index) => ({ done: index + 1, total: 13 })),
     );
     // Pallet 1 takes the late box into its own document; the one taken apart and the open one have none.
     expect(plan?.pallets.map((pallet) => [pallet.palletId, pallet.warnings])).toEqual([
@@ -97,14 +98,14 @@ describe("the dialog's plan (plan ЧЗ), made in turns", () => {
     ]);
   });
 
-  it("leaves a shift without pallets a plan with five formats and no pallets", async () => {
+  it("leaves a shift without pallets a plan with six formats and no pallets", async () => {
     const shift = rows();
     shift.shift.palletsEnabled = false;
     const made = deps();
     const plan = await planExport(shift, FORMED_AT, made);
-    expect(plan?.checks).toHaveLength(5);
+    expect(plan?.checks).toHaveLength(6);
     expect(plan?.pallets).toEqual([]);
-    expect(made.pause).toHaveBeenCalledTimes(7);
+    expect(made.pause).toHaveBeenCalledTimes(8);
   });
 
   it("stops at the first turn its caller no longer wants, and says so", async () => {
@@ -116,9 +117,9 @@ describe("the dialog's plan (plan ЧЗ), made in turns", () => {
     expect(await planExport(warned(), FORMED_AT, made)).toBeNull();
     // Three turns were wanted (counts and two formats), the fourth was not.
     expect(made.steps).toEqual([
-      { done: 1, total: 12 },
-      { done: 2, total: 12 },
-      { done: 3, total: 12 },
+      { done: 1, total: 13 },
+      { done: 2, total: 13 },
+      { done: 3, total: 13 },
     ]);
     expect(made.pause).toHaveBeenCalledTimes(4);
   });
@@ -172,11 +173,11 @@ describe("the plan of the rows on screen (plan ЧЗ)", () => {
     );
     expect(result.current).toEqual({ status: "working", done: 0, total: 0 });
     rerender({ shift: rows() });
-    expect(result.current).toEqual({ status: "working", done: 0, total: 12 });
+    expect(result.current).toEqual({ status: "working", done: 0, total: 13 });
     await waitFor(() => expect(result.current.status).toBe("ready"));
     rerender({ shift: warned() });
     // At once, before any turn: the plan of the first rows is not the second's.
-    expect(result.current).toEqual({ status: "working", done: 0, total: 12 });
+    expect(result.current).toEqual({ status: "working", done: 0, total: 13 });
     await waitFor(() => expect(result.current.status).toBe("ready"));
     expect(result.current.status === "ready" && result.current.plan.counts.codes).toBe(5);
   });

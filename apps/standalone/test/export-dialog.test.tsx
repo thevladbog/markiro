@@ -214,6 +214,73 @@ describe("office shifts: an export (plan ЧЗ)", () => {
     }
   });
 
+  it("offers the reversed boxes format to a shift with pallets and to one without, and saves the cloud's bytes: the codes of a box, then its SSCC (#681)", async () => {
+    const withoutPallets = (): ShiftExportRows => {
+      const source = rows();
+      source.shift.palletsEnabled = false;
+      source.boxes = source.boxes.map((box) => ({ ...box, palletId: null }));
+      source.pallets = [];
+      return source;
+    };
+    const reversed = "[TXT][С коробами][Обратная] Отчет смены";
+    for (const [shift, source, radios] of [
+      [CLOSED_PALLETS, rows(), 11],
+      [{ ...CLOSED_PALLETS, palletsEnabled: false }, withoutPallets(), 6],
+    ] as const) {
+      const files = fakeFiles();
+      const session = await openExport(shift, source, files);
+      expect(within(dialog()).getAllByRole("radio")).toHaveLength(radios);
+      const radio = within(dialog()).getByRole("radio", { name: reversed });
+      expect(radio.hasAttribute("disabled")).toBe(false);
+      fireEvent.click(radio);
+      form();
+      const folder = "2026-10-09_12-00-00_shift_txt_boxes_reversed";
+      await within(dialog()).findByText(
+        `Сохранено файлов: 1. Папка: C:\\Users\\Оператор\\Documents\\Markiro\\Выгрузки\\OCT26-004\\${folder}`,
+      );
+      expect(files.save).toHaveBeenCalledTimes(1);
+      const [segments, saved] = files.save.mock.calls[0] ?? [];
+      expect(segments).toEqual(["Выгрузки", "OCT26-004", folder]);
+      expect(saved).toEqual(
+        expectedParts(source, {
+          formatId: "shift_txt_boxes_reversed",
+          formatVersion: 1,
+          maxLines: null,
+          palletId: null,
+        }),
+      );
+      // The bytes themselves, not only the domain's own answer: each box is its codes, then its
+      // 00-prefixed SSCC, then a blank line; the boxes in the order of their SSCCs; UTF-8 text.
+      expect(saved?.map((file) => file.name)).toEqual([
+        "Молоко_3_2_0_9_л_3pcs_2box_2026-10-08.txt",
+      ]);
+      expect(new TextDecoder("utf-8", { fatal: true }).decode(saved?.[0]?.bytes)).toBe(
+        "010460068200001321Kq8vT2mXc5Rz\u001d93Ab1Z\n010460068200001321Pw3nY7hLd9Fs\u001d93Cd2Y\n" +
+          "00046006820000015000\n\n" +
+          "010460068200001321Gt5kR1wQe8Uv\u001d93Ef3X\n00046006820000015017\n\n",
+      );
+      expect(session.api.recordShiftExport.mock.calls).toEqual([
+        [
+          TOKEN,
+          ACTIVE.id,
+          {
+            formatId: "shift_txt_boxes_reversed",
+            formatVersion: 1,
+            maxLines: null,
+            palletId: null,
+            documentId: DOCUMENT,
+            partCount: 1,
+            codeCount: 3,
+            boxCount: 2,
+            palletCount: 0,
+            openPalletSuppressedBoxCount: 0,
+          },
+        ],
+      ]);
+      document.body.innerHTML = "";
+    }
+  });
+
   it("offers each format with its refusal and splits a format the source allows into parts", async () => {
     const source = rows();
     // Code C in the open box 3: no box format can cover it.
@@ -234,6 +301,11 @@ describe("office shifts: an export (plan ЧЗ)", () => {
       { label: "[TXT][Без коробов] Отчет смены", disabled: false },
       {
         label: "[TXT][С коробами] Отчет сменыНе все коды смены распределены по закрытым коробам.",
+        disabled: true,
+      },
+      {
+        label:
+          "[TXT][С коробами][Обратная] Отчет сменыНе все коды смены распределены по закрытым коробам.",
         disabled: true,
       },
       { label: "[CSV][Без коробов] Отчет смены", disabled: false },
@@ -885,7 +957,7 @@ describe("office shifts: an export's words, turns and care (plan ЧЗ, task 8)",
   it("shows how far the check of the formats has come while it makes it", async () => {
     const session = await openDialog(CLOSED_PALLETS, rows(), fakeFiles());
     expect(session.api.getShiftExportSource).toHaveBeenCalledTimes(1);
-    await within(dialog()).findByText(/^Проверяем, какие форматы доступны: \d+ из 12…$/);
+    await within(dialog()).findByText(/^Проверяем, какие форматы доступны: \d+ из 13…$/);
     await screen.findByRole("radiogroup");
     expect(within(dialog()).queryByText(/^Проверяем, какие форматы/)).toBeNull();
   });
