@@ -338,6 +338,27 @@ keeps its bytes as base64 text with no size bound, and no retention removes
 a job in plan 2a7 (decision 31 gave it to plan 2a8, whose `RETAINED_TABLES`
 lists `floor_print_jobs`).
 
+Migration `0008_floor_pallets.sql` (plan ПЛ-Ц, «Floor pallets») adds
+`floor_shifts.pallet_box_capacity` (`CHECK` above 0) and `pallet_template_id`
+(the host's list of a shift with pallets), `floor_boxes.pallet_id` (only on a
+closed box, `CHECK`; the partial index `floor_boxes_pallet`), `floor_pallets`
+and `floor_pallet_exceptions` (`DeviceData`, both in `RETAINED_TABLES`): a
+pallet is open without an SSCC, block, serial or `disassembled_at`, or closed
+with its SSCC (18 digits starting with the extension `1`), block and serial;
+one open pallet per shift and pairing (`floor_pallets_open`); an SSCC on one
+pallet under any pairing (`floor_pallets_sscc`); a pallet's exception is a
+`reprint` or a `disassemble`, always with a reason code, words only with
+`other`. A pallet's box count is never stored: it is counted from the boxes
+that name it and are not taken apart. The migration has one index the plan did
+not list, `floor_pallets_shift (host_id, device_id, shift_id)`, for the
+retention's delete and the exceptions screen's read of a shift's pallets;
+`floor_pallet_exceptions` has none, on purpose (see «Floor pallets», known
+limits). Additive only, `0007` rows stay as they were (a test on Node's SQLite
+and one on the shell's own `Migrator` apply `0008` over a database of `0007`).
+`test/floor-pallet-schema.test.ts` pins these rules; `test/floor-schema.test.ts`
+and `tests/local_db.rs` pin the columns, the indexes and the query plans of the
+pallets' reads on both SQLite engines (Node's and the shell's older one).
+
 ## Writes
 
 - Every multi-statement write uses `db::begin_write` (`BEGIN IMMEDIATE`), not a
@@ -2936,9 +2957,11 @@ forget or a sign-out never appears under a write in flight. `closeSteps` (the
 steps of every close, which run after the screen's own label step, see "Floor
 printing") and `onClosed` (told once for every box that closed, also one read
 back after a lost answer, in the queue's turn after the write) are the
-extension points of the pallets' plan (joining the station's open pallet with
-the `palletId` of `box_closed`, which the host already takes since plan ПЛ-Х, so
-the plan adds no protocol version); plan 2a7's label job is not started from
+extension points the pallets' plan was written against (joining the station's
+open pallet with the `palletId` of `box_closed`, which the host already takes
+since plan ПЛ-Х, so the plan adds no protocol version). Plan ПЛ-Ц did not need
+`closeSteps` for it: the screen appends its `palletStep` itself after the box's
+label step (see «Floor pallets»); plan 2a7's label job is not started from
 `onClosed` but written by the screen's own step. Whatever they start goes to `track` before it begins, and
 every writer of a box — plan 2a8's exceptions and the pallets' plan too — stays
 in the screen's queue: the digest of a closing box is read apart from the box,
@@ -3044,8 +3067,8 @@ station's own shift late on the host (`late_data_at`).
 The workstation setup (`WorkstationSetup.tsx`, one screen, from the list of
 shifts and from a label's recovery; any signed-in operator may open it) stores the
 printers (`{ id, name, target, language, dpi }`, one per address) and the printer
-of each purpose — `box`, `pallet`, `duplicate`; only `box` prints in stage 2a —
-the COM scanners, the tones' level and the label check (one setting for all
+of each purpose — `box`, `pallet`, `duplicate`; `box` prints, and `pallet` in a
+shift with pallets (plan ПЛ-Ц) — the COM scanners, the tones' level and the label check (one setting for all
 labels), all at once on «Сохранить»: the four keys of `workstation_settings` in
 one transaction, then the whole set of scanners to the shell (also when the app
 starts, `applySavedScanners`). What would not read back is refused before
@@ -3240,9 +3263,11 @@ Known limits of the retention, and who carries each:
   (there is no index by `shift_id`; measured 176 ms against 37 ms with one),
   and, with `secure_delete` on, the WAL grows by about 31 MB per 1000 deleted
   print jobs. A migration with `outbox (host_id, device_id, shift_id)` and
-  `floor_exceptions (host_id, device_id, shift_id)` would remove both: plan
-  ПЛ-Ц (which adds the local migration `0008_floor_pallets`) or plan РК, the
-  owner deciding.
+  `floor_exceptions (host_id, device_id, shift_id)` would remove both. Plan
+  ПЛ-Ц's migration `0008_floor_pallets` did not add them (it adds only
+  `floor_pallets_shift`); plan РК or the owner decides. `floor_pallet_exceptions`
+  is read whole by the delete in the same way, and its scan is pinned in both
+  engines' plan lists.
 - A refused or conflicting record of a shift whose close was accepted is
   purged with it after 30 days: what `rejected` and `quarantined` records
   should keep is a decision for plan ОЧ and the owner (hold the shift, or state
@@ -3262,7 +3287,149 @@ which must answer every record `accepted` and end with the station's
 numbers, the digest of every box matching, the shift closed by the station
 and not late (and with the office's close first: every record taken, the
 shift late, the close `alreadyClosed`). A change of what the station writes
-changes the fixture, and both tests read it.
+changes the fixture, and both tests read it. Since plan ПЛ-Ц the scenario is a
+shift with pallets (see «Floor pallets»).
+
+## Floor pallets
+
+Pilot, plan ПЛ-Ц (`src/floor/pallets/pallets.ts`,
+`src/floor/exceptions/pallet-exceptions.ts`; migration
+`0008_floor_pallets.sql`). A shift with pallets — `palletsEnabled`, the
+copy's `palletBoxCapacity` and `palletTemplateId`, the snapshot's
+`palletTemplate`, whose layout `checkShiftSnapshot` reads like the box's (a
+stored snapshot of a shift with pallets without one is refused, and the next
+entry with the host brings it; an entry whose pallet template no longer fits is
+`pallet_template_not_fit`) — fills its open pallet by itself, as the cloud
+station does; there is no scan of a box onto a pallet (that is the handheld's,
+outside the pilot). `shiftPallets` is `null` for a shift with pallets whose copy
+lacks the capacity or the layout, and the work screen then stops
+(`pallets_missing`) instead of working boxes alone.
+
+- A box's close joins the shift's open pallet, or opens one whose
+  `opened_at` is the box's close, in the box's own transaction
+  (`palletStep`, a `CloseStep`), and its `box_closed` names the pallet
+  (`palletId`). The box that brings the pallet to the shift's boxes per
+  pallet closes it in that same transaction, after the box's record: the
+  next serial of the earliest pallet block (extension 1) spent by
+  compare-and-set, the SSCC by `buildSscc(1, …)`, the pallet closed only
+  while it holds the boxes counted, its `pallet_closed` (`openedAt`,
+  `boxCount` — its boxes not taken apart, counted, never stored) and its
+  label's print job (`purpose = 'pallet'`, the snapshot's pallet layout, the
+  printer of «Паллета», the domain's `palletLabelFields`). A pallet's close
+  never happens without its box, nor a box's without its pallet. A rival open
+  pallet (the unique index) fails the box's close whole as a write error
+  (`close_failed`, «Повторить»; nothing written); the work queue serialises
+  closes, so the screen cannot reach it.
+- A serial that cannot become an SSCC is lost, not retried for good
+  (`freePalletSscc`): one past the prefix's range, or whose SSCC another
+  pallet already holds. The same compare-and-set spends that serial alone and
+  the close answers `invalid_serial`; the next close takes the next serial. In
+  a box's close such a serial leaves the full pallet open and unspent (the box
+  still closes and joins), and the pallet closes through `closePalletIfFull`,
+  which loses it; the screen's `settlePallet` retries up to three lost serials
+  in a row and then waits with «Номер SSCC паллеты не подошёл и пропущен» —
+  never a stop of the line.
+- No pallet serial left: the full pallet stays open, the next boxes join it,
+  the work screen says «Паллета заполнена, но не закрыта», and it closes as
+  soon as serials come (`closePalletIfFull`: on entry, after a box, when a
+  pallet block arrives). The message is derived (`palletWaitsNow`): it shows
+  only while the open pallet holds at least the capacity, so it goes with the
+  pallet's close or when a box is taken off. Pallet blocks are asked for by the
+  half rule like box blocks (the block supply with `extension` 1, its own
+  waiting request and newest block): on entry, after every close and when the
+  link is back.
+- «Закрыть паллету досрочно» (`closeOpenPallet`), after a confirmation,
+  closes the open pallet with the boxes it holds; an empty one — no box, or
+  every box taken apart — is refused before a serial is spent. No serial
+  stops the work with its reason (`pallet_no_serials`); an `invalid_serial` is
+  the stop `pallet_failed` with «Повторить». The button is off while any stop
+  stands or the floor is leaving.
+- Labels: `settleLabel` sends every label written and not sent, the box's
+  before its pallet's (`readOpenJob` orders jobs of one moment by purpose);
+  one that waits stops the work, and the next waits behind it. A pallet's
+  label is checked by a scan of its SSCC, skipped, or printed again by the
+  same decisions as a box's (plan 2a7), its panel says «паллеты», and its
+  records are `pallet_label`; printing again a label that may exist writes
+  the `pallet_exception` `reprint` in the transaction that sends it.
+- Exceptions: «Перепечатать этикетку паллеты» (`reprintPallet`, a pallet
+  whose label is done with: a new job with its last job's SSCC and fields,
+  the exception and its record in ONE transaction, then one send) and
+  «Расформировать паллету» (`disassemblePallet`: `disassembled_at`, the boxes
+  untouched — they keep their pallet, stay closed with their codes, and are
+  boxes without a pallet for the exports; the screen asks for the reason and
+  then a confirmation, and nothing can be undone). A pallet is chosen by a scan
+  of its label (the whole SSCC) or the last digits of its SSCC (every pallet
+  that ends alike is listed, up to 12, and the operator presses one); the
+  reasons are the box's lists, words only for «Другая причина»
+  (`reasonWords`). Both run in the work queue and are tracked. Their
+  transactions carry two comparisons (the pallet still closed and whole; for a
+  reprint, the job read still the pallet's newest), so a disassembly or a
+  racing reprint between the read and the write makes them stale with nothing
+  written or sent (`PalletUnavailableError`, `StaleJobError`;
+  `PalletTemplateChangedError`, a subclass, when the template moved on).
+  The exceptions open only with no label waiting, and the queue's
+  `labelWaits()` refuses a reprint or disassembly of any pallet while any
+  label of the shift waits, so a pallet is not taken apart under its own
+  label's panel. That refusal is the screen's: `disassemblePallet` has no
+  such guard of its own (see the known limits).
+- The shift's close: an open pallet with a box not taken apart keeps it open
+  (`readCloseSummary`'s blocker `open_pallet`, after an open box and a
+  waiting label); an empty open pallet does not, and costs no serial. The
+  summary asks «На паллете N из M коробов — закрыть?», and «Закрыть паллету и
+  смену» closes the pallet, sends its label and then closes the shift with
+  the reason chosen — after the label is decided when it waits. `closeShift`
+  takes `openPalletGuard` in its transaction (plan 2a8's `guards`), on every
+  close path (`finishClose`). The intention to close the shift is kept only
+  over the label of the pallet that this press closed (`pendingClose` carries
+  its job id); any other stop, a changed summary or a began leave drops it and
+  the operator presses «Закрыть смену» again.
+- A new shift on the station offers «С паллетами» / «Без паллет» for a product
+  with boxes per pallet (1 to 10 000, `palletCapacityOffered`) and a pallet
+  template that is enabled, of the pallet purpose and covers the product's
+  group, on by default; the pallet template by decision 7 for the purpose
+  `pallet` (`suggestPalletTemplate`), the capacity the product's. A pallets
+  form that cannot be made (`palletsOf`) is never sent as a plain shift, and a
+  repeated request id that brings back a shift with other pallets than the form
+  asked for is the «already created earlier» notice, not an entry.
+- Receipts take no new statement: a refused pallet record stays in the
+  outbox with its code (plan ОЧ). The shared scenario
+  (`proto/fixtures/floor-scenario.json`) is a shift with pallets: two
+  pallets, one closed by its second box, one closed early and taken apart,
+  a pallet's label printed again; `host/tests/floor_scenario.rs` also checks
+  the host's pallets and `closedPallets`.
+- Retention: a purged shift's `floor_pallets` and `floor_pallet_exceptions` go
+  with its other rows (`RETAINED_TABLES`); a forgotten pairing's rows stay, as
+  for the other tables. The pallet blocks and their cursors stay, so an SSCC is
+  not reused.
+
+Known limits of the pallets, and who carries each:
+
+- Nothing of it has run on Windows, a printer, a touch panel, WebView2 or a
+  real host over a LAN: the model, the screens and the exceptions run under
+  jsdom with `node:sqlite` behind `LocalExecutor` and a fake `HostApi`; the host
+  met the station's records only through the scenario (`floor_scenario.rs`).
+  The by-hand list is under «Verification».
+- `floor_pallet_exceptions` has no shift index: no read of it by pallet or shift
+  exists (it is only written), and the retention's delete scans it whole, as it
+  scans `floor_exceptions` and `outbox`. A read by pallet or shift needs a new
+  migration and moves the table off the two pinned scan lists.
+- The intention to close the shift is not kept across a pallet stop (no serial,
+  a lost serial, a label error): the operator presses again (question ВЦ3 of
+  the plan, recommended answer). After a pallet stop of the early close the
+  shift stays open.
+- A full pallet waiting for serials asks the host for them, inside the work
+  queue, on every box close while the link is up: up to 2 × 10 s when the host
+  hangs, during which the work queue waits, as a box close waiting for box
+  serials does.
+- `disassemblePallet` itself accepts a disassembly while the pallet's label job
+  is open; only the screen refuses it. A backstop in its transaction is a
+  carried item of the plan's final review; today a disassembly under a waiting
+  label cannot be started from the screen, and one made some other way would
+  make that label's «Напечатать снова» stale.
+- The scan feedback of the pallet choice (a tone and a short flash of the work
+  screen) still says «короб»; the flow's own words are the pallet's.
+- Pallets of several stations on one shift and the revocation of pallet blocks
+  are stage 2b (plan ПЛ-Х, «Перенесено»).
 
 ## Marking rules
 
@@ -3337,6 +3504,18 @@ either; a file log is stage 5.
   Until then these have run only under jsdom, with node:sqlite behind
   `LocalExecutor` and a fake `HostApi`: no WebView2, no real host, no scanner
   and no Windows has shown the list, the new shift, the entry or the leave.
+- The floor's pallets (plan ПЛ-Ц) by hand, on Windows 10 and 11, with the
+  client's printers. None of it has been run; check at least:
+  - the pallet label on the client's pallet printer (its language and
+    resolution, 100 × 150 or the client's size), printed right after the
+    box's label of the box that filled the pallet, and checked by a scan;
+  - a full pallet with the host's PC switched off and no pallet serials
+    left: the message, the next boxes on it, its close once the link is
+    back;
+  - «Закрыть паллету и смену» with the label check on, and a pallet's
+    reprint and disassembly chosen by a scan of its label;
+  - a new shift with pallets on the touch panel, and the office's totals
+    of its pallets.
 - The floor's exceptions and close (plan 2a8) by hand, on Windows 10 and 11.
   None of it has been run; check at least:
   - each exception on the touch panel, a box chosen by a scan of its label
