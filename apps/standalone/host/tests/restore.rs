@@ -14,8 +14,9 @@ use markiro_host::backup::copy::{
 use markiro_host::backup::identity::{identity_path, platform_guard, HostIdentity};
 use markiro_host::config::HostPaths;
 use markiro_host::restore::{
-    restore, restore_crashing, summary, verify_copy, Carried, CopyIdentity, CrashPoint, Current,
-    Interrupted, RestoreReport, SHIFT_NUMBER_MARGIN, UNREADABLE_CURRENT_MARGIN,
+    restore, restore_crashing, restore_with, summary, verify_copy, Carried, CopyIdentity,
+    CrashPoint, Current, IdentityChoice, IdentityOutcome, Interrupted, RestoreOptions,
+    RestoreReport, SHIFT_NUMBER_MARGIN, UNREADABLE_CURRENT_MARGIN,
 };
 use markiro_host::StartOptions;
 use markiro_proto::backup::BackupTrigger;
@@ -287,6 +288,7 @@ async fn a_restore_puts_the_copy_back_and_lifts_every_counter_above_both_databas
             ],
             "carried": { "devices": 0, "operators": 0, "badges": 0, "officeUsers": 0 },
             "sessionsEnded": 1,
+            "identity": "kept",
         })
     );
     assert_eq!(
@@ -1997,4 +1999,690 @@ async fn verify_copy_command_prints_the_identity_and_fails_on_a_damaged_one() {
         "{err}"
     );
     assert!(!out.contains(&key[..24]) && !err.contains(&key[..24]));
+}
+
+/// A new computer's installer started the host once: `host.json`, a TLS
+/// identity and a migrated database whose wizard never ran, as
+/// `markiro_host::start` leaves them (without binding a port).
+async fn installed(paths: &HostPaths) -> HostIdentity {
+    paths.ensure().unwrap();
+    // `start` takes the data folder's lock first: its file stays.
+    drop(paths.lock().unwrap());
+    let config = markiro_host::config::HostConfig::load_or_create(paths, None).unwrap();
+    markiro_host::tls::TlsIdentity::load_or_create(&paths.tls_dir(), &config.host_id).unwrap();
+    markiro_host::db::open(&paths.database_file())
+        .await
+        .unwrap()
+        .close()
+        .await;
+    HostIdentity::read(paths).unwrap()
+}
+
+/// Restore with `--keep-identity` or `--take-identity`.
+async fn restore_choosing(
+    paths: &HostPaths,
+    copy_path: &Path,
+    identity: IdentityChoice,
+) -> RestoreReport {
+    restore_with(
+        paths,
+        copy_path,
+        RestoreOptions {
+            without_manifest: false,
+            identity,
+        },
+        at(NOW),
+    )
+    .await
+    .unwrap()
+}
+
+/// The runbook's new computer (plan I1): the installer started the host once,
+/// and the copy carries its host's identity. The identity goes into place —
+/// the devices keep their pairing — and the margins stay those of a
+/// database that is not the copy's history: the installer's database knows
+/// nothing the copy's host issued after the copy.
+#[tokio::test]
+async fn a_new_computer_takes_the_copys_identity_and_keeps_the_unread_margins() {
+    let admin = admin().await;
+    ask_block(&admin, "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    ask_block(&admin, "4c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    let (copy_path, _, source) = copy_with_identity(&admin.app).await;
+    let copy_audit = newest_audit_id(&admin.app).await;
+    let fresh = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(fresh.path());
+    let installer = installed(&paths).await;
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_unread_margins(&paths, &report, copy_audit).await;
+    let aside = report
+        .saved_as
+        .clone()
+        .expect("the installer's database went aside");
+    assert_eq!(
+        report.identity,
+        IdentityOutcome::Restored {
+            host_id: admin.app.state.host_id.clone(),
+            fingerprint: source.fingerprint().to_owned(),
+            port: 45710,
+            replaced: Some(installer.host_id().to_owned()),
+            saved_in: Some(aside.join("identity")),
+            former_port: Some(45710),
+        }
+    );
+    assert!(!report.other_host, "the devices keep their pairing");
+    assert!(!report.new_identity);
+    assert!(HostIdentity::read(&paths).unwrap().same_as(&source));
+    let saved: Value =
+        serde_json::from_slice(&std::fs::read(aside.join("identity").join("host.json")).unwrap())
+            .unwrap();
+    assert_eq!(saved["hostId"], installer.host_id());
+    assert_eq!(
+        std::fs::read(aside.join("identity").join("key.der")).unwrap(),
+        installer.key_der()
+    );
+    assert!(!fresh.path().join("identity.partial").exists());
+    let lines = summary(&report);
+    assert!(
+        lines.iter().any(|line| line.starts_with(&format!(
+            "the copy's host identity was put in place (host {}",
+            admin.app.state.host_id
+        ))),
+        "{lines:#?}"
+    );
+    assert!(
+        lines.contains(&format!(
+            "the identity this data folder had (host {}) was replaced; its files are in {}",
+            installer.host_id(),
+            aside.join("identity").display()
+        )),
+        "{lines:#?}"
+    );
+    let pool = reopen(&paths).await;
+    let details: String =
+        sqlx::query_scalar("SELECT details FROM audit_log WHERE action = 'host.restore'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&details).unwrap()["identity"],
+        "restored"
+    );
+}
+
+/// A copy of host A over a working host B: the identity waits for the
+/// engineer's `--take-identity`, B's identity is kept aside, and the margins
+/// stay those of a database that is not the copy's history. (A `foreign`
+/// decided after the identity moved would give two blocks: the mutant of
+/// step 4.)
+#[tokio::test]
+async fn over_a_working_host_of_another_identity_the_copys_identity_waits_for_take_identity() {
+    let a = admin().await;
+    ask_block(&a, "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    ask_block(&a, "4c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    let (copy_path, _, source) = copy_with_identity(&a.app).await;
+    let copy_audit = newest_audit_id(&a.app).await;
+    let b = admin().await;
+    let paths = stop(&b.app).await;
+    let own = write_identity(b.app.dir(), &b.app.state.host_id);
+
+    let error = refused(&paths, &copy_path, false).await;
+    assert!(
+        error.contains("--take-identity") && error.contains("--keep-identity"),
+        "{error}"
+    );
+    assert!(HostIdentity::read(&paths).unwrap().same_as(&own));
+
+    let report = restore_choosing(&paths, &copy_path, IdentityChoice::Take).await;
+    assert_unread_margins(&paths, &report, copy_audit).await;
+    assert!(
+        matches!(&report.identity, IdentityOutcome::Restored { replaced: Some(host_id), saved_in: Some(_), .. } if host_id == &b.app.state.host_id),
+        "{:?}",
+        report.identity
+    );
+    assert!(!report.other_host);
+    assert!(HostIdentity::read(&paths).unwrap().same_as(&source));
+}
+
+/// The same computer: the copy's identity is the folder's own; nothing of it
+/// changes and the history is known as before.
+#[tokio::test]
+async fn on_the_same_computer_the_identity_is_the_folders_own() {
+    let admin = admin().await;
+    let (copy_path, _, source) = copy_with_identity(&admin.app).await;
+    let paths = stop(&admin.app).await;
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+    assert_eq!(report.identity, IdentityOutcome::Same);
+    assert!(report.history_known);
+    assert!(!report.other_host);
+    assert!(HostIdentity::read(&paths).unwrap().same_as(&source));
+    assert!(summary(&report)
+        .contains(&"the host identity is the copy's: devices keep their pairing".to_owned()));
+}
+
+/// A damaged identity beside the copy is refused, and with `--keep-identity`
+/// the data goes back without it: every device pairs again.
+#[tokio::test]
+async fn a_damaged_identity_is_refused_and_keep_identity_restores_without_it() {
+    let admin = admin().await;
+    let (copy_path, _, _) = copy_with_identity(&admin.app).await;
+    let file = identity_path(&copy_path);
+    let mut bytes = std::fs::read(&file).unwrap();
+    bytes[10] ^= 1;
+    std::fs::write(&file, &bytes).unwrap();
+    let fresh = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(fresh.path());
+    let installer = installed(&paths).await;
+
+    let error = refused(&paths, &copy_path, false).await;
+    assert!(
+        error.contains("damaged") && error.contains("--keep-identity"),
+        "{error}"
+    );
+    let report = restore_choosing(&paths, &copy_path, IdentityChoice::Keep).await;
+    assert_eq!(
+        report.identity,
+        IdentityOutcome::Kept { copy_had_one: true }
+    );
+    assert!(report.other_host);
+    assert!(HostIdentity::read(&paths).unwrap().same_as(&installer));
+    assert!(summary(&report).contains(
+        &"the copy's host identity was not used (--keep-identity): every device pairs with this host again"
+            .to_owned()
+    ));
+}
+
+/// A restore cut off after the new database took its place, or inside the
+/// identity (the key renamed, not the certificate or `host.json`): the host
+/// does not start, and the next restore finishes the identity first.
+#[tokio::test]
+async fn a_restore_cut_off_inside_the_identity_is_finished_by_the_next_one() {
+    let admin = admin().await;
+    let (copy_path, _, source) = copy_with_identity(&admin.app).await;
+    for (crash, with_installer) in [
+        (CrashPoint::NewDatabaseInPlace, true),
+        (CrashPoint::IdentityPartly, true),
+        (CrashPoint::IdentityPartly, false),
+    ] {
+        let fresh = tempfile::tempdir().unwrap();
+        let paths = HostPaths::new(fresh.path());
+        if with_installer {
+            installed(&paths).await;
+        }
+        restore_crashing(&paths, &copy_path, false, at(NOW), crash)
+            .await
+            .unwrap();
+        assert_waits_for_the_restore(&start_refused(&paths).await);
+        assert!(
+            !HostIdentity::read(&paths).is_ok_and(|identity| identity.same_as(&source)),
+            "{crash:?}: the identity is not whole yet"
+        );
+
+        let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+        assert_eq!(report.interrupted, Some(Interrupted::Finished), "{crash:?}");
+        assert_eq!(report.identity, IdentityOutcome::Same, "{crash:?}");
+        assert!(
+            HostIdentity::read(&paths).unwrap().same_as(&source),
+            "{crash:?}"
+        );
+        assert!(!fresh.path().join("identity.partial").exists());
+        assert!(!paths.restore_intent_file().exists());
+    }
+}
+
+/// The base64 private key of the identity file beside `copy_path`, to make
+/// sure no line prints it.
+fn identity_key_text(copy_path: &Path) -> String {
+    let file: Value =
+        serde_json::from_slice(&std::fs::read(identity_path(copy_path)).unwrap()).unwrap();
+    file["privateKey"].as_str().unwrap().to_owned()
+}
+
+/// Every file under `dir` that holds a private key (`key.der`, its
+/// `.partial`) is closed to everyone but its owner, and so is every folder
+/// a restore made for an identity.
+#[cfg(unix)]
+fn assert_keys_closed(dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(folder) = pending.pop() {
+        for entry in std::fs::read_dir(&folder).unwrap().flatten() {
+            let path = entry.path();
+            let mode = entry.metadata().unwrap().permissions().mode();
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if path.is_dir() {
+                if name == "identity.partial" || name == "identity" {
+                    assert_eq!(mode & 0o077, 0, "{} is {mode:o}", path.display());
+                }
+                pending.push(path);
+            } else if name.starts_with("key.der") {
+                assert_eq!(mode & 0o077, 0, "{} is {mode:o}", path.display());
+            }
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn assert_keys_closed(_dir: &Path) {}
+
+/// The `identity/` folders of every aside folder of `dir`.
+fn kept_identities(dir: &Path) -> Vec<PathBuf> {
+    restore_dirs(dir)
+        .into_iter()
+        .map(|name| dir.join(name).join("identity"))
+        .filter(|kept| kept.is_dir())
+        .collect()
+}
+
+/// Plan I1: a restore that takes the copy's identity over a new computer's
+/// installer, cut off at every step. While the marker is not there, the
+/// installer's database and identity are in place, whole; while it is, the
+/// host does not start. The next restore finishes (or rolls back) and puts
+/// the copy's identity in place; the installer's is kept whole, no key file
+/// is ever open to others, the margins of an unread database never shrink,
+/// and the revision is the copy's next one.
+#[tokio::test]
+async fn every_cut_of_a_restore_that_takes_the_identity_is_finished_by_the_next_one() {
+    let admin = admin().await;
+    ask_block(&admin, "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    ask_block(&admin, "4c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    let (copy_path, _, source) = copy_with_identity(&admin.app).await;
+    let copy_rev: i64 = sqlx::query_scalar("SELECT rev FROM host_revision")
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let key_text = identity_key_text(&copy_path);
+    // (`WalAside` needs a WAL: the installer's database, closed, has none;
+    // it rolls back as `DatabaseAside` does.)
+    for crash in [
+        CrashPoint::DatabaseAside,
+        CrashPoint::IdentityStaged,
+        CrashPoint::NewDatabaseInPlace,
+        CrashPoint::IdentityKeySaving,
+        CrashPoint::IdentityPartly,
+        CrashPoint::IdentityCertificate,
+        CrashPoint::IdentityInPlace,
+    ] {
+        let fresh = tempfile::tempdir().unwrap();
+        let paths = HostPaths::new(fresh.path());
+        let installer = installed(&paths).await;
+        let installer_db = std::fs::read(paths.database_file()).unwrap();
+
+        restore_crashing(&paths, &copy_path, false, at(NOW), crash)
+            .await
+            .unwrap_or_else(|error| panic!("{crash:?}: {error}"));
+
+        assert_keys_closed(fresh.path());
+        if crash == CrashPoint::IdentityStaged {
+            // Cut before the marker: the host may start, on what it had.
+            assert!(!paths.restore_intent_file().exists(), "{crash:?}");
+            markiro_host::restore::refuse_unfinished(&paths).unwrap();
+            assert_eq!(std::fs::read(paths.database_file()).unwrap(), installer_db);
+            assert!(HostIdentity::read(&paths).unwrap().same_as(&installer));
+            assert!(fresh.path().join("identity.partial").is_dir());
+        } else {
+            assert!(paths.restore_intent_file().exists(), "{crash:?}");
+            assert_waits_for_the_restore(&start_refused(&paths).await);
+        }
+
+        let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+        let (interrupted, identity_moved_now) = match crash {
+            CrashPoint::DatabaseAside => (Some(Interrupted::RolledBack), true),
+            CrashPoint::IdentityStaged => (None, true),
+            _ => (Some(Interrupted::Finished), false),
+        };
+        assert_eq!(report.interrupted, interrupted, "{crash:?}");
+        if identity_moved_now {
+            assert!(
+                matches!(&report.identity, IdentityOutcome::Restored { replaced: Some(host_id), .. } if host_id == installer.host_id()),
+                "{crash:?}: {:?}",
+                report.identity
+            );
+        } else {
+            assert_eq!(report.identity, IdentityOutcome::Same, "{crash:?}");
+        }
+        assert!(
+            HostIdentity::read(&paths).unwrap().same_as(&source),
+            "{crash:?}"
+        );
+        assert!(!fresh.path().join("identity.partial").exists(), "{crash:?}");
+        assert!(!paths.restore_intent_file().exists(), "{crash:?}");
+        assert_keys_closed(fresh.path());
+        // The installer's identity is kept, whole, once.
+        let kept = kept_identities(fresh.path());
+        assert_eq!(kept.len(), 1, "{crash:?}: {kept:?}");
+        assert_eq!(
+            std::fs::read(kept[0].join("key.der")).unwrap(),
+            installer.key_der(),
+            "{crash:?}"
+        );
+        assert_eq!(
+            std::fs::read(kept[0].join("cert.der")).unwrap(),
+            installer.cert_der(),
+            "{crash:?}"
+        );
+        let saved: Value =
+            serde_json::from_slice(&std::fs::read(kept[0].join("host.json")).unwrap()).unwrap();
+        assert_eq!(saved["hostId"], installer.host_id(), "{crash:?}");
+        assert_eq!(
+            names(&kept[0]),
+            ["cert.der", "host.json", "key.der"],
+            "{crash:?}: nothing half-copied stays"
+        );
+        // The margins of a database that is not the copy's history: never
+        // below 100 000 above the copy, cut or not.
+        let pool = reopen(&paths).await;
+        for (_, extension, next) in counters(&pool).await {
+            assert!(
+                next >= 110_000,
+                "{crash:?}: extension {extension} at {next}"
+            );
+        }
+        let rev: i64 = sqlx::query_scalar("SELECT rev FROM host_revision")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        assert_eq!(rev, copy_rev + 1, "{crash:?}");
+        pool.close().await;
+        assert!(
+            summary(&report)
+                .iter()
+                .all(|line| !line.contains(&key_text[..24])),
+            "{crash:?}"
+        );
+    }
+}
+
+/// Plan I1: a restore cut off inside the identity, and the next one cut off
+/// inside it again: each finishes what the one before left, and the files
+/// are where the order says (the key, the certificate, `host.json` last).
+#[tokio::test]
+async fn a_restore_cut_off_twice_inside_the_identity_is_finished_by_the_third_run() {
+    let admin = admin().await;
+    let (copy_path, _, source) = copy_with_identity(&admin.app).await;
+    for with_installer in [true, false] {
+        let fresh = tempfile::tempdir().unwrap();
+        let paths = HostPaths::new(fresh.path());
+        let installer = if with_installer {
+            Some(installed(&paths).await)
+        } else {
+            None
+        };
+        let tls = paths.tls_dir();
+        let config = || std::fs::read(paths.config_file()).ok();
+        let config_before = config();
+
+        restore_crashing(
+            &paths,
+            &copy_path,
+            false,
+            at(NOW),
+            CrashPoint::IdentityPartly,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read(tls.join("key.der")).unwrap(),
+            source.key_der()
+        );
+        assert_eq!(
+            std::fs::read(tls.join("cert.der")).ok(),
+            installer
+                .as_ref()
+                .map(|identity| identity.cert_der().to_vec()),
+            "the certificate is not moved yet"
+        );
+        assert_eq!(config(), config_before, "host.json goes last");
+
+        // The next run is cut off as well, after the certificate.
+        restore_crashing(
+            &paths,
+            &copy_path,
+            false,
+            at(NOW),
+            CrashPoint::IdentityCertificate,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read(tls.join("key.der")).unwrap(),
+            source.key_der()
+        );
+        assert_eq!(
+            std::fs::read(tls.join("cert.der")).unwrap(),
+            source.cert_der()
+        );
+        assert_eq!(config(), config_before, "host.json goes last");
+        assert_waits_for_the_restore(&start_refused(&paths).await);
+        assert_keys_closed(fresh.path());
+
+        let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+        assert_eq!(report.interrupted, Some(Interrupted::Finished));
+        assert_eq!(report.identity, IdentityOutcome::Same);
+        assert!(HostIdentity::read(&paths).unwrap().same_as(&source));
+        assert!(!fresh.path().join("identity.partial").exists());
+        if let Some(installer) = &installer {
+            let kept = kept_identities(fresh.path());
+            assert_eq!(kept.len(), 1, "{kept:?}");
+            assert_eq!(
+                std::fs::read(kept[0].join("key.der")).unwrap(),
+                installer.key_der()
+            );
+        }
+    }
+}
+
+/// Plan I1: an identity that would not read whole once in place (a staged
+/// file lost: the key would be of another certificate) is never left for
+/// the host: the marker stays and the host does not start.
+#[tokio::test]
+async fn an_identity_that_would_not_read_whole_keeps_the_marker() {
+    let admin = admin().await;
+    let (copy_path, _, _) = copy_with_identity(&admin.app).await;
+    let fresh = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(fresh.path());
+    installed(&paths).await;
+    restore_crashing(
+        &paths,
+        &copy_path,
+        false,
+        at(NOW),
+        CrashPoint::NewDatabaseInPlace,
+    )
+    .await
+    .unwrap();
+    std::fs::remove_file(fresh.path().join("identity.partial").join("cert.der")).unwrap();
+
+    let error = restore(&paths, &copy_path, false, at(NOW))
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(error.contains("does not read whole"), "{error}");
+    assert!(error.contains("markiro-host restore"), "{error}");
+    assert!(paths.restore_intent_file().exists());
+    assert_waits_for_the_restore(&start_refused(&paths).await);
+    assert!(!error.contains(&identity_key_text(&copy_path)[..24]));
+}
+
+/// Plan I1: a restore cut off after its identity was whole and its staging
+/// folder gone, the marker still there, is finished by the next one.
+#[tokio::test]
+async fn a_restore_cut_off_after_its_identity_was_in_place_is_finished_by_the_next_one() {
+    let admin = admin().await;
+    let (copy_path, _, source) = copy_with_identity(&admin.app).await;
+    let fresh = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(fresh.path());
+    installed(&paths).await;
+    restore_crashing(
+        &paths,
+        &copy_path,
+        false,
+        at(NOW),
+        CrashPoint::IdentityInPlace,
+    )
+    .await
+    .unwrap();
+    // The cut came after the empty staging folder was removed.
+    std::fs::remove_dir(fresh.path().join("identity.partial")).unwrap();
+    assert_waits_for_the_restore(&start_refused(&paths).await);
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(report.interrupted, Some(Interrupted::Finished));
+    assert_eq!(report.identity, IdentityOutcome::Same);
+    assert!(HostIdentity::read(&paths).unwrap().same_as(&source));
+}
+
+/// Plan I1: what a restore cut off before its marker staged of an identity
+/// goes with the next restore, whatever it does with the identity.
+#[tokio::test]
+async fn an_identity_staged_before_a_cut_goes_with_the_next_restore() {
+    let admin = admin().await;
+    let (copy_path, _, _) = copy_with_identity(&admin.app).await;
+    let fresh = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(fresh.path());
+    let installer = installed(&paths).await;
+    restore_crashing(
+        &paths,
+        &copy_path,
+        false,
+        at(NOW),
+        CrashPoint::IdentityStaged,
+    )
+    .await
+    .unwrap();
+    assert!(fresh.path().join("identity.partial").is_dir());
+
+    let report = restore_choosing(&paths, &copy_path, IdentityChoice::Keep).await;
+
+    assert_eq!(
+        report.identity,
+        IdentityOutcome::Kept { copy_had_one: true }
+    );
+    assert!(!fresh.path().join("identity.partial").exists());
+    assert!(HostIdentity::read(&paths).unwrap().same_as(&installer));
+}
+
+/// Plan I1: a data folder whose database does not read is a working host
+/// (its disk may be dying): the copy's identity of another host waits for
+/// `--take-identity`.
+#[tokio::test]
+async fn over_an_unreadable_database_of_another_identity_the_copys_identity_waits() {
+    let a = admin().await;
+    let (copy_path, _, source) = copy_with_identity(&a.app).await;
+    let b = admin().await;
+    let paths = stop(&b.app).await;
+    let own = write_identity(b.app.dir(), &b.app.state.host_id);
+    std::fs::write(paths.database_file(), b"what is left of a dead disk").unwrap();
+    for suffix in ["-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", paths.database_file().display()));
+    }
+
+    let error = refused(&paths, &copy_path, false).await;
+    assert!(error.contains("--take-identity"), "{error}");
+    assert!(HostIdentity::read(&paths).unwrap().same_as(&own));
+
+    let report = restore_choosing(&paths, &copy_path, IdentityChoice::Take).await;
+    assert_eq!(report.current, Current::Unreadable);
+    assert!(HostIdentity::read(&paths).unwrap().same_as(&source));
+}
+
+/// Plan I1: a data folder that has an identity but no database (lost, or
+/// removed by hand) gets the copy's, and its own is kept in an aside folder
+/// made for it; there was no previous database all the same.
+#[tokio::test]
+async fn an_identity_without_a_database_is_kept_aside_when_the_copys_replaces_it() {
+    let admin = admin().await;
+    let (copy_path, _, source) = copy_with_identity(&admin.app).await;
+    let fresh = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(fresh.path());
+    let installer = installed(&paths).await;
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", paths.database_file().display()));
+    }
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert_eq!(report.current, Current::Absent);
+    assert_eq!(report.saved_as, None);
+    assert!(summary(&report).contains(&"there was no previous database".to_owned()));
+    let kept = kept_identities(fresh.path());
+    assert_eq!(kept.len(), 1, "{kept:?}");
+    assert_eq!(
+        std::fs::read(kept[0].join("key.der")).unwrap(),
+        installer.key_der()
+    );
+    assert!(
+        matches!(&report.identity, IdentityOutcome::Restored { saved_in: Some(dir), .. } if dir == &kept[0]),
+        "{:?}",
+        report.identity
+    );
+    assert!(HostIdentity::read(&paths).unwrap().same_as(&source));
+    let pool = reopen(&paths).await;
+    let details: String =
+        sqlx::query_scalar("SELECT details FROM audit_log WHERE action = 'host.restore'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Value>(&details).unwrap()["savedAs"],
+        Value::Null
+    );
+}
+
+/// `markiro-host restore <copy> --data-dir <dir> [flags]`, the real binary.
+fn restore_cli(copy_path: &Path, data_dir: &Path, flags: &[&str]) -> (Option<i32>, String, String) {
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_markiro-host"))
+        .arg("restore")
+        .arg(copy_path)
+        .arg("--data-dir")
+        .arg(data_dir)
+        .args(flags)
+        .output()
+        .expect("the host binary runs");
+    (
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+/// Plan I1: `markiro-host restore` refuses the copy's identity over a
+/// working host of another one, and puts it in place with
+/// `--take-identity`; neither run prints the key.
+#[tokio::test]
+async fn the_restore_command_takes_the_copys_identity_only_when_told() {
+    let a = admin().await;
+    let (copy_path, _, source) = copy_with_identity(&a.app).await;
+    let key_text = identity_key_text(&copy_path);
+    let b = admin().await;
+    let paths = stop(&b.app).await;
+    let own = write_identity(b.app.dir(), &b.app.state.host_id);
+    let own_key = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, own.key_der());
+
+    let (code, out, err) = restore_cli(&copy_path, &paths.data_dir, &[]);
+    assert_ne!(code, Some(0), "{out}");
+    assert!(err.contains("--take-identity"), "{err}");
+    assert!(HostIdentity::read(&paths).unwrap().same_as(&own));
+
+    let (code, out, err) = restore_cli(&copy_path, &paths.data_dir, &["--take-identity"]);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        out.contains(&format!(
+            "the copy's host identity was put in place (host {}",
+            a.app.state.host_id
+        )),
+        "{out}"
+    );
+    assert!(HostIdentity::read(&paths).unwrap().same_as(&source));
+    for text in [&out, &err] {
+        assert!(!text.contains(&key_text[..24]) && !text.contains(&own_key[..24]));
+    }
 }

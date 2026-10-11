@@ -52,19 +52,24 @@
 //!    current database's files go into `restore-<time>/` in the data folder
 //!    (never deleted), the new database is renamed into place, each rename
 //!    synced — and removes the marker. A rename that fails puts the current
-//!    files back.
+//!    files back. When the copy's host identity goes into place (plan I1,
+//!    `identity_plan`), it is written whole into `identity.partial/`
+//!    before the marker (which says so), and renamed into place after the
+//!    new database, before the marker goes: the key, the certificate,
+//!    `host.json` last; the data folder's own files are kept first in
+//!    `restore-<time>/identity/`.
 //!
 //! Nothing is written to the current database or its folder before step 4,
 //! so a failure anywhere before it leaves the data folder as it was.
 //!
 //! A restore cut off during step 4 (the power went) leaves the marker. The
 //! host does not start while it is there, and the next `restore` finishes
-//! the cut-off one first:
+//! the cut-off one first, before it reads `host.json`:
 //!
 //! | `host.db.partial` | `host.db`                    | the next restore                                            |
 //! | ----------------- | ---------------------------- | ----------------------------------------------------------- |
-//! | there             | any                          | puts the aside folder's files back where they are missing, removes the marker and the new database (rolled back) |
-//! | gone              | holds the marker's epoch     | removes the marker (it had finished)                         |
+//! | there             | any                          | puts the aside folder's files back where they are missing, removes the staged identity, the marker and the new database (rolled back) |
+//! | gone              | holds the marker's epoch     | puts the rest of the staged identity in place, then removes the marker (it had finished) |
 //! | gone              | missing or another epoch     | refuses: support moves the files by hand                     |
 //!
 //! Then it restores as usual, over what it found.
@@ -232,9 +237,6 @@ pub enum IdentityChoice {
 /// What a restore does with the host identity, decided before anything
 /// moves.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// Task 4 of plan I1 puts the rule into `restore`; until then only its tests
-// call it.
-#[cfg_attr(not(test), allow(dead_code))]
 enum IdentityPlan {
     /// The data folder already has the copy's identity.
     Same,
@@ -248,7 +250,6 @@ enum IdentityPlan {
 
 impl IdentityPlan {
     /// The word of the `host.restore` audit row.
-    #[cfg_attr(not(test), allow(dead_code))]
     fn audit_word(self) -> &'static str {
         match self {
             Self::Same => "same",
@@ -263,7 +264,6 @@ impl IdentityPlan {
 /// `host.json` (`Err` when its TLS files do not read); `established`: the
 /// current database is a working host's (read with its wizard done, or
 /// unreadable).
-#[cfg_attr(not(test), allow(dead_code))]
 fn identity_plan(
     copy: &CopyIdentity,
     folder: Option<Result<&HostIdentity, &str>>,
@@ -353,6 +353,41 @@ pub struct Carried {
     pub office_users: u64,
 }
 
+/// How `markiro-host restore` was asked to restore.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RestoreOptions {
+    /// `--without-manifest`: only the integrity is checked, and no identity
+    /// is read.
+    pub without_manifest: bool,
+    pub identity: IdentityChoice,
+}
+
+/// What a restore did with the host identity (plan I1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IdentityOutcome {
+    /// The data folder already had the copy's identity.
+    Same,
+    /// The copy's identity was put in place: the devices paired with that
+    /// host keep their pairing.
+    Restored {
+        host_id: String,
+        fingerprint: String,
+        port: u16,
+        /// The host id of the identity the data folder had; `None` when it
+        /// had none.
+        replaced: Option<String>,
+        /// Where that identity's files were kept (`<aside>/identity`).
+        saved_in: Option<PathBuf>,
+        /// The port of the identity the data folder had.
+        former_port: Option<u16>,
+    },
+    /// The data folder kept its own identity; `copy_had_one`: the copy
+    /// brought one that was not used (`--keep-identity`).
+    Kept { copy_had_one: bool },
+    /// No identity anywhere: a new one was created (`new_identity`).
+    Created,
+}
+
 /// A restore that was cut off, found by the next one.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Interrupted {
@@ -393,6 +428,8 @@ pub struct RestoreReport {
     /// When the copy was made: its manifest's time or, without one, its
     /// newest audit row's.
     pub copy_made: String,
+    /// What became of the host identity (plan I1).
+    pub identity: IdentityOutcome,
 }
 
 /// A read-only connection. A database another program holds is waited for
@@ -1025,14 +1062,29 @@ fn leaving_order(db: &Path) -> [PathBuf; 3] {
 }
 
 /// Where a test cuts a restore off as a power cut would: after the WAL
-/// left, after the database file left, or after the new database took its
-/// place. Nothing is undone and the marker stays.
+/// left, after the database file left, after the new database took its
+/// place, or at a step of the copy's host identity (plan I1). Nothing is
+/// undone and the marker (when written) stays.
 #[doc(hidden)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CrashPoint {
     WalAside,
     DatabaseAside,
     NewDatabaseInPlace,
+    /// The copy's identity written whole into `identity.partial/`, the
+    /// marker not yet written (plan I1).
+    IdentityStaged,
+    /// The data folder's own key half copied into `<aside>/identity/` (its
+    /// `.partial`), not yet renamed there (plan I1).
+    IdentityKeySaving,
+    /// The copy's identity half in place: the key renamed, the certificate
+    /// and `host.json` not yet (plan I1).
+    IdentityPartly,
+    /// The key and the certificate renamed, `host.json` not yet (plan I1).
+    IdentityCertificate,
+    /// All three renamed; `identity.partial/` and the marker not yet removed
+    /// (plan I1).
+    IdentityInPlace,
 }
 
 /// A swap that failed: why, and which files of the current database could not
@@ -1157,6 +1209,10 @@ struct Intent {
     /// The new database's `site.restore_epoch`.
     epoch: String,
     started_at: String,
+    /// The copy's host identity waits in `identity.partial/` and goes into
+    /// place after the database (plan I1); `false` in an older marker.
+    #[serde(default)]
+    identity: bool,
 }
 
 /// The aside folder `name` of a marker, in the data folder of `paths`: a
@@ -1275,11 +1331,153 @@ fn put_back(db: &Path, aside: &Path) -> Result<(), BoxError> {
     Ok(())
 }
 
+/// Where the copy's identity waits for the swap (plan I1).
+fn identity_staging(paths: &HostPaths) -> PathBuf {
+    paths.data_dir.join("identity.partial")
+}
+
+/// Remove what a restore staged of an identity and never put in place.
+fn remove_identity_staging(paths: &HostPaths) {
+    let staged = identity_staging(paths);
+    if fs::symlink_metadata(&staged).is_ok() {
+        let _ = fs::remove_dir_all(&staged);
+        sync_dir(&paths.data_dir);
+    }
+}
+
+/// An owner-only folder (`0700` on Unix; the data folder's ACL on Windows).
+fn private_dir_builder() -> fs::DirBuilder {
+    let mut builder = fs::DirBuilder::new();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder
+}
+
+/// Write the copy's identity whole into `identity.partial/` (owner-only,
+/// each file synced) before the marker: what [`install_identity`] renames
+/// into place after the database.
+fn stage_identity(paths: &HostPaths, identity: &HostIdentity) -> Result<(), BoxError> {
+    remove_identity_staging(paths);
+    let staged = identity_staging(paths);
+    private_dir_builder().create(&staged)?;
+    let config = serde_json::to_vec_pretty(&identity.config())?;
+    for (name, bytes) in [
+        ("key.der", identity.key_der()),
+        ("cert.der", identity.cert_der()),
+        ("host.json", config.as_slice()),
+    ] {
+        // Created owner-only and empty, then written: the key is never in a
+        // file others can read.
+        let mut file = create_private(&staged.join(name), true)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
+    sync_dir(&staged);
+    sync_dir(&paths.data_dir);
+    Ok(())
+}
+
+/// Keep the data folder's own `target` as `kept/<name>` before the copy's
+/// file replaces it: through a synced `.partial`, then renamed, so a cut
+/// leaves either the whole file there or none (and then the original is
+/// still in place: it is replaced only afterwards, and the next run copies
+/// it again). A file already kept was kept by a run that was cut off.
+fn keep_replaced(
+    target: &Path,
+    kept: &Path,
+    name: &str,
+    crash: Option<CrashPoint>,
+) -> Result<(), BoxError> {
+    let saved = kept.join(name);
+    if !target.exists() || saved.exists() {
+        return Ok(());
+    }
+    let mut builder = private_dir_builder();
+    builder.recursive(true);
+    builder.create(kept)?;
+    let partial = partial_path(&saved);
+    let mut to = create_private(&partial, false)?;
+    if name == "key.der" && crash == Some(CrashPoint::IdentityKeySaving) {
+        // The power goes halfway through the copy.
+        let bytes = fs::read(target)?;
+        to.write_all(&bytes[..bytes.len() / 2])?;
+        to.sync_all()?;
+        return Err(Box::new(Crashed));
+    }
+    std::io::copy(&mut fs::File::open(target)?, &mut to)?;
+    to.sync_all()?;
+    drop(to);
+    rename_retrying(&partial, &saved, RENAME_RETRY_DELAY)?;
+    sync_dir(kept);
+    Ok(())
+}
+
+/// Rename the staged identity into place: the key, the certificate, then
+/// `host.json`, each rename synced. A file the data folder already has is
+/// first kept in `<aside>/identity/` (a replaced identity stays on disk,
+/// like the database it served). A staged file already gone was moved by a
+/// run that was cut off: it is skipped, so the next run finishes the first.
+/// The marker is still there meanwhile, so the host never starts on a
+/// certificate without its key; and the identity in place must read whole
+/// (the key its certificate's) before this returns, or the marker stays.
+fn install_identity(
+    paths: &HostPaths,
+    aside: Option<&Path>,
+    crash: Option<CrashPoint>,
+) -> Result<(), BoxError> {
+    let staged = identity_staging(paths);
+    let tls = paths.tls_dir();
+    fs::create_dir_all(&tls)?;
+    let moves = [
+        ("key.der", tls.join("key.der"), CrashPoint::IdentityPartly),
+        (
+            "cert.der",
+            tls.join("cert.der"),
+            CrashPoint::IdentityCertificate,
+        ),
+        (
+            "host.json",
+            paths.config_file(),
+            CrashPoint::IdentityInPlace,
+        ),
+    ];
+    for (name, target, cut) in &moves {
+        let from = staged.join(name);
+        if !from.exists() {
+            continue;
+        }
+        if let Some(aside) = aside {
+            keep_replaced(target, &aside.join("identity"), name, crash)?;
+        }
+        rename_retrying(&from, target, RENAME_RETRY_DELAY)?;
+        sync_dir(target.parent().unwrap_or(&paths.data_dir));
+        if crash == Some(*cut) {
+            return Err(Box::new(Crashed));
+        }
+    }
+    HostIdentity::read(paths).map_err(|error| {
+        format!(
+            "the host identity in place does not read whole ({error}); if the same command fails so again, call support"
+        )
+    })?;
+    match fs::remove_dir(&staged) {
+        Ok(()) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error.into()),
+    }
+    sync_dir(&paths.data_dir);
+    Ok(())
+}
+
 /// Finish a restore of `paths` that was cut off (see the module's table).
 async fn finish_interrupted(
     paths: &HostPaths,
     db: &Path,
     staging: &Path,
+    crash: Option<CrashPoint>,
 ) -> Result<Option<Interrupted>, BoxError> {
     let marker = paths.restore_intent_file();
     let text = match fs::read(&marker) {
@@ -1306,11 +1504,28 @@ async fn finish_interrupted(
         // The marker before the new database: a cut here leaves a stale
         // `host.db.partial`, which the next restore removes, never a marker
         // with neither database.
+        // The identity it staged never went into place (it follows the
+        // database): it goes first, so no key copy outlives the marker.
+        remove_identity_staging(paths);
         remove_intent(paths)?;
         remove_staging(staging);
         return Ok(Some(Interrupted::RolledBack));
     }
     if read_epoch(db).await.as_deref() == Some(intent.epoch.as_str()) {
+        // The new database is in place; the identity that was to follow it
+        // goes now, before the marker (plan I1).
+        if intent.identity {
+            install_identity(paths, aside.as_deref(), crash).map_err(|error| -> BoxError {
+                if error.is::<Crashed>() {
+                    return error;
+                }
+                format!(
+                    "a restore of {} was interrupted after its new database took its place, and the copy's host identity could not be put in place ({error}): run the same markiro-host restore command again; the host does not start until then",
+                    paths.data_dir.display()
+                )
+                .into()
+            })?;
+        }
         remove_intent(paths)?;
         return Ok(Some(Interrupted::Finished));
     }
@@ -1411,7 +1626,30 @@ pub async fn restore(
     without_manifest: bool,
     now: OffsetDateTime,
 ) -> Result<RestoreReport, BoxError> {
-    restore_until(paths, source, without_manifest, now, None).await
+    let options = RestoreOptions {
+        without_manifest,
+        identity: IdentityChoice::Auto,
+    };
+    restore_until(paths, source, options, now, None).await
+}
+
+/// [`restore`] with `--keep-identity` or `--take-identity` (plan I1).
+pub async fn restore_with(
+    paths: &HostPaths,
+    source: &Path,
+    options: RestoreOptions,
+    now: OffsetDateTime,
+) -> Result<RestoreReport, BoxError> {
+    restore_until(paths, source, options, now, None).await
+}
+
+/// [`restore_with`] at the present moment: `markiro-host restore`'s own call.
+pub async fn restore_now(
+    paths: &HostPaths,
+    source: &Path,
+    options: RestoreOptions,
+) -> Result<RestoreReport, BoxError> {
+    restore_with(paths, source, options, OffsetDateTime::now_utc()).await
 }
 
 /// [`restore`], cut off at `crash` as a power cut would cut it off: nothing
@@ -1424,7 +1662,11 @@ pub async fn restore_crashing(
     now: OffsetDateTime,
     crash: CrashPoint,
 ) -> Result<(), BoxError> {
-    match restore_until(paths, source, without_manifest, now, Some(crash)).await {
+    let options = RestoreOptions {
+        without_manifest,
+        identity: IdentityChoice::Auto,
+    };
+    match restore_until(paths, source, options, now, Some(crash)).await {
         Err(error) if error.is::<Crashed>() => Ok(()),
         Err(error) => Err(error),
         Ok(_) => Err("the restore ended before it was cut off".into()),
@@ -1434,7 +1676,7 @@ pub async fn restore_crashing(
 async fn restore_until(
     paths: &HostPaths,
     source: &Path,
-    without_manifest: bool,
+    options: RestoreOptions,
     now: OffsetDateTime,
     crash: Option<CrashPoint>,
 ) -> Result<RestoreReport, BoxError> {
@@ -1445,7 +1687,7 @@ async fn restore_until(
         )));
     }
     // The copy is checked before the data folder is touched at all.
-    let copy = verify_copy(source, without_manifest)
+    let copy = verify_copy(source, options.without_manifest)
         .await
         .map_err(untouched)?;
     let mut made = Made {
@@ -1464,9 +1706,18 @@ async fn restore_until(
         ),
         other => made.unchanged(paths, other),
     })?;
+    let db = paths.database_file();
+    let staging = partial_path(&db);
+    // A restore that was cut off is finished first, before `host.json` is
+    // read: a cut while the copy's identity went into place leaves
+    // `host.json` for last (plan I1).
+    made.interrupted = finish_interrupted(paths, &db, &staging, crash).await?;
+    // What an earlier restore that was interrupted before its marker left.
+    remove_staging(&staging);
+    remove_identity_staging(paths);
     // A data folder without host.json gets a new identity, on purpose (the
-    // restore of a new computer: the runbook says devices pair again), but
-    // only once the new database is ready.
+    // restore of a new computer from a copy without one: the runbook says
+    // devices pair again), but only once the new database is ready.
     let existing = match HostConfig::load(paths) {
         Ok(config) => Some(config),
         Err(ConfigError::Missing { .. }) if !HostConfig::would_orphan_host_data(paths) => None,
@@ -1481,11 +1732,6 @@ async fn restore_until(
         }
         Err(other) => return Err(made.unchanged(paths, other)),
     };
-    let db = paths.database_file();
-    let staging = partial_path(&db);
-    made.interrupted = finish_interrupted(paths, &db, &staging).await?;
-    // What an earlier restore that was interrupted before its marker left.
-    remove_staging(&staging);
     let (current, mut known, revoked, initialized) = current_state(&db)
         .await
         .map_err(|error| made.unchanged(paths, error))?;
@@ -1494,17 +1740,47 @@ async fn restore_until(
     // starts the host once and leaves a database whose wizard never ran; a
     // copy of another host says nothing of what this one issued (a folder
     // without `host.json` gets a new identity: another host too). Its
-    // numbers still count as floors.
+    // numbers still count as floors. `foreign` is of the identity the folder
+    // had BEFORE this restore: the copy's identity put in place (plan I1)
+    // never makes the installer's or another host's database the copy's
+    // history.
     let foreign = existing
         .as_ref()
         .is_none_or(|config| other_host(&copy, config));
     let history_known = current == Current::Read && initialized && !foreign;
     let revoked = revoked.filter(|_| history_known);
+    // What becomes of the host identity, decided before anything is built:
+    // a refusal changes nothing. A working host is one whose database was
+    // read with its wizard done, or that is there and does not read.
+    let folder_identity = existing
+        .as_ref()
+        .map(|_| HostIdentity::read(paths).map_err(|error| error.to_string()));
+    let established = current == Current::Unreadable || (current == Current::Read && initialized);
+    let plan = identity_plan(
+        &copy.identity,
+        folder_identity
+            .as_ref()
+            .map(|read| read.as_ref().map_err(String::as_str)),
+        established,
+        options.identity,
+    )
+    .map_err(|error| made.unchanged(paths, error))?;
+    let installing = match (plan, &copy.identity) {
+        (IdentityPlan::Install, CopyIdentity::Present(identity)) => Some(identity.clone()),
+        _ => None,
+    };
+    let former = existing
+        .as_ref()
+        .map(|config| (config.host_id.clone(), config.port));
     known.merge(aside_floors(&paths.data_dir).await);
     // A WAL beside no database would be read by the restored one: it goes
     // aside too.
     let leftovers = database_files(&db).iter().any(|file| file.exists());
-    let aside = leftovers.then(|| aside_dir(paths, now));
+    // An identity the copy's replaces is kept in the aside folder, made for
+    // it even when there is no database to set aside (plan I1).
+    let replacing = installing.is_some() && former.is_some();
+    let aside = (leftovers || replacing).then(|| aside_dir(paths, now));
+    let saved_as = aside.clone().filter(|_| leftovers);
     let staged = stage(
         &copy,
         &staging,
@@ -1513,8 +1789,9 @@ async fn restore_until(
             history_known,
             known: &known,
             revoked: revoked.as_ref(),
+            identity: plan.audit_word(),
         },
-        aside.as_deref(),
+        saved_as.as_deref(),
         now,
     )
     .await;
@@ -1525,9 +1802,10 @@ async fn restore_until(
             return Err(made.unchanged(paths, error));
         }
     };
-    let (config, new_identity) = match existing {
-        Some(config) => (config, false),
-        None => match HostConfig::load_or_create(paths, None) {
+    let (config, new_identity) = match (&installing, existing) {
+        (Some(identity), _) => (identity.config(), false),
+        (None, Some(config)) => (config, false),
+        (None, None) => match HostConfig::load_or_create(paths, None) {
             Ok(config) => {
                 made.identity = true;
                 (config, true)
@@ -1538,6 +1816,20 @@ async fn restore_until(
             }
         },
     };
+    if let Some(identity) = &installing {
+        if let Err(error) = stage_identity(paths, identity) {
+            remove_identity_staging(paths);
+            remove_staging(&staging);
+            return Err(made.unchanged(
+                paths,
+                format!("the copy's host identity could not be staged: {error}"),
+            ));
+        }
+        if crash == Some(CrashPoint::IdentityStaged) {
+            drop(lock);
+            return Err(Box::new(Crashed));
+        }
+    }
     let intent = Intent {
         format: INTENT_FORMAT,
         step: "swap".to_owned(),
@@ -1551,8 +1843,10 @@ async fn restore_until(
             .unwrap_or_default(),
         epoch: raised.epoch.clone(),
         started_at: format_timestamp(now),
+        identity: installing.is_some(),
     };
     if let Err(error) = write_intent(paths, &intent) {
+        remove_identity_staging(paths);
         remove_staging(&staging);
         return Err(made.unchanged(
             paths,
@@ -1565,8 +1859,10 @@ async fn restore_until(
             return Err(Box::new(Crashed));
         }
         if failure.stranded.is_empty() {
-            // Everything is back: the marker goes, then the new database (a
-            // cut between leaves a stale `host.db.partial`, nothing worse).
+            // Everything is back: the staged identity goes, then the marker,
+            // then the new database (a cut between leaves a stale
+            // `host.db.partial`, nothing worse).
+            remove_identity_staging(paths);
             let marker = remove_intent(paths);
             remove_staging(&staging);
             let cause = format!(
@@ -1582,8 +1878,8 @@ async fn restore_until(
                 .into(),
             });
         }
-        // The marker and the new database stay: the next restore puts the
-        // previous files back first.
+        // The marker, the new database and the staged identity stay: the
+        // next restore puts the previous files back first.
         return Err(format!(
             "the new database could not be put in place: {}. THE PREVIOUS DATABASE COULD NOT BE PUT BACK ({}): its files are in {}. Run the same markiro-host restore command again: it puts them back first (the host does not start until then); if that fails too, call support",
             failure.cause,
@@ -1591,6 +1887,18 @@ async fn restore_until(
             aside.as_deref().map_or_else(String::new, |dir| dir.display().to_string()),
         )
         .into());
+    }
+    if installing.is_some() {
+        if let Err(error) = install_identity(paths, aside.as_deref(), crash) {
+            if error.is::<Crashed>() {
+                drop(lock);
+                return Err(error);
+            }
+            return Err(format!(
+                "the copy is in place, but its host identity could not be put in place ({error}): run the same markiro-host restore command again: it finishes that first; the host does not start until then"
+            )
+            .into());
+        }
     }
     if let Err(error) = remove_intent(paths) {
         return Err(format!(
@@ -1600,13 +1908,31 @@ async fn restore_until(
         .into());
     }
     drop(lock);
+    let identity = match (plan, &installing) {
+        (IdentityPlan::Install, Some(identity)) => IdentityOutcome::Restored {
+            host_id: identity.host_id().to_owned(),
+            fingerprint: identity.fingerprint().to_owned(),
+            port: identity.port(),
+            replaced: former.as_ref().map(|(host_id, _)| host_id.clone()),
+            saved_in: aside
+                .as_ref()
+                .filter(|_| former.is_some())
+                .map(|dir| dir.join("identity")),
+            former_port: former.as_ref().map(|(_, port)| *port),
+        },
+        (IdentityPlan::Same, _) => IdentityOutcome::Same,
+        (IdentityPlan::KeepFolder, _) => IdentityOutcome::Kept {
+            copy_had_one: !matches!(copy.identity, CopyIdentity::Absent),
+        },
+        _ => IdentityOutcome::Created,
+    };
     Ok(RestoreReport {
         other_host: other_host(&copy, &config),
         copy,
         data_dir: std::path::absolute(&paths.data_dir).unwrap_or_else(|_| paths.data_dir.clone()),
         current,
         history_known,
-        saved_as: aside,
+        saved_as,
         epoch: raised.epoch,
         counters: raised.counters,
         shift_numbers: raised.shift_numbers,
@@ -1616,6 +1942,7 @@ async fn restore_until(
         sessions_ended: raised.sessions_ended,
         interrupted: made.interrupted,
         copy_made: raised.copy_made,
+        identity,
     })
 }
 
@@ -1629,6 +1956,8 @@ struct Before<'a> {
     history_known: bool,
     known: &'a Floors,
     revoked: Option<&'a Revoked>,
+    /// The audit word of what becomes of the host identity (plan I1).
+    identity: &'static str,
 }
 
 /// The new database at `staging`: the copy, migrated, raised and checked.
@@ -1823,6 +2152,7 @@ async fn raise_in(
         history_known,
         known,
         revoked,
+        identity,
     } = before;
     let at = format_timestamp(now);
     let copy_floors = read_floors(&mut *tx).await?;
@@ -2014,6 +2344,7 @@ async fn raise_in(
                     "officeUsers": carried.office_users,
                 })),
                 "sessionsEnded": sessions_ended,
+                "identity": identity,
             }),
         },
     )
@@ -2054,6 +2385,44 @@ pub fn summary(report: &RestoreReport) -> Vec<String> {
             "a new host identity was created in {}: every device pairs with this host again",
             report.data_dir.join("host.json").display()
         ));
+    }
+    match &report.identity {
+        IdentityOutcome::Same => {
+            lines.push("the host identity is the copy's: devices keep their pairing".to_owned());
+        }
+        IdentityOutcome::Restored {
+            host_id,
+            fingerprint,
+            port,
+            replaced,
+            saved_in,
+            former_port,
+        } => {
+            lines.push(format!(
+                "the copy's host identity was put in place (host {host_id}, certificate {}): devices paired with that host keep their pairing; at a new address, give this computer the old one's address or change the host address on each device (Офис → «Изменить адрес хоста»)",
+                markiro_proto::display_fingerprint(fingerprint)
+            ));
+            if let Some(replaced) = replaced {
+                lines.push(match saved_in {
+                    Some(dir) => format!(
+                        "the identity this data folder had (host {replaced}) was replaced; its files are in {}",
+                        dir.display()
+                    ),
+                    None => format!("the identity this data folder had (host {replaced}) was replaced"),
+                });
+            }
+            let opened = former_port.unwrap_or(markiro_proto::DEFAULT_PORT);
+            if *port != opened {
+                lines.push(format!(
+                    "the restored identity listens on port {port}, not on {opened}: run the installer again so the firewall opens port {port}"
+                ));
+            }
+        }
+        IdentityOutcome::Kept { copy_had_one: true } => lines.push(
+            "the copy's host identity was not used (--keep-identity): every device pairs with this host again"
+                .to_owned(),
+        ),
+        IdentityOutcome::Kept { copy_had_one: false } | IdentityOutcome::Created => {}
     }
     match report.interrupted {
         Some(Interrupted::RolledBack) => lines.push(
@@ -2530,6 +2899,7 @@ mod tests {
             staging: "host.db.partial".to_owned(),
             epoch: "e".to_owned(),
             started_at: "2026-10-09T15:00:00Z".to_owned(),
+            identity: true,
         };
 
         write_intent(&paths, &intent).unwrap();
@@ -2579,6 +2949,118 @@ mod tests {
         assert!(error.contains("changed while"), "{error}");
         fs::write(&source, "shorter").unwrap();
         assert!(place(&checked, &staging).is_err());
+    }
+
+    #[test]
+    fn a_marker_of_an_older_build_reads_and_stages_no_identity() {
+        let older = r#"{"format":1,"step":"swap","aside":null,"staging":"host.db.partial","epoch":"e","startedAt":"2026-10-09T15:00:00Z"}"#;
+        let intent: Intent = serde_json::from_str(older).unwrap();
+        assert!(!intent.identity);
+    }
+
+    /// A report of a restore whose identity outcome is `identity`.
+    fn report_with(copy: VerifiedCopy, identity: IdentityOutcome) -> RestoreReport {
+        RestoreReport {
+            copy,
+            data_dir: PathBuf::from("/data"),
+            current: Current::Read,
+            saved_as: Some(PathBuf::from("/data/restore-1")),
+            epoch: "e".to_owned(),
+            counters: Vec::new(),
+            shift_numbers: Vec::new(),
+            other_host: false,
+            new_identity: false,
+            revision: 2,
+            history_known: false,
+            carried: None,
+            sessions_ended: 0,
+            interrupted: None,
+            copy_made: "2026-10-09T14:00:00Z".to_owned(),
+            identity,
+        }
+    }
+
+    #[test]
+    fn the_summary_says_what_became_of_the_identity_and_which_port_to_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("copy.db");
+        fs::write(&source, "a copy").unwrap();
+        let restored = |port: u16,
+                        replaced: Option<&str>,
+                        saved_in: Option<&str>,
+                        former_port: Option<u16>| {
+            summary(&report_with(
+                verified(&source),
+                IdentityOutcome::Restored {
+                    host_id: "host-a".to_owned(),
+                    fingerprint: "ab".repeat(32),
+                    port,
+                    replaced: replaced.map(str::to_owned),
+                    saved_in: saved_in.map(PathBuf::from),
+                    former_port,
+                },
+            ))
+        };
+        let port_lines = |lines: &[String]| {
+            lines
+                .iter()
+                .filter(|line| line.starts_with("the restored identity listens on port"))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        // Same port as the one the installer opened: nothing to do.
+        let lines = restored(
+            45710,
+            Some("host-b"),
+            Some("/data/restore-1/identity"),
+            Some(45710),
+        );
+        assert!(port_lines(&lines).is_empty(), "{lines:#?}");
+        assert!(lines.contains(&"the identity this data folder had (host host-b) was replaced; its files are in /data/restore-1/identity".to_owned()), "{lines:#?}");
+        assert!(
+            lines.iter().any(|line| line.starts_with(&format!(
+                "the copy's host identity was put in place (host host-a, certificate {})",
+                markiro_proto::display_fingerprint(&"ab".repeat(32))
+            ))),
+            "{lines:#?}"
+        );
+        // Another port than the folder's: the installer opens it.
+        let lines = restored(46000, Some("host-b"), None, Some(45710));
+        assert_eq!(
+            port_lines(&lines),
+            ["the restored identity listens on port 46000, not on 45710: run the installer again so the firewall opens port 46000"]
+        );
+        assert!(
+            lines.contains(
+                &"the identity this data folder had (host host-b) was replaced".to_owned()
+            ),
+            "{lines:#?}"
+        );
+        // A folder that had none: the installer's default port counts.
+        assert!(port_lines(&restored(45710, None, None, None)).is_empty());
+        assert_eq!(
+            port_lines(&restored(46000, None, None, None)),
+            ["the restored identity listens on port 46000, not on 45710: run the installer again so the firewall opens port 46000"]
+        );
+        let lines = restored(46000, None, None, Some(46000));
+        assert!(port_lines(&lines).is_empty(), "{lines:#?}");
+        assert!(
+            !lines.iter().any(|line| line.contains("was replaced")),
+            "{lines:#?}"
+        );
+        // Kept without one, and created: no identity line beyond the old ones.
+        for quiet in [
+            IdentityOutcome::Kept {
+                copy_had_one: false,
+            },
+            IdentityOutcome::Created,
+        ] {
+            let lines = summary(&report_with(verified(&source), quiet));
+            assert!(
+                !lines.iter().any(|line| line.contains("identity")),
+                "{lines:#?}"
+            );
+        }
     }
 
     #[test]

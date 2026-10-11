@@ -2,7 +2,7 @@
 //!   run [--data-dir <path>] [--port <port>]   serve in the foreground
 //!   service                                   run under the Windows service manager
 //!   print-fingerprint [--data-dir <path>]     print the certificate fingerprint
-//!   restore <copy> [--data-dir <path>] [--without-manifest]
+//!   restore <copy> [--data-dir <path>] [--without-manifest] [--keep-identity | --take-identity]
 //!                                             put a copy back (the service stopped)
 //!   verify-copy <copy> [--without-manifest]   check a copy
 //!   install                                   register and start the service (Windows, administrator)
@@ -21,7 +21,7 @@ use std::process::ExitCode;
 use markiro_host::config::{HostConfig, HostPaths};
 use markiro_host::install::{InstallError, ServiceState, SystemCommands};
 use markiro_host::network_profile::{self, PUBLIC_REMAINS};
-use markiro_host::restore::CopyIdentity;
+use markiro_host::restore::{CopyIdentity, IdentityChoice, RestoreOptions};
 use markiro_host::{BoxError, StartOptions};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -38,6 +38,7 @@ enum Command {
         data_dir: PathBuf,
         copy: PathBuf,
         without_manifest: bool,
+        identity: IdentityChoice,
     },
     VerifyCopy {
         copy: PathBuf,
@@ -54,7 +55,7 @@ enum Command {
 const USAGE: &str = "usage: markiro-host run [--data-dir <path>] [--port <port>]
        markiro-host service
        markiro-host print-fingerprint [--data-dir <path>]
-       markiro-host restore <copy> [--data-dir <path>] [--without-manifest]
+       markiro-host restore <copy> [--data-dir <path>] [--without-manifest] [--keep-identity | --take-identity]
        markiro-host verify-copy <copy> [--without-manifest]
        markiro-host install | uninstall | stop-service
        markiro-host network-check [--make-private]";
@@ -89,6 +90,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
     let mut data_dir = None;
     let mut port = None;
     let mut without_manifest = false;
+    let mut identity = IdentityChoice::Auto;
     let mut index = 0;
     while index < rest.len() {
         let value = rest.get(index + 1);
@@ -106,11 +108,29 @@ fn parse(args: &[String]) -> Result<Command, String> {
                 without_manifest = true;
                 index += 1;
             }
+            flag @ ("--keep-identity" | "--take-identity") => {
+                let chosen = if flag == "--keep-identity" {
+                    IdentityChoice::Keep
+                } else {
+                    IdentityChoice::Take
+                };
+                if identity != IdentityChoice::Auto && identity != chosen {
+                    return Err(format!(
+                        "--keep-identity and --take-identity exclude each other\n{USAGE}"
+                    ));
+                }
+                identity = chosen;
+                index += 1;
+            }
             other => return Err(format!("unknown argument {other}\n{USAGE}")),
         }
     }
     let data_dir_or_default =
         |data_dir: Option<PathBuf>| data_dir.unwrap_or_else(HostPaths::default_data_dir);
+    // The identity flags belong to `restore` alone.
+    if identity != IdentityChoice::Auto && command.as_str() != "restore" {
+        return Err(USAGE.to_owned());
+    }
     match (command.as_str(), copy) {
         ("run", None) if !without_manifest => Ok(Command::Run {
             data_dir: data_dir_or_default(data_dir),
@@ -126,6 +146,7 @@ fn parse(args: &[String]) -> Result<Command, String> {
             data_dir: data_dir_or_default(data_dir),
             copy,
             without_manifest,
+            identity,
         }),
         ("verify-copy", Some(copy)) if port.is_none() && data_dir.is_none() => {
             Ok(Command::VerifyCopy {
@@ -154,7 +175,8 @@ fn main() -> ExitCode {
             data_dir,
             copy,
             without_manifest,
-        } => restore(data_dir, copy, without_manifest),
+            identity,
+        } => restore(data_dir, copy, without_manifest, identity),
         Command::VerifyCopy {
             copy,
             without_manifest,
@@ -332,14 +354,21 @@ fn print_fingerprint(data_dir: PathBuf) -> Result<(), BoxError> {
     Ok(())
 }
 
-fn restore(data_dir: PathBuf, copy: PathBuf, without_manifest: bool) -> Result<(), BoxError> {
+fn restore(
+    data_dir: PathBuf,
+    copy: PathBuf,
+    without_manifest: bool,
+    identity: IdentityChoice,
+) -> Result<(), BoxError> {
     let paths = HostPaths::new(data_dir);
     let runtime = tokio::runtime::Runtime::new()?;
-    let result = runtime.block_on(markiro_host::restore::restore(
+    let result = runtime.block_on(markiro_host::restore::restore_now(
         &paths,
         &copy,
-        without_manifest,
-        time::OffsetDateTime::now_utc(),
+        RestoreOptions {
+            without_manifest,
+            identity,
+        },
     ));
     // Reading a copy from an unreachable share can block a thread that
     // nothing cancels.
@@ -431,6 +460,7 @@ mod tests {
                 data_dir: PathBuf::from("/tmp/h"),
                 copy: PathBuf::from("C:/copies/a.db"),
                 without_manifest: false,
+                identity: IdentityChoice::Auto,
             })
         );
         assert_eq!(
@@ -439,6 +469,7 @@ mod tests {
                 data_dir: HostPaths::default_data_dir(),
                 copy: PathBuf::from("a.db"),
                 without_manifest: true,
+                identity: IdentityChoice::Auto,
             })
         );
         assert_eq!(
@@ -457,12 +488,49 @@ mod tests {
     }
 
     #[test]
+    fn restore_takes_one_identity_flag_and_no_other_command_takes_one() {
+        assert_eq!(
+            parse(&args(&["restore", "a.db", "--take-identity"])),
+            Ok(Command::Restore {
+                data_dir: HostPaths::default_data_dir(),
+                copy: PathBuf::from("a.db"),
+                without_manifest: false,
+                identity: IdentityChoice::Take,
+            })
+        );
+        assert_eq!(
+            parse(&args(&[
+                "restore",
+                "a.db",
+                "--keep-identity",
+                "--keep-identity"
+            ])),
+            Ok(Command::Restore {
+                data_dir: HostPaths::default_data_dir(),
+                copy: PathBuf::from("a.db"),
+                without_manifest: false,
+                identity: IdentityChoice::Keep,
+            })
+        );
+        assert!(parse(&args(&[
+            "restore",
+            "a.db",
+            "--keep-identity",
+            "--take-identity"
+        ]))
+        .is_err());
+        assert!(parse(&args(&["verify-copy", "a.db", "--take-identity"])).is_err());
+        assert!(parse(&args(&["run", "--keep-identity"])).is_err());
+    }
+
+    #[test]
     fn restore_of_a_missing_copy_is_an_error_and_writes_nothing() {
         let dir = tempfile::tempdir().unwrap();
         let error = restore(
             dir.path().to_path_buf(),
             dir.path().join("no-such-copy.db"),
             true,
+            IdentityChoice::Auto,
         )
         .unwrap_err()
         .to_string();
