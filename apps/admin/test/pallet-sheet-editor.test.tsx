@@ -192,3 +192,51 @@ it("blocks unrelated route navigation with a dirty A4 draft until discard is con
   await screen.findByText("Other destination");
   vi.unstubAllGlobals();
 });
+
+it("edits and removes footer caption and product underline without adding them to legacy JSON", () => {
+  const changed = vi.fn();
+  function Harness() {
+    const [value, setValue] = useState<PalletSheetSpecV2>({
+      ...spec,
+      body: [{ id: "product", kind: "field", field: "product.printName", fontSizePt: 12 }],
+      footer: {
+        id: "sscc",
+        kind: "sscc",
+        source: "sscc",
+        barHeightMm: 45,
+        moduleDots: 11,
+        align: "center",
+      },
+    });
+    return (
+      <SheetEditor
+        selectedId="product"
+        value={value}
+        onChange={(next) => {
+          changed(next);
+          setValue(next);
+        }}
+      />
+    );
+  }
+  render(<Harness />);
+  expect(
+    screen.getByRole("checkbox", { name: "Подчёркивание поля" }).getAttribute("aria-checked"),
+  ).toBe("false");
+  fireEvent.click(screen.getByRole("checkbox", { name: "Подчёркивание поля" }));
+  fireEvent.change(screen.getByLabelText("Толщина подчёркивания, мм"), {
+    target: { value: "0.2" },
+  });
+  expect(changed.mock.lastCall?.[0].body[0].underline.thicknessMm).toBe(0.2);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Подпись под SSCC" }));
+  fireEvent.change(screen.getByLabelText("Текст платформы"), { target: { value: "Маркиро" } });
+  fireEvent.click(screen.getByRole("checkbox", { name: "Показывать ИНН" }));
+  const current = changed.mock.lastCall?.[0];
+  expect(current.footer.caption).toMatchObject({ platformText: "Маркиро", showInn: false });
+  expect(parsePalletSheetSpec(JSON.parse(JSON.stringify(current)))).toEqual(current);
+  fireEvent.click(screen.getByRole("checkbox", { name: "Подпись под SSCC" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Подчёркивание поля" }));
+  const cleared = changed.mock.lastCall?.[0];
+  expect(JSON.parse(JSON.stringify(cleared)).footer).not.toHaveProperty("caption");
+  expect(JSON.parse(JSON.stringify(cleared)).body[0]).not.toHaveProperty("underline");
+});
