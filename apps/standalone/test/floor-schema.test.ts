@@ -4,6 +4,13 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import {
+  BOX_STATE_SQL,
+  CLOSED_BOXES_SQL,
+  LAST_BOX_JOB_SQL,
+  LAST_CODE_SQL,
+  NEWEST_CODE_SCAN_SQL,
+} from "../src/floor/exceptions/box-exceptions.js";
+import {
   CONFLICT_COUNT_SQL,
   HEAD_RECORD_SQL,
   REJECTED_COUNT_SQL,
@@ -707,6 +714,23 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(plan(BOX_CODES_SQL)).not.toContain("TEMP B-TREE");
     // A box closed whose answer was lost is read back by its own key.
     expect(plan(CLOSED_BOX_SQL)).toContain("sqlite_autoindex_floor_boxes_1 (id=?)");
+    // The box exceptions (plan 2a8): the last code of the open box and the newest scan
+    // among its codes search the box's own codes (the sort of a box's few codes is
+    // the capacity's worth), the closed boxes of a shift the shift's index, a box
+    // is read by its key and the box's newest print job through the shift's jobs.
+    for (const sql of [LAST_CODE_SQL, NEWEST_CODE_SCAN_SQL]) {
+      expect(plan(sql)).toContain("floor_codes_box (host_id=? AND device_id=? AND box_id=?)");
+    }
+    expect(plan(CLOSED_BOXES_SQL)).toContain(
+      "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?",
+    );
+    expect(plan(BOX_STATE_SQL)).toContain("sqlite_autoindex_floor_boxes_1 (id=?)");
+    expect(plan(LAST_BOX_JOB_SQL)).toContain(
+      "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
+    );
+    for (const sql of [NEWEST_CODE_SCAN_SQL, BOX_STATE_SQL, LAST_BOX_JOB_SQL]) {
+      expect(plan(sql), sql).not.toContain("TEMP B-TREE");
+    }
     // The scan pipeline's own reads and its one UPDATE, on every scan: the
     // station's registry of a code (the key of `floor_codes`), the open box of
     // a shift, and the open box's count by the box's own key.

@@ -107,3 +107,45 @@ export function outboxStatement(
     expectedChanges: 1,
   };
 }
+
+/**
+ * The station's `floor_exceptions` row and the `box_exception` record of one
+ * exception (stage 2a spec §5.7.6), for the transaction that applies its
+ * consequences: the same fields in both, so the audit row and the fact the
+ * host receives never differ. The ONE writer of both rows — every kind, the
+ * reprint of a box whose label waits (plan 2a7, `printAgain`) and the
+ * exceptions of plan 2a8 alike.
+ */
+export function exceptionStatements(
+  context: { pairing: Pairing; operatorId: string; newId: () => string },
+  shiftId: string,
+  data: BoxExceptionFact,
+): LocalStatement[] {
+  const { pairing, operatorId } = context;
+  const rowId = context.newId();
+  const record = boxExceptionRecord({ id: context.newId(), shiftId, operatorId }, data);
+  return [
+    {
+      sql:
+        "INSERT INTO floor_exceptions (id, host_id, device_id, shift_id, kind, box_id, code_hash, " +
+        "target_scanned_at, reason_code, reason_text, occurred_at, operator_id) " +
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      values: [
+        rowId,
+        pairing.hostId,
+        pairing.deviceId,
+        shiftId,
+        data.exception,
+        data.boxId,
+        data.codeHash,
+        data.targetScannedAt,
+        data.reasonCode,
+        data.reasonText,
+        data.occurredAt,
+        operatorId,
+      ],
+      expectedChanges: 1,
+    },
+    outboxStatement(record, pairing, data.occurredAt),
+  ];
+}

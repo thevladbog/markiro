@@ -3,7 +3,7 @@ import { parseScannedSscc, type LabelTemplateSpec } from "@markiro/domain";
 import { bytesToBase64 } from "../../hardware/hardware.js";
 import { LocalDbError, type LocalStatement } from "../../local/executor.js";
 import type { ReprintReason } from "../exception-reasons.js";
-import { boxExceptionRecord, boxLabelRecord, outboxStatement } from "../facts.js";
+import { boxLabelRecord, exceptionStatements, outboxStatement } from "../facts.js";
 import {
   resolvePrinter,
   type PrinterProfile,
@@ -73,8 +73,9 @@ function labelRecord(
 /**
  * The records of a reprint (decision 36): the station's `floor_exceptions`
  * row and the `box_exception` record of kind `reprint` with its reason, no
- * words (the work screen offers the codes only). A pallet's reprint is the
- * pallets' plan's.
+ * words (the work screen offers the codes only) — written by the one writer
+ * of exceptions (`exceptionStatements`), as the reprint of a settled box is
+ * (plan 2a8). A pallet's reprint is the pallets' plan's.
  */
 function reprintStatements(
   context: ResolveContext,
@@ -83,38 +84,15 @@ function reprintStatements(
   at: string,
 ): LocalStatement[] {
   if (job.purpose !== "box") throw new UnresolvableJobError(job.id, job.state);
-  const exceptionId = context.newId();
-  const record = boxExceptionRecord(
-    { id: context.newId(), shiftId: job.shiftId, operatorId: context.operatorId },
-    {
-      exception: "reprint",
-      boxId: job.subjectId,
-      codeHash: null,
-      targetScannedAt: null,
-      reasonCode: reason,
-      reasonText: null,
-      occurredAt: at,
-    },
-  );
-  return [
-    {
-      sql:
-        "INSERT INTO floor_exceptions (id, host_id, device_id, shift_id, kind, box_id, " +
-        "reason_code, occurred_at, operator_id) VALUES (?, ?, ?, ?, 'reprint', ?, ?, ?, ?)",
-      values: [
-        exceptionId,
-        context.pairing.hostId,
-        context.pairing.deviceId,
-        job.shiftId,
-        job.subjectId,
-        reason,
-        at,
-        context.operatorId,
-      ],
-      expectedChanges: 1,
-    },
-    outboxStatement(record, context.pairing, at),
-  ];
+  return exceptionStatements(context, job.shiftId, {
+    exception: "reprint",
+    boxId: job.subjectId,
+    codeHash: null,
+    targetScannedAt: null,
+    reasonCode: reason,
+    reasonText: null,
+    occurredAt: at,
+  });
 }
 
 /** Writes `statements` (the first one compares the job), mapping a lost comparison to `StaleJobError`. */
