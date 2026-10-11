@@ -235,7 +235,7 @@ export async function disassemblePallet(
     // A label job that opened after the read is what the screen is told; any
     // other change since the read stays `stale`.
     const last = await readLastPalletJob(context, palletId);
-    if (last !== null && isOpenJob(last)) throw new LabelWaitingError(palletId);
+    if (last !== null && isOpenJob(last)) throw new LabelWaitingError(palletId, "pallet");
     return { kind: "stale" };
   }
   return { kind: "done", boxes: pallet.boxes };
@@ -310,7 +310,7 @@ export async function reprintPallet(
   }
   const last = await readLastPalletJob(context, palletId);
   if (last === null) throw new PalletUnavailableError(palletId);
-  if (isOpenJob(last)) throw new LabelWaitingError(palletId);
+  if (isOpenJob(last)) throw new LabelWaitingError(palletId, "pallet");
   const { template } = pallets;
   if (template.id !== last.templateId || template.rev !== last.templateRev) {
     throw new PalletTemplateChangedError(palletId);

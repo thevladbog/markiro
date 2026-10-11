@@ -353,10 +353,10 @@ export async function disassembleBox(
   return written === "stale" ? { kind: "stale" } : { kind: "done", freed: box.codes };
 }
 
-/** The box's label still waits (its print job): the work screen decides it first. */
+/** The label of a box or a pallet still waits (its print job): the work screen decides it first. */
 export class LabelWaitingError extends Error {
-  constructor(boxId: string) {
-    super(`the label of box ${boxId} still waits`);
+  constructor(subjectId: string, subject: "box" | "pallet" = "box") {
+    super(`the label of ${subject} ${subjectId} still waits`);
     this.name = "LabelWaitingError";
   }
 }

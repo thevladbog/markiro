@@ -13,6 +13,7 @@ import type { CloseBlocker, CloseSummary } from "../src/floor/close/shift-close.
 import { PALLET_EXTENSION } from "../src/floor/pallets/pallets.js";
 import { saveWorkstationSettings } from "../src/floor/setup/workstation-settings.js";
 import type * as PrintResolution from "../src/floor/print/print-resolution.js";
+import type { SsccBlockRequest } from "../src/host/protocol.js";
 import { LocalDbError, type LocalExecutor } from "../src/local/executor.js";
 import { holdingWrites, km, PREFIX, rows } from "./support/floor-work.js";
 import { fakeHardware } from "./support/hardware.js";
@@ -28,6 +29,7 @@ const STALE = "Пока вы смотрели итоги, смена измен�
 const AFTER_LABEL = "Паллета закрыта. Смена закроется, как только вы решите по этикетке паллеты.";
 const REFUSED = "Скан не принят: смена закрыта на этой станции.";
 const MOVED = "Состояние этикетки изменилось — показано текущее.";
+const SHIFT_OPEN = "Смена не закрыта: когда паллета закроется, нажмите «Закрыть смену» ещё раз.";
 const noPalletPrinter = { assignments: { box: "zebra", pallet: null, duplicate: null } } as const;
 
 // Set by a test: the next check of a label is refused as one its job cannot be checked from.
@@ -553,13 +555,43 @@ describe("the pallet's label and the pallet's serial inside the close", () => {
     const work = await twoBoxesThenClose(at);
     await work.press("Закрыть паллету и смену");
     expect(screen.getByText("Паллета не закрыта")).toBeTruthy();
+    // The stop of the shift's close says the shift is NOT closed (the intention is dropped).
+    expect(screen.getByText(SHIFT_OPEN)).toBeTruthy();
     expect(kinds(at)).toEqual(["box_closed", "box_closed"]);
     expect(localState(at)).toBeNull();
     expect(document.activeElement).toBe(document.querySelector(".work-screen__last"));
     await work.press("Повторить");
     expect(kinds(at)).toEqual(["box_closed", "box_closed", "pallet_closed"]);
     expect(screen.queryByText("Паллета не закрыта")).toBeNull();
+    expect(screen.queryByText(SHIFT_OPEN)).toBeNull();
     // The intention to close is not kept: the shift is open, and the operator presses again.
+    expect(localState(at)).toBeNull();
+  });
+
+  it("keeps saying the shift is not closed on «Повторить» and when the link brings a block that cannot label a pallet", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1, palletBlock: false });
+    holdSscc(at, 0);
+    const work = await twoBoxesThenClose(at);
+    await work.press("Закрыть паллету и смену");
+    expect(screen.getByText("Нет номеров SSCC паллет: паллета не закрыта")).toBeTruthy();
+    expect(screen.getByText(SHIFT_OPEN)).toBeTruthy();
+    // «Повторить» with the serials still missing: the stop is the close's still.
+    await work.press("Повторить");
+    expect(screen.getByText("Нет номеров SSCC паллет: паллета не закрыта")).toBeTruthy();
+    expect(screen.getByText(SHIFT_OPEN)).toBeTruthy();
+    // The link brings a block whose first serial is held: the close's stop, in the failed words.
+    const requestBlock = vi.fn(async (request: SsccBlockRequest) => ({
+      id: "d6e0b0c4-0f7a-4f4e-9d0f-5a3b7f7f3c11",
+      issuerPrefix: request.issuerPrefix,
+      extension: request.extension,
+      fromSerial: 0,
+      toSerial: 199,
+    }));
+    work.rerender({ online: true, requestBlock });
+    await work.settled();
+    expect(await screen.findByText("Паллета не закрыта")).toBeTruthy();
+    expect(screen.getByText(SHIFT_OPEN)).toBeTruthy();
+    expect(kinds(at)).toEqual(["box_closed", "box_closed"]);
     expect(localState(at)).toBeNull();
   });
 
@@ -843,7 +875,7 @@ const BLOCKED_WORDS: Record<CloseBlocker["kind"], { blocker: CloseBlocker; words
   },
   open_pallet: {
     blocker: { kind: "open_pallet", boxes: 2 },
-    words: "На открытой паллете 2 коробов. Сначала закройте её.",
+    words: "Коробов на открытой паллете: 2. Сначала закройте её.",
   },
   closed: {
     blocker: { kind: "closed" },

@@ -3417,14 +3417,13 @@ Known limits of the pallets, and who carries each:
   migration and moves the table off the two pinned scan lists.
 - The intention to close the shift is not kept across a pallet stop (no serial,
   a lost serial, a label error): the operator presses again (question ВЦ3 of
-  the plan, recommended answer). After a pallet stop of the early close the
-  shift stays open.
+  the plan, recommended answer). After a pallet stop of «Закрыть паллету и
+  смену» the shift stays open, and the stop says so («Смена не закрыта…»; the
+  stop carries `fromClose`, which «Повторить» and the link-back keep).
 - A full pallet waiting for serials asks the host for them, inside the work
   queue, on every box close while the link is up: up to 2 × 10 s when the host
   hangs, during which the work queue waits, as a box close waiting for box
   serials does.
-- The scan feedback of the pallet choice (a tone and a short flash of the work
-  screen) still says «короб»; the flow's own words are the pallet's.
 - Pallets of several stations on one shift and the revocation of pallet blocks
   are stage 2b (plan ПЛ-Х, «Перенесено»).
 

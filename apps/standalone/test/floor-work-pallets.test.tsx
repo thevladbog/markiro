@@ -92,6 +92,12 @@ describe("the work screen of a shift with pallets (plan ПЛ-Ц)", () => {
     await work.settled();
     await work.scan(km("A1"));
     expect(screen.getByText("Паллета заполнена, но не закрыта")).toBeTruthy();
+    // The wait names the way out when the prefix has no numbers left.
+    expect(
+      screen.getByText(
+        "Нет номеров SSCC паллет: паллета закроется, как только они придут от хоста. Следующие короба встают на неё. Если номера префикса закончились, обратитесь к администратору.",
+      ),
+    ).toBeTruthy();
     await work.scan(km("A2"));
     expect(palletLine()).toBe("2 из 1 коробов");
     expect(kinds(at)).toEqual(["box_closed", "box_closed"]);
@@ -363,6 +369,13 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     await work.press("Закрыть паллету досрочно");
     await work.press("Закрыть паллету");
     expect(screen.getByText("Паллета не закрыта")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Номер SSCC паллеты не подошёл (вне диапазона префикса или уже занят другой паллетой) и пропущен, или паллета изменилась. Повторите закрытие.",
+      ),
+    ).toBeTruthy();
+    // The early close is not the shift's: nothing is said of the shift.
+    expect(screen.queryByText(/Смена не закрыта/)).toBeNull();
     expect(kinds(at)).not.toContain("pallet_closed");
     expect(palletCursor(at)).toEqual([1]);
     await work.press("Повторить");

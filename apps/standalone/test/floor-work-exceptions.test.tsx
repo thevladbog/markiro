@@ -34,7 +34,7 @@ type Work = ReturnType<typeof renderWork>;
 const SECOND_SSCC = buildSscc(0, PREFIX, 1501);
 const PAUSED = "Скан не принят: работа остановлена — сначала ответьте на сообщение на экране.";
 const FAILED =
-  "Не удалось записать исключение на этом компьютере. Возможно, оно всё же записалось: проверьте числа короба, прежде чем повторять.";
+  "Не удалось записать исключение на этом компьютере. Возможно, оно всё же записалось: проверьте исключения и числа смены, прежде чем повторять.";
 const STALE =
   "Пока вы выбирали, короб изменился. Проверьте числа короба и повторите, если ещё нужно.";
 const ZEBRA_LINE = "Печать пойдёт на принтер: Zebra у линии · ZPL · 203 dpi.";
@@ -828,7 +828,7 @@ describe("what the box choice says of a scan", () => {
     signal.mockClear();
     await work.scan(`]C100${SECOND_SSCC}`);
     expect(signal).toHaveBeenLastCalledWith("error");
-    expect(screen.getByText("НЕТ ТАКОГО КОРОБА")).toBeTruthy();
+    expect(screen.getByText("НЕ НАЙДЕНО СРЕДИ ЗАКРЫТЫХ")).toBeTruthy();
     signal.mockClear();
     await work.scan(`]C100${FIRST_SSCC}`);
     expect(signal).toHaveBeenLastCalledWith("ok");

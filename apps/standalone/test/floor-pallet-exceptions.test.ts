@@ -232,9 +232,10 @@ describe("«Расформировать паллету» (plan ПЛ-Ц)", () =>
   it("is refused by its own transaction while the pallet's label job is open, writing nothing", async () => {
     const { at, palletId } = await closedPallet({ settings: { verifyPrintedLabel: true } });
     const context = palletContext(at);
-    await expect(
-      disassemblePallet(context, palletId, { code: "wrong_product", text: null }),
-    ).rejects.toBeInstanceOf(LabelWaitingError);
+    const refused = disassemblePallet(context, palletId, { code: "wrong_product", text: null });
+    await expect(refused).rejects.toBeInstanceOf(LabelWaitingError);
+    // The message names a pallet, not a box (the log's words; the screen maps by class).
+    await expect(refused).rejects.toThrow(`the label of pallet ${palletId} still waits`);
     expect(rows(at.db, "SELECT disassembled_at FROM floor_pallets")).toEqual([
       { disassembled_at: null },
     ]);

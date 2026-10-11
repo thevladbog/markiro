@@ -27,7 +27,7 @@ const STALE = "Пока вы выбирали, паллета изменилас
 const GONE = "Этой паллеты больше нет среди закрытых паллет смены. Ничего не сделано.";
 const WAITING = "Этикетка этой паллеты ещё ждёт решения на рабочем экране. Ничего не сделано.";
 const FAILED =
-  "Не удалось записать исключение на этом компьютере. Возможно, оно всё же записалось: проверьте числа короба, прежде чем повторять.";
+  "Не удалось записать исключение на этом компьютере. Возможно, оно всё же записалось: проверьте исключения и числа смены, прежде чем повторять.";
 
 const option = (sscc: string, boxes = 1) => `${formatSsccHri(sscc)} · коробов: ${boxes}`;
 
@@ -103,6 +103,8 @@ describe("the exceptions of a pallet on the work screen (plan ПЛ-Ц)", () => {
     expect(screen.getByText("Это не код SSCC. Отсканируйте этикетку паллеты.")).toBeTruthy();
     await work.scan(`]C100${FIRST_BOX}`);
     expect(screen.getByText("Паллеты с этим SSCC нет среди закрытых паллет смены.")).toBeTruthy();
+    // The flash of the scan is neutral: the subject may be a pallet, and the box is no pallet.
+    expect(screen.getByText("НЕ НАЙДЕНО СРЕДИ ЗАКРЫТЫХ")).toBeTruthy();
     await work.scan(`]C100${FIRST_PALLET}`);
     expect(screen.getByText(`Паллета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
     await work.press("Не тот товар");

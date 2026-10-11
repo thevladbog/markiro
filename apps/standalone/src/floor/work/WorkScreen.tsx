@@ -254,10 +254,20 @@ type Stop =
   | { kind: "pallets_missing" }
   /** The early close of the open pallet, to confirm (plan ПЛ-Ц). */
   | { kind: "confirm_pallet" }
-  /** The early close found no pallet serial (the serials' reason), and waits for the operator's retry. */
-  | { kind: "pallet_no_serials"; reason: "offline" | "exhausted" | "failed" }
-  /** The early close did not take: its serial was lost, or the pallet changed meanwhile (three tries). */
-  | { kind: "pallet_failed" }
+  /**
+   * The early close found no pallet serial (the serials' reason), and waits for the operator's retry.
+   * `fromClose`: it was «Закрыть паллету и смену» that stopped here, so the shift is NOT closed.
+   */
+  | {
+      kind: "pallet_no_serials";
+      reason: "offline" | "exhausted" | "failed";
+      fromClose: boolean;
+    }
+  /**
+   * The early close did not take: its serial was lost, or the pallet changed meanwhile (three tries).
+   * `fromClose`: as above, the shift stays open.
+   */
+  | { kind: "pallet_failed"; fromClose: boolean }
   /**
    * `serial`: the block's serial does not fit (past the prefix's range, or an
    * SSCC a box already holds) and is spent; `write`: the close did not reach
@@ -295,7 +305,7 @@ type Stop =
 
 /** What an exception's failure says on the screen; anything unforeseen is this computer's failed write. */
 function outcomeOf(error: unknown): ExceptionOutcome {
-  // By class, never by text: `LabelWaitingError` says «box» of a pallet too, and
+  // By class, never by text: the message of a `LabelWaitingError` is for the log, and
   // `PalletTemplateChangedError` is a `PalletUnavailableError`, so it is asked first.
   if (error instanceof TemplateChangedError || error instanceof PalletTemplateChangedError) {
     return { kind: "template_changed" };
@@ -1592,47 +1602,51 @@ export function WorkScreen(props: WorkScreenProps) {
    * «Закрыть паллету досрочно» (plan ПЛ-Ц): the open pallet closes with the
    * boxes it holds, after a label that waits is decided; when the pallet
    * serials ran out the host is asked for a block and the close tried once
-   * more. What is left stops the work with its reason. Answers how it went.
-   * Only from the work queue.
+   * more. What is left stops the work with its reason (`fromClose`: it was the
+   * shift's close that asked, and the stop says the shift is not closed).
+   * Answers how it went. Only from the work queue.
    */
-  const closePallet = useCallback(async (): Promise<"closed" | "empty" | "stopped"> => {
-    const now = live.current;
-    const pallets = now.pallets;
-    if (pallets === null) return "empty";
-    if ((await readOpenJob(now.local, pairingOf(now), now.shift.copy.id)) !== null) {
-      await settleSafely();
-      return "stopped";
-    }
-    const close = () => closeOpenPallet(palletContextOf(live), pallets);
-    let result = await closeSettled(close);
-    let supplied: SupplyResult | null = null;
-    if (result.kind === "no_serials") {
-      supplied = await palletSupply.topUp();
-      if (supplied.kind === "stored") {
-        live.current.onRecorded();
-        result = await closeSettled(close);
+  const closePallet = useCallback(
+    async (fromClose = false): Promise<"closed" | "empty" | "stopped"> => {
+      const now = live.current;
+      const pallets = now.pallets;
+      if (pallets === null) return "empty";
+      if ((await readOpenJob(now.local, pairingOf(now), now.shift.copy.id)) !== null) {
+        await settleSafely();
+        return "stopped";
       }
-    }
-    if (result.kind === "empty") return "empty";
-    if (result.kind === "closed") {
-      live.current.onRecorded();
-      if (alive.current) setPalletWaits(null);
-      await settleSafely();
-      return "closed";
-    }
-    if (result.kind === "no_serials") {
-      const reason =
-        supplied === null || supplied.kind === "stored" || supplied.kind === "enough"
-          ? "failed"
-          : supplied.kind;
-      setStop({ kind: "pallet_no_serials", reason });
+      const close = () => closeOpenPallet(palletContextOf(live), pallets);
+      let result = await closeSettled(close);
+      let supplied: SupplyResult | null = null;
+      if (result.kind === "no_serials") {
+        supplied = await palletSupply.topUp();
+        if (supplied.kind === "stored") {
+          live.current.onRecorded();
+          result = await closeSettled(close);
+        }
+      }
+      if (result.kind === "empty") return "empty";
+      if (result.kind === "closed") {
+        live.current.onRecorded();
+        if (alive.current) setPalletWaits(null);
+        await settleSafely();
+        return "closed";
+      }
+      if (result.kind === "no_serials") {
+        const reason =
+          supplied === null || supplied.kind === "stored" || supplied.kind === "enough"
+            ? "failed"
+            : supplied.kind;
+        setStop({ kind: "pallet_no_serials", reason, fromClose });
+        return "stopped";
+      }
+      // A serial that could not label a pallet is lost (the next try takes the next),
+      // or the pallet changed under three tries: nothing was closed.
+      setStop({ kind: "pallet_failed", fromClose });
       return "stopped";
-    }
-    // A serial that could not label a pallet is lost (the next try takes the next),
-    // or the pallet changed under three tries: nothing was closed.
-    setStop({ kind: "pallet_failed" });
-    return "stopped";
-  }, [palletSupply, settleSafely, setStop]);
+    },
+    [palletSupply, settleSafely, setStop],
+  );
 
   /**
    * The summary of the close, read as the line's next piece of work: a scan
@@ -1727,7 +1741,7 @@ export function WorkScreen(props: WorkScreenProps) {
               await showSummary(fresh, "stale");
               return;
             }
-            const closed = await closePallet();
+            const closed = await closePallet(true);
             if (closed === "stopped") return;
             const waiting = stopRef.current;
             if (waiting?.kind === "label") {
@@ -1896,7 +1910,7 @@ export function WorkScreen(props: WorkScreenProps) {
                 try {
                   if (waiting?.kind === "pallet_no_serials") {
                     setStop(null);
-                    await closePallet();
+                    await closePallet(waiting.fromClose);
                   } else if (waiting === null) {
                     await settlePallet();
                   }
@@ -1932,12 +1946,16 @@ export function WorkScreen(props: WorkScreenProps) {
   const closePalletNow = () => {
     // Nothing the operator presses starts work the leave no longer waits for.
     if (leavingNow()) return;
+    // «Повторить» of a stop that the shift's close met keeps saying the shift is not closed.
+    const was = stopRef.current;
+    const fromClose =
+      (was?.kind === "pallet_no_serials" || was?.kind === "pallet_failed") && was.fromClose;
     setStop(null);
     palletRefocus.current = true;
     void live.current
       .track(
         queue.run(async () => {
-          await closePallet();
+          await closePallet(fromClose);
           await refreshQuietly();
         }),
       )
@@ -2140,6 +2158,7 @@ export function WorkScreen(props: WorkScreenProps) {
                   ? "floor.work.palletNoSerials.held"
                   : `floor.work.palletNoSerials.${stop.reason}`,
               )}
+              {stop.fromClose && <div>{t("floor.work.palletShiftOpen")}</div>}
             </Alert>
           )}
           {stop?.kind === "pallet_failed" && (
@@ -2160,6 +2179,7 @@ export function WorkScreen(props: WorkScreenProps) {
               }
             >
               {t("floor.work.palletFailed.body")}
+              {stop.fromClose && <div>{t("floor.work.palletShiftOpen")}</div>}
             </Alert>
           )}
           {planReached && (
