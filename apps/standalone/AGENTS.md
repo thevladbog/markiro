@@ -197,11 +197,12 @@ did; an applied migration is never edited.
 Every table of `src-tauri/migrations` has a class in `TABLE_CLASSES`
 (`src-tauri/src/local_db.rs`; stage 2a spec §5.2, decision 30):
 `Disposable` — the copies of the host's data, `sync_state`,
-`sync_quarantine` and `floor_sign_in_failures`; `DeviceData` — what the
+`sync_quarantine`, `floor_sign_in_failures` and `floor_restore_epochs` (plan
+РК-С: what a pairing owes a restored host is moot for a new one); `DeviceData` — what the
 device records itself (plans 2a5–2a8 and ПЛ-Ц: shifts, boxes, scans, the
 outbox, the print jobs, the pallets), each row tagged with the pairing that
 wrote it; `Workstation` — the PC's own settings (plan 2a7), which outlive any
-pairing. Of the 23 tables 11 are `Disposable`, the 8 of migration `0006`,
+pairing. Of the 24 tables 12 are `Disposable`, the 8 of migration `0006`,
 `floor_print_jobs` of `0007` and the two pallet tables of `0008` are
 `DeviceData` (below), and `workstation_settings` of `0007` is the one
 `Workstation` table. `tests/local_db.rs` fails on a table without a class and on a class
@@ -1024,11 +1025,13 @@ run ask for exactly one more, and a failed run waits for the next trigger;
 `run` must report its own failure, since the scheduler swallows every
 rejection. A host restored from a copy answers the revision of the copy plus
 one (`markiro-host restore`, plan РК), below what the station last read, so a
-station whose cursor passed it sees `rev < since` and starts again from zero;
-that is best effort. A station whose cursor is at or below the copy's next
-revision does not notice, nor does one that reconnects only after the host's
-later writes passed its cursor. The station does not read `hello.restoreEpoch`
-yet: the epoch wipe is plan РК-С's, written after plans 2a5 and 2a6.
+station whose cursor passed it sees `rev < since` and starts again from zero.
+That alone is best effort (a cursor at or below the copy's next revision sees
+nothing), so the station also reads `hello.restoreEpoch` (plan РК-С, "Backups
+and restore"): a new epoch writes `from_zero` into `sync_state`
+(`FROM_ZERO_SQL`), and the next run fetches from 0 and wipes the copies in the
+transaction of its first page, which deletes the mark with the rest of
+`sync_state`; until that page lands the copies stay usable.
 
 ## Protocol
 
@@ -1172,7 +1175,11 @@ then asks, and keeps whichever is newest. A heartbeat advances
 `connection_status` can report a newer contact time than the last event the
 webview received; an event's own `lastContactAt` is always the value
 current when that event was published. The webview syncs reference data on
-each revision and never opens the stream itself.
+each revision and never opens the stream itself. Before each stream the task
+reads `GET /v1/hello` with the same pinned client and no key; the `Online`
+status carries its `restoreEpoch` (plan РК-С, absent from the JSON when the
+host names none or the read failed: the stream opens all the same, and the
+next connection reads again). A fresh pairing and an unpaired device clear it.
 
 ## Hardware
 
@@ -3421,7 +3428,7 @@ Known limits of the retention, and who carries each:
   should keep is a decision for plan ОЧ and the owner (hold the shift, or state
   the window).
 - A station clock set forward purges early (the cutoff is the clock's);
-  checking the clock is plan РК-С's.
+  checking the clock is not part of plan РК-С and stays open.
 - A pass that fails leaves no trace but the next pass trying again: plan 2b or
   РК, with the process log of stage 5.
 
@@ -3838,8 +3845,9 @@ the host and the held restore; it reads the state with its own polling loop
 and writes times in the organization's zone. «Обзор» repeats the warnings (a
 held restore, a failed copy, no copy, a newest copy older than 26 hours by the
 host's clock, no second folder, a host clock behind the newest copy, a copy
-running for more than 30 minutes). No
-station code keeps count of returned blocks, so neither does the page.
+running for more than 30 minutes). The page lists per station whether it
+sent its blocks back (`reconciled`, plan РК-С); the host sets the flag on the
+first part of a station's blocks it takes.
 
 `markiro-host restore <copy> [--data-dir] [--without-manifest]` runs with the
 service stopped (the data folder's lock says so; the lock is let go slightly
@@ -3897,7 +3905,7 @@ every device pairs again. `markiro-host verify-copy` runs the same checks.
 the real restore dead after a rename; production passes `None`.
 
 `hello` names `restoreEpoch` once there was a restore. A station that sees it
-change is meant to send every block it holds to `POST
+change sends every block it holds (plan РК-С, below) to `POST
 /v1/device/sscc/blocks/known` (`routes/known_blocks.rs`): a block the host
 has is `known`, or `refused` `block_mismatch` if it differs; a lost one is
 `registered` under the station with its own id as the request id and moves its
@@ -3915,23 +3923,80 @@ an administrator resumes (`POST /v1/office/backups/resume`, «Возобнови
 приём данных станций»), a layer over the whole router answers
 `POST /v1/device/facts` and `GET /v1/device/codes/{…}` with `restore_pending`
 (503, `Retry-After: 60`, `details.since`) before any route or device check,
-and the station sends them again later (the station's own retry backs off to
-60 s; it does not read `Retry-After`); blocks, shifts and the feed are not
-held. The office lists every unrevoked station and whether it sent its blocks
+and the station sends them again a minute later (`RESTORE_HOLD_RETRY_MS`);
+blocks, shifts and the feed are not held. The office lists every unrevoked station and whether it sent its blocks
 back; resuming is the administrator's call, behind a dialog that asks for an
 explicit confirmation of the runbook's SSCC checks (a station on a dead
 computer never returns blocks), and writes one `host.restore.resume` row with
 how many did.
 
-The station's side is NOT written. Plan РК-С, written after plans 2a5 and 2a6
-(plan 2a6 leaves it to plan РК), is to: keep the last seen epoch; on a new one
-sync the copies from zero, send every block it holds in parts of 64 before it
-resumes delivery, honour `Retry-After`, and show refused blocks and the hold in
-the status bar. Until then no station returns a block, `reconciled` stays 0,
-the epoch wipe of the copies is best effort (above), and a shift a station
-opened or created after the copy has no re-registration (its facts are refused
-once the facts resume: `unknown_shift`, `not_entered`). The checks that make up
-for it are the runbook's, done by a person before the resume.
+The station's side is plan РК-С. The shell's link reads `hello` before every
+stream and the `Online` status names `restoreEpoch` ("Connection to the
+host"). `useHostLink` notes a new one for the pairing in `floor_restore_epochs`
+(migration `0009`, `noteRestoreEpoch`) before anything asks whether blocks are
+owed: the row is the obligation and survives a restart. While it is not
+settled (`reconciled_at` NULL) the outbox sends nothing (`restoreDue`), and
+`reconcileRestore` — at once, at every link event, retried like the reads —
+sends every block of `floor_sscc_blocks` of the pairing, used up ones too,
+oldest first, 64 to a request and as the host issued it; a refused block gets
+its cursor past its end in the transaction after that answer, so no box closes
+with a serial the host refused (the box close keeps the other blocks and asks
+for a new one by the half rule); `conflict` on `no_restore` means nothing is
+owed. Then ONE transaction writes `from_zero` for the sync, puts the records
+acknowledged in the last 30 days (`RESEND_WINDOW_MS`, equal to `RETENTION_MS`,
+decision 31) back in the outbox and settles the epoch with the count of
+refused blocks, only if the epoch is still the one read (a later restore noted
+meanwhile fails it with `changes_mismatch` and the next run settles that one).
+The host answers a record it has with the receipt it keeps, so nothing is
+applied twice. A send answered `restore_pending` is the failure `held` and
+waits `RESTORE_HOLD_RETRY_MS` (60 s, the host's `RESTORE_RETRY_AFTER_SECS`,
+which a test reads in `server.rs`: the shell passes the webview no headers);
+while that minute runs no other trigger sends (`factsHeld`), or each scan would
+knock a held host. The floor scans and closes boxes offline meanwhile, and code
+checks that meet the hold let the scan through as any failed check does. The
+status bar says, in its polite region, that the host holds the records, that
+blocks are owed, and how many the host refused (the stuck-delivery line is
+silent while the hold or the debt explains the wait). The office's hold card
+shows per station whether it gave its blocks back (`reconciled`) and the
+dialog how many of how many.
+
+Left open, none of it hidden by a green test:
+
+- A pairing without blocks never calls the route (the host asks for 1–64
+  blocks), so the office lists it «Не вернула» although nothing is owed; the
+  station says nothing. The follow-up is the host's: accept an empty list, or
+  expose whether the station ever had blocks (`hasBlocks`).
+- The host sets `reconciled` on the FIRST part it takes and the oldest blocks
+  go first, so «Вернула» can show before the newest blocks are back; a run
+  that fails between parts leaves the obligation open and the next run sends
+  everything again.
+- The 30-day window is per record, not per shift: with a copy older than the
+  window a shift can be split (its close goes again, scans acknowledged before
+  the window do not).
+- Of the refused blocks only the count is kept, not their codes.
+- A connection whose `hello` read failed learns of the restore only at the
+  next connection, and sends its facts meanwhile (the hold covers that until
+  the resume). The marks a `conflict` receipt left on scans and boxes stay when
+  the record goes again. A shift a station opened or created after the copy has
+  no re-registration (its facts are refused once the facts resume:
+  `unknown_shift`, `not_entered`).
+- `device_forget` does not warn that blocks are still owed: it empties
+  `floor_restore_epochs` with the other copies. The stuck line keeps the
+  record's `created_at` (`HEAD_RECORD_SQL`), so after a reconcile and a
+  failure that is not the hold it can count weeks.
+
+A restore on a NEW PC is not covered, and that is an open owner decision. The
+host there gets a new `hostId` and certificate, every station pairs again, and
+everything above is keyed to the CURRENT pairing. What the old pairing did
+after the copy never reaches the restored host: its records acknowledged by
+the dead host after the copy, its unsent records (they stay on the disk;
+`device_forget` refuses with `unsent_facts` until confirmed), its open shift
+with boxes already labelled, and the SSCC blocks it got after the copy. SSCC
+uniqueness then rests on the host's +100 000 counter margin and the runbook's
+check 1, which is mandatory. The options: back up `host.json` and `tls/` with
+the copy so stations keep their pairing; carry the old pairing's records and
+blocks into the new one; or accept the loss. The checks that make up for all of
+this are the runbook's, done by a person before the resume.
 
 Migration `0011` may be applied after `0012` on a database that already had
 it (sqlx accepts a lower version not yet applied; the test builds a
@@ -4122,6 +4187,17 @@ either; a file log is stage 5.
   - the kiosk window with the setup open: the Windows on-screen keyboard over
     the printer's fields, the USB printer list, no way out of the locked
     window, and the idle sign-out from the setup.
+- The station after a restore of the host (plan РК-С) by hand, on two
+  Windows PCs: the runbook's section 10, item 9 — a station closing boxes
+  while the host is restored from an hourly copy, the blocks it got after the
+  copy registered again, the hold's line and its one-minute retries, nothing
+  lost, no `sscc_not_issued` and no repeated SSCC after the resume, and the
+  copies of the station equal to the office's; and a restore on a new PC with
+  the stations paired again (item 9, second run). Until then it has run only
+  under jsdom and node:sqlite with a fake `HostApi`; the shell's `hello` read
+  ran against a real host on 127.0.0.1 whose `site.restore_epoch` a test
+  wrote, never against `markiro-host restore`, and nothing of it has met
+  Windows, WebView2, two stations or a real printer.
 - The Windows service and DPAPI run only in the `standalone-windows-build`
   job: it compiles the service and the Tauri app for Windows, and its cargo
   tests round-trip a key through DPAPI. Since plan УСТ it also builds the
