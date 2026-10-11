@@ -1,5 +1,11 @@
 {
   "palletSheet": {
+    "testHeader": "MARKIRO · TEST",
+    "testProduct": "TEST PRINT — NOT A PRODUCTION LABEL",
+    "testOrientation": "A4 test orientation",
+    "portrait": "Portrait",
+    "landscape": "Landscape",
+    "testPrintSent": "One A4 test sheet sent to {{name}}. Scan its SSCC to verify printing.",
     "readyRequired": "Wait for a ready A4 preview. Check organization branding and printer settings, then retry.",
     "paper": "Paper type",
     "labelPaper": "Label — custom size",

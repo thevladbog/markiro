@@ -66,7 +66,8 @@ export async function preparePrintDelivery(
   if (!parsed || printerMode(parsed) !== "windows_driver" || parsed.dpi !== page.dpi)
     throw new Error("Invalid Windows profile");
   if (parsed.paper === "a4") {
-    if (key.purpose !== "pallet" || !renderSnapshotJson) throw new Error("Sheet snapshot required");
+    if ((key.purpose !== "pallet" && key.purpose !== "test") || !renderSnapshotJson)
+      throw new Error("Sheet snapshot required");
     const snapshot = parsePalletSheetPrintSnapshot(renderSnapshotJson);
     if (snapshot.facts.sscc !== key.jobId || page.dpi !== 300)
       throw new Error("Sheet identity mismatch");

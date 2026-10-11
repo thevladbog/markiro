@@ -166,3 +166,32 @@ capability. RAW ZPL/TSPL остаются доступны. Изменений K
 остаются читаемыми и восстанавливаемыми. Не удалять их снимки/ресурсы и не
 откатывать API на код, который не умеет читать V2-строки. Совместимая предыдущая
 Station продолжает V1; смены только с А4 требуют обновлённую Windows Station.
+
+## Station preview and setup test print regression (2026-10-11)
+
+The New Shift preview now fits the complete A4 sheet into the available width
+and height, preserving its aspect ratio. This changes only display sizing;
+template geometry and saved print bytes are unchanged. Chromium coverage uses
+1024×768 for all three presets with both company and bundled Markiro branding,
+and checks that the logo has ink and that the complete sheet fits its container.
+
+For a Windows A4 profile, **Test print** sends one synthetic test sheet in the
+selected portrait or landscape orientation. It uses the standard sheet renderer,
+measured driver geometry, native preflight, and the durable Windows delivery
+journal under purpose `test`. Each run has a new checksum-valid SSCC; GS1 scanner
+wrappers are normalized by the domain parser. It allocates no production pallet
+and creates no production scan/event. A failed new test clears the old code,
+and a stale scan cannot confirm the next successful run. RAW paths are unchanged.
+A4 journals still require the saved sheet snapshot and matching SSCC; box and
+product-duplicate purposes remain ineligible for A4.
+
+Automated UI tests exercise both orientations, accepted GS1 scans, stale scans,
+and refusal before send. The browser test uses real bundled fonts and logo pixels,
+with native transport simulated. These results do not prove physical printing.
+
+Physical acceptance remains **NOT RUN**. On Windows, test both orientations on
+an actual A4 printer, inspect the complete page and logo, scan the printed SSCC,
+then print again and verify that scanning the previous sheet fails. Confirm one
+sheet, 100% scale, simplex, and no cropped barcode or driver scaling. If the driver
+refuses the page or communication fails after sending, use the existing delivery
+status and explicit operator acknowledgement; never retry automatically.

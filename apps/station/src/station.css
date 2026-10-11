@@ -6268,3 +6268,30 @@ body,
   margin: 0;
   font: 400 14px/20px var(--font-ui);
 }
+
+/* Fit the complete sheet into the available area on floor terminals. */
+.label-template-preview--sheet {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  overflow: hidden;
+}
+.label-template-preview--sheet > canvas {
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+.setup-a4-preview {
+  height: min(240px, 30vh);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+.setup-a4-preview > canvas {
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
