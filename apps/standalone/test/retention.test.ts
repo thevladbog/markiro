@@ -11,10 +11,17 @@ import { processScan } from "../src/floor/work/scan-pipeline.js";
 import type { EnteredShift } from "../src/host/protocol.js";
 import { LocalDbError } from "../src/local/executor.js";
 import {
+  noteRestoreEpoch,
+  reconcileRestore,
+  restoreDue,
+  RESEND_WINDOW_MS,
+} from "../src/local/restore-reconcile.js";
+import {
   DUE_SHIFTS_SQL,
   purgeAcknowledged,
   RETAINED_TABLES,
   RETENTION_INTERVAL_MS,
+  RETENTION_MS,
   scheduleRetention,
   type Every,
 } from "../src/local/retention.js";
@@ -699,5 +706,102 @@ describe("the retention pass", () => {
     await Promise.resolve();
     fire();
     expect(run).toHaveBeenCalledTimes(2);
+  });
+});
+
+// Plan РК-С: after a restore of the host the station sends its records of the last 30 days again
+// (`reconcileRestore` opens them), and the retention keeps what has not been answered. Neither
+// may take what the other needs: a record the host lost is not deleted before it is sent again,
+// and the SSCC blocks and the obligation itself are no shift's records.
+describe("the retention and what the station owes a restored host", () => {
+  const EPOCH = "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e";
+  /** The first instant of the window the reconciliation sends again, for a run at `NOW`. */
+  const SINCE = new Date(NOW.getTime() - RESEND_WINDOW_MS).toISOString();
+
+  /** The reconciliation of a host restored a moment ago, the host knowing every block. */
+  async function restored(at: Station): Promise<void> {
+    await noteRestoreEpoch(at.local, PAIRING, EPOCH, NOW);
+    await reconcileRestore({
+      local: at.local,
+      pairing: PAIRING,
+      register: async (request) => ({
+        results: request.blocks.map((block) => ({ id: block.id, outcome: "known", code: null })),
+      }),
+      now: () => NOW,
+    });
+    expect(await restoreDue(at.local, PAIRING)).toBe(false);
+  }
+
+  it("sends again exactly what the station keeps: one decision, one window", () => {
+    expect(RESEND_WINDOW_MS).toBe(RETENTION_MS);
+  });
+
+  it("keeps a shift whose records the restore opened until they are answered, then for 30 days", async () => {
+    const at = await printStation();
+    // A shift done with before the window, one inside it that the retention would take by the
+    // cutoff of the last pass of the month, one the retention already took.
+    await finished(at, ENTERED, "A", "2026-10-01T00:00:00.000Z");
+    await finished(at, SECOND, "B", "2026-10-20T00:00:00.000Z");
+    await restored(at);
+    const answered = (shiftId: string) =>
+      rows(
+        at.db,
+        "SELECT count(*) AS n, count(acked_at) AS answered FROM outbox WHERE shift_id = ?",
+        shiftId,
+      );
+    expect(answered(ENTERED.id)).toEqual([{ n: 5, answered: 5 }]);
+    expect(answered(SECOND.id)).toEqual([{ n: 5, answered: 0 }]);
+    // At the end of November both would be done with by their receipts; B's are open again.
+    const later = new Date("2026-12-01T00:00:00.000Z");
+    const cutoff = new Date(later.getTime() - 30 * 24 * 60 * 60 * 1000).toISOString();
+    expect(await dueIds(at, PAIRING, cutoff)).toEqual([ENTERED.id]);
+    expect(await purgeAcknowledged(at.local, PAIRING, later)).toBe(1);
+    expect(kept(at, ENTERED.id)).toEqual(NONE);
+    expect(kept(at, SECOND.id)).toEqual(WHOLE);
+    // The host answers B's records again: the shift is held for 30 days from those receipts.
+    const receipt = "2026-11-08T12:05:00.000Z";
+    at.db
+      .prepare("UPDATE outbox SET outcome = 'accepted', acked_at = ? WHERE shift_id = ?")
+      .run(receipt, SECOND.id);
+    expect(await purgeAcknowledged(at.local, PAIRING, later)).toBe(0);
+    expect(kept(at, SECOND.id)).toEqual(WHOLE);
+    expect(await purgeAcknowledged(at.local, PAIRING, new Date("2026-12-08T12:04:59.999Z"))).toBe(
+      0,
+    );
+    expect(await purgeAcknowledged(at.local, PAIRING, new Date("2026-12-08T12:05:00.000Z"))).toBe(
+      1,
+    );
+    expect(kept(at, SECOND.id)).toEqual(NONE);
+  });
+
+  it("takes the records the window reopens from shifts the retention has not taken, and none that it has", async () => {
+    const at = await printStation();
+    // The retention takes a shift once its close lies a full 30 days back, the very instant the
+    // window starts at: what the retention leaves, the window opens; what it took is gone.
+    await finished(at, ENTERED, "A", SINCE);
+    await finished(at, SECOND, "B", new Date(Date.parse(SINCE) + 1).toISOString());
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    await restored(at);
+    expect(kept(at, ENTERED.id)).toEqual(NONE);
+    expect(kept(at, SECOND.id)).toEqual(WHOLE);
+    expect(
+      rows(
+        at.db,
+        "SELECT count(*) AS n FROM outbox WHERE shift_id = ? AND acked_at IS NULL",
+        SECOND.id,
+      ),
+    ).toEqual([{ n: 5 }]);
+  });
+
+  it("keeps the SSCC blocks and the obligation through a pass that takes every shift", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-09-01T00:00:00.000Z");
+    await restored(at);
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    expect(kept(at, ENTERED.id)).toEqual(NONE);
+    expect(rows(at.db, "SELECT count(*) AS n FROM floor_sscc_blocks")).toEqual([{ n: 1 }]);
+    expect(rows(at.db, "SELECT epoch, reconciled_at, refused FROM floor_restore_epochs")).toEqual([
+      { epoch: EPOCH, reconciled_at: NOW.toISOString(), refused: 0 },
+    ]);
   });
 });

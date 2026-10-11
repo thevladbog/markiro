@@ -42,6 +42,14 @@ import { BOX_CODES_SQL, CLOSED_BOX_SQL } from "../src/floor/work/box-close.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
 import { attemptStatement, receiptStatements, UNSENT_SQL } from "../src/local/facts-sender.js";
 import {
+  BLOCKS_SQL,
+  DUE_SQL,
+  REOPEN_SQL,
+  RETIRE_SQL,
+  SETTLE_SQL,
+  STATUS_SQL,
+} from "../src/local/restore-reconcile.js";
+import {
   DUE_SHIFTS_SQL,
   PURGE_COPY_SQL,
   purgeTableSql,
@@ -198,8 +206,10 @@ describe("the station's own production tables (migration 0006)", () => {
       [],
       z.object({ tableName: z.string(), columnName: z.string(), required: z.number() }),
     );
+    // `floor_restore_epochs` (migration `0009`) is a pairing's own
+    // bookkeeping that a forget empties, tagged the same way.
     expect(columns).toEqual(
-      DEVICE_TABLES.flatMap((tableName) => [
+      [...DEVICE_TABLES, "floor_restore_epochs"].sort().flatMap((tableName) => [
         { tableName, columnName: "device_id", required: 1 },
         { tableName, columnName: "host_id", required: 1 },
       ]),
@@ -1171,6 +1181,52 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(statements).toHaveLength(6);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
   });
+
+  // What a station owes a restored host (plan РК-С; `src/local/restore-reconcile.ts`): the
+  // status bar reads the obligation on every bump, the reconciliation runs once per restore
+  // but over everything the station keeps, so none of its statements may read a table whole.
+  // Pinned on the shell's SQLite too (`the_floors_repeating_reads_search_an_index`), with the
+  // same texts.
+  it("serve the reconciliation after a restore from an index", () => {
+    const { db } = openLocalDb();
+    const plan = (sql: string): string[] =>
+      db
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...Array.from({ length: sql.split("?").length - 1 }, () => "x"))
+        .map((step) => String(step["detail"]));
+    const OWN = "sqlite_autoindex_floor_restore_epochs_1 (host_id=? AND device_id=?)";
+    for (const sql of [DUE_SQL, STATUS_SQL, SETTLE_SQL]) {
+      expect(plan(sql), sql).toEqual([`SEARCH floor_restore_epochs USING INDEX ${OWN}`]);
+    }
+    // Every block of the pairing, sorted once in memory (a pairing keeps some hundreds).
+    expect(plan(BLOCKS_SQL)).toEqual([
+      "SEARCH floor_sscc_blocks USING INDEX floor_sscc_blocks_prefix (host_id=? AND device_id=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+    ]);
+    // The refused blocks are found among the pairing's own, the ids from a JSON list.
+    const retire = plan(RETIRE_SQL);
+    expect(retire[0]).toBe(
+      "SEARCH floor_sscc_blocks USING INDEX floor_sscc_blocks_prefix (host_id=? AND device_id=?)",
+    );
+    expect(
+      retire.filter((step) => step.startsWith("SCAN ") && !step.includes("json_each")),
+    ).toEqual([]);
+    // The records to send again are the pairing's settled ones, not the whole outbox.
+    const reopen = plan(REOPEN_SQL);
+    expect(reopen[0]).toBe(
+      "SEARCH outbox USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome>?)",
+    );
+    expect(reopen.filter((step) => step.startsWith("SCAN ") || step.includes("TEMP"))).toEqual([]);
+  });
+
+  it("are pinned on the shell's SQLite with the reconciliation's own statements", () => {
+    const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
+      // A line continuation of a Rust string drops the newline and the next line's indent.
+      .replace(/\\\n\s*/g, "");
+    const statements = [DUE_SQL, STATUS_SQL, BLOCKS_SQL, RETIRE_SQL, REOPEN_SQL, SETTLE_SQL];
+    expect(new Set(statements).size).toBe(6);
+    for (const sql of statements) expect(source).toContain(`"${sql}"`);
+  });
 });
 
 describe("the rules of the production tables the first examples leave open", () => {
@@ -1465,5 +1521,79 @@ describe("the rules of the production tables the first examples leave open", () 
         z.object({ payload: z.string() }),
       ),
     ).toEqual([{ payload: whole }]);
+  });
+});
+
+describe("the restore obligation (migration 0009)", () => {
+  const EPOCH = "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e";
+  function obligation(overrides: Record<string, unknown> = {}): LocalStatement {
+    const row: Record<string, unknown> = {
+      host_id: HOST_ID,
+      device_id: DEVICE_ID,
+      epoch: EPOCH,
+      seen_at: AT,
+      ...overrides,
+    };
+    const columns = Object.keys(row);
+    return {
+      sql:
+        `INSERT INTO floor_restore_epochs (${columns.join(", ")}) ` +
+        `VALUES (${columns.map(() => "?").join(", ")})`,
+      values: Object.values(row),
+    };
+  }
+
+  it("fixes every column: its type, whether it is required, its default and its key", async () => {
+    const { executor } = openLocalDb();
+    const columns = await executor.query(
+      'SELECT name, type, "notnull" AS required, dflt_value AS fallback, pk ' +
+        "FROM pragma_table_info('floor_restore_epochs') ORDER BY cid",
+      [],
+      z.object({
+        name: z.string(),
+        type: z.string(),
+        required: z.number(),
+        fallback: z.string().nullable(),
+        pk: z.number(),
+      }),
+    );
+    expect(
+      columns.map(
+        (column) =>
+          `${column.name} ${column.type}${column.required === 1 ? " NOT NULL" : ""}` +
+          `${column.fallback === null ? "" : ` DEFAULT ${column.fallback}`}` +
+          `${column.pk === 0 ? "" : ` PK${column.pk}`}`,
+      ),
+    ).toEqual([
+      "host_id TEXT NOT NULL PK1",
+      "device_id TEXT NOT NULL PK2",
+      "epoch TEXT NOT NULL",
+      "seen_at TEXT NOT NULL",
+      "reconciled_at TEXT",
+      "refused INTEGER NOT NULL DEFAULT 0",
+    ]);
+  });
+
+  it("keeps one row per pairing, owed until it is settled, with a count that is never negative", async () => {
+    const { executor } = openLocalDb();
+    await accepted(executor, obligation());
+    expect(
+      await executor.query(
+        "SELECT reconciled_at AS settled, refused FROM floor_restore_epochs",
+        [],
+        z.object({ settled: z.string().nullable(), refused: z.number() }),
+      ),
+    ).toEqual([{ settled: null, refused: 0 }]);
+    // The same pairing has one epoch at a time; another device or host has its own.
+    await refused(executor, obligation({ epoch: "other" }));
+    await accepted(executor, obligation({ device_id: "device-2" }));
+    await accepted(executor, obligation({ host_id: "host-2" }));
+    await accepted(executor, obligation({ device_id: "device-3", refused: 64 }));
+    await accepted(executor, obligation({ device_id: "device-4", reconciled_at: AT }));
+    await refused(executor, obligation({ device_id: "device-5", refused: -1 }));
+    await refused(executor, obligation({ device_id: "device-6", epoch: null }));
+    await refused(executor, obligation({ device_id: "device-7", seen_at: null }));
+    await refused(executor, obligation({ device_id: null }));
+    await refused(executor, obligation({ host_id: null }));
   });
 });

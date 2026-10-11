@@ -74,6 +74,7 @@ pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
     ("floor_pallet_exceptions", TableClass::DeviceData),
     ("floor_pallets", TableClass::DeviceData),
     ("floor_print_jobs", TableClass::DeviceData),
+    ("floor_restore_epochs", TableClass::Disposable),
     ("floor_scans", TableClass::DeviceData),
     ("floor_shifts", TableClass::DeviceData),
     ("floor_sign_in_failures", TableClass::Disposable),

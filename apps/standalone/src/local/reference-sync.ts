@@ -350,6 +350,17 @@ const WRITE_PAIRING =
   "INSERT INTO sync_state (key, value) VALUES ('host_id', ?), ('device_id', ?) " +
   "ON CONFLICT (key) DO UPDATE SET value = excluded.value";
 
+/**
+ * Asks the next sync to start from zero (plan РК-С: the host went back to a
+ * copy, and its revision may still be above the one the copies reached): it
+ * fetches from revision 0, and its first page wipes the copies in the
+ * transaction that refills them, so they stay usable until then. The wipe
+ * deletes this mark with the rest of `sync_state`. The value is the epoch.
+ */
+export const FROM_ZERO_SQL =
+  "INSERT INTO sync_state (key, value) VALUES ('from_zero', ?) " +
+  "ON CONFLICT (key) DO UPDATE SET value = excluded.value";
+
 /** Makes the copies read as unsynced: `readState` then starts from zero. */
 const DROP_LAST_REV = "DELETE FROM sync_state WHERE key = 'last_rev'";
 
@@ -433,6 +444,8 @@ interface StoredState {
   hostId: string | null;
   deviceId: string | null;
   entitySet: string | null;
+  /** `FROM_ZERO_SQL` asked the next run to start from zero. */
+  fromZero: boolean;
 }
 
 async function readState(local: LocalExecutor): Promise<StoredState> {
@@ -444,6 +457,7 @@ async function readState(local: LocalExecutor): Promise<StoredState> {
     hostId: value("host_id"),
     deviceId: value("device_id"),
     entitySet: value("entity_set"),
+    fromZero: value("from_zero") !== null,
   };
 }
 
@@ -569,7 +583,10 @@ export async function syncReferences({
     stored.entitySet === ENTITY_SET &&
     stored.lastRev !== null
   ) {
-    since = stored.lastRev;
+    // A restore of the host asks for the whole feed again (`FROM_ZERO_SQL`):
+    // the first page wipes the copies as it refills them.
+    since = stored.fromZero ? 0 : stored.lastRev;
+    wipe = stored.fromZero;
   } else {
     if (stored.hostId === null || stored.deviceId === null) {
       // No complete stamp yet — this device's very first sync, or a state

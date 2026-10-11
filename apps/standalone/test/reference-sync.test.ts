@@ -15,6 +15,7 @@ import {
   copiesReady,
   createSyncScheduler,
   ENTITY_SET,
+  FROM_ZERO_SQL,
   SyncFeedError,
   syncReferences,
 } from "../src/local/reference-sync.js";
@@ -588,6 +589,84 @@ describe("reference sync", () => {
     // same — see "keeps a quarantine entry through a rollback…" below for a
     // case where it actually holds an entry).
     expect(quarantine(db)).toEqual([]);
+  });
+
+  it("starts from zero once after a restore asked it, keeping the copies until the first page", async () => {
+    const { db, executor } = openLocalDb();
+    await syncedTwoLines(executor);
+    // Plan РК-С: the station saw the host's new restore epoch. The restored
+    // host answers the copy's revision plus one, which may be above the
+    // station's 20, so the host going back is not seen in the feed.
+    await executor.transaction([
+      { sql: FROM_ZERO_SQL, values: ["5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e"] },
+    ]);
+    const before = tables(db);
+    const down = vi.fn(async (): Promise<ChangesResponse> => {
+      throw new Error("host unreachable");
+    });
+    await expect(
+      syncReferences({ changes: down, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).rejects.toThrow("host unreachable");
+    expect(down.mock.calls).toEqual([[0]]);
+    // The copies stay usable until the first page from zero lands.
+    expect(tables(db).lines).toEqual(before.lines);
+    expect(await copiesReady(executor, { hostId: HOST_ID, deviceId: DEVICE_ID })).toBe(true);
+
+    const changes = feed({ 0: page(25, [line(LINE_1, 25, "Линия 1 (из копии)")]) });
+    await expect(
+      syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).resolves.toEqual({ kind: "synced", rev: 25, quarantined: 0 });
+    expect(changes.mock.calls).toEqual([[0]]);
+    expect(tables(db).lines).toEqual([
+      { id: LINE_1, name: "Линия 1 (из копии)", archived: 0, rev: 25 },
+    ]);
+    // The wipe took the mark with it: the next sync goes on from 25.
+    expect(tables(db).state).toEqual(state(25));
+    const next = feed({ 25: page(25, []) });
+    await syncReferences({ changes: next, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID });
+    expect(next.mock.calls).toEqual([[25]]);
+  });
+
+  // Beyond the plan's example: a feed from zero of several pages wipes the copies once, with its
+  // first page. The mark goes with that wipe, so a page that fails later resumes after the pages
+  // that landed instead of wiping them (and applying them) a second time.
+  it("wipes once for a feed from zero of several pages, and resumes after the pages that landed", async () => {
+    const { db, executor } = openLocalDb();
+    await syncedTwoLines(executor);
+    await executor.transaction([{ sql: FROM_ZERO_SQL, values: ["5d2c8e1a"] }]);
+    const failing = vi.fn(async (since: number): Promise<ChangesResponse> => {
+      if (since === 0) return page(30, [line(LINE_1, 25, "Линия 1 (из копии)")], true);
+      throw new Error("host unreachable");
+    });
+    await expect(
+      syncReferences({ changes: failing, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID }),
+    ).rejects.toThrow("host unreachable");
+    expect(failing.mock.calls).toEqual([[0], [30]]);
+    // The first page replaced the copies (the second line of the old host is gone) and took the
+    // mark with it.
+    expect(tables(db).lines).toEqual([
+      { id: LINE_1, name: "Линия 1 (из копии)", archived: 0, rev: 25 },
+    ]);
+    expect(tables(db).state).toEqual(state(30));
+    const rest = feed({ 30: page(40, [line(LINE_2, 40, "Линия 2 (после копии)")]) });
+    await syncReferences({ changes: rest, local: executor, hostId: HOST_ID, deviceId: DEVICE_ID });
+    expect(rest.mock.calls).toEqual([[30]]);
+    expect(tables(db).lines).toEqual([
+      { id: LINE_1, name: "Линия 1 (из копии)", archived: 0, rev: 25 },
+      { id: LINE_2, name: "Линия 2 (после копии)", archived: 0, rev: 40 },
+    ]);
+  });
+
+  it("does not start from zero for a mark while the copies are not this pairing's", async () => {
+    const { db, executor } = openLocalDb();
+    await syncedTwoLines(executor);
+    await executor.transaction([{ sql: FROM_ZERO_SQL, values: ["5d2c8e1a"] }]);
+    // Another device id: the wipe for the other pairing takes the mark with the rest of the state.
+    const other = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
+    const changes = feed({ 0: page(7, []) });
+    await syncReferences({ changes, local: executor, hostId: HOST_ID, deviceId: other });
+    expect(changes.mock.calls).toEqual([[0]]);
+    expect(tables(db).state).toEqual(state(7, HOST_ID, other));
   });
 
   it("keeps the previous copies when the rollback's own refetch fails", async () => {

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it, vi } from "vitest";
 
 import { CODE_CHECK_TIMEOUT_MS, createHostApi, type HostApi } from "../src/host/api.js";
+import { knownBlocksRequestSchema } from "../src/host/backups.js";
 import {
   createTauriHostClient,
   HostError,
@@ -811,6 +812,30 @@ describe("HostApi floor work", () => {
     const facts = recording({ receipts: [] });
     await expect(facts.api.sendFacts(kept)).resolves.toEqual([]);
     expect(facts.sent.map((sent) => sent.body)).toEqual([{ records: kept }]);
+  });
+
+  it("gives the host back the station's blocks after a restore, with the device key only", async () => {
+    const request = knownBlocksRequestSchema.parse(fixture("known-blocks-request.json"));
+    const known = recording(fixture("known-blocks-response.json"));
+    await expect(known.api.registerKnownBlocks(request)).resolves.toEqual(
+      fixture("known-blocks-response.json"),
+    );
+    expect(known.sent).toEqual([
+      {
+        method: "POST",
+        path: "/v1/device/sscc/blocks/known",
+        body: request,
+        officeToken: undefined,
+      },
+    ]);
+    await expect(
+      recording({ results: [{ id: "x", outcome: "lost", code: null }] }).api.registerKnownBlocks(
+        request,
+      ),
+    ).rejects.toThrow();
+    await expect(fakeHostApi().registerKnownBlocks(request)).rejects.toThrow(
+      "unexpected HostApi.registerKnownBlocks call",
+    );
   });
 
   it("is stood in for by a fake that refuses the three calls loudly until a test stubs them", async () => {

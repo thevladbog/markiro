@@ -73,6 +73,7 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "floor_pallet_exceptions",
             "floor_pallets",
             "floor_print_jobs",
+            "floor_restore_epochs",
             "floor_scans",
             "floor_shifts",
             "floor_sign_in_failures",
@@ -234,6 +235,123 @@ async fn migration_0008_keeps_the_rows_of_a_database_of_0007() {
         .unwrap(),
         [1]
     );
+}
+
+/// Migration `0009` over a station's database of `0008` that holds a shift, an SSCC block, a
+/// waiting and an acknowledged outbox record and a sync state: the shell's own SQLite adds the
+/// table of the restore obligation, every row stays as it was, and a station that has seen no
+/// epoch owes the host nothing (plan РК-С, additive).
+#[tokio::test]
+async fn migration_0009_keeps_the_rows_of_a_database_of_0008() {
+    let dir = tempfile::tempdir().unwrap();
+    let until_0008: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version <= 8)
+        .cloned()
+        .collect();
+    assert_eq!(until_0008.len(), 8, "migrations 0001 to 0008 exist");
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(until_0008),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    for sql in [
+        "INSERT INTO floor_sscc_blocks (block_id, host_id, device_id, issuer_prefix, extension, \
+         from_serial, to_serial, next_serial, received_at) VALUES ('block-1', 'host', 'device', \
+         '460068200', 0, 3500, 5499, 3600, '2026-10-08T06:00:00.000Z')",
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, acked_at) VALUES ('record-1', 'host', 'device', 'scan', 'shift-1', '{}', \
+         '2026-10-09T08:00:00.000Z', 'accepted', '2026-10-09T08:00:05.000Z')",
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) \
+         VALUES ('record-2', 'host', 'device', 'scan', 'shift-1', '{}', '2026-10-09T08:01:00.000Z')",
+        "INSERT INTO sync_state (key, value) VALUES ('last_rev', '20')",
+    ] {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    let at_0008: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM sqlite_master WHERE name = 'floor_restore_epochs'")
+            .fetch_optional(&mut raw)
+            .await
+            .unwrap();
+    assert_eq!(at_0008, None, "no restore table before 0009");
+    raw.close().await.unwrap();
+
+    // The application opens the file as it starts: it applies what is pending.
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    let blocks = db
+        .query(
+            "SELECT block_id, from_serial, to_serial, next_serial FROM floor_sscc_blocks",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(blocks.into_iter().map(Value::Object).collect()),
+        json!([{
+            "block_id": "block-1", "from_serial": 3500, "to_serial": 5499, "next_serial": 3600
+        }])
+    );
+    let records = db
+        .query(
+            "SELECT id, outcome, acked_at FROM outbox ORDER BY seq",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(records.into_iter().map(Value::Object).collect()),
+        json!([
+            { "id": "record-1", "outcome": "accepted", "acked_at": "2026-10-09T08:00:05.000Z" },
+            { "id": "record-2", "outcome": null, "acked_at": null }
+        ])
+    );
+    let state = db
+        .query("SELECT key, value FROM sync_state", vec![])
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(state.into_iter().map(Value::Object).collect()),
+        json!([{ "key": "last_rev", "value": "20" }])
+    );
+    // No epoch seen yet: nothing is owed, and the table takes the first one.
+    assert_eq!(count(&db, "floor_restore_epochs").await, json!(0));
+    assert_eq!(
+        db.transaction(vec![expecting(
+            "INSERT INTO floor_restore_epochs (host_id, device_id, epoch, seen_at) \
+             VALUES ('host', 'device', '5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e', \
+             '2026-10-11T08:00:00.000Z')",
+            json!([]),
+            1,
+        )])
+        .await
+        .unwrap(),
+        [1]
+    );
+    let journal = db
+        .query(
+            "SELECT version, success FROM _sqlx_migrations ORDER BY version",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(journal.into_iter().map(Value::Object).collect()),
+        Value::Array(
+            (1..=MIGRATOR.iter().count())
+                .map(|version| json!({ "version": version, "success": 1 }))
+                .collect()
+        ),
+        "every migration is journaled once, in order"
+    );
+    assert!(MIGRATOR.iter().any(|migration| migration.version == 9));
 }
 
 #[tokio::test]
@@ -650,6 +768,13 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
              VALUES ('station', 3, 1790000000000, 1790000000000)",
             json!([]),
         ),
+        // What this pairing owes a restored host (plan РК-С, `0009`): the old pairing's
+        // obligation is not the new one's, so a forget empties it with the copies.
+        statement(
+            "INSERT INTO floor_restore_epochs (host_id, device_id, epoch, seen_at, refused) \
+             VALUES (?, ?, '5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e', '2026-10-11T08:00:00.000Z', 2)",
+            json!([HOST, DEVICE]),
+        ),
     ])
     .await
     .unwrap();
@@ -984,6 +1109,30 @@ const REFUSED_CLOSES: &str =
     "SELECT shift_id, outcome_code AS code FROM outbox WHERE host_id = ? AND device_id = ? \
      AND kind = 'shift_closed' AND outcome = 'rejected' ORDER BY seq";
 
+/// What a station owes a host restored from a copy (`src/local/restore-reconcile.ts`, plan РК-С):
+/// the obligation, read on every bump of the status bar, the blocks the station sends back, the
+/// refused ones retired, the records sent again and the settling of the epoch.
+/// `test/floor-schema.test.ts` plans the same texts on the Node runtime's SQLite and checks that
+/// they appear here word for word.
+const RESTORE_DUE: &str =
+    "SELECT epoch FROM floor_restore_epochs WHERE host_id = ? AND device_id = ? \
+     AND reconciled_at IS NULL";
+const RESTORE_STATUS: &str =
+    "SELECT reconciled_at IS NULL AS due, refused FROM floor_restore_epochs WHERE host_id = ? \
+     AND device_id = ?";
+const RESTORE_BLOCKS: &str =
+    "SELECT block_id, issuer_prefix, extension, from_serial, to_serial FROM floor_sscc_blocks \
+     WHERE host_id = ? AND device_id = ? ORDER BY received_at, block_id";
+const RESTORE_RETIRE: &str =
+    "UPDATE floor_sscc_blocks SET next_serial = to_serial + 1 WHERE host_id = ? AND device_id = ? \
+     AND block_id IN (SELECT value FROM json_each(?))";
+const RESTORE_REOPEN: &str =
+    "UPDATE outbox SET outcome = NULL, outcome_code = NULL, outcome_details = NULL, acked_at = \
+     NULL WHERE host_id = ? AND device_id = ? AND outcome IS NOT NULL AND acked_at >= ?";
+const RESTORE_SETTLE: &str =
+    "UPDATE floor_restore_epochs SET reconciled_at = ?, refused = ? WHERE host_id = ? AND \
+     device_id = ? AND epoch = ? AND reconciled_at IS NULL";
+
 /// The pallets' statements (plan ПЛ-Ц; `src/floor/pallets/pallets.ts`, `src/floor/close/shift-close.ts`,
 /// `src/floor/print/print-jobs.ts`; `test/floor-schema.test.ts` checks the texts agree): the open
 /// pallet and its counts, a pallet's close, a box joining it, the shift close's check and
@@ -1087,7 +1236,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 76] = [
+    let reads: [(&str, &str); 82] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1411,6 +1560,33 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             NEWEST_PALLET_JOB_GUARD,
             "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        // What a station owes a restored host (plan РК-С): the obligation and its status by the
+        // pairing's own key, the blocks and the retired ones through the pairing's blocks, the
+        // records to send again through the settled ones (not the whole outbox).
+        (
+            RESTORE_DUE,
+            "sqlite_autoindex_floor_restore_epochs_1 (host_id=? AND device_id=?)",
+        ),
+        (
+            RESTORE_STATUS,
+            "sqlite_autoindex_floor_restore_epochs_1 (host_id=? AND device_id=?)",
+        ),
+        (
+            RESTORE_SETTLE,
+            "sqlite_autoindex_floor_restore_epochs_1 (host_id=? AND device_id=?)",
+        ),
+        (
+            RESTORE_BLOCKS,
+            "floor_sscc_blocks_prefix (host_id=? AND device_id=?)",
+        ),
+        (
+            RESTORE_RETIRE,
+            "floor_sscc_blocks_prefix (host_id=? AND device_id=?)",
+        ),
+        (
+            RESTORE_REOPEN,
+            "outbox_settled (host_id=? AND device_id=? AND outcome>?)",
         ),
     ];
     for (sql, index) in reads {

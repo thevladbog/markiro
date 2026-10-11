@@ -1,6 +1,13 @@
 import { z } from "zod";
 
-import { backupStateSchema, type BackupSettingsUpdate, type BackupState } from "./backups.js";
+import {
+  backupStateSchema,
+  knownBlocksResponseSchema,
+  type BackupSettingsUpdate,
+  type BackupState,
+  type KnownBlocksRequest,
+  type KnownBlocksResponse,
+} from "./backups.js";
 import type { HostClient } from "./client.js";
 import {
   badgeInfoSchema,
@@ -246,6 +253,13 @@ export interface HostApi {
    * again.
    */
   sendFacts: (records: readonly unknown[]) => Promise<FactReceipt[]>;
+  /**
+   * After the host's restore epoch changed (plan РК-С): blocks this station
+   * holds, 1-64 a request, as the host issued them; a result for each, in
+   * their order. Stations only; `conflict` on `no_restore` from a host that
+   * was never restored.
+   */
+  registerKnownBlocks: (request: KnownBlocksRequest) => Promise<KnownBlocksResponse>;
   /** The copies in both folders (plan РК); every office role reads them. */
   getBackups: (token: string) => Promise<BackupState>;
   /**
@@ -535,6 +549,11 @@ export function createHostApi(client: HostClient): HostApi {
           schema: factReceiptsSchema,
         })
       ).receipts,
+    registerKnownBlocks: (request) =>
+      client.request("POST", "/v1/device/sscc/blocks/known", {
+        body: request,
+        schema: knownBlocksResponseSchema,
+      }),
     closeShift: (token, id, close) =>
       client.request("POST", `/v1/office/shifts/${id}/close`, {
         body: close,
