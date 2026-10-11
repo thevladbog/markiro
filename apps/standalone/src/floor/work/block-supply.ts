@@ -58,9 +58,10 @@ const spanRow = z.object({ next_serial: z.number().int(), to_serial: z.number().
  * cover is counted once, as only one box can carry it. The host numbers its
  * blocks from a counter that only grows, so the blocks do not overlap and
  * stay inside the capacity; the count does not rely on it. It counts a serial
- * whose SSCC another box already holds (a former pairing's, after a host that
- * was reinstalled with its counter reset), which the close then loses as an
- * `invalid_serial`; that state is not one a host can produce today.
+ * whose SSCC another box (or, for pallet serials, another pallet) already
+ * holds (a former pairing's, after a host that was reinstalled with its
+ * counter reset), which the close then loses as an `invalid_serial`; that
+ * state is not one a host can produce today.
  */
 export async function remainingSerials(
   local: LocalExecutor,

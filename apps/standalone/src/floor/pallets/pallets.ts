@@ -109,8 +109,8 @@ export interface ClosingPallet {
  * How a pallet's close went: `closed`; `empty` — no open pallet, or one
  * without a box, and no serial spent; `no_serials` — no pallet block of the
  * snapshot's prefix has a serial left, and the pallet stays open; an SSCC
- * past the prefix's range (`invalid_serial`) — that serial is spent and the
- * pallet stays open; `stale` — the pallet or the block changed between the
+ * past the prefix's range or already held by another pallet
+ * (`invalid_serial`) — that serial is spent and the pallet stays open; `stale` — the pallet or the block changed between the
  * read and the write, nothing was written.
  */
 export type PalletCloseResult =
@@ -121,6 +121,7 @@ export type PalletCloseResult =
   | { kind: "stale" };
 
 const blockRow = z.object({ block_id: z.string(), next_serial: z.number().int().nonnegative() });
+const heldRow = z.object({ n: z.literal(1) });
 
 /** The next serial of the earliest pallet block of the prefix that has one, or `null`. */
 async function nextPalletSerial(
@@ -147,14 +148,35 @@ function spendSerial(blockId: string, serial: number): LocalStatement {
   };
 }
 
-/** The pallet's SSCC by the domain's `buildSscc`; `null` past the prefix's range. */
-function palletSscc(issuerPrefix: string, serial: number): string | null {
+/**
+ * Whether a pallet already holds an SSCC (pinned in both lists of plans):
+ * `floor_pallets_sscc` is unique across pairings, and a forget keeps a former
+ * pairing's pallets.
+ */
+export const PALLET_SSCC_HELD_SQL = "SELECT 1 AS n FROM floor_pallets WHERE sscc = ? LIMIT 1";
+
+/**
+ * The SSCC a pallet can carry for `serial`, by the domain's `buildSscc`;
+ * `null` for a serial that cannot label a pallet: past the prefix's range, or
+ * whose SSCC another pallet already holds (after a host reinstalled with its
+ * counter reset). The write would fail whole on the unique key as a generic
+ * `statement_failed`, which every box close and every retry would repeat with
+ * the same serial for good; the box close loses such a serial instead.
+ */
+async function freePalletSscc(
+  local: LocalExecutor,
+  issuerPrefix: string,
+  serial: number,
+): Promise<string | null> {
+  let sscc: string;
   try {
-    return buildSscc(PALLET_EXTENSION, issuerPrefix, serial);
+    sscc = buildSscc(PALLET_EXTENSION, issuerPrefix, serial);
   } catch (error) {
     if (error instanceof DomainError && error.code === "SSCC_RANGE") return null;
     throw error;
   }
+  const [held] = await local.query(PALLET_SSCC_HELD_SQL, [sscc], heldRow);
+  return held === undefined ? sscc : null;
 }
 
 /**
@@ -267,10 +289,11 @@ export async function closeOpenPallet(
   if (open === null || open.boxCount === 0) return { kind: "empty" };
   const next = await nextPalletSerial(context);
   if (next === null) return { kind: "no_serials" };
-  const sscc = palletSscc(shift.snapshot.issuerPrefix, next.serial);
+  const sscc = await freePalletSscc(local, shift.snapshot.issuerPrefix, next.serial);
   if (sscc === null) {
-    // As for a box: the serial is lost, the pallet stays open, and the next
-    // close takes the next serial instead of failing on this one forever.
+    // As for a box: the serial is lost (past the range, or its SSCC held), the
+    // pallet stays open, and the next close takes the next serial instead of
+    // failing on this one forever.
     const spent = await commit(local, [spendSerial(next.blockId, next.serial)]);
     return spent === "stale" ? { kind: "stale" } : { kind: "invalid_serial" };
   }
@@ -324,8 +347,9 @@ export const BOX_ONTO_PALLET_SQL =
  * palletBoxCapacity`) closes it in the same transaction, after the box's
  * record, with the box's moment: the box never closes without its pallet,
  * and the pallet's `pallet_closed` follows its last box in the outbox. With
- * no pallet serial left the full pallet stays open, the next boxes join it,
- * and it closes when serials come (`closePalletIfFull`).
+ * no pallet serial left, or one that cannot label a pallet (past the range,
+ * its SSCC held), the full pallet stays open, the next boxes join it, and it
+ * closes when serials come (`closePalletIfFull`), which loses the bad serial.
  */
 export function palletStep(context: PalletContext, pallets: ShiftPallets): CloseStep {
   return async (box: ClosingBox) => {
@@ -356,7 +380,10 @@ export function palletStep(context: PalletContext, pallets: ShiftPallets): Close
     const boxCount = (open?.boxCount ?? 0) + 1;
     if (boxCount >= pallets.capacity) {
       const next = await nextPalletSerial(context);
-      const sscc = next === null ? null : palletSscc(shift.snapshot.issuerPrefix, next.serial);
+      const sscc =
+        next === null
+          ? null
+          : await freePalletSscc(local, shift.snapshot.issuerPrefix, next.serial);
       if (next !== null && sscc !== null) {
         statements.push(
           ...(await closeStatements(context, pallets, {

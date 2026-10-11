@@ -823,3 +823,102 @@ describe("the close of a shift with pallets, in the order its blockers come (pla
     await expect(guard("unknown")).rejects.toMatchObject({ code: "changes_mismatch" });
   });
 });
+
+/**
+ * A closed pallet of a former pairing (a forget keeps it) that holds the SSCC of
+ * pallet `serial`: `floor_pallets_sscc` is unique across pairings.
+ */
+function holdSscc(at: PalletStation, serial: number) {
+  at.db
+    .prepare(
+      "INSERT INTO floor_pallets (id, host_id, device_id, shift_id, opened_at, closed_at, sscc, " +
+        "block_id, serial, closed_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .run(
+      `former-${serial}`,
+      FOREIGN,
+      FOREIGN,
+      OTHER_SHIFT,
+      "2026-10-01T05:00:00.000Z",
+      "2026-10-01T06:00:00.000Z",
+      buildSscc(PALLET_EXTENSION, PREFIX, serial),
+      "former-block",
+      serial,
+      OPERATOR_ID,
+    );
+}
+
+function palletCursor(at: PalletStation) {
+  return rows(at.db, "SELECT next_serial FROM floor_sscc_blocks WHERE extension = 1");
+}
+
+describe("a pallet serial whose SSCC another pallet already holds (plan ПЛ-Ц)", () => {
+  it("is lost by an early close like a serial past the range: the pallet stays open and the next close takes the next serial", async () => {
+    const at = await palletStation({ capacity: 40 });
+    // Serial 0 is held; the SSCC of serial 5 is nothing to this close.
+    holdSscc(at, 0);
+    holdSscc(at, 5);
+    await closeBoxes(at, "A", 2);
+    await expect(closeOpenPallet(palletContext(at), at.pallets)).resolves.toEqual({
+      kind: "invalid_serial",
+    });
+    expect(palletCursor(at)).toEqual([{ next_serial: 1 }]);
+    expect(pallets(at).filter((pallet) => pallet["closed_at"] === null)).toEqual([
+      expect.objectContaining({ sscc: null, serial: null }),
+    ]);
+    expect(outbox(at).map((record) => record.kind)).not.toContain("pallet_closed");
+    await expect(closeOpenPallet(palletContext(at), at.pallets)).resolves.toMatchObject({
+      kind: "closed",
+      pallet: { serial: 1, sscc: buildSscc(PALLET_EXTENSION, PREFIX, 1), boxCount: 2 },
+    });
+    expect(palletCursor(at)).toEqual([{ next_serial: 2 }]);
+  });
+
+  it("leaves the full pallet open in the box's close: the box still closes and joins, the serial stays unspent, and the pallet closes later on a free serial", async () => {
+    const at = await palletStation({ capacity: 2 });
+    holdSscc(at, 0);
+    await closeBoxOnPallet(at, ["A1"]);
+    const full = await closeBoxOnPallet(at, ["B1", "B2"]);
+    if (full.kind !== "closed") throw new Error(full.kind);
+    const open = await readOpenPallet(at.local, PAIRING, at.shift.copy.id);
+    expect(open).toMatchObject({ boxCount: 2, itemCount: 3 });
+    expect(boxesOn(at, open?.id)).toHaveLength(2);
+    expect(palletCursor(at)).toEqual([{ next_serial: 0 }]);
+    expect(outbox(at).map((record) => record.kind)).toEqual([
+      "scan",
+      "box_closed",
+      "scan",
+      "scan",
+      "box_closed",
+    ]);
+    expect(rows(at.db, "SELECT id FROM floor_print_jobs WHERE purpose = 'pallet'")).toEqual([]);
+    // Another box joins the full pallet while the held serial waits (the box never fails on it).
+    const third = await closeBoxOnPallet(at, ["C1"]);
+    expect(third.kind).toBe("closed");
+    expect(await readOpenPallet(at.local, PAIRING, at.shift.copy.id)).toMatchObject({
+      boxCount: 3,
+    });
+    // The close that follows loses the held serial, the one after takes the next.
+    const context = palletContext(at);
+    await expect(closePalletIfFull(context, at.pallets)).resolves.toEqual({
+      kind: "invalid_serial",
+    });
+    expect(palletCursor(at)).toEqual([{ next_serial: 1 }]);
+    await expect(closePalletIfFull(context, at.pallets)).resolves.toMatchObject({
+      kind: "closed",
+      pallet: { serial: 1, boxCount: 3 },
+    });
+  });
+
+  it("is not looked for where it does not hold: another serial's SSCC held changes nothing", async () => {
+    const at = await palletStation({ capacity: 2 });
+    holdSscc(at, 7);
+    await closeBoxOnPallet(at, ["A1"]);
+    const full = await closeBoxOnPallet(at, ["B1"]);
+    expect(full.kind).toBe("closed");
+    expect(pallets(at).filter((pallet) => pallet["serial"] === 0)).toEqual([
+      expect.objectContaining({ sscc: buildSscc(PALLET_EXTENSION, PREFIX, 0) }),
+    ]);
+    expect(palletCursor(at)).toEqual([{ next_serial: 1 }]);
+  });
+});

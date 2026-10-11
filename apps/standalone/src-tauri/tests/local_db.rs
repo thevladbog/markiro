@@ -1006,6 +1006,7 @@ const JOIN_PALLET: &str =
 const BOX_ONTO_PALLET: &str =
     "UPDATE floor_boxes SET pallet_id = ? WHERE id = ? AND host_id = ? AND device_id = ? \
      AND closed_at IS NOT NULL AND pallet_id IS NULL";
+const PALLET_SSCC_HELD: &str = "SELECT 1 AS n FROM floor_pallets WHERE sscc = ? LIMIT 1";
 const OPEN_PALLET_GUARD: &str =
     "UPDATE floor_shifts AS s SET local_state = local_state WHERE s.host_id = ? AND \
      s.device_id = ? AND s.id = ? AND NOT EXISTS (SELECT 1 FROM floor_pallets p WHERE \
@@ -1049,7 +1050,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 64] = [
+    let reads: [(&str, &str); 65] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1322,6 +1323,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         (CLOSE_PALLET, "floor_boxes_pallet (pallet_id=?)"),
         (JOIN_PALLET, "sqlite_autoindex_floor_pallets_1 (id=?)"),
         (BOX_ONTO_PALLET, "sqlite_autoindex_floor_boxes_1 (id=?)"),
+        (PALLET_SSCC_HELD, "floor_pallets_sscc (sscc=?)"),
         (
             OPEN_PALLET_GUARD,
             "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",

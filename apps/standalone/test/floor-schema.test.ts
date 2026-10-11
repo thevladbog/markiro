@@ -25,6 +25,7 @@ import {
   JOIN_PALLET_SQL,
   OPEN_PALLET_GUARD_SQL,
   OPEN_PALLET_SQL,
+  PALLET_SSCC_HELD_SQL,
 } from "../src/floor/pallets/pallets.js";
 import { OPEN_JOB_READ_SQL } from "../src/floor/print/print-jobs.js";
 import { BLOCKS_WITH_ROOM_SQL } from "../src/floor/work/block-supply.js";
@@ -796,6 +797,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       [CLOSE_PALLET_SQL, ["sqlite_autoindex_floor_pallets_1 (id=?)", PALLET_BOXES_INDEX]],
       [JOIN_PALLET_SQL, ["sqlite_autoindex_floor_pallets_1 (id=?)"]],
       [BOX_ONTO_PALLET_SQL, ["sqlite_autoindex_floor_boxes_1 (id=?)"]],
+      [PALLET_SSCC_HELD_SQL, ["floor_pallets_sscc (sscc=?)"]],
       [OPEN_PALLET_GUARD_SQL, [SHIFT_KEY, OPEN_PALLET_INDEX, PALLET_BOXES_INDEX]],
       [CLOSE_SUMMARY_SQL, [SHIFT_KEY, OPEN_PALLET_INDEX, PALLET_BOXES_INDEX]],
       [OPEN_JOB_READ_SQL, ["floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"]],
@@ -1064,11 +1066,12 @@ describe("the shape of the production tables (migration 0006)", () => {
       CLOSE_PALLET_SQL,
       JOIN_PALLET_SQL,
       BOX_ONTO_PALLET_SQL,
+      PALLET_SSCC_HELD_SQL,
       OPEN_PALLET_GUARD_SQL,
       CLOSE_SUMMARY_SQL,
       OPEN_JOB_READ_SQL,
     ];
-    expect(new Set(statements).size).toBe(20);
+    expect(new Set(statements).size).toBe(21);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
     // The retention pass's statements, as `tests/local_db.rs` plans them (the refused closes' read
     // among them): the long ones as constants, the deletes of the tables with an index by shift as literals, the three that read
