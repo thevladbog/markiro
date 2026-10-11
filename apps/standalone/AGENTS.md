@@ -1443,28 +1443,27 @@ synchronous in the shell, so the window itself is hung then, and a timeout
 that let the next command overlap could leave the window locked while the
 webview believes it is not.
 
-`App` enters kiosk mode whenever no office session is open: at start, when
-the office closes («Выйти в цех») and when the session ends (below: when a
-call to the host finds it expired). That covers every screen that is not the
+`App` enters kiosk mode (on every PC but an office PC, below) whenever no
+office session is open: at start, when the office closes («Выйти в цех») and
+when the session ends (below: when a call to the host finds it expired). That covers every screen that is not the
 office, the first-run wizard and the repair screens (pairing, host not found,
 pairing failed) included: on a fresh install, or while the host service is
 down, nothing inside the app leads out of the locked window until setup is
 finished and an administrator signs in.
 
-Kiosk mode locks EVERY PC that runs the app, not only the floor's stations:
-whenever no office session is open, the host's own PC and a PC used only for
-the office are behind the borderless, topmost, unclosable window too, and a
-technologist cannot leave it (only an administrator can). Stage 1 always pairs
-the app as a station (`DeviceKind::Station` in `device.rs`; `DeviceKind::Office`
-exists in `proto` and nothing uses it), so the app has no way to tell a floor
-station from an office PC. This is the plan's decision («whenever no office
-session is open»), not a choice the owner made, and it is an open owner
-question to settle before the Windows trial at a customer, where someone will
-install the app on the host's PC. Options: accept it; lock only a window that
-is a floor station (for example only once the device has a line, or leave the
-line-selection screen unlocked); a per-device kiosk switch the administrator
-sets in «Устройства» (host, `proto` and `device.json` change); a local
-«office PC» flag in `device.json` set by an administrator.
+Kiosk mode locks every PC except an office PC (plan УСТ; owner question П11,
+answered as recommended until the owner says otherwise). An office PC is one
+the installer gave the role «только офис» (`installation.json`, see
+«Installer and service»), or one paired as a device of kind `office`: `App`
+asks the shell for the role first (`install_role`) and enters kiosk mode only
+once the answer came and says it is not an office PC; an answer the shell
+cannot give counts as a station, so the floor stays locked. The role wins over
+the pairing: a PC the installer made a host or a station stays locked even if
+its disk holds an office pairing, and an office-role PC never shows the floor,
+the line choice or the operator sign-in even if its disk holds a station
+pairing. The host's own PC is the site's station (pilot spec §3) and stays
+locked. A technologist on a station cannot leave the locked window (only an
+administrator can).
 
 An office session opens with the window still locked; the way out is «Оконный
 режим» (`src/office/WindowModeButton.tsx`, in the office header), shown only
@@ -1521,6 +1520,122 @@ keep the lockout counters out of what `clear_copies` empties, so a forget does
 not reset them; the second would be one change with making the buttons 64 px.
 The buttons of these shell screens are of ordinary size, not 64 px, although
 kiosk mode shows them on the station.
+
+## Installer and service
+
+Plan УСТ ships the app with one NSIS installer for Windows 10/11 x64 and
+three roles: `host` (the `MarkiroHost` service and the station), `station`
+(a station that pairs with a host on another PC) and `office` (the office
+only). The operator's guide is `docs/runbooks/standalone-install.md`; the
+pilot spec's «Уточнения плана УСТ» records the decisions and the deviations
+from §10. Nothing in this section has run on Windows: the installer, the NSIS
+hooks and `smoke.ps1` are covered by text and fake-based tests only, and the
+first real run is the `standalone-windows-build` job.
+
+`markiro-host install`, `uninstall`, `stop-service` and `network-check
+[--make-private]` (`host/src/main.rs`) are the installer's tools; the first
+three refuse outside Windows. `install::install_host` (`host/src/install.rs`)
+creates the data directory, then `install::install` hardens it with `icacls`
+by SID — inheritance off, SYSTEM and Administrators full control, LocalService
+modify, so no user reads the database or `tls/key.der`, which hold the PIN and
+badge hashes and the host's private key; stops a service an earlier version
+left running; creates or rewrites `MarkiroHost` («Markiro Хост», own process,
+automatic start, `NT AUTHORITY\LocalService`, `"<exe>" service`, restarts
+after 5, 30 and 60 s with the count reset after a day, failure actions on a
+non-crash exit too, which `service.rs`'s `ServiceSpecific(1)` needs; rewriting
+resets the account to LocalService, so an account the customer's IT chose for
+the backup share, see `docs/runbooks/standalone-backup-restore.md`, must be
+set again after each update); replaces the firewall rule `MarkiroHost` (TCP,
+`host.json`'s port or 45710 as of that moment, private and domain networks,
+`LocalSubnet`, no `-Program`); starts the service and waits up to 30 s. A fresh
+install that fails before the start is taken back (service and rule removed);
+a failed upgrade keeps the service it found, and a service that was started
+and then did not come up stays registered. `uninstall` stops and deletes the
+service and the rule and never touches the data directory. The service
+manager is behind `install::Services` (`install_windows.rs` on
+`windows-service`) and external programs behind `install::Commands`
+(`icacls.exe` and `powershell.exe` by their absolute path under
+`%SystemRoot%\System32`, and PowerShell takes its script as `-EncodedCommand`,
+so no quoting rule can change it), so `host/tests/install.rs` and
+`host/tests/network_profile.rs` pin the order of the steps, the exact command
+lines and the bounded waits with fakes on any OS; `install_windows.rs`
+compiles only for Windows. `network-check` lists `Get-NetConnectionProfile`
+(the category as text, UTF-8) and exits 3 while a network is public;
+`--make-private` makes the public ones private first. Exit codes: `install` 0
+running, 1 failed, 4 registered but did not stay up (usually an unfinished
+`restore`: `host.restore-intent` makes `start` refuse, and Windows keeps
+retrying every 60 s, so a `restore` may meet «locked» once and be repeated);
+`network-check` 0, 3, 1; a bad command line 2.
+
+The installer build is `tauri build --config src-tauri/tauri.installer.conf.json
+--bundles nsis` after `markiro-host.exe` was copied to
+`src-tauri/binaries/markiro-host-x86_64-pc-windows-msvc.exe` (ignored by git).
+The overlay adds the sidecar (`bundle.externalBin`), the per-machine install
+and the Russian installer. Never move `externalBin` into `tauri.conf.json` or
+a `tauri.windows.conf.json`: `tauri-build` copies the sidecar at compile time
+and reads `tauri.windows.conf.json` on every Windows build, so `cargo test`
+would fail without the binary. The hooks (`src-tauri/windows/installer-hooks.nsh`,
+UTF-8 with a byte order mark, or NSIS reads the Russian text in the build
+machine's code page) take the role from `/ROLE=`, else from
+`HKLM\Software\Markiro\Standalone\Role`, else from two questions; a silent
+install without a role fails, and a role never changes on reinstall. NSIS
+compares strings without regard to case, so the hook maps the role to the
+exact lower-case literal before it writes `{"role":"host|station|office"}` to
+`installation.json`: that file must carry no other key, or the app's reader
+refuses it and the PC becomes a locked-down station. Before files are copied
+an existing host binary stops its service; afterwards the host role runs
+`install` (a failure fails the installation; exit code 4 is only a warning
+with the restore hint) and `network-check`, offering to make a public network
+private; the other roles delete `markiro-host.exe`; every role but `office`
+opens the app at sign-in (`HKLM\…\Run\MarkiroStandalone`). Uninstalling
+ignores Tauri's «delete app data» checkbox (the station's local database may
+hold unsent facts); a real uninstall (not Tauri's `/UPDATE`) runs
+`markiro-host uninstall` and removes the role, the autostart and
+`installation.json`, and an update only stops the service. A failed
+`uninstall` or `stop-service` in the hooks is only logged, so files can go
+while the service stays registered; the runbook tells the operator to check.
+The Tauri template's facts the hooks rely on (hook positions, `$UpdateMode`,
+`$DeleteAppDataCheckboxState`, `GetOptions`) come from the signer's hooks, not
+from the template, which was not available to read, and no `makensis` has
+compiled the hooks.
+
+The app reads its role from `installation.json` beside its executable
+(`src-tauri/src/installation.rs`; `Program Files` is writable by
+administrators only, so nobody at the station can make it an office PC). A
+missing or unreadable file is no role: the app works as a station. An office
+PC pairs by code as a device of kind `office` (`DeviceState::claim`) and the
+shell refuses its `host_local_pair`, so it can never obtain a station key; its
+home is the office sign-in, which has no «В цех», its header says «Выйти»
+(`OfficeSessionValue.exitTo`), and nobody signs in on its floor. It still
+syncs the reference copies like a station (see «Перенесено» of plan УСТ).
+
+`device_change_address` (`DeviceState::change_address`) moves a pairing to
+the host's new address: the address is first reduced to `https://host[:port]`
+(no user name, password, path, query, fragment or white space, `host_origin`),
+and the pairing is kept only when that address presents the pinned
+certificate and the host still accepts the device key (`GET /v1/device`), so
+the key never reaches another machine; another certificate is
+`address_other_host`, a refused key is `key_rejected` (a rejected device), and
+nothing changes but `hostAddress` and the connection task's link. The office
+sign-in of a pairing with a remote host offers it («Сменить адрес хоста»,
+`src/app/HostAddressDialog.tsx`, the address typed as for pairing).
+
+`standalone-windows-build` builds the release host and the installer, runs
+`tools/standalone-release/smoke.ps1` on its runner (the three roles and a
+silent install without one, the service's account, start mode, restart
+policy and a restart after a killed process, the firewall rule, the data
+directory's access list, a reinstall that keeps the host's identity and
+certificate, a reinstall over an unfinished restore, a refused role change,
+uninstalls that keep the data, one with the host running), then
+`tools/standalone-release/prepare.mjs` writes the installer under its
+release name with `release-evidence.json` (version, commit, roles, hash and
+size, `Get-AuthenticodeSignature`'s status) and `SHA256SUMS`, uploaded as
+`standalone-installer-<sha>` for 30 days. `pnpm test:standalone-release:contract`
+pins the overlay, the hooks, the job's step order and the smoke test's checks.
+The installer is not signed (owner question П12); `sign-overlay.mjs` builds
+the Tauri overlay for a certificate in the build machine's store, and no
+signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
+`.nsh` hooks.
 
 ## Office pages
 
@@ -3194,9 +3309,12 @@ either; a file log is stage 5.
     scanner or a real Windows.
 - The Windows service and DPAPI run only in the `standalone-windows-build`
   job: it compiles the service and the Tauri app for Windows, and its cargo
-  tests round-trip a key through DPAPI. A real Windows user profile, the
-  service at runtime and kiosk mode still need a manual check on Windows; a
-  run on macOS proves none of it.
+  tests round-trip a key through DPAPI. Since plan УСТ it also builds the
+  installer and runs its smoke test on the runner (see «Installer and
+  service»). A real Windows user profile, two PCs over Wi-Fi, kiosk mode and
+  the installer's windows still need a manual check on Windows
+  (`docs/runbooks/standalone-install.md`, «Ручная проверка на Windows»); a run
+  on macOS proves none of it.
 - The `windows-sys` features of kiosk mode, the spooler and the power request,
   `serialport`, `base64` for every system and `libudev-dev` in `standalone-rust`
   came with plan 2a4's owner step (its Task 1, which also closed plan 1f2's).
