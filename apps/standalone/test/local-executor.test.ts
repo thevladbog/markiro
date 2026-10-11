@@ -114,6 +114,8 @@ describe("local database on node:sqlite", () => {
       "floor_boxes",
       "floor_codes",
       "floor_exceptions",
+      "floor_pallet_exceptions",
+      "floor_pallets",
       "floor_print_jobs",
       "floor_scans",
       "floor_shifts",

@@ -14,6 +14,7 @@ import {
 } from "../src/floor/shifts/shift-copies.js";
 import { checkShiftSnapshot } from "../src/floor/shifts/shift-snapshot.js";
 import {
+  deviceShiftSchema,
   deviceShiftsSchema,
   enteredShiftSchema,
   type DeviceShift,
@@ -83,6 +84,8 @@ describe("the station's copies of its shifts", () => {
       plannedQty: 1200,
       boxCapacity: 12,
       boxTemplateId: ACTIVE.boxTemplateId,
+      palletBoxCapacity: null,
+      palletTemplateId: null,
       ownerDeviceId: ACTIVE.ownerDeviceId,
       openedAt: "2026-10-08T06:02:00Z",
       closedAt: null,
@@ -246,6 +249,49 @@ describe("the station's copies of its shifts", () => {
       number: "OCT26-005/S",
       createdFrom: "station",
       entered: false,
+    });
+  });
+});
+
+describe("the copies of a shift with pallets (plan ПЛ-Ц)", () => {
+  const PALLETS: EnteredShift = enteredShiftSchema.parse(
+    fixture("device-shift-entered-pallets.json"),
+  );
+
+  it("keep its boxes per pallet and pallet template, and neither for a shift without pallets", async () => {
+    // The list names a shift without its snapshot.
+    const listed = deviceShiftSchema.parse(PALLETS);
+    const { executor } = openLocalDb();
+    await replaceShiftCopies(executor, PAIRING, [listed, PLANNED], SEEN);
+    expect(await readShiftCopy(executor, PAIRING, PALLETS.id)).toMatchObject({
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f",
+    });
+    expect(await readShiftCopy(executor, PAIRING, PLANNED.id)).toMatchObject({
+      palletsEnabled: false,
+      palletBoxCapacity: null,
+      palletTemplateId: null,
+    });
+  });
+
+  it("work the shift from its stored snapshot with the pallet layout, and refuse one kept without it", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, PALLETS, AT, SEEN);
+    const work = await readStoredWork(executor, PAIRING, PALLETS.id);
+    if (work.kind !== "ready") throw new Error(`not ready: ${work.kind}`);
+    expect(work.shift.copy).toMatchObject({ palletsEnabled: true, palletBoxCapacity: 40 });
+    expect(work.shift.snapshot.palletTemplate).toMatchObject({
+      id: "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f",
+      rev: 63,
+      spec: { widthMm: 100, heightMm: 150 },
+    });
+    // A snapshot an older build kept dropped the pallet template: not worked from.
+    const older = { ...PALLETS.snapshot, palletTemplate: undefined };
+    db.prepare("UPDATE floor_shifts SET snapshot = ?").run(JSON.stringify(older));
+    expect(await readStoredWork(executor, PAIRING, PALLETS.id)).toEqual({
+      kind: "unreadable",
+      reason: "layout",
     });
   });
 });

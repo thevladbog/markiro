@@ -38,12 +38,14 @@ const testModuleUrl = import.meta.url;
 const OTHER_DEVICE = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
 const AT = "2026-10-09T08:00:00.000Z";
 
-/** The tables of this device's own records (migrations `0006`, `0007`; `TableClass::DeviceData`). */
+/** The tables of this device's own records (migrations `0006`–`0008`; `TableClass::DeviceData`). */
 const DEVICE_TABLES = [
   "floor_block_requests",
   "floor_boxes",
   "floor_codes",
   "floor_exceptions",
+  "floor_pallet_exceptions",
+  "floor_pallets",
   "floor_print_jobs",
   "floor_scans",
   "floor_shifts",
@@ -448,6 +450,8 @@ const COLUMNS: Record<string, string[]> = {
     "entered_at TEXT",
     "local_state TEXT",
     "seen_at INTEGER NOT NULL",
+    "pallet_box_capacity INTEGER",
+    "pallet_template_id TEXT",
   ],
   floor_sscc_blocks: [
     "block_id TEXT NOT NULL PK1",
@@ -482,6 +486,32 @@ const COLUMNS: Record<string, string[]> = {
     "closed_by TEXT",
     "disassembled_at TEXT",
     "needs_fix INTEGER NOT NULL DEFAULT 0",
+    "pallet_id TEXT",
+  ],
+  floor_pallets: [
+    "id TEXT NOT NULL PK1",
+    "host_id TEXT NOT NULL",
+    "device_id TEXT NOT NULL",
+    "shift_id TEXT NOT NULL",
+    "opened_at TEXT NOT NULL",
+    "closed_at TEXT",
+    "sscc TEXT",
+    "block_id TEXT",
+    "serial INTEGER",
+    "closed_by TEXT",
+    "disassembled_at TEXT",
+  ],
+  floor_pallet_exceptions: [
+    "id TEXT NOT NULL PK1",
+    "host_id TEXT NOT NULL",
+    "device_id TEXT NOT NULL",
+    "shift_id TEXT NOT NULL",
+    "kind TEXT NOT NULL",
+    "pallet_id TEXT NOT NULL",
+    "reason_code TEXT NOT NULL",
+    "reason_text TEXT",
+    "occurred_at TEXT NOT NULL",
+    "operator_id TEXT",
   ],
   floor_codes: [
     "host_id TEXT NOT NULL PK1",
@@ -608,10 +638,14 @@ describe("the shape of the production tables (migration 0006)", () => {
     );
     expect(indexes).toEqual([
       { tableName: "floor_boxes", name: "floor_boxes_open", isUnique: 1, isPartial: 1 },
+      { tableName: "floor_boxes", name: "floor_boxes_pallet", isUnique: 0, isPartial: 1 },
       { tableName: "floor_boxes", name: "floor_boxes_shift", isUnique: 0, isPartial: 0 },
       { tableName: "floor_boxes", name: "floor_boxes_sscc", isUnique: 1, isPartial: 1 },
       { tableName: "floor_codes", name: "floor_codes_box", isUnique: 0, isPartial: 0 },
       { tableName: "floor_codes", name: "floor_codes_shift", isUnique: 0, isPartial: 0 },
+      { tableName: "floor_pallets", name: "floor_pallets_open", isUnique: 1, isPartial: 1 },
+      { tableName: "floor_pallets", name: "floor_pallets_shift", isUnique: 0, isPartial: 0 },
+      { tableName: "floor_pallets", name: "floor_pallets_sscc", isUnique: 1, isPartial: 1 },
       {
         tableName: "floor_print_jobs",
         name: "floor_print_jobs_open",
@@ -932,6 +966,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       floor_codes: "floor_codes_shift",
       floor_print_jobs: "floor_print_jobs_shift",
       floor_boxes: "floor_boxes_shift",
+      floor_pallets: "floor_pallets_shift",
     } as const;
     for (const table of RETAINED_TABLES) {
       const steps = plan(purgeTableSql(table)).split("\n");
@@ -953,6 +988,7 @@ describe("the shape of the production tables (migration 0006)", () => {
     }
     expect(RETAINED_TABLES.filter((table) => !(table in bySearch))).toEqual([
       "floor_exceptions",
+      "floor_pallet_exceptions",
       "outbox",
     ]);
   });
@@ -980,19 +1016,21 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(new Set(statements).size).toBe(13);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
     // The retention pass's statements, as `tests/local_db.rs` plans them (the refused closes' read
-    // among them): the long ones as constants, the deletes of the tables with an index by shift as literals, the two that read
+    // among them): the long ones as constants, the deletes of the tables with an index by shift as literals, the three that read
     // their whole table from one format string.
     const retention = [
       DUE_SHIFTS_SQL,
       PURGE_COPY_SQL,
       REFUSED_CLOSES_SQL,
-      ...(["floor_scans", "floor_codes", "floor_print_jobs", "floor_boxes"] as const).map(
-        purgeTableSql,
-      ),
+      ...(
+        ["floor_scans", "floor_codes", "floor_print_jobs", "floor_boxes", "floor_pallets"] as const
+      ).map(purgeTableSql),
     ];
-    expect(new Set(retention).size).toBe(7);
+    expect(new Set(retention).size).toBe(8);
     for (const sql of retention) expect(source).toContain(`"${sql}"`);
-    expect(source).toContain('for table in ["outbox", "floor_exceptions"] {');
+    expect(source).toContain(
+      'for table in ["outbox", "floor_exceptions", "floor_pallet_exceptions"] {',
+    );
     expect(source).toContain(`"${purgeTableSql("outbox").replace("outbox", "{table}")}"`);
   });
 

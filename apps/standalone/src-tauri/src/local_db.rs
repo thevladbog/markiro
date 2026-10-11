@@ -45,9 +45,9 @@ pub enum TableClass {
     /// Copies of the host's data and this pairing's own bookkeeping: the
     /// forget empties them, PIN and badge hashes included.
     Disposable,
-    /// What this device recorded itself — shifts, boxes, scans, the outbox
-    /// (plans 2a5–2a8): the forget keeps them, each row tagged with the
-    /// pairing that wrote it.
+    /// What this device recorded itself — shifts, boxes, pallets, scans, the
+    /// outbox (plans 2a5–2a8, ПЛ-Ц): the forget keeps them, each row tagged
+    /// with the pairing that wrote it.
     DeviceData,
     /// This computer's workstation settings — printers, scanners, sound
     /// (plan 2a7): they belong to the PC, not to a pairing, and outlive it.
@@ -71,6 +71,8 @@ pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
     ("floor_boxes", TableClass::DeviceData),
     ("floor_codes", TableClass::DeviceData),
     ("floor_exceptions", TableClass::DeviceData),
+    ("floor_pallet_exceptions", TableClass::DeviceData),
+    ("floor_pallets", TableClass::DeviceData),
     ("floor_print_jobs", TableClass::DeviceData),
     ("floor_scans", TableClass::DeviceData),
     ("floor_shifts", TableClass::DeviceData),

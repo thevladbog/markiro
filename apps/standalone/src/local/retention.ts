@@ -17,16 +17,18 @@ export const RETENTION_INTERVAL_MS = 60 * 60 * 1000;
 /**
  * The tables of a shift's own records, which carry its `shift_id`: the
  * retention deletes their rows with the shift's copy. A later plan's table
- * of a shift's records (the pallets' plan: `floor_pallets`,
- * `floor_pallet_exceptions`) joins this list, or a test that reads every
- * table of the database fails.
+ * of a shift's records joins this list, or a test that reads every table of
+ * the database fails; the pallets' plan (ПЛ-Ц) added `floor_pallets` and
+ * `floor_pallet_exceptions`.
  */
 export const RETAINED_TABLES = [
   "floor_scans",
   "floor_exceptions",
+  "floor_pallet_exceptions",
   "floor_codes",
   "floor_print_jobs",
   "floor_boxes",
+  "floor_pallets",
   "outbox",
 ] as const;
 

@@ -1675,6 +1675,26 @@ describe("the creation of a shift, apart from its screen", () => {
   });
 
   it("makes the copy of a created shift one nobody has entered and nobody is closing", () => {
-    expect(createdCopy(PLANNED)).toEqual({ ...PLANNED, localState: null, entered: false });
+    expect(createdCopy(PLANNED)).toEqual({
+      ...PLANNED,
+      palletBoxCapacity: null,
+      palletTemplateId: null,
+      localState: null,
+      entered: false,
+    });
+  });
+
+  it("makes the copy of a created shift with pallets keep its boxes per pallet and pallet template", () => {
+    const palletsShift = {
+      ...PLANNED,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f",
+    };
+    expect(createdCopy(palletsShift)).toEqual({
+      ...palletsShift,
+      localState: null,
+      entered: false,
+    });
   });
 });

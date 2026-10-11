@@ -165,18 +165,22 @@ const NONE = {
   floor_shifts: 0,
   floor_scans: 0,
   floor_exceptions: 0,
+  floor_pallet_exceptions: 0,
   floor_codes: 0,
   floor_print_jobs: 0,
   floor_boxes: 0,
+  floor_pallets: 0,
   outbox: 0,
 };
 const WHOLE = {
   floor_shifts: 1,
   floor_scans: 2,
   floor_exceptions: 1,
+  floor_pallet_exceptions: 0,
   floor_codes: 1,
   floor_print_jobs: 1,
   floor_boxes: 1,
+  floor_pallets: 0,
   outbox: 5,
 };
 
@@ -303,6 +307,55 @@ describe("the retention of a shift's records on the station", () => {
         "(SELECT 1 FROM pragma_table_info(m.name) c WHERE c.name = 'shift_id') ORDER BY m.name",
     ).map((row) => row["name"]);
     expect(withShift).toEqual([...RETAINED_TABLES].sort());
+  });
+
+  // The pallets of a shift (plan ПЛ-Ц) go with it: the pallet, its exception, one pairing's,
+  // while the same ids of another shift and of another pairing stay.
+  it("deletes a shift's pallets and their exceptions with it, and no one else's", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-09-01T00:00:00.000Z");
+    await finished(at, SECOND, "B", "2026-11-08T11:00:00.000Z");
+    const pallets = (pairing: Pair, shiftId: string, digit: string): void => {
+      at.db
+        .prepare(
+          "INSERT INTO floor_pallets (id, host_id, device_id, shift_id, opened_at, closed_at, " +
+            "sscc, block_id, serial) VALUES (?, ?, ?, ?, '2026-09-01T00:00:00.000Z', " +
+            "'2026-09-01T00:01:00.000Z', ?, 'block-p', 1)",
+        )
+        .run(
+          `pallet-${shiftId}-${pairing.deviceId}`,
+          pairing.hostId,
+          pairing.deviceId,
+          shiftId,
+          `1${digit}00000000000000`.padEnd(18, "0"),
+        );
+      at.db
+        .prepare(
+          "INSERT INTO floor_pallet_exceptions (id, host_id, device_id, shift_id, kind, " +
+            "pallet_id, reason_code, occurred_at) VALUES (?, ?, ?, ?, 'reprint', ?, " +
+            "'printer_jam', '2026-09-01T00:02:00.000Z')",
+        )
+        .run(
+          `exception-${shiftId}-${pairing.deviceId}`,
+          pairing.hostId,
+          pairing.deviceId,
+          shiftId,
+          `pallet-${shiftId}-${pairing.deviceId}`,
+        );
+    };
+    pallets(PAIRING, ENTERED.id, "1");
+    pallets(PAIRING, SECOND.id, "2");
+    pallets(OTHER_PAIRING, ENTERED.id, "3");
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    expect(keptFor(at, PAIRING, ENTERED.id)).toEqual(NONE);
+    expect(keptFor(at, PAIRING, SECOND.id)).toMatchObject({
+      floor_pallets: 1,
+      floor_pallet_exceptions: 1,
+    });
+    expect(keptFor(at, OTHER_PAIRING, ENTERED.id)).toMatchObject({
+      floor_pallets: 1,
+      floor_pallet_exceptions: 1,
+    });
   });
 });
 

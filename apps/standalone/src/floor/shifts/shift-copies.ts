@@ -40,6 +40,10 @@ export interface ShiftCopy {
   plannedQty: number | null;
   boxCapacity: number;
   boxTemplateId: string;
+  /** Boxes per pallet of a shift with pallets (plan ПЛ-Ц); `null` without pallets. */
+  palletBoxCapacity: number | null;
+  /** The pallet template of a shift with pallets; `null` without pallets. */
+  palletTemplateId: string | null;
   ownerDeviceId: string | null;
   openedAt: string | null;
   closedAt: string | null;
@@ -69,6 +73,9 @@ const HOST_FIELDS = [
   ["planned_qty", "plannedQty"],
   ["box_capacity", "boxCapacity"],
   ["box_template_id", "boxTemplateId"],
+  // Absent for a shift without pallets (protocol 3): `->>` yields NULL.
+  ["pallet_box_capacity", "palletBoxCapacity"],
+  ["pallet_template_id", "palletTemplateId"],
   ["owner_device_id", "ownerDeviceId"],
   ["opened_at", "openedAt"],
   ["closed_at", "closedAt"],
@@ -242,6 +249,8 @@ const copyRow = z.object({
   planned_qty: z.number().nullable(),
   box_capacity: z.number(),
   box_template_id: z.string(),
+  pallet_box_capacity: z.number().nullable(),
+  pallet_template_id: z.string().nullable(),
   owner_device_id: z.string().nullable(),
   opened_at: z.string().nullable(),
   closed_at: z.string().nullable(),
@@ -251,7 +260,8 @@ const copyRow = z.object({
 const COPY_COLUMNS =
   "id, number, status, local_state, mode, pallets_enabled, created_from, line_id, product_id, " +
   "product_name, product_gtin14, counterparty_name, production_date, planned_qty, " +
-  "box_capacity, box_template_id, owner_device_id, opened_at, closed_at, " +
+  "box_capacity, box_template_id, pallet_box_capacity, pallet_template_id, owner_device_id, " +
+  "opened_at, closed_at, " +
   "entered_at IS NOT NULL AS entered";
 
 function toCopy(row: z.infer<typeof copyRow>): ShiftCopy {
@@ -272,6 +282,8 @@ function toCopy(row: z.infer<typeof copyRow>): ShiftCopy {
     plannedQty: row.planned_qty,
     boxCapacity: row.box_capacity,
     boxTemplateId: row.box_template_id,
+    palletBoxCapacity: row.pallet_box_capacity,
+    palletTemplateId: row.pallet_template_id,
     ownerDeviceId: row.owner_device_id,
     openedAt: row.opened_at,
     closedAt: row.closed_at,

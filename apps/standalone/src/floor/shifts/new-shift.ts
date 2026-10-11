@@ -241,5 +241,11 @@ export function isShiftOfRequest(shift: DeviceShift, input: DeviceShiftInput): b
 
 /** The copy of a shift the station has just created, to enter it at once. */
 export function createdCopy(shift: DeviceShift): ShiftCopy {
-  return { ...shift, localState: null, entered: false };
+  return {
+    ...shift,
+    palletBoxCapacity: shift.palletBoxCapacity ?? null,
+    palletTemplateId: shift.palletTemplateId ?? null,
+    localState: null,
+    entered: false,
+  };
 }

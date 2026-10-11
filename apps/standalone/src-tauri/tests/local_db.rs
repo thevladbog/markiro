@@ -70,6 +70,8 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
             "floor_boxes",
             "floor_codes",
             "floor_exceptions",
+            "floor_pallet_exceptions",
+            "floor_pallets",
             "floor_print_jobs",
             "floor_scans",
             "floor_shifts",
@@ -131,6 +133,106 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
     assert_eq!(
         lines(&reopened).await,
         json!([{ "id": LINE_1, "name": "Линия 1", "archived": 0, "rev": 3 }])
+    );
+}
+
+/// Migration `0008` over a station's database of `0007` that holds a shift, a
+/// closed box and an outbox record: the shell's own SQLite adds the pallet
+/// columns to the populated tables, every row stays as it was and the new
+/// columns read `NULL` (plan ПЛ-Ц, additive).
+#[tokio::test]
+async fn migration_0008_keeps_the_rows_of_a_database_of_0007() {
+    let dir = tempfile::tempdir().unwrap();
+    let until_0007: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version <= 7)
+        .cloned()
+        .collect();
+    assert_eq!(until_0007.len(), 7, "migrations 0001 to 0007 exist");
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(until_0007),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    for sql in [
+        "INSERT INTO floor_shifts (host_id, device_id, id, number, status, mode, \
+         pallets_enabled, created_from, line_id, product_id, product_name, product_gtin14, \
+         production_date, box_capacity, box_template_id, seen_at, entered_at, snapshot, \
+         local_state) VALUES ('host', 'device', 'shift-1', 'OCT26-004', 'active', \
+         'aggregation', 0, 'office', 'line', 'product-1', 'Milk', '04600682000013', \
+         '2026-10-09', 12, 'template-1', 1790000000000, '2026-10-09T07:00:00.000Z', '{}', \
+         'closing')",
+        "INSERT INTO floor_boxes (id, host_id, device_id, shift_id, opened_at, closed_at, \
+         sscc, block_id, serial, item_count) VALUES ('box-1', 'host', 'device', 'shift-1', \
+         '2026-10-09T08:00:00.000Z', '2026-10-09T08:01:00.000Z', '046006820000000017', \
+         'block-1', 1, 12)",
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) \
+         VALUES ('record-1', 'host', 'device', 'box_closed', 'shift-1', '{}', \
+         '2026-10-09T08:01:00.000Z')",
+    ] {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    let at_0007: Option<(String,)> = sqlx::query_as(
+        "SELECT name FROM sqlite_master WHERE name IN ('floor_pallets', 'floor_pallet_exceptions')",
+    )
+    .fetch_optional(&mut raw)
+    .await
+    .unwrap();
+    assert_eq!(at_0007, None, "no pallet table before 0008");
+    raw.close().await.unwrap();
+
+    // The application opens the file as it starts: it applies what is pending.
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    let shifts = db
+        .query(
+            "SELECT id, status, local_state, pallets_enabled, box_capacity, pallet_box_capacity, \
+             pallet_template_id FROM floor_shifts",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(shifts.into_iter().map(Value::Object).collect()),
+        json!([{
+            "id": "shift-1", "status": "active", "local_state": "closing",
+            "pallets_enabled": 0, "box_capacity": 12,
+            "pallet_box_capacity": null, "pallet_template_id": null
+        }])
+    );
+    let boxes = db
+        .query(
+            "SELECT id, sscc, item_count, pallet_id FROM floor_boxes",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(boxes.into_iter().map(Value::Object).collect()),
+        json!([{
+            "id": "box-1", "sscc": "046006820000000017", "item_count": 12, "pallet_id": null
+        }])
+    );
+    assert_eq!(count(&db, "outbox").await, json!(1));
+    assert_eq!(count(&db, "floor_pallets").await, json!(0));
+    assert_eq!(count(&db, "floor_pallet_exceptions").await, json!(0));
+    // The old box joins a pallet afterwards.
+    assert_eq!(
+        db.transaction(vec![expecting(
+            "UPDATE floor_boxes SET pallet_id = 'pallet-1' WHERE id = 'box-1'",
+            json!([]),
+            1,
+        )])
+        .await
+        .unwrap(),
+        [1]
     );
 }
 
@@ -454,9 +556,10 @@ async fn every_table_has_a_forget_class() {
         listed, tables,
         "TABLE_CLASSES names each table of the migrations once, and nothing else"
     );
-    // This device's own records are the production tables of `0006` and the
-    // print jobs of `0007`; the sign-in lockouts stay with the copies (an
-    // open owner question); the workstation's settings belong to the PC.
+    // This device's own records are the production tables of `0006`, the
+    // print jobs of `0007` and the pallets of `0008`; the sign-in lockouts
+    // stay with the copies (an open owner question); the workstation's
+    // settings belong to the PC.
     let device_data: Vec<&str> = TABLE_CLASSES
         .iter()
         .filter(|(_, class)| *class == TableClass::DeviceData)
@@ -469,6 +572,8 @@ async fn every_table_has_a_forget_class() {
             "floor_boxes",
             "floor_codes",
             "floor_exceptions",
+            "floor_pallet_exceptions",
+            "floor_pallets",
             "floor_print_jobs",
             "floor_scans",
             "floor_shifts",
@@ -548,7 +653,7 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
     ])
     .await
     .unwrap();
-    // One record in each table of this device's own (`0006`, `0007`) and
+    // One record in each table of this device's own (`0006`–`0008`) and
     // one setting of the workstation (`0007`).
     db.transaction(device_records()).await.unwrap();
     db.transaction(vec![statement(
@@ -585,6 +690,8 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
         "floor_boxes",
         "floor_codes",
         "floor_exceptions",
+        "floor_pallet_exceptions",
+        "floor_pallets",
         "floor_print_jobs",
         "floor_scans",
         "floor_shifts",
@@ -649,9 +756,9 @@ fn outbox_record(id: &str, host: &str, device: &str, acked: Option<&str>) -> Loc
     )
 }
 
-/// One row in each table of this device's own records (migrations `0006`,
-/// `0007`), each of the pairing `(HOST, DEVICE)`, as the floor's writers will write
-/// them through `local_transaction`.
+/// One row in each table of this device's own records (migrations
+/// `0006`–`0008`), each of the pairing `(HOST, DEVICE)`, as the floor's
+/// writers will write them through `local_transaction`.
 fn device_records() -> Vec<LocalStatement> {
     vec![
         statement(
@@ -706,6 +813,17 @@ fn device_records() -> Vec<LocalStatement> {
              created_at, updated_at) VALUES ('job-1', ?, ?, 'shift-1', 'box', 'box-1', \
              '046006820000000017', 'skipped', 0, 'template-1', 3, '{}', 'operator-1', \
              '2026-10-08T06:04:00.000Z', '2026-10-08T06:04:00.000Z')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO floor_pallets (id, host_id, device_id, shift_id, opened_at) \
+             VALUES ('pallet-1', ?, ?, 'shift-1', '2026-10-08T06:04:00.000Z')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO floor_pallet_exceptions (id, host_id, device_id, shift_id, kind, \
+             pallet_id, reason_code, occurred_at) VALUES ('pallet-exception-1', ?, ?, \
+             'shift-1', 'reprint', 'pallet-1', 'printer_jam', '2026-10-08T06:05:00.000Z')",
             json!([HOST, DEVICE]),
         ),
         outbox_record("record-1", HOST, DEVICE, None),
@@ -880,7 +998,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 50] = [
+    let reads: [(&str, &str); 51] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1110,7 +1228,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         // The retention pass (plan 2a8), once an hour: the shifts done with and the delete of a
         // copy search the shift's key, the unsent records, the settled ones and the shift's
         // jobs. The due select must walk the settled records once (not once per shift): that is
-        // pinned after the loop. Two of the deletes below read the whole table (no index by
+        // pinned after the loop. Three of the deletes (not listed) read the whole table (no index by
         // shift): pinned after the loop too.
         (DUE_SHIFTS, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"),
         (DUE_SHIFTS, "outbox_unsent (host_id=? AND device_id=?)"),
@@ -1136,6 +1254,10 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             "DELETE FROM floor_boxes WHERE host_id = ? AND device_id = ? AND shift_id = ?",
             "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "DELETE FROM floor_pallets WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_pallets_shift (host_id=? AND device_id=? AND shift_id=?",
         ),
     ];
     for (sql, index) in reads {
@@ -1248,10 +1370,11 @@ async fn the_floors_repeating_reads_search_an_index() {
         ["SCAN floor_block_requests"],
         "{waiting}\n  should scan only the waiting requests, its plan is {plan:?}"
     );
-    // The two deletes of the retention pass with no index by shift: the outbox and the exceptions
-    // carry the shift only as a column, so a purged shift costs one read of each table. They run
-    // once for a shift that has been done with for 30 days, not on a scan.
-    for table in ["outbox", "floor_exceptions"] {
+    // The three deletes of the retention pass with no index by shift: the outbox and the
+    // exceptions (a box's, a pallet's) carry the shift only as a column, so a purged shift costs
+    // one read of each table. They run once for a shift that has been done with for 30 days, not
+    // on a scan.
+    for table in ["outbox", "floor_exceptions", "floor_pallet_exceptions"] {
         let delete =
             format!("DELETE FROM {table} WHERE host_id = ? AND device_id = ? AND shift_id = ?");
         let text = format!("EXPLAIN QUERY PLAN {delete}");
