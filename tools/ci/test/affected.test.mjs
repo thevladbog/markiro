@@ -249,6 +249,7 @@ test("deployment and release tooling selects its consuming jobs", () => {
     ["tools/production-browser/tests/docs.spec.ts", ["production_bundle"]],
     ["tools/station-release/build-manifest.mjs", ["station_rust", "station_windows_build"]],
     ["tools/signer-release/build-manifest.mjs", ["signer_rust", "signer_windows_build"]],
+    ["tools/standalone-release/smoke.ps1", ["standalone_rust", "standalone_windows_build"]],
   ];
 
   for (const [path, expected] of cases) {

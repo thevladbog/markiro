@@ -1,0 +1,29 @@
+{
+  "now": "2026-10-09T15:10:00Z",
+  "local": {
+    "dir": "C:\\ProgramData\\Markiro\\Host\\backups",
+    "lastAttempt": null,
+    "copies": []
+  },
+  "second": null,
+  "settingsRev": 7,
+  "running": null,
+  "restoreHold": {
+    "since": "2026-10-09T15:00:00Z",
+    "epoch": "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e",
+    "stations": [
+      {
+        "id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d",
+        "name": "Станция линии 1",
+        "lastSeenAt": "2026-10-09T15:06:00Z",
+        "reconciled": true
+      },
+      {
+        "id": "1f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b",
+        "name": "Станция линии 2",
+        "lastSeenAt": null,
+        "reconciled": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,173 @@
+// The installer of «Markiro Автоном» as a self-verifying artifact (plan УСТ):
+// the NSIS installer under a stable name, `release-evidence.json` (version,
+// source commit, roles, hash and size, Authenticode status) and `SHA256SUMS`.
+// The `standalone-windows-build` job runs it after the installer's smoke test
+// and uploads the directory; nothing is published anywhere else.
+//
+//   node tools/standalone-release/prepare.mjs --bundle-dir <nsis dir> --output-dir <dir> \
+//     --source-repository <owner/repo> --source-sha <40 hex> --authenticode <status>
+
+import { createHash } from "node:crypto";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { parseArgs } from "node:util";
+
+export const STANDALONE_TAURI_CONFIG = "apps/standalone/src-tauri/tauri.conf.json";
+export const EVIDENCE_FILE = "release-evidence.json";
+export const CHECKSUM_FILE = "SHA256SUMS";
+/** The installer's roles (`src-tauri/windows/installer-hooks.nsh`). */
+export const ROLES = Object.freeze(["host", "station", "office"]);
+/** `Get-AuthenticodeSignature`'s status for a signed and for an unsigned file. */
+export const AUTHENTICODE_STATUSES = Object.freeze(["Valid", "NotSigned"]);
+
+const VERSION = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
+
+export function standaloneInstallerName(version) {
+  if (!VERSION.test(version ?? "")) throw new Error(`${String(version)} is not a version`);
+  return `markiro-standalone-${version}-windows-x86_64-setup.exe`;
+}
+
+/** The single source of the version: the app's Tauri config. */
+export async function readStandaloneVersion(configPath = STANDALONE_TAURI_CONFIG) {
+  const config = JSON.parse(await readFile(configPath, "utf8"));
+  if (!VERSION.test(config?.version ?? "")) {
+    throw new Error(`${configPath} has no usable version`);
+  }
+  return config.version;
+}
+
+function sha256(bytes) {
+  return createHash("sha256").update(bytes).digest("hex");
+}
+
+function validateSource(repository, sha) {
+  if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository ?? "")) {
+    throw new Error("source repository is invalid");
+  }
+  if (!/^[a-f0-9]{40}$/.test(sha ?? "")) {
+    throw new Error("source SHA must be a full lowercase Git commit SHA");
+  }
+}
+
+export async function prepareStandaloneRelease({
+  version,
+  sourceRepository,
+  sourceSha,
+  bundleDir,
+  outputDir,
+  authenticode,
+}) {
+  validateSource(sourceRepository, sourceSha);
+  const name = standaloneInstallerName(version);
+  if (!AUTHENTICODE_STATUSES.includes(authenticode)) {
+    throw new Error(`Authenticode status ${String(authenticode)} is neither signed nor unsigned`);
+  }
+  const installers = (await readdir(bundleDir)).filter((name) => name.endsWith("-setup.exe"));
+  if (installers.length !== 1) {
+    throw new Error(`expected exactly one NSIS installer in ${bundleDir}`);
+  }
+  await mkdir(outputDir, { recursive: true });
+  if ((await readdir(outputDir)).length !== 0) {
+    throw new Error(`prepared release directory is not empty: ${outputDir}`);
+  }
+  const bytes = await readFile(join(bundleDir, installers[0]));
+  await writeFile(join(outputDir, name), bytes);
+  const evidence = {
+    schemaVersion: 1,
+    product: "standalone",
+    version,
+    source: { repository: sourceRepository, sha: sourceSha },
+    roles: [...ROLES],
+    authenticode,
+    assets: { [name]: { sha256: sha256(bytes), size: bytes.length } },
+  };
+  const evidenceBytes = Buffer.from(`${JSON.stringify(evidence, null, 2)}\n`, "utf8");
+  await writeFile(join(outputDir, EVIDENCE_FILE), evidenceBytes);
+  const sums = [
+    [EVIDENCE_FILE, sha256(evidenceBytes)],
+    [name, sha256(bytes)],
+  ]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([file, hash]) => `${hash}  ${file}\n`)
+    .join("");
+  await writeFile(join(outputDir, CHECKSUM_FILE), sums, "utf8");
+  return verifyPreparedStandaloneRelease({ directory: outputDir, version });
+}
+
+export async function verifyPreparedStandaloneRelease({ directory, version }) {
+  const name = standaloneInstallerName(version);
+  const expected = [CHECKSUM_FILE, EVIDENCE_FILE, name].sort();
+  const entries = (await readdir(directory)).sort();
+  if (entries.join("\n") !== expected.join("\n")) {
+    throw new Error("prepared standalone release has an unexpected asset set");
+  }
+  const bytes = Object.fromEntries(
+    await Promise.all(
+      entries.map(async (entry) => [entry, await readFile(join(directory, entry))]),
+    ),
+  );
+  const evidence = JSON.parse(bytes[EVIDENCE_FILE].toString("utf8"));
+  if (
+    evidence?.schemaVersion !== 1 ||
+    evidence?.product !== "standalone" ||
+    evidence?.version !== version ||
+    JSON.stringify(evidence?.roles) !== JSON.stringify(ROLES) ||
+    !AUTHENTICODE_STATUSES.includes(evidence?.authenticode)
+  ) {
+    throw new Error("prepared standalone release evidence is invalid");
+  }
+  validateSource(evidence.source?.repository, evidence.source?.sha);
+  const asset = evidence.assets?.[name];
+  if (
+    Object.keys(evidence.assets ?? {}).length !== 1 ||
+    asset?.sha256 !== sha256(bytes[name]) ||
+    asset?.size !== bytes[name].length
+  ) {
+    throw new Error(`prepared standalone release checksum mismatch: ${name}`);
+  }
+  const lines = bytes[CHECKSUM_FILE].toString("utf8").trim().split("\n");
+  const sums = new Map();
+  for (const line of lines) {
+    const match = /^([a-f0-9]{64}) {2}([^/\\]+)$/.exec(line);
+    if (!match || sums.has(match[2])) throw new Error("prepared standalone SHA256SUMS is invalid");
+    sums.set(match[2], match[1]);
+  }
+  if ([...sums.keys()].sort().join("\n") !== [EVIDENCE_FILE, name].sort().join("\n")) {
+    throw new Error("prepared standalone SHA256SUMS names unexpected assets");
+  }
+  for (const [file, hash] of sums) {
+    if (sha256(bytes[file]) !== hash) {
+      throw new Error(`prepared standalone release checksum mismatch: ${file}`);
+    }
+  }
+  return { directory, name, evidence };
+}
+
+async function main() {
+  const { values } = parseArgs({
+    options: {
+      "bundle-dir": { type: "string" },
+      "output-dir": { type: "string" },
+      "source-repository": { type: "string" },
+      "source-sha": { type: "string" },
+      authenticode: { type: "string" },
+    },
+    strict: true,
+  });
+  const prepared = await prepareStandaloneRelease({
+    version: await readStandaloneVersion(),
+    sourceRepository: values["source-repository"],
+    sourceSha: values["source-sha"],
+    bundleDir: values["bundle-dir"],
+    outputDir: values["output-dir"],
+    authenticode: values.authenticode,
+  });
+  process.stdout.write(
+    `${prepared.name} ${prepared.evidence.assets[prepared.name].sha256} (${prepared.evidence.authenticode})\n`,
+  );
+}
+
+if (import.meta.url === pathToFileURL(process.argv[1] ?? "").href) {
+  await main();
+}

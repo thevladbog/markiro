@@ -1,0 +1,20 @@
+{
+  "failures": [
+    "destination_unavailable",
+    "access_denied",
+    "disk_full",
+    "write_failed",
+    "verify_failed",
+    "local_copy_failed",
+    "internal"
+  ],
+  "dirProblems": [
+    "missing",
+    "not_a_directory",
+    "access_denied",
+    "unwritable",
+    "timeout",
+    "inside_data_dir"
+  ],
+  "knownBlockCodes": ["block_mismatch", "block_overlap", "prefix_unknown", "range_invalid"]
+}

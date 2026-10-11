@@ -50,6 +50,10 @@ pub mod codes {
     /// The SSCC counter of a prefix reached the end of its serials: no block
     /// of it can be issued any more.
     pub const SSCC_EXHAUSTED: &str = "sscc_exhausted";
+    /// The host was restored from a copy and holds the stations' facts (and
+    /// code checks) until an administrator resumes them (plan РК): a station
+    /// sends them again later, as after a lost connection.
+    pub const RESTORE_PENDING: &str = "restore_pending";
 
     /// Every code above, for the parity fixture the webview also reads.
     pub const ALL: &[&str] = &[
@@ -70,6 +74,7 @@ pub mod codes {
         PAIRING_CODE_INVALID,
         PAIRING_CODE_EXPIRED,
         SSCC_EXHAUSTED,
+        RESTORE_PENDING,
     ];
 }
 
@@ -183,6 +188,7 @@ pub mod shift_close_reasons {
     ];
 }
 
+pub mod backup;
 pub mod pairing;
 
 /// Serde for a field of a partial update that may be absent (keep the stored
@@ -231,6 +237,12 @@ pub struct Hello {
     /// Host clock, UTC RFC 3339.
     pub time: String,
     pub initialized: bool,
+    /// Set by `markiro-host restore` (plan РК), a new UUID at every restore:
+    /// a device that sees it change knows the host went back to a copy and
+    /// registers its SSCC blocks again (`POST /v1/device/sscc/blocks/known`).
+    /// Absent until the first restore.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restore_epoch: Option<String>,
 }
 
 /// The part of `hello` that keeps its shape in every protocol version.

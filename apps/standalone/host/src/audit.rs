@@ -8,6 +8,11 @@ use sqlx::SqliteConnection;
 /// the audit screen (plan 5) translates one list.
 pub mod actions {
     pub const HOST_BOOTSTRAP: &str = "host.bootstrap";
+    /// `markiro-host restore` put a copy back (plan РК); the host is the
+    /// actor.
+    pub const HOST_RESTORE: &str = "host.restore";
+    /// An administrator resumed the stations' facts a restore held.
+    pub const HOST_RESTORE_RESUME: &str = "host.restore.resume";
     pub const DEVICE_LOCAL_PAIR: &str = "device.local_pair";
     pub const OFFICE_LOGIN: &str = "office.login";
     pub const OFFICE_LOGOUT: &str = "office.logout";
@@ -52,6 +57,14 @@ pub mod actions {
     /// The office saved the files of a shift's or a pallet's export (plan
     /// ЧЗ); nothing else changed.
     pub const SHIFT_EXPORT: &str = "shift.export";
+    /// After a restore, a station gave the host back a block the copy had
+    /// lost (plan РК).
+    pub const SSCC_BLOCK_REGISTER: &str = "sscc.block.register";
+    /// A copy of the database, scheduled (the host's) or asked for in the
+    /// office (plan РК); `failed` when a folder did not get it.
+    pub const BACKUP_CREATE: &str = "backup.create";
+    /// An administrator set or cleared the second folder of copies.
+    pub const BACKUP_SETTINGS_UPDATE: &str = "backup.settings.update";
 }
 
 /// `details.reason` of a denied row: every denial names one.

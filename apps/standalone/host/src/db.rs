@@ -14,17 +14,22 @@ use tokio::sync::watch;
 /// edited: sqlx refuses to start when a checksum changes.
 pub static MIGRATOR: Migrator = sqlx::migrate!("./migrations");
 
-pub async fn open(path: &Path) -> Result<SqlitePool, sqlx::Error> {
-    let options = SqliteConnectOptions::new()
+/// The pragmas of every connection to the master database: WAL, every
+/// transaction synced, foreign keys, a 5 s busy timeout. The pool and the
+/// backup worker's own connection (plan РК) use them alike.
+pub fn options(path: &Path) -> SqliteConnectOptions {
+    SqliteConnectOptions::new()
         .filename(path)
-        .create_if_missing(true)
         .journal_mode(SqliteJournalMode::Wal)
         .synchronous(SqliteSynchronous::Full)
         .foreign_keys(true)
-        .busy_timeout(Duration::from_secs(5));
+        .busy_timeout(Duration::from_secs(5))
+}
+
+pub async fn open(path: &Path) -> Result<SqlitePool, sqlx::Error> {
     let pool = SqlitePoolOptions::new()
         .max_connections(4)
-        .connect_with(options)
+        .connect_with(options(path).create_if_missing(true))
         .await?;
     MIGRATOR.run(&pool).await?;
     Ok(pool)

@@ -16,6 +16,7 @@
     "internal",
     "pairing_code_invalid",
     "pairing_code_expired",
-    "sscc_exhausted"
+    "sscc_exhausted",
+    "restore_pending"
   ]
 }

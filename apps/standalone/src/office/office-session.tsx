@@ -28,6 +28,11 @@ export interface OfficeSessionValue {
    * dropped — and tells the host in the background.
    */
   logout: () => void;
+  /**
+   * Where `logout` leads: the floor (the default), or the office sign-in on
+   * an office PC, which has no floor (plan УСТ); the header names it so.
+   */
+  exitTo?: "floor" | "sign_in";
   /** Re-reads the signed-in user (name, role) from the host into the shell. */
   refreshUser: () => Promise<void>;
 }
