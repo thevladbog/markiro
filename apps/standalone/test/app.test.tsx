@@ -2910,7 +2910,7 @@ describe("the operator on the floor", () => {
     await waitFor(() => expect(link.stop).toHaveBeenCalledTimes(1));
   });
 
-  it("turns back an entry whose shift the office closed on the way, and holds nothing for the shell", async () => {
+  it("enters a shift the office closed on the way, to finish it, and holds a refused key until it is left", async () => {
     const link = fakeConnection();
     const host = fakeHost();
     host.getChanges.mockResolvedValue(feedPage(42, PEOPLE));
@@ -2940,10 +2940,13 @@ describe("the operator on the floor", () => {
     await act(async () => {
       answer(OPENED);
     });
-    expect(await screen.findByText("Смену OCT26-005/S закрыли в офисе.")).toBeTruthy();
-    expect(screen.queryByText("Выйти из смены")).toBeNull();
-    // Nothing waits for work that never began: a refused key takes the floor at once.
+    // The station entered it before the office closed it: it is finished here, with no new code.
+    expect(await screen.findByText("Смену закрыли в офисе")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Выйти из смены" })).toBeTruthy();
+    // The shell is told of work, so a refused key waits until the operator leaves the shift.
     await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
+    expect(screen.queryByText("Хост не принимает это устройство")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
     expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
   });
 

@@ -57,16 +57,19 @@ const CONFLICTS: Readonly<Record<string, EntryRefusal>> = {
 };
 
 /**
- * The stored shift to work without the host, or why there is none. Only an
- * active shift: `readStoredWork` also answers `ready` for one the office closed
- * or this station closed (the work screen needs those to finish them), which
- * the list never enters.
+ * The stored shift to work without the host, or why there is none. An active
+ * shift, or one the office closed after this station entered it (to finish
+ * it, plan 2a8): `readStoredWork` also answers `ready` for one this station
+ * closed, which the list never enters.
  */
 async function storedWork(context: EntryContext, shiftId: string): Promise<EntryResult> {
   const stored = await readStoredWork(context.local, context.pairing, shiftId);
   switch (stored.kind) {
     case "ready":
-      if (stored.shift.copy.status !== "active" || stored.shift.copy.localState !== null) {
+      if (
+        (stored.shift.copy.status !== "active" && stored.shift.copy.status !== "closed") ||
+        stored.shift.copy.localState !== null
+      ) {
         return { kind: "refused", reason: "closed" };
       }
       return { kind: "entered", shift: stored.shift, offline: true };
@@ -83,14 +86,18 @@ async function storedWork(context: EntryContext, shiftId: string): Promise<Entry
  * checked (`checkShiftSnapshot`) and kept before the station works from it;
  * a snapshot this build does not read is neither kept nor worked from. With
  * the link down, or a request that never reached the host, only an active
- * shift this station entered before is entered, from its stored snapshot.
+ * shift this station entered before is entered, from its stored snapshot;
+ * so is a shift the office closed after this station entered it, to finish
+ * it (plan 2a8).
  * Opening a planned shift and freezing its snapshot are the host's, so a
  * station on a PC away from the host enters its planned shifts while the
  * link is up and works them later without it.
  */
 export async function enterShift(context: EntryContext, copy: ShiftCopy): Promise<EntryResult> {
   if (copy.localState !== null) return { kind: "refused", reason: "closed" };
-  if (!context.online) return storedWork(context, copy.id);
+  // The office closed it after this station entered: finished from the
+  // stored snapshot, without the host, which refuses to enter a closed shift.
+  if (copy.status === "closed" || !context.online) return storedWork(context, copy.id);
   let answer: EnteredShift;
   try {
     answer = await context.enter(copy.id);

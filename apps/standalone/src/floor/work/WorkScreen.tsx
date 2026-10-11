@@ -206,6 +206,12 @@ export interface WorkScreenProps {
   render?: RenderLabel;
   /** The label panel's clock (milliseconds, never going back); tests drive it. */
   labelClock?: () => number;
+  /**
+   * The office closed the shift after this station entered it (plan 2a8):
+   * no new code is taken, while the box, its label, the exceptions and the
+   * shift's close are finished as usual.
+   */
+  officeClosed?: boolean;
 }
 
 /** What stops the scanning until the operator acts (stage 2a spec §5.7.3). */
@@ -261,7 +267,11 @@ function openBoxOutcome(result: OpenBoxResult, action: "undo" | "clear"): Except
 }
 
 /** The last scan, said in words under the box. */
-type Last = ScanOutcome | { kind: "paused"; leaving: boolean } | { kind: "shift_closed" };
+type Last =
+  | ScanOutcome
+  | { kind: "paused"; leaving: boolean }
+  | { kind: "shift_closed" }
+  | { kind: "office_closed" };
 
 /** How long the coloured flash of a refusal covers the screen (an accepted scan has none). */
 export const SIGNAL_MS = 700;
@@ -308,6 +318,8 @@ function lastText(last: Last, t: TFunction, capacity: number): string {
       return t(last.leaving ? "floor.work.last.leaving" : "floor.work.last.paused");
     case "shift_closed":
       return t("floor.work.last.closed");
+    case "office_closed":
+      return t("floor.work.last.officeClosed");
   }
 }
 
@@ -324,6 +336,7 @@ interface Live {
   local: LocalExecutor;
   online: boolean;
   leaving: boolean;
+  officeClosed: boolean;
   isLeaving: (() => boolean) | undefined;
   touch: () => void;
   track: <T>(work: Promise<T>) => Promise<T>;
@@ -539,7 +552,7 @@ async function attemptClose(env: CloseEnv, full: boolean): Promise<CloseOutcome>
  * verdict shows in words, as a flash and as a tone.
  */
 export function WorkScreen(props: WorkScreenProps) {
-  const { shift, leaving, onLeave, source, linkHeld = false } = props;
+  const { shift, leaving, onLeave, source, linkHeld = false, officeClosed = false } = props;
   const { t } = useTranslation();
   const [totals, setTotals] = useState<WorkTotals | null>(null);
   const [last, setLast] = useState<Last | null>(null);
@@ -576,6 +589,7 @@ export function WorkScreen(props: WorkScreenProps) {
     local: props.local,
     online: props.online,
     leaving,
+    officeClosed,
     isLeaving: props.isLeaving,
     touch: props.touch,
     track: props.track,
@@ -844,11 +858,13 @@ export function WorkScreen(props: WorkScreenProps) {
 
   /** A scan that is not taken: said in words, by flash and by tone, and not written. */
   const refuse = useCallback(
-    (leavingNow: boolean, shiftClosed = false) => {
+    (leavingNow: boolean, shiftClosed = false, officeClosedNow = false) => {
       const say = live.current.t;
-      const refused: Last = shiftClosed
-        ? { kind: "shift_closed" }
-        : { kind: "paused", leaving: leavingNow };
+      const refused: Last = officeClosedNow
+        ? { kind: "office_closed" }
+        : shiftClosed
+          ? { kind: "shift_closed" }
+          : { kind: "paused", leaving: leavingNow };
       setLast(refused);
       show("error", say("floor.work.signal.paused"), lastText(refused, say, 0));
     },
@@ -942,6 +958,11 @@ export function WorkScreen(props: WorkScreenProps) {
       await closeBox(true);
       if (stopRef.current !== null) {
         refuse(false);
+        return;
+      }
+      // A shift the office closed takes no new code: nothing is journalled.
+      if (live.current.officeClosed) {
+        refuse(false, false, true);
         return;
       }
       let outcome: ScanOutcome;
@@ -1402,6 +1423,11 @@ export function WorkScreen(props: WorkScreenProps) {
       titleAs="h2"
     >
       <div className="standalone-form">
+        {officeClosed && stop?.kind !== "closed" && (
+          <Alert tone="warn" title={t("floor.work.officeClosed.title")}>
+            {t("floor.work.officeClosed.body")}
+          </Alert>
+        )}
         <p className="shift-card__product">
           {t("floor.work.product", {
             name: shift.snapshot.product.name,

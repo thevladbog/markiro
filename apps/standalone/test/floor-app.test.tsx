@@ -236,6 +236,7 @@ function holdingWork() {
   let release: () => void = () => undefined;
   let fail: () => void = () => undefined;
   const leaving: boolean[] = [];
+  const officeClosed: boolean[] = [];
   let touch: () => void = () => undefined;
   let tracking = false;
   const seen: WorkScreenProps[] = [];
@@ -253,6 +254,7 @@ function holdingWork() {
     }, [track]);
     touch = props.touch;
     leaving.push(props.leaving);
+    officeClosed.push(props.officeClosed ?? false);
     return (
       <button type="button" onClick={props.onLeave}>
         {`Работа ${props.shift.copy.number}`}
@@ -264,6 +266,8 @@ function holdingWork() {
     release: () => act(async () => release()),
     fail: () => act(async () => fail()),
     leaving,
+    /** Whether the floor said the office closed the shift, at every render (plan 2a8). */
+    officeClosed,
     /** Every set of properties the floor gave the screen, in order. */
     seen,
     touch: () => touch(),
@@ -528,7 +532,7 @@ describe("the floor after an operator signed in", () => {
     expect(types(handlers)).not.toContain("operator_refreshed");
   });
 
-  it("takes the operator back to the list when the office closed the shift", async () => {
+  it("keeps the operator in the shift the office closed, to finish it, and takes no new code", async () => {
     const local = await floorCopies();
     const handlers = handlersOf();
     const view = render(floorOf(local, handlers));
@@ -541,8 +545,14 @@ describe("the floor after an operator signed in", () => {
       SEEN + 1,
     );
     view.rerender(floorOf(local, handlers, { shiftReads: { done: 2, failed: false } }));
-    expect(await screen.findByText("Смену OCT26-005/S закрыли в офисе.")).toBeTruthy();
-    expect(types(handlers)).toContain("work_left");
+    expect(await screen.findByText("Смену закрыли в офисе")).toBeTruthy();
+    expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
+    expect(types(handlers)).not.toContain("work_left");
+    // Back in the list it waits to be finished, and «Завершить» comes back to it.
+    fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Завершить" }));
+    expect(await screen.findByText("Смену закрыли в офисе")).toBeTruthy();
+    expect(handlers.enter).toHaveBeenCalledTimes(1);
     expect(handlers.onSignOut).not.toHaveBeenCalled();
   });
 
@@ -732,6 +742,7 @@ function WorkWithSetup(props: WorkScreenProps) {
   return (
     <>
       <p>{`Смена ${props.shift.copy.number}`}</p>
+      {props.officeClosed === true && <p>Закрыта в офисе</p>}
       <button type="button" onClick={props.onSetup}>
         Настроить принтер
       </button>
@@ -750,7 +761,7 @@ describe("what the workstation setup does to the floor around it", () => {
     return { local, handlers, view };
   }
 
-  it("reads the shift again on the way back: one the office closed meanwhile is not entered", async () => {
+  it("reads the shift again on the way back: one the office closed meanwhile is entered to be finished", async () => {
     const { local, handlers } = await inTheSetupFromTheWork();
     await replaceShiftCopies(
       local,
@@ -759,9 +770,9 @@ describe("what the workstation setup does to the floor around it", () => {
       SEEN + 1,
     );
     fireEvent.click(screen.getByRole("button", { name: "Назад" }));
-    expect(await screen.findByText("Смену OCT26-005/S закрыли в офисе.")).toBeTruthy();
-    expect(screen.queryByText("Смена OCT26-005/S")).toBeNull();
-    expect(types(handlers).filter((type) => type === "work_entered")).toHaveLength(1);
+    expect(await screen.findByText("Закрыта в офисе")).toBeTruthy();
+    expect(screen.getByText("Смена OCT26-005/S")).toBeTruthy();
+    expect(types(handlers).filter((type) => type === "work_entered")).toHaveLength(2);
   });
 
   it("goes back to the list when the shift cannot be read again, and enters nothing", async () => {
@@ -801,7 +812,7 @@ describe("what the workstation setup does to the floor around it", () => {
     expect(types(fromList).filter((type) => type.startsWith("work_"))).toEqual([]);
   });
 
-  it("lets the office's close of the shift outrank a setup that still waits for the work", async () => {
+  it("lets a setup that still waits for the work go on when the office closes the shift", async () => {
     const local = await floorCopies();
     const handlers = handlersOf();
     const work = holdingWork();
@@ -832,8 +843,8 @@ describe("what the workstation setup does to the floor around it", () => {
     );
     await settle();
     await work.release();
-    expect(await screen.findByText("Смену OCT26-005/S закрыли в офисе.")).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Принтеры" })).toBeNull();
+    expect(await screen.findByRole("heading", { name: "Принтеры" })).toBeTruthy();
+    expect(types(handlers).filter((type) => type === "work_left")).toHaveLength(1);
   });
 
   it("signs the operator out as idle in the setup as on the list", async () => {
@@ -1146,7 +1157,6 @@ function officeCloses(local: LocalExecutor, seenAt: number): Promise<void> {
 }
 
 const WORK_BUTTON = "Работа OCT26-005/S";
-const OFFICE_CLOSED = "Смену OCT26-005/S закрыли в офисе.";
 
 /** Anna is in the planned shift, with a work screen that holds the leave. */
 async function inTheWork(options: Options = {}, handlers = handlersOf()) {
@@ -1162,7 +1172,7 @@ async function inTheWork(options: Options = {}, handlers = handlersOf()) {
 }
 
 describe("an entry whose answer comes late (the work gate, minors 6 and 10)", () => {
-  it("turns back a shift the office closed on the way, says so, and shows no work for it", async () => {
+  it("enters a shift the office closed on the way, to finish it, without new codes", async () => {
     const local = await floorCopies();
     const answer = deferred<EnteredShift>();
     const handlers = handlersOf({ enter: () => answer.promise });
@@ -1178,12 +1188,10 @@ describe("an entry whose answer comes late (the work gate, minors 6 and 10)", ()
       SEEN + 1,
     );
     answer.resolve(OPENED);
-    expect(await screen.findByText(OFFICE_CLOSED)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: WORK_BUTTON })).toBeNull();
-    expect(types(handlers)).not.toContain("work_entered");
+    expect(await screen.findByRole("button", { name: WORK_BUTTON })).toBeTruthy();
+    expect(work.officeClosed.at(-1)).toBe(true);
+    expect(types(handlers)).toContain("work_entered");
     expect(types(handlers)).not.toContain("work_left");
-    // The list shows what the entry found out, not the card it was started from.
-    expect(screen.queryByRole("button", { name: "Открыть" })).toBeNull();
     // The shift is entered and kept, as the host's answer was, but it stays closed.
     expect(await readShiftCopy(local, PAIRING, PLANNED.id)).toMatchObject({
       entered: true,
@@ -1207,7 +1215,6 @@ describe("an entry whose answer comes late (the work gate, minors 6 and 10)", ()
     expect(closing).toHaveProperty("disabled", true);
     expect(screen.queryByRole("button", { name: "Продолжить" })).toBeNull();
     expect(screen.queryByRole("button", { name: WORK_BUTTON })).toBeNull();
-    expect(screen.queryByText(OFFICE_CLOSED)).toBeNull();
     expect(types(handlers)).not.toContain("work_entered");
   });
 
@@ -1226,7 +1233,6 @@ describe("an entry whose answer comes late (the work gate, minors 6 and 10)", ()
     await settle();
     await waitFor(() => expect(handlers.enter).toHaveBeenCalledTimes(1));
     expect(screen.queryByRole("button", { name: WORK_BUTTON })).toBeNull();
-    expect(screen.queryByText(OFFICE_CLOSED)).toBeNull();
     expect(types(handlers)).not.toContain("work_entered");
   });
 });
@@ -1435,20 +1441,22 @@ describe("what a leave that waits for the work ends in", () => {
     expect(handlers.onSignOut).toHaveBeenCalledTimes(1);
   });
 
-  it("stays the list, with its notice, when another line comes meanwhile", async () => {
+  it("leaves for another line once the work is done, whatever the office did to the shift meanwhile", async () => {
     const { local, work, handlers, again } = await inTheWork();
     await officeCloses(local, SEEN + 1);
     again({ shiftReads: { done: 2, failed: false } });
-    await waitFor(() => expect(work.leaving.at(-1)).toBe(true));
+    await waitFor(() => expect(work.officeClosed.at(-1)).toBe(true));
+    expect(work.leaving.at(-1)).toBe(false);
     again({ shiftReads: { done: 2, failed: false }, lineChangePending: true });
+    await waitFor(() => expect(work.leaving.at(-1)).toBe(true));
     await settle();
     await work.release();
-    expect(await screen.findByText(OFFICE_CLOSED)).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Завершить" })).toBeTruthy();
     expect(types(handlers)).toContain("work_left");
     expect(handlers.onSignOut).not.toHaveBeenCalled();
   });
 
-  it("says the office closed the shift when that comes after the operator asked to leave it", async () => {
+  it("leaves to the list, where the shift waits to be finished, when the office closes it after the operator asked to leave", async () => {
     const { local, work, handlers, again } = await inTheWork();
     fireEvent.click(screen.getByRole("button", { name: WORK_BUTTON }));
     await waitFor(() => expect(work.leaving.at(-1)).toBe(true));
@@ -1457,13 +1465,13 @@ describe("what a leave that waits for the work ends in", () => {
     again({ shiftReads: { done: 2, failed: false } });
     await settle();
     await work.release();
-    expect(await screen.findByText(OFFICE_CLOSED)).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Завершить" })).toBeTruthy();
     await settle();
     expect(types(handlers).filter((type) => type === "work_left")).toHaveLength(1);
     expect(handlers.onSignOut).not.toHaveBeenCalled();
   });
 
-  it("says the office closed the shift when that comes after the move to another line began to wait", async () => {
+  it("leaves for another line, the shift waiting to be finished, when the office closes it after the move to another line began to wait", async () => {
     const { local, work, handlers, again } = await inTheWork();
     again({ lineChangePending: true });
     await waitFor(() => expect(work.leaving.at(-1)).toBe(true));
@@ -1471,13 +1479,13 @@ describe("what a leave that waits for the work ends in", () => {
     again({ lineChangePending: true, shiftReads: { done: 2, failed: false } });
     await settle();
     await work.release();
-    expect(await screen.findByText(OFFICE_CLOSED)).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Завершить" })).toBeTruthy();
     await settle();
     expect(types(handlers).filter((type) => type === "work_left")).toHaveLength(1);
     expect(handlers.onSignOut).not.toHaveBeenCalled();
   });
 
-  it("keeps a sign-out that waits as it is when the office closes the shift meanwhile: no list, no notice", async () => {
+  it("keeps a sign-out that waits as it is when the office closes the shift meanwhile", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
     const { local, work, handlers, again } = await inTheWork({ idleTimeoutMs: 30_000 });
     await act(async () => {
@@ -1491,7 +1499,6 @@ describe("what a leave that waits for the work ends in", () => {
     await waitFor(() => expect(handlers.onSignOut).toHaveBeenCalledWith("idle"));
     await settle();
     expect(handlers.onSignOut).toHaveBeenCalledTimes(1);
-    expect(screen.queryByText(OFFICE_CLOSED)).toBeNull();
     expect(types(handlers).filter((type) => type === "work_left")).toHaveLength(1);
   });
 
@@ -1564,7 +1571,6 @@ describe("the shift's copy read after every read of the host's list", () => {
     gate.release();
     await settle();
     await settle();
-    expect(screen.queryByText(OFFICE_CLOSED)).toBeNull();
     expect(types(handlers).filter((type) => type === "work_left")).toHaveLength(1);
   });
 
@@ -1576,8 +1582,9 @@ describe("the shift's copy read after every read of the host's list", () => {
     await settle();
     expect(screen.getByRole("button", { name: WORK_BUTTON })).toBeTruthy();
     expect(work.leaving.at(-1)).toBe(false);
+    // The station's own close is the one that counts: no «closed in the office» on the screen.
+    expect(work.officeClosed.at(-1)).toBe(false);
     expect(types(handlers)).not.toContain("work_left");
-    expect(screen.queryByText(OFFICE_CLOSED)).toBeNull();
   });
 
   it("stays in the shift when its copy cannot be found, and says nothing", async () => {
@@ -1616,7 +1623,7 @@ describe("the shift's copy read after every read of the host's list", () => {
     broken = false;
     await officeCloses(real, SEEN + 1);
     view.rerender(floorOf(flaky, handlers, { shiftReads: { done: 3, failed: false } }));
-    expect(await screen.findByText(OFFICE_CLOSED)).toBeTruthy();
+    expect(await screen.findByText("Смену закрыли в офисе")).toBeTruthy();
   });
 });
 

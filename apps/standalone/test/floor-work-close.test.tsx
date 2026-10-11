@@ -1097,3 +1097,26 @@ describe("the figures of the summary", () => {
     expect(deviation(1_200, 12)).toBe("−1\u00a0188");
   });
 });
+
+describe("a shift the office closed while the station worked in it", () => {
+  it("takes no new code, but closes the box with its label and the shift as usual", async () => {
+    const at = await printStation();
+    const work = renderWork(at);
+    await scanAll(work, ["A1", "A2"]);
+    work.rerender({ officeClosed: true });
+    expect(screen.getByText("Смену закрыли в офисе")).toBeTruthy();
+    await work.scan(km("A3"));
+    expect(lastLine()).toBe("Скан не принят: смену закрыли в офисе.");
+    expect(rows(at.db, "SELECT count(*) AS n FROM floor_scans")).toEqual([{ n: 2 }]);
+    await work.press("Закрыть короб");
+    await work.press("Закрыть короб");
+    expect(work.shell.sends).toHaveLength(1);
+    await work.press("Закрыть смену");
+    await screen.findByText(TITLE);
+    await work.press("Изменение производственного задания");
+    await work.press("Подтвердить закрытие");
+    expect(await screen.findByText(CLOSED_TITLE)).toBeTruthy();
+    expect(screen.queryByText("Смену закрыли в офисе")).toBeNull();
+    expect(outboxKinds(at)).toEqual(["scan", "scan", "box_closed", "shift_closed"]);
+  });
+});

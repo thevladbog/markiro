@@ -42,27 +42,32 @@ import {
 } from "./setup/workstation-settings.js";
 import { NewShift } from "./shifts/NewShift.js";
 import { readShiftCopy, readStoredWork, type WorkShift } from "./shifts/shift-copies.js";
-import { ShiftList, type ShiftListNotice } from "./shifts/ShiftList.js";
+import { ShiftList } from "./shifts/ShiftList.js";
 import { readOperatorCopy } from "./sign-in.js";
 import { createWorkGate } from "./work-gate.js";
 import { playSignalTone } from "./work/signal-sound.js";
 import { WorkScreen, type WorkScreenProps } from "./work/WorkScreen.js";
 
 /**
- * Why the operator leaves the shift: back to the list, the office closed it,
- * a sign-out, another line, or the workstation setup from a label's recovery
- * (plan 2a7), which comes back to the shift.
+ * Why the operator leaves the shift: back to the list, a sign-out, another
+ * line, or the workstation setup from a label's recovery (plan 2a7), which
+ * comes back to the shift. A shift the office closed is no reason: it is
+ * finished on the work screen (plan 2a8).
  */
 type Leave =
-  | { kind: "list"; notice: ShiftListNotice | null }
+  | { kind: "list" }
   | { kind: "sign_out"; notice: FloorNotice | null }
   | { kind: "line_changed" }
   | { kind: "setup"; shift: WorkShift };
 
+/**
+ * The floor's screens; in the work of a shift, `officeClosed` says the
+ * office closed the shift after this station entered it (plan 2a8).
+ */
 type FloorView =
-  | { kind: "list"; notice: ShiftListNotice | null }
+  | { kind: "list" }
   | { kind: "new_shift" }
-  | { kind: "work"; shift: WorkShift; leaving: boolean }
+  | { kind: "work"; shift: WorkShift; leaving: boolean; officeClosed: boolean }
   | { kind: "setup"; back: WorkShift | null };
 
 export interface FloorAppProps {
@@ -120,7 +125,7 @@ export interface FloorAppProps {
  * the session), so nothing of one operator's screen outlives their sign-out.
  *
  * Leaving the shift — back to the list, a sign-out (the operator's own, idle,
- * removed by the host), the office's close of the shift, another line — waits
+ * removed by the host), another line — waits
  * for the work the screen tracks (`createWorkGate`), then tells the shell
  * (`work_left`), which is when a refusal of this device or a line change that
  * waited for the work takes the floor. The idle wait and the check of the
@@ -156,7 +161,7 @@ export function FloorApp({
   const { sessionId } = operator;
   // A refusal that waits for the operator stops the link: nothing more goes to that host.
   const online = link?.state === "online" && !rejectionPending;
-  const [view, setView] = useState<FloorView>({ kind: "list", notice: null });
+  const [view, setView] = useState<FloorView>({ kind: "list" });
   // How many times an entry was turned back on the list: it reads its copies
   // again, for those it showed are the ones the entry found out of date.
   const [turnedBack, setTurnedBack] = useState(0);
@@ -197,7 +202,7 @@ export function FloorApp({
       setView({ kind: "setup", back: leave.shift });
       return;
     }
-    setView({ kind: "list", notice: leave.kind === "list" ? leave.notice : null });
+    setView({ kind: "list" });
   }, []);
 
   /** Leaves the work (or, outside it, the floor) once its tracked work has settled. */
@@ -211,19 +216,8 @@ export function FloorApp({
       const waiting = standing.current;
       if (waiting !== null) {
         // A sign-out outranks the leave that waits (the idle lock fires once
-        // and then waits for nothing more): it is where that leave ends. The
-        // office's close of the shift outranks a leave to the list without a
-        // reason, to another line or to the setup, which would otherwise end
-        // without saying why the shift is gone.
+        // and then waits for nothing more): it is where that leave ends.
         if (reason.kind === "sign_out" && waiting.kind !== "sign_out") {
-          standing.current = reason;
-        } else if (
-          reason.kind === "list" &&
-          reason.notice !== null &&
-          (waiting.kind === "line_changed" ||
-            waiting.kind === "setup" ||
-            (waiting.kind === "list" && waiting.notice === null))
-        ) {
           standing.current = reason;
         }
         return;
@@ -285,7 +279,10 @@ export function FloorApp({
   }, [local, hostId, deviceId, operator.id, sessionId, sync.synced, leave]);
 
   // After every read of the host's list: a shift the office closed while the
-  // operator works in it takes them back to the list.
+  // operator works in it stays on screen to be finished (plan 2a8) — the box
+  // on the line closes with its label, and the station closes the shift —
+  // but it takes no new code. Leaving at once would strand the box and its
+  // label; the host takes what follows and marks the shift late.
   const workShiftId = view.kind === "work" ? view.shift.copy.id : null;
   useEffect(() => {
     if (workShiftId === null || shiftReads.done === 0) return;
@@ -294,7 +291,11 @@ export function FloorApp({
       (copy) => {
         if (cancelled || copy === null) return;
         if (copy.status === "closed" && copy.localState === null) {
-          leave({ kind: "list", notice: { kind: "office_closed", number: copy.number } });
+          setView((now) =>
+            now.kind === "work" && now.shift.copy.id === copy.id
+              ? { ...now, officeClosed: true }
+              : now,
+          );
         }
       },
       () => undefined,
@@ -302,7 +303,7 @@ export function FloorApp({
     return () => {
       cancelled = true;
     };
-  }, [local, hostId, deviceId, workShiftId, shiftReads.done, leave]);
+  }, [local, hostId, deviceId, workShiftId, shiftReads.done]);
 
   // Another line waits for the work (question В9): leave the shift for it.
   useEffect(() => {
@@ -312,21 +313,24 @@ export function FloorApp({
   const entered = useCallback(
     (shift: WorkShift) => {
       const { copy } = shift;
-      // An entry's late answer can land on a shift the office has closed since
-      // (the copy reads back `closed`), or one this station is closing: no work
-      // screen, and so no scan, for it. The shell is not told of work.
-      if (copy.status !== "active" || copy.localState !== null) {
-        const officeClosed = copy.status === "closed" && copy.localState === null;
-        setView({
-          kind: "list",
-          notice: officeClosed ? { kind: "office_closed", number: copy.number } : null,
-        });
+      // An entry's late answer can land on a shift this station is closing, or
+      // one that is neither active nor closed by the office: no work screen,
+      // and so no scan, for it. The shell is not told of work. A shift the
+      // office closed since is entered to be finished, without new codes
+      // (plan 2a8).
+      if ((copy.status !== "active" && copy.status !== "closed") || copy.localState !== null) {
+        setView({ kind: "list" });
         setTurnedBack((times) => times + 1);
         return;
       }
       current.current.dispatch({ type: "work_entered", sessionId, shiftId: copy.id });
       ending.current = false;
-      setView({ kind: "work", shift, leaving: false });
+      setView({
+        kind: "work",
+        shift,
+        leaving: false,
+        officeClosed: copy.status === "closed",
+      });
     },
     [sessionId],
   );
@@ -358,7 +362,7 @@ export function FloorApp({
   const backFromSetup = useCallback(
     (back: WorkShift | null) => {
       if (back === null) {
-        setView({ kind: "list", notice: null });
+        setView({ kind: "list" });
         return;
       }
       if (returning.current) return;
@@ -371,7 +375,7 @@ export function FloorApp({
         .then((shift) => {
           returning.current = false;
           if (!alive.current) return;
-          if (shift === null) setView({ kind: "list", notice: null });
+          if (shift === null) setView({ kind: "list" });
           else entered(shift);
         });
     },
@@ -415,9 +419,10 @@ export function FloorApp({
         track={gate.track}
         touch={lock.touch}
         leaving={view.leaving}
+        officeClosed={view.officeClosed}
         isLeaving={isLeaving}
         linkHeld={rejectionPending}
-        onLeave={() => leave({ kind: "list", notice: null })}
+        onLeave={() => leave({ kind: "list" })}
         source={source}
         checkCode={checkCode}
         requestBlock={requestBlock}
@@ -442,7 +447,7 @@ export function FloorApp({
         enter={enter}
         onEntered={entered}
         onHostError={hostError}
-        onBack={() => setView({ kind: "list", notice: null })}
+        onBack={() => setView({ kind: "list" })}
       />
     );
   }
@@ -459,7 +464,6 @@ export function FloorApp({
       online={online}
       shiftReads={shiftReads}
       outboxVersion={outboxVersion}
-      notice={view.notice}
       enter={enter}
       onEntered={entered}
       onHostError={hostError}

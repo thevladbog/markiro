@@ -7,12 +7,15 @@ import { formatCivilDate, formatQuantity } from "./shift-text.js";
 
 /**
  * What the card offers: open a planned shift, continue the active one this
- * station opened, or nothing for a shift another station opened or one this
- * station is closing. `enabled` is false where the host is needed and away.
+ * station opened, finish one the office closed after this station entered it
+ * (plan 2a8; no host needed), or nothing for a shift another station opened
+ * or one this station is closing. `enabled` is false where the host is
+ * needed and away.
  */
 export type CardAction =
   | { kind: "open"; enabled: boolean }
   | { kind: "continue"; enabled: boolean }
+  | { kind: "finish" }
   | { kind: "busy" }
   | { kind: "closing" };
 
@@ -24,6 +27,7 @@ export type CardAction =
  */
 export function cardAction(copy: ShiftCopy, deviceId: string, online: boolean): CardAction {
   if (copy.localState === "closing") return { kind: "closing" };
+  if (copy.status === "closed") return { kind: "finish" };
   if (copy.status === "active") {
     if (copy.ownerDeviceId !== deviceId) return { kind: "busy" };
     return { kind: "continue", enabled: online || copy.entered };
@@ -31,10 +35,11 @@ export function cardAction(copy: ShiftCopy, deviceId: string, online: boolean): 
   return { kind: "open", enabled: online };
 }
 
-const PHASE: Record<"planned" | "active" | "closing", TagPhase> = {
+const PHASE: Record<"planned" | "active" | "closing" | "office_closed", TagPhase> = {
   planned: "planned",
   active: "active",
   closing: "running",
+  office_closed: "attention",
 };
 
 export interface ShiftCardProps {
@@ -51,8 +56,16 @@ export interface ShiftCardProps {
 export function ShiftCard({ copy, refusal = null, action, busy, onAction }: ShiftCardProps) {
   const { t } = useTranslation();
   const phase =
-    copy.localState === "closing" ? "closing" : copy.status === "active" ? "active" : "planned";
-  const enabled = (action.kind === "open" || action.kind === "continue") && action.enabled;
+    copy.localState === "closing"
+      ? "closing"
+      : copy.status === "active"
+        ? "active"
+        : copy.status === "closed"
+          ? "office_closed"
+          : "planned";
+  const enabled =
+    action.kind === "finish" ||
+    ((action.kind === "open" || action.kind === "continue") && action.enabled);
   const needsLink = (action.kind === "open" || action.kind === "continue") && !action.enabled;
   return (
     <Card className="shift-card">
@@ -76,13 +89,16 @@ export function ShiftCard({ copy, refusal = null, action, busy, onAction }: Shif
       <Button
         size="floor"
         fullWidth
-        variant={action.kind === "continue" ? "primary" : "secondary"}
+        variant={action.kind === "continue" || action.kind === "finish" ? "primary" : "secondary"}
         disabled={busy || !enabled}
         onClick={onAction}
       >
         {t(`floor.shifts.action.${action.kind}`)}
       </Button>
       {needsLink && <p className="shift-card__hint">{t("floor.shifts.needsLink")}</p>}
+      {action.kind === "finish" && (
+        <p className="shift-card__hint">{t("floor.shifts.finishHint")}</p>
+      )}
       {refusal !== null && (
         <p className="shift-card__hint">
           {t("floor.shifts.closeRefused", { code: refusal.code ?? "—" })}

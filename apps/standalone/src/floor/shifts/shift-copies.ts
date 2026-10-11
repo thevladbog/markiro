@@ -281,9 +281,10 @@ function toCopy(row: z.infer<typeof copyRow>): ShiftCopy {
 
 /**
  * The shifts of `lineId` the floor's list shows, from this pairing's copies:
- * planned and active ones, and one this station is closing; neither a shift
- * the host closed nor one this station closed. By production date, then
- * number.
+ * planned and active ones, one this station is closing, and one the office
+ * closed after this station entered it and before this station closed it
+ * (plan 2a8: the station finishes it); neither another shift the host closed
+ * nor one this station closed. By production date, then number.
  */
 export async function readShiftCopies(
   local: LocalExecutor,
@@ -292,7 +293,8 @@ export async function readShiftCopies(
 ): Promise<ShiftCopy[]> {
   const rows = await local.query(
     `SELECT ${COPY_COLUMNS} FROM floor_shifts WHERE host_id = ? AND device_id = ? ` +
-      "AND line_id = ? AND status <> 'closed' AND (local_state IS NULL OR local_state = 'closing') " +
+      "AND line_id = ? AND (status <> 'closed' OR entered_at IS NOT NULL) " +
+      "AND (local_state IS NULL OR local_state = 'closing') " +
       "ORDER BY production_date, number, id",
     [pairing.hostId, pairing.deviceId, lineId],
     copyRow,

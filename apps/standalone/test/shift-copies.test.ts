@@ -117,14 +117,16 @@ describe("the station's copies of its shifts", () => {
       entered_at: AT,
       seen_at: SEEN + 1,
     });
-    // An entered shift the host closed leaves the list but not the copies.
+    // An entered shift the host closed stays, to be finished on this station (plan 2a8).
     await replaceShiftCopies(
       executor,
       PAIRING,
       [{ ...ACTIVE, status: "closed", closedAt: "2026-10-08T18:00:00Z" }],
       SEEN + 3,
     );
-    expect(await readShiftCopies(executor, PAIRING, LINE_ID)).toEqual([]);
+    expect((await readShiftCopies(executor, PAIRING, LINE_ID)).map((copy) => copy.id)).toEqual([
+      ENTERED.id,
+    ]);
     expect(await readShiftCopy(executor, PAIRING, ENTERED.id)).toMatchObject({
       status: "closed",
       entered: true,
@@ -177,7 +179,7 @@ describe("the station's copies of its shifts", () => {
     ]);
   });
 
-  it("show a shift this station is closing, and neither one it closed nor one the host closed", async () => {
+  it("show a shift this station is closing, and neither one it closed nor one the host closed that it never entered", async () => {
     const { db, executor } = openLocalDb();
     await keepEnteredShift(executor, PAIRING, ENTERED, AT, SEEN);
     await replaceShiftCopies(executor, PAIRING, [ACTIVE, PLANNED], SEEN);
@@ -192,6 +194,34 @@ describe("the station's copies of its shifts", () => {
     expect((await readShiftCopies(executor, PAIRING, LINE_ID)).map((copy) => copy.id)).toEqual([
       PLANNED.id,
     ]);
+  });
+
+  it("show a shift the office closed after this station entered it, until this station closes it", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, AT, SEEN);
+    const closed = { status: "closed" as const, closedAt: "2026-10-09T18:00:00Z" };
+    await replaceShiftCopies(
+      executor,
+      PAIRING,
+      [
+        { ...ACTIVE, ...closed },
+        { ...PLANNED, ...closed },
+      ],
+      SEEN,
+    );
+    expect(await readShiftCopies(executor, PAIRING, LINE_ID)).toMatchObject([
+      { id: ACTIVE.id, status: "closed", localState: null, entered: true },
+    ]);
+    // The station's own close stays its own: the host's list never touches it.
+    db.prepare("UPDATE floor_shifts SET local_state = 'closing' WHERE id = ?").run(ACTIVE.id);
+    await replaceShiftCopies(executor, PAIRING, [{ ...ACTIVE, ...closed }], SEEN + 1);
+    expect(await readShiftCopies(executor, PAIRING, LINE_ID)).toMatchObject([
+      { id: ACTIVE.id, status: "closed", localState: "closing" },
+    ]);
+    db.prepare("UPDATE floor_shifts SET local_state = 'closed' WHERE id = ?").run(ACTIVE.id);
+    await replaceShiftCopies(executor, PAIRING, [{ ...ACTIVE, ...closed }], SEEN + 2);
+    expect(await readShiftCopies(executor, PAIRING, LINE_ID)).toEqual([]);
+    expect((await readShiftCopy(executor, PAIRING, ACTIVE.id))?.localState).toBe("closed");
   });
 
   it("leave another pairing's rows alone, the same shift ids included", async () => {
@@ -389,7 +419,10 @@ describe("a shift's status only goes forward", () => {
       status: "closed",
       entered: true,
     });
-    expect(await readShiftCopies(executor, PAIRING, LINE_ID)).toEqual([]);
+    // It stays on the list only to be finished (plan 2a8), still closed.
+    expect(await readShiftCopies(executor, PAIRING, LINE_ID)).toMatchObject([
+      { id: ENTERED.id, status: "closed", localState: null },
+    ]);
   });
 
   it("from a late answer of an entry: the shift stays closed, the snapshot and entry are kept", async () => {

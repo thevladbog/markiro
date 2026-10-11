@@ -12,9 +12,6 @@ import { readShiftCopies, type ShiftCopy, type WorkShift } from "./shift-copies.
 import { enterShift, type EntryRefusal } from "./shift-entry.js";
 import { cardAction, ShiftCard } from "./ShiftCard.js";
 
-/** What the list says it was brought back for: the office closed the shift the operator worked in. */
-export type ShiftListNotice = { kind: "office_closed"; number: string };
-
 export interface ShiftListProps {
   local: LocalExecutor;
   pairing: Pairing;
@@ -30,7 +27,6 @@ export interface ShiftListProps {
    * write and every batch of receipts, so a close the host took leaves it.
    */
   outboxVersion?: number;
-  notice: ShiftListNotice | null;
   /** `HostApi.enterShift`. */
   enter: (shiftId: string) => Promise<EnteredShift>;
   onEntered: (shift: WorkShift) => void;
@@ -55,8 +51,8 @@ type Copies =
  * entry, so one that never settles does not trap the station here, and an
  * answer that lands after the screen is gone is dropped.
  *
- * What the list says of itself (a refusal of the entry or the office's close of
- * the shift, and the state of the link) is said together in one polite region
+ * What the list says of itself (a refusal of the entry, and the state of the
+ * link) is said together in one polite region
  * that is there before any of it: the first never hides the second. The focus
  * starts on the line that names the operator, so a keyboard or a screen reader
  * does not begin on the page after the work screen or the new shift is gone.
@@ -69,7 +65,6 @@ export function ShiftList({
   online,
   shiftReads,
   outboxVersion = 0,
-  notice,
   enter,
   onEntered,
   onHostError,
@@ -160,10 +155,6 @@ export function ShiftList({
     refusal !== null ? (
       <Alert tone="error" role="presentation">
         {t(`floor.shifts.refused.${refusal}`)}
-      </Alert>
-    ) : notice !== null ? (
-      <Alert tone="info" role="presentation">
-        {t("floor.shifts.officeClosed", { number: notice.number })}
       </Alert>
     ) : null;
   // Without the host, the list that did not update says nothing more.

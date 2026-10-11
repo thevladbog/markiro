@@ -13,7 +13,7 @@ import {
   type WorkShift,
 } from "../src/floor/shifts/shift-copies.js";
 import { enterShift, type EntryContext } from "../src/floor/shifts/shift-entry.js";
-import { ShiftList, type ShiftListNotice } from "../src/floor/shifts/ShiftList.js";
+import { ShiftList } from "../src/floor/shifts/ShiftList.js";
 import { HostError } from "../src/host/client.js";
 import {
   deviceShiftsSchema,
@@ -63,7 +63,6 @@ const SEEN = 1_790_000_000_000;
 interface Options {
   online?: boolean;
   shiftReads?: { done: number; failed: boolean };
-  notice?: ShiftListNotice | null;
   enter?: (id: string) => Promise<EnteredShift>;
   outboxVersion?: number;
   /** The workstation setup's entry (plan 2a7); none — no button. */
@@ -81,7 +80,6 @@ function listOf(local: LocalExecutor, handlers: ReturnType<typeof handlersOf>, o
         online={options.online ?? true}
         shiftReads={options.shiftReads ?? READ}
         outboxVersion={options.outboxVersion ?? 0}
-        notice={options.notice ?? null}
         enter={options.enter ?? handlers.enter}
         onEntered={handlers.onEntered}
         onHostError={handlers.onHostError}
@@ -463,6 +461,42 @@ describe("the shifts of the station's line", () => {
     ).toBeTruthy();
   });
 
+  it("offers to finish a shift the office closed after this station entered it, without asking the host", async () => {
+    const { db, executor } = await copiesOf([], [ENTERED_MINE, OPENED]);
+    const closed = { status: "closed" as const, closedAt: "2026-10-09T18:00:00Z" };
+    await replaceShiftCopies(
+      executor,
+      PAIRING,
+      [
+        { ...MINE, ...closed },
+        { ...PLANNED, ...closed },
+      ],
+      SEEN + 1,
+    );
+    // A shift this station closed itself stays closing, whatever the office did.
+    db.prepare("UPDATE floor_shifts SET local_state = 'closing' WHERE id = ?").run(PLANNED.id);
+    const { handlers } = renderList(executor);
+    await screen.findByText(MINE.number);
+    expect(
+      within(card(PLANNED.number)).getByRole("button", { name: "Закрывается" }),
+    ).toHaveProperty("disabled", true);
+    const finished = card(MINE.number);
+    expect(within(finished).getByText("Закрыта в офисе")).toBeTruthy();
+    expect(
+      within(finished).getByText(
+        "Смену закрыли в офисе. Закончите на станции короб и этикетку и закройте смену.",
+      ),
+    ).toBeTruthy();
+    fireEvent.click(within(finished).getByRole("button", { name: "Завершить" }));
+    await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
+    expect(handlers.enter).not.toHaveBeenCalled();
+    expect(handlers.onEntered.mock.calls[0]?.[0].copy).toMatchObject({
+      id: MINE.id,
+      status: "closed",
+      localState: null,
+    });
+  });
+
   it("reads its copies again after every read of the host's list", async () => {
     const { executor } = await copiesOf([]);
     const handlers = handlersOf();
@@ -485,25 +519,18 @@ describe("the shifts of the station's line", () => {
     ).toBeTruthy();
   });
 
-  it("says when the host's list did not update, and when a shift was closed in the office", async () => {
+  it("says when the host's list did not update", async () => {
     const { executor } = await copiesOf([PLANNED]);
-    const handlers = handlersOf();
-    const view = render(listOf(executor, handlers, { shiftReads: { done: 1, failed: true } }));
+    renderList(executor, { shiftReads: { done: 1, failed: true } });
     expect(
       await screen.findByText("Список смен не обновился с хоста — показаны полученные раньше."),
     ).toBeTruthy();
-    view.rerender(
-      listOf(executor, handlers, { notice: { kind: "office_closed", number: "OCT26-004" } }),
-    );
-    expect(screen.getByText("Смену OCT26-004 закрыли в офисе.")).toBeTruthy();
   });
 
   describe("what the list says in its one polite region", () => {
     const OFFLINE =
       "Нет связи с хостом: показаны смены, полученные раньше. Продолжить можно смену, которую эта станция уже открыла.";
     const NOT_UPDATED = "Список смен не обновился с хоста — показаны полученные раньше.";
-    const CLOSED = "Смену OCT26-004 закрыли в офисе.";
-    const NOTICE = { kind: "office_closed", number: "OCT26-004" } as const;
 
     /** The polite region, there from the first render, and what sits in it. */
     function region(): HTMLElement {
@@ -516,19 +543,10 @@ describe("the shifts of the station's line", () => {
       return element;
     }
 
-    it("shows the office's close of the shift and the lost link together, not one in place of the other", async () => {
+    it("shows the host's list that did not update in the region, not as an alert of its own", async () => {
       const { executor } = await copiesOf([PLANNED]);
-      renderList(executor, { online: false, notice: NOTICE });
+      renderList(executor, { shiftReads: { done: 1, failed: true } });
       await screen.findByText("OCT26-005/S");
-      expect(within(region()).getByText(CLOSED)).toBeTruthy();
-      expect(within(region()).getByText(OFFLINE)).toBeTruthy();
-    });
-
-    it("shows the office's close of the shift and the host's list that did not update together", async () => {
-      const { executor } = await copiesOf([PLANNED]);
-      renderList(executor, { notice: NOTICE, shiftReads: { done: 1, failed: true } });
-      await screen.findByText("OCT26-005/S");
-      expect(within(region()).getByText(CLOSED)).toBeTruthy();
       expect(within(region()).getByText(NOT_UPDATED)).toBeTruthy();
       expect(within(region()).queryAllByRole("alert")).toEqual([]);
     });
@@ -569,14 +587,14 @@ describe("the shifts of the station's line", () => {
       await screen.findByText("OCT26-005/S");
       const before = region();
       expect(before.textContent).toBe("");
-      view.rerender(listOf(executor, handlers, { online: false, notice: NOTICE }));
+      view.rerender(listOf(executor, handlers, { online: false }));
       expect(region()).toBe(before);
-      expect(within(before).getByText(CLOSED)).toBeTruthy();
+      expect(within(before).getByText(OFFLINE)).toBeTruthy();
     });
 
     it("is heard once: its messages are not alerts of their own inside a polite region", async () => {
       const { executor } = await copiesOf([PLANNED]);
-      renderList(executor, { online: false, notice: NOTICE });
+      renderList(executor, { online: false });
       await screen.findByText("OCT26-005/S");
       expect(within(region()).queryAllByRole("alert")).toEqual([]);
     });
@@ -745,15 +763,15 @@ describe("entering a shift without the host", () => {
   });
 
   it.each([false, true])(
-    "refuses a stored shift the office closed, with the link online %s",
+    "enters a stored shift the office closed, to finish it, with the link online %s",
     async (online) => {
       const { executor } = await copiesOf([], [{ ...ENTERED_MINE, status: "closed" }]);
-      const copy = await staleCopy(executor);
-      const enter = vi.fn(async () => {
-        throw new HostError({ kind: "transport", code: "unreachable", message: "down" });
-      });
+      const copy = { ...(await staleCopy(executor)), status: "closed" as const };
+      const enter = vi.fn(async () => OPENED);
       const result = await enterShift({ ...context(executor, online), enter }, copy);
-      expect(result).toEqual({ kind: "refused", reason: "closed" });
+      // From the stored snapshot: the host refuses to enter a closed shift, so it is not asked.
+      expect(result).toMatchObject({ kind: "entered", offline: true });
+      expect(enter).not.toHaveBeenCalled();
     },
   );
 
