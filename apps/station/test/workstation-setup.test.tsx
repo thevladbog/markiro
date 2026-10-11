@@ -1786,6 +1786,25 @@ describe("A4 setup test printing", () => {
       );
       await selectSetupTab("Printer");
       expect(await screen.findByRole("button", { name: "Test print" })).toBeDefined();
+      // A successful label check must not survive switching to A4.
+      const paper = screen.getByRole("combobox", { name: "Paper type" });
+      fireEvent.change(paper, { target: { value: "label" } });
+      fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+      const labelCode = (await screen.findByTestId("printer-test-label")).querySelector(
+        "code",
+      )!.textContent!;
+      act(() => scan(labelCode));
+      await waitFor(() =>
+        expect(screen.getByTestId("printer-check-result").getAttribute("data-tone")).toBe("ok"),
+      );
+      fireEvent.change(paper, { target: { value: "a4" } });
+      expect(screen.queryByTestId("printer-test-label")).toBeNull();
+      expect(screen.queryByTestId("printer-check-result")).toBeNull();
+      expect(screen.queryByRole("img", { name: "Print check" })).toBeNull();
+      act(() => scan(labelCode));
+      expect(screen.queryByTestId("printer-check-result")).toBeNull();
+      print.mockClear();
+
       fireEvent.change(screen.getByRole("combobox", { name: "A4 test orientation" }), {
         target: { value: orientation },
       });
@@ -1810,6 +1829,14 @@ describe("A4 setup test printing", () => {
       await waitFor(() =>
         expect(screen.getByTestId("printer-check-result").getAttribute("data-tone")).toBe("ok"),
       );
+      // A successful A4 check and full-page raster must not survive label selection.
+      fireEvent.change(paper, { target: { value: "label" } });
+      expect(screen.queryByTestId("printer-test-label")).toBeNull();
+      expect(screen.queryByTestId("printer-check-result")).toBeNull();
+      expect(screen.queryByRole("img", { name: "Print check" })).toBeNull();
+      act(() => scan("]C100" + code));
+      expect(screen.queryByTestId("printer-check-result")).toBeNull();
+      fireEvent.change(paper, { target: { value: "a4" } });
       fireEvent.click(screen.getByRole("button", { name: "Test print" }));
       await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
       const next = screen.getByTestId("printer-test-label").querySelector("code")!.textContent!;
@@ -1821,13 +1848,8 @@ describe("A4 setup test printing", () => {
       const rows = await exec.all<{ purpose: string; state: string; render_snapshot_json: string }>(
         "SELECT purpose,state,render_snapshot_json FROM printer_deliveries",
       );
-      expect(rows).toHaveLength(2);
-      expect(
-        rows.every(
-          (row) =>
-            row.purpose === "test" && row.state === "sent" && row.render_snapshot_json !== null,
-        ),
-      ).toBe(true);
+      expect(rows).toHaveLength(3);
+      expect(rows.every((row) => row.purpose === "test" && row.state === "sent")).toBe(true);
       preflight.mockResolvedValue({
         ok: false,
         error: { code: "geometry_mismatch", phase: "before_start" },

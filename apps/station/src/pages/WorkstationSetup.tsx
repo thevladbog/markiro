@@ -732,6 +732,10 @@ export function WorkstationSetup({
               onPaperChange={(paper) => {
                 setPrinterPaper(paper);
                 if (paper === "a4") setPrinterDpi(300);
+                setPrintedTestCode(null);
+                setPrinterCheck(null);
+                setRasterPreview(null);
+                setTestResult(null);
               }}
               onModeChange={setPrintMode}
               language={printerLanguage}
