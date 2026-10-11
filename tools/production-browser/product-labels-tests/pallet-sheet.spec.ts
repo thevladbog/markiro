@@ -43,7 +43,7 @@ for (const preset of ["pallet-a4-portrait", "pallet-a4-two-a5"]) {
   });
 }
 for (const preset of ["pallet-a4-portrait", "pallet-a4-landscape", "pallet-a4-two-a5"]) {
-  for (const scenario of ["", "&noDate&noEgais&long", "&wide&max"]) {
+  for (const scenario of ["&inn", "&noDate&noEgais&long", "&wide&max&inn"]) {
     test(`${preset} real font preview ${scenario || "standard"} matches Station pixels`, async ({
       page,
     }, info) => {
@@ -62,6 +62,11 @@ for (const preset of ["pallet-a4-portrait", "pallet-a4-landscape", "pallet-a4-tw
       }
       await expect(page.locator("html")).toHaveAttribute("data-sheet-ready", "true");
       await expect(page.locator("html")).toHaveAttribute("data-sheet-parity", "true");
+      const printed = JSON.parse(
+        (await page.locator("html").getAttribute("data-sheet-text")) ?? "[]",
+      );
+      expect(printed).toContain("Сформировано в Маркиро");
+      expect(printed.includes("ИНН 9705119097")).toBe(scenario.includes("inn"));
       await page.locator("canvas").screenshot({ path: info.outputPath("sheet.png") });
       expect(errors).toEqual([]);
     });

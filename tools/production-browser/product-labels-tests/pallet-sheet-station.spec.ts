@@ -56,6 +56,7 @@ for (const presetIndex of [0, 1, 2]) {
           return route.fulfill({
             json: {
               organizationName: "ООО «Реальный завод»",
+              organizationInn: companyLogo ? "9705119097" : null,
               logoRevision: companyLogo ? revision : null,
               logoUrl: companyLogo ? `/station/branding/logo/${revision}` : null,
               logo: companyLogo
@@ -139,12 +140,21 @@ for (const presetIndex of [0, 1, 2]) {
             sheet.bottom <= area.bottom + 1 &&
             sheet.left >= area.left - 1 &&
             sheet.right <= area.right + 1,
+          footerInk: Array.from(
+            ctx.getImageData(
+              x,
+              node.height - Math.ceil((17 * 300) / 25.4),
+              node.width / (margin === 7 ? 2 : 1) - 2 * x,
+              Math.floor((7 * 300) / 25.4),
+            ).data,
+          ).some((v, i) => i % 4 === 0 && v < 128),
           logoInk: Array.from(data).some((v, i) => i % 4 === 0 && v < 128),
         };
       }, preset.spec.page.marginsMm.left);
       expect(bounds.fits).toBe(true);
       expect(bounds.width / bounds.height).toBeCloseTo(bounds.ratio, 2);
       expect(bounds.logoInk).toBe(true);
+      expect(bounds.footerInk).toBe(true);
       await page.screenshot({ path: testInfo.outputPath("selected-a4.png"), fullPage: true });
       await page.getByRole("button", { name: "Начать", exact: true }).click();
       await expect(page.locator("html")).toHaveAttribute("data-started", "true");
