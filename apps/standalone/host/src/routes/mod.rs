@@ -18,6 +18,7 @@ pub mod office_shifts;
 pub mod office_users;
 pub mod operators;
 pub mod org;
+pub mod org_logo;
 pub mod pairing;
 pub mod products;
 pub mod sscc;

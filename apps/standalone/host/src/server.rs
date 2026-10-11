@@ -242,6 +242,12 @@ fn protected_routes() -> Router<AppState> {
             "/v1/office/org",
             get(crate::routes::org::get_org).put(crate::routes::org::put_org),
         )
+        .route(
+            "/v1/office/org/logo",
+            get(crate::routes::org_logo::get_logo)
+                .put(crate::routes::org_logo::put_logo)
+                .delete(crate::routes::org_logo::delete_logo),
+        )
         .route("/v1/office/sscc", get(crate::routes::sscc::get_sscc))
         .route(
             "/v1/office/sscc/counters/{prefix}/{extension}",

@@ -31,6 +31,7 @@ import {
   officeSessionSchema,
   officeUserRecordSchema,
   officeUserSchema,
+  orgLogoStateSchema,
   orgProfileSchema,
   pairingCodeSchema,
   productGroupSchema,
@@ -77,6 +78,8 @@ import {
   type OfficeUserUpdate,
   type OperatorCreate,
   type OperatorUpdate,
+  type OrgLogoPut,
+  type OrgLogoState,
   type OrgProfile,
   type OrgProfileUpdate,
   type PairingCode,
@@ -130,6 +133,9 @@ export interface HostApi {
   officeChangePassword: (token: string, request: PasswordChange) => Promise<void>;
   getOrg: (token: string) => Promise<OrgProfile>;
   updateOrg: (token: string, update: OrgProfileUpdate) => Promise<OrgProfile>;
+  getOrgLogo: (token: string) => Promise<OrgLogoState>;
+  putOrgLogo: (token: string, put: OrgLogoPut) => Promise<OrgLogoState>;
+  deleteOrgLogo: (token: string) => Promise<OrgLogoState>;
   getSscc: (token: string) => Promise<SsccState>;
   updateSsccCounter: (
     token: string,
@@ -306,6 +312,22 @@ export function createHostApi(client: HostClient): HostApi {
         body: update,
         officeToken: token,
         schema: orgProfileSchema,
+      }),
+    getOrgLogo: (token) =>
+      client.request("GET", "/v1/office/org/logo", {
+        officeToken: token,
+        schema: orgLogoStateSchema,
+      }),
+    putOrgLogo: (token, put) =>
+      client.request("PUT", "/v1/office/org/logo", {
+        body: put,
+        officeToken: token,
+        schema: orgLogoStateSchema,
+      }),
+    deleteOrgLogo: (token) =>
+      client.request("DELETE", "/v1/office/org/logo", {
+        officeToken: token,
+        schema: orgLogoStateSchema,
       }),
     getSscc: (token) =>
       client.request("GET", "/v1/office/sscc", { officeToken: token, schema: ssccStateSchema }),

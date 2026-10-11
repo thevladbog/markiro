@@ -24,6 +24,7 @@ import {
   officeProductSchema,
   operatorCreateSchema,
   operatorUpdateSchema,
+  orgLogoPutSchema,
   orgProfileUpdateSchema,
   pairingCodeRequestSchema,
   productCreateSchema,
@@ -76,6 +77,7 @@ function recording(answer: unknown) {
 const TOKEN = "office-session-token";
 const USER_ID = "1b4e28ba-2fa1-41d2-883f-0016d3cca427";
 const ORG_UPDATE = orgProfileUpdateSchema.parse(fixture("org-profile-update.json"));
+const LOGO_PUT = orgLogoPutSchema.parse(fixture("org-logo-put.json"));
 const COUNTERPARTY_ID = "d2b7c9e1-4f3a-4b6c-8d5e-9f0a1b2c3d4e";
 const LINE_ID = "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61";
 const DEVICE_ID = "7c9e6679-7425-40de-944b-e07fc1f90ae7";
@@ -130,6 +132,24 @@ const CASES: Case[] = [
     fixture("org-profile.json"),
     (api) => api.updateOrg(TOKEN, ORG_UPDATE),
     { method: "PUT", path: "/v1/office/org", body: ORG_UPDATE },
+  ],
+  [
+    "getOrgLogo",
+    fixture("org-logo.json"),
+    (api) => api.getOrgLogo(TOKEN),
+    { method: "GET", path: "/v1/office/org/logo", body: undefined },
+  ],
+  [
+    "putOrgLogo",
+    fixture("org-logo.json"),
+    (api) => api.putOrgLogo(TOKEN, LOGO_PUT),
+    { method: "PUT", path: "/v1/office/org/logo", body: LOGO_PUT },
+  ],
+  [
+    "deleteOrgLogo",
+    { logo: null },
+    (api) => api.deleteOrgLogo(TOKEN),
+    { method: "DELETE", path: "/v1/office/org/logo", body: undefined },
   ],
   [
     "getSscc",
@@ -492,6 +512,21 @@ describe("HostApi office endpoints", () => {
       currentIssuerPrefix: "460068200",
       blockSizesRev: 1,
     });
+  });
+
+  it("reads the logo as the host sent it, and none as null", async () => {
+    await expect(recording(fixture("org-logo.json")).api.getOrgLogo(TOKEN)).resolves.toEqual(
+      fixture("org-logo.json"),
+    );
+    await expect(recording({ logo: null }).api.getOrgLogo(TOKEN)).resolves.toEqual({ logo: null });
+  });
+
+  it("rejects a logo answer that is not a logo or none", async () => {
+    await expect(recording({}).api.getOrgLogo(TOKEN)).rejects.toThrow();
+    await expect(recording({ logo: { width: 10 } }).api.getOrgLogo(TOKEN)).rejects.toThrow();
+    const logo = fixture("org-logo.json") as { logo: Record<string, unknown> };
+    const stale = { logo: { ...logo.logo, updatedAt: "yesterday" } };
+    await expect(recording(stale).api.putOrgLogo(TOKEN, LOGO_PUT)).rejects.toThrow();
   });
 
   it("rejects a users answer that is not a list", async () => {

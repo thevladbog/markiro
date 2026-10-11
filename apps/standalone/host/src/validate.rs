@@ -505,6 +505,60 @@ pub fn template_spec(field: &str, spec: &serde_json::Value) -> Result<String, Ap
     Ok(text)
 }
 
+/// The largest print logo the host keeps (plan А4): 1024 × 512 dots, at most
+/// 90 000 characters of base64 (a whole 1024 × 512 logo is 87 384).
+pub const MAX_LOGO_WIDTH: u32 = 1024;
+pub const MAX_LOGO_HEIGHT: u32 = 512;
+pub const MAX_LOGO_BASE64: usize = 90_000;
+
+/// A monochrome logo: its size within bounds, its bits in canonical standard
+/// base64, exactly `ceil(width / 8) × height` bytes, and every row's padding
+/// bits zero (the domain's `validateMonoBitmap` refuses a logo otherwise, so
+/// the host never keeps one a station could not print).
+pub fn mono_logo(
+    prefix: &str,
+    width: u32,
+    height: u32,
+    pixels_base64: &str,
+) -> Result<(), ApiError> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let field = |name: &str| format!("{prefix}{name}");
+    if !(1..=MAX_LOGO_WIDTH).contains(&width) {
+        return Err(ApiError::validation(&field("width"), "1 to 1024 dots"));
+    }
+    if !(1..=MAX_LOGO_HEIGHT).contains(&height) {
+        return Err(ApiError::validation(&field("height"), "1 to 512 dots"));
+    }
+    let pixels = field("pixelsBase64");
+    if pixels_base64.len() > MAX_LOGO_BASE64 {
+        return Err(ApiError::validation(&pixels, "at most 90000 characters"));
+    }
+    let bytes = STANDARD
+        .decode(pixels_base64)
+        .map_err(|_| ApiError::validation(&pixels, "standard base64"))?;
+    if STANDARD.encode(&bytes) != pixels_base64 {
+        return Err(ApiError::validation(&pixels, "canonical standard base64"));
+    }
+    let stride = width.div_ceil(8) as usize;
+    if bytes.len() != stride * height as usize {
+        return Err(ApiError::validation(
+            &pixels,
+            "ceil(width / 8) × height bytes",
+        ));
+    }
+    let unused = (8 - width % 8) % 8;
+    if unused != 0 {
+        let mask = (1u8 << unused) - 1;
+        if bytes.chunks(stride).any(|row| row[stride - 1] & mask != 0) {
+            return Err(ApiError::validation(
+                &pixels,
+                "the padding bits of a row are zero",
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// The most codes a template lists: more than there are product groups, so
 /// the bound only caps the work one request can ask for.
 pub const MAX_CATEGORY_CODES: usize = 100;
@@ -549,6 +603,75 @@ mod tests {
     }
 
     const GLN: &str = "4601234000017";
+
+    #[test]
+    fn a_mono_logo_is_checked_to_the_bit() {
+        assert!(mono_logo("", 10, 2, "8MAPQA==").is_ok());
+        // A padding bit set in the second row's last byte.
+        assert!(mono_logo("", 10, 2, "8MAPQQ==").is_err());
+        assert!(mono_logo("", 10, 3, "8MAPQA==").is_err());
+        assert!(mono_logo("", 0, 2, "8MAPQA==").is_err());
+        assert!(mono_logo("", 1025, 1, "AA==").is_err());
+        assert!(mono_logo("", 8, 1, "AA").is_err());
+    }
+
+    /// Every bound at its edge, and the field a refusal names (with the
+    /// prefix a nested caller gives it).
+    #[test]
+    fn a_mono_logo_has_exact_bounds_and_names_its_field() {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let blank = |width: u32, height: u32| {
+            STANDARD.encode(vec![0u8; width.div_ceil(8) as usize * height as usize])
+        };
+        assert!(mono_logo("", 1, 1, &blank(1, 1)).is_ok());
+        assert!(mono_logo("", 1024, 512, &blank(1024, 512)).is_ok());
+        assert!(mono_logo("", 1023, 511, &blank(1023, 511)).is_ok());
+        assert_eq!(field(mono_logo("logo.", 0, 1, "AA==")), "logo.width");
+        assert_eq!(
+            field(mono_logo("logo.", 1025, 512, &blank(1025, 512))),
+            "logo.width"
+        );
+        assert_eq!(field(mono_logo("logo.", 8, 0, "")), "logo.height");
+        assert_eq!(
+            field(mono_logo("logo.", 1024, 513, &blank(1024, 513))),
+            "logo.height"
+        );
+        // The text bound: 90 000 characters reach the byte count (which
+        // refuses them with its own message), 90 001 never get that far.
+        let message = |result: Result<(), ApiError>| result.unwrap_err().message().to_owned();
+        assert_eq!(
+            message(mono_logo("", 1024, 512, &"A".repeat(90_000))),
+            "ceil(width / 8) × height bytes"
+        );
+        assert_eq!(
+            message(mono_logo("", 1024, 512, &"A".repeat(90_001))),
+            "at most 90000 characters"
+        );
+        // Standard alphabet only, padded; a short or long body is refused.
+        assert_eq!(message(mono_logo("", 8, 1, "AA")), "standard base64");
+        assert_eq!(message(mono_logo("", 24, 1, "-_-_")), "standard base64");
+        assert_eq!(message(mono_logo("", 8, 1, "A A=")), "standard base64");
+        assert_eq!(
+            message(mono_logo("", 8, 1, "AAA=")),
+            "ceil(width / 8) × height bytes"
+        );
+        // Only the padding bits of a row must be zero: at 9 dots the second
+        // byte of a row keeps one dot, so 0x80 is ink and 0x40 is padding.
+        assert!(mono_logo("", 9, 1, "AIA=").is_ok());
+        assert_eq!(
+            message(mono_logo("", 9, 1, "AEA=")),
+            "the padding bits of a row are zero"
+        );
+        assert_eq!(
+            message(mono_logo("", 9, 1, "AAE=")),
+            "the padding bits of a row are zero"
+        );
+        // A width of whole bytes has no padding to check.
+        assert!(mono_logo("", 8, 1, "/w==").is_ok());
+        // Rows are checked each, not only the first.
+        assert!(mono_logo("", 9, 2, "AIAAAA==").is_ok());
+        assert!(mono_logo("", 9, 2, "AIAAAQ==").is_err());
+    }
 
     #[test]
     fn company_fields_are_trimmed_and_normalized() {

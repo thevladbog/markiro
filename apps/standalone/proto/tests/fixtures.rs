@@ -10,11 +10,11 @@ use markiro_proto::{
     LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeBox,
     OfficeLine, OfficeLoginRequest, OfficeOperator, OfficePallet, OfficeProduct, OfficeRole,
     OfficeSession, OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
-    OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
-    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PalletClosedFact,
-    PalletExceptionFact, PalletExceptionKind, PalletLabelFact, PalletReportRows, PasswordChange,
-    PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate,
-    ScanFact, ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate,
+    OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgLogoPut, OrgLogoState,
+    OrgProfile, OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest,
+    PalletClosedFact, PalletExceptionFact, PalletExceptionKind, PalletLabelFact, PalletReportRows,
+    PasswordChange, PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus,
+    ProductUpdate, ScanFact, ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate,
     ShiftExportRecord, ShiftExportRows, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate,
     SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
     TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
@@ -150,6 +150,22 @@ fn bootstrap_and_org_fixtures_round_trip() {
     let _: OrgProfile = round_trip("org-profile.json");
     let update: OrgProfileUpdate = round_trip("org-profile-update.json");
     assert!(update.inn.is_none());
+}
+
+/// The organization's print logo (plan А4): the answer and the `PUT` body.
+#[test]
+fn org_logo_fixtures_round_trip() {
+    let state: OrgLogoState = round_trip("org-logo.json");
+    let logo = state.logo.expect("the fixture has a logo");
+    assert_eq!((logo.width, logo.height), (10, 2));
+    let put: OrgLogoPut = round_trip("org-logo-put.json");
+    assert_eq!(put.pixels_base64, logo.pixels_base64);
+    let none: OrgLogoState = serde_json::from_value(serde_json::json!({ "logo": null })).unwrap();
+    assert_eq!(none.logo, None);
+    // The body is strict: a field the host does not know is a refusal, so a
+    // client cannot smuggle an `updatedAt` of its own or a second picture.
+    let extra = serde_json::json!({ "width": 10, "height": 2, "pixelsBase64": "8MAPQA==", "updatedAt": "x" });
+    assert!(serde_json::from_value::<OrgLogoPut>(extra).is_err());
 }
 
 #[test]

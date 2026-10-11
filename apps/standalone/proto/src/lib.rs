@@ -905,6 +905,35 @@ pub struct OrgProfileUpdate {
     pub expected_rev: i64,
 }
 
+/// The organization's print logo (plan А4): monochrome, `width` × `height`
+/// dots, rows MSB first, 1 = ink, each row padded to whole bytes with zero
+/// bits, in standard base64. Labels with an `organization_logo` element and
+/// A4 sheets print it; without one they print the bundled Markiro logo.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrgLogo {
+    pub width: u32,
+    pub height: u32,
+    pub pixels_base64: String,
+    pub updated_at: String,
+}
+
+/// `GET`, `PUT` and `DELETE /v1/office/org/logo`: the logo, or `null` for none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OrgLogoState {
+    pub logo: Option<OrgLogo>,
+}
+
+/// `PUT /v1/office/org/logo` (administrators): the whole logo, replacing any.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OrgLogoPut {
+    pub width: u32,
+    pub height: u32,
+    pub pixels_base64: String,
+}
+
 /// One SSCC counter (`GET /v1/office/sscc`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

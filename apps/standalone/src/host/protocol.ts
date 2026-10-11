@@ -356,6 +356,29 @@ export const orgProfileSchema = z.object({
 });
 export type OrgProfile = z.infer<typeof orgProfileSchema>;
 
+/** Mirrors `markiro_proto::OrgLogo`: the organization's monochrome print logo (plan А4). */
+export const orgLogoSchema = z.object({
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
+  pixelsBase64: z.string(),
+  updatedAt: z.iso.datetime(),
+});
+export type OrgLogo = z.infer<typeof orgLogoSchema>;
+
+/** Mirrors `markiro_proto::OrgLogoState`: `GET`/`PUT`/`DELETE /v1/office/org/logo`. */
+export const orgLogoStateSchema = z.object({ logo: orgLogoSchema.nullable() });
+export type OrgLogoState = z.infer<typeof orgLogoStateSchema>;
+
+/** Mirrors `markiro_proto::OrgLogoPut`: the whole logo, replacing any. */
+export const orgLogoPutSchema = z
+  .object({
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    pixelsBase64: z.string(),
+  })
+  .strict();
+export type OrgLogoPut = z.infer<typeof orgLogoPutSchema>;
+
 /** One SSCC counter; `extension` 0 is a box, 1 a pallet. */
 export const ssccCounterSchema = z.object({
   issuerPrefix: z.string(),
