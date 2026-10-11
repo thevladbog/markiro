@@ -213,6 +213,26 @@ async fn send_facts(
     body["receipts"].as_array().unwrap().clone()
 }
 
+/// `POST /v1/device/warehouse/lookup` with `body`: the status and the body.
+async fn looked_up(
+    client: &reqwest::Client,
+    base: &str,
+    protocol: &(&str, String),
+    key: &str,
+    body: serde_json::Value,
+) -> (u16, serde_json::Value) {
+    let answer = client
+        .post(format!("{base}/v1/device/warehouse/lookup"))
+        .header(protocol.0, &protocol.1)
+        .bearer_auth(key)
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    let status = answer.status().as_u16();
+    (status, answer.json().await.unwrap())
+}
+
 /// The receipt answers record `id` with `outcome`, and `code` when refused.
 fn assert_receipt(
     receipt: &serde_json::Value,
@@ -1186,6 +1206,45 @@ async fn secrets_never_reach_the_process_log() {
         .unwrap();
     assert_eq!(malformed.status(), 400);
 
+    // The warehouse lookup answers a unit's full code, a box's and a
+    // pallet's labels, and refuses a malformed hash and SSCC: none of them
+    // reaches the log (plan СКЛ).
+    let (status, found_unit) = looked_up(
+        &client,
+        &base,
+        &protocol,
+        &key,
+        json!({ "codeHash": km_a.hash }),
+    )
+    .await;
+    assert_eq!(status, 200, "{found_unit}");
+    assert_eq!(found_unit["status"], "found", "{found_unit}");
+    assert_eq!(found_unit["source"]["canonical"], km_a.canonical);
+    for (sscc, kind) in [(&sscc_one, "box"), (&pallet_sscc, "pallet")] {
+        let (status, found) =
+            looked_up(&client, &base, &protocol, &key, json!({ "sscc": sscc })).await;
+        assert_eq!(status, 200, "{found}");
+        assert_eq!(found["source"]["kind"], kind, "{found}");
+    }
+    let (status, refused) = looked_up(
+        &client,
+        &base,
+        &protocol,
+        &key,
+        json!({ "codeHash": malformed_hash }),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+    let (status, refused) = looked_up(
+        &client,
+        &base,
+        &protocol,
+        &key,
+        json!({ "sscc": &sscc_one[..17] }),
+    )
+    .await;
+    assert_eq!(status, 400, "{refused}");
+
     // The totals the facts gave: one shift read, and the list.
     let totals_of_shift: serde_json::Value = client
         .get(format!("{base}/v1/office/shifts/{shift_id}"))
@@ -1863,6 +1922,7 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_three_audited_lines(
         "routes/facts.rs",
         "routes/codes.rs",
         "routes/office_shifts.rs",
+        "routes/warehouse.rs",
     ];
     let mut facts_files = 0;
     for file in &files {
@@ -1897,6 +1957,7 @@ fn the_host_prints_nothing_and_the_facts_path_logs_only_its_three_audited_lines(
     }
     // The facts path: the 12 files of 2a2 and the five pallet modules of
     // plan ПЛ-Х (`blocks`, `pallets`, `pallet_closed`, `pallet_label`,
-    // `pallet_exception`); none of them logs.
-    assert_eq!(facts_files, 17);
+    // `pallet_exception`); none of them logs. And the warehouse lookup of
+    // plan СКЛ, which answers a unit's full code and logs nothing.
+    assert_eq!(facts_files, 18);
 }

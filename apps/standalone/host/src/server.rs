@@ -143,10 +143,15 @@ pub fn router(state: AppState) -> Router {
 /// a minute.
 pub const RESTORE_RETRY_AFTER_SECS: u64 = 60;
 
-/// What a restore holds (plan РК): a station's facts and its code checks,
-/// whose answers depend on the shifts, blocks and codes a copy may lack.
+/// What a restore holds (plan РК): a station's facts, its code checks and
+/// its warehouse reprints, whose answers depend on the shifts, blocks and
+/// codes a copy may lack.
 fn held_by_a_restore(path: &str) -> bool {
-    path == "/v1/device/facts" || path.starts_with("/v1/device/codes/")
+    path == "/v1/device/facts"
+        || path.starts_with("/v1/device/codes/")
+        // A reprint looks up and records against shifts, boxes and codes a
+        // copy may lack (plan СКЛ).
+        || path.starts_with("/v1/device/warehouse/")
 }
 
 /// From `markiro-host restore` until an administrator resumes, a held path
@@ -212,6 +217,10 @@ fn protected_routes() -> Router<AppState> {
         .route(
             "/v1/device/codes/{code_hash}",
             get(crate::routes::codes::check_code),
+        )
+        .route(
+            "/v1/device/warehouse/lookup",
+            post(crate::routes::warehouse::lookup),
         )
         .route("/v1/changes", get(crate::routes::changes::changes))
         .route("/v1/changes/stream", get(crate::routes::changes::stream))
