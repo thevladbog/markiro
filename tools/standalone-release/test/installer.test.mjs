@@ -109,7 +109,11 @@ test("exit code 4 of `install` (installed, not staying up) is a warning with the
   assert.match(warning, /sc stop MarkiroHost/);
   // Code 4 also means a start still under way after 30 s (a big first
   // migration): the text says the service may still be starting.
-  assert.match(warning, /не осталась запущенной или ещё запускается/);
+  assert.match(warning, /DetailPrint "[^"\n]*не осталась запущенной или ещё запускается/);
+  assert.match(
+    warning,
+    /MessageBox MB_ICONEXCLAMATION "[^"\n]*не осталась запущенной или ещё запускается/,
+  );
   // The warning must not hang a silent install.
   assert.match(warning, /MessageBox MB_ICONEXCLAMATION .*\/SD IDOK/);
   // Anything else but 0 and 4 still fails closed, and nothing else is a warning.
