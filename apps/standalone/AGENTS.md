@@ -1535,17 +1535,22 @@ first real run is the `standalone-windows-build` job.
 `markiro-host install`, `uninstall`, `stop-service` and `network-check
 [--make-private]` (`host/src/main.rs`) are the installer's tools; the first
 three refuse outside Windows. `install::install_host` (`host/src/install.rs`)
-creates the data directory, then `install::install` hardens it with `icacls`
-by SID — inheritance off, SYSTEM and Administrators full control, LocalService
-modify, so no user reads the database or `tls/key.der`, which hold the PIN and
-badge hashes and the host's private key; stops a service an earlier version
+creates the data directory, then `install::install` makes Administrators the
+owner of it, of everything in it (`/setowner *S-1-5-32-544 /T /C`) and of its
+parent when that is the `Markiro` folder (a user who made the folder first
+would otherwise keep the right to change its access list), and hardens it with
+`icacls` by SID — inheritance off, SYSTEM and Administrators full control,
+LocalService modify, so no user reads the database or `tls/key.der`, which
+hold the PIN and badge hashes and the host's private key; stops a service an earlier version
 left running; creates or rewrites `MarkiroHost` («Markiro Хост», own process,
 automatic start, `NT AUTHORITY\LocalService`, `"<exe>" service`, restarts
 after 5, 30 and 60 s with the count reset after a day, failure actions on a
-non-crash exit too, which `service.rs`'s `ServiceSpecific(1)` needs; rewriting
-resets the account to LocalService, so an account the customer's IT chose for
-the backup share, see `docs/runbooks/standalone-backup-restore.md`, must be
-set again after each update); replaces the firewall rule `MarkiroHost` (TCP,
+non-crash exit too, which `service.rs`'s `ServiceSpecific(1)` needs; an
+existing service keeps its account — `ServiceSpec.account` is `None` and
+ChangeServiceConfigW gets NULL — so an account the customer's IT chose for
+the backup share, see `docs/runbooks/standalone-backup-restore.md`, survives
+every update, and a service created without one still gets LocalService,
+never LocalSystem); replaces the firewall rule `MarkiroHost` (TCP,
 `host.json`'s port or 45710 as of that moment, private and domain networks,
 `LocalSubnet`, no `-Program`); starts the service and waits up to 30 s. A fresh
 install that fails before the start is taken back (service and rule removed);
@@ -1562,9 +1567,10 @@ lines and the bounded waits with fakes on any OS; `install_windows.rs`
 compiles only for Windows. `network-check` lists `Get-NetConnectionProfile`
 (the category as text, UTF-8) and exits 3 while a network is public;
 `--make-private` makes the public ones private first. Exit codes: `install` 0
-running, 1 failed, 4 registered but did not stay up (usually an unfinished
-`restore`: `host.restore-intent` makes `start` refuse, and Windows keeps
-retrying every 60 s, so a `restore` may meet «locked» once and be repeated);
+running, 1 failed, 4 registered but did not stay up or still starting after
+the 30 s wait (usually an unfinished `restore`: `host.restore-intent` makes
+`start` refuse, and Windows keeps retrying every 60 s, so a `restore` may meet
+«locked» once and be repeated; or a big first migration);
 `network-check` 0, 3, 1; a bad command line 2.
 
 The installer build is `tauri build --config src-tauri/tauri.installer.conf.json
@@ -3048,7 +3054,10 @@ master database, one at a time, on a connection of its own:
   it waits for no writer and holds no uncommitted change), then
   `PRAGMA integrity_check` on that file opened read-only and immutable, its
   size and SHA-256, the rename to `markiro-host-<UTC time>-<tag>.db` and a
-  manifest `<name>.json` beside it (`backup/copy.rs`); a failure leaves
+  manifest `<name>.json` beside it (`backup/copy.rs`; the copy is flushed
+  before its rename through `copy::sync_file`, a handle opened for writing,
+  because Windows' FlushFileBuffers refuses a read-only one — the restore
+  uses the same helper); a failure leaves
   nothing of the copy behind, and a copy never replaces one of its name. On
   Unix the copy, the manifest and the second folder's replica are `0600`
   (they hold what `host.db` holds: PIN and badge hashes, pairing keys); on
@@ -3075,16 +3084,18 @@ master database, one at a time, on a connection of its own:
   without its manifest are leftovers of a broken copy; the worker removes them
   before each copy, in both folders (the only caller of `folder::clean`, and
   one task, so it never meets a copy in flight). Retention is relative to the
-  copies' own times: a clock set back by more than 24 newer copies can make
-  the fresh copy the first to go (open; the runbook says not to set the clock
-  back);
+  copies' own times, so `folder::rotate` takes the copy the run just made and
+  never deletes it: with the clock set back, the copies made before are newer
+  and the rule alone would drop the fresh one first. The office warns
+  `clockBehind` when the newest copy of either folder is more than an hour
+  later than the host's clock;
 - a run's outcome per folder is in memory (`Backups::state`, the office's
   `GET /v1/office/backups`: gone after a restart until the first copy) and in
   one `backup.create` audit row (the host as the actor for a scheduled copy,
   the office user for a manual one; `failed` when any folder did not get the
   copy; `details` hold the failure codes, never an error text). A run is a
   task of its own, so a panic is that run's `internal` failure and the worker
-  goes on; a host that stops waits up to 10 s for a copy in progress, and
+  goes on (a panic in the folder task leaves the copy lists the status holds); a host that stops waits up to 10 s for a copy in progress, and
   `shutdown_runtime` (`main.rs`, `service.rs`) then waits at most 5 s more for
   a blocking thread stuck on a dead share. The host does not check free space
   (it would need a dependency): a full disk is a `disk_full` failure of that
@@ -3093,7 +3104,9 @@ master database, one at a time, on a connection of its own:
 The office (`routes/backups.rs`): every role reads the state; administrators
 ask for a copy (`202`, `conflict` on `backup_running` while one runs or
 waits; the request itself writes no audit row, the worker's run does; the
-running state is read from `GET`) and set or clear the second folder with
+settings and the hold are read before the copy is queued, so a failed read is
+a 500 with no copy behind it, and the answer is built from memory) and set or
+clear the second folder with
 `expectedRev`. A folder is tried before it is saved, off the async threads and
 for at most 8 s: missing, not a folder, no right to write, unwritable, timed
 out, or inside the data folder is a `conflict` on `backup_dir` with
@@ -3107,7 +3120,8 @@ the host and the held restore; it reads the state with its own polling loop
 (1 s while a copy runs, slower when idle, paused while the window is hidden)
 and writes times in the organization's zone. «Обзор» repeats the warnings (a
 held restore, a failed copy, no copy, a newest copy older than 26 hours by the
-host's clock, no second folder, a copy running for more than 30 minutes). No
+host's clock, no second folder, a host clock behind the newest copy, a copy
+running for more than 30 minutes). No
 station code keeps count of returned blocks, so neither does the page.
 
 `markiro-host restore <copy> [--data-dir] [--without-manifest]` runs with the
@@ -3126,9 +3140,16 @@ transaction on one connection that is closed before the swap):
 
 - every SSCC counter is raised to two blocks of its extension above the
   highest serial either database knew (counter, block ends, box and pallet
-  serials; never past the prefix's last serial); when the current database was
-  not read it is also at least 100 000 above the copy's, rounded up to 10 000
-  (about 1 % of a 9-digit prefix's serials per restore); every month's shift
+  serials; never past the prefix's last serial); when the current database is
+  not the copy's known history it is also at least 100 000 above the copy's,
+  rounded up to 10 000 (about 1 % of a 9-digit prefix's serials per restore).
+  The history is known only when the current database was read, its wizard
+  was done (`site.initialized_at`) and its `host.json` is the copy's host's: a
+  new PC's installer starts the host once and leaves a migrated database
+  without a wizard, and another host's numbers say nothing of what the copy's
+  host issued. Otherwise the audit sequence also jumps by 1 000 000, no
+  revocations are carried and the summary says «the current database is not
+  this copy's history»; the live numbers still count as floors; every month's shift
   number is raised by 10 above both, from the copy's month to the current one;
 - the revision is the copy's next one, BELOW what the current database
   reached: a station whose cursor passed it sees the host go back and starts
@@ -3139,8 +3160,8 @@ transaction on one connection that is closed before the swap):
   badge stay revoked, an operator and an office user stay turned off; nothing
   the copy lacks comes back); every office session is ended; a password
   changed after the copy is not carried; the copy's devices are not revoked
-  when it came from another host. When the current database was not read, the
-  summary says what is active again;
+  when it came from another host. When the current database was not read or
+  is not the copy's history, the summary says what is active again;
 - a new `site.restore_epoch` (a UUID), `site.facts_held_since`, one
   `host.restore` row (the host as the actor; `carried` and `sessionsEnded` are
   part of its details).
