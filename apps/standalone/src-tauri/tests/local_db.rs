@@ -848,7 +848,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 30] = [
+    let reads: [(&str, &str); 35] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1016,6 +1016,38 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             "DELETE FROM floor_block_requests WHERE request_id = ?",
             "sqlite_autoindex_floor_block_requests_1 (request_id=?)",
+        ),
+        // The box exceptions (`src/floor/exceptions/box-exceptions.ts`; `test/floor-schema.test.ts`
+        // checks the texts agree): the last code of the open box and the newest scan
+        // among its codes search the box's own codes, the closed boxes of a shift the
+        // shift's index, a box is read by its key and its newest print job through the
+        // shift's jobs.
+        (
+            "SELECT code_hash, scan_id, scanned_at FROM floor_codes \
+             WHERE host_id = ? AND device_id = ? AND box_id = ? ORDER BY rowid DESC LIMIT 1",
+            "floor_codes_box (host_id=? AND device_id=? AND box_id=?)",
+        ),
+        (
+            "SELECT max(scanned_at) AS scanned_at FROM floor_codes \
+             WHERE host_id = ? AND device_id = ? AND box_id = ?",
+            "floor_codes_box (host_id=? AND device_id=? AND box_id=?)",
+        ),
+        (
+            "SELECT id, sscc, item_count, closed_at FROM floor_boxes WHERE host_id = ? AND device_id = ? \
+             AND shift_id = ? AND closed_at IS NOT NULL AND disassembled_at IS NULL \
+             ORDER BY closed_at DESC, serial DESC",
+            "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "SELECT closed_at, disassembled_at, (SELECT count(*) FROM floor_codes c \
+             WHERE c.host_id = b.host_id AND c.device_id = b.device_id AND c.box_id = b.id) AS codes \
+             FROM floor_boxes b WHERE b.id = ? AND b.host_id = ? AND b.device_id = ? AND b.shift_id = ?",
+            "sqlite_autoindex_floor_boxes_1 (id=?)",
+        ),
+        (
+            "SELECT id FROM floor_print_jobs WHERE host_id = ? AND device_id = ? AND shift_id = ? \
+             AND purpose = 'box' AND subject_id = ? ORDER BY rowid DESC LIMIT 1",
+            "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
         ),
         (
             "SELECT id FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?",

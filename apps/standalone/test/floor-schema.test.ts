@@ -862,8 +862,13 @@ describe("the shape of the production tables (migration 0006)", () => {
       BLOCKS_WITH_ROOM_SQL,
       CLOSED_BOX_SQL,
       BOX_CODES_SQL,
+      LAST_CODE_SQL,
+      NEWEST_CODE_SCAN_SQL,
+      CLOSED_BOXES_SQL,
+      BOX_STATE_SQL,
+      LAST_BOX_JOB_SQL,
     ];
-    expect(new Set(statements).size).toBe(8);
+    expect(new Set(statements).size).toBe(13);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
   });
 
