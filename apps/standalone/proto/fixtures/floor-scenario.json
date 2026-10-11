@@ -1,0 +1,476 @@
+{
+  "station": {
+    "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+    "blockId": "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+    "acceptedUnits": 5,
+    "closedBoxes": 2
+  },
+  "records": [
+    {
+      "id": "00000000-0000-4000-8000-000000000001",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "scan",
+      "data": {
+        "scannedAt": "2026-10-08T06:15:00.000Z",
+        "verdict": "ok",
+        "duplicateSource": null,
+        "rawKind": "km",
+        "rawLength": 30,
+        "code": {
+          "codeHash": "5066bf31ac88f18398f693870a0bfd29993658de62927d6141b9e2073da2df66",
+          "gtin14": "04600682000013",
+          "serial": "A1",
+          "canonical": "010460068200001321A1\u001d93dGVz"
+        },
+        "boxId": "00000000-0000-4000-8000-000000000002"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000003",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "scan",
+      "data": {
+        "scannedAt": "2026-10-08T06:15:01.000Z",
+        "verdict": "ok",
+        "duplicateSource": null,
+        "rawKind": "km",
+        "rawLength": 30,
+        "code": {
+          "codeHash": "7d7697d127a14af608a8c5aaf4e1faaa13bc43bdde9b05372f2a00f1ca1fe0ae",
+          "gtin14": "04600682000013",
+          "serial": "A2",
+          "canonical": "010460068200001321A2\u001d93dGVz"
+        },
+        "boxId": "00000000-0000-4000-8000-000000000002"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000004",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "scan",
+      "data": {
+        "scannedAt": "2026-10-08T06:15:02.000Z",
+        "verdict": "ok",
+        "duplicateSource": null,
+        "rawKind": "km",
+        "rawLength": 30,
+        "code": {
+          "codeHash": "a0bcf6b8672674919ef0cf51beef219fbd9d80716603eea7c7bfcc928b53290c",
+          "gtin14": "04600682000013",
+          "serial": "A3",
+          "canonical": "010460068200001321A3\u001d93dGVz"
+        },
+        "boxId": "00000000-0000-4000-8000-000000000002"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000006",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "box_closed",
+      "data": {
+        "boxId": "00000000-0000-4000-8000-000000000002",
+        "sscc": "046006820000015000",
+        "blockId": "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+        "serial": 1500,
+        "openedAt": "2026-10-08T06:15:00.000Z",
+        "closedAt": "2026-10-08T06:15:03.000Z",
+        "itemCount": 3,
+        "membershipDigest": "a8ac289180d9807b954190fd8f4a65f2c1609fad1589a284ce2d185b6ca5441a"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000007",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "box_label",
+      "data": {
+        "boxId": "00000000-0000-4000-8000-000000000002",
+        "outcome": "verified",
+        "at": "2026-10-08T06:15:06.000Z"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000008",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "scan",
+      "data": {
+        "scannedAt": "2026-10-08T06:15:09.000Z",
+        "verdict": "ok",
+        "duplicateSource": null,
+        "rawKind": "km",
+        "rawLength": 30,
+        "code": {
+          "codeHash": "e645500adbed620bec039e164c48a17d985c6ab8f04d7708dd0fdfdee0025042",
+          "gtin14": "04600682000013",
+          "serial": "B1",
+          "canonical": "010460068200001321B1\u001d93dGVz"
+        },
+        "boxId": "00000000-0000-4000-8000-000000000009"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000010",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "scan",
+      "data": {
+        "scannedAt": "2026-10-08T06:15:10.000Z",
+        "verdict": "ok",
+        "duplicateSource": null,
+        "rawKind": "km",
+        "rawLength": 30,
+        "code": {
+          "codeHash": "59626d6dcb61bc482b987f7613a91607ca2cf4b9ba43763a45990107b76701d1",
+          "gtin14": "04600682000013",
+          "serial": "B2",
+          "canonical": "010460068200001321B2\u001d93dGVz"
+        },
+        "boxId": "00000000-0000-4000-8000-000000000009"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000012",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "box_exception",
+      "data": {
+        "exception": "undo",
+        "boxId": "00000000-0000-4000-8000-000000000009",
+        "codeHash": "59626d6dcb61bc482b987f7613a91607ca2cf4b9ba43763a45990107b76701d1",
+        "targetScannedAt": "2026-10-08T06:15:10.000Z",
+        "reasonCode": null,
+        "reasonText": null,
+        "occurredAt": "2026-10-08T06:15:11.000Z"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000013",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "scan",
+      "data": {
+        "scannedAt": "2026-10-08T06:15:12.000Z",
+        "verdict": "ok",
+        "duplicateSource": null,
+        "rawKind": "km",
+        "rawLength": 30,
+        "code": {
+          "codeHash": "59626d6dcb61bc482b987f7613a91607ca2cf4b9ba43763a45990107b76701d1",
+          "gtin14": "04600682000013",
+          "serial": "B2",
+          "canonical": "010460068200001321B2\u001d93dGVz"
+        },
+        "boxId": "00000000-0000-4000-8000-000000000009"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000015",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "box_exception",
+      "data": {
+        "exception": "clear",
+        "boxId": "00000000-0000-4000-8000-000000000009",
+        "codeHash": null,
+        "targetScannedAt": null,
+        "reasonCode": null,
+        "reasonText": null,
+        "occurredAt": "2026-10-08T06:15:13.000Z"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000016",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "scan",
+      "data": {
+        "scannedAt": "2026-10-08T06:15:14.000Z",
+        "verdict": "ok",
+        "duplicateSource": null,
+        "rawKind": "km",
+        "rawLength": 30,
+        "code": {
+          "codeHash": "063b9bb4374012267a1d3a5b63d0e4b6df1425c9ba5df952e7f4bdead08b23b7",
+          "gtin14": "04600682000013",
+          "serial": "C1",
+          "canonical": "010460068200001321C1\u001d93dGVz"
+        },
+        "boxId": "00000000-0000-4000-8000-000000000009"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000017",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "scan",
+      "data": {
+        "scannedAt": "2026-10-08T06:15:15.000Z",
+        "verdict": "ok",
+        "duplicateSource": null,
+        "rawKind": "km",
+        "rawLength": 30,
+        "code": {
+          "codeHash": "4891a84fae19995d63f378df3767daae9ab1db7621d416c865ea99e679f83304",
+          "gtin14": "04600682000013",
+          "serial": "C2",
+          "canonical": "010460068200001321C2\u001d93dGVz"
+        },
+        "boxId": "00000000-0000-4000-8000-000000000009"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000018",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "scan",
+      "data": {
+        "scannedAt": "2026-10-08T06:15:16.000Z",
+        "verdict": "ok",
+        "duplicateSource": null,
+        "rawKind": "km",
+        "rawLength": 30,
+        "code": {
+          "codeHash": "1113b4cb64b09199a76d13cea056fdf13386c1810623e6cbbb13f47d6b7955f1",
+          "gtin14": "04600682000013",
+          "serial": "C3",
+          "canonical": "010460068200001321C3\u001d93dGVz"
+        },
+        "boxId": "00000000-0000-4000-8000-000000000009"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000020",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "box_closed",
+      "data": {
+        "boxId": "00000000-0000-4000-8000-000000000009",
+        "sscc": "046006820000015017",
+        "blockId": "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+        "serial": 1501,
+        "openedAt": "2026-10-08T06:15:09.000Z",
+        "closedAt": "2026-10-08T06:15:17.000Z",
+        "itemCount": 3,
+        "membershipDigest": "334a2cae4baf8c969aae3f80d30651f6179041c2479517f1b440442661f92d9a"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000021",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "box_label",
+      "data": {
+        "boxId": "00000000-0000-4000-8000-000000000009",
+        "outcome": "verified",
+        "at": "2026-10-08T06:15:20.000Z"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000023",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "box_exception",
+      "data": {
+        "exception": "disassemble",
+        "boxId": "00000000-0000-4000-8000-000000000002",
+        "codeHash": null,
+        "targetScannedAt": null,
+        "reasonCode": "wrong_quantity",
+        "reasonText": null,
+        "occurredAt": "2026-10-08T06:15:21.000Z"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000026",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "box_exception",
+      "data": {
+        "exception": "reprint",
+        "boxId": "00000000-0000-4000-8000-000000000009",
+        "codeHash": null,
+        "targetScannedAt": null,
+        "reasonCode": "damaged_label",
+        "reasonText": null,
+        "occurredAt": "2026-10-08T06:15:22.000Z"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000027",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "box_label",
+      "data": {
+        "boxId": "00000000-0000-4000-8000-000000000009",
+        "outcome": "verified",
+        "at": "2026-10-08T06:15:25.000Z"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000028",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "scan",
+      "data": {
+        "scannedAt": "2026-10-08T06:15:26.000Z",
+        "verdict": "ok",
+        "duplicateSource": null,
+        "rawKind": "km",
+        "rawLength": 30,
+        "code": {
+          "codeHash": "5066bf31ac88f18398f693870a0bfd29993658de62927d6141b9e2073da2df66",
+          "gtin14": "04600682000013",
+          "serial": "A1",
+          "canonical": "010460068200001321A1\u001d93dGVz"
+        },
+        "boxId": "00000000-0000-4000-8000-000000000029"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000030",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "scan",
+      "data": {
+        "scannedAt": "2026-10-08T06:15:27.000Z",
+        "verdict": "ok",
+        "duplicateSource": null,
+        "rawKind": "km",
+        "rawLength": 30,
+        "code": {
+          "codeHash": "7d7697d127a14af608a8c5aaf4e1faaa13bc43bdde9b05372f2a00f1ca1fe0ae",
+          "gtin14": "04600682000013",
+          "serial": "A2",
+          "canonical": "010460068200001321A2\u001d93dGVz"
+        },
+        "boxId": "00000000-0000-4000-8000-000000000029"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000032",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "box_closed",
+      "data": {
+        "boxId": "00000000-0000-4000-8000-000000000029",
+        "sscc": "046006820000015024",
+        "blockId": "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+        "serial": 1502,
+        "openedAt": "2026-10-08T06:15:26.000Z",
+        "closedAt": "2026-10-08T06:15:28.000Z",
+        "itemCount": 2,
+        "membershipDigest": "ac427eae7f4f163914ad643791e99c98f575c405b6ab113e3e7a90e6f3308b7e"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000033",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "box_label",
+      "data": {
+        "boxId": "00000000-0000-4000-8000-000000000029",
+        "outcome": "verified",
+        "at": "2026-10-08T06:15:31.000Z"
+      }
+    },
+    {
+      "id": "00000000-0000-4000-8000-000000000034",
+      "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "kind": "shift_closed",
+      "data": {
+        "plannedQtySnapshot": 1200,
+        "actualQty": 5,
+        "closedBoxCount": 2,
+        "reasonCode": "production_order_changed",
+        "closedAt": "2026-10-08T06:15:32.000Z"
+      }
+    }
+  ],
+  "sends": [
+    {
+      "ids": [
+        "00000000-0000-4000-8000-000000000001",
+        "00000000-0000-4000-8000-000000000003",
+        "00000000-0000-4000-8000-000000000004",
+        "00000000-0000-4000-8000-000000000006",
+        "00000000-0000-4000-8000-000000000007"
+      ],
+      "answer": "receipts"
+    },
+    {
+      "ids": [
+        "00000000-0000-4000-8000-000000000008",
+        "00000000-0000-4000-8000-000000000010",
+        "00000000-0000-4000-8000-000000000012",
+        "00000000-0000-4000-8000-000000000013",
+        "00000000-0000-4000-8000-000000000015",
+        "00000000-0000-4000-8000-000000000016",
+        "00000000-0000-4000-8000-000000000017",
+        "00000000-0000-4000-8000-000000000018",
+        "00000000-0000-4000-8000-000000000020",
+        "00000000-0000-4000-8000-000000000021",
+        "00000000-0000-4000-8000-000000000023",
+        "00000000-0000-4000-8000-000000000026",
+        "00000000-0000-4000-8000-000000000027",
+        "00000000-0000-4000-8000-000000000028",
+        "00000000-0000-4000-8000-000000000030",
+        "00000000-0000-4000-8000-000000000032",
+        "00000000-0000-4000-8000-000000000033",
+        "00000000-0000-4000-8000-000000000034"
+      ],
+      "answer": "unreachable"
+    },
+    {
+      "ids": [
+        "00000000-0000-4000-8000-000000000008",
+        "00000000-0000-4000-8000-000000000010",
+        "00000000-0000-4000-8000-000000000012",
+        "00000000-0000-4000-8000-000000000013",
+        "00000000-0000-4000-8000-000000000015",
+        "00000000-0000-4000-8000-000000000016",
+        "00000000-0000-4000-8000-000000000017",
+        "00000000-0000-4000-8000-000000000018",
+        "00000000-0000-4000-8000-000000000020",
+        "00000000-0000-4000-8000-000000000021",
+        "00000000-0000-4000-8000-000000000023",
+        "00000000-0000-4000-8000-000000000026",
+        "00000000-0000-4000-8000-000000000027",
+        "00000000-0000-4000-8000-000000000028",
+        "00000000-0000-4000-8000-000000000030",
+        "00000000-0000-4000-8000-000000000032",
+        "00000000-0000-4000-8000-000000000033",
+        "00000000-0000-4000-8000-000000000034"
+      ],
+      "answer": "lost"
+    },
+    {
+      "ids": [
+        "00000000-0000-4000-8000-000000000008",
+        "00000000-0000-4000-8000-000000000010",
+        "00000000-0000-4000-8000-000000000012",
+        "00000000-0000-4000-8000-000000000013",
+        "00000000-0000-4000-8000-000000000015",
+        "00000000-0000-4000-8000-000000000016",
+        "00000000-0000-4000-8000-000000000017",
+        "00000000-0000-4000-8000-000000000018",
+        "00000000-0000-4000-8000-000000000020",
+        "00000000-0000-4000-8000-000000000021",
+        "00000000-0000-4000-8000-000000000023",
+        "00000000-0000-4000-8000-000000000026",
+        "00000000-0000-4000-8000-000000000027",
+        "00000000-0000-4000-8000-000000000028",
+        "00000000-0000-4000-8000-000000000030",
+        "00000000-0000-4000-8000-000000000032",
+        "00000000-0000-4000-8000-000000000033",
+        "00000000-0000-4000-8000-000000000034"
+      ],
+      "answer": "receipts"
+    }
+  ]
+}
