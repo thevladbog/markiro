@@ -848,7 +848,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 35] = [
+    let reads: [(&str, &str); 36] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1056,6 +1056,15 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             "SELECT id FROM floor_shifts WHERE host_id = ? AND device_id = ? AND line_id = ?",
             "floor_shifts_line",
+        ),
+        // The guard every outbox write carries (`outboxStatement`, `src/floor/facts.ts`; plan
+        // 2a8): has this pairing closed the shift? The subquery of `INSERT INTO outbox …
+        // SELECT … WHERE NOT EXISTS (…)` runs on every scan; `test/floor-schema.test.ts`
+        // plans the statement itself.
+        (
+            "SELECT 1 FROM floor_shifts WHERE host_id = ? AND device_id = ? AND id = ? \
+             AND local_state IS NOT NULL",
+            "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
         ),
     ];
     for (sql, index) in reads {

@@ -10,6 +10,7 @@ import {
   LAST_CODE_SQL,
   NEWEST_CODE_SCAN_SQL,
 } from "../src/floor/exceptions/box-exceptions.js";
+import { outboxStatement, shiftClosedRecord } from "../src/floor/facts.js";
 import {
   CONFLICT_COUNT_SQL,
   HEAD_RECORD_SQL,
@@ -846,6 +847,28 @@ describe("the shape of the production tables (migration 0006)", () => {
       }
     }
     expect(plan(UNSENT_SQL)).toContain("outbox_unsent");
+    // Every record the floor writes (each scan too) is written by `outboxStatement`, whose
+    // guard looks the shift of the pairing up to see whether this station has closed it
+    // (plan 2a8): by the shift's own key, not by a walk over the pairing's shifts.
+    const guarded = outboxStatement(
+      shiftClosedRecord(
+        { id: "5d3c2b1a-9e8f-4a7b-8c6d-5e4f3a2b1c0d", shiftId: LINE_ID, operatorId: DEVICE_ID },
+        {
+          plannedQtySnapshot: null,
+          actualQty: 0,
+          closedBoxCount: 0,
+          reasonCode: null,
+          closedAt: AT,
+        },
+      ),
+      pairing,
+      AT,
+    );
+    const guardPlan = plan(guarded.sql);
+    expect(guardPlan).toContain(
+      "SEARCH floor_shifts USING INDEX sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
+    );
+    expect(guardPlan.split("\n").filter((step) => step.startsWith("SCAN floor_"))).toEqual([]);
   });
 
   // The same for what the status bar reads.

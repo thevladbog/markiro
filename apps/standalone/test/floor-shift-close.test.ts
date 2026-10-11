@@ -348,18 +348,25 @@ describe("the close of a shift on the station", () => {
     expect(await readPrintJob(at.local, PAIRING, job.id)).toMatchObject({ state: "sent" });
   });
 
-  it("stops the records of the shift this pairing closed, not those of another pairing's copy", async () => {
-    const at = await station(null);
-    const other = { hostId: PAIRING.hostId, deviceId: "9f8e7d6c-5b4a-4c3d-8e2f-1a0b9c8d7e6f" };
-    await keepEnteredShift(at.local, other, ENTERED, "2026-10-08T06:02:00.000Z", 1);
-    at.db
-      .prepare("UPDATE floor_shifts SET local_state = 'closing' WHERE device_id = ?")
-      .run(other.deviceId);
-    expect(await processScan(closer(at), km("D1"))).toMatchObject({ kind: "accepted" });
-    await expect(
-      processScan(closer(at, { pairing: other, newId: () => crypto.randomUUID() }), km("D2")),
-    ).rejects.toMatchObject({ code: "changes_mismatch" });
-  });
+  // A pairing that differs in the host only (a restored host, plan РК) and one that
+  // differs in the device only (an old pairing kept by a forget): each holds a copy
+  // of the same shift id, closing, and refuses its own records, never this one's.
+  it.each(FOREIGN)(
+    "stops the records of the shift this pairing closed, not those of another pairing's copy (%o)",
+    async (other) => {
+      const at = await station(null);
+      await keepEnteredShift(at.local, other, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+      at.db
+        .prepare(
+          "UPDATE floor_shifts SET local_state = 'closing' WHERE host_id = ? AND device_id = ?",
+        )
+        .run(other.hostId, other.deviceId);
+      expect(await processScan(closer(at), km("D1"))).toMatchObject({ kind: "accepted" });
+      await expect(
+        processScan(closer(at, { pairing: other, newId: () => crypto.randomUUID() }), km("D2")),
+      ).rejects.toMatchObject({ code: "changes_mismatch" });
+    },
+  );
 
   it("writes nothing when a scan lands between its summary and its write", async () => {
     const at = await station(null);
@@ -709,7 +716,7 @@ describe("the close of a shift, in more detail", () => {
     expect(outboxKinds(at).filter((kind) => kind === "shift_closed")).toHaveLength(1);
   });
 
-  it("lets the close of a closing shift go on without a second record after a restart", async () => {
+  it("finds a shift closing after a restart closed, and writes no second record", async () => {
     const at = await station(null);
     await closedBoxWithLabel(at);
     await closeShift(closer(at), null);
@@ -875,6 +882,51 @@ describe("the close of a shift, in more detail", () => {
     expect(localState(at)).toBeNull();
     expect(outboxKinds(at)).not.toContain("shift_closed");
   });
+
+  it.each([
+    ["a code is taken out of a closed box", -1],
+    ["a code is added to a closed box", 1],
+  ] as const)(
+    "writes nothing when the codes of the shift change under the close alone: %s",
+    async (_change, delta) => {
+      const at = await station(null);
+      await closedBoxWithLabel(at);
+      const held = holdingWrites(at.local);
+      held.holdNext();
+      const closing = closeShift(closer(at, { local: held.executor }), null);
+      await held.reached();
+      // A writer outside the queue changes the shift's codes only: its closed boxes
+      // stay the same, no box is open and no label waits, so the count of codes is
+      // the one guard that sees it (the three codes the summary read become 2 or 4).
+      if (delta < 0) {
+        at.db
+          .prepare("DELETE FROM floor_codes WHERE rowid = (SELECT max(rowid) FROM floor_codes)")
+          .run();
+      } else {
+        at.db
+          .prepare(
+            "INSERT INTO floor_codes (host_id, device_id, code_hash, shift_id, box_id, scan_id, " +
+              "scanned_at) SELECT host_id, device_id, ?, shift_id, id, ?, ? FROM floor_boxes " +
+              "WHERE closed_at IS NOT NULL",
+          )
+          .run("9".repeat(64), "bbbbbbbb-0000-4000-8000-0000000000ff", "2026-10-08T06:10:00.000Z");
+      }
+      held.release();
+      expect(await closing).toEqual({ kind: "stale" });
+      expect(localState(at)).toBeNull();
+      expect(outboxKinds(at)).not.toContain("shift_closed");
+      expect(await readCloseSummary(at.local, PAIRING, SHIFT_ID)).toMatchObject({
+        actualQty: 3 + delta,
+        closedBoxes: 1,
+        blocker: null,
+      });
+      // Read again, it closes on the codes the station holds now.
+      expect(await closeShift(closer(at), null)).toMatchObject({
+        kind: "closed",
+        record: { actualQty: 3 + delta, closedBoxCount: 1 },
+      });
+    },
+  );
 
   it("runs the guards of a later plan before it closes, in the same transaction", async () => {
     const at = await station(null);
