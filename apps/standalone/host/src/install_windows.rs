@@ -89,7 +89,9 @@ impl Services for WindowsServices {
             executable_path: spec.executable.clone(),
             launch_arguments: spec.arguments.iter().map(OsString::from).collect(),
             dependencies: Vec::new(),
-            account_name: Some(OsString::from(spec.account)),
+            // `None` leaves an existing service's account and password as
+            // they are (ChangeServiceConfigW with NULL for both).
+            account_name: spec.account.map(OsString::from),
             account_password: None,
         };
         let service = match self.open()? {
@@ -97,9 +99,19 @@ impl Services for WindowsServices {
                 service.change_config(&info).map_err(service_error)?;
                 service
             }
+            // A new service never runs as LocalSystem, which `None` would
+            // mean to CreateServiceW: it gets LocalService.
             None => self
                 .manager
-                .create_service(&info, access())
+                .create_service(
+                    &ServiceInfo {
+                        account_name: Some(OsString::from(
+                            spec.account.unwrap_or(crate::install::SERVICE_ACCOUNT),
+                        )),
+                        ..info
+                    },
+                    access(),
+                )
                 .map_err(service_error)?,
         };
         service

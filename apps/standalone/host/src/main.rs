@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use markiro_host::config::{HostConfig, HostPaths};
-use markiro_host::install::{InstallError, SystemCommands};
+use markiro_host::install::{InstallError, ServiceState, SystemCommands};
 use markiro_host::network_profile::{self, PUBLIC_REMAINS};
 use markiro_host::{BoxError, StartOptions};
 
@@ -183,15 +183,22 @@ fn main() -> ExitCode {
 }
 
 /// `install` exits with this when the service is registered but did not stay
-/// up after its start: the installer keeps it (and warns) instead of failing.
-/// The usual cause is a restore that was not finished (`markiro-host restore`
-/// again); the service manager keeps retrying every minute.
+/// up after its start, or is still starting after the wait (a big first
+/// migration): the installer keeps it (and warns) instead of failing. The
+/// usual cause of the first is a restore that was not finished
+/// (`markiro-host restore` again); the service manager keeps retrying every
+/// minute.
 const SERVICE_DID_NOT_STAY_UP: u8 = 4;
 
 /// The exit code of a failed command: 1, or [`SERVICE_DID_NOT_STAY_UP`].
 fn failure_code(error: &BoxError) -> u8 {
     match error.downcast_ref::<InstallError>() {
-        Some(InstallError::StoppedAfterStart) => SERVICE_DID_NOT_STAY_UP,
+        Some(
+            InstallError::StoppedAfterStart
+            | InstallError::Timeout {
+                waiting_for: ServiceState::Running,
+            },
+        ) => SERVICE_DID_NOT_STAY_UP,
         _ => 1,
     }
 }

@@ -528,20 +528,7 @@ async fn run_once(
         (local_copies, second)
     })
     .await;
-    let (local_copies, second_result) = match folders {
-        Ok(folders) => folders,
-        Err(error) => {
-            tracing::error!(
-                panicked = error.is_panic(),
-                "a backup folder task did not finish"
-            );
-            let failed = Failure::new(failure::INTERNAL, "the folder task did not finish");
-            (
-                Ok(Vec::new()),
-                second_dir.as_ref().map(|_| (Err(failed), Ok(Vec::new()))),
-            )
-        }
-    };
+    let (local_copies, second_result) = folder_outcome(folders, second_dir.as_ref());
     if let Some((Err(failed), _)) = &second_result {
         tracing::warn!(
             code = failed.code,
@@ -576,6 +563,38 @@ async fn run_once(
         second: second_result.map(|(result, _)| result),
     };
     (Some(conn), version, report)
+}
+
+/// The local folder's copies, and the second folder's result and copies
+/// (when one is set), as the folder task gives them.
+type FolderLists = (
+    std::io::Result<Vec<BackupCopy>>,
+    Option<(Result<(), Failure>, std::io::Result<Vec<BackupCopy>>)>,
+);
+
+/// What the folder task gave, or, when it did not finish (a panic), an
+/// `internal` failure for the second folder and no list for either: a list
+/// that is not `Ok` leaves the one the status holds, so the office does not
+/// see «нет проверенных копий» until the next good run.
+fn folder_outcome(
+    folders: Result<FolderLists, tokio::task::JoinError>,
+    second_dir: Option<&String>,
+) -> FolderLists {
+    match folders {
+        Ok(folders) => folders,
+        Err(error) => {
+            tracing::error!(
+                panicked = error.is_panic(),
+                "a backup folder task did not finish"
+            );
+            let unknown = || std::io::Error::other("the folder task did not finish");
+            let failed = Failure::new(failure::INTERNAL, "the folder task did not finish");
+            (
+                Err(unknown()),
+                second_dir.map(|_| (Err(failed), Err(unknown()))),
+            )
+        }
+    }
 }
 
 /// The worker task: a run at once when asked, a scheduled check every

@@ -691,7 +691,14 @@ fn a_second_install_over_a_stopped_service_asks_it_to_stop_nothing_and_ends_the_
             "state",
         ]
     );
-    assert_eq!(services.configured, [service_spec(Path::new(EXE))]);
+    // The service is there: it keeps its account.
+    assert_eq!(
+        services.configured,
+        [ServiceSpec {
+            account: None,
+            ..service_spec(Path::new(EXE))
+        }]
+    );
     assert!(sleeps.borrow().is_empty());
 }
 

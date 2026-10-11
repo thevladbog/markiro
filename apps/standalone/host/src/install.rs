@@ -67,7 +67,10 @@ pub struct ServiceSpec {
     pub description: &'static str,
     pub executable: PathBuf,
     pub arguments: Vec<String>,
-    pub account: &'static str,
+    /// The account a new service runs as. `None` for a service that exists
+    /// already: it keeps its account (IT may have given it one that writes to
+    /// a share), and every update is a reinstall.
+    pub account: Option<&'static str>,
     /// Starts with Windows, before anybody signs in.
     pub automatic: bool,
     /// One restart per failure, after these delays; the last repeats.
@@ -88,7 +91,7 @@ pub fn service_spec(executable: &Path) -> ServiceSpec {
         description: "Главная база Markiro Автоном: станции и офис площадки подключаются к ней по HTTPS, порт 45710.",
         executable: executable.to_path_buf(),
         arguments: vec!["service".to_owned()],
-        account: SERVICE_ACCOUNT,
+        account: Some(SERVICE_ACCOUNT),
         automatic: true,
         restart_delays: [
             Duration::from_secs(5),
@@ -203,7 +206,7 @@ pub fn install(
     )?;
     run_checked(commands, "icacls", &icacls_args(data_dir))?;
     let existed = stop(services, sleep)?;
-    if let Err(error) = register_and_start(executable, port, services, commands) {
+    if let Err(error) = register_and_start(existed, executable, port, services, commands) {
         // A fresh install that failed halfway leaves nothing behind; an
         // upgrade keeps the service it found (running the install again
         // converges, deleting the customer's service would not).
@@ -251,12 +254,18 @@ pub fn configured_port(paths: &HostPaths) -> u16 {
 
 /// The steps that can leave a half-made registration behind.
 fn register_and_start(
+    existed: bool,
     executable: &Path,
     port: u16,
     services: &mut dyn Services,
     commands: &mut dyn Commands,
 ) -> Result<(), InstallError> {
-    services.configure(&service_spec(executable))?;
+    let mut spec = service_spec(executable);
+    if existed {
+        // An update keeps the account the service runs as.
+        spec.account = None;
+    }
+    services.configure(&spec)?;
     run_checked(
         commands,
         "powershell.exe",

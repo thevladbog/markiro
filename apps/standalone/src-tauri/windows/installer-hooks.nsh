@@ -15,8 +15,9 @@
 ;; %ProgramData%\Markiro\Host or the app's data under %LOCALAPPDATA%; an
 ;; upgrade stops the running host service first and `install` starts it again.
 ;; Exit codes of markiro-host used here (host/src/main.rs): install 0 = running,
-;; 4 = installed but not staying up (usually an unfinished restore: a warning
-;; with the restore hint), anything else = failure; network-check 3 = a public
+;; 4 = installed but not staying up or still starting after 30 s (usually an
+;; unfinished restore, or a big first migration: a warning with the restore
+;; hint), anything else = failure; network-check 3 = a public
 ;; network remains. NSIS `==` ignores case, so roles are mapped to literals.
 
 !define MARKIRO_ROLE_KEY "Software\Markiro\Standalone"
@@ -120,11 +121,12 @@ Var MarkiroRole
     nsExec::ExecToLog '"$INSTDIR\markiro-host.exe" install'
     Pop $0
     ${If} $0 == "4"
-      ; Registered, but the host did not stay up: usually a restore from a copy
-      ; was interrupted and the host refuses to start until it is repeated.
-      ; The service and the data stay, so this is a warning, not a failure.
-      DetailPrint "Служба MarkiroHost установлена, но не осталась запущенной (код 4)."
-      MessageBox MB_ICONEXCLAMATION "Служба MarkiroHost установлена, но не осталась запущенной. Чаще всего не закончено восстановление из копии: остановите службу (sc stop MarkiroHost), повторите markiro-host restore и запустите службу. Данные не тронуты." /SD IDOK
+      ; Registered, but the host did not stay up, or is still starting after
+      ; 30 s: usually a restore from a copy was interrupted and the host
+      ; refuses to start until it is repeated, or a big database is still
+      ; being migrated. The service and the data stay, so this is a warning.
+      DetailPrint "Служба MarkiroHost установлена, но не осталась запущенной или ещё запускается (код 4)."
+      MessageBox MB_ICONEXCLAMATION "Служба MarkiroHost установлена, но не осталась запущенной или ещё запускается. Подождите минуту и проверьте её состояние (sc query MarkiroHost). Если служба остановлена, чаще всего не закончено восстановление из копии: остановите службу (sc stop MarkiroHost), повторите markiro-host restore и запустите службу. Данные не тронуты." /SD IDOK
     ${ElseIf} $0 != "0"
       !insertmacro MARKIRO_FAIL "Служба MarkiroHost не установлена (код $0). Подробности — в журнале установки выше."
     ${EndIf}

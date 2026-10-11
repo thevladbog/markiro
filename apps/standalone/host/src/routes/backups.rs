@@ -115,16 +115,27 @@ pub async fn start_backup(
 ) -> Result<(StatusCode, Json<BackupState>), ApiError> {
     context.require_admin()?;
     let backups = backups(&state)?;
+    // The settings and the hold are read before the copy is asked for: a
+    // read that fails answers 500 with no copy queued behind it. The state
+    // is then built from memory, which cannot fail.
+    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
+    let read = async {
+        let settings = read_settings(&mut tx).await?;
+        let hold = read_hold(&mut tx).await?;
+        Ok::<_, ApiError>((settings, hold))
+    }
+    .await;
+    tx.rollback().await.map_err(ApiError::internal)?;
+    let ((second_dir, rev), hold) = read?;
     if !backups.request_manual(&context.user.id, state.now()) {
         return Err(ApiError::conflict(
             "backup_running",
             "a copy is being made already",
         ));
     }
-    let mut tx = state.pool.begin().await.map_err(ApiError::internal)?;
-    let answered = answer(&mut tx, backups, state.timestamp()).await;
-    tx.rollback().await.map_err(ApiError::internal)?;
-    Ok((StatusCode::ACCEPTED, Json(answered?)))
+    let mut answered = backups.state(state.timestamp(), second_dir, rev);
+    answered.restore_hold = hold;
+    Ok((StatusCode::ACCEPTED, Json(answered)))
 }
 
 /// The folder as typed, trimmed: 1-260 characters, no control character,
