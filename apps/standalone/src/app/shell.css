@@ -615,6 +615,46 @@
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
+/* The exceptions of the work screen (plan 2a8): the steps under one heading,
+   the last digits of a box's SSCC typed on a pad of 64 px keys, the choices
+   (actions, boxes, reasons) as a grid that wraps at 1024 px, and the button
+   that destroys at the far end of its row, apart from «Назад». */
+.exceptions {
+  display: grid;
+  gap: 16px;
+}
+
+.exceptions h3,
+.exceptions h4,
+.exceptions p {
+  margin: 0;
+}
+
+.exceptions__view {
+  display: grid;
+  gap: 16px;
+}
+
+.exceptions__view p {
+  margin-bottom: 8px;
+}
+
+.exceptions__choices {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.exceptions__pad {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+}
+
+.exceptions__confirm {
+  justify-content: space-between;
+  gap: 48px;
+}
+
 /* The workstation setup (plan 2a7): one printer a row, its actions under it. */
 .workstation-setup {
   width: min(880px, 100%);

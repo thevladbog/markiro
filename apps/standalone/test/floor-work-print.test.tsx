@@ -248,16 +248,21 @@ describe("the label of a box the work screen closes", () => {
     expect(shell.sends).toHaveLength(1);
   });
 
-  it("promises nothing the screen does not have when it asks to go on without a label", async () => {
+  it("promises only what the screen has when it asks to go on without a label: the reprint in «Исключениях»", async () => {
     const at = await printStation();
     const shell = fakeHardware(async () => ({ sent: false, code: "not_sent" }));
     const screenWork = work(at, { shell });
     await fillBox(screenWork);
     await screenWork.press("Продолжить без этикетки");
     const body = screen.getByText(/^Короб уже закрыт/).textContent ?? "";
-    // «Исключения» arrive with plan 2a8: until then no text may send the operator there.
-    expect(body).not.toContain("Исключени");
+    // The text sends the operator to «Исключения», and the button is on the work screen to be
+    // found there once the choice is made (`floor-work-exceptions.test.tsx` prints from it).
+    expect(body).toContain("«Исключениях»");
     expect(body).toContain("промаркировать");
+    await screenWork.press("Назад");
+    await screenWork.press("Продолжить без этикетки");
+    await screenWork.press("Продолжить без этикетки");
+    expect(screen.getByRole("button", { name: "Исключения" }).hasAttribute("disabled")).toBe(false);
   });
 
   it("goes on without a label only after the operator confirms, with its record", async () => {

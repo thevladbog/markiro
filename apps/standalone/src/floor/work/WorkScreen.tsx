@@ -18,6 +18,19 @@ import type { SystemAwake } from "../../hardware/awake.js";
 import type { CodeCheck, SsccBlock, SsccBlockRequest } from "../../host/protocol.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
+import {
+  BoxUnavailableError,
+  clearOpenBox,
+  disassembleBox,
+  LabelWaitingError,
+  readClosedBoxes,
+  reprintBox,
+  TemplateChangedError,
+  undoLastCode,
+  type ClosedBox,
+  type OpenBoxResult,
+} from "../exceptions/box-exceptions.js";
+import { ExceptionFlow, type ExceptionOutcome } from "../exceptions/ExceptionFlow.js";
 import { LabelPanel, type LabelNote } from "../print/LabelPanel.js";
 import {
   boxLabelStep,
@@ -195,7 +208,28 @@ type Stop =
    */
   | { kind: "close_failed"; full: boolean; cause: "serial" | "write" }
   /** The label of a closed box waits: its check, or its recovery (plan 2a7, spec §5.7.5). */
-  | { kind: "label"; job: PrintJob };
+  | { kind: "label"; job: PrintJob }
+  /**
+   * The exceptions of the box (plan 2a8, spec §5.7.6), opened while nothing
+   * else stops the work and no label waits; `boxes`: the shift's closed
+   * boxes once they are read.
+   */
+  | { kind: "exceptions"; boxes: readonly ClosedBox[] | null };
+
+/** What an exception's failure says on the screen; anything unforeseen is this computer's failed write. */
+function outcomeOf(error: unknown): ExceptionOutcome {
+  if (error instanceof BoxUnavailableError) return { kind: "unavailable" };
+  if (error instanceof LabelWaitingError) return { kind: "label_waiting" };
+  if (error instanceof TemplateChangedError) return { kind: "template_changed" };
+  // Another reprint of the box landed between this one's read and its write: nothing was written.
+  if (error instanceof StaleJobError) return { kind: "stale" };
+  return { kind: "failed" };
+}
+
+/** An exception on the open box, as the screen says it. */
+function openBoxOutcome(result: OpenBoxResult, action: "undo" | "clear"): ExceptionOutcome {
+  return result.kind === "done" ? { kind: "done", action } : result;
+}
 
 /** The last scan, said in words under the box. */
 type Last = ScanOutcome | { kind: "paused"; leaving: boolean };
@@ -824,15 +858,31 @@ export function WorkScreen(props: WorkScreenProps) {
     [settleSafely, show, showLabel, closeBox, refreshQuietly],
   );
 
+  // The box choice of the exceptions, when it listens: a scan of a label picks the box.
+  const targetScan = useRef<((raw: string) => void) | null>(null);
+  const registerScan = useCallback((listener: ((raw: string) => void) | null) => {
+    targetScan.current = listener;
+  }, []);
+  const textEntry = useCallback(
+    (active: boolean) => source.setManualTextEntryActive(active),
+    [source],
+  );
+
   /**
    * One scan, in its turn: taken only while nothing stops the work. A box
    * that is already full is closed first (the stop that held it may have been
    * lifted), and if that leaves a stop the scan is not taken. The check of a
-   * label takes the scan before the pipeline (plan 2a6's contract).
+   * label takes the scan before the pipeline (plan 2a6's contract); the box
+   * choice of the exceptions takes it before that, and nothing is journalled.
    */
   const scan = useCallback(
     async (raw: string): Promise<void> => {
       const stopped = stopRef.current;
+      const choose = targetScan.current;
+      if (stopped?.kind === "exceptions" && choose !== null) {
+        choose(raw);
+        return;
+      }
       if (stopped?.kind === "label" && awaitsCheck(stopped.job)) {
         try {
           await check(stopped.job, raw);
@@ -942,6 +992,111 @@ export function WorkScreen(props: WorkScreenProps) {
 
   /** The settings the panel says a reprint's printer from (the same read `printAgain` makes). */
   const loadLabelSettings = useCallback(() => readWorkstationSettings(live.current.local), []);
+
+  /** The shift's closed boxes into the open exceptions (the screen of a stop that has gone is left alone). */
+  const showClosedBoxes = async (): Promise<void> => {
+    const now = live.current;
+    const boxes = await readClosedBoxes(now.local, pairingOf(now), now.shift.copy.id);
+    if (stopRef.current?.kind === "exceptions") setStop({ kind: "exceptions", boxes });
+  };
+
+  /**
+   * The exceptions, opened while nothing stops the work: as the line's next
+   * piece of work, so that the entry's own work has ended. A label that waits
+   * is decided first — a box with a waiting label could be taken apart, and
+   * the order of its panel is what keeps that from happening — so the panel
+   * takes the screen instead; otherwise the shift's closed boxes are read.
+   */
+  const openExceptions = () => {
+    if (leavingNow() || stopRef.current !== null) return;
+    setStop({ kind: "exceptions", boxes: null });
+    void live.current
+      .track(
+        queue.run(async () => {
+          await settleSafely();
+          if (stopRef.current?.kind === "exceptions") await showClosedBoxes();
+        }),
+      )
+      .catch(() => {
+        if (stopRef.current?.kind === "exceptions")
+          setStop({ kind: "system_error", cause: "read" });
+      });
+  };
+
+  /** Whether a label of the shift waits (read fresh, in the queue's turn). */
+  const labelWaits = async (): Promise<boolean> => {
+    const now = live.current;
+    return (await readOpenJob(now.local, pairingOf(now), now.shift.copy.id)) !== null;
+  };
+
+  /**
+   * An exception as the line's next piece of work, handed to the gate before
+   * it starts: whatever it wrote goes to the host, a label that now waits is
+   * settled (its panel takes the screen), the closed boxes and the numbers
+   * are read again, and the screen says how it went. It never rejects: a
+   * failure is said. Once the leave began it starts nothing.
+   */
+  const exception = (work: () => Promise<ExceptionOutcome>): Promise<ExceptionOutcome> => {
+    if (leavingNow()) return Promise.resolve({ kind: "leaving" });
+    return live.current.track(
+      queue.run(async () => {
+        let outcome: ExceptionOutcome;
+        try {
+          outcome = await work();
+        } catch (error) {
+          outcome = outcomeOf(error);
+        }
+        // A failed one may have written all the same: the host is told, and learns nothing new if it did not.
+        if (outcome.kind === "done" || outcome.kind === "label" || outcome.kind === "failed") {
+          live.current.onRecorded();
+        }
+        await settleSafely();
+        try {
+          await showClosedBoxes();
+          await refresh();
+        } catch {
+          // The numbers are read again with the next piece of work.
+        }
+        return outcome;
+      }),
+    );
+  };
+
+  /** A box's label printed again; a new label that waits is shown by the settling that follows. */
+  const reprint = (boxId: string, reason: Parameters<typeof reprintBox>[2]) =>
+    exception(async () => {
+      if (await labelWaits()) return { kind: "label_waiting" };
+      const now = live.current;
+      const settings = await readWorkstationSettings(now.local);
+      const job = await reprintBox(
+        { ...printContextOf(live), shift: now.shift },
+        boxId,
+        reason,
+        settings,
+        now.render,
+      );
+      return isOpenJob(job) ? { kind: "label" } : { kind: "done", action: "reprint" };
+    });
+
+  /** A closed box taken apart, unless a label waits (the label's panel is decided first). */
+  const disassemble = (boxId: string, reason: Parameters<typeof disassembleBox>[2]) =>
+    exception(async () => {
+      if (await labelWaits()) return { kind: "label_waiting" };
+      const result = await disassembleBox(boxContextOf(live), boxId, reason);
+      return result.kind === "done" ? { kind: "done", action: "disassemble" } : result;
+    });
+
+  // «Назад» from the exceptions: the focus returns to the button that opened them.
+  const exceptionsOpen = stop?.kind === "exceptions";
+  const exceptionsWere = useRef(false);
+  useEffect(() => {
+    if (exceptionsWere.current && !exceptionsOpen && stop === null) {
+      actionsRef.current
+        ?.querySelector<HTMLButtonElement>('[data-action="exceptions"]:not(:disabled)')
+        ?.focus();
+    }
+    exceptionsWere.current = exceptionsOpen;
+  }, [exceptionsOpen, stop]);
 
   /** The system error dismissed: the work goes on, after the label that may wait is read again. */
   const dismissSystemError = () => {
@@ -1197,6 +1352,28 @@ export function WorkScreen(props: WorkScreenProps) {
             <p className="work-screen__waiting">{t("floor.work.waitingSerials")}</p>
           )}
           {sending && <p className="work-screen__waiting">{t("floor.print.sending")}</p>}
+          {stop?.kind === "exceptions" && (
+            <ExceptionFlow
+              openItems={items}
+              boxes={stop.boxes}
+              onUndo={() =>
+                exception(async () =>
+                  openBoxOutcome(await undoLastCode(boxContextOf(live)), "undo"),
+                )
+              }
+              onClear={() =>
+                exception(async () =>
+                  openBoxOutcome(await clearOpenBox(boxContextOf(live)), "clear"),
+                )
+              }
+              onReprint={reprint}
+              onDisassemble={disassemble}
+              registerScan={registerScan}
+              onTextEntry={textEntry}
+              onBack={() => setStop(null)}
+              {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
+            />
+          )}
           {stop?.kind === "label" && (
             <LabelPanel
               // A new job, state or attempt starts the panel afresh.
@@ -1251,6 +1428,15 @@ export function WorkScreen(props: WorkScreenProps) {
               {t("floor.work.closeBox")}
             </Button>
           )}
+          <Button
+            size="floor"
+            variant="secondary"
+            data-action="exceptions"
+            disabled={stop !== null || leaving}
+            onClick={openExceptions}
+          >
+            {t("floor.exceptions.open")}
+          </Button>
           {/* On the keyboard while the leave waits: `aria-disabled`, and a press that does nothing. */}
           <Button
             size="floor"

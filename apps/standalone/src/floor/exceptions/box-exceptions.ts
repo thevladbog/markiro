@@ -358,6 +358,19 @@ export class LabelWaitingError extends Error {
   }
 }
 
+/**
+ * The box's label was made from another revision of the template than the
+ * shift holds now (the shift was entered again with a newer template): a
+ * reprint here would print another label than the one on the box, so
+ * nothing is written. Not a box that is missing — the operator is told so.
+ */
+export class TemplateChangedError extends Error {
+  constructor(boxId: string) {
+    super(`the label of box ${boxId} was made from another revision of the template`);
+    this.name = "TemplateChangedError";
+  }
+}
+
 const lastJobRow = z.object({ id: z.string() });
 
 /**
@@ -425,7 +438,8 @@ function reprintGuards(context: ReprintContext, boxId: string, last: PrintJob): 
  * A box whose label still waits is decided at the label's panel
  * (`LabelWaitingError`); a box open, taken apart or another shift's, or one
  * without a job, or whose job was made from another revision of the template
- * than the snapshot now holds — `BoxUnavailableError`. A box taken apart or
+ * than the snapshot now holds — `BoxUnavailableError`, and for the template
+ * `TemplateChangedError`. A box taken apart or
  * a reprint that landed after the read — `BoxUnavailableError` or
  * `StaleJobError`, nothing written. No printer or no render: the job is kept
  * `failed` and the label's panel takes it from there. Answers the new job.
@@ -453,7 +467,7 @@ export async function reprintBox(
   if (isOpenJob(last)) throw new LabelWaitingError(boxId);
   const { boxTemplate } = shift.snapshot;
   if (boxTemplate.id !== last.templateId || boxTemplate.rev !== last.templateRev) {
-    throw new BoxUnavailableError(boxId);
+    throw new TemplateChangedError(boxId);
   }
   const template: { id: string; rev: number; spec: LabelTemplateSpec } = {
     id: boxTemplate.id,

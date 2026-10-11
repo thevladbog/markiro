@@ -10,6 +10,7 @@ import {
   readClosedBoxes,
   reasonWords,
   reprintBox,
+  TemplateChangedError,
   undoLastCode,
 } from "../src/floor/exceptions/box-exceptions.js";
 import { checkLabel, skipLabel } from "../src/floor/print/print-resolution.js";
@@ -973,7 +974,7 @@ describe("«Перепечатать этикетку» of a box whose label is 
         at.settings,
         fakeRender,
       ),
-    ).rejects.toThrow(BoxUnavailableError);
+    ).rejects.toThrow(TemplateChangedError);
     expect(jobRows(at.db)).toHaveLength(1);
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_exceptions")).toEqual([{ n: 0 }]);
   });
