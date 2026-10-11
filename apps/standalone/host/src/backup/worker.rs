@@ -497,8 +497,10 @@ async fn run_once(
     let folders = tokio::task::spawn_blocking(move || {
         // The rule thins the copies out only after a new verified copy has
         // joined them: a failed run leaves every copy there is.
+        // The copy just made stays whatever the rule says (a clock set back).
+        let fresh = made.as_ref().map(|manifest| manifest.file.as_str());
         let local_copies = if made.is_some() {
-            folder::rotate(&local_dir)
+            folder::rotate(&local_dir, fresh)
         } else {
             folder::list(&local_dir)
         }
@@ -517,7 +519,7 @@ async fn run_once(
                 )),
             };
             let copies = if result.is_ok() {
-                folder::rotate(&dir)
+                folder::rotate(&dir, fresh)
             } else {
                 folder::list(&dir)
             };

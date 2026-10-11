@@ -10,6 +10,11 @@ import { formatWhen } from "./backup-format.js";
 export const STALE_AFTER_MS = 26 * 60 * 60 * 1000;
 /** A copy running longer than this is a warning: a folder that hangs holds every later copy. */
 export const STUCK_AFTER_MS = 30 * 60 * 1000;
+/**
+ * A newest copy later than the host's clock by more than this is a warning: the clock
+ * was set back, so the schedule and the retention rule read the copies wrongly.
+ */
+export const CLOCK_AHEAD_MS = 60 * 60 * 1000;
 
 /** What the office warns about, most serious first; `reason` is a failure code. */
 export type BackupWarning =
@@ -20,6 +25,7 @@ export type BackupWarning =
   | { kind: "stale" }
   | { kind: "noSecond" }
   | { kind: "secondStale" }
+  | { kind: "clockBehind" }
   | { kind: "stuck" };
 
 /** A failure code the office has words for; a newer host's other code is `unknown`. */
@@ -38,11 +44,17 @@ function stale(destination: BackupDestination, now: number): boolean {
   return newest !== undefined && now - Date.parse(newest.createdAt) > STALE_AFTER_MS;
 }
 
+/** Whether the folder's newest copy is later than the host's `now` by more than `CLOCK_AHEAD_MS`. */
+function ahead(destination: BackupDestination | null, now: number): boolean {
+  const newest = destination?.copies[0];
+  return newest !== undefined && Date.parse(newest.createdAt) - now > CLOCK_AHEAD_MS;
+}
+
 /**
  * The warnings of a backup state: the stations' facts held since a restore,
  * a failed last attempt in either folder, no copy at all, a newest copy
- * older than a day and a bit, no second folder, a copy running for more than
- * half an hour. A copy in progress hides nothing: the last attempt still
+ * older than a day and a bit, no second folder, a host clock behind the newest
+ * copy of either folder, a copy running for more than half an hour. A copy in progress hides nothing: the last attempt still
  * counts until it ends. The held facts name how many stations the host
  * knows, never how many gave their blocks back: no station does yet (plan
  * РК-С), so that number would be a claim about nothing.
@@ -67,6 +79,9 @@ export function backupWarnings(state: BackupState): BackupWarning[] {
     warnings.push({ kind: "noSecond" });
   } else if (second === null && stale(state.second, now)) {
     warnings.push({ kind: "secondStale" });
+  }
+  if (ahead(state.local, now) || ahead(state.second, now)) {
+    warnings.push({ kind: "clockBehind" });
   }
   if (state.running !== null && now - Date.parse(state.running.startedAt) > STUCK_AFTER_MS) {
     warnings.push({ kind: "stuck" });

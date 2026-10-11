@@ -77,8 +77,11 @@ pub fn clean(dir: &Path) -> std::io::Result<usize> {
 
 /// Delete the copies of `dir` that [`retention::keep`] does not keep: the
 /// manifest first, so a copy half deleted is a `.db` without one, which
-/// [`clean`] removes. Returns the copies that stay, newest first.
-pub fn rotate(dir: &Path) -> std::io::Result<Vec<Manifest>> {
+/// [`clean`] removes. `keep_also` (the copy a run just made) always stays:
+/// with the host's clock set back the copies made before are newer, and by
+/// the rule alone the fresh copy would be the first to go. Returns the
+/// copies that stay, newest first.
+pub fn rotate(dir: &Path, keep_also: Option<&str>) -> std::io::Result<Vec<Manifest>> {
     let copies = list(dir)?;
     let dated: Vec<(String, time::OffsetDateTime)> = copies
         .iter()
@@ -88,7 +91,8 @@ pub fn rotate(dir: &Path) -> std::io::Result<Vec<Manifest>> {
                 .map(|at| (copy.file.clone(), at))
         })
         .collect();
-    let kept = retention::keep(&dated);
+    let mut kept = retention::keep(&dated);
+    kept.extend(keep_also.map(str::to_owned));
     let mut staying = Vec::new();
     for copy in copies {
         if kept.contains(&copy.file) {
