@@ -209,6 +209,54 @@ fn install_hardens_the_data_dir_registers_the_service_opens_the_port_and_waits_u
     assert_eq!(script_of(&commands.runs[1].1), firewall_open_script(45710));
 }
 
+/// A user may make `%ProgramData%\Markiro\Host` (or a file in it) before the
+/// install: that user would stay its owner and could grant themselves the
+/// database again. Administrators own the folder, everything in it and its
+/// Markiro folder before the access list is set.
+#[test]
+fn install_makes_administrators_the_owner_of_the_data_dir_and_its_parent_before_the_access_list() {
+    let log = Log::default();
+    let mut services = FakeServices::new(&log, &[None, Some(ServiceState::Running)]);
+    let mut commands = FakeCommands::new(&log);
+    install::install(
+        Path::new(DATA_DIR),
+        Path::new(EXE),
+        45710,
+        &mut services,
+        &mut commands,
+        &mut |_| (),
+    )
+    .unwrap();
+    let icacls: Vec<&Vec<String>> = commands
+        .runs
+        .iter()
+        .filter(|(program, _)| program == "icacls")
+        .map(|(_, args)| args)
+        .collect();
+    assert_eq!(
+        icacls,
+        [
+            &vec![
+                r"C:\ProgramData\Markiro".to_owned(),
+                "/setowner".to_owned(),
+                "*S-1-5-32-544".to_owned(),
+            ],
+            &vec![
+                DATA_DIR.to_owned(),
+                "/setowner".to_owned(),
+                "*S-1-5-32-544".to_owned(),
+                "/T".to_owned(),
+                "/C".to_owned(),
+            ],
+            &icacls_args(Path::new(DATA_DIR)),
+        ]
+    );
+    assert_eq!(
+        log.borrow()[..4],
+        ["run icacls", "run icacls", "run icacls", "state"]
+    );
+}
+
 #[test]
 fn the_service_runs_as_local_service_at_boot_and_restarts_after_any_failure() {
     let spec = service_spec(Path::new(EXE));

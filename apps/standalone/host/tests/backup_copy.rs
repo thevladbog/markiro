@@ -7,6 +7,7 @@ mod support;
 use std::path::Path;
 use std::time::Duration;
 
+use markiro_host::backup::copy::sync_file;
 use markiro_host::backup::copy::{
     classify_io, classify_sqlite, is_copy_file_name, make_copy, make_copy_tagged, manifest_path,
     read_manifest, sha256_file, verify_database,
@@ -323,6 +324,31 @@ async fn rotation_never_takes_the_copy_it_was_asked_to_keep_even_with_newer_copi
     for (index, copy) in later.iter().enumerate() {
         assert_eq!(dir.join(&copy.file).exists(), index >= 6, "{}", copy.file);
     }
+}
+
+/// The flush before a copy's rename asks for write access: Windows'
+/// `FlushFileBuffers` refuses a read-only handle, which Unix never shows.
+/// Here a file the process may not write is refused, so a helper that
+/// opened it read-only would pass this test and fail on Windows. The call
+/// sites (`make_copy`, the restore) use this helper; only the smoke test on
+/// Windows proves the copy itself.
+#[cfg(unix)]
+#[test]
+fn a_copy_is_flushed_through_a_handle_opened_for_writing() {
+    use std::os::unix::fs::PermissionsExt;
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("markiro-host-copy.db.partial");
+    std::fs::write(&file, b"copy").unwrap();
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o444)).unwrap();
+    let refused = sync_file(&file).unwrap_err();
+    assert_eq!(refused.kind(), std::io::ErrorKind::PermissionDenied);
+    std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+    sync_file(&file).unwrap();
+    assert_eq!(
+        std::fs::read(&file).unwrap(),
+        b"copy",
+        "a flush changes nothing"
+    );
 }
 
 #[tokio::test]
