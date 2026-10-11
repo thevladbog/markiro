@@ -2,7 +2,8 @@
 <#
   The installer of «Markiro Автоном» on a disposable Windows machine (plan
   УСТ): the roles, the MarkiroHost service with its account and restart
-  policy, the firewall rule, the data directory's access list, a restart
+  policy, the firewall rule, the data directory's access list and owner, a
+  verified copy of the database in backups with that access list, a restart
   after a crash, a reinstall that keeps the host, a reinstall over an
   unfinished restore (the host's exit code 4), a refused role change, and
   uninstalls that keep the data, one of them with the host running. The
@@ -26,7 +27,9 @@ $found = @(Get-ChildItem -Path $BundleDir -Filter '*-setup.exe')
 if ($found.Count -ne 1) { throw "expected one installer in $BundleDir, found $($found.Count)" }
 $installer = $found[0].FullName
 $installDir = Join-Path $env:ProgramFiles 'Markiro Standalone'
-$dataDir = Join-Path $env:ProgramData 'Markiro\Host'
+$markiroDir = Join-Path $env:ProgramData 'Markiro'
+$dataDir = Join-Path $markiroDir 'Host'
+$backups = Join-Path $dataDir 'backups'
 $hostExe = Join-Path $installDir 'markiro-host.exe'
 $roleFile = Join-Path $installDir 'installation.json'
 $runKey = 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Run'
@@ -81,6 +84,15 @@ function RoleFileIs([string]$expected) {
   $text = [System.Text.Encoding]::UTF8.GetString($bytes).Trim()
   (-not $hasBom) -and ($text -ceq "{`"role`":`"$expected`"}")
 }
+function OwnerSid([string]$path) {
+  (Get-Acl $path).GetOwner([System.Security.Principal.SecurityIdentifier]).Value
+}
+# A copy counts once its manifest is beside it: a .db alone is what a broken
+# copy left.
+function VerifiedCopies {
+  @(Get-ChildItem -Path $backups -Filter 'markiro-host-*.db' -ErrorAction SilentlyContinue |
+      Where-Object { Test-Path ([System.IO.Path]::ChangeExtension($_.FullName, '.json')) })
+}
 function Sids([string]$path) {
   @((Get-Acl $path).Access | ForEach-Object {
       $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value
@@ -118,6 +130,14 @@ Check (((Sids $dataDir) -join ',') -eq 'S-1-5-18,S-1-5-19,S-1-5-32-544') 'SYSTEM
 $key = Join-Path $dataDir 'tls\key.der'
 WaitFor { Test-Path $key } 30 'the host made its TLS key'
 Check (((Sids $key) -join ',') -eq 'S-1-5-18,S-1-5-19,S-1-5-32-544') 'the TLS key is not readable by users'
+Check ((OwnerSid $dataDir) -eq 'S-1-5-32-544') 'Administrators own the data directory'
+Check ((OwnerSid $markiroDir) -eq 'S-1-5-32-544') 'and its Markiro folder'
+# The host copies its database at every start; the copy is flushed before it
+# is renamed, which on Windows needs a handle opened for writing.
+WaitFor { @(VerifiedCopies).Count -ge 1 } 120 'the host made a verified copy in backups'
+$copy = @(VerifiedCopies)[0]
+Check (((Sids $backups) -join ',') -eq 'S-1-5-18,S-1-5-19,S-1-5-32-544') 'the backups folder is not readable by users'
+Check (((Sids $copy.FullName) -join ',') -eq 'S-1-5-18,S-1-5-19,S-1-5-32-544') 'the copy is not readable by users'
 Check ($null -ne (RunValue)) 'the station opens at sign-in'
 
 Step 'a crash: Windows starts the service again'

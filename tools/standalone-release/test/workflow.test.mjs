@@ -238,6 +238,40 @@ test("smoke.ps1 is balanced and written defensively", () => {
   );
 });
 
+test("the smoke test finds a verified copy in backups with the data folder's SIDs, and Administrators own the data folder", () => {
+  const host = smoke.slice(smoke.indexOf("Step 'role host"), smoke.indexOf("Step 'a crash"));
+  // The host copies its database at every start (plan РК). A copy flushed
+  // through a read-only handle fails on Windows only, so only this run can
+  // see it; a copy counts once its manifest is beside it.
+  assert.match(smoke, /Get-ChildItem -Path \$backups -Filter 'markiro-host-\*\.db'/u);
+  assert.match(smoke, /\[System\.IO\.Path\]::ChangeExtension\(\$_\.FullName, '\.json'\)/u);
+  assert.match(
+    host,
+    /WaitFor \{ @\(VerifiedCopies\)\.Count -ge 1 \} 120 'the host made a verified copy in backups'/u,
+  );
+  // The copy and its folder get the data folder's access list: backups was
+  // made before icacls ran, so this proves the grants reached it.
+  assert.match(
+    host,
+    /\(\(Sids \$backups\) -join ','\) -eq 'S-1-5-18,S-1-5-19,S-1-5-32-544'\) 'the backups folder is not readable by users'/u,
+  );
+  assert.match(
+    host,
+    /\(\(Sids \$copy\.FullName\) -join ','\) -eq 'S-1-5-18,S-1-5-19,S-1-5-32-544'\) 'the copy is not readable by users'/u,
+  );
+  // A folder a user made before the install would keep that user as its
+  // owner, who could grant themselves the database again.
+  assert.match(
+    smoke,
+    /\(Get-Acl \$path\)\.GetOwner\(\[System\.Security\.Principal\.SecurityIdentifier\]\)\.Value/u,
+  );
+  assert.match(
+    host,
+    /\(OwnerSid \$dataDir\) -eq 'S-1-5-32-544'\) 'Administrators own the data directory'/u,
+  );
+  assert.match(host, /\(OwnerSid \$markiroDir\) -eq 'S-1-5-32-544'\) 'and its Markiro folder'/u);
+});
+
 test("the smoke test follows the installer's life in order, and every step is bounded", () => {
   const steps = [...smoke.matchAll(/^Step '([^']+)'$/gmu)].map((match) => match[1]);
   assert.deepEqual(steps, [
