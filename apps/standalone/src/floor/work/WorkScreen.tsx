@@ -1611,6 +1611,12 @@ export function WorkScreen(props: WorkScreenProps) {
       const now = live.current;
       const pallets = now.pallets;
       if (pallets === null) return "empty";
+      // No screen flow reaches this check today: every caller arrives with no label waiting
+      // (the early-close button is off under any stop, the shift's summary names `label` before
+      // `open_pallet` and `sameSummary` re-reads it in the turn, the link-back calls this only
+      // under `pallet_no_serials`). It still keeps `pendingClose`'s job id the pallet's own: after
+      // this close the stop that holds is the label of the pallet just closed. A caller that
+      // skips the summary must keep it.
       if ((await readOpenJob(now.local, pairingOf(now), now.shift.copy.id)) !== null) {
         await settleSafely();
         return "stopped";
@@ -1680,8 +1686,11 @@ export function WorkScreen(props: WorkScreenProps) {
    * closed, not an error. The reason is the operator's, from the buttons.
    * It is queued although the `close` stop already refuses every scan taken
    * after the press: that is defence in depth today (a queued scan is refused
-   * in its turn either way). The pallet work of plan ПЛ-Ц, which queues before
-   * the close, must pin the order with a held job that is not a scan.
+   * in its turn either way). The pallet work of plan ПЛ-Ц queues before the
+   * close, in the same turn (`confirmPalletClose`); the order is pinned by
+   * «takes no scan queued behind the close: it meets the closed shift»
+   * (`test/floor-work-close-pallets.test.tsx`), which holds a job that is not
+   * a scan.
    */
   const confirmClose = (reason: ShiftCloseReasonCode | null) => {
     const before = stopRef.current;
@@ -1742,6 +1751,10 @@ export function WorkScreen(props: WorkScreenProps) {
               return;
             }
             const closed = await closePallet(true);
+            // The explicit stop: the pallet did not close and `closePallet` left a stop of its
+            // own (a label to decide, no serial, a lost serial). Without this line the shift's
+            // close below would still be refused, but only by `closeShift`'s guards; do not
+            // delete it because the suite stays green.
             if (closed === "stopped") return;
             const waiting = stopRef.current;
             if (waiting?.kind === "label") {

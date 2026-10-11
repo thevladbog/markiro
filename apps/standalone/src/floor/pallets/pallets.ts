@@ -134,8 +134,9 @@ export interface ClosingPallet {
  * without a box, and no serial spent; `no_serials` — no pallet block of the
  * snapshot's prefix has a serial left, and the pallet stays open; an SSCC
  * past the prefix's range or already held by another pallet
- * (`invalid_serial`) — that serial is spent and the pallet stays open; `stale` — the pallet or the block changed between the
- * read and the write, nothing was written.
+ * (`invalid_serial`) — that serial is spent and the pallet stays open;
+ * `stale` — the pallet or the block changed between the read and the write,
+ * nothing was written.
  */
 export type PalletCloseResult =
   | { kind: "closed"; pallet: ClosingPallet }

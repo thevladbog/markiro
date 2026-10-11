@@ -85,7 +85,8 @@ export const purgeTableSql = (table: (typeof RETAINED_TABLES)[number]): string =
 /**
  * Deletes the records of this pairing's shifts done with for 30 days
  * (stage 2a spec, decision 31): the copy, its scans, exceptions, codes,
- * print jobs, boxes and outbox records, one shift per transaction. The copy
+ * print jobs, boxes, pallets, pallet exceptions and outbox records, one shift
+ * per transaction. The copy
  * goes first and only while the shift is still done with, so a shift that
  * took a record meanwhile keeps everything. The SSCC blocks and the
  * requests for them stay: a restore of the host asks the station for its

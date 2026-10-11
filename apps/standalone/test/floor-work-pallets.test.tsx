@@ -567,7 +567,7 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
   });
 
-  it("asks the host for pallet serials by the half rule after a box closes, and for no pallet serials in a shift without pallets", async () => {
+  it("asks the host for pallet serials by the half rule on entry and after a box closes", async () => {
     const at = await palletStation({ capacity: 40, boxCapacity: 1, palletBlock: false });
     const requestBlock = vi.fn(async (_request: SsccBlockRequest) => {
       throw new HostError({ kind: "transport", code: "unreachable", message: "down" });

@@ -187,11 +187,12 @@ Every table of `src-tauri/migrations` has a class in `TABLE_CLASSES`
 (`src-tauri/src/local_db.rs`; stage 2a spec §5.2, decision 30):
 `Disposable` — the copies of the host's data, `sync_state`,
 `sync_quarantine` and `floor_sign_in_failures`; `DeviceData` — what the
-device records itself (plans 2a5–2a8: shifts, boxes, scans, the outbox, the
-print jobs), each row tagged with the pairing that wrote it; `Workstation` —
-the PC's own settings (plan 2a7), which outlive any pairing. Of the 21 tables
-11 are `Disposable`, the 8 of migration `0006` and `floor_print_jobs` of `0007`
-are `DeviceData` (below), and `workstation_settings` of `0007` is the one
+device records itself (plans 2a5–2a8 and ПЛ-Ц: shifts, boxes, scans, the
+outbox, the print jobs, the pallets), each row tagged with the pairing that
+wrote it; `Workstation` — the PC's own settings (plan 2a7), which outlive any
+pairing. Of the 23 tables 11 are `Disposable`, the 8 of migration `0006`,
+`floor_print_jobs` of `0007` and the two pallet tables of `0008` are
+`DeviceData` (below), and `workstation_settings` of `0007` is the one
 `Workstation` table. `tests/local_db.rs` fails on a table without a class and on a class
 that names no table, so a plan that adds a table classes it in the same
 change. The same file forbids any foreign key between local tables

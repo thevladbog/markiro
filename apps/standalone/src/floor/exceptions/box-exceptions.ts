@@ -449,6 +449,9 @@ function reprintGuards(context: ReprintContext, boxId: string, last: PrintJob): 
  *
  * Known limit (accepted, plan 2a7): the exception does not name the printer
  * the first label came out on.
+ *
+ * The twin of `reprintPallet` (`pallet-exceptions.ts`): the guards of the two
+ * must stay the same texts, so a change to one is a change to the other.
  */
 export async function reprintBox(
   context: ReprintContext,

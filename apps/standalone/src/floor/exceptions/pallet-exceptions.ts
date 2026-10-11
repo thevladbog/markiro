@@ -294,6 +294,9 @@ export const NEWEST_PALLET_JOB_GUARD_SQL =
  * reprint that landed after the read — `PalletUnavailableError` or
  * `StaleJobError`, nothing written. No printer or no render: the job is kept
  * `failed`, and the label's panel takes it from there. Answers the new job.
+ *
+ * The twin of `reprintBox` (`box-exceptions.ts`): the guards of the two must
+ * stay the same texts, so a change to one is a change to the other.
  */
 export async function reprintPallet(
   context: ReprintContext,

@@ -225,7 +225,7 @@ describe("«Закрыть паллету досрочно» (plan ПЛ-Ц)", ()
     await expect(remainingSerials(at.local, PAIRING, PREFIX, PALLET_EXTENSION)).resolves.toBe(200);
   });
 
-  it("writes nothing when a box joins between its read and its write", async () => {
+  it("writes nothing when a box of the pallet is taken apart between its read and its write", async () => {
     const at = await palletStation({ capacity: 40 });
     await closeBoxes(at, "A", 2);
     const held = holdingWrites(at.local);
