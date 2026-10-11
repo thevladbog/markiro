@@ -71,6 +71,26 @@ impl TlsIdentity {
         }
     }
 
+    /// An identity from its DER files as a copy carries them (plan I1),
+    /// checked like [`Self::load`]: rustls refuses a key that does not match
+    /// the certificate.
+    pub fn from_der(cert_der: Vec<u8>, private_der: Vec<u8>) -> Result<Self, TlsError> {
+        let fingerprint = markiro_proto::certificate_fingerprint(&cert_der);
+        let identity = Self {
+            cert_der,
+            private_der,
+            fingerprint,
+        };
+        identity.server_config()?;
+        Ok(identity)
+    }
+
+    /// The private key's DER: only for the files of the host identity in a
+    /// copy (plan I1), never for a log.
+    pub fn private_der(&self) -> &[u8] {
+        &self.private_der
+    }
+
     pub fn load_or_create(tls_dir: &Path, host_id: &str) -> Result<Self, TlsError> {
         let cert_path = tls_dir.join("cert.der");
         let key_path = tls_dir.join("key.der");
