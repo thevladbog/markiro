@@ -1259,8 +1259,8 @@ describe("the work screen's obligations to the floor", () => {
     for (const button of screen.getAllByRole("button")) {
       expect(button.className).toContain("mk-btn--floor");
     }
-    // «Продолжить заполнять», «Закрыть короб», «Исключения» (plan 2a8) and «Выйти из смены».
-    expect(screen.getAllByRole("button")).toHaveLength(4);
+    // «Продолжить заполнять», «Закрыть короб», «Исключения», «Закрыть смену» (plan 2a8) and «Выйти из смены».
+    expect(screen.getAllByRole("button")).toHaveLength(5);
   });
 
   it("writes nothing to the console, whatever the scan was", async () => {

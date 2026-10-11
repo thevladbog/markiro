@@ -655,6 +655,24 @@
   gap: 48px;
 }
 
+/* The summary of a shift's close (plan 2a8): its numbers, the six reasons
+   as a grid, and the way back to the work. */
+.work-screen__close {
+  display: grid;
+  gap: 16px;
+}
+
+.work-screen__close h3,
+.work-screen__close p {
+  margin: 0;
+}
+
+.work-screen__close-reasons {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
 /* The workstation setup (plan 2a7): one printer a row, its actions under it. */
 .workstation-setup {
   width: min(880px, 100%);

@@ -1,4 +1,4 @@
-import { formatSsccHri } from "@markiro/domain";
+import { formatSsccHri, type ShiftCloseReasonCode } from "@markiro/domain";
 import type { TFunction } from "i18next";
 import {
   useCallback,
@@ -18,6 +18,14 @@ import type { SystemAwake } from "../../hardware/awake.js";
 import type { CodeCheck, SsccBlock, SsccBlockRequest } from "../../host/protocol.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
+import {
+  ShiftClosedPanel,
+  ShiftClosePanel,
+  sameSummary,
+  type CloseNote,
+  type ClosedNumbers,
+} from "../close/ShiftClosePanel.js";
+import { closeShift, readCloseSummary, type CloseSummary } from "../close/shift-close.js";
 import {
   BoxUnavailableError,
   clearOpenBox,
@@ -128,6 +136,11 @@ import { readOpenBox, readWorkTotals, type WorkTotals } from "./work-reads.js";
  *   interrupted sends (`recoverInterruptedJobs`, which must never run beside
  *   a send): the recovery runs once, on entering the screen, and a label is
  *   sent only from a turn of the queue.
+ * - The shift's close (plan 2a8) is the queue's work too, handed to `track`
+ *   before it starts, and it needs no host. After it the screen is at its end
+ *   (the `closed` stop): no scan is taken, nothing is written, and the way
+ *   out — «К списку смен», «Выйти из смены» — is never held. A leave that
+ *   began first starts no close.
  * - Nothing sends a label a second time by itself. The first send of a job
  *   (`prepared`) is the screen's; every later one is the operator's decision
  *   (`printAgain`), with a reason when the label may exist.
@@ -218,7 +231,19 @@ type Stop =
    * else stops the work and no label waits; `boxes`: the shift's closed
    * boxes once they are read.
    */
-  | { kind: "exceptions"; boxes: readonly ClosedBox[] | null };
+  | { kind: "exceptions"; boxes: readonly ClosedBox[] | null }
+  /**
+   * The summary of the shift's close (plan 2a8, spec §5.7.7), `null` while it
+   * is read; `waitingSscc`: the label that keeps the shift open, when there is one.
+   */
+  | {
+      kind: "close";
+      summary: CloseSummary | null;
+      note: CloseNote | null;
+      waitingSscc: string | null;
+    }
+  /** The shift is closed on this station: the end of its work screen, no scan is taken again. */
+  | { kind: "closed"; record: ClosedNumbers };
 
 /** What an exception's failure says on the screen; anything unforeseen is this computer's failed write. */
 function outcomeOf(error: unknown): ExceptionOutcome {
@@ -236,7 +261,7 @@ function openBoxOutcome(result: OpenBoxResult, action: "undo" | "clear"): Except
 }
 
 /** The last scan, said in words under the box. */
-type Last = ScanOutcome | { kind: "paused"; leaving: boolean };
+type Last = ScanOutcome | { kind: "paused"; leaving: boolean } | { kind: "shift_closed" };
 
 /** How long the coloured flash of a refusal covers the screen (an accepted scan has none). */
 export const SIGNAL_MS = 700;
@@ -281,6 +306,8 @@ function lastText(last: Last, t: TFunction, capacity: number): string {
       return t(`floor.work.last.invalid.${last.rawKind}`);
     case "paused":
       return t(last.leaving ? "floor.work.last.leaving" : "floor.work.last.paused");
+    case "shift_closed":
+      return t("floor.work.last.closed");
   }
 }
 
@@ -534,6 +561,9 @@ export function WorkScreen(props: WorkScreenProps) {
   const deciding = useRef(false);
   // A label on its way to the printer: the work waits for it, and says so.
   const [sending, setSending] = useState(false);
+  // The shift's close is being written; a second press meanwhile starts nothing.
+  const [closing, setClosing] = useState(false);
+  const closeRunning = useRef(false);
   const capacity = shift.copy.boxCapacity;
   const plannedQty = shift.copy.plannedQty;
 
@@ -814,11 +844,13 @@ export function WorkScreen(props: WorkScreenProps) {
 
   /** A scan that is not taken: said in words, by flash and by tone, and not written. */
   const refuse = useCallback(
-    (leavingNow: boolean) => {
+    (leavingNow: boolean, shiftClosed = false) => {
       const say = live.current.t;
-      const paused: Last = { kind: "paused", leaving: leavingNow };
-      setLast(paused);
-      show("error", say("floor.work.signal.paused"), lastText(paused, say, 0));
+      const refused: Last = shiftClosed
+        ? { kind: "shift_closed" }
+        : { kind: "paused", leaving: leavingNow };
+      setLast(refused);
+      show("error", say("floor.work.signal.paused"), lastText(refused, say, 0));
     },
     [show],
   );
@@ -904,7 +936,7 @@ export function WorkScreen(props: WorkScreenProps) {
         return;
       }
       if (stopped !== null) {
-        refuse(false);
+        refuse(false, stopped.kind === "closed");
         return;
       }
       await closeBox(true);
@@ -1109,6 +1141,126 @@ export function WorkScreen(props: WorkScreenProps) {
       return result.kind === "done" ? { kind: "done", action: "disassemble" } : result;
     });
 
+  /** The label that keeps the shift from closing, named by its SSCC; `null` when none is read. */
+  const waitingLabel = async (summary: CloseSummary): Promise<string | null> => {
+    if (summary.blocker?.kind !== "label") return null;
+    try {
+      const now = live.current;
+      const job = await readOpenJob(now.local, pairingOf(now), now.shift.copy.id);
+      return job === null ? null : formatSsccHri(job.sscc);
+    } catch {
+      return null;
+    }
+  };
+
+  /** The summary on the screen, unless the operator has gone back from it meanwhile. */
+  const showSummary = async (summary: CloseSummary, note: CloseNote | null): Promise<void> => {
+    const waitingSscc = await waitingLabel(summary);
+    if (stopRef.current?.kind === "close") setStop({ kind: "close", summary, note, waitingSscc });
+  };
+
+  /**
+   * The summary of the close, read as the line's next piece of work: a scan
+   * taken before «Закрыть смену» was pressed has been written by then, and
+   * the summary counts it.
+   */
+  const readSummary = () =>
+    queue.run(async () => {
+      const now = live.current;
+      await showSummary(await readCloseSummary(now.local, pairingOf(now), now.shift.copy.id), null);
+    });
+
+  /** «Закрыть смену», pressed while nothing stops the work: the summary first. */
+  const openClose = () => {
+    if (leavingNow() || stopRef.current !== null) return;
+    setPlanReached(false);
+    setStop({ kind: "close", summary: null, note: null, waitingSscc: null });
+    void live.current
+      .track(readSummary())
+      .catch(() => setStop({ kind: "system_error", cause: "read" }));
+  };
+
+  /** The shift is closed on this station: the end of this screen's work. */
+  const showClosed = (summary: CloseSummary) =>
+    setStop({
+      kind: "closed",
+      record: { actualQty: summary.actualQty, closedBoxCount: summary.closedBoxes },
+    });
+
+  /**
+   * The close itself, as the line's next piece of work handed to the gate
+   * before it starts, with no host: nothing queued before it is left behind
+   * it, and a scan queued after it finds the closed stop. It closes on the
+   * numbers the operator saw and on no others: the summary is read again in
+   * the turn, and a different one is shown instead (the model checks it once
+   * more inside its write: a change in between is `stale`, the same).
+   * A write whose answer was lost is read back: a shift found closed is
+   * closed, not an error. The reason is the operator's, from the buttons.
+   */
+  const confirmClose = (reason: ShiftCloseReasonCode | null) => {
+    const before = stopRef.current;
+    if (before?.kind !== "close" || before.summary === null) return;
+    if (closeRunning.current || leavingNow()) return;
+    const shown = before.summary;
+    closeRunning.current = true;
+    setClosing(true);
+    void live.current.track(
+      queue.run(async () => {
+        const now = live.current;
+        const read = () => readCloseSummary(now.local, pairingOf(now), now.shift.copy.id);
+        try {
+          const fresh = await read();
+          if (fresh.blocker?.kind === "closed") {
+            showClosed(fresh);
+            return;
+          }
+          if (!sameSummary(shown, fresh)) {
+            await showSummary(fresh, "stale");
+            return;
+          }
+          const result = await closeShift(boxContextOf(live), reason);
+          if (result.kind === "closed") {
+            live.current.onRecorded();
+            setStop({ kind: "closed", record: result.record });
+            return;
+          }
+          const again = await read();
+          if (again.blocker?.kind === "closed") showClosed(again);
+          else await showSummary(again, result.kind === "reason_required" ? "reason" : "stale");
+        } catch {
+          // The write may have been committed, and only its answer lost.
+          const again = await read().catch(() => null);
+          if (again?.blocker?.kind === "closed") {
+            live.current.onRecorded();
+            showClosed(again);
+          } else if (stopRef.current?.kind === "close") {
+            setStop({
+              kind: "close",
+              summary: again ?? shown,
+              note: "failed",
+              waitingSscc: null,
+            });
+          }
+        } finally {
+          closeRunning.current = false;
+          if (alive.current) setClosing(false);
+        }
+      }),
+    );
+  };
+
+  // «Назад» from the summary of the close: the focus returns to the button that opened it.
+  const summaryOpen = stop?.kind === "close";
+  const summaryWas = useRef(false);
+  useEffect(() => {
+    if (summaryWas.current && !summaryOpen && stop === null) {
+      actionsRef.current
+        ?.querySelector<HTMLButtonElement>('[data-action="close-shift"]:not(:disabled)')
+        ?.focus();
+    }
+    summaryWas.current = summaryOpen;
+  }, [summaryOpen, stop]);
+
   // «Назад» from the exceptions: the focus returns to the button that opened them.
   const exceptionsOpen = stop?.kind === "exceptions";
   const exceptionsWere = useRef(false);
@@ -1121,9 +1273,8 @@ export function WorkScreen(props: WorkScreenProps) {
     exceptionsWere.current = exceptionsOpen;
   }, [exceptionsOpen, stop]);
 
-  /** The system error dismissed: the work goes on, after the label that may wait is read again. */
-  const dismissSystemError = () => {
-    dismiss(() => setStop(null));
+  /** The work goes on, after the label that may wait is read again (its panel takes the screen). */
+  const resumeWork = () => {
     if (leavingNow()) return;
     void live.current
       .track(
@@ -1133,6 +1284,18 @@ export function WorkScreen(props: WorkScreenProps) {
         }),
       )
       .catch(() => undefined);
+  };
+
+  /** The system error dismissed. */
+  const dismissSystemError = () => {
+    dismiss(() => setStop(null));
+    resumeWork();
+  };
+
+  /** From the summary to the label that keeps the shift open: its panel decides it. */
+  const toLabel = () => {
+    setStop(null);
+    resumeWork();
   };
 
   useEffect(
@@ -1399,6 +1562,30 @@ export function WorkScreen(props: WorkScreenProps) {
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
           )}
+          {stop?.kind === "close" && (
+            <ShiftClosePanel
+              number={shift.copy.number}
+              productName={shift.snapshot.product.name}
+              summary={stop.summary}
+              note={stop.note}
+              waitingSscc={stop.waitingSscc}
+              busy={closing}
+              onClose={confirmClose}
+              onBack={() => setStop(null)}
+              onLabel={toLabel}
+              {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
+            />
+          )}
+          {stop?.kind === "closed" && (
+            <ShiftClosedPanel
+              number={shift.copy.number}
+              record={stop.record}
+              linkHeld={linkHeld}
+              leaving={leaving}
+              onDone={onLeave}
+              {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
+            />
+          )}
           {stop?.kind === "label" && (
             <LabelPanel
               // A new job, state or attempt starts the panel afresh.
@@ -1461,6 +1648,15 @@ export function WorkScreen(props: WorkScreenProps) {
             onClick={openExceptions}
           >
             {t("floor.exceptions.open")}
+          </Button>
+          <Button
+            size="floor"
+            variant="secondary"
+            data-action="close-shift"
+            disabled={stop !== null || leaving}
+            onClick={openClose}
+          >
+            {t("floor.close.open")}
           </Button>
           {/* On the keyboard while the leave waits: `aria-disabled`, and a press that does nothing. */}
           <Button
