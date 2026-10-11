@@ -9,11 +9,14 @@
 //! hashes and the pairing keys among it: it is as sensitive as `host.db`.
 //! On Unix every file written here is owner-only (`0600`); on Windows a file
 //! inherits the ACL of its folder, which the installer hardens for the data
-//! folder and the administrator chooses for the second one.
+//! folder and the administrator chooses for the second one. The host
+//! identity beside a copy (`<name>.identity`, plan I1) holds the TLS private
+//! key and is closed explicitly (`super::identity`).
 
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use aws_lc_rs::digest::{Context, SHA256};
 use markiro_proto::backup::{failure, BackupCopy, BackupTrigger};
@@ -22,6 +25,7 @@ use sqlx::sqlite::SqliteConnectOptions;
 use sqlx::{ConnectOptions, Connection, SqliteConnection};
 use time::OffsetDateTime;
 
+use super::identity::{identity_path, HostIdentity, IdentityRef, KeyFileGuard};
 use crate::clock::format_timestamp;
 
 /// Every file of a copy starts with this.
@@ -60,6 +64,11 @@ pub struct Manifest {
     pub schema_version: i64,
     pub size_bytes: u64,
     pub sha256: String,
+    /// The host identity beside the copy (`<name>.identity`, plan I1);
+    /// `None` for a copy without one: an older build's, or one whose folder
+    /// could not be closed to others. Optional, so the format stays 1.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<IdentityRef>,
 }
 
 impl Manifest {
@@ -70,6 +79,7 @@ impl Manifest {
             trigger: self.trigger,
             size_bytes: self.size_bytes,
             sha256: self.sha256.clone(),
+            host_identity: self.identity.is_some(),
         }
     }
 }
@@ -307,6 +317,39 @@ pub async fn make_copy_tagged(
     host_id: &str,
     tag: &str,
 ) -> Result<Manifest, Failure> {
+    make_copy_in(conn, dir, at, trigger, host_id, tag, None).await
+}
+
+/// [`make_copy`] with the host's identity beside the copy (plan I1):
+/// `<name>.identity`, closed by `guard`, named in the manifest. A folder the
+/// guard cannot close gets the copy without it (its manifest names none):
+/// the copy never fails for the identity.
+pub async fn make_copy_with_identity(
+    conn: &mut SqliteConnection,
+    dir: &Path,
+    at: OffsetDateTime,
+    trigger: BackupTrigger,
+    host_id: &str,
+    identity: Option<Arc<HostIdentity>>,
+    guard: Arc<dyn KeyFileGuard>,
+) -> Result<Manifest, Failure> {
+    let tag = uuid::Uuid::new_v4().simple().to_string()[..8].to_owned();
+    let identity = identity.map(|identity| (identity, guard));
+    make_copy_in(conn, dir, at, trigger, host_id, &tag, identity).await
+}
+
+/// An identity and the guard that closes it beside a copy.
+type Attached = Option<(Arc<HostIdentity>, Arc<dyn KeyFileGuard>)>;
+
+async fn make_copy_in(
+    conn: &mut SqliteConnection,
+    dir: &Path,
+    at: OffsetDateTime,
+    trigger: BackupTrigger,
+    host_id: &str,
+    tag: &str,
+    identity: Attached,
+) -> Result<Manifest, Failure> {
     let name = copy_name(at, tag);
     let db = dir.join(&name);
     let partial = partial_path(&db);
@@ -316,15 +359,18 @@ pub async fn make_copy_tagged(
             format!("{} is already there", db.display()),
         ));
     }
-    let made = write_copy(conn, &db, &partial, &name, at, trigger, host_id).await;
+    let made = write_copy(conn, &db, &partial, &name, at, trigger, host_id, identity).await;
     if made.is_err() {
         let _ = fs::remove_file(&partial);
         let _ = fs::remove_file(&db);
         let _ = fs::remove_file(partial_path(&manifest_path(&db)));
+        let _ = fs::remove_file(identity_path(&db));
+        let _ = fs::remove_file(partial_path(&identity_path(&db)));
     }
     made
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn write_copy(
     conn: &mut SqliteConnection,
     db: &Path,
@@ -333,6 +379,7 @@ async fn write_copy(
     at: OffsetDateTime,
     trigger: BackupTrigger,
     host_id: &str,
+    identity: Attached,
 ) -> Result<Manifest, Failure> {
     let target = partial.to_str().ok_or_else(|| {
         Failure::new(
@@ -368,17 +415,26 @@ async fn write_copy(
         schema_version,
         size_bytes,
         sha256,
+        identity: None,
     };
-    let bytes = serde_json::to_vec_pretty(&manifest)
-        .map_err(|error| Failure::new(failure::INTERNAL, error.to_string()))?;
     let (partial, db) = (partial.to_path_buf(), db.to_path_buf());
-    tokio::task::spawn_blocking(move || -> std::io::Result<()> {
+    tokio::task::spawn_blocking(move || -> std::io::Result<Manifest> {
         sync_file(&partial)?;
         fs::rename(&partial, &db)?;
-        write_synced(&manifest_path(&db), &bytes)
+        // The identity before the manifest, which names it: a copy is a copy
+        // only once its manifest is there.
+        let identity = identity
+            .as_ref()
+            .and_then(|(identity, guard)| super::identity::attach(&db, identity, guard.as_ref()));
+        let manifest = Manifest {
+            identity,
+            ..manifest
+        };
+        let bytes = serde_json::to_vec_pretty(&manifest).map_err(std::io::Error::other)?;
+        write_synced(&manifest_path(&db), &bytes)?;
+        Ok(manifest)
     })
     .await
     .map_err(|error| Failure::new(failure::INTERNAL, error.to_string()))?
-    .map_err(|error| Failure::new(classify_io(&error), error.to_string()))?;
-    Ok(manifest)
+    .map_err(|error| Failure::new(classify_io(&error), error.to_string()))
 }

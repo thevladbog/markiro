@@ -34,6 +34,8 @@ fn backup_states_round_trip() {
     let state: BackupState = round_trip("backup-state.json");
     assert_eq!(state.local.copies.len(), 2);
     assert_eq!(state.local.copies[1].trigger, BackupTrigger::Manual);
+    assert!(state.local.copies[0].host_identity);
+    assert!(!state.local.copies[1].host_identity);
     let second = state.second.expect("the fixture has a second folder");
     assert_eq!(
         second.last_attempt.unwrap().code.as_deref(),

@@ -1392,6 +1392,7 @@ async fn a_copy_with_its_wal_beside_it_is_restored_with_the_wal_folded_in() {
         schema_version: latest_migration(),
         size_bytes,
         sha256,
+        identity: None,
     };
     std::fs::write(
         manifest_path(&source),

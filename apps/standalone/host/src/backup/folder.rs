@@ -13,6 +13,7 @@ use super::copy::{
     classify_io, create_private, is_copy_file_name, manifest_path, partial_path, read_manifest,
     sha256_file, write_synced, Failure, Manifest, COPY_PREFIX,
 };
+use super::identity::{identity_path, platform_guard, KeyFileGuard};
 use super::retention;
 use crate::clock::parse_timestamp;
 
@@ -42,6 +43,15 @@ pub fn list(dir: &Path) -> std::io::Result<Vec<Manifest>> {
         if metadata.len() != manifest.size_bytes || parse_timestamp(&manifest.created_at).is_err() {
             continue;
         }
+        // An identity the manifest names but the folder lacks is none.
+        let mut manifest = manifest;
+        if let Some(identity) = &manifest.identity {
+            let beside = fs::metadata(identity_path(&path))
+                .is_ok_and(|metadata| metadata.len() == identity.size_bytes);
+            if !beside {
+                manifest.identity = None;
+            }
+        }
         copies.push(manifest);
     }
     copies.sort_by(|a, b| {
@@ -65,8 +75,11 @@ pub fn clean(dir: &Path) -> std::io::Result<usize> {
             continue;
         }
         let path = entry.path();
-        let broken =
-            name.ends_with(".partial") || (name.ends_with(".db") && !manifest_path(&path).exists());
+        // An identity whose copy lost its manifest (plan I1) is a leftover
+        // too: `<name>.identity` beside no `<name>.json`.
+        let broken = name.ends_with(".partial")
+            || (name.ends_with(".db") && !manifest_path(&path).exists())
+            || (name.ends_with(".identity") && !path.with_extension("json").exists());
         if broken {
             fs::remove_file(&path)?;
             removed += 1;
@@ -101,6 +114,11 @@ pub fn rotate(dir: &Path, keep_also: Option<&str>) -> std::io::Result<Vec<Manife
         }
         let db = dir.join(&copy.file);
         fs::remove_file(manifest_path(&db))?;
+        match fs::remove_file(identity_path(&db)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
         fs::remove_file(&db)?;
     }
     Ok(staying)
@@ -114,6 +132,18 @@ pub fn rotate(dir: &Path, keep_also: Option<&str>) -> std::io::Result<Vec<Manife
 /// was already in `dest_dir`. The copy in `source_dir` is left alone, and a
 /// source that cannot be read is `local_copy_failed`.
 pub fn replicate(source_dir: &Path, manifest: &Manifest, dest_dir: &Path) -> Result<(), Failure> {
+    replicate_guarded(source_dir, manifest, dest_dir, platform_guard().as_ref())
+}
+
+/// [`replicate`] with the guard that closes the host identity beside the
+/// copy (plan I1): a folder it cannot close gets the copy and a manifest
+/// that names no identity.
+pub fn replicate_guarded(
+    source_dir: &Path,
+    manifest: &Manifest,
+    dest_dir: &Path,
+    guard: &dyn KeyFileGuard,
+) -> Result<(), Failure> {
     if !is_copy_file_name(&manifest.file) {
         return Err(Failure::new(
             failure::INTERNAL,
@@ -135,12 +165,14 @@ pub fn replicate(source_dir: &Path, manifest: &Manifest, dest_dir: &Path) -> Res
     let partial = partial_path(&target);
     let was_there = target.exists();
     let mut renamed = false;
-    let copied = copy_and_check(&source, &partial, &target, manifest, &mut renamed);
+    let copied = copy_and_check(&source, &partial, &target, manifest, &mut renamed, guard);
     if copied.is_err() {
         let _ = fs::remove_file(&partial);
         let _ = fs::remove_file(partial_path(&manifest_path(&target)));
+        let _ = fs::remove_file(partial_path(&identity_path(&target)));
         if renamed && !was_there {
             let _ = fs::remove_file(&target);
+            let _ = fs::remove_file(identity_path(&target));
         }
     }
     copied
@@ -152,6 +184,7 @@ fn copy_and_check(
     target: &Path,
     manifest: &Manifest,
     renamed: &mut bool,
+    guard: &dyn KeyFileGuard,
 ) -> Result<(), Failure> {
     let io = |error: std::io::Error| Failure::new(classify_io(&error), error.to_string());
     let mut from = fs::File::open(source)
@@ -169,7 +202,17 @@ fn copy_and_check(
     }
     fs::rename(partial, target).map_err(io)?;
     *renamed = true;
-    let bytes = serde_json::to_vec_pretty(manifest)
+    // The identity before the manifest; the manifest of this folder names it
+    // only when it is here and closed.
+    let identity = manifest
+        .identity
+        .as_ref()
+        .and_then(|reference| super::identity::replicate(source, target, reference, guard));
+    let manifest = Manifest {
+        identity,
+        ..manifest.clone()
+    };
+    let bytes = serde_json::to_vec_pretty(&manifest)
         .map_err(|error| Failure::new(failure::INTERNAL, error.to_string()))?;
     write_synced(&manifest_path(target), &bytes).map_err(io)
 }

@@ -39,8 +39,9 @@ use time::OffsetDateTime;
 use tokio::sync::{watch, Notify};
 use tokio::task::JoinHandle;
 
-use super::copy::{make_copy, Failure, Manifest};
+use super::copy::{make_copy_with_identity, Failure, Manifest};
 use super::folder;
+use super::identity::{platform_guard, HostIdentity, KeyFileGuard};
 use crate::audit::{self, actions, Actor, Entry, Outcome};
 use crate::clock::{format_timestamp, parse_timestamp, Clock};
 use crate::config::HostPaths;
@@ -94,6 +95,8 @@ pub struct Backups {
     pub local_dir: PathBuf,
     pub db_path: PathBuf,
     pub host_id: String,
+    /// Closes the host identity beside each copy (plan I1).
+    pub guard: Arc<dyn KeyFileGuard>,
     status: Mutex<Status>,
     wake: Notify,
 }
@@ -109,12 +112,25 @@ impl Backups {
         db_path: PathBuf,
         host_id: impl Into<String>,
     ) -> Arc<Self> {
+        Self::new_with_guard(data_dir, local_dir, db_path, host_id, platform_guard())
+    }
+
+    /// [`Self::new`] with the guard that closes the host identity beside
+    /// each copy (a test's own).
+    pub fn new_with_guard(
+        data_dir: PathBuf,
+        local_dir: PathBuf,
+        db_path: PathBuf,
+        host_id: impl Into<String>,
+        guard: Arc<dyn KeyFileGuard>,
+    ) -> Arc<Self> {
         let local = FolderStatus::new(local_dir.display().to_string());
         Arc::new(Self {
             data_dir,
             local_dir,
             db_path,
             host_id: host_id.into(),
+            guard,
             status: Mutex::new(Status {
                 running: None,
                 pending_manual: None,
@@ -478,7 +494,34 @@ async fn run_once(
     if let Ok(Err(error)) = cleaned {
         tracing::warn!(%error, "cleaning the local backup folder failed");
     }
-    let local = make_copy(&mut conn, &backups.local_dir, at, trigger, &backups.host_id).await;
+    // The data folder's identity, read before each copy (it may have been
+    // put back by a restore since the host started); a copy goes without it
+    // when it does not read or names another host.
+    let identity = {
+        let paths = HostPaths::new(backups.data_dir.clone());
+        match tokio::task::spawn_blocking(move || HostIdentity::read(&paths)).await {
+            Ok(Ok(identity)) if identity.host_id() == backups.host_id => Some(Arc::new(identity)),
+            Ok(Ok(_)) => {
+                tracing::warn!("the host identity names another host: the copy goes without it");
+                None
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "the host identity did not read: the copy goes without it");
+                None
+            }
+            Err(_) => None,
+        }
+    };
+    let local = make_copy_with_identity(
+        &mut conn,
+        &backups.local_dir,
+        at,
+        trigger,
+        &backups.host_id,
+        identity,
+        backups.guard.clone(),
+    )
+    .await;
     match &local {
         Ok(manifest) => tracing::info!(
             file = %manifest.file,
@@ -494,6 +537,7 @@ async fn run_once(
     let local_dir = backups.local_dir.clone();
     let made = local.clone().ok();
     let second = second_dir.clone();
+    let guard = backups.guard.clone();
     let folders = tokio::task::spawn_blocking(move || {
         // The rule thins the copies out only after a new verified copy has
         // joined them: a failed run leaves every copy there is.
@@ -512,7 +556,9 @@ async fn run_once(
                     .map_err(|error| {
                         Failure::new(super::copy::classify_io(&error), error.to_string())
                     })
-                    .and_then(|_| folder::replicate(&local_dir, manifest, &dir)),
+                    .and_then(|_| {
+                        folder::replicate_guarded(&local_dir, manifest, &dir, guard.as_ref())
+                    }),
                 None => Err(Failure::new(
                     failure::LOCAL_COPY_FAILED,
                     "the local copy failed",

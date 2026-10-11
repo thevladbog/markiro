@@ -14,14 +14,16 @@
         "createdAt": "2026-10-09T14:00:00Z",
         "trigger": "scheduled",
         "sizeBytes": 4194304,
-        "sha256": "9f2b5c0e6d1a4b8c7e3f2a1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b"
+        "sha256": "9f2b5c0e6d1a4b8c7e3f2a1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b",
+        "hostIdentity": true
       },
       {
         "file": "markiro-host-20261009T113512Z-0d4f6b21.db",
         "createdAt": "2026-10-09T11:35:12Z",
         "trigger": "manual",
         "sizeBytes": 4190208,
-        "sha256": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809"
+        "sha256": "1a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708192a3b4c5d6e7f809",
+        "hostIdentity": false
       }
     ]
   },

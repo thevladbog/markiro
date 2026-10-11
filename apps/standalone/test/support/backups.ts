@@ -12,6 +12,7 @@ export function backupCopy(
     trigger,
     sizeBytes: 4 * 1024 * 1024,
     sha256: "9f2b5c0e6d1a4b8c7e3f2a1d0c9b8a7f6e5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b",
+    hostIdentity: true,
   };
 }
 

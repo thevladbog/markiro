@@ -47,6 +47,8 @@ export const backupCopySchema = z.object({
   trigger: backupTriggerSchema,
   sizeBytes: z.number().int().nonnegative(),
   sha256: z.string(),
+  /** The host's identity lies beside the copy (plan I1): on a new computer the devices keep their pairing. */
+  hostIdentity: z.boolean(),
 });
 export type BackupCopy = z.infer<typeof backupCopySchema>;
 

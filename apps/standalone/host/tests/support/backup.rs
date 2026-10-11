@@ -3,6 +3,8 @@
 use std::path::Path;
 
 use markiro_host::backup::copy::{copy_name, manifest_path, sha256_file, Manifest};
+use markiro_host::backup::identity::HostIdentity;
+use markiro_host::config::HostPaths;
 use markiro_proto::backup::BackupTrigger;
 use sqlx::{ConnectOptions, SqliteConnection};
 use time::OffsetDateTime;
@@ -60,6 +62,7 @@ pub fn fake_copy(dir: &Path, created: &str, tag: &str) -> Manifest {
         schema_version: latest_migration(),
         size_bytes,
         sha256,
+        identity: None,
     };
     std::fs::write(
         manifest_path(&db),
@@ -67,4 +70,18 @@ pub fn fake_copy(dir: &Path, created: &str, tag: &str) -> Manifest {
     )
     .unwrap();
     manifest
+}
+
+/// The host identity of the data folder `dir` as a host that started there
+/// has it (plan I1): `host.json` (port 45710) and `tls/`.
+pub fn write_identity(dir: &Path, host_id: &str) -> HostIdentity {
+    let paths = HostPaths::new(dir);
+    paths.ensure().unwrap();
+    std::fs::write(
+        paths.config_file(),
+        serde_json::json!({ "hostId": host_id, "port": 45710 }).to_string(),
+    )
+    .unwrap();
+    markiro_host::tls::TlsIdentity::load_or_create(&paths.tls_dir(), host_id).unwrap();
+    HostIdentity::read(&paths).unwrap()
 }

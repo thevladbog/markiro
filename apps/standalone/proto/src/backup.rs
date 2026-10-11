@@ -80,6 +80,10 @@ pub struct BackupCopy {
     pub size_bytes: u64,
     /// Lower-case hex SHA-256 of the file.
     pub sha256: String,
+    /// The host's identity lies beside the copy (plan I1): restored on a new
+    /// computer, it keeps every device's pairing.
+    #[serde(default)]
+    pub host_identity: bool,
 }
 
 /// The last copy the host tried to make in a folder since it started.
