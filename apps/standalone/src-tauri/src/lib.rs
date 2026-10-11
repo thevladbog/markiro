@@ -9,6 +9,7 @@ pub mod host_client;
 pub mod host_probe;
 pub mod local_db;
 pub mod lockdown;
+pub mod office_files;
 pub mod power;
 pub mod printer;
 pub mod scanner;
@@ -272,15 +273,19 @@ pub fn invoke_handler<R: tauri::Runtime>(
         scanner::list_serial_ports,
         scanner::configure_scanners,
         scanner::get_scanner_connections,
-        scanner::close_scanners
+        scanner::close_scanners,
+        office_files::save_office_files,
+        office_files::open_office_folder,
+        office_files::open_office_file
     ]
 }
 
 /// Manages every state the commands read: the device, the local database
 /// (opened here, before the window shows; when it cannot open, the app still
 /// starts and the local commands say so), the connection status, the scanner
-/// manager (it needs the app's handle for its events), kiosk mode and the
-/// awake lease. Returns the device's link, which the connection task watches.
+/// manager (it needs the app's handle for its events), kiosk mode, the
+/// awake lease and the office's folder under the documents folder (plan ЧЗ).
+/// Returns the device's link, which the connection task watches.
 /// `run`'s `setup` calls it, and `tests/ipc.rs` calls it on a mock app (the
 /// mock builder does not run `setup`), so a state a command reads cannot go
 /// missing here with only a compile to notice.
@@ -296,6 +301,9 @@ pub fn manage_state<R: Runtime>(
     app.manage(scanner::manager(app.clone()));
     app.manage(lockdown::LockdownState::default());
     app.manage(power::SystemAwakeState::default());
+    app.manage(office_files::OfficeFilesState::from_documents(
+        app.path().document_dir().ok(),
+    ));
     link
 }
 

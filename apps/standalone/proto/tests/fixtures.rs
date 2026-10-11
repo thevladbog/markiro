@@ -1,21 +1,22 @@
 use markiro_proto::{
     category_default_id, certificate_fingerprint, codes, compatibility, compatibility_for,
     credentials, display_fingerprint, BadgeCreate, BadgeSalt, BlockSizesUpdate, BootstrapRequest,
-    BootstrapResponse, BoxClosedFact, BoxExceptionFact, BoxLabelFact, CategoryTemplateDefault,
-    ChangesResponse, ClaimRequest, CodeCheck, CodeOwner, Compatibility, CounterpartyCreate,
-    CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind, DeviceLineRequest,
-    DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts, DeviceUpdate, ErrorBody,
-    ExceptionKind, FactBatch, FactKind, FactOutcome, FactReceipts, Hello, HelloEnvelope,
+    BootstrapResponse, BoxClosedFact, BoxExceptionFact, BoxLabelFact, BoxReportRows,
+    CategoryTemplateDefault, ChangesResponse, ClaimRequest, CodeCheck, CodeOwner, Compatibility,
+    CounterpartyCreate, CounterpartyRecord, CounterpartyUpdate, DeviceInfo, DeviceKind,
+    DeviceLineRequest, DeviceRecord, DeviceShift, DeviceShiftCreate, DeviceShifts, DeviceUpdate,
+    ErrorBody, ExceptionKind, FactBatch, FactKind, FactOutcome, FactReceipts, Hello, HelloEnvelope,
     LabelOutcome, LabelTemplate, LabelTemplateCreate, LabelTemplateRecord, LabelTemplateSummary,
-    LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeLine,
-    OfficeLoginRequest, OfficeOperator, OfficeProduct, OfficeRole, OfficeSession, OfficeShift,
-    OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate, OperatorBadgeRecord,
-    OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile, OrgProfileUpdate, OrgRecord,
-    PairResponse, PairingCode, PairingCodeRequest, PalletClosedFact, PalletExceptionFact,
-    PalletExceptionKind, PalletLabelFact, PasswordChange, PasswordSet, ProductCreate, ProductGroup,
-    ProductRecord, ProductStatus, ProductUpdate, ScanFact, ScanRawKind, ScanVerdict, ShiftClose,
-    ShiftClosedFact, ShiftCreate, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate, SiteRecord,
-    SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
+    LabelTemplateUpdate, LineCreate, LineRecord, LineUpdate, LocalPairRequest, OfficeBox,
+    OfficeLine, OfficeLoginRequest, OfficeOperator, OfficePallet, OfficeProduct, OfficeRole,
+    OfficeSession, OfficeShift, OfficeUser, OfficeUserCreate, OfficeUserRecord, OfficeUserUpdate,
+    OperatorBadgeRecord, OperatorCreate, OperatorRecord, OperatorUpdate, OrgProfile,
+    OrgProfileUpdate, OrgRecord, PairResponse, PairingCode, PairingCodeRequest, PalletClosedFact,
+    PalletExceptionFact, PalletExceptionKind, PalletLabelFact, PalletReportRows, PasswordChange,
+    PasswordSet, ProductCreate, ProductGroup, ProductRecord, ProductStatus, ProductUpdate,
+    ScanFact, ScanRawKind, ScanVerdict, ShiftClose, ShiftClosedFact, ShiftCreate,
+    ShiftExportRecord, ShiftExportRows, ShiftMode, ShiftOrigin, ShiftStatus, ShiftUpdate,
+    SiteRecord, SsccBlock, SsccBlockRequest, SsccCounterUpdate, SsccState, TemplateDefaults,
     TemplateDefaultsUpdate, TemplatePurpose, HOST_PRODUCT, PROTOCOL_VERSION,
 };
 use serde::{de::DeserializeOwned, Serialize};
@@ -1254,6 +1255,206 @@ fn code_check_fixtures_round_trip_and_name_the_owner_as_a_conflict_does() {
     let winner: CodeOwner =
         typed(&Value::Object(receipts.receipts[1].details.clone().unwrap())["winner"]);
     assert_eq!(taken, CodeCheck::Taken { owner: winner });
+}
+
+/// The export source of a shift (plan ЧЗ) round-trips, and its rows hang
+/// together as the host writes them: every live item names a box and a code
+/// of the source, a box names a pallet of the source, a closed box has its
+/// SSCC and an open one none, the station's close keeps its milliseconds
+/// beside the host's whole seconds, and a canonical code keeps its group
+/// separator and crypto tail.
+#[test]
+fn shift_export_rows_round_trip_and_hang_together() {
+    let rows: ShiftExportRows = round_trip("shift-export-rows.json");
+    assert_eq!(rows.shift.status, ShiftStatus::Closed);
+    for item in &rows.items {
+        assert!(rows.boxes.iter().any(|b| b.id == item.box_id), "{item:?}");
+        assert!(
+            rows.codes.iter().any(|c| c.code_hash == item.code_hash),
+            "{item:?}"
+        );
+    }
+    for b in &rows.boxes {
+        if let Some(pallet) = &b.pallet_id {
+            assert!(rows.pallets.iter().any(|p| &p.id == pallet), "{b:?}");
+        }
+        assert_eq!(b.closed_at.is_some(), b.sscc.is_some(), "{b:?}");
+    }
+    assert_eq!(
+        rows.shift.closed_at.as_deref(),
+        Some("2026-10-08T14:00:07Z")
+    );
+    assert_eq!(
+        rows.shift.station_closed_at.as_deref(),
+        Some("2026-10-08T14:00:07.412Z")
+    );
+    assert!(rows.codes.iter().all(|c| c.canonical.contains('\u{1d}')));
+}
+
+/// The office's lists of a shift's boxes and pallets (plan ЧЗ) round-trip
+/// and agree with the export source of the same shift: the same boxes and
+/// pallets, a box's live units are its live items there, and a pallet's
+/// boxes and units are those of its closed boxes not taken apart.
+#[test]
+fn office_box_and_pallet_lists_round_trip_and_agree_with_the_export_source() {
+    let boxes: Vec<OfficeBox> = round_trip("office-boxes.json");
+    let pallets: Vec<OfficePallet> = round_trip("office-pallets.json");
+    let rows: ShiftExportRows = serde_json::from_value(fixture("shift-export-rows.json")).unwrap();
+    assert_eq!(
+        boxes.iter().map(|b| &b.id).collect::<Vec<_>>(),
+        rows.boxes.iter().map(|b| &b.id).collect::<Vec<_>>()
+    );
+    for b in &boxes {
+        let live = rows.items.iter().filter(|i| i.box_id == b.id).count();
+        assert_eq!(usize::try_from(b.units).unwrap(), live, "{b:?}");
+    }
+    for p in &pallets {
+        let on: Vec<&OfficeBox> = boxes
+            .iter()
+            .filter(|b| b.pallet_id.as_deref() == Some(&p.id) && b.disassembled_at.is_none())
+            .collect();
+        assert_eq!(usize::try_from(p.boxes).unwrap(), on.len(), "{p:?}");
+        assert_eq!(
+            p.units,
+            on.iter().map(|b| u64::from(b.units)).sum::<u64>(),
+            "{p:?}"
+        );
+    }
+}
+
+/// The record of an export (plan ЧЗ) round-trips and names a format of
+/// `export-formats.json` with the counts of the rows of the same shift: the
+/// pallets format over `shift-export-rows.json` writes its three codes, its
+/// two closed boxes and its one pallet. A field the host does not read is
+/// refused.
+#[test]
+fn shift_export_record_round_trips_and_counts_the_rows_of_its_shift() {
+    let record: ShiftExportRecord = round_trip("shift-export-record.json");
+    let formats = fixture("export-formats.json");
+    assert!(formats["shift"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|f| f["id"] == record.format_id.as_str() && f["version"] == record.format_version));
+    let rows: ShiftExportRows = serde_json::from_value(fixture("shift-export-rows.json")).unwrap();
+    assert_eq!(record.code_count, u64::try_from(rows.items.len()).unwrap());
+    assert_eq!(
+        record.box_count,
+        u32::try_from(rows.boxes.iter().filter(|b| b.sscc.is_some()).count()).unwrap()
+    );
+    assert_eq!(
+        record.pallet_count,
+        u32::try_from(rows.pallets.len()).unwrap()
+    );
+    let mut value = fixture("shift-export-record.json");
+    value["folder"] = Value::String("C:\\Users".into());
+    assert!(serde_json::from_value::<ShiftExportRecord>(value).is_err());
+}
+
+/// «Состав короба»'s data (plan О-Ф) round-trips and agrees with the export
+/// source of the same shift: a box not taken apart prints exactly its live
+/// codes there, ordered by GTIN and then serial, and each code's GTIN and
+/// serial are the ones its canonical text carries.
+#[test]
+fn box_report_rows_round_trip_and_agree_with_the_export_source() {
+    let report: BoxReportRows = round_trip("box-report-rows.json");
+    let rows: ShiftExportRows = serde_json::from_value(fixture("shift-export-rows.json")).unwrap();
+    assert_eq!(report.shift_id, rows.shift.id);
+    assert_eq!(report.product_name, rows.shift.product_name);
+    assert_eq!(report.organization, rows.organization);
+    let source = rows.boxes.iter().find(|b| b.id == report.id).unwrap();
+    assert_eq!(
+        (
+            &report.sscc,
+            &report.opened_at,
+            &report.closed_at,
+            &report.disassembled_at
+        ),
+        (
+            &source.sscc,
+            &source.opened_at,
+            &source.closed_at,
+            &source.disassembled_at
+        )
+    );
+    let mut live: Vec<&str> = rows
+        .items
+        .iter()
+        .filter(|i| i.box_id == report.id)
+        .map(|i| {
+            rows.codes
+                .iter()
+                .find(|c| c.code_hash == i.code_hash)
+                .unwrap()
+                .canonical
+                .as_str()
+        })
+        .collect();
+    live.sort_unstable();
+    let printed: Vec<&str> = report.items.iter().map(|i| i.canonical.as_str()).collect();
+    assert_eq!(printed, live);
+    let mut ordered = report.items.clone();
+    ordered.sort_by(|a, b| (&a.gtin14, &a.serial).cmp(&(&b.gtin14, &b.serial)));
+    assert_eq!(ordered, report.items);
+    for item in &report.items {
+        assert!(
+            item.canonical
+                .starts_with(&format!("01{}21{}\u{1d}", item.gtin14, item.serial)),
+            "{item:?}"
+        );
+    }
+}
+
+/// The pallets' forms data (plan О-Ф) round-trips and agrees with the
+/// office's lists and the export source of the same shift: the same pallets
+/// opened first first, each box the export source puts on the pallet, closed
+/// first first, with the live units the box list counts, and a pallet's
+/// boxes and units not taken apart are the list's.
+#[test]
+fn pallet_report_rows_round_trip_and_agree_with_the_lists() {
+    let report: PalletReportRows = round_trip("pallet-report-rows.json");
+    let rows: ShiftExportRows = serde_json::from_value(fixture("shift-export-rows.json")).unwrap();
+    let boxes: Vec<OfficeBox> = serde_json::from_value(fixture("office-boxes.json")).unwrap();
+    let pallets: Vec<OfficePallet> =
+        serde_json::from_value(fixture("office-pallets.json")).unwrap();
+    assert_eq!(report.shift.id, rows.shift.id);
+    assert_eq!(report.shift.number, rows.shift.number);
+    assert_eq!(report.shift.production_date, rows.shift.production_date);
+    assert_eq!(report.shift.product_name, rows.shift.product_name);
+    assert_eq!(report.organization, rows.organization);
+    assert_eq!(
+        report.pallets.iter().map(|p| &p.id).collect::<Vec<_>>(),
+        pallets.iter().map(|p| &p.id).collect::<Vec<_>>()
+    );
+    for (pallet, listed) in report.pallets.iter().zip(&pallets) {
+        assert_eq!(
+            (&pallet.sscc, &pallet.closed_at, &pallet.disassembled_at),
+            (&listed.sscc, &listed.closed_at, &listed.disassembled_at)
+        );
+        let mut on: Vec<&OfficeBox> = boxes
+            .iter()
+            .filter(|b| b.pallet_id.as_deref() == Some(&pallet.id))
+            .collect();
+        on.sort_by(|a, b| (&a.closed_at, &a.id).cmp(&(&b.closed_at, &b.id)));
+        assert_eq!(
+            pallet.boxes.iter().map(|b| &b.id).collect::<Vec<_>>(),
+            on.iter().map(|b| &b.id).collect::<Vec<_>>()
+        );
+        for (printed, listed_box) in pallet.boxes.iter().zip(&on) {
+            assert_eq!(printed.units, listed_box.units, "{printed:?}");
+            assert_eq!(Some(&printed.closed_at), listed_box.closed_at.as_ref());
+        }
+        let standing: Vec<_> = pallet
+            .boxes
+            .iter()
+            .filter(|b| b.disassembled_at.is_none())
+            .collect();
+        assert_eq!(usize::try_from(listed.boxes).unwrap(), standing.len());
+        assert_eq!(
+            listed.units,
+            standing.iter().map(|b| u64::from(b.units)).sum::<u64>()
+        );
+    }
 }
 
 /// A shift's totals carry both pallet counts (plan ПЛ-Х): each is required,

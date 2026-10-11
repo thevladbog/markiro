@@ -6,6 +6,12 @@ export interface BoxTemplateProduct {
   defaultBoxTemplateId: string | null;
 }
 
+/** What the pallet choice reads of a product: its group and its pallet template preference. */
+export interface PalletTemplateProduct {
+  chzProductGroupCode: number | null;
+  defaultPalletTemplateId: string | null;
+}
+
 /** A template the choice may pick: its id and what decides whether it fits. */
 export interface BoxTemplateCandidate extends TemplateScope {
   id: string;
@@ -15,6 +21,48 @@ export interface BoxTemplateCandidate extends TemplateScope {
 export interface BoxTemplateDefaults {
   defaultBoxTemplateId: string | null;
   categories: readonly { chzProductGroupCode: number; purpose: string; templateId: string }[];
+}
+
+/** The defaults the pallet choice falls back on: the organization's pallet default and the categories'. */
+export interface PalletTemplateDefaults {
+  defaultPalletTemplateId: string | null;
+  categories: readonly { chzProductGroupCode: number; purpose: string; templateId: string }[];
+}
+
+/**
+ * The first of `ids` that names a template of `templates` fitting `purpose`
+ * and the product's `group` (`templateFitsSlot`), or `null`.
+ */
+function firstFitting(
+  ids: readonly (string | null)[],
+  templates: readonly BoxTemplateCandidate[],
+  purpose: "box" | "pallet",
+  group: number | null,
+): string | null {
+  for (const id of ids) {
+    if (id === null) continue;
+    const template = templates.find((each) => each.id === id);
+    if (
+      template !== undefined &&
+      templateFitsSlot(template, { purpose, chzProductGroupCode: group })
+    ) {
+      return id;
+    }
+  }
+  return null;
+}
+
+/** The category's default template of `purpose` for `group`, if the defaults name one. */
+function categoryDefault(
+  categories: BoxTemplateDefaults["categories"] | undefined,
+  purpose: "box" | "pallet",
+  group: number | null,
+): string | null {
+  if (group === null) return null;
+  return (
+    categories?.find((entry) => entry.purpose === purpose && entry.chzProductGroupCode === group)
+      ?.templateId ?? null
+  );
 }
 
 /**
@@ -33,26 +81,39 @@ export function suggestBoxTemplate(
   defaults: BoxTemplateDefaults | null,
 ): string | null {
   const group = product.chzProductGroupCode;
-  const categoryDefault =
-    group === null
-      ? undefined
-      : defaults?.categories.find(
-          (entry) => entry.purpose === "box" && entry.chzProductGroupCode === group,
-        )?.templateId;
-  const candidates = [
-    product.defaultBoxTemplateId,
-    categoryDefault ?? null,
-    defaults?.defaultBoxTemplateId ?? null,
-  ];
-  for (const id of candidates) {
-    if (id === null) continue;
-    const template = templates.find((each) => each.id === id);
-    if (
-      template !== undefined &&
-      templateFitsSlot(template, { purpose: "box", chzProductGroupCode: group })
-    ) {
-      return id;
-    }
-  }
-  return null;
+  return firstFitting(
+    [
+      product.defaultBoxTemplateId,
+      categoryDefault(defaults?.categories, "box", group),
+      defaults?.defaultBoxTemplateId ?? null,
+    ],
+    templates,
+    "box",
+    group,
+  );
+}
+
+/**
+ * The pallet template a shift with pallets starts with (stage 2a spec,
+ * decision 7, for the purpose `pallet`; plan О-Ф): the product's pallet
+ * preference, then its category's pallet default, then the organization's,
+ * the first that fits the product's group. `null` when none does: the person
+ * chooses.
+ */
+export function suggestPalletTemplate(
+  product: PalletTemplateProduct,
+  templates: readonly BoxTemplateCandidate[],
+  defaults: PalletTemplateDefaults | null,
+): string | null {
+  const group = product.chzProductGroupCode;
+  return firstFitting(
+    [
+      product.defaultPalletTemplateId,
+      categoryDefault(defaults?.categories, "pallet", group),
+      defaults?.defaultPalletTemplateId ?? null,
+    ],
+    templates,
+    "pallet",
+    group,
+  );
 }

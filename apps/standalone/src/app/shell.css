@@ -276,6 +276,26 @@
   color: var(--err-fg);
 }
 
+/* The card of a shift (plan О-Ф): its parts one under another. */
+.shift-card {
+  display: grid;
+  gap: 16px;
+}
+
+.shift-card__back {
+  justify-self: start;
+}
+
+.shift-card__section {
+  display: grid;
+  gap: 8px;
+}
+
+.shift-card__section > h2 {
+  margin: 0;
+  font: var(--text-h3);
+}
+
 .office-pager {
   display: flex;
   justify-content: flex-end;

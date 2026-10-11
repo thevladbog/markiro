@@ -1,0 +1,29 @@
+{
+  "shift": {
+    "id": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+    "number": "OCT26-004",
+    "productionDate": "2026-10-08",
+    "productName": "Молоко 3,2% 0,9 л",
+    "gtin14": "04600682000013",
+    "shelfLifeDays": 10
+  },
+  "organization": { "name": "ООО «Атолл»", "inn": "7701234567" },
+  "pallets": [
+    {
+      "id": "a0000000-0000-4000-8000-000000000001",
+      "sscc": "146006820000000409",
+      "openedAt": "2026-10-08T06:06:01.118Z",
+      "closedAt": "2026-10-08T06:20:44.650Z",
+      "disassembledAt": null,
+      "boxes": [
+        {
+          "id": "b0000000-0000-4000-8000-000000000001",
+          "sscc": "046006820000015000",
+          "closedAt": "2026-10-08T06:06:01.118Z",
+          "disassembledAt": null,
+          "units": 2
+        }
+      ]
+    }
+  ]
+}

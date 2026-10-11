@@ -17,6 +17,7 @@ import {
   NO_TOTALS,
   NORTH,
   openShifts,
+  PALLET,
   pickDate,
   shiftsSession,
   WATER,
@@ -254,6 +255,196 @@ describe("office shifts: planning a shift", () => {
       mode: "aggregation",
       palletsEnabled: false,
     });
+  });
+
+  it("plans a shift with pallets: their capacity from the product and their template by the rule, both changeable (plan О-Ф)", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockResolvedValue(CREATED);
+    await openCreate(session);
+    expect(within(dialog()).queryByLabelText("Коробов на паллете")).toBeNull();
+    fillMilk();
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    expect(valueOf("Коробов на паллете")).toBe("40");
+    // Milk has no pallet preference and its group no pallet default: the organization's.
+    expect(valueOf("Шаблон этикетки паллеты")).toBe(PALLET.id);
+    expect(options("Шаблон этикетки паллеты")).toEqual(["Выберите шаблон", "Паллета 100×150"]);
+    set("Коробов на паллете", " 32 ");
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    expect(session.api.createShift).toHaveBeenCalledWith(TOKEN, {
+      productId: MILK.id,
+      lineId: LINE_2.id,
+      productionDate: "2026-10-09",
+      boxTemplateId: MILK_BOX.id,
+      boxCapacity: 12,
+      plannedQty: 1200,
+      counterpartyId: NORTH.id,
+      mode: "aggregation",
+      palletsEnabled: true,
+      palletBoxCapacity: 32,
+      palletTemplateId: PALLET.id,
+    });
+  });
+
+  it("refuses pallets without a capacity or a template before sending, and sends none once they are off", async () => {
+    const session = shiftsSession();
+    session.api.getTemplateDefaults.mockResolvedValue({
+      ...DEFAULTS,
+      defaultPalletTemplateId: null,
+    });
+    session.api.createShift.mockResolvedValue(CREATED);
+    await openCreate(session);
+    fillMilk();
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    expect(valueOf("Шаблон этикетки паллеты")).toBe("");
+    set("Коробов на паллете", "");
+    submit();
+    await waitFor(() =>
+      expect(messageOf("Шаблон этикетки паллеты")).toBe("Выберите шаблон этикетки паллеты"),
+    );
+    expect(messageOf("Коробов на паллете")).toBe("Укажите целое число от 1 до 10 000");
+    await waitFor(() => expect(document.activeElement).toBe(field("Коробов на паллете")));
+    expect(session.api.createShift).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    submit();
+    await screen.findByText("Смена OCT26-006 запланирована.");
+    expect(session.api.createShift).toHaveBeenCalledWith(
+      TOKEN,
+      expect.objectContaining({ palletsEnabled: false }),
+    );
+    expect(session.api.createShift.mock.calls[0]?.[1]).not.toHaveProperty("palletTemplateId");
+  });
+
+  it("offers no pallets for a product without a pallet capacity, and turns them off when such a product is chosen", async () => {
+    const session = shiftsSession();
+    session.api.listProducts.mockResolvedValue([MILK, { ...WATER, palletBoxCapacity: null }]);
+    await openCreate(session);
+    set("Товар", MILK.id);
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    expect(valueOf("Коробов на паллете")).toBe("40");
+    set("Товар", WATER.id);
+    const pallets = within(dialog()).getByRole("checkbox", { name: "С паллетами" });
+    expect(pallets.getAttribute("aria-checked")).toBe("false");
+    expect(pallets).toHaveProperty("disabled", true);
+    expect(
+      within(dialog()).getByText("У товара не задана вместимость паллеты: смена без паллет"),
+    ).toBeTruthy();
+    expect(within(dialog()).queryByLabelText("Коробов на паллете")).toBeNull();
+  });
+
+  it("puts a pallet template the host refused under its select and reads the templates again", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockRejectedValue(
+      api("validation_failed", { field: "palletTemplateId" }),
+    );
+    await openCreate(session);
+    fillMilk();
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    session.api.listTemplates.mockResolvedValue([BOX_58, MILK_BOX, { ...PALLET, enabled: false }]);
+    submit();
+    await waitFor(() =>
+      expect(messageOf("Шаблон этикетки паллеты")).toBe(
+        "Шаблон паллеты выключен или больше не подходит товару. Выберите другой.",
+      ),
+    );
+    await waitFor(() =>
+      expect(options("Шаблон этикетки паллеты")).toEqual([
+        "Выберите шаблон",
+        "Паллета 100×150 — не подходит",
+      ]),
+    );
+  });
+
+  // Added by the task 8 implementer: the plan's pallet tests leave these behaviours unpinned.
+  it("takes the new product's pallet capacity and template when pallets are on, and none of them when they are off", async () => {
+    const session = shiftsSession();
+    const bigPallet = { ...WATER, palletBoxCapacity: 60, defaultPalletTemplateId: PALLET.id };
+    session.api.listProducts.mockResolvedValue([MILK, bigPallet]);
+    await openCreate(session);
+    set("Товар", MILK.id);
+    // Off: the capacity of a product chosen later is not copied anywhere.
+    set("Товар", WATER.id);
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    expect(valueOf("Коробов на паллете")).toBe("60");
+    set("Коробов на паллете", "7");
+    set("Товар", MILK.id);
+    expect(valueOf("Коробов на паллете")).toBe("40");
+    expect(valueOf("Шаблон этикетки паллеты")).toBe(PALLET.id);
+  });
+
+  it("does not keep a refusal of the pallets' earlier values once the pallets are chosen again", async () => {
+    const session = shiftsSession();
+    session.api.getTemplateDefaults.mockResolvedValue({
+      ...DEFAULTS,
+      defaultPalletTemplateId: null,
+    });
+    await openCreate(session);
+    fillMilk();
+    const pallets = () => within(dialog()).getByRole("checkbox", { name: "С паллетами" });
+    const refuse = async () => {
+      set("Коробов на паллете", "");
+      submit();
+      await waitFor(() =>
+        expect(messageOf("Шаблон этикетки паллеты")).toBe("Выберите шаблон этикетки паллеты"),
+      );
+      expect(messageOf("Коробов на паллете")).toBe("Укажите целое число от 1 до 10 000");
+    };
+    fireEvent.click(pallets());
+    await refuse();
+    // Off and on again: the fields start afresh, without the old refusal.
+    fireEvent.click(pallets());
+    fireEvent.click(pallets());
+    expect(messageOf("Шаблон этикетки паллеты")).toBeUndefined();
+    expect(messageOf("Коробов на паллете")).not.toBe("Укажите целое число от 1 до 10 000");
+    expect(valueOf("Коробов на паллете")).toBe("40");
+    // A refusal is cleared by a new product too.
+    await refuse();
+    set("Товар", WATER.id);
+    expect(messageOf("Шаблон этикетки паллеты")).toBeUndefined();
+    expect(messageOf("Коробов на паллете")).not.toBe("Укажите целое число от 1 до 10 000");
+  });
+
+  it("offers only the pallet templates that fit the product's group, and marks the one it kept that no longer fits", async () => {
+    const session = shiftsSession();
+    const milkOnly = {
+      ...PALLET,
+      id: "8f7e6d5c-4b3a-4291-8a0b-9c8d7e6f5a4b",
+      name: "Паллета молочная",
+      chzProductGroupCodes: [8],
+    };
+    session.api.listTemplates.mockResolvedValue([BOX_58, MILK_BOX, PALLET, milkOnly]);
+    await openCreate(session);
+    set("Товар", MILK.id);
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    expect(options("Шаблон этикетки паллеты")).toEqual([
+      "Выберите шаблон",
+      "Паллета 100×150",
+      "Паллета молочная",
+    ]);
+    set("Товар", WATER.id);
+    // Water is not of group 8; the template of the organization still fits.
+    expect(options("Шаблон этикетки паллеты")).toEqual(["Выберите шаблон", "Паллета 100×150"]);
+  });
+
+  it("holds the pallet controls too while the write is on its way", async () => {
+    const session = shiftsSession();
+    session.api.createShift.mockReturnValueOnce(new Promise<OfficeShift>(() => undefined));
+    await openCreate(session);
+    fillMilk();
+    fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
+    submit();
+    await waitFor(() => expect(session.api.createShift).toHaveBeenCalledTimes(1));
+    const disabled = (control: HTMLElement) =>
+      (control as HTMLInputElement | HTMLSelectElement).disabled;
+    await waitFor(() =>
+      expect(
+        [
+          within(dialog()).getByRole("checkbox", { name: "С паллетами" }),
+          field("Коробов на паллете"),
+          field("Шаблон этикетки паллеты"),
+        ].map(disabled),
+      ).toEqual([true, true, true]),
+    );
   });
 
   it("refuses an empty product, line, template, capacity and date before sending, and a bad plan", async () => {

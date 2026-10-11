@@ -19,6 +19,7 @@ use markiro_standalone_lib::local_db::{
     LocalDbState, TableClass, FILE_NAME, MIGRATOR, TABLE_CLASSES,
 };
 use markiro_standalone_lib::lockdown::LockdownState;
+use markiro_standalone_lib::office_files::OfficeFilesState;
 use markiro_standalone_lib::power::SystemAwakeState;
 use markiro_standalone_lib::scanner::{self, PortOpener, ScannerManager};
 use markiro_standalone_lib::secret_store::{ProtectedSecret, Scheme};
@@ -1229,6 +1230,7 @@ fn the_app_manages_every_state_its_commands_read() {
     assert!(app.try_state::<ScannerManager>().is_some());
     assert!(app.try_state::<LockdownState>().is_some());
     assert!(app.try_state::<SystemAwakeState>().is_some());
+    assert!(app.try_state::<OfficeFilesState>().is_some());
     // An unpaired app has no link yet; the receiver is the device's own.
     assert!(link.borrow().is_none());
     // Commands that read the managed states answer, instead of Tauri's refusal.
@@ -1249,6 +1251,190 @@ fn the_app_manages_every_state_its_commands_read() {
     assert_eq!(
         invoke(&webview, "set_system_awake", json!({ "awake": false })),
         Ok(Value::Null)
+    );
+}
+
+/// The shell with the office's folder at `files` (plan ЧЗ).
+fn mock_app_saving_into(files: OfficeFilesState) -> (App<MockRuntime>, WebviewWindow<MockRuntime>) {
+    let app = mock_builder()
+        .manage(files)
+        .invoke_handler(markiro_standalone_lib::invoke_handler())
+        .build(mock_context(noop_assets()))
+        .unwrap();
+    let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
+        .build()
+        .unwrap();
+    (app, webview)
+}
+
+/// `save_office_files` takes `segments` and `files` of `{ name,
+/// contentBase64 }` (`src/office/exports/office-files.ts`) and answers the
+/// folder as written; `open_office_folder` takes `segments`. Refusals are
+/// bare codes; without a documents folder every call is
+/// `documents_unavailable`.
+#[test]
+fn saving_office_files_answers_through_the_ipc_shapes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app_saving_into(OfficeFilesState::at(dir.path().to_path_buf()));
+    let segments = json!([
+        "Выгрузки",
+        "OCT26-004",
+        "2026-10-08_18-30-00_shift_txt_flat"
+    ]);
+    let saved = invoke(
+        &webview,
+        "save_office_files",
+        json!({
+            "segments": segments,
+            "files": [{ "name": "Молоко_1pcs_2026-10-08.txt", "contentBase64": "0JzQvtC70L7QutC+Cg==" }]
+        }),
+    )
+    .unwrap();
+    let folder = dir
+        .path()
+        .join("Выгрузки")
+        .join("OCT26-004")
+        .join("2026-10-08_18-30-00_shift_txt_flat");
+    assert_eq!(
+        saved,
+        json!({
+            "segments": segments,
+            "path": folder.display().to_string(),
+            "files": ["Молоко_1pcs_2026-10-08.txt"]
+        })
+    );
+    assert_eq!(
+        std::fs::read(folder.join("Молоко_1pcs_2026-10-08.txt")).unwrap(),
+        "Молоко\n".as_bytes()
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "save_office_files",
+            json!({ "segments": ["Выгрузки", "a/b"], "files": [{ "name": "a.txt", "contentBase64": "" }] }),
+        ),
+        Err(json!("invalid_request"))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "open_office_folder",
+            json!({ "segments": ["Выгрузки", "OCT26-004", "other"] }),
+        ),
+        Err(json!("invalid_request"))
+    );
+    // A way out of the office's folder is refused before anything is looked
+    // at, though the folder it leads to exists.
+    assert_eq!(
+        invoke(
+            &webview,
+            "open_office_folder",
+            json!({ "segments": ["Выгрузки", ".."] }),
+        ),
+        Err(json!("invalid_request"))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "save_office_files",
+            json!({ "segments": segments, "files": [{ "name": "Молоко.csv.bat", "contentBase64": "" }] }),
+        ),
+        Err(json!("invalid_request"))
+    );
+    if !cfg!(windows) {
+        assert_eq!(
+            invoke(
+                &webview,
+                "open_office_folder",
+                json!({ "segments": segments })
+            ),
+            Err(json!("unsupported"))
+        );
+    }
+    let (_app, unavailable) = mock_app_saving_into(OfficeFilesState::unavailable());
+    assert_eq!(
+        invoke(
+            &unavailable,
+            "save_office_files",
+            json!({ "segments": segments, "files": [{ "name": "a.txt", "contentBase64": "" }] }),
+        ),
+        Err(json!("documents_unavailable"))
+    );
+    assert_eq!(
+        invoke(
+            &unavailable,
+            "open_office_folder",
+            json!({ "segments": segments })
+        ),
+        Err(json!("documents_unavailable"))
+    );
+}
+
+/// `open_office_file` takes `segments` and `name`
+/// (`src/office/exports/office-files.ts`, plan О-Ф) and opens only a form's
+/// `.html` the office wrote under `Формы`; refusals are bare codes, and off
+/// Windows opening is `unsupported`.
+#[test]
+fn opening_an_office_form_answers_through_the_ipc_shapes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app_saving_into(OfficeFilesState::at(dir.path().to_path_buf()));
+    let segments = json!(["Формы", "OCT26-004", "2026-10-08_18-30-00_task"]);
+    invoke(
+        &webview,
+        "save_office_files",
+        json!({
+            "segments": segments,
+            "files": [{ "name": "Бланк смены.html", "contentBase64": "PCFkb2N0eXBlIGh0bWw+" }]
+        }),
+    )
+    .unwrap();
+    // The same bytes saved as an export part, in the exports' root.
+    invoke(
+        &webview,
+        "save_office_files",
+        json!({
+            "segments": ["Выгрузки", "OCT26-004", "run"],
+            "files": [{ "name": "Бланк смены.html", "contentBase64": "PCFkb2N0eXBlIGh0bWw+" }]
+        }),
+    )
+    .unwrap();
+    for (folder, name) in [
+        (segments.clone(), "Бланк смены.txt"),
+        (segments.clone(), "Другая форма.html"),
+        (segments.clone(), "..\\Бланк смены.html"),
+        (segments.clone(), "a,b.html"),
+        (json!(["Формы", "OCT26-004", ".."]), "Бланк смены.html"),
+        (json!(["Формы", ".."]), "Бланк смены.html"),
+        (json!(["Выгрузки", "OCT26-004", "run"]), "Бланк смены.html"),
+    ] {
+        assert_eq!(
+            invoke(
+                &webview,
+                "open_office_file",
+                json!({ "segments": folder, "name": name }),
+            ),
+            Err(json!("invalid_request")),
+            "{folder} {name:?}"
+        );
+    }
+    if !cfg!(windows) {
+        assert_eq!(
+            invoke(
+                &webview,
+                "open_office_file",
+                json!({ "segments": segments, "name": "Бланк смены.html" }),
+            ),
+            Err(json!("unsupported"))
+        );
+    }
+    let (_app, unavailable) = mock_app_saving_into(OfficeFilesState::unavailable());
+    assert_eq!(
+        invoke(
+            &unavailable,
+            "open_office_file",
+            json!({ "segments": segments, "name": "Бланк смены.html" }),
+        ),
+        Err(json!("documents_unavailable"))
     );
 }
 

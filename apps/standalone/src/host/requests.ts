@@ -19,6 +19,7 @@ import type {
   ProductUpdate,
   ShiftClose,
   ShiftCreate,
+  ShiftExportRecord,
   ShiftUpdate,
   TemplateCreate,
   TemplateDefaultsUpdate,
@@ -351,10 +352,16 @@ export function templateDefaultsUpdate(
   };
 }
 
+/** A shift's pallets as the office plans them (plan О-Ф): boxes on a pallet and the label template. */
+export interface ShiftPallets {
+  boxCapacity: number;
+  templateId: string;
+}
+
 /**
  * A planned shift's fields: ids the form chose, the production date
- * `YYYY-MM-DD`, the counts the form accepted, `null` for no plan or no
- * counterparty.
+ * `YYYY-MM-DD`, the counts the form accepted, `null` for no plan, no
+ * counterparty or no pallets.
  */
 export interface ShiftInput {
   productId: string;
@@ -364,12 +371,14 @@ export interface ShiftInput {
   boxCapacity: number;
   plannedQty: number | null;
   counterpartyId: string | null;
+  pallets: ShiftPallets | null;
 }
 
 /**
- * `POST /v1/office/shifts` (`shift-create.json`): every field, `null` for
- * none, and the mode and pallets stage 2a takes, so the host's defaults never
- * decide what was planned.
+ * `POST /v1/office/shifts` (`shift-create.json`, `shift-create-pallets.json`):
+ * every field, `null` for none, the mode and whether pallets are collected,
+ * so the host's defaults never decide what was planned; a shift with pallets
+ * names their capacity and template, one without names neither.
  */
 export function shiftCreate(shift: ShiftInput): ShiftCreate {
   return {
@@ -381,13 +390,19 @@ export function shiftCreate(shift: ShiftInput): ShiftCreate {
     plannedQty: shift.plannedQty,
     counterpartyId: shift.counterpartyId,
     mode: "aggregation",
-    palletsEnabled: false,
+    ...(shift.pallets === null
+      ? { palletsEnabled: false }
+      : {
+          palletsEnabled: true,
+          palletBoxCapacity: shift.pallets.boxCapacity,
+          palletTemplateId: shift.pallets.templateId,
+        }),
   };
 }
 
 /**
- * What a shift is to become; a field left out stays as it is. `plannedQty`
- * and `counterpartyId` take `null` for none.
+ * What a shift is to become; a field left out stays as it is. `plannedQty`,
+ * `counterpartyId` and `pallets` take `null` for none.
  */
 export interface ShiftChange {
   lineId?: string;
@@ -396,6 +411,7 @@ export interface ShiftChange {
   boxCapacity?: number;
   plannedQty?: number | null;
   counterpartyId?: string | null;
+  pallets?: ShiftPallets | null;
 }
 
 /**
@@ -413,6 +429,9 @@ export function shiftUpdate(
     | "boxCapacity"
     | "plannedQty"
     | "counterpartyId"
+    | "palletsEnabled"
+    | "palletBoxCapacity"
+    | "palletTemplateId"
     | "rev"
   >,
   next: ShiftChange,
@@ -434,6 +453,17 @@ export function shiftUpdate(
   if (next.counterpartyId !== undefined && next.counterpartyId !== shift.counterpartyId) {
     update.counterpartyId = next.counterpartyId;
   }
+  // Pallets turned off are only that: the host clears their capacity and template itself.
+  if (next.pallets === null && shift.palletsEnabled) update.palletsEnabled = false;
+  if (next.pallets !== undefined && next.pallets !== null) {
+    if (!shift.palletsEnabled) update.palletsEnabled = true;
+    if (next.pallets.boxCapacity !== shift.palletBoxCapacity) {
+      update.palletBoxCapacity = next.pallets.boxCapacity;
+    }
+    if (next.pallets.templateId !== shift.palletTemplateId) {
+      update.palletTemplateId = next.pallets.templateId;
+    }
+  }
   return update;
 }
 
@@ -443,6 +473,44 @@ export function shiftUpdate(
  */
 export function shiftClose(reason: string, expectedRev: number): ShiftClose {
   return { reason, expectedRev };
+}
+
+/**
+ * What an export wrote (plan ЧЗ): its format, its line limit, its pallet
+ * (`null` for a shift's export), the base `document_id` of its files, each
+ * part's counts and the boxes written on no pallet because their pallet had
+ * not closed.
+ */
+export interface ExportWritten {
+  formatId: string;
+  formatVersion: number;
+  maxLines: number | null;
+  palletId: string | null;
+  documentId: string;
+  parts: readonly { codeCount: number; boxCount: number; palletCount: number }[];
+  openPalletSuppressedBoxCount: number;
+}
+
+/**
+ * `POST /v1/office/shifts/{id}/exports` (`shift-export-record.json`): every
+ * field named, the counts summed over the parts as the cloud's export
+ * totals them.
+ */
+export function shiftExportRecord(written: ExportWritten): ShiftExportRecord {
+  const total = (count: (part: ExportWritten["parts"][number]) => number) =>
+    written.parts.reduce((sum, part) => sum + count(part), 0);
+  return {
+    formatId: written.formatId,
+    formatVersion: written.formatVersion,
+    maxLines: written.maxLines,
+    palletId: written.palletId,
+    documentId: written.documentId,
+    partCount: written.parts.length,
+    codeCount: total((part) => part.codeCount),
+    boxCount: total((part) => part.boxCount),
+    palletCount: total((part) => part.palletCount),
+    openPalletSuppressedBoxCount: written.openPalletSuppressedBoxCount,
+  };
 }
 
 /** What a station's new shift carries: the operator's choices and the request's id. */

@@ -61,10 +61,68 @@ describe("the shifts list's rules", () => {
     expect(openBlocker(unfit, [MILK], templates)).toBeNull();
     expect(openBlocker(unfit, products, undefined)).toBeNull();
     expect(openBlocker(unfit, products, [BOX_58])).toBeNull();
+    // A pallet template switched off, or not of the pallet purpose, keeps the shift closed too.
+    const palletUnfit = { ...PLANNED, palletTemplateId: OLD_BOX.id };
+    expect(openBlocker(palletUnfit, products, [...templates, PALLET])).toBe(
+      "pallet_template_unfit",
+    );
+    expect(
+      openBlocker({ ...PLANNED, palletTemplateId: PALLET.id }, products, [...templates, PALLET]),
+    ).toBeNull();
     // A draft is named before the template is looked at.
     expect(openBlocker({ ...unfit, productId: KEFIR_DRAFT.id }, products, undefined)).toBe(
       "product_draft",
     );
+  });
+
+  // Added by the task 8 implementer: the pallet template is judged by purpose, switch and group.
+  it("judges a pallet template by its purpose, its switch and the product's group, after the box template", () => {
+    const products = [MILK, WATER];
+    const templates = [BOX_58, MILK_BOX, PALLET];
+    const scoped = {
+      ...PALLET,
+      id: "8f7e6d5c-4b3a-4291-8a0b-9c8d7e6f5a4b",
+      chzProductGroupCodes: [8],
+    };
+    const off = { ...PALLET, id: "7e6d5c4b-3a29-4180-8b9c-8d7e6f5a4b3c", enabled: false };
+    const all = [...templates, scoped, off];
+    // Water is of group 13: a pallet template scoped to milk's group does not fit it.
+    expect(openBlocker({ ...PLANNED, palletTemplateId: scoped.id }, products, all)).toBe(
+      "pallet_template_unfit",
+    );
+    expect(
+      openBlocker(
+        { ...PLANNED, productId: MILK.id, boxTemplateId: MILK_BOX.id, palletTemplateId: scoped.id },
+        products,
+        all,
+      ),
+    ).toBeNull();
+    expect(openBlocker({ ...PLANNED, palletTemplateId: off.id }, products, all)).toBe(
+      "pallet_template_unfit",
+    );
+    // An enabled template of the box purpose is no pallet template.
+    expect(openBlocker({ ...PLANNED, palletTemplateId: BOX_58.id }, products, all)).toBe(
+      "pallet_template_unfit",
+    );
+    // A pallet template the list lacks is not claimed unfit; no pallets claim nothing.
+    expect(
+      openBlocker(
+        { ...PLANNED, palletTemplateId: "6d5c4b3a-2918-4070-8a8b-7d6e5f4a3b2c" },
+        products,
+        all,
+      ),
+    ).toBeNull();
+    expect(openBlocker({ ...PLANNED, palletTemplateId: null }, products, all)).toBeNull();
+    // The box template is named first when both do not fit.
+    expect(
+      openBlocker(
+        { ...PLANNED, boxTemplateId: MILK_BOX.id, palletTemplateId: off.id },
+        products,
+        all,
+      ),
+    ).toBe("template_unfit");
+    // An open or closed shift keeps its snapshot: no claim about its pallet template.
+    expect(openBlocker({ ...ACTIVE, palletTemplateId: off.id }, products, all)).toBeNull();
   });
 
   // Added by the task 3 implementer: the plan's tests leave these boundaries unpinned.

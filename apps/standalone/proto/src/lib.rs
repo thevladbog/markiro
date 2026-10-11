@@ -2101,6 +2101,251 @@ pub enum CodeCheck {
     Taken { owner: CodeOwner },
 }
 
+/// `POST /v1/office/shifts/{id}/exports` (plan ЧЗ): the office saved the
+/// files of an export and records it in the audit trail; nothing else
+/// changes. `formatId` and `formatVersion` are a format `@markiro/domain`
+/// advertises (`proto/fixtures/export-formats.json`); a pallet's export names
+/// its pallet and has one part and no `maxLines`, a shift's names no pallet.
+/// `documentId` is the base `document_id` the files carry; the counts are
+/// the parts' sums, as the cloud's export totals them, and
+/// `openPalletSuppressedBoxCount` the boxes written on no pallet because
+/// their pallet had not closed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ShiftExportRecord {
+    pub format_id: String,
+    pub format_version: u32,
+    pub max_lines: Option<u32>,
+    pub pallet_id: Option<String>,
+    pub document_id: String,
+    pub part_count: u32,
+    pub code_count: u64,
+    pub box_count: u32,
+    pub pallet_count: u32,
+    pub open_pallet_suppressed_box_count: u32,
+}
+
+/// A box of a shift as the office lists it (`GET
+/// /v1/office/shifts/{id}/boxes`, plan ЧЗ for the card of plan О-Ф): the
+/// device's instants as it sent them; `units` the box's live items now;
+/// `itemCountReported` and `digestMatches` what the station's close said
+/// and how it compared at that moment (stale once the box is taken apart);
+/// the label check's instants as the station sent them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficeBox {
+    pub id: String,
+    pub device_id: String,
+    pub sscc: Option<String>,
+    pub opened_at: String,
+    pub closed_at: Option<String>,
+    pub disassembled_at: Option<String>,
+    pub pallet_id: Option<String>,
+    pub units: u32,
+    pub item_count_reported: Option<u32>,
+    pub digest_matches: Option<bool>,
+    pub print_verified_at: Option<String>,
+    pub print_skipped_at: Option<String>,
+}
+
+/// A pallet of a shift as the office lists it (`GET
+/// /v1/office/shifts/{id}/pallets`, plan ЧЗ for plan О-Ф): `boxes` its closed
+/// boxes not taken apart and `units` their live items, both derived as the
+/// cloud's pallet card derives them; `boxCountReported` what the station's
+/// close counted.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OfficePallet {
+    pub id: String,
+    pub device_id: String,
+    pub sscc: Option<String>,
+    pub opened_at: String,
+    pub closed_at: Option<String>,
+    pub disassembled_at: Option<String>,
+    pub boxes: u32,
+    pub units: u64,
+    pub box_count_reported: Option<u32>,
+    pub print_verified_at: Option<String>,
+    pub print_skipped_at: Option<String>,
+}
+
+/// `GET /v1/office/shifts/{id}/export-source` (plan ЧЗ): what a shift's
+/// exports are built from, read in one snapshot. The office ports the
+/// cloud's source rules (`shift-export-source.service.ts`) over these rows
+/// and renders the files with `@markiro/domain`; the host checks nothing of
+/// an export itself. `codes` are the codes the shift owns, each with the
+/// canonical text of its owning scan (crypto tail included); `boxes` every
+/// box of the shift, open and taken apart ones too; `items` the live items
+/// of those boxes only (neither taken out by an exception nor taken by an
+/// earlier scan elsewhere), the only ones the cloud's rules ever read;
+/// `pallets` every pallet of the shift.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShiftExportRows {
+    pub shift: ExportShift,
+    pub organization: ExportOrganization,
+    pub codes: Vec<ExportCode>,
+    pub boxes: Vec<ExportBox>,
+    pub items: Vec<ExportItem>,
+    pub pallets: Vec<ExportPallet>,
+}
+
+/// The shift of [`ShiftExportRows`]. `closedAt` is the host's (whole
+/// seconds); `stationClosedAt` is the instant of the station's close the
+/// host accepted (the device's, with milliseconds), `null` when the office
+/// closed the shift or it is not closed. `productName` is the product's
+/// name now, as the cloud's export joins it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportShift {
+    pub id: String,
+    pub number: String,
+    pub status: ShiftStatus,
+    pub production_date: String,
+    pub product_name: String,
+    pub pallets_enabled: bool,
+    pub closed_at: Option<String>,
+    pub station_closed_at: Option<String>,
+    pub late_data_at: Option<String>,
+}
+
+/// The organization as the ЧЗ document names it: `org_name` and `LP_TIN`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportOrganization {
+    pub name: String,
+    pub inn: Option<String>,
+}
+
+/// A code the shift owns: its hash, the instant of its owning scan and that
+/// scan's canonical text.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportCode {
+    pub code_hash: String,
+    pub scanned_at: String,
+    pub canonical: String,
+}
+
+/// A box of the shift; the device's instants as it sent them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportBox {
+    pub id: String,
+    pub sscc: Option<String>,
+    pub opened_at: String,
+    pub closed_at: Option<String>,
+    pub disassembled_at: Option<String>,
+    pub pallet_id: Option<String>,
+}
+
+/// A live item: the code `codeHash` lies in box `boxId`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportItem {
+    pub box_id: String,
+    pub code_hash: String,
+}
+
+/// A pallet of the shift; the device's instants as it sent them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPallet {
+    pub id: String,
+    pub sscc: Option<String>,
+    pub opened_at: String,
+    pub closed_at: Option<String>,
+    pub disassembled_at: Option<String>,
+}
+
+/// `GET /v1/office/boxes/{id}/report-data` (plan О-Ф): what «Состав
+/// короба» prints of one box, read in one snapshot. `items` are the codes
+/// the cloud's form prints (`CodeSearchService.boxReportData`): the box's
+/// live items, and of a box taken apart the items its disassembly took out
+/// (`removed_at` equal to the box's `disassembled_at`: the host writes both
+/// from the one instant of the `disassemble` fact), never an item taken out
+/// earlier or taken by an earlier scan elsewhere; each with its scan's GTIN,
+/// serial and canonical text (crypto tail included), ordered by GTIN, then
+/// serial, byte for byte. `productName` is the product's name now, as the
+/// cloud's form joins it; the device's instants are as it sent them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoxReportRows {
+    pub id: String,
+    pub shift_id: String,
+    pub sscc: Option<String>,
+    pub opened_at: String,
+    pub closed_at: Option<String>,
+    pub disassembled_at: Option<String>,
+    pub product_name: String,
+    pub organization: ExportOrganization,
+    pub items: Vec<BoxReportItem>,
+}
+
+/// A code «Состав короба» prints: the AI 01 and AI 21 of its label line and
+/// the full canonical text its DataMatrix encodes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BoxReportItem {
+    pub gtin14: String,
+    pub serial: String,
+    pub canonical: String,
+}
+
+/// `GET /v1/office/shifts/{id}/pallet-report-data` (plan О-Ф): what
+/// «Состав паллеты» and «Ярлык паллеты» print of the shift's pallets, read
+/// in one snapshot, so the placards of the whole shift agree with each
+/// other. `pallets` are every pallet of the shift, opened first first;
+/// each pallet's `boxes` every box that ever stood on it, closed first first
+/// (then by id), boxes taken apart included, as the cloud's forms list them;
+/// a box's `units` are its live items now (a box taken apart has none: the
+/// forms print it without a count and count it nowhere).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PalletReportRows {
+    pub shift: ReportShift,
+    pub organization: ExportOrganization,
+    pub pallets: Vec<ReportPallet>,
+}
+
+/// The shift of [`PalletReportRows`]: its number, its production date and
+/// its product now (name, GTIN, shelf life), as the cloud's forms join the
+/// live product.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportShift {
+    pub id: String,
+    pub number: String,
+    pub production_date: String,
+    pub product_name: String,
+    pub gtin14: String,
+    pub shelf_life_days: Option<u32>,
+}
+
+/// A pallet of the shift with the boxes that stood on it; the device's
+/// instants as it sent them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportPallet {
+    pub id: String,
+    pub sscc: Option<String>,
+    pub opened_at: String,
+    pub closed_at: Option<String>,
+    pub disassembled_at: Option<String>,
+    pub boxes: Vec<ReportPalletBox>,
+}
+
+/// A box that stood on a pallet: it joined at its close, so it is closed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReportPalletBox {
+    pub id: String,
+    pub sscc: Option<String>,
+    pub closed_at: String,
+    pub disassembled_at: Option<String>,
+    pub units: u32,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

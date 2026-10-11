@@ -3,11 +3,11 @@ import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { Controller, useForm } from "react-hook-form";
 import { useTranslation } from "react-i18next";
 
-import { DatePicker, Input, Select } from "@markiro/ui";
+import { Checkbox, DatePicker, Input, Select } from "@markiro/ui";
 
 import type { OfficeShift, ShiftCreate, ShiftUpdate } from "../../host/protocol.js";
 import { shiftCreate, shiftUpdate } from "../../host/requests.js";
-import { suggestBoxTemplate } from "../../lib/box-template-choice.js";
+import { suggestBoxTemplate, suggestPalletTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
 import { useTemplateDefaults, useTemplates } from "../catalog-queries.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
@@ -44,7 +44,9 @@ export interface ShiftDialogProps {
 }
 
 /**
- * Plans a shift, or changes a planned one (stage 2a spec §5.6). A new shift's
+ * Plans a shift, or changes a planned one (stage 2a spec §5.6), with pallets
+ * or without (plan О-Ф: their capacity from the product, their template by
+ * decision 7 for the purpose `pallet`, both changeable). A new shift's
  * production date starts as today in the organization's time zone, so the
  * dialog waits for the organization's profile; when the profile does not
  * load, or names a zone this PC does not know, it starts as this PC's date
@@ -157,7 +159,10 @@ function ShiftForm({
   const productId = watch("productId");
   const lineId = watch("lineId");
   const counterpartyId = watch("counterpartyId");
+  const palletsEnabled = watch("palletsEnabled");
   const product = products.data?.find((each) => each.id === productId);
+  // Pallets need the product's pallet capacity, as the cloud's switch does.
+  const palletsPossible = product !== undefined && product.palletBoxCapacity !== null;
   // A changed shift of an archived or draft product will not open, whatever is changed.
   const productBlocker = shift === null ? null : openBlocker(shift, products.data, undefined);
 
@@ -221,6 +226,18 @@ function ShiftForm({
           },
         ];
 
+  /** The pallets' capacity and template from `chosen`, as a new choice of pallets takes them. */
+  const palletsFrom = (chosen: NonNullable<typeof product>) => {
+    setValue(
+      "palletBoxCapacity",
+      chosen.palletBoxCapacity === null ? "" : String(chosen.palletBoxCapacity),
+      { shouldDirty: true },
+    );
+    const suggested = suggestPalletTemplate(chosen, templates.data ?? [], defaults.data ?? null);
+    setValue("palletTemplateId", suggested ?? "", { shouldDirty: true });
+    clearErrors(["palletBoxCapacity", "palletTemplateId"]);
+  };
+
   const chooseProduct = (id: string, onChange: (id: string) => void) => {
     onChange(id);
     const chosen = products.data?.find((each) => each.id === id);
@@ -233,6 +250,18 @@ function ShiftForm({
     setValue("boxTemplateId", suggested ?? "", { shouldDirty: true });
     // A refusal of the earlier values does not outlive them.
     clearErrors(["boxCapacity", "boxTemplateId"]);
+    // So do the pallets', when they are on; a product without a pallet capacity turns them off.
+    if (palletsEnabled && chosen.palletBoxCapacity === null) {
+      setValue("palletsEnabled", false, { shouldDirty: true });
+    } else if (palletsEnabled) {
+      palletsFrom(chosen);
+    }
+  };
+
+  const choosePallets = (on: boolean, onChange: (on: boolean) => void) => {
+    onChange(on);
+    if (on && product !== undefined) palletsFrom(product);
+    if (!on) clearErrors(["palletBoxCapacity", "palletTemplateId"]);
   };
 
   const submit = handleSubmit(
@@ -271,7 +300,9 @@ function ShiftForm({
           // no longer offered, or shows as marked, once its list is read again.
           if (outcome.field === "productId") void products.refetch();
           if (outcome.field === "lineId") void lines.refetch();
-          if (outcome.field === "boxTemplateId") void templates.refetch();
+          if (outcome.field === "boxTemplateId" || outcome.field === "palletTemplateId") {
+            void templates.refetch();
+          }
           if (outcome.field === "counterpartyId") void counterparties.refetch();
         } else if (outdated && outcome.kind === "alert") {
           setOutdatedMessage(outcome.message);
@@ -444,6 +475,65 @@ function ShiftForm({
           />
         )}
       />
+      <Controller
+        control={control}
+        name="palletsEnabled"
+        render={({ field }) => (
+          <Checkbox
+            label={t("office.shifts.fields.pallets")}
+            hint={t(
+              product !== undefined && !palletsPossible
+                ? "office.shifts.fields.palletsUnavailable"
+                : "office.shifts.fields.palletsHint",
+            )}
+            checked={field.value}
+            onCheckedChange={(on) => choosePallets(on, field.onChange)}
+            id={fieldId("palletsEnabled")}
+            // A changed shift's own pallets can always be turned off.
+            disabled={locked || ((!palletsPossible || !templates.isSuccess) && !field.value)}
+          />
+        )}
+      />
+      {palletsEnabled && (
+        <>
+          <Input
+            label={t("office.shifts.fields.palletBoxCapacity")}
+            hint={t("office.shifts.fields.palletBoxCapacityHint")}
+            inputMode="numeric"
+            mono
+            id={fieldId("palletBoxCapacity")}
+            disabled={locked}
+            {...fieldError(errors.palletBoxCapacity?.message)}
+            {...register("palletBoxCapacity")}
+          />
+          <Controller
+            control={control}
+            name="palletTemplateId"
+            render={({ field }) => (
+              <Select
+                native
+                label={t("office.shifts.fields.palletTemplate")}
+                placeholder={t("office.shifts.fields.templatePlaceholder")}
+                options={templateOptions(
+                  templates.data,
+                  "pallet",
+                  product?.chzProductGroupCode ?? null,
+                  [shift?.palletTemplateId ?? "", field.value],
+                  t,
+                ).filter((option) => option.value !== "")}
+                value={field.value}
+                onValueChange={field.onChange}
+                id={fieldId("palletTemplateId")}
+                disabled={locked || !templates.isSuccess}
+                {...(templates.isError
+                  ? { hint: t("office.shifts.fields.templatesUnavailable") }
+                  : {})}
+                {...fieldError(errors.palletTemplateId?.message)}
+              />
+            )}
+          />
+        </>
+      )}
       <Controller
         control={control}
         name="counterpartyId"

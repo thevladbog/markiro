@@ -89,6 +89,12 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     updateShift: vi.fn<HostApi["updateShift"]>(() => unexpected("updateShift")),
     deleteShift: vi.fn<HostApi["deleteShift"]>(() => unexpected("deleteShift")),
     closeShift: vi.fn<HostApi["closeShift"]>(() => unexpected("closeShift")),
+    getShiftExportSource: vi.fn<HostApi["getShiftExportSource"]>(() =>
+      unexpected("getShiftExportSource"),
+    ),
+    listShiftBoxes: vi.fn<HostApi["listShiftBoxes"]>(() => unexpected("listShiftBoxes")),
+    listShiftPallets: vi.fn<HostApi["listShiftPallets"]>(() => unexpected("listShiftPallets")),
+    recordShiftExport: vi.fn<HostApi["recordShiftExport"]>(() => unexpected("recordShiftExport")),
     // The floor reads its shifts whenever it reads its device record; a test
     // about something else gets none.
     getDeviceShifts: vi.fn<HostApi["getDeviceShifts"]>(async () => []),
@@ -97,6 +103,10 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     requestSsccBlock: vi.fn<HostApi["requestSsccBlock"]>(() => unexpected("requestSsccBlock")),
     checkCode: vi.fn<HostApi["checkCode"]>(() => unexpected("checkCode")),
     sendFacts: vi.fn<HostApi["sendFacts"]>(() => unexpected("sendFacts")),
+    getBoxReportRows: vi.fn<HostApi["getBoxReportRows"]>(() => unexpected("getBoxReportRows")),
+    getPalletReportRows: vi.fn<HostApi["getPalletReportRows"]>(() =>
+      unexpected("getPalletReportRows"),
+    ),
     ...overrides,
   };
 }

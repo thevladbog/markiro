@@ -21,6 +21,7 @@ import {
   OLD_BOX,
   openShifts,
   OLD_LINE,
+  PALLET,
   pickDate,
   PLANNED,
   shiftRow,
@@ -180,6 +181,23 @@ describe("office shifts: the list", () => {
         boxTemplateId: MILK_BOX.id,
       },
       { ...PLANNED, id: "10000000-0000-4000-8000-000000000005", number: "A-5" },
+      // Pallets: a pallet template that is off, or a box one, keeps the shift closed (plan О-Ф).
+      {
+        ...PLANNED,
+        id: "10000000-0000-4000-8000-000000000007",
+        number: "A-7",
+        palletsEnabled: true,
+        palletBoxCapacity: 40,
+        palletTemplateId: OLD_BOX.id,
+      },
+      {
+        ...PLANNED,
+        id: "10000000-0000-4000-8000-000000000008",
+        number: "A-8",
+        palletsEnabled: true,
+        palletBoxCapacity: 40,
+        palletTemplateId: PALLET.id,
+      },
       // An open shift has its layout in its snapshot: no mark.
       {
         ...ACTIVE,
@@ -198,6 +216,10 @@ describe("office shifts: the list", () => {
       "◷Запланирована!Не откроется: шаблон выключен или не подходит товару",
     );
     expect(cells("A-5")[6]).toBe("◷Запланирована");
+    expect(cells("A-7")[6]).toBe(
+      "◷Запланирована!Не откроется: шаблон паллеты выключен или не подходит товару",
+    );
+    expect(cells("A-8")[6]).toBe("◷Запланирована");
     expect(cells("A-6")[6]).toBe("▸Активна");
   });
 

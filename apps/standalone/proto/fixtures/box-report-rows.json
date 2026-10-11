@@ -1,0 +1,22 @@
+{
+  "id": "b0000000-0000-4000-8000-000000000001",
+  "shiftId": "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b",
+  "sscc": "046006820000015000",
+  "openedAt": "2026-10-08T06:05:12.031Z",
+  "closedAt": "2026-10-08T06:06:01.118Z",
+  "disassembledAt": null,
+  "productName": "Молоко 3,2% 0,9 л",
+  "organization": { "name": "ООО «Атолл»", "inn": "7701234567" },
+  "items": [
+    {
+      "gtin14": "04600682000013",
+      "serial": "Kq8vT2mXc5Rz",
+      "canonical": "010460068200001321Kq8vT2mXc5Rz\u001d93Ab1Z"
+    },
+    {
+      "gtin14": "04600682000013",
+      "serial": "Pw3nY7hLd9Fs",
+      "canonical": "010460068200001321Pw3nY7hLd9Fs\u001d93Cd2Y"
+    }
+  ]
+}

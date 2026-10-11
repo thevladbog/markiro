@@ -15,8 +15,10 @@ import {
   factReceiptsSchema,
   labelTemplateSchema,
   labelTemplateSummarySchema,
+  officeBoxSchema,
   officeLineSchema,
   officeOperatorSchema,
+  officePalletSchema,
   officeProductSchema,
   officeSessionSchema,
   officeUserRecordSchema,
@@ -26,6 +28,9 @@ import {
   productGroupSchema,
   officeShiftSchema,
   ssccBlockSchema,
+  shiftExportRowsSchema,
+  boxReportRowsSchema,
+  palletReportRowsSchema,
   ssccCounterSchema,
   ssccStateSchema,
   templateDefaultsSchema,
@@ -50,9 +55,11 @@ import {
   type LabelTemplateSummary,
   type LineCreate,
   type LineUpdate,
+  type OfficeBox,
   type OfficeLine,
   type OfficeLoginRequest,
   type OfficeOperator,
+  type OfficePallet,
   type OfficeProduct,
   type OfficeSession,
   type OfficeShift,
@@ -73,6 +80,10 @@ import {
   type ProductUpdate,
   type ShiftClose,
   type ShiftCreate,
+  type ShiftExportRecord,
+  type ShiftExportRows,
+  type BoxReportRows,
+  type PalletReportRows,
   type ShiftUpdate,
   type SsccBlock,
   type SsccBlockRequest,
@@ -185,6 +196,24 @@ export interface HostApi {
   /** `204`, only a planned shift; a delete repeated after a lost answer is `not_found`. */
   deleteShift: (token: string, id: string) => Promise<void>;
   closeShift: (token: string, id: string, close: ShiftClose) => Promise<OfficeShift>;
+  /**
+   * What the shift's exports are built from, in one snapshot of the host
+   * (plan ЧЗ); every office role. A planned shift answers with empty lists.
+   */
+  getShiftExportSource: (token: string, id: string) => Promise<ShiftExportRows>;
+  /** Every box of the shift, opened first first, with its live units (plan ЧЗ, for plan О-Ф). */
+  listShiftBoxes: (token: string, id: string) => Promise<OfficeBox[]>;
+  /** Every pallet of the shift, opened first first, with what stands on it (plan ЧЗ). */
+  listShiftPallets: (token: string, id: string) => Promise<OfficePallet[]>;
+  /** `204`: the export's files are saved; the host writes its `shift.export` audit row (plan ЧЗ). */
+  recordShiftExport: (token: string, id: string, record: ShiftExportRecord) => Promise<void>;
+  /** What «Состав короба» prints of the box, in one snapshot (plan О-Ф); every office role. */
+  getBoxReportRows: (token: string, id: string) => Promise<BoxReportRows>;
+  /**
+   * What «Состав паллеты» and «Ярлык паллеты» print of the shift's pallets, in
+   * one snapshot (plan О-Ф); every office role. A shift without pallets has none.
+   */
+  getPalletReportRows: (token: string, id: string) => Promise<PalletReportRows>;
   /**
    * The station's shifts, with the device key only: the planned and active
    * shifts of its line and those it entered, active or closed within 30
@@ -500,6 +529,38 @@ export function createHostApi(client: HostClient): HostApi {
         body: close,
         officeToken: token,
         schema: officeShiftSchema,
+      }),
+    getShiftExportSource: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/export-source`, {
+        officeToken: token,
+        schema: shiftExportRowsSchema,
+      }),
+    listShiftBoxes: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/boxes`, {
+        officeToken: token,
+        schema: z.array(officeBoxSchema),
+      }),
+    listShiftPallets: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/pallets`, {
+        officeToken: token,
+        schema: z.array(officePalletSchema),
+      }),
+    recordShiftExport: async (token, id, record) => {
+      await client.request("POST", `/v1/office/shifts/${id}/exports`, {
+        body: record,
+        officeToken: token,
+        schema: NO_CONTENT,
+      });
+    },
+    getBoxReportRows: (token, id) =>
+      client.request("GET", `/v1/office/boxes/${id}/report-data`, {
+        officeToken: token,
+        schema: boxReportRowsSchema,
+      }),
+    getPalletReportRows: (token, id) =>
+      client.request("GET", `/v1/office/shifts/${id}/pallet-report-data`, {
+        officeToken: token,
+        schema: palletReportRowsSchema,
       }),
   };
 }

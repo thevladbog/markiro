@@ -329,6 +329,12 @@ export const plannedQtyRule = countRule(MAX_PLANNED_QTY, "rules.plannedQty");
 /** A shift's box capacity: 1 to `MAX_BOX_CAPACITY` units, always sent. */
 export const shiftBoxCapacityRule = requiredCountRule(MAX_BOX_CAPACITY, "rules.shiftBoxCapacity");
 
+/** The boxes on a pallet of a shift with pallets: 1 to `MAX_PALLET_BOX_CAPACITY`, always sent. */
+export const shiftPalletBoxCapacityRule = requiredCountRule(
+  MAX_PALLET_BOX_CAPACITY,
+  "rules.shiftPalletBoxCapacity",
+);
+
 /** A production date: a civil date the host takes (`validate::civil_date`). */
 export const productionDateRule = z.string().refine(isCivilDate, "rules.productionDate");
 
