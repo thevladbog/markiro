@@ -1178,8 +1178,13 @@ current when that event was published. The webview syncs reference data on
 each revision and never opens the stream itself. Before each stream the task
 reads `GET /v1/hello` with the same pinned client and no key; the `Online`
 status carries its `restoreEpoch` (plan РК-С, absent from the JSON when the
-host names none or the read failed: the stream opens all the same, and the
-next connection reads again). A fresh pairing and an unpaired device clear it.
+host names none; a host that predates restores answers without it and still
+comes online). A failed read ends the attempt before the stream opens — a
+transport failure as the link's own error (`unreachable`,
+`certificate_mismatch`), any other answer (another status, no body, not a
+Markiro host's `hello`, an epoch that does not read) as `stream_refused` — and
+the link backs off and tries again, so `Online` always means the host's epoch
+is known. A fresh pairing and an unpaired device clear it.
 
 ## Hardware
 
@@ -3934,7 +3939,11 @@ The station's side is plan РК-С. The shell's link reads `hello` before every
 stream and the `Online` status names `restoreEpoch` ("Connection to the
 host"). `useHostLink` notes a new one for the pairing in `floor_restore_epochs`
 (migration `0009`, `noteRestoreEpoch`) before anything asks whether blocks are
-owed: the row is the obligation and survives a restart. While it is not
+owed: the row is the obligation and survives a restart. The outbox sends
+nothing while the link's latest status is not `online` (only an online status
+names the epoch; when `watch` itself failed there is no status to wait for,
+and it goes as before), and going online sends it, so no record leaves before
+the station knows whether the host was restored. While the obligation is not
 settled (`reconciled_at` NULL) the outbox sends nothing (`restoreDue`), and
 `reconcileRestore` — at once, at every link event, retried like the reads —
 sends every block of `floor_sscc_blocks` of the pairing, used up ones too,
@@ -3946,7 +3955,10 @@ owed. Then ONE transaction writes `from_zero` for the sync, puts the records
 acknowledged in the last 30 days (`RESEND_WINDOW_MS`, equal to `RETENTION_MS`,
 decision 31) back in the outbox and settles the epoch with the count of
 refused blocks, only if the epoch is still the one read (a later restore noted
-meanwhile fails it with `changes_mismatch` and the next run settles that one).
+meanwhile fails it with `changes_mismatch` and the next run settles that one);
+which blocks were refused, each with the host's code, are kept beside the count
+(`refused_blocks`, a JSON list for support; a new epoch empties it, and nothing
+on screen shows it).
 The host answers a record it has with the receipt it keeps, so nothing is
 applied twice. A send answered `restore_pending` is the failure `held` and
 waits `RESTORE_HOLD_RETRY_MS` (60 s, the host's `RESTORE_RETRY_AFTER_SECS`,
@@ -3956,9 +3968,14 @@ knock a held host. The floor scans and closes boxes offline meanwhile, and code
 checks that meet the hold let the scan through as any failed check does. The
 status bar says, in its polite region, that the host holds the records, that
 blocks are owed, and how many the host refused (the stuck-delivery line is
-silent while the hold or the debt explains the wait). The office's hold card
-shows per station whether it gave its blocks back (`reconciled`) and the
-dialog how many of how many.
+silent while the hold or the debt explains the wait, and after a settled
+restore it counts from the reconciliation, `RECONCILED_AT_SQL`, not from a
+reopened record's creation). Before a forget the refused and other-host
+screens ask `restoreDue`: owed blocks are said (`shell.restoreOwed`), and the
+pairing is forgotten only on «Сбросить, не вернув блоки»; the question of the
+unsent records comes after it. The office's hold card shows per station
+whether it gave its blocks back (`reconciled`) and the dialog how many of how
+many.
 
 Left open, none of it hidden by a green test:
 
@@ -3966,34 +3983,43 @@ Left open, none of it hidden by a green test:
   blocks), so the office lists it «Не вернула» although nothing is owed; the
   station says nothing. The follow-up is the host's: accept an empty list, or
   expose whether the station ever had blocks (`hasBlocks`).
-- The host sets `reconciled` on the FIRST part it takes and the oldest blocks
-  go first, so «Вернула» can show before the newest blocks are back; a run
-  that fails between parts leaves the obligation open and the next run sends
-  everything again.
+- The host sets `reconciled` on the FIRST part it answers, even when it
+  refused every block of it (refusals show only on the station's status bar),
+  and the oldest blocks go first, so «Вернула» can show before the newest
+  blocks are back; a run that fails between parts leaves the obligation open
+  and the next run sends everything again.
 - The 30-day window is per record, not per shift: with a copy older than the
   window a shift can be split (its close goes again, scans acknowledged before
   the window do not).
-- Of the refused blocks only the count is kept, not their codes.
-- A connection whose `hello` read failed learns of the restore only at the
-  next connection, and sends its facts meanwhile (the hold covers that until
-  the resume). The marks a `conflict` receipt left on scans and boxes stay when
-  the record goes again. A shift a station opened or created after the copy has
-  no re-registration (its facts are refused once the facts resume:
-  `unknown_shift`, `not_entered`).
-- `device_forget` does not warn that blocks are still owed: it empties
-  `floor_restore_epochs` with the other copies. The stuck line keeps the
-  record's `created_at` (`HEAD_RECORD_SQL`), so after a reconcile and a
-  failure that is not the hold it can count weeks.
+- The refused-blocks line of the status bar stays until the next restore;
+  nothing acknowledges it, so days later it is not a fresh problem.
+- The marks a `conflict` receipt left on scans and boxes stay when the record
+  goes again. A shift a station opened or created after the copy has no
+  re-registration (its facts are refused once the facts resume:
+  `unknown_shift`, `not_entered`); the records of a shift it CLOSED after the
+  copy go again with the 30 days and are refused for good the same way (the
+  receipt is kept). That is more honest than the silent «accepted» before, but
+  such records cannot be resent.
+- A host error on the blocks that never resolves (a 4xx, a `conflict` other
+  than `no_restore`, an answer that does not answer the blocks) keeps the
+  obligation open and the outbox waiting: the status bar keeps «станция
+  возвращает…», and support reads the station's database.
 
 A restore on a NEW PC is not covered, and that is an open owner decision. The
 host there gets a new `hostId` and certificate, every station pairs again, and
 everything above is keyed to the CURRENT pairing. What the old pairing did
 after the copy never reaches the restored host: its records acknowledged by
 the dead host after the copy, its unsent records (they stay on the disk;
-`device_forget` refuses with `unsent_facts` until confirmed), its open shift
-with boxes already labelled, and the SSCC blocks it got after the copy. SSCC
-uniqueness then rests on the host's +100 000 counter margin and the runbook's
-check 1, which is mandatory. The options: back up `host.json` and `tls/` with
+`device_forget` refuses with `unsent_facts` until confirmed), the boxes it
+labelled in its open shift (a shift opened after the copy is unknown to the new
+host; one opened before is known, under the old device, but none of its boxes
+after the copy), and the SSCC blocks it got after the copy. SSCC uniqueness
+then rests on the host's +100 000 counter margin and the runbook's check 1,
+which is mandatory. The same loss hits, on ANY restore (the same PC
+included), every station paired after the copy: the copy does not know its
+device, its key is refused and it pairs again. Its SSCC is safe only when the
+previous database was read (the counters stand above everything the host
+issued); otherwise check 1 is mandatory for it too (runbook check 4). The options: back up `host.json` and `tls/` with
 the copy so stations keep their pairing; carry the old pairing's records and
 blocks into the new one; or accept the loss. The checks that make up for all of
 this are the runbook's, done by a person before the resume.
@@ -4193,7 +4219,7 @@ either; a file log is stage 5.
   copy registered again, the hold's line and its one-minute retries, nothing
   lost, no `sscc_not_issued` and no repeated SSCC after the resume, and the
   copies of the station equal to the office's; and a restore on a new PC with
-  the stations paired again (item 9, second run). Until then it has run only
+  the stations paired again (item 9, third run). Until then it has run only
   under jsdom and node:sqlite with a fake `HostApi`; the shell's `hello` read
   ran against a real host on 127.0.0.1 whose `site.restore_epoch` a test
   wrote, never against `markiro-host restore`, and nothing of it has met

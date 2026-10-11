@@ -142,8 +142,9 @@ export const hostStatusSchema = z
     seq: z.number().int().nonnegative(),
     /**
      * The host's `hello.restoreEpoch` as the connection that came online last
-     * read it (plan РК-С); absent before the host's first restore and when
-     * that read failed.
+     * read it (plan РК-С); absent before the host's first restore (and from
+     * a host that predates restores). A connection whose read failed does not
+     * come online.
      */
     restoreEpoch: z.uuid().optional(),
   })
