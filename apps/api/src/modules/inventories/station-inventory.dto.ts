@@ -1,4 +1,3 @@
-import { zodApiSchema } from "../../lib/openapi";
 import type { SchemaObject } from "@nestjs/swagger";
 import { z } from "zod";
 
@@ -604,9 +603,11 @@ export function parseLegacyStationInventoryManifest(
   return legacy;
 }
 
-export const stationInventoryLabelTemplateSpecOpenApiSchema: SchemaObject = zodApiSchema(
+// Task-form rendering imports this DTO in the browser; keep NestJS out of its runtime graph.
+export const stationInventoryLabelTemplateSpecOpenApiSchema: SchemaObject = z.toJSONSchema(
   labelTemplateSpecStrictSchema,
-);
+  { target: "openapi-3.0", io: "input" },
+) as SchemaObject;
 
 export const stationInventoryManifestOpenApiSchema: SchemaObject = {
   type: "object",
