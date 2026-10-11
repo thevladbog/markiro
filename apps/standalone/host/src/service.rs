@@ -1,5 +1,5 @@
-//! Windows service entry point. The installer registers `MarkiroHost` in
-//! stage 5; this module only answers the service manager.
+//! Windows service entry point. `markiro-host install` (`install.rs`, plan
+//! УСТ) registers `MarkiroHost`; this module only answers the service manager.
 
 use std::ffi::OsString;
 use std::sync::mpsc;
@@ -14,12 +14,12 @@ use windows_service::{define_windows_service, service_dispatcher};
 use crate::config::HostPaths;
 use crate::{BoxError, StartOptions};
 
-pub const SERVICE_NAME: &str = "MarkiroHost";
+pub const SERVICE_NAME: &str = crate::install::SERVICE_NAME;
 
-/// Recovery actions configured on the service (installer, stage 5) must see a
-/// failure, not a clean stop. The installer must also enable failure actions
-/// for non-crash exits (`sc failureflag MarkiroHost 1`), or Windows ignores
-/// this exit code.
+/// Recovery actions configured on the service (`install::service_spec`) must
+/// see a failure, not a clean stop. `install` also enables failure actions
+/// for non-crash exits (`sc failureflag MarkiroHost 1`), without which
+/// Windows ignores this exit code.
 const FAILURE_EXIT_CODE: u32 = 1;
 
 define_windows_service!(ffi_service_main, service_main);

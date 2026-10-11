@@ -10,6 +10,7 @@ pub mod db;
 pub mod error;
 pub mod facts;
 pub mod feed;
+pub mod install;
 pub mod logging;
 pub mod network;
 pub mod pairing_code;
