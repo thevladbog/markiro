@@ -47,12 +47,14 @@ export interface PalletStation {
 
 /**
  * A station with the shift with pallets entered — `capacity` boxes to a
- * pallet — a box block from 1500, a pallet block of serials 0–199 unless
- * `palletBlock` is `false`, and the Zebra for boxes and pallets.
+ * pallet, `boxCapacity` codes to a box (12) — a box block from 1500, a pallet
+ * block of serials 0–199 unless `palletBlock` is `false`, and the Zebra for
+ * boxes and pallets.
  */
 export async function palletStation(
   options: {
     capacity?: number;
+    boxCapacity?: number;
     palletBlock?: boolean;
     settings?: Partial<WorkstationSettings>;
   } = {},
@@ -60,6 +62,7 @@ export async function palletStation(
   const { db, executor } = openLocalDb();
   const shift = await enteredShift(executor, {
     ...PALLETS_ENTERED,
+    boxCapacity: options.boxCapacity ?? PALLETS_ENTERED.boxCapacity,
     palletBoxCapacity: options.capacity ?? 3,
   });
   const pallets = shiftPallets(shift);

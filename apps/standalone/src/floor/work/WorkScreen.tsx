@@ -43,6 +43,18 @@ import {
   type BoxScanVerdict,
   type ExceptionOutcome,
 } from "../exceptions/ExceptionFlow.js";
+import {
+  closeOpenPallet,
+  closePalletIfFull,
+  PALLET_EXTENSION,
+  palletStep,
+  readOpenPallet,
+  shiftPallets,
+  type OpenPallet,
+  type PalletCloseResult,
+  type PalletContext,
+  type ShiftPallets,
+} from "../pallets/pallets.js";
 import { LabelPanel, type LabelNote } from "../print/LabelPanel.js";
 import {
   boxLabelStep,
@@ -74,6 +86,7 @@ import type { WorkShift } from "../shifts/shift-copies.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 import { createBlockSupply, type BlockContext, type SupplyResult } from "./block-supply.js";
 import {
+  BOX_EXTENSION,
   boxIsFull,
   closeOpenBox,
   readClosedBox,
@@ -224,6 +237,19 @@ type Stop =
   | { kind: "confirm_close" }
   | { kind: "no_serials"; reason: "offline" | "exhausted" | "failed"; full: boolean }
   /**
+   * Plan ПЛ-Ц: the shift works with pallets, but this station's copy has no
+   * boxes per pallet or no pallet layout. The work never goes on with boxes
+   * alone (their pallets would be lost): nothing is taken until the operator
+   * leaves and enters the shift again.
+   */
+  | { kind: "pallets_missing" }
+  /** The early close of the open pallet, to confirm (plan ПЛ-Ц). */
+  | { kind: "confirm_pallet" }
+  /** The early close found no pallet serial (the serials' reason), and waits for the operator's retry. */
+  | { kind: "pallet_no_serials"; reason: "offline" | "exhausted" | "failed" }
+  /** The early close did not take: its serial was lost, or the pallet changed meanwhile (three tries). */
+  | { kind: "pallet_failed" }
+  /**
    * `serial`: the block's serial does not fit (past the prefix's range, or an
    * SSCC a box already holds) and is spent; `write`: the close did not reach
    * the database (a failed write, or three tries that found the box changed).
@@ -283,6 +309,12 @@ export const CUE_MS = 350;
 
 /** How many times a close that found the box or the block changed is tried in all. */
 const CLOSE_TRIES = 3;
+
+/** How many pallet serials a full pallet's close may lose, one per try, before it waits for the next close. */
+const PALLET_SERIAL_TRIES = 3;
+
+/** The stop of a shift that works with pallets and has none to work with. */
+const PALLETS_MISSING: Stop = { kind: "pallets_missing" };
 
 const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
 
@@ -348,6 +380,8 @@ interface Live {
   onRecorded: () => void;
   signal: (tone: SignalTone) => void;
   closeSteps: readonly CloseStep[];
+  /** The shift's boxes per pallet and pallet layout; `null` for a shift without pallets (plan ПЛ-Ц). */
+  pallets: ShiftPallets | null;
   onClosed: ((box: ClosingBox) => void) | undefined;
   printing: PrintRuntime;
   operatorName: string;
@@ -386,6 +420,16 @@ function printContextOf(live: LiveRef): ResolveContext {
   };
 }
 
+/** The context of a pallet's close: a box's, the operator's name for the label, the render. */
+function palletContextOf(live: LiveRef): PalletContext {
+  const now = live.current;
+  return {
+    ...boxContextOf(live),
+    operatorName: now.operatorName,
+    ...(now.render === undefined ? {} : { render: now.render }),
+  };
+}
+
 function scanContextOf(live: LiveRef): ScanContext {
   const now = live.current;
   return {
@@ -397,12 +441,15 @@ function scanContextOf(live: LiveRef): ScanContext {
 }
 
 /**
- * The context of the screen's one block supply. It reads everything through
- * `live`, so the supply is made once and never again, whatever the floor
- * gives the screen later (two supplies at once would both write the block).
+ * The context of one of the screen's block supplies — the box's (extension 0)
+ * and, for a shift with pallets, the pallet's (extension 1, plan ПЛ-Ц). It
+ * reads everything through `live`, so a supply is made once and never again,
+ * whatever the floor gives the screen later (two supplies of one extension at
+ * once would both write the block).
  */
-function blockContextOf(live: LiveRef): BlockContext {
+function blockContextOf(live: LiveRef, extension: number): BlockContext {
   return {
+    extension,
     get local() {
       return live.current.local;
     },
@@ -420,10 +467,12 @@ function blockContextOf(live: LiveRef): BlockContext {
   };
 }
 
-/** A close again on `stale` (nothing was written: the box or the block changed meanwhile). */
-async function closeSettled(close: () => Promise<CloseResult>): Promise<CloseResult> {
+/** A close again on `stale` (nothing was written: the box, the pallet or the block changed meanwhile). */
+async function closeSettled<Result extends { kind: string } | null>(
+  close: () => Promise<Result>,
+): Promise<Result> {
   let result = await close();
-  for (let attempt = 1; attempt < CLOSE_TRIES && result.kind === "stale"; attempt += 1) {
+  for (let attempt = 1; attempt < CLOSE_TRIES && result?.kind === "stale"; attempt += 1) {
     result = await close();
   }
   return result;
@@ -490,7 +539,14 @@ async function attemptClose(env: CloseEnv, full: boolean): Promise<CloseOutcome>
       ...(now.render === undefined ? {} : { render: now.render }),
     });
     try {
-      return await closeOpenBox(boxContextOf(env.live), [label, ...env.live.current.closeSteps]);
+      // A box of a shift with pallets joins the open pallet in its own close (plan ПЛ-Ц).
+      const pallets = env.live.current.pallets;
+      const steps = [
+        label,
+        ...env.live.current.closeSteps,
+        ...(pallets === null ? [] : [palletStep(palletContextOf(env.live), pallets)]),
+      ];
+      return await closeOpenBox(boxContextOf(env.live), steps);
     } catch (error) {
       // The write may have been committed, and only its answer lost.
       env.unsure.current = open.id;
@@ -568,7 +624,11 @@ export function WorkScreen(props: WorkScreenProps) {
   const [cued, setCued] = useState(false);
   // A close waits for the host's serials.
   const [waitingSerials, setWaitingSerials] = useState(false);
-  const [stop, setStopState] = useState<Stop | null>(null);
+  // The shift's pallets (plan ПЛ-Ц): what its copy and snapshot give. A shift that
+  // works with pallets and gives none is a stop from the first render, never boxes alone.
+  const pallets = shiftPallets(shift);
+  const palletsMissing = shift.copy.palletsEnabled && pallets === null;
+  const [stop, setStopState] = useState<Stop | null>(palletsMissing ? PALLETS_MISSING : null);
   const [planReached, setPlanReached] = useState(false);
   // The label the work stopped for: what its panel says under it, and whether a decision runs.
   const [labelNote, setLabelNote] = useState<LabelNote | null>(null);
@@ -579,6 +639,11 @@ export function WorkScreen(props: WorkScreenProps) {
   // The shift's close is being written; a second press meanwhile starts nothing.
   const [closing, setClosing] = useState(false);
   const closeRunning = useRef(false);
+  // The shift's open pallet and what it holds.
+  const [pallet, setPallet] = useState<OpenPallet | null>(null);
+  // The open pallet is full but did not close: no pallet serial is here ("no_serials"),
+  // or the one tried could not label a pallet ("invalid"). It closes with the next serials.
+  const [palletWaits, setPalletWaits] = useState<"no_serials" | "invalid" | null>(null);
   const capacity = shift.copy.boxCapacity;
   const plannedQty = shift.copy.plannedQty;
 
@@ -601,6 +666,7 @@ export function WorkScreen(props: WorkScreenProps) {
     onRecorded: props.onRecorded,
     signal: props.signal ?? playSignalTone,
     closeSteps: props.closeSteps ?? [],
+    pallets,
     onClosed: props.onClosed,
     printing: props.printing,
     operatorName: props.operator.name,
@@ -612,7 +678,7 @@ export function WorkScreen(props: WorkScreenProps) {
     live.current = latest;
   });
   // Read by a job in its turn, before React renders the stop it set.
-  const stopRef = useRef<Stop | null>(null);
+  const stopRef = useRef<Stop | null>(stop);
   const setStop = useCallback((next: Stop | null) => {
     stopRef.current = next;
     setStopState(next);
@@ -649,14 +715,21 @@ export function WorkScreen(props: WorkScreenProps) {
   // Counted when the operator answers a message: the element that held the
   // focus is gone after that render, and the focus goes to a safe place instead.
   const [refocused, setRefocused] = useState(0);
+  // The refocus follows an answer about the pallet (plan ПЛ-Ц).
+  const palletRefocus = useRef(false);
   const refocus = useCallback(() => {
     if (alive.current) setRefocused((times) => times + 1);
   }, []);
   useEffect(() => {
     if (refocused === 0) return;
-    const close = actionsRef.current?.querySelector<HTMLButtonElement>(
-      '[data-action="close-box"]:not(:disabled)',
-    );
+    // After the pallet's questions the focus returns to the pallet's button when it is still there.
+    const asked = palletRefocus.current;
+    palletRefocus.current = false;
+    const pick = (action: string) =>
+      actionsRef.current?.querySelector<HTMLButtonElement>(
+        `[data-action="${action}"]:not(:disabled)`,
+      );
+    const close = (asked ? pick("close-pallet") : null) ?? pick("close-box");
     (close ?? lastRef.current)?.focus();
   }, [refocused]);
   /** Whether the floor has begun to leave: the render's word, and the floor's own at once. */
@@ -668,12 +741,21 @@ export function WorkScreen(props: WorkScreenProps) {
   // One queue and one supply for the screen's life: `useState` keeps them, where
   // `useMemo` may be recomputed, and two supplies would both write the block.
   const [queue] = useState(createWorkQueue);
-  const [supply] = useState(() => createBlockSupply(blockContextOf(live)));
+  const [supply] = useState(() => createBlockSupply(blockContextOf(live, BOX_EXTENSION)));
+  // The pallet serials' own supply (extension 1); a shift without pallets never asks it.
+  const [palletSupply] = useState(() => createBlockSupply(blockContextOf(live, PALLET_EXTENSION)));
 
   const refresh = useCallback(async () => {
     const now = live.current;
     const next = await readWorkTotals(now.local, pairingOf(now), now.shift.copy.id);
-    if (alive.current) setTotals(next);
+    const open =
+      now.pallets === null
+        ? null
+        : await readOpenPallet(now.local, pairingOf(now), now.shift.copy.id);
+    if (alive.current) {
+      setTotals(next);
+      setPallet(open);
+    }
     return next;
   }, []);
   /** The totals again; a failed read leaves what the screen shows, as it is not the work's. */
@@ -703,8 +785,9 @@ export function WorkScreen(props: WorkScreenProps) {
 
   /** A top-up of serials as a piece of the floor's work: handed to the gate before it starts. */
   const topUpTracked = useCallback(
-    () => live.current.track(Promise.resolve().then(() => supply.topUp())),
-    [supply],
+    (blocks: { topUp: () => Promise<SupplyResult> }) =>
+      live.current.track(Promise.resolve().then(() => blocks.topUp())),
+    [],
   );
 
   /** After a box closed (also one read back after a lost answer): tell, and keep serials in stock. */
@@ -716,15 +799,18 @@ export function WorkScreen(props: WorkScreenProps) {
       } catch {
         // The label's plan answers for its own failures; the box is closed.
       }
-      // The half rule after every close: work of its own, not the line's.
-      void topUpTracked().then(
-        (topped) => {
-          if (topped.kind === "stored") live.current.onRecorded();
-        },
-        () => undefined,
-      );
+      // The half rule after every close: work of its own, not the line's — for the
+      // pallet serials too, in a shift with pallets.
+      for (const blocks of live.current.pallets === null ? [supply] : [supply, palletSupply]) {
+        void topUpTracked(blocks).then(
+          (topped) => {
+            if (topped.kind === "stored") live.current.onRecorded();
+          },
+          () => undefined,
+        );
+      }
     },
-    [topUpTracked],
+    [topUpTracked, supply, palletSupply],
   );
 
   /** The label stop for `job` while it waits; the work goes on when it does not (another stop is left alone). */
@@ -740,41 +826,48 @@ export function WorkScreen(props: WorkScreenProps) {
   );
 
   /**
-   * What the shift's waiting label needs (stage 2a spec §5.7.5), after every
-   * close and on entry. A job still `prepared` — written with its box, never
-   * sent — goes now: its first send, not a repeat. One that failed, is
-   * unknown or waits for its check stops the work. Nothing here sends a label
-   * a second time and nothing here recovers interrupted sends: that runs once,
-   * on entry, before this (the recovery must never run beside a send). Only
-   * from the work queue. A send that was rejected says nothing of where it
-   * stands: a stale one reads the job again, any other failure is the caller's
-   * to show, whose dismissal comes back here and reads it.
+   * What the shift's waiting labels need (stage 2a spec §5.7.5), after every
+   * close and on entry. A job still `prepared` — written with its box or
+   * pallet, never sent — goes now: its first send, not a repeat; the box's
+   * before the pallet's that its close filled (plan ПЛ-Ц), the next one as
+   * soon as the one before it is done with. One that failed, is unknown or
+   * waits for its check stops the work, and the label behind it waits. Nothing
+   * here sends a label a second time and nothing here recovers interrupted
+   * sends: that runs once, on entry, before this (the recovery must never run
+   * beside a send). Only from the work queue. A send that was rejected says
+   * nothing of where it stands: a stale one reads the job again (a job that is
+   * still the same one is shown, never sent in a loop), any other failure is
+   * the caller's to show, whose dismissal comes back here and reads it.
+   * A decision on a label that leaves another one prepared calls this again.
    *
-   * Known limits, left to the owner / plan 2b and to plan ПЛ-Ц:
-   * - A job this build cannot read (`UnreadableJobError`) makes this read
-   *   throw every time: that shift's line stays on the label system message
-   *   until the operator leaves the shift. There is no bypass here on purpose;
-   *   the proposal is in `UnreadableJobError`'s JSDoc.
-   * - The screen shows the shift's OLDEST open job and, after a decision on
-   *   it, trusts the decided job instead of reading the next waiting one. With
-   *   one box label per shift that is exact; once a pallet label can open in
-   *   the same close as its box's, a decision must call this function again.
+   * Known limit, left to the owner / plan 2b: a job this build cannot read
+   * (`UnreadableJobError`) makes this read throw every time: that shift's line
+   * stays on the label system message until the operator leaves the shift.
+   * There is no bypass here on purpose; the proposal is in
+   * `UnreadableJobError`'s JSDoc.
    */
   const settleLabel = useCallback(async (): Promise<void> => {
     const now = live.current;
     let job = await readOpenJob(now.local, pairingOf(now), now.shift.copy.id);
-    if (job?.state === "prepared") {
+    while (job?.state === "prepared") {
+      const first: PrintJob = job;
       if (alive.current) setSending(true);
       try {
         // A send writes no record for the host: the status bar has nothing to read again.
-        job = await sendLabelJob(printContextOf(live), job);
+        job = await sendLabelJob(printContextOf(live), first);
       } catch (error) {
         if (!(error instanceof StaleJobError)) throw error;
         const again = live.current;
         job = await readOpenJob(again.local, pairingOf(again), again.shift.copy.id);
+        if (job?.id === first.id) break;
+        continue;
       } finally {
         if (alive.current) setSending(false);
       }
+      // The oldest that still waits is read again: one that stops the work is
+      // that one, and the next waits behind it; one done with lets the next go.
+      const next = live.current;
+      job = await readOpenJob(next.local, pairingOf(next), next.shift.copy.id);
     }
     showLabel(job);
   }, [showLabel]);
@@ -787,6 +880,69 @@ export function WorkScreen(props: WorkScreenProps) {
       setStop({ kind: "system_error", cause: "label" });
     }
   }, [settleLabel, setStop]);
+
+  /**
+   * The full open pallet's close (`closePalletIfFull`, plan ПЛ-Ц), a serial
+   * that cannot label a pallet lost per try and a stale write tried again:
+   * each call that answers `invalid_serial` has spent one bad serial, so the
+   * next takes the next, a few times, and the line never stops on it. Only
+   * from the work queue.
+   */
+  const closeFullPallet = useCallback(async (): Promise<PalletCloseResult | null> => {
+    const pallets = live.current.pallets;
+    if (pallets === null) return null;
+    const attempt = () => closeSettled(() => closePalletIfFull(palletContextOf(live), pallets));
+    let result = await attempt();
+    for (
+      let tries = 1;
+      tries < PALLET_SERIAL_TRIES && result?.kind === "invalid_serial";
+      tries += 1
+    ) {
+      result = await attempt();
+    }
+    return result;
+  }, []);
+
+  /**
+   * A full pallet that waited for pallet serials closes once they are here
+   * (plan ПЛ-Ц): after a box's close, on entry, and when serials arrive, while
+   * no label waits. Without them the screen says the pallet waits and the next
+   * boxes join it — the line never stops for it. The pallet's label goes at
+   * once, after the box's. Only from the work queue.
+   */
+  const settlePallet = useCallback(async (): Promise<void> => {
+    if (live.current.pallets === null) return;
+    let result = await closeFullPallet();
+    if (result?.kind === "no_serials") {
+      const supplied = await palletSupply.topUp();
+      if (supplied.kind === "stored") {
+        live.current.onRecorded();
+        result = await closeFullPallet();
+      }
+    }
+    if (alive.current) {
+      setPalletWaits(
+        result?.kind === "no_serials"
+          ? "no_serials"
+          : result?.kind === "invalid_serial"
+            ? "invalid"
+            : null,
+      );
+    }
+    if (result?.kind === "closed") {
+      live.current.onRecorded();
+      await settleLabel();
+    }
+  }, [closeFullPallet, palletSupply, settleLabel]);
+
+  /** `settlePallet`, whose failure stops the line with the failed write instead of being lost. */
+  const settlePalletSafely = useCallback(async (): Promise<void> => {
+    try {
+      await settlePallet();
+    } catch {
+      setStop({ kind: "system_error", cause: "write" });
+    }
+  }, [settlePallet, setStop]);
 
   /**
    * Closes the box — the full one, or the open one the operator confirmed —
@@ -819,9 +975,12 @@ export function WorkScreen(props: WorkScreenProps) {
       if (outcome.kind === "stop") setStop(outcome.stop);
       if (recovered !== null || outcome.kind === "closed" || outcome.kind === "label_waits") {
         await settleSafely();
+        // The box that filled its pallet closed it in its own write; one that found no
+        // pallet serial left it open, and it closes now if serials are here.
+        if (stopRef.current === null) await settlePalletSafely();
       }
     },
-    [supply, afterClosed, setStop, settleSafely],
+    [supply, afterClosed, setStop, settleSafely, settlePalletSafely],
   );
 
   const settle = useCallback(
@@ -895,8 +1054,12 @@ export function WorkScreen(props: WorkScreenProps) {
         setLabelNote(null);
         show("ok", say("floor.print.signal.verified"), null);
         showLabel(result.job);
-        // A box a stop of the station left full closes now, with its label.
+        // The box's label decided, the pallet's that its close filled goes next.
+        if (stopRef.current === null) await settleSafely();
+        // A box a stop of the station left full closes now, with its label;
+        // so does a full pallet that waited.
         if (stopRef.current === null) await closeBox(true);
+        if (stopRef.current === null) await settlePalletSafely();
         await refreshQuietly();
         return;
       }
@@ -909,7 +1072,7 @@ export function WorkScreen(props: WorkScreenProps) {
         null,
       );
     },
-    [settleSafely, show, showLabel, closeBox, refreshQuietly],
+    [settleSafely, settlePalletSafely, show, showLabel, closeBox, refreshQuietly],
   );
 
   // The box choice of the exceptions, when it listens: a scan of a label picks the box.
@@ -1005,7 +1168,10 @@ export function WorkScreen(props: WorkScreenProps) {
             const job = await work(stopped.job);
             live.current.onRecorded();
             showLabel(job);
+            // A label decided lets the next one that waits go (a box's, then its pallet's).
+            if (stopRef.current === null) await settleLabel();
             if (stopRef.current === null) await closeBox(true);
+            if (stopRef.current === null) await settlePalletSafely();
           } catch (error) {
             if (error instanceof NoPrinterError) setLabelNote({ kind: "no_printer" });
             else if (error instanceof LabelRenderError) setLabelNote({ kind: "render_failed" });
@@ -1046,14 +1212,12 @@ export function WorkScreen(props: WorkScreenProps) {
     decide(async (job) => {
       const now = live.current;
       const settings = await readWorkstationSettings(now.local);
-      return printAgain(
-        printContextOf(live),
-        job,
-        request,
-        settings,
-        now.shift.snapshot.boxTemplate,
-        now.render,
-      );
+      // A pallet's label is rendered again from the snapshot's pallet layout (plan ПЛ-Ц).
+      const template =
+        job.purpose === "pallet" && now.pallets !== null
+          ? now.pallets.template
+          : now.shift.snapshot.boxTemplate;
+      return printAgain(printContextOf(live), job, request, settings, template, now.render);
     }, true);
 
   /** The settings the panel says a reprint's printer from (the same read `printAgain` makes). */
@@ -1163,6 +1327,52 @@ export function WorkScreen(props: WorkScreenProps) {
       const result = await disassembleBox(boxContextOf(live), boxId, reason);
       return result.kind === "done" ? { kind: "done", action: "disassemble" } : result;
     });
+
+  /**
+   * «Закрыть паллету досрочно» (plan ПЛ-Ц): the open pallet closes with the
+   * boxes it holds, after a label that waits is decided; when the pallet
+   * serials ran out the host is asked for a block and the close tried once
+   * more. What is left stops the work with its reason. Answers how it went.
+   * Only from the work queue.
+   */
+  const closePallet = useCallback(async (): Promise<"closed" | "empty" | "stopped"> => {
+    const now = live.current;
+    const pallets = now.pallets;
+    if (pallets === null) return "empty";
+    if ((await readOpenJob(now.local, pairingOf(now), now.shift.copy.id)) !== null) {
+      await settleSafely();
+      return "stopped";
+    }
+    const close = () => closeOpenPallet(palletContextOf(live), pallets);
+    let result = await closeSettled(close);
+    let supplied: SupplyResult | null = null;
+    if (result.kind === "no_serials") {
+      supplied = await palletSupply.topUp();
+      if (supplied.kind === "stored") {
+        live.current.onRecorded();
+        result = await closeSettled(close);
+      }
+    }
+    if (result.kind === "empty") return "empty";
+    if (result.kind === "closed") {
+      live.current.onRecorded();
+      if (alive.current) setPalletWaits(null);
+      await settleSafely();
+      return "closed";
+    }
+    if (result.kind === "no_serials") {
+      const reason =
+        supplied === null || supplied.kind === "stored" || supplied.kind === "enough"
+          ? "failed"
+          : supplied.kind;
+      setStop({ kind: "pallet_no_serials", reason });
+      return "stopped";
+    }
+    // A serial that could not label a pallet is lost (the next try takes the next),
+    // or the pallet changed under three tries: nothing was closed.
+    setStop({ kind: "pallet_failed" });
+    return "stopped";
+  }, [palletSupply, settleSafely, setStop]);
 
   /** The label that keeps the shift from closing, named by its SSCC; `null` when none is read. */
   const waitingLabel = async (summary: CloseSummary): Promise<string | null> => {
@@ -1364,13 +1574,15 @@ export function WorkScreen(props: WorkScreenProps) {
 
   // On entry: the numbers; the sends a stop of the station cut are unknown now
   // (the one place that recovers them, before anything of this screen sends);
-  // the label that waits is settled; and a box the stopped station left full
-  // closes first (kept open while a label waits).
+  // the label that waits is settled; a box the stopped station left full
+  // closes first (kept open while a label waits); then a pallet it left full.
   useEffect(() => {
     void live.current
       .track(
         queue.run(async () => {
           await refresh();
+          // Pallets that are missing stop the work before anything is written.
+          if (stopRef.current?.kind === "pallets_missing") return;
           try {
             await recoverInterruptedJobs(printContextOf(live));
           } catch {
@@ -1379,11 +1591,22 @@ export function WorkScreen(props: WorkScreenProps) {
           }
           await settleSafely();
           await closeBox(true);
+          // A pallet a stop of the station left full closes now.
+          if (stopRef.current === null) await settlePalletSafely();
           await refreshQuietly();
         }),
       )
       .catch(failSystem);
-  }, [queue, refresh, refreshQuietly, settleSafely, closeBox, failSystem, setStop]);
+  }, [
+    queue,
+    refresh,
+    refreshQuietly,
+    settleSafely,
+    settlePalletSafely,
+    closeBox,
+    failSystem,
+    setStop,
+  ]);
 
   // On entry and whenever the link is back: serials by the half rule; a close
   // that waited for them goes again.
@@ -1411,6 +1634,40 @@ export function WorkScreen(props: WorkScreenProps) {
       .catch(() => undefined);
   }, [online, supply, queue, closeBox, refreshQuietly, setStop]);
 
+  // Pallet serials by the half rule on entry and whenever the link is back (plan
+  // ПЛ-Ц): a pallet that waited for them closes, and an early close that stopped
+  // for them goes again.
+  const hasPallets = pallets !== null;
+  useEffect(() => {
+    if (!online || !hasPallets) return;
+    void live.current
+      .track(
+        Promise.resolve()
+          .then(() => palletSupply.topUp())
+          .then(async (topped) => {
+            if (topped.kind !== "stored") return;
+            live.current.onRecorded();
+            await live.current.track(
+              queue.run(async () => {
+                const waiting = stopRef.current;
+                try {
+                  if (waiting?.kind === "pallet_no_serials") {
+                    setStop(null);
+                    await closePallet();
+                  } else if (waiting === null) {
+                    await settlePallet();
+                  }
+                } catch {
+                  setStop({ kind: "system_error", cause: "write" });
+                }
+                await refreshQuietly();
+              }),
+            );
+          }),
+      )
+      .catch(() => undefined);
+  }, [online, hasPallets, palletSupply, queue, closePallet, settlePallet, refreshQuietly, setStop]);
+
   /** Runs a close as the line's next piece of work. */
   const closeNow = (full: boolean) => {
     // Nothing the operator presses starts work the leave no longer waits for.
@@ -1428,11 +1685,30 @@ export function WorkScreen(props: WorkScreenProps) {
       .finally(refocus);
   };
 
-  // The operator who asked to close an incomplete box has the safe answer under their hand.
+  /** «Закрыть паллету» confirmed (or «Повторить»): the early close as the line's next piece of work. */
+  const closePalletNow = () => {
+    // Nothing the operator presses starts work the leave no longer waits for.
+    if (leavingNow()) return;
+    setStop(null);
+    palletRefocus.current = true;
+    void live.current
+      .track(
+        queue.run(async () => {
+          await closePallet();
+          await refreshQuietly();
+        }),
+      )
+      .catch(() => setStop({ kind: "system_error", cause: "write" }))
+      // The button pressed is gone, and the pallet it closed may be too.
+      .finally(refocus);
+  };
+
+  // The operator who asked to close an incomplete box or pallet has the safe answer under their hand.
   const confirming = stop?.kind === "confirm_close";
+  const confirmingPallet = stop?.kind === "confirm_pallet";
   useEffect(() => {
-    if (confirming) confirmRef.current?.querySelector("button")?.focus();
-  }, [confirming]);
+    if (confirming || confirmingPallet) confirmRef.current?.querySelector("button")?.focus();
+  }, [confirming, confirmingPallet]);
 
   /** The operator answers a message: what it held the focus with goes, and the focus goes somewhere safe. */
   const dismiss = (answer: () => void) => {
@@ -1443,6 +1719,7 @@ export function WorkScreen(props: WorkScreenProps) {
   const openBox = totals?.openBox ?? null;
   const items = openBox?.itemCount ?? 0;
   const canClose = items > 0 && stop === null && !leaving;
+  const palletBoxes = pallet?.boxCount ?? 0;
 
   return (
     <Card
@@ -1486,6 +1763,17 @@ export function WorkScreen(props: WorkScreenProps) {
             <dt>{t("floor.work.plan")}</dt>
             <dd>{plannedQty === null ? t("floor.work.noPlan") : formatQuantity(plannedQty)}</dd>
           </div>
+          {pallets !== null && (
+            <div>
+              <dt>{t("floor.work.pallet")}</dt>
+              <dd>
+                {t("floor.work.palletBoxes", {
+                  quantity: formatQuantity(palletBoxes),
+                  capacity: formatQuantity(pallets.capacity),
+                })}
+              </dd>
+            </div>
+          )}
           {totals !== null && totals.lastSscc !== null && (
             <div>
               <dt>{t("floor.work.lastSscc")}</dt>
@@ -1567,6 +1855,64 @@ export function WorkScreen(props: WorkScreenProps) {
               }
             >
               {t(`floor.work.closeFailed.${stop.cause}`)}
+            </Alert>
+          )}
+          {stop?.kind === "pallets_missing" && (
+            <Alert tone="error" role="presentation" title={t("floor.work.palletsMissing.title")}>
+              {t("floor.work.palletsMissing.body")}
+            </Alert>
+          )}
+          {palletWaits !== null && (
+            <Alert tone="warn" role="presentation" title={t("floor.work.palletWaits.title")}>
+              {t(
+                palletWaits === "invalid"
+                  ? "floor.work.palletWaits.invalid"
+                  : "floor.work.palletWaits.body",
+              )}
+            </Alert>
+          )}
+          {stop?.kind === "pallet_no_serials" && (
+            <Alert
+              tone="warn"
+              role="presentation"
+              title={t("floor.work.palletNoSerials.title")}
+              action={
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  aria-disabled={leaving ? true : undefined}
+                  style={leaving ? WAITING_STYLE : undefined}
+                  onClick={closePalletNow}
+                >
+                  {t("floor.work.retry")}
+                </Button>
+              }
+            >
+              {t(
+                stop.reason === "offline" && linkHeld
+                  ? "floor.work.palletNoSerials.held"
+                  : `floor.work.palletNoSerials.${stop.reason}`,
+              )}
+            </Alert>
+          )}
+          {stop?.kind === "pallet_failed" && (
+            <Alert
+              tone="error"
+              role="presentation"
+              title={t("floor.work.palletFailed.title")}
+              action={
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  aria-disabled={leaving ? true : undefined}
+                  style={leaving ? WAITING_STYLE : undefined}
+                  onClick={closePalletNow}
+                >
+                  {t("floor.work.retry")}
+                </Button>
+              }
+            >
+              {t("floor.work.palletFailed.body")}
             </Alert>
           )}
           {planReached && (
@@ -1683,6 +2029,38 @@ export function WorkScreen(props: WorkScreenProps) {
             </div>
           </div>
         )}
+        {confirmingPallet && (
+          <div className="work-screen__confirm" ref={confirmRef}>
+            <p>
+              {t("floor.work.confirmPallet", {
+                quantity: formatQuantity(palletBoxes),
+                capacity: formatQuantity(pallets?.capacity ?? 0),
+              })}
+            </p>
+            <div className="standalone-form__actions">
+              <Button
+                size="floor"
+                variant="secondary"
+                onClick={() =>
+                  dismiss(() => {
+                    palletRefocus.current = true;
+                    setStop(null);
+                  })
+                }
+              >
+                {t("floor.work.keepPallet")}
+              </Button>
+              <Button
+                size="floor"
+                aria-disabled={leaving ? true : undefined}
+                style={leaving ? WAITING_STYLE : undefined}
+                onClick={closePalletNow}
+              >
+                {t("floor.work.closePallet")}
+              </Button>
+            </div>
+          </div>
+        )}
         <div className="standalone-form__actions" ref={actionsRef}>
           {!confirming && (
             <Button
@@ -1693,6 +2071,17 @@ export function WorkScreen(props: WorkScreenProps) {
               onClick={() => setStop({ kind: "confirm_close" })}
             >
               {t("floor.work.closeBox")}
+            </Button>
+          )}
+          {pallets !== null && (
+            <Button
+              size="floor"
+              variant="secondary"
+              data-action="close-pallet"
+              disabled={palletBoxes === 0 || stop !== null || leaving}
+              onClick={() => setStop({ kind: "confirm_pallet" })}
+            >
+              {t("floor.work.closePalletEarly")}
             </Button>
           )}
           <Button

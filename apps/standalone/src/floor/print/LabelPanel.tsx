@@ -67,12 +67,14 @@ type Settings = { kind: "loading" } | { kind: "ready"; value: PanelSettings } | 
 /** A button that is waiting for a decision's answer: on the keyboard still, and a press that does nothing. */
 const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
 
-function noteText(note: LabelNote, t: TFunction): string {
+function noteText(note: LabelNote, t: TFunction, pallet: boolean): string {
   switch (note.kind) {
     case "mismatch":
-      return t("floor.print.check.mismatch", { sscc: formatSsccHri(note.sscc) });
+      return t(pallet ? "floor.print.pallet.mismatch" : "floor.print.check.mismatch", {
+        sscc: formatSsccHri(note.sscc),
+      });
     case "not_sscc":
-      return t("floor.print.check.notSscc");
+      return t(pallet ? "floor.print.pallet.notSscc" : "floor.print.check.notSscc");
     case "no_printer":
       return t("floor.print.notes.noPrinter");
     case "render_failed":
@@ -119,9 +121,10 @@ function targetText(
 }
 
 /**
- * The label of the box the work stopped for (stage 2a spec §5.7.5): its
- * check — scan the SSCC, or skip it — or its recovery when it failed or its
- * outcome is unknown. Only the operator sends a label again: a label that
+ * The label of the box — or of the pallet (plan ПЛ-Ц), said so in its own
+ * words — the work stopped for (stage 2a spec §5.7.5): its check — scan the
+ * SSCC, or skip it — or its recovery when it failed or its outcome is
+ * unknown. Only the operator sends a label again: a label that
  * may already exist only with a reason, which the panel asks before the
  * send and builds from its buttons alone; «Продолжить без этикетки» after a
  * confirmation. Before a reprint is confirmed the panel says which printer
@@ -151,7 +154,10 @@ export function LabelPanel({
   const checking = awaitsCheck(job);
   // A label that may already be on a box: a second one needs a reason.
   const mayExist = checking || job.state === "unknown";
-  const sscc = t("floor.print.sscc", { sscc: formatSsccHri(job.sscc) });
+  const pallet = job.purpose === "pallet";
+  const sscc = t(pallet ? "floor.print.pallet.sscc" : "floor.print.sscc", {
+    sscc: formatSsccHri(job.sscc),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -242,7 +248,7 @@ export function LabelPanel({
         title={t("floor.print.reason.title")}
         className="work-screen__label"
       >
-        <p>{t("floor.print.reason.hint")}</p>
+        <p>{t(pallet ? "floor.print.pallet.reasonHint" : "floor.print.reason.hint")}</p>
         <p>{sscc}</p>
         {target !== null && <p>{target}</p>}
         <div className="standalone-form__actions work-screen__reasons">
@@ -296,7 +302,7 @@ export function LabelPanel({
         title={t("floor.print.skipConfirm.title")}
         className="work-screen__label"
       >
-        <p>{t("floor.print.skipConfirm.body")}</p>
+        <p>{t(pallet ? "floor.print.pallet.skipBody" : "floor.print.skipConfirm.body")}</p>
         <p>{sscc}</p>
         <div className="standalone-form__actions">
           {back}
@@ -354,9 +360,9 @@ export function LabelPanel({
         title={t("floor.print.check.title")}
         className="work-screen__label"
       >
-        <p>{t("floor.print.check.body")}</p>
+        <p>{t(pallet ? "floor.print.pallet.checkBody" : "floor.print.check.body")}</p>
         <p>{sscc}</p>
-        {note !== null && <p>{noteText(note, t)}</p>}
+        {note !== null && <p>{noteText(note, t, pallet)}</p>}
         <div className="standalone-form__actions">
           <Button size="floor" variant="secondary" {...press(() => again(null))}>
             {t("floor.print.printAgain")}
@@ -373,13 +379,25 @@ export function LabelPanel({
       <Alert
         tone="error"
         role="presentation"
-        title={t(job.state === "unknown" ? "floor.print.unknownTitle" : "floor.print.failedTitle")}
+        title={t(
+          job.state === "unknown"
+            ? "floor.print.unknownTitle"
+            : pallet
+              ? "floor.print.pallet.failedTitle"
+              : "floor.print.failedTitle",
+        )}
         className="work-screen__label"
       >
-        {job.errorCode !== null && <p>{t(`floor.print.codes.${job.errorCode}`)}</p>}
+        {job.errorCode !== null && (
+          <p>
+            {pallet && job.errorCode === "printer_unconfigured"
+              ? t("floor.print.pallet.printerUnconfigured")
+              : t(`floor.print.codes.${job.errorCode}`)}
+          </p>
+        )}
         <p>{sscc}</p>
         {target !== null && <p>{target}</p>}
-        {note !== null && <p>{noteText(note, t)}</p>}
+        {note !== null && <p>{noteText(note, t, pallet)}</p>}
         <div className="standalone-form__actions">
           {job.state === "unknown" && (
             <Button size="floor" {...press(onPrinted)}>
