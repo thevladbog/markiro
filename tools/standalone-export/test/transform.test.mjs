@@ -1536,3 +1536,139 @@ test("a PHC string the host would refuse: extra parts, another algorithm, a bad 
   assert.equal(parsePhc(12345), null);
   assert.equal(parsePhc(["a"]), null);
 });
+
+test("an output that lacks a list or a count stops the export instead of failing on a TypeError", () => {
+  const lists = [
+    "lines",
+    "counterparties",
+    "templates",
+    "boxDefaults",
+    "palletDefaults",
+    "products",
+    "operators",
+    "badges",
+    "ssccCounters",
+    "ssccBlocks",
+    "ssccPrinted",
+    "shiftNumberCounters",
+    "shiftNumberMaxima",
+    "otherTenantsSscc",
+    "activeShifts",
+    "staleDevices",
+  ];
+  for (const key of lists) {
+    for (const bad of [undefined, null, {}, "[]"]) {
+      const source = raw();
+      if (bad === undefined) delete source[key];
+      else source[key] = bad;
+      assert.throws(
+        () => buildExportFile(source, { exportedAt: EXPORTED_AT }),
+        (error) =>
+          error instanceof ExportError &&
+          error.code === "export_output_invalid" &&
+          error.message === `the export output has no list "${key}"`,
+        `${key} = ${JSON.stringify(bad)}`,
+      );
+    }
+  }
+  for (const key of ["nonOperatorBadges", "counterpartyIssuedShifts", "plannedShifts"]) {
+    for (const bad of [undefined, null, "2", -1, 1.5, Number.NaN]) {
+      const source = raw();
+      if (bad === undefined) delete source[key];
+      else source[key] = bad;
+      assert.throws(
+        () => buildExportFile(source, { exportedAt: EXPORTED_AT }),
+        (error) =>
+          error instanceof ExportError &&
+          error.code === "export_output_invalid" &&
+          error.message === `the export output has no count "${key}"`,
+        `${key} = ${String(bad)}`,
+      );
+    }
+    const zero = raw();
+    zero[key] = 0;
+    assert.doesNotThrow(() => buildExportFile(zero, { exportedAt: EXPORTED_AT }), key);
+  }
+  for (const bad of [null, [], "{}", 1]) {
+    assert.throws(
+      () => buildExportFile(bad, { exportedAt: EXPORTED_AT }),
+      (error) =>
+        error instanceof ExportError &&
+        error.code === "export_output_invalid" &&
+        error.message === "the export output is not an object",
+    );
+  }
+  assert.throws(
+    () => buildExportFile({ ...raw(), formatVersion: 2 }, { exportedAt: EXPORTED_AT }),
+    (error) =>
+      error instanceof ExportError &&
+      error.code === "export_output_invalid" &&
+      error.message === "the export output is not format version 1",
+  );
+  // A missing tenant is still its own refusal: its lists are all there.
+  assert.throws(
+    () => buildExportFile({ ...raw(), tenant: null }, { exportedAt: EXPORTED_AT }),
+    (error) => error instanceof ExportError && error.code === "tenant_not_found",
+  );
+});
+
+test("shifts that hold numbers past their month's counter stop the export, rehearsal or not", () => {
+  const behind = (mutate) => {
+    const source = raw();
+    mutate(source);
+    return source;
+  };
+  const refuses = (source, expected, options = {}) =>
+    assert.throws(
+      () => buildExportFile(source, { exportedAt: EXPORTED_AT, ...options }),
+      (error) =>
+        error instanceof ExportError &&
+        error.code === "shift_counter_behind" &&
+        error.message === expected,
+    );
+  // One past the counter.
+  refuses(
+    behind((source) => {
+      source.shiftNumberMaxima[1].maxSeq = 8;
+    }),
+    `shifts hold numbers past their month's counter: "OCT26" (shifts up to 8, counter 7)`,
+  );
+  // A month with shifts and no counter row at all.
+  refuses(
+    behind((source) => {
+      source.shiftNumberMaxima.push({ monthKey: "JAN27", maxSeq: 2 });
+    }),
+    `shifts hold numbers past their month's counter: "JAN27" (shifts up to 2, counter missing)`,
+  );
+  // Every month that is behind is named, in the order the SQL printed them.
+  refuses(
+    behind((source) => {
+      source.shiftNumberMaxima[0].maxSeq = 5;
+      source.shiftNumberMaxima[2].maxSeq = 42;
+    }),
+    `shifts hold numbers past their month's counter: "NOV26" (shifts up to 5, counter 1), "SEP26" (shifts up to 42, counter 41)`,
+  );
+  // The check is not a rehearsal's to skip: a repeated number cannot be repaired.
+  refuses(
+    behind((source) => {
+      source.shiftNumberMaxima[1].maxSeq = 8;
+    }),
+    `shifts hold numbers past their month's counter: "OCT26" (shifts up to 8, counter 7)`,
+    { rehearsal: true },
+  );
+  // A counter equal to the highest number, or ahead of it (a deleted shift), is fine;
+  // so is a month without shifts (the DEC26 counter of the fixture).
+  const ahead = raw();
+  ahead.shiftNumberMaxima[1].maxSeq = 6;
+  ahead.shiftNumberMaxima.length = 2;
+  assert.doesNotThrow(() => buildExportFile(ahead, { exportedAt: EXPORTED_AT }));
+  assert.doesNotThrow(() =>
+    buildExportFile({ ...raw(), shiftNumberMaxima: [] }, { exportedAt: EXPORTED_AT }),
+  );
+});
+
+test("the other tenants' serials are read for a warning, never carried into the file", () => {
+  const source = raw();
+  source.otherTenantsSscc = [{ issuerPrefix: "460068200", extension: 0, maxSerial: 99_999_999 }];
+  assert.deepEqual(buildExportFile(source, { exportedAt: EXPORTED_AT }), golden());
+});

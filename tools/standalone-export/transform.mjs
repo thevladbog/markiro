@@ -30,13 +30,42 @@ const MAX_SPEC_DEPTH = 64;
 const MAX_GS1_PREFIXES = 10;
 
 /**
+ * What `export.sql` always prints: every list and every count. A key that is
+ * missing means the SQL is not this tool's SQL (or ran against a schema it
+ * does not know), and reading on would end in a TypeError — or, for a count,
+ * in a quiet `undefined > 0`.
+ */
+const RAW_LISTS = [
+  "lines",
+  "counterparties",
+  "templates",
+  "boxDefaults",
+  "palletDefaults",
+  "products",
+  "operators",
+  "badges",
+  "ssccCounters",
+  "ssccBlocks",
+  "ssccPrinted",
+  "shiftNumberCounters",
+  "shiftNumberMaxima",
+  "otherTenantsSscc",
+  "activeShifts",
+  "staleDevices",
+];
+const RAW_COUNTS = ["nonOperatorBadges", "counterpartyIssuedShifts", "plannedShifts"];
+
+/**
  * A refusal to write any file: the data cannot become a site. The codes:
  * `tenant_not_found`, `org_profile_missing`, `org_gln_missing`,
  * `org_name_missing`, `cloud_not_clean` (with `blockers`), `sscc_exhausted`
  * (the cloud used every serial of a prefix), `sscc_input_invalid` (a prefix,
  * an extension or a serial the export cannot read) and
  * `shift_counter_unreadable` (a shift-number counter that drew numbers but
- * cannot be carried over). A message never holds a hash, a salt or a code.
+ * cannot be carried over), `shift_counter_behind` (shifts already hold
+ * numbers past their month's counter) and `export_output_invalid` (what
+ * `export.sql` printed lacks a list or a count). A message never holds a
+ * hash, a salt or a code.
  */
 export class ExportError extends Error {
   constructor(code, message, options) {
@@ -105,6 +134,26 @@ function formatShiftNumber({ monthKey, seq, createdFrom }) {
   return `${monthKey}-${String(seq).padStart(3, "0")}${createdFrom === "station" ? "/S" : ""}`;
 }
 
+/** `raw` has every list and count `export.sql` prints, or the export stops. */
+function assertRawShape(raw) {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) {
+    throw new ExportError("export_output_invalid", "the export output is not an object");
+  }
+  for (const key of RAW_LISTS) {
+    if (!Array.isArray(raw[key])) {
+      throw new ExportError("export_output_invalid", `the export output has no list "${key}"`);
+    }
+  }
+  for (const key of RAW_COUNTS) {
+    if (!Number.isSafeInteger(raw[key]) || raw[key] < 0) {
+      throw new ExportError("export_output_invalid", `the export output has no count "${key}"`);
+    }
+  }
+  if (raw.formatVersion !== 1) {
+    throw new ExportError("export_output_invalid", "the export output is not format version 1");
+  }
+}
+
 /**
  * The import file of `raw`. Throws `ExportError` when no file can be made
  * (no tenant, no organization profile or GLN, a used-up prefix) and, unless
@@ -121,6 +170,7 @@ export function buildExportFile(raw, options) {
   const notes = [];
   const note = (entry) => notes.push(entry);
 
+  assertRawShape(raw);
   if (raw.tenant === null) throw new ExportError("tenant_not_found", "no such tenant");
   if (raw.orgProfile === null) {
     throw new ExportError("org_profile_missing", "the tenant has no organization profile");
@@ -463,6 +513,31 @@ export function buildExportFile(raw, options) {
       "shift_counter_unreadable",
       `${unreadable.length} shift-number counter(s) cannot be carried over: ` +
         unreadable.map((counter) => JSON.stringify(counter.monthKey)).join(", "),
+    );
+  }
+
+  // The shifts themselves must not be ahead of the counters: a month whose
+  // shifts hold a number past its counter (or have no counter at all) would
+  // hand the same number out again on the standalone.
+  const lastSeqByMonth = new Map(
+    raw.shiftNumberCounters.map((counter) => [counter.monthKey, counter.lastSeq]),
+  );
+  const behind = raw.shiftNumberMaxima.filter((each) => {
+    const last = lastSeqByMonth.get(each.monthKey);
+    return !(last >= each.maxSeq);
+  });
+  if (behind.length > 0) {
+    throw new ExportError(
+      "shift_counter_behind",
+      `shifts hold numbers past their month's counter: ` +
+        behind
+          .map(
+            (each) =>
+              `${JSON.stringify(each.monthKey)} (shifts up to ${each.maxSeq}, counter ${
+                lastSeqByMonth.get(each.monthKey) ?? "missing"
+              })`,
+          )
+          .join(", "),
     );
   }
 

@@ -349,6 +349,42 @@
       "lastSeq": 41
     }
   ],
+  "shiftNumberMaxima": [
+    {
+      "monthKey": "NOV26",
+      "maxSeq": 1
+    },
+    {
+      "monthKey": "OCT26",
+      "maxSeq": 7
+    },
+    {
+      "monthKey": "SEP26",
+      "maxSeq": 41
+    }
+  ],
+  "otherTenantsSscc": [
+    {
+      "issuerPrefix": "460068200",
+      "extension": 0,
+      "maxSerial": 900000
+    },
+    {
+      "issuerPrefix": "460068200",
+      "extension": 1,
+      "maxSerial": 700000
+    },
+    {
+      "issuerPrefix": "460123400",
+      "extension": 0,
+      "maxSerial": 500000
+    },
+    {
+      "issuerPrefix": "460123400",
+      "extension": 1,
+      "maxSerial": 600000
+    }
+  ],
   "activeShifts": [],
   "staleDevices": [],
   "counterpartyIssuedShifts": 1,

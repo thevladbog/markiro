@@ -205,7 +205,9 @@ test("every start and the last serial of the space build a valid SSCC with the d
   let domain;
   try {
     domain = await import("../../../packages/domain/dist/gs1/sscc.js");
-  } catch {
+  } catch (error) {
+    // Only a domain that is not built is a skip; a broken one must fail the test.
+    if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
     context.skip("packages/domain is not built (pnpm turbo run build --filter=@markiro/domain)");
     return;
   }
