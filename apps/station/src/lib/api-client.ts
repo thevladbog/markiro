@@ -4,6 +4,7 @@ import {
   PRODUCT_LABEL_PROTOCOL,
   VALIDATION_REPROCESSING_PROTOCOL,
   PALLET_SHEET_PROTOCOL,
+  PALLET_SHEET_FOOTER_CAPABILITY,
 } from "@markiro/domain";
 import type { StationConfig } from "./config.js";
 import {
@@ -180,7 +181,7 @@ export function createStationClient(
   const base = (cfg.serverUrl ?? "").replace(/\/+$/, "");
   const capabilities =
     options.palletSheetSupported === true
-      ? `${STATION_CAPABILITIES},${PALLET_SHEET_PROTOCOL}`
+      ? `${STATION_CAPABILITIES},${PALLET_SHEET_PROTOCOL},${PALLET_SHEET_FOOTER_CAPABILITY}`
       : STATION_CAPABILITIES;
   const credentialBoundary = options.credentialBoundary;
   let latestRequestSequence = 0;

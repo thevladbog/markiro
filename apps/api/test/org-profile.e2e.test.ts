@@ -154,6 +154,25 @@ describe.skipIf(!ready)("org profile e2e", () => {
       logoUrl: null,
       logo: null,
     });
+    const withInn = await request(app!.getHttpServer())
+      .get("/station/branding")
+      .set("x-api-key", station.apiKey)
+      .set("x-station-capabilities", "pallet-sheet-footer-v1")
+      .expect(200);
+    expect(withInn.body).toHaveProperty("organizationInn", null);
+    await agent.put("/org/profile").send({ inn: "9705119097" }).expect(200);
+    const updatedInn = await request(app!.getHttpServer())
+      .get("/station/branding")
+      .set("x-api-key", station.apiKey)
+      .set("x-station-capabilities", "pallet-sheet-footer-v1")
+      .expect(200);
+    expect(updatedInn.body.organizationInn).toBe("9705119097");
+    expect(handheldNone.body).not.toHaveProperty("organizationInn");
+    const legacyBranding = await request(app!.getHttpServer())
+      .get("/station/branding")
+      .set("x-api-key", station.apiKey)
+      .expect(200);
+    expect(legacyBranding.body).not.toHaveProperty("organizationInn");
     const source = await sharp({
       create: { width: 1000, height: 100, channels: 4, background: "#223344" },
     })
@@ -207,6 +226,12 @@ describe.skipIf(!ready)("org profile e2e", () => {
       .send({ organizationId: otherTenant })
       .expect(200);
     const otherStation = await createTestStationDevice(app!, other, "Other station");
+    const foreignInn = await request(app!.getHttpServer())
+      .get("/station/branding")
+      .set("x-api-key", otherStation.apiKey)
+      .set("x-station-capabilities", "pallet-sheet-footer-v1")
+      .expect(200);
+    expect(foreignInn.body.organizationInn).toBeNull();
     await request(app!.getHttpServer())
       .get(current.body.logoUrl)
       .set("x-api-key", otherStation.apiKey)

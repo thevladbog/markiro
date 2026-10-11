@@ -216,3 +216,17 @@ it("resolves the same owner-scoped logo for thermal labels and never another ten
     .run(JSON.stringify({ ...owner, tenantId: "other-tenant" }));
   expect(await loadThermalLabelLogo(h.exec, h.generation)).toBeNull();
 });
+
+it("refreshes opt-in INN without decoding the unchanged logo and preserves a frozen old snapshot", async () => {
+  const h = await fixture();
+  await refreshOrganizationBranding(h.owner, ports);
+  const old = await loadOrganizationBranding(h.owner);
+  expect(old).not.toHaveProperty("organizationInn");
+  h.get.mockResolvedValue({ ...none, organizationInn: "9705119097" });
+  await refreshOrganizationBranding(h.owner, ports);
+  expect(await loadOrganizationBranding(h.owner)).toMatchObject({ organizationInn: "9705119097" });
+  expect(old).not.toHaveProperty("organizationInn");
+  h.get.mockResolvedValue({ ...none, organizationInn: null });
+  await refreshOrganizationBranding(h.owner, ports);
+  expect(await loadOrganizationBranding(h.owner)).toMatchObject({ organizationInn: null });
+});

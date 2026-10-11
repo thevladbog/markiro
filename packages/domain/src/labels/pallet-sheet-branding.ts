@@ -17,6 +17,11 @@ export const organizationLogoDescriptorSchema = z.strictObject({
 export const organizationBrandingDescriptorSchema = z
   .strictObject({
     organizationName: z.string().trim().min(1).max(255),
+    organizationInn: z
+      .string()
+      .regex(/^(?:\d{10}|\d{12})$/)
+      .nullable()
+      .optional(),
     logoRevision: z.uuid().nullable(),
     logoUrl: z.string().nullable(),
     logo: organizationLogoDescriptorSchema.nullable(),
