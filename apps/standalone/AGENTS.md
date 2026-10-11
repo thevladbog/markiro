@@ -2042,14 +2042,14 @@ kiosk mode shows them on the station.
   first show) and the shift's devices, named from `listDevices` for an
   administrator (a revoked one marked «(отозвано)») and by the first eight
   characters of the id for a technologist, for an id the list lacks or while
-  the list does not load, with a note saying why. The number opens the
-  shift's card (plan О-Ф, see "Shift card and printed forms"). A shift carries ids,
-  so the page names them from `listProducts`,
-  `listLines` and `listCounterparties`, an archived record marked «(в архиве)»,
-  and one a list lacks or that did not load by the first eight characters of
-  its id («Товар 5e6f7081…»). A lookup that fails leaves the list in place with
-  one warning (names that are missing are shown by the start of their codes,
-  and the marks of shifts that will not open may be missing) and «Повторить»,
+  the list does not load, with a note saying why. The number opens the shift's
+  card (plan О-Ф, see "Shift card and printed forms"). A shift carries ids, so
+  the page names them from `listProducts`, `listLines` and
+  `listCounterparties`, an archived record marked «(в архиве)», and one a list
+  lacks or that did not load by the first eight characters of its id («Товар
+  5e6f7081…»). A lookup that fails leaves the list in place with one warning
+  (names that are missing are shown by the start of their codes, and the marks
+  of shifts that will not open may be missing) and «Повторить»,
   which reads again only what failed; the retry of a failed list of shifts
   reads the failed lookups too.
 - A planned shift a station will refuse to open is marked from the page's own
@@ -2789,15 +2789,15 @@ file are the cloud's for the same facts, and that is the acceptance rule.
   (`EXPORT_PARITY_WRITE=1`), and the port follows in the same change. The
   location under `packages/domain` makes `tools/ci/affected.mjs` run both
   suites on any change of the cases.
-- The dialog (`ExportDialog.tsx`, from «Смены») offers the cloud's formats
-  (the pallets formats only for a shift with pallets), each with what its
-  source would refuse now, the line limit (2–1 000 000, 2000 by default), the
-  warnings (late data, boxes on a pallet still open, pallets taken apart in
-  the document, a pallet's count that differs from its boxes) and a ЧЗ
-  document for each closed pallet, also of an active shift. A late box and a
-  taken-apart pallet are shown as two facts: `late_boxes` also counts a box
-  on a taken-apart pallet, which is still written as a pallet. Forming reads
-  the rows
+- The dialog (`ExportDialog.tsx`, from «Смены» and from the shift's card)
+  offers the cloud's formats (the pallets formats only for a shift with
+  pallets), each with what its source would refuse now, the line limit
+  (2–1 000 000, 2000 by default), the warnings (late data, boxes on a pallet
+  still open, pallets taken apart in the document, a pallet's count that
+  differs from its boxes) and a ЧЗ document for each closed pallet, also of an
+  active shift. A late box and a taken-apart pallet are shown as two facts:
+  `late_boxes` also counts a box on a taken-apart pallet, which is still
+  written as a pallet. Forming reads the rows
   again, saves the parts and only then records the export; a record the host
   did not take is said, with «Записать снова», and the files stay.
   `document_id` is a new UUID each time and `file_date_time` the moment of
@@ -2896,10 +2896,11 @@ mapping; the bytes are the acceptance rule.
   not run (they are SQL against Postgres): their rules are ported and held by
   the host's tests. A change of a cloud form regenerates the golden in the
   same change; a change of a cloud loader is ported by hand.
-- Printing (`print-form.ts`, `PrintFormDialog.tsx`): each press draws the
-  form again from the rows the dialog read when it opened (so the card's
-  button for the pallets' placards decides from the card's cached pallet
-  list, while the dialog reads fresh). «Печать» writes the HTML into one
+- Printing (`print-form.ts`, `PrintFormDialog.tsx`): each press reads the
+  rows again (the blank its five records) and draws the form from them, so a
+  dialog left open never prints a box as it was; only the card's button for
+  the shift's placards decides from the card's cached pallet list, while the
+  dialog itself reads fresh. «Печать» writes the HTML into one
   hidden same-origin frame of the office's window and prints that frame
   (WebView2's print dialog, the paper by the form's `@page`); «Открыть в
   браузере» saves it, UTF-8, into a new folder
@@ -2914,9 +2915,6 @@ mapping; the bytes are the acceptance rule.
   of thousands of codes freezes the window for seconds (about 8 ms a code in
   jsdom under load), and a press already inside `openInBrowser` cannot be
   cancelled by closing the dialog; a worker is the real fix.
-- The test of an unknown time zone (`test/form-data.test.ts`, `formTimeZone`)
-  compares with this machine's zone, so on a machine in UTC it cannot tell the PC's zone
-  from UTC (mutant R14 survives there).
 
 ## Marking rules
 
@@ -2927,11 +2925,11 @@ arbitrates but does not reimplement them.
 
 The routes of a shift's exports and of its forms' data answer with codes and
 SSCCs and log none of them; `no_secrets_in_logs.rs` reads the export source,
-both lists, a box's and the pallets' form data and records an export; the
-form data it reads must hold the walk's own code, serial and SSCCs, or the
-walk would prove nothing about these routes. The shell's file commands log a failure by its code and
-the I/O error's kind, never a path (it names the Windows user), and the
-export dialog logs nothing.
+both lists, a box's and the pallets' form data and records an export; the form
+data it reads must hold the walk's own code, serial and SSCCs, or the walk
+would prove nothing about these routes. The shell's file commands log a
+failure by its code and the I/O error's kind, never a path (it names the
+Windows user), and the export dialog logs nothing.
 
 Never log device keys, session tokens, pairing codes, passwords, PINs, badge
 codes (a scan is one: the sign-in neither logs nor keeps it, and
