@@ -10,6 +10,11 @@ import {
 } from "./backups.js";
 import type { HostClient } from "./client.js";
 import {
+  cloudImportSummarySchema,
+  type CloudImportRequest,
+  type CloudImportSummary,
+} from "./cloud-import.js";
+import {
   badgeInfoSchema,
   badgeSaltSchema,
   bootstrapResponseSchema,
@@ -191,6 +196,8 @@ export interface HostApi {
     token: string,
     update: TemplateDefaultsUpdate,
   ) => Promise<TemplateDefaults>;
+  /** The cloud's data into a new site, or its trial (`dryRun`); administrators only. */
+  importFromCloud: (token: string, request: CloudImportRequest) => Promise<CloudImportSummary>;
   /**
    * Without a period every planned and active shift and the closed ones
    * produced in the last 31 days of the host's clock; with one, every shift
@@ -497,6 +504,12 @@ export function createHostApi(client: HostClient): HostApi {
         body: update,
         officeToken: token,
         schema: templateDefaultsSchema,
+      }),
+    importFromCloud: (token, request) =>
+      client.request("POST", "/v1/office/import", {
+        body: request,
+        officeToken: token,
+        schema: cloudImportSummarySchema,
       }),
     listShifts: (token, period) =>
       client.request(
