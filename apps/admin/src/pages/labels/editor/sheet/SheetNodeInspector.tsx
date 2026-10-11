@@ -82,6 +82,45 @@ export function SheetNodeInspector({
           {numeric("reservedLines", node.reservedLines, 1, 16)}
         </>
       ) : null}
+      {node.kind === "field" ? (
+        <>
+          <Checkbox
+            label={key("underline")}
+            checked={Boolean(node.underline)}
+            onCheckedChange={(enabled) =>
+              onChange({ underline: enabled ? { thicknessMm: 0.15, gapMm: 1 } : undefined })
+            }
+          />
+          {node.underline ? (
+            <>
+              <Input
+                type="number"
+                label={key("underlineThicknessMm")}
+                value={node.underline.thicknessMm}
+                min={0.05}
+                max={1}
+                step="0.05"
+                onChange={(e) =>
+                  onChange({
+                    underline: { ...node.underline, thicknessMm: Number(e.target.value) },
+                  })
+                }
+              />
+              <Input
+                type="number"
+                label={key("underlineGapMm")}
+                value={node.underline.gapMm}
+                min={0}
+                max={8}
+                step="0.1"
+                onChange={(e) =>
+                  onChange({ underline: { ...node.underline, gapMm: Number(e.target.value) } })
+                }
+              />
+            </>
+          ) : null}
+        </>
+      ) : null}
       {node.kind === "field_row"
         ? numeric("labelFontSizePt", node.labelFontSizePt ?? 8, 4, 72)
         : null}

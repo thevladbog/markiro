@@ -64,9 +64,10 @@ function make(orientation: "portrait" | "landscape", copies: 1 | 2): PalletSheet
     id: "product",
     kind: "field",
     field: "product.printName",
-    fontSizePt: small ? 16 : 22,
+    fontSizePt: small ? 14 : 22,
     bold: true,
     maxLines: orientation === "landscape" && !small ? 4 : 5,
+    underline: { thicknessMm: 0.15, gapMm: 1 },
     reservedLines: orientation === "landscape" && !small ? 4 : 5,
   };
   const quantities = row("quantities", [
@@ -118,6 +119,13 @@ function make(orientation: "portrait" | "landscape", copies: 1 | 2): PalletSheet
       moduleDots: small ? 9 : 11,
       ...(small ? { fallbackModuleDots: 8 } : {}),
       align: "center",
+      caption: {
+        fontSizePt: small ? 6 : 8,
+        separatorThicknessMm: 0.15,
+        gapMm: 1,
+        showInn: true,
+        platformText: "Сформировано в Маркиро",
+      },
     },
   });
 }

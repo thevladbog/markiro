@@ -147,6 +147,9 @@ export async function rebuildPalletSheet(
   const context: PalletSheetContext = {
     ...saved.facts,
     organizationName: branding.organizationName,
+    ...(branding.organizationInn !== undefined
+      ? { organizationInn: branding.organizationInn }
+      : {}),
     logo: branding.logo,
   };
   return encodeMonoRaster(

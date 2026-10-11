@@ -9,8 +9,12 @@ import {
   StreamableFile,
   UseGuards,
 } from "@nestjs/common";
-import { ApiOkResponse, ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
-import { CABINET_CAPABILITY, organizationBrandingDescriptorSchema } from "@markiro/domain";
+import { ApiHeader, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from "@nestjs/swagger";
+import {
+  CABINET_CAPABILITY,
+  PALLET_SHEET_FOOTER_CAPABILITY,
+  organizationBrandingDescriptorSchema,
+} from "@markiro/domain";
 import type { Response } from "express";
 import { AllowStationOrPermissions } from "../../authorization/access-policy";
 import { AuthorizationGuard } from "../../authorization/authorization.guard";
@@ -34,13 +38,26 @@ export class StationBrandingController {
       throw new ForbiddenException("Branding requires a station device");
   }
   @Get()
+  @ApiHeader({
+    name: "x-station-capabilities",
+    required: false,
+    description:
+      "Opt into organizationInn with pallet-sheet-footer-v1; absent capability preserves the legacy response.",
+  })
   @ApiOperation({ summary: "Read complete private branding for offline Station printing" })
   @ApiOkResponse({ schema: zodApiSchema(organizationBrandingDescriptorSchema) })
   @ApiHttpErrors(401, 403, 404, 503)
   async read(@Req() req: RequestWithTenant, @Res({ passthrough: true }) response: Response) {
     this.assertStation(req);
     response.setHeader("Cache-Control", "private, no-store");
-    return this.profiles.getStationBranding(req.tenantId!);
+    return this.profiles.getStationBranding(req.tenantId!, {
+      includeInn:
+        req
+          .get("x-station-capabilities")
+          ?.split(",")
+          .map((v) => v.trim())
+          .includes(PALLET_SHEET_FOOTER_CAPABILITY) === true,
+    });
   }
   @Get("logo/:revision")
   @ApiOperation({ summary: "Read the current tenant logo revision for a Station" })

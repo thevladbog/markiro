@@ -1110,7 +1110,10 @@ export class ShiftsService {
               ),
             )
             .for("share");
-          assertPalletSheetClient({ kind: "device", deviceKind: device?.kind, capabilities });
+          assertPalletSheetClient(
+            { kind: "device", deviceKind: device?.kind, capabilities },
+            sheetSnapshot.spec,
+          );
         }
         const [counter] = await tx
           .insert(schema.shiftNumberCounters)
@@ -1887,8 +1890,12 @@ export class ShiftsService {
       if (!shift) throw new NotFoundException();
       const previous = validationPrintFromStorage(shift);
       assertProductLabelCapability(previous, capabilities);
-      assertPalletSheetEntry(shift, { kind: "device", deviceKind: device.kind, capabilities });
-      if (shift.palletSheetTemplateId !== null) this.sheetSnapshotFromStorage(shift);
+      const entrySheet = this.sheetSnapshotFromStorage(shift);
+      assertPalletSheetEntry(
+        shift,
+        { kind: "device", deviceKind: device.kind, capabilities },
+        entrySheet?.spec,
+      );
       if (shift.status === "closed") throw new ConflictException("Closed shifts cannot be entered");
       if (shift.status === "planned") {
         // Same guard as openShift: a device entering a planned shift is what
@@ -2113,6 +2120,7 @@ export class ShiftsService {
           palletLabelTemplateId: shift.palletLabelTemplateId,
         },
         { kind: "device", deviceKind, capabilities },
+        sheetSnapshot?.spec,
       );
     }
 

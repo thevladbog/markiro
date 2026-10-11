@@ -642,10 +642,14 @@ export class OrgProfileService {
     if (previousAssetId) await this.tryDeleteLogoAsset(tenantId, previousAssetId);
   }
 
-  async getStationBranding(tenantId: string): Promise<OrganizationBrandingDescriptor> {
+  async getStationBranding(
+    tenantId: string,
+    options: { includeInn: boolean } = { includeInn: false },
+  ): Promise<OrganizationBrandingDescriptor> {
     const [row] = await this.db
       .select({
         organizationName: schema.organization.name,
+        organizationInn: schema.orgProfiles.inn,
         logoAssetId: schema.orgProfiles.logoAssetId,
         revision: schema.organizationLogoAssets.id,
         checksum: schema.organizationLogoAssets.checksum,
@@ -671,6 +675,7 @@ export class OrgProfileService {
       throw new ServiceUnavailableException("Configured logo is unavailable");
     const parsed = organizationBrandingDescriptorSchema.safeParse({
       organizationName: row.organizationName,
+      ...(options.includeInn ? { organizationInn: row.organizationInn ?? null } : {}),
       logoRevision: row.revision,
       logoUrl: row.revision ? `/station/branding/logo/${row.revision}` : null,
       logo: row.revision
@@ -698,8 +703,11 @@ export class OrgProfileService {
     };
   }
 
-  async getCabinetPrintBranding(tenantId: string): Promise<OrganizationBrandingDescriptor> {
-    const branding = await this.getStationBranding(tenantId);
+  async getCabinetPrintBranding(
+    tenantId: string,
+    options: { includeInn: boolean } = { includeInn: false },
+  ): Promise<OrganizationBrandingDescriptor> {
+    const branding = await this.getStationBranding(tenantId, options);
     return {
       ...branding,
       logoUrl: branding.logoRevision

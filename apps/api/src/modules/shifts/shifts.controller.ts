@@ -323,11 +323,13 @@ export class ShiftsController {
     query: PalletSheetTemplatePreviewQueryDto,
   ) {
     assertPalletSheetClient(sheetCaller(req));
-    return this.shiftsService.getPalletSheetPreview(
+    const snapshot = await this.shiftsService.getPalletSheetPreview(
       req.tenantId!,
       query.productId,
       query.templateId,
     );
+    assertPalletSheetClient(sheetCaller(req), snapshot.spec);
+    return snapshot;
   }
 
   @Get("label-template-preview")

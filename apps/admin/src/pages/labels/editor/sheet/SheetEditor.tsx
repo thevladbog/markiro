@@ -95,6 +95,13 @@ export function SheetEditor({ value, onChange, selectedId, onSelect }: SheetEdit
         replaceSheetNode(value, selected, (old) => sheetNodeSchema.parse({ ...old, ...patch })),
       );
   };
+  const changeCaption = (patch: Partial<NonNullable<PalletSheetSpecV2["footer"]["caption"]>>) => {
+    if (value.footer.caption)
+      onChange({
+        ...value,
+        footer: { ...value.footer, caption: { ...value.footer.caption, ...patch } },
+      });
+  };
   const containers: Array<{ value: string; label: string }> = [{ value: "", label: key("body") }];
   const collect = (nodes: SheetNode[]) => {
     for (const item of nodes)
@@ -251,6 +258,58 @@ export function SheetEditor({ value, onChange, selectedId, onSelect }: SheetEdit
       <fieldset>
         <legend>SSCC</legend>
         <p>{key("footerHint")}</p>
+        <Checkbox
+          label={key("footerCaption")}
+          checked={Boolean(value.footer.caption)}
+          onCheckedChange={(enabled) => {
+            const { caption: removed, ...footer } = value.footer;
+            void removed;
+            onChange({
+              ...value,
+              footer: {
+                ...footer,
+                ...(enabled
+                  ? {
+                      caption: {
+                        fontSizePt: 8,
+                        separatorThicknessMm: 0.15,
+                        gapMm: 1,
+                        showInn: true,
+                        platformText: key("defaultPlatformText"),
+                      },
+                    }
+                  : {}),
+              },
+            });
+          }}
+        />
+        {value.footer.caption ? (
+          <>
+            <Checkbox
+              label={key("showInn")}
+              checked={value.footer.caption.showInn}
+              onCheckedChange={(showInn) => changeCaption({ showInn })}
+            />
+            <Input
+              label={key("platformText")}
+              value={value.footer.caption.platformText}
+              maxLength={200}
+              onChange={(e) => changeCaption({ platformText: e.target.value })}
+            />
+            {(["fontSizePt", "separatorThicknessMm", "gapMm"] as const).map((property) => (
+              <Input
+                key={property}
+                type="number"
+                label={key(`caption_${property}`)}
+                value={value.footer.caption?.[property]}
+                min={property === "fontSizePt" ? 6 : property === "gapMm" ? 0 : 0.05}
+                max={property === "fontSizePt" ? 12 : property === "gapMm" ? 8 : 1}
+                step="0.05"
+                onChange={(e) => changeCaption({ [property]: Number(e.target.value) })}
+              />
+            ))}
+          </>
+        ) : null}
         <Input
           type="number"
           label={key("barHeightMm")}

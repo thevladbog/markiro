@@ -31,6 +31,7 @@ export interface BrandingSnapshot {
   tenantId: string;
   ownerDigest: string;
   organizationName: string;
+  organizationInn?: string | null;
   logoRevision: string | null;
   sourceChecksum: string | null;
   digest: string;
@@ -47,6 +48,11 @@ const storageSchema = z.strictObject({
   tenantId: z.string().min(1),
   ownerDigest: hash,
   organizationName: z.string().trim().min(1).max(255),
+  organizationInn: z
+    .string()
+    .regex(/^(?:\d{10}|\d{12})$/)
+    .nullable()
+    .optional(),
   logoRevision: z.uuid().nullable(),
   sourceChecksum: hash.nullable(),
   digest: hash,
@@ -109,8 +115,10 @@ export function parseOrganizationBranding(json: string): BrandingSnapshot {
       : saved.logoRevision !== null || saved.sourceChecksum !== null
   )
     throw new Error("Branding source mismatch");
+  const { organizationInn, ...legacy } = saved;
   return {
-    ...saved,
+    ...legacy,
+    ...(organizationInn !== undefined ? { organizationInn } : {}),
     logo: {
       ...bitmap,
       digest: saved.logo.digest,
@@ -228,7 +236,12 @@ async function refresh(
         cached.logo.width === metadata.logo.width &&
         cached.logo.height === metadata.logo.height
       : cached.logo.source === "markiro");
-  if (sameLogo && cached.organizationName === metadata.organizationName) return;
+  if (
+    sameLogo &&
+    cached.organizationName === metadata.organizationName &&
+    cached.organizationInn === metadata.organizationInn
+  )
+    return;
   let bitmap: MonoBitmap,
     sourceChecksum: string | null = null;
   if (sameLogo) {
@@ -258,6 +271,9 @@ async function refresh(
     tenantId: owner.tenantId,
     ownerDigest,
     organizationName: metadata.organizationName,
+    ...(metadata.organizationInn !== undefined
+      ? { organizationInn: metadata.organizationInn }
+      : {}),
     logoRevision: metadata.logoRevision,
     sourceChecksum,
     logo: {

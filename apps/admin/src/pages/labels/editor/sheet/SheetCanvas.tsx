@@ -53,13 +53,20 @@ export function SheetCanvas({
     setError(null);
     const loading = loadBranding
       ? loadBranding()
-      : loadSheetPreviewLogo(wideLogo).then((logo) => ({ organizationName: null, logo }));
+      : loadSheetPreviewLogo(wideLogo).then((logo) => ({
+          organizationName: null,
+          organizationInn: undefined,
+          logo,
+        }));
     void loading
       .then((branding) =>
         renderSheetPreview(
           spec,
           {
             ...previewSheetContext(options, branding.logo),
+            ...(branding.organizationInn !== undefined
+              ? { organizationInn: branding.organizationInn }
+              : {}),
             ...(branding.organizationName === null
               ? {}
               : { organizationName: branding.organizationName }),
