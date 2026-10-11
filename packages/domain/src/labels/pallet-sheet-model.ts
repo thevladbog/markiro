@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { DomainError } from "../errors.js";
 
+export const PALLET_SHEET_FOOTER_CAPABILITY = "pallet-sheet-footer-v1";
 export const PALLET_SHEET_MAX_NODES = 200;
 export const PALLET_SHEET_MAX_DEPTH = 8;
 export const PALLET_SHEET_DPI = 300;
@@ -50,7 +51,17 @@ const textNode = z.strictObject({
   text: z.string().max(16_000),
   ...textStyle,
 });
-const fieldNode = z.strictObject({ ...base, kind: z.literal("field"), field, ...textStyle });
+const underlineSchema = z.strictObject({
+  thicknessMm: z.number().min(0.05).max(1),
+  gapMm: z.number().min(0).max(8),
+});
+const fieldNode = z.strictObject({
+  ...base,
+  kind: z.literal("field"),
+  field,
+  ...textStyle,
+  underline: underlineSchema.optional(),
+});
 const rowFieldNode = z.strictObject({
   ...base,
   kind: z.literal("field_row"),
@@ -136,6 +147,13 @@ export const sheetNodeSchema: z.ZodType<SheetNode> = z.lazy(() =>
   ]),
 );
 
+const footerCaptionSchema = z.strictObject({
+  fontSizePt: z.number().min(6).max(12),
+  separatorThicknessMm: z.number().min(0.05).max(1),
+  gapMm: z.number().min(0).max(8),
+  showInn: z.boolean(),
+  platformText: z.string().max(200),
+});
 const footerSchema = z.strictObject({
   id: z.string().min(1).max(100),
   kind: z.literal("sscc"),
@@ -144,6 +162,7 @@ const footerSchema = z.strictObject({
   moduleDots: z.number().int().min(6).max(11),
   fallbackModuleDots: z.number().int().min(6).max(11).optional(),
   align: z.enum(["left", "center", "right"]),
+  caption: footerCaptionSchema.optional(),
 });
 export type SheetSsccFooter = z.infer<typeof footerSchema>;
 
@@ -290,4 +309,15 @@ export function parsePalletSheetSpec(value: unknown): PalletSheetSpecV2 {
     );
   }
   return result.data;
+}
+
+/** Optional extensions must never be sent to a strict legacy Station parser. */
+export function palletSheetRequiresFooterCapability(spec: PalletSheetSpecV2): boolean {
+  const hasUnderline = (nodes: SheetNode[]): boolean =>
+    nodes.some(
+      (node) =>
+        (node.kind === "field" && node.underline !== undefined) ||
+        ("children" in node && hasUnderline(node.children)),
+    );
+  return spec.footer.caption !== undefined || hasUnderline(spec.body);
 }
