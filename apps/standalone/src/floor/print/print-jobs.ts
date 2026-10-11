@@ -98,8 +98,11 @@ export function isOpenJob(job: Pick<PrintJob, "state" | "verify">): boolean {
   );
 }
 
-/** The same rule in SQL, word for word the index's. */
-const OPEN =
+/**
+ * The same rule in SQL, word for word the index's; plan 2a8's close of a
+ * shift checks it in its own transaction.
+ */
+export const OPEN_JOB_SQL =
   "(state IN ('prepared', 'sending', 'failed', 'unknown') OR (state = 'sent' AND verify = 1))";
 
 const COLUMNS =
@@ -206,7 +209,7 @@ export async function readOpenJob(
 ): Promise<PrintJob | null> {
   const [row] = await local.query(
     `SELECT ${COLUMNS} FROM floor_print_jobs WHERE host_id = ? AND device_id = ? ` +
-      `AND shift_id = ? AND ${OPEN} ORDER BY created_at, id LIMIT 1`,
+      `AND shift_id = ? AND ${OPEN_JOB_SQL} ORDER BY created_at, id LIMIT 1`,
     [pairing.hostId, pairing.deviceId, shiftId],
     jobRow,
   );
@@ -228,7 +231,7 @@ export async function shiftLabelsSettled(
 ): Promise<boolean> {
   const [row] = await local.query(
     `SELECT count(*) AS waiting FROM floor_print_jobs WHERE host_id = ? AND device_id = ? ` +
-      `AND shift_id = ? AND ${OPEN}`,
+      `AND shift_id = ? AND ${OPEN_JOB_SQL}`,
     [pairing.hostId, pairing.deviceId, shiftId],
     z.object({ waiting: z.number().int() }),
   );

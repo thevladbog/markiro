@@ -80,7 +80,11 @@ export class RecordTooLargeError extends Error {
  * itself (stage 2a spec, decision 11): the record is checked against its
  * schema and its size first, so a record this build cannot form, or one too
  * large to send, is never kept, and it is kept whole as the payload it is
- * sent as.
+ * sent as. A shift this station has closed (`local_state`, plan 2a8) takes
+ * no record any more: its `shift_closed` is its last, and the row of any
+ * later one changes nothing, so its whole transaction is refused
+ * (`changes_mismatch`). The host would mark the station's own shift late
+ * for a record after its close (plan 2a2).
  */
 export function outboxStatement(
   record: FactRecord,
@@ -94,7 +98,8 @@ export function outboxStatement(
   return {
     sql:
       "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) " +
-      "VALUES (?, ?, ?, ?, ?, ?, ?)",
+      "SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS (SELECT 1 FROM floor_shifts " +
+      "WHERE host_id = ? AND device_id = ? AND id = ? AND local_state IS NOT NULL)",
     values: [
       checked.id,
       pairing.hostId,
@@ -103,6 +108,9 @@ export function outboxStatement(
       checked.shiftId,
       payload,
       createdAt,
+      pairing.hostId,
+      pairing.deviceId,
+      checked.shiftId,
     ],
     expectedChanges: 1,
   };
