@@ -12,7 +12,8 @@ import {
   type DisassembleReason,
   type ReprintReason,
 } from "../exception-reasons.js";
-import { VIEW_GUARD_MS } from "../print/LabelPanel.js";
+import { VIEW_GUARD_MS, type PanelSettings } from "../print/LabelPanel.js";
+import { resolvePrinter, type PrinterProfile } from "../setup/workstation-settings.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 import {
   InvalidReasonError,
@@ -28,7 +29,8 @@ export type ExceptionAction = "undo" | "clear" | "reprint" | "disassemble";
  * How an exception went, as the screen says it: done; a reprint whose new
  * label now waits (the work screen shows it); nothing to take out; the box
  * changed meanwhile; the box is no longer a closed box of the shift; its
- * label still waits; its label was made from another revision of the
+ * label still waits (also the answer, never on this screen, of an action whose
+ * screen a waiting label took while it queued); its label was made from another revision of the
  * template than the shift holds now; the operator is leaving the shift; or
  * this computer could not write. Nothing but `done` and `label` wrote
  * anything the screen can count on (`failed` may have: the work screen
@@ -61,6 +63,18 @@ type Stage =
   | { kind: "confirm"; box: ClosedBox; reasoned: Reasoned }
   | { kind: "applying" }
   | { kind: "result"; outcome: ExceptionOutcome };
+
+/**
+ * What the box choice made of a scan: the box is picked, the code is no SSCC,
+ * or no closed box of the shift has it. `null` — the choice is not open any
+ * more (a scan before it was, or after the box was picked): the screen refuses
+ * the scan as it refuses every scan while the work is stopped.
+ */
+export type BoxScanVerdict = "taken" | "not_sscc" | "not_found";
+
+/** The printer a reprint goes to, as the reprint's confirmation knows it. */
+type ReprintPrinter =
+  { kind: "loading" } | { kind: "ready"; printer: PrinterProfile | null } | { kind: "failed" };
 
 /** The most boxes the list shows at once: more are found by the last digits of their SSCC. */
 export const MAX_LISTED_BOXES = 12;
@@ -145,11 +159,20 @@ export interface ExceptionFlowProps {
     reason: ExceptionReason<DisassembleReason>,
   ) => Promise<ExceptionOutcome>;
   /**
+   * The workstation's settings: which printer «Короб» has now, the printer a
+   * reprint goes to (the same choice `reprintBox` makes), read when the
+   * exceptions open.
+   */
+  loadSettings: () => Promise<PanelSettings>;
+  /** The workstation setup, offered where no printer is assigned; absent where the floor gives none. */
+  onSetup?: () => void;
+  /**
    * Hands the work screen the scan listener of the box choice (`null` — none):
    * while a box is chosen a scan of its label picks it, and is never
-   * journalled.
+   * journalled. It answers what it made of the scan, so that the screen gives
+   * it its tone and its words, or `null` when the choice is not open.
    */
-  registerScan: (listener: ((raw: string) => void) | null) => void;
+  registerScan: (listener: ((raw: string) => BoxScanVerdict | null) | null) => void;
   /** A text field takes typing (`true`) or gives it back: a keyboard scanner's keys are not a scan then. */
   onTextEntry: (active: boolean) => void;
   /** Back to the work: never held, whatever the screen shows. */
@@ -166,7 +189,10 @@ export interface ExceptionFlowProps {
  * a pad of 64 px keys (a text field would take a keyboard scanner's keys); a
  * reprint and a disassembly need a reason of their list, with words only for
  * «Другая причина»; a clear, a reprint and a disassembly are confirmed, the
- * box and its SSCC named, the button that destroys apart from «Назад». Each
+ * box and its SSCC named, the button that destroys apart from «Назад»; a
+ * reprint names the printer «Короб» has now before it is confirmed (or says
+ * that none is assigned, and what follows), a disassembly says that it cannot
+ * be undone. Each
  * action runs as the line's next piece of work, once, and says how it went.
  * «Назад» is there at every step but while an action writes. A press is
  * ignored for `VIEW_GUARD_MS` after the screen changed its view (the second
@@ -181,6 +207,8 @@ export function ExceptionFlow({
   onClear,
   onReprint,
   onDisassemble,
+  loadSettings,
+  onSetup,
   registerScan,
   onTextEntry,
   onBack,
@@ -206,21 +234,48 @@ export function ExceptionFlow({
     if (!choosing) return;
     registerScan((raw) => {
       const now = current.current.stage;
-      if (now.kind !== "target") return;
+      // Not the choice any more, though no render has said so yet: the screen refuses the scan.
+      if (now.kind !== "target") return null;
+      // The next stage is known at once, so that a second scan before the render finds the choice made.
+      const take = (next: Stage): void => {
+        current.current = { stage: next, boxes: current.current.boxes };
+        setStage(next);
+      };
       const sscc = parseScannedSscc(raw);
       if (sscc === null) {
-        setStage({ ...now, note: "not_sscc" });
-        return;
+        take({ ...now, note: "not_sscc" });
+        return "not_sscc";
       }
       const box = current.current.boxes?.find((candidate) => candidate.sscc === sscc);
-      setStage(
-        box === undefined
-          ? { ...now, note: "not_found" }
-          : { kind: "reason", action: now.action, box },
-      );
+      if (box === undefined) {
+        take({ ...now, note: "not_found" });
+        return "not_found";
+      }
+      take({ kind: "reason", action: now.action, box });
+      return "taken";
     });
     return () => registerScan(null);
   }, [choosing, registerScan]);
+
+  // The printer a reprint goes to, read once when the exceptions open (the setup is another
+  // screen: nothing changes it while this one is up), the choice `reprintBox` makes.
+  const [reprintPrinter, setReprintPrinter] = useState<ReprintPrinter>({ kind: "loading" });
+  useEffect(() => {
+    let cancelled = false;
+    loadSettings().then(
+      (settings) => {
+        if (!cancelled) {
+          setReprintPrinter({ kind: "ready", printer: resolvePrinter(settings, "box") });
+        }
+      },
+      () => {
+        if (!cancelled) setReprintPrinter({ kind: "failed" });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [loadSettings]);
 
   // The words field takes the keyboard from the scanner while its view is up
   // — and gives it back when the view goes, however it goes (a blur does not
@@ -303,6 +358,20 @@ export function ExceptionFlow({
 
   const title = t("floor.exceptions.title");
   const label = stageLabel(stage, t);
+  const printerLine =
+    reprintPrinter.kind === "loading" ? null : (
+      <p>
+        {reprintPrinter.kind === "failed"
+          ? t("floor.print.target.unknown")
+          : reprintPrinter.printer === null
+            ? t("floor.exceptions.confirm.reprint.noPrinter")
+            : t("floor.print.target.label", {
+                name: reprintPrinter.printer.name,
+                language: reprintPrinter.printer.language.toUpperCase(),
+                dpi: reprintPrinter.printer.dpi,
+              })}
+      </p>
+    );
   const body = () => {
     switch (stage.kind) {
       case "actions": {
@@ -325,7 +394,8 @@ export function ExceptionFlow({
               <Button
                 size="floor"
                 variant="secondary"
-                disabled={openItems === 0}
+                // The quantity it names is trusted once the numbers were read (`boxes` come after them).
+                disabled={openItems === 0 || boxes === null}
                 {...press(() => setStage({ kind: "confirm_clear" }))}
               >
                 {t("floor.exceptions.actions.clear")}
@@ -520,12 +590,26 @@ export function ExceptionFlow({
                 quantity: formatQuantity(box.itemCount),
               })}
             </p>
+            {reasoned.action === "disassemble" && (
+              <p>{t("floor.exceptions.confirm.disassemble.final")}</p>
+            )}
             <p>{t("floor.exceptions.confirm.reason", { reason: reasonText })}</p>
+            {reasoned.action === "reprint" && printerLine}
             <div className="standalone-form__actions exceptions__confirm">
               {back({ kind: "reason", action: reasoned.action, box })}
+              {reasoned.action === "reprint" &&
+                reprintPrinter.kind === "ready" &&
+                reprintPrinter.printer === null &&
+                onSetup !== undefined && (
+                  <Button size="floor" variant="secondary" {...press(onSetup)}>
+                    {t("floor.print.setup")}
+                  </Button>
+                )}
               <Button
                 size="floor"
                 variant={reasoned.action === "disassemble" ? "destructive" : "primary"}
+                // A reprint is confirmed once the operator can see where it goes.
+                disabled={reasoned.action === "reprint" && reprintPrinter.kind === "loading"}
                 {...press(() => apply(box, reasoned))}
               >
                 {t(`floor.exceptions.confirm.${reasoned.action}.action`)}
@@ -546,6 +630,9 @@ export function ExceptionFlow({
               : "warn";
         return (
           <Alert tone={tone} role="presentation" title={label}>
+            {outcome.kind === "done" && outcome.action === "undo" && (
+              <p>{t("floor.exceptions.result.hint.undo")}</p>
+            )}
             <div className="standalone-form__actions">
               <Button size="floor" {...press(onBack)}>
                 {t("floor.exceptions.result.back")}

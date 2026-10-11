@@ -30,7 +30,11 @@ import {
   type ClosedBox,
   type OpenBoxResult,
 } from "../exceptions/box-exceptions.js";
-import { ExceptionFlow, type ExceptionOutcome } from "../exceptions/ExceptionFlow.js";
+import {
+  ExceptionFlow,
+  type BoxScanVerdict,
+  type ExceptionOutcome,
+} from "../exceptions/ExceptionFlow.js";
 import { LabelPanel, type LabelNote } from "../print/LabelPanel.js";
 import {
   boxLabelStep,
@@ -859,8 +863,8 @@ export function WorkScreen(props: WorkScreenProps) {
   );
 
   // The box choice of the exceptions, when it listens: a scan of a label picks the box.
-  const targetScan = useRef<((raw: string) => void) | null>(null);
-  const registerScan = useCallback((listener: ((raw: string) => void) | null) => {
+  const targetScan = useRef<((raw: string) => BoxScanVerdict | null) | null>(null);
+  const registerScan = useCallback((listener: ((raw: string) => BoxScanVerdict | null) | null) => {
     targetScan.current = listener;
   }, []);
   const textEntry = useCallback(
@@ -880,8 +884,15 @@ export function WorkScreen(props: WorkScreenProps) {
       const stopped = stopRef.current;
       const choose = targetScan.current;
       if (stopped?.kind === "exceptions" && choose !== null) {
-        choose(raw);
-        return;
+        const verdict = choose(raw);
+        if (verdict !== null) {
+          const say = live.current.t;
+          if (verdict === "taken") show("ok", say("floor.exceptions.signal.taken"), null);
+          else if (verdict === "not_sscc") show("error", say("floor.print.signal.notSscc"), null);
+          else show("error", say("floor.exceptions.signal.notFound"), null);
+          return;
+        }
+        // The choice was made or closed a moment ago: this scan is refused below, in words.
       }
       if (stopped?.kind === "label" && awaitsCheck(stopped.job)) {
         try {
@@ -1040,6 +1051,18 @@ export function WorkScreen(props: WorkScreenProps) {
     if (leavingNow()) return Promise.resolve({ kind: "leaving" });
     return live.current.track(
       queue.run(async () => {
+        // The screen the operator pressed in may be gone in the queue's turn (a label that
+        // waits took it while this waited): the exception is not done, and the operator is told
+        // over whatever stands now, never left to think it was.
+        if (stopRef.current?.kind !== "exceptions") {
+          const say = live.current.t;
+          show(
+            "error",
+            say("floor.exceptions.signal.notDone"),
+            say("floor.exceptions.signal.notDoneDetail"),
+          );
+          return { kind: "label_waiting" };
+        }
         let outcome: ExceptionOutcome;
         try {
           outcome = await work();
@@ -1368,6 +1391,8 @@ export function WorkScreen(props: WorkScreenProps) {
               }
               onReprint={reprint}
               onDisassemble={disassemble}
+              loadSettings={loadLabelSettings}
+              {...(props.onSetup === undefined ? {} : { onSetup: props.onSetup })}
               registerScan={registerScan}
               onTextEntry={textEntry}
               onBack={() => setStop(null)}

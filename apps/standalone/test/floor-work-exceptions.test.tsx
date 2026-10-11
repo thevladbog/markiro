@@ -1,11 +1,15 @@
 import { buildSscc, formatSsccHri } from "@markiro/domain";
-import { act, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within, type RenderResult } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { describe, expect, it, vi } from "vitest";
+
+import type { SignalTone } from "@markiro/ui";
 
 import {
   boxesByTail,
   ExceptionFlow,
   MAX_LISTED_BOXES,
+  type BoxScanVerdict,
   type ExceptionFlowProps,
 } from "../src/floor/exceptions/ExceptionFlow.js";
 import type { ClosedBox } from "../src/floor/exceptions/box-exceptions.js";
@@ -15,9 +19,11 @@ import { fakeHardware } from "./support/hardware.js";
 import {
   FIRST_SSCC,
   jobRows,
+  printingSettings,
   printStation,
   renderedText,
   setUpPrinting,
+  TSC,
   ZEBRA,
 } from "./support/printing.js";
 import { lastLine, PRESS_PAUSE_MS, renderWork } from "./support/work-screen.js";
@@ -27,6 +33,12 @@ type Work = ReturnType<typeof renderWork>;
 
 const SECOND_SSCC = buildSscc(0, PREFIX, 1501);
 const PAUSED = "Скан не принят: работа остановлена — сначала ответьте на сообщение на экране.";
+const FAILED =
+  "Не удалось записать исключение на этом компьютере. Возможно, оно всё же записалось: проверьте числа короба, прежде чем повторять.";
+const STALE =
+  "Пока вы выбирали, короб изменился. Проверьте числа короба и повторите, если ещё нужно.";
+const ZEBRA_LINE = "Печать пойдёт на принтер: Zebra у линии · ZPL · 203 dpi.";
+const TSC_LINE = "Печать пойдёт на принтер: TSC на COM4 · TSPL · 300 dpi.";
 
 async function scanAll(work: Work, serials: readonly string[]): Promise<void> {
   await work.scanner.listening();
@@ -255,11 +267,7 @@ describe("the exceptions of the work screen", () => {
     await work.press("Исключения");
     broken = true;
     await work.press("Снять последний код");
-    expect(
-      await screen.findByText(
-        "Не удалось записать исключение на этом компьютере. Ничего не сделано.",
-      ),
-    ).toBeTruthy();
+    expect(await screen.findByText(FAILED)).toBeTruthy();
     await work.press("Другое действие");
     expect(region().getByRole("button", { name: "Снять последний код" })).toBeTruthy();
     await work.press("Назад");
@@ -277,12 +285,16 @@ describe("the exceptions of the work screen", () => {
     await work.press("Продолжить без этикетки");
     await work.press("Продолжить без этикетки");
     await work.press("Исключения");
-    expect(screen.getByRole("button", { name: "Выйти из смены" }).hasAttribute("disabled")).toBe(
-      false,
-    );
+    // The leave button never uses `disabled`: it says `aria-disabled` while the leave waits.
+    const leave = screen.getByRole("button", { name: "Выйти из смены" });
+    expect(leave.hasAttribute("aria-disabled")).toBe(false);
+    expect(region().queryByRole("button", { name: "Выйти из смены" })).toBeNull();
     await work.press("Назад");
     work.rerender({ leaving: true });
     expect(screen.getByRole("button", { name: "Исключения" }).hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByRole("button", { name: "Выйти из смены" }).getAttribute("aria-disabled"),
+    ).toBe("true");
   });
 });
 
@@ -376,9 +388,7 @@ describe("the order the exceptions keep around a label that waits", () => {
     at.db.exec("UPDATE floor_boxes SET disassembled_at = '2026-10-08T06:30:00.000Z'");
     held.release();
     await work.settled();
-    expect(
-      await screen.findByText("Пока вы выбирали, короб изменился. Ничего не сделано — повторите."),
-    ).toBeTruthy();
+    expect(await screen.findByText(STALE)).toBeTruthy();
     expect(exceptionKinds(at)).toEqual([]);
   });
 
@@ -435,9 +445,7 @@ describe("the order the exceptions keep around a label that waits", () => {
     );
     held.release();
     await work.settled();
-    expect(
-      await screen.findByText("Пока вы выбирали, короб изменился. Ничего не сделано — повторите."),
-    ).toBeTruthy();
+    expect(await screen.findByText(STALE)).toBeTruthy();
     expect(exceptionKinds(at)).toEqual([]);
     expect(work.shell.sends).toHaveLength(1);
   });
@@ -653,6 +661,212 @@ describe("what the exceptions guard against on a touch screen", () => {
   });
 });
 
+/** Reaches the confirmation of a reprint of the first box. */
+async function toReprintConfirm(work: Work): Promise<void> {
+  await work.press("Исключения");
+  await screen.findByRole("button", { name: "Перепечатать этикетку" });
+  await work.press("Перепечатать этикетку");
+  await work.press(`${formatSsccHri(FIRST_SSCC)} · 12 шт.`);
+  await work.press("Замятие в принтере");
+}
+
+describe("what the reprint says of its printer before it is confirmed", () => {
+  it("names the printer the new label will go to, and sends it there", async () => {
+    const at = await printStation();
+    const work = renderWork(at, { overrides: { onSetup: vi.fn() } });
+    await fillBox(work, "P");
+    await toReprintConfirm(work);
+    expect(await region().findByText(ZEBRA_LINE)).toBeTruthy();
+    // A printer is assigned: nothing to set up.
+    expect(region().queryByRole("button", { name: "Настроить принтер" })).toBeNull();
+    expect(work.shell.sends).toHaveLength(1);
+    await work.press("Перепечатать");
+    expect(await screen.findByText("Этикетка отправлена на принтер.")).toBeTruthy();
+    expect(work.shell.sends.at(-1)?.target).toEqual(ZEBRA.target);
+  });
+
+  it("names the printer «Короб» has now, not the one the box's first label came out on", async () => {
+    const at = await printStation();
+    const work = renderWork(at);
+    await fillBox(work, "P");
+    expect(work.shell.sends[0]?.target).toEqual(ZEBRA.target);
+    await setUpPrinting(at.local, { assignments: { box: "tsc", pallet: null, duplicate: null } });
+    await toReprintConfirm(work);
+    expect(await region().findByText(TSC_LINE)).toBeTruthy();
+    expect(region().queryByText(ZEBRA_LINE)).toBeNull();
+    await work.press("Перепечатать");
+    expect(await screen.findByText("Этикетка отправлена на принтер.")).toBeTruthy();
+    expect(work.shell.sends.at(-1)?.target).toEqual(TSC.target);
+  });
+
+  it("says before the confirmation that no printer is assigned, offers the setup, and still writes the exception", async () => {
+    const at = await printStation();
+    const onSetup = vi.fn();
+    const work = renderWork(at, { overrides: { onSetup } });
+    await fillBox(work, "P");
+    await setUpPrinting(at.local, { assignments: { box: null, pallet: null, duplicate: null } });
+    await toReprintConfirm(work);
+    const none = await region().findByText(
+      /Принтер для этикетки короба не назначен, поэтому она не напечатается/,
+    );
+    expect(none.textContent).toMatch(/Исключение всё равно будет записано/);
+    expect(none.textContent).toMatch(/останется на экране работы/);
+    expect(region().queryByText(/Печать пойдёт на принтер/)).toBeNull();
+    expect(exceptionKinds(at)).toEqual([]);
+    await work.press("Настроить принтер");
+    expect(onSetup).toHaveBeenCalledTimes(1);
+    expect(exceptionKinds(at)).toEqual([]);
+    // Confirmed all the same: the exception and its record are written, the label panel takes over.
+    await work.press("Перепечатать");
+    expect(await screen.findByText("Этикетка короба не напечатана")).toBeTruthy();
+    expect(exceptionKinds(at)).toEqual([
+      { kind: "reprint", reason_code: "printer_jam", reason_text: null },
+    ]);
+    expect(work.shell.sends).toHaveLength(1);
+  });
+
+  it("names no printer for a disassembly, which prints nothing", async () => {
+    const at = await printStation();
+    const work = renderWork(at);
+    await fillBox(work, "P");
+    await work.press("Исключения");
+    await screen.findByRole("button", { name: "Расформировать короб" });
+    await work.press("Расформировать короб");
+    await work.press(`${formatSsccHri(FIRST_SSCC)} · 12 шт.`);
+    await work.press("Брак по качеству");
+    expect(screen.getByText("Расформировать короб?")).toBeTruthy();
+    expect(region().queryByText(/Печать пойдёт на принтер/)).toBeNull();
+    expect(region().queryByText(/Принтер для этикетки короба не назначен/)).toBeNull();
+  });
+});
+
+describe("what the exceptions do while the screen has not yet read the shift", () => {
+  /** A third code of the open box is being written while the exceptions open behind it. */
+  async function openBehindHeldScan() {
+    const at = await printStation();
+    const held = holdingWrites(at.local);
+    const work = renderWork({ local: held.executor, shift: at.shift });
+    await fillBox(work, "P");
+    await scanAll(work, ["A1", "A2"]);
+    held.holdNext();
+    await act(async () => {
+      work.scanner.emit(km("A3"));
+      await held.reached();
+    });
+    work.pause();
+    tap("Исключения");
+    return { at, held, work };
+  }
+
+  it("refuses an undo pressed before the opening was settled once a label took the screen, and says so", async () => {
+    const { at, held, work } = await openBehindHeldScan();
+    work.pause();
+    tap("Снять последний код");
+    // The label of the first box fails while the third code is still being written.
+    at.db.exec("UPDATE floor_print_jobs SET state = 'failed', error_code = 'not_sent'");
+    held.release();
+    await work.settled();
+    // Said at once, over the label's panel: the undo was not done.
+    expect(screen.getByText("ИСКЛЮЧЕНИЕ НЕ ВЫПОЛНЕНО")).toBeTruthy();
+    expect(screen.getByText("Сначала ответьте на сообщение на экране.")).toBeTruthy();
+    expect(work.props.signal).toHaveBeenLastCalledWith("error");
+    expect(await screen.findByText("Этикетка короба не напечатана")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Исключения" })).toBeNull();
+    expect(exceptionKinds(at)).toEqual([]);
+    expect(rows(at.db, "SELECT count(*) AS n FROM floor_codes")).toEqual([{ n: 15 }]);
+  });
+
+  it("does not offer «Очистить короб» before the numbers were read, and names the real quantity after", async () => {
+    const { held, work } = await openBehindHeldScan();
+    // The screen still shows the two codes it knew; the third is being written.
+    expect(screen.getByText("2 из 12")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Очистить короб" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    held.release();
+    await work.settled();
+    expect(screen.getByRole("button", { name: "Очистить короб" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+    await work.press("Очистить короб");
+    expect(screen.getByText(/уйдут все коды \(3 шт\.\)/)).toBeTruthy();
+  });
+});
+
+describe("what the box choice says of a scan", () => {
+  it("takes the first of two scans that land before the screen is drawn, and refuses the second in words", async () => {
+    const at = await printStation();
+    const work = renderWork(at);
+    await fillBox(work, "P");
+    await fillBox(work, "Q");
+    await work.press("Исключения");
+    await screen.findByRole("button", { name: "Расформировать короб" });
+    await work.press("Расформировать короб");
+    await act(async () => {
+      work.scanner.emit(`]C100${FIRST_SSCC}`);
+      work.scanner.emit(`]C100${SECOND_SSCC}`);
+      await work.gate.drain();
+    });
+    expect(screen.getByText(`Короб ${formatSsccHri(FIRST_SSCC)}`)).toBeTruthy();
+    expect(screen.queryByText(`Короб ${formatSsccHri(SECOND_SSCC)}`)).toBeNull();
+    expect(lastLine()).toBe(PAUSED);
+    expect(exceptionKinds(at)).toEqual([]);
+  });
+
+  it("gives every verdict on a scan of the box choice its tone and its words, like the label's check", async () => {
+    const at = await printStation();
+    const signal = vi.fn<(tone: SignalTone) => void>();
+    const work = renderWork(at, { overrides: { signal } });
+    await fillBox(work, "P");
+    await work.press("Исключения");
+    await screen.findByRole("button", { name: "Расформировать короб" });
+    await work.press("Расформировать короб");
+    signal.mockClear();
+    await work.scan(km("P99"));
+    expect(signal).toHaveBeenLastCalledWith("error");
+    expect(screen.getByText("НЕ SSCC")).toBeTruthy();
+    signal.mockClear();
+    await work.scan(`]C100${SECOND_SSCC}`);
+    expect(signal).toHaveBeenLastCalledWith("error");
+    expect(screen.getByText("НЕТ ТАКОГО КОРОБА")).toBeTruthy();
+    signal.mockClear();
+    await work.scan(`]C100${FIRST_SSCC}`);
+    expect(signal).toHaveBeenLastCalledWith("ok");
+    expect(screen.getByText(`Короб ${formatSsccHri(FIRST_SSCC)}`)).toBeTruthy();
+  });
+});
+
+describe("what the exceptions tell the operator cannot be undone", () => {
+  it("tells to scan the code again after an undo, and that a disassembly cannot be undone", async () => {
+    const at = await printStation();
+    const work = renderWork(at);
+    await fillBox(work, "P");
+    await scanAll(work, ["A1"]);
+    await work.press("Исключения");
+    await screen.findByRole("button", { name: "Расформировать короб" });
+    await work.press("Расформировать короб");
+    await work.press(`${formatSsccHri(FIRST_SSCC)} · 12 шт.`);
+    await work.press("Брак по качеству");
+    expect(region().getByText("Отменить это нельзя: снимите этикетку с короба.")).toBeTruthy();
+    await work.press("Назад");
+    await work.press("Назад");
+    await work.press("Назад");
+    await work.press("Снять последний код");
+    await screen.findByText("Последний код снят из короба.");
+    expect(region().getByText("Если сняли по ошибке — отсканируйте этот код снова.")).toBeTruthy();
+  });
+});
+
+/** The flow rendered and its first read of the settings let in, as the floor's screen has it. */
+async function mount(node: ReactElement): Promise<RenderResult> {
+  let view: RenderResult | undefined;
+  await act(async () => {
+    view = render(node);
+  });
+  if (view === undefined) throw new Error("the flow was not rendered");
+  return view;
+}
+
 function flowProps(overrides: Partial<ExceptionFlowProps> = {}): ExceptionFlowProps {
   const done = async () => ({ kind: "done", action: "undo" }) as const;
   // Every look at the clock is a pause longer than the guard after a view.
@@ -667,6 +881,7 @@ function flowProps(overrides: Partial<ExceptionFlowProps> = {}): ExceptionFlowPr
     registerScan: vi.fn(),
     onTextEntry: vi.fn(),
     onBack: vi.fn(),
+    loadSettings: async () => printingSettings(),
     clock: () => {
       now += PRESS_PAUSE_MS;
       return now;
@@ -676,8 +891,8 @@ function flowProps(overrides: Partial<ExceptionFlowProps> = {}): ExceptionFlowPr
 }
 
 describe("the exceptions screen by itself", () => {
-  it("says there is nothing to do when the box is empty and no box is closed, and offers nothing", () => {
-    render(<ExceptionFlow {...flowProps()} />);
+  it("says there is nothing to do when the box is empty and no box is closed, and offers nothing", async () => {
+    await mount(<ExceptionFlow {...flowProps()} />);
     expect(screen.getByText(/Сейчас исключений нет/)).toBeTruthy();
     for (const name of [
       "Снять последний код",
@@ -689,42 +904,43 @@ describe("the exceptions screen by itself", () => {
     }
   });
 
-  it("does not call the work done while the closed boxes are read", () => {
-    render(<ExceptionFlow {...flowProps({ openItems: 0, boxes: null })} />);
+  it("does not call the work done while the closed boxes are read", async () => {
+    await mount(<ExceptionFlow {...flowProps({ openItems: 0, boxes: null })} />);
     expect(screen.getByText("Читаем закрытые короба…")).toBeTruthy();
     expect(screen.queryByText(/Сейчас исключений нет/)).toBeNull();
   });
 
-  it("waits for the closed boxes without calling the work done, and offers the open box's actions", () => {
-    render(<ExceptionFlow {...flowProps({ openItems: 3, boxes: null })} />);
+  it("waits for the closed boxes without calling the work done, and offers only the open box's undo", async () => {
+    await mount(<ExceptionFlow {...flowProps({ openItems: 3, boxes: null })} />);
     expect(screen.getByText("Читаем закрытые короба…")).toBeTruthy();
     expect(screen.queryByText(/Сейчас исключений нет/)).toBeNull();
     expect(
       screen.getByRole("button", { name: "Снять последний код" }).hasAttribute("disabled"),
     ).toBe(false);
+    // The quantity it would name is not trusted before the numbers were read.
     expect(screen.getByRole("button", { name: "Очистить короб" }).hasAttribute("disabled")).toBe(
-      false,
+      true,
     );
     expect(
       screen.getByRole("button", { name: "Перепечатать этикетку" }).hasAttribute("disabled"),
     ).toBe(true);
   });
 
-  it("lists twelve boxes at most and says how many more the digits will find", () => {
+  it("lists twelve boxes at most and says how many more the digits will find", async () => {
     const boxes: ClosedBox[] = Array.from({ length: 15 }, (_, index) => ({
       id: `box-${index}`,
       sscc: buildSscc(0, PREFIX, 1500 + index),
       itemCount: 12,
       closedAt: "2026-10-08T06:15:00.000Z",
     }));
-    render(<ExceptionFlow {...flowProps({ boxes })} />);
+    await mount(<ExceptionFlow {...flowProps({ boxes })} />);
     fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку" }));
     expect(screen.getAllByRole("button", { name: /шт\.$/ })).toHaveLength(MAX_LISTED_BOXES);
     expect(screen.getByText("Ещё коробов: 3. Наберите больше цифр.")).toBeTruthy();
   });
 
-  it("takes no more digits than an SSCC has, and erases them one by one", () => {
-    render(
+  it("takes no more digits than an SSCC has, and erases them one by one", async () => {
+    await mount(
       <ExceptionFlow
         {...flowProps({ boxes: [{ id: "a", sscc: FIRST_SSCC, itemCount: 12, closedAt: "x" }] })}
       />,
@@ -738,9 +954,9 @@ describe("the exceptions screen by itself", () => {
     expect(screen.getByText(`Последние цифры SSCC: ${FIRST_SSCC.slice(0, -1)}`)).toBeTruthy();
   });
 
-  it("listens for a scan only while a box is chosen, and gives the listener up after", () => {
+  it("listens for a scan only while a box is chosen, and gives the listener up after", async () => {
     const registerScan = vi.fn();
-    render(
+    await mount(
       <ExceptionFlow
         {...flowProps({
           registerScan,
@@ -755,25 +971,113 @@ describe("the exceptions screen by itself", () => {
     expect(registerScan).toHaveBeenLastCalledWith(null);
   });
 
+  /** The confirmation of a reprint of the one closed box, by the buttons. */
+  function toConfirm(): void {
+    fireEvent.click(screen.getByRole("button", { name: "Перепечатать этикетку" }));
+    fireEvent.click(screen.getByRole("button", { name: `${formatSsccHri(FIRST_SSCC)} · 12 шт.` }));
+    fireEvent.click(screen.getByRole("button", { name: "Замятие в принтере" }));
+  }
+  const ONE_BOX = [{ id: "a", sscc: FIRST_SSCC, itemCount: 12, closedAt: "x" }];
+
+  it("waits for the printer's name before a reprint can be confirmed", async () => {
+    let answer: (settings: ReturnType<typeof printingSettings>) => void = () => undefined;
+    const loadSettings = vi.fn(
+      () =>
+        new Promise<ReturnType<typeof printingSettings>>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    await mount(<ExceptionFlow {...flowProps({ boxes: ONE_BOX, loadSettings })} />);
+    toConfirm();
+    expect(screen.getByRole("button", { name: "Перепечатать" }).hasAttribute("disabled")).toBe(
+      true,
+    );
+    expect(screen.queryByText(/Печать пойдёт на принтер/)).toBeNull();
+    await act(async () => {
+      answer(printingSettings());
+    });
+    expect(screen.getByText(ZEBRA_LINE)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Перепечатать" }).hasAttribute("disabled")).toBe(
+      false,
+    );
+  });
+
+  it("says that the printers could not be read, and lets the operator decide", async () => {
+    const loadSettings = vi.fn(async () => {
+      throw new Error("the database does not answer");
+    });
+    const onReprint = vi.fn(async () => ({ kind: "done", action: "reprint" }) as const);
+    await mount(<ExceptionFlow {...flowProps({ boxes: ONE_BOX, loadSettings, onReprint })} />);
+    toConfirm();
+    expect(await screen.findByText("Не удалось прочитать настройку принтеров.")).toBeTruthy();
+    expect(screen.queryByText(/Печать пойдёт на принтер/)).toBeNull();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Перепечатать" }));
+    });
+    expect(onReprint).toHaveBeenCalledTimes(1);
+  });
+
+  it("offers the setup of the printers only where a setup is given", async () => {
+    const none = async () =>
+      printingSettings({ assignments: { box: null, pallet: null, duplicate: null } });
+    const first = await mount(
+      <ExceptionFlow {...flowProps({ boxes: ONE_BOX, loadSettings: none })} />,
+    );
+    toConfirm();
+    expect(await screen.findByText(/Принтер для этикетки короба не назначен/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Настроить принтер" })).toBeNull();
+    first.unmount();
+    const onSetup = vi.fn();
+    await mount(<ExceptionFlow {...flowProps({ boxes: ONE_BOX, loadSettings: none, onSetup })} />);
+    toConfirm();
+    fireEvent.click(await screen.findByRole("button", { name: "Настроить принтер" }));
+    expect(onSetup).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers a scan of the box choice with its verdict, and hands back one that comes after the choice", async () => {
+    const registerScan = vi.fn<ExceptionFlowProps["registerScan"]>();
+    const second = buildSscc(0, PREFIX, 1501);
+    await mount(
+      <ExceptionFlow
+        {...flowProps({
+          registerScan,
+          boxes: [
+            { id: "a", sscc: FIRST_SSCC, itemCount: 12, closedAt: "x" },
+            { id: "b", sscc: second, itemCount: 12, closedAt: "x" },
+          ],
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Расформировать короб" }));
+    const listener = registerScan.mock.calls.at(-1)?.[0];
+    if (listener === null || listener === undefined) throw new Error("no listener");
+    const verdicts: (BoxScanVerdict | null)[] = [];
+    act(() => {
+      verdicts.push(listener(km("P1")));
+      verdicts.push(listener(`]C100${buildSscc(0, PREFIX, 1999)}`));
+      // Two labels in one tick: the first picks the box, the second is not the choice any more.
+      verdicts.push(listener(`]C100${FIRST_SSCC}`));
+      verdicts.push(listener(`]C100${second}`));
+    });
+    expect(verdicts).toEqual(["not_sscc", "not_found", "taken", null]);
+    expect(screen.getByText(`Короб ${formatSsccHri(FIRST_SSCC)}`)).toBeTruthy();
+  });
+
   it("says an action whose work rejected as a failed write", async () => {
     const onUndo = vi.fn(async () => {
       throw new Error("nobody answered");
     });
-    render(<ExceptionFlow {...flowProps({ openItems: 1, onUndo })} />);
+    await mount(<ExceptionFlow {...flowProps({ openItems: 1, onUndo })} />);
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Снять последний код" }));
     });
-    expect(
-      await screen.findByText(
-        "Не удалось записать исключение на этом компьютере. Ничего не сделано.",
-      ),
-    ).toBeTruthy();
+    expect(await screen.findByText(FAILED)).toBeTruthy();
   });
 
   it("ignores a press for 400 ms after a view opened, and takes it at 400", async () => {
     const clock = { now: 5000 };
     const onUndo = vi.fn(async () => ({ kind: "done", action: "undo" }) as const);
-    render(<ExceptionFlow {...flowProps({ openItems: 1, onUndo, clock: () => clock.now })} />);
+    await mount(<ExceptionFlow {...flowProps({ openItems: 1, onUndo, clock: () => clock.now })} />);
     clock.now = 5399;
     fireEvent.click(screen.getByRole("button", { name: "Снять последний код" }));
     expect(onUndo).not.toHaveBeenCalled();
@@ -784,9 +1088,9 @@ describe("the exceptions screen by itself", () => {
     expect(onUndo).toHaveBeenCalledTimes(1);
   });
 
-  it("gives the keyboard back to the scanner when it goes away with the words field open", () => {
+  it("gives the keyboard back to the scanner when it goes away with the words field open", async () => {
     const onTextEntry = vi.fn();
-    const view = render(
+    const view = await mount(
       <ExceptionFlow
         {...flowProps({
           onTextEntry,
@@ -832,9 +1136,7 @@ describe("how the exceptions say what went wrong", () => {
     at.db.exec("UPDATE floor_boxes SET item_count = item_count + 1 WHERE closed_at IS NULL");
     held.release();
     await work.settled();
-    expect(
-      await screen.findByText("Пока вы выбирали, короб изменился. Ничего не сделано — повторите."),
-    ).toBeTruthy();
+    expect(await screen.findByText(STALE)).toBeTruthy();
     expect(exceptionKinds(at)).toEqual([]);
     expect(rows(at.db, "SELECT count(*) AS n FROM floor_codes")).toEqual([{ n: 2 }]);
   });
@@ -853,9 +1155,7 @@ describe("how the exceptions say what went wrong", () => {
     broken = true;
     vi.mocked(work.props.onRecorded).mockClear();
     await work.press("Снять последний код");
-    const failed = await screen.findByText(
-      "Не удалось записать исключение на этом компьютере. Ничего не сделано.",
-    );
+    const failed = await screen.findByText(FAILED);
     expect(failed.closest(".mk-alert--error")).not.toBeNull();
     // A failed write may have been written all the same: the host is asked once more.
     expect(work.props.onRecorded).toHaveBeenCalled();
