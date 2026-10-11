@@ -49,7 +49,9 @@ pub enum LinkError {
     CertificateMismatch,
     /// The host no longer accepts this device's key.
     KeyRejected,
-    /// The host refused the stream with another error.
+    /// The host refused the stream with another error, or answered the
+    /// `hello` read before it with something other than a Markiro host's
+    /// `hello` (plan РК-С).
     StreamRefused,
     /// The stream closed, went silent or carried something unreadable.
     StreamEnded,
@@ -76,10 +78,11 @@ pub struct HostStatus {
     /// The host's `hello.restoreEpoch` (plan РК-С) as the connection that came
     /// online last read it, with the pinned certificate, just before it opened
     /// the stream: a new value tells the webview the host went back to a copy.
-    /// `None`, and absent from the JSON, before the host's first restore,
-    /// before this pairing's first connection came online, and when that read
-    /// failed: the stream opens all the same, and the next connection reads
-    /// again.
+    /// `None`, and absent from the JSON, before the host's first restore
+    /// (a host that predates restores names none either) and before this
+    /// pairing's first connection came online. A failed read ends the
+    /// attempt before the stream opens, so `Online` always means the epoch of
+    /// this host is known.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub restore_epoch: Option<String>,
 }
@@ -261,8 +264,13 @@ async fn follow(
         Err(error) => return (request_error(error), false),
     };
     // Read before the stream opens, so that the `Online` status its first
-    // event publishes already carries it.
-    let mut epoch = restore_epoch(link).await;
+    // event publishes already carries it; without it no `Online` (plan РК-С:
+    // the outbox goes only once the station knows whether the host was
+    // restored).
+    let mut epoch = match restore_epoch(link).await {
+        Ok(epoch) => epoch,
+        Err(error) => return (error, false),
+    };
     let mut stream = match client.open(STREAM_PATH, link.key()).await {
         Ok(StreamOpen::Open(stream)) => stream,
         Ok(StreamOpen::Refused(response)) => return (refusal(&response), false),
@@ -297,23 +305,31 @@ async fn follow(
 }
 
 /// `GET /v1/hello` with the pinned certificate and no key: the host's restore
-/// epoch, `None` when it names none or the read fails.
-async fn restore_epoch(link: &HostLink) -> Option<String> {
-    let client = PinnedClient::new(&link.address, &link.fingerprint).ok()?;
+/// epoch, `None` when it names none. A transport failure is the link's
+/// (`request_error`, so a changed certificate is told apart).
+async fn restore_epoch(link: &HostLink) -> Result<Option<String>, LinkError> {
+    let client = PinnedClient::new(&link.address, &link.fingerprint).map_err(request_error)?;
     let response = client
         .send("GET", HELLO_PATH, None, Credentials::default())
         .await
-        .ok()?;
+        .map_err(request_error)?;
     epoch_of(&response)
 }
 
 /// The `restoreEpoch` of a `hello` answer: only from a 200 that reads as a
-/// compatible Markiro host's `hello` (`host_probe::classify_hello`).
-fn epoch_of(response: &HostResponse) -> Option<String> {
+/// compatible Markiro host's `hello` (`host_probe::classify_hello`); a host
+/// that predates restores answers without the field, which is `Ok(None)`.
+/// Anything else — another status, no body, not a Markiro host, an epoch
+/// that does not read — is `StreamRefused`: `hello` is unauthenticated and
+/// always a 200 on a healthy host.
+fn epoch_of(response: &HostResponse) -> Result<Option<String>, LinkError> {
     if response.status != 200 {
-        return None;
+        return Err(LinkError::StreamRefused);
     }
-    classify_hello(response.body.clone()?).ok()?.restore_epoch
+    let body = response.body.clone().ok_or(LinkError::StreamRefused)?;
+    classify_hello(body)
+        .map(|hello| hello.restore_epoch)
+        .map_err(|_| LinkError::StreamRefused)
 }
 
 fn request_error(error: RequestError) -> LinkError {
@@ -616,17 +632,53 @@ mod tests {
             serde_json::from_str(include_str!("../../proto/fixtures/hello-restored.json")).unwrap();
         let epoch =
             |status: u16, body: Option<serde_json::Value>| epoch_of(&HostResponse { status, body });
-        assert_eq!(epoch(200, Some(restored.clone())), Some(EPOCH.to_owned()));
+        assert_eq!(
+            epoch(200, Some(restored.clone())),
+            Ok(Some(EPOCH.to_owned()))
+        );
         let mut never = restored.clone();
         never.as_object_mut().unwrap().remove("restoreEpoch");
-        assert_eq!(epoch(200, Some(never)), None, "a host never restored");
-        assert_eq!(epoch(503, Some(restored.clone())), None);
-        assert_eq!(epoch(200, None), None);
+        assert_eq!(
+            epoch(200, Some(never)),
+            Ok(None),
+            "a host never restored, or one that predates restores"
+        );
+        // A failed read ends the attempt: no `Online` without the epoch.
+        assert_eq!(
+            epoch(503, Some(restored.clone())),
+            Err(LinkError::StreamRefused)
+        );
+        assert_eq!(epoch(200, None), Err(LinkError::StreamRefused));
         let mut foreign = restored.clone();
         foreign["product"] = json!("other");
-        assert_eq!(epoch(200, Some(foreign)), None, "not a Markiro host");
+        assert_eq!(
+            epoch(200, Some(foreign)),
+            Err(LinkError::StreamRefused),
+            "not a Markiro host"
+        );
         let mut unreadable = restored;
         unreadable["restoreEpoch"] = json!(7);
-        assert_eq!(epoch(200, Some(unreadable)), None);
+        assert_eq!(epoch(200, Some(unreadable)), Err(LinkError::StreamRefused));
+    }
+
+    #[test]
+    fn a_hello_of_a_host_that_predates_restores_reads_without_an_epoch() {
+        // `hello.json` is the answer of a host built before plan РК (no
+        // `restoreEpoch` at all); `hello-future.json` a later protocol with
+        // fields this build does not know. Both come online without an epoch.
+        for fixture in [
+            include_str!("../../proto/fixtures/hello.json"),
+            include_str!("../../proto/fixtures/hello-future.json"),
+        ] {
+            let body: serde_json::Value = serde_json::from_str(fixture).unwrap();
+            assert_eq!(
+                epoch_of(&HostResponse {
+                    status: 200,
+                    body: Some(body)
+                }),
+                Ok(None),
+                "{fixture}"
+            );
+        }
     }
 }

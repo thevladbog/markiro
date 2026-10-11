@@ -375,3 +375,44 @@ async fn a_rejected_key_and_a_changed_certificate_are_reported() {
     task.abort();
     host.stop().await.unwrap();
 }
+
+#[tokio::test]
+async fn a_host_whose_hello_does_not_read_keeps_the_link_offline() {
+    let host_dir = tempfile::tempdir().unwrap();
+    let app_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path(), "127.0.0.1:0").await;
+    let bound = host.addr.to_string();
+    let device = paired(&host, app_dir.path()).await;
+    host.stop().await.unwrap();
+    // An epoch that is not UTF-8 text: the host's `hello` fails with a 500,
+    // while its stream and the device key are as good as before.
+    let mut db = SqliteConnectOptions::new()
+        .filename(HostPaths::new(host_dir.path()).database_file())
+        .connect()
+        .await
+        .unwrap();
+    sqlx::query("UPDATE site SET restore_epoch = X'FF' WHERE id = 1")
+        .execute(&mut db)
+        .await
+        .unwrap();
+    db.close().await.unwrap();
+    let host = start_host(host_dir.path(), &bound).await;
+    let (mut heard, state, task) = follow(device.watch_link());
+
+    let refused = status_in(&mut heard, LinkState::Offline).await;
+    assert_eq!(refused.last_error, Some(LinkError::StreamRefused));
+    assert_eq!(refused.restore_epoch, None);
+    // It keeps trying, and never comes online without the epoch.
+    tokio::time::sleep(Duration::from_millis(600)).await;
+    let later: Vec<Heard> = std::iter::from_fn(|| heard.try_recv().ok()).collect();
+    assert!(
+        later.iter().all(
+            |heard| matches!(heard, Heard::Status(status) if status.state != LinkState::Online)
+        ),
+        "{later:?}"
+    );
+    assert!(later.len() >= 2, "the link keeps trying: {later:?}");
+    assert_ne!(state.snapshot().state, LinkState::Online);
+    task.abort();
+    host.stop().await.unwrap();
+}
