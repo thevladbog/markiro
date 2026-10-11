@@ -1,3 +1,4 @@
+import { buildStandardLabelSpec } from "./standard-layouts.js";
 import { code128ModuleCount, GS1_128_QUIET_ZONE_MODULES } from "./code128.js";
 import type { LabelElement, LabelTemplateSpec } from "./model.js";
 import { estimatedTextWidthMm, LINE_HEIGHT_EM, ptToMm } from "./wrap.js";
@@ -608,12 +609,12 @@ function buildBoxLabelSpec(
 const STOCK_AUTHORING_DPI = 203;
 
 /** The four stock sizes both families are cut in. */
-const BOX_LABEL_SIZES: ReadonlyArray<{ w: number; h: number }> = [
+const BOX_LABEL_SIZES = [
   { w: 58, h: 40 },
   { w: 75, h: 120 },
   { w: 100, h: 100 },
   { w: 100, h: 150 },
-];
+] as const;
 
 /** Part of the seed identity of the print-name family (see `buildPrintNameBoxLabelTemplates`). */
 const PRINT_NAME_SUFFIX = " [Назв. для печати]";
@@ -631,7 +632,10 @@ function stockName(w: number, h: number, dates: DateFields, suffix = ""): string
 export function buildDatedBoxLabelTemplates(): DefaultLabelTemplate[] {
   return BOX_LABEL_SIZES.map(({ w, h }) => ({
     name: stockName(w, h, "with-dates"),
-    spec: buildBoxLabelSpec(w, h, STOCK_AUTHORING_DPI, "with-dates"),
+    spec:
+      w === 58
+        ? buildBoxLabelSpec(w, h, STOCK_AUTHORING_DPI, "with-dates")
+        : buildStandardLabelSpec(w, h, false),
   }));
 }
 
@@ -649,7 +653,10 @@ export function buildDatedBoxLabelTemplates(): DefaultLabelTemplate[] {
 export function buildDateFreeBoxLabelTemplates(): DefaultLabelTemplate[] {
   return BOX_LABEL_SIZES.map(({ w, h }) => ({
     name: stockName(w, h, "without-dates"),
-    spec: buildBoxLabelSpec(w, h, STOCK_AUTHORING_DPI, "without-dates"),
+    spec:
+      w === 58
+        ? buildBoxLabelSpec(w, h, STOCK_AUTHORING_DPI, "without-dates")
+        : buildStandardLabelSpec(w, h, false, false),
   }));
 }
 
@@ -664,11 +671,17 @@ export function buildPrintNameBoxLabelTemplates(): DefaultLabelTemplate[] {
   return [
     ...BOX_LABEL_SIZES.map(({ w, h }) => ({
       name: stockName(w, h, "with-dates", PRINT_NAME_SUFFIX),
-      spec: buildBoxLabelSpec(w, h, STOCK_AUTHORING_DPI, "with-dates", "product.printName"),
+      spec:
+        w === 58
+          ? buildBoxLabelSpec(w, h, STOCK_AUTHORING_DPI, "with-dates", "product.printName")
+          : buildStandardLabelSpec(w, h, false, true, "product.printName"),
     })),
     ...BOX_LABEL_SIZES.map(({ w, h }) => ({
       name: stockName(w, h, "without-dates", PRINT_NAME_SUFFIX),
-      spec: buildBoxLabelSpec(w, h, STOCK_AUTHORING_DPI, "without-dates", "product.printName"),
+      spec:
+        w === 58
+          ? buildBoxLabelSpec(w, h, STOCK_AUTHORING_DPI, "without-dates", "product.printName")
+          : buildStandardLabelSpec(w, h, false, false, "product.printName"),
     })),
   ];
 }

@@ -12,8 +12,10 @@ class RosterRefresher @Inject constructor(
     private val api: StationApi,
     private val roster: RosterStore,
     private val config: DeviceConfigDao,
+    private val branding: app.markiro.handheld.core.label.OrganizationPrintBranding? = null,
 ) {
     suspend fun refresh(now: Long = System.currentTimeMillis()) = recovery.work {
+        try { branding?.refresh() } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { /* Retain the last complete logo offline. */ }
         val items = runCatching { api.operators().items }.getOrNull() ?: return@work
         roster.replace(items.map { it.toRecord() })
         recovery.commit { config.get()?.let { config.upsert(it.copy(rosterFetchedAt = now)) } }

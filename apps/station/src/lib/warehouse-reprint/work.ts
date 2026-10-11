@@ -1,3 +1,4 @@
+import { loadThermalLabelLogo } from "../organization-branding.js";
 import { printerMode } from "../printer-routing.js";
 import {
   productLabelBytesDigest,
@@ -464,6 +465,9 @@ export function createWarehouseWork(o: WarehouseWorkOptions) {
           template,
           profile,
           printerMode(profile) === "windows_driver" ? rasterizeDriverText : rasterizeText,
+          template.spec.elements.some((e) => e.kind === "organization_logo")
+            ? { logo: await loadThermalLabelLogo(o.exec, o.generation) }
+            : {},
         );
         if (
           !current() ||

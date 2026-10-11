@@ -688,6 +688,16 @@ export class OrgProfileService {
     return parsed.data;
   }
 
+  async getHandheldPrintBranding(tenantId: string): Promise<OrganizationBrandingDescriptor> {
+    const branding = await this.getStationBranding(tenantId);
+    return {
+      ...branding,
+      logoUrl: branding.logoRevision
+        ? `/station/handheld-branding/logo/${branding.logoRevision}`
+        : null,
+    };
+  }
+
   async getCabinetPrintBranding(tenantId: string): Promise<OrganizationBrandingDescriptor> {
     const branding = await this.getStationBranding(tenantId);
     return {

@@ -1,3 +1,4 @@
+import { loadCabinetSheetBranding } from "./sheet/sheet-branding.js";
 /**
  * The `/labels/new` / `/labels/:id` template page after the visual editor's
  * removal (spec 2026-08-20): a settings form (name, size, dpi) + the
@@ -485,16 +486,21 @@ function LabelEditorContent({
     if (duplicateInvalid) return;
     const sample = labelPreviewData(purpose);
     try {
+      const branding = spec.elements.some((e) => e.kind === "organization_logo")
+        ? { logo: (await loadCabinetSheetBranding()).logo }
+        : {};
       if (format === "zpl") {
         const text = await generateZpl(spec, sample, {
           rasterizeText,
           ...labelRenderOptions(purpose),
+          ...branding,
         });
         downloadBlob(buildZplBlob(text), `${safeFileName(name)}.zpl`);
       } else {
         const text = await generateTspl(spec, sample, {
           rasterizeText,
           ...labelRenderOptions(purpose),
+          ...branding,
         });
         downloadBlob(buildTsplBlob(text), `${safeFileName(name)}.tspl`);
       }

@@ -53,7 +53,11 @@ const elementBaseShape = {
  */
 const wrappableTextShape = {
   fontSizePt: z.number().min(4).max(72),
+  minFontSizePt: z.number().min(4).max(72).optional(),
   bold: z.boolean().optional(),
+  fontFamily: z.enum(["sans-serif", "monospace"]).optional(),
+  /** Explicit line boxes also opt into bundled-font raster printing, including ASCII. */
+  lineHeight: z.number().min(1).max(2).optional(),
   align: alignSchema.optional(),
   maxWidthMm: z.number().positive().optional(),
   maxLines: z.number().int().min(1).max(16).optional(),
@@ -80,7 +84,9 @@ const fieldElementShape = {
   ...elementBaseShape,
   field: labelFieldSchema,
   /** Human-readable identity only; the barcode continues to use the original field bytes. */
-  textFormat: z.literal("km_without_crypto").optional(),
+  textFormat: z
+    .enum(["km_without_crypto", "quantity_number", "sscc_with_title", "sscc_spaced"])
+    .optional(),
   ...wrappableTextShape,
 };
 const fieldElementSchema = z.object(fieldElementShape);
@@ -146,12 +152,24 @@ const boxElementShape = {
 const boxElementSchema = z.object(boxElementShape);
 export type LabelBoxElement = z.infer<typeof boxElementSchema>;
 
+const organizationLogoShape = {
+  kind: z.literal("organization_logo"),
+  ...elementBaseShape,
+  widthMm: z.number().positive().max(100),
+  heightMm: z.number().positive().max(50),
+  source: z.literal("organization"),
+  fallback: z.literal("markiro"),
+};
+const organizationLogoSchema = z.object(organizationLogoShape);
+export type LabelOrganizationLogoElement = z.infer<typeof organizationLogoSchema>;
+
 const labelElementSchema = z.discriminatedUnion("kind", [
   textElementSchema,
   fieldElementSchema,
   barcodeElementSchema,
   lineElementSchema,
   boxElementSchema,
+  organizationLogoSchema,
 ]);
 export type LabelElement = z.infer<typeof labelElementSchema>;
 
@@ -166,6 +184,7 @@ const specShape = {
   heightMm: z.number().min(10).max(300),
   dpi: dpiSchema,
   language: z.enum(["zpl", "tspl"]),
+  gs1Constraint: z.literal("sscc_x_below_distribution_minimum").optional(),
 };
 
 /**
@@ -204,6 +223,40 @@ export const labelTemplateSpecSchema = z
           path: ["elements"],
         });
       }
+      if (
+        element.kind === "field" &&
+        element.textFormat === "quantity_number" &&
+        element.field !== "qty" &&
+        element.field !== "qty.boxes"
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "quantity_number requires a quantity field",
+          path: ["elements"],
+        });
+      }
+      if (
+        element.kind === "field" &&
+        (element.textFormat === "sscc_with_title" || element.textFormat === "sscc_spaced") &&
+        element.field !== "sscc"
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "SSCC formatting requires the sscc field",
+          path: ["elements"],
+        });
+      }
+      if (
+        (element.kind === "field" || element.kind === "text") &&
+        element.minFontSizePt !== undefined &&
+        element.minFontSizePt > element.fontSizePt
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "minFontSizePt must not exceed fontSizePt",
+          path: ["elements"],
+        });
+      }
       if (seenIds.has(element.id)) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
@@ -235,6 +288,7 @@ export const labelTemplateSpecStrictSchema = z.strictObject({
       z.strictObject(barcodeElementShape(z.strictObject({ literal: z.string() }))),
       z.strictObject(lineElementShape),
       z.strictObject(boxElementShape),
+      z.strictObject(organizationLogoShape),
     ]),
   ),
 });
@@ -378,7 +432,14 @@ export function labelFieldDisplayValue(
       throw error;
     }
   }
-  if (field === "sscc" && /^\d{18}$/.test(value)) return formatSsccHri(value);
+  if ((field === "qty" || field === "qty.boxes") && textFormat === "quantity_number")
+    return value.trim();
+  if (field === "sscc" && /^\d{18}$/.test(value))
+    return textFormat === "sscc_with_title"
+      ? `SSCC  (00) ${value}`
+      : textFormat === "sscc_spaced"
+        ? `(00) ${value}`
+        : formatSsccHri(value);
   if (field === "qty") {
     const digits = value.trim();
     if (/^\d+$/.test(digits)) return `${digits} ${QTY_UNIT_SUFFIX}`;

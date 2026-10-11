@@ -1161,6 +1161,7 @@
     "additionalOperations": "Additional operations",
     "backToInventory": "Back to inventory",
     "operationsHint": "Choose an additional warehouse operation.",
-    "previewRetry": "Retry preview"
+    "previewRetry": "Retry preview",
+    "gs1WidthConstraint": "75×120 mm: SSCC X-dimension is below the usual GS1 minimum for logistic units."
   }
 }

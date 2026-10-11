@@ -1,3 +1,5 @@
+import { renderLabelLogo } from "./label-logo.js";
+import type { MonoBitmap } from "./mono-compose.js";
 /**
  * TSPL (TSC TSPL2) label document generator — emits complete, printer-ready
  * TSPL source text compatible with TSC thermal printers.
@@ -69,6 +71,7 @@ export { needsImageRendering } from "./text.js";
 
 export interface GenerateTsplDeps {
   rasterizeText?: RasterizeTextFn;
+  logo?: MonoBitmap;
   /** Product-duplicate layouts use sizeMm as the complete symbol square, including quiet zone. */
   kmDataMatrix?: "native" | "raster";
 }
@@ -235,7 +238,11 @@ async function renderTextLikeElement(
   const x = mmToDots(element.xMm, spec.dpi);
   const y = mmToDots(element.yMm, spec.dpi);
 
-  if (needsImageRendering(text)) {
+  if (
+    needsImageRendering(text) ||
+    element.lineHeight !== undefined ||
+    element.fontFamily !== undefined
+  ) {
     if (!deps.rasterizeText) {
       throw new DomainError(
         "RASTER_REQUIRED",
@@ -248,7 +255,11 @@ async function renderTextLikeElement(
     // `maxWidthPx`/`maxLines` bound the bitmap itself — identical to zpl.ts's
     // raster branch; see `RasterizeTextOptions`'s doc comment.
     const raster = await deps.rasterizeText(text, {
-      fontFamily: "sans-serif",
+      fontFamily: element.fontFamily ?? "sans-serif",
+      ...(element.minFontSizePt === undefined
+        ? {}
+        : { minFontSizePx: ptToDots(element.minFontSizePt, spec.dpi) }),
+      ...(element.lineHeight === undefined ? {} : { lineHeight: element.lineHeight }),
       fontSizePx,
       bold: element.bold ?? false,
       maxWidthPx: maxWidthDots,
@@ -482,6 +493,11 @@ export async function generateTspl(
   // call order in tests, regardless of individual rasterizeText timing.
   for (const element of spec.elements) {
     switch (element.kind) {
+      case "organization_logo": {
+        const { xDots, yDots, raster } = renderLabelLogo(element, spec.dpi, deps.logo);
+        lines.push(buildBitmapCommand(xDots, yDots, raster));
+        break;
+      }
       case "text":
         lines.push(await renderTextLikeElement(element, element.text, spec, deps));
         break;

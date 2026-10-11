@@ -49,7 +49,7 @@ internal fun rasterLayout(text: String, options: RasterOptions, measure: (String
     }
     val natural = ceil(lines.maxOf { measure(it) }).toInt()
     val width = max(1, if (maxWidth == null) natural else min(natural, maxWidth))
-    val lineHeight = ceil(options.fontSizePx * LINE_HEIGHT_EM).toInt()
+    val lineHeight = ceil(options.fontSizePx * (options.lineHeight ?: LINE_HEIGHT_EM)).toInt()
     return RasterLayout(lines, width, max(1, lineHeight * lines.size), lineHeight)
 }
 
@@ -59,10 +59,18 @@ class AndroidTextRasterizer @Inject constructor() : RasterizeText {
         withContext(Dispatchers.Default) {
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 textSize = options.fontSizePx.toFloat()
-                typeface = Typeface.create(Typeface.SANS_SERIF, if (options.bold) Typeface.BOLD else Typeface.NORMAL)
+                typeface = Typeface.create(if (options.fontFamily == "monospace") Typeface.MONOSPACE else Typeface.SANS_SERIF, if (options.bold) Typeface.BOLD else Typeface.NORMAL)
                 color = Color.BLACK
             }
-            val layout = rasterLayout(text, options) { paint.measureText(it).toDouble() }
+            var fitted = options
+            if (options.maxWidthPx != null && options.minFontSizePx != null) {
+                while (paint.measureText(text) > options.maxWidthPx && fitted.fontSizePx > options.minFontSizePx) {
+                    fitted = fitted.copy(fontSizePx = fitted.fontSizePx - 1)
+                    paint.textSize = fitted.fontSizePx.toFloat()
+                }
+                if (paint.measureText(text) > options.maxWidthPx) throw LabelRenderException("Label quantity exceeds its box at minimum font size")
+            }
+            val layout = rasterLayout(text, fitted) { paint.measureText(it).toDouble() }
             val lines = layout.lines
             val width = layout.width
             val height = layout.height

@@ -22,6 +22,7 @@ suspend fun generateZpl(
     spec: LabelSpec,
     data: Map<LabelField, String>,
     rasterize: RasterizeText?,
+    logo: RasterResult? = null,
 ): String {
     val lines = ArrayList<String>()
     lines += "^XA"
@@ -31,13 +32,14 @@ suspend fun generateZpl(
         lines += when (element) {
             is LabelElement.Text -> textLike(
                 spec, element.xMm, element.yMm, element.text, element.fontSizePt, element.bold,
-                element.align, element.maxWidthMm, element.maxLines, rasterize,
+                element.align, element.maxWidthMm, element.maxLines, rasterize, element.fontFamily, element.lineHeight, element.minFontSizePt,
             )
             is LabelElement.Field -> textLike(
                 spec, element.xMm, element.yMm,
                 labelFieldDisplayValue(element.field, data, element.textFormat),
-                element.fontSizePt, element.bold, element.align, element.maxWidthMm, element.maxLines, rasterize,
+                element.fontSizePt, element.bold, element.align, element.maxWidthMm, element.maxLines, rasterize, element.fontFamily, element.lineHeight, element.minFontSizePt,
             )
+            is LabelElement.OrganizationLogo -> fitLabelLogo(element, spec.dpi, logo).let { "^FO${it.x},${it.y}${buildGfaCommand(it.raster)}^FS" }
             is LabelElement.Barcode -> barcode(spec, element, data)
             is LabelElement.Line -> line(spec, element)
             is LabelElement.Box -> box(spec, element)
@@ -74,11 +76,12 @@ private suspend fun textLike(
     maxWidthMm: Double?,
     maxLines: Int?,
     rasterize: RasterizeText?,
+    fontFamily: String?, lineHeight: Double?, minFontSizePt: Double?,
 ): String {
     val x = mmToDots(xMm, spec.dpi)
     val y = mmToDots(yMm, spec.dpi)
     val maxWidthDots = maxWidthMm?.let { mmToDots(it, spec.dpi) }
-    if (needsImageRendering(text)) {
+    if (needsImageRendering(text) || lineHeight != null || fontFamily != null) {
         if (rasterize == null) {
             throw LabelRenderException(
                 "label text \"$text\" contains characters outside printable ASCII and needs image rendering, " +
@@ -88,7 +91,9 @@ private suspend fun textLike(
         val raster = rasterize.rasterize(
             text,
             RasterOptions(
-                fontFamily = "sans-serif",
+                fontFamily = fontFamily ?: "sans-serif",
+                lineHeight = lineHeight,
+                minFontSizePx = minFontSizePt?.let { ptToDots(it, spec.dpi) },
                 fontSizePx = ptToDots(fontSizePt, spec.dpi),
                 bold = bold ?: false,
                 maxWidthPx = maxWidthDots,

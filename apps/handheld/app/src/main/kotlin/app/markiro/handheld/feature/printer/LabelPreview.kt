@@ -36,7 +36,7 @@ import app.markiro.handheld.core.label.ptToMm
  * claim a fidelity this preview does not have. The caption beside it says so.
  */
 @Composable
-fun LabelPreview(spec: LabelSpec, data: Map<LabelField, String>, modifier: Modifier = Modifier) {
+fun LabelPreview(spec: LabelSpec, data: Map<LabelField, String>, modifier: Modifier = Modifier, logo: app.markiro.handheld.core.label.RasterResult? = null) {
     // The box takes the label's own proportions and clips. Sizing it by a fixed height instead lets
     // the drawing run past the bottom edge and collide with whatever follows it on the screen.
     Box(
@@ -61,6 +61,17 @@ fun LabelPreview(spec: LabelSpec, data: Map<LabelField, String>, modifier: Modif
 
             for (element in spec.elements) {
                 when (element) {
+                    is LabelElement.OrganizationLogo -> {
+                        if (logo != null) {
+                            val fitted = app.markiro.handheld.core.label.fitLabelLogo(element, spec.dpi, logo)
+                            val dotScale = scale * 25.4f / spec.dpi
+                            for (y in 0 until fitted.raster.height) for (x in 0 until fitted.raster.width) {
+                                val index = (y * fitted.raster.bytesPerRow + (x shr 3)) * 2
+                                if ((fitted.raster.hex.substring(index, index + 2).toInt(16) and (0x80 shr (x % 8))) != 0)
+                                    drawRect(Color.Black, Offset((fitted.x + x) * dotScale, (fitted.y + y) * dotScale), Size(dotScale, dotScale))
+                            }
+                        }
+                    }
                     is LabelElement.Box -> drawRect(
                         Color.Black,
                         topLeft = Offset(mm(element.xMm), mm(element.yMm)),

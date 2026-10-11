@@ -983,6 +983,14 @@ export function NewShift({
                 ) : currentPreview?.template ? (
                   <LabelPreview
                     template={currentPreview.template}
+                    {...(sheetBrandingOwner
+                      ? {
+                          logoOwner: {
+                            exec: sheetBrandingOwner.exec,
+                            generation: sheetBrandingOwner.generation,
+                          },
+                        }
+                      : {})}
                     {...(previewPrinter?.dpi ? { dpi: previewPrinter.dpi } : {})}
                     {...(previewPrinter ? { language: previewPrinter.language } : {})}
                   />

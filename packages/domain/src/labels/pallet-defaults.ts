@@ -1,24 +1,15 @@
+import { buildStandardLabelSpec } from "./standard-layouts.js";
 import type { DefaultLabelTemplate } from "./defaults.js";
 import { buildPallet58x40LabelSpec, SSCC_BARCODE_MODULES, ssccModuleWidthMm } from "./defaults.js";
 import type { LabelTemplateSpec } from "./model.js";
 
-/**
- * The stock PALLET label.
- *
- * Deliberately its own module with its own hand-authored layout rather than
- * another family of `buildBoxLabelSpec`: that builder's budget arithmetic is
- * shared by sixteen stock box templates whose exact bytes migration 0123
- * inlines, so adding a row for the box count there would risk silently
- * reflowing all of them. `duplicate.ts` sets the same precedent for the
- * product-duplicate family.
- *
- * A pallet label is read from a metre away on a stack in a corridor, not at
- * arm's length on a bench, so it is authored large (100×150 mm) with a tall
- * symbol and no three-column compression.
- */
+/** Standard thermal pallet layouts share the approved box-label geometry.
+ * The historical builder is retained exclusively for exact-spec migration guards;
+ * 58×40 keeps its established layout and seed identity. */
 
-/** Seed identity. Renaming this re-seeds a second row rather than updating. */
-export const PALLET_LABEL_TEMPLATE_NAME = "Паллета 100×150";
+/** Current seed identity; migration 0185 renames the exact historical stock row in place. */
+export const PALLET_LABEL_TEMPLATE_NAME = "Палет 100×150";
+export const PALLET_LABEL_75X120_TEMPLATE_NAME = "Палет 75×120";
 
 /** Seed identity of the small stock pallet label (spec 2026-09-18 §8). Renaming re-seeds. */
 export const PALLET_LABEL_58X40_TEMPLATE_NAME = "Паллета 58×40";
@@ -38,7 +29,7 @@ function round1(v: number): number {
   return Math.round(v * 10) / 10;
 }
 
-function buildPalletLabelSpec(): LabelTemplateSpec {
+export function buildLegacyPalletLabelSpec(): LabelTemplateSpec {
   // Costed with GS1's two mandatory 10X quiet zones inside the budget, so the
   // symbol cannot end up wide enough to leave a margin scanners may reject.
   const moduleWidthMm = ssccModuleWidthMm(CONTENT_W_MM, AUTHORING_DPI);
@@ -250,7 +241,8 @@ function buildPalletLabelSpec(): LabelTemplateSpec {
  */
 export function buildPalletLabelTemplates(): DefaultLabelTemplate[] {
   return [
-    { name: PALLET_LABEL_TEMPLATE_NAME, spec: buildPalletLabelSpec() },
+    { name: PALLET_LABEL_TEMPLATE_NAME, spec: buildStandardLabelSpec(100, 150, true) },
     { name: PALLET_LABEL_58X40_TEMPLATE_NAME, spec: buildPallet58x40LabelSpec() },
+    { name: PALLET_LABEL_75X120_TEMPLATE_NAME, spec: buildStandardLabelSpec(75, 120, true) },
   ];
 }

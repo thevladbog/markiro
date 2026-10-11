@@ -205,3 +205,104 @@ it.each(["box", "pallet"] as const)(
     }
   },
 );
+
+const LOGO_TEMPLATE: LabelTemplateSpec = {
+  ...BOX_TEMPLATE,
+  elements: [
+    {
+      id: "logo",
+      kind: "organization_logo",
+      source: "organization",
+      fallback: "markiro",
+      xMm: 4,
+      yMm: 3,
+      widthMm: 30,
+      heightMm: 7,
+    },
+  ],
+};
+const TEST_LOGO = {
+  width: 8,
+  height: 4,
+  stride: 1,
+  pixels: new Uint8Array([0x80, 0x40, 0x20, 0x10]),
+};
+it("supplies owner branding only to fresh logo labels and does not query it for 58×40", async () => {
+  const input = configuredInput();
+  const loadLogo = vi.fn(async () => TEST_LOGO);
+  expect(await attemptBoxPrint({ ...input, template: LOGO_TEMPLATE, loadLogo })).toMatchObject({
+    kind: "printed",
+  });
+  expect(input.render).toHaveBeenCalledWith(LOGO_TEMPLATE, input.fields, "zpl", 300, TEST_LOGO);
+  loadLogo.mockClear();
+  await attemptBoxPrint({ ...input, loadLogo });
+  expect(loadLogo).not.toHaveBeenCalled();
+});
+it("sends nothing and keeps logo failures recoverable", async () => {
+  const input = configuredInput();
+  const loadLogo = vi.fn(async () => {
+    throw new Error("branding unavailable");
+  });
+  expect(await attemptBoxPrint({ ...input, template: LOGO_TEMPLATE, loadLogo })).toEqual({
+    kind: "failed",
+    code: "render_failed",
+  });
+  expect(input.render).not.toHaveBeenCalled();
+  expect(input.printing?.print).not.toHaveBeenCalled();
+});
+it("replays an uncertain Windows delivery from frozen logo bytes while offline", async () => {
+  const w = await openProductLabelWork();
+  const profile: PrinterProfile = {
+    id: "win",
+    name: "Queue",
+    target: { kind: "usb", printer: "Queue" },
+    language: "zpl",
+    mode: "windows_driver",
+    dpi: 203,
+  };
+  const preflight = vi
+    .spyOn(tauriWindowsPrinting, "preflightWindowsRaster")
+    .mockResolvedValue({ ok: true });
+  let dispatchCount = 0;
+  const send = vi
+    .spyOn(tauriWindowsPrinting, "printWindowsRaster")
+    .mockImplementation(async (queue, bytes, documentName) => {
+      expect(decodeMonoRaster(bytes).pixels.some((byte) => byte !== 0)).toBe(true);
+      dispatchCount++;
+      return dispatchCount === 1
+        ? { ok: false, error: { code: "driver_failure", phase: "delivery_unknown" } }
+        : { ok: true, receipt: { queue, jobId: 1, documentName } };
+    });
+  const loadLogo = vi.fn(async () => TEST_LOGO);
+  const input = {
+    ...configuredInput(),
+    template: LOGO_TEMPLATE,
+    loadLogo,
+    destination: {
+      exec: w.exec,
+      key: { scope: "shift", purpose: "box" as const, jobId: "sscc", attemptId: "label" },
+    },
+    printing: {
+      target: profile.target,
+      profile,
+      language: profile.language,
+      dpi: profile.dpi,
+      print: vi.fn(),
+    },
+  };
+  try {
+    const first = await attemptBoxPrint(input);
+    expect(first).toEqual({ kind: "failed", code: "transport_failed" });
+    loadLogo.mockClear();
+    loadLogo.mockRejectedValue(new Error("offline"));
+    const second = await attemptBoxPrint({ ...input, explicitRetry: true });
+    expect(second.kind).toBe("printed");
+    expect(send.mock.calls[1]?.[1]).toEqual(send.mock.calls[0]?.[1]);
+    expect(loadLogo).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(2);
+  } finally {
+    preflight.mockRestore();
+    send.mockRestore();
+    w.close();
+  }
+});

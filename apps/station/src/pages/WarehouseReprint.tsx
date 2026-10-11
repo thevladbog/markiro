@@ -487,6 +487,7 @@ export function WarehouseReprintView(
       {picker && state.catalog ? (
         <TemplatePicker
           key={state.catalog.revision}
+          logoOwner={{ exec: props.exec, generation: props.credentialGeneration }}
           loading={state.busy}
           error={state.error}
           catalog={state.catalog}

@@ -9,6 +9,7 @@ import {
   type SheetLogo,
 } from "@markiro/domain";
 import type { SqlExecutor } from "./mirror.js";
+import { readDeviceRecovery } from "./device-recovery.js";
 import {
   acquireCredentialCommitLease,
   credentialGenerationOwnership,
@@ -281,4 +282,34 @@ async function refresh(
   } finally {
     lease.release();
   }
+}
+
+/** Thermal labels reuse A4's complete, credential-owned snapshot. Never replace a
+ * configured company logo with Markiro merely because its download/cache failed. */
+export async function loadThermalLabelLogoForOwner(
+  exec: SqlExecutor,
+  ownerDigest: string,
+  isCurrent: () => boolean,
+): Promise<MonoBitmap> {
+  if (!isCurrent()) throw new Error("Thermal branding owner changed");
+  const recovery = await readDeviceRecovery(exec);
+  if (recovery?.phase !== "active" || !recovery.owner)
+    throw new Error("Thermal branding owner is unavailable");
+  const tenantId = recovery.owner.tenantId;
+  const rows = await exec.all<{ snapshot_json: string }>(
+    "SELECT snapshot_json FROM station_organization_branding WHERE tenant_id=? AND owner_digest=?",
+    [tenantId, ownerDigest],
+  );
+  if (!isCurrent() || rows.length !== 1) throw new Error("Thermal branding is unavailable");
+  const saved = parseOrganizationBranding(rows[0]!.snapshot_json);
+  if (saved.ownerDigest !== ownerDigest || saved.tenantId !== tenantId)
+    throw new Error("Thermal branding owner mismatch");
+  return saved.logo;
+}
+export async function loadThermalLabelLogo(
+  exec: SqlExecutor,
+  generation: CredentialGeneration,
+): Promise<MonoBitmap> {
+  const ownerDigest = await ownership({ generation });
+  return loadThermalLabelLogoForOwner(exec, ownerDigest, () => !generation.sealed);
 }

@@ -2,7 +2,7 @@ import { printerMode } from "../lib/printer-routing.js";
 import type { PalletPrintErrorCode } from "../lib/pallets.js";
 import { printPalletSheet } from "../lib/pallet-sheet-printing.js";
 import { preparePalletSheet } from "../lib/pallet-sheet-print-snapshot.js";
-import { loadOrganizationBranding } from "../lib/organization-branding.js";
+import { loadOrganizationBranding, loadThermalLabelLogo } from "../lib/organization-branding.js";
 import { readShiftExecutionProjection } from "../lib/offline-grants/semantic.js";
 import { tauriWindowsPrinting } from "../lib/hardware.js";
 import { rasterizeDriverText } from "../lib/rasterizer.js";
@@ -803,6 +803,9 @@ export function WorkScreen({
       }
     }
     return attemptBoxPrint({
+      ...(credentialGeneration
+        ? { loadLogo: () => loadThermalLabelLogo(exec, credentialGeneration) }
+        : {}),
       explicitRetry,
       destination: {
         exec,
@@ -824,8 +827,11 @@ export function WorkScreen({
             print: (target, bytes) => serializePrint(() => currentPrinting.print(target, bytes)),
           }
         : null,
-      render: (template, fields, language, dpi) =>
-        renderLabelBytes(template, fields, language, rasterizeText, { dpi }),
+      render: (template, fields, language, dpi, logo) =>
+        renderLabelBytes(template, fields, language, rasterizeText, {
+          dpi,
+          ...(logo ? { logo } : {}),
+        }),
     });
   }
 
@@ -1806,6 +1812,9 @@ export function WorkScreen({
       }
     }
     return attemptBoxPrint({
+      ...(credentialGeneration
+        ? { loadLogo: () => loadThermalLabelLogo(exec, credentialGeneration) }
+        : {}),
       explicitRetry,
       destination: {
         exec,
@@ -1827,8 +1836,11 @@ export function WorkScreen({
             print: (target, bytes) => serializePrint(() => currentPrinting.print(target, bytes)),
           }
         : null,
-      render: (template, fields, language, dpi) =>
-        renderLabelBytes(template, fields, language, rasterizeText, { dpi }),
+      render: (template, fields, language, dpi, logo) =>
+        renderLabelBytes(template, fields, language, rasterizeText, {
+          dpi,
+          ...(logo ? { logo } : {}),
+        }),
     });
   }
 

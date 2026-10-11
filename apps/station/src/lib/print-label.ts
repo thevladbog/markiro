@@ -4,6 +4,7 @@ import {
   withPrinterDpi,
   type LabelField,
   type LabelTemplateSpec,
+  type MonoBitmap,
   type PrinterDpi,
   type RasterizeTextFn,
 } from "@markiro/domain";
@@ -24,6 +25,7 @@ export function latin1ToBytes(text: string): Uint8Array {
 }
 
 export interface RenderLabelOptions {
+  logo?: MonoBitmap;
   kmDataMatrix?: "native" | "raster";
   /**
    * The attached printer's resolution. `null` (or omitted) means the

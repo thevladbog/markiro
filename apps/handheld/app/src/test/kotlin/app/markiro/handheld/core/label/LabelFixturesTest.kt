@@ -45,6 +45,25 @@ class LabelFixturesTest {
     }
 
     @Test
+    fun containedLogoPixelsMatchTypeScriptAtBothPrinterResolutions() = runTest {
+        val cases = fixtures.getValue("logoIdentical").jsonArray
+        assertEquals(2, cases.size)
+        for (element in cases) {
+            val case = element.jsonObject
+            val source = case.getValue("logo").jsonObject
+            val hex = source.getValue("pixels").jsonArray.joinToString("") { "%02X".format(it.jsonPrimitive.content.toInt()) }
+            val width = source.getValue("width").jsonPrimitive.content.toInt()
+            val height = source.getValue("height").jsonPrimitive.content.toInt()
+            val stride = source.getValue("stride").jsonPrimitive.content.toInt()
+            val logo = RasterResult(hex, stride * height, stride, width, height)
+            val spec = LabelSpecCodec.spec(case.getValue("spec").jsonObject)
+            val values = data(case.getValue("data").jsonObject)
+            assertEquals(case.str("name"), case.str("zpl"), generateZpl(spec, values, null, logo))
+            assertEquals(case.str("name"), case.str("tspl"), String(generateTspl(spec, values, null, logo), Charsets.ISO_8859_1))
+        }
+    }
+
+    @Test
     fun asciiSpecsRenderCharacterForCharacterInBothLanguages() = runTest {
         val cases = fixtures.getValue("byteIdentical").jsonArray
         assertTrue(cases.size >= 9)

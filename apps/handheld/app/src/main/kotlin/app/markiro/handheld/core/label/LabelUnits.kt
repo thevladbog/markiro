@@ -76,10 +76,13 @@ fun labelFieldDisplayValue(
     textFormat: TextFormat?,
 ): String {
     val value = data[field] ?: ""
+    if ((field == LabelField.QTY || field == LabelField.QTY_BOXES) && textFormat == TextFormat.QUANTITY_NUMBER) return value.trim()
+    if (field == LabelField.SSCC && textFormat == TextFormat.SSCC_WITH_TITLE && value.matches(Regex("\\d{18}"))) return "SSCC  (00) $value"
     if (field == LabelField.KM_CODE && textFormat == TextFormat.KM_WITHOUT_CRYPTO) {
         val km = runCatching { KmCodec.canonicalize(value) }.getOrNull() ?: return ""
         return "01${km.gtin14}21${km.serial}"
     }
+    if (field == LabelField.SSCC && textFormat == TextFormat.SSCC_SPACED && SSCC_18.matches(value)) return "(00) $value"
     if (field == LabelField.SSCC && SSCC_18.matches(value)) return "(00)$value"
     if (field == LabelField.QTY) {
         val digits = value.trim()

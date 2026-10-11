@@ -482,3 +482,5 @@ export {
 export type { OrganizationBrandingDescriptor } from "./labels/pallet-sheet-branding.js";
 export { validateMonoBitmap } from "./labels/mono-compose.js";
 export { sheetLogoFingerprint } from "./labels/pallet-sheet-branding.js";
+
+export { renderLabelLogo } from "./labels/label-logo.js";

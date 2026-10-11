@@ -91,6 +91,14 @@ that legacy queue can be adopted.
 
 ## Reachable by a device key
 
+`GET /station/handheld-branding` and `GET /station/handheld-branding/logo/:revision`
+are private read-only print-branding endpoints for paired handheld devices only.
+Cabinet sessions and line-station keys are rejected. Metadata and revision-bound
+WebP bytes use the same tenant scope and validation as Station branding. Handhelds
+cache a validated monochrome logo under the server, tenant, device and credential
+owner for offline printing; confirmed logo absence selects the bundled Markiro asset.
+A download failure preserves the previous owner cache and never substitutes Markiro.
+
 | Route                                                                                                                | Why the station needs it                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | -------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `GET /station/identity`                                                                                              | one-time migration of pre-`deviceId` configs; `TenantGuard` resolves the durable row solely from the presented station key and `StationOnlyGuard` rejects cabinet sessions; the request accepts no client device or tenant identifier                                                                                                                                                                                                                                                        |

@@ -1,3 +1,5 @@
+import type { SqlExecutor } from "../../lib/mirror.js";
+import type { CredentialGeneration } from "../../lib/credential-recovery.js";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, FullScreenDialog } from "@markiro/ui";
@@ -11,6 +13,7 @@ import { TemplateChoiceList } from "../labels/TemplateChoiceList.js";
 import { LabelPreview } from "./LabelPreview.js";
 export function TemplatePicker({
   catalog,
+  logoOwner,
   unitTemplate,
   boxTemplate,
   onApply,
@@ -23,6 +26,7 @@ export function TemplatePicker({
   loading = false,
   error = null,
 }: {
+  logoOwner?: { exec: SqlExecutor; generation: CredentialGeneration };
   defaultBoxId?: string | null;
   loading?: boolean;
   error?: string | null;
@@ -124,6 +128,7 @@ export function TemplatePicker({
         <div>
           {selected ? (
             <LabelPreview
+              {...(logoOwner ? { logoOwner } : {})}
               template={selected}
               language={(tab === "box" ? boxLanguage : unitLanguage) ?? selected.spec.language}
               dpi={(tab === "box" ? boxDpi : unitDpi) ?? selected.spec.dpi}

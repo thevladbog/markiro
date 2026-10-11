@@ -133,6 +133,17 @@ describe.skipIf(!ready)("org profile e2e", () => {
       .get("/station/branding")
       .set("x-api-key", handheld.apiKey)
       .expect(403);
+    await request(app!.getHttpServer()).get("/station/handheld-branding").expect(401);
+    await agent.get("/station/handheld-branding").expect(403);
+    await request(app!.getHttpServer())
+      .get("/station/handheld-branding")
+      .set("x-api-key", station.apiKey)
+      .expect(403);
+    const handheldNone = await request(app!.getHttpServer())
+      .get("/station/handheld-branding")
+      .set("x-api-key", handheld.apiKey)
+      .expect(200);
+    expect(handheldNone.body).toMatchObject({ logoRevision: null, logo: null, logoUrl: null });
     const none = await request(app!.getHttpServer())
       .get("/station/branding")
       .set("x-api-key", station.apiKey)
@@ -162,6 +173,22 @@ describe.skipIf(!ready)("org profile e2e", () => {
       logoUrl: `/station/branding/logo/${upload.body.logoRevision}`,
       logo: { contentType: "image/webp", width: 1000, height: 100 },
     });
+    const handheldBranding = await request(app!.getHttpServer())
+      .get("/station/handheld-branding")
+      .set("x-api-key", handheld.apiKey)
+      .expect(200);
+    expect(handheldBranding.body.logoUrl).toBe(
+      `/station/handheld-branding/logo/${upload.body.logoRevision}`,
+    );
+    await request(app!.getHttpServer())
+      .get(handheldBranding.body.logoUrl)
+      .set("x-api-key", handheld.apiKey)
+      .expect("content-type", /image\/webp/)
+      .expect(200);
+    await request(app!.getHttpServer())
+      .get(handheldBranding.body.logoUrl)
+      .set("x-api-key", station.apiKey)
+      .expect(403);
     const served = await request(app!.getHttpServer())
       .get(current.body.logoUrl)
       .set("x-api-key", station.apiKey)

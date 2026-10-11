@@ -1,3 +1,4 @@
+import { paintThermalThumbnail } from "./thermal-thumbnail.js";
 /**
  * Plan 04 Task 8: label template library screen -- per-card thumbnail.
  *
@@ -88,6 +89,15 @@ export function TemplateThumb({ id, widthMm, heightMm }: TemplateThumbProps) {
     if (isPalletSheetSpec(data.spec)) {
       drawSheetThumbnail(ctx, data.spec, canvas.width, canvas.height);
       return;
+    }
+    if (data.spec.elements.some((e) => e.kind === "organization_logo")) {
+      let cancelled = false;
+      void paintThermalThumbnail(canvas, data.spec, data.purpose, () => !cancelled).catch(() => {
+        if (!cancelled) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      });
+      return () => {
+        cancelled = true;
+      };
     }
     draw(data.spec, ctx, scale, labelPreviewData(data.purpose), labelRenderOptions(data.purpose));
   }, [data, scale]);

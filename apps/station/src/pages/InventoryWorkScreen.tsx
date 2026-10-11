@@ -1,3 +1,4 @@
+import { loadThermalLabelLogo } from "../lib/organization-branding.js";
 import { SavedPrinterDestination } from "../ui/PrinterDestination.js";
 import {
   bindPrintDestination,
@@ -1150,6 +1151,9 @@ function RepackInventoryWorkScreen({
         const outcome = await attemptInventoryBoxPrint({
           exec,
           manifest: inventory,
+          ...(credentialGeneration
+            ? { loadLogo: () => loadThermalLabelLogo(exec, credentialGeneration) }
+            : {}),
           inventoryId: inventory.inventoryId,
           snapshotId: inventory.snapshotId,
           deviceId,
@@ -1237,6 +1241,7 @@ function RepackInventoryWorkScreen({
     },
     [
       createEventId,
+      credentialGeneration,
       deviceId,
       exec,
       inventory,
@@ -1276,6 +1281,9 @@ function RepackInventoryWorkScreen({
         const outcome = await processNextInventoryRemoteReprint({
           exec,
           manifest: inventory,
+          ...(credentialGeneration
+            ? { loadLogo: () => loadThermalLabelLogo(exec, credentialGeneration) }
+            : {}),
           inventoryId: inventory.inventoryId,
           snapshotId: inventory.snapshotId,
           deviceId,
@@ -1301,6 +1309,7 @@ function RepackInventoryWorkScreen({
     })();
   }, [
     createEventId,
+    credentialGeneration,
     deviceId,
     exec,
     gallery,
