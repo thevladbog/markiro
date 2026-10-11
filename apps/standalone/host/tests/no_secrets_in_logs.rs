@@ -5,8 +5,9 @@
 //! one included. Nor does a fact's code of marking, its crypto tail, its
 //! hash, a box's SSCC or the words of a reason (stage 2a spec §4.11): a
 //! rejected record is logged by its id and its receipt code alone; nor do the
-//! routes of a shift's exports, which answer with codes and SSCCs (plan ЧЗ).
-//! Its own binary, because it installs the global tracing subscriber.
+//! routes of a shift's exports (plan ЧЗ) and of its printed forms (plan О-Ф),
+//! which answer with codes and SSCCs. Its own binary, because it installs the
+//! global tracing subscriber.
 
 mod support;
 
@@ -1472,6 +1473,40 @@ async fn secrets_never_reach_the_process_log() {
         .await
         .unwrap();
     assert_eq!(recorded.status(), 204);
+    // The data of the shift's printed forms carries the codes and the SSCCs
+    // too (plan О-Ф): «Состав короба» of the box and the pallets' forms. Each
+    // answer must hold what the log is searched for below, or the walk would
+    // prove nothing about these routes.
+    let box_form = office_get(format!("/v1/office/boxes/{box1}/report-data"))
+        .await
+        .unwrap();
+    assert_eq!(box_form.status(), 200);
+    let box_form: serde_json::Value = box_form.json().await.unwrap();
+    assert_eq!(box_form["sscc"], sscc_one.as_str(), "{box_form}");
+    let box_items = box_form["items"].as_array().unwrap();
+    assert!(
+        box_items.iter().any(|item| {
+            item["canonical"] == km_a.canonical.as_str()
+                && item["serial"] == km_a.serial.as_str()
+                && item["canonical"].as_str().unwrap().contains(&km_a.tail)
+        }),
+        "{box_form}"
+    );
+    let pallet_forms = office_get(format!("/v1/office/shifts/{shift_id}/pallet-report-data"))
+        .await
+        .unwrap();
+    assert_eq!(pallet_forms.status(), 200);
+    let pallet_forms: serde_json::Value = pallet_forms.json().await.unwrap();
+    assert_eq!(
+        pallet_forms["pallets"][0]["sscc"],
+        pallet_sscc.as_str(),
+        "{pallet_forms}"
+    );
+    assert_eq!(
+        pallet_forms["pallets"][0]["boxes"][0]["sscc"],
+        sscc_one.as_str(),
+        "{pallet_forms}"
+    );
 
     // A wrong device key and a wrong session token are both rejected...
     let wrong_device_key = "not-a-real-device-key";

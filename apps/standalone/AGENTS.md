@@ -2042,8 +2042,8 @@ kiosk mode shows them on the station.
   first show) and the shift's devices, named from `listDevices` for an
   administrator (a revoked one marked «(отозвано)») and by the first eight
   characters of the id for a technologist, for an id the list lacks or while
-  the list does not load, with a note saying why. The full card of a shift is
-  stage 4. A shift carries ids,
+  the list does not load, with a note saying why. The number opens the
+  shift's card (plan О-Ф, see "Shift card and printed forms"). A shift carries ids,
   so the page names them from `listProducts`,
   `listLines` and `listCounterparties`, an archived record marked «(в архиве)»,
   and one a list lacks or that did not load by the first eight characters of
@@ -2086,7 +2086,14 @@ kiosk mode shows them on the station.
   the organization's, the first that fits; none, and the person chooses); it
   also clears an earlier refusal of those two fields. The template offers what
   fits the product's group and has no «Не выбран»; the line offers active
-  lines; the counterparty is optional. When the template defaults do not load,
+  lines; the counterparty is optional. «С паллетами» (plan О-Ф) is offered for
+  a product with a pallet capacity: turned on, it takes that capacity and the
+  pallet template by the same rule for the purpose `pallet`
+  (`suggestPalletTemplate`), both changeable and both required; another
+  product chosen takes its own, and one without a pallet capacity turns the
+  pallets off. A shift without pallets sends neither field, and a change that
+  turns them off sends `palletsEnabled: false` alone (the host clears the
+  two). When the template defaults do not load,
   a note under the template says it comes from the product alone. While a write is on its way every
   control of the dialog is off. A refused field takes the focus, the first in
   the form's order (`SHIFT_FIELD_ORDER`), the selects and the date included.
@@ -2816,7 +2823,8 @@ file are the cloud's for the same facts, and that is the acceptance rule.
   folder that exists gets « (2)»), checks every name before writing and
   takes the folder back on a failure; `open_office_folder` shows it in
   Explorer. No file dialog and no new dependency (pilot question П16).
-  `Формы` is the second root, for plan О-Ф. A name is a short allowlist
+  `Формы` is the second root (plan О-Ф uses it, see "Shift card and printed
+  forms"). A name is a short allowlist
   (plain characters, the extensions csv, txt, xml and html, at most 150
   characters, no link or look-alike character, at most 8 segments); a name or
   a path over 240 UTF-16 units is `invalid_request`, which a long product
@@ -2827,6 +2835,89 @@ file are the cloud's for the same facts, and that is the acceptance rule.
   junctions, OneDrive-redirected «Документы» and a path near MAX_PATH ran
   only on macOS temporary folders.
 
+## Shift card and printed forms
+
+Plan О-Ф gives the office the card of a shift and the cloud's printed forms
+of a shift (pilot spec §5.5): «Бланк смены», «Состав короба», «Состав
+паллеты», «Ярлык паллеты» (A4 or A5) and «Ярлыки паллет смены». The forms
+are `@markiro/domain`'s `print-forms`, the cloud's own renderers, so what
+makes a standalone form the cloud's for the same facts is the data and its
+mapping; the bytes are the acceptance rule.
+
+- The card (`src/office/shifts/ShiftCardPage.tsx`, route `shifts/:id`,
+  opened by the number in «Смены») reads the shift afresh (`getShift`) and
+  shows its fields, its status and marks as the list does, its boxes
+  (`GET …/boxes`, fifty a page, filtered by the SSCC's last digits; the state,
+  the pallet, the label check the station sent last, a close whose digest did
+  not match) and its pallets (`GET …/pallets`; a station's count that differs
+  from the boxes standing is marked, never fixed). «Итоги» opens
+  `ShiftTotalsDialog`, «Выгрузка» `ExportDialog` (plan ЧЗ) and «Закрыть»
+  `CloseShiftDialog` (`planShifts`), all as the list opens them; a close
+  reads the card and every list again. Every role prints. The card does not
+  refresh itself: an active shift's lists are as of opening, and the pallet
+  list is not paged (fine at hundreds; page it at about a thousand).
+- The host only reads, one snapshot a route, each query by an index
+  (`EXPLAIN QUERY PLAN` in `host/tests/office_reports.rs`):
+  `GET /v1/office/boxes/{id}/report-data` (`BoxReportRows`) gives a box's
+  codes as the cloud's `boxReportData` prints them — the live items, and of a
+  box taken apart the items its disassembly took out (`removed_at` equal to
+  the box's `disassembled_at`: the host writes both from the fact's one
+  instant), through the scans of the box's shift, since no index names a
+  box's items that are no longer live — each with its scan's GTIN, serial and
+  canonical text, by GTIN and serial byte for byte (the cloud sorts by its
+  database's collation: a serial of mixed case may stand elsewhere there);
+  `GET /v1/office/shifts/{id}/pallet-report-data` (`PalletReportRows`) gives
+  the shift's number, date and product now and every pallet with every box
+  that stood on it (closed first, then by id), a box's units its live items
+  (a box taken apart has none; no form prints or counts them). Both name the
+  organization. The product is the one now, as the cloud joins it. A box
+  still open on a pallet cannot be reached on the host (a box joins the
+  pallet as it closes). A box's request for a box of a shift of a hundred
+  thousand scans reads the shift's scans (about 0.14 s measured under load);
+  an index on the box's items is a host migration, not made.
+- The office maps these rows to the cloud's inputs
+  (`src/office/forms/form-data.ts`) and draws with `renderForm`
+  (`render-form.ts`): SSCCs with `00`, the state as the cloud derives it, no
+  logo (pilot question П15) and no photo; times in the organization's zone
+  (`formTimeZone`, this PC's when it is not known), except «Сформирован» of
+  the blank, which the domain always prints in Moscow time (the cloud's bytes
+  are the same). The cloud's refusals stay: a placard needs a closed pallet
+  with an SSCC (one taken apart prints with the watermark), «Ярлыки паллет
+  смены» print the closed standing pallets closed first and need one, «Бланк
+  смены» is for a planned or an active shift and takes the shift's one date as
+  both its dates (stage 2a spec, question В3).
+- Parity: `packages/domain/test/fixtures/print-forms-parity/cases.json` holds
+  each case's input as the cloud's loader returns it (`cloud`) and the same
+  facts as the host answers them (`host`); `golden.json` the HTML the cloud's
+  controllers answer for `cloud`
+  (`apps/api/test/standalone-forms-parity.test.ts`, which writes it with
+  `FORMS_PARITY_WRITE=1`), and `test/forms-parity.test.ts` draws `host`
+  through `renderForm` to the same bytes. The cloud's loaders themselves are
+  not run (they are SQL against Postgres): their rules are ported and held by
+  the host's tests. A change of a cloud form regenerates the golden in the
+  same change; a change of a cloud loader is ported by hand.
+- Printing (`print-form.ts`, `PrintFormDialog.tsx`): each press draws the
+  form again from the rows the dialog read when it opened (so the card's
+  button for the pallets' placards decides from the card's cached pallet
+  list, while the dialog reads fresh). «Печать» writes the HTML into one
+  hidden same-origin frame of the office's window and prints that frame
+  (WebView2's print dialog, the paper by the form's `@page`); «Открыть в
+  браузере» saves it, UTF-8, into a new folder
+  `Документы\Markiro\Формы\<номер смены>\<дата_время>_<форма>` and the
+  shell's `open_office_file` opens it in the default browser
+  (`explorer.exe`, a `.html` of the office's folder only, so no file the
+  webview names starts as a program). Both are offered side by side: a print
+  dialog that did not open cannot be seen. The forms load nothing from the
+  network (inline SVG barcodes, system Arial). The saved HTML carries no
+  Content-Security-Policy (the bytes are the domain's, for parity) and relies
+  on the domain's escaping of the data. The domain draws synchronously: a box
+  of thousands of codes freezes the window for seconds (about 8 ms a code in
+  jsdom under load), and a press already inside `openInBrowser` cannot be
+  cancelled by closing the dialog; a worker is the real fix.
+- The test of an unknown time zone (`test/form-data.test.ts`, `formTimeZone`)
+  compares with this machine's zone, so on a machine in UTC it cannot tell the PC's zone
+  from UTC (mutant R14 survives there).
+
 ## Marking rules
 
 GS1, KM, SSCC and label rules stay in `@markiro/domain`; the host stores and
@@ -2834,9 +2925,11 @@ arbitrates but does not reimplement them.
 
 ## Logs
 
-The routes of a shift's exports answer with codes and SSCCs and log none of
-them; `no_secrets_in_logs.rs` reads the export source, both lists and
-records an export. The shell's file commands log a failure by its code and
+The routes of a shift's exports and of its forms' data answer with codes and
+SSCCs and log none of them; `no_secrets_in_logs.rs` reads the export source,
+both lists, a box's and the pallets' form data and records an export; the
+form data it reads must hold the walk's own code, serial and SSCCs, or the
+walk would prove nothing about these routes. The shell's file commands log a failure by its code and
 the I/O error's kind, never a path (it names the Windows user), and the
 export dialog logs nothing.
 
@@ -3036,3 +3129,9 @@ either; a file log is stage 5.
   of 366 days. The «Итоги» window and the «Выпуск» column have run only
   against fixture totals: never against a host's subqueries over real facts,
   nor with the time of the last fact written by WebView2's `Intl`.
+- The shift's card and its printed forms (plan О-Ф) have run only under jsdom,
+  printing into a mock: never WebView2's print dialog for the hidden frame,
+  A4 and A5 paper by `@page` on a real printer, the default browser that
+  `explorer.exe` opens for a form's `.html`, Cyrillic and DataMatrix on paper,
+  nor a card of thousands of boxes; «Бланк смены»'s DataMatrix scanned by a
+  station is plan 2a5's.
