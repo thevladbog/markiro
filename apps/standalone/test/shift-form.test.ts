@@ -6,11 +6,12 @@ import {
   SHIFT_CONFLICTS,
   SHIFT_FIELDS,
   shiftFields,
+  shiftFieldsSchema,
   shiftWriteFailure,
   toShiftChange,
   toShiftInput,
 } from "../src/office/shifts/shift-form.js";
-import { ACTIVE, PLANNED } from "./support/shifts.js";
+import { ACTIVE, PALLET, PLANNED } from "./support/shifts.js";
 
 function api(code: string, details: Record<string, unknown> = {}): HostError {
   return new HostError({ kind: "api", code, status: 409, message: code, details });
@@ -27,9 +28,23 @@ describe("a shift's form", () => {
       plannedQty: "1200",
       boxCapacity: "12",
       boxTemplateId: ACTIVE.boxTemplateId,
+      palletsEnabled: false,
+      palletBoxCapacity: "",
+      palletTemplateId: "",
       counterpartyId: ACTIVE.counterpartyId,
     });
-    for (const shift of [ACTIVE, PLANNED]) {
+    const withPallets = {
+      ...PLANNED,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: PALLET.id,
+    };
+    expect(shiftFields(withPallets)).toMatchObject({
+      palletsEnabled: true,
+      palletBoxCapacity: "40",
+      palletTemplateId: PALLET.id,
+    });
+    for (const shift of [ACTIVE, PLANNED, withPallets]) {
       expect(shiftUpdate(shift, toShiftChange(shiftFields(shift)))).toStrictEqual({
         expectedRev: shift.rev,
       });
@@ -51,9 +66,72 @@ describe("a shift's form", () => {
       boxCapacity: 20,
       plannedQty: 900,
       counterpartyId: null,
+      pallets: null,
     });
+    expect(
+      toShiftInput({
+        ...shiftFields(PLANNED),
+        palletsEnabled: true,
+        palletBoxCapacity: " 32 ",
+        palletTemplateId: PALLET.id,
+      }).pallets,
+    ).toEqual({ boxCapacity: 32, templateId: PALLET.id });
+    // Pallets turned off send none, whatever their fields still hold.
+    expect(
+      toShiftInput({
+        ...shiftFields(PLANNED),
+        palletsEnabled: false,
+        palletBoxCapacity: "32",
+        palletTemplateId: PALLET.id,
+      }).pallets,
+    ).toBeNull();
     // The change of a planned shift never names its product.
     expect(Object.keys(toShiftChange(shiftFields(PLANNED)))).not.toContain("productId");
+  });
+
+  it("requires the pallets' capacity and template only when the shift has pallets (plan О-Ф)", () => {
+    const fields = { ...shiftFields(PLANNED), palletBoxCapacity: "", palletTemplateId: "" };
+    expect(shiftFieldsSchema.safeParse(fields).success).toBe(true);
+    const refused = shiftFieldsSchema.safeParse({ ...fields, palletsEnabled: true });
+    expect(refused.error?.issues.map((issue) => [issue.path.join("."), issue.message])).toEqual([
+      ["palletBoxCapacity", "rules.shiftPalletBoxCapacity"],
+      ["palletTemplateId", "office.shifts.errors.palletTemplateRequired"],
+    ]);
+    for (const capacity of ["0", "10001", "1.5", "сорок"]) {
+      expect(
+        shiftFieldsSchema.safeParse({
+          ...fields,
+          palletsEnabled: true,
+          palletBoxCapacity: capacity,
+          palletTemplateId: PALLET.id,
+        }).success,
+      ).toBe(false);
+    }
+    for (const capacity of ["1", " 10000 "]) {
+      expect(
+        shiftFieldsSchema.safeParse({
+          ...fields,
+          palletsEnabled: true,
+          palletBoxCapacity: capacity,
+          palletTemplateId: PALLET.id,
+        }).success,
+      ).toBe(true);
+    }
+  });
+
+  it("puts a refused pallet template under its select and a refused pallet capacity under its field", () => {
+    expect(sort(api("validation_failed", { field: "palletTemplateId" }))).toEqual({
+      failure: {
+        kind: "field",
+        field: "palletTemplateId",
+        message: "office.shifts.errors.palletTemplateRejected",
+      },
+      outdated: false,
+    });
+    expect(sort(api("validation_failed", { field: "palletBoxCapacity" }))).toEqual({
+      failure: { kind: "field", field: "palletBoxCapacity", message: "rules.rejected" },
+      outdated: false,
+    });
   });
 
   it("calls a shift deleted meanwhile, or opened or closed meanwhile, outdated in words of its own", () => {

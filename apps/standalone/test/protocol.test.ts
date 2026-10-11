@@ -666,9 +666,18 @@ describe("request builders produce their fixtures exactly", () => {
       boxCapacity: shift.boxCapacity,
       plannedQty: 1200,
       counterpartyId: shift.counterpartyId,
+      pallets: null,
       productName: "Молоко 3,2% 0,9 л",
     };
     expect(shiftCreate(typed)).toStrictEqual(fixture("shift-create.json"));
+    // With pallets: their capacity and template, and nothing else changes (plan О-Ф).
+    expect(
+      shiftCreate({
+        ...typed,
+        counterpartyId: null,
+        pallets: { boxCapacity: 40, templateId: "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f" },
+      }),
+    ).toStrictEqual(fixture("shift-create-pallets.json"));
     // Loaded on another line, moved back to the fixture's line.
     const elsewhere = { ...shift, lineId: "0b7e7dcb-3f56-4c43-9a4b-1f0b3b3f8a21" };
     expect(
@@ -762,6 +771,7 @@ describe("request builders produce their fixtures exactly", () => {
       boxCapacity: shift.boxCapacity,
       plannedQty: null,
       counterpartyId: null,
+      pallets: null,
     });
     expect(body).toStrictEqual({
       productId: shift.productId,
@@ -1081,6 +1091,9 @@ describe("request builders send only what changes", () => {
       boxCapacity: 12,
       plannedQty: 1200,
       counterpartyId: "d2b7c9e1-4f3a-4b6c-8d5e-9f0a1b2c3d4e",
+      palletsEnabled: false,
+      palletBoxCapacity: null,
+      palletTemplateId: null,
       rev: 71,
     };
     const same = {
@@ -1130,6 +1143,98 @@ describe("request builders send only what changes", () => {
         ),
         { expectedRev: 71 },
       ],
+    ] as const;
+    for (const [body, expected] of bodies) {
+      expect(body).toStrictEqual(expected);
+      expect(shiftUpdateSchema.parse(body)).toStrictEqual(body);
+    }
+  });
+
+  // Added by the task 8 implementer: a shift without pallets keeps the body it always had.
+  it("sends a shift without pallets the body it always had, and names the pallet fields only for a shift with pallets (plan О-Ф)", () => {
+    const fixtureText = (name: string) => JSON.stringify(fixture(name));
+    const input = {
+      productId: "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
+      lineId: "5f0c6a52-6a3e-4b9f-9d3c-2b1a0e8f7d61",
+      productionDate: "2026-10-08",
+      boxTemplateId: "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+      boxCapacity: 12,
+      plannedQty: 1200,
+      counterpartyId: "d2b7c9e1-4f3a-4b6c-8d5e-9f0a1b2c3d4e",
+      pallets: null,
+    };
+    const without = shiftCreate(input);
+    expect(Object.keys(without)).toEqual([
+      "productId",
+      "lineId",
+      "productionDate",
+      "boxTemplateId",
+      "boxCapacity",
+      "plannedQty",
+      "counterpartyId",
+      "mode",
+      "palletsEnabled",
+    ]);
+    expect(JSON.stringify(without)).toBe(fixtureText("shift-create.json"));
+    expect(shiftCreateSchema.parse(without)).toStrictEqual(without);
+    const template = "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f";
+    const withPallets = shiftCreate({
+      ...input,
+      counterpartyId: null,
+      pallets: { boxCapacity: 40, templateId: template },
+    });
+    expect(shiftCreateSchema.parse(withPallets)).toStrictEqual(withPallets);
+    expect(JSON.stringify(withPallets)).toBe(fixtureText("shift-create-pallets.json"));
+    // An edit of something else names no pallet field, with pallets or without.
+    const shift = officeShiftSchema.parse(fixture("office-shift.json"));
+    const enabled = {
+      ...shift,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: template,
+    };
+    for (const current of [shift, enabled]) {
+      const body = shiftUpdate(current, { plannedQty: 7 });
+      expect(Object.keys(body).sort()).toEqual(["expectedRev", "plannedQty"]);
+      expect(shiftUpdateSchema.parse(body)).toStrictEqual(body);
+    }
+  });
+
+  it("turns a shift's pallets on with their capacity and template, changes either alone, and turns them off by the switch alone (plan О-Ф)", () => {
+    const template = "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f";
+    const other = "0b1c2d3e-4f5a-4b6c-8d7e-8f9a0b1c2d3e";
+    const without = officeShiftSchema.parse(fixture("office-shift.json"));
+    const withPallets = {
+      ...without,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: template,
+    };
+    const bodies = [
+      [
+        shiftUpdate(without, { pallets: { boxCapacity: 40, templateId: template } }),
+        {
+          palletsEnabled: true,
+          palletBoxCapacity: 40,
+          palletTemplateId: template,
+          expectedRev: 71,
+        },
+      ],
+      [shiftUpdate(without, { pallets: null }), { expectedRev: 71 }],
+      [shiftUpdate(withPallets, { pallets: null }), { palletsEnabled: false, expectedRev: 71 }],
+      [
+        shiftUpdate(withPallets, { pallets: { boxCapacity: 40, templateId: template } }),
+        { expectedRev: 71 },
+      ],
+      [
+        shiftUpdate(withPallets, { pallets: { boxCapacity: 32, templateId: template } }),
+        { palletBoxCapacity: 32, expectedRev: 71 },
+      ],
+      [
+        shiftUpdate(withPallets, { pallets: { boxCapacity: 40, templateId: other } }),
+        { palletTemplateId: other, expectedRev: 71 },
+      ],
+      [shiftUpdate(withPallets, {}), { expectedRev: 71 }],
     ] as const;
     for (const [body, expected] of bodies) {
       expect(body).toStrictEqual(expected);

@@ -7,23 +7,48 @@ import {
   plannedQtyRule,
   productionDateRule,
   shiftBoxCapacityRule,
+  shiftPalletBoxCapacityRule,
   toCount,
 } from "../../lib/rules.js";
 import { writeFailure, type FieldMessage, type WriteFailure } from "../form-errors.js";
 
 /**
  * A shift as the form holds it: the ids its selects hold (`""` for none), the
- * production date `YYYY-MM-DD` and the counts as typed.
+ * production date `YYYY-MM-DD` and the counts as typed. With pallets (plan
+ * О-Ф) their capacity and template are required; without, whatever the two
+ * fields still hold is neither checked nor sent.
  */
-export const shiftFieldsSchema = z.object({
-  productId: z.string().min(1, "office.shifts.errors.productRequired"),
-  lineId: z.string().min(1, "office.shifts.errors.lineRequired"),
-  productionDate: productionDateRule,
-  plannedQty: plannedQtyRule,
-  boxCapacity: shiftBoxCapacityRule,
-  boxTemplateId: z.string().min(1, "office.shifts.errors.templateRequired"),
-  counterpartyId: z.string(),
-});
+export const shiftFieldsSchema = z
+  .object({
+    productId: z.string().min(1, "office.shifts.errors.productRequired"),
+    lineId: z.string().min(1, "office.shifts.errors.lineRequired"),
+    productionDate: productionDateRule,
+    plannedQty: plannedQtyRule,
+    boxCapacity: shiftBoxCapacityRule,
+    boxTemplateId: z.string().min(1, "office.shifts.errors.templateRequired"),
+    palletsEnabled: z.boolean(),
+    palletBoxCapacity: z.string(),
+    palletTemplateId: z.string(),
+    counterpartyId: z.string(),
+  })
+  .superRefine((values, context) => {
+    if (!values.palletsEnabled) return;
+    const capacity = shiftPalletBoxCapacityRule.safeParse(values.palletBoxCapacity);
+    if (!capacity.success) {
+      context.addIssue({
+        code: "custom",
+        path: ["palletBoxCapacity"],
+        message: "rules.shiftPalletBoxCapacity",
+      });
+    }
+    if (values.palletTemplateId === "") {
+      context.addIssue({
+        code: "custom",
+        path: ["palletTemplateId"],
+        message: "office.shifts.errors.palletTemplateRequired",
+      });
+    }
+  });
 export type ShiftFields = z.input<typeof shiftFieldsSchema>;
 
 /** The fields in the order the form shows them: the first one refused takes the focus. */
@@ -34,6 +59,9 @@ export const SHIFT_FIELD_ORDER = [
   "plannedQty",
   "boxCapacity",
   "boxTemplateId",
+  "palletsEnabled",
+  "palletBoxCapacity",
+  "palletTemplateId",
   "counterpartyId",
 ] as const satisfies readonly (keyof ShiftFields)[];
 
@@ -46,6 +74,9 @@ export function newShiftFields(today: string): ShiftFields {
     plannedQty: "",
     boxCapacity: "",
     boxTemplateId: "",
+    palletsEnabled: false,
+    palletBoxCapacity: "",
+    palletTemplateId: "",
     counterpartyId: "",
   };
 }
@@ -59,13 +90,16 @@ export function shiftFields(shift: OfficeShift): ShiftFields {
     plannedQty: shift.plannedQty === null ? "" : String(shift.plannedQty),
     boxCapacity: String(shift.boxCapacity),
     boxTemplateId: shift.boxTemplateId,
+    palletsEnabled: shift.palletsEnabled,
+    palletBoxCapacity: shift.palletBoxCapacity === null ? "" : String(shift.palletBoxCapacity),
+    palletTemplateId: shift.palletTemplateId ?? "",
     counterpartyId: shift.counterpartyId ?? "",
   };
 }
 
 /**
  * The host's fields for values the form accepted: the counts as numbers,
- * `null` for no plan or no counterparty.
+ * `null` for no plan, no counterparty or no pallets.
  */
 export function toShiftInput(values: ShiftFields): ShiftInput {
   return {
@@ -76,6 +110,12 @@ export function toShiftInput(values: ShiftFields): ShiftInput {
     boxCapacity: Number(values.boxCapacity.trim()),
     plannedQty: toCount(values.plannedQty),
     counterpartyId: values.counterpartyId === "" ? null : values.counterpartyId,
+    pallets: values.palletsEnabled
+      ? {
+          boxCapacity: Number(values.palletBoxCapacity.trim()),
+          templateId: values.palletTemplateId,
+        }
+      : null,
   };
 }
 
@@ -90,9 +130,14 @@ export const SHIFT_FIELDS = {
   lineId: { field: "lineId", message: "office.shifts.errors.lineRejected" },
   boxTemplateId: { field: "boxTemplateId", message: "office.shifts.errors.templateRejected" },
   counterpartyId: { field: "counterpartyId", message: "office.shifts.errors.counterpartyRejected" },
+  palletTemplateId: {
+    field: "palletTemplateId",
+    message: "office.shifts.errors.palletTemplateRejected",
+  },
   productionDate: "productionDate",
   plannedQty: "plannedQty",
   boxCapacity: "boxCapacity",
+  palletBoxCapacity: "palletBoxCapacity",
 } as const;
 
 /** A draft or archived product (`product_inactive`) goes under the product. */
@@ -113,6 +158,7 @@ export function toShiftChange(values: ShiftFields): ShiftChange {
     boxCapacity: input.boxCapacity,
     plannedQty: input.plannedQty,
     counterpartyId: input.counterpartyId,
+    pallets: input.pallets,
   };
 }
 

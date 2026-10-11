@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   suggestBoxTemplate,
+  suggestPalletTemplate,
   type BoxTemplateCandidate,
   type BoxTemplateDefaults,
 } from "../src/lib/box-template-choice.js";
@@ -85,5 +86,83 @@ describe("the box template a new shift starts with", () => {
   it("counts only the preference while the defaults are not read", () => {
     expect(suggestBoxTemplate(MILK, TEMPLATES, null)).toBe(PREFERRED);
     expect(suggestBoxTemplate({ ...MILK, defaultBoxTemplateId: null }, TEMPLATES, null)).toBeNull();
+  });
+});
+
+describe("the pallet template a shift with pallets starts with (plan О-Ф)", () => {
+  /** An enabled pallet template for every category. */
+  const pallet = (id: string, scope: Partial<BoxTemplateCandidate> = {}): BoxTemplateCandidate => ({
+    id,
+    purpose: "pallet",
+    enabled: true,
+    chzProductGroupCodes: null,
+    ...scope,
+  });
+  const templates = [
+    pallet(PREFERRED),
+    pallet(CATEGORY, { chzProductGroupCodes: [8] }),
+    pallet(ORGANIZATION),
+    box(OTHER),
+  ];
+  const defaults = {
+    defaultPalletTemplateId: ORGANIZATION,
+    categories: [
+      { chzProductGroupCode: 8, purpose: "box", templateId: OTHER },
+      { chzProductGroupCode: 8, purpose: "pallet", templateId: CATEGORY },
+    ],
+  };
+
+  it("takes the product's pallet preference, then its category's pallet default, then the organization's", () => {
+    const milk = { chzProductGroupCode: 8, defaultPalletTemplateId: PREFERRED };
+    expect(suggestPalletTemplate(milk, templates, defaults)).toBe(PREFERRED);
+    expect(
+      suggestPalletTemplate({ ...milk, defaultPalletTemplateId: null }, templates, defaults),
+    ).toBe(CATEGORY);
+    expect(
+      suggestPalletTemplate(
+        { chzProductGroupCode: 13, defaultPalletTemplateId: null },
+        templates,
+        defaults,
+      ),
+    ).toBe(ORGANIZATION);
+  });
+
+  it("never takes a box template, nor one that is off, and leaves the choice when none fits", () => {
+    const water = { chzProductGroupCode: 13, defaultPalletTemplateId: OTHER };
+    expect(suggestPalletTemplate(water, templates, defaults)).toBe(ORGANIZATION);
+    expect(
+      suggestPalletTemplate(
+        water,
+        [pallet(ORGANIZATION, { enabled: false }), box(OTHER)],
+        defaults,
+      ),
+    ).toBeNull();
+    expect(suggestPalletTemplate(water, templates, null)).toBeNull();
+  });
+
+  // Added by the task 8 implementer: the plan's cases leave the group of the preference unpinned.
+  it("skips a preference or a default scoped to another group of products", () => {
+    const water = { chzProductGroupCode: 13, defaultPalletTemplateId: PREFERRED };
+    // PREFERRED and CATEGORY are scoped to group 8 here; water is group 13.
+    const scoped = [
+      pallet(PREFERRED, { chzProductGroupCodes: [8] }),
+      pallet(CATEGORY, { chzProductGroupCodes: [8] }),
+      pallet(ORGANIZATION),
+    ];
+    expect(suggestPalletTemplate(water, scoped, defaults)).toBe(ORGANIZATION);
+    expect(
+      suggestPalletTemplate(
+        { chzProductGroupCode: 13, defaultPalletTemplateId: null },
+        [pallet(ORGANIZATION, { chzProductGroupCodes: [8] })],
+        defaults,
+      ),
+    ).toBeNull();
+    // A product of no group takes only the unscoped ones.
+    expect(
+      suggestPalletTemplate({ chzProductGroupCode: null, defaultPalletTemplateId: null }, scoped, {
+        ...defaults,
+        categories: [{ chzProductGroupCode: 8, purpose: "pallet", templateId: CATEGORY }],
+      }),
+    ).toBe(ORGANIZATION);
   });
 });
