@@ -175,3 +175,44 @@ export function exceptionStatements(
     outboxStatement(record, pairing, data.occurredAt),
   ];
 }
+
+/**
+ * The station's `floor_pallet_exceptions` row and the `pallet_exception`
+ * record of one pallet exception (plan ПЛ-Ц; the form of plan ПЛ-Х:
+ * `exception`, a reason code always, words only with `other`), for the
+ * transaction that applies its consequences — the disassembly, or the one
+ * that sends the pallet's label again (`reprintPallet`, and `printAgain` of a
+ * label that may already exist). The same fields in both rows, so the audit
+ * row and the fact the host receives never differ: the ONE writer of both,
+ * as `exceptionStatements` is for a box.
+ */
+export function palletExceptionStatements(
+  context: { pairing: Pairing; operatorId: string; newId: () => string },
+  shiftId: string,
+  data: PalletExceptionFact,
+): LocalStatement[] {
+  const { pairing, operatorId } = context;
+  const rowId = context.newId();
+  const record = palletExceptionRecord({ id: context.newId(), shiftId, operatorId }, data);
+  return [
+    {
+      sql:
+        "INSERT INTO floor_pallet_exceptions (id, host_id, device_id, shift_id, kind, pallet_id, " +
+        "reason_code, reason_text, occurred_at, operator_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      values: [
+        rowId,
+        pairing.hostId,
+        pairing.deviceId,
+        shiftId,
+        data.exception,
+        data.palletId,
+        data.reasonCode,
+        data.reasonText,
+        data.occurredAt,
+        operatorId,
+      ],
+      expectedChanges: 1,
+    },
+    outboxStatement(record, pairing, data.occurredAt),
+  ];
+}

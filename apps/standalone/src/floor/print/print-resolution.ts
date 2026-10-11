@@ -3,12 +3,19 @@ import { parseScannedSscc, type LabelTemplateSpec } from "@markiro/domain";
 import { bytesToBase64 } from "../../hardware/hardware.js";
 import { LocalDbError, type LocalStatement } from "../../local/executor.js";
 import type { ReprintReason } from "../exception-reasons.js";
-import { boxLabelRecord, exceptionStatements, outboxStatement } from "../facts.js";
+import {
+  boxLabelRecord,
+  exceptionStatements,
+  outboxStatement,
+  palletExceptionStatements,
+  palletLabelRecord,
+} from "../facts.js";
 import {
   resolvePrinter,
   type PrinterProfile,
   type WorkstationSettings,
 } from "../setup/workstation-settings.js";
+import { palletLiveGuard } from "../pallets/pallets.js";
 import { renderLabel } from "./label-render.js";
 import {
   readPrintJob,
@@ -52,8 +59,8 @@ export class LabelRenderError extends Error {
 }
 
 /**
- * The record of a label's check for the host: `box_label` for a box. A
- * pallet's (`pallet_label`) is the pallets' plan's to add (ПЛ-Ц).
+ * The record of a label's check for the host: `box_label` for a box,
+ * `pallet_label` for a pallet (plan ПЛ-Ц).
  */
 function labelRecord(
   context: ResolveContext,
@@ -66,7 +73,7 @@ function labelRecord(
     case "box":
       return boxLabelRecord(head, { boxId: job.subjectId, outcome, at });
     case "pallet":
-      throw new UnresolvableJobError(job.id, job.state);
+      return palletLabelRecord(head, { palletId: job.subjectId, outcome, at });
   }
 }
 
@@ -75,7 +82,9 @@ function labelRecord(
  * row and the `box_exception` record of kind `reprint` with its reason, no
  * words (the work screen offers the codes only) — written by the one writer
  * of exceptions (`exceptionStatements`), as the reprint of a settled box is
- * (plan 2a8). A pallet's reprint is the pallets' plan's.
+ * (plan 2a8); for a pallet, its `floor_pallet_exceptions` row and
+ * `pallet_exception` record (`palletExceptionStatements`, plan ПЛ-Ц), after
+ * the comparison that the pallet was not taken apart meanwhile.
  */
 function reprintStatements(
   context: ResolveContext,
@@ -83,7 +92,18 @@ function reprintStatements(
   reason: ReprintReason,
   at: string,
 ): LocalStatement[] {
-  if (job.purpose !== "box") throw new UnresolvableJobError(job.id, job.state);
+  if (job.purpose === "pallet") {
+    return [
+      palletLiveGuard(context.pairing, job.shiftId, job.subjectId),
+      ...palletExceptionStatements(context, job.shiftId, {
+        exception: "reprint",
+        palletId: job.subjectId,
+        reasonCode: reason,
+        reasonText: null,
+        occurredAt: at,
+      }),
+    ];
+  }
   return exceptionStatements(context, job.shiftId, {
     exception: "reprint",
     boxId: job.subjectId,

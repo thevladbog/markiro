@@ -1007,6 +1007,37 @@ const BOX_ONTO_PALLET: &str =
     "UPDATE floor_boxes SET pallet_id = ? WHERE id = ? AND host_id = ? AND device_id = ? \
      AND closed_at IS NOT NULL AND pallet_id IS NULL";
 const PALLET_SSCC_HELD: &str = "SELECT 1 AS n FROM floor_pallets WHERE sscc = ? LIMIT 1";
+/// The exceptions of a pallet (plan ПЛ-Ц, `src/floor/exceptions/pallet-exceptions.ts` and
+/// `src/floor/pallets/pallets.ts`; `test/floor-schema.test.ts` checks the texts agree): the
+/// closed pallets of a shift with their boxes, a pallet by its key with its boxes, its
+/// disassembly and the reprint's comparison that it is still closed and whole, the pallet's
+/// newest job and the comparison that no newer job came.
+const CLOSED_PALLETS: &str =
+    "SELECT p.id, p.sscc, p.closed_at, (SELECT count(*) FROM floor_boxes b WHERE b.host_id = \
+     p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id AND b.disassembled_at \
+     IS NULL) AS boxes FROM floor_pallets p WHERE p.host_id = ? AND p.device_id = ? AND \
+     p.shift_id = ? AND p.closed_at IS NOT NULL AND p.disassembled_at IS NULL ORDER BY \
+     p.closed_at DESC, p.serial DESC";
+const PALLET_STATE: &str =
+    "SELECT p.closed_at, p.disassembled_at, (SELECT count(*) FROM floor_boxes b WHERE \
+     b.host_id = p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id AND \
+     b.disassembled_at IS NULL) AS boxes FROM floor_pallets p WHERE p.id = ? AND p.host_id \
+     = ? AND p.device_id = ? AND p.shift_id = ?";
+const DISASSEMBLE_PALLET: &str =
+    "UPDATE floor_pallets SET disassembled_at = ? WHERE id = ? AND host_id = ? AND \
+     device_id = ? AND shift_id = ? AND closed_at IS NOT NULL AND disassembled_at IS NULL";
+const PALLET_LIVE_GUARD: &str =
+    "UPDATE floor_pallets SET disassembled_at = disassembled_at WHERE id = ? AND host_id = \
+     ? AND device_id = ? AND shift_id = ? AND closed_at IS NOT NULL AND disassembled_at IS \
+     NULL";
+const LAST_PALLET_JOB: &str =
+    "SELECT id FROM floor_print_jobs WHERE host_id = ? AND device_id = ? AND shift_id = ? \
+     AND purpose = 'pallet' AND subject_id = ? ORDER BY rowid DESC LIMIT 1";
+const NEWEST_PALLET_JOB_GUARD: &str =
+    "UPDATE floor_print_jobs SET state = state WHERE host_id = ? AND device_id = ? AND id = \
+     ? AND NOT EXISTS (SELECT 1 FROM floor_print_jobs newer WHERE newer.host_id = ? AND \
+     newer.device_id = ? AND newer.shift_id = ? AND newer.purpose = 'pallet' AND \
+     newer.subject_id = ? AND newer.rowid > (SELECT rowid FROM floor_print_jobs WHERE id = ?))";
 const OPEN_PALLET_GUARD: &str =
     "UPDATE floor_shifts AS s SET local_state = local_state WHERE s.host_id = ? AND \
      s.device_id = ? AND s.id = ? AND NOT EXISTS (SELECT 1 FROM floor_pallets p WHERE \
@@ -1050,7 +1081,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 65] = [
+    let reads: [(&str, &str); 74] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1345,6 +1376,27 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             OPEN_JOB_READ,
             "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
+        ),
+        (
+            CLOSED_PALLETS,
+            "floor_pallets_shift (host_id=? AND device_id=? AND shift_id=?)",
+        ),
+        (CLOSED_PALLETS, "floor_boxes_pallet (pallet_id=?)"),
+        (PALLET_STATE, "sqlite_autoindex_floor_pallets_1 (id=?)"),
+        (PALLET_STATE, "floor_boxes_pallet (pallet_id=?)"),
+        (DISASSEMBLE_PALLET, "sqlite_autoindex_floor_pallets_1 (id=?)"),
+        (PALLET_LIVE_GUARD, "sqlite_autoindex_floor_pallets_1 (id=?)"),
+        (
+            LAST_PALLET_JOB,
+            "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
+        ),
+        (
+            NEWEST_PALLET_JOB_GUARD,
+            "sqlite_autoindex_floor_print_jobs_1 (id=?)",
+        ),
+        (
+            NEWEST_PALLET_JOB_GUARD,
+            "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?",
         ),
     ];
     for (sql, index) in reads {

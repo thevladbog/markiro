@@ -3,6 +3,8 @@ import { z } from "zod";
 
 import { closeShift } from "../src/floor/close/shift-close.js";
 import { undoLastCode } from "../src/floor/exceptions/box-exceptions.js";
+import { disassemblePallet } from "../src/floor/exceptions/pallet-exceptions.js";
+import { openPalletGuard } from "../src/floor/pallets/pallets.js";
 import { boxLabelStep, readPrintJob, sendLabelJob } from "../src/floor/print/print-jobs.js";
 import { closeOpenBox } from "../src/floor/work/box-close.js";
 import { processScan } from "../src/floor/work/scan-pipeline.js";
@@ -26,6 +28,7 @@ import {
   SECOND,
 } from "./support/floor-work.js";
 import { fakeHardware } from "./support/hardware.js";
+import { closeBoxOnPallet, palletContext, palletStation } from "./support/pallets.js";
 import { fakeRender, manualRuntime, printStation, resolveContext } from "./support/printing.js";
 
 type Station = Awaited<ReturnType<typeof printStation>>;
@@ -83,7 +86,7 @@ async function finished(
 }
 
 /** The rows of each table the shift's records live in, the copy's first. */
-function kept(at: Station, shiftId: string): Record<string, unknown> {
+function kept(at: Pick<Station, "db">, shiftId: string): Record<string, unknown> {
   const counts: Record<string, unknown> = {
     floor_shifts: rows(at.db, "SELECT count(*) AS n FROM floor_shifts WHERE id = ?", shiftId)[0]?.[
       "n"
@@ -297,6 +300,28 @@ describe("the retention of a shift's records on the station", () => {
     expect(await purgeAcknowledged(racing, PAIRING, NOW)).toBe(1);
     expect(kept(at, ENTERED.id)).toEqual(WHOLE);
     expect(kept(at, THIRD.id)).toEqual(NONE);
+  });
+
+  it("deletes a shift's pallets and their exceptions with it (plan ПЛ-Ц)", async () => {
+    const at = await palletStation({ capacity: 1 });
+    const closed = await closeBoxOnPallet(at, ["A1"]);
+    if (closed.kind !== "closed") throw new Error(closed.kind);
+    at.db.prepare("UPDATE floor_print_jobs SET state = 'sent'").run();
+    const [pallet] = rows(at.db, "SELECT id FROM floor_pallets");
+    const context = palletContext(at);
+    await disassemblePallet(context, String(pallet?.["id"]), { code: "wrong_product", text: null });
+    const result = await closeShift(context, "production_defect", [
+      openPalletGuard(PAIRING, at.shift.copy.id),
+    ]);
+    if (result.kind !== "closed") throw new Error(result.kind);
+    at.db.prepare("UPDATE outbox SET outcome = 'accepted', acked_at = ?").run(CUTOFF);
+    at.db.prepare("UPDATE floor_shifts SET local_state = 'closed'").run();
+    expect(kept(at, at.shift.copy.id)).toMatchObject({
+      floor_pallets: 1,
+      floor_pallet_exceptions: 1,
+    });
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    expect(kept(at, at.shift.copy.id)).toEqual(NONE);
   });
 
   it("names every table of a shift's records: a table with a `shift_id` and no retention fails here", async () => {

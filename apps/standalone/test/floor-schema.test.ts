@@ -10,6 +10,13 @@ import {
   LAST_CODE_SQL,
   NEWEST_CODE_SCAN_SQL,
 } from "../src/floor/exceptions/box-exceptions.js";
+import {
+  CLOSED_PALLETS_SQL,
+  DISASSEMBLE_PALLET_SQL,
+  LAST_PALLET_JOB_SQL,
+  NEWEST_PALLET_JOB_GUARD_SQL,
+  PALLET_STATE_SQL,
+} from "../src/floor/exceptions/pallet-exceptions.js";
 import { outboxStatement, shiftClosedRecord } from "../src/floor/facts.js";
 import {
   CONFLICT_COUNT_SQL,
@@ -25,6 +32,7 @@ import {
   JOIN_PALLET_SQL,
   OPEN_PALLET_GUARD_SQL,
   OPEN_PALLET_SQL,
+  PALLET_LIVE_GUARD_SQL,
   PALLET_SSCC_HELD_SQL,
 } from "../src/floor/pallets/pallets.js";
 import { OPEN_JOB_READ_SQL } from "../src/floor/print/print-jobs.js";
@@ -798,6 +806,26 @@ describe("the shape of the production tables (migration 0006)", () => {
       [JOIN_PALLET_SQL, ["sqlite_autoindex_floor_pallets_1 (id=?)"]],
       [BOX_ONTO_PALLET_SQL, ["sqlite_autoindex_floor_boxes_1 (id=?)"]],
       [PALLET_SSCC_HELD_SQL, ["floor_pallets_sscc (sscc=?)"]],
+      // The exceptions of a pallet (task 4): the closed pallets of a shift through the shift's
+      // pallets with their boxes counted through the pallet's boxes, a pallet by its key
+      // (with its boxes counted), its disassembly and the reprint's comparison by the same
+      // key, the pallet's newest job through the shift's jobs and the comparison against a
+      // newer one through the job's own key and the same index.
+      [
+        CLOSED_PALLETS_SQL,
+        ["floor_pallets_shift (host_id=? AND device_id=? AND shift_id=?)", PALLET_BOXES_INDEX],
+      ],
+      [PALLET_STATE_SQL, ["sqlite_autoindex_floor_pallets_1 (id=?)", PALLET_BOXES_INDEX]],
+      [DISASSEMBLE_PALLET_SQL, ["sqlite_autoindex_floor_pallets_1 (id=?)"]],
+      [PALLET_LIVE_GUARD_SQL, ["sqlite_autoindex_floor_pallets_1 (id=?)"]],
+      [LAST_PALLET_JOB_SQL, ["floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"]],
+      [
+        NEWEST_PALLET_JOB_GUARD_SQL,
+        [
+          "sqlite_autoindex_floor_print_jobs_1 (id=?)",
+          "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?",
+        ],
+      ],
       [OPEN_PALLET_GUARD_SQL, [SHIFT_KEY, OPEN_PALLET_INDEX, PALLET_BOXES_INDEX]],
       [CLOSE_SUMMARY_SQL, [SHIFT_KEY, OPEN_PALLET_INDEX, PALLET_BOXES_INDEX]],
       [OPEN_JOB_READ_SQL, ["floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"]],
@@ -815,11 +843,29 @@ describe("the shape of the production tables (migration 0006)", () => {
         .split("\n")
         .filter((step) => step.includes("TEMP")),
     ).toEqual(["USE TEMP B-TREE FOR ORDER BY"]);
+    // The closed pallets of a shift are sorted, the few pallets of one shift; the others sort
+    // nothing: a pallet's newest job is read by the rowid the index ends with.
+    expect(
+      plan(CLOSED_PALLETS_SQL)
+        .split("\n")
+        .filter((step) => step.includes("TEMP")),
+    ).toEqual(["USE TEMP B-TREE FOR ORDER BY"]);
+    for (const sql of [
+      PALLET_STATE_SQL,
+      DISASSEMBLE_PALLET_SQL,
+      PALLET_LIVE_GUARD_SQL,
+      LAST_PALLET_JOB_SQL,
+      NEWEST_PALLET_JOB_GUARD_SQL,
+    ]) {
+      expect(plan(sql), sql).not.toContain("TEMP B-TREE");
+    }
     for (const sql of [
       OPEN_PALLET_SQL,
       CLOSE_PALLET_SQL,
       OPEN_PALLET_GUARD_SQL,
       CLOSE_SUMMARY_SQL,
+      CLOSED_PALLETS_SQL,
+      PALLET_STATE_SQL,
     ]) {
       expect(plan(sql), sql).not.toContain("floor_boxes_shift (host_id=? AND device_id=?)");
     }
@@ -1070,8 +1116,14 @@ describe("the shape of the production tables (migration 0006)", () => {
       OPEN_PALLET_GUARD_SQL,
       CLOSE_SUMMARY_SQL,
       OPEN_JOB_READ_SQL,
+      CLOSED_PALLETS_SQL,
+      PALLET_STATE_SQL,
+      DISASSEMBLE_PALLET_SQL,
+      PALLET_LIVE_GUARD_SQL,
+      LAST_PALLET_JOB_SQL,
+      NEWEST_PALLET_JOB_GUARD_SQL,
     ];
-    expect(new Set(statements).size).toBe(21);
+    expect(new Set(statements).size).toBe(27);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
     // The retention pass's statements, as `tests/local_db.rs` plans them (the refused closes' read
     // among them): the long ones as constants, the deletes of the tables with an index by shift as literals, the three that read

@@ -69,8 +69,11 @@ export interface ExceptionReason<Code extends string> {
   text: string | null;
 }
 
-/** The checked reason fields of a record: the code, and its words or `null`. */
-function reasonFields(
+/**
+ * The checked reason fields of a record: the code of its kind's list, and
+ * its words or `null`; a pallet's exceptions (plan ПЛ-Ц) take the same.
+ */
+export function reasonFields(
   reasons: readonly string[],
   reason: ExceptionReason<string>,
 ): { reasonCode: string; reasonText: string | null } {

@@ -84,6 +84,30 @@ export async function readOpenPallet(
     : { id: row.id, openedAt: row.opened_at, boxCount: row.boxes, itemCount: row.items };
 }
 
+/**
+ * The comparison that keeps a record from following a disassembly (pinned in
+ * both lists of query plans): a no-op update that counts a row only while
+ * the pallet is closed and not taken apart. In the transaction of every
+ * reprint, so a disassembly that landed between the read and the write makes
+ * it `stale` and the host is never sent a `pallet_exception` it must refuse.
+ */
+export const PALLET_LIVE_GUARD_SQL =
+  "UPDATE floor_pallets SET disassembled_at = disassembled_at WHERE id = ? AND host_id = ? " +
+  "AND device_id = ? AND shift_id = ? AND closed_at IS NOT NULL AND disassembled_at IS NULL";
+
+/** The guard of a reprint of the pallet `palletId` of the shift `shiftId`. */
+export function palletLiveGuard(
+  pairing: Pairing,
+  shiftId: string,
+  palletId: string,
+): LocalStatement {
+  return {
+    sql: PALLET_LIVE_GUARD_SQL,
+    values: [palletId, pairing.hostId, pairing.deviceId, shiftId],
+    expectedChanges: 1,
+  };
+}
+
 /** What a pallet's close needs: a box's context, the operator's name for the label, a render. */
 export type PalletContext = BoxContext & {
   operatorName: string | null;

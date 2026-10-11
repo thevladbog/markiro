@@ -813,16 +813,39 @@ describe("printing again, beyond the first cases", () => {
   });
 });
 
+const PALLET_ID = "6c2f1a9e-3b4d-4e8f-a1b2-c3d4e5f60718";
+
 describe("a pallet's label", () => {
-  it("is not decided here: the records of a pallet are the pallets' plan's", async () => {
+  // The pallet's own flows are in `floor-pallet-exceptions.test.ts`; here, that the decisions
+  // of this module follow the job's purpose (plan ПЛ-Ц, which replaced the refusal of plan 2a7).
+  it("is checked and skipped with the records of a pallet", async () => {
+    const at = await printStation({ verifyPrintedLabel: true });
+    const { job } = await sentOnce(at, { sent: true });
+    const pallet = { ...job, purpose: "pallet", subjectId: PALLET_ID } as const;
+    await expect(checkLabel(context(at), pallet, FIRST_SSCC)).resolves.toMatchObject({
+      kind: "verified",
+    });
+    const skipping = await printStation({ verifyPrintedLabel: true });
+    const second = await sentOnce(skipping, { sent: true });
+    await expect(
+      skipLabel(context(skipping), { ...second.job, purpose: "pallet", subjectId: PALLET_ID }),
+    ).resolves.toMatchObject({ state: "skipped" });
+    for (const station of [at, skipping]) {
+      expect(outbox(station).map((record) => record.kind)).toEqual(["box_closed", "pallet_label"]);
+    }
+    expect(outbox(at)[1]?.payload).toMatchObject({
+      data: { palletId: PALLET_ID, outcome: "verified" },
+    });
+    expect(outbox(skipping)[1]?.payload).toMatchObject({
+      data: { palletId: PALLET_ID, outcome: "skipped" },
+    });
+  });
+
+  it("is printed again only for a pallet that is closed and whole: any other is stale, with nothing written", async () => {
     const at = await printStation({ verifyPrintedLabel: true });
     const { job } = await sentOnce(at, { sent: true });
     const shell = fakeHardware();
-    const pallet = { ...job, purpose: "pallet" } as const;
-    await expect(checkLabel(context(at), pallet, FIRST_SSCC)).rejects.toBeInstanceOf(
-      UnresolvableJobError,
-    );
-    await expect(skipLabel(context(at), pallet)).rejects.toBeInstanceOf(UnresolvableJobError);
+    const pallet = { ...job, purpose: "pallet", subjectId: PALLET_ID } as const;
     await expect(
       printAgain(
         context(at, shell),
@@ -831,8 +854,9 @@ describe("a pallet's label", () => {
         at.settings,
         template(at),
       ),
-    ).rejects.toBeInstanceOf(UnresolvableJobError);
+    ).rejects.toBeInstanceOf(StaleJobError);
     expect(shell.sends).toEqual([]);
+    expect(rows(at.db, "SELECT count(*) AS n FROM floor_pallet_exceptions")).toEqual([{ n: 0 }]);
     expect(exceptionRows(at)).toEqual([{ n: 0 }]);
     expect(outbox(at).map((record) => record.kind)).toEqual(["box_closed"]);
     expect(jobRows(at.db)[0]).toMatchObject({ state: "sent", attempts: 1 });
