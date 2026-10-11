@@ -15,7 +15,8 @@ import {
   credentialGenerationOwnership,
   type CredentialGeneration,
 } from "./credential-recovery.js";
-import markiroLogoUrl from "../assets/markiro-print-logo.svg";
+// Fetch stays on the bundled origin: data URLs are blocked by the installed CSP.
+import markiroLogoUrl from "../assets/markiro-print-logo.svg?no-inline";
 
 export interface OrganizationBrandingOwner {
   exec: SqlExecutor;

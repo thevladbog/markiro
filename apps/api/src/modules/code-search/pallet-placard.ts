@@ -275,7 +275,7 @@ function renderPlacardPage(data: PalletPlacardData, format: PlacardFormat): stri
   ${watermark}
   <header class="pl-header">
     <div class="pl-brand">${brandLogo(data.org)}<span class="pl-org">${orgName}</span></div>
-    <span class="pl-title">ПАЛЛЕТА</span>
+    <span class="pl-title">ПАЛЕТА</span>
   </header>
   <div class="pl-name" style="font-size: ${namePt}pt">${dash(data.productName)}</div>
   <div class="pl-figures">
