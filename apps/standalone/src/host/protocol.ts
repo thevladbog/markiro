@@ -140,6 +140,12 @@ export const hostStatusSchema = z
       .nullable(),
     /** Grows with every status the shell publishes. */
     seq: z.number().int().nonnegative(),
+    /**
+     * The host's `hello.restoreEpoch` as the connection that came online last
+     * read it (plan РК-С); absent before the host's first restore and when
+     * that read failed.
+     */
+    restoreEpoch: z.uuid().optional(),
   })
   .strict();
 export type HostStatus = z.infer<typeof hostStatusSchema>;

@@ -13,6 +13,8 @@ use markiro_standalone_lib::connection::{
 };
 use markiro_standalone_lib::device::{DeviceState, HostLink};
 use serde_json::Value;
+use sqlx::sqlite::SqliteConnectOptions;
+use sqlx::{ConnectOptions, Connection};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
@@ -145,6 +147,7 @@ async fn an_unpaired_device_stays_offline_without_trying() {
             last_contact_at: None,
             last_error: None,
             seq: 1,
+            restore_epoch: None,
         })
     );
     tokio::time::sleep(Duration::from_millis(300)).await;
@@ -170,6 +173,7 @@ async fn a_paired_device_comes_online_and_hears_every_revision() {
             last_contact_at: None,
             last_error: None,
             seq: 1,
+            restore_epoch: None,
         }
     );
     let online = next_status(&mut heard).await;
@@ -228,6 +232,84 @@ async fn the_link_goes_offline_with_the_host_and_returns_with_it() {
     let host = start_host(host_dir.path(), &bound).await;
     status_in(&mut heard, LinkState::Online).await;
     assert_eq!(next_revision(&mut heard).await, 0);
+    task.abort();
+    host.stop().await.unwrap();
+}
+
+/// What `markiro-host restore` leaves in the stopped host's `site` (plan РК):
+/// a new restore epoch, which `hello` names from then on.
+async fn mark_restored(dir: &Path, epoch: &str) {
+    let mut db = SqliteConnectOptions::new()
+        .filename(HostPaths::new(dir).database_file())
+        .connect()
+        .await
+        .unwrap();
+    let marked = sqlx::query("UPDATE site SET restore_epoch = ? WHERE id = 1")
+        .bind(epoch)
+        .execute(&mut db)
+        .await
+        .unwrap();
+    assert_eq!(marked.rows_affected(), 1);
+    db.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn the_online_status_names_the_epoch_of_a_restored_host() {
+    const EPOCH: &str = "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e";
+    let host_dir = tempfile::tempdir().unwrap();
+    let app_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path(), "127.0.0.1:0").await;
+    let bound = host.addr.to_string();
+    let device = paired(&host, app_dir.path()).await;
+    let (mut heard, state, task) = follow(device.watch_link());
+    let first = status_in(&mut heard, LinkState::Online).await;
+    assert_eq!(
+        first.restore_epoch, None,
+        "a host never restored names none"
+    );
+
+    host.stop().await.unwrap();
+    let offline = status_in(&mut heard, LinkState::Offline).await;
+    assert_eq!(offline.restore_epoch, None);
+    mark_restored(host_dir.path(), EPOCH).await;
+    let host = start_host(host_dir.path(), &bound).await;
+    let back = status_in(&mut heard, LinkState::Online).await;
+    assert_eq!(back.restore_epoch.as_deref(), Some(EPOCH));
+    assert_eq!(state.snapshot().restore_epoch.as_deref(), Some(EPOCH));
+
+    // Forgetting the device leaves no epoch behind for the next pairing.
+    device.forget().await.unwrap();
+    let forgotten = status_in(&mut heard, LinkState::Offline).await;
+    assert_eq!(forgotten.restore_epoch, None);
+    assert_eq!(state.snapshot().restore_epoch, None);
+    task.abort();
+    host.stop().await.unwrap();
+}
+
+#[tokio::test]
+async fn a_link_swapped_for_another_host_does_not_inherit_the_epoch() {
+    const EPOCH: &str = "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e";
+    let host_dir = tempfile::tempdir().unwrap();
+    let app_dir = tempfile::tempdir().unwrap();
+    let host = start_host(host_dir.path(), "127.0.0.1:0").await;
+    host.stop().await.unwrap();
+    mark_restored(host_dir.path(), EPOCH).await;
+    let host = start_host(host_dir.path(), "127.0.0.1:0").await;
+    let device = paired(&host, app_dir.path()).await;
+    let current = device.watch_link().borrow().clone();
+    let (swap, link) = watch::channel(current);
+    let (mut heard, state, task) = follow(link);
+    let online = status_in(&mut heard, LinkState::Online).await;
+    assert_eq!(online.restore_epoch.as_deref(), Some(EPOCH));
+
+    // The link changes hands without passing through "unpaired" (a quick
+    // forget and re-pair coalesces): the new link's own first status must not
+    // carry the old host's epoch.
+    let other = HostLink::new(address(&host), "0".repeat(64), Secret::new("any"));
+    swap.send(Some(Arc::new(other))).unwrap();
+    let connecting = status_in(&mut heard, LinkState::Connecting).await;
+    assert_eq!(connecting.restore_epoch, None, "{connecting:?}");
+    assert_eq!(state.snapshot().restore_epoch, None);
     task.abort();
     host.stop().await.unwrap();
 }

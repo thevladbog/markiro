@@ -81,6 +81,21 @@ describe("connection to the host", () => {
     expect(onStatus.mock.calls).toEqual([[status(1)]]);
   });
 
+  it("passes on the restore epoch the shell read from the host's hello, and drops a malformed one", async () => {
+    // `restoreEpoch` of `proto/fixtures/hello-restored.json`.
+    const epoch = "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e";
+    const events = fakeEvents();
+    const onStatus = vi.fn();
+    await createTauriConnectionApi(async () => status(1), events.listen).watch({
+      onStatus,
+      onRevision: vi.fn(),
+    });
+    events.emit(HOST_STATUS_EVENT, { ...status(2), restoreEpoch: epoch });
+    events.emit(HOST_STATUS_EVENT, { ...status(3), restoreEpoch: "epoch-1" });
+    events.emit(HOST_STATUS_EVENT, { ...status(4), restoreEpoch: null });
+    expect(onStatus.mock.calls).toEqual([[status(1)], [{ ...status(2), restoreEpoch: epoch }]]);
+  });
+
   it("stops listening when asked", async () => {
     const events = fakeEvents();
     const stop = await createTauriConnectionApi(async () => status(1), events.listen).watch({

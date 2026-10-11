@@ -3,7 +3,9 @@
 //! certificate, reconnects after a pause that grows from 1 to 30 s, and tells
 //! the webview how the link is (`standalone://host-status`) and which
 //! revision the host reached (`standalone://host-revision`). The webview syncs
-//! reference data on every revision; it never opens the stream itself.
+//! reference data on every revision; it never opens the stream itself. Before
+//! each stream it reads `GET /v1/hello` with the same pinned certificate, and
+//! the `Online` status carries the host's restore epoch (plan РК-С).
 
 use std::convert::Infallible;
 use std::sync::{Arc, Mutex};
@@ -13,11 +15,15 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::watch;
 
 use crate::device::HostLink;
-use crate::host_client::{HostResponse, RequestError, StreamClient, StreamOpen};
+use crate::host_client::{
+    Credentials, HostResponse, PinnedClient, RequestError, StreamClient, StreamOpen,
+};
+use crate::host_probe::classify_hello;
 
 pub const STATUS_EVENT: &str = "standalone://host-status";
 pub const REVISION_EVENT: &str = "standalone://host-revision";
 const STREAM_PATH: &str = "/v1/changes/stream";
+const HELLO_PATH: &str = "/v1/hello";
 /// An event longer than this is not from a Markiro host.
 const MAX_EVENT_BYTES: usize = 64 * 1024;
 
@@ -67,6 +73,15 @@ pub struct HostStatus {
     /// Grows by one with every published status, so the webview can order a
     /// `connection_status` answer against events that raced it.
     pub seq: u64,
+    /// The host's `hello.restoreEpoch` (plan РК-С) as the connection that came
+    /// online last read it, with the pinned certificate, just before it opened
+    /// the stream: a new value tells the webview the host went back to a copy.
+    /// `None`, and absent from the JSON, before the host's first restore,
+    /// before this pairing's first connection came online, and when that read
+    /// failed: the stream opens all the same, and the next connection reads
+    /// again.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub restore_epoch: Option<String>,
 }
 
 impl Default for HostStatus {
@@ -76,6 +91,7 @@ impl Default for HostStatus {
             last_contact_at: None,
             last_error: None,
             seq: 0,
+            restore_epoch: None,
         }
     }
 }
@@ -136,6 +152,7 @@ impl ConnectionState {
             current.state = LinkState::Offline;
             current.last_error = None;
             current.last_contact_at = None;
+            current.restore_epoch = None;
         });
     }
 }
@@ -219,6 +236,7 @@ async fn hold(
             current.last_error = last_error;
             if fresh_link {
                 current.last_contact_at = None;
+                current.restore_epoch = None;
             }
         });
         fresh_link = false;
@@ -242,6 +260,9 @@ async fn follow(
         Ok(client) => client,
         Err(error) => return (request_error(error), false),
     };
+    // Read before the stream opens, so that the `Online` status its first
+    // event publishes already carries it.
+    let mut epoch = restore_epoch(link).await;
     let mut stream = match client.open(STREAM_PATH, link.key()).await {
         Ok(StreamOpen::Open(stream)) => stream,
         Ok(StreamOpen::Refused(response)) => return (refusal(&response), false),
@@ -261,13 +282,38 @@ async fn follow(
         for item in items {
             if !online {
                 online = true;
-                state.publish(events, LinkState::Online, None);
+                let epoch = epoch.take();
+                state.publish_with(events, |current| {
+                    current.state = LinkState::Online;
+                    current.last_error = None;
+                    current.restore_epoch = epoch;
+                });
             }
             if let SseItem::Revision(rev) = item {
                 events.revision(HostRevision { rev });
             }
         }
     }
+}
+
+/// `GET /v1/hello` with the pinned certificate and no key: the host's restore
+/// epoch, `None` when it names none or the read fails.
+async fn restore_epoch(link: &HostLink) -> Option<String> {
+    let client = PinnedClient::new(&link.address, &link.fingerprint).ok()?;
+    let response = client
+        .send("GET", HELLO_PATH, None, Credentials::default())
+        .await
+        .ok()?;
+    epoch_of(&response)
+}
+
+/// The `restoreEpoch` of a `hello` answer: only from a 200 that reads as a
+/// compatible Markiro host's `hello` (`host_probe::classify_hello`).
+fn epoch_of(response: &HostResponse) -> Option<String> {
+    if response.status != 200 {
+        return None;
+    }
+    classify_hello(response.body.clone()?).ok()?.restore_epoch
 }
 
 fn request_error(error: RequestError) -> LinkError {
@@ -538,14 +584,49 @@ mod tests {
             last_contact_at: Some(1_700_000_000_000),
             last_error: Some(LinkError::CertificateMismatch),
             seq: 4,
+            restore_epoch: None,
         };
         assert_eq!(
             serde_json::to_value(&status).unwrap(),
             json!({ "state": "offline", "lastContactAt": 1_700_000_000_000u64, "lastError": "certificate_mismatch", "seq": 4 })
         );
+        let restored = HostStatus {
+            state: LinkState::Online,
+            last_contact_at: Some(1_700_000_000_000),
+            last_error: None,
+            seq: 5,
+            restore_epoch: Some(EPOCH.to_owned()),
+        };
+        assert_eq!(
+            serde_json::to_value(&restored).unwrap(),
+            json!({ "state": "online", "lastContactAt": 1_700_000_000_000u64, "lastError": null, "seq": 5, "restoreEpoch": EPOCH })
+        );
         assert_eq!(
             serde_json::to_value(HostRevision { rev: 12 }).unwrap(),
             json!({ "rev": 12 })
         );
+    }
+
+    /// `restoreEpoch` of `proto/fixtures/hello-restored.json`.
+    const EPOCH: &str = "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e";
+
+    #[test]
+    fn the_epoch_comes_only_from_a_hello_that_reads() {
+        let restored: serde_json::Value =
+            serde_json::from_str(include_str!("../../proto/fixtures/hello-restored.json")).unwrap();
+        let epoch =
+            |status: u16, body: Option<serde_json::Value>| epoch_of(&HostResponse { status, body });
+        assert_eq!(epoch(200, Some(restored.clone())), Some(EPOCH.to_owned()));
+        let mut never = restored.clone();
+        never.as_object_mut().unwrap().remove("restoreEpoch");
+        assert_eq!(epoch(200, Some(never)), None, "a host never restored");
+        assert_eq!(epoch(503, Some(restored.clone())), None);
+        assert_eq!(epoch(200, None), None);
+        let mut foreign = restored.clone();
+        foreign["product"] = json!("other");
+        assert_eq!(epoch(200, Some(foreign)), None, "not a Markiro host");
+        let mut unreadable = restored;
+        unreadable["restoreEpoch"] = json!(7);
+        assert_eq!(epoch(200, Some(unreadable)), None);
     }
 }
