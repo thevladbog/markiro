@@ -250,7 +250,13 @@ pub struct RestoreReport {
     pub new_identity: bool,
     /// The host's revision after the restore: the copy's next one.
     pub revision: i64,
-    /// `None` when the current database was not read.
+    /// The current database was read, its wizard was done and it is of this
+    /// copy's host: what it issued after the copy is known. Otherwise (none,
+    /// unreadable, a new host whose wizard never ran, another host's) the
+    /// margins of an unread database apply.
+    pub history_known: bool,
+    /// `None` when the current database was not read or is not this copy's
+    /// history.
     pub carried: Option<Carried>,
     pub sessions_ended: u64,
     pub interrupted: Option<Interrupted>,
@@ -603,15 +609,42 @@ impl Visit {
     }
 }
 
-/// The numbers and the revocations of the database at `path`, read once.
-async fn read_live(path: &Path) -> Result<(Floors, Revoked), sqlx::Error> {
+/// What a live database told: its numbers, its revocations and whether its
+/// wizard was done (one whose wizard never ran issued nothing).
+struct Live {
+    floors: Floors,
+    revoked: Revoked,
+    initialized: bool,
+}
+
+/// Whether the wizard of the database on `conn` was done.
+async fn read_initialized(conn: &mut SqliteConnection) -> Result<bool, sqlx::Error> {
+    if !table_names(&mut *conn).await?.contains("site") {
+        return Ok(false);
+    }
+    let initialized: Option<String> =
+        sqlx::query_scalar("SELECT initialized_at FROM site WHERE id = 1")
+            .fetch_optional(&mut *conn)
+            .await?
+            .flatten();
+    Ok(initialized.is_some())
+}
+
+/// The numbers, the revocations and the wizard's state of the database at
+/// `path`, read once.
+async fn read_live(path: &Path) -> Result<Live, sqlx::Error> {
     let visit = Visit::begin(path);
     let read = async {
         let mut conn = open_read_only(path, false).connect().await?;
         let read = async {
             let floors = read_floors(&mut conn).await?;
             let revoked = read_revoked(&mut conn).await?;
-            Ok::<_, sqlx::Error>((floors, revoked))
+            let initialized = read_initialized(&mut conn).await?;
+            Ok::<_, sqlx::Error>(Live {
+                floors,
+                revoked,
+                initialized,
+            })
         }
         .await;
         let _ = conn.close().await;
@@ -654,20 +687,26 @@ fn is_busy(error: &sqlx::Error) -> bool {
         .is_some_and(|code| matches!(code & 0xff, 5 | 6))
 }
 
-/// What the current database at `db` is, its numbers and its revocations
-/// (when read). A file that is there but does not read is read again a few
-/// times before it counts as unreadable; one another program keeps busy all
-/// that time is a refusal, not an unreadable database.
-async fn current_state(db: &Path) -> Result<(Current, Floors, Option<Revoked>), BoxError> {
+/// What the current database at `db` is, its numbers, its revocations and
+/// whether its wizard was done (when read). A file that is there but does
+/// not read is read again a few times before it counts as unreadable; one
+/// another program keeps busy all that time is a refusal, not an unreadable
+/// database.
+async fn current_state(db: &Path) -> Result<(Current, Floors, Option<Revoked>, bool), BoxError> {
     match fs::metadata(db) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok((Current::Absent, Floors::default(), None));
+            return Ok((Current::Absent, Floors::default(), None, false));
         }
         // Any other answer: the file is there, or may be; reading it says.
         _ => {}
     }
     match with_retries(READ_ATTEMPTS, READ_RETRY_DELAY, || read_live(db)).await {
-        Ok((floors, revoked)) => Ok((Current::Read, floors, Some(revoked))),
+        Ok(live) => Ok((
+            Current::Read,
+            live.floors,
+            Some(live.revoked),
+            live.initialized,
+        )),
         Err(error) if is_busy(&error) => Err(format!(
             "the current database {} is held by another program ({error}): close every program that has it open and run the command again",
             db.display()
@@ -675,7 +714,7 @@ async fn current_state(db: &Path) -> Result<(Current, Floors, Option<Revoked>), 
         .into()),
         Err(error) => {
             tracing::warn!(%error, "the current database could not be read");
-            Ok((Current::Unreadable, Floors::default(), None))
+            Ok((Current::Unreadable, Floors::default(), None, false))
         }
     }
 }
@@ -698,7 +737,7 @@ async fn aside_floors(data_dir: &Path) -> Floors {
     asides.sort();
     for db in asides {
         match read_live(&db).await {
-            Ok((found, _)) => floors.merge(found),
+            Ok(found) => floors.merge(found.floors),
             Err(error) => {
                 tracing::warn!(%error, path = %db.display(), "a database set aside could not be read");
             }
@@ -1304,9 +1343,20 @@ async fn restore_until(
     made.interrupted = finish_interrupted(paths, &db, &staging).await?;
     // What an earlier restore that was interrupted before its marker left.
     remove_staging(&staging);
-    let (current, mut known, revoked) = current_state(&db)
+    let (current, mut known, revoked, initialized) = current_state(&db)
         .await
         .map_err(|error| made.unchanged(paths, error))?;
+    // What the current database issued after the copy is known only when it
+    // is the copy's own host's, past its wizard. A new computer's installer
+    // starts the host once and leaves a database whose wizard never ran; a
+    // copy of another host says nothing of what this one issued (a folder
+    // without `host.json` gets a new identity: another host too). Its
+    // numbers still count as floors.
+    let foreign = existing
+        .as_ref()
+        .is_none_or(|config| other_host(&copy, config));
+    let history_known = current == Current::Read && initialized && !foreign;
+    let revoked = revoked.filter(|_| history_known);
     known.merge(aside_floors(&paths.data_dir).await);
     // A WAL beside no database would be read by the restored one: it goes
     // aside too.
@@ -1317,6 +1367,7 @@ async fn restore_until(
         &staging,
         Before {
             current,
+            history_known,
             known: &known,
             revoked: revoked.as_ref(),
         },
@@ -1411,6 +1462,7 @@ async fn restore_until(
         copy,
         data_dir: std::path::absolute(&paths.data_dir).unwrap_or_else(|_| paths.data_dir.clone()),
         current,
+        history_known,
         saved_as: aside,
         epoch: raised.epoch,
         counters: raised.counters,
@@ -1430,6 +1482,8 @@ async fn restore_until(
 #[derive(Clone, Copy)]
 struct Before<'a> {
     current: Current,
+    /// See [`RestoreReport::history_known`].
+    history_known: bool,
     known: &'a Floors,
     revoked: Option<&'a Revoked>,
 }
@@ -1535,13 +1589,15 @@ async fn raise(
 }
 
 /// The audit sequence after a restore: above every id either database
-/// issued, and far above the copy's when the current one was not read.
-fn audit_floor(current: Current, copy: Option<i64>, known: Option<i64>) -> i64 {
+/// issued, and far above the copy's when the current one is not the copy's
+/// known history.
+fn audit_floor(history_known: bool, copy: Option<i64>, known: Option<i64>) -> i64 {
     let copy = copy.unwrap_or(0);
     let known = copy.max(known.unwrap_or(0));
-    match current {
-        Current::Read => known,
-        Current::Unreadable | Current::Absent => known.max(copy + UNREADABLE_CURRENT_MARGIN),
+    if history_known {
+        known
+    } else {
+        known.max(copy + UNREADABLE_CURRENT_MARGIN)
     }
 }
 
@@ -1621,6 +1677,7 @@ async fn raise_in(
 ) -> Result<Raised, BoxError> {
     let Before {
         current,
+        history_known,
         known,
         revoked,
     } = before;
@@ -1662,7 +1719,11 @@ async fn raise_in(
     let revision = db::next_revision(&mut *tx).await?;
     // The audit row's own id is the next one: above every id either database
     // issued.
-    let audit_sequence = audit_floor(current, copy_floors.audit_sequence, known.audit_sequence);
+    let audit_sequence = audit_floor(
+        history_known,
+        copy_floors.audit_sequence,
+        known.audit_sequence,
+    );
     let moved = sqlx::query("UPDATE sqlite_sequence SET seq = ?1 WHERE name = 'audit_log'")
         .bind(audit_sequence)
         .execute(&mut *tx)
@@ -1693,7 +1754,7 @@ async fn raise_in(
         };
         let capacity = i64::try_from(crate::validate::serial_capacity(prefix))?;
         let mut to = floor + SSCC_MARGIN_BLOCKS * size;
-        if current != Current::Read {
+        if !history_known {
             to = to.max(unread_sscc_floor(copy_floor.unwrap_or(0)));
         }
         let to = to.min(capacity);
@@ -1867,6 +1928,11 @@ pub fn summary(report: &RestoreReport) -> Vec<String> {
     if report.current == Current::Unreadable {
         lines.push(format!(
             "the previous database could not be read: every SSCC counter is at least {UNREAD_SSCC_MARGIN} above the copy's highest number"
+        ));
+    }
+    if report.current == Current::Read && !report.history_known {
+        lines.push(format!(
+            "the current database is not this copy's history (a new host, one whose wizard never finished, or another host's): every SSCC counter is at least {UNREAD_SSCC_MARGIN} above the copy's highest number"
         ));
     }
     lines.push(match report.carried {
@@ -2073,15 +2139,15 @@ mod tests {
 
     #[test]
     fn an_audit_id_is_above_both_databases_or_far_above_the_copy_when_the_other_is_unknown() {
-        assert_eq!(audit_floor(Current::Read, Some(10), Some(25)), 25);
-        assert_eq!(audit_floor(Current::Read, Some(40), Some(25)), 40);
-        assert_eq!(audit_floor(Current::Read, None, None), 0);
+        assert_eq!(audit_floor(true, Some(10), Some(25)), 25);
+        assert_eq!(audit_floor(true, Some(40), Some(25)), 40);
+        assert_eq!(audit_floor(true, None, None), 0);
         assert_eq!(
-            audit_floor(Current::Unreadable, Some(40), None),
+            audit_floor(false, Some(40), None),
             40 + UNREADABLE_CURRENT_MARGIN
         );
         assert_eq!(
-            audit_floor(Current::Absent, Some(40), Some(2_000_000)),
+            audit_floor(false, Some(40), Some(2_000_000)),
             2_000_000,
             "a database set aside that issued more counts"
         );
