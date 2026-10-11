@@ -161,6 +161,13 @@ pub fn is_copy_file_name(name: &str) -> bool {
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'.')
 }
 
+/// Flush `path` to the disk through a handle opened for writing: on Windows
+/// `FlushFileBuffers` needs write access and refuses a read-only handle.
+/// Blocking.
+pub fn sync_file(path: &Path) -> std::io::Result<()> {
+    fs::OpenOptions::new().write(true).open(path)?.sync_all()
+}
+
 /// Write `bytes` to `path` through `<path>.partial`, synced before the
 /// rename, so a crash never leaves a half-written file under the final
 /// name. Owner-only on Unix. Blocking.
@@ -366,7 +373,7 @@ async fn write_copy(
         .map_err(|error| Failure::new(failure::INTERNAL, error.to_string()))?;
     let (partial, db) = (partial.to_path_buf(), db.to_path_buf());
     tokio::task::spawn_blocking(move || -> std::io::Result<()> {
-        fs::File::open(&partial)?.sync_all()?;
+        sync_file(&partial)?;
         fs::rename(&partial, &db)?;
         write_synced(&manifest_path(&db), &bytes)
     })

@@ -180,6 +180,8 @@ fn install_hardens_the_data_dir_registers_the_service_opens_the_port_and_waits_u
         *log.borrow(),
         [
             "run icacls",
+            "run icacls",
+            "run icacls",
             "state",
             "configure",
             "run powershell.exe",
@@ -192,7 +194,7 @@ fn install_hardens_the_data_dir_registers_the_service_opens_the_port_and_waits_u
     assert_eq!(*sleeps.borrow(), [POLL_EVERY, POLL_EVERY]);
     assert_eq!(services.configured, [service_spec(Path::new(EXE))]);
     assert_eq!(
-        commands.runs[0],
+        commands.runs[2],
         (
             "icacls".to_owned(),
             vec![
@@ -205,8 +207,8 @@ fn install_hardens_the_data_dir_registers_the_service_opens_the_port_and_waits_u
             ]
         )
     );
-    assert_eq!(commands.runs[1].0, "powershell.exe");
-    assert_eq!(script_of(&commands.runs[1].1), firewall_open_script(45710));
+    assert_eq!(commands.runs[3].0, "powershell.exe");
+    assert_eq!(script_of(&commands.runs[3].1), firewall_open_script(45710));
 }
 
 /// A user may make `%ProgramData%\Markiro\Host` (or a file in it) before the
@@ -307,6 +309,8 @@ fn install_over_a_running_service_stops_it_first_and_starts_it_again() {
     assert_eq!(
         *log.borrow(),
         [
+            "run icacls",
+            "run icacls",
             "run icacls",
             "state",
             "stop",
@@ -516,6 +520,8 @@ fn a_fresh_install_whose_firewall_rule_fails_takes_the_service_and_the_rule_away
         *log.borrow(),
         [
             "run icacls",
+            "run icacls",
+            "run icacls",
             "state",
             "configure",
             "run powershell.exe",
@@ -524,7 +530,7 @@ fn a_fresh_install_whose_firewall_rule_fails_takes_the_service_and_the_rule_away
             "run powershell.exe",
         ]
     );
-    assert_eq!(script_of(&commands.runs[2].1), firewall_close_script());
+    assert_eq!(script_of(&commands.runs[4].1), firewall_close_script());
     assert!(sleeps.borrow().is_empty(), "the undo waits for nothing");
 }
 
@@ -542,6 +548,8 @@ fn a_fresh_install_whose_start_is_refused_is_taken_back_and_a_pending_service_is
     assert_eq!(
         *log.borrow(),
         [
+            "run icacls",
+            "run icacls",
             "run icacls",
             "state",
             "configure",
@@ -570,6 +578,8 @@ fn a_fresh_install_whose_configuration_stops_half_way_removes_what_was_created()
         *log.borrow(),
         [
             "run icacls",
+            "run icacls",
+            "run icacls",
             "state",
             "configure",
             "state",
@@ -593,7 +603,14 @@ fn an_upgrade_that_fails_leaves_the_installed_service_registered_and_the_rule_al
     // A second run converges; deleting the customer's service would not.
     assert_eq!(
         *log.borrow(),
-        ["run icacls", "state", "configure", "run powershell.exe"]
+        [
+            "run icacls",
+            "run icacls",
+            "run icacls",
+            "state",
+            "configure",
+            "run powershell.exe"
+        ]
     );
 }
 
@@ -610,7 +627,7 @@ fn a_failed_undo_never_hides_the_error_that_caused_it() {
         Err(firewall_refused())
     );
     // Both undo steps were tried although the first one failed.
-    assert_eq!(log.borrow()[4..], ["state", "delete", "run powershell.exe"]);
+    assert_eq!(log.borrow()[6..], ["state", "delete", "run powershell.exe"]);
 }
 
 #[test]
@@ -654,6 +671,8 @@ fn a_second_install_over_a_stopped_service_asks_it_to_stop_nothing_and_ends_the_
     assert_eq!(
         *log.borrow(),
         [
+            "run icacls",
+            "run icacls",
             "run icacls",
             "state",
             "configure",
@@ -853,14 +872,14 @@ fn install_creates_the_data_directory_before_icacls_reads_it_and_opens_the_defau
     let log = Log::default();
     let (result, commands) = install_host_in(&paths, &log);
     result.unwrap();
-    assert_eq!(commands.directory_existed, [true]);
+    assert_eq!(commands.directory_existed, [true, true, true]);
     assert!(paths.logs_dir().is_dir() && paths.tls_dir().is_dir());
     assert_eq!(
-        commands.inner.runs[0].1[0],
+        commands.inner.runs[2].1[0],
         paths.data_dir.display().to_string()
     );
     assert_eq!(
-        script_of(&commands.inner.runs[1].1),
+        script_of(&commands.inner.runs[3].1),
         firewall_open_script(45710)
     );
 }
@@ -875,7 +894,7 @@ fn install_opens_the_port_the_host_was_configured_with() {
     let (result, commands) = install_host_in(&paths, &log);
     result.unwrap();
     assert_eq!(
-        script_of(&commands.inner.runs[1].1),
+        script_of(&commands.inner.runs[2].1),
         firewall_open_script(46123)
     );
 }

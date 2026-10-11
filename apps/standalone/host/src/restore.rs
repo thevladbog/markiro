@@ -90,7 +90,8 @@ use time::{Month, OffsetDateTime};
 
 use crate::audit::{self, actions, Actor, Entry, Outcome};
 use crate::backup::copy::{
-    create_private, partial_path, read_manifest, sha256_file, utc_stamp, verify_database, Manifest,
+    create_private, partial_path, read_manifest, sha256_file, sync_file, utc_stamp,
+    verify_database, Manifest,
 };
 use crate::clock::{format_timestamp, parse_timestamp};
 use crate::config::{ConfigError, HostConfig, HostPaths};
@@ -819,12 +820,6 @@ fn retrying<T>(
 
 fn rename_retrying(from: &Path, to: &Path, delay: Duration) -> std::io::Result<()> {
     retrying(RENAME_ATTEMPTS, delay, || fs::rename(from, to))
-}
-
-/// Flush `path` to the disk. Opened for writing: on Windows a flush needs
-/// write access, and a read-only handle is refused.
-fn sync_file(path: &Path) -> std::io::Result<()> {
-    fs::OpenOptions::new().write(true).open(path)?.sync_all()
 }
 
 /// Make the renames in `dir` durable, where the system allows it: `fsync`

@@ -42,6 +42,12 @@ pub const DATA_DIR_GRANTS: [&str; 3] = [
     "*S-1-5-19:(OI)(CI)M",
 ];
 
+/// The owner the data directory, everything in it and its `Markiro` folder
+/// get: Administrators (`S-1-5-32-544`). A user may make the folder (or a file
+/// in it) before the install, since `ProgramData` lets users create folders;
+/// as its owner that user could grant themselves the database again.
+pub const DATA_DIR_OWNER: &str = "*S-1-5-32-544";
+
 /// What a service reports while `install` and `stop` wait for it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServiceState {
@@ -184,6 +190,17 @@ pub fn install(
     commands: &mut dyn Commands,
     sleep: &mut dyn FnMut(Duration),
 ) -> Result<(), InstallError> {
+    // The owner first: an owner keeps the right to change the access list,
+    // and taking ownership is what opens a folder whose list shuts the
+    // administrators out.
+    if let Some(markiro) = markiro_folder(data_dir) {
+        run_checked(commands, "icacls", &owner_args(&markiro, false))?;
+    }
+    run_checked(
+        commands,
+        "icacls",
+        &owner_args(&data_dir.display().to_string(), true),
+    )?;
     run_checked(commands, "icacls", &icacls_args(data_dir))?;
     let existed = stop(services, sleep)?;
     if let Err(error) = register_and_start(executable, port, services, commands) {
@@ -350,6 +367,33 @@ pub fn run_checked(
             code: output.code,
         })
     }
+}
+
+/// The data directory's parent when it is the `Markiro` folder (as in
+/// `%ProgramData%\Markiro\Host`), never another folder: an unusual data
+/// directory must not change the owner of a drive or of `ProgramData`. Both
+/// separators count, so a Windows path reads the same on every system.
+pub fn markiro_folder(data_dir: &Path) -> Option<String> {
+    let dir = data_dir.display().to_string();
+    let dir = dir.trim_end_matches(['\\', '/']);
+    let (parent, _) = dir.rsplit_once(['\\', '/'])?;
+    let name = parent.rsplit(['\\', '/']).next()?;
+    name.eq_ignore_ascii_case("Markiro")
+        .then(|| parent.to_owned())
+}
+
+/// `icacls <dir> /setowner <DATA_DIR_OWNER>`, with `/T /C` for everything in
+/// it when `recursive`.
+pub fn owner_args(dir: &str, recursive: bool) -> Vec<String> {
+    let mut args = vec![
+        dir.to_owned(),
+        "/setowner".to_owned(),
+        DATA_DIR_OWNER.to_owned(),
+    ];
+    if recursive {
+        args.extend(["/T".to_owned(), "/C".to_owned()]);
+    }
+    args
 }
 
 /// `icacls <dir> /inheritance:r /grant:r <DATA_DIR_GRANTS…>`.
