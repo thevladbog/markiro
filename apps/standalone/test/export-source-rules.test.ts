@@ -48,6 +48,8 @@ const palletId = (n: number): string => `a0000000-0000-4000-8000-${String(n).pad
 interface CodeSpec {
   n: number;
   scannedAt?: string;
+  /** The code's text; `canonical(n)` when absent. The hash stays `hash(n)`. */
+  text?: string;
 }
 interface BoxSpec {
   n: number;
@@ -94,7 +96,7 @@ function build(parts: {
     codes: parts.codes.map((spec) => ({
       codeHash: hash(spec.n),
       scannedAt: spec.scannedAt ?? day("06:00:00.000"),
-      canonical: canonical(spec.n),
+      canonical: spec.text ?? canonical(spec.n),
     })),
     boxes: parts.boxes.map((spec) => ({
       id: boxId(spec.n),
@@ -149,6 +151,29 @@ describe("the order of a shift's codes (plan ЧЗ)", () => {
       codes: [canonical(1), canonical(3), canonical(2)],
     });
   });
+
+  it.each([
+    ["flat", FLAT_TXT],
+    ["boxes", BOXES_TXT],
+  ] as const)(
+    "breaks a tie of instants by the hash, not by the text of the code (%s)",
+    (_, format) => {
+      // Hash 10 (…0a) comes before hash 11 (…0b); the texts run the other way.
+      const rows = build({
+        codes: [
+          { n: 11, text: "KM-A" },
+          { n: 10, text: "KM-Z" },
+        ],
+        boxes: [{ n: 1, codes: [11, 10] }],
+      });
+      const source = snapshotOf(rows, format).source;
+      expect(source).toEqual(
+        format.boxMode === "flat"
+          ? { mode: "flat", codes: ["KM-Z", "KM-A"] }
+          : { mode: "boxes", boxes: [{ sscc: sscc(1), codes: ["KM-Z", "KM-A"] }] },
+      );
+    },
+  );
 
   it("orders a box's codes the same way, not by hash alone", () => {
     const rows = build({
@@ -421,7 +446,11 @@ describe("what a shift's export needs to start (plan ЧЗ)", () => {
 
   it("takes the date of the document from the production date, not from the close", () => {
     const rows = build({
-      shift: { productionDate: "2026-10-08", closedAt: "2026-10-09T01:00:00Z" },
+      shift: {
+        productionDate: "2026-10-08",
+        closedAt: "2026-10-09T01:00:00Z",
+        stationClosedAt: "2026-10-09T01:00:00.000Z",
+      },
       codes: [{ n: 1 }],
       boxes: [{ n: 1, codes: [1] }],
     });
@@ -474,6 +503,21 @@ describe("one pallet's document (plan ЧЗ)", () => {
     const snapshot = palletExportSnapshot(rows, palletId(1));
     if (!snapshot.ok) throw new Error(snapshot.refusal);
     expect(snapshot.value.pallet.boxSsccs).toEqual([sscc(9), sscc(1)]);
+  });
+
+  it("lists a pallet's boxes by the millisecond of their close, not by the second", () => {
+    const rows = build({
+      codes: [{ n: 1 }, { n: 2 }],
+      boxes: [
+        // The same second: box 1 closes at .900 (id before box 2's), box 2 at .100.
+        { n: 1, closedAt: day("06:30:00.900"), palletId: palletId(1), codes: [1] },
+        { n: 2, closedAt: day("06:30:00.100"), palletId: palletId(1), codes: [2] },
+      ],
+      pallets: [{ n: 1 }],
+    });
+    const snapshot = palletExportSnapshot(rows, palletId(1));
+    if (!snapshot.ok) throw new Error(snapshot.refusal);
+    expect(snapshot.value.pallet.boxSsccs).toEqual([sscc(2), sscc(1)]);
   });
 
   it("leaves out a closed box that has no SSCC", () => {

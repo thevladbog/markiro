@@ -156,10 +156,26 @@ describe("the forms' inputs from the host's rows (plan О-Ф)", () => {
     ).toBeNull();
   });
 
-  it("writes times in the organization's zone, or this PC's when it is not known", () => {
-    const here = new Intl.DateTimeFormat().resolvedOptions().timeZone;
+  it("writes times in the organization's zone", () => {
     expect(formTimeZone({ ...ORG_PROFILE, timeZone: "Asia/Vladivostok" })).toBe("Asia/Vladivostok");
-    expect(formTimeZone({ ...ORG_PROFILE, timeZone: "Mars/Olympus_Mons" })).toBe(here);
-    expect(formTimeZone(undefined)).toBe(here);
   });
+
+  // Node re-reads `TZ` at run time on POSIX only; on Windows the assignment below changes nothing.
+  it.skipIf(process.platform === "win32")(
+    "writes times in this PC's zone, not UTC, when the organization's is not known",
+    () => {
+      // A zone that is neither UTC nor the one a test machine is likely to be in.
+      const zone = process.env.TZ;
+      process.env.TZ = "Pacific/Kiritimati";
+      try {
+        expect(formTimeZone({ ...ORG_PROFILE, timeZone: "Mars/Olympus_Mons" })).toBe(
+          "Pacific/Kiritimati",
+        );
+        expect(formTimeZone(undefined)).toBe("Pacific/Kiritimati");
+      } finally {
+        if (zone === undefined) delete process.env.TZ;
+        else process.env.TZ = zone;
+      }
+    },
+  );
 });

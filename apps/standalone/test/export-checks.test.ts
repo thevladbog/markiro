@@ -168,6 +168,21 @@ describe("the shift's counts and warnings in the dialog (plan ЧЗ)", () => {
     expect(exportCounts(taken).closedPallets).toBe(1);
   });
 
+  it("leave a closed box that was taken apart out of the closed boxes and of their codes", () => {
+    const shift = rows();
+    const box2 = shift.boxes[1];
+    if (box2 === undefined) throw new Error("the fixture has box 2");
+    box2.disassembledAt = "2026-10-08T07:00:00.000Z";
+    // Box 2 still has its SSCC and its close, and its item is still in the rows: only the
+    // taken-apart stamp tells it from the closed box 2 above.
+    expect(exportCounts(shift)).toEqual({
+      codes: 3,
+      codesInClosedBoxes: 2,
+      closedBoxes: 1,
+      closedPallets: 1,
+    });
+  });
+
   it("warn of late data for every format, and of open and taken-apart pallets for the pallets formats", () => {
     const shift = rows();
     shift.shift.lateDataAt = "2026-10-08T16:00:00Z";
