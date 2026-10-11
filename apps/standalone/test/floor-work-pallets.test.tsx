@@ -577,3 +577,145 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     expect(screen.getByText(/номера паллет не придут/)).toBeTruthy();
   });
 });
+
+describe("the pallet-waits message cannot outlive the pallet it speaks of", () => {
+  const WAITS = "Паллета заполнена, но не закрыта";
+
+  it("drops the message when the next box fills and closes the waiting pallet in its own turn while the box's label check stands", async () => {
+    const at = await palletStation({
+      capacity: 1,
+      boxCapacity: 1,
+      palletBlock: false,
+      settings: { verifyPrintedLabel: true },
+    });
+    const work = renderWork(at);
+    await work.scanner.listening();
+    await work.settled();
+    await work.scan(km("A1"));
+    await work.scan(`(00)${BOX_SSCC(1500)}`);
+    expect(screen.getByText(WAITS)).toBeTruthy();
+    // The block arrives; the next box joins the full pallet and closes it with its own transaction.
+    seedBlock(at.db, { blockId: PALLET_BLOCK, from: 0, to: 199, extension: 1 });
+    await work.scan(km("A2"));
+    expect(kinds(at)).toEqual(["box_closed", "box_label", "box_closed", "pallet_closed"]);
+    expect(screen.getByText("Отсканируйте SSCC на этикетке короба.")).toBeTruthy();
+    expect(palletLine()).toBe("0 из 1 коробов");
+    expect(screen.queryByText(WAITS)).toBeNull();
+  });
+
+  it("drops the message when a disassembly takes the waiting pallet below its capacity", async () => {
+    const at = await palletStation({ capacity: 2, boxCapacity: 2, palletBlock: false });
+    const work = renderWork(at);
+    await work.scanner.listening();
+    await work.settled();
+    for (const serial of ["A1", "A2", "B1", "B2"]) await work.scan(km(serial));
+    expect(palletLine()).toBe("2 из 2 коробов");
+    expect(screen.getByText(WAITS)).toBeTruthy();
+    at.db
+      .prepare(
+        "UPDATE floor_boxes SET disassembled_at = '2026-10-01T07:00:00.000Z' WHERE serial = 1500",
+      )
+      .run();
+    await work.scan(km("C1"));
+    expect(palletLine()).toBe("1 из 2 коробов");
+    expect(screen.queryByText(WAITS)).toBeNull();
+  });
+
+  it("keeps the message while the same pallet waits full", async () => {
+    const at = await palletStation({ capacity: 1, boxCapacity: 1, palletBlock: false });
+    const work = renderWork(at);
+    await work.scanner.listening();
+    await work.settled();
+    await work.scan(km("A1"));
+    expect(screen.getByText(WAITS)).toBeTruthy();
+    await work.scan(km("A2"));
+    expect(palletLine()).toBe("2 из 1 коробов");
+    expect(screen.getByText(WAITS)).toBeTruthy();
+  });
+});
+
+describe("the pallet's early-close button and the full pallet's retries (plan ПЛ-Ц)", () => {
+  const early = () => screen.getByRole("button", { name: "Закрыть паллету досрочно" });
+
+  it("keeps the early close away while a label stop stands, though the pallet holds a box", async () => {
+    const at = await palletStation({
+      capacity: 40,
+      boxCapacity: 1,
+      settings: { assignments: { box: null, pallet: "zebra", duplicate: null } },
+    });
+    const work = renderWork(at);
+    await work.scanner.listening();
+    await work.settled();
+    await work.scan(km("A1"));
+    expect(screen.getByText("Этикетка короба не напечатана")).toBeTruthy();
+    expect(palletLine()).toBe("1 из 40 коробов");
+    expect(early()).toHaveProperty("disabled", true);
+  });
+
+  it("keeps the early close away once the floor has begun to leave, though the pallet holds a box", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1 });
+    const work = renderWork(at);
+    await work.scanner.listening();
+    await work.settled();
+    await work.scan(km("A1"));
+    expect(early()).toHaveProperty("disabled", false);
+    work.rerender({ leaving: true });
+    expect(early()).toHaveProperty("disabled", true);
+  });
+
+  it("closes the full pallet in the box's own turn when the host hands the pallet serials during the close", async () => {
+    const at = await palletStation({ capacity: 1, boxCapacity: 1, palletBlock: false });
+    let asked = 0;
+    const requestBlock = vi.fn(async (request: SsccBlockRequest) => {
+      if (request.extension !== PALLET_EXTENSION) {
+        return {
+          id: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+          issuerPrefix: request.issuerPrefix,
+          extension: request.extension,
+          fromSerial: 1500,
+          toSerial: 3499,
+        };
+      }
+      asked += 1;
+      // The entry finds the host out of reach; the box's close finds it answering, a moment later.
+      if (asked === 1) {
+        throw new HostError({ kind: "transport", code: "unreachable", message: "down" });
+      }
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      return {
+        id: PALLET_BLOCK,
+        issuerPrefix: request.issuerPrefix,
+        extension: request.extension,
+        fromSerial: 0,
+        toSerial: 199,
+      };
+    });
+    const work = renderWork(at, { overrides: { requestBlock, online: true } });
+    await work.scanner.listening();
+    await work.settled();
+    expect(kinds(at)).toEqual([]);
+    await work.scan(km("A1"));
+    expect(kinds(at)).toEqual(["box_closed", "pallet_closed"]);
+    expect(palletLine()).toBe("0 из 1 коробов");
+    expect(screen.queryByText("Паллета заполнена, но не закрыта")).toBeNull();
+    expect(work.shell.sends.at(-1)?.text).toBe(renderedText(ZEBRA, PALLET_SSCC, "100x150"));
+  });
+
+  it("closes the full pallet again when its first close finds the pallet moved on", async () => {
+    const at = await palletStation({ capacity: 1, boxCapacity: 1, palletBlock: false });
+    await closeBoxOnPallet(at, ["A1"]);
+    seedBlock(at.db, { blockId: PALLET_BLOCK, from: 0, to: 199, extension: 1 });
+    let moved = 0;
+    const local = failing(at.local, (sql) => {
+      if (!sql.startsWith("UPDATE floor_pallets AS p SET closed_at")) return null;
+      moved += 1;
+      return moved === 1 ? new LocalDbError("changes_mismatch", "the pallet moved") : null;
+    });
+    const work = renderWork({ local, shift: at.shift });
+    await work.scanner.listening();
+    await work.settled();
+    expect(moved).toBe(2);
+    expect(kinds(at)).toEqual(["box_closed", "pallet_closed"]);
+    expect(palletLine()).toBe("0 из 1 коробов");
+  });
+});

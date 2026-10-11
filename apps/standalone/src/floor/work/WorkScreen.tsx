@@ -643,6 +643,8 @@ export function WorkScreen(props: WorkScreenProps) {
   const [pallet, setPallet] = useState<OpenPallet | null>(null);
   // The open pallet is full but did not close: no pallet serial is here ("no_serials"),
   // or the one tried could not label a pallet ("invalid"). It closes with the next serials.
+  // Shown only while the pallet that `refresh` reads is still full (see `palletWaitsNow`),
+  // so it cannot outlive the pallet it speaks of.
   const [palletWaits, setPalletWaits] = useState<"no_serials" | "invalid" | null>(null);
   const capacity = shift.copy.boxCapacity;
   const plannedQty = shift.copy.plannedQty;
@@ -1720,6 +1722,10 @@ export function WorkScreen(props: WorkScreenProps) {
   const items = openBox?.itemCount ?? 0;
   const canClose = items > 0 && stop === null && !leaving;
   const palletBoxes = pallet?.boxCount ?? 0;
+  // The waiting message follows what `refresh` reads: with no open pallet, or one below
+  // its capacity (it closed, or a box was taken off it), nothing waits any more.
+  const palletWaitsNow =
+    pallet !== null && pallets !== null && pallet.boxCount >= pallets.capacity ? palletWaits : null;
 
   return (
     <Card
@@ -1862,10 +1868,10 @@ export function WorkScreen(props: WorkScreenProps) {
               {t("floor.work.palletsMissing.body")}
             </Alert>
           )}
-          {palletWaits !== null && (
+          {palletWaitsNow !== null && (
             <Alert tone="warn" role="presentation" title={t("floor.work.palletWaits.title")}>
               {t(
-                palletWaits === "invalid"
+                palletWaitsNow === "invalid"
                   ? "floor.work.palletWaits.invalid"
                   : "floor.work.palletWaits.body",
               )}
