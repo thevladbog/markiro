@@ -2,6 +2,7 @@
   "shift": [
     { "id": "shift_txt_flat", "version": 1 },
     { "id": "shift_txt_boxes", "version": 2 },
+    { "id": "shift_txt_boxes_reversed", "version": 1 },
     { "id": "shift_csv_flat", "version": 1 },
     { "id": "shift_csv_boxes", "version": 2 },
     { "id": "shift_xml_gismt_aggregation", "version": 1 },

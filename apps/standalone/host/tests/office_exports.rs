@@ -786,7 +786,66 @@ async fn every_format_is_recorded_at_its_own_version_and_at_no_other() {
     }
     let rows = support::app::audit_trail(&admin.app, "shift.export").await;
     assert_eq!(rows.len(), taken);
-    assert_eq!(taken, 11);
+    assert_eq!(taken, 12);
+}
+
+/// The reversed TXT boxes format (`shift_txt_boxes_reversed`, the cloud's
+/// #681) is named by its own id at its own version 1: the host records it
+/// for a closed shift, with exactly what the record says, and refuses a
+/// look-alike id, the version of its sibling `shift_txt_boxes` (2) and a
+/// pallet named on it, so the plain boxes format neither stands in for it nor
+/// does it admit a pallet's record.
+#[tokio::test]
+async fn the_reversed_boxes_format_is_recorded_at_version_one_and_no_look_alike_is() {
+    let admin = admin().await;
+    let (_, floor) = pallet_shift(&admin).await;
+    close_by_station(&admin, &floor).await;
+    let shift = floor.shift.clone();
+    for (id, version) in [
+        ("shift_txt_boxes_reversed", 0),
+        ("shift_txt_boxes_reversed", 2),
+        ("shift_txt_boxes_reverse", 1),
+        ("shift_txt_boxes_reversed ", 1),
+        ("shift_csv_boxes_reversed", 1),
+        ("shift_txt_reversed", 1),
+        ("", 1),
+    ] {
+        let (status, body) =
+            record_export(&admin, &admin.token, &shift, record_of(id, version)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{id:?}@{version} {body}");
+        assert_eq!(
+            body["error"]["details"]["field"], "formatId",
+            "{id:?}@{version}"
+        );
+    }
+    let mut with_pallet = record_of("shift_txt_boxes_reversed", 1);
+    with_pallet["palletId"] = json!(pallet_id(1));
+    let (status, body) = record_export(&admin, &admin.token, &shift, with_pallet).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+    assert_eq!(body["error"]["details"]["field"], "palletId");
+    assert_eq!(
+        support::app::audit_trail(&admin.app, "shift.export").await,
+        vec![]
+    );
+    let mut record = record_of("shift_txt_boxes_reversed", 1);
+    record["maxLines"] = json!(2);
+    record["partCount"] = json!(3);
+    let (status, body) = record_export(&admin, &admin.token, &shift, record).await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+    assert_eq!(
+        support::app::audit_trail(&admin.app, "shift.export").await,
+        vec![admin.row(
+            "shift.export",
+            "shift",
+            &shift,
+            json!({
+                "formatId": "shift_txt_boxes_reversed", "formatVersion": 1,
+                "maxLines": 2, "palletId": null, "documentId": DOCUMENT,
+                "partCount": 3, "codeCount": 3, "boxCount": 2, "palletCount": 1,
+                "openPalletSuppressedBoxCount": 0,
+            })
+        )]
+    );
 }
 
 /// The session gate: no session, a device key alone and an unknown token are
