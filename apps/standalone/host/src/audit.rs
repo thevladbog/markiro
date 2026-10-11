@@ -54,6 +54,9 @@ pub mod actions {
     pub const SHIFT_CLOSE: &str = "shift.close";
     /// A station got a block of SSCC serials.
     pub const SSCC_BLOCK_ISSUE: &str = "sscc.block.issue";
+    /// The cloud's data moved into this site (plan IMP); the row holds the
+    /// import's summary, which a repeat of the same import answers with.
+    pub const IMPORT_CLOUD: &str = "import.cloud";
     /// The office saved the files of a shift's or a pallet's export (plan
     /// ЧЗ); nothing else changed.
     pub const SHIFT_EXPORT: &str = "shift.export";
