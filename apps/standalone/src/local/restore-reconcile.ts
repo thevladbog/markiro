@@ -25,13 +25,14 @@ export class KnownBlocksMismatchError extends Error {
 
 /**
  * The note of an epoch: a first one or another than the last is new and owes
- * everything again (`reconciled_at` and `refused` start over); the same one
- * changes nothing. Parameters: host id, device id, epoch, the instant seen.
+ * everything again (`reconciled_at`, `refused` and `refused_blocks` start
+ * over); the same one changes nothing. Parameters: host id, device id, epoch,
+ * the instant seen.
  */
 export const NOTE_SQL =
   "INSERT INTO floor_restore_epochs (host_id, device_id, epoch, seen_at) VALUES (?, ?, ?, ?) " +
   "ON CONFLICT (host_id, device_id) DO UPDATE SET epoch = excluded.epoch, " +
-  "seen_at = excluded.seen_at, reconciled_at = NULL, refused = 0 " +
+  "seen_at = excluded.seen_at, reconciled_at = NULL, refused = 0, refused_blocks = '[]' " +
   "WHERE floor_restore_epochs.epoch <> excluded.epoch";
 
 /**
@@ -70,18 +71,32 @@ export async function restoreDue(local: LocalExecutor, pairing: Pairing): Promis
 
 /** The status bar's read of the obligation; parameters: host id, device id. */
 export const STATUS_SQL =
-  "SELECT reconciled_at IS NULL AS due, refused FROM floor_restore_epochs " +
+  "SELECT reconciled_at IS NULL AS due, refused, refused_blocks FROM floor_restore_epochs " +
   "WHERE host_id = ? AND device_id = ?";
+
+/** A block the host refused at the last reconciliation, with the host's code (`block_overlap`, …). */
+export interface RefusedBlock {
+  id: string;
+  code: string | null;
+}
+
+const refusedBlocksSchema = z.array(z.object({ id: z.string(), code: z.string().nullable() }));
 
 const statusRow = z.object({
   due: z.number().int(),
   refused: z.number().int().nonnegative(),
+  refused_blocks: z.string(),
 });
 
-/** What the floor's status bar says of a restore: whether blocks are owed, and how many the host refused. */
+/**
+ * What a restore left on the station: whether blocks are owed, how many the
+ * host refused (the floor's status bar says it) and which, with its code (for
+ * support; nothing shows them yet).
+ */
 export interface RestoreStatus {
   due: boolean;
   refused: number;
+  refusedBlocks: RefusedBlock[];
 }
 
 export async function readRestoreStatus(
@@ -90,8 +105,12 @@ export async function readRestoreStatus(
 ): Promise<RestoreStatus> {
   const [row] = await local.query(STATUS_SQL, [pairing.hostId, pairing.deviceId], statusRow);
   return row === undefined
-    ? { due: false, refused: 0 }
-    : { due: row.due === 1, refused: row.refused };
+    ? { due: false, refused: 0, refusedBlocks: [] }
+    : {
+        due: row.due === 1,
+        refused: row.refused,
+        refusedBlocks: refusedBlocksSchema.parse(JSON.parse(row.refused_blocks)),
+      };
 }
 
 const blockRow = z.object({
@@ -140,11 +159,11 @@ function reopenStatement(pairing: Pairing, since: string): LocalStatement {
 
 /**
  * Settles the epoch the run read, once: only while it is still that epoch
- * and still owed. Parameters: the instant, the refused count, host id, device
- * id, the epoch.
+ * and still owed. Parameters: the instant, the refused count, the refused
+ * blocks (a JSON list of `{id, code}`), host id, device id, the epoch.
  */
 export const SETTLE_SQL =
-  "UPDATE floor_restore_epochs SET reconciled_at = ?, refused = ? " +
+  "UPDATE floor_restore_epochs SET reconciled_at = ?, refused = ?, refused_blocks = ? " +
   "WHERE host_id = ? AND device_id = ? AND epoch = ? AND reconciled_at IS NULL";
 
 /** A host that was never restored lost no block (`conflict` on `no_restore`). */
@@ -184,7 +203,8 @@ export type ReconcileResult =
  *    and takes one it lost), and the epoch is settled with the count of the
  *    refused blocks — only if it is still the epoch this run read, or a later
  *    restore noted meanwhile fails the batch (`changes_mismatch`) and is
- *    settled by the next run.
+ *    settled by the next run. Which blocks were refused, and the host's code
+ *    for each, are kept with it (`readRestoreStatus`).
  *
  * A failed request or write rejects, and the next run sends every block
  * again (the host answers `known` for one it took). A host that says it was
@@ -198,7 +218,7 @@ export async function reconcileRestore(context: ReconcileContext): Promise<Recon
   const blocks = await local.query(BLOCKS_SQL, [pairing.hostId, pairing.deviceId], blockRow);
   let registered = 0;
   let known = 0;
-  let refused = 0;
+  const refusedBlocks: RefusedBlock[] = [];
   for (let start = 0; start < blocks.length; start += MAX_KNOWN_BLOCKS) {
     const chunk = blocks.slice(start, start + MAX_KNOWN_BLOCKS);
     let answer: KnownBlocksResponse;
@@ -221,7 +241,7 @@ export async function reconcileRestore(context: ReconcileContext): Promise<Recon
         `${answer.results.length} results for ${chunk.length} blocks`,
       );
     }
-    const refusedHere: string[] = [];
+    const refusedHere: RefusedBlock[] = [];
     chunk.forEach((block, index) => {
       const result = answer.results[index];
       if (result === undefined || result.id !== block.block_id) {
@@ -229,20 +249,29 @@ export async function reconcileRestore(context: ReconcileContext): Promise<Recon
       }
       if (result.outcome === "registered") registered += 1;
       else if (result.outcome === "known") known += 1;
-      else refusedHere.push(block.block_id);
+      else refusedHere.push({ id: block.block_id, code: result.code });
     });
     if (refusedHere.length > 0) {
-      await local.transaction([retireStatement(pairing, JSON.stringify(refusedHere))]);
-      refused += refusedHere.length;
+      const ids = JSON.stringify(refusedHere.map((block) => block.id));
+      await local.transaction([retireStatement(pairing, ids)]);
+      refusedBlocks.push(...refusedHere);
     }
   }
+  const refused = refusedBlocks.length;
   const at = now();
   await local.transaction([
     { sql: FROM_ZERO_SQL, values: [due.epoch] },
     reopenStatement(pairing, new Date(at.getTime() - RESEND_WINDOW_MS).toISOString()),
     {
       sql: SETTLE_SQL,
-      values: [at.toISOString(), refused, pairing.hostId, pairing.deviceId, due.epoch],
+      values: [
+        at.toISOString(),
+        refused,
+        JSON.stringify(refusedBlocks),
+        pairing.hostId,
+        pairing.deviceId,
+        due.epoch,
+      ],
       expectedChanges: 1,
     },
   ]);

@@ -203,7 +203,15 @@ describe("the reconciliation after a restore", () => {
       { block_id: FIXTURE_BLOCK.id, next_serial: 5500, to_serial: 5499 },
     ]);
     expect(await remainingSerials(executor, PAIRING, PREFIX)).toBe(2000);
-    expect(await readRestoreStatus(executor, PAIRING)).toEqual({ due: false, refused: 2 });
+    // Which blocks, and why, in the order they went: for support, until the next restore.
+    expect(await readRestoreStatus(executor, PAIRING)).toEqual({
+      due: false,
+      refused: 2,
+      refusedBlocks: [
+        { id: FIXTURE_BLOCK.id, code: "block_overlap" },
+        { id: blockId(2), code: "prefix_unknown" },
+      ],
+    });
   });
 
   it("asks the next sync to start from zero and sends the records of the last 30 days again", async () => {
@@ -383,7 +391,11 @@ describe("the reconciliation after a restore", () => {
         now: () => NOW,
       }),
     ).rejects.toBeInstanceOf(LocalDbError);
-    expect(await readRestoreStatus(executor, PAIRING)).toEqual({ due: true, refused: 0 });
+    expect(await readRestoreStatus(executor, PAIRING)).toEqual({
+      due: true,
+      refused: 0,
+      refusedBlocks: [],
+    });
   });
 });
 
@@ -501,7 +513,11 @@ describe("the blocks the reconciliation sends", () => {
         "SELECT block_id FROM floor_sscc_blocks WHERE next_serial > to_serial ORDER BY block_id",
       ).map((row) => row["block_id"]),
     ).toEqual(requests.map((ids) => ids[0]).sort());
-    expect(await readRestoreStatus(executor, PAIRING)).toEqual({ due: false, refused: 3 });
+    expect(await readRestoreStatus(executor, PAIRING)).toEqual({
+      due: false,
+      refused: 3,
+      refusedBlocks: requests.map((ids) => ({ id: ids[0], code: "block_overlap" })),
+    });
   });
 
   it("keeps nothing of an answer that carries more results than the blocks sent", async () => {
@@ -537,7 +553,13 @@ describe("the obligation of each pairing", () => {
       register: answering({ [FIXTURE_BLOCK.id]: refused(FIXTURE_BLOCK.id, "block_overlap") }),
       now: () => NOW,
     });
-    expect(await readRestoreStatus(executor, PAIRING)).toEqual({ due: false, refused: 1 });
+    // The same epoch noted again is no new restore: the codes stay.
+    expect(await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW)).toBe(false);
+    expect(await readRestoreStatus(executor, PAIRING)).toEqual({
+      due: false,
+      refused: 1,
+      refusedBlocks: [{ id: FIXTURE_BLOCK.id, code: "block_overlap" }],
+    });
     const later = new Date(NOW.getTime() + 3_600_000);
     expect(await noteRestoreEpoch(executor, PAIRING, LATER_EPOCH, later)).toBe(true);
     expect(epochs(db)).toEqual([
@@ -550,7 +572,11 @@ describe("the obligation of each pairing", () => {
         refused: 0,
       },
     ]);
-    expect(await readRestoreStatus(executor, PAIRING)).toEqual({ due: true, refused: 0 });
+    expect(await readRestoreStatus(executor, PAIRING)).toEqual({
+      due: true,
+      refused: 0,
+      refusedBlocks: [],
+    });
     // Noting the same epoch again, however late, changes nothing.
     expect(
       await noteRestoreEpoch(executor, PAIRING, LATER_EPOCH, new Date(later.getTime() + 1)),
@@ -575,10 +601,18 @@ describe("the obligation of each pairing", () => {
     expect(
       register.mock.calls.flatMap(([request]) => request.blocks.map((block) => block.id)),
     ).toEqual([FIXTURE_BLOCK.id]);
-    expect(await readRestoreStatus(executor, PAIRING)).toEqual({ due: false, refused: 1 });
+    expect(await readRestoreStatus(executor, PAIRING)).toEqual({
+      due: false,
+      refused: 1,
+      refusedBlocks: [{ id: FIXTURE_BLOCK.id, code: "block_overlap" }],
+    });
     for (const pairing of [otherDevice, otherHost]) {
       expect(await restoreDue(executor, pairing)).toBe(true);
-      expect(await readRestoreStatus(executor, pairing)).toEqual({ due: true, refused: 0 });
+      expect(await readRestoreStatus(executor, pairing)).toEqual({
+        due: true,
+        refused: 0,
+        refusedBlocks: [],
+      });
     }
     expect(
       rows(db, "SELECT block_id FROM floor_sscc_blocks WHERE next_serial > to_serial ORDER BY 1"),
@@ -586,7 +620,11 @@ describe("the obligation of each pairing", () => {
     // A pairing that never saw an epoch owes nothing, whatever the others owe.
     const stranger = { hostId: OTHER_HOST, deviceId: OTHER_DEVICE };
     expect(await restoreDue(executor, stranger)).toBe(false);
-    expect(await readRestoreStatus(executor, stranger)).toEqual({ due: false, refused: 0 });
+    expect(await readRestoreStatus(executor, stranger)).toEqual({
+      due: false,
+      refused: 0,
+      refusedBlocks: [],
+    });
     // The others settle in their turn, each with its own count.
     await reconcileRestore({
       local: executor,
@@ -594,8 +632,16 @@ describe("the obligation of each pairing", () => {
       register: answering(),
       now: () => NOW,
     });
-    expect(await readRestoreStatus(executor, otherDevice)).toEqual({ due: false, refused: 0 });
-    expect(await readRestoreStatus(executor, PAIRING)).toEqual({ due: false, refused: 1 });
+    expect(await readRestoreStatus(executor, otherDevice)).toEqual({
+      due: false,
+      refused: 0,
+      refusedBlocks: [],
+    });
+    expect(await readRestoreStatus(executor, PAIRING)).toEqual({
+      due: false,
+      refused: 1,
+      refusedBlocks: [{ id: FIXTURE_BLOCK.id, code: "block_overlap" }],
+    });
     expect(await restoreDue(executor, otherHost)).toBe(true);
   });
 });
@@ -768,6 +814,10 @@ describe("what the host's refusals mean", () => {
     });
     await reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW });
     expect(register).toHaveBeenCalledTimes(1);
-    expect(await readRestoreStatus(executor, PAIRING)).toEqual({ due: false, refused: 0 });
+    expect(await readRestoreStatus(executor, PAIRING)).toEqual({
+      due: false,
+      refused: 0,
+      refusedBlocks: [],
+    });
   });
 });

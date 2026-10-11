@@ -237,10 +237,10 @@ async fn migration_0008_keeps_the_rows_of_a_database_of_0007() {
     );
 }
 
-/// Migration `0009` over a station's database of `0008` that holds a shift, an SSCC block, a
-/// waiting and an acknowledged outbox record and a sync state: the shell's own SQLite adds the
-/// table of the restore obligation, every row stays as it was, and a station that has seen no
-/// epoch owes the host nothing (plan РК-С, additive).
+/// Migration `0009` over a station's database of `0008` that holds an SSCC block, a waiting and
+/// an acknowledged outbox record and a sync state: the shell's own SQLite adds the table of the
+/// restore obligation, every row stays as it was, a station that has seen no epoch owes the host
+/// nothing, and a first epoch starts with no refused block (plan РК-С, additive).
 #[tokio::test]
 async fn migration_0009_keeps_the_rows_of_a_database_of_0008() {
     let dir = tempfile::tempdir().unwrap();
@@ -335,6 +335,25 @@ async fn migration_0009_keeps_the_rows_of_a_database_of_0008() {
         .unwrap(),
         [1]
     );
+    let obligation = db
+        .query(
+            "SELECT refused, refused_blocks FROM floor_restore_epochs",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(obligation.into_iter().map(Value::Object).collect()),
+        json!([{ "refused": 0, "refused_blocks": "[]" }])
+    );
+    // The refused blocks are a JSON list, never anything else.
+    assert!(db
+        .transaction(vec![statement(
+            "UPDATE floor_restore_epochs SET refused_blocks = '['",
+            json!([]),
+        )])
+        .await
+        .is_err());
     let journal = db
         .query(
             "SELECT version, success FROM _sqlx_migrations ORDER BY version",
@@ -1118,8 +1137,8 @@ const RESTORE_DUE: &str =
     "SELECT epoch FROM floor_restore_epochs WHERE host_id = ? AND device_id = ? \
      AND reconciled_at IS NULL";
 const RESTORE_STATUS: &str =
-    "SELECT reconciled_at IS NULL AS due, refused FROM floor_restore_epochs WHERE host_id = ? \
-     AND device_id = ?";
+    "SELECT reconciled_at IS NULL AS due, refused, refused_blocks FROM floor_restore_epochs \
+     WHERE host_id = ? AND device_id = ?";
 const RESTORE_BLOCKS: &str =
     "SELECT block_id, issuer_prefix, extension, from_serial, to_serial FROM floor_sscc_blocks \
      WHERE host_id = ? AND device_id = ? ORDER BY received_at, block_id";
@@ -1130,8 +1149,8 @@ const RESTORE_REOPEN: &str =
     "UPDATE outbox SET outcome = NULL, outcome_code = NULL, outcome_details = NULL, acked_at = \
      NULL WHERE host_id = ? AND device_id = ? AND outcome IS NOT NULL AND acked_at >= ?";
 const RESTORE_SETTLE: &str =
-    "UPDATE floor_restore_epochs SET reconciled_at = ?, refused = ? WHERE host_id = ? AND \
-     device_id = ? AND epoch = ? AND reconciled_at IS NULL";
+    "UPDATE floor_restore_epochs SET reconciled_at = ?, refused = ?, refused_blocks = ? WHERE \
+     host_id = ? AND device_id = ? AND epoch = ? AND reconciled_at IS NULL";
 
 /// The pallets' statements (plan ПЛ-Ц; `src/floor/pallets/pallets.ts`, `src/floor/close/shift-close.ts`,
 /// `src/floor/print/print-jobs.ts`; `test/floor-schema.test.ts` checks the texts agree): the open

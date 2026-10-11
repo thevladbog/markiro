@@ -1571,6 +1571,7 @@ describe("the restore obligation (migration 0009)", () => {
       "seen_at TEXT NOT NULL",
       "reconciled_at TEXT",
       "refused INTEGER NOT NULL DEFAULT 0",
+      "refused_blocks TEXT NOT NULL DEFAULT '[]'",
     ]);
   });
 
@@ -1595,5 +1596,27 @@ describe("the restore obligation (migration 0009)", () => {
     await refused(executor, obligation({ device_id: "device-7", seen_at: null }));
     await refused(executor, obligation({ device_id: null }));
     await refused(executor, obligation({ host_id: null }));
+  });
+
+  it("keeps the refused blocks and their codes as a JSON list, empty until a refusal", async () => {
+    const { executor } = openLocalDb();
+    await accepted(executor, obligation());
+    expect(
+      await executor.query(
+        "SELECT refused_blocks FROM floor_restore_epochs",
+        [],
+        z.object({ refused_blocks: z.string() }),
+      ),
+    ).toEqual([{ refused_blocks: "[]" }]);
+    await accepted(
+      executor,
+      obligation({
+        device_id: "device-2",
+        refused: 1,
+        refused_blocks: '[{"id":"block-1","code":"block_overlap"}]',
+      }),
+    );
+    await refused(executor, obligation({ device_id: "device-3", refused_blocks: "[" }));
+    await refused(executor, obligation({ device_id: "device-4", refused_blocks: null }));
   });
 });

@@ -7,7 +7,9 @@
 -- survives a restart, and the outbox waits while `reconciled_at` is NULL.
 -- `refused` counts the blocks the host refused at the last reconciliation:
 -- no serial of them is used again (`next_serial` past their end), and the
--- floor's status bar says how many. One row per pairing, no foreign key (see
+-- floor's status bar says how many; `refused_blocks` names them, with the
+-- host's code for each, as a JSON list `[{"id", "code"}]` for support (empty
+-- until a refusal; a new epoch empties it). One row per pairing, no foreign key (see
 -- `0006`); a forget empties the table with the copies
 -- (`TableClass::Disposable`): the new pairing owes the host nothing of the
 -- old one's. Times are UTC RFC 3339 text as `Date.toISOString` writes it.
@@ -18,5 +20,6 @@ CREATE TABLE floor_restore_epochs (
   seen_at TEXT NOT NULL,
   reconciled_at TEXT,
   refused INTEGER NOT NULL DEFAULT 0 CHECK (refused >= 0),
+  refused_blocks TEXT NOT NULL DEFAULT '[]' CHECK (json_valid(refused_blocks)),
   PRIMARY KEY (host_id, device_id)
 );
