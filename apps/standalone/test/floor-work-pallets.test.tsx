@@ -112,6 +112,36 @@ describe("the work screen of a shift with pallets (plan ПЛ-Ц)", () => {
     );
   });
 
+  it("after a restart decides the box's cut label before the pallet's, which is sent right after it and not before", async () => {
+    const at = await palletStation({ capacity: 1, boxCapacity: 1 });
+    // One fill-close wrote both jobs; the station stopped while the box's label was being sent.
+    await closeBoxOnPallet(at, ["A1"]);
+    at.db
+      .prepare("UPDATE floor_print_jobs SET state = 'sending', attempts = 1 WHERE purpose = 'box'")
+      .run();
+    const work = renderWork(at);
+    await work.scanner.listening();
+    await work.settled();
+    // The box's label is the one the screen asks about; the pallet's waits, unsent.
+    expect(await screen.findByText("Неизвестно, напечаталась ли этикетка")).toBeTruthy();
+    expect(work.shell.sends).toEqual([]);
+    const states = () =>
+      rows(at.db, "SELECT purpose, state FROM floor_print_jobs ORDER BY purpose");
+    expect(states()).toEqual([
+      { purpose: "box", state: "unknown" },
+      { purpose: "pallet", state: "prepared" },
+    ]);
+    await work.press("Продолжить без этикетки");
+    await work.press("Продолжить без этикетки");
+    expect(work.shell.sends.map((send) => send.text)).toEqual([
+      renderedText(ZEBRA, PALLET_SSCC, "100x150"),
+    ]);
+    expect(states()).toEqual([
+      { purpose: "box", state: "skipped" },
+      { purpose: "pallet", state: "sent" },
+    ]);
+  });
+
   it("checks the box's label first and then the pallet's, each by its own SSCC, in the pallet's words", async () => {
     const at = await palletStation({
       capacity: 1,

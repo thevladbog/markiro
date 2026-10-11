@@ -1,4 +1,4 @@
-import { buildSscc } from "@markiro/domain";
+import { buildSscc, formatSsccHri } from "@markiro/domain";
 import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
@@ -22,6 +22,7 @@ import { printingSettings } from "./support/printing.js";
 import { renderWork, type WorkHarness } from "./support/work-screen.js";
 
 const PALLET_SSCC = buildSscc(PALLET_EXTENSION, PREFIX, 0);
+const BOX_SSCC = buildSscc(0, PREFIX, 1500);
 const CLOSED = "Смена OCT26-004 закрыта на этой станции";
 const QUESTION = "На паллете 2 из 40 коробов — закрыть?";
 const TITLE = "Закрытие смены OCT26-004";
@@ -264,15 +265,22 @@ describe("the close of a shift with an open pallet (plan ПЛ-Ц)", () => {
     await work.scanner.listening();
     await work.settled();
     await work.scan(km("A1"));
-    at.db.prepare("UPDATE floor_boxes SET disassembled_at = closed_at").run();
-    at.db.prepare("DELETE FROM floor_codes").run();
+    // The box leaves the pallet by the screen's own way, «Расформировать короб»: the pallet is open and empty.
+    await work.press("Исключения");
+    await screen.findByRole("button", { name: "Расформировать короб" });
+    await work.press("Расформировать короб");
+    await work.press(`${formatSsccHri(BOX_SSCC)} · 1 шт.`);
+    await work.press("Брак по качеству");
+    await work.press("Расформировать");
+    expect(await screen.findByText("Короб расформирован, его коды свободны.")).toBeTruthy();
+    await work.press("Вернуться к работе");
     await work.press("Закрыть смену");
     expect(await screen.findByRole("button", { name: "Подтвердить закрытие" })).toBeTruthy();
     expect(screen.queryByText(/На паллете/)).toBeNull();
     await work.press("Производственный брак");
     await work.press("Подтвердить закрытие");
     expect(await screen.findByText(CLOSED)).toBeTruthy();
-    expect(kinds(at)).toEqual(["box_closed", "shift_closed"]);
+    expect(kinds(at)).toEqual(["box_closed", "box_exception", "shift_closed"]);
   });
 
   it("keeps the shift open and says why when no pallet serial is left", async () => {

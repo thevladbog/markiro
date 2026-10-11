@@ -149,6 +149,51 @@ describe("the label of a pallet (plan ПЛ-Ц)", () => {
   });
 });
 
+describe("the label of a pallet printed again at its panel keeps the operator's reason (plan ПЛ-Ц)", () => {
+  it.each([
+    ["unknown", {}],
+    ["sent and awaiting its check", { settings: { verifyPrintedLabel: true } }],
+  ] as const)("writes the reason chosen for a label that is %s", async (state, options) => {
+    const at = await palletStation({ capacity: 1, ...options });
+    await closeBoxOnPallet(at, ["A1"]);
+    const [row] = rows(at.db, "SELECT id FROM floor_print_jobs WHERE purpose = 'pallet'");
+    const prepared = await readPrintJob(at.local, PAIRING, String(row?.["id"]));
+    if (prepared === null) throw new Error("no job");
+    const job = await sendLabelJob(
+      resolving(
+        at,
+        state === "unknown"
+          ? fakeHardware(async () => ({ sent: false, code: "outcome_unknown" }))
+          : fakeHardware(),
+      ),
+      prepared,
+    );
+    expect(job.state).toBe(state === "unknown" ? "unknown" : "sent");
+    await printAgain(
+      resolving(at),
+      job,
+      { reason: "damaged_label", printer: null },
+      at.settings,
+      at.pallets.template,
+    );
+    expect(rows(at.db, "SELECT kind, reason_code FROM floor_pallet_exceptions")).toEqual([
+      { kind: "reprint", reason_code: "damaged_label" },
+    ]);
+    expect(palletRecords(at)).toEqual([
+      {
+        kind: "pallet_exception",
+        data: {
+          exception: "reprint",
+          palletId: prepared.subjectId,
+          reasonCode: "damaged_label",
+          reasonText: null,
+          occurredAt: expect.any(String),
+        },
+      },
+    ]);
+  });
+});
+
 describe("the closed pallets of a shift (plan ПЛ-Ц)", () => {
   it("are the closed ones not taken apart, the last first, with the boxes they hold", async () => {
     const { at, palletId } = await closedPallet();

@@ -29,6 +29,15 @@ const WAITING = "Этикетка этой паллеты ещё ждёт реш
 const FAILED =
   "Не удалось записать исключение на этом компьютере. Возможно, оно всё же записалось: проверьте исключения и числа смены, прежде чем повторять.";
 
+/** A valid SSCC of another number that ends with the last four digits of `sscc`. */
+function endsAlike(sscc: string): string {
+  for (let serial = 1000; serial < 200_000; serial += 1000) {
+    const other = buildSscc(0, PREFIX, serial);
+    if (other.slice(-4) === sscc.slice(-4)) return other;
+  }
+  throw new Error("no SSCC ends like " + sscc);
+}
+
 const option = (sscc: string, boxes = 1) => `${formatSsccHri(sscc)} · коробов: ${boxes}`;
 
 function palletExceptions(at: PalletStation) {
@@ -237,7 +246,7 @@ describe("the choice of the pallet never acts on a guess", () => {
     expect(boxesByTail(items, "100")).toEqual({ shown: [items[1]], hidden: 0 });
   });
 
-  it("finds the pallet by its whole SSCC only: a scan that merely ends alike is not found", () => {
+  it("lists the pallets by the end of their SSCC; no digits list all, digits nothing ends with list none", () => {
     const pallets = [FIRST_PALLET, SECOND_PALLET].map((sscc, index) => ({
       id: String(index),
       sscc,
@@ -247,6 +256,42 @@ describe("the choice of the pallet never acts on a guess", () => {
     expect(boxesByTail(pallets, "").shown).toEqual(pallets);
     expect(boxesByTail(pallets, "9".repeat(18))).toEqual({ shown: [], hidden: 0 });
   });
+
+  it("chooses a pallet by its whole SSCC only: a valid SSCC that merely ends alike is not found", async () => {
+    const at = await palletStation({ capacity: 1, boxCapacity: 1 });
+    const work = await twoPallets(at);
+    const impostor = endsAlike(FIRST_PALLET);
+    expect(impostor).not.toBe(FIRST_PALLET);
+    await work.press("Расформировать паллету");
+    await work.scan(`]C100${impostor}`);
+    expect(screen.getByText("Паллеты с этим SSCC нет среди закрытых паллет смены.")).toBeTruthy();
+    expect(screen.getByText("Какую паллету расформировать?")).toBeTruthy();
+    expect(screen.queryByText(`Паллета ${formatSsccHri(FIRST_PALLET)}`)).toBeNull();
+    expect(disassembledPallets(at)).toBe(0);
+    expect(palletExceptions(at)).toEqual([]);
+    // The pallet itself is found.
+    await work.scan(`]C100${FIRST_PALLET}`);
+    expect(screen.getByText(`Паллета ${formatSsccHri(FIRST_PALLET)}`)).toBeTruthy();
+  });
+
+  it.each([
+    ["Расформировать паллету", "Какую паллету расформировать?"],
+    ["Перепечатать этикетку паллеты", "Какую паллету перепечатать?"],
+  ])(
+    "ignores a tap on «%s» just after the exceptions opened, the second tap of a double tap",
+    async (name, heading) => {
+      const at = await palletStation({ capacity: 1, boxCapacity: 1 });
+      const work = await pallets(at, ["A1"]);
+      await work.press("Исключения");
+      await screen.findByRole("button", { name });
+      // The view has just opened: a tap on what is under the finger does nothing.
+      tap(name);
+      expect(screen.queryByText(heading)).toBeNull();
+      work.pause();
+      tap(name);
+      expect(screen.getByText(heading)).toBeTruthy();
+    },
+  );
 
   it("does not let a scan change the pallet once it is chosen, and writes nothing for it", async () => {
     const at = await palletStation({ capacity: 1, boxCapacity: 1 });
