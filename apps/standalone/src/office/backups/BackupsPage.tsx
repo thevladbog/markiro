@@ -257,9 +257,11 @@ interface RestoreHoldCardProps {
 }
 
 /**
- * The stations after a restore, and, for an administrator, resuming the facts
- * the host holds until then. No station gives its blocks back yet (plan РК-С),
- * so the host cannot say how many did and this card does not pretend to: the
+ * The stations after a restore, each with whether the host marks it as having
+ * given its blocks back (plan РК-С: a station does by itself once it is online;
+ * the host marks it on the first accepted part, and never marks a station that
+ * never took a block), and, for an administrator, resuming the facts the host
+ * holds until then. A station on a dead computer never gives them back, so the
  * administrator resumes only after the SSCC checks, and says so in a
  * confirmation that is not one click.
  */
@@ -277,7 +279,14 @@ function RestoreHoldCard({ hold, canManage, format, onResumed }: RestoreHoldCard
       render: (station) =>
         station.lastSeenAt === null ? t("office.common.none") : format(station.lastSeenAt),
     },
+    {
+      key: "blocks",
+      title: t("office.backups.hold.blocks"),
+      render: (station) =>
+        t(station.reconciled ? "office.backups.hold.returned" : "office.backups.hold.notReturned"),
+    },
   ];
+  const returned = hold.stations.filter((station) => station.reconciled).length;
   const open = () => {
     setFailure(null);
     setAcknowledged(false);
@@ -336,7 +345,14 @@ function RestoreHoldCard({ hold, canManage, format, onResumed }: RestoreHoldCard
         description={
           <div className="standalone-form">
             <p>{t("office.backups.hold.confirmChecks")}</p>
-            <p>{t("office.backups.hold.confirmCount")}</p>
+            <p>
+              {t("office.backups.hold.confirmCount", {
+                returned,
+                total: hold.stations.length,
+                count: hold.stations.length,
+              })}
+            </p>
+            <p>{t("office.backups.hold.confirmNoBlocks")}</p>
             <p>{t("office.backups.hold.confirmRisk")}</p>
             <p>
               {t("office.backups.hold.confirmFacts", {

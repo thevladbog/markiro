@@ -423,7 +423,7 @@ describe("Резервные копии", () => {
     ).toBeTruthy();
   });
 
-  it("shows the stations a restore waits for, and says it cannot count the blocks they gave back", async () => {
+  it("shows the stations a restore waits for, and which of them gave their blocks back", async () => {
     const session = sessionOf();
     session.api.getBackups.mockResolvedValue(HELD);
     await openBackups(session);
@@ -440,12 +440,19 @@ describe("Резервные копии", () => {
     expect(within(rows[0]!).getByText("Станция линии 1")).toBeTruthy();
     expect(within(rows[0]!).getByText(at("2026-10-09T15:06:00Z"))).toBeTruthy();
     expect(within(rows[1]!).getByText("—")).toBeTruthy();
-    // No claim about stations that "gave their blocks back": no station code does it yet.
-    expect(within(hold).queryByText("Вернула")).toBeNull();
-    expect(screen.queryByText(/Блоки вернули/)).toBeNull();
+    // Plan РК-С: a station gives its blocks back by itself once it is online.
+    // The state is words in the cell, not a colour.
+    expect(within(rows[0]!).getByText("Вернула")).toBeTruthy();
+    expect(within(rows[0]!).queryByText("Не вернула")).toBeNull();
+    expect(within(rows[1]!).getByText("Не вернула")).toBeTruthy();
+    expect(within(rows[1]!).queryByText("Вернула")).toBeNull();
+    expect(within(hold).getByRole("columnheader", { name: "Блоки SSCC" })).toBeTruthy();
     expect(
-      within(hold).getByText(/Станции в этой версии пока не возвращают блоки SSCC сами/),
+      within(hold).getByText(
+        "Станция возвращает хосту свои блоки SSCC сама, как только выйдет на связь. Отметка «Вернула» ставится, когда хост принял первую часть её блоков. Станция, которая ещё не получала блоков SSCC, остаётся «Не вернула»: возвращать ей нечего. Станция на выключенном или неисправном компьютере блоков не вернёт, поэтому приём возобновляется только по решению администратора после проверок SSCC.",
+      ),
     ).toBeTruthy();
+    expect(screen.queryByText(/пока не возвращают/)).toBeNull();
   });
 
   it("makes an administrator confirm the resume in words that tell the truth, and then resumes", async () => {
@@ -457,23 +464,24 @@ describe("Резервные копии", () => {
     fireEvent.click(within(hold).getByRole("button", { name: RESUME }));
     const dialog = await screen.findByRole("alertdialog");
     expect(within(dialog).getByText(/Не возобновляйте приём до проверок SSCC/)).toBeTruthy();
+    expect(within(dialog).getByText("Вернули свои блоки SSCC: 1 из 2 станций.")).toBeTruthy();
     expect(
-      within(dialog).getByText(/Сколько станций вернули свои блоки SSCC, хост сказать не может/),
+      within(dialog).getByText(
+        "«Не вернула» не всегда сбой: станция, которая ещё не получала блоков SSCC, их и не возвращает. По остальным станциям, не вернувшим блоки, сверьте счётчики по памятке.",
+      ),
     ).toBeTruthy();
     expect(
       within(dialog).getByText(
         `Приём остановлен с ${at("2026-10-09T15:00:00Z")}, эпоха восстановления 5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e.`,
       ),
     ).toBeTruthy();
-    // No number of stations that "gave their blocks back" is claimed.
-    expect(within(dialog).queryByText(/1 из 2/)).toBeNull();
     const confirm = within(dialog).getByRole("button", { name: RESUME }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
     fireEvent.click(confirm);
     expect(session.api.resumeFacts).not.toHaveBeenCalled();
     fireEvent.click(
       within(dialog).getByRole("checkbox", {
-        name: "Проверки SSCC выполнены. Я возобновляю приём, зная, что станции не возвращали свои блоки.",
+        name: "Проверки SSCC выполнены. Я возобновляю приём, зная, какие станции не вернули свои блоки.",
       }),
     );
     expect(confirm.disabled).toBe(false);
@@ -484,6 +492,77 @@ describe("Резервные копии", () => {
     expect(session.api.resumeFacts).toHaveBeenCalledWith("office-session-token");
     expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(await screen.findByText("Приём данных станций возобновлён.")).toBeTruthy();
+  });
+
+  it.each([
+    { reconciled: [true], text: "Вернули свои блоки SSCC: 1 из 1 станции." },
+    { reconciled: [false], text: "Вернули свои блоки SSCC: 0 из 1 станции." },
+    { reconciled: [true, true, false], text: "Вернули свои блоки SSCC: 2 из 3 станций." },
+    {
+      reconciled: [false, true, true, true, true],
+      text: "Вернули свои блоки SSCC: 4 из 5 станций.",
+    },
+    {
+      reconciled: Array.from({ length: 21 }, (_, index) => index === 0),
+      text: "Вернули свои блоки SSCC: 1 из 21 станции.",
+    },
+    {
+      reconciled: Array.from({ length: 11 }, () => false),
+      text: "Вернули свои блоки SSCC: 0 из 11 станций.",
+    },
+  ])("counts the stations that gave their blocks back: $text", async ({ reconciled, text }) => {
+    const session = sessionOf();
+    session.api.getBackups.mockResolvedValue({
+      ...HEALTHY_BACKUPS,
+      restoreHold: {
+        ...HELD.restoreHold!,
+        stations: reconciled.map((done, index) => ({
+          id: `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`,
+          name: `Станция ${index + 1}`,
+          lastSeenAt: null,
+          reconciled: done,
+        })),
+      },
+    });
+    await openBackups(session);
+    fireEvent.click(
+      within(card("Приём данных станций остановлен")).getByRole("button", { name: RESUME }),
+    );
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(text)).toBeTruthy();
+  });
+
+  it("marks every station by its own reconciled flag, whatever their order", async () => {
+    const session = sessionOf();
+    const [first, second] = HELD.restoreHold!.stations;
+    session.api.getBackups.mockResolvedValue({
+      ...HEALTHY_BACKUPS,
+      restoreHold: {
+        ...HELD.restoreHold!,
+        stations: [
+          { ...second!, name: "Б", reconciled: false },
+          { ...first!, name: "А", reconciled: true },
+          { ...second!, id: "2f2e3d4c-5b6a-4978-8a9b-0c1d2e3f4a5b", name: "В", reconciled: true },
+        ],
+      },
+    });
+    await openBackups(session);
+    const rows = within(card("Приём данных станций остановлен")).getAllByRole("row").slice(1);
+    expect(within(rows[0]!).getByText("Не вернула")).toBeTruthy();
+    expect(within(rows[1]!).getByText("Вернула")).toBeTruthy();
+    expect(within(rows[2]!).getByText("Вернула")).toBeTruthy();
+  });
+
+  it("tells in the restore steps that a station gives its blocks back by itself", async () => {
+    const session = sessionOf();
+    session.api.getBackups.mockResolvedValue(HEALTHY_BACKUPS);
+    await openBackups(session);
+    expect(
+      screen.getByText(
+        "Текущая база сохраняется рядом. Хост поднимает счётчики SSCC и номера смен с запасом. Станции, выйдя на связь, сами возвращают ему свои блоки SSCC; приём их данных администратор возобновляет здесь, после проверок SSCC.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/Станции пока не возвращают/)).toBeNull();
   });
 
   it("asks again for the confirmation every time the dialog opens", async () => {
