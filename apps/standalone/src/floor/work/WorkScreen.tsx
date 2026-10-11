@@ -111,9 +111,8 @@ import { readOpenBox, readWorkTotals, type WorkTotals } from "./work-reads.js";
  * - No scan is accepted while `leaving`: a scan taken then would start work
  *   the leave no longer waits for. It is refused in words, by tone and by
  *   flash; none is dropped silently. `leaving` comes with a render, which a
- *   leave started by a timer or an answer (the idle lock, the office closing
- *   the shift) may not have had yet: `isLeaving` says it at once, and the
- *   screen asks both.
+ *   leave started by a timer or an answer (the idle lock) may not have had
+ *   yet: `isLeaving` says it at once, and the screen asks both.
  * - Tracked work is bounded, because the gate has no timeout of its own that
  *   could let the leave through in the middle of a write: a local write ends in
  *   about 35 s at the most (the busy timeout of 5 s and the wait for the pool
@@ -1243,6 +1242,10 @@ export function WorkScreen(props: WorkScreenProps) {
    * more inside its write: a change in between is `stale`, the same).
    * A write whose answer was lost is read back: a shift found closed is
    * closed, not an error. The reason is the operator's, from the buttons.
+   * It is queued although the `close` stop already refuses every scan taken
+   * after the press: that is defence in depth today (a queued scan is refused
+   * in its turn either way). The pallet work of plan ПЛ-Ц, which queues before
+   * the close, must pin the order with a held job that is not a scan.
    */
   const confirmClose = (reason: ShiftCloseReasonCode | null) => {
     const before = stopRef.current;

@@ -73,15 +73,17 @@ export function attemptStatement(pairing: Pairing, ids: string, sentAt: string):
  * marks a `conflict` of a scan leaves on the scan and on its box, and the
  * `closed` a receipt of the station's close gives its shift (plan 2a8).
  *
- * The unary pluses on `host_id`, `device_id`, `acked_at` and `outcome` are
- * deliberate (measured on node:sqlite 3.53 with 100,000 records): without
- * them the planner walks the `(host_id, device_id, …)` prefix of
+ * The unary pluses on `host_id`, `device_id` and `acked_at` are deliberate
+ * (measured on node:sqlite 3.53 with 100,000 records): without them the
+ * planner walks the `(host_id, device_id, …)` prefix of
  * `outbox_unsent`, `outbox_settled` (every settled record of the pairing),
  * `floor_scans_shift` and `floor_boxes_shift` — every unsent record, scan
  * and box of the pairing for each batch, 9 s for the outbox's own statement
  * — instead of looking the batch's few records up by their own key, which
  * takes well under a millisecond. The ids are unique across pairings, so the
- * pairing terms only restate what the key already says.
+ * pairing terms only restate what the key already says. The plus on `outcome`
+ * of the close's statement is defensive only: with `+host_id` the leftmost
+ * column of `outbox_settled` is unusable anyway, and it was not measured alone.
  */
 export function receiptStatements(
   pairing: Pairing,
@@ -140,7 +142,9 @@ export function receiptStatements(
  * refused close leaves the shift `closing`.
  * A failed send or an answer that does not fit rejects and keeps nothing:
  * the same batch goes again, and the host answers it with the same receipts.
- * A record is never deleted, and one with a receipt never goes again.
+ * The sender never deletes a record (the retention does, 30 days after its
+ * shift's accepted close: `src/local/retention.ts`), and one with a receipt
+ * never goes again.
  */
 export async function sendFactBatch(
   local: LocalExecutor,

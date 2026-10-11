@@ -3182,9 +3182,10 @@ the plan not met needs one of the domain's six reasons. The close
 (`closeShift`) is local and needs no host: ONE transaction drops the empty
 open box, writes the `shift_closed` record (the plan it saw, the fact, the
 closed boxes, the reason, the moment) and marks the copy `closing`, but only
-while nothing changed since the summary (no waiting label, the same counts of
-codes and closed boxes, which a code scanned or taken out since changes; else
-`stale`, and the summary is read again). From then on the
+while nothing changed since the summary (no waiting label, the same plan as
+the copy's now, no code in the open box it drops, the same counts of codes and
+closed boxes, which a code scanned or taken out since changes; else `stale`,
+and the summary is read again). From then on the
 shift takes no record: `outboxStatement` inserts a record only while its
 shift has no `local_state`, so its whole transaction is refused otherwise
 and `shift_closed` is always the shift's last record (the host marks the
@@ -3218,27 +3219,38 @@ answered and no label waiting, goes with all its rows — the tables of
 `RETAINED_TABLES` by `shift_id`, then the copy, one shift per transaction,
 whose first statement deletes the copy only while that still holds. Only an
 ACCEPTED close starts the clock: a refused close, and a shift the office
-closed, are never purged here. The SSCC blocks stay (a restored host asks for
-them, plan РК). A later plan's table of a shift's records joins
+closed that this station has not closed itself, are never purged here; a shift
+the office closed and the station then finished («Завершить», its close
+answered `accepted` with `alreadyClosed`) is purged like any other, 30 days
+after that receipt. The SSCC blocks stay (a restored host asks for them, plan
+РК). The codes of a purged shift go with it, and with them the station's own
+registry of them (`floor_codes`): a code of a shift accepted more than 30 days
+ago, scanned again while the host is away, is taken locally, and only the host
+refuses it afterwards (`conflict`, then `needs_fix` on its box); with the link
+up the host's code check refuses it first, and SSCC reuse is not at risk (the
+blocks and their cursors stay). A later plan's table of a shift's records joins
 `RETAINED_TABLES`: a test fails for any table with a `shift_id` that the list
 does not name. The rows of a pairing that was forgotten (`clear_copies`) are
 never purged: the passes are pairing-scoped, and a new pairing does not see
 them. That is a known limit, not a bug of the pass.
 
-Known limits of the retention, carried to the final review (plan РК / the
-owner decides):
+Known limits of the retention, and who carries each:
 
 - The delete of a purged shift reads `outbox` and `floor_exceptions` whole
   (there is no index by `shift_id`; measured 176 ms against 37 ms with one),
   and, with `secure_delete` on, the WAL grows by about 31 MB per 1000 deleted
   print jobs. A migration with `outbox (host_id, device_id, shift_id)` and
-  `floor_exceptions (shift_id)` would remove both.
+  `floor_exceptions (host_id, device_id, shift_id)` would remove both: plan
+  ПЛ-Ц (which adds the local migration `0008_floor_pallets`) or plan РК, the
+  owner deciding.
 - A refused or conflicting record of a shift whose close was accepted is
   purged with it after 30 days: what `rejected` and `quarantined` records
-  should keep is a decision for plan ОЧ / the owner.
+  should keep is a decision for plan ОЧ and the owner (hold the shift, or state
+  the window).
 - A station clock set forward purges early (the cutoff is the clock's);
   checking the clock is plan РК-С's.
-- A pass that fails leaves no trace but the next pass trying again.
+- A pass that fails leaves no trace but the next pass trying again: plan 2b or
+  РК, with the process log of stage 5.
 
 One shift on one PC is checked end to end on both sides of the protocol:
 `test/floor-scenario.test.ts` runs it with the webview's own modules — codes,

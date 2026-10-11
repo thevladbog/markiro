@@ -46,8 +46,10 @@ type Copies =
 /**
  * The shifts of the station's line (stage 2a spec §5.7.1, the cloud station's
  * `ShiftSelection` on local data): the copies this station keeps, read again
- * after every read of the host's list, so the list stays on screen with the
- * host away. One entry at a time; «Сменить оператора» is never held by an
+ * after every read of the host's list and after every write and every batch of
+ * receipts (`outboxVersion`), so the list stays on screen with the host away
+ * and says what the outbox has become: a shift closing here, one whose close
+ * the host refused (its card names the code), one closed. One entry at a time; «Сменить оператора» is never held by an
  * entry, so one that never settles does not trap the station here, and an
  * answer that lands after the screen is gone is dropped.
  *

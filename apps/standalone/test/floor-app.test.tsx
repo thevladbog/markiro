@@ -1218,7 +1218,7 @@ describe("an entry whose answer comes late (the work gate, minors 6 and 10)", ()
     expect(types(handlers)).not.toContain("work_entered");
   });
 
-  it("does not call a shift the office closed on the way the office's when this station began to close it too", async () => {
+  it("opens no work screen and tells the shell of no `work_entered` for a shift this station is closing, whatever the office did meanwhile", async () => {
     const local = await floorCopies();
     await keepEnteredShift(local, PAIRING, OPENED, "2026-10-09T06:00:00.000Z", SEEN);
     const answer = deferred<EnteredShift>();
