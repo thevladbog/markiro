@@ -22,6 +22,7 @@ import { outboxStatement, shiftClosedRecord } from "../src/floor/facts.js";
 import {
   CONFLICT_COUNT_SQL,
   HEAD_RECORD_SQL,
+  RECONCILED_AT_SQL,
   REJECTED_COUNT_SQL,
   SHIFT_PREFIX_SQL,
   UNSENT_COUNT_SQL,
@@ -1195,7 +1196,8 @@ describe("the shape of the production tables (migration 0006)", () => {
         .all(...Array.from({ length: sql.split("?").length - 1 }, () => "x"))
         .map((step) => String(step["detail"]));
     const OWN = "sqlite_autoindex_floor_restore_epochs_1 (host_id=? AND device_id=?)";
-    for (const sql of [DUE_SQL, STATUS_SQL, SETTLE_SQL]) {
+    // The stuck line's clamp after a restore (`src/floor/outbox-status.ts`) reads it the same way.
+    for (const sql of [DUE_SQL, STATUS_SQL, SETTLE_SQL, RECONCILED_AT_SQL]) {
       expect(plan(sql), sql).toEqual([`SEARCH floor_restore_epochs USING INDEX ${OWN}`]);
     }
     // Every block of the pairing, sorted once in memory (a pairing keeps some hundreds).
@@ -1223,8 +1225,16 @@ describe("the shape of the production tables (migration 0006)", () => {
     const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
       // A line continuation of a Rust string drops the newline and the next line's indent.
       .replace(/\\\n\s*/g, "");
-    const statements = [DUE_SQL, STATUS_SQL, BLOCKS_SQL, RETIRE_SQL, REOPEN_SQL, SETTLE_SQL];
-    expect(new Set(statements).size).toBe(6);
+    const statements = [
+      DUE_SQL,
+      STATUS_SQL,
+      BLOCKS_SQL,
+      RETIRE_SQL,
+      REOPEN_SQL,
+      SETTLE_SQL,
+      RECONCILED_AT_SQL,
+    ];
+    expect(new Set(statements).size).toBe(7);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
   });
 });

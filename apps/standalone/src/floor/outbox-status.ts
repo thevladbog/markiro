@@ -66,6 +66,17 @@ const headRow = z.object({
   created_at: instant,
 });
 
+/**
+ * When this pairing last settled a restore of the host (plan РК-С; `NULL`
+ * while one is owed): the reconciliation reopens the acknowledged records of
+ * 30 days, so the delivery they start counts from it, not from their
+ * creation. Pinned with the reconciliation's reads in both query-plan lists.
+ */
+export const RECONCILED_AT_SQL =
+  "SELECT reconciled_at FROM floor_restore_epochs WHERE host_id = ? AND device_id = ?";
+
+const reconciledRow = z.object({ reconciled_at: instant.nullable() });
+
 /** How long the delivery has been stuck, as far as the outbox itself can tell. */
 export interface DeliveryStuck {
   /** Milliseconds the oldest undelivered record has waited (never negative). */
@@ -79,20 +90,34 @@ export interface DeliveryStuck {
 /**
  * What the outbox knows of a stuck delivery: the oldest undelivered record,
  * how long it has waited and how often a send carried it. `null` when
- * nothing waits. A failed read rejects.
+ * nothing waits. After a settled restore the wait counts from the
+ * reconciliation when the record is older, and a send before it is no
+ * attempt of this delivery (`sinceLastAttemptMs` is `null`). A failed read
+ * rejects.
  */
 export async function readDeliveryStuck(
   local: LocalExecutor,
   pairing: Pairing,
   now: Date,
 ): Promise<DeliveryStuck | null> {
-  const [row] = await local.query(HEAD_RECORD_SQL, [pairing.hostId, pairing.deviceId], headRow);
+  const key = [pairing.hostId, pairing.deviceId];
+  const [[row], [restore]] = await Promise.all([
+    local.query(HEAD_RECORD_SQL, key, headRow),
+    local.query(RECONCILED_AT_SQL, key, reconciledRow),
+  ]);
   if (row === undefined) return null;
-  const since = (instant: string): number => Math.max(0, now.getTime() - Date.parse(instant));
+  const reconciledAt =
+    restore === undefined || restore.reconciled_at === null
+      ? null
+      : Date.parse(restore.reconciled_at);
+  const since = (at: number): number => Math.max(0, now.getTime() - at);
+  const created = Date.parse(row.created_at);
+  const sent = row.sent_at === null ? null : Date.parse(row.sent_at);
   return {
-    waitedMs: since(row.created_at),
+    waitedMs: since(reconciledAt === null ? created : Math.max(created, reconciledAt)),
     attempts: row.attempts,
-    sinceLastAttemptMs: row.sent_at === null ? null : since(row.sent_at),
+    sinceLastAttemptMs:
+      sent === null || (reconciledAt !== null && sent < reconciledAt) ? null : since(sent),
   };
 }
 

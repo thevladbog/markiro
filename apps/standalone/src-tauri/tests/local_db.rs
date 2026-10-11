@@ -1148,6 +1148,10 @@ const RESTORE_RETIRE: &str =
 const RESTORE_REOPEN: &str =
     "UPDATE outbox SET outcome = NULL, outcome_code = NULL, outcome_details = NULL, acked_at = \
      NULL WHERE host_id = ? AND device_id = ? AND outcome IS NOT NULL AND acked_at >= ?";
+/// The stuck line's clamp after a restore (`src/floor/outbox-status.ts`): when the pairing last
+/// settled one, read with every status of a failing delivery.
+const RESTORE_RECONCILED_AT: &str =
+    "SELECT reconciled_at FROM floor_restore_epochs WHERE host_id = ? AND device_id = ?";
 const RESTORE_SETTLE: &str =
     "UPDATE floor_restore_epochs SET reconciled_at = ?, refused = ?, refused_blocks = ? WHERE \
      host_id = ? AND device_id = ? AND epoch = ? AND reconciled_at IS NULL";
@@ -1255,7 +1259,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 82] = [
+    let reads: [(&str, &str); 83] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1593,6 +1597,10 @@ async fn the_floors_repeating_reads_search_an_index() {
         ),
         (
             RESTORE_SETTLE,
+            "sqlite_autoindex_floor_restore_epochs_1 (host_id=? AND device_id=?)",
+        ),
+        (
+            RESTORE_RECONCILED_AT,
             "sqlite_autoindex_floor_restore_epochs_1 (host_id=? AND device_id=?)",
         ),
         (

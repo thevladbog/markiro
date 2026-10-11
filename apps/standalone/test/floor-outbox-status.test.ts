@@ -131,6 +131,68 @@ describe("how long the delivery has been stuck", () => {
     });
   });
 
+  /** A restore of the host this pairing settled at `at` (`floor_restore_epochs`, plan РК-С). */
+  function reconciled(
+    db: DatabaseSync,
+    pairing: { hostId: string; deviceId: string },
+    at: string | null,
+  ): void {
+    db.prepare(
+      "INSERT INTO floor_restore_epochs (host_id, device_id, epoch, seen_at, reconciled_at) " +
+        "VALUES (?, ?, '5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e', '2026-10-08T09:00:00.000Z', ?)",
+    ).run(pairing.hostId, pairing.deviceId, at);
+  }
+
+  it("counts from the reconciliation after a restore, not from a reopened record's creation", async () => {
+    const { db, executor } = openLocalDb();
+    // Acknowledged weeks ago and sent again by the reconciliation five minutes ago.
+    put(db, PAIRING, 1, null, "2026-09-18T06:00:00.000Z");
+    db.prepare(
+      "UPDATE outbox SET attempts = 1, sent_at = '2026-09-18T06:00:05.000Z' WHERE acked_at IS NULL",
+    ).run();
+    reconciled(db, PAIRING, "2026-10-08T09:48:00.000Z");
+    await expect(readDeliveryStuck(executor, PAIRING, NOW)).resolves.toEqual({
+      waitedMs: 5 * 60_000,
+      attempts: 1,
+      // The send before the restore is not this delivery's.
+      sinceLastAttemptMs: null,
+    });
+    // A send after the reconciliation is.
+    db.prepare(
+      "UPDATE outbox SET attempts = 2, sent_at = '2026-10-08T09:51:00.000Z' WHERE acked_at IS NULL",
+    ).run();
+    await expect(readDeliveryStuck(executor, PAIRING, NOW)).resolves.toEqual({
+      waitedMs: 5 * 60_000,
+      attempts: 2,
+      sinceLastAttemptMs: 2 * 60_000,
+    });
+  });
+
+  it("counts a record written after the reconciliation from its own creation", async () => {
+    const { db, executor } = openLocalDb();
+    reconciled(db, PAIRING, "2026-10-08T08:53:00.000Z");
+    put(db, PAIRING, 1, null, "2026-10-08T09:43:00.000Z");
+    await expect(readDeliveryStuck(executor, PAIRING, NOW)).resolves.toEqual({
+      waitedMs: 10 * 60_000,
+      attempts: 0,
+      sinceLastAttemptMs: null,
+    });
+  });
+
+  it("is not clamped by an obligation still owed, nor by another pairing's reconciliation", async () => {
+    const { db, executor } = openLocalDb();
+    put(db, PAIRING, 1, null, "2026-10-08T06:53:00.000Z");
+    db.prepare(
+      "UPDATE outbox SET attempts = 3, sent_at = '2026-10-08T09:23:00.000Z' WHERE acked_at IS NULL",
+    ).run();
+    reconciled(db, OTHER_DEVICE, "2026-10-08T09:50:00.000Z");
+    reconciled(db, OTHER_HOST, "2026-10-08T09:50:00.000Z");
+    const unclamped = { waitedMs: 3 * 60 * 60_000, attempts: 3, sinceLastAttemptMs: 30 * 60_000 };
+    await expect(readDeliveryStuck(executor, PAIRING, NOW)).resolves.toEqual(unclamped);
+    reconciled(db, PAIRING, null);
+    await expect(readDeliveryStuck(executor, PAIRING, NOW)).resolves.toEqual(unclamped);
+  });
+
   it("is not read from a time it cannot understand", async () => {
     const { db, executor } = openLocalDb();
     put(db, PAIRING, 1, null, "not a time");
