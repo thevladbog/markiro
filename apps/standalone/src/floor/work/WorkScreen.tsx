@@ -46,6 +46,7 @@ import {
 import {
   closeOpenPallet,
   closePalletIfFull,
+  openPalletGuard,
   PALLET_EXTENSION,
   palletStep,
   readOpenPallet,
@@ -681,6 +682,19 @@ export function WorkScreen(props: WorkScreenProps) {
   });
   // Read by a job in its turn, before React renders the stop it set.
   const stopRef = useRef<Stop | null>(stop);
+  // «Закрыть паллету и смену» whose pallet's label waits for the operator: the shift's
+  // close goes, with the reason chosen, once that label is decided (plan ПЛ-Ц).
+  // `shown` is the summary the operator pressed on, for the close's own failure notes.
+  const pendingClose = useRef<{
+    reason: ShiftCloseReasonCode | null;
+    shown: CloseSummary;
+  } | null>(null);
+  // The same, said to the operator: the label's panel tells the shift closes after it.
+  const [closeAfterLabel, setCloseAfterLabel] = useState(false);
+  const setPendingClose = useCallback((next: typeof pendingClose.current) => {
+    pendingClose.current = next;
+    setCloseAfterLabel(next !== null);
+  }, []);
   const setStop = useCallback((next: Stop | null) => {
     stopRef.current = next;
     setStopState(next);
@@ -985,6 +999,151 @@ export function WorkScreen(props: WorkScreenProps) {
     [supply, afterClosed, setStop, settleSafely, settlePalletSafely],
   );
 
+  /** The label that keeps the shift from closing, named by its SSCC; `null` when none is read. */
+  const waitingLabel = useCallback(async (summary: CloseSummary): Promise<string | null> => {
+    if (summary.blocker?.kind !== "label") return null;
+    try {
+      const now = live.current;
+      const job = await readOpenJob(now.local, pairingOf(now), now.shift.copy.id);
+      return job === null ? null : formatSsccHri(job.sscc);
+    } catch {
+      return null;
+    }
+  }, []);
+
+  /** The shift is closed on this station: the end of this screen's work. */
+  const showClosed = useCallback(
+    (summary: CloseSummary) =>
+      setStop({
+        kind: "closed",
+        record: { actualQty: summary.actualQty, closedBoxCount: summary.closedBoxes },
+      }),
+    [setStop],
+  );
+
+  /**
+   * A shift found closed on this station, wherever it was found: the end of
+   * this screen's work. The floor is told of a record, for the close may not
+   * have been told yet (a write whose answer was lost): it is harmless when
+   * it has.
+   */
+  const foundClosed = useCallback(
+    (summary: CloseSummary) => {
+      live.current.onRecorded();
+      showClosed(summary);
+    },
+    [showClosed],
+  );
+
+  /**
+   * The summary on the screen, unless the operator has gone back from it
+   * meanwhile; a shift found closed is the closed stop instead. Every showing
+   * is a new `attempt`, so the panel's guard over «Подтвердить закрытие»
+   * starts again each time, however alike two showings are.
+   */
+  const showSummary = useCallback(
+    async (summary: CloseSummary, note: CloseNote | null): Promise<void> => {
+      if (summary.blocker?.kind === "closed") {
+        foundClosed(summary);
+        return;
+      }
+      const waitingSscc = await waitingLabel(summary);
+      const now = stopRef.current;
+      if (now?.kind === "close") {
+        setStop({ kind: "close", summary, note, waitingSscc, attempt: now.attempt + 1 });
+      }
+    },
+    [foundClosed, waitingLabel, setStop],
+  );
+
+  /** The shift's close summary as this station's records have it now. */
+  const readSummaryNow = useCallback((): Promise<CloseSummary> => {
+    const now = live.current;
+    return readCloseSummary(now.local, pairingOf(now), now.shift.copy.id);
+  }, []);
+
+  /**
+   * The close's write failed or its answer was lost (it may have been
+   * committed): the summary is read back. Closed after all, or still open and
+   * said so; a re-read that failed too knows nothing, and the note says so
+   * instead of claiming the shift open.
+   */
+  const closeFailed = useCallback(
+    async (shown: CloseSummary): Promise<void> => {
+      const again = await readSummaryNow().catch(() => null);
+      if (again !== null) {
+        await showSummary(again, "failed");
+      } else if (stopRef.current?.kind === "close") {
+        setStop({
+          kind: "close",
+          summary: shown,
+          note: "unknown",
+          waitingSscc: null,
+          attempt: stopRef.current.attempt + 1,
+        });
+      }
+    },
+    [readSummaryNow, showSummary, setStop],
+  );
+
+  /**
+   * The shift's close itself (stage 2a spec §5.7.7), the one path of
+   * «Подтвердить закрытие» and of «Закрыть паллету и смену»: a local write that
+   * needs no host, with the open pallet's check of plan ПЛ-Ц in its
+   * transaction — on every path, for the pallet may have changed since any
+   * reading of the summary. A shift that changed since it shows the summary
+   * again with why; a write that failed is read back (`closeFailed`). Only from
+   * the work queue, handed to the gate.
+   */
+  const finishClose = useCallback(
+    async (reason: ShiftCloseReasonCode | null, shown: CloseSummary): Promise<void> => {
+      try {
+        const now = live.current;
+        const guards = [openPalletGuard(pairingOf(now), now.shift.copy.id)];
+        const result = await closeShift(boxContextOf(live), reason, guards);
+        if (result.kind === "closed") {
+          live.current.onRecorded();
+          setStop({ kind: "closed", record: result.record });
+          return;
+        }
+        await showSummary(
+          await readSummaryNow(),
+          result.kind === "reason_required" ? "reason" : "stale",
+        );
+      } catch {
+        // The write may have been committed, and only its answer lost.
+        await closeFailed(shown);
+      }
+    },
+    [showSummary, readSummaryNow, closeFailed, setStop],
+  );
+
+  /**
+   * After a label is decided and nothing stops the work: the shift's close that
+   * waited for its pallet's label goes now (plan ПЛ-Ц), unless the leave began
+   * first; otherwise a box a stop of the station left full closes, then a full
+   * pallet that waited. Only from the work queue.
+   */
+  const afterLabel = useCallback(async (): Promise<void> => {
+    if (stopRef.current !== null) return;
+    const pending = pendingClose.current;
+    if (pending !== null) {
+      setPendingClose(null);
+      // A leave that began first starts no close.
+      if (leavingNow()) return;
+      setStop({ kind: "close", summary: null, note: null, waitingSscc: null, attempt: 0 });
+      if (alive.current) setClosing(true);
+      try {
+        await finishClose(pending.reason, pending.shown);
+      } finally {
+        if (alive.current) setClosing(false);
+      }
+      return;
+    }
+    await closeBox(true);
+    if (stopRef.current === null) await settlePalletSafely();
+  }, [finishClose, closeBox, settlePalletSafely, leavingNow, setStop, setPendingClose]);
+
   const settle = useCallback(
     async (outcome: ScanOutcome): Promise<void> => {
       const say = live.current.t;
@@ -1058,10 +1217,9 @@ export function WorkScreen(props: WorkScreenProps) {
         showLabel(result.job);
         // The box's label decided, the pallet's that its close filled goes next.
         if (stopRef.current === null) await settleSafely();
-        // A box a stop of the station left full closes now, with its label;
-        // so does a full pallet that waited.
-        if (stopRef.current === null) await closeBox(true);
-        if (stopRef.current === null) await settlePalletSafely();
+        // A box a stop of the station left full closes now, with its label; so does a
+        // full pallet that waited, or a shift's close that waited for this label.
+        await afterLabel();
         await refreshQuietly();
         return;
       }
@@ -1074,7 +1232,7 @@ export function WorkScreen(props: WorkScreenProps) {
         null,
       );
     },
-    [settleSafely, settlePalletSafely, show, showLabel, closeBox, refreshQuietly],
+    [settleSafely, show, showLabel, afterLabel, refreshQuietly],
   );
 
   // The box choice of the exceptions, when it listens: a scan of a label picks the box.
@@ -1172,8 +1330,7 @@ export function WorkScreen(props: WorkScreenProps) {
             showLabel(job);
             // A label decided lets the next one that waits go (a box's, then its pallet's).
             if (stopRef.current === null) await settleLabel();
-            if (stopRef.current === null) await closeBox(true);
-            if (stopRef.current === null) await settlePalletSafely();
+            await afterLabel();
           } catch (error) {
             if (error instanceof NoPrinterError) setLabelNote({ kind: "no_printer" });
             else if (error instanceof LabelRenderError) setLabelNote({ kind: "render_failed" });
@@ -1376,47 +1533,6 @@ export function WorkScreen(props: WorkScreenProps) {
     return "stopped";
   }, [palletSupply, settleSafely, setStop]);
 
-  /** The label that keeps the shift from closing, named by its SSCC; `null` when none is read. */
-  const waitingLabel = async (summary: CloseSummary): Promise<string | null> => {
-    if (summary.blocker?.kind !== "label") return null;
-    try {
-      const now = live.current;
-      const job = await readOpenJob(now.local, pairingOf(now), now.shift.copy.id);
-      return job === null ? null : formatSsccHri(job.sscc);
-    } catch {
-      return null;
-    }
-  };
-
-  /**
-   * A shift found closed on this station, wherever it was found: the end of
-   * this screen's work. The floor is told of a record, for the close may not
-   * have been told yet (a write whose answer was lost): it is harmless when
-   * it has.
-   */
-  const foundClosed = (summary: CloseSummary) => {
-    live.current.onRecorded();
-    showClosed(summary);
-  };
-
-  /**
-   * The summary on the screen, unless the operator has gone back from it
-   * meanwhile; a shift found closed is the closed stop instead. Every showing
-   * is a new `attempt`, so the panel's guard over «Подтвердить закрытие»
-   * starts again each time, however alike two showings are.
-   */
-  const showSummary = async (summary: CloseSummary, note: CloseNote | null): Promise<void> => {
-    if (summary.blocker?.kind === "closed") {
-      foundClosed(summary);
-      return;
-    }
-    const waitingSscc = await waitingLabel(summary);
-    const now = stopRef.current;
-    if (now?.kind === "close") {
-      setStop({ kind: "close", summary, note, waitingSscc, attempt: now.attempt + 1 });
-    }
-  };
-
   /**
    * The summary of the close, read as the line's next piece of work: a scan
    * taken before «Закрыть смену» was pressed has been written by then, and
@@ -1437,13 +1553,6 @@ export function WorkScreen(props: WorkScreenProps) {
       .track(readSummary())
       .catch(() => setStop({ kind: "system_error", cause: "read" }));
   };
-
-  /** The shift is closed on this station: the end of this screen's work. */
-  const showClosed = (summary: CloseSummary) =>
-    setStop({
-      kind: "closed",
-      record: { actualQty: summary.actualQty, closedBoxCount: summary.closedBoxes },
-    });
 
   /**
    * The close itself, as the line's next piece of work handed to the gate
@@ -1469,41 +1578,70 @@ export function WorkScreen(props: WorkScreenProps) {
     void live.current
       .track(
         queue.run(async () => {
-          const now = live.current;
-          const read = () => readCloseSummary(now.local, pairingOf(now), now.shift.copy.id);
           try {
-            const fresh = await read();
+            const fresh = await readSummaryNow();
             // A shift found closed differs from the one shown, and is shown as closed.
             if (!sameSummary(shown, fresh)) {
               await showSummary(fresh, "stale");
               return;
             }
-            const result = await closeShift(boxContextOf(live), reason);
-            if (result.kind === "closed") {
-              live.current.onRecorded();
-              setStop({ kind: "closed", record: result.record });
-              return;
-            }
-            await showSummary(await read(), result.kind === "reason_required" ? "reason" : "stale");
+            await finishClose(reason, shown);
           } catch {
-            // The write may have been committed, and only its answer lost.
-            const again = await read().catch(() => null);
-            if (again !== null) {
-              // Closed after all, or still open and said so; a re-read that failed too
-              // knows nothing, and the note says so instead of claiming the shift open.
-              await showSummary(again, "failed");
-            } else if (stopRef.current?.kind === "close") {
-              setStop({
-                kind: "close",
-                summary: shown,
-                note: "unknown",
-                waitingSscc: null,
-                attempt: stopRef.current.attempt + 1,
-              });
-            }
+            await closeFailed(shown);
           } finally {
             closeRunning.current = false;
             if (alive.current) setClosing(false);
+          }
+        }),
+      )
+      .catch(() => setStop({ kind: "system_error", cause: "write" }));
+  };
+
+  /**
+   * «Закрыть паллету и смену» (plan ПЛ-Ц; the cloud station's
+   * `confirmShiftClosePallet`), as the line's next piece of work handed to the
+   * gate before it starts, like `confirmClose`: the summary is read again in
+   * the turn and a different one is shown instead of closing on what the
+   * operator did not see; then the open pallet closes and its label goes, and
+   * the shift closes with the reason chosen. A pallet label that waits — its
+   * check, a printer that failed — takes the screen first, and the shift's
+   * close follows once it is decided (`pendingClose`, `afterLabel`). No pallet
+   * serial, or a serial out of range, stops the work with its reason, and the
+   * shift stays open: the intention to close is not kept, the operator presses
+   * again.
+   */
+  const confirmPalletClose = (reason: ShiftCloseReasonCode | null) => {
+    const before = stopRef.current;
+    if (before?.kind !== "close" || before.summary === null) return;
+    if (closeRunning.current || leavingNow()) return;
+    const shown = before.summary;
+    closeRunning.current = true;
+    setClosing(true);
+    void live.current
+      .track(
+        queue.run(async () => {
+          try {
+            const fresh = await readSummaryNow();
+            if (!sameSummary(shown, fresh)) {
+              await showSummary(fresh, "stale");
+              return;
+            }
+            const closed = await closePallet();
+            if (closed === "stopped") return;
+            if (stopRef.current?.kind === "label") {
+              setPendingClose({ reason, shown });
+              return;
+            }
+            await finishClose(reason, shown);
+          } catch {
+            await closeFailed(shown);
+          } finally {
+            closeRunning.current = false;
+            if (alive.current) setClosing(false);
+            // The summary's button is gone with the summary, which a stop of the pallet's
+            // close replaced: the focus goes to a safe place, as after any answer.
+            const stopped = stopRef.current?.kind;
+            if (stopped === "pallet_no_serials" || stopped === "pallet_failed") refocus();
           }
         }),
       )
@@ -1980,6 +2118,8 @@ export function WorkScreen(props: WorkScreenProps) {
               onClose={confirmClose}
               onBack={() => setStop(null)}
               onLabel={toLabel}
+              palletCapacity={pallets?.capacity ?? null}
+              onClosePallet={confirmPalletClose}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
           )}
@@ -1992,6 +2132,9 @@ export function WorkScreen(props: WorkScreenProps) {
               onDone={onLeave}
               {...(props.labelClock === undefined ? {} : { clock: props.labelClock })}
             />
+          )}
+          {stop?.kind === "label" && closeAfterLabel && (
+            <p className="work-screen__waiting">{t("floor.close.afterLabel")}</p>
           )}
           {stop?.kind === "label" && (
             <LabelPanel

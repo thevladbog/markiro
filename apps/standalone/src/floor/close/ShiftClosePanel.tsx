@@ -1,4 +1,5 @@
 import { SHIFT_CLOSE_REASON_CODES, type ShiftCloseReasonCode } from "@markiro/domain";
+import type { TFunction } from "i18next";
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 
@@ -6,7 +7,7 @@ import { Alert, Button } from "@markiro/ui";
 
 import { VIEW_GUARD_MS } from "../print/LabelPanel.js";
 import { formatQuantity } from "../shifts/shift-text.js";
-import type { CloseSummary } from "./shift-close.js";
+import type { CloseBlocker, CloseSummary } from "./shift-close.js";
 
 /**
  * Why the summary is shown again: the shift changed meanwhile, no reason was
@@ -38,7 +39,8 @@ export function deviation(plannedQty: number, actualQty: number): string {
 /**
  * Whether two readings of the summary say the same to the operator: the plan,
  * the fact, the closed boxes, whether a reason is needed, and what keeps the
- * shift open. A close goes on the reading that was shown, never on another.
+ * shift open (the open box's codes and the open pallet's boxes included). A
+ * close goes on the reading that was shown, never on another.
  */
 export function sameSummary(shown: CloseSummary, read: CloseSummary): boolean {
   const a = shown.blocker;
@@ -47,7 +49,9 @@ export function sameSummary(shown: CloseSummary, read: CloseSummary): boolean {
     a === null || b === null
       ? a === b
       : a.kind === b.kind &&
-        (a.kind !== "open_box" || (b.kind === "open_box" && a.items === b.items));
+        (a.kind !== "open_box" || (b.kind === "open_box" && a.items === b.items)) &&
+        // The question names the boxes of the open pallet (plan ПЛ-Ц): other boxes, another question.
+        (a.kind !== "open_pallet" || (b.kind === "open_pallet" && a.boxes === b.boxes));
   return (
     shown.plannedQty === read.plannedQty &&
     shown.actualQty === read.actualQty &&
@@ -58,6 +62,31 @@ export function sameSummary(shown: CloseSummary, read: CloseSummary): boolean {
 }
 
 const realClock = () => performance.now();
+
+/**
+ * What keeps the shift open, in words. Every blocker has its own: the `switch`
+ * is exhaustive, so a blocker added to `CloseBlocker` fails to compile here
+ * instead of being said with another one's words (the open pallet was once
+ * said as «closed»).
+ */
+function blockerText(blocker: CloseBlocker, waitingSscc: string | null, t: TFunction): string {
+  switch (blocker.kind) {
+    case "open_box":
+      return t("floor.close.blocked.open_box", { quantity: formatQuantity(blocker.items) });
+    case "label":
+      return waitingSscc === null
+        ? t("floor.close.blocked.labelUnknown")
+        : t("floor.close.blocked.label", { sscc: waitingSscc });
+    case "open_pallet":
+      return t("floor.close.blocked.open_pallet", { quantity: formatQuantity(blocker.boxes) });
+    case "closed":
+      return t("floor.close.blocked.closed");
+    default: {
+      const unsaid: never = blocker;
+      return unsaid;
+    }
+  }
+}
 
 /** A button that is waiting for the write's answer: on the keyboard still, and a press that does nothing. */
 const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
@@ -116,6 +145,13 @@ export interface ShiftClosePanelProps {
   onBack: () => void;
   /** To the label that waits: its panel decides it. */
   onLabel: () => void;
+  /** Boxes per pallet of a shift with pallets (plan ПЛ-Ц); `null` — none. */
+  palletCapacity?: number | null;
+  /**
+   * «Закрыть паллету и смену»: the open pallet first, then the shift with this
+   * reason. Without it an open pallet only keeps the shift open.
+   */
+  onClosePallet?: (reason: ShiftCloseReasonCode | null) => void;
   /** Milliseconds from a clock that does not go back; the guard after a change of view reads it. */
   clock?: () => number;
 }
@@ -128,9 +164,13 @@ export interface ShiftClosePanelProps {
  * a label that waits, named by its SSCC — and sends the operator back to the
  * work, or to the label, where both are resolved. When the plan is given and
  * not met, one of the domain's six reasons is chosen from the buttons before
- * «Подтвердить закрытие». It sits in the work screen's polite region, so its
- * alerts have no role of their own; the work screen's «Выйти из смены» stays
- * outside it, so nobody is held here.
+ * «Подтвердить закрытие». An open pallet with boxes (plan ПЛ-Ц) shows the
+ * whole summary and asks «На паллете N из M коробов — закрыть?» under it, and
+ * the close becomes «Закрыть паллету и смену», as at the cloud station; the
+ * question names the counts, since the press closes the pallet, prints its
+ * label and closes the shift, none of which can be taken back. It sits in the
+ * work screen's polite region, so its alerts have no role of their own; the
+ * work screen's «Выйти из смены» stays outside it, so nobody is held here.
  */
 export function ShiftClosePanel({
   number,
@@ -143,6 +183,8 @@ export function ShiftClosePanel({
   onClose,
   onBack,
   onLabel,
+  palletCapacity = null,
+  onClosePallet,
   clock = realClock,
 }: ShiftClosePanelProps) {
   const { t } = useTranslation();
@@ -171,20 +213,17 @@ export function ShiftClosePanel({
         </>
       );
     }
-    if (summary.blocker !== null) {
+    // An open pallet that «Закрыть паллету и смену» can close is asked about under
+    // the summary; without that button it only keeps the shift open, like any blocker.
+    const openPallet = summary.blocker?.kind === "open_pallet" ? summary.blocker : null;
+    const palletAsked =
+      openPallet !== null && onClosePallet !== undefined && palletCapacity !== null;
+    if (summary.blocker !== null && !palletAsked) {
       const { blocker } = summary;
       return (
         <>
           <Alert tone="warn" role="presentation" title={t("floor.close.blockedTitle")}>
-            <p>
-              {blocker.kind === "open_box"
-                ? t("floor.close.blocked.open_box", { quantity: formatQuantity(blocker.items) })
-                : blocker.kind === "label"
-                  ? waitingSscc === null
-                    ? t("floor.close.blocked.labelUnknown")
-                    : t("floor.close.blocked.label", { sscc: waitingSscc })
-                  : t("floor.close.blocked.closed")}
-            </p>
+            <p>{blockerText(blocker, waitingSscc, t)}</p>
           </Alert>
           <div className="standalone-form__actions">
             {back}
@@ -267,14 +306,26 @@ export function ShiftClosePanel({
           </div>
         )}
         <p>{t("floor.close.irreversible")}</p>
+        {palletAsked && (
+          <Alert
+            tone="warn"
+            role="presentation"
+            title={t("floor.close.palletOpen", {
+              quantity: formatQuantity(openPallet.boxes),
+              capacity: formatQuantity(palletCapacity),
+            })}
+          >
+            <p>{t("floor.close.palletIrreversible")}</p>
+          </Alert>
+        )}
         <div className="standalone-form__actions">
           {back}
           <Button
             size="floor"
             disabled={summary.reasonRequired && chosen === null}
-            {...press(() => onClose(chosen))}
+            {...press(() => (palletAsked ? onClosePallet(chosen) : onClose(chosen)))}
           >
-            {t("floor.close.confirm")}
+            {t(palletAsked ? "floor.close.confirmPallet" : "floor.close.confirm")}
           </Button>
         </div>
       </>
@@ -295,7 +346,15 @@ export function ShiftClosePanel({
           title={t(`floor.close.notes.${note}`)}
         />
       )}
-      {busy && <p className="work-screen__waiting">{t("floor.close.closing")}</p>}
+      {busy && (
+        <p className="work-screen__waiting">
+          {t(
+            summary?.blocker?.kind === "open_pallet"
+              ? "floor.close.closingPallet"
+              : "floor.close.closing",
+          )}
+        </p>
+      )}
       {body()}
     </section>
   );
