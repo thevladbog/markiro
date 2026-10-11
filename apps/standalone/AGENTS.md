@@ -3370,8 +3370,10 @@ lacks the capacity or the layout, and the work screen then stops
   The exceptions open only with no label waiting, and the queue's
   `labelWaits()` refuses a reprint or disassembly of any pallet while any
   label of the shift waits, so a pallet is not taken apart under its own
-  label's panel. That refusal is the screen's: `disassemblePallet` has no
-  such guard of its own (see the known limits).
+  label's panel. `disassemblePallet`'s transaction refuses it too
+  (`PALLET_LABEL_CLOSED_GUARD_SQL` in front of the disassembly: no job of the
+  pallet's label open, else `LabelWaitingError` with nothing written), for a
+  job written between the read and the write.
 - The shift's close: an open pallet with a box not taken apart keeps it open
   (`readCloseSummary`'s blocker `open_pallet`, after an open box and a
   waiting label); an empty open pallet does not, and costs no serial. The
@@ -3421,11 +3423,6 @@ Known limits of the pallets, and who carries each:
   queue, on every box close while the link is up: up to 2 × 10 s when the host
   hangs, during which the work queue waits, as a box close waiting for box
   serials does.
-- `disassemblePallet` itself accepts a disassembly while the pallet's label job
-  is open; only the screen refuses it. A backstop in its transaction is a
-  carried item of the plan's final review; today a disassembly under a waiting
-  label cannot be started from the screen, and one made some other way would
-  make that label's «Напечатать снова» stale.
 - The scan feedback of the pallet choice (a tone and a short flash of the work
   screen) still says «короб»; the flow's own words are the pallet's.
 - Pallets of several stations on one shift and the revocation of pallet blocks

@@ -15,6 +15,7 @@ import {
   DISASSEMBLE_PALLET_SQL,
   LAST_PALLET_JOB_SQL,
   NEWEST_PALLET_JOB_GUARD_SQL,
+  PALLET_LABEL_CLOSED_GUARD_SQL,
   PALLET_STATE_SQL,
 } from "../src/floor/exceptions/pallet-exceptions.js";
 import { outboxStatement, shiftClosedRecord } from "../src/floor/facts.js";
@@ -818,6 +819,15 @@ describe("the shape of the production tables (migration 0006)", () => {
       [PALLET_STATE_SQL, ["sqlite_autoindex_floor_pallets_1 (id=?)", PALLET_BOXES_INDEX]],
       [DISASSEMBLE_PALLET_SQL, ["sqlite_autoindex_floor_pallets_1 (id=?)"]],
       [PALLET_LIVE_GUARD_SQL, ["sqlite_autoindex_floor_pallets_1 (id=?)"]],
+      // The disassembly's check that no job of the pallet's label is open: the pallet by its key
+      // and the open job by the open-job index, which holds exactly that rule.
+      [
+        PALLET_LABEL_CLOSED_GUARD_SQL,
+        [
+          "sqlite_autoindex_floor_pallets_1 (id=?)",
+          "floor_print_jobs_open (host_id=? AND device_id=? AND purpose=? AND subject_id=?)",
+        ],
+      ],
       [LAST_PALLET_JOB_SQL, ["floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"]],
       [
         NEWEST_PALLET_JOB_GUARD_SQL,
@@ -854,6 +864,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       PALLET_STATE_SQL,
       DISASSEMBLE_PALLET_SQL,
       PALLET_LIVE_GUARD_SQL,
+      PALLET_LABEL_CLOSED_GUARD_SQL,
       LAST_PALLET_JOB_SQL,
       NEWEST_PALLET_JOB_GUARD_SQL,
     ]) {
@@ -1120,10 +1131,11 @@ describe("the shape of the production tables (migration 0006)", () => {
       PALLET_STATE_SQL,
       DISASSEMBLE_PALLET_SQL,
       PALLET_LIVE_GUARD_SQL,
+      PALLET_LABEL_CLOSED_GUARD_SQL,
       LAST_PALLET_JOB_SQL,
       NEWEST_PALLET_JOB_GUARD_SQL,
     ];
-    expect(new Set(statements).size).toBe(27);
+    expect(new Set(statements).size).toBe(28);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
     // The retention pass's statements, as `tests/local_db.rs` plans them (the refused closes' read
     // among them): the long ones as constants, the deletes of the tables with an index by shift as literals, the three that read

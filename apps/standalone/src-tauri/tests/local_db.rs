@@ -1030,6 +1030,12 @@ const PALLET_LIVE_GUARD: &str =
     "UPDATE floor_pallets SET disassembled_at = disassembled_at WHERE id = ? AND host_id = \
      ? AND device_id = ? AND shift_id = ? AND closed_at IS NOT NULL AND disassembled_at IS \
      NULL";
+const PALLET_LABEL_CLOSED_GUARD: &str =
+    "UPDATE floor_pallets SET disassembled_at = disassembled_at WHERE id = ? AND host_id = ? \
+     AND device_id = ? AND shift_id = ? AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE \
+     j.host_id = floor_pallets.host_id AND j.device_id = floor_pallets.device_id AND \
+     j.purpose = 'pallet' AND j.subject_id = floor_pallets.id AND (state IN ('prepared', \
+     'sending', 'failed', 'unknown') OR (state = 'sent' AND verify = 1)))";
 const LAST_PALLET_JOB: &str =
     "SELECT id FROM floor_print_jobs WHERE host_id = ? AND device_id = ? AND shift_id = ? \
      AND purpose = 'pallet' AND subject_id = ? ORDER BY rowid DESC LIMIT 1";
@@ -1081,7 +1087,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 74] = [
+    let reads: [(&str, &str); 76] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1386,6 +1392,14 @@ async fn the_floors_repeating_reads_search_an_index() {
         (PALLET_STATE, "floor_boxes_pallet (pallet_id=?)"),
         (DISASSEMBLE_PALLET, "sqlite_autoindex_floor_pallets_1 (id=?)"),
         (PALLET_LIVE_GUARD, "sqlite_autoindex_floor_pallets_1 (id=?)"),
+        (
+            PALLET_LABEL_CLOSED_GUARD,
+            "sqlite_autoindex_floor_pallets_1 (id=?)",
+        ),
+        (
+            PALLET_LABEL_CLOSED_GUARD,
+            "floor_print_jobs_open (host_id=? AND device_id=? AND purpose=? AND subject_id=?)",
+        ),
         (
             LAST_PALLET_JOB,
             "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",

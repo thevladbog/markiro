@@ -228,6 +228,46 @@ describe("«Расформировать паллету» (plan ПЛ-Ц)", () =>
     await expect(first).resolves.toEqual({ kind: "stale" });
     expect(palletRecords(at).map((record) => record.data["reasonCode"])).toEqual(["wrong_product"]);
   });
+
+  it("is refused by its own transaction while the pallet's label job is open, writing nothing", async () => {
+    const { at, palletId } = await closedPallet({ settings: { verifyPrintedLabel: true } });
+    const context = palletContext(at);
+    await expect(
+      disassemblePallet(context, palletId, { code: "wrong_product", text: null }),
+    ).rejects.toBeInstanceOf(LabelWaitingError);
+    expect(rows(at.db, "SELECT disassembled_at FROM floor_pallets")).toEqual([
+      { disassembled_at: null },
+    ]);
+    expect(rows(at.db, "SELECT count(*) AS n FROM floor_pallet_exceptions")).toEqual([{ n: 0 }]);
+    expect(palletRecords(at)).toEqual([]);
+    // Decided, the label no longer holds the pallet.
+    at.db.prepare("UPDATE floor_print_jobs SET state = 'skipped' WHERE purpose = 'pallet'").run();
+    await expect(
+      disassemblePallet(context, palletId, { code: "wrong_product", text: null }),
+    ).resolves.toEqual({ kind: "done", boxes: 2 });
+  });
+
+  it("writes nothing when the pallet's label job opens between its read and its write", async () => {
+    const { at, palletId } = await closedPallet();
+    const held = holdingWrites(at.local);
+    held.holdNext();
+    const apart = disassemblePallet(palletContext({ ...at, local: held.executor }), palletId, {
+      code: "wrong_quantity",
+      text: null,
+    });
+    await held.reached();
+    at.db
+      .prepare(
+        "UPDATE floor_print_jobs SET state = 'unknown', error_code = 'outcome_unknown' WHERE purpose = 'pallet'",
+      )
+      .run();
+    held.release();
+    await expect(apart).rejects.toBeInstanceOf(LabelWaitingError);
+    expect(rows(at.db, "SELECT disassembled_at FROM floor_pallets")).toEqual([
+      { disassembled_at: null },
+    ]);
+    expect(palletRecords(at)).toEqual([]);
+  });
 });
 
 describe("«Перепечатать этикетку паллеты» (plan ПЛ-Ц)", () => {
@@ -936,10 +976,11 @@ describe("a pallet's label printed again where it may exist (plan ПЛ-Ц)", () 
       ),
       prepared,
     );
-    await disassemblePallet(palletContext(at), prepared.subjectId, {
-      code: "wrong_product",
-      text: null,
-    });
+    // The disassembly lands by hand: the transaction of `disassemblePallet` refuses a pallet
+    // whose label is open, so this is the case that guard of the reprint is the backstop of.
+    at.db
+      .prepare("UPDATE floor_pallets SET disassembled_at = ? WHERE id = ?")
+      .run(new Date().toISOString(), prepared.subjectId);
     const shell = fakeHardware();
     await expect(
       printAgain(
@@ -955,6 +996,6 @@ describe("a pallet's label printed again where it may exist (plan ПЛ-Ц)", () 
       state: "unknown",
       attempts: 1,
     });
-    expect(palletRecords(at).map((record) => record.data["exception"])).toEqual(["disassemble"]);
+    expect(palletRecords(at)).toEqual([]);
   });
 });

@@ -12,6 +12,7 @@ import { palletExceptionStatements } from "../facts.js";
 import { LIVE_BOXES, palletLiveGuard, type ShiftPallets } from "../pallets/pallets.js";
 import {
   isOpenJob,
+  OPEN_JOB_SQL,
   prepareLabelJob,
   readPrintJob,
   sendLabelJob,
@@ -40,9 +41,11 @@ export { palletExceptionStatements };
  *
  * A pallet's label is never sent again by itself. The one reprint here is
  * written with its reason in the transaction that records the new job, and
- * goes to the printer once, as a first send; and nothing at all is recorded
- * of a pallet after it was taken apart (the host answers `pallet_state` to
- * such a record, and a refusal stays in the queue for good).
+ * goes to the printer once, as a first send; no `pallet_exception` follows a
+ * disassembly (the host answers `pallet_state` to such a record, and a
+ * refusal stays in the queue for good), and a pallet is not taken apart while
+ * its label job is open, so the label's `pallet_label` is not recorded after
+ * it either.
  */
 
 /** A closed pallet of the shift, as the exceptions list it. */
@@ -156,6 +159,20 @@ export const DISASSEMBLE_PALLET_SQL =
   "UPDATE floor_pallets SET disassembled_at = ? WHERE id = ? AND host_id = ? AND device_id = ? " +
   "AND shift_id = ? AND closed_at IS NOT NULL AND disassembled_at IS NULL";
 
+/**
+ * The comparison that keeps a disassembly from landing under a waiting label
+ * (pinned in both lists of query plans): a no-op update that counts a row only
+ * while no job of the pallet's label is open, by the rule of the open-job
+ * index. The work screen refuses the disassembly while the label waits; this
+ * is the backstop in the transaction itself, for a job that is written between
+ * the read and the write.
+ */
+export const PALLET_LABEL_CLOSED_GUARD_SQL =
+  "UPDATE floor_pallets SET disassembled_at = disassembled_at WHERE id = ? AND host_id = ? " +
+  "AND device_id = ? AND shift_id = ? AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j " +
+  "WHERE j.host_id = floor_pallets.host_id AND j.device_id = floor_pallets.device_id " +
+  `AND j.purpose = 'pallet' AND j.subject_id = floor_pallets.id AND ${OPEN_JOB_SQL})`;
+
 /** Runs the write; a comparison that no longer holds is `stale` (nothing was written). */
 async function commit(
   local: LocalExecutor,
@@ -179,8 +196,11 @@ async function commit(
  * boxes without a pallet (plan ПЛ-Х), and they stay closed, with their
  * codes. The pallet keeps its SSCC: the number is spent. `stale` — the pallet
  * changed meanwhile, nothing written; one that is open, taken apart or
- * another shift's — `PalletUnavailableError`. The act cannot be undone: the
- * work screen asks to confirm it before it calls this.
+ * another shift's — `PalletUnavailableError`. A pallet whose label job is
+ * open is not taken apart (`LabelWaitingError`, nothing written): its label is
+ * decided at the label's panel first, and the transaction itself refuses it,
+ * not only the work screen. The act cannot be undone: the work screen asks to
+ * confirm it before it calls this.
  */
 export async function disassemblePallet(
   context: BoxContext,
@@ -194,6 +214,11 @@ export async function disassemblePallet(
   const at = context.now().toISOString();
   const written = await commit(local, [
     {
+      sql: PALLET_LABEL_CLOSED_GUARD_SQL,
+      values: [palletId, pairing.hostId, pairing.deviceId, shift.copy.id],
+      expectedChanges: 1,
+    },
+    {
       sql: DISASSEMBLE_PALLET_SQL,
       values: [at, palletId, pairing.hostId, pairing.deviceId, shift.copy.id],
       expectedChanges: 1,
@@ -206,7 +231,14 @@ export async function disassemblePallet(
       occurredAt: at,
     }),
   ]);
-  return written === "stale" ? { kind: "stale" } : { kind: "done", boxes: pallet.boxes };
+  if (written === "stale") {
+    // A label job that opened after the read is what the screen is told; any
+    // other change since the read stays `stale`.
+    const last = await readLastPalletJob(context, palletId);
+    if (last !== null && isOpenJob(last)) throw new LabelWaitingError(palletId);
+    return { kind: "stale" };
+  }
+  return { kind: "done", boxes: pallet.boxes };
 }
 
 const lastJobRow = z.object({ id: z.string() });
@@ -219,6 +251,20 @@ const lastJobRow = z.object({ id: z.string() });
 export const LAST_PALLET_JOB_SQL =
   "SELECT id FROM floor_print_jobs WHERE host_id = ? AND device_id = ? AND shift_id = ? " +
   "AND purpose = 'pallet' AND subject_id = ? ORDER BY rowid DESC LIMIT 1";
+
+/** The pallet's newest print job, or `null` when it has none. */
+async function readLastPalletJob(
+  context: Pick<BoxContext, "local" | "pairing" | "shift">,
+  palletId: string,
+): Promise<PrintJob | null> {
+  const { local, pairing, shift } = context;
+  const [row] = await local.query(
+    LAST_PALLET_JOB_SQL,
+    [pairing.hostId, pairing.deviceId, shift.copy.id, palletId],
+    lastJobRow,
+  );
+  return row === undefined ? null : readPrintJob(local, pairing, row.id);
+}
 
 /**
  * The comparison that keeps two reprints from both passing (pinned in both
@@ -262,12 +308,7 @@ export async function reprintPallet(
   if ((await readLiveClosedPallet(context, palletId)) === null) {
     throw new PalletUnavailableError(palletId);
   }
-  const [row] = await local.query(
-    LAST_PALLET_JOB_SQL,
-    [pairing.hostId, pairing.deviceId, shift.copy.id, palletId],
-    lastJobRow,
-  );
-  const last = row === undefined ? null : await readPrintJob(local, pairing, row.id);
+  const last = await readLastPalletJob(context, palletId);
   if (last === null) throw new PalletUnavailableError(palletId);
   if (isOpenJob(last)) throw new LabelWaitingError(palletId);
   const { template } = pallets;
