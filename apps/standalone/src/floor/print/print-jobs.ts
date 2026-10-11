@@ -37,7 +37,9 @@ export type PrintJobState = (typeof PRINT_JOB_STATES)[number];
  * a label: no printer for the purpose, a label that would not render, the
  * shell's `not_sent`, `invalid_target`, `invalid_payload`, `unsupported`,
  * and `printer_busy` — the send's limit ran out while an earlier send to the
- * same address still had the printer.
+ * same address still had the printer. A driver print (plan ДРВ) adds
+ * `queue_unavailable`, `geometry_mismatch` and `driver_not_started`: the
+ * Windows driver refused before the spooler took anything.
  */
 export const FAILED_CODES = [
   "printer_unconfigured",
@@ -47,13 +49,25 @@ export const FAILED_CODES = [
   "invalid_payload",
   "unsupported",
   "printer_busy",
+  // Plan ДРВ: the Windows driver refused before the spooler took anything.
+  "queue_unavailable",
+  "geometry_mismatch",
+  "driver_not_started",
 ] as const;
 /**
  * Why a job's outcome is unknown — a label may exist: the shell's
  * `outcome_unknown`, no answer within the limit (`timeout`), and a job found
- * `sending` after a restart or a lost write (`interrupted`).
+ * `sending` after a restart or a lost write (`interrupted`). A driver print
+ * (plan ДРВ) adds `driver_unknown`: its document started and did not finish,
+ * or its answer was lost.
  */
-export const UNKNOWN_CODES = ["outcome_unknown", "timeout", "interrupted"] as const;
+export const UNKNOWN_CODES = [
+  "outcome_unknown",
+  "timeout",
+  "interrupted",
+  // Plan ДРВ: the driver's document started and did not finish, or its answer was lost.
+  "driver_unknown",
+] as const;
 export type FailedCode = (typeof FAILED_CODES)[number];
 export type UnknownCode = (typeof UNKNOWN_CODES)[number];
 export type PrintJobCode = FailedCode | UnknownCode;
@@ -398,7 +412,9 @@ export function settleOutcome(
   if (outcome.kind === "busy") return { state: "failed", code: "printer_busy" };
   const { result } = outcome;
   if (result.sent) return { state: "sent" };
-  if (result.code === "outcome_unknown") return { state: "unknown", code: "outcome_unknown" };
+  if (result.code === "outcome_unknown" || result.code === "driver_unknown") {
+    return { state: "unknown", code: result.code };
+  }
   return { state: "failed", code: result.code };
 }
 
