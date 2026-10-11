@@ -57,6 +57,21 @@ import {
   RETAINED_TABLES,
 } from "../src/local/retention.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
+import {
+  DUE_SESSIONS_SQL,
+  FINISH_SESSION_SQL,
+  JOB_BY_IDENTITY_SQL,
+  JOB_SQL,
+  MOVE_JOB_SQL,
+  OPEN_JOB_SQL,
+  OPEN_SESSION_SQL,
+  PURGE_JOBS_SQL,
+  PURGE_RECORDS_SQL,
+  PURGE_SESSION_SQL,
+  SENT_COUNT_SQL,
+  UNSENT_RECORDS_SQL,
+  UPDATE_SESSION_SQL,
+} from "../src/floor/warehouse/warehouse-store.js";
 import { openLocalDb } from "./support/local-db.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building a URL from it.
@@ -79,6 +94,9 @@ const DEVICE_TABLES = [
   "floor_sscc_blocks",
   "outbox",
 ];
+
+/** The warehouse reprint's tables (migration `0012`; `TableClass::DeviceData`), tagged the same way. */
+const WAREHOUSE_TABLES = ["wh_jobs", "wh_outbox", "wh_sessions"];
 
 function shift(id: string, overrides: Record<string, unknown> = {}): LocalStatement {
   const row: Record<string, unknown> = {
@@ -210,10 +228,12 @@ describe("the station's own production tables (migration 0006)", () => {
     // `floor_restore_epochs` (migration `0009`) is a pairing's own
     // bookkeeping that a forget empties, tagged the same way.
     expect(columns).toEqual(
-      [...DEVICE_TABLES, "floor_restore_epochs"].sort().flatMap((tableName) => [
-        { tableName, columnName: "device_id", required: 1 },
-        { tableName, columnName: "host_id", required: 1 },
-      ]),
+      [...DEVICE_TABLES, ...WAREHOUSE_TABLES, "floor_restore_epochs"]
+        .sort()
+        .flatMap((tableName) => [
+          { tableName, columnName: "device_id", required: 1 },
+          { tableName, columnName: "host_id", required: 1 },
+        ]),
     );
     const keys = await executor.query(
       "SELECT t.name AS name FROM pragma_table_list AS t, pragma_foreign_key_list(t.name) AS k " +
@@ -1628,5 +1648,74 @@ describe("the restore obligation (migration 0009)", () => {
     );
     await refused(executor, obligation({ device_id: "device-3", refused_blocks: "[" }));
     await refused(executor, obligation({ device_id: "device-4", refused_blocks: null }));
+  });
+});
+
+// The warehouse reprint (plan СКЛ, migration 0012): every read and write of its growing tables
+// searches an index; pinned on the shell's SQLite too (`the_warehouse_reads_search_an_index`
+// in `tests/local_db.rs`), with the same texts.
+describe("the warehouse reprint's statements (migration 0012)", () => {
+  const STATEMENTS: readonly (readonly [string, string])[] = [
+    [OPEN_SESSION_SQL, "wh_sessions_open"],
+    [OPEN_JOB_SQL, "(host_id=? AND device_id=? AND session_id=?)"],
+    [
+      JOB_BY_IDENTITY_SQL,
+      "wh_jobs_session (host_id=? AND device_id=? AND session_id=? AND identity=?)",
+    ],
+    [JOB_SQL, "sqlite_autoindex_wh_jobs_1 (id=?)"],
+    [SENT_COUNT_SQL, "wh_jobs_session (host_id=? AND device_id=? AND session_id=?)"],
+    [UNSENT_RECORDS_SQL, "wh_outbox_unsent"],
+    [MOVE_JOB_SQL, "sqlite_autoindex_wh_jobs_1 (id=?)"],
+    // A session by its key, or by the pairing's one open session: either is one row.
+    [UPDATE_SESSION_SQL, "SEARCH wh_sessions USING"],
+    [FINISH_SESSION_SQL, "SEARCH wh_sessions USING"],
+    [DUE_SESSIONS_SQL, "wh_sessions_finished (host_id=? AND device_id=? AND finished_at"],
+    [PURGE_SESSION_SQL, "SEARCH wh_sessions USING"],
+    [PURGE_JOBS_SQL, "wh_jobs_session (host_id=? AND device_id=? AND session_id=?)"],
+    [PURGE_RECORDS_SQL, "wh_outbox_session (session_id=? AND host_id=? AND device_id=?)"],
+  ];
+
+  it("search an index, never a whole table", () => {
+    const { db } = openLocalDb();
+    const plan = (sql: string): string[] =>
+      db
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...Array.from({ length: sql.split("?").length - 1 }, () => "x"))
+        .map((step) => String(step["detail"]));
+    for (const [sql, index] of STATEMENTS) {
+      expect(
+        plan(sql).some((step) => step.includes(index)),
+        `${sql}\n${plan(sql).join("\n")}`,
+      ).toBe(true);
+      // `json_each` (alias `r` in the receipt's `UPDATE … FROM`) is the batch's own list.
+      expect(
+        plan(sql).filter(
+          (step) =>
+            step.startsWith("SCAN ") && !step.includes("json_each") && !step.startsWith("SCAN r "),
+        ),
+        sql,
+      ).toEqual([]);
+    }
+    expect(plan(JOB_BY_IDENTITY_SQL).filter((step) => step.includes("TEMP"))).toEqual([]);
+  });
+
+  it("are pinned on the shell's SQLite with the same texts", () => {
+    const source = readFileSync(new URL("../src-tauri/tests/local_db.rs", testModuleUrl), "utf8")
+      // A line continuation of a Rust string drops the newline and the next line's indent.
+      .replace(/\\\n\s*/g, "");
+    // The job reads are built from one column list in the Rust test (`let jobs = "…"`):
+    // the list itself, then each read's tail after `{jobs}`.
+    const columns =
+      "SELECT id, session_id, kind, subject_id, identity, repair, reason, state, template_id, " +
+      "template_rev, template_spec, fields, printer, bytes_base64, error_code, attempts, " +
+      "operator_id, created_at, updated_at FROM wh_jobs";
+    expect(source).toContain(`"${columns}"`);
+    for (const sql of [OPEN_JOB_SQL, JOB_BY_IDENTITY_SQL, JOB_SQL]) {
+      expect(sql.startsWith(columns), sql).toBe(true);
+      expect(source).toContain(`{jobs}${sql.slice(columns.length)}`);
+    }
+    for (const [sql] of STATEMENTS.filter(([sql]) => !sql.startsWith(columns))) {
+      expect(source, sql).toContain(`"${sql}"`);
+    }
   });
 });

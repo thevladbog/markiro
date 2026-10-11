@@ -90,6 +90,10 @@ pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
     ("ref_templates", TableClass::Disposable),
     ("sync_quarantine", TableClass::Disposable),
     ("sync_state", TableClass::Disposable),
+    // The warehouse reprint (plan СКЛ, migration `0012`): this device's records.
+    ("wh_jobs", TableClass::DeviceData),
+    ("wh_outbox", TableClass::DeviceData),
+    ("wh_sessions", TableClass::DeviceData),
     ("workstation_settings", TableClass::Workstation),
 ];
 

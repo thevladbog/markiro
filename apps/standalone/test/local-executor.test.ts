@@ -133,6 +133,9 @@ describe("local database on node:sqlite", () => {
       "ref_templates",
       "sync_quarantine",
       "sync_state",
+      "wh_jobs",
+      "wh_outbox",
+      "wh_sessions",
       "workstation_settings",
     ]);
   });
