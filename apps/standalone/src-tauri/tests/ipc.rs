@@ -15,6 +15,7 @@ use markiro_proto::DeviceKind;
 use markiro_standalone_lib::connection::ConnectionState;
 use markiro_standalone_lib::device::DeviceState;
 use markiro_standalone_lib::device_config::{self, DeviceConfig};
+use markiro_standalone_lib::installation::InstallRole;
 use markiro_standalone_lib::local_db::{
     LocalDbState, TableClass, FILE_NAME, MIGRATOR, TABLE_CLASSES,
 };
@@ -1218,7 +1219,8 @@ fn the_app_manages_every_state_its_commands_read() {
     let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default())
         .build()
         .unwrap();
-    let link = markiro_standalone_lib::manage_state(app.handle(), dir.path());
+    let link =
+        markiro_standalone_lib::manage_state(app.handle(), dir.path(), Some(InstallRole::Station));
 
     assert!(app.try_state::<DeviceState>().is_some());
     assert!(app.try_state::<LocalDbState>().is_some());
@@ -1232,6 +1234,11 @@ fn the_app_manages_every_state_its_commands_read() {
     assert_eq!(
         invoke(&webview, "device_status", json!({})),
         Ok(Value::Null)
+    );
+    // The role `run` read beside the executable reaches the device state.
+    assert_eq!(
+        invoke(&webview, "install_role", json!({})),
+        Ok(json!("station"))
     );
     assert_eq!(
         invoke(&webview, "connection_status", json!({}))
@@ -1596,5 +1603,31 @@ fn the_connection_status_has_the_webview_shape() {
     assert_eq!(
         invoke(&webview, "connection_status", json!({})),
         Ok(json!({ "state": "offline", "lastContactAt": null, "lastError": null, "seq": 0 }))
+    );
+}
+
+#[test]
+fn the_install_role_and_a_new_host_address_have_the_webview_shapes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app(DeviceState::load(dir.path().to_path_buf()));
+    assert_eq!(invoke(&webview, "install_role", json!({})), Ok(Value::Null));
+    // `src/host/device.ts` sends `address`; an unpaired device has none to change.
+    assert_eq!(
+        invoke(
+            &webview,
+            "device_change_address",
+            json!({ "address": "https://192.168.1.20:45710" })
+        ),
+        Err(json!("not_paired"))
+    );
+
+    let office_dir = tempfile::tempdir().unwrap();
+    let (_office_app, office) = mock_app(
+        DeviceState::load(office_dir.path().to_path_buf())
+            .with_install_role(Some(InstallRole::Office)),
+    );
+    assert_eq!(
+        invoke(&office, "install_role", json!({})),
+        Ok(json!("office"))
     );
 }

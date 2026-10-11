@@ -18,6 +18,7 @@ use tokio::sync::watch;
 use crate::device_config::{self, DeviceConfig};
 use crate::host_client::{Credentials, HostResponse, PinnedClient, RequestError};
 use crate::host_probe::{self, HelloObservation, ProbeError};
+use crate::installation::InstallRole;
 use crate::secret_store;
 
 /// A station's line (`PUT /v1/device/line`): only [`DeviceState::select_line`]
@@ -116,6 +117,9 @@ pub enum DeviceError {
     KeyRejected,
     /// The host answered a device request with another error.
     RequestFailed,
+    /// The address given for the paired host answers with another
+    /// certificate: another host lives there.
+    AddressOtherHost,
 }
 
 impl DeviceError {
@@ -136,6 +140,7 @@ impl DeviceError {
             DeviceError::LineRejected => "line_rejected",
             DeviceError::KeyRejected => "key_rejected",
             DeviceError::RequestFailed => "request_failed",
+            DeviceError::AddressOtherHost => "address_other_host",
         }
     }
 }
@@ -192,8 +197,11 @@ pub struct DeviceState {
     current: Mutex<Current>,
     pairing: tokio::sync::Mutex<()>,
     /// The host the connection task should hold a stream to; `None` while
-    /// unpaired. Replaced on pairing and forgetting.
+    /// unpaired. Replaced on pairing, forgetting and a new host address.
     link: watch::Sender<Option<Arc<HostLink>>>,
+    /// The installer's role for this computer (`installation.rs`); `None`
+    /// in a development build.
+    role: Option<InstallRole>,
 }
 
 impl DeviceState {
@@ -217,6 +225,27 @@ impl DeviceState {
             current: Mutex::new(current),
             pairing: tokio::sync::Mutex::new(()),
             link: watch::channel(link).0,
+            role: None,
+        }
+    }
+
+    /// This computer's role from the installer: an office PC pairs by code
+    /// as a device of kind `office` (pilot spec §9.4), every other one as a
+    /// station.
+    pub fn with_install_role(mut self, role: Option<InstallRole>) -> Self {
+        self.role = role;
+        self
+    }
+
+    pub fn install_role(&self) -> Option<InstallRole> {
+        self.role
+    }
+
+    /// The kind `claim` pairs as.
+    fn claim_kind(&self) -> DeviceKind {
+        match self.role {
+            Some(InstallRole::Office) => DeviceKind::Office,
+            Some(InstallRole::Host | InstallRole::Station) | None => DeviceKind::Station,
         }
     }
 
@@ -243,6 +272,11 @@ impl DeviceState {
         name: &str,
         app_version: &str,
     ) -> Result<DeviceStatus, DeviceError> {
+        // The loopback pairing grants a station on the host's own computer; an
+        // office PC is paired by code, as an office device (`claim`).
+        if self.role == Some(InstallRole::Office) {
+            return Err(DeviceError::Request(RequestError::InvalidRequest));
+        }
         let _pairing = self.pairing.lock().await;
         self.ensure_unpaired()?;
         let observation = host_probe::observe_hello(address)
@@ -269,7 +303,14 @@ impl DeviceState {
         if response.status != 200 {
             return Err(DeviceError::PairRejected);
         }
-        self.remember(address, observation, client, name, response.body)
+        self.remember(
+            address,
+            observation,
+            client,
+            name,
+            response.body,
+            DeviceKind::Station,
+        )
     }
 
     /// Pair with the host at `address` using a one-time `code` from the
@@ -306,9 +347,10 @@ impl DeviceState {
             return Err(DeviceError::Request(RequestError::CertificateMismatch));
         }
         let client = PinnedClient::new(address, fingerprint).map_err(DeviceError::Request)?;
+        let kind = self.claim_kind();
         let request = ClaimRequest {
             code: Secret::new(code),
-            kind: DeviceKind::Station,
+            kind,
             name: name.to_owned(),
             app_version: app_version.to_owned(),
             capabilities: Vec::new(),
@@ -326,7 +368,62 @@ impl DeviceState {
         if response.status != 200 {
             return Err(claim_refusal(response.body.as_ref()));
         }
-        self.remember(address, observation, client, name, response.body)
+        self.remember(address, observation, client, name, response.body, kind)
+    }
+
+    /// Reach the paired host at another `address` (it got another IP
+    /// address), keeping the pairing: the key, the line and the local
+    /// copies. The new address is kept only when it presents the pinned
+    /// certificate — the same host, since nobody else holds its private
+    /// key — and the host still accepts this device's key (`GET
+    /// /v1/device`); the pin stops the key before it could reach any other
+    /// machine. Another certificate is `address_other_host` and changes
+    /// nothing: the device stays paired with its old address. The address
+    /// must be a plain `https://host[:port]` (`host_origin`): it is checked
+    /// before the key goes anywhere and is kept in that plain form.
+    /// Serialised with pairing, forgetting and line changes.
+    pub async fn change_address(&self, address: &str) -> Result<DeviceStatus, DeviceError> {
+        let _pairing = self.pairing.lock().await;
+        let device = self.paired()?;
+        let address = host_origin(address).map_err(DeviceError::Request)?;
+        let client = PinnedClient::new(&address, &device.config.fingerprint)
+            .map_err(DeviceError::Request)?;
+        let response = match client
+            .send(
+                "GET",
+                DEVICE_ROUTE,
+                None,
+                Credentials {
+                    device_key: Some(&device.key),
+                    office_token: None,
+                },
+            )
+            .await
+        {
+            Ok(response) => response,
+            Err(RequestError::CertificateMismatch) => return Err(DeviceError::AddressOtherHost),
+            Err(error) => return Err(DeviceError::Request(error)),
+        };
+        match response.status {
+            200 => {}
+            401 => return Err(DeviceError::KeyRejected),
+            _ => return Err(DeviceError::RequestFailed),
+        }
+        let config = DeviceConfig {
+            host_address: address,
+            ..device.config.clone()
+        };
+        device_config::save(&self.dir, &config).map_err(|_| DeviceError::Storage)?;
+        let updated = Arc::new(PairedDevice {
+            config,
+            key: device.key.clone(),
+            client,
+        });
+        let status = updated.status();
+        let link = updated.link();
+        *self.current.lock().expect("device lock") = Current::Paired(updated);
+        self.link.send_replace(Some(link));
+        Ok(status)
     }
 
     /// Choose the line this station works on (`PUT /v1/device/line`) and
@@ -453,6 +550,7 @@ impl DeviceState {
         client: PinnedClient,
         name: &str,
         body: Option<Value>,
+        kind: DeviceKind,
     ) -> Result<DeviceStatus, DeviceError> {
         let pair: PairResponse = body
             .and_then(|body| serde_json::from_value(body).ok())
@@ -465,7 +563,7 @@ impl DeviceState {
             fingerprint: observation.fingerprint,
             host_id: pair.host_id,
             device_id: pair.device_id,
-            kind: DeviceKind::Station,
+            kind,
             line_id: None,
             device_name: Some(name.trim().to_owned()),
             device_key: secret_store::protect(pair.device_key.expose())
@@ -560,6 +658,34 @@ fn webview_may_reach(path: &str) -> bool {
         || route == "/v1/bootstrap"
         || route == "/v1/changes"
         || route.starts_with("/v1/office/")
+}
+
+/// The address of a host as it is kept in `device.json`: `https://host[:port]`
+/// and nothing more. A user name or a password, a path, a query or a fragment
+/// would end up in the status the webview reads and in the requests the
+/// shell builds from it, and an address with white space or a control
+/// character is not one a person meant. Anything else is `InvalidRequest`,
+/// like an address that is not HTTPS. The kept form is the origin
+/// (`scheme://host[:port]`, host in lower case, no trailing `/`).
+fn host_origin(address: &str) -> Result<String, RequestError> {
+    if address
+        .chars()
+        .any(|character| character.is_whitespace() || character.is_control())
+    {
+        return Err(RequestError::InvalidRequest);
+    }
+    let url = reqwest::Url::parse(address).map_err(|_| RequestError::InvalidRequest)?;
+    let plain = url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.path() == "/"
+        && url.query().is_none()
+        && url.fragment().is_none();
+    if plain {
+        Ok(url.origin().ascii_serialization())
+    } else {
+        Err(RequestError::InvalidRequest)
+    }
 }
 
 /// A SHA-256 fingerprint as the host prints it: 64 lower-case hex characters.
@@ -672,6 +798,66 @@ mod tests {
         assert_eq!(DeviceError::LineRejected.code(), "line_rejected");
         assert_eq!(DeviceError::KeyRejected.code(), "key_rejected");
         assert_eq!(DeviceError::RequestFailed.code(), "request_failed");
+        assert_eq!(DeviceError::AddressOtherHost.code(), "address_other_host");
+    }
+
+    #[test]
+    fn only_an_office_pc_pairs_by_code_as_an_office_device() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = |role| DeviceState::load(dir.path().to_path_buf()).with_install_role(role);
+        assert_eq!(state(None).claim_kind(), DeviceKind::Station);
+        assert_eq!(
+            state(Some(InstallRole::Host)).claim_kind(),
+            DeviceKind::Station
+        );
+        assert_eq!(
+            state(Some(InstallRole::Station)).claim_kind(),
+            DeviceKind::Station
+        );
+        assert_eq!(
+            state(Some(InstallRole::Office)).claim_kind(),
+            DeviceKind::Office
+        );
+        assert_eq!(
+            state(Some(InstallRole::Office)).install_role(),
+            Some(InstallRole::Office)
+        );
+    }
+
+    #[test]
+    fn a_host_address_is_a_https_origin_and_nothing_else() {
+        for (typed, kept) in [
+            ("https://192.168.1.20:45710", "https://192.168.1.20:45710"),
+            ("https://192.168.1.20:45710/", "https://192.168.1.20:45710"),
+            ("HTTPS://Host-PC.local:45710", "https://host-pc.local:45710"),
+            ("https://[fd00::20]:45710", "https://[fd00::20]:45710"),
+            ("https://host-pc", "https://host-pc"),
+        ] {
+            assert_eq!(host_origin(typed), Ok(kept.to_owned()), "{typed}");
+        }
+        for typed in [
+            "",
+            "192.168.1.20:45710",
+            "http://192.168.1.20:45710",
+            "ftp://192.168.1.20:45710",
+            "https://",
+            "https://user@192.168.1.20:45710",
+            "https://:secret@192.168.1.20:45710",
+            "https://192.168.1.20:45710/v1/hello",
+            "https://192.168.1.20:45710//",
+            "https://192.168.1.20:45710?a=1",
+            "https://192.168.1.20:45710#a",
+            " https://192.168.1.20:45710",
+            "https://192.168.1.20:45710\t",
+            "https://192.168.1.20:45710\u{0}",
+            "https://192.168.1.20:99999",
+        ] {
+            assert_eq!(
+                host_origin(typed),
+                Err(RequestError::InvalidRequest),
+                "{typed:?}"
+            );
+        }
     }
 
     #[test]
