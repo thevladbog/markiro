@@ -672,6 +672,18 @@ describe("the shape of the production tables (migration 0006)", () => {
       { tableName: "floor_boxes", name: "floor_boxes_sscc", isUnique: 1, isPartial: 1 },
       { tableName: "floor_codes", name: "floor_codes_box", isUnique: 0, isPartial: 0 },
       { tableName: "floor_codes", name: "floor_codes_shift", isUnique: 0, isPartial: 0 },
+      {
+        tableName: "floor_exceptions",
+        name: "floor_exceptions_shift",
+        isUnique: 0,
+        isPartial: 0,
+      },
+      {
+        tableName: "floor_pallet_exceptions",
+        name: "floor_pallet_exceptions_shift",
+        isUnique: 0,
+        isPartial: 0,
+      },
       { tableName: "floor_pallets", name: "floor_pallets_open", isUnique: 1, isPartial: 1 },
       { tableName: "floor_pallets", name: "floor_pallets_shift", isUnique: 0, isPartial: 0 },
       { tableName: "floor_pallets", name: "floor_pallets_sscc", isUnique: 1, isPartial: 1 },
@@ -696,6 +708,7 @@ describe("the shape of the production tables (migration 0006)", () => {
         isPartial: 0,
       },
       { tableName: "outbox", name: "outbox_settled", isUnique: 0, isPartial: 1 },
+      { tableName: "outbox", name: "outbox_shift", isUnique: 0, isPartial: 0 },
       { tableName: "outbox", name: "outbox_unsent", isUnique: 0, isPartial: 1 },
     ]);
   });
@@ -1038,10 +1051,12 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(guardPlan.split("\n").filter((step) => step.startsWith("SCAN floor_"))).toEqual([]);
     // The retention pass (plan 2a8), once an hour. The due select starts from the accepted
     // closes: its first step walks `outbox_settled` once, and each close it finds costs a search
-    // of the unsent records, of the shift's jobs and of the shift's copy by its key. Asking per
-    // copy instead walked the pairing's accepted records once for every shift (shifts ×
-    // records: 6.5 s at 600 000 rows and 70 shifts). The only temporary structure allowed is
-    // the one of its `DISTINCT`.
+    // of the shift's unsent records (`outbox_shift`, migration `0010`, the index alone), of the
+    // shift's jobs and of the shift's copy by its key. Asking per copy instead walked the
+    // pairing's accepted records once for every shift (shifts × records: 6.5 s at 600 000 rows
+    // and 70 shifts). The only temporary structure allowed is the one of its `DISTINCT`. An index
+    // by shift led by the pairing would become this first step (a walk of every record of the
+    // pairing): `outbox_shift` is led by the shift on purpose (plan ХП, Д1).
     const due = plan(DUE_SHIFTS_SQL).split("\n");
     expect(due[0], DUE_SHIFTS_SQL).toBe(
       "SEARCH o USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome=?)",
@@ -1049,25 +1064,26 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(due.filter((step) => step.includes("outbox_settled"))).toHaveLength(1);
     expect(due.filter((step) => step.startsWith("SCAN "))).toEqual([]);
     expect(due.filter((step) => step.includes("TEMP"))).toEqual(["USE TEMP B-TREE FOR DISTINCT"]);
-    // The delete of a copy walks the settled records for the one shift it deletes (its close
-    // lies among the oldest records), so it searches the same indexes, and no temporary one.
-    for (const [sql, key] of [
-      [DUE_SHIFTS_SQL, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"],
-      [PURGE_COPY_SQL, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"],
-    ] as const) {
-      const retention = plan(sql);
-      expect(retention, sql).toContain(key);
-      expect(retention, sql).toContain("outbox_unsent (host_id=? AND device_id=?)");
-      expect(retention, sql).toContain("outbox_settled (host_id=? AND device_id=? AND outcome=?)");
-      expect(retention, sql).toContain(
-        "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
-      );
-      expect(
-        retention.split("\n").filter((step) => step.startsWith("SCAN ")),
-        sql,
-      ).toEqual([]);
+    for (const key of [
+      "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at=?)",
+      "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
+      "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
+    ]) {
+      expect(due.join("\n"), key).toContain(key);
     }
-    expect(plan(PURGE_COPY_SQL)).not.toContain("TEMP");
+    // The delete of a copy searches the one shift's own records: its accepted close and its
+    // unsent records through `outbox_shift`, its jobs, the copy by its key; no temporary one.
+    const purge = plan(PURGE_COPY_SQL);
+    for (const key of [
+      "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
+      "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at<?)",
+      "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at=?)",
+      "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
+    ]) {
+      expect(purge, key).toContain(key);
+    }
+    expect(purge.split("\n").filter((step) => step.startsWith("SCAN "))).toEqual([]);
+    expect(purge).not.toContain("TEMP");
     // The refused closes of the shift list (plan 2a8), read again on every bump of the outbox
     // while the list is shown, a reconnect's every batch included: the pairing's refused records
     // through `outbox_settled`, in `seq` order with no sort of its own.
@@ -1076,39 +1092,30 @@ describe("the shape of the production tables (migration 0006)", () => {
       "SEARCH outbox USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome=?)",
     );
     expect(refused.filter((step) => step.startsWith("SCAN ") || step.includes("TEMP"))).toEqual([]);
-    // The deletes of a purged shift's records: the tables with an index by shift search it; the
-    // outbox and the exceptions carry the shift only as a column, so each costs one read of its
-    // table, once for a shift done with for 30 days (not on a scan).
-    const bySearch = {
-      floor_scans: "floor_scans_shift",
-      floor_codes: "floor_codes_shift",
-      floor_print_jobs: "floor_print_jobs_shift",
-      floor_boxes: "floor_boxes_shift",
-      floor_pallets: "floor_pallets_shift",
-    } as const;
+    // The deletes of a purged shift's records search the table's index by shift: every table of
+    // `RETAINED_TABLES` has one since migration `0010` (plan ХП), and a table that joins the list
+    // needs one too, or this fails.
+    const bySearch: ReadonlyMap<string, string> = new Map([
+      ["floor_scans", "floor_scans_shift (host_id=? AND device_id=? AND shift_id=?"],
+      ["floor_codes", "floor_codes_shift (host_id=? AND device_id=? AND shift_id=?"],
+      ["floor_print_jobs", "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?"],
+      ["floor_boxes", "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?"],
+      ["floor_pallets", "floor_pallets_shift (host_id=? AND device_id=? AND shift_id=?"],
+      ["floor_exceptions", "floor_exceptions_shift (shift_id=? AND host_id=? AND device_id=?"],
+      [
+        "floor_pallet_exceptions",
+        "floor_pallet_exceptions_shift (shift_id=? AND host_id=? AND device_id=?",
+      ],
+      ["outbox", "outbox_shift (shift_id=? AND host_id=? AND device_id=?"],
+    ]);
     for (const table of RETAINED_TABLES) {
       const steps = plan(purgeTableSql(table)).split("\n");
-      const index = table in bySearch ? bySearch[table as keyof typeof bySearch] : null;
-      if (index !== null) {
-        expect(steps.join("\n"), table).toContain(
-          `${index} (host_id=? AND device_id=? AND shift_id=?`,
-        );
-        expect(
-          steps.filter((step) => step.startsWith("SCAN ")),
-          table,
-        ).toEqual([]);
-      } else {
-        expect(
-          steps.filter((step) => step.startsWith("SCAN ")),
-          table,
-        ).toEqual([`SCAN ${table}`]);
-      }
+      expect(steps.join("\n"), table).toContain(bySearch.get(table) ?? `${table}: no index`);
+      expect(
+        steps.filter((step) => step.startsWith("SCAN ")),
+        table,
+      ).toEqual([]);
     }
-    expect(RETAINED_TABLES.filter((table) => !(table in bySearch))).toEqual([
-      "floor_exceptions",
-      "floor_pallet_exceptions",
-      "outbox",
-    ]);
   });
 
   // The same for what the status bar reads.
@@ -1149,22 +1156,16 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(new Set(statements).size).toBe(28);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
     // The retention pass's statements, as `tests/local_db.rs` plans them (the refused closes' read
-    // among them): the long ones as constants, the deletes of the tables with an index by shift as literals, the three that read
-    // their whole table from one format string.
+    // among them): the long ones as constants, every table's delete by shift as a literal (each
+    // searches an index by shift since migration `0010`, plan ХП).
     const retention = [
       DUE_SHIFTS_SQL,
       PURGE_COPY_SQL,
       REFUSED_CLOSES_SQL,
-      ...(
-        ["floor_scans", "floor_codes", "floor_print_jobs", "floor_boxes", "floor_pallets"] as const
-      ).map(purgeTableSql),
+      ...RETAINED_TABLES.map(purgeTableSql),
     ];
-    expect(new Set(retention).size).toBe(8);
+    expect(new Set(retention).size).toBe(11);
     for (const sql of retention) expect(source).toContain(`"${sql}"`);
-    expect(source).toContain(
-      'for table in ["outbox", "floor_exceptions", "floor_pallet_exceptions"] {',
-    );
-    expect(source).toContain(`"${purgeTableSql("outbox").replace("outbox", "{table}")}"`);
   });
 
   // The shell's list (`tests/local_db.rs`) is written by hand: it must hold the

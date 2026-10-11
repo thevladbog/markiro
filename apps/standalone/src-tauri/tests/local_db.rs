@@ -373,6 +373,70 @@ async fn migration_0009_keeps_the_rows_of_a_database_of_0008() {
     assert!(MIGRATOR.iter().any(|migration| migration.version == 9));
 }
 
+/// Migration `0010` over a station's database of `0009` (plan ХП): the shell's own SQLite adds
+/// the three indexes by shift the retention's deletes search, and every row stays as it was.
+#[tokio::test]
+async fn migration_0010_adds_the_shift_indexes_and_keeps_every_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let until_0009: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version <= 9)
+        .cloned()
+        .collect();
+    assert_eq!(until_0009.len(), 9, "migrations 0001 to 0009 exist");
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(until_0009),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    for sql in [
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, acked_at) VALUES ('record-1', 'host', 'device', 'shift_closed', 'shift-1', \
+         '{}', '2026-10-09T08:00:00.000Z', 'accepted', '2026-10-09T08:00:05.000Z')",
+        "INSERT INTO floor_exceptions (id, host_id, device_id, shift_id, kind, box_id, \
+         occurred_at) VALUES ('exception-1', 'host', 'device', 'shift-1', 'clear', 'box-1', \
+         '2026-10-09T08:00:00.000Z')",
+        "INSERT INTO floor_pallet_exceptions (id, host_id, device_id, shift_id, kind, pallet_id, \
+         reason_code, occurred_at) VALUES ('pallet-exception-1', 'host', 'device', 'shift-1', \
+         'reprint', 'pallet-1', 'damaged_label', '2026-10-09T08:00:00.000Z')",
+    ] {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    raw.close().await.unwrap();
+
+    // The application opens the file as it starts: it applies what is pending.
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    let indexes = db
+        .query(
+            "SELECT name, tbl_name FROM sqlite_master WHERE type = 'index' AND name IN \
+             ('outbox_shift', 'floor_exceptions_shift', 'floor_pallet_exceptions_shift') \
+             ORDER BY name",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(indexes.into_iter().map(Value::Object).collect()),
+        json!([
+            { "name": "floor_exceptions_shift", "tbl_name": "floor_exceptions" },
+            { "name": "floor_pallet_exceptions_shift", "tbl_name": "floor_pallet_exceptions" },
+            { "name": "outbox_shift", "tbl_name": "outbox" }
+        ])
+    );
+    for table in ["outbox", "floor_exceptions", "floor_pallet_exceptions"] {
+        assert_eq!(count(&db, table).await, json!(1), "{table} keeps its row");
+    }
+    assert!(MIGRATOR.iter().any(|migration| migration.version == 10));
+}
+
 #[tokio::test]
 async fn a_batch_commits_together_and_values_come_back_typed() {
     let (_dir, db) = open().await;
@@ -1259,7 +1323,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 83] = [
+    let reads: [(&str, &str); 86] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1486,18 +1550,27 @@ async fn the_floors_repeating_reads_search_an_index() {
              AND local_state IS NOT NULL",
             "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
         ),
-        // The retention pass (plan 2a8), once an hour: the shifts done with and the delete of a
-        // copy search the shift's key, the unsent records, the settled ones and the shift's
-        // jobs. The due select must walk the settled records once (not once per shift): that is
-        // pinned after the loop. Three of the deletes (not listed) read the whole table (no index by
-        // shift): pinned after the loop too.
+        // The retention pass (plan 2a8), once an hour: the due select walks the settled records
+        // once (pinned after the loop) and searches each close's shift — its unsent records
+        // through `outbox_shift` (migration `0010`, plan ХП), its jobs, its copy by its key; the
+        // delete of a copy searches the one shift's close and unsent records through
+        // `outbox_shift`. Every delete of a shift's rows searches an index by shift.
         (DUE_SHIFTS, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"),
-        (DUE_SHIFTS, "outbox_unsent (host_id=? AND device_id=?)"),
+        (
+            DUE_SHIFTS,
+            "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at=?)",
+        ),
         (DUE_SHIFTS, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
         (DUE_SHIFTS, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
         (PURGE_COPY, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"),
-        (PURGE_COPY, "outbox_unsent (host_id=? AND device_id=?)"),
-        (PURGE_COPY, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
+        (
+            PURGE_COPY,
+            "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at<?)",
+        ),
+        (
+            PURGE_COPY,
+            "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at=?)",
+        ),
         (PURGE_COPY, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
         (REFUSED_CLOSES, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
         (
@@ -1519,6 +1592,19 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             "DELETE FROM floor_pallets WHERE host_id = ? AND device_id = ? AND shift_id = ?",
             "floor_pallets_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "DELETE FROM outbox WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "outbox_shift (shift_id=? AND host_id=? AND device_id=?",
+        ),
+        (
+            "DELETE FROM floor_exceptions WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_exceptions_shift (shift_id=? AND host_id=? AND device_id=?",
+        ),
+        (
+            "DELETE FROM floor_pallet_exceptions WHERE host_id = ? AND device_id = ? \
+             AND shift_id = ?",
+            "floor_pallet_exceptions_shift (shift_id=? AND host_id=? AND device_id=?",
         ),
         // The pallets (plan ПЛ-Ц): the open pallet and its two counts on every box close and render,
         // a pallet's close and a box joining it by their keys, the shift close's check and summary,
@@ -1726,35 +1812,6 @@ async fn the_floors_repeating_reads_search_an_index() {
         ["SCAN floor_block_requests"],
         "{waiting}\n  should scan only the waiting requests, its plan is {plan:?}"
     );
-    // The three deletes of the retention pass with no index by shift: the outbox and the
-    // exceptions (a box's, a pallet's) carry the shift only as a column, so a purged shift costs
-    // one read of each table. They run once for a shift that has been done with for 30 days, not
-    // on a scan.
-    for table in ["outbox", "floor_exceptions", "floor_pallet_exceptions"] {
-        let delete =
-            format!("DELETE FROM {table} WHERE host_id = ? AND device_id = ? AND shift_id = ?");
-        let text = format!("EXPLAIN QUERY PLAN {delete}");
-        let mut explain = sqlx::query(&text);
-        for _ in 0..delete.matches('?').count() {
-            explain = explain.bind("x");
-        }
-        let plan: Vec<String> = explain
-            .fetch_all(&mut raw)
-            .await
-            .unwrap()
-            .iter()
-            .map(|row| row.get::<String, _>("detail"))
-            .collect();
-        let scans: Vec<&String> = plan
-            .iter()
-            .filter(|step| step.starts_with("SCAN "))
-            .collect();
-        assert_eq!(
-            scans,
-            [&format!("SCAN {table}")],
-            "{delete}\n  should read only {table}, its plan is {plan:?}"
-        );
-    }
     raw.close().await.unwrap();
 }
 
