@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import * as domain from "../src/index.js";
@@ -356,3 +357,114 @@ it.each(["pallet-a4-portrait", "pallet-a4-two-a5"])(
     expect(() => domain.encodeMonoRaster(page)).not.toThrow();
   },
 );
+
+it("retains legacy A4 raster bytes without optional styling", async () => {
+  const spec = makeSheetSpec();
+  const page = await domain.renderPalletSheet(
+    spec,
+    context,
+    domain.nominalSheetGeometry(spec),
+    textRecorder().rasterize,
+  );
+  expect(createHash("sha256").update(domain.encodeMonoRaster(page)).digest("hex")).toBe(
+    "cb2a5314e2bb6d0e801edf0463cdbf7880916ebd6f091dab38623533f5678e85",
+  );
+});
+
+describe("optional A4 footer and product underline", () => {
+  it.each(["pallet-a4-portrait", "pallet-a4-landscape", "pallet-a4-two-a5"])(
+    "prints INN and platform on %s within available bounds",
+    async (key) => {
+      const preset = domain.buildPalletSheetPresets().find((p) => p.key === key);
+      if (!preset) throw new Error("Missing preset");
+      const { printed, rasterize } = textRecorder();
+      const regions: domain.SheetElementRegion[] = [];
+      await domain.renderPalletSheet(
+        preset.spec,
+        { ...context, organizationInn: "9705119097" },
+        domain.nominalSheetGeometry(preset.spec),
+        rasterize,
+        (value) => regions.push(...value),
+      );
+      expect(printed).toContain("ИНН 9705119097");
+      expect(printed).toContain("Сформировано в Маркиро");
+      expect(regions.filter((r) => r.id === "product-underline")).toHaveLength(
+        preset.spec.page.copies,
+      );
+      expect(regions.filter((r) => r.id === "sscc-caption")).toHaveLength(preset.spec.page.copies);
+      for (const region of regions.filter((r) => r.id === "sscc-caption")) {
+        expect(region.topMm + region.heightMm).toBeLessThanOrEqual(geometryBottom(preset.spec));
+      }
+    },
+  );
+  it("places the underline below actual text and keeps the reserved lines", async () => {
+    const spec = makeSheetSpec();
+    spec.body = [
+      {
+        id: "product",
+        kind: "field",
+        field: "product.printName",
+        fontSizePt: 12,
+        maxLines: 5,
+        reservedLines: 5,
+        underline: { thicknessMm: 0.15, gapMm: 1 },
+      },
+      { id: "after", kind: "text", text: "After", fontSizePt: 8 },
+    ];
+    const regions: domain.SheetElementRegion[] = [];
+    await domain.renderPalletSheet(
+      spec,
+      { ...context, productPrintName: "Short" },
+      domain.nominalSheetGeometry(spec),
+      textRecorder().rasterize,
+      (r) => regions.push(...r),
+    );
+    const product = regions.find((r) => r.id === "product"),
+      line = regions.find((r) => r.id === "product-underline"),
+      after = regions.find((r) => r.id === "after");
+    if (!product || !line || !after) throw new Error("Missing measured node");
+    expect(line.topMm - product.topMm - product.heightMm).toBeCloseTo(1, 1);
+    expect(after.topMm).toBeGreaterThan(line.topMm + line.heightMm + 10);
+  });
+  it("hides missing INN but retains the platform caption", async () => {
+    const preset = domain.buildPalletSheetPresets()[0];
+    if (!preset) throw new Error("Missing preset");
+    const { printed, rasterize } = textRecorder();
+    await domain.renderPalletSheet(
+      preset.spec,
+      context,
+      domain.nominalSheetGeometry(preset.spec),
+      rasterize,
+    );
+    expect(printed.some((text) => text.startsWith("ИНН"))).toBe(false);
+    expect(printed).toContain("Сформировано в Маркиро");
+  });
+  it("fails before painting an overflowing footer caption", async () => {
+    const preset = domain.buildPalletSheetPresets()[2];
+    if (!preset) throw new Error("Missing preset");
+    const spec = domain.parsePalletSheetSpec({
+      ...preset.spec,
+      footer: {
+        ...preset.spec.footer,
+        caption: {
+          fontSizePt: 12,
+          separatorThicknessMm: 0.15,
+          gapMm: 1,
+          showInn: true,
+          platformText: "Очень длинная подпись ".repeat(8),
+        },
+      },
+    });
+    await expect(
+      domain.renderPalletSheet(
+        spec,
+        { ...context, organizationInn: "123456789012" },
+        domain.nominalSheetGeometry(spec),
+        textRecorder().rasterize,
+      ),
+    ).rejects.toThrow();
+  });
+});
+function geometryBottom(spec: domain.PalletSheetSpecV2) {
+  return domain.nominalSheetGeometry(spec).heightMm - spec.page.marginsMm.bottom;
+}

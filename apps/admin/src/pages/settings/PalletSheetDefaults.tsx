@@ -50,7 +50,7 @@ export function PalletSheetDefaultsForm({
       : []),
   ];
   const rows = Array.from(
-    new Set([...(groups.data ?? []).map((g) => g.code), ...Object.keys(categories).map(Number)]),
+    new Set([...(profile.productGroupsInUse ?? []), ...Object.keys(categories).map(Number)]),
   ).sort((a, b) => a - b);
   const stale =
     (defaultId !== "" && !available(null).some((item) => item.id === defaultId)) ||

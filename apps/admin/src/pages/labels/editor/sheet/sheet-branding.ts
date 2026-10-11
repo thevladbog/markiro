@@ -1,5 +1,6 @@
 import {
   DomainError,
+  PALLET_SHEET_FOOTER_CAPABILITY,
   organizationBrandingDescriptorSchema,
   logoFromRgba,
   sheetLogoFingerprint,
@@ -10,6 +11,7 @@ import { API_BASE, apiFetch, apiErrorFromResponse } from "../../../../api/client
 import { loadSheetPreviewLogo } from "./sheet-preview.js";
 export interface SheetPreviewBranding {
   organizationName: string;
+  organizationInn?: string | null;
   logo: SheetLogo;
 }
 interface PreviewBrandingPorts {
@@ -51,7 +53,9 @@ export async function loadCabinetSheetBranding(
 ): Promise<SheetPreviewBranding> {
   try {
     const metadata = organizationBrandingDescriptorSchema.parse(
-      await apiFetch<unknown>("/org/profile/print-branding"),
+      await apiFetch<unknown>("/org/profile/print-branding", {
+        headers: { "x-station-capabilities": PALLET_SHEET_FOOTER_CAPABILITY },
+      }),
     );
     let bitmap: MonoBitmap;
     if (metadata.logo && metadata.logoRevision && metadata.logoUrl) {
@@ -74,6 +78,9 @@ export async function loadCabinetSheetBranding(
     } else bitmap = await (ports.loadMarkiroLogo ?? (() => loadSheetPreviewLogo(false)))();
     return {
       organizationName: metadata.organizationName,
+      ...(metadata.organizationInn !== undefined
+        ? { organizationInn: metadata.organizationInn }
+        : {}),
       logo: {
         ...bitmap,
         digest: sheetLogoFingerprint(bitmap),

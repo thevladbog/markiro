@@ -40,6 +40,7 @@ export interface PalletSheetContext {
   itemCount: number;
   shiftNumber: string | null;
   organizationName: string;
+  organizationInn?: string | null;
   logo: SheetLogo;
 }
 export interface SheetGeometry {
@@ -280,6 +281,17 @@ export async function renderPalletSheet(
         };
       } else
         block = { width, height: valueHeight, paints: [{ x: align(bitmap.width), y: 0, bitmap }] };
+      if (node.kind === "field" && node.underline) {
+        const thickness = Math.max(1, d(node.underline.thicknessMm));
+        const y = bitmap.height + d(node.underline.gapMm);
+        block.paints.push({
+          nodeId: `${node.id}-underline`,
+          x: 0,
+          y,
+          bitmap: rectangleBitmap(width, thickness, thickness, true),
+        });
+        block.height = Math.max(block.height, y + thickness);
+      }
     } else if (node.kind === "organization_logo") {
       const maxHeight = d(node.maxHeightMm),
         naturalWidth = Math.max(
@@ -422,8 +434,45 @@ export async function renderPalletSheet(
     1,
     "IBM Plex Mono",
   );
-  const gap = d(2),
-    footerHeight = caption.height + gap + bars.height + gap + hri.height;
+  const gap = d(2);
+  const brandingCaption = spec.footer.caption;
+  const captionPaints: Paint[] = [];
+  let brandingHeight = 0;
+  if (brandingCaption) {
+    const thickness = Math.max(1, d(brandingCaption.separatorThicknessMm));
+    const spacing = d(brandingCaption.gapMm);
+    const inn =
+      brandingCaption.showInn && context.organizationInn ? `ИНН ${context.organizationInn}` : "";
+    const both = Boolean(inn && brandingCaption.platformText);
+    const textWidth = both ? Math.floor((usableWidth - gap) / 2) : usableWidth;
+    const left = inn
+      ? await paintText("footer-caption", inn, textWidth, brandingCaption.fontSizePt)
+      : null;
+    const right = brandingCaption.platformText
+      ? await paintText(
+          "footer-caption",
+          brandingCaption.platformText,
+          textWidth,
+          brandingCaption.fontSizePt,
+        )
+      : null;
+    brandingHeight =
+      spacing + thickness + spacing + Math.max(left?.height ?? 0, right?.height ?? 0);
+    captionPaints.push({
+      x: 0,
+      y: spacing,
+      bitmap: rectangleBitmap(usableWidth, thickness, thickness, true),
+    });
+    if (left) captionPaints.push({ x: 0, y: spacing + thickness + spacing, bitmap: left });
+    if (right)
+      captionPaints.push({
+        x: usableWidth - right.width,
+        y: spacing + thickness + spacing,
+        bitmap: right,
+      });
+  }
+  const barcodeHeight = caption.height + gap + bars.height + gap + hri.height;
+  const footerHeight = barcodeHeight + brandingHeight;
   const footerTop = bounds.bottom - footerHeight;
   const body = await layoutStack(spec.body, usableWidth, d(2));
   if (body.height > footerTop - bounds.top - gap)
@@ -472,6 +521,23 @@ export async function renderPalletSheet(
       widthMm: (footerWidth * 25.4) / 300,
       heightMm: (footerHeight * 25.4) / 300,
     });
+    if (brandingCaption) {
+      for (const paint of captionPaints)
+        pasteMonoBitmap(
+          page,
+          paint.bitmap,
+          offset + bounds.left + paint.x,
+          footerTop + barcodeHeight + paint.y,
+        );
+      regions.push({
+        id: `${spec.footer.id}-caption`,
+        copy,
+        leftMm: ((offset + bounds.left) * 25.4) / 300,
+        topMm: ((footerTop + barcodeHeight) * 25.4) / 300,
+        widthMm: (usableWidth * 25.4) / 300,
+        heightMm: (brandingHeight * 25.4) / 300,
+      });
+    }
     pasteMonoBitmap(
       page,
       caption,

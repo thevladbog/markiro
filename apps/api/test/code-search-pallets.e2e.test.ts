@@ -358,7 +358,7 @@ describe.skipIf(!ready)("code search pallet card e2e", () => {
         .expect(200)
         .expect("Content-Type", /text\/html/);
       expect(a4.text).toContain("@page { size: A4;");
-      expect(a4.text).toContain("ПАЛЛЕТА");
+      expect(a4.text).toContain("ПАЛЕТА");
       expect(a4.text).toContain(`(00)${palletSscc}`);
       expect(a4.text).toContain("Cola");
       expect(a4.text).toContain(VALID_GTIN14);

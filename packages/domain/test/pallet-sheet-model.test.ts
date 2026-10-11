@@ -305,3 +305,66 @@ describe("strict pallet sheet geometry and elements", () => {
     expect(domain.parseStoredLabelTemplate({ ...spec, body })).toEqual({ ...spec, body });
   });
 });
+
+describe("optional A4 print branding", () => {
+  const caption = {
+    fontSizePt: 8,
+    separatorThicknessMm: 0.15,
+    gapMm: 1,
+    showInn: true,
+    platformText: "Сформировано в Маркиро",
+  };
+  it("round-trips underline and caption without adding fields to legacy JSON", () => {
+    const legacy = makeSheetSpec();
+    expect(domain.parsePalletSheetSpec(legacy)).toEqual(legacy);
+    const spec = {
+      ...legacy,
+      body: [
+        {
+          id: "product",
+          kind: "field",
+          field: "product.printName",
+          fontSizePt: 22,
+          underline: { thicknessMm: 0.25, gapMm: 1 },
+        },
+      ],
+      footer: { ...legacy.footer, caption },
+    };
+    const parsed = domain.parsePalletSheetSpec(spec);
+    expect(parsed).toEqual(spec);
+    expect(domain.parsePalletSheetSpec(JSON.parse(JSON.stringify(parsed)))).toEqual(spec);
+    expect(domain.palletSheetRequiresFooterCapability(parsed)).toBe(true);
+    expect(domain.palletSheetRequiresFooterCapability(legacy)).toBe(false);
+  });
+  it.each([0, -1, 2, NaN])("rejects invalid caption separator %s", (separatorThicknessMm) => {
+    const spec = makeSheetSpec();
+    expect(() =>
+      domain.parsePalletSheetSpec({
+        ...spec,
+        footer: { ...spec.footer, caption: { ...caption, separatorThicknessMm } },
+      }),
+    ).toThrow(domain.DomainError);
+  });
+  it("detects underline in a nested group without a caption", () => {
+    const spec = makeSheetSpec();
+    const parsed = domain.parsePalletSheetSpec({
+      ...spec,
+      body: [
+        {
+          id: "group",
+          kind: "stack",
+          children: [
+            {
+              id: "product",
+              kind: "field",
+              field: "product.printName",
+              fontSizePt: 22,
+              underline: { thicknessMm: 0.25, gapMm: 1 },
+            },
+          ],
+        },
+      ],
+    });
+    expect(domain.palletSheetRequiresFooterCapability(parsed)).toBe(true);
+  });
+});

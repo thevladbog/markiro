@@ -8,7 +8,6 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { buildPalletSheetPresets } from "@markiro/domain";
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
 describe.skipIf(!databaseUrl)("pallet sheet migration", () => {
@@ -87,31 +86,35 @@ describe.skipIf(!databaseUrl)("pallet sheet migration", () => {
       [legacyId],
     );
     await pool.query(seedSql);
-    const presets = await pool.query(
+    const presets = await pool.query<{ seed_key: string; spec: Record<string, unknown> }>(
       "SELECT seed_key,name,spec,format,revision FROM label_templates WHERE tenant_id='sheet-a' AND seed_key IS NOT NULL ORDER BY seed_key",
     );
-    expect(presets.rows).toEqual(
-      buildPalletSheetPresets()
-        .map((p) => ({
-          seed_key: p.key,
-          name: p.name,
-          spec: p.spec,
-          format: "pallet_sheet_v2",
-          revision: 1,
-        }))
-        .sort((a, b) => a.seed_key.localeCompare(b.seed_key)),
+    // Migration 0183 is immutable; current presets may evolve for new organizations.
+    const historicalPresets: unknown = JSON.parse(
+      await readFile(
+        new URL("./support/pallet-sheet-migration-0183-presets.json", import.meta.url),
+        "utf8",
+      ),
     );
+    expect(presets.rows).toEqual(historicalPresets);
+    const portrait = presets.rows.find((p) => p.seed_key === "pallet-a4-portrait");
+    if (!portrait) throw new Error("Historical portrait preset is missing");
+    const editedSpec = {
+      ...portrait.spec,
+      custom: "preserve saved edits",
+    };
     await pool.query(
-      "UPDATE label_templates SET name='Custom',enabled=false,revision=2 WHERE tenant_id='sheet-a' AND seed_key='pallet-a4-portrait'",
+      "UPDATE label_templates SET name='Custom',enabled=false,revision=2,spec=$1 WHERE tenant_id='sheet-a' AND seed_key='pallet-a4-portrait'",
+      [editedSpec],
     );
     await pool.query(seedSql);
     expect(
       (
         await pool.query(
-          "SELECT name,enabled,revision FROM label_templates WHERE tenant_id='sheet-a' AND seed_key='pallet-a4-portrait'",
+          "SELECT name,enabled,revision,spec FROM label_templates WHERE tenant_id='sheet-a' AND seed_key='pallet-a4-portrait'",
         )
       ).rows,
-    ).toEqual([{ name: "Custom", enabled: false, revision: 2 }]);
+    ).toEqual([{ name: "Custom", enabled: false, revision: 2, spec: editedSpec }]);
     expect(
       (await pool.query("SELECT spec,format,revision FROM label_templates WHERE id=$1", [legacyId]))
         .rows,

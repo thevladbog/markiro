@@ -53,3 +53,18 @@ it("loads a private configured logo and refuses failure instead of substituting 
   await expect(loadCabinetSheetBranding({ loadMarkiroLogo: fallback })).rejects.toThrow();
   expect(fallback).not.toHaveBeenCalled();
 });
+
+it("opts into INN for A4 previews while accepting older API descriptors", async () => {
+  vi.mocked(apiFetch).mockResolvedValue({
+    organizationName: "Plant",
+    organizationInn: "9705119097",
+    logoRevision: null,
+    logoUrl: null,
+    logo: null,
+  });
+  const actual = await loadCabinetSheetBranding({ loadMarkiroLogo: async () => bitmap });
+  expect(actual).toHaveProperty("organizationInn", "9705119097");
+  expect(apiFetch).toHaveBeenCalledWith("/org/profile/print-branding", {
+    headers: { "x-station-capabilities": "pallet-sheet-footer-v1" },
+  });
+});

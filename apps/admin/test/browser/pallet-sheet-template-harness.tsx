@@ -60,6 +60,7 @@ if (params.has("editor")) {
       const actual = await loadCabinetSheetBranding();
       context.logo = actual.logo;
       context.organizationName = actual.organizationName;
+      if (actual.organizationInn !== undefined) context.organizationInn = actual.organizationInn;
       const source = await fetch("/test/browser/branding-company.webp").then((response) =>
         response.blob(),
       );
@@ -73,10 +74,16 @@ if (params.has("editor")) {
       document.documentElement.dataset.brandingSize = `${actual.logo.width}x${actual.logo.height}`;
     }
     const spec = { ...preset.spec, footer: { ...preset.spec.footer, barHeightMm: 45 } };
-    const admin = await renderSheetPreview(spec, context, adminText),
+    if (params.has("inn")) context.organizationInn = "9705119097";
+    const printed: string[] = [];
+    const admin = await renderSheetPreview(spec, context, async (text, options) => {
+        printed.push(text);
+        return adminText(text, options);
+      }),
       station = await renderSheetPreview(spec, context, stationText);
     const bytes = encodeMonoRaster(admin),
       other = encodeMonoRaster(station);
+    document.documentElement.dataset.sheetText = JSON.stringify(printed);
     document.documentElement.dataset.sheetParity = String(
       bytes.length === other.length && bytes.every((byte, index) => byte === other[index]),
     );

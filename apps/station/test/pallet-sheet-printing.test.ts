@@ -543,3 +543,35 @@ it("accepts an explicit A4 setup snapshot but preserves production-purpose and S
     work.close();
   }
 });
+
+it("rebuilds a prepared sheet using frozen INN after live branding and template changes", async () => {
+  const stored = JSON.parse(serializeOrganizationBranding(branding));
+  const { digest: oldDigest, ...oldContent } = stored;
+  void oldDigest;
+  const frozenContent = { ...oldContent, organizationInn: "9705119097" };
+  const frozen = parseOrganizationBranding(
+    JSON.stringify({ ...frozenContent, digest: productLabelValueDigest(frozenContent) }),
+  );
+  const recorded: string[] = [];
+  const text = vi.fn(async (value: string) => {
+    recorded.push(value);
+    return rasterize();
+  });
+  const prepared = await preparePalletSheet(
+    { profile, template: template(), facts, branding: frozen, geometry },
+    text,
+  );
+  expect(recorded).toContain("ИНН 9705119097");
+  recorded.length = 0;
+  const liveContent = { ...frozenContent, organizationInn: "123456789012" };
+  const live = parseOrganizationBranding(
+    JSON.stringify({ ...liveContent, digest: productLabelValueDigest(liveContent) }),
+  );
+  expect(live.organizationInn).toBe("123456789012");
+  expect(await rebuildPalletSheet(prepared.renderSnapshot, text)).toEqual(prepared.bytes);
+  expect(recorded).toContain("ИНН 9705119097");
+  expect(recorded).not.toContain("ИНН 123456789012");
+  expect(parseOrganizationBranding(prepared.renderSnapshot.brandingJson).digest).toBe(
+    frozen.digest,
+  );
+});

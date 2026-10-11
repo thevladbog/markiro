@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <body>
+    <output id="result">Loading</output>
+    <script type="module">
+      import { loadBundledMarkiroLogo } from "../../src/lib/organization-branding.ts";
+      loadBundledMarkiroLogo().then(
+        (bitmap) => {
+          document.querySelector("#result").textContent = JSON.stringify({
+            width: bitmap.width,
+            height: bitmap.height,
+            hasInk: bitmap.pixels.some((byte) => byte !== 0),
+          });
+        },
+        (error) => {
+          document.querySelector("#result").textContent = error.message;
+        },
+      );
+    </script>
+  </body>
+</html>

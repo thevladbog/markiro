@@ -512,3 +512,8 @@ export {
   THERMAL_LABEL_BRANDING_PROTOCOL,
 } from "./labels/thermal-compatibility.js";
 export { renderLabelLogo } from "./labels/label-logo.js";
+
+export {
+  PALLET_SHEET_FOOTER_CAPABILITY,
+  palletSheetRequiresFooterCapability,
+} from "./labels/pallet-sheet-model.js";
