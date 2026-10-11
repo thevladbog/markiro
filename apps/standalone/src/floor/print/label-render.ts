@@ -7,14 +7,16 @@ import {
   type RasterizeTextFn,
 } from "@markiro/domain";
 
-import { rasterizeText } from "../../labels/rasterizer.js";
-import type { PrinterDpi, PrinterLanguage } from "../setup/workstation-settings.js";
+import { rasterizeDriverText, rasterizeText } from "../../labels/rasterizer.js";
+import type { PrinterDpi, PrinterLanguage, PrinterMode } from "../setup/workstation-settings.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
 
 /** What a render needs of a printer: its language and its resolution. */
 export interface LabelPrinter {
   language: PrinterLanguage;
   dpi: PrinterDpi;
+  /** `windows_driver` — a `mono-raster-v1` page for the Windows driver (plan ДРВ); absent — the language. */
+  mode?: PrinterMode;
 }
 
 /** A label's fields, as the domain gives them for its template. */
@@ -98,19 +100,33 @@ export function palletLabelData(
  * the app's rasterizer — the same model the office previews, so the print
  * and the preview do not drift. A text too large for the canvas rejects with
  * `RasterTooLargeError`; any failure rejects, and the caller records the
- * label as `render_failed`.
+ * label as `render_failed`. For a printer in driver mode the bytes are a
+ * `mono-raster-v1` page (`renderMonoLabel` + `encodeMonoRaster`), with
+ * `rasterizeDriverText` unless a rasterizer is given; the same template,
+ * fields and resolution as the RAW path.
  */
 export async function renderLabel(
   spec: LabelTemplateSpec,
   fields: LabelFields,
   printer: LabelPrinter,
-  rasterize: RasterizeTextFn = rasterizeText,
+  rasterize?: RasterizeTextFn,
 ): Promise<Uint8Array> {
-  const { generateTspl, generateZpl } = await import("./label-emitters.js");
+  const emitters = await import("./label-emitters.js");
   const printSpec = withPrinterDpi(spec, printer.dpi);
+  if (printer.mode === "windows_driver") {
+    // The template drawn to the dot at the printer's resolution; the driver
+    // prints it 1:1 (plan ДРВ). Text only from the bundled face.
+    const page = await emitters.renderMonoLabel(
+      printSpec,
+      fields,
+      rasterize ?? rasterizeDriverText,
+    );
+    return emitters.encodeMonoRaster(page);
+  }
+  const options = { rasterizeText: rasterize ?? rasterizeText };
   const text =
     printer.language === "tspl"
-      ? await generateTspl(printSpec, fields, { rasterizeText: rasterize })
-      : await generateZpl(printSpec, fields, { rasterizeText: rasterize });
+      ? await emitters.generateTspl(printSpec, fields, options)
+      : await emitters.generateZpl(printSpec, fields, options);
   return latin1ToBytes(text);
 }

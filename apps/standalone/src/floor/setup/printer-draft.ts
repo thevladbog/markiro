@@ -5,8 +5,10 @@
 import type { PrintTarget } from "../../hardware/hardware.js";
 import {
   parsePrinterProfile,
+  printerMode,
   type PrinterDpi,
   type PrinterLanguage,
+  type PrinterMode,
   type PrinterProfile,
 } from "./workstation-settings.js";
 
@@ -26,6 +28,8 @@ export interface PrinterDraft {
   usbPrinter: string;
   language: PrinterLanguage;
   dpi: `${PrinterDpi}`;
+  /** Read only for a Windows queue (plan ДРВ): another kind always prints RAW. */
+  mode: PrinterMode;
 }
 
 export const NEW_PRINTER: PrinterDraft = {
@@ -39,6 +43,7 @@ export const NEW_PRINTER: PrinterDraft = {
   usbPrinter: "",
   language: "zpl",
   dpi: "203",
+  mode: "raw",
 };
 
 export function draftOf(profile: PrinterProfile): PrinterDraft {
@@ -55,6 +60,7 @@ export function draftOf(profile: PrinterProfile): PrinterDraft {
     usbPrinter: target.kind === "usb" ? target.printer : "",
     language: profile.language,
     dpi: profile.dpi === 300 ? "300" : "203",
+    mode: printerMode(profile),
   };
 }
 
@@ -65,7 +71,11 @@ function wholeNumber(text: string): number | null {
   return /^[0-9]+$/.test(text.trim()) ? Number(text.trim()) : null;
 }
 
-/** The profile a draft describes, or the first thing wrong with it. */
+/**
+ * The profile a draft describes, or the first thing wrong with it. The
+ * driver's mode is written only for a Windows queue; RAW is no field at all,
+ * as every profile before plan ДРВ.
+ */
 export function profileOf(
   draft: PrinterDraft,
   newId: () => string,
@@ -86,12 +96,14 @@ export function profileOf(
     if (draft.usbPrinter.trim() === "") return { error: "usbPrinter" };
     target = { kind: "usb", printer: draft.usbPrinter };
   }
+  const driver = draft.kind === "usb" && draft.mode === "windows_driver";
   const profile = parsePrinterProfile({
     id: draft.id ?? newId(),
     name: draft.name,
     target,
     language: draft.language,
     dpi: Number(draft.dpi),
+    ...(driver ? { mode: "windows_driver" } : {}),
   });
   return profile === null ? { error: "name" } : { profile };
 }

@@ -607,6 +607,7 @@
           "usb": "Принтер Windows: {{printer}}"
         },
         "format": "{{language}} · {{dpi}} dpi",
+        "formats": { "windowsDriver": "Драйвер Windows" },
         "editor": {
           "titleNew": "Новый принтер",
           "titleEdit": "Принтер «{{name}}»",

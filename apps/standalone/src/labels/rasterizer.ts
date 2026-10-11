@@ -162,3 +162,23 @@ export const rasterizeText: RasterizeTextFn = async (text, options) => {
     throw error instanceof Error ? error : new Error(String(error));
   }
 };
+
+/**
+ * The rasterizer of a driver page (plan ДРВ, the cloud station's
+ * `rasterizeDriverText`): the page's pixels are frozen into the job's bytes
+ * and replayed by a reprint, so a text is drawn only with the bundled IBM Plex
+ * face loaded for its own script — a webview without `document.fonts`, or a
+ * face that did not load, refuses (`RasterUnavailableError`, the job's
+ * `render_failed`) instead of freezing a fallback face.
+ */
+export const rasterizeDriverText: RasterizeTextFn = async (text, options) => {
+  const font = fontShorthand(options.fontFamily, options.fontSizePx, options.bold);
+  const sample = text === "" ? "Аа" : text;
+  const fonts: FontFaceSet | undefined = document.fonts;
+  if (fonts === undefined) throw new RasterUnavailableError("Font loading is unavailable");
+  const loaded = await fonts.load(font, sample);
+  if (loaded.length === 0 || !fonts.check(font, sample)) {
+    throw new RasterUnavailableError("The bundled label font is unavailable");
+  }
+  return rasterizeTextSync(text, options);
+};

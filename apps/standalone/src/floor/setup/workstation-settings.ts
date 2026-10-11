@@ -21,6 +21,15 @@ export const PRINTER_DPIS = [203, 300] as const;
 export type PrinterDpi = (typeof PRINTER_DPIS)[number];
 
 /**
+ * How the label reaches the printer (plan ДРВ): `raw` — in the printer's own
+ * language (ZPL/TSPL) over TCP, COM or a Windows queue with datatype RAW;
+ * `windows_driver` — a `mono-raster-v1` page drawn by the queue's Windows
+ * driver, allowed only for a Windows queue.
+ */
+export const PRINTER_MODES = ["raw", "windows_driver"] as const;
+export type PrinterMode = (typeof PRINTER_MODES)[number];
+
+/**
  * A printer of this workstation: where it is, its language and its
  * resolution. A job keeps a copy of the profile it was rendered for, so an
  * edit here never changes a label already prepared.
@@ -31,6 +40,13 @@ export interface PrinterProfile {
   target: PrintTarget;
   language: PrinterLanguage;
   dpi: PrinterDpi;
+  /**
+   * Absent — `raw`: every profile stored before plan ДРВ, and every RAW
+   * profile since (the form writes the field only for the driver), so a job's
+   * stored printer snapshot reads as it did. `language` stays for a profile
+   * in driver mode: the last RAW language, for switching back.
+   */
+  mode?: PrinterMode;
 }
 
 /** The workstation's sound: the verdict tones' level, 0–100, or none at all. */
@@ -160,6 +176,11 @@ export function printerTargetKey(target: PrintTarget): string {
   }
 }
 
+/** A profile's way of printing: `raw` unless it says `windows_driver`. */
+export function printerMode(profile: Pick<PrinterProfile, "mode">): PrinterMode {
+  return profile.mode ?? "raw";
+}
+
 /** A printer profile, or `null` for anything this build cannot print with. */
 export function parsePrinterProfile(value: unknown): PrinterProfile | null {
   const row = record(value);
@@ -169,8 +190,12 @@ export function parsePrinterProfile(value: unknown): PrinterProfile | null {
   const target = parsePrintTarget(row["target"]);
   const language = PRINTER_LANGUAGES.find((candidate) => candidate === row["language"]);
   const dpi = PRINTER_DPIS.find((candidate) => candidate === row["dpi"]);
+  const mode = PRINTER_MODES.find((candidate) => candidate === row["mode"]);
   if (id === null || name === null || target === null || !language || !dpi) return null;
-  return { id, name, target, language, dpi };
+  // A way of printing this build does not know is no profile; the driver prints to a Windows queue only.
+  if (row["mode"] !== undefined && mode === undefined) return null;
+  if (mode === "windows_driver" && target.kind !== "usb") return null;
+  return { id, name, target, language, dpi, ...(mode === undefined ? {} : { mode }) };
 }
 
 /**
