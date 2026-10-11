@@ -4,6 +4,7 @@
 
 mod support;
 
+use axum::body::Body;
 use axum::http::StatusCode;
 use serde_json::{json, Value};
 use support::app::{
@@ -286,6 +287,16 @@ async fn the_same_import_again_answers_its_summary_and_another_is_refused() {
     assert_eq!(audit_rows(&admin.app).await, audits);
     assert!(!wake.has_changed().unwrap());
 
+    // A dry run of an import already done is no dry run: it answers what the
+    // import did, marked as a repeat.
+    let (status, dry) = admin
+        .call("POST", IMPORT, Some(cloud_import_request(IMPORT_ID, true)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{dry}");
+    assert_eq!(dry, expected);
+    assert_eq!(host_revision(&admin.app).await, after);
+    assert_eq!(audit_rows(&admin.app).await, audits);
+
     let imported_at: String =
         sqlx::query_scalar("SELECT at FROM audit_log WHERE action = 'import.cloud'")
             .fetch_one(&admin.app.state.pool)
@@ -453,6 +464,11 @@ async fn counters_only_move_forward() {
         )
         .await;
     assert_eq!(status, StatusCode::OK, "{body}");
+    let moved_rev = scalar_i64(
+        &admin,
+        "SELECT rev FROM sscc_counters WHERE issuer_prefix = '460068200' AND extension = 0",
+    )
+    .await;
     sqlx::query("INSERT INTO shift_number_counters (month_key, last_seq) VALUES ('OCT26', 9)")
         .execute(&admin.app.state.pool)
         .await
@@ -477,6 +493,22 @@ async fn counters_only_move_forward() {
             { "monthKey": "OCT26", "lastSeq": 9 },
             { "monthKey": "SEP26", "lastSeq": 41 },
         ])
+    );
+    // A counter the import raised carries the import's revision (a form read
+    // before the import is then stale); the one it kept keeps its own.
+    let import_rev = host_revision(&admin.app).await;
+    let revs: Vec<(String, i64, i64)> =
+        sqlx::query_as("SELECT issuer_prefix, extension, rev FROM sscc_counters ORDER BY 1, 2")
+            .fetch_all(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        revs,
+        [
+            ("460068200".to_owned(), 0, moved_rev),
+            ("460068200".to_owned(), 1, import_rev),
+            ("460123400".to_owned(), 0, import_rev),
+        ]
     );
     let (_, sscc) = admin.call("GET", "/v1/office/sscc", None).await;
     let stands: Vec<(String, u64, u64)> = sscc["counters"]
@@ -599,6 +631,10 @@ async fn the_route_takes_a_body_past_axums_default_up_to_32_mib() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{error}");
     assert_eq!(error["error"]["code"], "validation_failed");
     assert_eq!(error["error"]["details"], Value::Null);
+    assert_eq!(
+        error["error"]["message"],
+        "the body could not be read or is larger than 32 MiB"
+    );
 }
 
 /// Nothing the import writes, and nothing it logs, appears after a refused
@@ -957,4 +993,525 @@ async fn neither_the_answer_nor_the_audit_trail_holds_a_verifier() {
     for secret in secrets {
         assert!(!seen.contains(&secret), "a verifier reached the record");
     }
+}
+
+/// A stored value differs from the file's. Names the field only: the fields
+/// compared this way are verifiers, and a failure must not print them.
+fn same(field: &str, stored: &str, file: &str) {
+    assert!(stored == file, "{field} is not the file's value");
+}
+
+/// `json(true|false)` for a 0/1 column.
+fn flag(column: &str) -> String {
+    format!("json(CASE WHEN {column} = 1 THEN 'true' ELSE 'false' END)")
+}
+
+/// One stored row spelled as the file spells it: `json_object` over
+/// `(file key, SQL expression)` pairs.
+async fn stored_row(admin: &Admin, table: &str, key: &str, columns: &[(&str, String)]) -> Value {
+    let pairs: Vec<String> = columns
+        .iter()
+        .map(|(name, sql)| format!("'{name}', {sql}"))
+        .collect();
+    let text: Option<String> = sqlx::query_scalar(&format!(
+        "SELECT json_object({}) FROM {table} WHERE {key}",
+        pairs.join(", ")
+    ))
+    .fetch_optional(&admin.app.state.pool)
+    .await
+    .unwrap();
+    serde_json::from_str(&text.unwrap_or_else(|| panic!("{table} {key} was not written"))).unwrap()
+}
+
+/// Every row of `file_rows` is in `table` with each field the file gives it
+/// (`columns`: file key and SQL expression; `fixed` overrides what the file
+/// does not say: the revision, the flags the import sets), the table holds
+/// no other row of `filter`, and each `secrets` column (file key, column)
+/// equals the file's without a value reaching a failure message.
+async fn assert_rows_are_the_files(
+    admin: &Admin,
+    table: &str,
+    filter: &str,
+    file_rows: &[Value],
+    columns: &[(&str, String)],
+    fixed: &Value,
+    secrets: &[(&str, &str)],
+) {
+    let mut ids: Vec<String> = sqlx::query_scalar(&format!(
+        "SELECT id FROM {table} WHERE {filter} ORDER BY id"
+    ))
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let mut file_ids: Vec<String> = file_rows
+        .iter()
+        .map(|row| row["id"].as_str().unwrap().to_owned())
+        .collect();
+    ids.sort();
+    file_ids.sort();
+    assert_eq!(ids, file_ids, "{table}: the rows are not the file's");
+    for row in file_rows {
+        let id = row["id"].as_str().unwrap();
+        let expected: serde_json::Map<String, Value> = columns
+            .iter()
+            .map(|(name, _)| {
+                let value = fixed.get(*name).unwrap_or(&row[*name]);
+                ((*name).to_owned(), value.clone())
+            })
+            .collect();
+        let stored = stored_row(admin, table, &format!("id = '{id}'"), columns).await;
+        assert_eq!(stored, Value::Object(expected), "{table} {id}");
+        for (name, column) in secrets {
+            let stored: String =
+                sqlx::query_scalar(&format!("SELECT {column} FROM {table} WHERE id = ?"))
+                    .bind(id)
+                    .fetch_one(&admin.app.state.pool)
+                    .await
+                    .unwrap();
+            same(
+                &format!("{table} {id} {name}"),
+                &stored,
+                row[*name].as_str().unwrap(),
+            );
+        }
+    }
+}
+
+fn col(name: &str) -> (&str, String) {
+    (name, name.to_owned())
+}
+
+/// Every field of every row of the file reaches its own column (a swapped
+/// bind, a value lost to NULL or a default would corrupt the catalog for
+/// good). Table-driven from the golden transfer file; nothing is retyped.
+#[tokio::test]
+async fn every_field_of_the_file_reaches_its_own_column() {
+    let admin = admin().await;
+    let file = fixture("cloud-export-file.json");
+    let payload = &file["payload"];
+    let pool = &admin.app.state.pool;
+
+    let present: Vec<String> = sqlx::query_scalar("SELECT name_key FROM lines WHERE archived = 0")
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    let sscc_before: Vec<(String, i64, i64, i64)> =
+        sqlx::query_as("SELECT issuer_prefix, extension, next_serial, rev FROM sscc_counters")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    let shifts_before: Vec<(String, i64)> =
+        sqlx::query_as("SELECT month_key, last_seq FROM shift_number_counters")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    let before = host_revision(&admin.app).await;
+
+    let (status, summary) = admin
+        .call("POST", IMPORT, Some(cloud_import_request(IMPORT_ID, false)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    let rev = before + 1;
+    let at: String = sqlx::query_scalar("SELECT at FROM audit_log WHERE action = 'import.cloud'")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    let rows = |key: &str| payload[key].as_array().unwrap().clone();
+
+    // Lines: the wizard's «Линия 1» stays; the others are created, active.
+    let created: Vec<Value> = rows("lines")
+        .into_iter()
+        .filter(|line| !present.contains(&line["name"].as_str().unwrap().to_lowercase()))
+        .collect();
+    assert!(!created.is_empty() && created.len() < rows("lines").len());
+    let mut line_columns = vec![col("id"), col("name"), ("nameKey", "name_key".to_owned())];
+    line_columns.push(("archived", flag("archived")));
+    line_columns.push(("rev", "rev".to_owned()));
+    let created_ids: Vec<String> = created
+        .iter()
+        .map(|line| format!("'{}'", line["id"].as_str().unwrap()))
+        .collect();
+    let with_keys: Vec<Value> = created
+        .iter()
+        .map(|line| {
+            let mut line = line.clone();
+            line["nameKey"] = json!(line["name"].as_str().unwrap().to_lowercase());
+            line
+        })
+        .collect();
+    assert_rows_are_the_files(
+        &admin,
+        "lines",
+        &format!("id IN ({})", created_ids.join(", ")),
+        &with_keys,
+        &line_columns,
+        &json!({ "archived": false, "rev": rev }),
+        &[],
+    )
+    .await;
+    assert_eq!(
+        scalar_i64(&admin, "SELECT COUNT(*) FROM lines").await,
+        i64::try_from(present.len() + created.len()).unwrap(),
+        "lines: a row the file does not name"
+    );
+
+    assert_rows_are_the_files(
+        &admin,
+        "counterparties",
+        "1 = 1",
+        &rows("counterparties"),
+        &[
+            col("id"),
+            col("name"),
+            col("inn"),
+            col("gln"),
+            ("gs1Prefixes", "json(gs1_prefixes)".to_owned()),
+            ("archived", flag("archived")),
+            col("rev"),
+        ],
+        &json!({ "archived": false, "rev": rev }),
+        &[],
+    )
+    .await;
+
+    assert_rows_are_the_files(
+        &admin,
+        "label_templates",
+        "stock = 0",
+        &rows("templates"),
+        &[
+            col("id"),
+            col("name"),
+            col("purpose"),
+            ("enabled", flag("enabled")),
+            ("chzProductGroupCodes", "json(category_codes)".to_owned()),
+            ("spec", "json(spec)".to_owned()),
+            col("stock"),
+            col("rev"),
+        ],
+        &json!({ "stock": 0, "rev": rev }),
+        &[],
+    )
+    .await;
+
+    assert_rows_are_the_files(
+        &admin,
+        "products",
+        "1 = 1",
+        &rows("products"),
+        &[
+            col("id"),
+            col("gtin14"),
+            col("name"),
+            ("printName", "print_name".to_owned()),
+            ("chzProductGroupCode", "chz_group_code".to_owned()),
+            ("boxCapacity", "box_capacity".to_owned()),
+            ("palletBoxCapacity", "pallet_box_capacity".to_owned()),
+            ("shelfLifeDays", "shelf_life_days".to_owned()),
+            ("defaultBoxTemplateId", "default_box_template_id".to_owned()),
+            (
+                "defaultPalletTemplateId",
+                "default_pallet_template_id".to_owned(),
+            ),
+            ("archived", flag("archived")),
+            col("rev"),
+        ],
+        &json!({ "rev": rev }),
+        &[],
+    )
+    .await;
+
+    assert_rows_are_the_files(
+        &admin,
+        "operators",
+        "1 = 1",
+        &rows("operators"),
+        &[
+            col("id"),
+            col("login"),
+            col("name"),
+            col("role"),
+            ("active", flag("active")),
+            col("rev"),
+        ],
+        &json!({ "rev": rev }),
+        &[("pinPhc", "pin_phc")],
+    )
+    .await;
+
+    assert_rows_are_the_files(
+        &admin,
+        "operator_badges",
+        "1 = 1",
+        &rows("badges"),
+        &[
+            col("id"),
+            ("operatorId", "operator_id".to_owned()),
+            col("label"),
+            ("createdAt", "created_at".to_owned()),
+            ("revokedAt", "revoked_at".to_owned()),
+            col("rev"),
+        ],
+        &json!({ "createdAt": at, "revokedAt": null, "rev": rev }),
+        &[("badgePhc", "badge_phc")],
+    )
+    .await;
+
+    // The salt: the file's, with the revision the feed carries.
+    same(
+        "the badge salt",
+        &site_salt(&admin).await,
+        payload["badgeSalt"].as_str().unwrap(),
+    );
+    assert_eq!(
+        scalar_i64(&admin, "SELECT rev FROM site WHERE id = 1").await,
+        rev
+    );
+
+    // The organization's defaults and the categories'.
+    let defaults = &payload["templateDefaults"];
+    let stored = stored_row(
+        &admin,
+        "org_profile",
+        "id = 1",
+        &[
+            ("defaultBoxTemplateId", "default_box_template_id".to_owned()),
+            (
+                "defaultPalletTemplateId",
+                "default_pallet_template_id".to_owned(),
+            ),
+            ("rev", "rev".to_owned()),
+        ],
+    )
+    .await;
+    assert_eq!(
+        stored,
+        json!({
+            "defaultBoxTemplateId": defaults["defaultBoxTemplateId"],
+            "defaultPalletTemplateId": defaults["defaultPalletTemplateId"],
+            "rev": rev,
+        })
+    );
+    let stored: Vec<String> = sqlx::query_scalar(
+        "SELECT json_object('chzProductGroupCode', chz_group_code, 'purpose', purpose, \
+         'templateId', template_id, 'rev', rev) FROM category_template_defaults \
+         ORDER BY chz_group_code, purpose",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let stored: Vec<Value> = stored
+        .iter()
+        .map(|row| serde_json::from_str(row).unwrap())
+        .collect();
+    let mut expected: Vec<Value> = defaults["categories"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|each| {
+            let mut each = each.clone();
+            each["rev"] = json!(rev);
+            each
+        })
+        .collect();
+    expected.sort_by_key(|each| {
+        (
+            each["chzProductGroupCode"].as_u64().unwrap(),
+            each["purpose"].as_str().unwrap().to_owned(),
+        )
+    });
+    assert_eq!(stored, expected);
+
+    // The counters: the larger of the site's and the file's, with the import's
+    // revision on the ones the file raised.
+    let mut stored: Vec<(String, i64, i64, i64)> = sqlx::query_as(
+        "SELECT issuer_prefix, extension, next_serial, rev FROM sscc_counters \
+         ORDER BY issuer_prefix, extension",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let mut expected: Vec<(String, i64, i64, i64)> = sscc_before.clone();
+    for each in payload["ssccCounters"].as_array().unwrap() {
+        let prefix = each["issuerPrefix"].as_str().unwrap().to_owned();
+        let extension = each["extension"].as_i64().unwrap();
+        let next = i64::try_from(each["nextSerial"].as_u64().unwrap()).unwrap();
+        match expected
+            .iter_mut()
+            .find(|row| row.0 == prefix && row.1 == extension)
+        {
+            Some(row) if next > row.2 => {
+                row.2 = next;
+                row.3 = rev;
+            }
+            Some(_) => {}
+            None => expected.push((prefix, extension, next, rev)),
+        }
+    }
+    stored.sort();
+    expected.sort();
+    assert_eq!(stored, expected, "sscc_counters");
+    let mut stored: Vec<(String, i64)> =
+        sqlx::query_as("SELECT month_key, last_seq FROM shift_number_counters")
+            .fetch_all(pool)
+            .await
+            .unwrap();
+    let mut expected = shifts_before.clone();
+    for each in payload["shiftNumberCounters"].as_array().unwrap() {
+        let key = each["monthKey"].as_str().unwrap().to_owned();
+        let seq = each["lastSeq"].as_i64().unwrap();
+        match expected.iter_mut().find(|row| row.0 == key) {
+            Some(row) => row.1 = row.1.max(seq),
+            None => expected.push((key, seq)),
+        }
+    }
+    stored.sort();
+    expected.sort();
+    assert_eq!(stored, expected, "shift_number_counters");
+}
+
+/// A request that could not be read answers a fixed text. serde's own texts
+/// quote the offending value, and a file edited by hand may hold a verifier
+/// or the salt where a number belongs.
+#[tokio::test]
+async fn an_unreadable_body_is_answered_with_a_fixed_text_that_quotes_nothing() {
+    let admin = admin().await;
+    let file = fixture("cloud-export-file.json");
+    let secrets = [
+        file["payload"]["operators"][0]["pinPhc"].as_str().unwrap(),
+        file["payload"]["badges"][0]["badgePhc"].as_str().unwrap(),
+        file["payload"]["badgeSalt"].as_str().unwrap(),
+    ];
+    const READ: &str = "the body is not a transfer file this host reads";
+    let tech = admin.technologist().await;
+    let before = host_revision(&admin.app).await;
+    for secret in secrets {
+        // A verifier in a number, a flag and a text-or-null position, and as
+        // an unknown field's name.
+        for pointer in [
+            "/payload/products/0/boxCapacity",
+            "/payload/products/0/archived",
+            "/payload/operators/0/active",
+            "/payload/templates/0/chzProductGroupCodes",
+            "/payload/ssccCounters/0/extension",
+            "/formatVersion",
+        ] {
+            let mut body = cloud_import_request(IMPORT_ID, false);
+            *body.pointer_mut(pointer).unwrap() = json!(secret);
+            let (status, error) = admin.call("POST", IMPORT, Some(body)).await;
+            assert_eq!(status, StatusCode::BAD_REQUEST, "{pointer}");
+            assert!(
+                !error.to_string().contains(secret),
+                "the answer to {pointer} quotes a verifier"
+            );
+            assert_eq!(error["error"]["code"], "validation_failed", "{pointer}");
+            assert_eq!(error["error"]["message"], READ, "{pointer}");
+            assert_eq!(error["error"]["details"], Value::Null, "{pointer}");
+        }
+        let mut body = cloud_import_request(IMPORT_ID, false);
+        body["payload"][secret] = json!(1);
+        let (status, error) = admin.call("POST", IMPORT, Some(body)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(
+            !error.to_string().contains(secret),
+            "the answer to an unknown field quotes a verifier"
+        );
+        assert_eq!(error["error"]["message"], READ);
+    }
+
+    // Not JSON at all, and no JSON content type.
+    let builder = || with_session(request("POST", IMPORT), &admin.key, &admin.token);
+    let (status, error) = admin
+        .app
+        .send(
+            builder()
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"importId": "#))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(error["error"]["message"], READ);
+    let (status, error) = admin
+        .app
+        .send(
+            builder()
+                .body(Body::from(
+                    cloud_import_request(IMPORT_ID, false).to_string(),
+                ))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(
+        error["error"]["message"],
+        "Content-Type application/json is required"
+    );
+
+    // The role is checked before the body is read: a technologist who sends
+    // an unreadable body is refused, not told what is wrong with it.
+    let mut body = cloud_import_request(IMPORT_ID, false);
+    body["payload"]["products"][0]["boxCapacity"] = json!("not a number");
+    let (status, error) = admin.call_as(&tech, "POST", IMPORT, Some(body)).await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{error}");
+    let (status, error) = admin
+        .app
+        .send(
+            with_session(request("POST", IMPORT), &admin.key, &tech)
+                .header("content-type", "application/json")
+                .body(Body::from("{"))
+                .unwrap(),
+        )
+        .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{error}");
+    assert_eq!(host_revision(&admin.app).await, before);
+    assert_eq!(imported_rows(&admin).await, [0; 6]);
+}
+
+/// The golden file's two category defaults share a group (8), so a group the
+/// import wrote for every row would pass there: three defaults over two
+/// groups and both purposes, read back as the file names them.
+#[tokio::test]
+async fn category_defaults_keep_their_own_group_and_purpose() {
+    let admin = admin().await;
+    let mut request = cloud_import_request(IMPORT_ID, false);
+    let templates = |index: usize| {
+        request["payload"]["templates"][index]["id"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    let (box_any, box_milk, pallet) = (templates(0), templates(1), templates(2));
+    let categories = json!([
+        { "chzProductGroupCode": 13, "purpose": "box", "templateId": box_any },
+        { "chzProductGroupCode": 8, "purpose": "box", "templateId": box_milk },
+        { "chzProductGroupCode": 13, "purpose": "pallet", "templateId": pallet },
+    ]);
+    request["payload"]["templateDefaults"]["categories"] = categories.clone();
+    let before = host_revision(&admin.app).await;
+    let (status, summary) = admin.call("POST", IMPORT, Some(request)).await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    let stored: Vec<String> = sqlx::query_scalar(
+        "SELECT json_object('chzProductGroupCode', chz_group_code, 'purpose', purpose, \
+         'templateId', template_id, 'rev', rev) FROM category_template_defaults \
+         ORDER BY chz_group_code, purpose",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    let stored: Vec<Value> = stored
+        .iter()
+        .map(|row| serde_json::from_str(row).unwrap())
+        .collect();
+    let mut expected: Vec<Value> = categories.as_array().unwrap().clone();
+    for each in &mut expected {
+        each["rev"] = json!(before + 1);
+    }
+    expected.sort_by_key(|each| {
+        (
+            each["chzProductGroupCode"].as_u64().unwrap(),
+            each["purpose"].as_str().unwrap().to_owned(),
+        )
+    });
+    assert_eq!(stored, expected);
 }

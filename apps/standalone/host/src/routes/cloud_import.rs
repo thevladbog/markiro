@@ -11,7 +11,8 @@
 
 use std::collections::HashSet;
 
-use axum::extract::State;
+use axum::extract::rejection::JsonRejection;
+use axum::extract::{FromRequest, FromRequestParts, Request, State};
 use axum::Json;
 use markiro_proto::cloud_import::{
     CloudImportRequest, CloudImportSummary, ShiftNumberCounterValue, SsccCounterValue,
@@ -23,7 +24,7 @@ use crate::audit::{self, actions, Entry, Outcome};
 use crate::auth::OfficeContext;
 use crate::cloud_import::{self, ValidImport};
 use crate::db::{begin_write, commit_with_revision, next_revision};
-use crate::error::{ApiError, ApiJson};
+use crate::error::ApiError;
 use crate::server::AppState;
 
 /// The route's own body limit: a catalog whose layouts reach 256 KB each
@@ -362,12 +363,44 @@ async fn write(
     })
 }
 
+/// The text a body the host cannot read gets. Fixed: serde's own texts quote
+/// the offending value, and a file edited by hand may hold a verifier or the
+/// salt where a number belongs.
+fn unreadable(rejection: &JsonRejection) -> &'static str {
+    match rejection {
+        JsonRejection::MissingJsonContentType(_) => "Content-Type application/json is required",
+        JsonRejection::BytesRejection(_) => "the body could not be read or is larger than 32 MiB",
+        _ => "the body is not a transfer file this host reads",
+    }
+}
+
+/// The administrator's office session, then the file. The role is checked
+/// before the body is buffered, so a technologist makes the host read and
+/// parse nothing, and every rejection of the body has a fixed text.
+pub struct AdminImport {
+    context: OfficeContext,
+    request: CloudImportRequest,
+}
+
+impl FromRequest<AppState> for AdminImport {
+    type Rejection = ApiError;
+
+    async fn from_request(request: Request, state: &AppState) -> Result<Self, ApiError> {
+        let (mut parts, body) = request.into_parts();
+        let context = OfficeContext::from_request_parts(&mut parts, state).await?;
+        context.require_admin()?;
+        let request = Request::from_parts(parts, body);
+        match Json::<CloudImportRequest>::from_request(request, state).await {
+            Ok(Json(request)) => Ok(Self { context, request }),
+            Err(rejection) => Err(ApiError::malformed(unreadable(&rejection))),
+        }
+    }
+}
+
 pub async fn import(
     State(state): State<AppState>,
-    context: OfficeContext,
-    ApiJson(request): ApiJson<CloudImportRequest>,
+    AdminImport { context, request }: AdminImport,
 ) -> Result<Json<CloudImportSummary>, ApiError> {
-    context.require_admin()?;
     let valid = cloud_import::check(&request)?;
     let at = state.timestamp();
     let mut tx = begin_write(&state.pool).await.map_err(ApiError::internal)?;
