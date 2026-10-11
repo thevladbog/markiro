@@ -7370,3 +7370,136 @@ async fn migration_0012_applies_to_a_host_that_already_holds_shifts_and_boxes() 
     );
     old.close().await.unwrap();
 }
+
+/// A station takes a box apart and packs its codes again, clears an open box and fills it
+/// again, undoes a scan and takes it again — and the records reach the host in one batch (the
+/// cloud's #650 lost such codes: it applied a batch's exceptions after its scans). The host
+/// applies a batch record by record in the station's order, so each exception frees its codes
+/// before the scan that takes them again: every record is accepted, the new scans hold the
+/// codes, and no conflict is written.
+#[tokio::test]
+async fn codes_freed_and_scanned_again_in_one_batch_go_to_the_new_scan() {
+    let (admin, floor) = floor().await;
+    let block = issue_block(&admin.app, &floor.key, BLOCK_REQUEST).await;
+    let shift = floor.shift.as_str();
+    let scan = |n: u32, code: u32, box_n: u32, second: u32| {
+        fact(
+            &record_id(n),
+            "scan",
+            shift,
+            ok_scan(code, &box_id(box_n), &instant(second, 0)),
+        )
+    };
+    let mut disassemble = box_exception("disassemble", &box_id(1), &instant(11, 0));
+    disassemble["reasonCode"] = json!("wrong_quantity");
+    let mut undo = box_exception("undo", &box_id(3), &instant(31, 0));
+    undo["codeHash"] = json!(code_hash(5));
+    undo["targetScannedAt"] = json!(instant(30, 0));
+    let batch = vec![
+        // A closed box taken apart, its codes packed into another box.
+        scan(1, 1, 1, 1),
+        scan(2, 2, 1, 2),
+        fact(
+            &record_id(3),
+            "box_closed",
+            shift,
+            box_closed(
+                &box_id(1),
+                &block,
+                1500,
+                &[1, 2],
+                &instant(1, 0),
+                &instant(10, 0),
+            ),
+        ),
+        fact(&record_id(4), "box_exception", shift, disassemble),
+        scan(5, 1, 2, 12),
+        scan(6, 2, 2, 13),
+        fact(
+            &record_id(7),
+            "box_closed",
+            shift,
+            box_closed(
+                &box_id(2),
+                &block,
+                1501,
+                &[1, 2],
+                &instant(12, 0),
+                &instant(20, 0),
+            ),
+        ),
+        // An open box cleared and filled again.
+        scan(8, 3, 4, 21),
+        fact(
+            &record_id(9),
+            "box_exception",
+            shift,
+            box_exception("clear", &box_id(4), &instant(22, 0)),
+        ),
+        scan(10, 3, 4, 23),
+        // A scan undone and taken again.
+        scan(11, 5, 3, 30),
+        fact(&record_id(12), "box_exception", shift, undo),
+        scan(13, 5, 3, 32),
+    ];
+    let all: Vec<Value> = (1..=13).map(|n| accepted(&record_id(n))).collect();
+    assert_eq!(receipts(&admin.app, &floor.key, &batch).await, all);
+    assert_eq!(conflicts(&admin).await, Vec::<Value>::new());
+    assert_eq!(
+        owned(&admin).await,
+        sorted(vec![
+            (code_hash(1), record_id(5)),
+            (code_hash(2), record_id(6)),
+            (code_hash(3), record_id(10)),
+            (code_hash(5), record_id(13)),
+        ])
+    );
+    assert_eq!(
+        items(&admin, &box_id(1)).await,
+        vec![
+            json!([
+                record_id(1),
+                code_hash(1),
+                instant(1, 0),
+                instant(11, 0),
+                null
+            ]),
+            json!([
+                record_id(2),
+                code_hash(2),
+                instant(2, 0),
+                instant(11, 0),
+                null
+            ]),
+        ]
+    );
+    assert_eq!(
+        items(&admin, &box_id(2)).await,
+        vec![
+            json!([record_id(5), code_hash(1), instant(12, 0), null, null]),
+            json!([record_id(6), code_hash(2), instant(13, 0), null, null]),
+        ]
+    );
+    assert_eq!(
+        items(&admin, &box_id(4)).await,
+        vec![
+            json!([
+                record_id(8),
+                code_hash(3),
+                instant(21, 0),
+                instant(22, 0),
+                null
+            ]),
+            json!([record_id(10), code_hash(3), instant(23, 0), null, null]),
+        ]
+    );
+    // The batch once more: the same receipts, nothing written again.
+    let kept = fact_rows(&admin.app).await;
+    assert_eq!(
+        receipts(&admin.app, &floor.key, &batch).await,
+        (1..=13)
+            .map(|n| accepted(&record_id(n)))
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(fact_rows(&admin.app).await, kept);
+}

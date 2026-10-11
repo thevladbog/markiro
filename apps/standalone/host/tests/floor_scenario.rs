@@ -162,6 +162,18 @@ async fn pallets(admin: &Admin) -> Vec<(i64, Option<i64>, i64, bool)> {
         .collect()
 }
 
+/// The highest serial the closes used, per extension (a box's block 0, a pallet's 1): what
+/// `blocks::consume` keeps for a restore and for the office's counters.
+async fn consumed(admin: &Admin) -> Vec<(i64, Option<i64>)> {
+    sqlx::query_as(
+        "SELECT extension, max(consumed_through) FROM sscc_blocks \
+         GROUP BY extension ORDER BY extension",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap()
+}
+
 /// What the host keeps of the pallets, read by their serials: whether each
 /// label was checked or skipped and the pallet taken apart, the pallet
 /// exceptions with their reasons, and the pallet each box holds.
@@ -284,6 +296,9 @@ async fn the_host_takes_every_record_of_the_stations_shift_once_and_ends_with_it
         pallets(&admin).await,
         vec![(40, Some(2), 2, false), (41, Some(1), 1, true)]
     );
+    // Each kind of block remembers the highest serial its closes used: the third box and the
+    // second pallet (plan ХП; a pallet's close consumes its pallet block like a box's).
+    assert_eq!(consumed(&admin).await, vec![(0, Some(1502)), (1, Some(41))]);
     // What the host kept of them: both labels checked, the exceptions with
     // their reasons, and each box on the pallet it closed on - the box taken
     // apart and the boxes of the pallet taken apart keep theirs.
