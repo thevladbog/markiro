@@ -3328,6 +3328,14 @@ file are the cloud's for the same facts, and that is the acceptance rule.
   (`EXPORT_PARITY_WRITE=1`), and the port follows in the same change. The
   location under `packages/domain` makes `tools/ci/affected.mjs` run both
   suites on any change of the cases.
+  A new cloud format is a host change too: the host takes only the formats of
+  `SHIFT_FORMATS` (`routes/office_exports.rs`) and `proto/fixtures/export-formats.json`,
+  which `test/protocol.test.ts` compares with `SHIFT_EXPORT_FORMATS` (order
+  included) and the host's `the_formats_the_host_takes_are_the_fixtures` with
+  the Rust list. Both now carry the eleven shift formats, among them
+  `shift_txt_boxes_reversed` (1), the cloud's #681 (the codes of a box, then
+  its SSCC); the golden's 218 older entries did not change when its 21 keys
+  were added.
 - The dialog (`ExportDialog.tsx`, from «Смены» and from the shift's card)
   offers the cloud's formats (the pallets formats only for a shift with
   pallets), each with what its source would refuse now, the line limit
@@ -3759,7 +3767,11 @@ either; a file log is stage 5.
     TCP 9100, a COM port and a USB spooler queue: the label's size and
     position, a long Cyrillic name (IBM Plex through the WebView2 canvas,
     including a canvas near 4096 dots), the dates, and the printed SSCC and
-    barcode read back by the client's scanner and equal to the box's; the same
+    barcode read back by the client's scanner and equal to the box's (since the
+    cloud's #692 the domain writes the TSPL SSCC as the native `EAN128` barcode
+    holding `00` and the 18 digits, no longer a `128` with a literal `!1`: on
+    a TSC the scan must read `00` + the SSCC and no `!1`; ZPL is unchanged;
+    no TSC has been tried); the same
     template matches the office preview; the size of a stock label's stored
     base64 at each resolution;
   - the test print and its scan back on each printer and each connection;
