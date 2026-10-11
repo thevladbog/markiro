@@ -67,6 +67,7 @@ pub enum TableClass {
 /// database»), and keeping the lockout counters across a forget is an open
 /// owner question.
 pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
+    ("floor_block_drops", TableClass::DeviceData),
     ("floor_block_requests", TableClass::DeviceData),
     ("floor_boxes", TableClass::DeviceData),
     ("floor_codes", TableClass::DeviceData),

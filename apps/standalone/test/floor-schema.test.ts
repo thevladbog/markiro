@@ -64,9 +64,17 @@ const testModuleUrl = import.meta.url;
 
 const OTHER_DEVICE = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
 const AT = "2026-10-09T08:00:00.000Z";
+/**
+ * The count of the blocks a pairing's station did not take (migration `0013`, plan ОЧ): the
+ * status bar's own statement comes with the plan's later task, and its reach is pinned here on
+ * the table's key, the same text on the shell's SQLite in `tests/local_db.rs`.
+ */
+const BLOCK_DROPS_COUNT_SQL =
+  "SELECT count(*) AS n FROM floor_block_drops WHERE host_id = ? AND device_id = ?";
 
-/** The tables of this device's own records (migrations `0006`–`0008`; `TableClass::DeviceData`). */
+/** The tables of this device's own records (migrations `0006`–`0008` and `0013`; `TableClass::DeviceData`). */
 const DEVICE_TABLES = [
+  "floor_block_drops",
   "floor_block_requests",
   "floor_boxes",
   "floor_codes",
@@ -493,6 +501,18 @@ const COLUMNS: Record<string, string[]> = {
     "next_serial INTEGER NOT NULL",
     "received_at TEXT NOT NULL",
   ],
+  floor_block_drops: [
+    "host_id TEXT NOT NULL PK1",
+    "device_id TEXT NOT NULL PK2",
+    "block_id TEXT NOT NULL PK3",
+    "request_id TEXT NOT NULL",
+    "issuer_prefix TEXT NOT NULL",
+    "extension INTEGER NOT NULL",
+    "from_serial INTEGER NOT NULL",
+    "to_serial INTEGER NOT NULL",
+    "reason TEXT NOT NULL",
+    "dropped_at TEXT NOT NULL",
+  ],
   floor_block_requests: [
     "request_id TEXT NOT NULL PK1",
     "host_id TEXT NOT NULL",
@@ -620,6 +640,10 @@ const COLUMNS: Record<string, string[]> = {
     "outcome_code TEXT",
     "outcome_details TEXT",
     "acked_at TEXT",
+    "resolution TEXT",
+    "resent_as TEXT",
+    "resolved_at TEXT",
+    "resolved_by TEXT",
   ],
 };
 
@@ -758,6 +782,9 @@ describe("the shape of the production tables (migration 0006)", () => {
     );
     expect(plan(BLOCKS_WITH_ROOM_SQL)).toContain(
       "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
+    );
+    expect(plan(BLOCK_DROPS_COUNT_SQL)).toContain(
+      "sqlite_autoindex_floor_block_drops_1 (host_id=? AND device_id=?)",
     );
     for (const sql of [
       UNSENT_COUNT_SQL,
@@ -1152,8 +1179,9 @@ describe("the shape of the production tables (migration 0006)", () => {
       PALLET_LABEL_CLOSED_GUARD_SQL,
       LAST_PALLET_JOB_SQL,
       NEWEST_PALLET_JOB_GUARD_SQL,
+      BLOCK_DROPS_COUNT_SQL,
     ];
-    expect(new Set(statements).size).toBe(28);
+    expect(new Set(statements).size).toBe(29);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
     // The retention pass's statements, as `tests/local_db.rs` plans them (the refused closes' read
     // among them): the long ones as constants, every table's delete by shift as a literal (each
@@ -1532,6 +1560,65 @@ describe("the rules of the production tables the first examples leave open", () 
         z.object({ payload: z.string() }),
       ),
     ).toEqual([{ payload: whole }]);
+  });
+
+  it("take a person's resolution of a refused or conflicting record, and no other word (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    db.prepare(
+      "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, " +
+        "outcome_code, acked_at) VALUES ('r-1', ?, ?, 'scan', 'shift-1', '{}', ?, 'rejected', " +
+        "'not_entered', ?)",
+    ).run(HOST_ID, DEVICE_ID, AT, AT);
+    expect(
+      db
+        .prepare("SELECT resolution, resent_as, resolved_at, resolved_by FROM outbox")
+        .all()
+        .map((row) => ({ ...row })),
+    ).toEqual([{ resolution: null, resent_as: null, resolved_at: null, resolved_by: null }]);
+    for (const resolution of ["resent", "dismissed"]) {
+      await accepted(executor, {
+        sql: "UPDATE outbox SET resolution = ?, resolved_at = ?, resolved_by = 'op-1' WHERE id = 'r-1'",
+        values: [resolution, AT],
+      });
+    }
+    await refused(executor, {
+      sql: "UPDATE outbox SET resolution = 'forgotten' WHERE id = 'r-1'",
+    });
+    // The empty word is no resolution either, and a resolution can be taken back to none.
+    await refused(executor, { sql: "UPDATE outbox SET resolution = '' WHERE id = 'r-1'" });
+    await refused(executor, { sql: "UPDATE outbox SET resolution = 'Resent' WHERE id = 'r-1'" });
+    await accepted(executor, { sql: "UPDATE outbox SET resolution = NULL WHERE id = 'r-1'" });
+    // A new record may also be written with the word and the pointer to the record that carries it.
+    await accepted(
+      executor,
+      record("r-2", {
+        outcome: "rejected",
+        acked_at: AT,
+        resolution: "resent",
+        resent_as: "r-3",
+        resolved_at: AT,
+        resolved_by: "op-1",
+      }),
+    );
+    await refused(executor, record("r-4", { resolution: "later" }));
+  });
+
+  it("keep a block the station did not take with its reason, once per pairing (plan ОЧ)", async () => {
+    const { executor } = openLocalDb();
+    const drop = (blockId: string, reason: string, deviceId = DEVICE_ID): LocalStatement => ({
+      sql:
+        "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, issuer_prefix, " +
+        "extension, from_serial, to_serial, reason, dropped_at) VALUES (?, ?, ?, 'req-1', " +
+        "'460068200', 0, 5499, 3500, ?, ?)",
+      values: [HOST_ID, deviceId, blockId, reason, AT],
+    });
+    // An inverted range is what such a row may hold: no CHECK on the serials.
+    await accepted(executor, drop("block-1", "mismatch"));
+    await accepted(executor, drop("block-2", "overlap"));
+    await accepted(executor, drop("block-1", "overlap", OTHER_DEVICE));
+    await refused(executor, drop("block-1", "overlap"));
+    await refused(executor, drop("block-3", "lost"));
+    await refused(executor, drop("block-4", ""));
   });
 });
 

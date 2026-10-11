@@ -66,6 +66,7 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
     assert_eq!(
         names,
         [
+            "floor_block_drops",
             "floor_block_requests",
             "floor_boxes",
             "floor_codes",
@@ -364,11 +365,12 @@ async fn migration_0009_keeps_the_rows_of_a_database_of_0008() {
     assert_eq!(
         Value::Array(journal.into_iter().map(Value::Object).collect()),
         Value::Array(
-            (1..=MIGRATOR.iter().count())
-                .map(|version| json!({ "version": version, "success": 1 }))
+            MIGRATOR
+                .iter()
+                .map(|migration| json!({ "version": migration.version, "success": 1 }))
                 .collect()
         ),
-        "every migration is journaled once, in order"
+        "every migration is journaled once, in order (the numbers may have gaps: plan ОЧ)"
     );
     assert!(MIGRATOR.iter().any(|migration| migration.version == 9));
 }
@@ -435,6 +437,236 @@ async fn migration_0010_adds_the_shift_indexes_and_keeps_every_row() {
         assert_eq!(count(&db, table).await, json!(1), "{table} keeps its row");
     }
     assert!(MIGRATOR.iter().any(|migration| migration.version == 10));
+}
+
+/// Migration `0013` over a station's database of the migrations before it that holds a refused
+/// record: the record stays as it was with no resolution, a resolution takes only `resent` or
+/// `dismissed`, and the table of the blocks the station did not take exists and is the device's
+/// own data (plan ОЧ, additive). Migrations `0011` and `0012` belong to other plans: the numbers
+/// may have gaps, and the journal lists the migrations there are.
+#[tokio::test]
+async fn migration_0013_keeps_the_outbox_and_adds_its_resolution() {
+    let dir = tempfile::tempdir().unwrap();
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version < 13)
+        .cloned()
+        .collect();
+    assert!(before.iter().any(|migration| migration.version == 9));
+    assert!(before.iter().any(|migration| migration.version == 10));
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(before),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    for sql in [
+        // A waiting, an accepted, a refused and a conflicting record: the CHECK on the new
+        // column must take every row that exists.
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) \
+         VALUES ('record-0', 'host', 'device', 'scan', 'shift-1', '{}', \
+         '2026-10-09T07:59:00.000Z')",
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, acked_at) VALUES ('record-2', 'host', 'device', 'scan', 'shift-1', '{}', \
+         '2026-10-09T08:00:30.000Z', 'accepted', '2026-10-09T08:00:35.000Z')",
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, outcome_code, acked_at) VALUES ('record-1', 'host', 'device', 'scan', \
+         'shift-1', '{}', '2026-10-09T08:00:00.000Z', 'rejected', 'not_entered', \
+         '2026-10-09T08:00:05.000Z')",
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, outcome_code, outcome_details, acked_at) VALUES ('record-3', 'host', \
+         'device', 'scan', 'shift-1', '{}', '2026-10-09T08:01:00.000Z', 'conflict', \
+         'duplicate', '{}', '2026-10-09T08:01:05.000Z')",
+    ] {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    raw.close().await.unwrap();
+
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    let records = db
+        .query(
+            "SELECT id, outcome, outcome_code, resolution, resent_as, resolved_at, resolved_by \
+             FROM outbox ORDER BY seq",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(records.into_iter().map(Value::Object).collect()),
+        json!([
+            {
+                "id": "record-0", "outcome": null, "outcome_code": null,
+                "resolution": null, "resent_as": null, "resolved_at": null, "resolved_by": null
+            },
+            {
+                "id": "record-2", "outcome": "accepted", "outcome_code": null,
+                "resolution": null, "resent_as": null, "resolved_at": null, "resolved_by": null
+            },
+            {
+                "id": "record-1", "outcome": "rejected", "outcome_code": "not_entered",
+                "resolution": null, "resent_as": null, "resolved_at": null, "resolved_by": null
+            },
+            {
+                "id": "record-3", "outcome": "conflict", "outcome_code": "duplicate",
+                "resolution": null, "resent_as": null, "resolved_at": null, "resolved_by": null
+            }
+        ])
+    );
+    for word in ["later", "forgotten", "", "Resent"] {
+        assert!(
+            db.transaction(vec![expecting(
+                "UPDATE outbox SET resolution = ? WHERE id = 'record-1'",
+                json!([word]),
+                1,
+            )])
+            .await
+            .is_err(),
+            "{word:?} is no resolution"
+        );
+    }
+    for resolution in ["resent", "dismissed"] {
+        db.transaction(vec![expecting(
+            "UPDATE outbox SET resolution = ?, resolved_at = '2026-10-11T08:00:00.000Z', \
+             resolved_by = 'op-1' WHERE id = 'record-1'",
+            json!([resolution]),
+            1,
+        )])
+        .await
+        .unwrap();
+    }
+    assert_eq!(count(&db, "floor_block_drops").await, json!(0));
+    assert_eq!(
+        table_class("floor_block_drops"),
+        Some(TableClass::DeviceData)
+    );
+    // One row per block and pairing; the reason is `overlap` or `mismatch`; an inverted range
+    // is what such a row may hold.
+    let drop = |block: &str, device: &str, reason: &str| {
+        expecting(
+            "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, \
+             issuer_prefix, extension, from_serial, to_serial, reason, dropped_at) \
+             VALUES ('host', ?, ?, 'request-1', '460068200', 0, 5499, 3500, ?, \
+             '2026-10-11T08:00:00.000Z')",
+            json!([device, block, reason]),
+            1,
+        )
+    };
+    db.transaction(vec![drop("block-1", "device", "mismatch")])
+        .await
+        .unwrap();
+    db.transaction(vec![drop("block-1", "other", "overlap")])
+        .await
+        .unwrap();
+    db.transaction(vec![drop("block-2", "device", "overlap")])
+        .await
+        .unwrap();
+    assert!(db
+        .transaction(vec![statement(
+            "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, \
+             issuer_prefix, extension, from_serial, to_serial, reason, dropped_at) \
+             VALUES ('host', 'device', 'block-5', NULL, '460068200', 0, 1, 2, 'overlap', \
+             '2026-10-11T08:00:00.000Z')",
+            json!([]),
+        )])
+        .await
+        .is_err());
+    assert!(db
+        .transaction(vec![drop("block-1", "device", "overlap")])
+        .await
+        .is_err());
+    assert!(db
+        .transaction(vec![drop("block-6", "device", "lost")])
+        .await
+        .is_err());
+    let journal = db
+        .query(
+            "SELECT version, success FROM _sqlx_migrations ORDER BY version",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(journal.into_iter().map(Value::Object).collect()),
+        Value::Array(
+            MIGRATOR
+                .iter()
+                .map(|migration| json!({ "version": migration.version, "success": 1 }))
+                .collect()
+        ),
+        "every migration there is is journaled once"
+    );
+    assert!(MIGRATOR.iter().any(|migration| migration.version == 13));
+}
+
+/// The shell's migrator takes a migration with lower numbers missing and applies a lower one
+/// that arrives later (plan ОЧ takes `0013` while `0011` and `0012` belong to other streams): a
+/// database that holds `0013` but not `0009` is opened by the full list, which applies `0009`
+/// and leaves what is there as it is.
+#[tokio::test]
+async fn a_lower_migration_that_arrives_after_a_higher_one_is_applied() {
+    let dir = tempfile::tempdir().unwrap();
+    let without_0009: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version != 9)
+        .cloned()
+        .collect();
+    assert!(without_0009.iter().any(|migration| migration.version == 13));
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(without_0009),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, outcome_code, acked_at) VALUES ('record-1', 'host', 'device', 'scan', \
+         'shift-1', '{}', '2026-10-09T08:00:00.000Z', 'rejected', 'not_entered', \
+         '2026-10-09T08:00:05.000Z')",
+    )
+    .execute(&mut raw)
+    .await
+    .unwrap();
+    let missing: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM sqlite_master WHERE name = 'floor_restore_epochs'")
+            .fetch_optional(&mut raw)
+            .await
+            .unwrap();
+    assert_eq!(missing, None, "0009 has not been applied");
+    raw.close().await.unwrap();
+
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    assert_eq!(count(&db, "floor_restore_epochs").await, json!(0));
+    assert_eq!(count(&db, "outbox").await, json!(1));
+    let journal = db
+        .query(
+            "SELECT version FROM _sqlx_migrations ORDER BY version",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(journal.into_iter().map(Value::Object).collect()),
+        Value::Array(
+            MIGRATOR
+                .iter()
+                .map(|migration| json!({ "version": migration.version }))
+                .collect()
+        ),
+    );
 }
 
 #[tokio::test]
@@ -758,7 +990,7 @@ async fn every_table_has_a_forget_class() {
         "TABLE_CLASSES names each table of the migrations once, and nothing else"
     );
     // This device's own records are the production tables of `0006`, the
-    // print jobs of `0007` and the pallets of `0008`; the sign-in lockouts
+    // print jobs of `0007`, the pallets of `0008` and the dropped blocks of `0013`; the sign-in lockouts
     // stay with the copies (an open owner question); the workstation's
     // settings belong to the PC.
     let device_data: Vec<&str> = TABLE_CLASSES
@@ -769,6 +1001,7 @@ async fn every_table_has_a_forget_class() {
     assert_eq!(
         device_data,
         [
+            "floor_block_drops",
             "floor_block_requests",
             "floor_boxes",
             "floor_codes",
@@ -894,6 +1127,7 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
     // The rows of this device's own stay whatever `TABLE_CLASSES` says, named
     // here once more so the check does not follow the list it checks.
     for table in [
+        "floor_block_drops",
         "floor_block_requests",
         "floor_boxes",
         "floor_codes",
@@ -965,7 +1199,7 @@ fn outbox_record(id: &str, host: &str, device: &str, acked: Option<&str>) -> Loc
 }
 
 /// One row in each table of this device's own records (migrations
-/// `0006`–`0008`), each of the pairing `(HOST, DEVICE)`, as the floor's
+/// `0006`–`0008` and `0013`), each of the pairing `(HOST, DEVICE)`, as the floor's
 /// writers will write them through `local_transaction`.
 fn device_records() -> Vec<LocalStatement> {
     vec![
@@ -989,6 +1223,13 @@ fn device_records() -> Vec<LocalStatement> {
             "INSERT INTO floor_block_requests (request_id, host_id, device_id, issuer_prefix, \
              extension, requested_at) VALUES ('request-1', ?, ?, '460068200', 0, \
              '2026-10-08T06:02:02.000Z')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, \
+             issuer_prefix, extension, from_serial, to_serial, reason, dropped_at) \
+             VALUES (?, ?, 'block-2', 'request-0', '460068200', 0, 1500, 2000, 'overlap', \
+             '2026-10-08T06:02:03.000Z')",
             json!([HOST, DEVICE]),
         ),
         statement(
@@ -1323,7 +1564,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 86] = [
+    let reads: [(&str, &str); 87] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1500,6 +1741,12 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             "DELETE FROM floor_block_requests WHERE request_id = ?",
             "sqlite_autoindex_floor_block_requests_1 (request_id=?)",
+        ),
+        // The blocks the station did not take (migration `0013`, plan ОЧ): a pairing's rows by
+        // the table's key (`test/floor-schema.test.ts` pins the same text).
+        (
+            "SELECT count(*) AS n FROM floor_block_drops WHERE host_id = ? AND device_id = ?",
+            "sqlite_autoindex_floor_block_drops_1 (host_id=? AND device_id=?)",
         ),
         // The box exceptions (`src/floor/exceptions/box-exceptions.ts`; `test/floor-schema.test.ts`
         // checks the texts agree): the last code of the open box and the newest scan
