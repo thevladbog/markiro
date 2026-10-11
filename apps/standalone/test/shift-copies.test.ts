@@ -272,6 +272,28 @@ describe("a stored shift to work", () => {
     expect(await readStoredWork(executor, PAIRING, ENTERED.id)).toEqual({ kind: "missing" });
   });
 
+  it("keeps a pallets shift with its pallet layout and reads it back; one without the layout is not kept nor worked (plan ПЛ-Ц)", async () => {
+    const { db, executor } = openLocalDb();
+    const pallets = enteredShiftSchema.parse(fixture("device-shift-entered-pallets.json"));
+    await keepEnteredShift(executor, PAIRING, pallets, AT, SEEN);
+    expect(await readStoredWork(executor, PAIRING, pallets.id)).toMatchObject({
+      kind: "ready",
+      shift: { snapshot: { palletTemplate: { rev: 63 } } },
+    });
+    // A snapshot kept by a build before pallets has no layout: not worked.
+    const before = ENTERED.snapshot;
+    db.prepare("UPDATE floor_shifts SET snapshot = ?").run(JSON.stringify(before));
+    expect(await readStoredWork(executor, PAIRING, pallets.id)).toEqual({
+      kind: "unreadable",
+      reason: "layout",
+    });
+    // And the same answer is not kept at all.
+    const fresh = openLocalDb();
+    await expect(
+      keepEnteredShift(fresh.executor, PAIRING, { ...pallets, snapshot: before }, AT, SEEN),
+    ).rejects.toThrow("layout");
+  });
+
   it("is unreadable when the stored layout is not one the domain reads", async () => {
     const { db, executor } = openLocalDb();
     await keepEnteredShift(executor, PAIRING, ENTERED, AT, SEEN);
@@ -295,6 +317,30 @@ describe("checkShiftSnapshot", () => {
       ok: true,
       snapshot: { boxTemplate: { spec: { dpi: 203, elements: [{ id: "name" }] } } },
     });
+  });
+
+  it("reads a shift's pallet layout and refuses a pallets shift without one it can print (plan ПЛ-Ц)", () => {
+    const pallets = enteredShiftSchema.parse(fixture("device-shift-entered-pallets.json")).snapshot;
+    expect(checkShiftSnapshot(pallets, true)).toMatchObject({
+      ok: true,
+      snapshot: { palletTemplate: { rev: 63, spec: { widthMm: 100, language: "zpl" } } },
+    });
+    // Without pallets the pallet layout is not needed and a box's snapshot reads as before.
+    expect(checkShiftSnapshot(snapshot)).toMatchObject({
+      ok: true,
+      snapshot: { palletTemplate: null },
+    });
+    expect(checkShiftSnapshot(snapshot, true)).toEqual({ ok: false, reason: "layout" });
+    // A shift without pallets does not carry a pallet layout it was sent.
+    expect(checkShiftSnapshot(pallets)).toMatchObject({
+      ok: true,
+      snapshot: { palletTemplate: null },
+    });
+    const broken = {
+      ...pallets,
+      palletTemplate: { ...pallets.palletTemplate, spec: { widthMm: 5 } },
+    };
+    expect(checkShiftSnapshot(broken, true)).toEqual({ ok: false, reason: "layout" });
   });
 
   it("refuses a layout, a GTIN and a prefix the station cannot print from", () => {

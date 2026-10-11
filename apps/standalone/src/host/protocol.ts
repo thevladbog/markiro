@@ -625,13 +625,15 @@ export const shiftSnapshotTemplateSchema = z.object({
 /**
  * What a shift freezes when a station opens it (`markiro_proto::ShiftSnapshot`):
  * the station prints and reprints from this alone. A response type, so a
- * field a newer host adds is tolerated (and dropped).
+ * field a newer host adds is tolerated (and dropped). A shift with pallets
+ * freezes its pallet template too (protocol 3); one without has none.
  */
 export const shiftSnapshotSchema = z.object({
   product: shiftSnapshotProductSchema,
   boxTemplate: shiftSnapshotTemplateSchema,
   issuerPrefix: z.string(),
   counterpartyName: z.string().nullable(),
+  palletTemplate: shiftSnapshotTemplateSchema.optional(),
 });
 export type ShiftSnapshot = z.infer<typeof shiftSnapshotSchema>;
 
@@ -639,7 +641,9 @@ export type ShiftSnapshot = z.infer<typeof shiftSnapshotSchema>;
  * A shift as a station sees it (`GET /v1/device/shifts`,
  * `markiro_proto::DeviceShift`): named by the snapshot once open and by the
  * records before; `ownerDeviceId` is the station that opened it, and another
- * station's id means the shift is busy.
+ * station's id means the shift is busy. A shift with pallets names their
+ * capacity and template (protocol 3, plan ПЛ-Х); one without names neither —
+ * the fields are absent, not `null`.
  */
 export const deviceShiftSchema = z.object({
   id: z.uuid(),
@@ -657,6 +661,8 @@ export const deviceShiftSchema = z.object({
   plannedQty: z.number().int().positive().nullable(),
   boxCapacity: z.number().int().positive(),
   boxTemplateId: z.uuid(),
+  palletBoxCapacity: z.number().int().positive().optional(),
+  palletTemplateId: z.uuid().optional(),
   ownerDeviceId: z.uuid().nullable(),
   openedAt: z.iso.datetime().nullable(),
   closedAt: z.iso.datetime().nullable(),
@@ -1092,7 +1098,10 @@ export type ShiftClose = z.infer<typeof shiftCloseSchema>;
 /**
  * `POST /v1/device/shifts` (`markiro_proto::DeviceShiftCreate`): a station's
  * planned shift on its own line. `requestId`, a UUID the station made up,
- * makes it repeatable: the same request answers the shift it created.
+ * makes it repeatable: the same request answers the shift it created. A
+ * shift with pallets names its pallet template and may name its pallet
+ * capacity (the product's when left out); one without sends none of the
+ * three (protocol 3, `device-shift-create-pallets.json`).
  */
 export const deviceShiftCreateSchema = z
   .object({
@@ -1103,13 +1112,16 @@ export const deviceShiftCreateSchema = z
     boxCapacity: z.number().int().positive().optional(),
     plannedQty: z.number().int().positive().nullable().optional(),
     counterpartyId: z.uuid().nullable().optional(),
+    palletsEnabled: z.boolean().optional(),
+    palletBoxCapacity: z.number().int().positive().optional(),
+    palletTemplateId: z.uuid().optional(),
   })
   .strict();
 export type DeviceShiftCreate = z.infer<typeof deviceShiftCreateSchema>;
 
 /**
  * `POST /v1/device/sscc/blocks` (`markiro_proto::SsccBlockRequest`): a block
- * of the shift's issuer prefix and an extension (0, a box). The station keeps
+ * of the shift's issuer prefix and an extension (0, a box; 1, a pallet). The station keeps
  * the request (`floor_block_requests`) and repeats it whole until it has the
  * block: the same `requestId` answers the same block.
  */
@@ -1158,7 +1170,11 @@ export const scanFactSchema = z
   .strict();
 export type ScanFact = z.infer<typeof scanFactSchema>;
 
-/** `data` of a `box_closed` fact (`markiro_proto::BoxClosedFact`). */
+/**
+ * `data` of a `box_closed` fact (`markiro_proto::BoxClosedFact`); `palletId`
+ * is the pallet the box joined as it closed (protocol 3, plan ПЛ-Х), absent
+ * in a shift without pallets.
+ */
 export const boxClosedFactSchema = z
   .object({
     boxId: z.uuid(),
@@ -1169,6 +1185,7 @@ export const boxClosedFactSchema = z
     closedAt: z.string(),
     itemCount: z.number().int().positive(),
     membershipDigest: z.string(),
+    palletId: z.uuid().optional(),
   })
   .strict();
 export type BoxClosedFact = z.infer<typeof boxClosedFactSchema>;
@@ -1205,6 +1222,47 @@ export const shiftClosedFactSchema = z
   .strict();
 export type ShiftClosedFact = z.infer<typeof shiftClosedFactSchema>;
 
+/**
+ * `data` of a `pallet_closed` fact (`markiro_proto::PalletClosedFact`): the
+ * pallet closed with the SSCC of one of this station's blocks of extension 1;
+ * `openedAt` is when its first box closed, `boxCount` the boxes on it that
+ * are not taken apart, as this station counts them.
+ */
+export const palletClosedFactSchema = z
+  .object({
+    palletId: z.uuid(),
+    sscc: z.string(),
+    blockId: z.uuid(),
+    serial: z.number().int().nonnegative(),
+    openedAt: z.string(),
+    closedAt: z.string(),
+    boxCount: z.number().int().positive(),
+  })
+  .strict();
+export type PalletClosedFact = z.infer<typeof palletClosedFactSchema>;
+
+/** `data` of a `pallet_label` fact (`markiro_proto::PalletLabelFact`): the check of a closed pallet's label. */
+export const palletLabelFactSchema = z
+  .object({ palletId: z.uuid(), outcome: z.enum(["verified", "skipped"]), at: z.string() })
+  .strict();
+export type PalletLabelFact = z.infer<typeof palletLabelFactSchema>;
+
+/**
+ * `data` of a `pallet_exception` fact (`markiro_proto::PalletExceptionFact`):
+ * a reprint or a disassembly of a closed pallet, always with a reason code,
+ * and words only with `other`.
+ */
+export const palletExceptionFactSchema = z
+  .object({
+    exception: z.enum(["reprint", "disassemble"]),
+    palletId: z.uuid(),
+    reasonCode: z.string(),
+    reasonText: z.string().nullable(),
+    occurredAt: z.string(),
+  })
+  .strict();
+export type PalletExceptionFact = z.infer<typeof palletExceptionFactSchema>;
+
 /** The envelope of every record: its own id, the shift and the operator signed in, or `null`. */
 const factHead = { id: z.uuid(), shiftId: z.uuid(), operatorId: z.uuid().nullable() };
 
@@ -1221,6 +1279,13 @@ export const factRecordSchema = z.discriminatedUnion("kind", [
     .object({ ...factHead, kind: z.literal("box_exception"), data: boxExceptionFactSchema })
     .strict(),
   z.object({ ...factHead, kind: z.literal("shift_closed"), data: shiftClosedFactSchema }).strict(),
+  z
+    .object({ ...factHead, kind: z.literal("pallet_closed"), data: palletClosedFactSchema })
+    .strict(),
+  z.object({ ...factHead, kind: z.literal("pallet_label"), data: palletLabelFactSchema }).strict(),
+  z
+    .object({ ...factHead, kind: z.literal("pallet_exception"), data: palletExceptionFactSchema })
+    .strict(),
 ]);
 export type FactRecord = z.infer<typeof factRecordSchema>;
 export type FactKind = FactRecord["kind"];

@@ -206,7 +206,7 @@ export async function keepEnteredShift(
   seenAt: number,
 ): Promise<void> {
   const { snapshot, ...fields } = shift;
-  const checked = checkShiftSnapshot(snapshot);
+  const checked = checkShiftSnapshot(snapshot, shift.palletsEnabled);
   if (!checked.ok) {
     throw new Error(`keepEnteredShift: a snapshot to work from is required (${checked.reason})`);
   }
@@ -353,7 +353,7 @@ export async function readStoredWork(
   } catch {
     return { kind: "unreadable", reason: "shape" };
   }
-  const checked = checkShiftSnapshot(raw);
+  const checked = checkShiftSnapshot(raw, row.pallets_enabled === 1);
   return checked.ok
     ? { kind: "ready", shift: { copy: toCopy(row), snapshot: checked.snapshot } }
     : { kind: "unreadable", reason: checked.reason };

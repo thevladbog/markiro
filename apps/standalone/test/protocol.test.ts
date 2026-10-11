@@ -271,6 +271,7 @@ const RESPONSES = [
   ["error-sscc-exhausted.json", errorBodySchema],
   ["device-shifts.json", deviceShiftsSchema],
   ["device-shift-entered.json", enteredShiftSchema],
+  ["device-shift-entered-pallets.json", enteredShiftSchema],
   ["sscc-block.json", ssccBlockSchema],
   ["code-check-free.json", codeCheckSchema],
   ["code-check-taken.json", codeCheckSchema],
@@ -307,8 +308,10 @@ const REQUESTS = [
   ["shift-update.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
   ["device-shift-create.json", deviceShiftCreateSchema],
+  ["device-shift-create-pallets.json", deviceShiftCreateSchema],
   ["sscc-block-request.json", ssccBlockRequestSchema],
   ["facts-request.json", factBatchSchema],
+  ["facts-request-pallets.json", factBatchSchema],
 ] as const;
 
 function extended(name: string): Record<string, unknown> {
@@ -640,6 +643,27 @@ describe("request builders produce their fixtures exactly", () => {
     expect(Object.keys(created).sort()).toStrictEqual(
       Object.keys(chosen).concat("counterpartyId").sort(),
     );
+  });
+
+  it("a station's new shift with pallets names them, their capacity and their template (plan ПЛ-Ц)", () => {
+    const shift = deviceShiftCreateSchema.parse(fixture("device-shift-create-pallets.json"));
+    const plain = {
+      requestId: shift.requestId,
+      productId: shift.productId,
+      boxTemplateId: shift.boxTemplateId,
+      productionDate: shift.productionDate,
+      boxCapacity: 12,
+      plannedQty: null,
+    };
+    const pallets = { boxCapacity: 40, templateId: "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f" };
+    expect(deviceShiftCreate({ ...plain, pallets })).toStrictEqual(
+      fixture("device-shift-create-pallets.json"),
+    );
+    // Without pallets, none of their fields: the host's rule for a shift without them.
+    const body = deviceShiftCreate(plain);
+    for (const field of ["palletsEnabled", "palletBoxCapacity", "palletTemplateId"]) {
+      expect(body).not.toHaveProperty(field);
+    }
   });
 
   it("a shift planned with no plan and no counterparty names both as null and still names the mode and pallets", () => {
@@ -1240,6 +1264,27 @@ describe("catalog shapes", () => {
 });
 
 describe("shift shapes", () => {
+  it("read a station's shift with pallets: their capacity, their template and its frozen layout (plan ПЛ-Ц)", () => {
+    const entered = enteredShiftSchema.parse(fixture("device-shift-entered-pallets.json"));
+    expect(entered).toMatchObject({
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f",
+      snapshot: { palletTemplate: { rev: 63, spec: { widthMm: 100 } } },
+    });
+    // A shift without pallets names neither field (protocol 3 keeps
+    // `device-shifts.json` as it was), and its snapshot has no pallet template.
+    const [listed] = deviceShiftsSchema.parse(fixture("device-shifts.json")).shifts;
+    expect(listed).not.toHaveProperty("palletBoxCapacity");
+    expect(listed).not.toHaveProperty("palletTemplateId");
+    for (const palletBoxCapacity of [0, 1.5, "40"]) {
+      expect(enteredShiftSchema.safeParse({ ...entered, palletBoxCapacity }).success).toBe(false);
+    }
+    expect(enteredShiftSchema.safeParse({ ...entered, palletTemplateId: "42" }).success).toBe(
+      false,
+    );
+  });
+
   it("read a planned shift without a plan, a counterparty, an owner or times, and a closed one", () => {
     const shift = officeShiftSchema.parse(fixture("office-shift.json"));
     const planned = {
@@ -1994,6 +2039,34 @@ describe("facts of the floor", () => {
     expect(edge(5, "data.actualQty", 0)).toBe(true);
     expect(edge(5, "data.closedBoxCount", 0)).toBe(true);
     expect(edge(5, "data.reasonCode", null)).toBe(true);
+  });
+
+  it("read the pallets' records of protocol 3 and refuse what the host refuses (plan ПЛ-Ц)", () => {
+    const [box, closed, label, exception] = factBatchSchema.parse(
+      fixture("facts-request-pallets.json"),
+    ).records;
+    expect(box).toMatchObject({
+      kind: "box_closed",
+      data: { palletId: "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d" },
+    });
+    expect(closed).toMatchObject({ kind: "pallet_closed", data: { boxCount: 40, serial: 40 } });
+    const data = (record: unknown, change: Record<string, unknown>) => ({
+      ...(record as Record<string, unknown>),
+      data: { ...(record as { data: Record<string, unknown> }).data, ...change },
+    });
+    expect(factRecordSchema.safeParse(data(box, { palletId: "pallet-1" })).success).toBe(false);
+    expect(factRecordSchema.safeParse(data(closed, { boxCount: 0 })).success).toBe(false);
+    expect(factRecordSchema.safeParse(data(label, { outcome: "printed" })).success).toBe(false);
+    expect(factRecordSchema.safeParse(data(exception, { exception: "undo" })).success).toBe(false);
+    expect(factRecordSchema.safeParse(data(exception, { reasonCode: null })).success).toBe(false);
+    // The records are exact: a field the host does not know is refused.
+    for (const record of [closed, label, exception]) {
+      expect(factRecordSchema.safeParse(data(record, { addedLater: true })).success).toBe(false);
+    }
+    // A pallet's record is read by its kind only: not as a box's.
+    expect(factRecordSchema.safeParse({ ...(closed as object), kind: "box_closed" }).success).toBe(
+      false,
+    );
   });
 
   it("take a receipt code a newer host adds, and refuse a taken code without its owner", () => {

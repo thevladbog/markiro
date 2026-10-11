@@ -453,12 +453,15 @@ export interface DeviceShiftInput {
   productionDate: string;
   boxCapacity: number;
   plannedQty: number | null;
+  /** «С паллетами» (plan ПЛ-Ц): boxes per pallet and the pallet template; absent — none. */
+  pallets?: { boxCapacity: number; templateId: string };
 }
 
 /**
  * `POST /v1/device/shifts` (`device-shift-create.json`): every field, `null`
  * for no plan, and no counterparty, of which the station keeps no copy. The
- * line is the station's own and no field.
+ * line is the station's own and no field. A shift with pallets adds their
+ * three fields (`device-shift-create-pallets.json`); one without sends none.
  */
 export function deviceShiftCreate(shift: DeviceShiftInput): DeviceShiftCreate {
   return {
@@ -469,5 +472,12 @@ export function deviceShiftCreate(shift: DeviceShiftInput): DeviceShiftCreate {
     boxCapacity: shift.boxCapacity,
     plannedQty: shift.plannedQty,
     counterpartyId: null,
+    ...(shift.pallets === undefined
+      ? {}
+      : {
+          palletsEnabled: true,
+          palletBoxCapacity: shift.pallets.boxCapacity,
+          palletTemplateId: shift.pallets.templateId,
+        }),
   };
 }

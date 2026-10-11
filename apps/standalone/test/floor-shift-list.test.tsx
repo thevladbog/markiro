@@ -217,6 +217,10 @@ describe("the shifts of the station's line", () => {
       "template_not_fit",
       "Шаблон этикетки смены выключен или не подходит товару: смену не открыть. Обратитесь в офис.",
     ],
+    [
+      "pallet_template_not_fit",
+      "Шаблон этикетки паллеты выключен или не подходит товару: смену не открыть. Обратитесь в офис.",
+    ],
   ])("says why the host refused the entry (%s) and keeps the list", async (constraint, text) => {
     const { executor } = await copiesOf([PLANNED]);
     const refused = new HostError({
@@ -252,6 +256,22 @@ describe("the shifts of the station's line", () => {
       snapshot: { ...OPENED.snapshot, boxTemplate: { ...OPENED.snapshot.boxTemplate, spec: {} } },
     };
     const { handlers } = renderList(executor, { enter: vi.fn(async () => broken) });
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+    expect(
+      await screen.findByText(
+        "Этикетку этой смены приложение прочитать не может. Обновите приложение или попросите офис закрыть смену.",
+      ),
+    ).toBeTruthy();
+    expect(handlers.onEntered).not.toHaveBeenCalled();
+    expect(await readShiftCopy(executor, PAIRING, PLANNED.id)).toMatchObject({ entered: false });
+  });
+
+  it("neither keeps nor works a shift with pallets whose answer has no pallet layout (plan ПЛ-Ц)", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    const pallets = enteredShiftSchema.parse(fixture("device-shift-entered-pallets.json"));
+    // The snapshot of a box shift has no pallet layout.
+    const answer: EnteredShift = { ...pallets, id: PLANNED.id, snapshot: ENTERED.snapshot };
+    const { handlers } = renderList(executor, { enter: vi.fn(async () => answer) });
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
     expect(
       await screen.findByText(

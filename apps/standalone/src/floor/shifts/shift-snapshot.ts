@@ -10,9 +10,19 @@ import { shiftSnapshotSchema, type ShiftSnapshot } from "../../host/protocol.js"
  */
 export interface CheckedSnapshot {
   product: ShiftSnapshot["product"];
-  boxTemplate: { id: string; name: string; rev: number; spec: LabelTemplateSpec };
+  boxTemplate: SnapshotTemplate;
   issuerPrefix: string;
   counterpartyName: string | null;
+  /** The pallet layout of a shift with pallets (plan ПЛ-Ц); `null` — a shift without. */
+  palletTemplate: SnapshotTemplate | null;
+}
+
+/** A template as the snapshot froze it, with the layout the domain read. */
+export interface SnapshotTemplate {
+  id: string;
+  name: string;
+  rev: number;
+  spec: LabelTemplateSpec;
 }
 
 /**
@@ -29,13 +39,29 @@ export type SnapshotCheck =
 const GTIN14 = /^[0-9]{14}$/;
 const ISSUER_PREFIX = /^[0-9]{9}$/;
 
+/** A frozen template whose layout the domain reads, or `null`. */
+function readTemplate(template: {
+  id: string;
+  name: string;
+  rev: number;
+  spec: unknown;
+}): SnapshotTemplate | null {
+  const spec = labelTemplateSpecSchema.safeParse(template.spec);
+  return spec.success
+    ? { id: template.id, name: template.name, rev: template.rev, spec: spec.data }
+    : null;
+}
+
 /**
  * Checks a shift's snapshot before the station works the shift: once when it
  * enters (the host never checks a layout, stage 2a spec §4.2) and again when
  * a stored one is read back. A snapshot that fails keeps the operator out of
- * the shift; nothing is printed from a layout the domain does not read.
+ * the shift; nothing is printed from a layout the domain does not read. A
+ * shift with pallets (`palletsEnabled`, plan ПЛ-Ц) needs its pallet layout as
+ * well: a snapshot kept by a build before pallets has none, and the next
+ * entry with the host brings it.
  */
-export function checkShiftSnapshot(raw: unknown): SnapshotCheck {
+export function checkShiftSnapshot(raw: unknown, palletsEnabled = false): SnapshotCheck {
   const parsed = shiftSnapshotSchema.safeParse(raw);
   if (!parsed.success) return { ok: false, reason: "shape" };
   const { product, boxTemplate, issuerPrefix, counterpartyName } = parsed.data;
@@ -43,20 +69,19 @@ export function checkShiftSnapshot(raw: unknown): SnapshotCheck {
     return { ok: false, reason: "gtin" };
   }
   if (!ISSUER_PREFIX.test(issuerPrefix)) return { ok: false, reason: "prefix" };
-  const spec = labelTemplateSpecSchema.safeParse(boxTemplate.spec);
-  if (!spec.success) return { ok: false, reason: "layout" };
+  const box = readTemplate(boxTemplate);
+  if (box === null) return { ok: false, reason: "layout" };
+  const pallet =
+    parsed.data.palletTemplate === undefined ? null : readTemplate(parsed.data.palletTemplate);
+  if (palletsEnabled && pallet === null) return { ok: false, reason: "layout" };
   return {
     ok: true,
     snapshot: {
       product,
-      boxTemplate: {
-        id: boxTemplate.id,
-        name: boxTemplate.name,
-        rev: boxTemplate.rev,
-        spec: spec.data,
-      },
+      boxTemplate: box,
       issuerPrefix,
       counterpartyName,
+      palletTemplate: palletsEnabled ? pallet : null,
     },
   };
 }

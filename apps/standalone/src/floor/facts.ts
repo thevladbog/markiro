@@ -6,6 +6,9 @@ import {
   type BoxExceptionFact,
   type BoxLabelFact,
   type FactRecord,
+  type PalletClosedFact,
+  type PalletExceptionFact,
+  type PalletLabelFact,
   type ScanFact,
   type ScannedCode,
   type ShiftClosedFact,
@@ -46,6 +49,21 @@ export function boxExceptionRecord(head: RecordHead, data: BoxExceptionFact): Fa
 /** A `shift_closed` record: this station closed its shift (plan 2a8). */
 export function shiftClosedRecord(head: RecordHead, data: ShiftClosedFact): FactRecord {
   return { ...head, kind: "shift_closed", data };
+}
+
+/** A `pallet_closed` record: a pallet closed with the SSCC of one of this station's pallet blocks (plan ПЛ-Ц). */
+export function palletClosedRecord(head: RecordHead, data: PalletClosedFact): FactRecord {
+  return { ...head, kind: "pallet_closed", data };
+}
+
+/** A `pallet_label` record: the check of a closed pallet's label (plan ПЛ-Ц). */
+export function palletLabelRecord(head: RecordHead, data: PalletLabelFact): FactRecord {
+  return { ...head, kind: "pallet_label", data };
+}
+
+/** A `pallet_exception` record: a pallet's reprint or disassembly (plan ПЛ-Ц). */
+export function palletExceptionRecord(head: RecordHead, data: PalletExceptionFact): FactRecord {
+  return { ...head, kind: "pallet_exception", data };
 }
 
 /**

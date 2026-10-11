@@ -15,7 +15,8 @@ import { checkShiftSnapshot } from "./shift-snapshot.js";
  * Why the station did not enter a shift: the host is away and the shift is
  * not one this station entered before (`no_link`); the host refused it
  * (`busy`: another station opened it, `closed`, `other_line`, `not_found`:
- * deleted, `product_inactive`, `template_not_fit`); its layout is one this
+ * deleted, `product_inactive`, `template_not_fit`, `pallet_template_not_fit`:
+ * the pallet template, plan ПЛ-Х); its layout is one this
  * build does not read (`unreadable`); this computer could not keep it
  * (`local`); or anything else (`failed`).
  */
@@ -27,6 +28,7 @@ export type EntryRefusal =
   | "not_found"
   | "product_inactive"
   | "template_not_fit"
+  | "pallet_template_not_fit"
   | "unreadable"
   | "local"
   | "failed";
@@ -54,6 +56,7 @@ const CONFLICTS: Readonly<Record<string, EntryRefusal>> = {
   shift_line: "other_line",
   product_inactive: "product_inactive",
   template_not_fit: "template_not_fit",
+  pallet_template_not_fit: "pallet_template_not_fit",
 };
 
 /**
@@ -114,7 +117,9 @@ export async function enterShift(context: EntryContext, copy: ShiftCopy): Promis
         : undefined;
     return { kind: "refused", reason: refusal ?? "failed" };
   }
-  if (!checkShiftSnapshot(answer.snapshot).ok) return { kind: "refused", reason: "unreadable" };
+  if (!checkShiftSnapshot(answer.snapshot, answer.palletsEnabled).ok) {
+    return { kind: "refused", reason: "unreadable" };
+  }
   try {
     const at = context.now();
     await keepEnteredShift(context.local, context.pairing, answer, at.toISOString(), at.getTime());

@@ -10,6 +10,9 @@ import {
   boxLabelRecord,
   MAX_RECORD_BYTES,
   outboxStatement,
+  palletClosedRecord,
+  palletExceptionRecord,
+  palletLabelRecord,
   RecordTooLargeError,
   scanRecord,
   scannedCode,
@@ -22,6 +25,9 @@ import {
   boxLabelFactSchema,
   factBatchSchema,
   MAX_FACT_BATCH,
+  palletClosedFactSchema,
+  palletExceptionFactSchema,
+  palletLabelFactSchema,
   scanFactSchema,
   scannedCodeSchema,
   shiftClosedFactSchema,
@@ -110,6 +116,21 @@ describe("the builders of the outbox's records", () => {
     );
     expect(made.operatorId).toBeNull();
     expect(JSON.parse(JSON.stringify(made))).toHaveProperty("operatorId", null);
+  });
+
+  it("build every record of facts-request-pallets.json exactly (plan ПЛ-Ц)", () => {
+    const pallets = factBatchSchema.parse(fixture("facts-request-pallets.json")).records;
+    const [box, closed, label, exception] = pallets;
+    if (box === undefined || closed === undefined || label === undefined) throw new Error("short");
+    if (exception === undefined) throw new Error("short");
+    expect(boxClosedRecord(head(box), boxClosedFactSchema.parse(box.data))).toEqual(box);
+    expect(palletClosedRecord(head(closed), palletClosedFactSchema.parse(closed.data))).toEqual(
+      closed,
+    );
+    expect(palletLabelRecord(head(label), palletLabelFactSchema.parse(label.data))).toEqual(label);
+    expect(
+      palletExceptionRecord(head(exception), palletExceptionFactSchema.parse(exception.data)),
+    ).toEqual(exception);
   });
 
   it("carry a code as the domain read it: the hash without the tail, the canonical text with it", () => {
