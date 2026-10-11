@@ -1711,3 +1711,26 @@ async fn a_copy_of_another_host_restored_over_an_initialized_host_takes_the_unre
     assert!(report.other_host);
     assert_unread_margins(&paths, &report, copy_audit).await;
 }
+
+/// This host's own data folder, whose database was lost and made again by a
+/// start (a migrated database whose wizard never ran, beside the same
+/// `host.json`): it is of this host, but it issued nothing the copy's host
+/// did after the copy.
+#[tokio::test]
+async fn a_restore_over_this_hosts_database_made_again_by_a_start_takes_the_unread_margins() {
+    let admin = admin().await;
+    ask_block(&admin, "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    ask_block(&admin, "4c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    let (copy_path, _) = copy(&admin.app).await;
+    let copy_audit = newest_audit_id(&admin.app).await;
+    let paths = stop(&admin.app).await;
+    for suffix in ["", "-wal", "-shm"] {
+        let _ = std::fs::remove_file(format!("{}{suffix}", paths.database_file().display()));
+    }
+    reopen(&paths).await.close().await;
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert!(!report.other_host, "the copy is of this host");
+    assert_unread_margins(&paths, &report, copy_audit).await;
+}
