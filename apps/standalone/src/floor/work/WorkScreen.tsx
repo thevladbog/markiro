@@ -683,11 +683,15 @@ export function WorkScreen(props: WorkScreenProps) {
   // Read by a job in its turn, before React renders the stop it set.
   const stopRef = useRef<Stop | null>(stop);
   // «Закрыть паллету и смену» whose pallet's label waits for the operator: the shift's
-  // close goes, with the reason chosen, once that label is decided (plan ПЛ-Ц).
-  // `shown` is the summary the operator pressed on, for the close's own failure notes.
+  // close goes, with the reason chosen, once that label — the job `jobId` — is decided
+  // (plan ПЛ-Ц). `shown` is the summary the operator pressed on: the close goes on its
+  // numbers and on no others. The intention ends with that label's stop: a stop of
+  // anything else, another label included, drops it (`setStop`), and so does a check
+  // or a decision that found the label moved; the operator presses «Закрыть смену» again.
   const pendingClose = useRef<{
     reason: ShiftCloseReasonCode | null;
     shown: CloseSummary;
+    jobId: string;
   } | null>(null);
   // The same, said to the operator: the label's panel tells the shift closes after it.
   const [closeAfterLabel, setCloseAfterLabel] = useState(false);
@@ -695,10 +699,18 @@ export function WorkScreen(props: WorkScreenProps) {
     pendingClose.current = next;
     setCloseAfterLabel(next !== null);
   }, []);
-  const setStop = useCallback((next: Stop | null) => {
-    stopRef.current = next;
-    setStopState(next);
-  }, []);
+  const setStop = useCallback(
+    (next: Stop | null) => {
+      stopRef.current = next;
+      setStopState(next);
+      // Only the intention's own label may stand while it waits; no stop at all is the
+      // decision of that label, which `afterLabel` reads next.
+      const pending = pendingClose.current;
+      if (pending === null || next === null) return;
+      if (next.kind !== "label" || next.job.id !== pending.jobId) setPendingClose(null);
+    },
+    [setPendingClose],
+  );
   /**
    * A failed read of this computer's database at the entry (the first thing the
    * queue does, so no other stop stands yet) stops the line.
@@ -1121,8 +1133,9 @@ export function WorkScreen(props: WorkScreenProps) {
   /**
    * After a label is decided and nothing stops the work: the shift's close that
    * waited for its pallet's label goes now (plan ПЛ-Ц), unless the leave began
-   * first; otherwise a box a stop of the station left full closes, then a full
-   * pallet that waited. Only from the work queue.
+   * first — on the numbers the operator saw, read again; other numbers are shown
+   * with why instead. Otherwise a box a stop of the station left full closes,
+   * then a full pallet that waited. Only from the work queue.
    */
   const afterLabel = useCallback(async (): Promise<void> => {
     if (stopRef.current !== null) return;
@@ -1131,10 +1144,19 @@ export function WorkScreen(props: WorkScreenProps) {
       setPendingClose(null);
       // A leave that began first starts no close.
       if (leavingNow()) return;
+      const { reason, shown } = pending;
       setStop({ kind: "close", summary: null, note: null, waitingSscc: null, attempt: 0 });
       if (alive.current) setClosing(true);
       try {
-        await finishClose(pending.reason, pending.shown);
+        // Only the open pallet the operator was asked about may have changed: it is closed now.
+        const fresh = await readSummaryNow();
+        if (!sameSummary({ ...shown, blocker: null }, fresh)) {
+          await showSummary(fresh, "stale");
+          return;
+        }
+        await finishClose(reason, shown);
+      } catch {
+        await closeFailed(shown);
       } finally {
         if (alive.current) setClosing(false);
       }
@@ -1142,7 +1164,17 @@ export function WorkScreen(props: WorkScreenProps) {
     }
     await closeBox(true);
     if (stopRef.current === null) await settlePalletSafely();
-  }, [finishClose, closeBox, settlePalletSafely, leavingNow, setStop, setPendingClose]);
+  }, [
+    finishClose,
+    readSummaryNow,
+    showSummary,
+    closeFailed,
+    closeBox,
+    settlePalletSafely,
+    leavingNow,
+    setStop,
+    setPendingClose,
+  ]);
 
   const settle = useCallback(
     async (outcome: ScanOutcome): Promise<void> => {
@@ -1206,6 +1238,8 @@ export function WorkScreen(props: WorkScreenProps) {
         result = await checkLabel(printContextOf(live), job, raw);
       } catch (error) {
         if (!(error instanceof StaleJobError || error instanceof UnresolvableJobError)) throw error;
+        // The label was not decided here: an intention to close after it ends.
+        setPendingClose(null);
         setLabelNote({ kind: "moved" });
         await settleSafely();
         return;
@@ -1232,7 +1266,7 @@ export function WorkScreen(props: WorkScreenProps) {
         null,
       );
     },
-    [settleSafely, show, showLabel, afterLabel, refreshQuietly],
+    [settleSafely, show, showLabel, afterLabel, refreshQuietly, setPendingClose],
   );
 
   // The box choice of the exceptions, when it listens: a scan of a label picks the box.
@@ -1335,6 +1369,8 @@ export function WorkScreen(props: WorkScreenProps) {
             if (error instanceof NoPrinterError) setLabelNote({ kind: "no_printer" });
             else if (error instanceof LabelRenderError) setLabelNote({ kind: "render_failed" });
             else if (error instanceof StaleJobError || error instanceof UnresolvableJobError) {
+              // Not this decision's label any more: an intention to close after it ends.
+              setPendingClose(null);
               setLabelNote({ kind: "moved" });
               await settleSafely();
             } else throw error;
@@ -1628,8 +1664,10 @@ export function WorkScreen(props: WorkScreenProps) {
             }
             const closed = await closePallet();
             if (closed === "stopped") return;
-            if (stopRef.current?.kind === "label") {
-              setPendingClose({ reason, shown });
+            const waiting = stopRef.current;
+            if (waiting?.kind === "label") {
+              // Tied to the label that stopped the work: the pallet's own, just closed.
+              setPendingClose({ reason, shown, jobId: waiting.job.id });
               return;
             }
             await finishClose(reason, shown);

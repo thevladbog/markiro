@@ -12,8 +12,10 @@ import {
 import type { CloseBlocker, CloseSummary } from "../src/floor/close/shift-close.js";
 import { PALLET_EXTENSION } from "../src/floor/pallets/pallets.js";
 import { saveWorkstationSettings } from "../src/floor/setup/workstation-settings.js";
-import type { LocalExecutor } from "../src/local/executor.js";
+import type * as PrintResolution from "../src/floor/print/print-resolution.js";
+import { LocalDbError, type LocalExecutor } from "../src/local/executor.js";
 import { holdingWrites, km, PREFIX, rows } from "./support/floor-work.js";
+import { fakeHardware } from "./support/hardware.js";
 import { palletStation, type PalletStation } from "./support/pallets.js";
 import { printingSettings } from "./support/printing.js";
 import { renderWork, type WorkHarness } from "./support/work-screen.js";
@@ -25,6 +27,24 @@ const TITLE = "Закрытие смены OCT26-004";
 const STALE = "Пока вы смотрели итоги, смена изменилась: итоги посчитаны заново.";
 const AFTER_LABEL = "Паллета закрыта. Смена закроется, как только вы решите по этикетке паллеты.";
 const REFUSED = "Скан не принят: смена закрыта на этой станции.";
+const MOVED = "Состояние этикетки изменилось — показано текущее.";
+const noPalletPrinter = { assignments: { box: "zebra", pallet: null, duplicate: null } } as const;
+
+// Set by a test: the next check of a label is refused as one its job cannot be checked from.
+const unresolvable = vi.hoisted(() => ({ next: false }));
+vi.mock("../src/floor/print/print-resolution.js", async (importOriginal) => {
+  const real = await importOriginal<typeof PrintResolution>();
+  return {
+    ...real,
+    checkLabel: async (...args: Parameters<typeof real.checkLabel>) => {
+      if (unresolvable.next) {
+        unresolvable.next = false;
+        throw new real.UnresolvableJobError(args[1].id, args[1].state);
+      }
+      return real.checkLabel(...args);
+    },
+  };
+});
 
 function kinds(at: PalletStation): unknown[] {
   return rows(at.db, "SELECT kind FROM outbox WHERE kind <> 'scan' ORDER BY seq").map(
@@ -94,6 +114,88 @@ function reopeningBeforeClose(at: PalletStation, times = Number.POSITIVE_INFINIT
       "UPDATE floor_pallets SET closed_at = NULL, sscc = NULL, block_id = NULL, serial = NULL",
     );
   });
+}
+
+/**
+ * The local database whose next skip of a label, once armed, fails: before
+ * anything is written, or after it was written (its answer lost).
+ */
+function failingSkip(
+  at: PalletStation,
+  when: "before" | "after",
+): { executor: LocalExecutor; arm: () => void } {
+  let armed = false;
+  return {
+    arm: () => {
+      armed = true;
+    },
+    executor: {
+      query: (sql, params, row) => at.local.query(sql, params, row),
+      transaction: async (statements) => {
+        const skip = statements.some(
+          (statement) =>
+            statement.sql.startsWith("UPDATE floor_print_jobs SET state = ?") &&
+            statement.values?.[0] === "skipped",
+        );
+        if (!armed || !skip) return at.local.transaction(statements);
+        armed = false;
+        if (when === "after") await at.local.transaction(statements);
+        throw new LocalDbError("statement_failed", "disk I/O error");
+      },
+    },
+  };
+}
+
+/** The local database whose next reading of the close's summary, once armed, fails. */
+function failingSummaryRead(at: PalletStation): { executor: LocalExecutor; arm: () => void } {
+  let armed = false;
+  return {
+    arm: () => {
+      armed = true;
+    },
+    executor: {
+      query: (sql, params, row) => {
+        if (armed && sql.includes("SELECT s.local_state")) {
+          armed = false;
+          return Promise.reject(new LocalDbError("statement_failed", "disk I/O error"));
+        }
+        return at.local.query(sql, params, row);
+      },
+      transaction: (statements) => at.local.transaction(statements),
+    },
+  };
+}
+
+/** «Продолжить без этикетки» and its confirmation. */
+async function skipTwice(work: WorkHarness): Promise<void> {
+  await work.press("Продолжить без этикетки");
+  await work.press("Продолжить без этикетки");
+}
+
+/**
+ * Two boxes on the open pallet of 40, then «Закрыть паллету и смену» whose
+ * pallet label waits for its check, with the intention to close after it.
+ */
+async function palletLabelChecked(at: PalletStation): Promise<WorkHarness> {
+  const work = renderWork(at);
+  await work.scanner.listening();
+  await work.settled();
+  await work.scan(km("A1"));
+  await work.scan(km("A2"));
+  await saveWorkstationSettings(
+    at.local,
+    printingSettings({
+      assignments: { box: "zebra", pallet: "zebra", duplicate: null },
+      verifyPrintedLabel: true,
+    }),
+  );
+  await work.press("Закрыть смену");
+  expect(await screen.findByText(QUESTION)).toBeTruthy();
+  await work.press("Производственный брак");
+  await work.press("Закрыть паллету и смену");
+  expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
+  expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
+  return work;
 }
 
 /** Two boxes of one code each on the open pallet of 40; the close's summary open, its reason chosen. */
@@ -398,8 +500,6 @@ describe("what the summary and the press say of the open pallet", () => {
 });
 
 describe("the pallet's label and the pallet's serial inside the close", () => {
-  const noPalletPrinter = { assignments: { box: "zebra", pallet: null, duplicate: null } } as const;
-
   it("writes the pallet's label job before the shift can close, and closes the shift once the label is skipped", async () => {
     const at = await palletStation({ capacity: 40, boxCapacity: 1, settings: noPalletPrinter });
     const work = await twoBoxesThenClose(at);
@@ -476,6 +576,250 @@ describe("the pallet's label and the pallet's serial inside the close", () => {
     await work.press("Закрыть паллету и смену");
     expect(await screen.findByText(CLOSED)).toBeTruthy();
     expect(document.activeElement).toBe(screen.getByRole("group", { name: CLOSED }));
+  });
+});
+
+describe("an intention to close that outlives its pallet's label never closes the shift", () => {
+  const verifying = () =>
+    printingSettings({
+      assignments: { box: "zebra", pallet: "zebra", duplicate: null },
+      verifyPrintedLabel: true,
+    });
+
+  it("closes nothing on another pallet's label after the pallet's own check found its label moved", async () => {
+    const at = await palletStation({ capacity: 2, boxCapacity: 1 });
+    const work = renderWork(at);
+    await work.scanner.listening();
+    await work.settled();
+    await work.scan(km("A1"));
+    await saveWorkstationSettings(at.local, verifying());
+    await work.press("Закрыть смену");
+    expect(await screen.findByText("На паллете 1 из 2 коробов — закрыть?")).toBeTruthy();
+    await work.press("Производственный брак");
+    await work.press("Закрыть паллету и смену");
+    expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
+    expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
+    // The pallet's job moves under the screen: its check meets a label that changed.
+    at.db.exec("UPDATE floor_print_jobs SET state = 'verified' WHERE purpose = 'pallet'");
+    await work.scan(`(00)${PALLET_SSCC}`);
+    expect(screen.queryByText("Отсканируйте SSCC на этикетке паллеты.")).toBeNull();
+    // The work goes on; another pallet fills and its label fails at a printer that is gone.
+    await saveWorkstationSettings(
+      at.local,
+      printingSettings({ assignments: { box: "zebra", pallet: null, duplicate: null } }),
+    );
+    await work.scan(km("A2"));
+    await work.scan(km("A3"));
+    expect(screen.getByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    const saidAfterLabel = screen.queryByText(AFTER_LABEL) !== null;
+    await work.press("Продолжить без этикетки");
+    await work.press("Продолжить без этикетки");
+    await work.settled();
+    expect(kinds(at)).not.toContain("shift_closed");
+    expect(localState(at)).toBeNull();
+    expect(screen.queryByText(CLOSED)).toBeNull();
+    expect(screen.queryByRole("region", { name: TITLE })).toBeNull();
+    // «Смена закроется…» was never said over the label it did not concern.
+    expect(saidAfterLabel).toBe(false);
+  });
+
+  it("drops the intention when the pallet's check finds its label moved but still waiting, and closes nothing on its decision", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1 });
+    const work = await palletLabelChecked(at);
+    // The job fails under the screen: the check meets a label that changed, and is shown again.
+    at.db.exec(
+      "UPDATE floor_print_jobs SET state = 'failed', error_code = 'not_sent' WHERE purpose = 'pallet'",
+    );
+    await work.scan(`(00)${PALLET_SSCC}`);
+    expect(screen.getByText(MOVED)).toBeTruthy();
+    expect(screen.getByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(screen.queryByText(AFTER_LABEL)).toBeNull();
+    await skipTwice(work);
+    expect(kinds(at).slice(-2)).toEqual(["pallet_closed", "pallet_label"]);
+    expect(localState(at)).toBeNull();
+    expect(screen.queryByRole("region", { name: TITLE })).toBeNull();
+  });
+
+  it("drops the intention when the pallet's check cannot be resolved, and closes nothing on its next check", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1 });
+    const work = await palletLabelChecked(at);
+    unresolvable.next = true;
+    await work.scan(`(00)${PALLET_SSCC}`);
+    expect(screen.getByText(MOVED)).toBeTruthy();
+    expect(screen.getByText("Отсканируйте SSCC на этикетке паллеты.")).toBeTruthy();
+    expect(screen.queryByText(AFTER_LABEL)).toBeNull();
+    await work.scan(`(00)${PALLET_SSCC}`);
+    await work.settled();
+    expect(kinds(at).slice(-2)).toEqual(["pallet_closed", "pallet_label"]);
+    expect(localState(at)).toBeNull();
+    expect(screen.queryByRole("region", { name: TITLE })).toBeNull();
+  });
+
+  it("drops the intention when the pallet label's decision finds it moved but still waiting, and closes nothing on the next decision", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1, settings: noPalletPrinter });
+    const work = await twoBoxesThenClose(at);
+    await work.press("Закрыть паллету и смену");
+    expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
+    // Another try counted under the screen: the decision meets a label that changed, still failed.
+    at.db.exec("UPDATE floor_print_jobs SET attempts = attempts + 1 WHERE purpose = 'pallet'");
+    await skipTwice(work);
+    expect(screen.getByText(MOVED)).toBeTruthy();
+    expect(screen.queryByText(AFTER_LABEL)).toBeNull();
+    expect(kinds(at)).not.toContain("pallet_label");
+    await skipTwice(work);
+    expect(kinds(at).slice(-2)).toEqual(["pallet_closed", "pallet_label"]);
+    expect(localState(at)).toBeNull();
+    expect(screen.queryByRole("region", { name: TITLE })).toBeNull();
+  });
+
+  it("drops the intention when the pallet label's decision stops on a system error, and closes nothing when the label is decided again", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1, settings: noPalletPrinter });
+    const failing = failingSkip(at, "before");
+    const work = await twoBoxesThenClose(at, failing.executor);
+    await work.press("Закрыть паллету и смену");
+    expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
+    failing.arm();
+    await skipTwice(work);
+    expect(screen.getByText("Состояние этикетки не прочитано")).toBeTruthy();
+    await work.press("Понятно");
+    // Nothing was written: the same label stands again, and nothing says the shift closes after it.
+    expect(screen.getByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(screen.queryByText(AFTER_LABEL)).toBeNull();
+    await skipTwice(work);
+    expect(kinds(at).slice(-2)).toEqual(["pallet_closed", "pallet_label"]);
+    expect(localState(at)).toBeNull();
+    expect(screen.queryByRole("region", { name: TITLE })).toBeNull();
+  });
+
+  it("closes nothing on a later box label after the pallet label's decision was written and its answer lost", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1, settings: noPalletPrinter });
+    const failing = failingSkip(at, "after");
+    const work = await twoBoxesThenClose(at, failing.executor);
+    await work.press("Закрыть паллету и смену");
+    failing.arm();
+    await skipTwice(work);
+    expect(screen.getByText("Состояние этикетки не прочитано")).toBeTruthy();
+    expect(kinds(at).slice(-2)).toEqual(["pallet_closed", "pallet_label"]);
+    await work.press("Понятно");
+    expect(screen.queryByText("Этикетка паллеты не напечатана")).toBeNull();
+    // Another box closes and its label's check is decided.
+    await saveWorkstationSettings(
+      at.local,
+      printingSettings({
+        assignments: { box: "zebra", pallet: null, duplicate: null },
+        verifyPrintedLabel: true,
+      }),
+    );
+    await work.scan(km("A3"));
+    expect(screen.getByText("Отсканируйте SSCC на этикетке короба.")).toBeTruthy();
+    expect(screen.queryByText(AFTER_LABEL)).toBeNull();
+    await work.scan(`(00)${buildSscc(0, PREFIX, 1502)}`);
+    await work.settled();
+    expect(kinds(at)).not.toContain("shift_closed");
+    expect(localState(at)).toBeNull();
+    expect(screen.queryByRole("region", { name: TITLE })).toBeNull();
+  });
+
+  it("drops the intention when another label takes the screen after the pallet's, and closes nothing on that label's decision", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1, settings: noPalletPrinter });
+    const work = await twoBoxesThenClose(at);
+    await work.press("Закрыть паллету и смену");
+    expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
+    // A box's label failed under the screen: it waits behind the pallet's, the same numbers.
+    at.db.exec(
+      "UPDATE floor_print_jobs SET state = 'failed', error_code = 'not_sent' WHERE id = " +
+        "(SELECT id FROM floor_print_jobs WHERE purpose = 'box' ORDER BY created_at LIMIT 1)",
+    );
+    await skipTwice(work);
+    expect(kinds(at).slice(-2)).toEqual(["pallet_closed", "pallet_label"]);
+    expect(screen.getByText("Этикетка короба не напечатана")).toBeTruthy();
+    expect(screen.queryByText(AFTER_LABEL)).toBeNull();
+    await skipTwice(work);
+    expect(kinds(at)).not.toContain("shift_closed");
+    expect(localState(at)).toBeNull();
+    expect(screen.queryByRole("region", { name: TITLE })).toBeNull();
+  });
+
+  it("decides nothing and closes nothing once the leave began while the pallet's label stands", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1, settings: noPalletPrinter });
+    const leaving = { now: false };
+    const work = renderWork(at, { overrides: { isLeaving: () => leaving.now } });
+    await work.scanner.listening();
+    await work.settled();
+    await work.scan(km("A1"));
+    await work.scan(km("A2"));
+    await work.press("Закрыть смену");
+    await screen.findByText(QUESTION);
+    await work.press("Производственный брак");
+    await work.press("Закрыть паллету и смену");
+    expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
+    leaving.now = true;
+    await skipTwice(work);
+    expect(kinds(at)).toEqual(["box_closed", "box_closed", "pallet_closed"]);
+    expect(localState(at)).toBeNull();
+    expect(screen.queryByText(CLOSED)).toBeNull();
+  });
+
+  it("shows the summary read again instead of closing when the numbers changed while the pallet's label waited", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1, settings: noPalletPrinter });
+    const work = await twoBoxesThenClose(at);
+    await work.press("Закрыть паллету и смену");
+    expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
+    // A code is gone under the screen: the operator was shown 2, the station has 1.
+    at.db.exec("DELETE FROM floor_codes WHERE rowid = (SELECT min(rowid) FROM floor_codes)");
+    await skipTwice(work);
+    expect(screen.getByText(STALE)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Подтвердить закрытие" })).toBeTruthy();
+    expect(kinds(at).slice(-2)).toEqual(["pallet_closed", "pallet_label"]);
+    expect(localState(at)).toBeNull();
+    expect(screen.queryByText(CLOSED)).toBeNull();
+  });
+
+  it("says the close failed, and closes nothing, when the summary cannot be read again after the pallet's label", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1, settings: noPalletPrinter });
+    const failing = failingSummaryRead(at);
+    const work = await twoBoxesThenClose(at, failing.executor);
+    await work.press("Закрыть паллету и смену");
+    failing.arm();
+    await skipTwice(work);
+    expect(
+      screen.getByText(
+        "Не удалось записать закрытие на этом компьютере. Смена не закрыта — повторите.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("Состояние этикетки не прочитано")).toBeNull();
+    expect(kinds(at).slice(-2)).toEqual(["pallet_closed", "pallet_label"]);
+    expect(localState(at)).toBeNull();
+  });
+
+  it("keeps the intention and its words while the pallet's label fails again on «Напечатать снова», then closes on its skip", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1 });
+    const printer = { ok: true };
+    const shell = fakeHardware(async () =>
+      printer.ok ? { sent: true } : { sent: false, code: "not_sent" },
+    );
+    const work = renderWork(at, { shell });
+    await work.scanner.listening();
+    await work.settled();
+    await work.scan(km("A1"));
+    await work.scan(km("A2"));
+    printer.ok = false;
+    await work.press("Закрыть смену");
+    expect(await screen.findByText(QUESTION)).toBeTruthy();
+    await work.press("Производственный брак");
+    await work.press("Закрыть паллету и смену");
+    expect(screen.getByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
+    const sent = shell.sends.length;
+    await work.press("Напечатать снова");
+    expect(shell.sends.length).toBe(sent + 1);
+    expect(screen.getByText("Этикетка паллеты не напечатана")).toBeTruthy();
+    expect(screen.getByText(AFTER_LABEL)).toBeTruthy();
+    expect(screen.queryByRole("region", { name: TITLE })).toBeNull();
+    expect(kinds(at)).not.toContain("shift_closed");
+    await skipTwice(work);
+    expect(await screen.findByText(CLOSED)).toBeTruthy();
+    expect(kinds(at).slice(-3)).toEqual(["pallet_closed", "pallet_label", "shift_closed"]);
   });
 });
 
