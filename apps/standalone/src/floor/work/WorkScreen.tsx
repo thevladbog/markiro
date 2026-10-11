@@ -240,13 +240,16 @@ type Stop =
   | { kind: "exceptions"; boxes: readonly ClosedBox[] | null }
   /**
    * The summary of the shift's close (plan 2a8, spec §5.7.7), `null` while it
-   * is read; `waitingSscc`: the label that keeps the shift open, when there is one.
+   * is read; `waitingSscc`: the label that keeps the shift open, when there is one;
+   * `attempt`: how many times the summary has been shown again, so that two
+   * re-shows in a row are two views for the panel's guard.
    */
   | {
       kind: "close";
       summary: CloseSummary | null;
       note: CloseNote | null;
       waitingSscc: string | null;
+      attempt: number;
     }
   /** The shift is closed on this station: the end of its work screen, no scan is taken again. */
   | { kind: "closed"; record: ClosedNumbers };
@@ -1174,10 +1177,33 @@ export function WorkScreen(props: WorkScreenProps) {
     }
   };
 
-  /** The summary on the screen, unless the operator has gone back from it meanwhile. */
+  /**
+   * A shift found closed on this station, wherever it was found: the end of
+   * this screen's work. The floor is told of a record, for the close may not
+   * have been told yet (a write whose answer was lost): it is harmless when
+   * it has.
+   */
+  const foundClosed = (summary: CloseSummary) => {
+    live.current.onRecorded();
+    showClosed(summary);
+  };
+
+  /**
+   * The summary on the screen, unless the operator has gone back from it
+   * meanwhile; a shift found closed is the closed stop instead. Every showing
+   * is a new `attempt`, so the panel's guard over «Подтвердить закрытие»
+   * starts again each time, however alike two showings are.
+   */
   const showSummary = async (summary: CloseSummary, note: CloseNote | null): Promise<void> => {
+    if (summary.blocker?.kind === "closed") {
+      foundClosed(summary);
+      return;
+    }
     const waitingSscc = await waitingLabel(summary);
-    if (stopRef.current?.kind === "close") setStop({ kind: "close", summary, note, waitingSscc });
+    const now = stopRef.current;
+    if (now?.kind === "close") {
+      setStop({ kind: "close", summary, note, waitingSscc, attempt: now.attempt + 1 });
+    }
   };
 
   /**
@@ -1195,7 +1221,7 @@ export function WorkScreen(props: WorkScreenProps) {
   const openClose = () => {
     if (leavingNow() || stopRef.current !== null) return;
     setPlanReached(false);
-    setStop({ kind: "close", summary: null, note: null, waitingSscc: null });
+    setStop({ kind: "close", summary: null, note: null, waitingSscc: null, attempt: 0 });
     void live.current
       .track(readSummary())
       .catch(() => setStop({ kind: "system_error", cause: "read" }));
@@ -1225,49 +1251,48 @@ export function WorkScreen(props: WorkScreenProps) {
     const shown = before.summary;
     closeRunning.current = true;
     setClosing(true);
-    void live.current.track(
-      queue.run(async () => {
-        const now = live.current;
-        const read = () => readCloseSummary(now.local, pairingOf(now), now.shift.copy.id);
-        try {
-          const fresh = await read();
-          if (fresh.blocker?.kind === "closed") {
-            showClosed(fresh);
-            return;
+    void live.current
+      .track(
+        queue.run(async () => {
+          const now = live.current;
+          const read = () => readCloseSummary(now.local, pairingOf(now), now.shift.copy.id);
+          try {
+            const fresh = await read();
+            // A shift found closed differs from the one shown, and is shown as closed.
+            if (!sameSummary(shown, fresh)) {
+              await showSummary(fresh, "stale");
+              return;
+            }
+            const result = await closeShift(boxContextOf(live), reason);
+            if (result.kind === "closed") {
+              live.current.onRecorded();
+              setStop({ kind: "closed", record: result.record });
+              return;
+            }
+            await showSummary(await read(), result.kind === "reason_required" ? "reason" : "stale");
+          } catch {
+            // The write may have been committed, and only its answer lost.
+            const again = await read().catch(() => null);
+            if (again !== null) {
+              // Closed after all, or still open and said so; a re-read that failed too
+              // knows nothing, and the note says so instead of claiming the shift open.
+              await showSummary(again, "failed");
+            } else if (stopRef.current?.kind === "close") {
+              setStop({
+                kind: "close",
+                summary: shown,
+                note: "unknown",
+                waitingSscc: null,
+                attempt: stopRef.current.attempt + 1,
+              });
+            }
+          } finally {
+            closeRunning.current = false;
+            if (alive.current) setClosing(false);
           }
-          if (!sameSummary(shown, fresh)) {
-            await showSummary(fresh, "stale");
-            return;
-          }
-          const result = await closeShift(boxContextOf(live), reason);
-          if (result.kind === "closed") {
-            live.current.onRecorded();
-            setStop({ kind: "closed", record: result.record });
-            return;
-          }
-          const again = await read();
-          if (again.blocker?.kind === "closed") showClosed(again);
-          else await showSummary(again, result.kind === "reason_required" ? "reason" : "stale");
-        } catch {
-          // The write may have been committed, and only its answer lost.
-          const again = await read().catch(() => null);
-          if (again?.blocker?.kind === "closed") {
-            live.current.onRecorded();
-            showClosed(again);
-          } else if (stopRef.current?.kind === "close") {
-            setStop({
-              kind: "close",
-              summary: again ?? shown,
-              note: "failed",
-              waitingSscc: null,
-            });
-          }
-        } finally {
-          closeRunning.current = false;
-          if (alive.current) setClosing(false);
-        }
-      }),
-    );
+        }),
+      )
+      .catch(() => setStop({ kind: "system_error", cause: "write" }));
   };
 
   // «Назад» from the summary of the close: the focus returns to the button that opened it.
@@ -1595,6 +1620,7 @@ export function WorkScreen(props: WorkScreenProps) {
               summary={stop.summary}
               note={stop.note}
               waitingSscc={stop.waitingSscc}
+              attempt={stop.attempt}
               busy={closing}
               onClose={confirmClose}
               onBack={() => setStop(null)}

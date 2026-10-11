@@ -8,8 +8,12 @@ import { VIEW_GUARD_MS } from "../print/LabelPanel.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 import type { CloseSummary } from "./shift-close.js";
 
-/** Why the summary is shown again: the shift changed meanwhile, no reason was chosen, or the write failed. */
-export type CloseNote = "stale" | "reason" | "failed";
+/**
+ * Why the summary is shown again: the shift changed meanwhile, no reason was
+ * chosen, the write failed (and the shift was read back open), or the write
+ * failed and the shift could not be read back at all (`unknown`: it may be closed).
+ */
+export type CloseNote = "stale" | "reason" | "failed" | "unknown";
 
 /** What the closed shift's panel says of it: the figures of the record, or of the shift when its record was written unseen. */
 export interface ClosedNumbers {
@@ -85,12 +89,14 @@ function useViewGuard<T extends HTMLElement>(view: string, clock: () => number) 
 
 /**
  * The view the summary shows, which the guard and the focus follow: loading,
- * the summary (or what keeps the shift open), and each note that brings a new
- * one — a summary read again lands under the finger that pressed the old one.
+ * the summary (or what keeps the shift open), and each showing that brings a
+ * new one — a summary read again lands under the finger that pressed the old
+ * one, and two showings in a row may say the same, which only the `attempt`
+ * tells apart.
  */
-function viewOf(summary: CloseSummary | null, note: CloseNote | null): string {
+function viewOf(summary: CloseSummary | null, note: CloseNote | null, attempt: number): string {
   if (summary === null) return "loading";
-  return `summary:${summary.blocker?.kind ?? "ready"}:${note ?? ""}`;
+  return `summary:${summary.blocker?.kind ?? "ready"}:${note ?? ""}:${attempt}`;
 }
 
 export interface ShiftClosePanelProps {
@@ -99,6 +105,8 @@ export interface ShiftClosePanelProps {
   /** `null` while the summary is read. */
   summary: CloseSummary | null;
   note: CloseNote | null;
+  /** How many times the summary has been shown again: each showing restarts the guard. */
+  attempt: number;
   /** The SSCC of the label that keeps the shift open, when it is known. */
   waitingSscc: string | null;
   /** The close is being written: every button waits. */
@@ -129,6 +137,7 @@ export function ShiftClosePanel({
   productName,
   summary,
   note,
+  attempt,
   waitingSscc,
   busy,
   onClose,
@@ -138,7 +147,7 @@ export function ShiftClosePanel({
 }: ShiftClosePanelProps) {
   const { t } = useTranslation();
   const [reason, setReason] = useState<ShiftCloseReasonCode | null>(null);
-  const { viewRef, settled } = useViewGuard<HTMLElement>(viewOf(summary, note), clock);
+  const { viewRef, settled } = useViewGuard<HTMLElement>(viewOf(summary, note, attempt), clock);
   /** Props of a button: while the close writes, or just after the view changed, a press does nothing. */
   const press = (action: () => void) => ({
     "aria-disabled": busy ? true : undefined,

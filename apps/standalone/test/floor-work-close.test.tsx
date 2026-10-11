@@ -27,6 +27,8 @@ const REFUSED = "Скан не принят: смена закрыта на эт
 const PAUSED = "Скан не принят: работа остановлена — сначала ответьте на сообщение на экране.";
 const FAILED = "Не удалось записать закрытие на этом компьютере. Смена не закрыта — повторите.";
 const STALE = "Пока вы смотрели итоги, смена изменилась: итоги посчитаны заново.";
+const UNKNOWN =
+  "Не удалось записать закрытие или проверить, записалось ли оно. Смена могла закрыться: нажмите «Подтвердить закрытие» ещё раз — программа проверит.";
 
 async function scanAll(work: WorkHarness, serials: readonly string[]): Promise<void> {
   await work.scanner.listening();
@@ -406,8 +408,155 @@ describe("the close of a shift on the work screen", () => {
     await work.press("Подтвердить закрытие");
     expect(await screen.findByText(CLOSED_TITLE)).toBeTruthy();
     expect(closedRecords(at)).toHaveLength(0);
-    // This screen wrote no record: it tells the floor of none.
+    // This screen wrote no record, but the close it found may not have been told: the floor is
+    // told once, which is harmless when the record has been told already.
+    expect(recorded(work)).toBe(before + 1);
+  });
+
+  it("shows the closed stop at once when «Закрыть смену» finds the shift closed, and tells the floor", async () => {
+    const at = await printStation();
+    const work = renderWork(at);
+    await fillBox(work);
+    const before = recorded(work);
+    at.db.exec("UPDATE floor_shifts SET local_state = 'closing'");
+    await work.press("Закрыть смену");
+    expect(await screen.findByText(CLOSED_TITLE)).toBeTruthy();
+    expect(screen.getByText("Принято: 12 шт., коробов: 1.")).toBeTruthy();
+    // Not a summary with «Назад к работе»: a live screen on a closed shift takes no scan.
+    expect(screen.queryByRole("region", { name: TITLE })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Назад к работе" })).toBeNull();
+    expect(recorded(work)).toBe(before + 1);
+    await work.scan(km("Z1"));
+    expect(lastLine()).toBe(REFUSED);
+  });
+
+  it("does not claim the shift open when the write's answer was lost and the shift could not be read back: a second press finds it closed and tells the floor", async () => {
+    const at = await printStation();
+    const lose = { now: false, blind: false };
+    const local: LocalExecutor = {
+      query: (sql, params, row) => {
+        if (lose.blind) throw new LocalDbError("statement_failed", "the database does not answer");
+        return at.local.query(sql, params, row);
+      },
+      transaction: async (statements) => {
+        await at.local.transaction(statements);
+        if (lose.now) {
+          lose.blind = true;
+          throw new LocalDbError("statement_failed", "the answer was lost");
+        }
+        return [];
+      },
+    };
+    const work = renderWork({ local, shift: at.shift });
+    await fillBox(work);
+    await openSummary(work);
+    await work.press("Производственный брак");
+    const before = recorded(work);
+    lose.now = true;
+    await work.press("Подтвердить закрытие");
+    expect(await screen.findByText(UNKNOWN)).toBeTruthy();
+    // The write did commit; the screen does not say that the shift is open.
+    expect(screen.queryByText(FAILED)).toBeNull();
+    expect(localState(at)).toBe("closing");
     expect(recorded(work)).toBe(before);
+    expect(screen.getByRole("button", { name: "Подтвердить закрытие" })).toBeTruthy();
+    // A second press that cannot read it back either shows the same note again; the tap that
+    // follows at once is the echo of the first, and the shift stays as the screen shows it.
+    await work.press("Подтвердить закрытие");
+    expect(screen.getByText(UNKNOWN)).toBeTruthy();
+    lose.now = false;
+    lose.blind = false;
+    tap("Подтвердить закрытие");
+    await work.settled();
+    expect(screen.queryByText(CLOSED_TITLE)).toBeNull();
+    expect(recorded(work)).toBe(before);
+    await work.press("Подтвердить закрытие");
+    expect(await screen.findByText(CLOSED_TITLE)).toBeTruthy();
+    expect(closedRecords(at)).toHaveLength(1);
+    // The fresh read found the close: the status bar and the outbox are told of its record.
+    expect(recorded(work)).toBe(before + 1);
+  });
+
+  it("names the label that waits when the shift is shown again after a failed write", async () => {
+    const at = await printStation();
+    const lose = { now: false };
+    const local: LocalExecutor = {
+      query: (sql, params, row) => at.local.query(sql, params, row),
+      transaction: async (statements) => {
+        if (lose.now) {
+          // The write fails, and a label turns to wait meanwhile.
+          at.db.exec("UPDATE floor_print_jobs SET state = 'failed', error_code = 'not_sent'");
+          throw new LocalDbError("statement_failed", "disk");
+        }
+        return at.local.transaction(statements);
+      },
+    };
+    const work = renderWork({ local, shift: at.shift });
+    await fillBox(work);
+    await openSummary(work);
+    await work.press("Производственный брак");
+    lose.now = true;
+    await work.press("Подтвердить закрытие");
+    expect(
+      await screen.findByText(
+        `Этикетка короба ${formatSsccHri(FIRST_SSCC)} ещё ждёт решения. Решите её, затем закройте смену.`,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText(FAILED)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Перейти к этикетке" })).toBeTruthy();
+  });
+
+  it("restarts the guard over «Подтвердить закрытие» at every showing of the summary, two alike in a row too", async () => {
+    const at = await printStation();
+    const work = renderWork(at);
+    await fillBox(work);
+    await openSummary(work);
+    await work.press("Производственный брак");
+    loseACode(at);
+    await work.press("Подтвердить закрытие");
+    await vi.waitFor(() => expect(fact("Факт")).toBe("11"));
+    expect(screen.getByText(STALE)).toBeTruthy();
+    // The second showing says the same: the note is the same, the blocker is the same.
+    work.pause();
+    loseACode(at);
+    await work.press("Подтвердить закрытие");
+    await vi.waitFor(() => expect(fact("Факт")).toBe("10"));
+    expect(screen.getByText(STALE)).toBeTruthy();
+    // A second tap, as the first one's echo, lands on the button the new summary put there.
+    tap("Подтвердить закрытие");
+    await work.settled();
+    expect(localState(at)).toBeNull();
+    expect(closedRecords(at)).toHaveLength(0);
+    expect(screen.queryByText(CLOSED_TITLE)).toBeNull();
+    work.clock.now += 399;
+    tap("Подтвердить закрытие");
+    await work.settled();
+    expect(localState(at)).toBeNull();
+    work.clock.now += 1;
+    tap("Подтвердить закрытие");
+    await work.settled();
+    expect(await screen.findByText("Принято: 10 шт., коробов: 1.")).toBeTruthy();
+    expect(closedRecords(at)).toHaveLength(1);
+  });
+
+  it("does not leave an unhandled rejection when the screen cannot tell the floor of the close: the stop says the write failed", async () => {
+    const at = await printStation();
+    const onRecorded = vi.fn();
+    const work = renderWork(at, { overrides: { onRecorded } });
+    await fillBox(work);
+    await openSummary(work);
+    await work.press("Производственный брак");
+    onRecorded.mockImplementation(() => {
+      throw new Error("the status bar is gone");
+    });
+    await work.press("Подтвердить закрытие");
+    expect(await screen.findByText("Скан не записан")).toBeTruthy();
+    // The close itself was written: the shift is closing and its record waits in the outbox.
+    expect(localState(at)).toBe("closing");
+    expect(closedRecords(at)).toHaveLength(1);
+    // The close gate is open again: nothing keeps the work from ending.
+    await work.settled();
+    expect(work.gate.pending()).toBe(0);
   });
 
   it("never closes on numbers the operator did not see: a code lost since the summary shows a new summary", async () => {
@@ -902,7 +1051,8 @@ describe("the close of a shift on the work screen, in its races", () => {
     await work.press("Подтвердить закрытие");
     expect(await screen.findByText(CLOSED_TITLE)).toBeTruthy();
     expect(closedRecords(at)).toHaveLength(0);
-    expect(recorded(work)).toBe(before);
+    // The close it found was not written by this screen and may not have been told yet.
+    expect(recorded(work)).toBe(before + 1);
   });
 
   it("shows a label that began to wait inside the write, and closes nothing", async () => {
@@ -944,7 +1094,9 @@ describe("the close of a shift on the work screen, in its races", () => {
     await work.press("Производственный брак");
     broken = true;
     await work.press("Подтвердить закрытие");
-    expect(await screen.findByText(FAILED)).toBeTruthy();
+    // Neither "closed" nor "not closed" is known: the note hedges, and does not call the shift open.
+    expect(await screen.findByText(UNKNOWN)).toBeTruthy();
+    expect(screen.queryByText(FAILED)).toBeNull();
     expect(fact("Факт")).toBe("12");
     expect(screen.getByRole("button", { name: "Подтвердить закрытие" })).toBeTruthy();
     broken = false;
