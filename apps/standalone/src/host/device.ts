@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { z } from "zod";
 
 import { deviceStatusSchema, type DeviceStatus } from "./protocol.js";
 
@@ -24,6 +25,7 @@ export const DEVICE_ERROR_CODES = [
   "key_rejected",
   "request_failed",
   "unsent_facts",
+  "address_other_host",
 ] as const;
 export type DeviceErrorCode = (typeof DEVICE_ERROR_CODES)[number];
 
@@ -49,6 +51,14 @@ export interface ClaimInput {
   name: string;
 }
 
+/**
+ * The role the installer gave this computer (`installation.json`, plan УСТ):
+ * «хост и станция», «только станция», «только офис». `null` in a development
+ * build, which works as a station.
+ */
+export const installRoleSchema = z.enum(["host", "station", "office"]).nullable();
+export type InstallRole = z.infer<typeof installRoleSchema>;
+
 /** The pairing of this installation, kept by the shell (`device.json`). */
 export interface DeviceApi {
   status(): Promise<DeviceStatus | null>;
@@ -72,6 +82,13 @@ export interface DeviceApi {
    * takes it unbound (`@typescript-eslint/unbound-method`).
    */
   refresh: () => Promise<DeviceStatus>;
+  /** The installer's role for this computer (`install_role`). */
+  installRole(): Promise<InstallRole>;
+  /**
+   * Reach the paired host at a new address (`https://host:port`) with the
+   * same certificate (`device_change_address`); the pairing stays.
+   */
+  changeAddress(address: string): Promise<DeviceStatus>;
 }
 
 type Invoke = (command: string, args: Record<string, unknown>) => Promise<unknown>;
@@ -104,6 +121,14 @@ export function createTauriDeviceApi(call: Invoke = invoke): DeviceApi {
       await run("device_forget", options?.keepUnsent === true ? { keepUnsent: true } : {});
     },
     refresh: async () => parseStatus(await run("device_refresh", {})),
+    async installRole() {
+      const parsed = installRoleSchema.safeParse(await run("install_role", {}));
+      if (!parsed.success) throw new DeviceError("invalid_response", parsed.error.message);
+      return parsed.data;
+    },
+    async changeAddress(address) {
+      return parseStatus(await run("device_change_address", { address }));
+    },
   };
 }
 

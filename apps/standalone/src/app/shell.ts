@@ -203,6 +203,8 @@ export type ShellAction =
   | { type: "sync_failed"; failure: SyncFailure; quarantined: number | null }
   | { type: "line_selected"; status: DeviceStatus }
   | { type: "device_refreshed"; status: DeviceStatus }
+  /** The shell reached the paired host at a new address (plan УСТ). */
+  | { type: "address_changed"; status: DeviceStatus }
   // `deviceId` and `lineId`: the pairing and the line the sign-in began on, as
   // the screen that asked had them (not what the shell has by now);
   // `address`: the local host address the shell derives its screen with.
@@ -322,6 +324,9 @@ export function nextShellView(state: ShellState, localAddress: string): ShellVie
   }
   switch (state.office.kind) {
     case "closed":
+      // An office PC (the installer's role «только офис», plan УСТ) has no
+      // floor: its home is the office sign-in.
+      if (status.kind === "office") return { kind: "office_login", notice: null };
       // A station works on one line and chooses it before the floor.
       if (status.kind === "station" && status.lineId === null) return { kind: "line_select" };
       if (state.operator !== null) return { kind: "floor_operator", operator: state.operator };
@@ -596,6 +601,15 @@ export function shellReducer(state: ShellState, action: ShellAction): ShellState
       // Another line waits until the operator leaves the shift (question В9).
       if (state.floorWork !== null) return { ...saved, pendingDevice: action.status };
       return changeLine(saved, action.status);
+    }
+    case "address_changed": {
+      // Only the pairing the answer belongs to: same host, same device.
+      if (state.device.kind !== "ready" || state.device.status === null) return state;
+      const current = state.device.status;
+      if (current.deviceId !== action.status.deviceId || current.hostId !== action.status.hostId) {
+        return state;
+      }
+      return { ...state, device: { kind: "ready", status: action.status } };
     }
     case "operator_signed_in": {
       // Only onto the floor the sign-in started from: a late answer must not
