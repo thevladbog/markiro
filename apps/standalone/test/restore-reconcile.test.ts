@@ -229,8 +229,8 @@ describe("the reconciliation after a restore", () => {
     await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
     const register = answering();
     await reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW });
-    // No block: nothing to ask the host.
-    expect(register).not.toHaveBeenCalled();
+    // No block: one empty request, so the host marks the station (plan ХП).
+    expect(register.mock.calls).toEqual([[{ blocks: [] }]]);
     expect(
       rows(
         db,
@@ -248,6 +248,71 @@ describe("the reconciliation after a restore", () => {
       { id: waiting, outcome: null, outcome_code: null, outcome_details: null, acked_at: null },
     ]);
     expect(fromZero(db)).toEqual([{ value: EPOCH }]);
+  });
+
+  it("sends one empty request for a pairing that holds no block, and settles with nothing refused", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = answering();
+    await expect(
+      reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
+    ).resolves.toEqual({ kind: "reconciled", epoch: EPOCH, registered: 0, known: 0, refused: 0 });
+    expect(register.mock.calls).toEqual([[{ blocks: [] }]]);
+    await expect(restoreDue(executor, PAIRING)).resolves.toBe(false);
+  });
+
+  it("sends exactly 64 blocks in one request, with no empty request after them", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlocks(db, MAX_KNOWN_BLOCKS - 1);
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = answering();
+    await expect(
+      reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
+    ).resolves.toEqual({ kind: "reconciled", epoch: EPOCH, registered: 0, known: 64, refused: 0 });
+    expect(register.mock.calls.map(([request]) => request.blocks.length)).toEqual([64]);
+  });
+
+  it("owes nothing more when a host never restored hears the empty request", async () => {
+    const { db, executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = vi.fn(async (): Promise<KnownBlocksResponse> => {
+      throw new HostError({
+        kind: "api",
+        code: "conflict",
+        status: 409,
+        message: "the host was never restored: it lost no block",
+        details: { constraint: "no_restore" },
+      });
+    });
+    await expect(
+      reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
+    ).resolves.toEqual({ kind: "reconciled", epoch: EPOCH, registered: 0, known: 0, refused: 0 });
+    expect(register.mock.calls).toEqual([[{ blocks: [] }]]);
+    expect(fromZero(db)).toEqual([{ value: EPOCH }]);
+  });
+
+  it("keeps owing when the empty request fails", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = vi.fn(async (): Promise<KnownBlocksResponse> => {
+      throw new HostError({ kind: "transport", code: "unreachable", message: "down" });
+    });
+    await expect(
+      reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
+    ).rejects.toBeInstanceOf(HostError);
+    await expect(restoreDue(executor, PAIRING)).resolves.toBe(true);
+  });
+
+  it("keeps owing when the host answers the empty request with a result", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = vi.fn(async () =>
+      knownBlocksResponseSchema.parse({ results: [{ id: "x", outcome: "known", code: null }] }),
+    );
+    await expect(
+      reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
+    ).rejects.toBeInstanceOf(KnownBlocksMismatchError);
+    await expect(restoreDue(executor, PAIRING)).resolves.toBe(true);
   });
 
   it("keeps owing the blocks when a request fails, and the next run sends them all again", async () => {

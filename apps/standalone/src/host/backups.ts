@@ -114,8 +114,14 @@ export const knownBlockSchema = z
   })
   .strict();
 
-/** `POST /v1/device/sscc/blocks/known`: every block the station holds, after a restore. */
-export const knownBlocksRequestSchema = z.object({ blocks: z.array(knownBlockSchema) }).strict();
+/**
+ * `POST /v1/device/sscc/blocks/known`: every block the station holds, after a restore, 64 at
+ * most to a request (`known_blocks::MAX_BLOCKS`); an empty list from a station that never took
+ * a block only marks it (plan ХП).
+ */
+export const knownBlocksRequestSchema = z
+  .object({ blocks: z.array(knownBlockSchema).max(64) })
+  .strict();
 export type KnownBlocksRequest = z.infer<typeof knownBlocksRequestSchema>;
 
 /** What became of each block, in the request's order. */

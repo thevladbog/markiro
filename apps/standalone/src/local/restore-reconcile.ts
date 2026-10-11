@@ -208,8 +208,8 @@ export type ReconcileResult =
  *
  * A failed request or write rejects, and the next run sends every block
  * again (the host answers `known` for one it took). A host that says it was
- * never restored owes nothing back. Nothing is asked of the host for a
- * pairing without blocks.
+ * never restored owes nothing back. A pairing without blocks sends one empty
+ * request: the host marks a station only on a request it answered (plan ХП).
  */
 export async function reconcileRestore(context: ReconcileContext): Promise<ReconcileResult> {
   const { local, pairing, register, now } = context;
@@ -219,7 +219,9 @@ export async function reconcileRestore(context: ReconcileContext): Promise<Recon
   let registered = 0;
   let known = 0;
   const refusedBlocks: RefusedBlock[] = [];
-  for (let start = 0; start < blocks.length; start += MAX_KNOWN_BLOCKS) {
+  // One request per 64 blocks, and one empty request when the pairing holds none.
+  let start = 0;
+  do {
     const chunk = blocks.slice(start, start + MAX_KNOWN_BLOCKS);
     let answer: KnownBlocksResponse;
     try {
@@ -256,7 +258,8 @@ export async function reconcileRestore(context: ReconcileContext): Promise<Recon
       await local.transaction([retireStatement(pairing, ids)]);
       refusedBlocks.push(...refusedHere);
     }
-  }
+    start += MAX_KNOWN_BLOCKS;
+  } while (start < blocks.length);
   const refused = refusedBlocks.length;
   const at = now();
   await local.transaction([

@@ -739,7 +739,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
     await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
     const view = render(bar({ local: executor }));
     expect(await screen.findByText(/станция возвращает ему свои блоки/)).toBeTruthy();
-    // No block: nothing is asked of the host, and the obligation is settled at once.
+    // No block: one empty request marks the station on the host (plan ХП), and the obligation is settled at once.
     const asked = vi.fn();
     const result = await reconcileRestore({
       local: executor,
@@ -751,7 +751,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
       now: () => new Date(),
     });
     expect(result).toMatchObject({ kind: "reconciled", registered: 0, known: 0, refused: 0 });
-    expect(asked).not.toHaveBeenCalled();
+    expect(asked.mock.calls).toEqual([[{ blocks: [] }]]);
     view.rerender(bar({ local: executor, outboxVersion: 1 }));
     await waitFor(() => expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull());
     expect(screen.queryByText(/Блоков номеров SSCC, которые хост не принял/)).toBeNull();

@@ -75,6 +75,9 @@ fn the_settings_update_is_strict_and_clears_with_null() {
 fn known_blocks_round_trip_and_the_request_is_strict() {
     let request: KnownBlocksRequest = round_trip("known-blocks-request.json");
     assert_eq!(request.blocks[0].to_serial, 5499);
+    // A station that never took a block sends an empty list (plan ХП).
+    let empty: KnownBlocksRequest = round_trip("known-blocks-request-empty.json");
+    assert!(empty.blocks.is_empty());
     let mut extra = fixture("known-blocks-request.json");
     extra["blocks"][0]["nextSerial"] = json!(3600);
     assert!(serde_json::from_value::<KnownBlocksRequest>(extra).is_err());

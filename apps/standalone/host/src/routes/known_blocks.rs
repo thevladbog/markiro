@@ -22,8 +22,9 @@
 //! marked as having sent its blocks for the current epoch
 //! (`devices.known_blocks_epoch`), which the office shows before it resumes
 //! the facts. Only a station, only after a restore (`conflict` on
-//! `no_restore` before any), at most [`MAX_BLOCKS`] blocks; the facts' hold
-//! does not stop it.
+//! `no_restore` before any), at most [`MAX_BLOCKS`] blocks; an empty list
+//! (a station that never took a block, plan ХП) only marks the station. The
+//! facts' hold does not stop it.
 
 use axum::extract::State;
 use axum::Json;
@@ -171,8 +172,8 @@ pub async fn register_known_blocks(
     if device.kind != DeviceKind::Station {
         return Err(ApiError::forbidden(FORBIDDEN));
     }
-    if request.blocks.is_empty() || request.blocks.len() > MAX_BLOCKS {
-        return Err(ApiError::validation("blocks", "1-64 blocks"));
+    if request.blocks.len() > MAX_BLOCKS {
+        return Err(ApiError::validation("blocks", "0-64 blocks"));
     }
     for (index, block) in request.blocks.iter().enumerate() {
         validate::client_uuid(&format!("blocks.{index}.id"), &block.id)?;

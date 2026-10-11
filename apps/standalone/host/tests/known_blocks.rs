@@ -268,7 +268,6 @@ async fn only_a_station_after_a_restore_is_heard() {
         (StatusCode::FORBIDDEN, json!("forbidden"))
     );
     for (blocks, field) in [
-        (vec![], "blocks"),
         (vec![block(LOST, PREFIX, 0, 1, 10); 65], "blocks"),
         (
             vec![
@@ -285,6 +284,57 @@ async fn only_a_station_after_a_restore_is_heard() {
             "{body}"
         );
     }
+}
+
+#[tokio::test]
+async fn a_station_without_blocks_is_marked_by_an_empty_list_and_nothing_else_changes() {
+    let admin = admin().await;
+    // Before a restore an empty list is heard as any other: the host lost nothing.
+    let (status, body) = send(&admin, &admin.key, vec![]).await;
+    assert_eq!(
+        (status, body["error"]["details"].clone()),
+        (StatusCode::CONFLICT, json!({ "constraint": "no_restore" }))
+    );
+    restored(&admin).await;
+    let station = device_id(&admin).await;
+    let known_epoch = || async {
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT known_blocks_epoch FROM devices WHERE id = ?",
+        )
+        .bind(&station)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+    };
+    let rev = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let blocks = block_rows(&admin).await;
+    for _ in 0..2 {
+        let (status, body) = send(&admin, &admin.key, vec![]).await;
+        assert_eq!((status, body), (StatusCode::OK, json!({ "results": [] })));
+        assert_eq!(
+            known_epoch().await.as_deref(),
+            Some("5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e")
+        );
+    }
+    assert_eq!(host_revision(&admin.app).await, rev);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(block_rows(&admin).await, blocks);
+}
+
+#[tokio::test]
+async fn a_request_of_the_largest_size_is_heard_and_one_block_more_is_not() {
+    let admin = admin().await;
+    let issued = restored(&admin).await;
+    let (status, body) = send(&admin, &admin.key, vec![issued.clone(); 64]).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"].as_array().unwrap().len(), 64);
+    let (status, body) = send(&admin, &admin.key, vec![issued; 65]).await;
+    assert_eq!(
+        (status, body["error"]["details"]["field"].clone()),
+        (StatusCode::BAD_REQUEST, json!("blocks")),
+        "{body}"
+    );
 }
 
 #[tokio::test]
