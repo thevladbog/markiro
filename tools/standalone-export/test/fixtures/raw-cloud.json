@@ -1,0 +1,356 @@
+{
+  "formatVersion": 1,
+  "tenant": {
+    "id": "imp-test-atoll",
+    "name": "ООО «Атолл»"
+  },
+  "orgProfile": {
+    "gln": "4600682000010",
+    "inn": "7701234567",
+    "gs1Prefixes": ["4600682", " 4600682 ", "46x"],
+    "timeZone": "Europe/Moscow",
+    "defaultBoxTemplateId": "0d0d0000-0000-4000-8000-000000000001",
+    "defaultPalletTemplateId": "0d0d0000-0000-4000-8000-000000000003"
+  },
+  "badgeSalt": "bWFya2lyby1iYWRnZS0wMQ==",
+  "lines": [
+    {
+      "id": "0a0a0000-0000-4000-8000-000000000001",
+      "name": "Линия 1"
+    },
+    {
+      "id": "0a0a0000-0000-4000-8000-000000000002",
+      "name": "Упаковка"
+    },
+    {
+      "id": "0a0a0000-0000-4000-8000-000000000003",
+      "name": " линия 1 "
+    }
+  ],
+  "counterparties": [
+    {
+      "id": "0c0c0000-0000-4000-8000-000000000001",
+      "name": "ООО «Берег»",
+      "inn": "7812345678",
+      "gln": "4601234000017",
+      "gs1Prefixes": ["4601234"],
+      "hasNotes": true
+    },
+    {
+      "id": "0c0c0000-0000-4000-8000-000000000002",
+      "name": "ИП Петров",
+      "inn": null,
+      "gln": "46012",
+      "gs1Prefixes": [],
+      "hasNotes": false
+    },
+    {
+      "id": "0c0c0000-0000-4000-8000-000000000003",
+      "name": "АО «Дельта»",
+      "inn": "12345",
+      "gln": "4607000000014",
+      "gs1Prefixes": [],
+      "hasNotes": false
+    }
+  ],
+  "templates": [
+    {
+      "id": "0d0d0000-0000-4000-8000-000000000001",
+      "name": "Короб 58×40",
+      "purpose": "box",
+      "enabled": true,
+      "chzProductGroupCodes": null,
+      "spec": {
+        "dpi": 203,
+        "widthMm": 58,
+        "elements": [],
+        "heightMm": 40,
+        "language": "zpl"
+      }
+    },
+    {
+      "id": "0d0d0000-0000-4000-8000-000000000002",
+      "name": "Короб молочный",
+      "purpose": "box",
+      "enabled": true,
+      "chzProductGroupCodes": [8],
+      "spec": {
+        "dpi": 203,
+        "widthMm": 58,
+        "elements": [],
+        "heightMm": 60,
+        "language": "zpl"
+      }
+    },
+    {
+      "id": "0d0d0000-0000-4000-8000-000000000003",
+      "name": "Паллета 100×150",
+      "purpose": "pallet",
+      "enabled": true,
+      "chzProductGroupCodes": null,
+      "spec": {
+        "dpi": 203,
+        "widthMm": 100,
+        "elements": [],
+        "heightMm": 150,
+        "language": "zpl"
+      }
+    },
+    {
+      "id": "0d0d0000-0000-4000-8000-000000000004",
+      "name": "Дубликат",
+      "purpose": "product_duplicate",
+      "enabled": true,
+      "chzProductGroupCodes": null,
+      "spec": {
+        "dpi": 203,
+        "widthMm": 58,
+        "elements": [],
+        "heightMm": 40,
+        "language": "zpl"
+      }
+    },
+    {
+      "id": "0d0d0000-0000-4000-8000-000000000005",
+      "name": "Старый короб",
+      "purpose": "box",
+      "enabled": false,
+      "chzProductGroupCodes": null,
+      "spec": {
+        "dpi": 300,
+        "widthMm": 58,
+        "elements": [],
+        "heightMm": 40,
+        "language": "tspl"
+      }
+    },
+    {
+      "id": "0d0d0000-0000-4000-8000-000000000006",
+      "name": "Не макет",
+      "purpose": "box",
+      "enabled": true,
+      "chzProductGroupCodes": null,
+      "spec": ["not", "a", "layout"]
+    }
+  ],
+  "boxDefaults": [
+    {
+      "chzProductGroupCode": 8,
+      "templateId": "0d0d0000-0000-4000-8000-000000000002"
+    },
+    {
+      "chzProductGroupCode": 13,
+      "templateId": "0d0d0000-0000-4000-8000-000000000005"
+    }
+  ],
+  "palletDefaults": [
+    {
+      "chzProductGroupCode": 8,
+      "templateId": "0d0d0000-0000-4000-8000-000000000003"
+    }
+  ],
+  "products": [
+    {
+      "id": "0e0e0000-0000-4000-8000-000000000001",
+      "gtin14": "04600682000013",
+      "name": "Молоко 3,2% 0,9 л",
+      "printName": "Молоко 3,2%",
+      "chzProductGroupCode": 8,
+      "boxCapacity": 12,
+      "palletBoxCapacity": 40,
+      "shelfLifeDays": 10,
+      "archived": false,
+      "defaultLabelTemplateId": "0d0d0000-0000-4000-8000-000000000002",
+      "lost": ["price"]
+    },
+    {
+      "id": "0e0e0000-0000-4000-8000-000000000002",
+      "gtin14": "04600682000020",
+      "name": "Вода яяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяяя",
+      "printName": null,
+      "chzProductGroupCode": 13,
+      "boxCapacity": 6,
+      "palletBoxCapacity": 100000,
+      "shelfLifeDays": 5000,
+      "archived": false,
+      "defaultLabelTemplateId": "0d0d0000-0000-4000-8000-000000000003",
+      "lost": ["externalRef"]
+    },
+    {
+      "id": "0e0e0000-0000-4000-8000-000000000003",
+      "gtin14": "04600682000013",
+      "name": "Молоко (старая карточка)",
+      "printName": null,
+      "chzProductGroupCode": 8,
+      "boxCapacity": 12,
+      "palletBoxCapacity": 40,
+      "shelfLifeDays": null,
+      "archived": true,
+      "defaultLabelTemplateId": "0d0d0000-0000-4000-8000-000000000004",
+      "lost": ["egaisCode"]
+    },
+    {
+      "id": "0e0e0000-0000-4000-8000-000000000004",
+      "gtin14": "4600682000037",
+      "name": "Кефир",
+      "printName": null,
+      "chzProductGroupCode": null,
+      "boxCapacity": null,
+      "palletBoxCapacity": null,
+      "shelfLifeDays": null,
+      "archived": false,
+      "defaultLabelTemplateId": null,
+      "lost": []
+    }
+  ],
+  "operators": [
+    {
+      "id": "0f0f0000-0000-4000-8000-000000000001",
+      "login": "0042",
+      "pinHash": "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=",
+      "credentialActive": true,
+      "employeeStatus": "active",
+      "fullName": "Анна Кузнецова",
+      "role": "Оператор линии"
+    },
+    {
+      "id": "0f0f0000-0000-4000-8000-000000000002",
+      "login": "117",
+      "pinHash": "pbkdf2$sha256$100000$bWFya2lyby1waW4tdHdvIQ==$QVZc+yU8wJn39tbKU3wt1Q2wIycAv4j5TS8wJZxy3u8=",
+      "credentialActive": false,
+      "employeeStatus": "active",
+      "fullName": "Пётр\tСидоров",
+      "role": null
+    },
+    {
+      "id": "0f0f0000-0000-4000-8000-000000000003",
+      "login": "12",
+      "pinHash": "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=",
+      "credentialActive": true,
+      "employeeStatus": "active",
+      "fullName": "Илья Короткий",
+      "role": null
+    },
+    {
+      "id": "0f0f0000-0000-4000-8000-000000000004",
+      "login": "205",
+      "pinHash": "pbkdf2$sha256$100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=",
+      "credentialActive": true,
+      "employeeStatus": "archived",
+      "fullName": "Ольга Архивная",
+      "role": null
+    },
+    {
+      "id": "0f0f0000-0000-4000-8000-000000000005",
+      "login": "306",
+      "pinHash": "pbkdf2$sha256$0100000$bWFya2lyby1waW4tc2FsdA==$3OKvrZ2+EfTB2zsCso90r5g8c6Ib6t+Bv+cGJOpgPmU=",
+      "credentialActive": true,
+      "employeeStatus": "active",
+      "fullName": "Сергей Без-Пина",
+      "role": null
+    }
+  ],
+  "badges": [
+    {
+      "id": "0b0b0000-0000-4000-8000-000000000001",
+      "operatorId": "0f0f0000-0000-4000-8000-000000000001",
+      "badgeCode": "MRK-000742",
+      "badgeHash": "pbkdf2$sha256$100000$bWFya2lyby1iYWRnZS0wMQ==$CFQuvVuv7iz+ANkhgZVnO2k8iP67A2gex7JV7uWRayo=",
+      "label": "Пропуск 1"
+    },
+    {
+      "id": "0b0b0000-0000-4000-8000-000000000002",
+      "operatorId": "0f0f0000-0000-4000-8000-000000000001",
+      "badgeCode": "MRK-000743",
+      "badgeHash": null,
+      "label": null
+    },
+    {
+      "id": "0b0b0000-0000-4000-8000-000000000003",
+      "operatorId": "0f0f0000-0000-4000-8000-000000000002",
+      "badgeCode": " MRK-000744 ",
+      "badgeHash": "pbkdf2$sha256$100000$bGVnYWN5LXJvdy1zYWx0IQ==$vULnmFLrlEL53UOHeKzL62/qUqLZKBBI/X0BXSWxx5E=",
+      "label": "Запасной\nбейдж"
+    },
+    {
+      "id": "0b0b0000-0000-4000-8000-000000000004",
+      "operatorId": "0f0f0000-0000-4000-8000-000000000001",
+      "badgeCode": "МРК-1",
+      "badgeHash": null,
+      "label": null
+    },
+    {
+      "id": "0b0b0000-0000-4000-8000-000000000005",
+      "operatorId": "0f0f0000-0000-4000-8000-000000000003",
+      "badgeCode": "MRK-000746",
+      "badgeHash": null,
+      "label": null
+    }
+  ],
+  "nonOperatorBadges": 2,
+  "ssccCounters": [
+    {
+      "issuerPrefix": "460068200",
+      "extension": 0,
+      "nextSerial": 18500
+    },
+    {
+      "issuerPrefix": "460068200",
+      "extension": 1,
+      "nextSerial": 301
+    },
+    {
+      "issuerPrefix": "460123400",
+      "extension": 0,
+      "nextSerial": 1
+    }
+  ],
+  "ssccBlocks": [
+    {
+      "issuerPrefix": "460068200",
+      "extension": 0,
+      "maxToSerial": 19999,
+      "maxConsumedThrough": 18750
+    },
+    {
+      "issuerPrefix": "460068200",
+      "extension": 1,
+      "maxToSerial": 400,
+      "maxConsumedThrough": 250
+    }
+  ],
+  "ssccPrinted": [
+    {
+      "issuerPrefix": "460068200",
+      "extension": 0,
+      "maxSerial": 21003
+    },
+    {
+      "issuerPrefix": "460068200",
+      "extension": 1,
+      "maxSerial": 250
+    }
+  ],
+  "shiftNumberCounters": [
+    {
+      "monthKey": "DEC26",
+      "lastSeq": 0
+    },
+    {
+      "monthKey": "NOV26",
+      "lastSeq": 1
+    },
+    {
+      "monthKey": "OCT26",
+      "lastSeq": 7
+    },
+    {
+      "monthKey": "SEP26",
+      "lastSeq": 41
+    }
+  ],
+  "activeShifts": [],
+  "staleDevices": [],
+  "counterpartyIssuedShifts": 1,
+  "plannedShifts": 2
+}

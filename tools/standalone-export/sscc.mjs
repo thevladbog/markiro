@@ -101,7 +101,13 @@ export function standaloneStart(extension, issued) {
 /** The rollback window of an extension. */
 export function windowOf(extension, windows = { box: BOX_WINDOW, pallet: PALLET_WINDOW }) {
   checkExtension(extension);
-  return extension === 0 ? windows.box : windows.pallet;
+  const window = extension === 0 ? windows.box : windows.pallet;
+  if (!Number.isSafeInteger(window) || window <= 0) {
+    throw new RangeError(
+      `the rollback window ${String(window)} of extension ${extension} is not a positive whole number`,
+    );
+  }
+  return window;
 }
 
 /**

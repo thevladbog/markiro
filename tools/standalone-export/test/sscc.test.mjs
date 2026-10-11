@@ -733,3 +733,32 @@ test("shift numbers: the list is by month key and carries nothing but the key an
     { monthKey: "SEP26", lastSeq: 2 },
   ]);
 });
+
+test("a rollback window that is no positive whole number stops the export", () => {
+  for (const bad of [
+    0,
+    -5_000,
+    1.5,
+    Number.NaN,
+    "50",
+    null,
+    undefined,
+    Number.MAX_SAFE_INTEGER + 2,
+  ]) {
+    assert.throws(
+      () => windowOf(0, { box: bad, pallet: 100_000 }),
+      (error) => error instanceof RangeError && /rollback window/u.test(error.message),
+      `box window ${String(bad)}`,
+    );
+    assert.throws(
+      () => cloudReseedTo(30_000, 1, { box: 1_000_000, pallet: bad }),
+      (error) => error instanceof RangeError && /rollback window/u.test(error.message),
+      `pallet window ${String(bad)}`,
+    );
+  }
+  assert.equal(windowOf(0, { box: 1, pallet: 1 }), 1);
+  assert.equal(windowOf(1, { box: 1, pallet: 2 }), 2);
+  assert.equal(cloudReseedTo(30_000, 0, { box: 1, pallet: 1 }), 30_001);
+  // The window of the other extension is not looked at.
+  assert.equal(windowOf(0, { box: 5, pallet: "x" }), 5);
+});
