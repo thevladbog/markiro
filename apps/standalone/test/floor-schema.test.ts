@@ -22,6 +22,12 @@ import { BLOCKS_WITH_ROOM_SQL } from "../src/floor/work/block-supply.js";
 import { BOX_CODES_SQL, CLOSED_BOX_SQL } from "../src/floor/work/box-close.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
 import { attemptStatement, receiptStatements, UNSENT_SQL } from "../src/local/facts-sender.js";
+import {
+  DUE_SHIFTS_SQL,
+  PURGE_COPY_SQL,
+  purgeTableSql,
+  RETAINED_TABLES,
+} from "../src/local/retention.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
 import { openLocalDb } from "./support/local-db.js";
 
@@ -877,6 +883,55 @@ describe("the shape of the production tables (migration 0006)", () => {
       "SEARCH floor_shifts USING INDEX sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
     );
     expect(guardPlan.split("\n").filter((step) => step.startsWith("SCAN floor_"))).toEqual([]);
+    // The retention pass (plan 2a8), once an hour: the shifts done with and the delete of a
+    // copy search the shift's key, the unsent records, the settled ones and the shift's jobs.
+    for (const [sql, key] of [
+      [DUE_SHIFTS_SQL, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=?)"],
+      [PURGE_COPY_SQL, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"],
+    ] as const) {
+      const retention = plan(sql);
+      expect(retention, sql).toContain(key);
+      expect(retention, sql).toContain("outbox_unsent (host_id=? AND device_id=?)");
+      expect(retention, sql).toContain("outbox_settled (host_id=? AND device_id=? AND outcome=?)");
+      expect(retention, sql).toContain(
+        "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
+      );
+      expect(
+        retention.split("\n").filter((step) => step.startsWith("SCAN ") || step.includes("TEMP")),
+        sql,
+      ).toEqual([]);
+    }
+    // The deletes of a purged shift's records: the tables with an index by shift search it; the
+    // outbox and the exceptions carry the shift only as a column, so each costs one read of its
+    // table, once for a shift done with for 30 days (not on a scan).
+    const bySearch = {
+      floor_scans: "floor_scans_shift",
+      floor_codes: "floor_codes_shift",
+      floor_print_jobs: "floor_print_jobs_shift",
+      floor_boxes: "floor_boxes_shift",
+    } as const;
+    for (const table of RETAINED_TABLES) {
+      const steps = plan(purgeTableSql(table)).split("\n");
+      const index = table in bySearch ? bySearch[table as keyof typeof bySearch] : null;
+      if (index !== null) {
+        expect(steps.join("\n"), table).toContain(
+          `${index} (host_id=? AND device_id=? AND shift_id=?`,
+        );
+        expect(
+          steps.filter((step) => step.startsWith("SCAN ")),
+          table,
+        ).toEqual([]);
+      } else {
+        expect(
+          steps.filter((step) => step.startsWith("SCAN ")),
+          table,
+        ).toEqual([`SCAN ${table}`]);
+      }
+    }
+    expect(RETAINED_TABLES.filter((table) => !(table in bySearch))).toEqual([
+      "floor_exceptions",
+      "outbox",
+    ]);
   });
 
   // The same for what the status bar reads.
@@ -901,6 +956,20 @@ describe("the shape of the production tables (migration 0006)", () => {
     ];
     expect(new Set(statements).size).toBe(13);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
+    // The retention pass's statements, as `tests/local_db.rs` plans them: the two long ones as
+    // constants, the deletes of the tables with an index by shift as literals, the two that read
+    // their whole table from one format string.
+    const retention = [
+      DUE_SHIFTS_SQL,
+      PURGE_COPY_SQL,
+      ...(["floor_scans", "floor_codes", "floor_print_jobs", "floor_boxes"] as const).map(
+        purgeTableSql,
+      ),
+    ];
+    expect(new Set(retention).size).toBe(6);
+    for (const sql of retention) expect(source).toContain(`"${sql}"`);
+    expect(source).toContain('for table in ["outbox", "floor_exceptions"] {');
+    expect(source).toContain(`"${purgeTableSql("outbox").replace("outbox", "{table}")}"`);
   });
 
   // The shell's list (`tests/local_db.rs`) is written by hand: it must hold the

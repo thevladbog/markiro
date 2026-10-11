@@ -834,6 +834,29 @@ async fn an_outbox_that_cannot_be_counted_stops_a_forget() {
     assert_eq!(db.clear_copies(UnsentGuard::Ignore).await, Ok(()));
 }
 
+/// The statements of the retention pass (`src/local/retention.ts`, plan 2a8): which shifts are
+/// done with and the delete of the first one's copy. `test/floor-schema.test.ts` plans the same
+/// texts on the Node runtime's SQLite and checks that they appear here word for word.
+const DUE_SHIFTS: &str =
+    "SELECT s.id FROM floor_shifts s WHERE s.host_id = ? AND s.device_id = ? AND EXISTS \
+     (SELECT 1 FROM outbox o WHERE o.host_id = s.host_id AND o.device_id = s.device_id \
+     AND o.shift_id = s.id AND o.kind = 'shift_closed' AND o.outcome = 'accepted' AND \
+     o.acked_at <= ?) AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.host_id = s.host_id \
+     AND o.device_id = s.device_id AND o.shift_id = s.id AND o.acked_at IS NULL) AND NOT \
+     EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = s.host_id AND \
+     j.device_id = s.device_id AND j.shift_id = s.id AND (state IN ('prepared', \
+     'sending', 'failed', 'unknown') OR (state = 'sent' AND verify = 1))) ORDER BY s.id";
+const PURGE_COPY: &str =
+    "DELETE FROM floor_shifts AS s WHERE s.id = ? AND s.host_id = ? AND s.device_id = ? \
+     AND EXISTS (SELECT 1 FROM outbox o WHERE o.host_id = s.host_id AND o.device_id = \
+     s.device_id AND o.shift_id = s.id AND o.kind = 'shift_closed' AND o.outcome = \
+     'accepted' AND o.acked_at <= ?) AND NOT EXISTS (SELECT 1 FROM outbox o WHERE \
+     o.host_id = s.host_id AND o.device_id = s.device_id AND o.shift_id = s.id AND \
+     o.acked_at IS NULL) AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE \
+     j.host_id = s.host_id AND j.device_id = s.device_id AND j.shift_id = s.id AND \
+     (state IN ('prepared', 'sending', 'failed', 'unknown') OR (state = 'sent' AND \
+     verify = 1)))";
+
 /// The reads the floor repeats on every scan and box close search an index
 /// instead of reading every row of the pairing (migration `0006`). The plans
 /// are those of the SQLite the shell bundles; `test/floor-schema.test.ts`
@@ -848,7 +871,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 37] = [
+    let reads: [(&str, &str); 49] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1075,6 +1098,34 @@ async fn the_floors_repeating_reads_search_an_index() {
              AND local_state IS NOT NULL",
             "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
         ),
+        // The retention pass (plan 2a8), once an hour: the shifts done with and the delete of a
+        // copy search the shift's key, the unsent records, the settled ones and the shift's
+        // jobs. Two of the deletes below read the whole table (no index by shift): pinned
+        // after the loop.
+        (DUE_SHIFTS, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=?)"),
+        (DUE_SHIFTS, "outbox_unsent (host_id=? AND device_id=?)"),
+        (DUE_SHIFTS, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
+        (DUE_SHIFTS, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
+        (PURGE_COPY, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"),
+        (PURGE_COPY, "outbox_unsent (host_id=? AND device_id=?)"),
+        (PURGE_COPY, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
+        (PURGE_COPY, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
+        (
+            "DELETE FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_scans_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "DELETE FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_codes_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "DELETE FROM floor_print_jobs WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "DELETE FROM floor_boxes WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_boxes_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
     ];
     for (sql, index) in reads {
         let placeholders = sql.matches('?').count();
@@ -1129,6 +1180,34 @@ async fn the_floors_repeating_reads_search_an_index() {
         ["SCAN floor_block_requests"],
         "{waiting}\n  should scan only the waiting requests, its plan is {plan:?}"
     );
+    // The two deletes of the retention pass with no index by shift: the outbox and the exceptions
+    // carry the shift only as a column, so a purged shift costs one read of each table. They run
+    // once for a shift that has been done with for 30 days, not on a scan.
+    for table in ["outbox", "floor_exceptions"] {
+        let delete =
+            format!("DELETE FROM {table} WHERE host_id = ? AND device_id = ? AND shift_id = ?");
+        let text = format!("EXPLAIN QUERY PLAN {delete}");
+        let mut explain = sqlx::query(&text);
+        for _ in 0..delete.matches('?').count() {
+            explain = explain.bind("x");
+        }
+        let plan: Vec<String> = explain
+            .fetch_all(&mut raw)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect();
+        let scans: Vec<&String> = plan
+            .iter()
+            .filter(|step| step.starts_with("SCAN "))
+            .collect();
+        assert_eq!(
+            scans,
+            [&format!("SCAN {table}")],
+            "{delete}\n  should read only {table}, its plan is {plan:?}"
+        );
+    }
     raw.close().await.unwrap();
 }
 

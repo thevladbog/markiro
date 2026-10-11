@@ -35,6 +35,7 @@ import {
 } from "../host/protocol.js";
 import { createTauriLocalExecutor, type LocalExecutor } from "../local/executor.js";
 import { countUnsentRecords } from "../local/outbox.js";
+import { purgeAcknowledged, scheduleRetention } from "../local/retention.js";
 import { Office } from "../office/Office.js";
 import { OfficeLogin } from "../office/OfficeLogin.js";
 import type { OfficeSessionValue } from "../office/office-session.js";
@@ -207,6 +208,20 @@ export function App({
     state.sync.kind !== "other_host"
       ? pairedStatus
       : null;
+  // The records of the shifts the host took 30 days ago go, at the start and
+  // every hour (decision 31); a failed pass is tried again at the next.
+  const keptHostId = pairedStatus?.hostId ?? null;
+  const keptDeviceId = pairedStatus?.deviceId ?? null;
+  useEffect(() => {
+    if (keptHostId === null || keptDeviceId === null) return;
+    const pairing = { hostId: keptHostId, deviceId: keptDeviceId };
+    return scheduleRetention(async () => {
+      if ((await purgeAcknowledged(localDb, pairing, new Date())) > 0) {
+        dispatch({ type: "outbox_changed" });
+      }
+    });
+  }, [localDb, keptHostId, keptDeviceId]);
+
   const { requestSync, requestFacts } = useHostLink({
     hostId: linked?.hostId ?? null,
     deviceId: linked?.deviceId ?? null,
