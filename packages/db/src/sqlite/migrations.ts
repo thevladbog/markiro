@@ -5059,6 +5059,28 @@ export const STATION_MIGRATIONS: string[] = [
     PRIMARY KEY(tenant_id,owner_digest)
   );`,
   `ALTER TABLE printer_deliveries ADD COLUMN render_snapshot_json TEXT CHECK(render_snapshot_json IS NULL OR (length(render_snapshot_json)<=700000 AND json_valid(render_snapshot_json)));`,
+  `CREATE TABLE IF NOT EXISTS pallet_sheet_branding_resources (
+    digest TEXT PRIMARY KEY NOT NULL CHECK(length(digest)=64 AND digest NOT GLOB '*[^0-9a-f]*'),
+    snapshot_json TEXT NOT NULL CHECK(length(CAST(snapshot_json AS BLOB))<=131072 AND CASE
+      WHEN NOT json_valid(snapshot_json) THEN 0
+      ELSE COALESCE(json_extract(snapshot_json,'$.schemaVersion')=1 AND json_extract(snapshot_json,'$.digest')=digest,0) END)
+  );`,
+  `ALTER TABLE printer_deliveries ADD COLUMN sheet_branding_digest TEXT REFERENCES pallet_sheet_branding_resources(digest)
+    CHECK(sheet_branding_digest IS NULL OR (render_snapshot_json IS NOT NULL AND COALESCE(json_extract(render_snapshot_json,'$.brandingResourceDigest')=sheet_branding_digest,0)));`,
+  `INSERT INTO pallet_sheet_branding_resources(digest,snapshot_json)
+    SELECT json_extract(json_extract(render_snapshot_json,'$.brandingJson'),'$.digest'),json_extract(render_snapshot_json,'$.brandingJson') FROM printer_deliveries
+    WHERE render_snapshot_json IS NOT NULL AND CASE
+      WHEN NOT json_valid(json_extract(render_snapshot_json,'$.brandingJson')) THEN 0
+      ELSE COALESCE(json_extract(json_extract(render_snapshot_json,'$.brandingJson'),'$.schemaVersion')=1
+        AND length(CAST(json_extract(render_snapshot_json,'$.brandingJson') AS BLOB))<=131072
+        AND length(json_extract(json_extract(render_snapshot_json,'$.brandingJson'),'$.digest'))=64
+        AND json_extract(json_extract(render_snapshot_json,'$.brandingJson'),'$.digest') NOT GLOB '*[^0-9a-f]*',0) END
+    ON CONFLICT(digest) DO NOTHING;`,
+  `UPDATE printer_deliveries SET
+    sheet_branding_digest=json_extract(json_extract(render_snapshot_json,'$.brandingJson'),'$.digest'),
+    render_snapshot_json=json_set(json_remove(render_snapshot_json,'$.brandingJson'),'$.brandingResourceDigest',json_extract(json_extract(render_snapshot_json,'$.brandingJson'),'$.digest'))
+    WHERE render_snapshot_json IS NOT NULL AND EXISTS(SELECT 1 FROM pallet_sheet_branding_resources r
+      WHERE r.snapshot_json=json_extract(printer_deliveries.render_snapshot_json,'$.brandingJson'));`,
 ];
 
 export interface StationMigrationEntry {

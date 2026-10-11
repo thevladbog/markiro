@@ -19,6 +19,7 @@ import {
   isBoxLabelTemplateEligible,
   isPalletLabelTemplateEligible,
   type LabelTemplatePurpose,
+  type LabelTemplateSpec,
   type StoredLabelTemplateSpec,
   parseStoredLabelTemplate,
   isPalletSheetSpec,
@@ -371,12 +372,19 @@ export class LabelTemplatesService {
     return row;
   }
 
+  private readStoredSpec(row: LabelTemplateRow): StoredLabelTemplateSpec {
+    // V1 reads retain the historical wire contract; current validation stays at write/render boundaries.
+    return row.format === "label_v1"
+      ? (row.spec as LabelTemplateSpec)
+      : parseStoredLabelTemplate(row.spec);
+  }
+
   private rowToDto(row: LabelTemplateRow, includeMetadata = false): LabelTemplateDto {
     return {
       id: row.id,
       name: row.name,
       purpose: row.purpose,
-      spec: parseStoredLabelTemplate(row.spec),
+      spec: this.readStoredSpec(row),
       ...(includeMetadata || row.format === "pallet_sheet_v2"
         ? { format: row.format, revision: row.revision }
         : {}),
@@ -391,7 +399,7 @@ export class LabelTemplatesService {
     row: LabelTemplateRow,
     includeMetadata: boolean,
   ): LabelTemplateSummaryDto {
-    const spec = parseStoredLabelTemplate(row.spec);
+    const spec = this.readStoredSpec(row);
     const common = {
       id: row.id,
       name: row.name,

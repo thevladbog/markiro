@@ -12,6 +12,7 @@ import {
 } from "./print-deliveries.js";
 import {
   parsePalletSheetPrintSnapshot,
+  loadPalletSheetPrintSnapshot,
   rebuildPalletSheet,
   type PalletSheetPrintSnapshotV1,
 } from "./pallet-sheet-print-snapshot.js";
@@ -54,7 +55,7 @@ export async function printPalletSheet(input: {
     if (previous.state === "sending" || (!input.explicitRetry && previous.state !== "prepared"))
       throw new Error("PRINT_DELIVERY_REQUIRES_RECOVERY");
     if (!previous.render_snapshot_json) throw new Error("Saved label is not an A4 sheet");
-    const saved = parsePalletSheetPrintSnapshot(previous.render_snapshot_json);
+    const saved = await loadPalletSheetPrintSnapshot(exec, previous.render_snapshot_json);
     const branding = parseOrganizationBranding(saved.brandingJson);
     if (
       branding.tenantId !== input.owner.tenantId ||
@@ -62,9 +63,8 @@ export async function printPalletSheet(input: {
     )
       throw new Error("Sheet owner changed");
     if (
-      saved.replayOf === null &&
-      (previous.state === "failed_before_send" ||
-        (previous.state === "prepared" && input.explicitRetry))
+      previous.state === "failed_before_send" ||
+      (saved.replayOf === null && previous.state === "prepared" && input.explicitRetry)
     ) {
       // Reprepare from the previous attempt's own facts/spec/resources, never the catalog.
       if (!hardware.getWindowsPageGeometry) throw new Error("A4 support unavailable");
@@ -74,7 +74,7 @@ export async function printPalletSheet(input: {
       });
       const { digest: oldDigest, ...content } = saved;
       void oldDigest;
-      const updated = { ...content, geometry };
+      const updated = { ...content, geometry, replayOf: null };
       const renderSnapshot = parsePalletSheetPrintSnapshot(
         JSON.stringify({ ...updated, digest: productLabelValueDigest(updated) }),
       );

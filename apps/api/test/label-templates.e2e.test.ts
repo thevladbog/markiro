@@ -92,6 +92,29 @@ describe.skipIf(!ready)("label-templates e2e", () => {
       .expect(200);
     return orgId;
   }
+  it("reads historical V1 templates without applying today's stricter element validation to the list or detail", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const historical = { ...VALID_SPEC, elements: [{ ...VALID_SPEC.elements[0], fontSizePt: 0 }] };
+    const [saved] = await db
+      .insert(schema.labelTemplates)
+      .values({ tenantId, name: "Historical", purpose: "box", spec: historical })
+      .returning();
+    if (!saved) throw new Error("Missing fixture");
+    await agent
+      .post("/label-templates")
+      .send({ name: "Current", purpose: "box", spec: VALID_SPEC })
+      .expect(201);
+    for (const headers of [{}, { "x-label-template-formats": "label-v1,pallet-sheet-v2" }]) {
+      const list = await agent.get("/label-templates").set(headers).expect(200);
+      expect(list.body.items.map((item: { name: string }) => item.name)).toEqual(
+        expect.arrayContaining(["Historical", "Current"]),
+      );
+      const detail = await agent.get(`/label-templates/${saved.id}`).set(headers).expect(200);
+      expect(detail.body.spec).toEqual(historical);
+    }
+    await agent.patch(`/label-templates/${saved.id}`).send({ spec: historical }).expect(400);
+  });
 
   it("isolates V2 reads, serializes concurrent revisions and audits the committed editor", async () => {
     const agent = request.agent(app!.getHttpServer());

@@ -1626,6 +1626,24 @@ export const deviceReplacementDrain = sqliteTable(
 );
 
 /** Local Windows spooler facts; server events never infer physical verification. */
+export const palletSheetBrandingResources = sqliteTable(
+  "pallet_sheet_branding_resources",
+  {
+    digest: text("digest").primaryKey().notNull(),
+    snapshotJson: text("snapshot_json").notNull(),
+  },
+  (t) => [
+    check(
+      "pallet_sheet_branding_digest_check",
+      sql`length(${t.digest})=64 AND ${t.digest} NOT GLOB '*[^0-9a-f]*'`,
+    ),
+    check(
+      "pallet_sheet_branding_json_check",
+      sql`length(CAST(${t.snapshotJson} AS BLOB))<=131072 AND CASE WHEN NOT json_valid(${t.snapshotJson}) THEN 0 ELSE COALESCE(json_extract(${t.snapshotJson},'$.schemaVersion')=1 AND json_extract(${t.snapshotJson},'$.digest')=${t.digest},0) END`,
+    ),
+  ],
+);
+
 export const printerDeliveries = sqliteTable(
   "printer_deliveries",
   {
@@ -1637,6 +1655,9 @@ export const printerDeliveries = sqliteTable(
     profileJson: text("profile_json").notNull(),
     artifactDigest: text("artifact_digest").notNull(),
     renderSnapshotJson: text("render_snapshot_json"),
+    sheetBrandingDigest: text("sheet_branding_digest").references(
+      () => palletSheetBrandingResources.digest,
+    ),
     artifactBase64: text("artifact_base64"),
     documentName: text("document_name").notNull(),
     receiptJson: text("receipt_json"),
@@ -1661,6 +1682,10 @@ export const printerDeliveries = sqliteTable(
     check(
       "printer_deliveries_render_snapshot_check",
       sql`${t.renderSnapshotJson} IS NULL OR (length(${t.renderSnapshotJson})<=700000 AND json_valid(${t.renderSnapshotJson}))`,
+    ),
+    check(
+      "printer_deliveries_branding_reference_check",
+      sql`${t.sheetBrandingDigest} IS NULL OR (${t.renderSnapshotJson} IS NOT NULL AND COALESCE(json_extract(${t.renderSnapshotJson},'$.brandingResourceDigest')=${t.sheetBrandingDigest},0))`,
     ),
     check(
       "printer_deliveries_artifact_check",

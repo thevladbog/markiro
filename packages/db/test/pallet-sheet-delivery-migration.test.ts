@@ -4,7 +4,11 @@ import { STATION_MIGRATIONS } from "../src/sqlite/migrations.js";
 it("adds a nullable bounded snapshot without altering a historical delivery", () => {
   const db = new DatabaseSync(":memory:");
   try {
-    for (const sql of STATION_MIGRATIONS.slice(0, -1)) {
+    const migration = STATION_MIGRATIONS.findIndex((sql) =>
+      sql.includes("ALTER TABLE printer_deliveries ADD COLUMN render_snapshot_json"),
+    );
+    expect(migration).toBeGreaterThan(0);
+    for (const sql of STATION_MIGRATIONS.slice(0, migration)) {
       try {
         db.exec(sql);
       } catch (error) {
@@ -14,7 +18,7 @@ it("adds a nullable bounded snapshot without altering a historical delivery", ()
     db.prepare(
       "INSERT INTO printer_deliveries(scope,purpose,job_id,attempt_id,state,profile_json,artifact_digest,artifact_base64,document_name,updated_at) VALUES('owner','pallet','sscc','old','delivery_unknown','{}',?,'gA==','doc','now')",
     ).run("a".repeat(64));
-    db.exec(STATION_MIGRATIONS.at(-1)!);
+    db.exec(STATION_MIGRATIONS[migration]!);
     expect(
       db.prepare("SELECT artifact_base64,render_snapshot_json FROM printer_deliveries").get(),
     ).toEqual({ artifact_base64: "gA==", render_snapshot_json: null });

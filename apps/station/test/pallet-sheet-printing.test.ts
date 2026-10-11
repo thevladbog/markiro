@@ -98,14 +98,14 @@ it("allows same-device restored credentials to replay retained A4 work without r
     for (const row of rows)
       expect(
         parseOrganizationBranding(
-          parsePalletSheetPrintSnapshot(row.render_snapshot_json).brandingJson,
+          (await loadPalletSheetPrintSnapshot(w.exec, row.render_snapshot_json)).brandingJson,
         ).ownerDigest,
       ).toBe(original);
   } finally {
     w.close();
   }
 });
-it("keeps the original geometry locked when a replay of unknown output itself fails before send", async () => {
+it("allows explicit fresh geometry after a replay is proven not sent, preserving original unknown history and frozen facts", async () => {
   vi.spyOn(textAdapter, "rasterizeDriverText").mockImplementation(rasterize);
   const w = await openProductLabelWork();
   try {
@@ -119,7 +119,11 @@ it("keeps the original geometry locked when a replay of unknown output itself fa
       jobId: facts.sscc,
       attemptId: "label",
     };
-    const getGeometry = vi.fn(async () => ({ ...geometry, fingerprint: "changed-driver" }));
+    const getGeometry = vi.fn(async () => ({
+      ...geometry,
+      printableBoundsMm: { ...geometry.printableBoundsMm, left: 12 },
+      fingerprint: "changed-driver",
+    }));
     const preflight = vi
       .fn<WindowsPrinting["preflightWindowsRaster"]>()
       .mockResolvedValueOnce({ ok: true })
@@ -153,11 +157,27 @@ it("keeps the original geometry locked when a replay of unknown output itself fa
     await expect(printPalletSheet({ ...input, explicitRetry: true })).rejects.toThrow(
       "geometry_mismatch",
     );
+    await expect(printPalletSheet(input)).rejects.toThrow("PRINT_DELIVERY_REQUIRES_RECOVERY");
+    expect(getGeometry).not.toHaveBeenCalled();
     await expect(printPalletSheet({ ...input, explicitRetry: true })).rejects.toThrow(
       "driver_failure",
     );
-    expect(getGeometry).not.toHaveBeenCalled();
-    expect(send.mock.calls[1]?.[3]?.geometryFingerprint).toBe("driver-1");
+    expect(getGeometry).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[1]?.[3]?.geometryFingerprint).toBe("changed-driver");
+    expect(send.mock.calls[1]?.[1]).not.toEqual(prepared.bytes);
+    const rows = await w.exec.all<{ state: string; render_snapshot_json: string }>(
+      "SELECT state,render_snapshot_json FROM printer_deliveries WHERE scope='replay-owner' ORDER BY rowid",
+    );
+    expect(rows.map((row) => row.state)).toEqual([
+      "delivery_unknown",
+      "failed_before_send",
+      "delivery_unknown",
+    ]);
+    const latest = await loadPalletSheetPrintSnapshot(w.exec, rows[2]!.render_snapshot_json);
+    expect(latest.replayOf).toBeNull();
+    expect(latest.facts).toEqual(prepared.renderSnapshot.facts);
+    expect(latest.template).toEqual(prepared.renderSnapshot.template);
+    expect(latest.brandingJson).toBe(prepared.renderSnapshot.brandingJson);
   } finally {
     w.close();
   }
@@ -171,6 +191,7 @@ import {
 import {
   preparePalletSheet,
   parsePalletSheetPrintSnapshot,
+  loadPalletSheetPrintSnapshot,
   rebuildPalletSheet,
 } from "../src/lib/pallet-sheet-print-snapshot.js";
 import {
@@ -297,7 +318,7 @@ it("persists bytes and resources before IPC, survives restart without resend, an
         );
         expect(row?.state).toBe("sending");
         expect(row?.artifact_base64).toBeTruthy();
-        const persisted = parsePalletSheetPrintSnapshot(row!.render_snapshot_json);
+        const persisted = await loadPalletSheetPrintSnapshot(w.exec, row!.render_snapshot_json);
         expect(persisted.template).toEqual(prepared.renderSnapshot.template);
         expect(persisted.facts).toEqual(prepared.renderSnapshot.facts);
         expect(persisted.brandingJson).toEqual(prepared.renderSnapshot.brandingJson);
@@ -407,6 +428,77 @@ it("rebuilds tombstoned settled bytes from its own resources and retains a faile
     expect(JSON.parse(latest!.render_snapshot_json).geometry.fingerprint).toBe("driver-2");
     expect(await printPalletSheet({ ...input, explicitRetry: true })).toEqual(prepared.bytes);
     expect(prepare).toHaveBeenCalledTimes(1);
+  } finally {
+    w.close();
+  }
+});
+
+it("stores immutable branding once across attempts and rebuilds retained sheets without the live cache", async () => {
+  vi.spyOn(textAdapter, "rasterizeDriverText").mockImplementation(rasterize);
+  const w = await openProductLabelWork();
+  try {
+    const prepared = await preparePalletSheet(
+      { profile, template: template(), facts, branding, geometry },
+      rasterize,
+    );
+    const hardware: WindowsPrinting = {
+      supportsWindowsPrinting: async () => true,
+      preflightWindowsRaster: async () => ({ ok: true }),
+      printWindowsRaster: async () => ({
+        ok: true,
+        receipt: { queue: "Queue", jobId: 1, documentName: "unused" },
+      }),
+      getWindowsPrintJob: async () => ({ state: "unavailable" }),
+    };
+    hardware.printWindowsRaster = vi.fn(async (_queue, _bytes, documentName) => ({
+      ok: true as const,
+      receipt: { queue: "Queue", jobId: 1, documentName },
+    }));
+    const input = {
+      exec: w.exec,
+      key: {
+        scope: "resource-owner",
+        purpose: "pallet" as const,
+        jobId: facts.sscc,
+        attemptId: "label",
+      },
+      profile,
+      owner: { tenantId: branding.tenantId, ownerDigest: branding.ownerDigest },
+      prepare: async () => prepared,
+      explicitRetry: false,
+      isCurrent: () => true,
+      hardware,
+    };
+    await printPalletSheet(input);
+    await printPalletSheet({ ...input, explicitRetry: true });
+    await printPalletSheet({ ...input, explicitRetry: true });
+    const rows = await w.exec.all<{ render_snapshot_json: string }>(
+      "SELECT render_snapshot_json FROM printer_deliveries WHERE scope='resource-owner'",
+    );
+    expect(rows).toHaveLength(3);
+    for (const row of rows)
+      expect(JSON.parse(row.render_snapshot_json).brandingJson).toBeUndefined();
+    expect(await w.exec.all("SELECT digest FROM pallet_sheet_branding_resources")).toEqual([
+      { digest: branding.digest },
+    ]);
+    await w.exec.run("DELETE FROM station_organization_branding");
+    await w.exec.run(
+      "UPDATE printer_deliveries SET artifact_base64='' WHERE scope='resource-owner' AND state='sent'",
+    );
+    w.restart();
+    const unexpectedPrepare = vi.fn(async () => {
+      throw new Error("live catalog must not be consulted");
+    });
+    expect(
+      await printPalletSheet({
+        ...input,
+        exec: w.exec,
+        explicitRetry: true,
+        prepare: unexpectedPrepare,
+      }),
+    ).toEqual(prepared.bytes);
+    expect(unexpectedPrepare).not.toHaveBeenCalled();
+    expect(await w.exec.all("SELECT digest FROM pallet_sheet_branding_resources")).toHaveLength(1);
   } finally {
     w.close();
   }

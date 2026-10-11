@@ -17,6 +17,7 @@ import {
 } from "./organization-branding.js";
 import { parsePrinterProfile, type PrinterProfile } from "./printer-routing.js";
 import type { WindowsPageGeometry, WindowsSheetRequest } from "./hardware.js";
+import type { SqlExecutor } from "./mirror.js";
 const finite = z.number().finite();
 const bounds = z.strictObject({
   left: finite.nonnegative(),
@@ -70,6 +71,55 @@ const schema = z.strictObject({
   digest: z.string().regex(/^[a-f0-9]{64}$/),
 });
 export type PalletSheetPrintSnapshotV1 = z.infer<typeof schema>;
+const referencedSchema = schema
+  .omit({ brandingJson: true })
+  .extend({ brandingResourceDigest: z.string().regex(/^[a-f0-9]{64}$/) });
+/** Historical resources are immutable and separate from the replaceable current-branding cache. */
+export async function storePalletSheetPrintSnapshot(
+  exec: SqlExecutor,
+  json: string,
+): Promise<{ json: string; brandingDigest: string }> {
+  const saved = parsePalletSheetPrintSnapshot(json);
+  const branding = parseOrganizationBranding(saved.brandingJson);
+  await exec.run(
+    "INSERT INTO pallet_sheet_branding_resources(digest,snapshot_json) VALUES(?,?) ON CONFLICT(digest) DO NOTHING",
+    [branding.digest, saved.brandingJson],
+  );
+  const [resource] = await exec.all<{ snapshot_json: string }>(
+    "SELECT snapshot_json FROM pallet_sheet_branding_resources WHERE digest=?",
+    [branding.digest],
+  );
+  if (!resource || resource.snapshot_json !== saved.brandingJson)
+    throw new Error("Sheet branding resource changed");
+  const { brandingJson: omitted, ...content } = saved;
+  void omitted;
+  return {
+    json: JSON.stringify({ ...content, brandingResourceDigest: branding.digest }),
+    brandingDigest: branding.digest,
+  };
+}
+export async function loadPalletSheetPrintSnapshot(
+  exec: SqlExecutor,
+  json: string,
+): Promise<PalletSheetPrintSnapshotV1> {
+  if (new TextEncoder().encode(json).length > 700000) throw new Error("Unsupported sheet snapshot");
+  const value: unknown = JSON.parse(json);
+  if (typeof value === "object" && value !== null && "brandingJson" in value)
+    return parsePalletSheetPrintSnapshot(json);
+  const { brandingResourceDigest, ...saved } = referencedSchema.parse(value);
+  const [resource] = await exec.all<{ snapshot_json: string }>(
+    "SELECT snapshot_json FROM pallet_sheet_branding_resources WHERE digest=?",
+    [brandingResourceDigest],
+  );
+  if (
+    !resource ||
+    parseOrganizationBranding(resource.snapshot_json).digest !== brandingResourceDigest
+  )
+    throw new Error("Sheet branding resource missing or changed");
+  return parsePalletSheetPrintSnapshot(
+    JSON.stringify({ ...saved, brandingJson: resource.snapshot_json }),
+  );
+}
 export function parsePalletSheetPrintSnapshot(json: string): PalletSheetPrintSnapshotV1 {
   if (new TextEncoder().encode(json).length > 700000) throw new Error("Unsupported sheet snapshot");
   const saved = schema.parse(JSON.parse(json));

@@ -7,7 +7,12 @@ import {
   type WindowsPrinting,
 } from "./hardware.js";
 import { parsePrinterProfile, printerMode, type PrinterProfile } from "./printer-routing.js";
-import { parsePalletSheetPrintSnapshot, sheetRequest } from "./pallet-sheet-print-snapshot.js";
+import {
+  parsePalletSheetPrintSnapshot,
+  loadPalletSheetPrintSnapshot,
+  storePalletSheetPrintSnapshot,
+  sheetRequest,
+} from "./pallet-sheet-print-snapshot.js";
 export interface WindowsDeliveryPreflight {
   profileJson: string;
   bytes: Uint8Array;
@@ -70,8 +75,11 @@ export async function preparePrintDelivery(
   } else if (renderSnapshotJson) throw new Error("A4 Windows profile required");
   const digest = productLabelBytesDigest(bytes),
     json = JSON.stringify(parsed);
+  const stored = renderSnapshotJson
+    ? await storePalletSheetPrintSnapshot(exec, renderSnapshotJson)
+    : null;
   await exec.run(
-    `INSERT INTO printer_deliveries(scope,purpose,job_id,attempt_id,state,profile_json,artifact_digest,artifact_base64,document_name,updated_at,render_snapshot_json) VALUES(?,?,?,?,'prepared',?,?,?,?,?,?) ON CONFLICT DO NOTHING`,
+    `INSERT INTO printer_deliveries(scope,purpose,job_id,attempt_id,state,profile_json,artifact_digest,artifact_base64,document_name,updated_at,render_snapshot_json,sheet_branding_digest) VALUES(?,?,?,?,'prepared',?,?,?,?,?,?,?) ON CONFLICT DO NOTHING`,
     [
       ...values(key),
       json,
@@ -79,7 +87,8 @@ export async function preparePrintDelivery(
       key.purpose === "duplicate" ? null : bytesToBase64(bytes),
       `Markiro:${crypto.randomUUID()}`,
       new Date().toISOString(),
-      renderSnapshotJson,
+      stored?.json ?? null,
+      stored?.brandingDigest ?? null,
     ],
   );
   const row = await readPrintDelivery(exec, key);
@@ -87,7 +96,7 @@ export async function preparePrintDelivery(
     !row ||
     row.artifact_digest !== digest ||
     row.profile_json !== json ||
-    row.render_snapshot_json !== renderSnapshotJson
+    row.render_snapshot_json !== (stored?.json ?? null)
   )
     throw new Error("Print delivery identity changed");
   return row;
@@ -147,7 +156,7 @@ export async function dispatchWindowsDelivery(
 ): Promise<void> {
   const row = await preparePrintDelivery(exec, key, profile, bytes, renderSnapshotJson);
   const sheet = row.render_snapshot_json
-    ? sheetRequest(parsePalletSheetPrintSnapshot(row.render_snapshot_json))
+    ? sheetRequest(await loadPalletSheetPrintSnapshot(exec, row.render_snapshot_json))
     : undefined;
   if (row.state !== "prepared") throw new Error("PRINT_DELIVERY_REQUIRES_RECOVERY");
   if (profile.target.kind !== "usb") throw new Error("Windows queue required");

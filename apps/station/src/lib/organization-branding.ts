@@ -210,11 +210,29 @@ async function refresh(
     await owner.client.get("/station/branding"),
   );
   if (!current(owner)) return;
+  if (
+    metadata.logoRevision &&
+    metadata.logoUrl !== `/station/branding/logo/${metadata.logoRevision}`
+  )
+    throw new Error("Invalid Station branding route");
+  const cached = await loadOrganizationBranding(owner);
+  if (!current(owner)) return;
+  const sameLogo =
+    cached &&
+    cached.logoRevision === metadata.logoRevision &&
+    cached.sourceChecksum === (metadata.logo?.checksum ?? null) &&
+    (metadata.logo
+      ? cached.logo.source === "organization" &&
+        cached.logo.width === metadata.logo.width &&
+        cached.logo.height === metadata.logo.height
+      : cached.logo.source === "markiro");
+  if (sameLogo && cached.organizationName === metadata.organizationName) return;
   let bitmap: MonoBitmap,
     sourceChecksum: string | null = null;
-  if (metadata.logo && metadata.logoRevision && metadata.logoUrl) {
-    if (metadata.logoUrl !== `/station/branding/logo/${metadata.logoRevision}`)
-      throw new Error("Invalid Station branding route");
+  if (sameLogo) {
+    bitmap = cached.logo;
+    sourceChecksum = cached.sourceChecksum;
+  } else if (metadata.logo && metadata.logoRevision && metadata.logoUrl) {
     const blob = await owner.client.download(metadata.logoUrl);
     if (!current(owner)) return;
     if (blob.type !== metadata.logo.contentType || blob.size !== metadata.logo.byteSize)

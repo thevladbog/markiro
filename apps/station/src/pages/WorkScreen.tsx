@@ -786,7 +786,9 @@ export function WorkScreen({
             : message === "Sheet branding unavailable"
               ? "sheet_branding_missing"
               : delivery?.state === "delivery_unknown" ||
-                  message === "PRINT_DELIVERY_REQUIRES_RECOVERY"
+                  delivery?.state === "sending" ||
+                  (delivery?.state !== "failed_before_send" &&
+                    message === "PRINT_DELIVERY_REQUIRES_RECOVERY")
                 ? "sheet_delivery_unknown"
                 : delivery?.error_code === "geometry_mismatch" ||
                     (typeof error === "object" &&

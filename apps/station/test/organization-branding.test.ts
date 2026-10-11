@@ -58,6 +58,52 @@ async function configured() {
     },
   };
 }
+it("does not download, decode or rewrite unchanged branding, including after restart", async () => {
+  const h = await fixture(),
+    { blob, descriptor } = await configured();
+  const decodeLogo = vi.fn(async () => bitmap);
+  h.get.mockResolvedValue(descriptor);
+  h.download.mockResolvedValue(blob);
+  await refreshOrganizationBranding(h.owner, { decodeLogo });
+  const write = vi.spyOn(h.exec, "run");
+  await refreshOrganizationBranding(
+    { ...h.owner, generation: createCredentialGeneration("test-branding-key") },
+    { decodeLogo },
+  );
+  expect(h.download).toHaveBeenCalledTimes(1);
+  expect(decodeLogo).toHaveBeenCalledTimes(1);
+  expect(write).not.toHaveBeenCalled();
+  h.get.mockResolvedValue({
+    ...descriptor,
+    logoUrl: `/org/profile/print-branding/logo/${revision}`,
+  });
+  await expect(refreshOrganizationBranding(h.owner, { decodeLogo })).rejects.toThrow(
+    "Invalid Station branding route",
+  );
+  expect(h.download).toHaveBeenCalledTimes(1);
+  h.get.mockResolvedValue({ ...descriptor, organizationName: "Renamed Plant" });
+  await refreshOrganizationBranding(h.owner, { decodeLogo });
+  expect(h.download).toHaveBeenCalledTimes(1);
+  expect(decodeLogo).toHaveBeenCalledTimes(1);
+  expect((await loadOrganizationBranding(h.owner))?.organizationName).toBe("Renamed Plant");
+  expect(write).toHaveBeenCalledTimes(1);
+  h.get.mockResolvedValue({
+    ...descriptor,
+    logoRevision: "b1111111-1111-4111-8111-111111111111",
+    logoUrl: "/station/branding/logo/b1111111-1111-4111-8111-111111111111",
+  });
+  await refreshOrganizationBranding(h.owner, { decodeLogo });
+  expect(h.download).toHaveBeenCalledTimes(2);
+});
+it("does not reload or rewrite the unchanged bundled fallback", async () => {
+  const h = await fixture(),
+    loadMarkiroLogo = vi.fn(async () => bitmap);
+  await refreshOrganizationBranding(h.owner, { loadMarkiroLogo });
+  const write = vi.spyOn(h.exec, "run");
+  await refreshOrganizationBranding(h.owner, { loadMarkiroLogo });
+  expect(loadMarkiroLogo).toHaveBeenCalledTimes(1);
+  expect(write).not.toHaveBeenCalled();
+});
 it("uses bundled Markiro only for explicit absence and reloads a complete cache offline", async () => {
   const h = await fixture();
   await refreshOrganizationBranding(h.owner, ports);
@@ -89,7 +135,12 @@ it("keeps the last complete company logo if a newer configured revision fails; d
   const saved = await loadOrganizationBranding(h.owner);
   expect(saved?.logo).toMatchObject({ source: "organization", revision, width: 4, height: 1 });
   h.download.mockRejectedValue(new Error("offline"));
-  h.get.mockResolvedValue({ ...descriptor, organizationName: "New name" });
+  h.get.mockResolvedValue({
+    ...descriptor,
+    organizationName: "New name",
+    logoRevision: "b1111111-1111-4111-8111-111111111111",
+    logoUrl: "/station/branding/logo/b1111111-1111-4111-8111-111111111111",
+  });
   await expect(refreshOrganizationBranding(h.owner, ports)).rejects.toThrow();
   expect(await loadOrganizationBranding(h.owner)).toEqual(saved);
   h.get.mockResolvedValue(none);
