@@ -99,6 +99,33 @@ function UnsentNotice({
   );
 }
 
+/**
+ * A forget held back while this pairing still owes a host restored from a
+ * copy its SSCC blocks (plan РК-С): once forgotten it never returns them, so
+ * the host would not know the serials issued to it after the copy. It says so
+ * and lets a person go ahead.
+ */
+function RestoreOwedNotice({
+  owed,
+  busy,
+  onConfirm,
+}: {
+  owed: boolean;
+  busy: boolean;
+  onConfirm: () => void;
+}) {
+  const { t } = useTranslation();
+  if (!owed) return null;
+  return (
+    <>
+      <Alert tone="warn">{t("shell.restoreOwed.body")}</Alert>
+      <Button variant="destructive" onClick={onConfirm} loading={busy}>
+        {t("shell.restoreOwed.confirm")}
+      </Button>
+    </>
+  );
+}
+
 export function ConfigErrorScreen({
   busy,
   error,
@@ -147,8 +174,10 @@ export function DeviceRejectedScreen({
   busy,
   error,
   unsent,
+  owed,
   onRepair,
   onConfirm,
+  onConfirmOwed,
 }: {
   reason: RejectionReason;
   /** The paired host's address when that host is not on this computer. */
@@ -156,8 +185,11 @@ export function DeviceRejectedScreen({
   busy: boolean;
   error: DeviceErrorCode | null;
   unsent: UnsentRecords | null;
+  /** The forget waits: the pairing still owes a restored host its blocks. */
+  owed: boolean;
   onRepair: () => void;
   onConfirm: () => void;
+  onConfirmOwed: () => void;
 }) {
   const { t } = useTranslation();
   let explanation = t("shell.deviceRejected.keyRejected");
@@ -171,6 +203,7 @@ export function DeviceRejectedScreen({
     <Card className="standalone-card" title={t("shell.deviceRejected.title")} titleAs="h2">
       <Alert tone="warn">{explanation}</Alert>
       {error && <Alert tone="error">{t(`errors.device.${error}`)}</Alert>}
+      <RestoreOwedNotice owed={owed} busy={busy} onConfirm={onConfirmOwed} />
       <UnsentNotice unsent={unsent} busy={busy} onConfirm={onConfirm} />
       <Button onClick={onRepair} loading={busy}>
         {t("shell.deviceRejected.repair")}
@@ -188,21 +221,27 @@ export function OtherHostScreen({
   busy,
   error,
   unsent,
+  owed,
   onRepair,
   onConfirm,
+  onConfirmOwed,
 }: {
   hostAddress: string;
   busy: boolean;
   error: DeviceErrorCode | null;
   unsent: UnsentRecords | null;
+  /** The forget waits: the pairing still owes a restored host its blocks. */
+  owed: boolean;
   onRepair: () => void;
   onConfirm: () => void;
+  onConfirmOwed: () => void;
 }) {
   const { t } = useTranslation();
   return (
     <Card className="standalone-card" title={t("shell.otherHost.title")} titleAs="h2">
       <Alert tone="warn">{t("shell.otherHost.body", { address: hostAddress })}</Alert>
       {error && <Alert tone="error">{t(`errors.device.${error}`)}</Alert>}
+      <RestoreOwedNotice owed={owed} busy={busy} onConfirm={onConfirmOwed} />
       <UnsentNotice unsent={unsent} busy={busy} onConfirm={onConfirm} />
       <Button onClick={onRepair} loading={busy}>
         {t("shell.otherHost.repair")}

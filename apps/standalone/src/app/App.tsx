@@ -36,6 +36,7 @@ import {
 } from "../host/protocol.js";
 import { createTauriLocalExecutor, type LocalExecutor } from "../local/executor.js";
 import { countUnsentRecords } from "../local/outbox.js";
+import { restoreDue } from "../local/restore-reconcile.js";
 import { purgeAcknowledged, scheduleRetention } from "../local/retention.js";
 import { Office } from "../office/Office.js";
 import { OfficeLogin } from "../office/OfficeLogin.js";
@@ -193,6 +194,9 @@ export function App({
     records: number | null;
     view: ShellView["kind"];
   } | null>(null);
+  // A forget held back because the pairing still owes a restored host its
+  // SSCC blocks (plan РК-С), and the screen it was asked on.
+  const [owed, setOwed] = useState<ShellView["kind"] | null>(null);
   // An office PC has no floor: whatever pairing its disk holds, the station's
   // screens are not shown there, and the office sign-in is the home (plan УСТ).
   const shellView = nextShellView(state, address);
@@ -204,6 +208,7 @@ export function App({
       ? { kind: "office_login", notice: null }
       : shellView;
   const unsentHere = unsent !== null && unsent.view === view.kind ? unsent : null;
+  const owedHere = owed !== null && owed === view.kind;
   const localName = t("device.localName");
   const pairedStatus = state.device.kind === "ready" ? state.device.status : null;
   // The pairing's host when it is not the one on this computer.
@@ -378,42 +383,59 @@ export function App({
   const forgetHostId = pairedStatus?.hostId ?? null;
   const forgetDeviceId = pairedStatus?.deviceId ?? null;
   const forget = useCallback(
-    (keepUnsent: boolean) => {
+    (keepUnsent: boolean, blocksAnswered: boolean) => {
       const screenKind = view.kind;
+      const pairing =
+        forgetHostId === null || forgetDeviceId === null
+          ? null
+          : { hostId: forgetHostId, deviceId: forgetDeviceId };
       setRepairState("busy");
-      deviceApi.forget(keepUnsent ? { keepUnsent: true } : undefined).then(
-        () => {
+      // A pairing that still owes a restored host its blocks never returns
+      // them once forgotten (plan РК-С): a person decides first. The question
+      // of the records not yet sent comes after that one, and a failed read
+      // does not trap the device here.
+      const owes =
+        blocksAnswered || pairing === null
+          ? Promise.resolve(false)
+          : restoreDue(localDb, pairing).catch(() => false);
+      void owes.then((due) => {
+        if (due) {
+          setOwed(screenKind);
           setRepairState("idle");
-          setUnsent(null);
-          dispatch({ type: "forgotten" });
-          retryProbe();
-        },
-        (error: unknown) => {
-          if (error instanceof DeviceError && error.code === "unsent_facts") {
-            // A rejected device can send nothing more, so a person decides,
-            // knowing how many (question В7): the records stay on this PC. The
-            // pairing's own, or every pairing's when the file is unreadable,
-            // as the shell counts them.
-            const pairing =
-              forgetHostId === null || forgetDeviceId === null
-                ? null
-                : { hostId: forgetHostId, deviceId: forgetDeviceId };
-            void countUnsentRecords(localDb, pairing).then((records) => {
-              setUnsent({ records, view: screenKind });
-              setRepairState("idle");
-            });
-            return;
-          }
-          // The config could not be removed; this screen stays and offers the
-          // same action again, now explaining why it did not work.
-          setRepairState(error instanceof DeviceError ? error.code : "unreachable");
-        },
-      );
+          return;
+        }
+        setOwed(null);
+        deviceApi.forget(keepUnsent ? { keepUnsent: true } : undefined).then(
+          () => {
+            setRepairState("idle");
+            setUnsent(null);
+            dispatch({ type: "forgotten" });
+            retryProbe();
+          },
+          (error: unknown) => {
+            if (error instanceof DeviceError && error.code === "unsent_facts") {
+              // A rejected device can send nothing more, so a person decides,
+              // knowing how many (question В7): the records stay on this PC. The
+              // pairing's own, or every pairing's when the file is unreadable,
+              // as the shell counts them.
+              void countUnsentRecords(localDb, pairing).then((records) => {
+                setUnsent({ records, view: screenKind });
+                setRepairState("idle");
+              });
+              return;
+            }
+            // The config could not be removed; this screen stays and offers the
+            // same action again, now explaining why it did not work.
+            setRepairState(error instanceof DeviceError ? error.code : "unreachable");
+          },
+        );
+      });
     },
     [deviceApi, retryProbe, localDb, forgetHostId, forgetDeviceId, view.kind],
   );
-  const repair = useCallback(() => forget(false), [forget]);
-  const confirmRepair = useCallback(() => forget(true), [forget]);
+  const repair = useCallback(() => forget(false, false), [forget]);
+  const confirmRepair = useCallback(() => forget(true, true), [forget]);
+  const confirmOwed = useCallback(() => forget(false, true), [forget]);
 
   const unpaired = state.device.kind === "ready" && state.device.status === null;
   const bootstrap = useCallback(
@@ -632,8 +654,10 @@ export function App({
           busy={repairBusy}
           error={repairError}
           unsent={unsentHere}
+          owed={owedHere}
           onRepair={repair}
           onConfirm={confirmRepair}
+          onConfirmOwed={confirmOwed}
         />
       )}
       {view.kind === "other_host" && (
@@ -642,8 +666,10 @@ export function App({
           busy={repairBusy}
           error={repairError}
           unsent={unsentHere}
+          owed={owedHere}
           onRepair={repair}
           onConfirm={confirmRepair}
+          onConfirmOwed={confirmOwed}
         />
       )}
       {view.kind === "line_select" && (

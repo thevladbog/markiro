@@ -778,6 +778,155 @@ describe("App", () => {
     expect(screen.queryByRole("button", { name: "Сбросить всё равно" })).toBeNull();
   });
 
+  /** A restore of the host this pairing has noted and not settled: it still owes its blocks. */
+  function owingBlocks(settled: string | null = null) {
+    const { db, executor } = openLocalDb();
+    db.prepare(
+      "INSERT INTO floor_restore_epochs (host_id, device_id, epoch, seen_at, reconciled_at) " +
+        "VALUES (?, ?, '5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e', '2026-10-11T08:00:00.000Z', ?)",
+    ).run(HOST_ID, DEVICE_ID, settled);
+    db.prepare(
+      "INSERT INTO floor_sscc_blocks (block_id, host_id, device_id, issuer_prefix, extension, " +
+        "from_serial, to_serial, next_serial, received_at) VALUES ('block-1', ?, ?, '460068200', " +
+        "0, 3500, 5499, 3600, '2026-10-08T06:00:00.000Z')",
+    ).run(HOST_ID, DEVICE_ID);
+    return { db, executor };
+  }
+
+  /** The host never answers the blocks: the obligation stays owed while the test runs. */
+  function hostKeepingTheBlocks() {
+    const host = fakeHost();
+    host.registerKnownBlocks.mockImplementation(() => new Promise(() => undefined));
+    return host;
+  }
+
+  const OWED =
+    "Хост восстановлен из копии, а эта станция ещё не вернула ему свои блоки номеров SSCC. " +
+    "После сброса подключения она их уже не вернёт, и номера, выданные ей после копии, хост не " +
+    "узнает. Если станция на связи с хостом, дождитесь, пока в строке состояния цеха пропадёт " +
+    "«станция возвращает ему свои блоки номеров SSCC».";
+
+  it("warns before it forgets a pairing that still owes a restored host its blocks", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: hostKeepingTheBlocks(),
+      connection: link.connection,
+      local: owingBlocks().executor,
+    });
+    await screen.findByText("Цех");
+    await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
+    fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
+    expect(await screen.findByText(OWED)).toBeTruthy();
+    expect(device.forget).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить, не вернув блоки" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(device.forget.mock.calls).toEqual([[undefined]]);
+  });
+
+  it("asks about the blocks first and about the records not yet sent next", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.forget.mockRejectedValueOnce(new DeviceError("unsent_facts", "unsent"));
+    const { db, executor } = owingBlocks();
+    db.prepare(
+      "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) " +
+        "VALUES ('a', ?, ?, 'scan', 'shift-1', '{}', '2026-10-09T08:00:00.000Z')",
+    ).run(HOST_ID, DEVICE_ID);
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host: hostKeepingTheBlocks(),
+      connection: link.connection,
+      local: executor,
+    });
+    await screen.findByText("Цех");
+    await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
+    fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Сбросить, не вернув блоки" }));
+    expect(await screen.findByText(/не отправлено на хост записей смен: 1\./)).toBeTruthy();
+    // The blocks were answered for; the records are a question of their own.
+    expect(screen.queryByText(OWED)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить всё равно" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(device.forget.mock.calls).toEqual([[undefined], [{ keepUnsent: true }]]);
+  });
+
+  it("forgets at once when the restore is settled, or the obligation cannot be read", async () => {
+    for (const local of [
+      owingBlocks("2026-10-11T08:05:00.000Z").executor,
+      ((): LocalExecutor => {
+        const real = owingBlocks().executor;
+        return {
+          query: (sql, params, row) =>
+            sql.includes("FROM floor_restore_epochs") && sql.startsWith("SELECT epoch")
+              ? Promise.reject(new Error("disk"))
+              : real.query(sql, params, row),
+          transaction: (statements) => real.transaction(statements),
+        };
+      })(),
+    ]) {
+      const link = fakeConnection();
+      const device = fakeDevice(DEVICE_STATUS);
+      const view = renderApp({
+        probe: probeAnswering(true),
+        device,
+        host: hostKeepingTheBlocks(),
+        connection: link.connection,
+        local,
+      });
+      await screen.findByText("Цех");
+      await link.status({ ...ONLINE, lastError: "key_rejected", seq: 2 });
+      fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
+      await waitFor(() => expect(device.forget.mock.calls).toEqual([[undefined]]));
+      expect(screen.queryByText(OWED)).toBeNull();
+      view.unmount();
+    }
+  });
+
+  it("warns the same on the screen of another host, before anything is forgotten", async () => {
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    const host = hostKeepingTheBlocks();
+    host.getChanges.mockResolvedValueOnce(feedPage(7, [], OTHER_HOST_ID));
+    renderApp({
+      probe: probeAnswering(true),
+      device,
+      host,
+      connection: link.connection,
+      local: owingBlocks().executor,
+    });
+    expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Подключить заново" }));
+    expect(await screen.findByText(OWED)).toBeTruthy();
+    expect(device.forget).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Сбросить, не вернув блоки" }));
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    expect(device.forget.mock.calls).toEqual([[undefined]]);
+  });
+
+  it("does not carry the warning about the blocks over to the screen of another refusal", async () => {
+    const swapped = observation(true);
+    swapped.hello.hostId = OTHER_HOST_ID;
+    const probe = { hello: vi.fn<HostProbe["hello"]>(async () => swapped) };
+    const link = fakeConnection();
+    const device = fakeDevice(DEVICE_STATUS);
+    const host = hostKeepingTheBlocks();
+    host.getChanges.mockResolvedValue(feedPage(7));
+    renderApp({ probe, device, host, connection: link.connection, local: owingBlocks().executor });
+    fireEvent.click(await screen.findByRole("button", { name: "Подключить заново" }));
+    expect(await screen.findByText(OWED)).toBeTruthy();
+
+    host.getChanges.mockResolvedValue(feedPage(8, [], OTHER_HOST_ID));
+    await link.revision(8);
+    expect(await screen.findByText("Устройство подключено к другому хосту")).toBeTruthy();
+    expect(screen.queryByText(OWED)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Сбросить, не вернув блоки" })).toBeNull();
+    expect(device.forget).not.toHaveBeenCalled();
+  });
+
   it("does not carry the count of one screen over to the screen of another refusal", async () => {
     // The probe finds another host at the paired address: the device is refused (derived,
     // the link goes on), and a later read of the feed finds the pairing's host elsewhere.
