@@ -21,9 +21,11 @@ import {
   type ClosedBox,
   type ExceptionReason,
 } from "./box-exceptions.js";
+import type { ClosedPallet } from "./pallet-exceptions.js";
 
-/** The four exceptions of a box (stage 2a spec §5.7.6). */
-export type ExceptionAction = "undo" | "clear" | "reprint" | "disassemble";
+/** The four exceptions of a box (stage 2a spec §5.7.6) and the two of a pallet (plan ПЛ-Ц). */
+export type ExceptionAction =
+  "undo" | "clear" | "reprint" | "disassemble" | "pallet_reprint" | "pallet_disassemble";
 
 /**
  * How an exception went, as the screen says it: done; a reprint whose new
@@ -47,22 +49,42 @@ export type ExceptionOutcome =
   | { kind: "leaving" }
   | { kind: "failed" };
 
-/** A reason of its action's list. */
+/** A reason of its action's list: a pallet's lists are a box's (plan ПЛ-Х). */
 type Reasoned =
-  | { action: "reprint"; reason: ExceptionReason<ReprintReason> }
-  | { action: "disassemble"; reason: ExceptionReason<DisassembleReason> };
+  | { action: "reprint" | "pallet_reprint"; reason: ExceptionReason<ReprintReason> }
+  | { action: "disassemble" | "pallet_disassemble"; reason: ExceptionReason<DisassembleReason> };
 
 type BoxAction = Reasoned["action"];
+
+/**
+ * What a reprint or a disassembly is done to: a closed box and its codes, or a
+ * closed pallet and its boxes (`quantity` counts what the subject holds).
+ */
+interface Subject {
+  id: string;
+  sscc: string;
+  quantity: number;
+}
+
+/** An action on a closed pallet (plan ПЛ-Ц). */
+function onPallet(action: BoxAction): boolean {
+  return action === "pallet_reprint" || action === "pallet_disassemble";
+}
+
+/** The list of reasons, and the words of them, an action takes. */
+function reasonKind(action: BoxAction): "reprint" | "disassemble" {
+  return action === "reprint" || action === "pallet_reprint" ? "reprint" : "disassemble";
+}
 
 type Stage =
   | { kind: "actions" }
   | { kind: "confirm_clear" }
   | { kind: "target"; action: BoxAction; tail: string; note: "not_sscc" | "not_found" | null }
-  | { kind: "reason"; action: BoxAction; box: ClosedBox }
-  | { kind: "words"; action: BoxAction; box: ClosedBox; text: string; invalid: boolean }
-  | { kind: "confirm"; box: ClosedBox; reasoned: Reasoned }
-  | { kind: "applying" }
-  | { kind: "result"; outcome: ExceptionOutcome };
+  | { kind: "reason"; action: BoxAction; box: Subject }
+  | { kind: "words"; action: BoxAction; box: Subject; text: string; invalid: boolean }
+  | { kind: "confirm"; box: Subject; reasoned: Reasoned }
+  | { kind: "applying"; pallet: boolean }
+  | { kind: "result"; outcome: ExceptionOutcome; pallet: boolean };
 
 /**
  * What the box choice made of a scan: the box is picked, the code is no SSCC,
@@ -72,9 +94,14 @@ type Stage =
  */
 export type BoxScanVerdict = "taken" | "not_sscc" | "not_found";
 
-/** The printer a reprint goes to, as the reprint's confirmation knows it. */
+/**
+ * The printers a reprint goes to, as the reprint's confirmation knows them: a
+ * box's label goes to the printer of «Короб», a pallet's to that of «Паллета».
+ */
 type ReprintPrinter =
-  { kind: "loading" } | { kind: "ready"; printer: PrinterProfile | null } | { kind: "failed" };
+  | { kind: "loading" }
+  | { kind: "ready"; box: PrinterProfile | null; pallet: PrinterProfile | null }
+  | { kind: "failed" };
 
 /** The most boxes the list shows at once: more are found by the last digits of their SSCC. */
 export const MAX_LISTED_BOXES = 12;
@@ -82,16 +109,32 @@ export const MAX_LISTED_BOXES = 12;
 /** The longest tail of digits the pad takes: an SSCC has 18. */
 const MAX_TAIL = 18;
 
-/** The boxes whose SSCC ends with `tail`, the first `MAX_LISTED_BOXES` of them, and how many more. */
-export function boxesByTail(
-  boxes: readonly ClosedBox[],
+/**
+ * The boxes — or the pallets (plan ПЛ-Ц) — whose SSCC ends with `tail`, the
+ * first `MAX_LISTED_BOXES` of them, and how many more.
+ */
+export function boxesByTail<Item extends { sscc: string }>(
+  boxes: readonly Item[],
   tail: string,
-): { shown: ClosedBox[]; hidden: number } {
+): { shown: Item[]; hidden: number } {
   const matching = boxes.filter((box) => box.sscc.endsWith(tail));
   return {
     shown: matching.slice(0, MAX_LISTED_BOXES),
     hidden: Math.max(0, matching.length - MAX_LISTED_BOXES),
   };
+}
+
+/** The line that names the box or the pallet a reason is asked for. */
+function subjectKey(action: BoxAction): string {
+  return onPallet(action) ? "floor.exceptions.reason.pallet" : "floor.exceptions.reason.box";
+}
+
+/** The printer a reprint of `action` goes to: «Паллета» for a pallet, «Короб» for a box. */
+function printerOf(
+  printers: { box: PrinterProfile | null; pallet: PrinterProfile | null },
+  action: BoxAction,
+): PrinterProfile | null {
+  return onPallet(action) ? printers.pallet : printers.box;
 }
 
 const DIGITS = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"] as const;
@@ -118,6 +161,23 @@ function viewOf(stage: Stage): string {
   }
 }
 
+/**
+ * The words of an outcome. What a pallet's action could not do is said of the
+ * pallet (plan ПЛ-Ц); the rest — a template that changed, the leave, a failed
+ * write — is said the same of a box and of a pallet.
+ */
+function resultKey(outcome: ExceptionOutcome, pallet: boolean): string {
+  if (outcome.kind === "done") return `floor.exceptions.result.done.${outcome.action}`;
+  const ofPallet =
+    pallet &&
+    (outcome.kind === "stale" ||
+      outcome.kind === "unavailable" ||
+      outcome.kind === "label_waiting");
+  return ofPallet
+    ? `floor.exceptions.result.pallet.${outcome.kind}`
+    : `floor.exceptions.result.${outcome.kind}`;
+}
+
 /** What a view is called: the heading of the view and the name of the group the focus lands on. */
 function stageLabel(stage: Stage, t: TFunction): string {
   switch (stage.kind) {
@@ -130,17 +190,13 @@ function stageLabel(stage: Stage, t: TFunction): string {
     case "reason":
       return t("floor.exceptions.reason.title");
     case "words":
-      return t(`floor.exceptions.reasons.${stage.action}.other`);
+      return t(`floor.exceptions.reasons.${reasonKind(stage.action)}.other`);
     case "confirm":
       return t(`floor.exceptions.confirm.${stage.reasoned.action}.title`);
     case "applying":
       return t("floor.exceptions.applying");
     case "result":
-      return t(
-        stage.outcome.kind === "done"
-          ? `floor.exceptions.result.done.${stage.outcome.action}`
-          : `floor.exceptions.result.${stage.outcome.kind}`,
-      );
+      return t(resultKey(stage.outcome, stage.pallet));
   }
 }
 
@@ -156,6 +212,20 @@ export interface ExceptionFlowProps {
   onReprint: (boxId: string, reason: ExceptionReason<ReprintReason>) => Promise<ExceptionOutcome>;
   onDisassemble: (
     boxId: string,
+    reason: ExceptionReason<DisassembleReason>,
+  ) => Promise<ExceptionOutcome>;
+  /**
+   * The shift's closed pallets not taken apart, the last first (plan ПЛ-Ц);
+   * `null` while they are read; absent for a shift without pallets, which
+   * offers no pallet's exception.
+   */
+  pallets?: readonly ClosedPallet[] | null;
+  onPalletReprint?: (
+    palletId: string,
+    reason: ExceptionReason<ReprintReason>,
+  ) => Promise<ExceptionOutcome>;
+  onPalletDisassemble?: (
+    palletId: string,
     reason: ExceptionReason<DisassembleReason>,
   ) => Promise<ExceptionOutcome>;
   /**
@@ -194,7 +264,12 @@ export interface ExceptionFlowProps {
  * that none is assigned, and what follows), a disassembly says that it cannot
  * be undone. Each
  * action runs as the line's next piece of work, once, and says how it went.
- * «Назад» is there at every step but while an action writes. A press is
+ * «Назад» is there at every step but while an action writes. A shift with
+ * pallets (plan ПЛ-Ц) prints a closed pallet's label again and takes a closed
+ * pallet apart the same way: chosen by a scan of its label or the last digits
+ * of its SSCC (several pallets that end alike are all listed, and none is
+ * taken for the operator), with a reason of the same lists, confirmed, a
+ * disassembly said to be final. A press is
  * ignored for `VIEW_GUARD_MS` after the screen changed its view (the second
  * tap of a gloved double tap lands on whatever the new view put under the
  * finger), and the focus goes to the view itself, never to a button. It sits
@@ -207,6 +282,9 @@ export function ExceptionFlow({
   onClear,
   onReprint,
   onDisassemble,
+  pallets,
+  onPalletReprint,
+  onPalletDisassemble,
   loadSettings,
   onSetup,
   registerScan,
@@ -223,10 +301,25 @@ export function ExceptionFlow({
       alive.current = false;
     };
   }, []);
-  // What a scan of the box choice reads when it lands.
-  const current = useRef({ stage, boxes });
+  /** The closed boxes, or for a pallet's action the closed pallets, as subjects; `null` while they are read. */
+  const subjects = (action: BoxAction): Subject[] | null => {
+    if (onPallet(action)) {
+      return pallets === undefined || pallets === null
+        ? null
+        : pallets.map((pallet) => ({
+            id: pallet.id,
+            sscc: pallet.sscc,
+            quantity: pallet.boxCount,
+          }));
+    }
+    return boxes === null
+      ? null
+      : boxes.map((box) => ({ id: box.id, sscc: box.sscc, quantity: box.itemCount }));
+  };
+  // What a scan of the choice reads when it lands.
+  const current = useRef({ stage, subjects });
   useLayoutEffect(() => {
-    current.current = { stage, boxes };
+    current.current = { stage, subjects };
   });
 
   const choosing = stage.kind === "target";
@@ -238,7 +331,7 @@ export function ExceptionFlow({
       if (now.kind !== "target") return null;
       // The next stage is known at once, so that a second scan before the render finds the choice made.
       const take = (next: Stage): void => {
-        current.current = { stage: next, boxes: current.current.boxes };
+        current.current = { stage: next, subjects: current.current.subjects };
         setStage(next);
       };
       const sscc = parseScannedSscc(raw);
@@ -246,7 +339,9 @@ export function ExceptionFlow({
         take({ ...now, note: "not_sscc" });
         return "not_sscc";
       }
-      const box = current.current.boxes?.find((candidate) => candidate.sscc === sscc);
+      const box = current.current
+        .subjects(now.action)
+        ?.find((candidate) => candidate.sscc === sscc);
       if (box === undefined) {
         take({ ...now, note: "not_found" });
         return "not_found";
@@ -265,7 +360,11 @@ export function ExceptionFlow({
     loadSettings().then(
       (settings) => {
         if (!cancelled) {
-          setReprintPrinter({ kind: "ready", printer: resolvePrinter(settings, "box") });
+          setReprintPrinter({
+            kind: "ready",
+            box: resolvePrinter(settings, "box"),
+            pallet: resolvePrinter(settings, "pallet"),
+          });
         }
       },
       () => {
@@ -308,32 +407,41 @@ export function ExceptionFlow({
 
   // One action at a time: a second press before the first one's view is up does nothing.
   const running = useRef(false);
-  const run = (work: () => Promise<ExceptionOutcome>) => {
+  const run = (work: () => Promise<ExceptionOutcome>, pallet = false) => {
     if (running.current) return;
     running.current = true;
-    setStage({ kind: "applying" });
+    setStage({ kind: "applying", pallet });
     work().then(
       (outcome) => {
         running.current = false;
-        if (alive.current) setStage({ kind: "result", outcome });
+        if (alive.current) setStage({ kind: "result", outcome, pallet });
       },
       () => {
         running.current = false;
-        if (alive.current) setStage({ kind: "result", outcome: { kind: "failed" } });
+        if (alive.current) setStage({ kind: "result", outcome: { kind: "failed" }, pallet });
       },
     );
   };
 
-  const apply = (box: ClosedBox, reasoned: Reasoned) => {
-    run(() =>
-      reasoned.action === "reprint"
-        ? onReprint(box.id, reasoned.reason)
-        : onDisassemble(box.id, reasoned.reason),
-    );
+  const apply = (box: Subject, reasoned: Reasoned) => {
+    // A pallet's action the floor does not give is a pallet that is not there: nothing is done.
+    const missing = (): Promise<ExceptionOutcome> => Promise.resolve({ kind: "unavailable" });
+    run(() => {
+      switch (reasoned.action) {
+        case "reprint":
+          return onReprint(box.id, reasoned.reason);
+        case "disassemble":
+          return onDisassemble(box.id, reasoned.reason);
+        case "pallet_reprint":
+          return onPalletReprint?.(box.id, reasoned.reason) ?? missing();
+        case "pallet_disassemble":
+          return onPalletDisassemble?.(box.id, reasoned.reason) ?? missing();
+      }
+    }, onPallet(reasoned.action));
   };
 
-  const pick = (action: BoxAction, box: ClosedBox, code: string, text: string | null) => {
-    if (action === "reprint") {
+  const pick = (action: BoxAction, box: Subject, code: string, text: string | null) => {
+    if (action === "reprint" || action === "pallet_reprint") {
       const reason = REPRINT_REASONS.find((candidate) => candidate === code);
       if (reason !== undefined) {
         setStage({ kind: "confirm", box, reasoned: { action, reason: { code: reason, text } } });
@@ -358,25 +466,35 @@ export function ExceptionFlow({
 
   const title = t("floor.exceptions.title");
   const label = stageLabel(stage, t);
-  const printerLine =
-    reprintPrinter.kind === "loading" ? null : (
+  /** Where a reprint of `action` goes: the printer of its purpose, or the words that none is assigned. */
+  const printerLine = (action: BoxAction) => {
+    if (reprintPrinter.kind === "loading") return null;
+    const printer = reprintPrinter.kind === "failed" ? null : printerOf(reprintPrinter, action);
+    return (
       <p>
         {reprintPrinter.kind === "failed"
           ? t("floor.print.target.unknown")
-          : reprintPrinter.printer === null
-            ? t("floor.exceptions.confirm.reprint.noPrinter")
+          : printer === null
+            ? t(`floor.exceptions.confirm.${action}.noPrinter`)
             : t("floor.print.target.label", {
-                name: reprintPrinter.printer.name,
-                language: reprintPrinter.printer.language.toUpperCase(),
-                dpi: reprintPrinter.printer.dpi,
+                name: printer.name,
+                language: printer.language.toUpperCase(),
+                dpi: printer.dpi,
               })}
       </p>
     );
+  };
   const body = () => {
     switch (stage.kind) {
       case "actions": {
         const closed = boxes ?? [];
-        const nothing = openItems === 0 && boxes !== null && closed.length === 0;
+        const closedPallets = pallets ?? [];
+        const nothing =
+          openItems === 0 &&
+          boxes !== null &&
+          closed.length === 0 &&
+          pallets !== null &&
+          closedPallets.length === 0;
         return (
           <>
             <h4>{label}</h4>
@@ -420,6 +538,35 @@ export function ExceptionFlow({
               >
                 {t("floor.exceptions.actions.disassemble")}
               </Button>
+              {pallets !== undefined && (
+                <>
+                  <Button
+                    size="floor"
+                    variant="secondary"
+                    disabled={closedPallets.length === 0}
+                    {...press(() =>
+                      setStage({ kind: "target", action: "pallet_reprint", tail: "", note: null }),
+                    )}
+                  >
+                    {t("floor.exceptions.actions.pallet_reprint")}
+                  </Button>
+                  <Button
+                    size="floor"
+                    variant="secondary"
+                    disabled={closedPallets.length === 0}
+                    {...press(() =>
+                      setStage({
+                        kind: "target",
+                        action: "pallet_disassemble",
+                        tail: "",
+                        note: null,
+                      }),
+                    )}
+                  >
+                    {t("floor.exceptions.actions.pallet_disassemble")}
+                  </Button>
+                </>
+              )}
             </div>
             <div className="standalone-form__actions">{back(null)}</div>
           </>
@@ -440,15 +587,18 @@ export function ExceptionFlow({
           </Alert>
         );
       case "target": {
-        const { shown, hidden } = boxesByTail(boxes ?? [], stage.tail);
+        const listed = subjects(stage.action);
+        const { shown, hidden } = boxesByTail(listed ?? [], stage.tail);
         const type = (tail: string) => setStage({ ...stage, tail, note: null });
+        // A pallet's words: `floor.exceptions.target.pallet.*` (plan ПЛ-Ц).
+        const words = onPallet(stage.action)
+          ? "floor.exceptions.target.pallet"
+          : "floor.exceptions.target";
         return (
           <>
             <h4>{label}</h4>
-            <p>{t("floor.exceptions.target.hint")}</p>
-            {stage.note !== null && (
-              <p role="alert">{t(`floor.exceptions.target.${stage.note}`)}</p>
-            )}
+            <p>{t(`${words}.hint`)}</p>
+            {stage.note !== null && <p role="alert">{t(`${words}.${stage.note}`)}</p>}
             <p>
               {stage.tail === ""
                 ? t("floor.exceptions.target.tailEmpty")
@@ -479,8 +629,10 @@ export function ExceptionFlow({
                 {t("floor.exceptions.target.erase")}
               </Button>
             </div>
-            {shown.length === 0 ? (
-              <p>{t("floor.exceptions.target.nothing")}</p>
+            {listed === null ? (
+              <p>{t(`${words}.loading`)}</p>
+            ) : shown.length === 0 ? (
+              <p>{t(`${words}.nothing`)}</p>
             ) : (
               <div className="exceptions__choices">
                 {shown.map((box) => (
@@ -490,27 +642,26 @@ export function ExceptionFlow({
                     variant="secondary"
                     {...press(() => setStage({ kind: "reason", action: stage.action, box }))}
                   >
-                    {t("floor.exceptions.target.box", {
+                    {t(`${words}.box`, {
                       sscc: formatSsccHri(box.sscc),
-                      quantity: formatQuantity(box.itemCount),
+                      quantity: formatQuantity(box.quantity),
                     })}
                   </Button>
                 ))}
               </div>
             )}
-            {hidden > 0 && (
-              <p>{t("floor.exceptions.target.more", { number: formatQuantity(hidden) })}</p>
-            )}
+            {hidden > 0 && <p>{t(`${words}.more`, { number: formatQuantity(hidden) })}</p>}
             <div className="standalone-form__actions">{back({ kind: "actions" })}</div>
           </>
         );
       }
       case "reason": {
-        const reasons = stage.action === "reprint" ? REPRINT_REASONS : DISASSEMBLE_REASONS;
+        const kind = reasonKind(stage.action);
+        const reasons = kind === "reprint" ? REPRINT_REASONS : DISASSEMBLE_REASONS;
         return (
           <>
             <h4>{label}</h4>
-            <p>{t("floor.exceptions.reason.box", { sscc: formatSsccHri(stage.box.sscc) })}</p>
+            <p>{t(subjectKey(stage.action), { sscc: formatSsccHri(stage.box.sscc) })}</p>
             <div className="exceptions__choices">
               {reasons.map((code) => (
                 <Button
@@ -523,7 +674,7 @@ export function ExceptionFlow({
                       : pick(stage.action, stage.box, code, null),
                   )}
                 >
-                  {t(`floor.exceptions.reasons.${stage.action}.${code}`)}
+                  {t(`floor.exceptions.reasons.${kind}.${code}`)}
                 </Button>
               ))}
             </div>
@@ -545,7 +696,7 @@ export function ExceptionFlow({
         return (
           <>
             <h4>{label}</h4>
-            <p>{t("floor.exceptions.reason.box", { sscc: formatSsccHri(stage.box.sscc) })}</p>
+            <p>{t(subjectKey(stage.action), { sscc: formatSsccHri(stage.box.sscc) })}</p>
             <Input
               size="floor"
               label={t("floor.exceptions.words.label")}
@@ -575,31 +726,27 @@ export function ExceptionFlow({
       }
       case "confirm": {
         const { box, reasoned } = stage;
+        const kind = reasonKind(reasoned.action);
         const reasonText =
-          reasoned.reason.text ??
-          t(`floor.exceptions.reasons.${reasoned.action}.${reasoned.reason.code}`);
+          reasoned.reason.text ?? t(`floor.exceptions.reasons.${kind}.${reasoned.reason.code}`);
         return (
-          <Alert
-            tone={reasoned.action === "disassemble" ? "error" : "warn"}
-            role="presentation"
-            title={label}
-          >
+          <Alert tone={kind === "disassemble" ? "error" : "warn"} role="presentation" title={label}>
             <p>
               {t(`floor.exceptions.confirm.${reasoned.action}.body`, {
                 sscc: formatSsccHri(box.sscc),
-                quantity: formatQuantity(box.itemCount),
+                quantity: formatQuantity(box.quantity),
               })}
             </p>
-            {reasoned.action === "disassemble" && (
-              <p>{t("floor.exceptions.confirm.disassemble.final")}</p>
+            {kind === "disassemble" && (
+              <p>{t(`floor.exceptions.confirm.${reasoned.action}.final`)}</p>
             )}
             <p>{t("floor.exceptions.confirm.reason", { reason: reasonText })}</p>
-            {reasoned.action === "reprint" && printerLine}
+            {kind === "reprint" && printerLine(reasoned.action)}
             <div className="standalone-form__actions exceptions__confirm">
               {back({ kind: "reason", action: reasoned.action, box })}
-              {reasoned.action === "reprint" &&
+              {kind === "reprint" &&
                 reprintPrinter.kind === "ready" &&
-                reprintPrinter.printer === null &&
+                printerOf(reprintPrinter, reasoned.action) === null &&
                 onSetup !== undefined && (
                   <Button size="floor" variant="secondary" {...press(onSetup)}>
                     {t("floor.print.setup")}
@@ -607,9 +754,9 @@ export function ExceptionFlow({
                 )}
               <Button
                 size="floor"
-                variant={reasoned.action === "disassemble" ? "destructive" : "primary"}
+                variant={kind === "disassemble" ? "destructive" : "primary"}
                 // A reprint is confirmed once the operator can see where it goes.
-                disabled={reasoned.action === "reprint" && reprintPrinter.kind === "loading"}
+                disabled={kind === "reprint" && reprintPrinter.kind === "loading"}
                 {...press(() => apply(box, reasoned))}
               >
                 {t(`floor.exceptions.confirm.${reasoned.action}.action`)}

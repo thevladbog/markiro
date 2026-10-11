@@ -44,6 +44,14 @@ import {
   type ExceptionOutcome,
 } from "../exceptions/ExceptionFlow.js";
 import {
+  disassemblePallet,
+  PalletTemplateChangedError,
+  PalletUnavailableError,
+  readClosedPallets,
+  reprintPallet,
+  type ClosedPallet,
+} from "../exceptions/pallet-exceptions.js";
+import {
   closeOpenPallet,
   closePalletIfFull,
   openPalletGuard,
@@ -261,9 +269,14 @@ type Stop =
   /**
    * The exceptions of the box (plan 2a8, spec §5.7.6), opened while nothing
    * else stops the work and no label waits; `boxes`: the shift's closed
-   * boxes once they are read.
+   * boxes once they are read; `pallets`: the closed pallets of a shift with
+   * pallets (plan ПЛ-Ц), `null` while they are read (and without pallets).
    */
-  | { kind: "exceptions"; boxes: readonly ClosedBox[] | null }
+  | {
+      kind: "exceptions";
+      boxes: readonly ClosedBox[] | null;
+      pallets: readonly ClosedPallet[] | null;
+    }
   /**
    * The summary of the shift's close (plan 2a8, spec §5.7.7), `null` while it
    * is read; `waitingSscc`: the label that keeps the shift open, when there is one;
@@ -282,9 +295,15 @@ type Stop =
 
 /** What an exception's failure says on the screen; anything unforeseen is this computer's failed write. */
 function outcomeOf(error: unknown): ExceptionOutcome {
-  if (error instanceof BoxUnavailableError) return { kind: "unavailable" };
+  // By class, never by text: `LabelWaitingError` says «box» of a pallet too, and
+  // `PalletTemplateChangedError` is a `PalletUnavailableError`, so it is asked first.
+  if (error instanceof TemplateChangedError || error instanceof PalletTemplateChangedError) {
+    return { kind: "template_changed" };
+  }
+  if (error instanceof BoxUnavailableError || error instanceof PalletUnavailableError) {
+    return { kind: "unavailable" };
+  }
   if (error instanceof LabelWaitingError) return { kind: "label_waiting" };
-  if (error instanceof TemplateChangedError) return { kind: "template_changed" };
   // Another reprint of the box landed between this one's read and its write: nothing was written.
   if (error instanceof StaleJobError) return { kind: "stale" };
   return { kind: "failed" };
@@ -1422,7 +1441,13 @@ export function WorkScreen(props: WorkScreenProps) {
   const showClosedBoxes = async (): Promise<void> => {
     const now = live.current;
     const boxes = await readClosedBoxes(now.local, pairingOf(now), now.shift.copy.id);
-    if (stopRef.current?.kind === "exceptions") setStop({ kind: "exceptions", boxes });
+    const closedPallets =
+      now.pallets === null
+        ? null
+        : await readClosedPallets(now.local, pairingOf(now), now.shift.copy.id);
+    if (stopRef.current?.kind === "exceptions") {
+      setStop({ kind: "exceptions", boxes, pallets: closedPallets });
+    }
   };
 
   /**
@@ -1434,7 +1459,7 @@ export function WorkScreen(props: WorkScreenProps) {
    */
   const openExceptions = () => {
     if (leavingNow() || stopRef.current !== null) return;
-    setStop({ kind: "exceptions", boxes: null });
+    setStop({ kind: "exceptions", boxes: null, pallets: null });
     void live.current
       .track(
         queue.run(async () => {
@@ -1521,6 +1546,46 @@ export function WorkScreen(props: WorkScreenProps) {
       if (await labelWaits()) return { kind: "label_waiting" };
       const result = await disassembleBox(boxContextOf(live), boxId, reason);
       return result.kind === "done" ? { kind: "done", action: "disassemble" } : result;
+    });
+
+  /**
+   * A closed pallet's label printed again with a reason (plan ПЛ-Ц), unless a
+   * label waits (decided at its panel first); a new label that waits is shown
+   * by the settling that follows.
+   */
+  const reprintThePallet = (palletId: string, reason: Parameters<typeof reprintPallet>[3]) =>
+    exception(async () => {
+      if (await labelWaits()) return { kind: "label_waiting" };
+      const now = live.current;
+      // The screen offers a pallet's exception only to a shift with pallets.
+      if (now.pallets === null) return { kind: "unavailable" };
+      const settings = await readWorkstationSettings(now.local);
+      const job = await reprintPallet(
+        { ...printContextOf(live), shift: now.shift },
+        now.pallets,
+        palletId,
+        reason,
+        settings,
+        now.render,
+      );
+      return isOpenJob(job) ? { kind: "label" } : { kind: "done", action: "pallet_reprint" };
+    });
+
+  /**
+   * A closed pallet taken apart (plan ПЛ-Ц). It cannot be undone, so the flow
+   * has confirmed it with a reason before this runs; and never while any label
+   * waits: a taken-apart pallet's waiting label could not be printed again
+   * (every attempt would meet the pallet gone) and a failed one would still
+   * be printed for it. A label that waits is decided at its panel first.
+   */
+  const disassembleThePallet = (
+    palletId: string,
+    reason: Parameters<typeof disassemblePallet>[2],
+  ) =>
+    exception(async () => {
+      if (await labelWaits()) return { kind: "label_waiting" };
+      const result = await disassemblePallet(boxContextOf(live), palletId, reason);
+      return result.kind === "done" ? { kind: "done", action: "pallet_disassemble" } : result;
     });
 
   /**
@@ -2136,6 +2201,13 @@ export function WorkScreen(props: WorkScreenProps) {
               }
               onReprint={reprint}
               onDisassemble={disassemble}
+              {...(pallets === null
+                ? {}
+                : {
+                    pallets: stop.pallets,
+                    onPalletReprint: reprintThePallet,
+                    onPalletDisassemble: disassembleThePallet,
+                  })}
               loadSettings={loadLabelSettings}
               {...(props.onSetup === undefined ? {} : { onSetup: props.onSetup })}
               registerScan={registerScan}

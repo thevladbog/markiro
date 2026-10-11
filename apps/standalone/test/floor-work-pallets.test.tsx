@@ -611,12 +611,15 @@ describe("the pallet-waits message cannot outlive the pallet it speaks of", () =
     for (const serial of ["A1", "A2", "B1", "B2"]) await work.scan(km(serial));
     expect(palletLine()).toBe("2 из 2 коробов");
     expect(screen.getByText(WAITS)).toBeTruthy();
-    at.db
-      .prepare(
-        "UPDATE floor_boxes SET disassembled_at = '2026-10-01T07:00:00.000Z' WHERE serial = 1500",
-      )
-      .run();
-    await work.scan(km("C1"));
+    // Task 7's screen exists: a box is taken off the waiting pallet by the real flow, not by a poke.
+    await work.press("Исключения");
+    await screen.findByRole("button", { name: "Расформировать короб" });
+    await work.press("Расформировать короб");
+    await work.scan(`]C100${BOX_SSCC(1500)}`);
+    await work.press("Брак по качеству");
+    await work.press("Расформировать");
+    expect(await screen.findByText("Короб расформирован, его коды свободны.")).toBeTruthy();
+    await work.press("Вернуться к работе");
     expect(palletLine()).toBe("1 из 2 коробов");
     expect(screen.queryByText(WAITS)).toBeNull();
   });
