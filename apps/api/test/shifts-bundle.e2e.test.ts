@@ -227,29 +227,27 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     const preset = buildPalletSheetPresets()[0];
     if (!preset) throw new Error("Missing preset");
     const sheetId = randomUUID();
-    await db
-      .insert(schema.labelTemplates)
-      .values({
-        id: sheetId,
-        tenantId,
-        name: "A4 footer",
-        purpose: "pallet",
-        format: "pallet_sheet_v2",
-        revision: 1,
-        spec: {
-          ...preset.spec,
-          footer: {
-            ...preset.spec.footer,
-            caption: {
-              fontSizePt: 8,
-              separatorThicknessMm: 0.15,
-              gapMm: 1,
-              showInn: true,
-              platformText: "Сформировано в Маркиро",
-            },
+    await db.insert(schema.labelTemplates).values({
+      id: sheetId,
+      tenantId,
+      name: "A4 footer",
+      purpose: "pallet",
+      format: "pallet_sheet_v2",
+      revision: 1,
+      spec: {
+        ...preset.spec,
+        footer: {
+          ...preset.spec.footer,
+          caption: {
+            fontSizePt: 8,
+            separatorThicknessMm: 0.15,
+            gapMm: 1,
+            showInn: true,
+            platformText: "Сформировано в Маркиро",
           },
         },
-      });
+      },
+    });
     await agent
       .put("/org/profile")
       .send({ gln: "6291041500213", gs1Prefixes: ["629104150"] })
@@ -417,7 +415,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     const preview = await request(app!.getHttpServer())
       .get(`/shifts/pallet-sheet-template-preview?productId=${productId}&templateId=${sheetId}`)
       .set("x-api-key", current.apiKey)
-      .set("x-station-capabilities", "pallet-sheet-v2")
+      .set("x-station-capabilities", "pallet-sheet-v2,pallet-sheet-footer-v1")
       .expect(200);
     expect(preview.body).toMatchObject({ id: sheetId, revision: 1, spec: preset.spec });
     const oldCabinet = await agent.get(`/shifts/${shiftId}`).expect(200);
@@ -442,13 +440,13 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     await request(app!.getHttpServer())
       .post(`/shifts/${shiftId}/enter`)
       .set("x-api-key", current.apiKey)
-      .set("x-station-capabilities", "pallet-sheet-v2")
+      .set("x-station-capabilities", "pallet-sheet-v2,pallet-sheet-footer-v1")
       .send({ entryMethod: "list" })
       .expect(200);
     const downloaded = await request(app!.getHttpServer())
       .get(`/shifts/${shiftId}/bundle`)
       .set("x-api-key", current.apiKey)
-      .set("x-station-capabilities", "pallet-sheet-v2")
+      .set("x-station-capabilities", "pallet-sheet-v2,pallet-sheet-footer-v1")
       .expect(200);
     expect(downloaded.body.palletSheetTemplate).toMatchObject({
       id: sheetId,

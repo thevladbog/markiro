@@ -87,6 +87,9 @@ export function PalletSheetPreview({
             itemCount: 576,
             shiftNumber: null,
             organizationName: branding.organizationName,
+            ...(branding.organizationInn !== undefined
+              ? { organizationInn: branding.organizationInn }
+              : {}),
             logo: branding.logo,
           },
           geometry,
