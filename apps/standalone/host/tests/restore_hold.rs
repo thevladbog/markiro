@@ -119,6 +119,35 @@ async fn a_held_host_answers_facts_and_code_checks_restore_pending_and_nothing_e
     );
 }
 
+/// The hold is read before the route: a database that cannot tell whether
+/// the facts are held answers `internal`, never the route's own answer.
+#[tokio::test]
+async fn a_hold_that_cannot_be_read_holds_the_facts_and_the_code_checks() {
+    let admin = admin().await;
+    sqlx::query("ALTER TABLE site RENAME COLUMN facts_held_since TO facts_held_since_gone")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, body) = facts(&admin).await;
+    assert_eq!(
+        (status, body["error"]["code"].clone()),
+        (StatusCode::INTERNAL_SERVER_ERROR, json!("internal")),
+        "{body}"
+    );
+    let (status, body) = admin
+        .app
+        .send(empty(with_device(
+            request("GET", &format!("/v1/device/codes/{}", "ab".repeat(32))),
+            &admin.key,
+        )))
+        .await;
+    assert_eq!(
+        (status, body["error"]["code"].clone()),
+        (StatusCode::INTERNAL_SERVER_ERROR, json!("internal")),
+        "{body}"
+    );
+}
+
 #[tokio::test]
 async fn a_host_that_holds_nothing_lets_the_facts_through() {
     let admin = admin().await;

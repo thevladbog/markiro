@@ -607,3 +607,32 @@ pub fn spawn(
         worker.close().await;
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A folder task that panicked tells nothing of the folders: the lists the
+    /// status holds stay (a list that is not `Ok` never replaces them), and
+    /// the second folder's run is an `internal` failure.
+    #[tokio::test]
+    async fn a_folder_task_that_did_not_finish_keeps_the_lists_the_status_holds() {
+        let panicked = tokio::task::spawn_blocking(|| -> FolderLists {
+            panic!("a folder task that panics");
+        })
+        .await
+        .unwrap_err();
+        let second_dir = Some(r"E:\Markiro".to_owned());
+        let (local, second) = folder_outcome(Err(panicked), second_dir.as_ref());
+        assert!(local.is_err(), "no list replaces the local one");
+        let (result, copies) = second.expect("a second folder is set");
+        assert_eq!(result.unwrap_err().code, failure::INTERNAL);
+        assert!(copies.is_err(), "no list replaces the second folder's");
+        let panicked = tokio::task::spawn_blocking(|| -> FolderLists {
+            panic!("a folder task that panics");
+        })
+        .await
+        .unwrap_err();
+        assert!(folder_outcome(Err(panicked), None).1.is_none());
+    }
+}

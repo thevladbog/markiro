@@ -497,6 +497,38 @@ async fn a_second_ask_while_a_copy_runs_starts_nothing_and_keeps_the_first() {
     assert_eq!(next["running"]["startedAt"], json!("2026-09-21T14:13:25Z"));
 }
 
+/// The state is read before the copy is asked for: a read that fails
+/// answers 500 and leaves no copy waiting behind the answer.
+#[tokio::test]
+async fn a_failed_state_read_answers_internal_and_queues_no_copy() {
+    let mut admin = admin().await;
+    with_backups(&mut admin);
+    sqlx::query("ALTER TABLE backup_settings RENAME TO backup_settings_gone")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, body) = admin.call("POST", "/v1/office/backups", None).await;
+    assert_eq!(
+        (status, body["error"]["code"].clone()),
+        (StatusCode::INTERNAL_SERVER_ERROR, json!("internal")),
+        "{body}"
+    );
+    sqlx::query("ALTER TABLE backup_settings_gone RENAME TO backup_settings")
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, body) = admin.call("GET", "/v1/office/backups", None).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["running"], Value::Null, "no copy waits: {body}");
+    let (status, body) = admin.call("POST", "/v1/office/backups", None).await;
+    assert_eq!(
+        status,
+        StatusCode::ACCEPTED,
+        "the next ask is not refused: {body}"
+    );
+    assert_eq!(body["running"]["trigger"], json!("manual"), "{body}");
+}
+
 #[tokio::test]
 async fn a_form_read_before_a_change_is_stale_after_it() {
     let mut admin = admin().await;

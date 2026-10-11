@@ -489,6 +489,16 @@ mod tests {
             code: Some(5),
         });
         let plain: BoxError = "no".into();
+        // A start that is still under way after the wait (a big first
+        // migration) leaves the service registered as well: a warning.
+        let still_starting: BoxError = Box::new(InstallError::Timeout {
+            waiting_for: markiro_host::install::ServiceState::Running,
+        });
+        let never_stopped: BoxError = Box::new(InstallError::Timeout {
+            waiting_for: markiro_host::install::ServiceState::Stopped,
+        });
+        assert_eq!(failure_code(&still_starting), 4);
+        assert_eq!(failure_code(&never_stopped), 1);
         assert_eq!(failure_code(&stayed_down), 4);
         assert_eq!(failure_code(&refused), 1);
         assert_eq!(failure_code(&plain), 1);

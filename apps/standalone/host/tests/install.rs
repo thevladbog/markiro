@@ -270,7 +270,7 @@ fn the_service_runs_as_local_service_at_boot_and_restarts_after_any_failure() {
             description: "Главная база Markiro Автоном: станции и офис площадки подключаются к ней по HTTPS, порт 45710.",
             executable: EXE.into(),
             arguments: vec!["service".to_owned()],
-            account: r"NT AUTHORITY\LocalService",
+            account: Some(r"NT AUTHORITY\LocalService"),
             automatic: true,
             restart_delays: [
                 Duration::from_secs(5),
@@ -323,6 +323,16 @@ fn install_over_a_running_service_stops_it_first_and_starts_it_again() {
         ]
     );
     assert_eq!(sleeps.borrow().len(), 1);
+    // An upgrade (by reinstall, the only one) keeps the account IT gave the
+    // service, e.g. one that can write to a share; a fresh install sets
+    // LocalService.
+    assert_eq!(
+        services.configured,
+        [ServiceSpec {
+            account: None,
+            ..service_spec(Path::new(EXE))
+        }]
+    );
 }
 
 #[test]
