@@ -5,13 +5,17 @@
 mod support;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use axum::http::StatusCode;
-use markiro_host::backup::copy::{make_copy, manifest_path, sha256_file, Manifest};
+use markiro_host::backup::copy::{
+    make_copy, make_copy_with_identity, manifest_path, sha256_file, Manifest,
+};
+use markiro_host::backup::identity::{identity_path, platform_guard, HostIdentity};
 use markiro_host::config::HostPaths;
 use markiro_host::restore::{
-    restore, restore_crashing, summary, verify_copy, Carried, CrashPoint, Current, Interrupted,
-    RestoreReport, SHIFT_NUMBER_MARGIN, UNREADABLE_CURRENT_MARGIN,
+    restore, restore_crashing, summary, verify_copy, Carried, CopyIdentity, CrashPoint, Current,
+    Interrupted, RestoreReport, SHIFT_NUMBER_MARGIN, UNREADABLE_CURRENT_MARGIN,
 };
 use markiro_host::StartOptions;
 use markiro_proto::backup::BackupTrigger;
@@ -21,7 +25,7 @@ use support::app::{
     add_operator, admin, json as json_request, login, pair_device, plan_shift, request,
     seed_office_user, shift_body, shift_setup, with_device, Admin, TestApp,
 };
-use support::backup::{at, latest_migration, names, worker_conn};
+use support::backup::{at, latest_migration, names, worker_conn, write_identity};
 
 const PREFIX: &str = "460068200";
 const NOW: &str = "2026-10-09T15:00:00Z";
@@ -54,6 +58,30 @@ async fn copy(app: &TestApp) -> (PathBuf, Manifest) {
     .unwrap();
     conn.close().await.unwrap();
     (folder.join(&manifest.file), manifest)
+}
+
+/// A verified copy of `app`'s database with its data folder's host identity
+/// beside it (plan I1), and that identity.
+async fn copy_with_identity(app: &TestApp) -> (PathBuf, Manifest, HostIdentity) {
+    let identity = write_identity(app.dir(), &app.state.host_id);
+    let folder = app.dir().join("backups");
+    let mut conn = worker_conn(app).await;
+    let manifest = make_copy_with_identity(
+        &mut conn,
+        &folder,
+        app.state.now(),
+        BackupTrigger::Scheduled,
+        &app.state.host_id,
+        Some(Arc::new(
+            HostIdentity::read(&HostPaths::new(app.dir())).unwrap(),
+        )),
+        platform_guard(),
+    )
+    .await
+    .unwrap();
+    conn.close().await.unwrap();
+    assert!(manifest.identity.is_some(), "the copy carries the identity");
+    (folder.join(&manifest.file), manifest, identity)
 }
 
 /// Stop using the app's database as a service that stopped cleanly has:
@@ -1734,4 +1762,239 @@ async fn a_restore_over_this_hosts_database_made_again_by_a_start_takes_the_unre
 
     assert!(!report.other_host, "the copy is of this host");
     assert_unread_margins(&paths, &report, copy_audit).await;
+}
+
+/// Plan I1: `verify_copy` reads the identity the manifest names, says when it
+/// is damaged, and reads none with `--without-manifest` or beside a copy
+/// without one.
+#[tokio::test]
+async fn verify_copy_reads_the_identity_beside_a_copy_as_its_manifest_names_it() {
+    let admin = admin().await;
+    let (copy_path, _, source) = copy_with_identity(&admin.app).await;
+    let verified = verify_copy(&copy_path, false).await.unwrap();
+    assert!(
+        matches!(&verified.identity, CopyIdentity::Present(identity) if identity.same_as(&source))
+    );
+    assert!(matches!(
+        verify_copy(&copy_path, true).await.unwrap().identity,
+        CopyIdentity::Absent
+    ));
+    std::fs::remove_file(identity_path(&copy_path)).unwrap();
+    assert!(matches!(
+        verify_copy(&copy_path, false).await.unwrap().identity,
+        CopyIdentity::Damaged(_)
+    ));
+    let (plain, _) = copy(&admin.app).await;
+    assert!(matches!(
+        verify_copy(&plain, false).await.unwrap().identity,
+        CopyIdentity::Absent
+    ));
+}
+
+/// Make the manifest of `copy_path` name exactly `bytes` as its identity
+/// (size, SHA-256, and the fingerprint of `identity` when given), so that
+/// only the content is what is wrong with it.
+fn rename_identity_in_manifest(copy_path: &Path, bytes: &[u8], fingerprint: Option<&str>) {
+    let path = manifest_path(copy_path);
+    let mut manifest: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    let reference = manifest.get_mut("identity").expect("the copy names one");
+    reference["sizeBytes"] = json!(bytes.len());
+    reference["sha256"] = json!(markiro_host::backup::identity::sha256_hex(bytes));
+    if let Some(fingerprint) = fingerprint {
+        reference["fingerprint"] = json!(fingerprint);
+    }
+    std::fs::write(&path, serde_json::to_vec_pretty(&manifest).unwrap()).unwrap();
+}
+
+/// What `verify_copy` says of the identity beside `copy_path`: the code and
+/// the text of a damaged one. The copy itself still verifies.
+async fn damage_of(copy_path: &Path) -> (&'static str, String) {
+    match verify_copy(copy_path, false)
+        .await
+        .expect("a damaged identity does not fail the copy itself")
+        .identity
+    {
+        CopyIdentity::Damaged(damage) => (damage.code, damage.to_string()),
+        CopyIdentity::Absent => panic!("a damaged identity read as none"),
+        CopyIdentity::Present(_) => panic!("a damaged identity was trusted"),
+    }
+}
+
+/// Plan I1: every way the file beside a copy can be wrong is `Damaged` with a
+/// stable code, never `Present`, and nothing of the key is in the text.
+#[tokio::test]
+async fn a_damaged_identity_beside_a_copy_is_named_and_never_trusted() {
+    let admin = admin().await;
+    let (copy_path, manifest, source) = copy_with_identity(&admin.app).await;
+    let file = identity_path(&copy_path);
+    let good = std::fs::read(&file).unwrap();
+    let parsed: Value = serde_json::from_slice(&good).unwrap();
+    let key = parsed["privateKey"].as_str().unwrap().to_owned();
+    let certificate = parsed["certificate"].as_str().unwrap().to_owned();
+    let no_key = |text: &str| {
+        assert!(!text.contains(&key[..24]), "the key is in: {text}");
+        assert!(
+            !text.contains(&certificate[..24]),
+            "the certificate is in: {text}"
+        );
+    };
+
+    // The file is gone: unreadable.
+    std::fs::remove_file(&file).unwrap();
+    let (code, text) = damage_of(&copy_path).await;
+    assert_eq!(code, "identity_unreadable", "{text}");
+    no_key(&text);
+
+    // One byte changed, same size: the manifest's SHA-256 says so.
+    let mut tampered = good.clone();
+    let at = tampered.len() / 2;
+    tampered[at] = if tampered[at] == b'A' { b'B' } else { b'A' };
+    std::fs::write(&file, &tampered).unwrap();
+    let (code, text) = damage_of(&copy_path).await;
+    assert_eq!(code, "identity_invalid", "{text}");
+    assert!(text.contains("manifest"), "{text}");
+    no_key(&text);
+
+    // A change that leaves the host, the certificate and the key as they
+    // were (the port) and the size: only the manifest's SHA-256 sees it.
+    let text_of_file = String::from_utf8(good.clone()).unwrap();
+    assert_eq!(text_of_file.matches("45710").count(), 1);
+    std::fs::write(&file, text_of_file.replace("45710", "45711")).unwrap();
+    let (code, text) = damage_of(&copy_path).await;
+    assert_eq!(code, "identity_invalid", "{text}");
+    assert!(text.contains("SHA-256"), "{text}");
+
+    // Cut short: the size differs.
+    std::fs::write(&file, &good[..good.len() - 40]).unwrap();
+    let (code, text) = damage_of(&copy_path).await;
+    assert_eq!(code, "identity_invalid", "{text}");
+    no_key(&text);
+
+    // A key cut short, the manifest made to agree with the cut file: the key
+    // no longer matches the certificate.
+    let mut cut = parsed.clone();
+    cut["privateKey"] = json!(&key[..key.len() / 2]);
+    let cut = serde_json::to_vec_pretty(&cut).unwrap();
+    std::fs::write(&file, &cut).unwrap();
+    rename_identity_in_manifest(&copy_path, &cut, None);
+    let (code, text) = damage_of(&copy_path).await;
+    assert_eq!(code, "identity_invalid", "{text}");
+    no_key(&text);
+
+    // A file that is no identity at all, again agreeing with its manifest.
+    let junk = b"not an identity";
+    std::fs::write(&file, junk).unwrap();
+    rename_identity_in_manifest(&copy_path, junk, None);
+    assert_eq!(damage_of(&copy_path).await.0, "identity_invalid");
+
+    // A whole, valid identity of ANOTHER host, the manifest made to agree
+    // with it: still not this copy's host.
+    let elsewhere = tempfile::tempdir().unwrap();
+    let other = write_identity(elsewhere.path(), "0b7a6c5d-4e3f-4a2b-9c1d-8e7f6a5b4c3d");
+    assert_ne!(other.host_id(), source.host_id());
+    let other_bytes = other.to_file_bytes();
+    std::fs::write(&file, &other_bytes).unwrap();
+    rename_identity_in_manifest(&copy_path, &other_bytes, Some(other.fingerprint()));
+    let (code, text) = damage_of(&copy_path).await;
+    assert_eq!(code, "identity_invalid", "{text}");
+    assert!(text.contains("another host"), "{text}");
+
+    // The right host's file, but the manifest names another certificate.
+    std::fs::write(&file, &good).unwrap();
+    rename_identity_in_manifest(&copy_path, &good, Some(&"0".repeat(64)));
+    let (code, text) = damage_of(&copy_path).await;
+    assert_eq!(code, "identity_invalid", "{text}");
+    assert!(text.contains("certificate"), "{text}");
+
+    // Everything put back: trusted again, and only then.
+    rename_identity_in_manifest(&copy_path, &good, Some(source.fingerprint()));
+    let verified = verify_copy(&copy_path, false).await.unwrap();
+    assert!(
+        matches!(&verified.identity, CopyIdentity::Present(identity) if identity.same_as(&source))
+    );
+    assert_eq!(
+        manifest.identity.as_ref().unwrap().fingerprint,
+        source.fingerprint()
+    );
+}
+
+/// Plan I1: a file beyond the bound beside a copy is refused without being
+/// read whole, as a damaged identity, not as a failure of the copy.
+#[tokio::test]
+async fn a_huge_file_beside_a_copy_is_a_damaged_identity() {
+    let admin = admin().await;
+    let (copy_path, _, _) = copy_with_identity(&admin.app).await;
+    let huge = vec![b'x'; 1024 * 1024];
+    std::fs::write(identity_path(&copy_path), &huge).unwrap();
+    rename_identity_in_manifest(&copy_path, &huge, None);
+    let (code, text) = damage_of(&copy_path).await;
+    assert_eq!(code, "identity_invalid", "{text}");
+    assert!(text.contains("too large"), "{text}");
+}
+
+/// `markiro-host verify-copy <copy> [--without-manifest]` through the real
+/// binary: (exit code, stdout, stderr).
+fn verify_copy_cli(copy_path: &Path, without_manifest: bool) -> (Option<i32>, String, String) {
+    let mut command = std::process::Command::new(env!("CARGO_BIN_EXE_markiro-host"));
+    command.arg("verify-copy").arg(copy_path);
+    if without_manifest {
+        command.arg("--without-manifest");
+    }
+    let output = command.output().expect("the host binary runs");
+    (
+        output.status.code(),
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        String::from_utf8_lossy(&output.stderr).into_owned(),
+    )
+}
+
+/// Plan I1: `verify-copy` prints the identity beside a copy, says when there
+/// is none, and fails on a damaged one, printing no key.
+#[tokio::test]
+async fn verify_copy_command_prints_the_identity_and_fails_on_a_damaged_one() {
+    let admin = admin().await;
+    let (copy_path, _, source) = copy_with_identity(&admin.app).await;
+    let key = {
+        let file: Value =
+            serde_json::from_slice(&std::fs::read(identity_path(&copy_path)).unwrap()).unwrap();
+        file["privateKey"].as_str().unwrap().to_owned()
+    };
+    let (code, out, err) = verify_copy_cli(&copy_path, false);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(
+        out.contains(&format!(
+            "host identity: host {} (certificate {})",
+            source.host_id(),
+            markiro_proto::display_fingerprint(source.fingerprint())
+        )),
+        "{out}"
+    );
+    assert!(!out.contains(&key[..24]) && !err.contains(&key[..24]));
+
+    // `--without-manifest` reads none.
+    let (code, out, err) = verify_copy_cli(&copy_path, true);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(out.contains("host identity: none"), "{out}");
+
+    // A copy without one.
+    let (plain, _) = copy(&admin.app).await;
+    let (code, out, err) = verify_copy_cli(&plain, false);
+    assert_eq!(code, Some(0), "{err}");
+    assert!(out.contains("host identity: none"), "{out}");
+
+    // A damaged one: the command fails and names the way out.
+    let bytes = std::fs::read(identity_path(&copy_path)).unwrap();
+    let mut tampered = bytes.clone();
+    let middle = tampered.len() / 2;
+    tampered[middle] = if tampered[middle] == b'A' { b'B' } else { b'A' };
+    std::fs::write(identity_path(&copy_path), &tampered).unwrap();
+    let (code, out, err) = verify_copy_cli(&copy_path, false);
+    assert_ne!(code, Some(0), "{out}");
+    assert!(
+        err.contains("DAMAGED")
+            && err.contains("identity_invalid")
+            && err.contains("--keep-identity"),
+        "{err}"
+    );
+    assert!(!out.contains(&key[..24]) && !err.contains(&key[..24]));
 }

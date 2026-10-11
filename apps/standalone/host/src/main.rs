@@ -21,6 +21,7 @@ use std::process::ExitCode;
 use markiro_host::config::{HostConfig, HostPaths};
 use markiro_host::install::{InstallError, ServiceState, SystemCommands};
 use markiro_host::network_profile::{self, PUBLIC_REMAINS};
+use markiro_host::restore::CopyIdentity;
 use markiro_host::{BoxError, StartOptions};
 
 #[derive(Debug, PartialEq, Eq)]
@@ -368,6 +369,23 @@ fn verify_copy(copy: PathBuf, without_manifest: bool) -> Result<(), BoxError> {
         verified.sha256,
         verified.schema_version
     );
+    match &verified.identity {
+        CopyIdentity::Present(identity) => println!(
+            "host identity: host {} (certificate {})",
+            identity.host_id(),
+            markiro_proto::display_fingerprint(identity.fingerprint())
+        ),
+        CopyIdentity::Absent => {
+            println!("host identity: none (restored on a new computer, every device pairs again)");
+        }
+        CopyIdentity::Damaged(damage) => {
+            return Err(format!(
+                "host identity: DAMAGED ({}: {}); restore this copy only with --keep-identity, or take another copy",
+                damage.code, damage.reason
+            )
+            .into());
+        }
+    }
     Ok(())
 }
 

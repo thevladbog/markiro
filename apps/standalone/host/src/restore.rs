@@ -93,6 +93,7 @@ use crate::backup::copy::{
     create_private, partial_path, read_manifest, sha256_file, sync_file, utc_stamp,
     verify_database, Manifest,
 };
+use crate::backup::identity::{read_beside_coded, HostIdentity, IdentityError};
 use crate::clock::{format_timestamp, parse_timestamp};
 use crate::config::{ConfigError, HostConfig, HostPaths};
 use crate::{db, feed, BoxError};
@@ -173,7 +174,135 @@ pub struct VerifiedCopy {
     /// A WAL with frames lay beside the copy (`--without-manifest` only): its
     /// commits were folded into a private copy, which is what is put in place.
     pub wal_folded: bool,
+    /// The host identity beside the copy (plan I1).
+    pub identity: CopyIdentity,
     staged: Arc<Source>,
+}
+
+/// The host identity beside a copy (plan I1), as `verify_copy` found it.
+#[derive(Debug, Clone)]
+pub enum CopyIdentity {
+    /// None: an older build's copy, one whose folder could not be closed, or
+    /// `--without-manifest`, which reads none.
+    Absent,
+    Present(Arc<HostIdentity>),
+    /// The manifest names one, but the file is missing, changed or unusable.
+    Damaged(IdentityDamage),
+}
+
+/// Why the identity beside a copy cannot be used: a stable `code`
+/// (`identity_unreadable`, `identity_invalid`) and a `reason` for the
+/// engineer. Neither holds a byte of the key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdentityDamage {
+    pub code: &'static str,
+    pub reason: String,
+}
+
+impl IdentityDamage {
+    fn from_error(error: &IdentityError) -> Self {
+        Self {
+            code: error.code(),
+            reason: error.to_string(),
+        }
+    }
+}
+
+impl std::fmt::Display for IdentityDamage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.reason)
+    }
+}
+
+/// What `markiro-host restore` does with the copy's host identity (plan I1).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdentityChoice {
+    /// The copy's identity wherever no paired device can lose its host: a
+    /// data folder without one, or one whose host never finished its wizard
+    /// (the installer's). Refused over a working host of another identity.
+    Auto,
+    /// `--keep-identity`: never the copy's; the data folder keeps its own (or
+    /// gets a new one), and every device pairs again.
+    Keep,
+    /// `--take-identity`: the copy's, also over a working host of another
+    /// identity (whose devices then pair again).
+    Take,
+}
+
+/// What a restore does with the host identity, decided before anything
+/// moves.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+// Task 4 of plan I1 puts the rule into `restore`; until then only its tests
+// call it.
+#[cfg_attr(not(test), allow(dead_code))]
+enum IdentityPlan {
+    /// The data folder already has the copy's identity.
+    Same,
+    /// The copy's identity goes into place.
+    Install,
+    /// The data folder keeps its own.
+    KeepFolder,
+    /// No identity anywhere: a new one is created.
+    Create,
+}
+
+impl IdentityPlan {
+    /// The word of the `host.restore` audit row.
+    #[cfg_attr(not(test), allow(dead_code))]
+    fn audit_word(self) -> &'static str {
+        match self {
+            Self::Same => "same",
+            Self::Install => "restored",
+            Self::KeepFolder => "kept",
+            Self::Create => "created",
+        }
+    }
+}
+
+/// The rule of plan I1. `folder`: the data folder's identity when it has a
+/// `host.json` (`Err` when its TLS files do not read); `established`: the
+/// current database is a working host's (read with its wizard done, or
+/// unreadable).
+#[cfg_attr(not(test), allow(dead_code))]
+fn identity_plan(
+    copy: &CopyIdentity,
+    folder: Option<Result<&HostIdentity, &str>>,
+    established: bool,
+    choice: IdentityChoice,
+) -> Result<IdentityPlan, String> {
+    let own = if folder.is_some() {
+        IdentityPlan::KeepFolder
+    } else {
+        IdentityPlan::Create
+    };
+    let copied = match copy {
+        CopyIdentity::Present(identity) => identity.as_ref(),
+        CopyIdentity::Absent if choice == IdentityChoice::Take => {
+            return Err("the copy carries no host identity (an older copy, one checked with --without-manifest, or one whose folder could not be closed to others): restore it without --take-identity; every device pairs again".to_owned());
+        }
+        CopyIdentity::Damaged(damage) if choice != IdentityChoice::Keep => {
+            return Err(format!(
+                "the host identity beside the copy is damaged ({}: {}): restore with --keep-identity to put the data back without it (every device pairs again), or take another copy",
+                damage.code, damage.reason
+            ));
+        }
+        CopyIdentity::Absent | CopyIdentity::Damaged(_) => return Ok(own),
+    };
+    match folder {
+        Some(Ok(folder)) if folder.same_as(copied) => Ok(IdentityPlan::Same),
+        _ if choice == IdentityChoice::Keep => Ok(own),
+        None => Ok(IdentityPlan::Install),
+        Some(_) if !established || choice == IdentityChoice::Take => Ok(IdentityPlan::Install),
+        Some(Ok(folder)) => Err(format!(
+            "this data folder is host {folder_host} and its database is a working host's, while the copy is host {copy_host}: run the command again with --take-identity to make this computer host {copy_host} (the devices paired with host {folder_host} pair again), or with --keep-identity to put the copy's data back under host {folder_host} (every device pairs again)",
+            folder_host = folder.host_id(),
+            copy_host = copied.host_id(),
+        )),
+        Some(Err(reason)) => Err(format!(
+            "this data folder's host identity does not read ({reason}) and its database is a working host's: run the command again with --take-identity to put the copy's identity (host {}) in place, or with --keep-identity",
+            copied.host_id()
+        )),
+    }
 }
 
 /// An SSCC counter after a restore: `from` is the copy's (`None` when only
@@ -308,6 +437,24 @@ pub async fn verify_copy(path: &Path, without_manifest: bool) -> Result<Verified
             .into());
         }
     }
+    // The identity the manifest names (plan I1); a damaged one does not make
+    // the copy fail here: the restore decides (`identity_plan`).
+    let identity = match manifest.as_ref() {
+        Some(Manifest {
+            identity: Some(reference),
+            host_id,
+            ..
+        }) => {
+            let (db, host_id, reference) = (path.to_path_buf(), host_id.clone(), reference.clone());
+            match tokio::task::spawn_blocking(move || read_beside_coded(&db, &host_id, &reference))
+                .await?
+            {
+                Ok(identity) => CopyIdentity::Present(Arc::new(identity)),
+                Err(error) => CopyIdentity::Damaged(IdentityDamage::from_error(&error)),
+            }
+        }
+        _ => CopyIdentity::Absent,
+    };
     let source = if has_wal_frames(path) {
         if manifest.is_some() {
             return Err(format!(
@@ -336,6 +483,7 @@ pub async fn verify_copy(path: &Path, without_manifest: bool) -> Result<Verified
         manifest,
         schema_version,
         wal_folded: source._folder.is_some(),
+        identity,
         staged: Arc::new(source),
     })
 }
@@ -2405,6 +2553,7 @@ mod tests {
             manifest: None,
             schema_version: 1,
             wal_folded: false,
+            identity: CopyIdentity::Absent,
             staged: Arc::new(Source {
                 path: path.to_path_buf(),
                 size_bytes,
@@ -2513,5 +2662,238 @@ mod tests {
         held.close().await.unwrap();
         settle(&staging).await.unwrap();
         assert!(!wal.exists());
+    }
+}
+
+#[cfg(test)]
+mod identity_tests {
+    use super::*;
+
+    const A: &str = "3f1c2d4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f";
+    const B: &str = "0b7a6c5d-4e3f-4a2b-9c1d-8e7f6a5b4c3d";
+
+    fn host(dir: &Path, host_id: &str) -> HostIdentity {
+        let tls = crate::tls::TlsIdentity::load_or_create(dir, host_id).unwrap();
+        HostIdentity::new(
+            host_id.to_owned(),
+            45710,
+            tls.cert_der.clone(),
+            tls.private_der().to_vec(),
+        )
+        .unwrap()
+    }
+
+    fn damaged(reason: &str) -> CopyIdentity {
+        CopyIdentity::Damaged(IdentityDamage {
+            code: "identity_invalid",
+            reason: reason.to_owned(),
+        })
+    }
+
+    #[test]
+    fn the_copys_identity_goes_only_where_no_paired_device_loses_its_host() {
+        use IdentityChoice::{Auto, Keep, Take};
+        use IdentityPlan::{Create, Install, KeepFolder, Same};
+        let a_dir = tempfile::tempdir().unwrap();
+        let b_dir = tempfile::tempdir().unwrap();
+        let copied = CopyIdentity::Present(Arc::new(host(a_dir.path(), A)));
+        // The same files read again: the same host.
+        let same = host(a_dir.path(), A);
+        let other = host(b_dir.path(), B);
+        let plan = identity_plan;
+        for choice in [Auto, Take] {
+            assert_eq!(plan(&copied, None, false, choice), Ok(Install));
+            assert_eq!(plan(&copied, Some(Ok(&same)), true, choice), Ok(Same));
+            assert_eq!(plan(&copied, Some(Ok(&other)), false, choice), Ok(Install));
+            assert_eq!(plan(&copied, Some(Err("tls")), false, choice), Ok(Install));
+        }
+        // A working host of another identity: only on the engineer's word.
+        let refused = plan(&copied, Some(Ok(&other)), true, Auto).unwrap_err();
+        assert!(
+            refused.contains("--take-identity") && refused.contains("--keep-identity"),
+            "{refused}"
+        );
+        assert!(plan(&copied, Some(Err("tls")), true, Auto).is_err());
+        assert_eq!(plan(&copied, Some(Ok(&other)), true, Take), Ok(Install));
+        assert_eq!(plan(&copied, Some(Err("tls")), true, Take), Ok(Install));
+        // --keep-identity never takes the copy's.
+        assert_eq!(plan(&copied, Some(Ok(&other)), true, Keep), Ok(KeepFolder));
+        assert_eq!(plan(&copied, Some(Ok(&same)), true, Keep), Ok(Same));
+        assert_eq!(plan(&copied, None, false, Keep), Ok(Create));
+        // A copy without one: as before plan I1.
+        assert_eq!(plan(&CopyIdentity::Absent, None, false, Auto), Ok(Create));
+        assert_eq!(
+            plan(&CopyIdentity::Absent, Some(Ok(&other)), true, Auto),
+            Ok(KeepFolder)
+        );
+        assert!(plan(&CopyIdentity::Absent, None, false, Take)
+            .unwrap_err()
+            .contains("carries no host identity"));
+        // A damaged one: refused unless kept out.
+        let damaged = damaged("changed");
+        assert!(plan(&damaged, None, false, Auto)
+            .unwrap_err()
+            .contains("--keep-identity"));
+        assert!(plan(&damaged, None, false, Take).is_err());
+        assert_eq!(
+            plan(&damaged, Some(Ok(&other)), false, Keep),
+            Ok(KeepFolder)
+        );
+    }
+
+    /// What the data folder holds, as `identity_plan` is told.
+    #[derive(Clone, Copy, Debug)]
+    enum Folder {
+        None,
+        Same,
+        /// The copy's `hostId` with another certificate and key.
+        SameHostOtherCertificate,
+        Other,
+        Unreadable,
+    }
+
+    /// What the copy holds.
+    #[derive(Clone, Copy, Debug)]
+    enum Copy {
+        Present,
+        Absent,
+        Damaged,
+    }
+
+    /// The expected outcome of every combination, written from plan I1 Д6
+    /// and not from the code under test. `Ok(None)` is an error.
+    fn expected(
+        copy: Copy,
+        folder: Folder,
+        established: bool,
+        choice: IdentityChoice,
+    ) -> Option<IdentityPlan> {
+        use IdentityChoice::{Auto, Keep, Take};
+        use IdentityPlan::{Create, Install, KeepFolder, Same};
+        let own = match folder {
+            Folder::None => Create,
+            _ => KeepFolder,
+        };
+        match (copy, choice) {
+            // A copy without an identity: as before plan I1; `--take-identity`
+            // has nothing to take.
+            (Copy::Absent, Take) => None,
+            (Copy::Absent, _) => Some(own),
+            // A damaged one is refused unless it is kept out.
+            (Copy::Damaged, Keep) => Some(own),
+            (Copy::Damaged, _) => None,
+            (Copy::Present, choice) => match (folder, established, choice) {
+                // The data folder already is that host: nothing moves, and
+                // `--keep-identity` agrees.
+                (Folder::Same, _, _) => Some(Same),
+                // Never the copy's with `--keep-identity`.
+                (_, _, Keep) => Some(own),
+                // No identity in the folder: the copy's.
+                (Folder::None, _, _) => Some(Install),
+                // Another or an unreadable identity: the copy's only where no
+                // working host loses its devices, or on the engineer's word.
+                (_, false, _) | (_, true, Take) => Some(Install),
+                (_, true, Auto) => None,
+            },
+        }
+    }
+
+    #[test]
+    fn every_combination_of_copy_folder_state_and_choice_has_its_one_outcome() {
+        let a_dir = tempfile::tempdir().unwrap();
+        let b_dir = tempfile::tempdir().unwrap();
+        let copied_identity = Arc::new(host(a_dir.path(), A));
+        let same = host(a_dir.path(), A);
+        let other = host(b_dir.path(), B);
+        // The copy's host id, but a certificate and key made elsewhere.
+        let c_dir = tempfile::tempdir().unwrap();
+        let same_host_other_certificate = host(c_dir.path(), A);
+        assert!(!same_host_other_certificate.same_as(&same));
+        let mut cases = 0;
+        for copy in [Copy::Present, Copy::Absent, Copy::Damaged] {
+            let copied = match copy {
+                Copy::Present => CopyIdentity::Present(copied_identity.clone()),
+                Copy::Absent => CopyIdentity::Absent,
+                Copy::Damaged => damaged("changed"),
+            };
+            for folder in [
+                Folder::None,
+                Folder::Same,
+                Folder::SameHostOtherCertificate,
+                Folder::Other,
+                Folder::Unreadable,
+            ] {
+                let given = match folder {
+                    Folder::None => None,
+                    Folder::Same => Some(Ok(&same)),
+                    Folder::SameHostOtherCertificate => Some(Ok(&same_host_other_certificate)),
+                    Folder::Other => Some(Ok(&other)),
+                    Folder::Unreadable => Some(Err("tls does not read")),
+                };
+                for established in [false, true] {
+                    for choice in [
+                        IdentityChoice::Auto,
+                        IdentityChoice::Keep,
+                        IdentityChoice::Take,
+                    ] {
+                        cases += 1;
+                        let got = identity_plan(&copied, given, established, choice);
+                        let want = expected(copy, folder, established, choice);
+                        assert_eq!(
+                            got.as_ref().ok().copied(),
+                            want,
+                            "{copy:?} {folder:?} established={established} {choice:?}: {got:?}"
+                        );
+                        // The refusal names the way out and the hosts, and a
+                        // refusal is always a text, never a plan.
+                        if let Err(text) = &got {
+                            assert!(
+                                text.contains("--keep-identity")
+                                    || text.contains("without --take-identity"),
+                                "{text}"
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 90);
+    }
+
+    #[test]
+    fn a_refusal_over_a_working_host_names_both_hosts_and_never_the_key() {
+        let a_dir = tempfile::tempdir().unwrap();
+        let b_dir = tempfile::tempdir().unwrap();
+        let copied = CopyIdentity::Present(Arc::new(host(a_dir.path(), A)));
+        let other = host(b_dir.path(), B);
+        let refused =
+            identity_plan(&copied, Some(Ok(&other)), true, IdentityChoice::Auto).unwrap_err();
+        assert!(refused.contains(A) && refused.contains(B), "{refused}");
+        let unreadable = identity_plan(
+            &copied,
+            Some(Err("tls/key.der: missing")),
+            true,
+            IdentityChoice::Auto,
+        )
+        .unwrap_err();
+        assert!(
+            unreadable.contains(A) && unreadable.contains("tls/key.der: missing"),
+            "{unreadable}"
+        );
+        // A damaged identity's text carries its code and reason, no more.
+        let text =
+            identity_plan(&damaged("size differs"), None, false, IdentityChoice::Auto).unwrap_err();
+        assert!(
+            text.contains("identity_invalid") && text.contains("size differs"),
+            "{text}"
+        );
+    }
+
+    #[test]
+    fn the_audit_word_of_every_plan_is_its_own() {
+        assert_eq!(IdentityPlan::Same.audit_word(), "same");
+        assert_eq!(IdentityPlan::Install.audit_word(), "restored");
+        assert_eq!(IdentityPlan::KeepFolder.audit_word(), "kept");
+        assert_eq!(IdentityPlan::Create.audit_word(), "created");
     }
 }

@@ -313,15 +313,19 @@ pub fn platform_guard() -> Arc<dyn KeyFileGuard> {
 
 /// Read `path` whole, but never more than [`MAX_IDENTITY_BYTES`]: a longer
 /// file is refused without reading the rest. Blocking.
-fn read_bounded(path: &Path) -> Result<Vec<u8>, String> {
-    let text = |error: std::io::Error| format!("{}: {error}", path.display());
+fn read_bounded(path: &Path) -> Result<Vec<u8>, IdentityError> {
+    let text =
+        |error: std::io::Error| IdentityError::Unreadable(format!("{}: {error}", path.display()));
     let file = fs::File::open(path).map_err(text)?;
     let mut bytes = Vec::new();
     file.take(MAX_IDENTITY_BYTES + 1)
         .read_to_end(&mut bytes)
         .map_err(text)?;
     if bytes.len() as u64 > MAX_IDENTITY_BYTES {
-        return Err(format!("{} is too large for an identity", path.display()));
+        return Err(IdentityError::Invalid(format!(
+            "{} is too large for an identity",
+            path.display()
+        )));
     }
     Ok(bytes)
 }
@@ -416,26 +420,38 @@ pub fn read_beside(
     host_id: &str,
     reference: &IdentityRef,
 ) -> Result<HostIdentity, String> {
+    read_beside_coded(db, host_id, reference).map_err(|error| error.to_string())
+}
+
+/// [`read_beside`] with the kind of refusal: [`IdentityError::Unreadable`]
+/// for a file that cannot be read, [`IdentityError::Invalid`] for one that
+/// reads but is too large, differs from the manifest, is no identity or is
+/// of another host. The text never holds a byte of the key.
+pub fn read_beside_coded(
+    db: &Path,
+    host_id: &str,
+    reference: &IdentityRef,
+) -> Result<HostIdentity, IdentityError> {
     let path = identity_path(db);
     let bytes = read_bounded(&path)?;
     if bytes.len() as u64 != reference.size_bytes || sha256_hex(&bytes) != reference.sha256 {
-        return Err(format!(
+        return Err(IdentityError::Invalid(format!(
             "{} does not match the manifest (size or SHA-256)",
             path.display()
-        ));
+        )));
     }
-    let identity = HostIdentity::from_file_bytes(&bytes).map_err(|error| error.to_string())?;
+    let identity = HostIdentity::from_file_bytes(&bytes)?;
     if identity.host_id() != host_id {
-        return Err(format!(
+        return Err(IdentityError::Invalid(format!(
             "{} is the identity of another host than the copy's",
             path.display()
-        ));
+        )));
     }
     if identity.fingerprint() != reference.fingerprint {
-        return Err(format!(
+        return Err(IdentityError::Invalid(format!(
             "{} holds another certificate than the manifest names",
             path.display()
-        ));
+        )));
     }
     Ok(identity)
 }
