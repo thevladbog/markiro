@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { describe, expect, it } from "vitest";
 import * as domain from "../src/index.js";
 import { decodeFixtureSscc } from "./helpers/decode-sscc-bars.js";
@@ -314,7 +315,7 @@ it("reports measured element bounds from the actual renderer without changing pr
     domain.nominalSheetGeometry(spec),
     rasterize,
   );
-  expect(domain.encodeMonoRaster(traced)).toEqual(domain.encodeMonoRaster(plain));
+  expect(Buffer.compare(domain.encodeMonoRaster(traced), domain.encodeMonoRaster(plain))).toBe(0);
   expect(regions.find((item) => item.id === "placed")).toMatchObject({
     copy: 0,
     leftMm: expect.any(Number),
