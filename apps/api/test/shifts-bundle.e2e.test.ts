@@ -181,6 +181,10 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
           .expect(200);
         expect(response.body.boxLabelTemplate.spec).toEqual(expectedBox);
         expect(response.body.palletLabelTemplate.spec).toEqual(expectedPallet);
+        if (kind === "station" && capabilities === "pallet-sheet-v2") {
+          expect(response.body.shift.palletSheetTemplateId).toBeNull();
+          expect(response.body.palletSheetTemplate).toBeNull();
+        }
         if (kind === "handheld") {
           const bootstrap = await request(app!.getHttpServer())
             .get("/station/pallet-bootstrap")
@@ -363,6 +367,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       revision: 1,
       spec: preset.spec,
     });
+    expect(downloaded.body.shift.palletSheetTemplateId).toBe(sheetId);
     expect(downloaded.body.palletLabelTemplate).toBeNull();
     await agent.patch(`/shifts/${shiftId}`).send({ palletSheetTemplateId: sheetId }).expect(400);
     await agent
@@ -475,6 +480,7 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
       .set("x-label-template-formats", "label-v1,pallet-sheet-v2")
       .expect(200);
     expect(disabledBundle.body.palletSheetTemplate).toBeNull();
+    expect(disabledBundle.body.shift.palletSheetTemplateId).toBeNull();
   });
 
   it("POST /shifts/:id/open flips planned->active and sets openedAt; 409 if not planned", async () => {

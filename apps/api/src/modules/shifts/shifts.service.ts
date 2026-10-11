@@ -2170,6 +2170,7 @@ export class ShiftsService {
       ssccIssuerCounterpartyId: shift.ssccIssuerCounterpartyId,
       boxLabelTemplateId: shift.boxLabelTemplateId,
       palletLabelTemplateId: shift.palletLabelTemplateId,
+      palletSheetTemplateId: shift.palletSheetTemplateId ?? null,
       plannedQty: shift.plannedQty,
       plannedDate: shift.plannedDate,
       productionDate: shift.productionDate,
