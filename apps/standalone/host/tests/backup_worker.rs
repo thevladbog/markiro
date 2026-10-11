@@ -513,6 +513,40 @@ async fn a_failed_copy_thins_out_nothing() {
 }
 
 #[tokio::test]
+async fn a_copy_made_with_the_clock_set_back_stays_in_both_folders() {
+    let admin = admin().await;
+    let local = local_folder(&admin);
+    let second_parent = tempfile::tempdir().unwrap();
+    let second = second_parent.path().join("ADMIN-PC");
+    std::fs::create_dir(&second).unwrap();
+    set_second_dir(&admin, Some(&second)).await;
+    // Thirty copies a week ahead of the host's clock (2026-09-21T14:13:20Z),
+    // and one later today: the day and the month of the copy the worker
+    // is about to make are already covered by newer copies.
+    for folder in [&local, &second] {
+        for step in 0..30 {
+            let at = format!("2026-09-28T{:02}:{:02}:00Z", step / 4, (step % 4) * 15);
+            fake_copy(folder, &at, &format!("{step:08x}"));
+        }
+        fake_copy(folder, "2026-09-21T20:00:00Z", "0000aaaa");
+    }
+    let backups = backups_in(&admin, &local);
+    let mut worker = worker(&admin, &backups);
+
+    let report = worker.tick().await.unwrap();
+
+    let made = report.local.unwrap();
+    assert_eq!(report.second, Some(Ok(())));
+    for folder in [&local, &second] {
+        let db = folder.join(&made.file);
+        assert!(db.exists(), "{} keeps the copy just made", folder.display());
+    }
+    let status = state(&admin, &backups, Some(&second));
+    assert!(status.local.copies.contains(&made.copy()));
+    assert!(status.second.unwrap().copies.contains(&made.copy()));
+}
+
+#[tokio::test]
 async fn a_restarted_worker_knows_the_copies_there_are_and_copies_once_at_start() {
     let admin = admin().await;
     let local = local_folder(&admin);

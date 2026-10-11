@@ -285,7 +285,7 @@ async fn rotation_deletes_what_the_rule_does_not_keep_and_nothing_else() {
         })
         .collect();
     std::fs::write(dir.join("notes.txt"), "someone else's").unwrap();
-    let staying = rotate(dir).unwrap();
+    let staying = rotate(dir, None).unwrap();
     assert_eq!(staying.len(), 24);
     let staying: Vec<&str> = staying.iter().map(|copy| copy.file.as_str()).collect();
     for (index, copy) in copies.iter().enumerate() {
@@ -296,6 +296,33 @@ async fn rotation_deletes_what_the_rule_does_not_keep_and_nothing_else() {
         assert_eq!(staying.contains(&copy.file.as_str()), kept);
     }
     assert!(dir.join("notes.txt").exists());
+}
+
+#[tokio::test]
+async fn rotation_never_takes_the_copy_it_was_asked_to_keep_even_with_newer_copies_from_a_clock_set_back(
+) {
+    let folder = tempfile::tempdir().unwrap();
+    let dir = folder.path();
+    // Thirty copies made before the host's clock went back, all later the
+    // same day than the copy just made: by the rule alone the fresh copy is
+    // neither one of the 24 newest nor the newest of its day or month.
+    let later: Vec<_> = (0..30)
+        .map(|step| {
+            let created = format!("2026-10-09T{:02}:{:02}:00Z", 14 + step / 4, (step % 4) * 15);
+            fake_copy(dir, &created, &format!("{step:08}"))
+        })
+        .collect();
+    let fresh = fake_copy(dir, "2026-10-09T08:00:00Z", "0000ffff");
+    let staying = rotate(dir, Some(&fresh.file)).unwrap();
+    let staying: Vec<&str> = staying.iter().map(|copy| copy.file.as_str()).collect();
+    assert!(staying.contains(&fresh.file.as_str()), "{staying:?}");
+    let db = dir.join(&fresh.file);
+    assert!(db.exists() && manifest_path(&db).exists());
+    // The rest follows the rule: the 24 newest of the later copies.
+    assert_eq!(staying.len(), 25);
+    for (index, copy) in later.iter().enumerate() {
+        assert_eq!(dir.join(&copy.file).exists(), index >= 6, "{}", copy.file);
+    }
 }
 
 #[tokio::test]

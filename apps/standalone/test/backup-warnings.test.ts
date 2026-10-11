@@ -100,6 +100,30 @@ describe("backupWarnings", () => {
     ).toEqual([{ kind: "secondFailed", reason: "destination_unavailable" }]);
   });
 
+  it("warns of a host clock behind its newest copy by more than an hour, in either folder", () => {
+    const at = (createdAt: string) => [backupCopy(createdAt)];
+    // The host's clock says 14:20; an hour ahead of it is still a clock that drifted.
+    expect(
+      backupWarnings(
+        state({ local: { ...HEALTHY_BACKUPS.local, copies: at("2026-10-09T15:20:00Z") } }),
+      ),
+    ).toEqual([]);
+    expect(
+      backupWarnings(
+        state({ local: { ...HEALTHY_BACKUPS.local, copies: at("2026-10-09T15:20:01Z") } }),
+      ),
+    ).toEqual([{ kind: "clockBehind" }]);
+    expect(
+      backupWarnings(
+        state({ second: { ...HEALTHY_BACKUPS.local, copies: at("2026-10-16T14:00:00Z") } }),
+      ),
+    ).toEqual([{ kind: "clockBehind" }]);
+    expect(warningTone({ kind: "clockBehind" })).toBe("warn");
+    expect(warningText({ kind: "clockBehind" })).toEqual({
+      key: "office.backups.warnings.clockBehind",
+    });
+  });
+
   it("warns of a copy running for more than half an hour", () => {
     const running = (startedAt: string) => state({ running: { trigger: "manual", startedAt } });
     expect(backupWarnings(running("2026-10-09T13:50:00Z"))).toEqual([]);
