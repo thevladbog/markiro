@@ -55,7 +55,7 @@ export type SyncFailure = "host" | "local" | "feed";
  * Either way nothing was kept and the same batch goes again; the status bar
  * names a failure that is not the link's.
  */
-export type FactsFailure = "offline" | "host" | "local";
+export type FactsFailure = "offline" | "host" | "held" | "local";
 
 /**
  * The reference sync (`src/local/reference-sync.ts`): what the latest run

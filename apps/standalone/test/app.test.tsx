@@ -3691,6 +3691,7 @@ describe("useHostLink", () => {
           refresh,
           deviceShifts: async () => [],
           sendFacts: async () => [],
+          registerKnownBlocks: async () => ({ results: [] }),
           dispatch,
         }),
       { initialProps: { deviceId: DEVICE_ID } },

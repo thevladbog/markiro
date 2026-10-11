@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
+import type { KnownBlocksRequest, KnownBlocksResponse } from "../host/backups.js";
 import { HostError } from "../host/client.js";
 import type { ConnectionApi } from "../host/connection.js";
 import { replaceShiftCopies } from "../floor/shifts/shift-copies.js";
@@ -12,6 +13,7 @@ import {
   readQuarantineCount,
   syncReferences,
 } from "../local/reference-sync.js";
+import { noteRestoreEpoch, reconcileRestore, restoreDue } from "../local/restore-reconcile.js";
 import {
   deviceRejection,
   shellActionFor,
@@ -31,6 +33,19 @@ const RETRY_CAP_MS = 60_000;
  */
 export function nextSyncRetryMs(attempt: number): number {
   return RETRY_MS[attempt - 1] ?? RETRY_CAP_MS;
+}
+
+/**
+ * How long the outbox waits after the host answered `restore_pending` (plan
+ * РК-С): the `Retry-After` of a held answer, `RESTORE_RETRY_AFTER_SECS` in
+ * the host's `server.rs` (a test reads it there). The shell passes the
+ * webview status and body only, so the number lives on both sides.
+ */
+export const RESTORE_HOLD_RETRY_MS = 60_000;
+
+/** The host was restored from a copy and holds the stations' facts until the office resumes them. */
+function restoreHeld(error: unknown): boolean {
+  return error instanceof HostError && error.kind === "api" && error.code === "restore_pending";
 }
 
 /**
@@ -57,6 +72,7 @@ export function syncFailureOf(error: unknown): SyncFailure {
  * the receipts is this computer's.
  */
 export function factsFailureOf(error: unknown): FactsFailure {
+  if (restoreHeld(error)) return "held";
   if (error instanceof HostError) {
     return error.kind === "transport" && error.code !== "invalid_response" ? "offline" : "host";
   }
@@ -78,6 +94,8 @@ export interface HostLinkOptions {
   deviceShifts: () => Promise<DeviceShift[]>;
   /** `HostApi.sendFacts`: the outbox's records to the host, a receipt for each. */
   sendFacts: (records: readonly unknown[]) => Promise<FactReceipt[]>;
+  /** `HostApi.registerKnownBlocks`: this station's blocks back to a host restored from a copy. */
+  registerKnownBlocks: (request: KnownBlocksRequest) => Promise<KnownBlocksResponse>;
   dispatch: (action: ShellAction) => void;
 }
 
@@ -110,7 +128,14 @@ export interface HostLinkControls {
  * and at once when the link is back; a refused key ends the link as
  * everywhere. It lives exactly as long as the link: a refusal waiting for the
  * operator to leave the shift stops the link (`App`), and the delivery with
- * it. Returns the requests for a sync and for the delivery.
+ * it. After a restore of the host (plan РК-С) an online status names its new
+ * epoch: the pairing notes it and owes the host its blocks, a sync from zero
+ * and its recent records again (`reconcileRestore`), at once and at every
+ * link event until that is settled, retried like the reads above; no record
+ * goes meanwhile. While the host holds the facts (`restore_pending`) a send
+ * waits `RESTORE_HOLD_RETRY_MS` — no other trigger (a local write, a
+ * revision) asks the host again before that — and the floor goes on offline.
+ * Returns the requests for a sync and for the delivery.
  */
 export function useHostLink({
   hostId,
@@ -121,6 +146,7 @@ export function useHostLink({
   refresh,
   deviceShifts,
   sendFacts,
+  registerKnownBlocks,
   dispatch,
 }: HostLinkOptions): HostLinkControls {
   const syncNow = useRef<() => void>(() => undefined);
@@ -163,10 +189,47 @@ export function useHostLink({
     // And for sending the outbox.
     let factFailures = 0;
     let factRetry: ReturnType<typeof setTimeout> | null = null;
+    // The host holds the facts and the wait it named is running: only that
+    // wait's end asks again (it is set exactly when `factRetry` is the
+    // hold's wait, and cleared with it).
+    let factsHeld = false;
     const cancelFactRetry = () => {
+      factsHeld = false;
       if (factRetry === null) return;
       clearTimeout(factRetry);
       factRetry = null;
+    };
+    // And for settling a restore of the host.
+    let reconcileFailures = 0;
+    let reconcileRetry: ReturnType<typeof setTimeout> | null = null;
+    const cancelReconcileRetry = () => {
+      if (reconcileRetry === null) return;
+      clearTimeout(reconcileRetry);
+      reconcileRetry = null;
+    };
+    const pairing = { hostId, deviceId };
+    // The restore epoch the link's last online status named, and the write of
+    // it: a new epoch is written before anything asks whether blocks are owed,
+    // so the outbox never goes out ahead of it. The sender and the settling
+    // both ask, and share one write per epoch; a failed write is forgotten, so
+    // the next ask writes again.
+    let epochSeen: string | null = null;
+    let noting: { epoch: string; done: Promise<void> } | null = null;
+    const noteEpoch = (): Promise<void> => {
+      const epoch = epochSeen;
+      if (epoch === null) return Promise.resolve();
+      if (noting === null || noting.epoch !== epoch) {
+        const done = noteRestoreEpoch(local, pairing, epoch, new Date()).then((changed) => {
+          // The status bar says what the station owes.
+          if (changed && active) dispatch({ type: "outbox_changed" });
+        });
+        const mine = { epoch, done };
+        noting = mine;
+        done.catch(() => {
+          if (noting === mine) noting = null;
+        });
+      }
+      return noting.done;
     };
     // Nothing more should reach a host that refused this device's key or
     // presented another certificate.
@@ -175,10 +238,12 @@ export function useHostLink({
       refresher.stop();
       shiftReader.stop();
       factSender.stop();
+      reconciler.stop();
       cancelRetry();
       cancelRefreshRetry();
       cancelShiftRetry();
       cancelFactRetry();
+      cancelReconcileRetry();
     };
     const scheduler = createSyncScheduler(async () => {
       if (!active) return;
@@ -311,8 +376,14 @@ export function useHostLink({
     // full batch asks for the next one at once; a refused key ends the link.
     const factSender = createSyncScheduler(async () => {
       if (!active) return;
+      // The host said when to ask again: nothing else asks before.
+      if (factsHeld) return;
       cancelFactRetry();
       try {
+        // A restored host gets this station's blocks back first: a box closed
+        // with a serial the host lost would be refused for good.
+        await noteEpoch();
+        if (await restoreDue(local, pairing)) return;
         const { sent, more } = await sendFactBatch(
           local,
           { hostId, deviceId },
@@ -336,10 +407,56 @@ export function useHostLink({
         dispatch({ type: "facts_failed", failure: factsFailureOf(error) });
         factFailures += 1;
         if (online) {
-          factRetry = setTimeout(() => {
-            factRetry = null;
-            factSender.trigger();
-          }, nextSyncRetryMs(factFailures));
+          const held = restoreHeld(error);
+          factRetry = setTimeout(
+            () => {
+              factRetry = null;
+              factsHeld = false;
+              factSender.trigger();
+            },
+            // The host said when to ask again.
+            held ? RESTORE_HOLD_RETRY_MS : nextSyncRetryMs(factFailures),
+          );
+          factsHeld = held;
+        }
+      }
+    });
+    // One settling of a restore at a time, retried like the reads above; it
+    // asks nothing of the host while nothing is owed.
+    const reconciler = createSyncScheduler(async () => {
+      if (!active) return;
+      cancelReconcileRetry();
+      try {
+        await noteEpoch();
+        const result = await reconcileRestore({
+          local,
+          pairing,
+          register: registerKnownBlocks,
+          now: () => new Date(),
+        });
+        if (!active) return;
+        reconcileFailures = 0;
+        if (result.kind === "reconciled") {
+          // The status bar, the copies from zero and the records waiting again.
+          dispatch({ type: "outbox_changed" });
+          scheduler.trigger();
+          factSender.trigger();
+        }
+      } catch (error) {
+        if (!active) return;
+        const action = shellActionFor(error, null);
+        if (action) {
+          stopAll();
+          dispatch(action);
+          return;
+        }
+        if (error instanceof HostError && error.code === "not_paired") return;
+        reconcileFailures += 1;
+        if (online) {
+          reconcileRetry = setTimeout(() => {
+            reconcileRetry = null;
+            reconciler.trigger();
+          }, nextSyncRetryMs(reconcileFailures));
         }
       }
     });
@@ -348,6 +465,7 @@ export function useHostLink({
       refresher.trigger();
       shiftReader.trigger();
       factSender.trigger();
+      reconciler.trigger();
     };
     syncNow.current = everything;
     factsNow.current = () => factSender.trigger();
@@ -365,7 +483,12 @@ export function useHostLink({
             cancelRefreshRetry();
             cancelShiftRetry();
             cancelFactRetry();
+            cancelReconcileRetry();
             return;
+          }
+          if (status.restoreEpoch !== undefined && status.restoreEpoch !== epochSeen) {
+            epochSeen = status.restoreEpoch;
+            reconciler.trigger();
           }
           if (failures > 0 && !running && retry === null) {
             // Back online after a failed run whose retry the lost link
@@ -376,6 +499,7 @@ export function useHostLink({
           if (refreshFailures > 0 && refreshRetry === null) refresher.trigger();
           if (shiftFailures > 0 && shiftRetry === null) shiftReader.trigger();
           if (factFailures > 0 && factRetry === null) factSender.trigger();
+          if (reconcileFailures > 0 && reconcileRetry === null) reconciler.trigger();
         },
         onRevision: (rev) => {
           if (!active) return;
@@ -410,7 +534,18 @@ export function useHostLink({
       stopAll();
       unwatch?.();
     };
-  }, [hostId, deviceId, connection, local, changes, refresh, deviceShifts, sendFacts, dispatch]);
+  }, [
+    hostId,
+    deviceId,
+    connection,
+    local,
+    changes,
+    refresh,
+    deviceShifts,
+    sendFacts,
+    registerKnownBlocks,
+    dispatch,
+  ]);
   const requestSync = useCallback(() => syncNow.current(), []);
   const requestFacts = useCallback(() => factsNow.current(), []);
   return useMemo(() => ({ requestSync, requestFacts }), [requestSync, requestFacts]);

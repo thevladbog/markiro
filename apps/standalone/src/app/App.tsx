@@ -244,6 +244,7 @@ export function App({
     refresh: deviceApi.refresh,
     deviceShifts: hostApi.getDeviceShifts,
     sendFacts: hostApi.sendFacts,
+    registerKnownBlocks: hostApi.registerKnownBlocks,
     dispatch,
   });
 

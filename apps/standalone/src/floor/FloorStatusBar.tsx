@@ -9,6 +9,7 @@ import type { FactsFailure, SyncState } from "../app/shell.js";
 import type { HostStatus } from "../host/protocol.js";
 import type { LocalExecutor } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
+import { readRestoreStatus, type RestoreStatus } from "../local/restore-reconcile.js";
 import { readFloorPlace, type FloorPlace } from "./floor-status.js";
 import {
   readDeliveryStuck,
@@ -113,7 +114,10 @@ function stuckText(t: TFunction, stuck: DeliveryStuck): string {
  * warnings that a send of the outbox failed (for the host or for this
  * computer; the link's own failure the link's line says) with how long the
  * oldest record has waited and how often it was sent, which stay while
- * the failure does, and that the serials are running out or gone. While
+ * the failure does, and that the serials are running out or gone. Plan РК-С
+ * adds, in the same region, that a host restored from a copy holds the
+ * records, that the station still owes it its blocks, and how many blocks it
+ * refused (their serials are no longer used), read with the outbox. While
  * the host's refusal waits nothing is sent, so the failure of an earlier send
  * is not news. A failed read of the copies leaves the names out, and of the
  * outbox or the serials their figures; the floor works on.
@@ -156,6 +160,22 @@ export function FloorStatusBar({
   }, [local, hostId, deviceId, shiftId]);
   // Only the number of the shift on screen: none after it is left.
   const shiftNumber = shift !== null && shift.id === shiftId ? shift.number : null;
+
+  const [restore, setRestore] = useState<RestoreStatus | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    readRestoreStatus(local, { hostId, deviceId }).then(
+      (next) => {
+        if (!cancelled) setRestore(next);
+      },
+      () => {
+        if (!cancelled) setRestore(null);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [local, hostId, deviceId, outboxVersion]);
 
   const [outbox, setOutbox] = useState<OutboxStatus | null>(null);
   useEffect(() => {
@@ -215,6 +235,12 @@ export function FloorStatusBar({
       cancelled = true;
     };
   }, [local, hostId, deviceId, failing, outboxVersion, tick, now]);
+
+  // A restore reopens the last 30 days of records, so the oldest waiting one
+  // is old by weeks while the station has only just begun to send: while the
+  // host holds the facts or the station still owes its blocks, the words
+  // above say why nothing goes, and a wait of weeks would only alarm.
+  const stuckIsRestore = factsFailure === "held" || (restore !== null && restore.due);
 
   const refreshing = failing || serialsRunningOut;
   useEffect(() => {
@@ -329,12 +355,27 @@ export function FloorStatusBar({
               {t("floor.status.factsHost")}
             </Alert>
           )}
+          {!refusalHeld && factsFailure === "held" && (
+            <Alert tone="warn" role="presentation">
+              {t("floor.status.restoreHeld")}
+            </Alert>
+          )}
+          {!refusalHeld && restore !== null && restore.due && (
+            <Alert tone="warn" role="presentation">
+              {t("floor.status.restoreDue")}
+            </Alert>
+          )}
+          {restore !== null && restore.refused > 0 && (
+            <Alert tone="error" role="presentation">
+              {t("floor.status.restoreRefused", { n: restore.refused })}
+            </Alert>
+          )}
           {!refusalHeld && factsFailure === "local" && (
             <Alert tone="warn" role="presentation">
               {t("floor.status.factsLocal")}
             </Alert>
           )}
-          {!refusalHeld && stuck !== null && (
+          {!refusalHeld && !stuckIsRestore && stuck !== null && (
             <Alert tone="warn" role="presentation">
               {stuckText(t, stuck)}
             </Alert>

@@ -87,6 +87,7 @@ async function link(
         refresh,
         deviceShifts: async () => [],
         sendFacts: send,
+        registerKnownBlocks: async () => ({ results: [] }),
         dispatch,
       }),
     { initialProps: { host: hostId } },

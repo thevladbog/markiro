@@ -12,6 +12,7 @@ import { keepEnteredShift } from "../src/floor/shifts/shift-copies.js";
 import { enteredShiftSchema, type ChangeItem, type HostStatus } from "../src/host/protocol.js";
 import type { LocalExecutor } from "../src/local/executor.js";
 import { syncReferences } from "../src/local/reference-sync.js";
+import { noteRestoreEpoch, reconcileRestore } from "../src/local/restore-reconcile.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
 import { seedBlock, unsentScans } from "./support/floor-work.js";
 import { openLocalDb } from "./support/local-db.js";
@@ -662,6 +663,132 @@ describe("the outbox and the serials on the floor's status bar", () => {
     expect(screen.queryByText(/Станция повторяет отправку/)).toBeNull();
   });
 
+  it("says in the polite region that a host restored from a copy holds the records", async () => {
+    const { executor } = openLocalDb();
+    const view = render(bar({ local: executor, factsFailure: null }));
+    expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
+    const before = politeRegions();
+    expect(screen.queryByText(/отправка ждёт администратора/)).toBeNull();
+    view.rerender(bar({ local: executor, factsFailure: "held" }));
+    const held = screen.getByText(
+      "Хост восстановлен из копии — отправка ждёт администратора. Станция работает и хранит записи на этом компьютере.",
+    );
+    expect(heardOnce(before, held)).toBe(true);
+    expect(screen.queryByText(/Хост не принимает записи смены/)).toBeNull();
+  });
+
+  it("says while the station owes a restored host its blocks, and then how many the host refused", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlock(db, { blockId: "6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", from: 3500, to: 5499 });
+    seedBlock(db, { blockId: "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", from: 5500, to: 7499 });
+    await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
+    const view = render(bar({ local: executor }));
+    expect(await screen.findByText("Никто не вошёл")).toBeTruthy();
+    const before = politeRegions();
+    const due = await screen.findByText(
+      "Хост восстановлен из копии — станция возвращает ему свои блоки номеров SSCC. Записи смены ждут и хранятся на этом компьютере.",
+    );
+    expect(heardOnce(before, due)).toBe(true);
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: async (request) => ({
+        results: request.blocks.map((block) => ({
+          id: block.id,
+          outcome: "refused" as const,
+          code: "block_overlap",
+        })),
+      }),
+      now: () => new Date(),
+    });
+    view.rerender(bar({ local: executor, outboxVersion: 1 }));
+    const refused = await screen.findByText(
+      "Блоков номеров SSCC, которые хост не принял после восстановления: 2. Станция больше не печатает номера из них — сообщите администратору.",
+    );
+    expect(heardOnce(before, refused)).toBe(true);
+    expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull();
+  });
+
+  it("does not call a wait of weeks stuck while the host holds the records or blocks are owed", async () => {
+    const { executor } = openLocalDb();
+    await unsentScans(executor, 2);
+    await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
+    const view = render(bar({ local: executor, factsFailure: "host", now: clock }));
+    expect(await screen.findByText(/Хост не принимает записи смены/)).toBeTruthy();
+    expect(screen.getByText(/станция возвращает ему свои блоки/)).toBeTruthy();
+    await flushEffects();
+    expect(screen.queryByText(/Самая старая запись ждёт/)).toBeNull();
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: async (request) => ({
+        results: request.blocks.map((block) => ({ id: block.id, outcome: "known", code: null })),
+      }),
+      now: () => new Date(),
+    });
+    view.rerender(bar({ local: executor, factsFailure: "host", now: clock, outboxVersion: 1 }));
+    expect(await screen.findByText(/Самая старая запись ждёт/)).toBeTruthy();
+    view.rerender(bar({ local: executor, factsFailure: "held", now: clock, outboxVersion: 1 }));
+    expect(screen.getByText(/отправка ждёт администратора/)).toBeTruthy();
+    expect(screen.queryByText(/Самая старая запись ждёт/)).toBeNull();
+    expect(shown("Не отправлено")).toBe("2");
+  });
+
+  it("says nothing of a restore for a station that owes nothing, with no block either", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
+    const view = render(bar({ local: executor }));
+    expect(await screen.findByText(/станция возвращает ему свои блоки/)).toBeTruthy();
+    // No block: nothing is asked of the host, and the obligation is settled at once.
+    const asked = vi.fn();
+    const result = await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: async (request) => {
+        asked(request);
+        return { results: [] };
+      },
+      now: () => new Date(),
+    });
+    expect(result).toMatchObject({ kind: "reconciled", registered: 0, known: 0, refused: 0 });
+    expect(asked).not.toHaveBeenCalled();
+    view.rerender(bar({ local: executor, outboxVersion: 1 }));
+    await waitFor(() => expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull());
+    expect(screen.queryByText(/Блоков номеров SSCC, которые хост не принял/)).toBeNull();
+    expect(screen.queryByText(/Хост не принимает записи смены/)).toBeNull();
+  });
+
+  it("keeps the refused blocks in the bar when the host's refusal waits, and hides what is not news", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlock(db, { blockId: "6f1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d", from: 3500, to: 5499 });
+    await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
+    const view = render(bar({ local: executor, refusalHeld: true }));
+    expect(await screen.findByText(/Хост отказал этой станции/)).toBeTruthy();
+    await flushEffects();
+    expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull();
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: async (request) => ({
+        results: request.blocks.map((block) => ({
+          id: block.id,
+          outcome: "refused" as const,
+          code: "block_mismatch",
+        })),
+      }),
+      now: () => new Date(),
+    });
+    view.rerender(
+      bar({ local: executor, refusalHeld: true, factsFailure: "held", outboxVersion: 1 }),
+    );
+    expect(
+      await screen.findByText(
+        /Блоков номеров SSCC, которые хост не принял после восстановления: 1/,
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/отправка ждёт администратора/)).toBeNull();
+  });
+
   it("does not say the host fails the delivery, or that the link is up, while the host's refusal waits", async () => {
     const { executor } = openLocalDb();
     await unsentScans(executor, 2);
@@ -902,6 +1029,49 @@ describe("the outbox and the serials on the floor's status bar", () => {
     // (Not inside `waitFor`: its own polling is a timer too.)
     await flushEffects();
     expect(vi.getTimerCount()).toBe(1);
+  });
+
+  const isRestoreStatus = (sql: string): boolean => sql.includes("floor_restore_epochs");
+
+  it("keeps what the newest read says of a restore when an older one lands late", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
+    const held = holdingFirstRead(executor, isRestoreStatus);
+    const view = render(bar({ local: held.executor }));
+    await waitFor(() => expect(held.started()).toBe(true));
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: async () => ({ results: [] }),
+      now: () => new Date(),
+    });
+    view.rerender(bar({ local: held.executor, outboxVersion: 1 }));
+    await flushEffects();
+    expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull();
+    // The older read, which saw the obligation, lands now.
+    await act(async () => {
+      held.release();
+      await new Promise((resolve) => setImmediate(resolve));
+    });
+    expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull();
+  });
+
+  it("drops what it said of a restore when the next read of it fails", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e", new Date());
+    let failing = false;
+    const flaky: LocalExecutor = {
+      query: (sql, params, row) =>
+        failing && isRestoreStatus(sql)
+          ? Promise.reject(new Error("unreadable"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    const view = render(bar({ local: flaky }));
+    expect(await screen.findByText(/станция возвращает ему свои блоки/)).toBeTruthy();
+    failing = true;
+    view.rerender(bar({ local: flaky, outboxVersion: 1 }));
+    await waitFor(() => expect(screen.queryByText(/станция возвращает ему свои блоки/)).toBeNull());
   });
 
   it("keeps the counts of the newest read when an older one lands late", async () => {
