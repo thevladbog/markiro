@@ -50,8 +50,25 @@ const DONE_WITH =
   "AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = s.host_id " +
   `AND j.device_id = s.device_id AND j.shift_id = s.id AND ${OPEN_JOB_SQL})`;
 
-/** The shifts of the pairing that are done with; parameters: host id, device id, cutoff. */
-export const DUE_SHIFTS_SQL = `SELECT s.id FROM floor_shifts s WHERE ${DONE_WITH} ORDER BY s.id`;
+/**
+ * The shifts of the pairing that are done with; parameters: host id, device
+ * id, cutoff. The same conditions as `DONE_WITH`, but driven from the
+ * accepted closes instead of from the copies: the pass walks the pairing's
+ * accepted records once (`outbox_settled`) and checks each close's shift by
+ * its keys, where asking per copy walked them once for every shift (shifts ×
+ * records, 6.5 s at 600 000 rows). `DISTINCT` because a shift may hold more
+ * than one accepted close; the order of the answer is not part of the
+ * contract.
+ */
+export const DUE_SHIFTS_SQL =
+  "SELECT DISTINCT o.shift_id AS id FROM outbox o WHERE o.host_id = ? AND o.device_id = ? " +
+  "AND o.outcome = 'accepted' AND o.kind = 'shift_closed' AND o.acked_at <= ? " +
+  "AND EXISTS (SELECT 1 FROM floor_shifts s WHERE s.host_id = o.host_id " +
+  "AND s.device_id = o.device_id AND s.id = o.shift_id) " +
+  "AND NOT EXISTS (SELECT 1 FROM outbox u WHERE u.host_id = o.host_id " +
+  "AND u.device_id = o.device_id AND u.shift_id = o.shift_id AND u.acked_at IS NULL) " +
+  "AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = o.host_id " +
+  `AND j.device_id = o.device_id AND j.shift_id = o.shift_id AND ${OPEN_JOB_SQL})`;
 
 /**
  * The shift's copy goes while the shift is still done with; parameters: shift

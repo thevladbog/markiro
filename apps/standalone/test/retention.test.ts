@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 
 import { closeShift } from "../src/floor/close/shift-close.js";
 import { undoLastCode } from "../src/floor/exceptions/box-exceptions.js";
@@ -8,6 +9,7 @@ import { processScan } from "../src/floor/work/scan-pipeline.js";
 import type { EnteredShift } from "../src/host/protocol.js";
 import { LocalDbError } from "../src/local/executor.js";
 import {
+  DUE_SHIFTS_SQL,
   purgeAcknowledged,
   RETAINED_TABLES,
   RETENTION_INTERVAL_MS,
@@ -178,6 +180,20 @@ const WHOLE = {
   outbox: 5,
 };
 
+/**
+ * What the hourly reading answers by itself: the guarded delete of each copy
+ * re-checks every condition, so a reading that is too wide would be hidden by
+ * `purgeAcknowledged`; these tests read it directly.
+ */
+async function dueIds(at: Station, pairing: Pair = PAIRING, cutoff = CUTOFF): Promise<string[]> {
+  const found = await at.local.query(
+    DUE_SHIFTS_SQL,
+    [pairing.hostId, pairing.deviceId, cutoff],
+    z.object({ id: z.string() }),
+  );
+  return found.map((row) => row.id).sort();
+}
+
 describe("the retention of a shift's records on the station", () => {
   it("deletes a shift 30 days after the host took its close, and keeps one taken later", async () => {
     const at = await printStation();
@@ -325,6 +341,118 @@ describe("the retention of one pairing among others on the same computer", () =>
     }
     expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(0);
     expect(keptFor(at, PAIRING, ENTERED.id)).toEqual(WHOLE);
+  });
+});
+
+describe("the reading of the shifts that are done with", () => {
+  it("answers exactly the shifts whose accepted close is old enough, answered, with no label waiting", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-09-01T00:00:00.000Z");
+    await finished(at, SECOND, "B", "2026-09-01T00:00:00.000Z", "rejected");
+    await finished(at, THIRD, "C", "2026-09-01T00:00:00.000Z");
+    await finished(at, FOURTH, "D", "2026-09-01T00:00:00.000Z");
+    at.db
+      .prepare(
+        "UPDATE outbox SET outcome = NULL, acked_at = NULL WHERE shift_id = ? AND kind = 'scan'",
+      )
+      .run(THIRD.id);
+    at.db
+      .prepare(
+        "UPDATE floor_print_jobs SET state = 'unknown', error_code = 'interrupted' WHERE shift_id = ?",
+      )
+      .run(FOURTH.id);
+    expect(await dueIds(at)).toEqual([ENTERED.id]);
+  });
+
+  it.each([
+    ["prepared", false, "state = 'prepared', attempts = 0, error_code = NULL"],
+    ["sending", false, "state = 'sending', error_code = NULL"],
+    ["failed", false, "state = 'failed', error_code = 'printer_offline'"],
+    ["unknown", false, "state = 'unknown', error_code = 'interrupted'"],
+    ["sent and waiting for its check", false, "state = 'sent', verify = 1, error_code = NULL"],
+    ["sent and not to be checked", true, "state = 'sent', verify = 0, error_code = NULL"],
+    ["verified", true, "state = 'verified', verify = 1, error_code = NULL"],
+    ["skipped", true, "state = 'skipped', error_code = NULL"],
+  ])("reads a shift whose label is %s as due: %s", async (_name, due, change) => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-09-01T00:00:00.000Z");
+    at.db.prepare(`UPDATE floor_print_jobs SET ${change} WHERE shift_id = ?`).run(ENTERED.id);
+    expect(await dueIds(at)).toEqual(due ? [ENTERED.id] : []);
+  });
+
+  it("holds the 30 days inclusive, and takes only a record of the close's own kind", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", CUTOFF);
+    await finished(at, SECOND, "B", "2026-10-09T12:00:00.001Z");
+    await finished(at, THIRD, "C", "2026-09-01T00:00:00.000Z");
+    // Accepted old records of other kinds do not stand for a close that was never taken.
+    at.db.prepare("DELETE FROM outbox WHERE shift_id = ? AND kind = 'shift_closed'").run(THIRD.id);
+    expect(await dueIds(at)).toEqual([ENTERED.id]);
+  });
+
+  it("answers a shift once, however many accepted closes it holds, and only a shift whose copy is here", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-09-01T00:00:00.000Z");
+    await finished(at, SECOND, "B", "2026-09-01T00:00:00.000Z");
+    at.db
+      .prepare(
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, " +
+          "acked_at) SELECT 'second-close', host_id, device_id, kind, shift_id, payload, created_at, " +
+          "outcome, acked_at FROM outbox WHERE shift_id = ? AND kind = 'shift_closed'",
+      )
+      .run(ENTERED.id);
+    expect(
+      rows(
+        at.db,
+        "SELECT count(*) AS n FROM outbox WHERE shift_id = ? AND kind = 'shift_closed'",
+        ENTERED.id,
+      ),
+    ).toEqual([{ n: 2 }]);
+    // The close of a shift whose copy this pairing no longer holds names nothing to delete.
+    at.db.prepare("DELETE FROM floor_shifts WHERE id = ?").run(SECOND.id);
+    const found = await at.local.query(
+      DUE_SHIFTS_SQL,
+      [PAIRING.hostId, PAIRING.deviceId, CUTOFF],
+      z.object({ id: z.string() }),
+    );
+    expect(found).toEqual([{ id: ENTERED.id }]);
+  });
+
+  it("looks for the copy, the records and the labels of the pairing only", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", "2026-09-01T00:00:00.000Z");
+    await finished(at, SECOND, "B", "2026-09-01T00:00:00.000Z", "rejected");
+    copyRecordsTo(at, ENTERED.id, OTHER_PAIRING, "7");
+    copyRecordsTo(at, ENTERED.id, OTHER_HOST_PAIRING, "8");
+    copyRecordsTo(at, SECOND.id, OTHER_PAIRING, "5");
+    copyRecordsTo(at, SECOND.id, OTHER_HOST_PAIRING, "6");
+    // The others' unanswered records and waiting labels do not hold this pairing's shift back,
+    // and their accepted closes (of the shift this pairing was refused) do not make it due.
+    for (const other of [OTHER_PAIRING, OTHER_HOST_PAIRING]) {
+      at.db
+        .prepare(
+          "UPDATE outbox SET outcome = NULL, acked_at = NULL WHERE host_id = ? AND device_id = ? " +
+            "AND shift_id = ? AND kind = 'scan'",
+        )
+        .run(other.hostId, other.deviceId, ENTERED.id);
+      at.db
+        .prepare(
+          "UPDATE outbox SET outcome = 'accepted' WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+        )
+        .run(other.hostId, other.deviceId, SECOND.id);
+    }
+    at.db
+      .prepare(
+        "UPDATE floor_print_jobs SET state = 'unknown', error_code = 'interrupted' " +
+          "WHERE NOT (host_id = ? AND device_id = ?) AND shift_id = ?",
+      )
+      .run(PAIRING.hostId, PAIRING.deviceId, ENTERED.id);
+    expect(await dueIds(at)).toEqual([ENTERED.id]);
+    // A copy of this pairing's shift is not found through another pairing's copy of that id.
+    at.db
+      .prepare("DELETE FROM floor_shifts WHERE host_id = ? AND device_id = ? AND id = ?")
+      .run(PAIRING.hostId, PAIRING.deviceId, ENTERED.id);
+    expect(await dueIds(at)).toEqual([]);
   });
 });
 

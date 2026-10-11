@@ -883,10 +883,23 @@ describe("the shape of the production tables (migration 0006)", () => {
       "SEARCH floor_shifts USING INDEX sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
     );
     expect(guardPlan.split("\n").filter((step) => step.startsWith("SCAN floor_"))).toEqual([]);
-    // The retention pass (plan 2a8), once an hour: the shifts done with and the delete of a
-    // copy search the shift's key, the unsent records, the settled ones and the shift's jobs.
+    // The retention pass (plan 2a8), once an hour. The due select starts from the accepted
+    // closes: its first step walks `outbox_settled` once, and each close it finds costs a search
+    // of the unsent records, of the shift's jobs and of the shift's copy by its key. Asking per
+    // copy instead walked the pairing's accepted records once for every shift (shifts ×
+    // records: 6.5 s at 600 000 rows and 70 shifts). The only temporary structure allowed is
+    // the one of its `DISTINCT`.
+    const due = plan(DUE_SHIFTS_SQL).split("\n");
+    expect(due[0], DUE_SHIFTS_SQL).toBe(
+      "SEARCH o USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+    );
+    expect(due.filter((step) => step.includes("outbox_settled"))).toHaveLength(1);
+    expect(due.filter((step) => step.startsWith("SCAN "))).toEqual([]);
+    expect(due.filter((step) => step.includes("TEMP"))).toEqual(["USE TEMP B-TREE FOR DISTINCT"]);
+    // The delete of a copy walks the settled records for the one shift it deletes (its close
+    // lies among the oldest records), so it searches the same indexes, and no temporary one.
     for (const [sql, key] of [
-      [DUE_SHIFTS_SQL, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=?)"],
+      [DUE_SHIFTS_SQL, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"],
       [PURGE_COPY_SQL, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"],
     ] as const) {
       const retention = plan(sql);
@@ -897,10 +910,11 @@ describe("the shape of the production tables (migration 0006)", () => {
         "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
       );
       expect(
-        retention.split("\n").filter((step) => step.startsWith("SCAN ") || step.includes("TEMP")),
+        retention.split("\n").filter((step) => step.startsWith("SCAN ")),
         sql,
       ).toEqual([]);
     }
+    expect(plan(PURGE_COPY_SQL)).not.toContain("TEMP");
     // The deletes of a purged shift's records: the tables with an index by shift search it; the
     // outbox and the exceptions carry the shift only as a column, so each costs one read of its
     // table, once for a shift done with for 30 days (not on a scan).

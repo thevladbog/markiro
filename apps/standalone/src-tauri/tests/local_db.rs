@@ -835,17 +835,18 @@ async fn an_outbox_that_cannot_be_counted_stops_a_forget() {
 }
 
 /// The statements of the retention pass (`src/local/retention.ts`, plan 2a8): which shifts are
-/// done with and the delete of the first one's copy. `test/floor-schema.test.ts` plans the same
-/// texts on the Node runtime's SQLite and checks that they appear here word for word.
+/// done with (driven from the accepted closes, so the pairing's accepted records are walked once,
+/// not once per shift) and the delete of the first one's copy. `test/floor-schema.test.ts` plans
+/// the same texts on the Node runtime's SQLite and checks that they appear here word for word.
 const DUE_SHIFTS: &str =
-    "SELECT s.id FROM floor_shifts s WHERE s.host_id = ? AND s.device_id = ? AND EXISTS \
-     (SELECT 1 FROM outbox o WHERE o.host_id = s.host_id AND o.device_id = s.device_id \
-     AND o.shift_id = s.id AND o.kind = 'shift_closed' AND o.outcome = 'accepted' AND \
-     o.acked_at <= ?) AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.host_id = s.host_id \
-     AND o.device_id = s.device_id AND o.shift_id = s.id AND o.acked_at IS NULL) AND NOT \
-     EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = s.host_id AND \
-     j.device_id = s.device_id AND j.shift_id = s.id AND (state IN ('prepared', \
-     'sending', 'failed', 'unknown') OR (state = 'sent' AND verify = 1))) ORDER BY s.id";
+    "SELECT DISTINCT o.shift_id AS id FROM outbox o WHERE o.host_id = ? AND o.device_id = ? \
+     AND o.outcome = 'accepted' AND o.kind = 'shift_closed' AND o.acked_at <= ? AND EXISTS \
+     (SELECT 1 FROM floor_shifts s WHERE s.host_id = o.host_id AND s.device_id = o.device_id \
+     AND s.id = o.shift_id) AND NOT EXISTS (SELECT 1 FROM outbox u WHERE u.host_id = \
+     o.host_id AND u.device_id = o.device_id AND u.shift_id = o.shift_id AND u.acked_at IS \
+     NULL) AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = o.host_id AND \
+     j.device_id = o.device_id AND j.shift_id = o.shift_id AND (state IN ('prepared', \
+     'sending', 'failed', 'unknown') OR (state = 'sent' AND verify = 1)))";
 const PURGE_COPY: &str =
     "DELETE FROM floor_shifts AS s WHERE s.id = ? AND s.host_id = ? AND s.device_id = ? \
      AND EXISTS (SELECT 1 FROM outbox o WHERE o.host_id = s.host_id AND o.device_id = \
@@ -1100,9 +1101,10 @@ async fn the_floors_repeating_reads_search_an_index() {
         ),
         // The retention pass (plan 2a8), once an hour: the shifts done with and the delete of a
         // copy search the shift's key, the unsent records, the settled ones and the shift's
-        // jobs. Two of the deletes below read the whole table (no index by shift): pinned
-        // after the loop.
-        (DUE_SHIFTS, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=?)"),
+        // jobs. The due select must walk the settled records once (not once per shift): that is
+        // pinned after the loop. Two of the deletes below read the whole table (no index by
+        // shift): pinned after the loop too.
+        (DUE_SHIFTS, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"),
         (DUE_SHIFTS, "outbox_unsent (host_id=? AND device_id=?)"),
         (DUE_SHIFTS, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
         (DUE_SHIFTS, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
@@ -1152,6 +1154,41 @@ async fn the_floors_repeating_reads_search_an_index() {
             "{sql}\n  scans a table: {plan:?}"
         );
     }
+    // The hourly due select starts from the accepted closes: it walks `outbox_settled` once, as
+    // its first step, and everything else is a search per close it found (the unsent records,
+    // the shift's jobs, the shift's copy). Asking per copy instead walked the pairing's
+    // accepted records once for every shift (6.5 s at 600 000 rows, 70 shifts); the only
+    // temporary structure allowed is the one for its `DISTINCT`.
+    let text = format!("EXPLAIN QUERY PLAN {DUE_SHIFTS}");
+    let mut explain = sqlx::query(&text);
+    for _ in 0..DUE_SHIFTS.matches('?').count() {
+        explain = explain.bind("x");
+    }
+    let plan: Vec<String> = explain
+        .fetch_all(&mut raw)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.get::<String, _>("detail"))
+        .collect();
+    assert_eq!(
+        plan.first().map(String::as_str),
+        Some("SEARCH o USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
+        "the due select should start from the settled records, its plan is {plan:?}"
+    );
+    assert_eq!(
+        plan.iter()
+            .filter(|step| step.contains("outbox_settled"))
+            .count(),
+        1,
+        "the due select should walk the settled records once, its plan is {plan:?}"
+    );
+    let temporary: Vec<&String> = plan.iter().filter(|step| step.contains("TEMP")).collect();
+    assert_eq!(
+        temporary,
+        ["USE TEMP B-TREE FOR DISTINCT"],
+        "its plan is {plan:?}"
+    );
     // The one read of the floor that names no index: a pairing's waiting block
     // requests. The table holds at most one row per pairing and issuer prefix
     // (a request is kept only when none waits, and goes with its block), so the
