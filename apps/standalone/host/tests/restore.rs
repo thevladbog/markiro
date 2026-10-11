@@ -11,7 +11,7 @@ use markiro_host::backup::copy::{make_copy, manifest_path, sha256_file, Manifest
 use markiro_host::config::HostPaths;
 use markiro_host::restore::{
     restore, restore_crashing, summary, verify_copy, Carried, CrashPoint, Current, Interrupted,
-    SHIFT_NUMBER_MARGIN, UNREADABLE_CURRENT_MARGIN,
+    RestoreReport, SHIFT_NUMBER_MARGIN, UNREADABLE_CURRENT_MARGIN,
 };
 use markiro_host::StartOptions;
 use markiro_proto::backup::BackupTrigger;
@@ -1611,4 +1611,103 @@ async fn a_rollback_stands_when_the_restore_after_it_fails() {
         "the host may start on the database put back"
     );
     assert!(restore_dirs(&paths.data_dir).is_empty());
+}
+
+/// The line `markiro-host restore` prints when the current database was read
+/// but is not the copy's history.
+const NOT_THE_HISTORY: &str = "the current database is not this copy's history (a new host, one whose wizard never finished, or another host's): every SSCC counter is at least 100000 above the copy's highest number";
+
+/// The highest audit id `app`'s database issued.
+async fn newest_audit_id(app: &TestApp) -> i64 {
+    sqlx::query_scalar("SELECT max(id) FROM audit_log")
+        .fetch_one(&app.state.pool)
+        .await
+        .unwrap()
+}
+
+/// What a restore whose current database says nothing of what the copy's
+/// host issued after the copy must give: the margins of an unread database,
+/// no revocations carried, and the lines that say so.
+async fn assert_unread_margins(paths: &HostPaths, report: &RestoreReport, copy_audit: i64) {
+    assert_eq!(
+        report.current,
+        Current::Read,
+        "the database was there and read"
+    );
+    let pool = reopen(paths).await;
+    // The copy's highest numbers are 5500 and 40: 100 000 above each, rounded
+    // up to the next 10 000, not two blocks (9500 and 440).
+    assert_eq!(
+        counters(&pool).await,
+        [
+            (PREFIX.to_owned(), 0, 110_000),
+            (PREFIX.to_owned(), 1, 110_000)
+        ]
+    );
+    assert_eq!(report.carried, None);
+    let lines = summary(report);
+    assert!(lines.contains(&NOT_THE_HISTORY.to_owned()), "{lines:#?}");
+    assert!(lines.contains(&format!(
+        "the previous database was not read: devices, operators, badges and office users revoked after {} are active again: check them in the office",
+        report.copy_made
+    )), "{lines:#?}");
+    assert!(
+        !lines
+            .iter()
+            .any(|line| line.starts_with("revocations carried over")),
+        "{lines:#?}"
+    );
+    let restore_row: i64 =
+        sqlx::query_scalar("SELECT id FROM audit_log WHERE action = 'host.restore'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(restore_row, copy_audit + UNREADABLE_CURRENT_MARGIN + 1);
+    let details: String =
+        sqlx::query_scalar("SELECT details FROM audit_log WHERE action = 'host.restore'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let details: Value = serde_json::from_str(&details).unwrap();
+    assert_eq!(details["carried"], Value::Null);
+}
+
+/// The runbook's new computer: the installer started the service once, so
+/// the data folder holds a new identity and a migrated database whose wizard
+/// never ran. That database reads, but it issued nothing of the copy's host.
+#[tokio::test]
+async fn a_restore_over_a_host_that_never_finished_its_wizard_takes_the_unread_margins() {
+    let admin = admin().await;
+    ask_block(&admin, "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    ask_block(&admin, "4c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    let (copy_path, _) = copy(&admin.app).await;
+    let copy_audit = newest_audit_id(&admin.app).await;
+    let fresh = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(fresh.path());
+    paths.ensure().unwrap();
+    markiro_host::config::HostConfig::load_or_create(&paths, None).unwrap();
+    reopen(&paths).await.close().await;
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert!(report.saved_as.is_some(), "the empty database goes aside");
+    assert_unread_margins(&paths, &report, copy_audit).await;
+}
+
+/// A copy of host A restored over host B, whose wizard was done: B's numbers
+/// say nothing of what A issued after the copy.
+#[tokio::test]
+async fn a_copy_of_another_host_restored_over_an_initialized_host_takes_the_unread_margins() {
+    let a = admin().await;
+    ask_block(&a, "3c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    ask_block(&a, "4c2b1a09-8f7e-4d6c-9b5a-4f3e2d1c0b9a").await;
+    let (copy_path, _) = copy(&a.app).await;
+    let copy_audit = newest_audit_id(&a.app).await;
+    let b = admin().await;
+    let paths = stop(&b.app).await;
+
+    let report = restore(&paths, &copy_path, false, at(NOW)).await.unwrap();
+
+    assert!(report.other_host);
+    assert_unread_margins(&paths, &report, copy_audit).await;
 }
