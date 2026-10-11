@@ -312,8 +312,8 @@ in that file and in `tests/local_db.rs`
 (`the_floors_repeating_reads_search_an_index`). A new repeated read of a floor
 table gets a line in both lists. The header of `0006` says that codes and boxes
 have no retention at all; plan 2a8's `RETAINED_TABLES` deletes a shift's codes
-and boxes 30 days after the host took its close, so the header is out of date on
-that point. It is left as written: sqlx stores a checksum of the migration file,
+and boxes 30 days after the host took its close (see «Floor exceptions and
+close»), so the header is out of date on that point. It is left as written: sqlx stores a checksum of the migration file,
 and a changed header would refuse a database that already applied `0006`.
 
 Migration `0007_floor_printing.sql` (plan 2a7) adds `floor_print_jobs`
@@ -335,7 +335,8 @@ the columns and indexes. The jobs' repeating reads (`readOpenJob` before every
 close and after it, `shiftLabelsSettled`) have no line in the query-plan lists
 above: they rest on `floor_print_jobs_shift`, and nothing pins that yet. A job
 keeps its bytes as base64 text with no size bound, and no retention removes
-a job in plan 2a7 (decision 31 gives it to plan 2a8).
+a job in plan 2a7 (decision 31 gave it to plan 2a8, whose `RETAINED_TABLES`
+lists `floor_print_jobs`).
 
 ## Writes
 
@@ -2396,9 +2397,10 @@ boxes, see "Floor work") and, from plan 2a7, the workstation setup (see "Floor
 printing"). `App` keys it by the pairing and the session, so nothing
 of one operator's screen outlives their sign-out. Any operator signed in may
 enter and create shifts (question В10): the station checks no role. The list
-shows this pairing's copies of the line's planned and active shifts and one
-this station is closing (`readShiftCopies`), never a closed one, so it stays
-on screen with the host away. Every read of the host's list replaces the
+shows this pairing's copies of the line's planned and active shifts, one
+this station is closing and one the office closed after this station entered
+it, until this station closes it («Завершить», plan 2a8; `readShiftCopies`),
+never another closed one, so it stays on screen with the host away. Every read of the host's list replaces the
 copies (`replaceShiftCopies`): a shift this station never entered goes when
 the host stops listing it, and one it entered stays with its snapshot whatever
 the list says and never goes back to `planned` (a list read before the
@@ -2424,13 +2426,16 @@ unmounts `NewShift` on «Назад»).
 What `FloorApp` does with an entry is a gate of its own, beyond the entry's
 result: `readStoredWork` answers `ready` for any entered shift with a
 readable snapshot, a host-closed one (`copy.status === 'closed'`) or one this
-station is closing (`localState !== null`) too, so its callers decide. The
-offline path of `enterShift` refuses such a copy as `closed`; the online path
-can still return `entered` for a copy that reads back closed (a late answer
-over an office close). `FloorApp` therefore turns any shift whose copy is not
-active, or has a `localState`, back to the list (with «Смену N закрыли в
-офисе.» when the office closed it) and tells the shell nothing: no
-`work_entered`, so no scan can be taken in it.
+station is closing (`localState !== null`) too, so its callers decide.
+`enterShift` enters a copy the office closed from the stored snapshot, with
+the host or without it (plan 2a8: it is finished on the station, and the host
+refuses to enter a closed shift), and refuses one this station is closing.
+`FloorApp`
+turns back to the list (telling the shell nothing: no `work_entered`, so no
+scan can be taken) any shift whose copy is neither active nor closed by the
+office, or has a `localState`; a shift the office closed is entered with
+`officeClosed` set, in finish mode (see "Floor exceptions and close"), and the
+shell is told of the work as for any other shift.
 
 A new shift takes its product from a scan (a GTIN or a code of marking,
 `classifyScan`; two products in use with one GTIN are not guessed between) or
@@ -2452,17 +2457,14 @@ the app: a repeat then makes a second planned shift (`/S`), which the office
 deletes.
 
 Leaving the shift — back to the list, a sign-out (the operator's own, idle,
-removed), the office's close of the shift (seen in the copies after a read:
-«Смену … закрыли в офисе»), another line — waits for the work the screen
+removed), another line — waits for the work the screen
 tracks (`createWorkGate`, `src/floor/work-gate.ts`: a failed piece of work
 does not hold it, work tracked while it waits does), then tells the shell
 (`work_left`). One leave waits at a time: a sign-out outranks a leave that
 already waits (the idle lock fires once and then waits for nothing more, so
-the wait ends in the sign-out), and the office's close of the shift upgrades a
-plain leave to the list or a move to another line that already waits, so the
-list says «Смену … закрыли в офисе» (a waiting sign-out keeps its ending, an
-office close included, which then shows no notice); any other leave that comes
-meanwhile is ignored. A leave for another line ends on the list when the move
+the wait ends in the sign-out); any other leave that comes meanwhile is
+ignored. The office's close of the shift is no leave (plan 2a8): the screen
+stays on the shift in finish mode and the operator leaves when done. A leave for another line ends on the list when the move
 was undone: a later read of the
 device that puts the station back on its line clears `pendingDevice`, so
 `work_left` changes nothing and the floor shows the list, where a move that
@@ -2944,7 +2946,8 @@ and only the queue keeps an undo from changing the box between the two reads. A
 box whose lost answer was not read back before the operator left is closed in
 the database and told to nobody, but its label job was written by the same
 transaction, so the next entry of the screen finds it (`readOpenJob`). The box's
-label is «Floor printing»; the exceptions and the shift's close are plan 2a8.
+label is «Floor printing»; the exceptions and the shift's close are «Floor
+exceptions and close».
 
 ## Floor printing
 
@@ -3095,11 +3098,9 @@ What plan 2a7 accepted and left open, none of it verified on a printer:
   (`settleLabel`) and add a test with two open jobs.
 - The 20 s limit counts the queue wait, so with pallet labels on the box printer a
   label behind a slow send can end `timeout` or `busy`.
-- «Продолжить без этикетки» says only «Короб уже закрыт. Без этикетки его нужно
-  будет промаркировать позже.»: plan 2a8's «Исключения» screen does not exist yet.
-  When it lands, restore the reference in the text with a test that the reprint is
-  really reachable there, and change the test «promises nothing the screen does not
-  have…» in `floor-work-print.test.tsx`.
+- «Продолжить без этикетки» names the way back: plan 2a8 restored the reference
+  to «Исключения» in the text, and a test skips a label and reprints it from
+  there (`floor-work-print.test.tsx`).
 - A job keeps its label's bytes in `bytes_base64`, and the `CHECK` of `0007`
   requires them in `sending`, `sent`, `unknown` and `verified` (loosening it later
   is a table rebuild). Measured at the final review on a synthetic worst case (every
@@ -3111,9 +3112,9 @@ What plan 2a7 accepted and left open, none of it verified on a printer:
   controller's decision: keep the `CHECK` as it is (the bytes are what «Напечатать
   снова» sends again). At 500 boxes per shift, two shifts a day and the 30 days of
   retention that is up to about 30 000 jobs, roughly 0.6–1.3 GB at the 58 × 40
-  sizes, so clearing them is plan 2a8's retention duty: it deletes a shift's
-  `floor_print_jobs` rows with the shift's other records (`RETAINED_TABLES` lists
-  the table).
+  sizes, so clearing them is plan 2a8's retention duty, done: it deletes a
+  shift's `floor_print_jobs` rows with the shift's other records
+  (`RETAINED_TABLES` lists the table).
 - A forget (`clear_copies`) keeps the `floor_print_jobs` rows (`DeviceData`), while the
   pairing they belong to is gone, and every job read is pairing-scoped. A label that waited (`failed` or `unknown`)
   when the device was forgotten and paired again stays in the database, shown by no
@@ -3132,6 +3133,124 @@ What plan 2a7 accepted and left open, none of it verified on a printer:
 - `FloorApp` reads the saved sound level once when it opens (a read slower than a
   whole setup visit could overwrite a newer level); a spooler queue whose port is a
   COM port is not known to the app.
+
+## Floor exceptions and close
+
+Stage 2a, plan 2a8 (`src/floor/exceptions`, `src/floor/close`,
+`src/local/retention.ts`). The work screen's «Исключения» (`ExceptionFlow`,
+`Stop` `exceptions`; never while a label waits or the operator leaves) does
+four things, each as the line's next piece of work, handed to the work gate,
+and each in ONE transaction with the station's `floor_exceptions` row and its
+`box_exception` record (`box-exceptions.ts`):
+
+- «Снять последний код» (`undoLastCode`): the code accepted last into the
+  open box (the latest row of `floor_codes` by rowid, whatever the clock
+  says) leaves it and is free again; the record carries that code's hash and
+  the EXACT `scanned_at` of its `floor_codes` row — the text of the scan's
+  own record — because the host takes out only the item of that code added
+  at that instant (plan 2a2), so an undo that arrives late, or is sent again
+  under a new id, never takes out a later scan of the code.
+- «Очистить короб» (`clearOpenBox`), after a confirmation: every code of the
+  open box is free again and the box stays open; the record's `occurredAt`
+  is the moment of the clear, up to which the host takes out the items.
+- «Перепечатать этикетку» of a closed box whose label is done with
+  (`reprintBox`): a new print job with the SSCC and the fields of the box's
+  last job, the snapshot's template of its revision and the box printer of
+  now, written with the `reprint` record and its reason, then sent once; a
+  label that waits is decided at its panel (`LabelWaitingError`).
+- «Расформировать короб» (`disassembleBox`), after a confirmation: the box's
+  codes are free again, `disassembled_at` is set, the SSCC stays spent and
+  the box no longer counts among the closed ones.
+
+Each guard compares what was read (the box open with the count read; not yet
+taken apart), so a scan or another exception that landed meanwhile makes it
+`stale` and writes nothing. A closed box is chosen by a scan of its label
+(taken before the pipeline, never journalled) or by the last digits of its
+SSCC on a pad of 64 px keys — a text field would take a keyboard scanner's
+keys. A reprint and a disassembly need a reason of their list
+(`exception-reasons.ts`), with words only for «Другая причина»: trimmed, at
+most 200 code points, no control character (`reasonWords`, the host's
+`validate::exception_reason_text`), refused before anything is written.
+
+«Закрыть смену» (`ShiftClosePanel`, `Stop` `close`) shows the summary — the
+product, the plan of the station's copy now, the fact (the codes it holds),
+the deviation, the closed boxes and the units per box — read as the line's
+next piece of work, so a scan taken before the press is counted. An open box
+with codes or a label that waits keeps the shift open (`readCloseSummary`'s
+blocker) and sends the operator back to the work, where both are resolved;
+the plan not met needs one of the domain's six reasons. The close
+(`closeShift`) is local and needs no host: ONE transaction drops the empty
+open box, writes the `shift_closed` record (the plan it saw, the fact, the
+closed boxes, the reason, the moment) and marks the copy `closing`, but only
+while nothing changed since the summary (no waiting label, the same counts of
+codes and closed boxes, which a code scanned or taken out since changes; else
+`stale`, and the summary is read again). From then on the
+shift takes no record: `outboxStatement` inserts a record only while its
+shift has no `local_state`, so its whole transaction is refused otherwise
+and `shift_closed` is always the shift's last record (the host marks the
+station's own shift late for anything after it). The screen then says «Смена
+закрыта на этой станции. Данные будут отправлены автоматически» with the link
+and without it, takes no scan again, and «К списку смен» leaves. «Назад к
+работе» and «Выйти из смены» are never held, but while the close writes. The
+receipt `accepted` of the record — `alreadyClosed` too — makes the copy
+`closed` (the fourth statement of `sendFactBatch`); a refused close stays
+`closing`, its card in the list says the host's code, and the office closes it
+there. The list reads its copies again after every write and every batch of
+receipts (`ShellState.outboxVersion`).
+
+A shift the office closes while the station works in it (or before the
+station closed it) stays on the work screen to be finished, in finish mode
+(`WorkScreenProps.officeClosed`): no new code is taken (the scan is said,
+never journalled), while the box, its label, the exceptions and the shift's
+close work as usual; the office's close is no leave and starts no wait. In the
+list it is «Закрыта в офисе» with «Завершить», which enters it from the
+stored snapshot without the host. Its records are late for the host, which
+takes them, and its close gets `alreadyClosed`. The station's own close is
+never undone by the host's list: `replaceShiftCopies` never touches
+`local_state`.
+
+The retention (`purgeAcknowledged`, decision 31) runs when the app starts and
+every hour (`scheduleRetention`, never two passes at a time): a shift of the
+pairing that this station closed, whose close the host accepted at least 30
+days ago (the instant of the receipt, `acked_at <= now − 30 × 24 h`, so the
+30th day itself counts; a fixed span of UTC instants), with every record
+answered and no label waiting, goes with all its rows — the tables of
+`RETAINED_TABLES` by `shift_id`, then the copy, one shift per transaction,
+whose first statement deletes the copy only while that still holds. Only an
+ACCEPTED close starts the clock: a refused close, and a shift the office
+closed, are never purged here. The SSCC blocks stay (a restored host asks for
+them, plan РК). A later plan's table of a shift's records joins
+`RETAINED_TABLES`: a test fails for any table with a `shift_id` that the list
+does not name. The rows of a pairing that was forgotten (`clear_copies`) are
+never purged: the passes are pairing-scoped, and a new pairing does not see
+them. That is a known limit, not a bug of the pass.
+
+Known limits of the retention, carried to the final review (plan РК / the
+owner decides):
+
+- The delete of a purged shift reads `outbox` and `floor_exceptions` whole
+  (there is no index by `shift_id`; measured 176 ms against 37 ms with one),
+  and, with `secure_delete` on, the WAL grows by about 31 MB per 1000 deleted
+  print jobs. A migration with `outbox (host_id, device_id, shift_id)` and
+  `floor_exceptions (shift_id)` would remove both.
+- A refused or conflicting record of a shift whose close was accepted is
+  purged with it after 30 days: what `rejected` and `quarantined` records
+  should keep is a decision for plan ОЧ / the owner.
+- A station clock set forward purges early (the cutoff is the clock's);
+  checking the clock is plan РК-С's.
+- A pass that fails leaves no trace but the next pass trying again.
+
+One shift on one PC is checked end to end on both sides of the protocol:
+`test/floor-scenario.test.ts` runs it with the webview's own modules — codes,
+three boxes with checked labels, every exception, the host away, the close,
+a send that finds no host, one whose answer is lost — and compares the
+records and sends with `proto/fixtures/floor-scenario.json`;
+`host/tests/floor_scenario.rs` sends those batches to the host's router,
+which must answer every record `accepted` and end with the station's
+numbers, the digest of every box matching, the shift closed by the station
+and not late (and with the office's close first: every record taken, the
+shift late, the close `alreadyClosed`). A change of what the station writes
+changes the fixture, and both tests read it.
 
 ## Marking rules
 
@@ -3206,6 +3325,23 @@ either; a file log is stage 5.
   Until then these have run only under jsdom, with node:sqlite behind
   `LocalExecutor` and a fake `HostApi`: no WebView2, no real host, no scanner
   and no Windows has shown the list, the new shift, the entry or the leave.
+- The floor's exceptions and close (plan 2a8) by hand, on Windows 10 and 11.
+  None of it has been run; check at least:
+  - each exception on the touch panel, a box chosen by a scan of its label
+    with the client's scanner and by the last digits on the pad, and the
+    words of «Другая причина» typed with the on-screen keyboard while a
+    keyboard scanner is plugged in;
+  - the close of a shift with the host's PC switched off: the words after
+    the close, the status bar's unsent count, the list's «Закрывается», and
+    the close reaching the host once it is back (the office sees the shift
+    closed by the station with the same numbers);
+  - the office closing a shift while the station works in it: the work
+    screen's message, the box and its label finished, the station's close,
+    and «Завершить» in the list after a restart of the app;
+  - the PC switched off in the middle of a close: on return the shift is
+    either open or «Закрывается», never in between;
+  - the retention on a real station database after 30 days (the test moves
+    the clock, it does not wait).
 - The floor's work (plan 2a6) by hand, on Windows 10 and 11. None of it has
   been run; check at least:
   - codes of marking with a GS and a crypto tail scanned on the work screen
