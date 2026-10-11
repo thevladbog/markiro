@@ -686,7 +686,9 @@ jobs:
     needs: classify-changes
     if: needs.classify-changes.outputs.standalone_windows_build == 'true'
     runs-on: windows-latest
-    timeout-minutes: 40
+    # The release build of the app and the host, the installer and its smoke
+    # test come on top of the debug test build.
+    timeout-minutes: 75
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -698,14 +700,45 @@ jobs:
           cache: pnpm
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
       - run: pnpm install --frozen-lockfile
+      - run: pnpm test:standalone-release:contract
       - name: Build standalone webview + workspace deps
         run: pnpm turbo build --filter '@markiro/standalone...'
-      # The Windows service entry point only compiles on Windows, so this is
-      # the only job that exercises it.
+      # The Windows service entry point and its installer seam only compile on
+      # Windows, so this is the only job that exercises them.
       - name: cargo test (Windows paths)
         run: cargo test --manifest-path apps/standalone/Cargo.toml --workspace
-      - name: Compile the Windows Tauri application
-        run: pnpm --filter @markiro/standalone tauri build --debug --no-bundle
+      - name: Build the host for the installer
+        run: cargo build --release --locked --manifest-path apps/standalone/Cargo.toml -p markiro-host
+      # Tauri bundles `bundle.externalBin` from src-tauri/binaries under the
+      # target triple; tauri.installer.conf.json names it.
+      - name: Put the host beside the app as its sidecar
+        shell: bash
+        run: |
+          mkdir -p apps/standalone/src-tauri/binaries
+          cp apps/standalone/target/release/markiro-host.exe \
+            apps/standalone/src-tauri/binaries/markiro-host-x86_64-pc-windows-msvc.exe
+      - name: Build the installer (NSIS, per machine, with roles)
+        run: pnpm --filter @markiro/standalone tauri build --config src-tauri/tauri.installer.conf.json --bundles nsis
+      - name: Install, crash, reinstall and uninstall on this runner
+        shell: pwsh
+        run: ./tools/standalone-release/smoke.ps1 -BundleDir apps/standalone/target/release/bundle/nsis
+      - name: Prepare the installer artifact
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem apps/standalone/target/release/bundle/nsis/*-setup.exe
+          $status = (Get-AuthenticodeSignature $installer.FullName).Status.ToString()
+          node tools/standalone-release/prepare.mjs `
+            --bundle-dir apps/standalone/target/release/bundle/nsis `
+            --output-dir "$env:RUNNER_TEMP/standalone-installer" `
+            --source-repository "$env:GITHUB_REPOSITORY" `
+            --source-sha "$env:GITHUB_SHA" `
+            --authenticode $status
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: standalone-installer-${{ github.sha }}
+          path: ${{ runner.temp }}/standalone-installer
+          if-no-files-found: error
+          retention-days: 30
 
   handheld-android:
     needs: classify-changes
