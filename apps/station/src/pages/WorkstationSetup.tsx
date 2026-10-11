@@ -6,7 +6,7 @@ import { WindowsDeliveryStatus } from "../ui/WindowsDeliveryStatus.js";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
-import { sampleLabelData, type LabelTemplateSpec } from "@markiro/domain";
+import { sampleLabelData, parseScannedSscc, type LabelTemplateSpec } from "@markiro/domain";
 import { playSignalTone, saveSoundSettings, type SoundSettings } from "../lib/signal-sound.js";
 import type {
   HardwareContract,
@@ -23,8 +23,13 @@ import {
   type HardwareConfig,
   type PrinterLanguage,
 } from "../lib/hardware-config.js";
+import { makeA4TestSscc, prepareA4TestPrint } from "../lib/a4-test-print.js";
 import { renderPrintArtifact } from "../lib/print-artifact.js";
-import { dispatchWindowsDelivery, resolvePrintDelivery } from "../lib/print-deliveries.js";
+import {
+  dispatchWindowsDelivery,
+  resolvePrintDelivery,
+  PrintDeliveryBeforeSendError,
+} from "../lib/print-deliveries.js";
 import { tauriWindowsPrinting, probeWindowsA4Printing } from "../lib/hardware.js";
 import { LabelRasterPreview } from "../ui/LabelRasterPreview.js";
 import { rasterizeText, rasterizeDriverText } from "../lib/rasterizer.js";
@@ -136,6 +141,7 @@ export function WorkstationSetup({
   const [windowsSupported, setWindowsSupported] = useState(false);
   const [a4Supported, setA4Supported] = useState(false);
   const [printerPaper, setPrinterPaper] = useState<"a4" | undefined>();
+  const [a4TestOrientation, setA4TestOrientation] = useState<"portrait" | "landscape">("portrait");
   const [rasterPreview, setRasterPreview] = useState<Uint8Array | null>(null);
   useEffect(() => {
     void probeWindowsA4Printing().then(setA4Supported);
@@ -206,7 +212,10 @@ export function WorkstationSetup({
         // exact comparisons — a stale or foreign code must read as a failure,
         // never as «works correctly».
         if (activeTabRef.current === "printer" && printedCodeRef.current !== null) {
-          setPrinterCheck({ ok: raw === printedCodeRef.current, received: raw });
+          setPrinterCheck({
+            ok: raw === printedCodeRef.current || parseScannedSscc(raw) === printedCodeRef.current,
+            received: raw,
+          });
         } else {
           setScannerCheck({ ok: raw === scannerCodeRef.current, received: raw });
         }
@@ -453,12 +462,50 @@ export function WorkstationSetup({
       if (result.printer.paper === "a4") {
         if (result.printer.target.kind !== "usb" || !tauriWindowsPrinting.getWindowsPageGeometry)
           throw new Error(t("palletSheet.unsupported"));
-        for (const orientation of ["portrait", "landscape"] as const)
-          await tauriWindowsPrinting.getWindowsPageGeometry(result.printer.target.printer, {
-            mode: "a4_sheet",
-            orientation,
+        setPrintedTestCode(null);
+        setPrinterCheck(null);
+        setRasterPreview(null);
+        const lease = credentialGeneration
+          ? acquireCredentialCommitLease(credentialGeneration)
+          : null;
+        if (credentialGeneration && !lease) throw new Error("Credential is retired");
+        try {
+          const profile = result.printer;
+          const geometry = await tauriWindowsPrinting.getWindowsPageGeometry(
+            result.printer.target.printer,
+            {
+              mode: "a4_sheet",
+              orientation: a4TestOrientation,
+            },
+          );
+          const code = makeA4TestSscc();
+          const artifact = await prepareA4TestPrint(profile, geometry, a4TestOrientation, code, {
+            title: t("palletSheet.testHeader"),
+            product: t("palletSheet.testProduct"),
           });
-        setTestResult({ tab: "printer", text: t("palletSheet.geometryChecked") });
+          setRasterPreview(artifact.bytes);
+          const id = crypto.randomUUID();
+          await serializePrinterOutput(profile.target, () =>
+            dispatchWindowsDelivery(
+              exec,
+              { scope: printScope, purpose: "test", jobId: code, attemptId: id },
+              profile,
+              artifact.bytes,
+              tauriWindowsPrinting,
+              () => !credentialGeneration?.sealed,
+              undefined,
+              JSON.stringify(artifact.renderSnapshot),
+            ),
+          );
+          setPrintedTestCode(code);
+          setPrinterCheck(null);
+          setTestResult({
+            tab: "printer",
+            text: t("palletSheet.testPrintSent", { name: profile.name }),
+          });
+        } finally {
+          lease?.release();
+        }
         return;
       }
       // A fresh code per print: scanning yesterday's test label must fail the
@@ -516,7 +563,13 @@ export function WorkstationSetup({
         text: t("setup.testPrintSentTo", { name: result.printer.name }),
       });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("setup.failed"));
+      setError(
+        caught instanceof PrintDeliveryBeforeSendError && caught.message === "geometry_mismatch"
+          ? t("palletSheet.geometryMismatch")
+          : caught instanceof Error
+            ? caught.message
+            : t("setup.failed"),
+      );
     } finally {
       setBusy(false);
     }
@@ -625,7 +678,7 @@ export function WorkstationSetup({
       panel:
         editorId !== null ? (
           <>
-            {rasterPreview && (
+            {rasterPreview && printerPaper !== "a4" && (
               <LabelRasterPreview bytes={rasterPreview} label={t("setup.printerCheckTitle")} />
             )}
             {printMode === "windows_driver" && (
@@ -667,9 +720,22 @@ export function WorkstationSetup({
               windowsSupported={windowsSupported}
               a4Supported={a4Supported}
               paper={printerPaper}
+              a4RasterPreview={rasterPreview}
+              a4TestOrientation={a4TestOrientation}
+              onA4TestOrientationChange={(orientation) => {
+                setA4TestOrientation(orientation);
+                setPrintedTestCode(null);
+                setPrinterCheck(null);
+                setRasterPreview(null);
+                setTestResult(null);
+              }}
               onPaperChange={(paper) => {
                 setPrinterPaper(paper);
                 if (paper === "a4") setPrinterDpi(300);
+                setPrintedTestCode(null);
+                setPrinterCheck(null);
+                setRasterPreview(null);
+                setTestResult(null);
               }}
               onModeChange={setPrintMode}
               language={printerLanguage}

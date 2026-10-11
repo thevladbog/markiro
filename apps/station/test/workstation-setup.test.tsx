@@ -1,10 +1,18 @@
 import { DatabaseSync } from "node:sqlite";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { beforeAll, describe, expect, it, vi } from "vitest";
+import { beforeAll, beforeEach, afterEach, describe, expect, it, vi } from "vitest";
+import { decodeMonoRaster, parseScannedSscc } from "@markiro/domain";
+import { tauriWindowsPrinting } from "../src/lib/hardware.js";
+import * as brandingPorts from "../src/lib/organization-branding.js";
+import * as rasterPorts from "../src/lib/rasterizer.js";
 import i18n from "../src/i18n/index.js";
 import { saveHardwareConfig, type HardwareConfig } from "../src/lib/hardware-config.js";
 import type { HardwareContract, PrintTarget, ScannerConnection } from "../src/lib/hardware.js";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
+import {
+  createCredentialGeneration,
+  sealCredentialGeneration,
+} from "../src/lib/credential-recovery.js";
 import { WorkstationSetup } from "../src/pages/WorkstationSetup.js";
 
 beforeAll(async () => {
@@ -1685,5 +1693,197 @@ it("rejects a duplicate endpoint, preserves edits by ID, and removes only the re
         },
       }),
     ),
+  );
+});
+
+describe("A4 setup test printing", () => {
+  beforeEach(() => vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(null));
+  afterEach(() => vi.restoreAllMocks());
+  it.each(["portrait", "landscape"] as const)(
+    "sends one %s A4 sheet and verifies its fresh GS1 SSCC",
+    async (orientation) => {
+      const profile = {
+        id: "office",
+        name: "Office",
+        mode: "windows_driver" as const,
+        paper: "a4" as const,
+        language: "zpl" as const,
+        dpi: 300 as const,
+        target: { kind: "usb" as const, printer: "Office" },
+      };
+      const exec = await storedHardwareExec({
+        scanner: null,
+        verifyPrintedLabel: false,
+        printer: null,
+        printerLanguage: "zpl",
+        printerRouting: {
+          printers: [profile],
+          assignments: { box: null, duplicate: null, pallet: "office" },
+        },
+      });
+      vi.spyOn(tauriWindowsPrinting, "supportsWindowsPrinting").mockResolvedValue(true);
+      vi.spyOn(tauriWindowsPrinting, "supportsWindowsA4Printing").mockResolvedValue(true);
+      const geometry = vi
+        .spyOn(tauriWindowsPrinting, "getWindowsPageGeometry")
+        .mockImplementation(async (_queue, options) => {
+          const landscape = options.orientation === "landscape";
+          return {
+            widthMm: landscape ? 297 : 210,
+            heightMm: landscape ? 210 : 297,
+            printableBoundsMm: {
+              left: 3,
+              top: 3,
+              right: landscape ? 294 : 207,
+              bottom: landscape ? 207 : 294,
+            },
+            guardMm: 0.5,
+            deviceDpiX: 600,
+            deviceDpiY: 600,
+            fingerprint: "office-" + options.orientation,
+          };
+        });
+      vi.spyOn(brandingPorts, "loadBundledMarkiroLogo").mockResolvedValue({
+        width: 4,
+        height: 1,
+        stride: 1,
+        pixels: Uint8Array.of(128),
+      });
+      vi.spyOn(rasterPorts, "rasterizeDriverText").mockResolvedValue({
+        hex: "80",
+        bytesPerRow: 1,
+        totalBytes: 1,
+        width: 1,
+        height: 1,
+      });
+      const preflight = vi
+        .spyOn(tauriWindowsPrinting, "preflightWindowsRaster")
+        .mockResolvedValue({ ok: true });
+      const print = vi
+        .spyOn(tauriWindowsPrinting, "printWindowsRaster")
+        .mockImplementation(async (queue, _bytes, documentName) => ({
+          ok: true,
+          receipt: { queue, jobId: 123, documentName },
+        }));
+      const generation = createCredentialGeneration("a4-setup-test");
+      let scan: (raw: string) => void = () => {};
+      const rawPrint = vi.fn(async () => {});
+      render(
+        <WorkstationSetup
+          hw={hardware({
+            print: rawPrint,
+            onScan: async (listener) => {
+              scan = listener;
+              return () => {};
+            },
+          })}
+          exec={exec}
+          credentialGeneration={generation}
+          sound={{ muted: false, volume: 1 }}
+          onSoundChange={() => {}}
+          onConfigChange={() => {}}
+          onDone={() => {}}
+        />,
+      );
+      await selectSetupTab("Printer");
+      expect(await screen.findByRole("button", { name: "Test print" })).toBeDefined();
+      // A successful label check must not survive switching to A4.
+      const paper = screen.getByRole("combobox", { name: "Paper type" });
+      fireEvent.change(paper, { target: { value: "label" } });
+      fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+      const labelCode = (await screen.findByTestId("printer-test-label")).querySelector(
+        "code",
+      )!.textContent!;
+      act(() => scan(labelCode));
+      await waitFor(() =>
+        expect(screen.getByTestId("printer-check-result").getAttribute("data-tone")).toBe("ok"),
+      );
+      fireEvent.change(paper, { target: { value: "a4" } });
+      expect(screen.queryByTestId("printer-test-label")).toBeNull();
+      expect(screen.queryByTestId("printer-check-result")).toBeNull();
+      expect(screen.queryByRole("img", { name: "Print check" })).toBeNull();
+      act(() => scan(labelCode));
+      expect(screen.queryByTestId("printer-check-result")).toBeNull();
+      print.mockClear();
+
+      fireEvent.change(screen.getByRole("combobox", { name: "A4 test orientation" }), {
+        target: { value: orientation },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+      await waitFor(() => expect(print).toHaveBeenCalledTimes(1));
+      const [, bytes, , sheet] = print.mock.calls[0]!;
+      const raster = decodeMonoRaster(bytes);
+      expect(raster.widthDots).toBe(orientation === "portrait" ? 2480 : 3508);
+      expect(raster.heightDots).toBe(orientation === "portrait" ? 3508 : 2480);
+      expect(sheet).toEqual({
+        pageOptions: { mode: "a4_sheet", orientation },
+        geometryFingerprint: "office-" + orientation,
+      });
+      expect(preflight).toHaveBeenCalledWith("Office", bytes, sheet);
+      expect(geometry).toHaveBeenCalledWith("Office", { mode: "a4_sheet", orientation });
+      expect(rawPrint).not.toHaveBeenCalled();
+      const code = (await screen.findByTestId("printer-test-label")).querySelector(
+        "code",
+      )!.textContent!;
+      expect(parseScannedSscc(code)).toBe(code);
+      act(() => scan("]C100" + code));
+      await waitFor(() =>
+        expect(screen.getByTestId("printer-check-result").getAttribute("data-tone")).toBe("ok"),
+      );
+      // A successful A4 check and full-page raster must not survive label selection.
+      fireEvent.change(paper, { target: { value: "label" } });
+      expect(screen.queryByTestId("printer-test-label")).toBeNull();
+      expect(screen.queryByTestId("printer-check-result")).toBeNull();
+      expect(screen.queryByRole("img", { name: "Print check" })).toBeNull();
+      act(() => scan("]C100" + code));
+      expect(screen.queryByTestId("printer-check-result")).toBeNull();
+      fireEvent.change(paper, { target: { value: "a4" } });
+      fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+      await waitFor(() => expect(print).toHaveBeenCalledTimes(2));
+      const next = screen.getByTestId("printer-test-label").querySelector("code")!.textContent!;
+      expect(next).not.toBe(code);
+      act(() => scan("]C100" + code));
+      await waitFor(() =>
+        expect(screen.getByTestId("printer-check-result").getAttribute("data-tone")).toBe("error"),
+      );
+      const rows = await exec.all<{ purpose: string; state: string; render_snapshot_json: string }>(
+        "SELECT purpose,state,render_snapshot_json FROM printer_deliveries",
+      );
+      expect(rows).toHaveLength(3);
+      expect(rows.every((row) => row.purpose === "test" && row.state === "sent")).toBe(true);
+      preflight.mockResolvedValue({
+        ok: false,
+        error: { code: "geometry_mismatch", phase: "before_start" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+      await waitFor(async () => {
+        const refused = await exec.all<{ state: string; error_code: string }>(
+          "SELECT state,error_code FROM printer_deliveries ORDER BY rowid DESC LIMIT 1",
+        );
+        expect(refused[0]).toEqual({
+          state: "failed_before_send",
+          error_code: "geometry_mismatch",
+        });
+      });
+      expect(print).toHaveBeenCalledTimes(2);
+      expect(screen.queryByTestId("printer-test-label")).toBeNull();
+      preflight.mockImplementation(async () => {
+        void sealCredentialGeneration(generation);
+        return { ok: true };
+      });
+      await waitFor(() =>
+        expect(
+          (screen.getByRole("button", { name: "Test print" }) as HTMLButtonElement).disabled,
+        ).toBe(false),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Test print" }));
+      await waitFor(async () => {
+        const retired = await exec.all<{ state: string; error_code: string }>(
+          "SELECT state,error_code FROM printer_deliveries ORDER BY rowid DESC LIMIT 1",
+        );
+        expect(retired[0]).toEqual({ state: "failed_before_send", error_code: "owner_changed" });
+      });
+      expect(print).toHaveBeenCalledTimes(2);
+      await waitFor(() => expect(generation.phase).toBe("sealed"));
+    },
   );
 });

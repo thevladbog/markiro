@@ -3,6 +3,8 @@ import "../../src/station.css";
 import "../../src/i18n/index.js";
 import { createRoot } from "react-dom/client";
 import { ThemeProvider } from "@markiro/ui";
+import { WorkstationSetup } from "../../src/pages/WorkstationSetup.js";
+import { saveHardwareConfig } from "../../src/lib/hardware-config.js";
 import { NewShift, type NewShiftDraft } from "../../src/pages/NewShift.js";
 import { createStationClient } from "../../src/lib/api-client.js";
 import { applyMigrations, type SqlExecutor } from "../../src/lib/mirror.js";
@@ -79,21 +81,47 @@ const hardwareConfig = {
     assignments: { box: "box", duplicate: "box", pallet: "office" },
   },
 };
+const setupMode = new URLSearchParams(location.search).has("setup");
+if (setupMode) await saveHardwareConfig(exec, hardwareConfig);
 const root = document.getElementById("root");
 if (!root) throw new Error("Root missing");
 createRoot(root).render(
   <ThemeProvider defaultTheme="dark">
-    <NewShift
-      client={client}
-      sheetBrandingOwner={owner}
-      hardwareConfig={hardwareConfig}
-      initialDraft={draft}
-      source={{ start: () => () => {} }}
-      onStarted={() => {
-        document.documentElement.dataset.started = "true";
-      }}
-      onBack={() => {}}
-    />
+    {setupMode ? (
+      <WorkstationSetup
+        exec={exec}
+        credentialGeneration={generation}
+        hw={{
+          listScannerPorts: async () => [],
+          listUsbPrinters: async () => [{ name: "Office", port: "USB" }],
+          configureScanners: async () => {},
+          closeScanner: async () => {},
+          onScan: async () => () => {},
+          onScannerConnections: async () => () => {},
+          onScannerStatus: async () => () => {},
+          print: async () => {
+            throw new Error("RAW forbidden for A4");
+          },
+        }}
+        initialTab="printer"
+        sound={{ muted: true, volume: 0 }}
+        onSoundChange={() => {}}
+        onConfigChange={() => {}}
+        onDone={() => {}}
+      />
+    ) : (
+      <NewShift
+        client={client}
+        sheetBrandingOwner={owner}
+        hardwareConfig={hardwareConfig}
+        initialDraft={draft}
+        source={{ start: () => () => {} }}
+        onStarted={() => {
+          document.documentElement.dataset.started = "true";
+        }}
+        onBack={() => {}}
+      />
+    )}
   </ThemeProvider>,
 );
 document.documentElement.dataset.ready = "true";

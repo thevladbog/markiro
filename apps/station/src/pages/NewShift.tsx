@@ -967,7 +967,9 @@ export function NewShift({
                 search={templateSearch}
                 onSearch={setTemplateSearch}
               />
-              <div className="label-template-preview">
+              <div
+                className={`label-template-preview${palletLabels && palletSheetMode ? " label-template-preview--sheet" : ""}`}
+              >
                 {palletLabels && palletSheetMode && sheetPreview ? (
                   <PalletSheetPreview
                     template={sheetPreview}

@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button, Input, Select } from "@markiro/ui";
 import type { PrintTarget, UsbPrinterInfo } from "../../lib/hardware.js";
 import type { PrinterLanguage } from "../../lib/hardware-config.js";
+import { LabelRasterPreview } from "../LabelRasterPreview.js";
 import { TestBarcode } from "./TestBarcode.js";
 import type { SetupCheckResult } from "./test-code.js";
 
@@ -13,6 +14,9 @@ export interface PrinterSetupPanelProps {
   windowsSupported?: boolean;
   a4Supported?: boolean;
   paper?: "a4" | undefined;
+  a4RasterPreview?: Uint8Array | null;
+  a4TestOrientation?: "portrait" | "landscape";
+  onA4TestOrientationChange?: (orientation: "portrait" | "landscape") => void;
   onPaperChange?: (paper: "a4" | undefined) => void;
   onModeChange?: (mode: "raw" | "windows_driver") => void;
   name?: string;
@@ -49,6 +53,9 @@ export function PrinterSetupPanel({
   windowsSupported = false,
   a4Supported = false,
   paper,
+  a4RasterPreview,
+  a4TestOrientation = "portrait",
+  onA4TestOrientationChange,
   onPaperChange,
   onModeChange,
   name,
@@ -290,15 +297,40 @@ export function PrinterSetupPanel({
         <p id={dpiHintId} className="setup-card__dpi-hint">
           {t("setup.printerDpiHint")}
         </p>
+        {paper === "a4" && (
+          <Select
+            native
+            size="floor"
+            label={t("palletSheet.testOrientation")}
+            value={a4TestOrientation}
+            options={[
+              { value: "portrait", label: t("palletSheet.portrait") },
+              { value: "landscape", label: t("palletSheet.landscape") },
+            ]}
+            disabled={disabled || busy}
+            onValueChange={(value) =>
+              onA4TestOrientationChange?.(value === "landscape" ? "landscape" : "portrait")
+            }
+          />
+        )}
         <Button size="floor" disabled={!printReady} onClick={onTestPrint}>
-          {paper === "a4" ? t("palletSheet.checkGeometry") : t("setup.testPrint")}
+          {t("setup.testPrint")}
         </Button>
 
         {printedCode ? (
           <>
             <div className="setup-label-preview" data-testid="printer-test-label">
               <span className="setup-label-preview__name">MARKIRO · TEST</span>
-              <TestBarcode code={printedCode} label={t("setup.printerCheckTitle")} />
+              {paper === "a4" && a4RasterPreview ? (
+                <div className="setup-a4-preview">
+                  <LabelRasterPreview
+                    bytes={a4RasterPreview}
+                    label={t("setup.printerCheckTitle")}
+                  />
+                </div>
+              ) : (
+                <TestBarcode code={printedCode} label={t("setup.printerCheckTitle")} />
+              )}
               <code>{printedCode}</code>
             </div>
             {check ? (

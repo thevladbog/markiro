@@ -118,7 +118,7 @@ test("Windows driver mode preserves explicit RAW language and compact controls",
   await page.getByRole("radio", { name: "Сеть (TCP)", exact: true }).check();
   await expect(page.getByRole("radio", { name: "TSPL", exact: true })).toBeChecked();
 });
-test("A4 paper has fixed source resolution and checks actual driver settings without claiming a print", async ({
+test("A4 paper locks source resolution and offers an oriented test print", async ({
   page,
 }, testInfo) => {
   await page.addInitScript(() =>
@@ -153,8 +153,12 @@ test("A4 paper has fixed source resolution and checks actual driver settings wit
   const resolution = page.getByRole("combobox", { name: "Разрешение принтера", exact: true });
   await expect(resolution).toHaveValue("300");
   await expect(resolution).toBeDisabled();
-  await expect(
-    page.getByRole("button", { name: "Проверить параметры А4", exact: true }),
-  ).toBeVisible();
+  // This gallery uses a read-only executor. The real send/journal path is
+  // exercised by product-labels-tests/pallet-sheet-station.spec.ts.
+  const orientation = page.getByRole("combobox", { name: "Ориентация тестового А4", exact: true });
+  await expect(orientation).toHaveValue("portrait");
+  await orientation.selectOption("landscape");
+  await expect(orientation).toHaveValue("landscape");
+  await expect(page.getByRole("button", { name: "Тестовая печать", exact: true })).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath("a4-paper-settings.png"), fullPage: true });
 });

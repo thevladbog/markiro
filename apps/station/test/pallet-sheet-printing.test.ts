@@ -2,7 +2,7 @@
 import { expect, it, vi, afterEach } from "vitest";
 import { openProductLabelWork } from "./support/product-label-work.js";
 import { printPalletSheet } from "../src/lib/pallet-sheet-printing.js";
-import { readPrintDelivery } from "../src/lib/print-deliveries.js";
+import { readPrintDelivery, preparePrintDelivery } from "../src/lib/print-deliveries.js";
 import * as textAdapter from "../src/lib/rasterizer.js";
 import type { WindowsPrinting } from "../src/lib/hardware.js";
 import {
@@ -501,5 +501,45 @@ it("stores immutable branding once across attempts and rebuilds retained sheets 
     expect(await w.exec.all("SELECT digest FROM pallet_sheet_branding_resources")).toHaveLength(1);
   } finally {
     w.close();
+  }
+});
+
+it("accepts an explicit A4 setup snapshot but preserves production-purpose and SSCC identity guards", async () => {
+  const work = await openProductLabelWork();
+  try {
+    const saved = await preparePalletSheet(
+      { profile, template: template(), facts, branding, geometry },
+      rasterize,
+    );
+    const snapshot = JSON.stringify(saved.renderSnapshot);
+    const key = {
+      scope: "setup",
+      purpose: "test" as const,
+      jobId: facts.sscc,
+      attemptId: "a4-test",
+    };
+    await expect(preparePrintDelivery(work.exec, key, profile, saved.bytes)).rejects.toThrow(
+      "Sheet snapshot required",
+    );
+    await expect(
+      preparePrintDelivery(
+        work.exec,
+        { ...key, jobId: "another-code" },
+        profile,
+        saved.bytes,
+        snapshot,
+      ),
+    ).rejects.toThrow("Sheet identity mismatch");
+    for (const purpose of ["box", "duplicate"] as const)
+      await expect(
+        preparePrintDelivery(work.exec, { ...key, purpose }, profile, saved.bytes, snapshot),
+      ).rejects.toThrow("Sheet snapshot required");
+    const row = await preparePrintDelivery(work.exec, key, profile, saved.bytes, snapshot);
+    expect(row).toMatchObject({ purpose: "test", job_id: facts.sscc, state: "prepared" });
+    expect(await loadPalletSheetPrintSnapshot(work.exec, row.render_snapshot_json!)).toEqual(
+      saved.renderSnapshot,
+    );
+  } finally {
+    work.close();
   }
 });
