@@ -70,10 +70,10 @@ export interface AttemptInventoryBoxPrintInput {
     fields: Record<LabelField, string>,
     language: PrinterLanguage,
     dpi: PrinterDpi | null,
-    logo?: MonoBitmap,
+    logo?: MonoBitmap | null,
   ) => Promise<Uint8Array>;
   rasterizeText?: RasterizeTextFn;
-  loadLogo?: () => Promise<MonoBitmap>;
+  loadLogo?: () => Promise<MonoBitmap | null>;
   kind?: "initial" | "reprint";
   recoveryOfAttemptId?: string;
 }
@@ -91,7 +91,7 @@ export interface ProcessNextInventoryRemoteReprintInput {
   printTransport?: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
   render?: AttemptInventoryBoxPrintInput["render"];
   rasterizeText?: RasterizeTextFn;
-  loadLogo?: () => Promise<MonoBitmap>;
+  loadLogo?: () => Promise<MonoBitmap | null>;
 }
 
 export class InventoryPrintRecoveryStaleError extends Error {
@@ -421,7 +421,7 @@ async function attemptInternal(
       _fields: Record<LabelField, string>,
       language: PrinterLanguage,
       dpi: PrinterDpi | null,
-      logo?: MonoBitmap,
+      logo?: MonoBitmap | null,
     ) =>
       renderInventoryBoxLabel(
         template,

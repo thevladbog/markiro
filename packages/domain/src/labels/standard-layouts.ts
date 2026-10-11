@@ -98,7 +98,7 @@ export function buildStandardLabelSpec(
   });
   text(
     "cap-title",
-    pallet ? "ПАЛЕТ" : "КОРОБКА",
+    pallet ? "ПАЛЕТА" : "КОРОБКА",
     narrow ? (pallet ? 39 : 35) : 60,
     pallet && tall ? 6 : 4,
     narrow ? (pallet ? 32 : 36) : 36,

@@ -21,7 +21,7 @@ export async function renderWarehouseLabel(
   selection: WarehouseTemplate,
   profile: PrinterProfile,
   rasterizeText: RasterizeTextFn,
-  options: { logo?: MonoBitmap } = {},
+  options: { logo?: MonoBitmap | null } = {},
 ) {
   const source = warehouseSourceSchema.parse(value);
   const template = warehouseTemplateSchema.parse(selection);

@@ -210,11 +210,9 @@ it("resolves the same owner-scoped logo for thermal labels and never another ten
     )
     .run(JSON.stringify(owner));
   expect(await loadThermalLabelLogo(h.exec, h.generation)).toMatchObject(bitmap);
-  await expect(
-    loadThermalLabelLogo(h.exec, createCredentialGeneration("other-key")),
-  ).rejects.toThrow(/branding/i);
+  expect(await loadThermalLabelLogo(h.exec, createCredentialGeneration("other-key"))).toBeNull();
   h.db
     .prepare("UPDATE station_device_recovery SET owner_json=? WHERE id=1")
     .run(JSON.stringify({ ...owner, tenantId: "other-tenant" }));
-  await expect(loadThermalLabelLogo(h.exec, h.generation)).rejects.toThrow(/branding/i);
+  expect(await loadThermalLabelLogo(h.exec, h.generation)).toBeNull();
 });

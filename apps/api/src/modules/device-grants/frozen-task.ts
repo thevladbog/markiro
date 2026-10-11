@@ -1,3 +1,5 @@
+import { parseLabelTemplate, projectThermalLabelForClient } from "@markiro/domain";
+import { projectThermalInventoryManifest } from "../inventories/thermal-label-policy";
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { schema } from "@markiro/db";
@@ -265,7 +267,7 @@ export async function freezeGrantTask(
         .for("share");
       if (inventorySnapshotContentDigest(codes) !== manifest.contentDigest) return missing;
       scope = serializable({
-        manifest,
+        manifest: projectThermalInventoryManifest(manifest, capabilities),
         snapshotId: snapshot.id,
         combinedDigest: snapshot.combinedDigest,
         contentDigest: manifest.contentDigest,
@@ -332,7 +334,18 @@ export async function freezeGrantTask(
           )
           .for("share");
         if (!template) return missing;
-        templates.push({ id: template.id, spec: template.spec });
+        try {
+          const thermal = id === shift.boxLabelTemplateId || id === shift.palletLabelTemplateId;
+          const parsed = thermal ? parseLabelTemplate(template.spec) : null;
+          const projected = parsed ? projectThermalLabelForClient(parsed, capabilities) : null;
+          // Preserve historical raw V1 facts when no read projection is needed.
+          templates.push({
+            id: template.id,
+            spec: projected && projected !== parsed ? projected : template.spec,
+          });
+        } catch {
+          return missing;
+        }
       }
       const [product] = await tx
         .select()

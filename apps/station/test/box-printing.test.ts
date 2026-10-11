@@ -238,16 +238,24 @@ it("supplies owner branding only to fresh logo labels and does not query it for 
   await attemptBoxPrint({ ...input, loadLogo });
   expect(loadLogo).not.toHaveBeenCalled();
 });
-it("sends nothing and keeps logo failures recoverable", async () => {
+it("prints SSCC labels with blank logo space when branding is unavailable", async () => {
+  const input = configuredInput();
+  const loadLogo = vi.fn(async () => null);
+  expect(await attemptBoxPrint({ ...input, template: LOGO_TEMPLATE, loadLogo })).toMatchObject({
+    kind: "printed",
+  });
+  expect(input.render).toHaveBeenCalledWith(LOGO_TEMPLATE, input.fields, "zpl", 300, null);
+  expect(input.printing?.print).toHaveBeenCalledOnce();
+});
+it("does not degrade a credential owner rejection into printable authority", async () => {
   const input = configuredInput();
   const loadLogo = vi.fn(async () => {
-    throw new Error("branding unavailable");
+    throw new Error("Thermal branding owner changed");
   });
   expect(await attemptBoxPrint({ ...input, template: LOGO_TEMPLATE, loadLogo })).toEqual({
     kind: "failed",
     code: "render_failed",
   });
-  expect(input.render).not.toHaveBeenCalled();
   expect(input.printing?.print).not.toHaveBeenCalled();
 });
 it("replays an uncertain Windows delivery from frozen logo bytes while offline", async () => {

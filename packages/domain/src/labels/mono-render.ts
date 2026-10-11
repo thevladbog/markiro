@@ -22,7 +22,7 @@ export async function renderMonoLabel(
   spec: LabelTemplateSpec,
   fields: Record<LabelField, string>,
   rasterizeText: RasterizeTextFn,
-  options: { logo?: MonoBitmap } = {},
+  options: { logo?: MonoBitmap | null } = {},
 ): Promise<MonoRaster> {
   const validated = labelTemplateSpecStrictSchema.parse(spec);
   const plan = await createLabelRenderPlan(validated, fields, {

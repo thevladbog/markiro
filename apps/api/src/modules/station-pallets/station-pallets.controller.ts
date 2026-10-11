@@ -31,6 +31,6 @@ export class StationPalletsController {
   @ApiHttpErrors(401, 403, 409, 429)
   bootstrap(@Req() req: RequestWithTenant): Promise<StationPalletBootstrapDto> {
     if (!req.deviceId) throw new Error("Station device identity is missing");
-    return this.service.bootstrap(req.tenantId!, req.deviceId);
+    return this.service.bootstrap(req.tenantId!, req.deviceId, req.get("x-station-capabilities"));
   }
 }

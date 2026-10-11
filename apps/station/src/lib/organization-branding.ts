@@ -290,26 +290,29 @@ export async function loadThermalLabelLogoForOwner(
   exec: SqlExecutor,
   ownerDigest: string,
   isCurrent: () => boolean,
-): Promise<MonoBitmap> {
+): Promise<MonoBitmap | null> {
   if (!isCurrent()) throw new Error("Thermal branding owner changed");
-  const recovery = await readDeviceRecovery(exec);
-  if (recovery?.phase !== "active" || !recovery.owner)
-    throw new Error("Thermal branding owner is unavailable");
-  const tenantId = recovery.owner.tenantId;
-  const rows = await exec.all<{ snapshot_json: string }>(
-    "SELECT snapshot_json FROM station_organization_branding WHERE tenant_id=? AND owner_digest=?",
-    [tenantId, ownerDigest],
-  );
-  if (!isCurrent() || rows.length !== 1) throw new Error("Thermal branding is unavailable");
-  const saved = parseOrganizationBranding(rows[0]!.snapshot_json);
-  if (saved.ownerDigest !== ownerDigest || saved.tenantId !== tenantId)
-    throw new Error("Thermal branding owner mismatch");
-  return saved.logo;
+  try {
+    const recovery = await readDeviceRecovery(exec);
+    if (recovery?.phase !== "active" || !recovery.owner) return null;
+    const tenantId = recovery.owner.tenantId;
+    const rows = await exec.all<{ snapshot_json: string }>(
+      "SELECT snapshot_json FROM station_organization_branding WHERE tenant_id=? AND owner_digest=?",
+      [tenantId, ownerDigest],
+    );
+    if (!isCurrent()) throw new Error("Thermal branding owner changed");
+    if (rows.length !== 1) return null;
+    const saved = parseOrganizationBranding(rows[0]!.snapshot_json);
+    return saved.ownerDigest === ownerDigest && saved.tenantId === tenantId ? saved.logo : null;
+  } catch {
+    if (!isCurrent()) throw new Error("Thermal branding owner changed");
+    return null; // No network/fallback on the critical SSCC path.
+  }
 }
 export async function loadThermalLabelLogo(
   exec: SqlExecutor,
   generation: CredentialGeneration,
-): Promise<MonoBitmap> {
+): Promise<MonoBitmap | null> {
   const ownerDigest = await ownership({ generation });
   return loadThermalLabelLogoForOwner(exec, ownerDigest, () => !generation.sealed);
 }

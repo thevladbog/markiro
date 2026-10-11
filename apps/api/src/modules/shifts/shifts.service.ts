@@ -1,3 +1,4 @@
+import { projectThermalLabelForClient } from "@markiro/domain";
 import { assertDeviceReplacementNewWorkAllowed } from "../device-licensing/device-replacement-admission";
 import {
   parsePalletSheetSnapshot,
@@ -2139,8 +2140,16 @@ export class ShiftsService {
       image,
     };
 
-    const boxLabelTemplate = await this.findLabelTemplate(tenantId, shift.boxLabelTemplateId);
-    const palletLabelTemplate = await this.findLabelTemplate(tenantId, shift.palletLabelTemplateId);
+    const currentBox = await this.findLabelTemplate(tenantId, shift.boxLabelTemplateId);
+    const boxLabelTemplate =
+      currentBox && stationCaller
+        ? { ...currentBox, spec: projectThermalLabelForClient(currentBox.spec, capabilities) }
+        : currentBox;
+    const currentPallet = await this.findLabelTemplate(tenantId, shift.palletLabelTemplateId);
+    const palletLabelTemplate =
+      currentPallet && stationCaller
+        ? { ...currentPallet, spec: projectThermalLabelForClient(currentPallet.spec, capabilities) }
+        : currentPallet;
 
     const bundleShift: ShiftBundleDto["shift"] = {
       id: shift.id,

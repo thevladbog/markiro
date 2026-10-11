@@ -219,7 +219,7 @@ describe.skipIf(!databaseUrl)("pallets migration", () => {
       for (const [index, name] of [
         PALLET_LABEL_TEMPLATE_NAME,
         PALLET_LABEL_58X40_TEMPLATE_NAME,
-        "Палет 75×120",
+        "Палета 75×120",
       ].entries()) {
         const { rows } = await pool.query(
           "SELECT spec FROM label_templates WHERE tenant_id=$1 AND name=$2 AND purpose='pallet'",

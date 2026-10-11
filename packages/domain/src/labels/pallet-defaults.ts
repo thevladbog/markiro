@@ -8,8 +8,8 @@ import type { LabelTemplateSpec } from "./model.js";
  * 58×40 keeps its established layout and seed identity. */
 
 /** Current seed identity; migration 0185 renames the exact historical stock row in place. */
-export const PALLET_LABEL_TEMPLATE_NAME = "Палет 100×150";
-export const PALLET_LABEL_75X120_TEMPLATE_NAME = "Палет 75×120";
+export const PALLET_LABEL_TEMPLATE_NAME = "Палета 100×150";
+export const PALLET_LABEL_75X120_TEMPLATE_NAME = "Палета 75×120";
 
 /** Seed identity of the small stock pallet label (spec 2026-09-18 §8). Renaming re-seeds. */
 export const PALLET_LABEL_58X40_TEMPLATE_NAME = "Паллета 58×40";

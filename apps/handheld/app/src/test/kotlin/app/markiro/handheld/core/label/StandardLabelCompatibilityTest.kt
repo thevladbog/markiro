@@ -18,9 +18,9 @@ class StandardLabelCompatibilityTest {
     fun organizationLogoIsNotRejectedAsAnUnknownTemplate() = runTest {
         val spec = LabelSpecCodec.parse("""{"widthMm":75,"heightMm":120,"dpi":203,"language":"zpl","elements":[{"id":"logo","kind":"organization_logo","source":"organization","fallback":"markiro","xMm":4,"yMm":3,"widthMm":30,"heightMm":7}]}""")
         assertEquals(1, spec.elements.size)
-        try {
-            generateZpl(spec, emptyMap(), null)
-            throw AssertionError("Logo must be supplied, never silently omitted")
-        } catch (e: LabelRenderException) { assertTrue(e.message!!.contains("logo", ignoreCase = true)) }
+        val output = generateZpl(spec, emptyMap(), null)
+        assertTrue(output.contains("^XA"))
+        assertTrue(!output.contains("^GFA"))
+
     }
 }

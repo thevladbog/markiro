@@ -44,6 +44,14 @@ class OrganizationPrintBranding @Inject constructor(
         if (raster.width !in 1..1120 || raster.height !in 1..512 || raster.bytesPerRow != (raster.width + 7) / 8 || raster.totalBytes != raster.bytesPerRow * raster.height || raster.hex.length != raster.totalBytes * 2 || !raster.hex.matches(Regex("[a-fA-F0-9]+")) || sha(raster.hex.toByteArray()) != saved.getValue("digest").jsonPrimitive.content) throw LabelRenderException("Invalid branding cache")
         return raster
     }
+    /** Cache only: label rendering cannot make a network request. */
+    suspend fun loadCached(): RasterResult? = db.recovery.work {
+        val key = ownerKey()
+        try { cached(key) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (_: Exception) { null }
+    }
+    private fun cachedDescriptor(key: String): String? = prefs.getString(key, null)?.let {
+        Json.parseToJsonElement(it).jsonObject["descriptor"]?.jsonPrimitive?.content
+    }
     suspend fun load(): RasterResult = db.recovery.work {
         val key = ownerKey()
         cached(key) ?: refresh()
@@ -53,6 +61,25 @@ class OrganizationPrintBranding @Inject constructor(
         val key = ownerKey()
         val descriptor = api.printBranding()
         val revision = descriptor["logoRevision"].takeUnless { it == null || it is JsonNull }?.jsonPrimitive?.content
+        val identity = if (revision == null) {
+            if (descriptor["logo"] != JsonNull || descriptor["logoUrl"] != JsonNull) throw LabelRenderException("Incomplete absent branding")
+            "absent"
+        } else {
+            val path = "/station/handheld-branding/logo/$revision"
+            if (!revision.matches(Regex("[0-9a-fA-F-]{36}")) || descriptor["logoUrl"]?.jsonPrimitive?.content != path) throw LabelRenderException("Invalid logo route")
+            val meta = descriptor.getValue("logo").jsonObject
+            val size = meta.getValue("byteSize").jsonPrimitive.int
+            val width = meta.getValue("width").jsonPrimitive.int
+            val height = meta.getValue("height").jsonPrimitive.int
+            val checksum = meta.getValue("checksum").jsonPrimitive.content
+            if (size !in 1..5*1024*1024 || width !in 1..1024 || height !in 1..512 || !checksum.matches(Regex("[a-f0-9]{64}")) || meta.getValue("contentType").jsonPrimitive.content != "image/webp") throw LabelRenderException("Invalid logo metadata")
+            sha("$revision\n$path\n$size\n$width\n$height\n$checksum\nimage/webp".toByteArray())
+        }
+        val existing = runCatching { cached(key) }.getOrNull()
+        if (existing != null && cachedDescriptor(key) == identity) {
+            db.recovery.guard(token) { }
+            return@work existing
+        }
         val bitmap = if (revision == null) {
             if (descriptor["logo"] != JsonNull || descriptor["logoUrl"] != JsonNull) throw LabelRenderException("Incomplete absent branding")
             withContext(Dispatchers.IO) { context.assets.open("markiro-print-logo.png").use { BitmapFactory.decodeStream(it) } }
@@ -93,7 +120,7 @@ class OrganizationPrintBranding @Inject constructor(
             } finally { bitmap.recycle() }
         }
         val saved = buildJsonObject {
-            put("width", raster.width); put("height", raster.height); put("bytesPerRow", raster.bytesPerRow); put("totalBytes", raster.totalBytes); put("hex", raster.hex); put("digest", sha(raster.hex.toByteArray()))
+            put("descriptor", identity); put("width", raster.width); put("height", raster.height); put("bytesPerRow", raster.bytesPerRow); put("totalBytes", raster.totalBytes); put("hex", raster.hex); put("digest", sha(raster.hex.toByteArray()))
         }.toString()
         db.recovery.guard(token) {
             if (!prefs.edit().clear().putString(key, saved).commit()) throw LabelRenderException("Branding cache write failed")

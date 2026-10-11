@@ -1,4 +1,10 @@
-import { buildPalletSheetPresets } from "@markiro/domain";
+import {
+  buildDefaultLabelTemplates,
+  buildPalletLabelTemplates,
+  projectThermalLabelForClient,
+  THERMAL_LABEL_BRANDING_PROTOCOL,
+  buildPalletSheetPresets,
+} from "@markiro/domain";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
@@ -135,6 +141,69 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     });
     return createManagedSubscription(db, { tenantId, planVersionId, startsAt, endsAt });
   }
+
+  it("negotiates thermal label extensions for Station and handheld bundle, bootstrap and warehouse reads", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const productId = await seedProduct(tenantId, {
+      status: "active",
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+    const box = buildDefaultLabelTemplates().find((t) => t.name === "Коробка 100×150")!;
+    const pallet = buildPalletLabelTemplates()[0]!;
+    const boxId = randomUUID(),
+      palletId = randomUUID();
+    await db.insert(schema.labelTemplates).values([
+      { id: boxId, tenantId, name: box.name, purpose: "box", spec: box.spec },
+      { id: palletId, tenantId, name: pallet.name, purpose: "pallet", spec: pallet.spec },
+    ]);
+    await agent.put("/org/profile").send({ defaultPalletLabelTemplateId: palletId }).expect(200);
+    const created = await agent
+      .post("/shifts")
+      .send({
+        productId,
+        mode: "aggregation",
+        boxLabelTemplateId: boxId,
+        palletLabelTemplateId: palletId,
+        palletsEnabled: true,
+      })
+      .expect(201);
+    for (const kind of ["station", "handheld"] as const) {
+      const device = await createTestStationDevice(app!, agent, kind, { kind });
+      for (const capabilities of ["", "pallet-sheet-v2", THERMAL_LABEL_BRANDING_PROTOCOL]) {
+        const expectedBox = projectThermalLabelForClient(box.spec, capabilities);
+        const expectedPallet = projectThermalLabelForClient(pallet.spec, capabilities);
+        const response = await request(app!.getHttpServer())
+          .get(`/shifts/${created.body.id}/reference-bundle`)
+          .set("x-api-key", device.apiKey)
+          .set("x-station-capabilities", capabilities)
+          .expect(200);
+        expect(response.body.boxLabelTemplate.spec).toEqual(expectedBox);
+        expect(response.body.palletLabelTemplate.spec).toEqual(expectedPallet);
+        if (kind === "handheld") {
+          const bootstrap = await request(app!.getHttpServer())
+            .get("/station/pallet-bootstrap")
+            .set("x-api-key", device.apiKey)
+            .set("x-station-capabilities", capabilities)
+            .expect(200);
+          expect(bootstrap.body.palletLabelTemplates.organisation).toEqual(expectedPallet);
+        } else {
+          const warehouse = await request(app!.getHttpServer())
+            .get(`/station/warehouse-reprint/templates?ids=${boxId}`)
+            .set("x-api-key", device.apiKey)
+            .set("x-station-capabilities", capabilities)
+            .expect(200);
+          expect(warehouse.body.templates[0].spec).toEqual(expectedBox);
+        }
+      }
+    }
+    const saved = await db
+      .select()
+      .from(schema.labelTemplates)
+      .where(eq(schema.labelTemplates.id, boxId));
+    expect(saved[0]?.spec).toEqual(box.spec);
+  });
 
   it("captures A4 revision once and denies legacy or forged handheld entry before allocating SSCC", async () => {
     const agent = request.agent(app!.getHttpServer());

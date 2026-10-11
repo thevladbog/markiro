@@ -161,7 +161,7 @@ function projectShift(
   name: "x-label-template-formats",
   required: false,
   description:
-    "Cabinet clients opt into optional A4 fields with label-v1,pallet-sheet-v2. Devices negotiate x-station-capabilities instead.",
+    "Cabinet clients opt into optional A4 fields with label-v1,pallet-sheet-v2. Devices negotiate x-station-capabilities instead; thermal-label-branding-v1 enables logo/typography V1 extensions.",
 })
 @Controller("shifts")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)

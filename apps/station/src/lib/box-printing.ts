@@ -23,7 +23,7 @@ export type BoxPrintAttempt =
 
 export interface BoxPrintInput {
   explicitRetry?: boolean;
-  loadLogo?: () => Promise<MonoBitmap>;
+  loadLogo?: () => Promise<MonoBitmap | null>;
   template: LabelTemplateSpec | null;
   fields: Record<string, string>;
   destination?: {
@@ -48,7 +48,7 @@ export interface BoxPrintInput {
     fields: Record<string, string>,
     language: PrinterLanguage,
     dpi: PrinterDpi | null,
-    logo?: MonoBitmap,
+    logo?: MonoBitmap | null,
   ) => Promise<Uint8Array>;
 }
 
@@ -73,8 +73,7 @@ export async function attemptBoxPrint(input: BoxPrintInput): Promise<BoxPrintAtt
   try {
     const logoOptions = async () => {
       if (!template.elements.some((e) => e.kind === "organization_logo")) return {};
-      if (!input.loadLogo) throw new Error("Thermal branding is unavailable");
-      return { logo: await input.loadLogo() };
+      return input.loadLogo ? { logo: await input.loadLogo() } : {};
     };
     const render = async () =>
       (

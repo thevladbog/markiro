@@ -19,7 +19,7 @@ export async function renderPrintArtifact(
   fields: Record<LabelField, string>,
   profile: PrinterProfile,
   rasterizeText: RasterizeTextFn,
-  options: { kmDataMatrix?: "native" | "raster"; logo?: MonoBitmap } = {},
+  options: { kmDataMatrix?: "native" | "raster"; logo?: MonoBitmap | null } = {},
 ): Promise<PrintArtifact> {
   if (profile.paper === "a4") throw new Error("A4 requires a pallet sheet template");
   if (printerMode(profile) === "windows_driver") {

@@ -71,7 +71,7 @@ export { needsImageRendering } from "./text.js";
 
 export interface GenerateTsplDeps {
   rasterizeText?: RasterizeTextFn;
-  logo?: MonoBitmap;
+  logo?: MonoBitmap | null;
   /** Product-duplicate layouts use sizeMm as the complete symbol square, including quiet zone. */
   kmDataMatrix?: "native" | "raster";
 }
@@ -494,6 +494,7 @@ export async function generateTspl(
   for (const element of spec.elements) {
     switch (element.kind) {
       case "organization_logo": {
+        if (!deps.logo) break; // Decorative: preserve the empty reserved space offline.
         const { xDots, yDots, raster } = renderLabelLogo(element, spec.dpi, deps.logo);
         lines.push(buildBitmapCommand(xDots, yDots, raster));
         break;

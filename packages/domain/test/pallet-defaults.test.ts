@@ -39,7 +39,7 @@ describe("stock pallet label template", () => {
     expect(names).toEqual([
       PALLET_LABEL_TEMPLATE_NAME,
       PALLET_LABEL_58X40_TEMPLATE_NAME,
-      "Палет 75×120",
+      "Палета 75×120",
     ]);
   });
 

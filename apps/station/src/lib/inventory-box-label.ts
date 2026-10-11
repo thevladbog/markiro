@@ -51,7 +51,7 @@ export function renderInventoryBoxLabel(
   language: PrinterLanguage,
   rasterizeText: RasterizeTextFn,
   dpi: PrinterDpi | null = null,
-  logo?: MonoBitmap,
+  logo?: MonoBitmap | null,
 ): Promise<Uint8Array> {
   return renderLabelBytes(template, inventoryBoxLabelFields(input), language, rasterizeText, {
     dpi,

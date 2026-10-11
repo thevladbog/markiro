@@ -39,8 +39,6 @@ export function LabelPreview({
     let active = true;
     const run = async () => {
       const hasLogo = template.spec.elements.some((e) => e.kind === "organization_logo");
-      if (hasLogo && (!logoExec || !logoGeneration))
-        throw new Error("Thermal branding is unavailable");
       const branding =
         hasLogo && logoExec && logoGeneration
           ? { logo: await loadThermalLabelLogo(logoExec, logoGeneration) }

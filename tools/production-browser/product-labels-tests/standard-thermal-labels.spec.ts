@@ -45,7 +45,7 @@ for (const company of [false, true])
       );
       for (const size of ["75×120", "100×150"]) {
         await page
-          .locator(`section[data-template="Палет ${size}"] canvas`)
+          .locator(`section[data-template="Палета ${size}"] canvas`)
           .screenshot({ path: info.outputPath(`pallet-${size}.png`) });
       }
       for (const size of ["75×120", "100×100", "100×150"]) {

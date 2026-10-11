@@ -115,6 +115,8 @@ class HubViewModelTest {
         enter: suspend (String) -> ShiftDto = { throw UnsupportedOperationException() },
         bundle: suspend (String) -> ShiftBundleDto = { throw UnsupportedOperationException() },
     ) = object : StationApi {
+        override suspend fun printBranding(): kotlinx.serialization.json.JsonObject = error("Unused")
+        override suspend fun printBrandingLogo(revision: String): okhttp3.ResponseBody = error("Unused")
         override suspend fun grantInventoryLeave(id: String, body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = error("Unused")
         override suspend fun grantConfiguration(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = error("Unused")
         override suspend fun grantKeyset(): kotlinx.serialization.json.JsonObject = throw java.io.IOException("unconfigured")

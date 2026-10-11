@@ -27,7 +27,7 @@ export { needsImageRendering } from "./text.js";
 
 export interface GenerateZplDeps {
   rasterizeText?: RasterizeTextFn;
-  logo?: MonoBitmap;
+  logo?: MonoBitmap | null;
   /** Opt-in duplicate layout: sizeMm is the full symbol square, not a module size. */
   kmDataMatrix?: "native" | "raster";
 }
@@ -374,6 +374,7 @@ export async function generateZpl(
   for (const element of spec.elements) {
     switch (element.kind) {
       case "organization_logo": {
+        if (!deps.logo) break; // Decorative: preserve the empty reserved space offline.
         const { xDots, yDots, raster } = renderLabelLogo(element, spec.dpi, deps.logo);
         lines.push(`^FO${xDots},${yDots}${buildGfaCommand(raster)}^FS`);
         break;

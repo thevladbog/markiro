@@ -60,13 +60,13 @@ describe("approved standard label family", () => {
   it("adds Palet 75×120, keeps the existing 58×40 identity and removes shift only from larger pallets", () => {
     const templates = buildPalletLabelTemplates();
     expect(templates.map((t) => t.name)).toEqual([
-      "Палет 100×150",
+      "Палета 100×150",
       "Паллета 58×40",
-      "Палет 75×120",
+      "Палета 75×120",
     ]);
     for (const { spec } of templates.filter((t) => t.spec.widthMm !== 58)) {
       expect(spec.elements.find((e) => e.kind === "text" && e.id === "cap-title")).toMatchObject({
-        text: "ПАЛЕТ",
+        text: "ПАЛЕТА",
       });
       expect(
         spec.elements.filter((e) => e.kind === "field" && e.field === "shift.no"),
@@ -114,9 +114,30 @@ describe("approved standard label family", () => {
       }),
     ).toThrow(/minFontSizePt/);
   });
-  it("fails explicitly rather than silently dropping a missing logo", async () => {
-    await expect(generateZpl(logoSpec(), sampleLabelData())).rejects.toThrow(/logo/i);
-    await expect(generateTspl(logoSpec(), sampleLabelData())).rejects.toThrow(/logo/i);
+  it("reserves blank logo space without changing mandatory print data when branding is unavailable", async () => {
+    const spec = buildDefaultLabelTemplates().find((t) => t.name === "Коробка 100×150")!.spec;
+    const blank = {
+      ...spec,
+      elements: spec.elements.filter((e) => e.kind !== "organization_logo"),
+    };
+    const rasterizeText = async () => ({
+      hex: "80",
+      totalBytes: 1,
+      bytesPerRow: 1,
+      width: 8,
+      height: 1,
+    });
+    const data = sampleLabelData();
+    expect(await generateZpl(spec, data, { rasterizeText })).toEqual(
+      await generateZpl(blank, data, { rasterizeText }),
+    );
+    expect(await generateTspl(spec, data, { rasterizeText })).toEqual(
+      await generateTspl(blank, data, { rasterizeText }),
+    );
+    const destination = { dpi: spec.dpi, language: spec.language, rasterizeText };
+    expect(await createLabelRenderPlan(spec, data, destination)).toEqual(
+      await createLabelRenderPlan(blank, data, destination),
+    );
   });
 });
 

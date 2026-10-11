@@ -71,6 +71,7 @@ export {
   LABEL_FIELDS,
   labelFieldDisplayValue,
   labelTemplateSpecSchema,
+  labelTemplateSpecStrictSchema,
   mmToDots,
   parseLabelTemplate,
   ptToDots,
@@ -483,4 +484,8 @@ export type { OrganizationBrandingDescriptor } from "./labels/pallet-sheet-brand
 export { validateMonoBitmap } from "./labels/mono-compose.js";
 export { sheetLogoFingerprint } from "./labels/pallet-sheet-branding.js";
 
+export {
+  projectThermalLabelForClient,
+  THERMAL_LABEL_BRANDING_PROTOCOL,
+} from "./labels/thermal-compatibility.js";
 export { renderLabelLogo } from "./labels/label-logo.js";

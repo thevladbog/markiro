@@ -106,6 +106,11 @@ export class StationWarehouseReprintController {
     query: z.infer<typeof warehouseTemplateIdsQuerySchema>,
   ): Promise<WarehouseTemplateCatalog> {
     const { tenantId, deviceId } = scope(req);
-    return this.templatesService.templates(tenantId, deviceId, query.ids);
+    return this.templatesService.templates(
+      tenantId,
+      deviceId,
+      query.ids,
+      req.get("x-station-capabilities"),
+    );
   }
 }

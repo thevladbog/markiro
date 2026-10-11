@@ -39,7 +39,7 @@ suspend fun generateZpl(
                 labelFieldDisplayValue(element.field, data, element.textFormat),
                 element.fontSizePt, element.bold, element.align, element.maxWidthMm, element.maxLines, rasterize, element.fontFamily, element.lineHeight, element.minFontSizePt,
             )
-            is LabelElement.OrganizationLogo -> fitLabelLogo(element, spec.dpi, logo).let { "^FO${it.x},${it.y}${buildGfaCommand(it.raster)}^FS" }
+            is LabelElement.OrganizationLogo -> if (logo == null) continue else fitLabelLogo(element, spec.dpi, logo).let { "^FO${it.x},${it.y}${buildGfaCommand(it.raster)}^FS" }
             is LabelElement.Barcode -> barcode(spec, element, data)
             is LabelElement.Line -> line(spec, element)
             is LabelElement.Box -> box(spec, element)

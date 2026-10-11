@@ -71,7 +71,7 @@ export async function createLabelRenderPlan(
     language: LabelTemplateSpec["language"];
     dpi: PrinterDpi;
     rasterizeText: RasterizeTextFn;
-    logo?: MonoBitmap;
+    logo?: MonoBitmap | null;
   },
 ): Promise<LabelRenderPlan> {
   const { dpi, language, rasterizeText } = destination;
@@ -110,6 +110,7 @@ export async function createLabelRenderPlan(
         raster,
       });
     } else if (element.kind === "organization_logo") {
+      if (!destination.logo) continue;
       const logo = renderLabelLogo(element, dpi, destination.logo);
       elements.push({ id: element.id, kind: "raster", text: "", ...logo });
     } else if (element.kind === "barcode") {

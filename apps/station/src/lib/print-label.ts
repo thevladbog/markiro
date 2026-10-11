@@ -25,7 +25,7 @@ export function latin1ToBytes(text: string): Uint8Array {
 }
 
 export interface RenderLabelOptions {
-  logo?: MonoBitmap;
+  logo?: MonoBitmap | null;
   kmDataMatrix?: "native" | "raster";
   /**
    * The attached printer's resolution. `null` (or omitted) means the

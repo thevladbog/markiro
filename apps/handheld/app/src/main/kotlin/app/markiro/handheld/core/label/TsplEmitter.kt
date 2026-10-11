@@ -47,6 +47,7 @@ suspend fun generateTspl(
                 rasterize, out, ::line, element.fontFamily, element.lineHeight, element.minFontSizePt,
             )
             is LabelElement.OrganizationLogo -> {
+                if (logo == null) continue
                 val fitted = fitLabelLogo(element, spec.dpi, logo)
                 buildBitmapCommand(fitted.x, fitted.y, fitted.raster, out)
                 out.write('\n'.code)
