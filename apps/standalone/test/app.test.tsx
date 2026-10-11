@@ -31,7 +31,7 @@ import {
   saveWorkstationSettings,
 } from "../src/floor/setup/workstation-settings.js";
 import { keepEnteredShift } from "../src/floor/shifts/shift-copies.js";
-import type { HardwareApi } from "../src/hardware/hardware.js";
+import type { HardwareApi, WindowsPrinting } from "../src/hardware/hardware.js";
 import type { HostApi } from "../src/host/api.js";
 import { HostError } from "../src/host/client.js";
 import type { ConnectionApi, ConnectionHandlers } from "../src/host/connection.js";
@@ -70,6 +70,8 @@ import { completeWizard, EXPECTED_REQUEST } from "./support/wizard.js";
  * still rendered: this only watches its props.
  */
 const signOutHandles = vi.hoisted(() => [] as Array<(notice: FloorNotice | null) => void>);
+/** The print runtimes the floor was given, in order (plan ДРВ: which driver printing the app wired in). */
+const printingHandles = vi.hoisted(() => [] as Array<FloorAppProps["printing"]>);
 
 vi.mock("../src/floor/FloorApp.js", async (importOriginal) => {
   const actual = await importOriginal<{ FloorApp: ComponentType<FloorAppProps> }>();
@@ -77,6 +79,7 @@ vi.mock("../src/floor/FloorApp.js", async (importOriginal) => {
     ...actual,
     FloorApp: (props: FloorAppProps) => {
       if (signOutHandles.at(-1) !== props.onSignOut) signOutHandles.push(props.onSignOut);
+      if (printingHandles.at(-1) !== props.printing) printingHandles.push(props.printing);
       return <actual.FloorApp {...props} />;
     },
   };
@@ -257,6 +260,7 @@ interface Services {
   idleTimeoutMs?: number;
   scanSource?: ScanSource;
   hardware?: HardwareApi;
+  windowsPrinting?: WindowsPrinting;
   lockdown?: LockdownLifecycle;
 }
 
@@ -2369,6 +2373,7 @@ describe("the operator on the floor", () => {
 
   beforeEach(() => {
     signOutHandles.length = 0;
+    printingHandles.length = 0;
   });
 
   afterEach(() => {
@@ -2809,14 +2814,17 @@ describe("the operator on the floor", () => {
   };
 
   /** Anna signed in, in the line's shift, on a station whose host lists it. */
-  async function inTheShift(probe: HostProbe = probeAnswering(true)) {
+  async function inTheShift(
+    probe: HostProbe = probeAnswering(true),
+    extra: Pick<Services, "windowsPrinting"> = {},
+  ) {
     const link = fakeConnection();
     const device = fakeDevice(DEVICE_STATUS);
     const host = fakeHost();
     host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
     host.getDeviceShifts.mockResolvedValue([PLANNED]);
     host.enterShift.mockResolvedValue(OPENED);
-    renderApp({ probe, device, host, connection: link.connection });
+    renderApp({ probe, device, host, connection: link.connection, ...extra });
     await screen.findByText(PROMPT);
     scan("MRK-000742");
     fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
@@ -2830,6 +2838,22 @@ describe("the operator on the floor", () => {
     fireEvent.click(screen.getByRole("button", { name: "Выйти из смены" }));
     expect(await screen.findByRole("button", { name: "Продолжить" })).toBeTruthy();
     expect(screen.getByText(SIGNED_IN)).toBeTruthy();
+  });
+
+  it("gives the floor a print runtime over the shell's driver printing it was given (plan ДРВ)", async () => {
+    const windowsPrinting: WindowsPrinting = {
+      supportsWindowsPrinting: vi.fn(async () => true),
+      printWindowsRaster: vi.fn(async () => ({
+        sent: false as const,
+        code: "unsupported" as const,
+      })),
+      getWindowsPrintJob: vi.fn(async () => ({ state: "absent" as const })),
+    };
+    await inTheShift(probeAnswering(true), { windowsPrinting });
+    const printing = printingHandles.at(-1);
+    expect(printing).toBeDefined();
+    await expect(printing?.supportsWindowsDriver()).resolves.toBe(true);
+    expect(windowsPrinting.supportsWindowsPrinting).toHaveBeenCalledTimes(1);
   });
 
   it("keeps the operator in the shift when the host refuses the key, and refuses the device once they leave", async () => {

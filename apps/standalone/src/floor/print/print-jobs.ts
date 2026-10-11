@@ -6,6 +6,7 @@ import { LocalDbError, type LocalExecutor, type LocalStatement } from "../../loc
 import type { Pairing } from "../../local/reference-sync.js";
 import {
   parsePrinterProfile,
+  printerMode,
   readWorkstationSettings,
   resolvePrinter,
   type PrinterProfile,
@@ -507,7 +508,12 @@ export async function sendLabelJob(
     }
     throw error;
   }
-  const outcome = await runtime.send(job.id, printer.target, base64ToBytes(bytesBase64));
+  const outcome = await runtime.send(
+    job.id,
+    printer.target,
+    base64ToBytes(bytesBase64),
+    printerMode(printer),
+  );
   const settled = settleOutcome(outcome);
   try {
     await local.transaction([

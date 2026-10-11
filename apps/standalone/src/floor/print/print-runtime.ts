@@ -1,12 +1,20 @@
-import type { HardwareApi, PrintResult, PrintTarget } from "../../hardware/hardware.js";
-import { printerTargetKey } from "../setup/workstation-settings.js";
+import type {
+  HardwareApi,
+  PrintResult,
+  PrintTarget,
+  WindowsJobObservation,
+  WindowsPrinting,
+  WindowsPrintReceipt,
+} from "../../hardware/hardware.js";
+import { printerTargetKey, type PrinterMode } from "../setup/workstation-settings.js";
 
 /**
  * How long the webview waits for one send's answer, from the moment it asks
  * (queue included). The shell bounds each connection and write by 5 s, but a
  * COM port's flush or a spooler call can block past its own limit, and the
  * call then never answers (plan 2a4's notes): the work screen must not wait
- * for it forever.
+ * for it forever. A driver print (plan ДРВ) has the shell's own 30 s limit;
+ * this one is shorter, so the work screen reads `timeout` first.
  *
  * The limit counts from the moment of asking, queue wait included: a label
  * queued behind a slow but healthy send gets only what is left of it and can
@@ -34,9 +42,18 @@ const realTimer: StartTimer = (ms, fire) => {
 };
 
 /**
+ * What «Проверить очередь Windows» learns of a job (plan ДРВ): the spooler's
+ * word on its newest driver send, or `no_receipt` — no driver send of this
+ * app run named a spooler job for it. Never a printed label.
+ */
+export type WindowsQueueCheck = WindowsJobObservation | { state: "no_receipt" };
+
+/**
  * The printers of this app: one send at a time per address (the cloud
  * station's `serializePrinterOutput`), each answered within
  * `PRINT_SEND_LIMIT_MS`, and the jobs whose bytes the shell holds right now.
+ * A send in driver mode (plan ДРВ) goes to the queue's Windows driver as the
+ * document `Markiro:<uuid>`, through the same queue of its address.
  *
  * A shell call that never returns holds its address until the app restarts:
  * every later send to that printer ends `busy` (`failed` `printer_busy`, the
@@ -46,25 +63,58 @@ const realTimer: StartTimer = (ms, fire) => {
  */
 export interface PrintRuntime {
   /**
-   * Sends `bytes` to `target` after the sends already queued for its address.
-   * Never rejects: a failed IPC call is `outcome_unknown` (`printBytes`).
+   * Sends `bytes` to `target` after the sends already queued for its address:
+   * in the printer's language (`raw`, the default) or as a page for the
+   * Windows driver (`windows_driver`, a Windows queue only). Never rejects: a
+   * failed IPC call is `outcome_unknown` (`printBytes`) or `driver_unknown`.
    * `jobId` (a print job's, `null` for a test label) is in flight from now
    * until the shell's call really settles — past the limit too.
    */
-  send: (jobId: string | null, target: PrintTarget, bytes: Uint8Array) => Promise<SendOutcome>;
+  send: (
+    jobId: string | null,
+    target: PrintTarget,
+    bytes: Uint8Array,
+    mode?: PrinterMode,
+  ) => Promise<SendOutcome>;
   /** The job's bytes are with the shell, or wait for their turn. */
   isInFlight: (jobId: string) => boolean;
   /** Every job in flight (the recovery of interrupted jobs skips them). */
   inFlight: () => string[];
+  /**
+   * The spooler's word on the job's newest driver send. The receipt is kept
+   * in memory only — one that came after the limit too — and a new send of
+   * the job forgets it; after a restart it is `no_receipt`. Never rejects.
+   */
+  checkWindowsJob: (jobId: string) => Promise<WindowsQueueCheck>;
+  /** The shell prints through Windows drivers (Windows only); `false` when it cannot say. */
+  supportsWindowsDriver: () => Promise<boolean>;
+}
+
+export interface PrintRuntimeOptions {
+  limitMs?: number;
+  startTimer?: StartTimer;
+  /** The shell's driver printing; without it a driver send is `unsupported`, nothing sent. */
+  windows?: WindowsPrinting;
+  /** The UUID of a driver send's document name; a fresh one for every send. */
+  newDocumentId?: () => string;
 }
 
 export function createPrintRuntime(
   printBytes: HardwareApi["printBytes"],
-  options: { limitMs?: number; startTimer?: StartTimer } = {},
+  options: PrintRuntimeOptions = {},
 ): PrintRuntime {
-  const { limitMs = PRINT_SEND_LIMIT_MS, startTimer = realTimer } = options;
+  const {
+    limitMs = PRINT_SEND_LIMIT_MS,
+    startTimer = realTimer,
+    windows,
+    newDocumentId = () => crypto.randomUUID(),
+  } = options;
   const tails = new Map<string, Promise<void>>();
   const flying = new Map<string, number>();
+  // The spooler receipt of each job's newest driver send, and which send that is.
+  const receipts = new Map<string, WindowsPrintReceipt>();
+  const newest = new Map<string, number>();
+  let sequence = 0;
 
   function hold(jobId: string | null): () => void {
     if (jobId === null) return () => undefined;
@@ -76,10 +126,38 @@ export function createPrintRuntime(
     };
   }
 
+  async function deliver(
+    jobId: string | null,
+    send: number,
+    target: PrintTarget,
+    bytes: Uint8Array,
+    mode: PrinterMode,
+  ): Promise<PrintResult> {
+    if (mode !== "windows_driver") return printBytes(target, bytes);
+    // A driver profile is a Windows queue (`parsePrinterProfile`): anything else never goes.
+    if (target.kind !== "usb") return { sent: false, code: "invalid_target" };
+    if (windows === undefined) return { sent: false, code: "unsupported" };
+    const result = await windows.printWindowsRaster(
+      target.printer,
+      bytes,
+      `Markiro:${newDocumentId()}`,
+    );
+    if (jobId !== null && result.receipt !== undefined && newest.get(jobId) === send) {
+      receipts.set(jobId, result.receipt);
+    }
+    return result;
+  }
+
   return {
-    send: (jobId, target, bytes) => {
+    send: (jobId, target, bytes, mode = "raw") => {
       const key = printerTargetKey(target);
       const release = hold(jobId);
+      sequence += 1;
+      const send = sequence;
+      if (jobId !== null) {
+        newest.set(jobId, send);
+        receipts.delete(jobId);
+      }
       let started = false;
       let expired = false;
       const previous = tails.get(key) ?? Promise.resolve();
@@ -89,7 +167,7 @@ export function createPrintRuntime(
       const call = previous.then(async (): Promise<PrintResult | null> => {
         if (expired) return null;
         started = true;
-        return printBytes(target, bytes);
+        return deliver(jobId, send, target, bytes, mode);
       });
       const settled = call.then(
         () => undefined,
@@ -103,7 +181,13 @@ export function createPrintRuntime(
       const answered = call.then(
         (result): SendOutcome =>
           result === null ? { kind: "busy" } : { kind: "answered", result },
-        (): SendOutcome => ({ kind: "answered", result: { sent: false, code: "outcome_unknown" } }),
+        (): SendOutcome => ({
+          kind: "answered",
+          result: {
+            sent: false,
+            code: mode === "windows_driver" ? "driver_unknown" : "outcome_unknown",
+          },
+        }),
       );
       return new Promise<SendOutcome>((resolve) => {
         let done = false;
@@ -124,5 +208,22 @@ export function createPrintRuntime(
     },
     isInFlight: (jobId) => flying.has(jobId),
     inFlight: () => [...flying.keys()],
+    checkWindowsJob: async (jobId) => {
+      const receipt = receipts.get(jobId);
+      if (receipt === undefined || windows === undefined) return { state: "no_receipt" };
+      try {
+        return await windows.getWindowsPrintJob(receipt);
+      } catch {
+        return { state: "unavailable" };
+      }
+    },
+    supportsWindowsDriver: async () => {
+      if (windows === undefined) return false;
+      try {
+        return await windows.supportsWindowsPrinting();
+      } catch {
+        return false;
+      }
+    },
   };
 }

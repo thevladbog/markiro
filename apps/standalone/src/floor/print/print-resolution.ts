@@ -11,6 +11,7 @@ import {
   palletLabelRecord,
 } from "../facts.js";
 import {
+  printerMode,
   resolvePrinter,
   type PrinterProfile,
   type WorkstationSettings,
@@ -246,8 +247,9 @@ export function printerForAgain(
  * that failed to read it — only with a reason, written as a reprint
  * exception in the transaction that marks the job `sending`. The bytes are
  * the job's when the printer's language and resolution are the job's, and
- * rendered again from the shift's snapshot otherwise (`template` must be the
- * job's own revision). No printer — `NoPrinterError`; no render —
+ * rendered again from the shift's snapshot otherwise — another language,
+ * resolution or way of printing (plan ДРВ; `template` must be the job's own
+ * revision). No printer — `NoPrinterError`; no render —
  * `LabelRenderError`; neither changes or sends anything.
  *
  * Known limit: a rebind overwrites the job's printer and bytes, and the
@@ -274,8 +276,10 @@ export async function printAgain(
   const printer = printerForAgain(job, settings, request.printer);
   if (printer === null) throw new NoPrinterError();
   let bytesBase64 = job.bytesBase64;
+  // A driver page and a RAW document are other bytes even at one language and resolution (plan ДРВ).
   const sameRender =
     job.printer !== null &&
+    printerMode(job.printer) === printerMode(printer) &&
     job.printer.language === printer.language &&
     job.printer.dpi === printer.dpi;
   if (bytesBase64 === null || !sameRender) {
