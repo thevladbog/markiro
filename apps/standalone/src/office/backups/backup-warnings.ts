@@ -25,6 +25,8 @@ export type BackupWarning =
   | { kind: "stale" }
   | { kind: "noSecond" }
   | { kind: "secondStale" }
+  | { kind: "localNoIdentity" }
+  | { kind: "secondNoIdentity" }
   | { kind: "clockBehind" }
   | { kind: "stuck" };
 
@@ -44,6 +46,16 @@ function stale(destination: BackupDestination, now: number): boolean {
   return newest !== undefined && now - Date.parse(newest.createdAt) > STALE_AFTER_MS;
 }
 
+/**
+ * Whether the folder's newest copy lacks the host identity (plan I1): restored on a new
+ * computer, every device would pair again. The host could not close the key in that folder
+ * (FAT32, exFAT, a share without ACLs), or the copy is an older build's.
+ */
+function withoutIdentity(destination: BackupDestination | null): boolean {
+  const newest = destination?.copies[0];
+  return newest !== undefined && !newest.hostIdentity;
+}
+
 /** Whether the folder's newest copy is later than the host's `now` by more than `CLOCK_AHEAD_MS`. */
 function ahead(destination: BackupDestination | null, now: number): boolean {
   const newest = destination?.copies[0];
@@ -53,7 +65,8 @@ function ahead(destination: BackupDestination | null, now: number): boolean {
 /**
  * The warnings of a backup state: the stations' facts held since a restore,
  * a failed last attempt in either folder, no copy at all, a newest copy
- * older than a day and a bit, no second folder, a host clock behind the newest
+ * older than a day and a bit, no second folder, a newest copy without the host
+ * identity in either folder, a host clock behind the newest
  * copy of either folder, a copy running for more than half an hour. A copy in progress hides nothing: the last attempt still
  * counts until it ends. The held facts name how many stations the host
  * knows, never how many gave their blocks back: no station does yet (plan
@@ -80,6 +93,8 @@ export function backupWarnings(state: BackupState): BackupWarning[] {
   } else if (second === null && stale(state.second, now)) {
     warnings.push({ kind: "secondStale" });
   }
+  if (withoutIdentity(state.local)) warnings.push({ kind: "localNoIdentity" });
+  if (withoutIdentity(state.second)) warnings.push({ kind: "secondNoIdentity" });
   if (ahead(state.local, now) || ahead(state.second, now)) {
     warnings.push({ kind: "clockBehind" });
   }

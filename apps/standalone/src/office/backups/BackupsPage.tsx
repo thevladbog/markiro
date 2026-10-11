@@ -207,6 +207,7 @@ function BackupsContent() {
               <li>{t("office.backups.restore.start")}</li>
             </ol>
             <p className="office-note">{t("office.backups.restore.after")}</p>
+            <p className="office-note">{t("office.backups.restore.newPc")}</p>
           </div>
         </Card>
       </>
@@ -436,14 +437,23 @@ function CopiesTable({ copies, time }: { copies: BackupCopy[]; time: BackupTime 
       mono: true,
       render: (copy) => formatSize(copy.sizeBytes, t),
     },
+    {
+      key: "identity",
+      title: t("office.backups.table.identity"),
+      render: (copy) =>
+        t(copy.hostIdentity ? "office.backups.identity.yes" : "office.backups.identity.no"),
+    },
   ];
   return (
-    <Table
-      columns={columns}
-      rows={copies}
-      getRowKey={(copy) => copy.file}
-      empty={t("office.backups.noCopiesYet")}
-      scrollLabel={t("office.backups.copies")}
-    />
+    <>
+      <Table
+        columns={columns}
+        rows={copies}
+        getRowKey={(copy) => copy.file}
+        empty={t("office.backups.noCopiesYet")}
+        scrollLabel={t("office.backups.copies")}
+      />
+      {copies.length > 0 && <p className="office-note">{t("office.backups.identity.note")}</p>}
+    </>
   );
 }

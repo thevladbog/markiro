@@ -124,6 +124,33 @@ describe("backupWarnings", () => {
     });
   });
 
+  it("warns of a newest copy without the host identity, in either folder", () => {
+    const bare = { ...backupCopy("2026-10-09T14:00:00Z"), hostIdentity: false };
+    expect(backupWarnings(state({ local: { ...HEALTHY_BACKUPS.local, copies: [bare] } }))).toEqual([
+      { kind: "localNoIdentity" },
+    ]);
+    expect(
+      backupWarnings(
+        state({
+          second: { dir: "\\\\ADMIN-PC\\MarkiroCopies", lastAttempt: null, copies: [bare] },
+        }),
+      ),
+    ).toEqual([{ kind: "secondNoIdentity" }]);
+    // An older copy without it does not count: a restore takes the newest.
+    const older = { ...backupCopy("2026-10-09T11:35:12Z"), hostIdentity: false };
+    expect(
+      backupWarnings(
+        state({
+          local: { ...HEALTHY_BACKUPS.local, copies: [backupCopy("2026-10-09T14:00:00Z"), older] },
+        }),
+      ),
+    ).toEqual([]);
+    expect(warningTone({ kind: "secondNoIdentity" })).toBe("warn");
+    expect(warningText({ kind: "localNoIdentity" })).toEqual({
+      key: "office.backups.warnings.localNoIdentity",
+    });
+  });
+
   it("warns of a copy running for more than half an hour", () => {
     const running = (startedAt: string) => state({ running: { trigger: "manual", startedAt } });
     expect(backupWarnings(running("2026-10-09T13:50:00Z"))).toEqual([]);
