@@ -1,3 +1,6 @@
+import { loadThermalLabelLogo } from "../../lib/organization-branding.js";
+import type { SqlExecutor } from "../../lib/mirror.js";
+import type { CredentialGeneration } from "../../lib/credential-recovery.js";
 import { useEffect, useState } from "react";
 import {
   createLabelRenderPlan,
@@ -12,43 +15,63 @@ import { useTranslation } from "react-i18next";
 type PreviewTemplate = { name: string; spec: LabelTemplateSpec };
 export function LabelPreview({
   template,
+  logoOwner,
   dpi = template.spec.dpi,
   language = template.spec.language,
 }: {
   template: PreviewTemplate;
+  logoOwner?: { exec: SqlExecutor; generation: CredentialGeneration };
   dpi?: PrinterDpi;
   language?: LabelTemplateSpec["language"];
 }) {
   const { t } = useTranslation();
+  const logoExec = logoOwner?.exec;
+  const logoGeneration = logoOwner?.generation;
   const [loaded, setLoaded] = useState<{
     template: PreviewTemplate;
     dpi: PrinterDpi;
     language: LabelTemplateSpec["language"];
     plan: LabelRenderPlan | null;
+    logoExec: SqlExecutor | undefined;
+    logoGeneration: CredentialGeneration | undefined;
   } | null>(null);
   useEffect(() => {
     let active = true;
-    void createLabelRenderPlan(
-      template.spec,
-      { ...sampleLabelData(), "km.code": `${sampleLabelData()["km.code"]}\u001d93DEMO` },
-      { dpi, language, rasterizeText },
-    )
+    const run = async () => {
+      const hasLogo = template.spec.elements.some((e) => e.kind === "organization_logo");
+      const branding =
+        hasLogo && logoExec && logoGeneration
+          ? { logo: await loadThermalLabelLogo(logoExec, logoGeneration) }
+          : {};
+      return createLabelRenderPlan(
+        template.spec,
+        { ...sampleLabelData(), "km.code": `${sampleLabelData()["km.code"]}\u001d93DEMO` },
+        { dpi, language, rasterizeText, ...branding },
+      );
+    };
+    void run()
       .then((plan) => {
-        if (active) setLoaded({ template, dpi, language, plan });
+        if (active) setLoaded({ template, dpi, language, plan, logoExec, logoGeneration });
       })
       .catch(() => {
-        if (active) setLoaded({ template, dpi, language, plan: null });
+        if (active) setLoaded({ template, dpi, language, plan: null, logoExec, logoGeneration });
       });
     return () => {
       active = false;
     };
-  }, [template, dpi, language]);
+  }, [template, dpi, language, logoExec, logoGeneration]);
   const current =
-    loaded?.template === template && loaded.dpi === dpi && loaded.language === language;
+    loaded?.template === template &&
+    loaded.dpi === dpi &&
+    loaded.language === language &&
+    loaded.logoExec === logoExec &&
+    loaded.logoGeneration === logoGeneration &&
+    !logoGeneration?.sealed;
   const plan = current ? loaded.plan : null;
   const spec = template.spec;
   return (
     <figure className="warehouse-label-preview">
+      {spec.gs1Constraint && <p role="note">{t("warehouse.gs1WidthConstraint")}</p>}
       {plan ? (
         <svg
           role="img"

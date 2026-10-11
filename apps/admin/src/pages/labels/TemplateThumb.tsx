@@ -1,3 +1,5 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { paintThermalThumbnail } from "./thermal-thumbnail.js";
 /**
  * Plan 04 Task 8: label template library screen -- per-card thumbnail.
  *
@@ -71,6 +73,7 @@ export interface TemplateThumbProps {
 
 export function TemplateThumb({ id, widthMm, heightMm }: TemplateThumbProps) {
   const { data } = useLabelTemplate(id);
+  const queryClient = useQueryClient();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Fit the label's own aspect ratio inside a fixed-size track, same
@@ -89,8 +92,23 @@ export function TemplateThumb({ id, widthMm, heightMm }: TemplateThumbProps) {
       drawSheetThumbnail(ctx, data.spec, canvas.width, canvas.height);
       return;
     }
+    if (data.spec.elements.some((e) => e.kind === "organization_logo")) {
+      let cancelled = false;
+      void paintThermalThumbnail(
+        canvas,
+        data.spec,
+        data.purpose,
+        () => !cancelled,
+        queryClient,
+      ).catch(() => {
+        if (!cancelled) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
     draw(data.spec, ctx, scale, labelPreviewData(data.purpose), labelRenderOptions(data.purpose));
-  }, [data, scale]);
+  }, [data, scale, queryClient]);
 
   return (
     <div

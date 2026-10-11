@@ -1,3 +1,4 @@
+import type { MonoBitmap } from "./mono-compose.js";
 import bwipjs from "bwip-js/generic";
 import { DomainError } from "../errors.js";
 import {
@@ -21,12 +22,14 @@ export async function renderMonoLabel(
   spec: LabelTemplateSpec,
   fields: Record<LabelField, string>,
   rasterizeText: RasterizeTextFn,
+  options: { logo?: MonoBitmap | null } = {},
 ): Promise<MonoRaster> {
   const validated = labelTemplateSpecStrictSchema.parse(spec);
   const plan = await createLabelRenderPlan(validated, fields, {
     language: "zpl",
     dpi: validated.dpi,
     rasterizeText,
+    ...options,
   });
   const stride = Math.ceil(plan.widthDots / 8);
   const page: MonoRaster = {

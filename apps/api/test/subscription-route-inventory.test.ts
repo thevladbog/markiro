@@ -508,6 +508,8 @@ const CUSTOMER_ROUTE_GROUPS: readonly {
       reason: "read",
     }),
     routes: [
+      "GET /station/handheld-branding (HandheldBrandingController.read)",
+      "GET /station/handheld-branding/logo/:revision (HandheldBrandingController.logo)",
       "GET /station/branding (StationBrandingController.read)",
       "GET /station/branding/logo/:revision (StationBrandingController.logo)",
     ],
@@ -1167,7 +1169,8 @@ describe("registered subscription route inventory", () => {
           route.controller.name === "StationWriteoffsController" ||
           route.controller.name === "StationPalletsController";
         const expected =
-          route.controller.name === "StationBrandingController"
+          route.controller.name === "StationBrandingController" ||
+          route.controller.name === "HandheldBrandingController"
             ? STATION_BRANDING_GUARDS
             : route.controller.name === "KioskController" ||
                 route.controller.name === "KioskGrantsController"

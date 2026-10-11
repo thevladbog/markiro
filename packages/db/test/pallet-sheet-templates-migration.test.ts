@@ -41,7 +41,7 @@ describe.skipIf(!databaseUrl)("pallet sheet migration", () => {
     expect(
       (
         await pool.query(
-          "SELECT spec,format,revision FROM label_templates WHERE tenant_id='historical' AND seed_key IS NULL",
+          "SELECT spec,format,revision FROM label_templates WHERE tenant_id='historical' AND name='Historical' AND seed_key IS NULL",
         )
       ).rows,
     ).toEqual([{ spec: { preserved: true }, format: "label_v1", revision: 1 }]);

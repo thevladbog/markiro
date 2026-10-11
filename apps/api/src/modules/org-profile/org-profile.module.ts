@@ -1,3 +1,4 @@
+import { HandheldBrandingController } from "./handheld-branding.controller";
 import { Module } from "@nestjs/common";
 import { SsccModule } from "../sscc/sscc.module";
 import { OrgProfileController } from "./org-profile.controller";
@@ -13,7 +14,12 @@ import { CabinetPrintBrandingController } from "./cabinet-print-branding.control
  */
 @Module({
   imports: [SsccModule],
-  controllers: [OrgProfileController, StationBrandingController, CabinetPrintBrandingController],
+  controllers: [
+    HandheldBrandingController,
+    OrgProfileController,
+    StationBrandingController,
+    CabinetPrintBrandingController,
+  ],
   providers: [OrgProfileService],
   exports: [OrgProfileService],
 })

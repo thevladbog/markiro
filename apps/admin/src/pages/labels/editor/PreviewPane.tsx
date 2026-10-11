@@ -1,3 +1,6 @@
+import { renderMonoLabel } from "@markiro/domain";
+import { loadCabinetSheetBranding } from "./sheet/sheet-branding.js";
+import { paintSheetRaster } from "./sheet/sheet-preview.js";
 /**
  * Plan 04 Task 10: label editor chrome -- the live preview pane.
  *
@@ -116,6 +119,7 @@ export function PreviewPane({
 }: PreviewPaneProps) {
   const { t } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const [brandingFailed, setBrandingFailed] = useState(false);
   const [coverageStatus, setCoverageStatus] = useState<CoverageStatus>("ok");
   const resolvedData = data ?? labelPreviewData(purpose);
   const renderOptions = labelRenderOptions(purpose);
@@ -131,6 +135,27 @@ export function PreviewPane({
     const ctx = canvas.getContext("2d");
     if (!ctx) return undefined;
 
+    if (spec.elements.some((e) => e.kind === "organization_logo")) {
+      let active = true;
+      setBrandingFailed(false);
+      void loadCabinetSheetBranding()
+        .then((branding) =>
+          renderMonoLabel(spec, resolvedData, rasterizeText, { logo: branding.logo }),
+        )
+        .then((raster) => {
+          if (active) paintSheetRaster(canvas, raster);
+        })
+        .catch(() => {
+          if (active) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            setBrandingFailed(true);
+          }
+        });
+      return () => {
+        active = false;
+      };
+    }
+    setBrandingFailed(false);
     draw(spec, ctx, scale, resolvedData, renderOptions);
 
     let cancelled = false;
@@ -140,7 +165,8 @@ export function PreviewPane({
         try {
           const fontSizePx = ptToDots(element.fontSizePt, spec.dpi);
           const raster = await rasterizeText(text, {
-            fontFamily: PREVIEW_FONT_FAMILY,
+            fontFamily: element.fontFamily ?? PREVIEW_FONT_FAMILY,
+            ...(element.lineHeight === undefined ? {} : { lineHeight: element.lineHeight }),
             fontSizePx,
             bold: element.bold ?? false,
             ...(element.maxWidthMm !== undefined
@@ -254,6 +280,10 @@ export function PreviewPane({
           {t("pages.labels.purpose.sample")}
         </span>
       ) : null}
+      {brandingFailed && <Alert tone="warn">{t("pages.labels.sheet.editor.brandingError")}</Alert>}
+      {spec.gs1Constraint && (
+        <Alert tone="warn">{t("pages.labels.editor.preview.gs1WidthConstraint")}</Alert>
+      )}
       {coverageStatus === "missing" && (
         <Alert tone="warn">{t("pages.labels.editor.preview.cyrillicWarning")}</Alert>
       )}

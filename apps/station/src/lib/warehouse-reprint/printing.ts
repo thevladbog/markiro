@@ -1,3 +1,4 @@
+import { loadThermalLabelLogoForOwner } from "../organization-branding.js";
 import { renderWarehouseLabel } from "./prepare.js";
 import { rasterizeDriverText, rasterizeText } from "../rasterizer.js";
 import type { RasterizeTextFn } from "@markiro/domain";
@@ -223,6 +224,13 @@ export async function reprintWarehouseJob(
             profile,
             deps.rasterizeText ??
               (printerFormat(profile) === "mono-raster-v1" ? rasterizeDriverText : rasterizeText),
+            job.template.spec.elements.some((e) => e.kind === "organization_logo")
+              ? {
+                  logo: await loadThermalLabelLogoForOwner(deps.exec, deps.owner, () =>
+                    deps.isCurrent(),
+                  ),
+                }
+              : {},
           )),
           dpi: profile.dpi,
           ...(printerFormat(profile) === "mono-raster-v1"

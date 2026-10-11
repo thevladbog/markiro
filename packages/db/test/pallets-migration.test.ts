@@ -209,7 +209,7 @@ describe.skipIf(!databaseUrl)("pallets migration", () => {
       [tenantId],
     );
     expect(rows).toEqual([
-      { format: "label_v1", n: 2 },
+      { format: "label_v1", n: 3 },
       { format: "pallet_sheet_v2", n: 3 },
     ]);
   });
@@ -219,6 +219,7 @@ describe.skipIf(!databaseUrl)("pallets migration", () => {
       for (const [index, name] of [
         PALLET_LABEL_TEMPLATE_NAME,
         PALLET_LABEL_58X40_TEMPLATE_NAME,
+        "Палета 75×120",
       ].entries()) {
         const { rows } = await pool.query(
           "SELECT spec FROM label_templates WHERE tenant_id=$1 AND name=$2 AND purpose='pallet'",

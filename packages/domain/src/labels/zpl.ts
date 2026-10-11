@@ -1,3 +1,5 @@
+import { renderLabelLogo } from "./label-logo.js";
+import type { MonoBitmap } from "./mono-compose.js";
 import { DomainError } from "../errors.js";
 import { rasterizeGs1DataMatrix } from "../barcodes/gs1-data-matrix.js";
 import {
@@ -25,6 +27,7 @@ export { needsImageRendering } from "./text.js";
 
 export interface GenerateZplDeps {
   rasterizeText?: RasterizeTextFn;
+  logo?: MonoBitmap | null;
   /** Opt-in duplicate layout: sizeMm is the full symbol square, not a module size. */
   kmDataMatrix?: "native" | "raster";
 }
@@ -150,7 +153,11 @@ async function renderTextLikeElement(
   const x = mmToDots(element.xMm, spec.dpi);
   const y = mmToDots(element.yMm, spec.dpi);
 
-  if (needsImageRendering(text)) {
+  if (
+    needsImageRendering(text) ||
+    element.lineHeight !== undefined ||
+    element.fontFamily !== undefined
+  ) {
     if (!deps.rasterizeText) {
       throw new DomainError(
         "RASTER_REQUIRED",
@@ -170,7 +177,11 @@ async function renderTextLikeElement(
     // long Cyrillic product name prints off the right edge of the label
     // (`RasterizeTextOptions`'s doc comment has the full story).
     const raster = await deps.rasterizeText(text, {
-      fontFamily: "sans-serif",
+      fontFamily: element.fontFamily ?? "sans-serif",
+      ...(element.minFontSizePt === undefined
+        ? {}
+        : { minFontSizePx: ptToDots(element.minFontSizePt, spec.dpi) }),
+      ...(element.lineHeight === undefined ? {} : { lineHeight: element.lineHeight }),
       fontSizePx,
       bold: element.bold ?? false,
       maxWidthPx: maxWidthDots,
@@ -362,6 +373,12 @@ export async function generateZpl(
   // calls resolve, and keeps a test double's call order predictable.
   for (const element of spec.elements) {
     switch (element.kind) {
+      case "organization_logo": {
+        if (!deps.logo) break; // Decorative: preserve the empty reserved space offline.
+        const { xDots, yDots, raster } = renderLabelLogo(element, spec.dpi, deps.logo);
+        lines.push(`^FO${xDots},${yDots}${buildGfaCommand(raster)}^FS`);
+        break;
+      }
       case "text":
         lines.push(await renderTextLikeElement(element, element.text, spec, deps));
         break;

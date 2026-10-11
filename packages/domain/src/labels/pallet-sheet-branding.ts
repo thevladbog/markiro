@@ -29,6 +29,7 @@ export const organizationBrandingDescriptorSchema = z
       value.logo === null ||
       ![
         `/station/branding/logo/${value.logoRevision}`,
+        `/station/handheld-branding/logo/${value.logoRevision}`,
         `/org/profile/print-branding/logo/${value.logoRevision}`,
       ].includes(value.logoUrl ?? "")
     ) {

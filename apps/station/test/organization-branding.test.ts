@@ -193,3 +193,26 @@ it("rejects wrong source digest and corruption without replacing the last comple
     .run();
   await expect(loadOrganizationBranding(h.owner)).rejects.toThrow();
 });
+
+it("resolves the same owner-scoped logo for thermal labels and never another tenant's cache", async () => {
+  const { loadThermalLabelLogo } = await import("../src/lib/organization-branding.js");
+  const h = await fixture();
+  await refreshOrganizationBranding(h.owner, ports);
+  const owner = {
+    serverOrigin: "https://markiro.test",
+    tenantId: h.owner.tenantId,
+    deviceId: "device",
+    kind: "station",
+  };
+  h.db
+    .prepare(
+      "INSERT INTO station_device_recovery(id,machine_id,owner_json,phase) VALUES(1,'machine',?,'active')",
+    )
+    .run(JSON.stringify(owner));
+  expect(await loadThermalLabelLogo(h.exec, h.generation)).toMatchObject(bitmap);
+  expect(await loadThermalLabelLogo(h.exec, createCredentialGeneration("other-key"))).toBeNull();
+  h.db
+    .prepare("UPDATE station_device_recovery SET owner_json=? WHERE id=1")
+    .run(JSON.stringify({ ...owner, tenantId: "other-tenant" }));
+  expect(await loadThermalLabelLogo(h.exec, h.generation)).toBeNull();
+});

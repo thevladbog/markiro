@@ -2201,7 +2201,8 @@
         "preview": {
           "caption": "preview = print at the preview resolution",
           "cyrillicWarning": "The selected font has no Cyrillic glyphs — text will print as a raster image. Sharpness may be reduced.",
-          "coverageCheckFailed": "Could not verify the font — printed text may look different from this preview."
+          "coverageCheckFailed": "Could not verify the font — printed text may look different from this preview.",
+          "gs1WidthConstraint": "75×120 mm: the SSCC X-dimension is below the usual GS1 minimum for logistic units. This format has a GS1 limitation."
         },
         "toasts": {
           "createSuccess": "Template created",

@@ -602,5 +602,105 @@
         "PRINT 1"
       ]
     }
+  ],
+  "logoIdentical": [
+    {
+      "name": "contained logo 203 dpi",
+      "spec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 203,
+        "language": "zpl",
+        "elements": [
+          {
+            "id": "logo",
+            "kind": "organization_logo",
+            "xMm": 4,
+            "yMm": 3,
+            "widthMm": 3,
+            "heightMm": 2,
+            "source": "organization",
+            "fallback": "markiro"
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "qty.boxes": "12",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "logo": {
+        "width": 8,
+        "height": 4,
+        "stride": 1,
+        "pixels": [
+          128,
+          64,
+          32,
+          16
+        ]
+      },
+      "zpl": "^XA\n^PW599\n^LL959\n^FO32,26^GFA,36,36,3,E00000E00000E000001C00001C00001C0000038000038000038000007000007000007000^FS\n^XZ\n",
+      "tspl": "SIZE 75 mm, 120 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBITMAP 32,26,3,12,0,\u001fÿÿ\u001fÿÿ\u001fÿÿãÿÿãÿÿãÿÿüÿüÿüÿÿÿÿÿÿÿ\nPRINT 1\n"
+    },
+    {
+      "name": "contained logo 300 dpi",
+      "spec": {
+        "widthMm": 75,
+        "heightMm": 120,
+        "dpi": 300,
+        "language": "zpl",
+        "elements": [
+          {
+            "id": "logo",
+            "kind": "organization_logo",
+            "xMm": 4,
+            "yMm": 3,
+            "widthMm": 3,
+            "heightMm": 2,
+            "source": "organization",
+            "fallback": "markiro"
+          }
+        ]
+      },
+      "data": {
+        "product.name": "Вода питьевая 0,5 л",
+        "product.printName": "Вода 0,5",
+        "product.gtin": "04600682000013",
+        "product.egais": "0101234567890123456",
+        "km.code": "010460068200001321abcDEF1234567",
+        "sscc": "346006820000000014",
+        "shift.no": "214",
+        "date": "23.07.2026",
+        "expiry": "19.01.2027",
+        "qty": "20",
+        "qty.boxes": "12",
+        "operator": "Smirnov A.",
+        "counterparty.name": "Zavod Partner"
+      },
+      "logo": {
+        "width": 8,
+        "height": 4,
+        "stride": 1,
+        "pixels": [
+          128,
+          64,
+          32,
+          16
+        ]
+      },
+      "zpl": "^XA\n^PW886\n^LL1417\n^FO47,38^GFA,90,90,5,F800000000F800000000F800000000F800000000F8000000000780000000078000000007800000000780000000007C000000007C000000007C000000007C000000007C0000000003C000000003C000000003C000000003C00000^FS\n^XZ\n",
+      "tspl": "SIZE 75 mm, 120 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBITMAP 47,38,5,18,0,\u0007ÿÿÿÿ\u0007ÿÿÿÿ\u0007ÿÿÿÿ\u0007ÿÿÿÿ\u0007ÿÿÿÿøÿÿÿøÿÿÿøÿÿÿøÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿÿü?ÿÿÿü?ÿÿÿü?ÿÿÿü?ÿÿ\nPRINT 1\n"
+    }
   ]
 }

@@ -49,6 +49,9 @@ export interface StructuralFixture {
 export interface LabelFixtures {
   byteIdentical: ByteIdenticalFixture[];
   structural: StructuralFixture[];
+  logoIdentical: (ByteIdenticalFixture & {
+    logo: { width: number; height: number; stride: number; pixels: number[] };
+  })[];
 }
 
 const DATA: Record<LabelField, string> = {
@@ -328,5 +331,36 @@ export async function buildLabelFixtures(): Promise<LabelFixtures> {
       tsplShape: reduceTspl(tspl),
     });
   }
-  return { byteIdentical, structural };
+  const logoIdentical: LabelFixtures["logoIdentical"] = [];
+  const logo = { width: 8, height: 4, stride: 1, pixels: [128, 64, 32, 16] };
+  for (const dpi of [203, 300] as const) {
+    const s: LabelTemplateSpec = {
+      widthMm: 75,
+      heightMm: 120,
+      dpi,
+      language: "zpl",
+      elements: [
+        {
+          id: "logo",
+          kind: "organization_logo",
+          xMm: 4,
+          yMm: 3,
+          widthMm: 3,
+          heightMm: 2,
+          source: "organization",
+          fallback: "markiro",
+        },
+      ],
+    };
+    const bitmap = { ...logo, pixels: Uint8Array.from(logo.pixels) };
+    logoIdentical.push({
+      name: `contained logo ${dpi} dpi`,
+      spec: s,
+      data: DATA,
+      logo,
+      zpl: await generateZpl(s, DATA, { logo: bitmap }),
+      tspl: await generateTspl(s, DATA, { logo: bitmap }),
+    });
+  }
+  return { byteIdentical, structural, logoIdentical };
 }

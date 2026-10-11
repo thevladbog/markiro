@@ -130,15 +130,33 @@ function buildFontShorthand(fontFamily: string, fontSizePx: number, bold: boolea
  */
 function rasterizeTextSync(
   text: string,
-  { fontFamily, fontSizePx, bold, maxWidthPx, maxLines, overflow }: RasterizeTextOptions,
+  {
+    fontFamily,
+    fontSizePx,
+    bold,
+    maxWidthPx,
+    maxLines,
+    overflow,
+    lineHeight: lineHeightEm,
+    minFontSizePx,
+  }: RasterizeTextOptions,
 ) {
-  const font = buildFontShorthand(fontFamily, fontSizePx, bold);
+  let font = buildFontShorthand(fontFamily, fontSizePx, bold);
 
   const measureCtx = getCanvas2dContext(1, 1);
   measureCtx.font = font;
   const measure = (s: string) => measureCtx.measureText(s).width;
 
   const bounded = maxWidthPx !== undefined && maxWidthPx > 0;
+  if (bounded && minFontSizePx !== undefined) {
+    while (measure(text) > maxWidthPx && fontSizePx > minFontSizePx) {
+      fontSizePx--;
+      font = buildFontShorthand(fontFamily, fontSizePx, bold);
+      measureCtx.font = font;
+    }
+    if (measure(text) > maxWidthPx)
+      throw new Error("Label quantity exceeds its box at minimum font size");
+  }
   const lines = bounded
     ? (overflow === "error" ? wrapTextToWidthStrict : wrapTextToWidth)(
         text,
@@ -147,7 +165,7 @@ function rasterizeTextSync(
         maxLines ?? 1,
       )
     : [text];
-  const lineHeight = Math.ceil(fontSizePx * 1.5);
+  const lineHeight = Math.ceil(fontSizePx * (lineHeightEm ?? 1.5));
   const naturalWidth = Math.ceil(Math.max(...lines.map(measure)));
   // Clamped as well as wrapped: `measure` is fractional and `wrapTextToWidth`
   // only guarantees each line is <= maxWidthPx BEFORE the ceil, so a line

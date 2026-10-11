@@ -3,6 +3,7 @@ import {
   shelfLifeExpiryDate,
   isValidSscc,
   type LabelField,
+  type MonoBitmap,
   type LabelTemplateSpec,
   type PrinterDpi,
   type RasterizeTextFn,
@@ -50,8 +51,10 @@ export function renderInventoryBoxLabel(
   language: PrinterLanguage,
   rasterizeText: RasterizeTextFn,
   dpi: PrinterDpi | null = null,
+  logo?: MonoBitmap | null,
 ): Promise<Uint8Array> {
   return renderLabelBytes(template, inventoryBoxLabelFields(input), language, rasterizeText, {
     dpi,
+    ...(logo ? { logo } : {}),
   });
 }

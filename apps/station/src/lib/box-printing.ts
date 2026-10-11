@@ -5,7 +5,7 @@ import {
   prepareWindowsReprint,
   type DeliveryKey,
 } from "./print-deliveries.js";
-import type { LabelTemplateSpec, PrinterDpi } from "@markiro/domain";
+import type { LabelTemplateSpec, PrinterDpi, MonoBitmap } from "@markiro/domain";
 import type { BoxPrintErrorCode } from "./boxes.js";
 import type { PrintTarget } from "./hardware.js";
 import type { PrinterLanguage } from "./hardware-config.js";
@@ -23,6 +23,7 @@ export type BoxPrintAttempt =
 
 export interface BoxPrintInput {
   explicitRetry?: boolean;
+  loadLogo?: () => Promise<MonoBitmap | null>;
   template: LabelTemplateSpec | null;
   fields: Record<string, string>;
   destination?: {
@@ -47,6 +48,7 @@ export interface BoxPrintInput {
     fields: Record<string, string>,
     language: PrinterLanguage,
     dpi: PrinterDpi | null,
+    logo?: MonoBitmap | null,
   ) => Promise<Uint8Array>;
 }
 
@@ -69,8 +71,20 @@ export async function attemptBoxPrint(input: BoxPrintInput): Promise<BoxPrintAtt
   let bytes: Uint8Array;
   let deliveryKey: DeliveryKey | undefined = input.destination?.key;
   try {
+    const logoOptions = async () => {
+      if (!template.elements.some((e) => e.kind === "organization_logo")) return {};
+      return input.loadLogo ? { logo: await input.loadLogo() } : {};
+    };
     const render = async () =>
-      (await renderPrintArtifact(template, input.fields, printer, rasterizeDriverText)).bytes;
+      (
+        await renderPrintArtifact(
+          template,
+          input.fields,
+          printer,
+          rasterizeDriverText,
+          await logoOptions(),
+        )
+      ).bytes;
     const retry =
       input.explicitRetry && input.destination && printerMode(printer) === "windows_driver"
         ? await prepareWindowsReprint(
@@ -86,9 +100,24 @@ export async function attemptBoxPrint(input: BoxPrintInput): Promise<BoxPrintAtt
     } else
       bytes =
         printerMode(printer) === "windows_driver"
-          ? (await renderPrintArtifact(input.template, input.fields, printer, rasterizeDriverText))
-              .bytes
-          : await input.render(input.template, input.fields, printer.language, printer.dpi);
+          ? (
+              await renderPrintArtifact(
+                input.template,
+                input.fields,
+                printer,
+                rasterizeDriverText,
+                await logoOptions(),
+              )
+            ).bytes
+          : template.elements.some((e) => e.kind === "organization_logo")
+            ? await input.render(
+                template,
+                input.fields,
+                printer.language,
+                printer.dpi,
+                (await logoOptions()).logo,
+              )
+            : await input.render(template, input.fields, printer.language, printer.dpi);
   } catch {
     console.error("station: box label render failed");
     return { kind: "failed", code: "render_failed" };

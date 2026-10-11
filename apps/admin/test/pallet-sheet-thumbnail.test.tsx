@@ -1,3 +1,4 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { buildPalletSheetPresets } from "@markiro/domain";
 import { render, cleanup } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -40,7 +41,7 @@ it("keeps every A4 library thumbnail bounded and avoids print rendering or priva
     context as unknown as CanvasRenderingContext2D,
   );
   const { container } = render(
-    <>
+    <QueryClientProvider client={new QueryClient()}>
       {presets.map((preset, index) => (
         <TemplateThumb
           key={index}
@@ -49,7 +50,7 @@ it("keeps every A4 library thumbnail bounded and avoids print rendering or priva
           heightMm={preset.spec.page.orientation === "portrait" ? 297 : 210}
         />
       ))}
-    </>,
+    </QueryClientProvider>,
   );
   await Promise.resolve();
   expect(loadCabinetSheetBranding).not.toHaveBeenCalled();

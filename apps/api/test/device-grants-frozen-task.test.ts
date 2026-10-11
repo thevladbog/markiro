@@ -1,3 +1,10 @@
+import { projectThermalInventoryManifest } from "../src/modules/inventories/thermal-label-policy";
+import { parseStationInventoryManifest } from "../src/modules/inventories/station-inventory.dto";
+import {
+  buildDefaultLabelTemplates,
+  projectThermalLabelForClient,
+  THERMAL_LABEL_BRANDING_PROTOCOL,
+} from "@markiro/domain";
 import { describe, expect, it } from "vitest";
 import {
   buildFrozenGrantTask,
@@ -39,6 +46,56 @@ describe("frozen productive scope", () => {
         "pallet-sheet-v2",
       ),
     ).toThrow();
+  });
+  it("binds the same projected thermal print model as the legacy/current inventory bundle", () => {
+    const spec = buildDefaultLabelTemplates().find((t) => t.name === "Коробка 100×150")!.spec;
+    const manifest = parseStationInventoryManifest({
+      inventoryId: "a1111111-1111-4111-8111-111111111111",
+      inventoryNumber: "INV-1",
+      snapshotId: "b1111111-1111-4111-8111-111111111111",
+      snapshotRevision: 1,
+      snapshotFixedAt: "2026-10-11T00:00:00.000Z",
+      combinedDigest: "a".repeat(64),
+      contentDigest: "b".repeat(64),
+      codeCount: 0,
+      productId: "c1111111-1111-4111-8111-111111111111",
+      productName: "Product",
+      productPrintName: null,
+      egaisCode: null,
+      shelfLifeDays: null,
+      gtin14: "04680089900383",
+      boxCapacity: 12,
+      mode: "repack",
+      lineId: "d1111111-1111-4111-8111-111111111111",
+      lineName: "Line",
+      productionDateFrom: "2026-10-01",
+      productionDateTo: "2026-10-11",
+      boxLabelTemplate: { id: "e1111111-1111-4111-8111-111111111111", name: "Box", spec },
+      limits: { codePageSize: 200, eventBatchSize: 100, progressPageSize: 200 },
+    });
+    const legacy = projectThermalInventoryManifest(manifest);
+    const current = projectThermalInventoryManifest(manifest, THERMAL_LABEL_BRANDING_PROTOCOL);
+    expect(legacy.boxLabelTemplate?.spec).toEqual(projectThermalLabelForClient(spec));
+    expect(current.boxLabelTemplate?.spec).toEqual(spec);
+    expect(manifest.boxLabelTemplate?.spec).toEqual(spec);
+    const bounds = { "inventory.close.v1": { maxEvents: 1 } };
+    expect(
+      buildFrozenGrantTask(
+        "inventory",
+        manifest.inventoryId,
+        { manifest: legacy },
+        ["inventory.close.v1"],
+        bounds,
+      ),
+    ).not.toEqual(
+      buildFrozenGrantTask(
+        "inventory",
+        manifest.inventoryId,
+        { manifest: current },
+        ["inventory.close.v1"],
+        bounds,
+      ),
+    );
   });
   const scope = { snapshotId: "saved-snapshot", contentDigest: "a".repeat(64), mode: "check" };
   it("requires every productive event dimension without synthesizing quantity", () => {

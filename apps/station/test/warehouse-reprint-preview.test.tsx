@@ -7,6 +7,10 @@ import {
   type LabelTemplateSpec,
 } from "@markiro/domain";
 import { LabelPreview } from "../src/ui/warehouse-reprint/LabelPreview.js";
+import { loadThermalLabelLogo } from "../src/lib/organization-branding.js";
+import { createCredentialGeneration } from "../src/lib/credential-recovery.js";
+import type { SqlExecutor } from "../src/lib/mirror.js";
+vi.mock("../src/lib/organization-branding.js", () => ({ loadThermalLabelLogo: vi.fn() }));
 import { rasterizeText } from "../src/lib/rasterizer.js";
 vi.mock("../src/lib/rasterizer.js", () => ({ rasterizeText: vi.fn() }));
 const bitmap = { width: 9, height: 1, hex: "80ff", bytesPerRow: 2, totalBytes: 2 };
@@ -182,4 +186,45 @@ it("previews the complete GS1 KM including a crypto tail with the destination la
   expect(
     view.container.querySelector('[data-raster-element="km"]')?.getAttribute("aria-label"),
   ).toContain("\u001d93");
+});
+
+it("hides the previous owner's logo while another credential loads its own preview", async () => {
+  const logo = { width: 8, height: 1, stride: 1, pixels: Uint8Array.of(0x80) };
+  const spec: LabelTemplateSpec = {
+    language: "zpl",
+    dpi: 203,
+    widthMm: 75,
+    heightMm: 120,
+    elements: [
+      {
+        kind: "organization_logo",
+        id: "logo",
+        source: "organization",
+        fallback: "markiro",
+        xMm: 4,
+        yMm: 3,
+        widthMm: 30,
+        heightMm: 7,
+      },
+    ],
+  };
+  const selected = template(spec);
+  const exec: SqlExecutor = { all: async () => [], run: async () => {} };
+  const first = createCredentialGeneration("first-preview-key");
+  const second = createCredentialGeneration("second-preview-key");
+  vi.mocked(loadThermalLabelLogo).mockReset().mockResolvedValueOnce(logo);
+  const view = render(<LabelPreview template={selected} logoOwner={{ exec, generation: first }} />);
+  await waitFor(() => expect(view.container.querySelector("svg[role='img']")).toBeTruthy());
+  let finish: (value: typeof logo) => void = () => {};
+  vi.mocked(loadThermalLabelLogo).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  view.rerender(<LabelPreview template={selected} logoOwner={{ exec, generation: second }} />);
+  expect(view.container.querySelector("svg[role='img']")).toBeNull();
+  await waitFor(() => expect(loadThermalLabelLogo).toHaveBeenCalledWith(exec, second));
+  finish(logo);
+  await waitFor(() => expect(view.container.querySelector("svg[role='img']")).toBeTruthy());
 });

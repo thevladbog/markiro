@@ -36,7 +36,11 @@ describe("stock pallet label template", () => {
     const names = buildPalletLabelTemplates().map((t) => t.name);
     // Order is load-bearing: provisioning makes [0] the organisation default
     // and the editor starts a new pallet template from [0].
-    expect(names).toEqual([PALLET_LABEL_TEMPLATE_NAME, PALLET_LABEL_58X40_TEMPLATE_NAME]);
+    expect(names).toEqual([
+      PALLET_LABEL_TEMPLATE_NAME,
+      PALLET_LABEL_58X40_TEMPLATE_NAME,
+      "Палета 75×120",
+    ]);
   });
 
   it("keeps the name resolution-neutral", () => {
@@ -107,9 +111,9 @@ describe("stock pallet label template", () => {
     }
   });
 
-  it("does not overlap its rows vertically", () => {
+  it("preserves the 58×40 historical row budget", () => {
     const data = palletData();
-    for (const { spec } of buildPalletLabelTemplates()) {
+    for (const { spec } of buildPalletLabelTemplates().filter((t) => t.spec.widthMm === 58)) {
       // Elements are declared top to bottom; each band must clear the next.
       // `val-qty` is the box layout's one coordinate-level exception (see
       // `labels-defaults.test.ts`): its bitmap origin sits in the preceding
@@ -135,6 +139,22 @@ describe("stock pallet label template", () => {
           `${current.ids.join(",")} into ${next.ids.join(",")}`,
         ).toBeLessThanOrEqual(nextY + 1e-9);
       }
+    }
+  });
+
+  it("keeps larger pallet elements from intersecting in both axes", () => {
+    for (const { name, spec } of buildPalletLabelTemplates().filter((t) => t.spec.widthMm !== 58)) {
+      const boxes = spec.elements
+        .filter((e) => e.kind !== "line")
+        .map((e) => ({ id: e.id, b: elementBoundsMm(e, palletData()) }));
+      for (let i = 0; i < boxes.length; i++)
+        for (let j = i + 1; j < boxes.length; j++) {
+          const a = boxes[i]!,
+            b = boxes[j]!;
+          const overlapX = Math.min(a.b.x + a.b.w, b.b.x + b.b.w) - Math.max(a.b.x, b.b.x);
+          const overlapY = Math.min(a.b.y + a.b.h, b.b.y + b.b.h) - Math.max(a.b.y, b.b.y);
+          expect(overlapX <= 0 || overlapY <= 0, `${name}: ${a.id}/${b.id}`).toBe(true);
+        }
     }
   });
 

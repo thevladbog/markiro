@@ -1,3 +1,5 @@
+import { renderLabelLogo } from "./label-logo.js";
+import type { MonoBitmap } from "./mono-compose.js";
 import bwipjs from "bwip-js/generic";
 import { DomainError } from "../errors.js";
 import { rasterizeGs1DataMatrix } from "../barcodes/gs1-data-matrix.js";
@@ -69,6 +71,7 @@ export async function createLabelRenderPlan(
     language: LabelTemplateSpec["language"];
     dpi: PrinterDpi;
     rasterizeText: RasterizeTextFn;
+    logo?: MonoBitmap | null;
   },
 ): Promise<LabelRenderPlan> {
   const { dpi, language, rasterizeText } = destination;
@@ -89,7 +92,11 @@ export async function createLabelRenderPlan(
       const maxWidthPx =
         element.maxWidthMm === undefined ? undefined : mmToDots(element.maxWidthMm, dpi);
       const raster = await rasterizeText(text, {
-        fontFamily: "sans-serif",
+        fontFamily: element.fontFamily ?? "sans-serif",
+        ...(element.minFontSizePt === undefined
+          ? {}
+          : { minFontSizePx: ptToDots(element.minFontSizePt, dpi) }),
+        ...(element.lineHeight === undefined ? {} : { lineHeight: element.lineHeight }),
         fontSizePx: ptToDots(element.fontSizePt, dpi),
         bold: element.bold ?? false,
         maxWidthPx,
@@ -102,6 +109,10 @@ export async function createLabelRenderPlan(
         text,
         raster,
       });
+    } else if (element.kind === "organization_logo") {
+      if (!destination.logo) continue;
+      const logo = renderLabelLogo(element, dpi, destination.logo);
+      elements.push({ id: element.id, kind: "raster", text: "", ...logo });
     } else if (element.kind === "barcode") {
       const value = typeof element.data === "string" ? data[element.data] : element.data.literal;
       if (element.format === "datamatrix" && element.data === "km.code") {

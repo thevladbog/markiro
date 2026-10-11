@@ -1,3 +1,4 @@
+import { parseLabelTemplate, projectThermalLabelForClient } from "@markiro/domain";
 import { Inject, Injectable, PayloadTooLargeException } from "@nestjs/common";
 import { and, asc, eq, inArray } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -17,6 +18,7 @@ export class WarehouseTemplatesService {
     tenantId: string,
     deviceId: string,
     ids?: readonly string[],
+    capabilities?: string,
   ): Promise<WarehouseTemplateCatalog> {
     await assertWarehouseDevice(this.db, tenantId, deviceId);
     const rows = await this.db
@@ -35,12 +37,15 @@ export class WarehouseTemplatesService {
     if (rows.length > 1000)
       throw new PayloadTooLargeException({ code: "WAREHOUSE_TEMPLATE_CATALOG_TOO_LARGE" });
     const templates = rows.flatMap((row) => {
+      const parsed = warehouseTemplateSchema.shape.spec.safeParse(row.spec);
+      if (!parsed.success) return [];
+      const spec = projectThermalLabelForClient(parseLabelTemplate(parsed.data), capabilities);
       const value = {
         id: row.id,
         revision: productLabelValueDigest({
           id: row.id,
           updatedAt: row.updatedAt.toISOString(),
-          spec: row.spec,
+          spec,
           name: row.name,
           purpose: row.purpose,
           enabled: row.enabled,
@@ -50,7 +55,7 @@ export class WarehouseTemplatesService {
         purpose: row.purpose,
         enabled: row.enabled,
         chzProductGroupCodes: row.chzProductGroupCodes,
-        spec: row.spec,
+        spec,
       };
       const result = warehouseTemplateSchema.safeParse({
         ...value,

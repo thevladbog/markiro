@@ -3,14 +3,10 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   DEFAULT_BOX_LABEL_TEMPLATE_NAME,
-  buildDateFreeBoxLabelTemplates,
-  buildDatedBoxLabelTemplates,
-  buildDefaultLabelTemplates,
   buildLegacyDateFreeBoxLabelTemplates,
   buildLegacyDatedBoxLabelTemplates,
   buildLegacyDuplicateLabelTemplates,
   buildLegacyPrintNameBoxLabelTemplates,
-  buildPrintNameBoxLabelTemplates,
   code128ModuleCount,
   elementBoundsMm,
   estimatedTextWidthMm,
@@ -29,6 +25,21 @@ import {
   type RasterResult,
   type RasterizeTextFn,
 } from "../src/index.js";
+
+// These assertions pin the former stock geometry used by applied migrations.
+// Current approved defaults are covered by standard-labels-branding.test.ts.
+function legacyCurrent(rows: ReturnType<typeof buildLegacyDatedBoxLabelTemplates>) {
+  return rows.filter((t) => t.spec.dpi === 203).map((t) => ({ name: t.renamedTo!, spec: t.spec }));
+}
+const buildDatedBoxLabelTemplates = () => legacyCurrent(buildLegacyDatedBoxLabelTemplates());
+const buildDateFreeBoxLabelTemplates = () => legacyCurrent(buildLegacyDateFreeBoxLabelTemplates());
+const buildPrintNameBoxLabelTemplates = () =>
+  legacyCurrent(buildLegacyPrintNameBoxLabelTemplates());
+const buildDefaultLabelTemplates = () => [
+  ...buildDatedBoxLabelTemplates(),
+  ...buildDateFreeBoxLabelTemplates(),
+  ...buildPrintNameBoxLabelTemplates(),
+];
 
 const FAKE_RASTER: RasterResult = {
   hex: "00",
@@ -84,7 +95,7 @@ const SIZES: Array<[number, number, number]> = [
   [100, 150, 203],
 ];
 
-describe("buildDefaultLabelTemplates", () => {
+describe("historical stock box layouts (migration compatibility)", () => {
   it("returns BOTH stock families with the exact, resolution-free seed names", () => {
     const templates = buildDefaultLabelTemplates();
     // The names are the `(tenant_id, name)` idempotency key of provisioning

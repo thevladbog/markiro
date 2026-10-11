@@ -11,6 +11,7 @@ import {
   type WarehouseReprintSource,
   type WarehouseTemplate,
   type RasterizeTextFn,
+  type MonoBitmap,
 } from "@markiro/domain";
 import { bytesToBase64 } from "../hardware.js";
 import { parsePrinterProfile, printerMode, type PrinterProfile } from "../printer-routing.js";
@@ -20,6 +21,7 @@ export async function renderWarehouseLabel(
   selection: WarehouseTemplate,
   profile: PrinterProfile,
   rasterizeText: RasterizeTextFn,
+  options: { logo?: MonoBitmap | null } = {},
 ) {
   const source = warehouseSourceSchema.parse(value);
   const template = warehouseTemplateSchema.parse(selection);
@@ -41,7 +43,12 @@ export async function renderWarehouseLabel(
   const fields = { ...source.fields };
   if (printerMode(printer) === "windows_driver") {
     const bytes = encodeMonoRaster(
-      await renderMonoLabel(withPrinterDpi(template.spec, printer.dpi), fields, rasterizeText),
+      await renderMonoLabel(
+        withPrinterDpi(template.spec, printer.dpi),
+        fields,
+        rasterizeText,
+        options,
+      ),
     );
     return {
       fields,
@@ -53,6 +60,7 @@ export async function renderWarehouseLabel(
     language: printer.language,
     dpi: printer.dpi,
     rasterizeText,
+    ...options,
   });
   const bytes = latin1ToBytes(emitLabelRenderPlan(plan));
   return { fields, bytesBase64: bytesToBase64(bytes), bytesDigest: productLabelBytesDigest(bytes) };

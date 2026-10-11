@@ -3,6 +3,7 @@ import {
   renderMonoLabel,
   withPrinterDpi,
   type LabelTemplateSpec,
+  type MonoBitmap,
   type LabelField,
   type RasterizeTextFn,
 } from "@markiro/domain";
@@ -18,7 +19,7 @@ export async function renderPrintArtifact(
   fields: Record<LabelField, string>,
   profile: PrinterProfile,
   rasterizeText: RasterizeTextFn,
-  options: { kmDataMatrix?: "native" | "raster" } = {},
+  options: { kmDataMatrix?: "native" | "raster"; logo?: MonoBitmap | null } = {},
 ): Promise<PrintArtifact> {
   if (profile.paper === "a4") throw new Error("A4 requires a pallet sheet template");
   if (printerMode(profile) === "windows_driver") {
@@ -28,7 +29,7 @@ export async function renderPrintArtifact(
       format: "mono-raster-v1",
       dpi: profile.dpi,
       bytes: encodeMonoRaster(
-        await renderMonoLabel(withPrinterDpi(spec, profile.dpi), fields, rasterizeText),
+        await renderMonoLabel(withPrinterDpi(spec, profile.dpi), fields, rasterizeText, options),
       ),
     };
   }

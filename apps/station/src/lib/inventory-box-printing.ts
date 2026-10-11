@@ -5,6 +5,7 @@ import {
   isValidSscc,
   type InventoryEvent,
   type LabelField,
+  type MonoBitmap,
   type LabelTemplateSpec,
   type PrinterDpi,
   type RasterizeTextFn,
@@ -69,8 +70,10 @@ export interface AttemptInventoryBoxPrintInput {
     fields: Record<LabelField, string>,
     language: PrinterLanguage,
     dpi: PrinterDpi | null,
+    logo?: MonoBitmap | null,
   ) => Promise<Uint8Array>;
   rasterizeText?: RasterizeTextFn;
+  loadLogo?: () => Promise<MonoBitmap | null>;
   kind?: "initial" | "reprint";
   recoveryOfAttemptId?: string;
 }
@@ -88,6 +91,7 @@ export interface ProcessNextInventoryRemoteReprintInput {
   printTransport?: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
   render?: AttemptInventoryBoxPrintInput["render"];
   rasterizeText?: RasterizeTextFn;
+  loadLogo?: () => Promise<MonoBitmap | null>;
 }
 
 export class InventoryPrintRecoveryStaleError extends Error {
@@ -417,6 +421,7 @@ async function attemptInternal(
       _fields: Record<LabelField, string>,
       language: PrinterLanguage,
       dpi: PrinterDpi | null,
+      logo?: MonoBitmap | null,
     ) =>
       renderInventoryBoxLabel(
         template,
@@ -424,6 +429,7 @@ async function attemptInternal(
         language,
         input.rasterizeText ?? rasterizeText,
         dpi,
+        logo,
       ));
   const destination = {
     scope: JSON.stringify([input.inventoryId, input.snapshotId, input.deviceId]),
@@ -441,6 +447,7 @@ async function attemptInternal(
     // Keep each attempt's output facts after an explicit replacement of the label's destination.
     await bindPrintDestination(input.exec, { ...destination, attemptId: input.attemptId }, printer);
     physical = await attemptBoxPrint({
+      ...(input.loadLogo ? { loadLogo: input.loadLogo } : {}),
       template: input.manifest.boxLabelTemplate?.spec ?? null,
       fields,
       printing: input.printing,
@@ -579,6 +586,7 @@ export async function processNextInventoryRemoteReprint(
     ...(input.printTransport ? { printTransport: input.printTransport } : {}),
     kind: "reprint",
     ...(input.render ? { render: input.render } : {}),
+    ...(input.loadLogo ? { loadLogo: input.loadLogo } : {}),
     ...(input.rasterizeText ? { rasterizeText: input.rasterizeText } : {}),
   });
   await input.exec.run(

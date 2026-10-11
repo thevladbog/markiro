@@ -1,3 +1,4 @@
+import { HandheldBrandingController } from "../src/modules/org-profile/handheld-branding.controller";
 import { ReplacementRecoveryReadinessController } from "../src/modules/device-licensing/replacement-recovery-readiness.controller";
 import { DeviceReplacementReadinessController } from "../src/modules/device-licensing/device-replacement-readiness.controller";
 import { DeviceRetentionController } from "../src/modules/device-licensing/device-retention.controller";
@@ -99,6 +100,7 @@ const OPERATIONAL_CONTROLLERS: readonly [
 ][] = [
   [DashboardController, { overview: readPolicy }],
   [CabinetPrintBrandingController, { read: readPolicy, logo: readPolicy }],
+  [HandheldBrandingController, { read: sharedReadPolicy, logo: sharedReadPolicy }],
   [StationBrandingController, { read: sharedReadPolicy, logo: sharedReadPolicy }],
   [DevicesController, { listDevices: readPolicy }],
   [BoxesController, { listBoxes: readPolicy, getSellCodes: readPolicy }],

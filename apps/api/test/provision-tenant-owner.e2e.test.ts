@@ -9,8 +9,6 @@ import {
   buildWarehouseCodeOnlyBoxTemplate,
   buildPalletLabelTemplates,
   buildPalletSheetPresets,
-  PALLET_LABEL_58X40_TEMPLATE_NAME,
-  PALLET_LABEL_TEMPLATE_NAME,
 } from "@markiro/domain";
 import { MailCryptoService } from "../src/modules/mail/mail-crypto.service";
 import { MailDeliveryService } from "../src/modules/mail/mail-delivery.service";
@@ -346,23 +344,18 @@ describe.skipIf(!ready)("tenant owner provisioning", () => {
       .select({ id: schema.labelTemplates.id })
       .from(schema.labelTemplates)
       .where(eq(schema.labelTemplates.tenantId, result.tenantId));
-    // 17 box + 3 product_duplicate + 2 legacy pallet + 3 editable A4 sheets.
-    expect(after).toHaveLength(25);
+    // 17 box + 3 product_duplicate + 3 thermal pallet + 3 editable A4 sheets.
+    expect(after).toHaveLength(26);
     // Selection order is not guaranteed without ORDER BY; sort by name so the
     // comparison is deterministic regardless of physical row order.
     const pallets = templates
       .filter((t) => t.purpose === "pallet" && t.format === "label_v1")
       .sort((a, b) => a.name.localeCompare(b.name));
-    expect(pallets).toEqual([
-      expect.objectContaining({
-        name: PALLET_LABEL_TEMPLATE_NAME,
-        spec: buildPalletLabelTemplates()[0]!.spec,
-      }),
-      expect.objectContaining({
-        name: PALLET_LABEL_58X40_TEMPLATE_NAME,
-        spec: buildPalletLabelTemplates()[1]!.spec,
-      }),
-    ]);
+    expect(pallets).toEqual(
+      buildPalletLabelTemplates()
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((t) => expect.objectContaining(t)),
+    );
     const sheets = templates.filter((t) => t.format === "pallet_sheet_v2");
     expect(sheets).toHaveLength(3);
     for (const preset of buildPalletSheetPresets())
