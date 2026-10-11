@@ -7044,15 +7044,20 @@ async fn the_office_reads_a_shifts_totals_from_its_facts() {
     // The devices come first entry first. A second device on a shift comes
     // with plan 2b, so its entry is put in directly: a device whose id sorts
     // after the station's, entered before it, so that first entry first is
-    // neither the order of the ids nor the order of the rows.
-    let mut other = colleague.station.clone();
-    for _ in 0..64 {
-        if other > floor.station {
-            break;
-        }
-        other = pair_device(&admin.app, "station").await.0;
-    }
+    // neither the order of the ids nor the order of the rows. The id is built
+    // (the largest a v4 UUID can be), not drawn: a random one sorts after the
+    // station's only by chance.
+    let other = "ffffffff-ffff-4fff-bfff-ffffffffffff".to_owned();
     assert!(other > floor.station);
+    sqlx::query(
+        "INSERT INTO devices (id, kind, name, key_hash, app_version, protocol, paired_at) \
+         VALUES (?, 'station', 'Тестовое устройство', 'late-id-station', '0.1.0', 1, \
+                 '2026-09-21T13:00:00Z')",
+    )
+    .bind(&other)
+    .execute(&admin.app.state.pool)
+    .await
+    .unwrap();
     sqlx::query(
         "INSERT INTO shift_participants (shift_id, device_id, first_entered_at, last_entered_at) \
          VALUES (?, ?, '2026-09-21T14:00:00Z', '2026-09-21T14:00:00Z')",
