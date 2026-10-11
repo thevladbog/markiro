@@ -104,9 +104,9 @@ describe("summarizeByProductionDate", () => {
 });
 
 describe("pallet placard", () => {
-  it("prints the header with only the word ПАЛЛЕТА, the organisation and the product", () => {
+  it("prints the header with only the word ПАЛЕТА, the organisation and the product", () => {
     const html = renderPalletPlacardHtml(fixture(), "a4");
-    expect(html).toContain("ПАЛЛЕТА");
+    expect(html).toContain("ПАЛЕТА");
     expect(html).toContain("ООО «Атолл»");
     expect(html).toContain("Вода питьевая негазированная «Атолл» 0,5 л, ПЭТ");
     expect(html).toContain("04600682000013");
