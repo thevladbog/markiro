@@ -1820,3 +1820,62 @@ fn the_install_role_and_a_new_host_address_have_the_webview_shapes() {
         Ok(json!("office"))
     );
 }
+
+/// The driver printing commands of plan ДРВ: `supports_windows_printing` is
+/// `true` exactly on Windows; a page that is not `mono-raster-v1` is refused
+/// before any queue opens; a valid page goes no further than
+/// `unsupported_platform` off Windows, or `queue_unavailable` on Windows for a
+/// queue that does not exist; a receipt of such a queue reads `unavailable`.
+/// Every answer is the object the webview parses, never Tauri's text.
+#[test]
+fn driver_printing_answers_through_the_ipc_shapes() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_app, webview) = mock_app(DeviceState::load(dir.path().to_path_buf()));
+    assert_eq!(
+        invoke(&webview, "supports_windows_printing", json!({})),
+        Ok(json!(cfg!(windows)))
+    );
+    let fixture: serde_json::Value = serde_json::from_str(include_str!(
+        "../../../../packages/domain/test/fixtures/mono-raster-v1.json"
+    ))
+    .unwrap();
+    let document = "Markiro:7d1c2a8e-3b4f-4c5d-9e6f-0a1b2c3d4e5f";
+    let print = |payload: &str| {
+        invoke(
+            &webview,
+            "print_windows_raster",
+            json!({
+                "queue": "Markiro: no such queue",
+                "payloadBase64": payload,
+                "documentName": document,
+            }),
+        )
+    };
+    assert_eq!(
+        print("AAAA"),
+        Ok(
+            json!({ "ok": false, "error": { "code": "invalid_artifact", "phase": "before_start" } })
+        )
+    );
+    let expected = if cfg!(windows) {
+        "queue_unavailable"
+    } else {
+        "unsupported_platform"
+    };
+    assert_eq!(
+        print(fixture["base64"].as_str().unwrap()),
+        Ok(json!({ "ok": false, "error": { "code": expected, "phase": "before_start" } }))
+    );
+    assert_eq!(
+        invoke(
+            &webview,
+            "get_windows_print_job",
+            json!({ "receipt": {
+                "queue": "Markiro: no such queue",
+                "jobId": 7,
+                "documentName": document,
+            } }),
+        ),
+        Ok(json!({ "state": "unavailable" }))
+    );
+}
