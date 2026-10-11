@@ -91,7 +91,7 @@ describe("demoRequestSchema", () => {
     expectInvalid(validInput({ phone: `+1${" ".repeat(29)}2025550114` }));
   });
 
-  it("accepts exactly the 16 canonical published source paths", () => {
+  it("accepts exactly the 18 canonical published source paths", () => {
     expect(DEMO_SOURCE_PATHS).toEqual([
       "/",
       "/markirovka-chestny-znak/",
@@ -101,6 +101,7 @@ describe("demoRequestSchema", () => {
       "/integratsiya-1c/",
       "/oflayn-rabota/",
       "/faq/",
+      "/kak-rabotaet/",
       "/en/",
       "/en/chestny-znak-serialization/",
       "/en/sscc-and-aggregation/",
@@ -109,6 +110,7 @@ describe("demoRequestSchema", () => {
       "/en/1c-integration/",
       "/en/offline-production/",
       "/en/faq/",
+      "/en/how-it-works/",
     ]);
 
     for (const sourcePath of DEMO_SOURCE_PATHS) {

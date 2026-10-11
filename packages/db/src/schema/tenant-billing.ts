@@ -28,6 +28,7 @@ export const BILLING_REQUEST_TYPES = [
   "additional_service",
   "documents",
   "other",
+  "support",
 ] as const;
 export type BillingRequestType = (typeof BILLING_REQUEST_TYPES)[number];
 

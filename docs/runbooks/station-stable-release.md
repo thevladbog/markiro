@@ -156,10 +156,11 @@ tree: сохраните evidence, расследуйте collision/audit и в�
 автоматической установки или restart нет.
 
 До и после установки зафиксируйте application ID `app.markiro.station`,
-фактический абсолютный путь к базе и относительное имя
-`sqlite:station-mirror.db`, pairing, settings, journals, boxes, exceptions и
-pending outbox. Не выводите путь из предположения о Windows user profile:
-снимите его с установленной Station до и после install-over.
+фактический абсолютный путь к базе (Центр обновлений → «Данные станции»),
+pairing, settings, journals, boxes, exceptions и pending outbox. Не выводите
+путь из предположения о Windows user profile: снимите его с установленной
+Station до и после install-over. Первая сборка с переносом хранилища один раз
+переносит базу из перемещаемого профиля в `%LOCALAPPDATA%\app.markiro.station`.
 Проверьте offline restart/reconnect и последующую синхронизацию outbox. Нельзя
 считать удаление SQLite или outbox допустимым rollback.
 
@@ -233,8 +234,35 @@ stable Overall `FAIL`, остановитесь для incident recovery и не
 только когда exact current candidate stable снова является подтверждённой целью
 обоих manifests и default alias.
 
-Rollback channel pointer влияет только на ещё не обновившихся клиентов. Для уже
-обновлённой Station закройте активную смену, проверьте SQLite compatibility
-window и SHA-256, затем вручную установите предыдущий accepted immutable stable.
-Application ID, SQLite path, pairing, settings, journals, boxes, exceptions и
-outbox сохраняются; удаление данных запрещено.
+Rollback channel pointer влияет только на ещё не обновившихся клиентов. Для
+уже обновлённой Station сначала откройте Центр обновлений → «Данные станции»
+и убедитесь, что там указано «Хранятся на этом компьютере:» с
+`%LOCALAPPDATA%\app.markiro.station` и под ним нет предупреждений; если вместо
+этого показана папка `…migrating-…`, «Хранятся в перемещаемом профиле
+Windows:» или любое предупреждение — например «В перемещаемом профиле найдены
+данные другой станции…», «В перемещаемом профиле снова появились данные этой
+станции…» или «Старая папка данных станции удалена не полностью…» — откат не
+делайте: в `%APPDATA%\app.markiro.station` уже могут быть `station.json` или
+`station-mirror.db*` (или рядом может существовать папка `.migrating-`), и
+перенос перезапишет данные другой станции или оставит устаревшую копию, с
+которой запустится старая сборка; следуйте
+`docs/runbooks/station-storage-recovery.md` или обратитесь к разработчикам.
+Предупреждения отражают состояние на момент последнего запуска станции,
+поэтому, закрыв станцию, дополнительно проверьте, что в
+`%APPDATA%\app.markiro.station` нет `station.json` и `station-mirror.db*`, а
+рядом нет папки `app.markiro.station.migrating-*`; если при переносе система
+предлагает заменить какой-либо файл, остановитесь. Если обе проверки пройдены,
+закройте активную смену, проверьте SQLite compatibility window и
+SHA-256, затем вручную установите предыдущий accepted immutable stable.
+Application ID, pairing, settings, journals, boxes,
+exceptions и outbox сохраняются; удаление данных запрещено. Сборка до переноса
+хранилища читает только перемещаемую папку. Перед её установкой закройте
+станцию и переместите (не копируйте) `station.json`, `station-mirror.db*` и
+`.station-*.bak` из `%LOCALAPPDATA%\app.markiro.station` в
+`%APPDATA%\app.markiro.station`, затем удалите
+`%LOCALAPPDATA%\app.markiro.station\station-storage.json`. Без перемещения
+старая сборка запустится без привязки. Если скопировать файлы вместо
+перемещения или оставить запись, сломается следующее обновление: оно
+продолжит работу с устаревшей локальной копией (курсор SSCC откатится, SSCC и
+batch id повторятся), запустится без привязки или остановится до вмешательства
+поддержки.

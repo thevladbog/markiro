@@ -365,13 +365,72 @@
 
 .mk-product-label-history {
   display: grid;
-  gap: var(--sp-3);
-}
-.mk-product-label-history__job {
-  padding: var(--sp-3);
+  overflow: hidden;
   border: 1px solid var(--line);
   border-radius: var(--r-2);
 }
+
+.mk-product-label-history__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-4);
+}
+
+.mk-product-label-history__heading > div {
+  display: grid;
+  gap: var(--sp-2);
+}
+
+.mk-product-label-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface-panel);
+}
+
+.mk-product-label-summary__item {
+  min-width: 0;
+  padding: var(--sp-3);
+  border-left: 1px solid var(--line);
+}
+
+.mk-product-label-summary__item:first-child {
+  border-left: 0;
+}
+
+.mk-product-label-summary__item strong,
+.mk-product-label-summary__item span {
+  display: block;
+}
+
+.mk-product-label-summary__item strong {
+  color: var(--fg-1);
+  font: var(--text-h3);
+  font-variant-numeric: tabular-nums;
+}
+
+.mk-product-label-summary__item span {
+  margin-top: var(--sp-1);
+  color: var(--fg-3);
+  font: var(--text-caption);
+}
+
+.mk-product-label-history__job {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) minmax(120px, auto) minmax(120px, auto);
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3);
+  border-top: 1px solid var(--line);
+}
+
+.mk-product-label-history__job:first-child {
+  border-top: 0;
+}
+
 .mk-product-label-history__job header {
   display: flex;
   gap: var(--sp-2);
@@ -380,10 +439,17 @@
 }
 .mk-product-label-history__job > time {
   display: block;
-  margin-top: var(--sp-2);
   color: var(--fg-3);
   font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
+
+.mk-product-label-history__job > .mk-alert,
+.mk-product-label-history__job > .mk-product-label-history__events,
+.mk-product-label-history__job > button + .mk-product-label-history__events {
+  grid-column: 1 / -1;
+}
+
 .mk-product-label-history__events {
   list-style: none;
   padding: 0;
@@ -401,6 +467,30 @@
   gap: var(--sp-1);
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+@media (max-width: 639px) {
+  .mk-product-label-history__heading,
+  .mk-product-label-history__job {
+    align-items: stretch;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .mk-product-label-history__heading {
+    flex-direction: column;
+  }
+
+  .mk-product-label-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mk-product-label-summary__item:nth-child(odd) {
+    border-left: 0;
+  }
+
+  .mk-product-label-summary__item:nth-child(n + 3) {
+    border-top: 1px solid var(--line);
+  }
 }
 
 .mk-validation-reprocessings {

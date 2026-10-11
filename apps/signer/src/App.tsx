@@ -87,6 +87,7 @@ export function App(): ReactElement {
     return (
       <Pairing
         hostname={status?.hostname ?? ""}
+        notices={status?.storageNotices ?? []}
         onPair={(code) => bridge.pair(code)}
         onPaired={() => void bridge.status().then(setStatus)}
       />

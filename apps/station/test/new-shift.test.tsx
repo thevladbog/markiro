@@ -42,6 +42,34 @@ const templateLibrary = {
   defaultBoxLabelTemplateId: "tpl-default",
 };
 
+/** Keep display-only preview reads separate from the start workflow response queue. */
+function mockNewShiftFetch() {
+  const workflow = vi.fn<typeof fetch>();
+  vi.spyOn(globalThis, "fetch").mockImplementation((url, init) => {
+    const request = new URL(String(url));
+    if (request.pathname === "/shifts/label-template-preview") {
+      const id = request.searchParams.get("templateId");
+      const template = templateLibrary.items.find((item) => item.id === id);
+      return Promise.resolve(
+        Response.json({
+          id,
+          name: template?.name ?? "Pallet label",
+          purpose: request.searchParams.get("purpose"),
+          spec: {
+            widthMm: template?.widthMm ?? 100,
+            heightMm: template?.heightMm ?? 150,
+            dpi: 203,
+            language: "zpl",
+            elements: [],
+          },
+        }),
+      );
+    }
+    return workflow(url, init);
+  });
+  return workflow;
+}
+
 function deferredResponse() {
   let settle: (response: Response) => void = () => {};
   const promise = new Promise<Response>((resolve) => {
@@ -99,7 +127,7 @@ function manualScanSource() {
 describe("NewShift", () => {
   it("fills and resolves the product from an EAN-13 scanner event", async () => {
     const gtinCheck = deferredResponse();
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockImplementationOnce(() => gtinCheck.promise)
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ items: [resolvedProduct] }), { status: 200 }),
@@ -128,7 +156,7 @@ describe("NewShift", () => {
 
   it("extracts the product GTIN from a DataMatrix scanner event", async () => {
     const gtinCheck = deferredResponse();
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockImplementationOnce(() => gtinCheck.promise)
       .mockResolvedValueOnce(
         new Response(
@@ -178,7 +206,7 @@ describe("NewShift", () => {
   });
 
   it("returns from the resolved-product screen to shift selection", async () => {
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
           status: 200,
@@ -204,7 +232,7 @@ describe("NewShift", () => {
 
   it("keeps Back disabled while GTIN resolution is pending", async () => {
     const gtinCheck = deferredResponse();
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockImplementationOnce(() => gtinCheck.promise)
       .mockResolvedValueOnce(
         new Response(
@@ -239,8 +267,7 @@ describe("NewShift", () => {
   it("keeps Back and the lease held through cancellation, create, and open", async () => {
     const createShift = deferredResponse();
     const openShift = deferredResponse();
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
+    const fetchSpy = mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
           status: 200,
@@ -321,8 +348,7 @@ describe("NewShift", () => {
 
   it("does not open or publish after a pending create retires with the route", async () => {
     const createShift = deferredResponse();
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
+    const fetchSpy = mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
           status: 200,
@@ -365,7 +391,7 @@ describe("NewShift", () => {
   });
 
   it("releases the lease once when the activation request is rejected", async () => {
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), {
           status: 200,
@@ -404,7 +430,7 @@ describe("NewShift", () => {
   });
 
   it("renders input, found, and missing as mutually exclusive fixed state panels", async () => {
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
       )
@@ -457,8 +483,7 @@ describe("NewShift", () => {
     useTimeZone("Europe/Moscow");
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-14T21:30:00.000Z"));
-    const fetchSpy = vi
-      .spyOn(globalThis, "fetch")
+    const fetchSpy = mockNewShiftFetch()
       // POST /products/gtin-check
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
@@ -514,7 +539,7 @@ describe("NewShift", () => {
   });
 
   it("shows an optional production-date picker only after resolving a product", async () => {
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
       )
@@ -538,8 +563,7 @@ describe("NewShift", () => {
     useTimeZone("Europe/Moscow");
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-14T12:00:00.000Z"));
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
+    const fetchMock = mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
       )
@@ -635,7 +659,7 @@ describe("NewShift", () => {
   );
 
   it("shows the blocking not-in-catalog screen for an unknown GTIN", async () => {
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "unknown" }), {
           status: 200,
@@ -671,7 +695,7 @@ describe("NewShift", () => {
     const createPromise = new Promise<Response>((resolve) => {
       resolveCreate = resolve;
     });
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       // POST /products/gtin-check
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
@@ -717,8 +741,7 @@ describe("NewShift", () => {
   // 15th in Kiritimati (UTC+14), which would fail the body assertion below.
   // Pinning the zone makes the literal date mean one thing everywhere.
   it("enables pallets using the product capacity and a separate pallet label without sending capacity overrides", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
+    const fetchMock = mockNewShiftFetch()
       .mockResolvedValueOnce(Response.json({ gtin14: resolvedProduct.gtin14, owner: "own" }))
       .mockResolvedValueOnce(
         Response.json({ items: [{ ...resolvedProduct, boxCapacity: 10, palletBoxCapacity: 66 }] }),
@@ -766,7 +789,7 @@ describe("NewShift", () => {
   });
 
   it("recovers a failed pallet-template read and requires explicit selection when no default exists", async () => {
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockResolvedValueOnce(Response.json({ gtin14: resolvedProduct.gtin14, owner: "own" }))
       .mockResolvedValueOnce(
         Response.json({ items: [{ ...resolvedProduct, boxCapacity: 10, palletBoxCapacity: 66 }] }),
@@ -805,7 +828,7 @@ describe("NewShift", () => {
   });
 
   it("explains missing product capacity and prevents enabling pallets", async () => {
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockResolvedValueOnce(Response.json({ gtin14: resolvedProduct.gtin14, owner: "own" }))
       .mockResolvedValueOnce(Response.json({ items: [resolvedProduct] }));
     render(
@@ -824,8 +847,7 @@ describe("NewShift", () => {
     useTimeZone("Europe/Moscow");
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-14T12:00:00.000Z"));
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
+    const fetchMock = mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
       )
@@ -863,7 +885,7 @@ describe("NewShift", () => {
     const defaultOption = screen.getByRole("button", { name: /Box 58x40/ });
     expect(defaultOption.getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByText("Default")).toBeDefined();
-    expect(screen.getByText("58×40 mm")).toBeDefined();
+    expect(screen.getByText(/^58\s*×\s*40 mm$/)).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Start" }));
     await waitFor(() =>
@@ -881,7 +903,7 @@ describe("NewShift", () => {
   });
 
   it("filters the template grid by the search field", async () => {
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
       )
@@ -915,8 +937,7 @@ describe("NewShift", () => {
     useTimeZone("Europe/Moscow");
     vi.useFakeTimers({ toFake: ["Date"] });
     vi.setSystemTime(new Date("2026-08-14T12:00:00.000Z"));
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
+    const fetchMock = mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
       )
@@ -959,7 +980,7 @@ describe("NewShift", () => {
   });
 
   it("disables Start on the template step until a template is selected when no default exists", async () => {
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
       )
@@ -989,7 +1010,7 @@ describe("NewShift", () => {
   });
 
   it("shows guidance and blocks start when the template library is empty", async () => {
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
       )
@@ -1017,8 +1038,7 @@ describe("NewShift", () => {
   });
 
   it("stays on the found product with a retriable error when the template list fails to load", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
+    const fetchMock = mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
       )
@@ -1048,8 +1068,7 @@ describe("NewShift", () => {
   });
 
   it("returns from the template step to the found product without creating a shift", async () => {
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
+    const fetchMock = mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
       )
@@ -1075,7 +1094,7 @@ describe("NewShift", () => {
 
   it("renders the template step and the server safety net in Russian", async () => {
     await i18n.changeLanguage("ru");
-    vi.spyOn(globalThis, "fetch")
+    mockNewShiftFetch()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ gtin14: "04600000000015", owner: "own" }), { status: 200 }),
       )
@@ -1108,7 +1127,7 @@ describe("NewShift", () => {
     await waitFor(() => expect(screen.getByTestId("new-shift-template")).toBeDefined());
     expect(screen.getByRole("heading", { name: "Шаблон этикетки короба" })).toBeDefined();
     expect(screen.getByText("По умолчанию")).toBeDefined();
-    expect(screen.getByText("58×40 мм")).toBeDefined();
+    expect(screen.getByText(/^58\s*×\s*40 мм$/)).toBeDefined();
 
     fireEvent.click(screen.getByRole("button", { name: "Начать" }));
     await waitFor(() =>

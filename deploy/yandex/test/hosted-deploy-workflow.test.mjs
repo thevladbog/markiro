@@ -59,7 +59,11 @@ function assertDirectDeployWorkflow(source) {
     "release_run_id",
     "release_sha",
     "landing_demo_submission_state",
+    "scope",
   ]);
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.scope.options, ["full", "api-only"]);
+  assert.equal(workflow.on.workflow_dispatch.inputs.scope.default, "full");
+  assert.equal(workflow.jobs.deploy.env.MARKIRO_DEPLOY_SCOPE, "${{ inputs.scope }}");
   assert.deepEqual(Object.keys(workflow.jobs), ["deploy"]);
   const deploy = workflow.jobs.deploy;
   assert.equal(deploy["runs-on"], "ubuntu-latest");

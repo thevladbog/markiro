@@ -15,11 +15,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import type { UseMutationResult, UseQueryResult } from "@tanstack/react-query";
 
-import type { LabelTemplateSpec } from "@markiro/domain";
+import type { StoredLabelTemplateSpec } from "@markiro/domain";
 
 import { apiFetch } from "../../api/client.js";
 
-export interface LabelTemplateSummaryDto {
+export interface LegacyLabelTemplateSummaryDto {
+  format?: "label_v1";
+  revision?: number;
   purpose: "box" | "product_duplicate" | "pallet";
   id: string;
   name: string;
@@ -33,11 +35,43 @@ export interface LabelTemplateSummaryDto {
   updatedAt: string;
 }
 
+export interface PalletSheetTemplateSummaryDto {
+  id: string;
+  name: string;
+  purpose: "pallet";
+  format: "pallet_sheet_v2";
+  revision: number;
+  page: { size: "A4"; orientation: "portrait" | "landscape"; copies: 1 | 2 };
+  dpi: 300;
+  enabled: boolean;
+  chzProductGroupCodes: number[] | null;
+  updatedAt: string;
+}
+export type LabelTemplateSummaryDto = LegacyLabelTemplateSummaryDto | PalletSheetTemplateSummaryDto;
+export function templatePaperSize(item: LabelTemplateSummaryDto): {
+  widthMm: number;
+  heightMm: number;
+} {
+  if (item.format === "pallet_sheet_v2")
+    return item.page.orientation === "portrait"
+      ? { widthMm: 210, heightMm: 297 }
+      : { widthMm: 297, heightMm: 210 };
+  return { widthMm: item.widthMm, heightMm: item.heightMm };
+}
+export function isLegacyTemplateSummary(
+  item: LabelTemplateSummaryDto,
+): item is LegacyLabelTemplateSummaryDto {
+  return item.format !== "pallet_sheet_v2";
+}
+const sheetReadHeaders = { "x-label-template-formats": "label-v1,pallet-sheet-v2" };
+
 export interface LabelTemplateDto {
+  format?: "label_v1" | "pallet_sheet_v2";
+  revision?: number;
   purpose: "box" | "product_duplicate" | "pallet";
   id: string;
   name: string;
-  spec: LabelTemplateSpec;
+  spec: StoredLabelTemplateSpec;
   enabled: boolean;
   chzProductGroupCodes: number[] | null;
   createdAt: string;
@@ -49,6 +83,7 @@ export type LabelTemplateEnabledFilter = "true" | "false" | "all";
 export interface ListLabelTemplatesParams {
   /** Omitted = enabled only (the API default), which is what every picker wants. */
   enabled?: LabelTemplateEnabledFilter;
+  includeSheets?: boolean;
 }
 
 interface ListLabelTemplatesResponse {
@@ -66,23 +101,27 @@ async function fetchLabelTemplates(
   const query = search.toString();
   const response = await apiFetch<ListLabelTemplatesResponse>(
     `/label-templates${query ? `?${query}` : ""}`,
+    params.includeSheets ? { headers: sheetReadHeaders } : undefined,
   );
   return response.items;
 }
 
 function fetchLabelTemplate(id: string): Promise<LabelTemplateDto> {
-  return apiFetch<LabelTemplateDto>(`/label-templates/${id}`);
+  return apiFetch<LabelTemplateDto>(`/label-templates/${id}`, { headers: sheetReadHeaders });
 }
 
 export interface CreateLabelTemplateInput {
+  format?: "label_v1" | "pallet_sheet_v2";
   purpose?: "box" | "product_duplicate" | "pallet";
   name: string;
-  spec: LabelTemplateSpec;
+  spec: StoredLabelTemplateSpec;
   enabled?: boolean;
   chzProductGroupCodes?: number[] | null;
 }
 
-export type UpdateLabelTemplateInput = Partial<CreateLabelTemplateInput>;
+export type UpdateLabelTemplateInput = Partial<CreateLabelTemplateInput> & {
+  expectedRevision?: number;
+};
 
 function postLabelTemplate(input: CreateLabelTemplateInput): Promise<LabelTemplateDto> {
   return apiFetch<LabelTemplateDto>("/label-templates", {

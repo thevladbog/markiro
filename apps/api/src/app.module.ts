@@ -17,6 +17,7 @@ import { DevicesModule } from "./modules/devices/devices.module";
 import { DeviceLicensingModule } from "./modules/device-licensing/device-licensing.module";
 import { StationPairingModule } from "./modules/station-pairing/station-pairing.module";
 import { StationScansModule } from "./modules/station-scans/station-scans.module";
+import { StationWarehouseReprintModule } from "./modules/station-warehouse-reprint/station-warehouse-reprint.module";
 import { EmployeesModule } from "./modules/employees/employees.module";
 import { OperatorsModule } from "./modules/operators/operators.module";
 import { KiosksModule } from "./modules/kiosks/kiosks.module";
@@ -73,6 +74,7 @@ import { DashboardModule } from "./modules/dashboard/dashboard.module";
 import { ProductRegulatoryModule } from "./modules/product-regulatory/product-regulatory.module";
 import { NationalCatalogModule } from "./modules/national-catalog/national-catalog.module";
 import { PlatformServicePeriodsModule } from "./modules/service-periods/platform-service-periods.module";
+import { SupportChatModule } from "./modules/support-chat/support-chat.module";
 
 @Module({})
 export class AppModule {
@@ -95,6 +97,7 @@ export class AppModule {
     },
   ): DynamicModule {
     const env = setup.env ?? loadEnv();
+    const supportChatModule = SupportChatModule.forRoot(env);
     return {
       module: AppModule,
       imports: [
@@ -124,7 +127,8 @@ export class AppModule {
         AuthorizationModule,
         SubscriptionsModule.forRoot(env.SUBSCRIPTION_ENFORCEMENT_MODE),
         TenantBillingModule.forRoot(env.ADMIN_ORIGIN),
-        JobsModule.forRoot(setup.databaseUrl, env),
+        supportChatModule,
+        JobsModule.forRoot(setup.databaseUrl, env, supportChatModule),
         DemoRequestsModule.forRoot(env),
         OrgProfileModule,
         CounterpartiesModule,
@@ -148,6 +152,7 @@ export class AppModule {
         DeviceLicensingModule,
         StationPairingModule,
         StationScansModule,
+        StationWarehouseReprintModule,
         EmployeesModule,
         OperatorsModule,
         KiosksModule,

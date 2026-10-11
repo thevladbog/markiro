@@ -189,6 +189,7 @@ export async function readBoxReconciliationBatch(
   shiftId?: string,
   limit = 200,
   checkedBefore?: string,
+  isCurrent: () => boolean = () => true,
 ): Promise<BoxReconciliationFact[]> {
   if (!Number.isInteger(limit) || limit < 1 || limit > 200)
     throw new Error("Invalid reconciliation limit");
@@ -209,7 +210,9 @@ export async function readBoxReconciliationBatch(
   );
   const facts: BoxReconciliationFact[] = [];
   for (const row of rows) {
+    if (!isCurrent()) return [];
     const members = await readMembers(exec, row.box_id);
+    if (!isCurrent()) return [];
     const hashes = members.map((member) => member.code_hash);
     facts.push({
       shiftId: row.shift_id,
@@ -242,8 +245,10 @@ async function readMembers(exec: SqlExecutor, boxId: string): Promise<MemberRow[
 async function reconstructBox(
   exec: SqlExecutor,
   fact: BoxReconciliationFact,
+  isCurrent: () => boolean,
 ): Promise<readonly Record<string, string | null>[] | null> {
   const members = await readMembers(exec, fact.boxId);
+  if (!isCurrent()) return null;
   if (
     members.length === 0 ||
     boxMembershipDigestV1(members.map((m) => m.code_hash)) !== fact.membershipDigest
@@ -256,6 +261,7 @@ async function reconstructBox(
       AND scanned_at IN (SELECT value FROM json_each(?)) ORDER BY id`,
     [fact.shiftId, JSON.stringify([...new Set(members.map((member) => member.scanned_at))])],
   );
+  if (!isCurrent()) return null;
   const byHash = new Map<string, EventRow[]>();
   for (const event of events) {
     let hash: string;
@@ -270,44 +276,64 @@ async function reconstructBox(
     matches.push(event);
     byHash.set(hash, matches);
   }
-  const replay: Record<string, string | null>[] = [];
+  const matched: { member: MemberRow; event: EventRow }[] = [];
   for (const member of members) {
     const matches = (byHash.get(member.code_hash) ?? []).filter(
       (event) => event.scanned_at === member.scanned_at,
     );
     if (matches.length !== 1) return null;
-    const event = matches[0]!;
-    const grantEvidence = await exec.all<{ event_id: string }>(
-      `SELECT command.event_id
-      FROM offline_grant_scan_commands command
-      JOIN offline_grant_event_evidence evidence ON evidence.event_id=command.event_id
-      JOIN offline_grant_decisions decision ON decision.event_id=command.event_id
-      WHERE json_extract(command.payload_json,'$.event.shiftId')=?
-        AND json_extract(command.payload_json,'$.event.raw')=?
-        AND json_extract(command.payload_json,'$.event.scannedAt')=?
-        AND json_extract(command.payload_json,'$.code.codeHash')=?
-        AND json_extract(command.payload_json,'$.code.boxId')=?
-        AND command.stored_code=1
-        AND json_extract(decision.decision_json,'$.allow')=1
-      LIMIT 2`,
-      [fact.shiftId, event.raw, event.scanned_at, member.code_hash, fact.boxId],
-    );
-    if (grantEvidence.length > 1) return null;
-    replay.push({
-      shiftId: fact.shiftId,
-      terminalId: event.terminal_id,
-      raw: event.raw,
-      verdict: event.verdict,
-      scannedAt: event.scanned_at,
-      codeHash: member.code_hash,
-      gtin14: member.gtin14,
-      serial: member.serial,
-      boxId: fact.boxId,
-      operatorId: event.operator_id,
-      replayEventId: grantEvidence[0]?.event_id ?? null,
-    });
+    matched.push({ member, event: matches[0]! });
   }
-  return replay;
+  if (!isCurrent()) return null;
+  // This history has no JSON expression index. A per-member lookup rescans
+  // every retained command for every unit. An uncorrelated tuple set lets
+  // SQLite scan the history once for the entire box, preserving exact identity.
+  const grantEvidence = await exec.all<{ event_id: string; code_hash: string }>(
+    `SELECT command.event_id,json_extract(command.payload_json,'$.code.codeHash') AS code_hash
+    FROM offline_grant_scan_commands command
+    JOIN offline_grant_event_evidence evidence ON evidence.event_id=command.event_id
+    JOIN offline_grant_decisions decision ON decision.event_id=command.event_id
+    WHERE json_extract(command.payload_json,'$.event.shiftId')=?
+      AND json_extract(command.payload_json,'$.code.boxId')=?
+      AND command.stored_code=1
+      AND json_extract(decision.decision_json,'$.allow')=1
+      AND (json_extract(command.payload_json,'$.event.raw'),
+           json_extract(command.payload_json,'$.event.scannedAt'),
+           json_extract(command.payload_json,'$.code.codeHash')) IN (
+        SELECT json_extract(value,'$.raw'),json_extract(value,'$.scannedAt'),json_extract(value,'$.codeHash')
+        FROM json_each(?)
+      )`,
+    [
+      fact.shiftId,
+      fact.boxId,
+      JSON.stringify(
+        matched.map(({ member, event }) => ({
+          raw: event.raw,
+          scannedAt: event.scanned_at,
+          codeHash: member.code_hash,
+        })),
+      ),
+    ],
+  );
+  if (!isCurrent()) return null;
+  const grantIds = new Map<string, string>();
+  for (const evidence of grantEvidence) {
+    if (grantIds.has(evidence.code_hash)) return null;
+    grantIds.set(evidence.code_hash, evidence.event_id);
+  }
+  return matched.map(({ member, event }) => ({
+    shiftId: fact.shiftId,
+    terminalId: event.terminal_id,
+    raw: event.raw,
+    verdict: event.verdict,
+    scannedAt: event.scanned_at,
+    codeHash: member.code_hash,
+    gtin14: member.gtin14,
+    serial: member.serial,
+    boxId: fact.boxId,
+    operatorId: event.operator_id,
+    replayEventId: grantIds.get(member.code_hash) ?? null,
+  }));
 }
 
 async function recordIssue(
@@ -340,6 +366,7 @@ export async function applyBoxReconciliationResults(
   exec: SqlExecutor,
   facts: readonly BoxReconciliationFact[],
   results: readonly BoxReconciliationResult[],
+  isCurrent: () => boolean = () => true,
 ): Promise<void> {
   if (
     facts.length !== results.length ||
@@ -348,6 +375,9 @@ export async function applyBoxReconciliationResults(
   )
     throw new Error("Incomplete box reconciliation response");
   for (const [index, result] of results.entries()) {
+    // Pause between boxes, never inside a durable commit. The remaining
+    // revisions stay due and will be retried by the next sync drain.
+    if (!isCurrent()) return;
     const fact = facts[index]!;
     const current = await exec.all<{
       revision: number;
@@ -358,8 +388,10 @@ export async function applyBoxReconciliationResults(
        FROM boxes_mirror WHERE box_id=? AND shift_id=?`,
       [fact.boxId, fact.shiftId],
     );
+    if (!isCurrent()) return;
     if (current[0]?.revision !== fact.revision || current[0]?.acked_at === null) continue;
     const members = await readMembers(exec, fact.boxId);
+    if (!isCurrent()) return;
     if (boxMembershipDigestV1(members.map((member) => member.code_hash)) !== fact.membershipDigest)
       continue;
     const guard = `box_id=? AND shift_id=? AND reconciliation_revision=? AND acked_at IS NOT NULL
@@ -409,7 +441,9 @@ export async function applyBoxReconciliationResults(
     }
     if (!exec.atomic) throw new Error("Atomic reconciliation commit unavailable");
     if (result.reasonCode === "box_absent") {
-      const replay = await reconstructBox(exec, fact);
+      const replay = await reconstructBox(exec, fact, isCurrent);
+      // Cancellation is not missing evidence and must not create an issue.
+      if (!isCurrent()) return;
       if (!replay) {
         await recordIssue(
           exec,

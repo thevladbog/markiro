@@ -93,6 +93,14 @@ const optionalHttpsUrlSchema = z
   })
   .optional();
 
+const optionalChatwootOriginSchema = z
+  .url()
+  .refine((value) => {
+    const url = new URL(value);
+    return url.protocol === "https:" && url.origin === value && !url.username && !url.password;
+  }, "must be a trusted HTTPS origin without path or credentials")
+  .optional();
+
 const optionalNationalCatalogLiveGtinSchema = z
   .string()
   .trim()
@@ -154,6 +162,14 @@ const EnvSchema = z
     ADMIN_ORIGIN: canonicalOriginSchema.default("http://localhost:5173"),
     SAAS_ADMIN_ORIGIN: canonicalOriginSchema,
     SUBSCRIPTION_ENFORCEMENT_MODE: z.enum(["managed_only", "all"]).default("managed_only"),
+    SUPPORT_CHAT_ENABLED: z
+      .enum(["true", "false"])
+      .default("false")
+      .transform((v) => v === "true"),
+    SUPPORT_CHATWOOT_BASE_URL: optionalChatwootOriginSchema,
+    SUPPORT_CHATWOOT_ACCOUNT_ID: z.coerce.number().int().positive().optional(),
+    SUPPORT_CHATWOOT_INBOX_ID: z.coerce.number().int().positive().optional(),
+    SUPPORT_CHATWOOT_API_TOKEN: z.string().min(1).optional(),
     // Origin the pickup kiosk PWA (apps/kiosk) is served from, when it is
     // served from one at all. OPTIONAL, and deliberately WITHOUT a localhost
     // default, unlike ADMIN_ORIGIN:
@@ -265,6 +281,21 @@ const EnvSchema = z
     NATIONAL_CATALOG_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1).default(15_000),
   })
   .superRefine((env, ctx) => {
+    if (env.SUPPORT_CHAT_ENABLED) {
+      for (const name of [
+        "SUPPORT_CHATWOOT_BASE_URL",
+        "SUPPORT_CHATWOOT_ACCOUNT_ID",
+        "SUPPORT_CHATWOOT_INBOX_ID",
+        "SUPPORT_CHATWOOT_API_TOKEN",
+      ] as const) {
+        if (!env[name])
+          ctx.addIssue({
+            code: "custom",
+            path: [name],
+            message: "required when support chat is enabled",
+          });
+      }
+    }
     try {
       configureGrantSigning(env);
     } catch {
@@ -382,6 +413,11 @@ export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
     "NATIONAL_CATALOG_SCHEMA_SOURCE_TENANT_ID",
     "NATIONAL_CATALOG_LIVE_GTIN",
     "NATIONAL_CATALOG_REQUEST_TIMEOUT_MS",
+    "SUPPORT_CHAT_ENABLED",
+    "SUPPORT_CHATWOOT_BASE_URL",
+    "SUPPORT_CHATWOOT_ACCOUNT_ID",
+    "SUPPORT_CHATWOOT_INBOX_ID",
+    "SUPPORT_CHATWOOT_API_TOKEN",
   ]) {
     if (normalizedSource[name]?.trim() === "") delete normalizedSource[name];
   }

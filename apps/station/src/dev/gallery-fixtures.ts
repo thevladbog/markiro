@@ -3,7 +3,10 @@ import {
   type PersistentGalleryStateId,
 } from "../ui/persistent-station-states.js";
 
+import type { GalleryProfileId } from "./gallery-profile.js";
+
 const VISUAL_STRESS_GALLERY_STATE_IDS = [
+  "new-shift-pallets",
   "printer-recovery-box",
   "setup-printers",
   "setup-printers-empty",
@@ -11,6 +14,9 @@ const VISUAL_STRESS_GALLERY_STATE_IDS = [
   "work-pallet-66",
   "work-pallet-20",
   "work-pallet-20-stale",
+  "pallet-close-printed",
+  "pallet-close-unknown",
+  "pallet-exceptions-reason",
   "work-aggregation-waiting",
   "work-close-reason",
   "pairing-recovery",
@@ -18,6 +24,15 @@ const VISUAL_STRESS_GALLERY_STATE_IDS = [
   "floor-header-window-error",
   "long-copy-ru",
   "long-copy-en",
+] as const;
+
+export const WAREHOUSE_GALLERY_STATE_IDS = [
+  "warehouse-reprint-ready",
+  "warehouse-reprint-setup",
+  "warehouse-reprint-lookup",
+  "warehouse-reprint-unknown",
+  "warehouse-reprint-legacy-sent",
+  "warehouse-reprint-history-warning",
 ] as const;
 
 export const INVENTORY_GALLERY_STATE_IDS = [
@@ -45,13 +60,15 @@ export const INVENTORY_GALLERY_STATE_IDS = [
 export type GalleryStateId =
   | PersistentGalleryStateId
   | (typeof VISUAL_STRESS_GALLERY_STATE_IDS)[number]
-  | (typeof INVENTORY_GALLERY_STATE_IDS)[number];
+  | (typeof INVENTORY_GALLERY_STATE_IDS)[number]
+  | (typeof WAREHOUSE_GALLERY_STATE_IDS)[number];
 
 export const EXPECTED_GALLERY_STATE_IDS: readonly GalleryStateId[] = Array.from(
   new Set<GalleryStateId>([
     ...PERSISTENT_GALLERY_STATE_IDS,
     ...VISUAL_STRESS_GALLERY_STATE_IDS,
     ...INVENTORY_GALLERY_STATE_IDS,
+    ...WAREHOUSE_GALLERY_STATE_IDS,
   ]),
 );
 export type GalleryLocale = "ru" | "en";
@@ -59,6 +76,8 @@ export type GalleryLocale = "ru" | "en";
 export interface GalleryRequest {
   state: GalleryStateId;
   locale: GalleryLocale;
+  /** Omitted for the original demo data. */
+  profile?: GalleryProfileId;
 }
 
 export type GalleryFixtureKind =
@@ -70,6 +89,7 @@ export type GalleryFixtureKind =
   | "new-shift"
   | "shift"
   | "work"
+  | "pallet"
   | "product-label"
   | "work-overlay"
   | "signal"
@@ -82,6 +102,7 @@ export type GalleryFixtureKind =
   | "sync"
   | "print"
   | "updates"
+  | "warehouse-reprint"
   | "inventory"
   | "floor-header"
   | "long-copy";
@@ -208,6 +229,7 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
     variant: "not-found",
     source: "synthetic",
   },
+  { id: "new-shift-pallets", kind: "new-shift", variant: "pallets", source: "synthetic" },
   {
     id: "new-shift-pallet-template",
     kind: "new-shift",
@@ -243,6 +265,17 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
   // The owner's 2026-09-25 photo: a 20-place box with two items on pallet
   // 15 of 66, the shift total counting another terminal.
   { id: "work-pallet-20", kind: "work", variant: "aggregation-pallet-20", source: "synthetic" },
+  // The pallet screens the printed instructions (MKR-INS-02/03) show: a closed
+  // pallet whose label printed, one whose print outcome is unknown after an
+  // interruption, and the pallet disassembly reasons.
+  { id: "pallet-close-printed", kind: "pallet", variant: "close-printed", source: "synthetic" },
+  { id: "pallet-close-unknown", kind: "pallet", variant: "close-unknown", source: "synthetic" },
+  {
+    id: "pallet-exceptions-reason",
+    kind: "pallet",
+    variant: "exceptions-reason",
+    source: "synthetic",
+  },
   {
     id: "work-pallet-20-stale",
     kind: "work",
@@ -382,6 +415,12 @@ export const GALLERY_FIXTURES: readonly GalleryFixture[] = [
   { id: "print-not-sscc", kind: "print", variant: "not-sscc", source: "synthetic" },
   { id: "long-copy-ru", kind: "long-copy", variant: "ru", source: "synthetic" },
   { id: "long-copy-en", kind: "long-copy", variant: "en", source: "synthetic" },
+  ...WAREHOUSE_GALLERY_STATE_IDS.map((id) => ({
+    id,
+    kind: "warehouse-reprint" as const,
+    variant: id.replace("warehouse-reprint-", ""),
+    source: "synthetic" as const,
+  })),
   ...INVENTORY_GALLERY_STATE_IDS.map((id) => ({
     id,
     kind: "inventory" as const,
@@ -421,5 +460,6 @@ export function resolveGalleryRequest(
       ? (requestedState as GalleryStateId)
       : "pairing-waiting";
   const locale: GalleryLocale = params.get("locale") === "en" ? "en" : "ru";
-  return { state, locale };
+  const profile: GalleryProfileId | null = params.get("profile") === "landing" ? "landing" : null;
+  return profile === null ? { state, locale } : { state, locale, profile };
 }

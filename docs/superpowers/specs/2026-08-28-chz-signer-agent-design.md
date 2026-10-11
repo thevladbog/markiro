@@ -188,6 +188,8 @@ rolling file this section originally described.
 - The private key never leaves the customer machine; the agent transmits only CAdES
   signatures and resulting tokens.
 - `agentSecret` is stored via DPAPI; agent config lives under `%APPDATA%\Markiro Signer`.
+  (Superseded: the config lived in `%APPDATA%\app.markiro.signer` and moves to
+  `%LOCALAPPDATA%\app.markiro.signer`; see `2026-09-27-signer-local-storage-design.md`.)
 - The cloud stores only short-lived (≤10 h) tokens, encrypted at rest; access to them is
   tenant-scoped.
 - The pairing code is short-lived, single-use, and rate-limited.

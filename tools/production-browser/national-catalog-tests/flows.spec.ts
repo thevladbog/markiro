@@ -69,6 +69,17 @@ test("own partial feed, cross-page choices, link-only and draft, independent pho
   await page.route(`${origin}/api/**`, async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
+    // Support chat is disabled in these unrelated cabinet scenarios.
+    if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
+      return route.fulfill({
+        status: 503,
+        json: {
+          statusCode: 503,
+          message: "Support chat unavailable",
+          error: "Service Unavailable",
+        },
+      });
+    }
     const method = route.request().method();
     if (path.includes("/images/")) {
       await route.fulfill({
@@ -460,6 +471,17 @@ for (const lang of ["ru", "en"] as const)
     });
     await page.route(`${origin}/api/**`, async (route) => {
       const path = new URL(route.request().url()).pathname;
+      // Support chat is disabled in these unrelated cabinet scenarios.
+      if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
+        return route.fulfill({
+          status: 503,
+          json: {
+            statusCode: 503,
+            message: "Support chat unavailable",
+            error: "Service Unavailable",
+          },
+        });
+      }
       let body: unknown;
       if (path.endsWith("/access/me"))
         body = { roles: ["manager"], capabilities: ["operations.read", "operations.write"] };

@@ -24,8 +24,12 @@ const siteConfig = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_P
     <div class="container not-found-page__inner">
       <p class="section-index">404 / NOT FOUND</p>
       <h1>Редакция не найдена<br /><span lang="en">Revision not found</span></h1>
-      <p>Проверьте адрес или вернитесь в публичный реестр. Check the address or return to the public registry.</p>
-      <a class="button" href="/legal/">Реестр документов / Document registry</a>
+      <p>Проверьте адрес, вернитесь на главную или в реестр документов. Check the address, go to the home page or return to the document registry.</p>
+      <div class="not-found-page__actions">
+        <a class="button" href="/">На главную / Home</a>
+        <a class="text-link" href="/#demo">Запросить демо / Request a demo <span aria-hidden="true">→</span></a>
+        <a class="text-link" href="/legal/">Реестр документов / Document registry <span aria-hidden="true">→</span></a>
+      </div>
     </div>
   </main>
   <LandingFooter page={metadata} />

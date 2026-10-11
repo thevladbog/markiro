@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router";
 
 import { Alert, Button } from "@markiro/ui";
+import { orgInitials } from "./org-initials.js";
 
 import { useAuthClient, type OrganizationSummary } from "../../auth/client.js";
 import { useClearAuthQueryCache } from "../../query/AuthQueryBoundary.js";
@@ -150,7 +151,7 @@ export function SelectOrgPage() {
                       onClick={() => void handleSelect(org.id)}
                     >
                       <span className="mk-account-org__mark" aria-hidden="true">
-                        {initialsOf(org.name)}
+                        {orgInitials(org.name)}
                       </span>
                       <span className="mk-account-org__copy">
                         <strong>{org.name}</strong>
@@ -187,11 +188,4 @@ export function SelectOrgPage() {
       </div>
     </AccountShell>
   );
-}
-
-function initialsOf(value: string): string {
-  const parts = value.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return (parts[0] ?? "").slice(0, 2).toUpperCase();
-  return `${parts[0]?.[0] ?? ""}${parts[1]?.[0] ?? ""}`.toUpperCase();
 }

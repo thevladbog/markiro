@@ -20,6 +20,8 @@ import type { ChzExportRunnerService } from "../src/modules/chz-exports/chz-expo
 import type { ChzCodeStatusIngestService } from "../src/modules/chz-code-statuses/chz-code-status-ingest.service";
 import type { ChzCodeStatusRefreshService } from "../src/modules/chz-code-statuses/chz-code-status-refresh.service";
 import type { PlatformReportRunnerService } from "../src/platform-reports/platform-report-runner.service";
+import type { SupportChatJobsService } from "../src/modules/support-chat/support-chat-jobs.service";
+import type { SupportChatSyncService } from "../src/modules/support-chat/support-chat-sync.service";
 
 const pgBossMock = vi.hoisted(() => ({
   instances: [] as unknown[],
@@ -108,6 +110,8 @@ function serviceWith(
   options: {
     nationalCatalogSchemaSourceTenantId?: string;
     platformReports?: PlatformReportRunnerService;
+    supportChatJobs?: SupportChatJobsService;
+    supportChatSync?: SupportChatSyncService;
   } = {},
 ) {
   pgBossMock.instances.push(boss);
@@ -179,6 +183,8 @@ function serviceWith(
       options.nationalCatalogSchemaSourceTenantId,
       undefined,
       options.platformReports,
+      options.supportChatJobs,
+      options.supportChatSync,
     ),
     subscriptionStatus,
     signerScheduler,
@@ -186,6 +192,40 @@ function serviceWith(
 }
 
 describe("PgBossService readiness", () => {
+  it.each([false, true])(
+    "accepts the extra support-chat worker with platform reports enabled=%s",
+    async (reportsEnabled) => {
+      const workIds = [
+        ...WORKER_IDS,
+        ...(reportsEnabled ? ["report-worker", "report-repair"] : []),
+        "support-worker",
+      ];
+      const boss = fakeBoss({ workIds });
+      const { service } = serviceWith(boss, {
+        ...(reportsEnabled
+          ? {
+              platformReports: {
+                run: vi.fn(),
+                reconcile: vi.fn(),
+              } as unknown as PlatformReportRunnerService,
+            }
+          : {}),
+        supportChatJobs: {
+          run: vi.fn(),
+          repairAndWake: vi.fn(),
+        } as unknown as SupportChatJobsService,
+        supportChatSync: {} as SupportChatSyncService,
+      });
+      await service.onModuleInit();
+      try {
+        await expect(service.checkReady()).resolves.toBeUndefined();
+        boss.setWipData(workIds.filter((id) => id !== "support-worker").map((id) => wip(id)));
+        await expect(service.checkReady()).rejects.toThrow("pg-boss workers are not active");
+      } finally {
+        await service.onModuleDestroy();
+      }
+    },
+  );
   it("registers a scheduled report recovery worker and wakes it after committed intents", async () => {
     const boss = fakeBoss({ workIds: [...WORKER_IDS, "report-worker", "report-repair"] });
     const reportId = "81111111-1111-4111-8111-111111111111";

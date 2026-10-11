@@ -1,12 +1,25 @@
 import { ApiRequestError } from "../../api/client.js";
 
-type TenantOperation = "create" | "renew" | "plan" | "addon";
+type TenantOperation = "create" | "renew" | "grant" | "plan" | "addon";
 
 const CREATE_ERROR_KEYS: Readonly<Record<string, string>> = {
   tenant_owner_email_conflict: "tenants.errors.tenant_owner_email_conflict",
   tenant_email_conflict: "tenants.errors.tenant_email_conflict",
   tenant_first_owner_conflict: "tenants.errors.tenant_first_owner_conflict",
   tenant_first_member_not_owner: "tenants.errors.tenant_first_member_not_owner",
+  default_demo_not_configured: "tenants.errors.default_demo_not_configured",
+  tenant_cabinet_access_mismatch: "tenants.errors.tenant_cabinet_access_mismatch",
+};
+
+// A grant adds an owner to an existing tenant, so a tenant that already has
+// another member is a different conflict from a create-time slug clash.
+const GRANT_ERROR_KEYS: Readonly<Record<string, string>> = {
+  cabinet_access_already_enabled: "tenants.errors.cabinet_access_already_enabled",
+  tenant_first_owner_conflict: "tenants.errors.grant_owner_conflict",
+  tenant_first_member_not_owner: "tenants.errors.tenant_first_member_not_owner",
+  tenant_owner_email_conflict: "tenants.errors.tenant_owner_email_conflict",
+  tenant_email_conflict: "tenants.errors.tenant_email_conflict",
+  tenant_not_found: "tenants.errors.tenant_not_found",
   default_demo_not_configured: "tenants.errors.default_demo_not_configured",
 };
 
@@ -34,6 +47,7 @@ const ASSIGNMENT_ERROR_KEYS: Readonly<Record<string, string>> = {
 const FALLBACK_KEYS: Record<TenantOperation, string> = {
   create: "tenants.errors.create_failed",
   renew: "tenants.errors.renew_failed",
+  grant: "tenants.errors.grant_failed",
   plan: "tenants.errors.assignment_failed",
   addon: "tenants.errors.assignment_failed",
 };
@@ -45,6 +59,8 @@ export function tenantErrorMessageKey(operation: TenantOperation, error: unknown
       ? CREATE_ERROR_KEYS
       : operation === "renew"
         ? RENEW_ERROR_KEYS
-        : ASSIGNMENT_ERROR_KEYS;
+        : operation === "grant"
+          ? GRANT_ERROR_KEYS
+          : ASSIGNMENT_ERROR_KEYS;
   return (code ? allowed[code] : undefined) ?? FALLBACK_KEYS[operation];
 }

@@ -1,0 +1,2 @@
+ALTER TABLE "organization" ADD COLUMN "cabinet_access" text DEFAULT 'enabled' NOT NULL;--> statement-breakpoint
+ALTER TABLE "organization" ADD CONSTRAINT "organization_cabinet_access_ck" CHECK ("organization"."cabinet_access" in ('enabled', 'none'));

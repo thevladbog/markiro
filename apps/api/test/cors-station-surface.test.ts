@@ -49,6 +49,11 @@ const documentedStationSurface = [
   ["POST", "/station/codes/releases"],
   ["POST", "/station/boxes/reconciliation"],
   ["POST", "/station/scans"],
+  ["POST", "/station/warehouse-reprint/lookup"],
+  ["GET", "/station/warehouse-reprint/templates"],
+  ["GET", "/station/branding"],
+  ["GET", "/station/branding/logo/a1111111-1111-4111-8111-111111111111"],
+  ["POST", "/station/warehouse-reprint/event-batches"],
   ["GET", "/station/inventory-tasks"],
   ["POST", "/station/inventory-tasks/resolve-barcode"],
   ["POST", "/station/inventories/inventory-1/join"],
@@ -63,7 +68,10 @@ const documentedStationSurface = [
   ["POST", "/shifts"],
   ["GET", "/shifts/box-label-templates"],
   ["GET", "/shifts/pallet-label-templates"],
+  ["GET", "/shifts/pallet-sheet-templates"],
+  ["GET", "/shifts/pallet-sheet-template-preview"],
   ["GET", "/shifts/product-label-templates"],
+  ["GET", "/shifts/label-template-preview"],
   ["GET", "/shifts/planning-config"],
   ["GET", "/shifts/shift-1/bundle"],
   ["GET", "/shifts/shift-1/reference-bundle"],
@@ -112,6 +120,8 @@ describe("station CORS surface", () => {
   });
 
   it.each([
+    ["POST", "/shifts/label-template-preview"],
+    ["GET", "/shifts/label-template-preview/extra"],
     ["GET", "/station/pair"],
     ["GET", "/station/pair/recovery"],
     ["POST", "/station/pair/recovery/extra"],

@@ -35,6 +35,7 @@ export type PrepareProductLabelInput = Pick<
   eventId: string;
   attemptId: string;
   language: PrinterLanguage;
+  printerMode?: "raw" | "windows_driver";
   /** Unknown resolution must be configured before accepting the first unit. */
   printerDpi: 203 | 300 | null;
   rasterizeText: RasterizeTextFn;
@@ -76,13 +77,15 @@ export interface StoredProductLabelJob extends PreparedProductLabelAcceptance {
   updatedAt: string;
 }
 export interface ProductLabelJobView {
+  printScope?: string;
   printer?: PrinterProfile | null;
   jobId: string;
   shiftId: string;
   codeSuffix: string;
   attemptId: string;
   attemptNo: number;
-  language: PrinterLanguage;
+  language?: PrinterLanguage | undefined;
+  printFormat?: "mono-raster-v1" | undefined;
   dpi: 203 | 300;
   status: ProductLabelJobStatus;
   attemptState: ProductLabelAttemptState;

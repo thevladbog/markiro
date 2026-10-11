@@ -9,6 +9,7 @@ import pg from "pg";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runRuntimeMigrations } from "../src/runtime-migrate.js";
 import { copyMigrationsThroughIndex } from "./support/legacy-migrations.js";
+import { closeFixturePool } from "./support/close-pool.js";
 
 const databaseUrl = process.env.DATABASE_URL;
 const migrationsFolder = fileURLToPath(new URL("../migrations", import.meta.url));
@@ -80,7 +81,7 @@ describe.skipIf(!databaseUrl)("working device replacement forward migration", ()
   }, 120_000);
 
   afterAll(async () => {
-    await pool.end();
+    await closeFixturePool(pool);
     if (created) await maintenance.query(`DROP DATABASE "${name}" WITH (FORCE)`);
     await maintenance.end();
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });

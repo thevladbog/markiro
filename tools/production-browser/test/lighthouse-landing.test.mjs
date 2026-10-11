@@ -54,7 +54,7 @@ test("builds the production-like enabled landing for the gate unless the caller 
   assert.equal(environment.ASTRO_TELEMETRY_DISABLED, "1");
   assert.equal(environment.PUBLIC_DEMO_SUBMISSION_ENABLED, "true");
   assert.match(environment.PUBLIC_SMARTCAPTCHA_CLIENT_KEY, /^ysc1_.+/);
-  assert.equal(environment.PUBLIC_PHONE, "+7 934 355-14-90");
+  assert.equal(environment.PUBLIC_PHONE, "+7 960 495-46-10");
 
   const overridden = lighthouseBuildEnvironment({
     PUBLIC_DEMO_SUBMISSION_ENABLED: "false",
@@ -64,12 +64,13 @@ test("builds the production-like enabled landing for the gate unless the caller 
   assert.equal(overridden.PUBLIC_PHONE, "");
 });
 
-test("gates the home page, a commercial topic page and an article", () => {
+test("gates the home page, a commercial topic page, an article and the film", () => {
   assert.ok(Object.isFrozen(LIGHTHOUSE_ROUTES));
   assert.deepEqual(LIGHTHOUSE_ROUTES, [
     "/",
     "/markirovka-chestny-znak/",
     "/stati/markirovka-piva-2026/",
+    "/kak-rabotaet/",
   ]);
 });
 

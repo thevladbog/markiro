@@ -233,7 +233,7 @@ describe("platform tenants", () => {
     expect(screen.getByRole("button", { name: "Повторить" })).toBeDefined();
   });
 
-  it("blocks invalid create input, then sends only name, slug, and owner email", async () => {
+  it("blocks invalid create input, then sends only name, slug, owner email, and cabinet access", async () => {
     const api = installTenantApi({ me: SUPPORT_ME });
     renderSaasApp({ initialEntry: "/tenants/new" });
     const user = userEvent.setup();
@@ -265,6 +265,7 @@ describe("platform tenants", () => {
           tenantName: "Первый завод",
           tenantSlug: "first-factory",
           email: "owner@example.com",
+          cabinetAccess: "enabled",
         },
       },
     ]);

@@ -92,6 +92,14 @@ registry, `save-exact`, `engine-strict`, `minimum-release-age=10080`
 - **Local DB:** SQLite via `tauri-plugin-sql`, accessed with
   `drizzle-orm/sqlite-proxy`; schema defined in `packages/db`, mirrors the
   server's shift entities (shift, codes, scan journal, boxes, pallets).
+- **Local storage location:** `station.json` (device identity and key) and
+  `station-mirror.db` live together in machine-local app data
+  (`%LOCALAPPDATA%\app.markiro.station`): a copy on another PC prints duplicate
+  SSCCs offline and stalls its outbox on batch-id collisions. Older installs
+  move out of the roaming profile once, crash-safely
+  (`apps/station/src-tauri/src/storage/`), unless the profile wipes local data
+  at sign-out (then the data stays in the roaming folder and the station says
+  so).
 - **Updates:** Tauri updater. **All assets bundled** — fonts (IBM Plex,
   OFL), icons, sounds; zero CDN (the shop floor is offline).
 - Windows targets for MVP; Linux later; Android deferred (serial is painful).
@@ -115,6 +123,22 @@ saved language/DPI and replay their original bytes with a reprint reason. Sends 
 serialized per physical endpoint, including test labels. Local destination metadata
 retires with the existing print-job retention rules and never enters server event digests.
 See [device printer routing](superpowers/specs/2026-09-13-device-printer-routing-design.md).
+
+Station additionally supports `windows_driver` profiles for installed Windows queues.
+The default and every legacy profile remain RAW ZPL/TSPL. Driver mode freezes a
+validated `mono-raster-v1` page at 203 or 300 DPI and prints it through GDI at 1:1
+scale. Product/warehouse prepared events carry `printFormat` instead of `language`;
+the profile retains the last RAW language solely for configuration. Windows receipts
+and delivery uncertainty stay in the local SQLite sidecar. Queue acceptance or an
+absent spooler job never establishes physical verification. Settled box/pallet
+rasters are released while their digest/receipt remains; unresolved unknown output
+retains its bytes, and an explicitly resolved box/pallet can regenerate on reprint.
+A warehouse job may regenerate only after proven failure before sending: an explicit
+new attempt uses saved fields/template and records its new format, DPI and digest
+atomically, without changing the original prepared snapshot. This permits recovery
+between Windows raster, ZPL and TSPL after a proven non-send. Deploy the compatible
+API before enabling this Station version. See the [Windows printing acceptance
+runbook](acceptance/station-windows-printing.md).
 
 A validation shift can print one duplicate of the full product Data Matrix on its
 outer packaging. This does not create another product unit, SSCC or aggregation.
@@ -178,6 +202,21 @@ aggregation, and saved historical reports and generated exports remain unchanged
   the server snapshots the product's current value when creating the shift.
   The pallet template picker reads tenant/category-filtered summaries through
   `GET /shifts/pallet-label-templates`, with category then organisation defaults.
+- Editable pallet A4 templates use strict JSON V2 (`pallet_sheet`), independent
+  defaults and revision-checked cabinet CRUD. Rendering remains client-side.
+  An opted-in Windows Station snapshots the selected full spec with its revision
+  and digest in the shift and signed offline scope; legacy clients receive V1
+  projections. Actual handheld kind cannot acquire sheet capability by a header.
+  Windows A4 paper profiles are pallet-only and require a native capability probe.
+  Native DEVMODE requests standard A4, orientation, simplex, scale100/copies1;
+  actual printable bounds and an effective geometry fingerprint are checked before
+  StartDoc. Source raster300 is replicated only at device300/600/1200, without fit.
+  Each delivery freezes facts, template, renderer version, private mono branding
+  and geometry atomically with bytes. Unknown output never resends automatically;
+  explicit replay retains bytes, while proven non-send permits a new geometry
+  attempt from the saved resources. Historical resources remain tenant/key-bound.
+  See [V2 JSON](labels/pallet-sheet-json-v2.md) and
+  [physical acceptance](acceptance/validation-pallet-a4-printing.md).
 - Product snapshots carry an optional private image descriptor. Device mirrors
   treat an absent `image` field as a legacy/unknown value and retain any
   already-published local pointer; only explicit `image: null` clears it. This
@@ -473,6 +512,13 @@ external integration, or production environment.
   single-consumption, attempt-lockout, and source/global rate-limit policy —
   not credential generation. Their credentials retain separate headers,
   guards, persistence, and device tables.
+- **Signer agent: separate secret.** The Chestny ZNAK signer redeems a
+  single-use pairing code for a random agent secret; the API stores only its
+  hash and authenticates `x-signer-token` against it. The agent keeps the
+  secret under user-scope DPAPI in `%LOCALAPPDATA%`, never in the roaming
+  profile: DPAPI user keys roam with a roaming profile or redirected AppData,
+  so a roamed copy would decrypt on another computer and clone the agent
+  (`docs/superpowers/specs/2026-09-27-signer-local-storage-design.md`).
 
 ### Cabinet authorization
 

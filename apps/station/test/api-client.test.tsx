@@ -31,6 +31,20 @@ afterEach(() => {
 });
 
 describe("createStationClient", () => {
+  it("advertises A4 only after native support was established", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(
+        async () => new Response("{}", { headers: { "Content-Type": "application/json" } }),
+      );
+    const config = { apiKey: "test-key", serverUrl: "https://example.test" };
+    await createStationClient(config).get("/shifts");
+    await createStationClient(config, { palletSheetSupported: true }).get("/shifts");
+    const oldHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    const newHeaders = new Headers(fetchMock.mock.calls[1]?.[1]?.headers);
+    expect(oldHeaders.get("x-station-capabilities")).not.toContain("pallet-sheet-v2");
+    expect(newHeaders.get("x-station-capabilities")).toContain("pallet-sheet-v2");
+  });
   it("sends the x-api-key header and base-URLs from config", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), {
@@ -55,7 +69,7 @@ describe("createStationClient", () => {
     expect(url).toBe("http://localhost:3000/shifts");
     expect((init!.headers as Record<string, string>)["x-api-key"]).toBe("mk_key");
     expect((init!.headers as Record<string, string>)["x-station-capabilities"]).toBe(
-      "subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,validation-dm-duplicate-v1,validation-reprocessing-v1",
+      "subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,thermal-label-branding-v1,validation-dm-duplicate-v1,validation-reprocessing-v1,warehouse-label-reprint-v1",
     );
     expect(onReachabilityChange).toHaveBeenCalledOnce();
     expect(onReachabilityChange).toHaveBeenLastCalledWith("reachable");
@@ -813,7 +827,7 @@ describe("redeemStationPairing", () => {
     expect(init?.headers).toEqual({
       "Content-Type": "application/json",
       "x-station-capabilities":
-        "subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,validation-dm-duplicate-v1,validation-reprocessing-v1",
+        "subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,thermal-label-branding-v1,validation-dm-duplicate-v1,validation-reprocessing-v1,warehouse-label-reprint-v1",
     });
   });
 

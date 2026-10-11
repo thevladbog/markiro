@@ -1,9 +1,13 @@
 //! DPAPI-backed secret storage (per-user scope).
 //!
-//! `CryptProtectData` ties the ciphertext to the Windows account, which is
-//! exactly the boundary we want: the agent runs as the operator who owns the
-//! UKEP, and nobody else — including another account on the same machine —
-//! can recover the agent secret from the config file.
+//! `CryptProtectData` without `CRYPTPROTECT_LOCAL_MACHINE` ties the ciphertext
+//! to the Windows account: the agent runs as the operator who owns the UKEP,
+//! and nobody else, including another account on the same machine, can
+//! recover the agent secret from the config file. It does not tie the
+//! ciphertext to this computer: the user's DPAPI master keys travel with a
+//! roaming profile or redirected AppData, and Microsoft documents that such a
+//! user "can decrypt the data from another computer on the network". Keeping
+//! the file in non-roaming storage is `storage_location`'s job.
 
 use std::ptr;
 

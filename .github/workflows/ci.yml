@@ -132,6 +132,8 @@ jobs:
     env:
       DATABASE_URL: postgres://markiro:markiro@localhost:5432/markiro
       INVENTORY_TEST_DATABASE_URL: postgres://markiro:markiro@localhost:5432/markiro
+      SUPPORT_CHAT_ISOLATED_DB: "1"
+      SUPPORT_CHAT_TEST_MAINTENANCE_URL: postgres://markiro:markiro@localhost:5432/markiro
       BETTER_AUTH_SECRET: insecure-dummy-ci-placeholder-not-a-secret
       BETTER_AUTH_URL: http://localhost:3000
       ADMIN_ORIGIN: http://localhost:5173
@@ -261,7 +263,11 @@ jobs:
     # The job then took 26-34 minutes (runs 36142260084, 36147194885,
     # 36150539644); the product-labels contract adds about 2 more (59 tests,
     # 1.8 minutes locally), so keep the same headroom above that.
-    timeout-minutes: 45
+    # Main later took 33-42 minutes (42.3 on run 36257096021). The landing home
+    # redesign adds about 3 more (image build +48s, landing browser and
+    # Lighthouse gates +91s) and was cancelled at 45.1 minutes in the last step
+    # of run 36310376201, so the budget moves to 60 minutes.
+    timeout-minutes: 60
     env:
       COMPOSE_PROJECT_NAME: markiro-production
       MARKIRO_IMAGE_TAG: ${{ github.sha }}
@@ -283,6 +289,15 @@ jobs:
           : > "$env_file"
           chmod 600 "$env_file"
           printf '%s\n' "MARKIRO_ENV_FILE=$env_file" >> "$GITHUB_ENV"
+      - name: Reserve browser harness ports
+        # The tools/production-browser harnesses listen on fixed ports, and
+        # 43179-43188 lie inside the runner's ephemeral range (32768-60999).
+        # The suites run back to back, so a loopback connection from one can be
+        # handed such a port as its source port and hold it, TIME_WAIT
+        # included, when the next `--strictPort` server starts: run 36201712862
+        # failed with "Port 43182 is already in use". Reserved ports are never
+        # assigned automatically; an explicit listen on them still works.
+        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=43179-43188
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
@@ -581,6 +596,14 @@ jobs:
       # built for the same reason as the `station-rust` job above.
       - name: Build station webview + workspace deps
         run: pnpm turbo build --filter '@markiro/station...'
+      # `#[cfg(windows)]` tests (storage move, exclusive handles, profile
+      # probe) must at least compile on Windows. They are not launched: on
+      # Windows Server 2025 the Tauri test harness can fail before main() with
+      # STATUS_ENTRYPOINT_NOT_FOUND (see station-stable-release.yml).
+      - name: Test portable raster and Windows driver core
+        run: cargo test --manifest-path tools/station-printer-tests/Cargo.toml --locked
+      - name: Compile station Rust tests for Windows
+        run: cargo test --manifest-path apps/station/src-tauri/Cargo.toml --no-run
       - name: Compile the Windows Tauri application
         run: pnpm --filter @markiro/station tauri build --debug --no-bundle
 

@@ -1,3 +1,4 @@
+import { projectThermalLabelForClient } from "@markiro/domain";
 import { assertDeviceReplacementNewWorkAllowed } from "../device-licensing/device-replacement-admission";
 import { BadRequestException, Inject, Injectable, Logger } from "@nestjs/common";
 import { and, eq } from "drizzle-orm";
@@ -25,7 +26,11 @@ export class StationPalletsService {
     private readonly entitlements: EntitlementsService,
   ) {}
 
-  async bootstrap(tenantId: string, deviceId: string): Promise<StationPalletBootstrapDto> {
+  async bootstrap(
+    tenantId: string,
+    deviceId: string,
+    capabilities?: string,
+  ): Promise<StationPalletBootstrapDto> {
     const [products, operators, profile, categoryDefaults] = await Promise.all([
       this.db
         .select({
@@ -79,7 +84,10 @@ export class StationPalletsService {
         .where(eq(schema.labelTemplates.tenantId, tenantId));
       for (const row of rows) {
         if (row.enabled && templateIds.includes(row.id))
-          specs.set(row.id, row.spec as LabelTemplateSpec);
+          specs.set(
+            row.id,
+            projectThermalLabelForClient(row.spec as LabelTemplateSpec, capabilities),
+          );
       }
     }
 

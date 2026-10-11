@@ -42,12 +42,19 @@ test("required verification blocks the next unit; full tail and restart use the 
   await page.waitForFunction(() => window.__productLabels?.ready());
   await expect(dialog).toBeVisible();
   expect((await page.evaluate(() => window.__productLabels.inspect())).prints).toBe(1);
+  // The success signal lasts 650 ms and can overlap the instrument readout.
+  // Hold its timer and assert the unique signal rather than a transient global count.
+  await page.clock.install();
+  await page.clock.pauseAt(new Date());
   await page.evaluate(() => window.__productLabels.scan());
-  await expect(page.getByText("Этикетка подтверждена", { exact: true })).toHaveCount(1);
+  await expect(
+    page.getByRole("alert").getByText("Этикетка подтверждена", { exact: true }),
+  ).toHaveCount(1);
   await expect(dialog).toHaveCount(0);
   const state = await page.evaluate(() => window.__productLabels.inspect());
   expect(state.accepted).toBe(1);
   expect(state.events.at(-1)).toBe("verified");
+  await page.clock.runFor(650);
   await page.screenshot({ path: info.outputPath("station-verified.png") });
 });
 
@@ -274,7 +281,15 @@ for (const verification of ["required", "none", "off"])
             dpi: spec.dpi,
           })),
         };
-      else if (path === "/shifts") {
+      else if (path === "/shifts/label-template-preview") {
+        const query = new URL(route.request().url()).searchParams;
+        expect(route.request().method()).toBe("GET");
+        expect(query.get("productId")).toBe("44444444-4444-4444-8444-444444444444");
+        expect(query.get("purpose")).toBe("product_duplicate");
+        const selected = templates.find((item) => item.id === query.get("templateId"));
+        if (!selected) throw new Error("Unknown preview template");
+        body = { ...selected, purpose: "product_duplicate" };
+      } else if (path === "/shifts") {
         writes.push(route.request().postDataJSON());
         body = { id: shiftId, productionDate: "2026-09-09" };
       } else if (path === `/shifts/${shiftId}/open`)
@@ -339,6 +354,9 @@ for (const verification of ["required", "none", "off"])
           }),
         ).toBeVisible();
       await page.getByRole("button", { name: template.name, exact: false }).click();
+      await expect(
+        page.getByRole("img", { name: `Предпросмотр: ${template.name}`, exact: true }),
+      ).toBeVisible();
       await page.screenshot({ path: info.outputPath(`station-template-${verification}.png`) });
       await expect(page.getByRole("button", { name: "Начать", exact: true })).toHaveCount(0);
       await page.getByRole("button", { name: "Применить", exact: true }).click();
@@ -574,7 +592,18 @@ for (const locale of ["ru", "en"])
     }, info) => {
       const writes: Record<string, unknown>[] = [];
       const unexpected: string[] = [];
-      const template = { widthMm: 100, heightMm: 150, dpi: 203, language: "zpl" };
+      const sqliteRequests: string[] = [];
+      page.on("request", (request) => {
+        if (new URL(request.url()).pathname === "/__product_labels_sql")
+          sqliteRequests.push(request.url());
+      });
+      const { buildDatedBoxLabelTemplates, buildPalletLabelTemplates } =
+        await import("../../../packages/domain/dist/index.js");
+      const originalBoxSpec = buildDatedBoxLabelTemplates()[0]?.spec;
+      const palletSpec = buildPalletLabelTemplates()[0]?.spec;
+      if (!originalBoxSpec || !palletSpec) throw new Error("Missing stock label specs");
+      const boxSpec = { ...originalBoxSpec, widthMm: 75, heightMm: 120 };
+      const palletName = locale === "en" ? "Pallet 100×150" : "Паллета 100×150";
       await page.addInitScript((theme) => localStorage.setItem("markiro.theme", theme), theme);
       await page.route(`${station}/__product_labels_api/**`, async (route) => {
         const path = new URL(route.request().url()).pathname.replace("/__product_labels_api", "");
@@ -594,21 +623,46 @@ for (const locale of ["ru", "en"])
           };
         else if (path === "/shifts/box-label-templates")
           body = {
-            items: [{ ...template, id: "box-label", name: "Этикетка короба" }],
+            items: [
+              {
+                id: "box-label",
+                name: "Этикетка короба",
+                widthMm: boxSpec.widthMm,
+                heightMm: boxSpec.heightMm,
+                dpi: boxSpec.dpi,
+                language: boxSpec.language,
+              },
+            ],
             defaultBoxLabelTemplateId: "box-label",
           };
         else if (path === "/shifts/pallet-label-templates")
           body = {
             items: [
               {
-                ...template,
                 id: "pallet-label",
-                name: locale === "en" ? "Pallet 100×150" : "Паллета 100×150",
+                name: palletName,
+                widthMm: palletSpec.widthMm,
+                heightMm: palletSpec.heightMm,
+                dpi: palletSpec.dpi,
+                language: palletSpec.language,
               },
             ],
             defaultPalletLabelTemplateId: "pallet-label",
           };
-        else if (path === "/shifts") {
+        else if (path === "/shifts/label-template-preview") {
+          const query = new URL(route.request().url()).searchParams;
+          expect(route.request().method()).toBe("GET");
+          expect(query.get("productId")).toBe("product");
+          const purpose = query.get("purpose");
+          expect(["box", "pallet"]).toContain(purpose);
+          expect(query.get("templateId")).toBe(`${purpose}-label`);
+          body = {
+            id: `${purpose}-label`,
+            name: purpose === "box" ? "Этикетка короба" : palletName,
+            purpose,
+            spec: purpose === "box" ? boxSpec : palletSpec,
+          };
+        } else if (path === "/shifts") {
           writes.push(route.request().postDataJSON());
           body = { id: "shift" };
         } else if (path === "/shifts/shift/open")
@@ -668,6 +722,20 @@ for (const locale of ["ru", "en"])
         await page
           .getByRole("button", { name: locale === "ru" ? "Начать" : "Start", exact: true })
           .click();
+        const boxPreview = page.getByRole("img", {
+          name: `${locale === "en" ? "Preview" : "Предпросмотр"}: Этикетка короба`,
+          exact: true,
+        });
+        await expect(boxPreview).toBeVisible();
+        const boxBounds = await boxPreview.boundingBox();
+        if (!boxBounds) throw new Error("Missing box label bounds");
+        expect(boxBounds.width / boxBounds.height).toBeCloseTo(75 / 120, 2);
+        expect(
+          await boxPreview.evaluate((svg) => parseFloat(getComputedStyle(svg).borderTopWidth)),
+        ).toBeGreaterThanOrEqual(1);
+        await page.screenshot({
+          path: info.outputPath(`box-75x120-${viewport.width}-${locale}-${theme}.png`),
+        });
         await page
           .getByRole("button", { name: locale === "ru" ? "Далее" : "Next", exact: true })
           .click();
@@ -676,6 +744,18 @@ for (const locale of ["ru", "en"])
             name: locale === "en" ? /Pallet 100×150/ : /Паллета 100×150/,
           }),
         ).toHaveAttribute("aria-pressed", "true");
+        await expect(
+          page.getByRole("img", {
+            name: `${locale === "en" ? "Preview" : "Предпросмотр"}: ${palletName}`,
+            exact: true,
+          }),
+        ).toBeVisible();
+        const palletBounds = await page.getByRole("img").boundingBox();
+        if (!palletBounds) throw new Error("Missing pallet label bounds");
+        expect(palletBounds.width / palletBounds.height).toBeCloseTo(
+          palletSpec.widthMm / palletSpec.heightMm,
+          2,
+        );
         await page.screenshot({
           path: info.outputPath(`pallet-template-${viewport.width}-${locale}-${theme}.png`),
         });
@@ -697,6 +777,7 @@ for (const locale of ["ru", "en"])
         expect(write).not.toHaveProperty("boxCapacity");
       }
       expect(unexpected).toEqual([]);
+      expect(sqliteRequests).toEqual([]);
     });
 
 for (const width of [1024, 1280])

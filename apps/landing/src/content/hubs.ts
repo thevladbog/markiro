@@ -113,3 +113,15 @@ export function hubPath(locale: Locale, kind: HubKind): HubPath {
   if (hub === undefined) throw new Error(`Unknown hub: ${locale}/${kind}`);
   return hub.path;
 }
+
+/**
+ * Anchor of a hub group, the same in both locales: the group's English name as a slug. An
+ * instructions group is named by the prefix of its English titles ("Cabinet: …" -> "cabinet").
+ */
+export function hubGroupId(englishName: string): string {
+  const slug = englishName
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/gu, "-")
+    .replace(/^-|-$/gu, "");
+  return `hub-group-${slug.length > 0 ? slug : "other"}`;
+}

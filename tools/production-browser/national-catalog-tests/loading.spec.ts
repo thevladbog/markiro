@@ -40,6 +40,17 @@ for (const width of [390, 720, 1280]) {
       page.on("pageerror", (error) => errors.push(error.message));
       await page.route("http://127.0.0.1:43183/api/**", async (route) => {
         const path = new URL(route.request().url()).pathname;
+        // Support chat is disabled in these unrelated cabinet scenarios.
+        if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
+          return route.fulfill({
+            status: 503,
+            json: {
+              statusCode: 503,
+              message: "Support chat unavailable",
+              error: "Service Unavailable",
+            },
+          });
+        }
         let body: unknown;
         if (path === "/api/access/me")
           body = { roles: ["manager"], capabilities: ["operations.read", "operations.write"] };

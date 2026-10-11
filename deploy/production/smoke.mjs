@@ -15,6 +15,8 @@ const VBTECH_CSP =
   "default-src 'self'; base-uri 'self'; connect-src 'self'; font-src 'self'; form-action 'self'; frame-ancestors 'none'; frame-src https://smartcaptcha.cloud.yandex.ru; img-src 'self' data:; object-src 'none'; script-src 'self' 'unsafe-inline' https://smartcaptcha.cloud.yandex.ru; style-src 'self' 'unsafe-inline'; upgrade-insecure-requests";
 const LANDING_SITE_URL = "https://markiro.app";
 const STATION_STABLE_DOWNLOAD_URL = "https://releases.markiro.app/station/download";
+// Sales contact in the landing footer; an outbound link only, never a loaded resource.
+const SALES_TELEGRAM_URL = "https://t.me/thevladbog";
 const COMMAND_TIMEOUT_MS = 30_000;
 const TERMINATION_GRACE_MS = 1_000;
 function timeoutError(command, timeoutMs) {
@@ -510,6 +512,7 @@ function assertLandingRoute(check, response, body, baseUrl, landingDemoSubmissio
       landingDemoSubmissionState === "enabled" ? ["https://smartcaptcha.cloud.yandex.ru"] : [];
     assertNoExternalOrigins(body, baseUrl, expectedUrl, allowedExternalOrigins, [
       STATION_STABLE_DOWNLOAD_URL,
+      SALES_TELEGRAM_URL,
     ]);
     return;
   }

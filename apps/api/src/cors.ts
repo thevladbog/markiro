@@ -59,6 +59,8 @@ function isStationRequest(req: Request): boolean {
         path === "/station/conflicts/status" ||
         path === "/station/validation-occurrences/status" ||
         path === "/station/scans" ||
+        path === "/station/warehouse-reprint/lookup" ||
+        path === "/station/warehouse-reprint/event-batches" ||
         path === "/station/shift-closures" ||
         path === "/station/device-replacement-intent/v1/acknowledge" ||
         path === "/station/device-replacement-readiness" ||
@@ -66,11 +68,20 @@ function isStationRequest(req: Request): boolean {
     (method === "GET" &&
       (path === "/station/identity" ||
         path === "/station/operators" ||
+        path === "/station/warehouse-reprint/templates" ||
+        path === "/station/branding" ||
         path === "/station/device-replacement-intent/v1")) ||
     ((method === "GET" || method === "POST") && path === "/shifts") ||
     (method === "GET" && path === "/shifts/box-label-templates") ||
     (method === "GET" && path === "/shifts/pallet-label-templates") ||
+    (method === "GET" && path === "/shifts/pallet-sheet-templates") ||
+    (method === "GET" && path === "/shifts/pallet-sheet-template-preview") ||
+    (method === "GET" &&
+      /^\/station\/branding\/logo\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+        path,
+      )) ||
     (method === "GET" && path === "/shifts/product-label-templates") ||
+    (method === "GET" && path === "/shifts/label-template-preview") ||
     (method === "GET" && path === "/shifts/planning-config") ||
     (method === "GET" && path === "/products") ||
     (method === "POST" && path === "/products/gtin-check")

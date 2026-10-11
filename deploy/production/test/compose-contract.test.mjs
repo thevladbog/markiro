@@ -15,7 +15,7 @@ const edgeDigest = `sha256:${"b".repeat(64)}`;
 const vbtechDigest = `sha256:${"d".repeat(64)}`;
 const vbtechImageRef = `ghcr.io/thevladbog/vbtech-web@${vbtechDigest}`;
 
-function renderCompose(files) {
+function renderCompose(files, overrides = {}) {
   return JSON.parse(
     execFileSync(
       "docker",
@@ -32,6 +32,7 @@ function renderCompose(files) {
           MARKIRO_IMAGE_TAG: "a".repeat(40),
           MARKIRO_API_IMAGE_DIGEST: `sha256:${"b".repeat(64)}`,
           MARKIRO_EDGE_IMAGE_DIGEST: `sha256:${"c".repeat(64)}`,
+          ...overrides,
         },
       },
     ),
@@ -67,8 +68,17 @@ test("production edge receives the immutable release SHA used by its public iden
 
   assert.equal(
     model.services.edge.environment.MARKIRO_RELEASE_SHA,
-    "${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}",
+    "${MARKIRO_EDGE_RELEASE_SHA:-${MARKIRO_IMAGE_TAG:?MARKIRO_IMAGE_TAG is required}}",
   );
+});
+
+test("Compose preserves a separate edge SHA and keeps the full-release fallback", () => {
+  const full = renderCompose([productionCompose], { MARKIRO_EDGE_RELEASE_SHA: "" });
+  assert.equal(full.services.edge.environment.MARKIRO_RELEASE_SHA, "a".repeat(40));
+  const mixed = renderCompose([productionCompose], { MARKIRO_EDGE_RELEASE_SHA: "f".repeat(40) });
+  assert.equal(mixed.services.edge.environment.MARKIRO_RELEASE_SHA, "f".repeat(40));
+  assert.equal(mixed.services.api.image, full.services.api.image);
+  assert.equal(mixed.services.edge.image, full.services.edge.image);
 });
 
 test("production edge requires separate customer admin, SaaS admin, kiosk and landing domains", async () => {

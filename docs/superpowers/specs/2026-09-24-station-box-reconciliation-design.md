@@ -142,7 +142,8 @@ The server may fill a missing pallet link on an already closed box only when all
 of tenant, authenticated device, shift, local box id, SSCC, and membership digest
 match and the existing pallet link is null. It must never overwrite a different
 non-null pallet id. A different relationship is `identity_conflict`, not an
-automatic move. If the named pallet is not yet present, normal closure replay
+automatic move, unless it is a later warehouse link (see the 2026-09-26
+revision below). If the named pallet is not yet present, normal closure replay
 creates it through the existing ingest pre-pass; a later control reconciliation
 can then fill the null link under the same exact-match guard.
 
@@ -334,7 +335,11 @@ side logs raw marking codes or secrets.
 - Return `content_mismatch` for a different effective set or count and never
   overwrite membership.
 - Return `identity_conflict` for reused local ids, SSCCs, non-null different
-  pallet links, or incompatible shift/device ownership.
+  pallet links that no later warehouse aggregation explains, or incompatible
+  shift/device ownership.
+- Confirm, without writing, a box a handheld later put on a warehouse pallet:
+  one the Station closed without a pallet, and one whose Station pallet was
+  taken apart first.
 - Repeat requests and repairs without duplicates or counter drift.
 - Deny or non-disclose cross-tenant, cross-device, cabinet-session, and malformed
   requests according to the route policy.
@@ -426,3 +431,30 @@ connectivity a prerequisite.
 A differing membership or established pallet relationship can represent a real
 duplicate, manual correction, or cross-device conflict. Silent overwrite would
 destroy the evidence needed to resolve it.
+
+## Revision, 2026-09-26: later warehouse aggregation
+
+The first release compared the server's current pallet link with the pallet the
+Station recorded when it closed the box, and reported any difference as
+`pallet_conflict`. That assumed the Station is the only writer of the link. It
+is not: a handheld may later put a closed box onto a warehouse pallet when the
+box stands on no pallet, or when its pallet has been taken apart. The Station
+never learns of that link. A shift closed without pallets and palletised
+afterwards on a handheld therefore showed `Привязка к другому паллету` on every
+box.
+
+The server now confirms such a box without writing to it:
+
+- the Station reports no pallet and the server links the box to a warehouse
+  pallet;
+- the Station reports its own production pallet, the server has recorded that
+  pallet as disassembled, and the box now stands on a warehouse pallet.
+
+A production link the Station did not report, and a warehouse link while the
+Station's own pallet still stands, remain `identity_conflict`: no recorded
+event explains how the box left the Station's pallet.
+
+The fix is server-only. A Station re-checks each box with an open issue once
+its last check is two minutes old, and a `confirmed` result clears that issue,
+so boxes already flagged recover after the API deploy without a Station
+release.

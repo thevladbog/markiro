@@ -1,7 +1,8 @@
 import { resolvePrinter } from "../lib/printer-routing.js";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
-import { Alert, Button, Card, DatePicker, Input, Pager } from "@markiro/ui";
+import { Alert, Button, Card, DatePicker, Input } from "@markiro/ui";
+import { z } from "zod";
 import {
   classifyScan,
   DomainError,
@@ -12,22 +13,31 @@ import {
   productLabelValueDigest,
   validationPrintInputSchema,
   validationPrintPolicySchema,
+  labelTemplateSpecSchema,
+  parsePalletSheetSnapshot,
+  type PalletSheetTemplateSnapshot,
   type ProductLabelTemplateList,
   type ValidationPrintInput,
 } from "@markiro/domain";
 import { StationApiError, type StationClient } from "../lib/api-client.js";
 import { OfflineGrantDeniedError } from "../lib/journal.js";
 import { DEFAULT_HARDWARE_CONFIG, type HardwareConfig } from "../lib/hardware-config.js";
-import { paginate } from "../lib/pagination.js";
 import type { ScanSource } from "../lib/scan-source.js";
 import type { AcquireShiftEntry, ShiftEntryLease } from "../lib/shift-entry-lease.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 import { StationScreen } from "../ui/StationScreen.js";
+import { TemplateChoiceList } from "../ui/labels/TemplateChoiceList.js";
+import { LabelPreview } from "../ui/warehouse-reprint/LabelPreview.js";
+import { PalletSheetPreview, type SheetBrandingOwner } from "../ui/PalletSheetPreview.js";
+import { refreshOrganizationBranding } from "../lib/organization-branding.js";
 
 interface ResolvedProduct {
   id: string;
   gtin14: string;
   name: string;
+  printName?: string | null;
+  egaisCode?: string | null;
+  shelfLifeDays?: number | null;
   boxCapacity: number | null;
   palletBoxCapacity?: number | null;
 }
@@ -43,9 +53,15 @@ interface BoxLabelTemplateOption {
   language: string;
 }
 
-const TEMPLATE_PAGE_SIZE = 4;
+const templatePreviewSchema = z.strictObject({
+  id: z.string(),
+  name: z.string(),
+  purpose: z.enum(["box", "pallet", "product_duplicate"]),
+  spec: labelTemplateSpecSchema,
+});
 
 export interface NewShiftProps {
+  sheetBrandingOwner?: SheetBrandingOwner;
   client: StationClient;
   source: ScanSource;
   acquireShiftEntry?: AcquireShiftEntry;
@@ -110,6 +126,7 @@ export function NewShift({
   onSetup,
   isCurrent,
   initialDraft,
+  sheetBrandingOwner,
 }: NewShiftProps) {
   const { i18n, t } = useTranslation();
   const [raw, setRaw] = useState("");
@@ -153,14 +170,130 @@ export function NewShift({
   const [palletTemplates, setPalletTemplates] = useState<BoxLabelTemplateOption[]>([]);
   const [defaultPalletTemplateId, setDefaultPalletTemplateId] = useState<string | null>(null);
   const [palletTemplateId, setPalletTemplateId] = useState<string | null>(null);
+  const palletPrinter = useMemo(() => resolvePrinter(hardwareConfig, "pallet"), [hardwareConfig]);
+  const palletSheetMode = palletPrinter?.paper === "a4";
+  const [sheetPreview, setSheetPreview] = useState<PalletSheetTemplateSnapshot | null>(null);
+  const [previewRetry, setPreviewRetry] = useState(0);
+  const sheetReadinessSource = useMemo(
+    () => ({
+      sheetPreview,
+      palletPrinter,
+      sheetBrandingOwner,
+      product,
+      productionDate,
+      view,
+      previewRetry,
+    }),
+    [sheetPreview, palletPrinter, sheetBrandingOwner, product, productionDate, view, previewRetry],
+  );
+  const [sheetReadiness, setSheetReadiness] = useState<{
+    source: typeof sheetReadinessSource;
+    ready: boolean;
+  } | null>(null);
+  const onSheetReadyChange = useCallback(
+    (ready: boolean) => setSheetReadiness({ source: sheetReadinessSource, ready }),
+    [sheetReadinessSource],
+  );
+  const sheetReady = sheetReadiness?.source === sheetReadinessSource && sheetReadiness.ready;
+  async function retrySheetPreview() {
+    setSheetReadiness(null);
+    if (sheetBrandingOwner)
+      await refreshOrganizationBranding({ ...sheetBrandingOwner, client }).catch(() => {});
+    setPreviewRetry((value) => value + 1);
+  }
+  useEffect(() => {
+    setSheetPreview(null);
+    if (view !== "palletTemplate" || !palletSheetMode || !product || !palletTemplateId) return;
+    let active = true;
+    void client
+      .get<unknown>(
+        `/shifts/pallet-sheet-template-preview?productId=${encodeURIComponent(product.id)}&templateId=${encodeURIComponent(palletTemplateId)}`,
+        { displayOnly: true },
+      )
+      .then((response) => {
+        const parsed = parsePalletSheetSnapshot(response);
+        if (active && parsed.id === palletTemplateId) setSheetPreview(parsed);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [view, palletSheetMode, product, palletTemplateId, client, previewRetry]);
   const [templates, setTemplates] = useState<BoxLabelTemplateOption[]>([]);
   const [defaultTemplateId, setDefaultTemplateId] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
-  const [templatePage, setTemplatePage] = useState(1);
   const [templateSearch, setTemplateSearch] = useState("");
   const resolving = useRef(false);
   const mounted = useRef(true);
+  const isCurrentRef = useRef(isCurrent);
+  isCurrentRef.current = isCurrent;
   const shiftEntryOperation = useRef(0);
+  const previewPurpose =
+    view === "template"
+      ? "box"
+      : view === "palletTemplate" && !palletSheetMode
+        ? "pallet"
+        : view === "productTemplate"
+          ? "product_duplicate"
+          : null;
+  const previewTemplateId =
+    previewPurpose === "box"
+      ? selectedTemplateId
+      : previewPurpose === "pallet"
+        ? palletTemplateId
+        : previewPurpose === "product_duplicate"
+          ? productTemplateId
+          : null;
+  const previewProductId = product?.id ?? null;
+  const previewOwner = useMemo(
+    () =>
+      previewPurpose && previewTemplateId && previewProductId
+        ? {
+            client,
+            productId: previewProductId,
+            templateId: previewTemplateId,
+            purpose: previewPurpose,
+            retry: previewRetry,
+          }
+        : null,
+    [client, previewProductId, previewTemplateId, previewPurpose, previewRetry],
+  );
+  const [previewResult, setPreviewResult] = useState<{
+    owner: NonNullable<typeof previewOwner>;
+    template: z.infer<typeof templatePreviewSchema> | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!previewOwner || !(isCurrentRef.current?.() ?? true)) return;
+    let active = true;
+    const current = () => active && mounted.current && (isCurrentRef.current?.() ?? true);
+    const query = new URLSearchParams({
+      productId: previewOwner.productId,
+      templateId: previewOwner.templateId,
+      purpose: previewOwner.purpose,
+    });
+    void previewOwner.client
+      .get<unknown>(`/shifts/label-template-preview?${query}`, { displayOnly: true })
+      .then((response) => {
+        if (!current()) return;
+        const parsed = templatePreviewSchema.safeParse(response);
+        setPreviewResult({
+          owner: previewOwner,
+          template:
+            parsed.success &&
+            parsed.data.id === previewOwner.templateId &&
+            parsed.data.purpose === previewOwner.purpose
+              ? parsed.data
+              : null,
+        });
+      })
+      .catch(() => {
+        if (current()) setPreviewResult({ owner: previewOwner, template: null });
+      });
+    return () => {
+      active = false;
+    };
+  }, [previewOwner]);
 
   useEffect(() => {
     mounted.current = true;
@@ -262,7 +395,6 @@ export function NewShift({
       setTemplates(config.items);
       setDefaultTemplateId(config.defaultBoxLabelTemplateId);
       setSelectedTemplateId(preselected);
-      setTemplatePage(1);
       setTemplateSearch("");
       setView("template");
     } catch (err) {
@@ -280,6 +412,38 @@ export function NewShift({
     setBusy(true);
     setError(null);
     try {
+      if (palletSheetMode) {
+        if (!client.palletSheetSupported) throw new Error(t("palletSheet.unsupported"));
+        const config = await client.get<{
+          items: {
+            id: string;
+            name: string;
+            revision: number;
+            page: { orientation: "portrait" | "landscape" };
+          }[];
+          defaultPalletSheetTemplateId: string | null;
+        }>(`/shifts/pallet-sheet-templates?productId=${encodeURIComponent(product.id)}`);
+        if (!current()) return;
+        setPalletTemplates(
+          config.items.map((item) => ({
+            id: item.id,
+            name: item.name,
+            widthMm: item.page.orientation === "portrait" ? 210 : 297,
+            heightMm: item.page.orientation === "portrait" ? 297 : 210,
+            dpi: 300,
+            language: "",
+          })),
+        );
+        setDefaultPalletTemplateId(config.defaultPalletSheetTemplateId);
+        setPalletTemplateId(
+          config.items.some((item) => item.id === palletTemplateId)
+            ? palletTemplateId
+            : config.defaultPalletSheetTemplateId,
+        );
+        setTemplateSearch("");
+        setView("palletTemplate");
+        return;
+      }
       const config = await client.get<{
         items: BoxLabelTemplateOption[];
         defaultPalletLabelTemplateId: string | null;
@@ -294,7 +458,6 @@ export function NewShift({
             ? config.defaultPalletLabelTemplateId
             : null,
       );
-      setTemplatePage(1);
       setTemplateSearch("");
       setView("palletTemplate");
     } catch (err) {
@@ -365,7 +528,6 @@ export function NewShift({
       setProductTemplateId((previous) =>
         result.items.some((item) => item.id === previous) ? previous : null,
       );
-      setTemplatePage(1);
       setTemplateSearch("");
       setView("productTemplate");
     } catch {
@@ -414,6 +576,10 @@ export function NewShift({
         return;
       }
       if (!palletTemplateId) return;
+      if (palletSheetMode && !sheetReady) {
+        setError(t("palletSheet.readyRequired"));
+        return;
+      }
     }
     const operation = ++shiftEntryOperation.current;
     let lease: ShiftEntryLease | null = null;
@@ -491,7 +657,15 @@ export function NewShift({
           : {}),
         ...(mode === "aggregation" ? { boxLabelTemplateId: selectedTemplateId } : {}),
         ...(mode === "aggregation" && palletsEnabled
-          ? { palletsEnabled: true, palletLabelTemplateId: palletTemplateId }
+          ? {
+              palletsEnabled: true,
+              ...(palletSheetMode
+                ? { palletSheetTemplateId: palletTemplateId, palletLabelTemplateId: null }
+                : {
+                    palletLabelTemplateId: palletTemplateId,
+                    ...(client.palletSheetSupported ? { palletSheetTemplateId: null } : {}),
+                  }),
+            }
           : {}),
       };
       const requestDigest = productLabelValueDigest(createInput);
@@ -721,11 +895,12 @@ export function NewShift({
         ? "shifts.palletTemplateLabel"
         : "shifts.templateLabel";
     const selectedDefault = palletLabels ? defaultPalletTemplateId : defaultTemplateId;
-    const needle = templateSearch.trim().toLocaleLowerCase();
-    const visibleTemplates = needle
-      ? choices.filter((option) => option.name.toLocaleLowerCase().includes(needle))
-      : choices;
-    const currentPage = paginate(visibleTemplates, templatePage, TEMPLATE_PAGE_SIZE);
+    const currentPreview =
+      previewResult?.owner === previewOwner && (isCurrent?.() ?? true) ? previewResult : null;
+    const previewPrinter = resolvePrinter(
+      hardwareConfig,
+      productLabels ? "duplicate" : palletLabels ? "pallet" : "box",
+    );
     return (
       <StationScreen
         title={t("shifts.new")}
@@ -735,7 +910,7 @@ export function NewShift({
               size="floor"
               fullWidth
               loading={busy}
-              disabled={!selectedId}
+              disabled={!selectedId || (palletLabels && palletSheetMode && !sheetReady)}
               onClick={() => void (productLabels ? applyPrintSettings() : start())}
             >
               {t(
@@ -756,7 +931,6 @@ export function NewShift({
                 if (productLabels) void openPrintSettings();
                 else {
                   setTemplateSearch("");
-                  setTemplatePage(1);
                   setView(palletLabels ? "template" : "found");
                 }
               }}
@@ -776,75 +950,86 @@ export function NewShift({
               <p>{t("shifts.templatesEmpty")}</p>
             </div>
           ) : (
-            <>
-              <Input
-                id="template-search"
-                size="floor"
-                type="search"
-                label={t("shifts.templateSearch")}
-                value={templateSearch}
+            <div className="label-template-grid">
+              <TemplateChoiceList
+                choices={choices}
+                selectedId={selectedId}
+                defaultId={productLabels ? null : selectedDefault}
+                onSelect={(id) =>
+                  productLabels
+                    ? setProductTemplateId(id)
+                    : palletLabels
+                      ? setPalletTemplateId(id)
+                      : setSelectedTemplateId(id)
+                }
                 disabled={busy}
-                onChange={(event) => {
-                  setTemplateSearch(event.target.value);
-                  setTemplatePage(1);
-                }}
+                ariaLabel={t(templateTitle)}
+                search={templateSearch}
+                onSearch={setTemplateSearch}
               />
-              {visibleTemplates.length === 0 ? (
-                <div className="new-shift__center">
-                  <p>{t("shifts.templateSearchEmpty")}</p>
-                </div>
-              ) : null}
-              <div className="new-shift__templates" role="group" aria-label={t(templateTitle)}>
-                {currentPage.items.map((option) => {
-                  const selected = option.id === selectedId;
-                  return (
-                    <button
-                      key={option.id}
-                      type="button"
-                      className={
-                        selected
-                          ? "new-shift__template new-shift__template--selected"
-                          : "new-shift__template"
-                      }
-                      aria-pressed={selected}
-                      disabled={busy}
-                      onClick={() =>
-                        productLabels
-                          ? setProductTemplateId(option.id)
-                          : palletLabels
-                            ? setPalletTemplateId(option.id)
-                            : setSelectedTemplateId(option.id)
-                      }
-                    >
-                      <span className="new-shift__template-name">{option.name}</span>
-                      <span className="new-shift__template-meta">
-                        {t("shifts.templateMeta", {
-                          width: option.widthMm,
-                          height: option.heightMm,
-                        })}
-                      </span>
-                      {!productLabels && option.id === selectedDefault ? (
-                        <span className="new-shift__template-badge">
-                          {t("shifts.templateDefault")}
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })}
+              <div
+                className={`label-template-preview${palletLabels && palletSheetMode ? " label-template-preview--sheet" : ""}`}
+              >
+                {palletLabels && palletSheetMode && sheetPreview ? (
+                  <PalletSheetPreview
+                    template={sheetPreview}
+                    profile={palletPrinter}
+                    owner={sheetBrandingOwner}
+                    productName={product.printName || product.name}
+                    gtin14={product.gtin14}
+                    productionDate={productionDate || null}
+                    egaisCode={product.egaisCode ?? null}
+                    shelfLifeDays={product.shelfLifeDays ?? null}
+                    onReadyChange={onSheetReadyChange}
+                  />
+                ) : currentPreview?.template ? (
+                  <LabelPreview
+                    template={currentPreview.template}
+                    {...(sheetBrandingOwner
+                      ? {
+                          logoOwner: {
+                            exec: sheetBrandingOwner.exec,
+                            generation: sheetBrandingOwner.generation,
+                          },
+                        }
+                      : {})}
+                    {...(previewPrinter?.dpi ? { dpi: previewPrinter.dpi } : {})}
+                    {...(previewPrinter ? { language: previewPrinter.language } : {})}
+                  />
+                ) : (
+                  <div className="label-template-preview-state">
+                    <p role="status">
+                      {t(
+                        !selectedId
+                          ? "warehouse.pickPreview"
+                          : currentPreview
+                            ? "warehouse.previewUnavailable"
+                            : "warehouse.previewLoading",
+                      )}
+                    </p>
+                    {currentPreview && selectedId ? (
+                      <Button
+                        size="floor"
+                        variant="secondary"
+                        onClick={() => setPreviewRetry((value) => value + 1)}
+                      >
+                        {t("warehouse.previewRetry")}
+                      </Button>
+                    ) : null}
+                  </div>
+                )}
               </div>
-              {currentPage.pageCount > 1 ? (
-                <Pager
-                  page={currentPage.page}
-                  pageCount={currentPage.pageCount}
-                  onPageChange={setTemplatePage}
-                  ariaLabel={t("shifts.templatePagination")}
-                  previousLabel={t("shifts.previousPage")}
-                  nextLabel={t("shifts.nextPage")}
-                  pageLabel={(page, pageCount) => t("shifts.page", { page, pageCount })}
-                  className="new-shift__template-pager"
-                />
+              {palletLabels && palletSheetMode ? (
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => void retrySheetPreview()}
+                >
+                  {t("warehouse.previewRetry")}
+                </Button>
               ) : null}
-            </>
+            </div>
           )}
           {messageSlot}
         </section>

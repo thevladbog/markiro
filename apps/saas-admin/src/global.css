@@ -2181,6 +2181,10 @@ textarea {
   font: var(--text-body-sm);
 }
 
+.cabinet-grant form {
+  align-self: stretch;
+}
+
 .subscription-card__heading {
   display: flex;
   flex-wrap: wrap;

@@ -39,6 +39,7 @@ export const tenant = tenantListItemSchema.parse({
   id: "offers-fixture",
   name: "Молочная мастерская (тест)",
   slug: "dairy-fixture",
+  cabinetAccess: "enabled",
   createdAt: NOW,
   subscriptionStatus: "trial",
 });

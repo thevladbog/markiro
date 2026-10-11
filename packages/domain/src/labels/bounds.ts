@@ -143,9 +143,11 @@ export function elementBoundsMm(
         element.maxWidthMm,
         element.maxLines,
       );
-      const h = ptToMm(element.fontSizePt) * LINE_HEIGHT_EM * lines;
+      const h = ptToMm(element.fontSizePt) * (element.lineHeight ?? LINE_HEIGHT_EM) * lines;
       return { x: element.xMm, y: element.yMm, w, h };
     }
+    case "organization_logo":
+      return { x: element.xMm, y: element.yMm, w: element.widthMm, h: element.heightMm };
     case "barcode": {
       if (
         element.format === "datamatrix" &&

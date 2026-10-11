@@ -1,0 +1,142 @@
+---
+import type { FilmPageDefinition } from "../content/film";
+import { posterFor } from "../content/film-posters";
+import { getUiCopy } from "../content/ui";
+import { buildFilmPageGraph } from "../lib/seo";
+import { readPublicSiteConfig } from "../lib/site-config";
+import BaseLayout from "../layouts/BaseLayout.astro";
+import DemoSection from "./DemoSection.astro";
+import FilmPoster from "./FilmPoster.astro";
+import LandingFooter from "./LandingFooter.astro";
+import LandingHeader from "./LandingHeader.astro";
+import "../styles/film.css";
+
+interface Props {
+  page: FilmPageDefinition;
+}
+
+const { page } = Astro.props;
+const copy = getUiCopy(page.locale);
+const siteConfig = readPublicSiteConfig(
+  {
+    PUBLIC_DEMO_SUBMISSION_ENABLED: import.meta.env.PUBLIC_DEMO_SUBMISSION_ENABLED,
+    PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE,
+    PUBLIC_SMARTCAPTCHA_CLIENT_KEY: import.meta.env.PUBLIC_SMARTCAPTCHA_CLIENT_KEY,
+  },
+  page.locale,
+);
+const total = String(page.chapters.length).padStart(2, "0");
+const lastIndex = page.chapters.length - 1;
+---
+
+<BaseLayout metadata={page} graph={buildFilmPageGraph(page)}>
+  <div class="film-top" data-theme="light" data-film-chrome>
+    <LandingHeader page={page} phone={siteConfig.phone} demoHref="#demo" />
+  </div>
+
+  <main id="main">
+    <div class="film" data-film data-theme="light">
+      <div class="film__stage" aria-hidden="true">
+        <canvas class="film__canvas" data-film-canvas></canvas>
+      </div>
+
+      {page.chapters.map((chapter, index) => {
+        const poster = posterFor(chapter.id);
+        return (
+          <section
+            class:list={["film-chapter", { "film-chapter--hero": index === 0 }]}
+            id={chapter.id}
+            data-film-chapter
+            data-theme={chapter.theme}
+            style={`--span: ${chapter.span}`}
+            aria-labelledby={`${chapter.id}-title`}
+          >
+            <div class="film-chapter__poster" aria-hidden="true">
+              <FilmPoster wide={poster.wide} tall={poster.tall} eager={index === 0} />
+            </div>
+            {index === 0 ? (
+              <div class="film-hero">
+                <p class="film-kicker">{chapter.kicker}</p>
+                <h1 id={`${chapter.id}-title`} class="film-hero__title">{chapter.title}</h1>
+                <p class="film-hero__lead">{chapter.body}</p>
+                <div class="film-hero__actions">
+                  <a class="button" href="#demo" data-analytics="landing_demo_click" data-placement="film_hero">
+                    {copy.common.requestDemoShort} <span aria-hidden="true">→</span>
+                  </a>
+                  <a class="film-link" href={page.heroSecondary.href}>{page.heroSecondary.label} <span aria-hidden="true">↓</span></a>
+                </div>
+                <ul class="film-tags">
+                  {chapter.tags.map((tag) => <li>{tag}</li>)}
+                </ul>
+                <p class="film-hero__hint">{page.scrollHint} <span aria-hidden="true">↓</span></p>
+              </div>
+            ) : (
+              <div class="film-card">
+                <p class="film-card__progress" aria-hidden="true">{String(index + 1).padStart(2, "0")} / {total}</p>
+                {chapter.status !== undefined && (
+                  <p class="film-card__status">
+                    <svg class="film-card__status-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+                      <path d="M1.5 5.5a10 10 0 0 1 13 0M4 8.4a6.5 6.5 0 0 1 8 0M6.4 11.2a2.6 2.6 0 0 1 3.2 0M2 2l12 12" />
+                      <circle cx="8" cy="13.6" r="0.9" />
+                    </svg>
+                    {chapter.status}
+                  </p>
+                )}
+                <p class="film-kicker">{chapter.kicker}</p>
+                <h2 id={`${chapter.id}-title`} class="film-card__title">{chapter.title}</h2>
+                <p class="film-card__body">{chapter.body}</p>
+                <ul class="film-tags">
+                  {chapter.tags.map((tag) => <li>{tag}</li>)}
+                </ul>
+                {index === lastIndex && (
+                  <div class="film-card__actions">
+                    <a class="button" href="#demo" data-analytics="landing_demo_click" data-placement="film_final">
+                      {copy.common.requestDemoShort} <span aria-hidden="true">→</span>
+                    </a>
+                    <a class="film-link" href={page.finalSecondary.href}>{page.finalSecondary.label} <span aria-hidden="true">→</span></a>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+        );
+      })}
+
+      <nav class="film__rail" data-film-rail aria-label={page.railLabel}>
+        <ol>
+          {page.chapters.map((chapter, index) => (
+            <li>
+              <a href={`#${chapter.id}`}>
+                <span class="film__rail-mark" aria-hidden="true"></span>
+                {String(index + 1).padStart(2, "0")} {chapter.railLabel}
+              </a>
+            </li>
+          ))}
+        </ol>
+      </nav>
+    </div>
+
+    <DemoSection
+      locale={page.locale}
+      phone={siteConfig.phone}
+      demoEndpoint={siteConfig.demoEndpoint}
+      legalLinks={siteConfig.legalLinks}
+      captchaClientKey={siteConfig.captchaClientKey}
+      consentVersion={siteConfig.consentVersion}
+      sourcePath={page.path}
+    />
+  </main>
+
+  <LandingFooter page={page} />
+
+  <script>
+    import { browserDemoFormRuntime, initDemoForm } from "../scripts/demo-form";
+    import { browserFilmRuntime, initFilm } from "../scripts/film/film";
+    import { browserLandingRuntime, initLanding } from "../scripts/site";
+
+    initLanding(document, browserLandingRuntime(window));
+    initFilm(document, browserFilmRuntime(window));
+    const demoForm = document.querySelector<HTMLFormElement>("[data-demo-form]");
+    if (demoForm !== null) initDemoForm(demoForm, browserDemoFormRuntime(window));
+  </script>
+</BaseLayout>

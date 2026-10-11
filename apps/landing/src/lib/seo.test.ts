@@ -4,10 +4,12 @@ import { describe, expect, it } from "vitest";
 import { BEER_MARKING_2026_ARTICLE, BEER_MARKING_2026_ARTICLE_EN } from "../content/articles";
 import { findHubPage } from "../content/hubs";
 import { findSeoPage } from "../content/pages";
+import { findFilmPage } from "../content/film";
 import { getLegalDocumentPage } from "../content/legal-pages";
 import {
   attachOrganizationContact,
   buildArticlePageGraph,
+  buildFilmPageGraph,
   buildHubPageGraph,
   buildPageGraph,
   buildLegalPageGraph,
@@ -64,10 +66,10 @@ describe("SEO generators", () => {
     );
     expect(sitemap).toContain("<loc>https://markiro.app/en/offline-production/</loc>");
     expect(sitemap).toMatch(
-      /<loc>https:\/\/markiro\.app\/stati\/agregatsiya-piva-v-koroba\/<\/loc>[\s\S]*?<lastmod>2026-08-26<\/lastmod>/,
+      /<loc>https:\/\/markiro\.app\/stati\/agregatsiya-piva-v-koroba\/<\/loc>(?:(?!<\/url>)[\s\S])*<lastmod>2026-10-05<\/lastmod>/,
     );
     expect(sitemap).toMatch(
-      /<loc>https:\/\/markiro\.app\/stati\/markirovka-piva-2026\/<\/loc>[\s\S]*?<lastmod>2026-08-26<\/lastmod>/,
+      /<loc>https:\/\/markiro\.app\/stati\/markirovka-piva-2026\/<\/loc>(?:(?!<\/url>)[\s\S])*<lastmod>2026-10-05<\/lastmod>/,
     );
     expect(sitemap).toContain("<loc>https://markiro.app/en/articles/beer-case-aggregation/</loc>");
     expect(sitemap).toContain("<loc>https://markiro.app/en/articles/beer-marking-2026/</loc>");
@@ -112,13 +114,23 @@ describe("SEO generators", () => {
     expect(sitemap).toContain('hreflang="ru"');
     expect(sitemap).toContain('hreflang="en"');
     expect(sitemap).toContain('hreflang="x-default"');
-    expect(sitemap.match(/<url>/g)).toHaveLength(70);
+    expect(sitemap.match(/<url>/g)).toHaveLength(72);
   });
 
   it("publishes an experimental content map without ranking claims", () => {
     const llms = renderLlmsTxt();
 
     expect(llms).toContain("# Markiro");
+    expect(llms).toContain(
+      "- Товарные группы: любая маркируемая продукция, например соки и вода, молочная продукция, пиво, косметика. Правила конкретной товарной группы сверяются до запуска.",
+    );
+    expect(llms).toContain(
+      "- Product groups: any marked goods, for example juice and water, dairy, beer and cosmetics. The rules of a specific product group are checked before launch.",
+    );
+    expect(llms).toContain("- Уровни агрегации: единица → короб → паллета.");
+    expect(llms).toContain("- Aggregation levels: item → case → pallet.");
+    expect(llms).not.toContain("Паллетная агрегация запланирована");
+    expect(llms).not.toContain("для линий розлива");
     expect(llms).toContain(
       "> Производственная система для маркировки, агрегации и прослеживаемости с локальной работой станций.",
     );
@@ -154,7 +166,7 @@ describe("SEO generators", () => {
 
     expect(llms).toContain("## Коротко о продукте");
     expect(llms).toContain("единица → короб");
-    expect(llms).toContain("hello@v-b.tech");
+    expect(llms).toContain("hello@markiro.app");
     expect(llms).toContain("https://markiro.app/#demo");
     expect(llms).toContain("## Полные тексты");
     expect(llms).toContain("https://markiro.app/llms-full.txt");
@@ -208,7 +220,7 @@ describe("SEO generators", () => {
         llms.split("\n").filter((line) => line.includes(`](https://markiro.app${route}):`)),
       ).toHaveLength(1);
     }
-    expect(sitemap.match(/<url>/g)).toHaveLength(70);
+    expect(sitemap.match(/<url>/g)).toHaveLength(72);
     expect(sitemap).toMatch(
       /<loc>https:\/\/markiro\.app\/privacy\/<\/loc>[\s\S]*?<lastmod>2026-08-15<\/lastmod>/,
     );
@@ -345,9 +357,9 @@ describe("SEO generators", () => {
       .sort()
       .at(-1);
 
-    // The pallet reissue of MKR-INS-08/09 made 2026-09-19 the newest
-    // effective date in the registry.
-    expect(newest).toBe("2026-09-19");
+    // The small-screen work screen reissue of MKR-INS-01/02/03 made
+    // 2026-09-26 the newest effective date in the registry.
+    expect(newest).toBe("2026-09-26");
     expect(sitemap).toMatch(
       new RegExp(`<loc>https://markiro\\.app/legal/</loc>[\\s\\S]*?<lastmod>${newest}</lastmod>`),
     );
@@ -437,14 +449,14 @@ describe("SEO generators", () => {
       "@id": "https://markiro.app/#organization",
       name: "Markiro",
       url: "https://markiro.app/",
-      email: "hello@v-b.tech",
+      email: "hello@markiro.app",
       logo: { "@type": "ImageObject", url: "https://markiro.app/brand/markiro-logo.svg" },
       areaServed: "RU",
       contactPoint: [
         {
           "@type": "ContactPoint",
           contactType: "sales",
-          email: "hello@v-b.tech",
+          email: "hello@markiro.app",
           availableLanguage: ["Russian", "English"],
         },
       ],
@@ -489,14 +501,15 @@ describe("SEO generators", () => {
 
     expect(ru).toMatchObject({
       url: "https://markiro.app/",
-      operatingSystem: "Windows, Web",
+      operatingSystem: "Windows, Android, Web",
       softwareHelp: { "@type": "CreativeWork", url: "https://markiro.app/instruktsii/" },
     });
     expect(ru?.featureList).toEqual([
       "Проверка кодов маркировки Data Matrix на линии",
-      "Агрегация единиц в короба с SSCC",
+      "Агрегация в короба и паллеты с SSCC",
       "Печать этикеток ZPL и TSPL",
       "Офлайн-работа станции с локальным журналом",
+      "Сборка паллет и инвентаризация на ТСД с Android",
       "Обмен с 1С по CommerceML",
       "Выгрузки отчётов смены для ГИС МТ",
     ]);
@@ -505,9 +518,10 @@ describe("SEO generators", () => {
     });
     expect(en?.featureList).toEqual([
       "Data Matrix code verification on the line",
-      "Item-to-case aggregation with SSCC",
+      "Case and pallet aggregation with SSCC",
       "ZPL and TSPL label printing",
       "Offline station with a local journal",
+      "Pallet building and inventory on an Android handheld",
       "1C exchange over CommerceML",
       "Shift report exports for GIS MT",
     ]);
@@ -519,5 +533,35 @@ describe("SEO generators", () => {
     const serialized = serializeJsonLd({ value: "</script>&\u2028\u2029" });
 
     expect(serialized).toBe('{"value":"\\u003c/script\\u003e\\u0026\\u2028\\u2029"}');
+  });
+});
+
+describe("film page search surfaces", () => {
+  it("lists both locales in the sitemap with reciprocal hreflang", () => {
+    const sitemap = renderSitemapXml();
+    expect(sitemap).toContain("<loc>https://markiro.app/kak-rabotaet/</loc>");
+    expect(sitemap).toContain("<loc>https://markiro.app/en/how-it-works/</loc>");
+    expect(sitemap).toContain(
+      '<xhtml:link rel="alternate" hreflang="en" href="https://markiro.app/en/how-it-works/" />',
+    );
+    expect(sitemap).toContain(
+      '<xhtml:link rel="alternate" hreflang="ru" href="https://markiro.app/kak-rabotaet/" />',
+    );
+  });
+
+  it("describes the film in llms.txt for both languages", () => {
+    const llms = renderLlmsTxt();
+    expect(llms).toContain("- [Как работает](https://markiro.app/kak-rabotaet/): ");
+    expect(llms).toContain("- [How it works](https://markiro.app/en/how-it-works/): ");
+  });
+
+  it("builds a web page graph without breadcrumbs, like the home page", () => {
+    const nodes = buildFilmPageGraph(findFilmPage("ru"))["@graph"];
+    expect(nodes.find((node) => node["@type"] === "WebPage")).toMatchObject({
+      url: "https://markiro.app/kak-rabotaet/",
+      inLanguage: "ru",
+      dateModified: "2026-09-26",
+    });
+    expect(nodes.some((node) => node["@type"] === "BreadcrumbList")).toBe(false);
   });
 });

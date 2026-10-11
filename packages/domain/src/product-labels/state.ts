@@ -1,6 +1,7 @@
+import { productLabelPrintFormat, productLabelPrintIdentity } from "./contracts.js";
 import { DomainError } from "../errors.js";
 import type {
-  PrinterLanguage,
+  ProductLabelPrintIdentity,
   ProductLabelAttemptState,
   ProductLabelEvent,
   ProductLabelEventBase,
@@ -20,21 +21,18 @@ const ORIGIN_FIELDS = [
 ] as const;
 
 /** Immutable origin and print context accompany the current attempt's projection. */
-export interface ProductLabelProjection extends Pick<
-  ProductLabelEventBase,
-  (typeof ORIGIN_FIELDS)[number]
-> {
-  latestSequence: number;
-  attemptId: string;
-  attemptNo: number;
-  attemptState: ProductLabelAttemptState;
-  verification: VerificationPolicy;
-  verificationOutcome: VerificationOutcome;
-  status: ProductLabelJobStatus;
-  bytesDigest: string;
-  language: PrinterLanguage;
-  dpi: 203 | 300;
-}
+export type ProductLabelProjection = Pick<ProductLabelEventBase, (typeof ORIGIN_FIELDS)[number]> &
+  ProductLabelPrintIdentity & {
+    latestSequence: number;
+    attemptId: string;
+    attemptNo: number;
+    attemptState: ProductLabelAttemptState;
+    verification: VerificationPolicy;
+    verificationOutcome: VerificationOutcome;
+    status: ProductLabelJobStatus;
+    bytesDigest: string;
+    dpi: 203 | 300;
+  };
 
 function invalidTransition(): never {
   throw new DomainError(
@@ -90,7 +88,7 @@ export function canApplyProductLabelEvent(
       event.attemptNo === current.attemptNo + 1 &&
       event.reason !== null &&
       event.bytesDigest === current.bytesDigest &&
-      event.language === current.language &&
+      productLabelPrintFormat(event) === productLabelPrintFormat(current) &&
       event.dpi === current.dpi
     );
   }
@@ -145,7 +143,7 @@ export function applyProductLabelEvent(
       templateDigest: event.templateDigest,
       payloadDigest: event.payloadDigest,
       bytesDigest: event.bytesDigest,
-      language: event.language,
+      ...productLabelPrintIdentity(event),
       dpi: event.dpi,
       latestSequence: 1,
       attemptId: event.attemptId,

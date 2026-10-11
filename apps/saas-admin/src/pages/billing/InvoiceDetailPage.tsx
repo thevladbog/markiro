@@ -1,5 +1,6 @@
 import { getCatalogEditorContext } from "../catalog/api.js";
 import { commercialErrorKey, commercialIssuanceError } from "../documents/commercialError.js";
+import { openDocumentInNewTab } from "../documents/openDocumentInNewTab.js";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
@@ -261,16 +262,10 @@ export function InvoiceDetailPage() {
 
   const openDocument = (documentId: string) => {
     setDownloadBlocked(false);
-    const target = window.open("about:blank", "_blank");
-    if (!target) {
-      setDownloadBlocked(true);
-      return;
-    }
-    target.opener = null;
-    void downloadDocument
-      .mutateAsync(documentId)
-      .then(({ url }) => target.location.replace(url))
-      .catch(() => target.close());
+    const opened = openDocumentInNewTab(() =>
+      downloadDocument.mutateAsync(documentId).then(({ url }) => url),
+    );
+    if (!opened) setDownloadBlocked(true);
   };
 
   return (

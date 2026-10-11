@@ -85,6 +85,10 @@ describe("cabinet label history", () => {
     });
     vi.stubGlobal("fetch", fetch);
     renderHistory();
+    await screen.findByText("Контроль печати");
+    const openHistory = await screen.findByRole("button", { name: "Открыть журнал печати" });
+    expect(screen.queryByText("…IAL-42")).toBeNull();
+    fireEvent.click(openHistory);
     await screen.findByText("…IAL-42");
     expect(screen.getByText("Отправки на принтер").parentElement?.textContent).toContain("2");
     fireEvent.click(screen.getByRole("button", { name: "История попыток · …IAL-42" }));
@@ -122,6 +126,9 @@ describe("cabinet label history", () => {
       ),
     );
     renderHistory();
+    const openHistory = await screen.findByRole("button", { name: "Открыть журнал печати" });
+    expect(screen.queryByText("Проверка пропущена")).toBeNull();
+    fireEvent.click(openHistory);
     await screen.findByText("Проверка пропущена");
     expect(screen.queryByText("Проверена")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "История попыток · …IAL-42" }));
@@ -155,6 +162,10 @@ describe("cabinet label history", () => {
       ),
     );
     renderHistory();
+    await screen.findByText("Контроль печати");
+    const openHistory = await screen.findByRole("button", { name: "Открыть журнал печати" });
+    expect(screen.queryByText("…IAL-42")).toBeNull();
+    fireEvent.click(openHistory);
     await screen.findByText("…IAL-42");
     fireEvent.click(screen.getByRole("button", { name: "Загрузить ещё" }));
     await screen.findByText("…IAL-43");

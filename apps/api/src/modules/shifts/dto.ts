@@ -3,17 +3,76 @@ import type { SchemaObject } from "@nestjs/swagger";
 import {
   validationPrintInputSchema,
   validationPrintPolicySchema,
+  labelTemplateSpecSchema,
   PRODUCT_LABEL_PROTOCOL,
   VALIDATION_REPROCESSING_PROTOCOL,
   type ValidationPrintPolicy,
   type BoxLabelTemplateDefaultSource,
   type LabelTemplateSpec,
+  type PalletSheetTemplateSnapshot,
+  type PalletSheetSpecV2,
 } from "@markiro/domain";
 import { zodApiSchema } from "../../lib/openapi";
 import type { OperatorMirrorRecord } from "@markiro/db";
 import type { ProductDto, ProductImageDescriptor } from "../products/dto";
+import { palletSheetOpenApiSchema } from "../label-templates/dto";
+
+export const palletSheetSnapshotOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["id", "name", "revision", "spec", "digest"],
+  properties: {
+    id: { type: "string", format: "uuid" },
+    name: { type: "string", maxLength: 255 },
+    revision: { type: "integer", minimum: 1 },
+    spec: palletSheetOpenApiSchema,
+    digest: { type: "string", pattern: "^[a-f0-9]{64}$" },
+  },
+};
+export const shiftPalletSheetTemplatesOpenApiSchema: SchemaObject = {
+  type: "object",
+  additionalProperties: false,
+  required: ["items", "defaultPalletSheetTemplateId", "defaultSource"],
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: false,
+        required: ["id", "name", "revision", "format", "page"],
+        properties: {
+          id: { type: "string", format: "uuid" },
+          name: { type: "string" },
+          revision: { type: "integer", minimum: 1 },
+          format: { type: "string", enum: ["pallet_sheet_v2"] },
+          page: palletSheetOpenApiSchema.properties?.page ?? { type: "object" },
+        },
+      },
+    },
+    defaultPalletSheetTemplateId: { type: "string", format: "uuid", nullable: true },
+    defaultSource: { type: "string", enum: ["category", "organization"], nullable: true },
+  },
+};
 
 const SHIFT_MODES = ["validation", "aggregation"] as const;
+export const palletSheetTemplatePreviewQuerySchema = z.strictObject({
+  productId: z.uuid(),
+  templateId: z.uuid(),
+});
+export type PalletSheetTemplatePreviewQueryDto = z.infer<
+  typeof palletSheetTemplatePreviewQuerySchema
+>;
+export interface ShiftPalletSheetTemplatesDto {
+  items: {
+    id: string;
+    name: string;
+    revision: number;
+    format: "pallet_sheet_v2";
+    page: PalletSheetSpecV2["page"];
+  }[];
+  defaultPalletSheetTemplateId: string | null;
+  defaultSource: BoxLabelTemplateDefaultSource | null;
+}
 export type ShiftMode = (typeof SHIFT_MODES)[number];
 
 const SHIFT_STATUSES = ["planned", "active", "closed"] as const;
@@ -89,6 +148,7 @@ export const createShiftSchema = z.object({
    * the service never resolves a default in that case.
    */
   palletLabelTemplateId: z.string().uuid().nullable().optional(),
+  palletSheetTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
   productionDate: productionDateSchema.nullable().optional(),
@@ -112,6 +172,7 @@ export const updateShiftSchema = z.object({
   boxLabelTemplateId: z.string().uuid().nullable().optional(),
   /** Updates the existing pallet-label snapshot only when explicitly present. */
   palletLabelTemplateId: z.string().uuid().nullable().optional(),
+  palletSheetTemplateId: z.string().uuid().nullable().optional(),
   plannedQty: z.number().int().min(1).nullable().optional(),
   plannedDate: plannedDateSchema.nullable().optional(),
   productionDate: productionDateSchema.nullable().optional(),
@@ -181,6 +242,9 @@ export interface ShiftDto {
   ssccIssuerCounterpartyId: string | null;
   boxLabelTemplateId: string | null;
   palletLabelTemplateId: string | null;
+  palletSheetTemplateId?: string | null;
+  palletSheetTemplateName?: string | null;
+  palletSheetTemplateRevision?: number | null;
   plannedQty: number | null;
   plannedDate: string | null;
   productionDate: string | null;
@@ -247,11 +311,31 @@ export type ProductLabelTemplateProductQueryDto = z.infer<
   typeof productLabelTemplateProductQuerySchema
 >;
 
+export const shiftLabelTemplatePreviewQuerySchema = z.strictObject({
+  productId: z.uuid(),
+  templateId: z.uuid(),
+  purpose: z.enum(["box", "pallet", "product_duplicate"]),
+});
+export type ShiftLabelTemplatePreviewQueryDto = z.infer<
+  typeof shiftLabelTemplatePreviewQuerySchema
+>;
+
+export const shiftLabelTemplatePreviewSchema = z.strictObject({
+  id: z.uuid(),
+  name: z.string(),
+  purpose: shiftLabelTemplatePreviewQuerySchema.shape.purpose,
+  spec: labelTemplateSpecSchema,
+});
+export type ShiftLabelTemplatePreviewDto = z.infer<typeof shiftLabelTemplatePreviewSchema>;
+
 /** GET /shifts/planning-config response — the operations-readable planning subset only. */
 export interface ShiftPlanningConfigDto {
   validationPrintProtocol: typeof PRODUCT_LABEL_PROTOCOL | null;
   validationReprocessingProtocol?: typeof VALIDATION_REPROCESSING_PROTOCOL | null;
   defaultBoxLabelTemplateId: string | null;
+  defaultPalletSheetTemplateId?: string | null;
+  palletSheetDefaultSource?: BoxLabelTemplateDefaultSource | null;
+  palletSheetProtocol?: "pallet-sheet-v2";
   /** Which default answered: the product's category, the organisation, or none. */
   defaultSource: BoxLabelTemplateDefaultSource | null;
   /**
@@ -300,12 +384,9 @@ export interface ShiftPalletLabelTemplatesDto {
 /**
  * Legacy fields retained only on station bundles during a rolling deployment.
  *
- * `chzProductGroupCode` is deliberately omitted: the Station stores the group
- * as text in its SQLite mirror and has no use for the code, and
- * `stationBundleProductOpenApiSchema` is `additionalProperties: false`, so
- * adding it here would break bundle validation for no gain.
+ * The numeric group accompanies its display name for offline label eligibility.
  */
-export type StationBundleProductDto = Omit<ProductDto, "chzProductGroupCode"> & {
+export type StationBundleProductDto = ProductDto & {
   defaultLabelTemplateId: null;
 };
 
@@ -336,6 +417,7 @@ export interface ShiftBundleDto {
    * so rather than printing an empty one.
    */
   palletLabelTemplate: { id: string; name: string; spec: LabelTemplateSpec } | null;
+  palletSheetTemplate?: PalletSheetTemplateSnapshot | null;
   counterpartyGln: string | null;
   operators: OperatorMirrorRecord[];
   /**
@@ -439,6 +521,7 @@ export const createShiftOpenApiSchema = {
     ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
     boxLabelTemplateId: nullableUuidOpenApiSchema,
     palletLabelTemplateId: nullableUuidOpenApiSchema,
+    palletSheetTemplateId: nullableUuidOpenApiSchema,
     plannedQty: nullablePositiveIntegerOpenApiSchema,
     plannedDate: nullableDateOpenApiSchema,
     productionDate: productionDateOpenApiSchema,
@@ -460,6 +543,7 @@ export const updateShiftOpenApiSchema = {
     ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
     boxLabelTemplateId: nullableUuidOpenApiSchema,
     palletLabelTemplateId: nullableUuidOpenApiSchema,
+    palletSheetTemplateId: nullableUuidOpenApiSchema,
     plannedQty: nullablePositiveIntegerOpenApiSchema,
     plannedDate: nullableDateOpenApiSchema,
     productionDate: productionDateOpenApiSchema,
@@ -485,6 +569,13 @@ export const shiftPlanningConfigOpenApiSchema: SchemaObject = {
     "orgGlnConfigured",
   ],
   properties: {
+    palletSheetProtocol: { type: "string", enum: ["pallet-sheet-v2"] },
+    defaultPalletSheetTemplateId: nullableUuidOpenApiSchema,
+    palletSheetDefaultSource: {
+      type: "string",
+      enum: ["category", "organization"],
+      nullable: true,
+    },
     validationPrintProtocol: { type: "string", enum: [PRODUCT_LABEL_PROTOCOL], nullable: true },
     orgGlnConfigured: {
       type: "boolean",
@@ -656,6 +747,9 @@ export const shiftOpenApiSchema = {
     ssccIssuerCounterpartyId: nullableUuidOpenApiSchema,
     boxLabelTemplateId: nullableUuidOpenApiSchema,
     palletLabelTemplateId: nullableUuidOpenApiSchema,
+    palletSheetTemplateId: nullableUuidOpenApiSchema,
+    palletSheetTemplateName: { type: "string", nullable: true },
+    palletSheetTemplateRevision: { type: "integer", minimum: 1, nullable: true },
     plannedQty: nullablePositiveIntegerOpenApiSchema,
     plannedDate: nullableDateOpenApiSchema,
     productionDate: productionDateOpenApiSchema,
@@ -761,6 +855,7 @@ const stationBundleProductOpenApiSchema = {
     gtin14: { type: "string" },
     name: { type: "string" },
     productGroup: { type: "string", nullable: true },
+    chzProductGroupCode: { type: "integer", minimum: 0, nullable: true },
     boxCapacity: nullablePositiveIntegerOpenApiSchema,
     palletBoxCapacity: nullablePositiveIntegerOpenApiSchema,
     status: { type: "string", enum: ["draft", "active"] },
@@ -858,6 +953,7 @@ export const shiftBundleOpenApiSchema = {
     labelTemplate: { type: "string", nullable: true, enum: [null] },
     boxLabelTemplate: boxLabelTemplateOpenApiSchema,
     palletLabelTemplate: boxLabelTemplateOpenApiSchema,
+    palletSheetTemplate: { ...palletSheetSnapshotOpenApiSchema, nullable: true },
     counterpartyGln: { type: "string", nullable: true },
     operators: { type: "array", items: operatorMirrorOpenApiSchema },
     sscc: ssccBundleOpenApiSchema,

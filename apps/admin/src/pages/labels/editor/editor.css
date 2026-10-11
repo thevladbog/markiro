@@ -244,3 +244,54 @@
     border-bottom: 1px solid var(--line);
   }
 }
+
+/* A4 editor uses the same printed pixels; CSS only controls viewing zoom. */
+.label-sheet-page {
+  padding: 28px 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.sheet-workspace {
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(300px, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.sheet-editor,
+.sheet-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.sheet-editor fieldset,
+.sheet-preview fieldset {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-2);
+  padding: 12px;
+  min-width: 0;
+}
+.sheet-palette,
+.sheet-history,
+.label-sheet-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.sheet-editor ol {
+  padding-left: 20px;
+  margin: 4px 0;
+}
+.sheet-editor li {
+  margin: 4px 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 960px) {
+  .sheet-workspace {
+    grid-template-columns: 1fr;
+  }
+}

@@ -3,6 +3,11 @@ import { Alert, Button, StatusChip } from "@markiro/ui";
 import { getVersion } from "@tauri-apps/api/app";
 import { useTranslation } from "react-i18next";
 import type { StationUpdaterController } from "../lib/use-station-updater.js";
+import {
+  storageNoticeKey,
+  storageNoticeTone,
+  type StationStorageStatus,
+} from "../lib/storage-status.js";
 import { StationScreen } from "../ui/StationScreen.js";
 import { FloorFooter } from "../ui/FloorFooter.js";
 
@@ -12,6 +17,8 @@ export interface UpdateCenterProps {
   pendingOutbox: number;
   onBack: () => void;
   readInstalledVersion?: () => Promise<string>;
+  /** From `station_storage_status`; the section is hidden until it is known. */
+  storageStatus?: StationStorageStatus | null;
 }
 
 export function UpdateCenter({
@@ -20,9 +27,11 @@ export function UpdateCenter({
   pendingOutbox,
   onBack,
   readInstalledVersion = getVersion,
+  storageStatus = null,
 }: UpdateCenterProps) {
   const { t } = useTranslation();
   const sourceTitleId = useId();
+  const storageTitleId = useId();
   const [confirming, setConfirming] = useState(false);
   const [installedVersion, setInstalledVersion] = useState<string | null | undefined>(undefined);
   const available = controller.persisted?.available ?? null;
@@ -149,6 +158,25 @@ export function UpdateCenter({
                 {t("updates.source.packageFallback")}
               </p>
             ) : null}
+          </section>
+        ) : null}
+        {storageStatus ? (
+          <section
+            className="station-update-center__source station-update-center__storage"
+            aria-labelledby={storageTitleId}
+          >
+            <p id={storageTitleId} className="station-update-center__source-label">
+              {t("storage.title")}
+            </p>
+            <p className="station-update-center__storage-folder">
+              <span>{t(`storage.mode.${storageStatus.mode}`)}</span>{" "}
+              <code>{storageStatus.dir}</code>
+            </p>
+            {storageStatus.notices.map((notice) => (
+              <Alert key={storageNoticeKey(notice)} tone={storageNoticeTone(notice)}>
+                {t(storageNoticeKey(notice))}
+              </Alert>
+            ))}
           </section>
         ) : null}
         {activeShift ? <Alert tone="warn">{t("updates.activeShift")}</Alert> : null}

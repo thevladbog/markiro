@@ -3,7 +3,7 @@ import { cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createDb, schema } from "@markiro/db";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { migrate } from "drizzle-orm/node-postgres/migrator";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
@@ -80,12 +80,11 @@ describe.skipIf(!databaseUrl)("stale commercial family after a real 0094 to 0096
     await writeFile(journalPath, JSON.stringify(journal));
     await migrate(connection.db, { migrationsFolder: migrationsThrough0094 });
 
-    await connection.db.insert(schema.organization).values({
-      id: tenantId,
-      name: "Stale family runtime",
-      slug: tenantId,
-      createdAt: new Date(),
-    });
+    // Raw SQL: `schema.organization` now lists `cabinet_access` (0176),
+    // which this scratch DB pinned at migration 0094 does not have yet.
+    await connection.db.execute(
+      sql`insert into organization (id, name, slug, created_at) values (${tenantId}, ${"Stale family runtime"}, ${tenantId}, now())`,
+    );
     await connection.db.insert(schema.platformUsers).values({
       id: actorId,
       name: "Stale family actor",

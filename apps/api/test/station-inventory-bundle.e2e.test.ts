@@ -1,3 +1,8 @@
+import {
+  buildDefaultLabelTemplates,
+  projectThermalLabelForClient,
+  THERMAL_LABEL_BRANDING_PROTOCOL,
+} from "@markiro/domain";
 import { freezeGrantTask } from "../src/modules/device-grants/frozen-task";
 import { seedGrantPolicy } from "./support/grant-policy-fixture";
 import { randomUUID } from "node:crypto";
@@ -297,6 +302,52 @@ describe.skipIf(!ready)("station inventory bundle e2e", () => {
     });
     await createManagedSubscription(db, { tenantId, planVersionId, startsAt, endsAt });
   }
+
+  it("projects frozen repack print specs by capability without rewriting inventory facts or digests", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const fixture = await seedBundle(agent, "repack");
+    const current = buildDefaultLabelTemplates().find((t) => t.name === "Коробка 100×150")!.spec;
+    const [row] = await db
+      .select({ manifest: schema.inventories.stationManifest })
+      .from(schema.inventories)
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+    const before = row!.manifest as Record<string, unknown>;
+    const originalTemplate = before.boxLabelTemplate as {
+      id: string;
+      name: string;
+      spec: LabelTemplateSpec;
+    };
+    const frozen = {
+      ...before,
+      productPrintName: null,
+      egaisCode: null,
+      shelfLifeDays: null,
+      boxLabelTemplate: { ...originalTemplate, spec: current },
+    };
+    await db
+      .update(schema.inventories)
+      .set({ stationManifest: frozen })
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+    const first = await join(fixture);
+    expect(first.body.boxLabelTemplate.spec).toEqual(projectThermalLabelForClient(current));
+    for (const capabilities of ["", THERMAL_LABEL_BRANDING_PROTOCOL]) {
+      const response = await request(app!.getHttpServer())
+        .get(`/station/inventories/${fixture.inventoryId}/bundle/manifest`)
+        .set("x-api-key", fixture.apiKey)
+        .set("x-station-capabilities", capabilities)
+        .expect(200);
+      expect(response.body.boxLabelTemplate.spec).toEqual(
+        projectThermalLabelForClient(current, capabilities),
+      );
+      expect(response.body.contentDigest).toBe(before.contentDigest);
+      expect(response.body.combinedDigest).toBe(before.combinedDigest);
+    }
+    const [after] = await db
+      .select({ manifest: schema.inventories.stationManifest })
+      .from(schema.inventories)
+      .where(eq(schema.inventories.id, fixture.inventoryId));
+    expect(after!.manifest).toEqual(frozen);
+  });
 
   it("freezes the selected inventory snapshot without mutable product hydration", async () => {
     const fixture = await seedBundle(request.agent(app!.getHttpServer()));

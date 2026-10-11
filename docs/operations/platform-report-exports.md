@@ -16,8 +16,18 @@ Monitor failed rows by their safe error code and the corresponding audit event. 
 
 ## Artifact interpretation
 
-Each ZIP contains CSV data and a definitions JSON file with the exact parameters, snapshot time and metric definitions. Dates are inclusive local calendar dates in the selected IANA timezone; event timestamps in the artifact remain UTC. Current names are snapshot identity labels, not asserted historical names.
+Each ZIP contains `data.csv` and `metadata.json` with the exact parameters, snapshot time, `definitionsVersion`, the SHA-256 of `data.csv` (`dataSha256`) and metric definitions. Dates are inclusive local calendar dates in the selected IANA timezone; event timestamps in the artifact remain UTC. Current names are snapshot identity labels, not asserted historical names.
 
 Confirmed box labels require `print_verified_at`; reprint requests are separate operational facts. Inventory expected values and code classifications are current projections, while scan and repack facts are interval events. Missing facts are unavailable (`null`), not inferred zero. Badge/PIN values, raw scan codes, authentication material and integration credentials are never exported.
 
 CommerceML reports use an allowlisted journal projection. They can state whether a current temporary upload exists, but the platform does not retain a complete historical raw CommerceML archive. An unavailable historical file must remain unavailable and must not be reconstructed or described as retained.
+
+## Usage, quality and commercial reports
+
+The `usage`, `quality` and `commercial` templates give one row per tenant and local calendar day for platform-usage analytics and supporting evidence. They take the same explicit tenant selection (1–10), inclusive dates (at most 366 days) and IANA timezone as the other templates, and reject every optional filter and the production-date basis.
+
+A row exists only for a tenant-day with at least one recorded fact. A missing row means no recorded fact, not a measured zero. Every numeric column is an additive count or sum, so days can be rolled up to weeks or months; lag is reported as bucket counts, and amounts are RUB kopecks. Server clocks are used wherever they exist and each definition in `metadata.json` names its clock. Late device synchronisation can restate past days, so compare exports by `snapshotAt` and `definitionsVersion`, which is bumped whenever a formula changes.
+
+Privacy modes apply to tenants instead of operators. `identified` shows tenant ids and names and needs the identified capability. `pseudonymous` replaces both with `tenant-01`, `tenant-02`, … in ascending tenant-id order and records only `tenantCount` in the artifact parameters. `aggregate` removes the tenant columns and sums days across the selected tenants. Neither is legal anonymization: a distinctive volume or a small selection can still identify a tenant. Do not name a customer in published material without its consent.
+
+Artifacts keep the seven-day retention. Place downloaded files in an evidence package with `tools/evidence-package` (seal, verify) for long-term retention. Facts the platform does not retain, such as the CommerceML item journal older than 14 days, cannot be regenerated: export the `commerceml` report regularly and keep it in the evidence package.

@@ -3,6 +3,10 @@ import type { StationClient } from "./api-client.js";
 import type { CredentialGeneration, CredentialRejectedEvent } from "./credential-recovery.js";
 import type { SqlExecutor } from "./mirror.js";
 import { createSyncEngine, type SyncEngine, type SyncState } from "./sync.js";
+import {
+  refreshOrganizationBranding,
+  type OrganizationBrandingOwner,
+} from "./organization-branding.js";
 
 /**
  * Nudge the engine even without a triggering event, so a connection that
@@ -14,7 +18,12 @@ export const HEARTBEAT_MS = 15_000;
 export interface UseSyncEngineDeps {
   exec: SqlExecutor;
   /** `null` before the device has an API client (not yet enrolled). */
-  client: (Pick<StationClient, "post"> & Partial<Pick<StationClient, "get">>) | null;
+  client:
+    | (Pick<StationClient, "post"> &
+        Partial<Pick<StationClient, "get" | "download" | "palletSheetSupported">>)
+    | null;
+  /** Credential-verified tenant identity; absent on old/native-incompatible clients. */
+  brandingTenantId?: string;
   /** `null`/`undefined` whenever `client` is `null`. */
   machineId: string | null | undefined;
   credentialGeneration?: CredentialGeneration;
@@ -88,6 +97,49 @@ export function useSyncEngine(deps: UseSyncEngineDeps): UseSyncEngineResult {
   const engineRef = useRef<SyncEngine | null>(null);
   const pausedRef = useRef(false);
   const watchedShiftRef = useRef<string | null>(null);
+  const brandingOwnerRef = useRef<OrganizationBrandingOwner | null>(null);
+
+  useEffect(() => {
+    if (
+      !client?.palletSheetSupported ||
+      !client.get ||
+      !client.download ||
+      !credentialGeneration ||
+      !deps.brandingTenantId
+    )
+      return;
+    let active = true;
+    const owner: OrganizationBrandingOwner = {
+      exec,
+      tenantId: deps.brandingTenantId,
+      generation: credentialGeneration,
+      isCurrent: () => active && !pausedRef.current,
+      client: {
+        get: <T>(path: string, options?: Parameters<StationClient["get"]>[1]) => {
+          if (!client.get) throw new Error("Branding API unavailable");
+          return client.get<T>(path, options);
+        },
+        download: (path: string) => {
+          if (!client.download) throw new Error("Branding download unavailable");
+          return client.download(path);
+        },
+      },
+    };
+    brandingOwnerRef.current = owner;
+    // Branding is independently recoverable: a failed fetch retains the last
+    // complete publication and must not stall device-wide production sync.
+    void refreshOrganizationBranding(owner).catch(() => undefined);
+    return () => {
+      active = false;
+      if (brandingOwnerRef.current === owner) brandingOwnerRef.current = null;
+    };
+  }, [exec, client, credentialGeneration, deps.brandingTenantId]);
+
+  useEffect(() => {
+    const owner = brandingOwnerRef.current;
+    if (state.lastSuccessAt !== null && owner)
+      void refreshOrganizationBranding(owner).catch(() => undefined);
+  }, [state.lastSuccessAt]);
 
   useEffect(() => {
     if (!client || !machineId) {

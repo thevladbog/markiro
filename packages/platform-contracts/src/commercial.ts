@@ -738,6 +738,7 @@ export const billingRequestTypeSchema = z.enum([
   "additional_service",
   "documents",
   "other",
+  "support",
 ]);
 export const platformBillingRequestStatusSchema = z.enum([
   "new",
@@ -749,6 +750,7 @@ export const platformBillingRequestStatusSchema = z.enum([
   "completed",
   "cancelled",
 ]);
+export type BillingRequestStatus = z.infer<typeof platformBillingRequestStatusSchema>;
 export const platformBillingRequestTargetStatusSchema = z.enum([
   "under_review",
   "clarification_required",

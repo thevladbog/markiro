@@ -7,6 +7,7 @@ import { Alert, Button, SectionHeader, Spinner, StatusChip } from "@markiro/ui";
 import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { getBillingRequest } from "../billing-requests/api.js";
 import { getInvoice } from "../billing/api.js";
+import { openDocumentInNewTab } from "../documents/openDocumentInNewTab.js";
 import { getBillingAct, getBillingActDocumentDownload } from "./api.js";
 import { BILLING_ACT_STATUS_TO_PHASE } from "./BillingActsPage.js";
 
@@ -55,16 +56,10 @@ export function BillingActDetailPage() {
   const act = detail.data;
   const openDocument = (documentId: string) => {
     setDownloadBlocked(false);
-    const target = window.open("about:blank", "_blank");
-    if (!target) {
-      setDownloadBlocked(true);
-      return;
-    }
-    target.opener = null;
-    void downloadDocument
-      .mutateAsync(documentId)
-      .then(({ url }) => target.location.replace(url))
-      .catch(() => target.close());
+    const opened = openDocumentInNewTab(() =>
+      downloadDocument.mutateAsync(documentId).then(({ url }) => url),
+    );
+    if (!opened) setDownloadBlocked(true);
   };
   return (
     <section className="invoice-detail-page billing-act-detail">

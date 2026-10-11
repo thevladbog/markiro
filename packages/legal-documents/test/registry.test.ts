@@ -57,11 +57,26 @@ describe("legal document registry", () => {
       // 2026-09-02: the station instruction set (01/02/03/05) was reissued in
       // one sweep -- the floor header collapsed into status dots, the work
       // screen got its product hero, and the demo product image was redrawn.
-      "MKR-INS-01": "2026.09/01",
-      "MKR-INS-02": "2026.09/01",
-      "MKR-INS-03": "2026.09/01",
-      "MKR-INS-04": "2026.08/02",
-      "MKR-INS-05": "2026.09/01",
+      // 2026-09-26: the work screen was redesigned for small monitors -- a
+      // shift band with the total across terminals, a shift journal with its
+      // own error and duplicate counters, and «Конфликты» in the header -- so
+      // 01, 02 and 03, which show or describe it, were reissued again.
+      // 2026-09-26, same day: the rest of the station set caught up with the
+      // product -- the shift list's card buttons (01), the header's scanner
+      // and printer indicators (03), printers assigned by label type (04) and
+      // the one-line floor header on the inventory frames (05).
+      // 2026-09-26, later still: pallet work was documented for the operator
+      // -- the pallet strip, automatic and early pallet close with its label,
+      // the contents view and closing a shift with an open pallet (02), and
+      // pallet reprint and disassembly among the exceptions (03).
+      // 2026-09-26, last: creating a shift on the station gained its pallet
+      // choice -- «Без паллет» / «С паллетами» with the capacity from the
+      // product card and the pallet label template -- so 01 was reissued.
+      "MKR-INS-01": "2026.09/04",
+      "MKR-INS-02": "2026.09/03",
+      "MKR-INS-03": "2026.09/04",
+      "MKR-INS-04": "2026.09/01",
+      "MKR-INS-05": "2026.09/02",
       // 2026-09-10: обе редакции исправлены по факту экрана при съёмке
       // английских кадров.
       "MKR-INS-06": "2026.09/01",
@@ -104,11 +119,11 @@ describe("legal document registry", () => {
           code !== "MKR-INS-11",
       ).every(({ effectiveDate }) => effectiveDate === "2026-08-15"),
     ).toBe(true);
-    expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-09-02");
-    expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-09-02");
-    expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-09-02");
-    expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-09-01");
-    expect(findLegalRelease("MKR-INS-05").effectiveDate).toBe("2026-09-02");
+    expect(findLegalRelease("MKR-INS-01").effectiveDate).toBe("2026-09-26");
+    expect(findLegalRelease("MKR-INS-02").effectiveDate).toBe("2026-09-26");
+    expect(findLegalRelease("MKR-INS-03").effectiveDate).toBe("2026-09-26");
+    expect(findLegalRelease("MKR-INS-04").effectiveDate).toBe("2026-09-26");
+    expect(findLegalRelease("MKR-INS-05").effectiveDate).toBe("2026-09-26");
     expect(findLegalRelease("MKR-INS-06").effectiveDate).toBe("2026-09-10");
     expect(findLegalRelease("MKR-INS-07").effectiveDate).toBe("2026-09-01");
     expect(findLegalRelease("MKR-INS-08").effectiveDate).toBe("2026-09-19");

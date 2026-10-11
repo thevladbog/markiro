@@ -82,29 +82,25 @@ corepack pnpm evidence:init -- evidence/INV-20260824-pilot-01 INV-20260824-pilot
 
 ## Получите дату из зеркала Station без записи в базу
 
-Текущая Station загружает `sqlite:station-mirror.db`. Закреплённый в Cargo.lock
-`tauri-plugin-sql` 2.4.0 разрешает этот относительный URL от app-scoped каталога
-конфигурации Tauri `BaseDirectory::AppConfig`. Идентификатор приложения равен
-`app.markiro.station`, поэтому ожидаемый путь в Windows:
-
-```text
-%APPDATA%\app.markiro.station\station-mirror.db
-```
-
-Этот путь выведен из текущего кода и зависимости. Он не проверен на рабочем
-Windows-устройстве. Перед чтением закройте Station, чтобы зафиксировать снимок.
-В PowerShell задайте выбранные значения, проверьте файл и запустите диагностику:
+Папку с базой показывает сама Station: Центр обновлений → «Данные станции».
+Обычно это `%LOCALAPPDATA%\app.markiro.station`, но на некоторых профилях
+Windows база остаётся в `%APPDATA%`: берите папку, которую показала Station, а
+не выводите её из профиля. Перед чтением закройте Station, чтобы зафиксировать
+снимок. В PowerShell задайте выбранные значения, проверьте файл и запустите
+диагностику:
 
 ```powershell
 $operationRoot = 'D:\private-evidence\INV-20260824-pilot-01'
 $shiftId = '00000000-0000-0000-0000-000000000001'
-$stationDb = Join-Path $env:APPDATA 'app.markiro.station\station-mirror.db'
+$stationDir = 'C:\Users\operator\AppData\Local\app.markiro.station'
+$stationDb = Join-Path $stationDir 'station-mirror.db'
 $output = Join-Path $operationRoot 'exports\system\rehearsal-date\station-production-date.json'
 if (-not (Test-Path -LiteralPath $stationDb -PathType Leaf)) { throw 'Station DB not found' }
 corepack pnpm evidence:station-date -- $stationDb $shiftId $output
 ```
 
-Замените только примерные корень операции и ID смены. Команда открывает SQLite
+Замените только примерные корень операции и ID смены, а в `$stationDir`
+впишите папку из «Данных станции». Команда открывает SQLite
 в режиме `readOnly`, выполняет параметризованный запрос
 `SELECT id, production_date FROM shift_mirror WHERE id = ?`, требует ровно одну
 строку и отказывается перезаписывать существующий результат. Она записывает

@@ -1,0 +1,47 @@
+---
+import { Picture } from "astro:assets";
+
+import { homeCover } from "../../content/home-images";
+import { hubPath } from "../../content/hubs";
+import type { Locale } from "../../content/pages";
+import { getUiCopy } from "../../content/ui";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const copy = getUiCopy(locale).home.documents;
+const legalPath = locale === "ru" ? "/legal/" : "/en/legal/";
+---
+
+<section class="section home-documents" id="documents" aria-labelledby="documents-title">
+  <div class="container home-documents__grid">
+    <div>
+      <p class="section-index">{copy.kicker}</p>
+      <h2 id="documents-title" class="display-heading display-heading--sentence">{copy.heading}</h2>
+      <p class="section-lead">{copy.lead}</p>
+      <p class="home-documents__links">
+        <a class="text-link" href={hubPath(locale, "instructions")}>{copy.allInstructions} <span aria-hidden="true">→</span></a>
+        <a class="text-link" href={legalPath}>{copy.legal} <span aria-hidden="true">→</span></a>
+      </p>
+    </div>
+    <ul class="home-documents__covers" role="list">
+      {copy.covers.map((cover) => (
+        <li>
+          <figure>
+            <Picture
+              src={homeCover(locale, cover.code)}
+              alt={cover.alt}
+              widths={[240, 480, 720]}
+              formats={["avif", "webp"]}
+              sizes="(max-width: 767px) 30vw, 14.75rem"
+              loading="lazy"
+            />
+            <figcaption class="home-caption">{cover.caption}</figcaption>
+          </figure>
+        </li>
+      ))}
+    </ul>
+  </div>
+</section>

@@ -14,6 +14,7 @@ pub mod signer_cades;
 #[cfg(windows)]
 pub mod signer_capi;
 pub mod storage;
+pub mod storage_location;
 #[cfg(windows)]
 pub mod storage_dpapi;
 pub mod trueapi;

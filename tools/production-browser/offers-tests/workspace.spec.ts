@@ -1,4 +1,4 @@
-import type { Locator, Page, TestInfo } from "@playwright/test";
+import type { ConsoleMessage, Locator, Page, TestInfo } from "@playwright/test";
 import {
   test,
   expect,
@@ -102,13 +102,14 @@ for (const width of [390, 1440]) {
         await page.setViewportSize({ width, height: 1000 });
         await page.addInitScript((value) => localStorage.setItem("markiro.theme", value), theme);
         const violations: string[] = [];
-        page.on("console", (message) => {
+        const collectViolations = (message: ConsoleMessage) => {
           if (
             message.type() === "error" &&
             /Content Security Policy|Refused to|violates/i.test(message.text())
           )
             violations.push(message.text());
-        });
+        };
+        page.on("console", collectViolations);
         const response = await page.goto(
           "/offers?status=draft&page=2&limit=25&createdFrom=2026-09-01T00%3A00%3A00%2B03%3A00&createdTo=2026-10-01T00%3A00%3A00%2B03%3A00",
         );
@@ -312,22 +313,29 @@ for (const width of [390, 1440]) {
         );
         await noPageOverflow(page);
         await shot(page, info, "issued-detail");
+        const offerUrl = page.url();
         const pending = page.waitForRequest((request) => request.url().endsWith("/download"));
+        const opened = context.waitForEvent("page");
         await signed.getByRole("button", { name: ru ? "Открыть HTML" : "Open HTML" }).click();
         await pending;
+        // The blank tab is opened inside the click handler, while the click still carries user
+        // activation, so the enabled popup blocker lets it through before the signed URL is known.
+        const documentTab = await opened;
+        documentTab.on("console", collectViolations);
         await page.waitForFunction(() => !navigator.userActivation.isActive);
-        expect(context.pages()).toEqual([page]);
-        const documentResponse = page.waitForResponse((response) =>
+        expect(context.pages()).toEqual([page, documentTab]);
+        expect(documentTab.url()).toBe("about:blank");
+        const documentResponse = documentTab.waitForResponse((response) =>
           response.url().endsWith("/synthetic-offer-signed.html"),
         );
         fixture.download.release();
         expect(await (await documentResponse).text()).toBe(signedHtml);
-        await expect(page).toHaveURL(/\/synthetic-offer-signed.html$/);
-        await expect(page.locator("body")).toHaveAttribute("data-print-variant", "signed");
-        await expect(page.locator(".authorized-signature")).toBeVisible();
-        await expect(page.locator(".legal-seal")).toBeVisible();
+        await expect(documentTab).toHaveURL(/\/synthetic-offer-signed.html$/);
+        await expect(documentTab.locator("body")).toHaveAttribute("data-print-variant", "signed");
+        await expect(documentTab.locator(".authorized-signature")).toBeVisible();
+        await expect(documentTab.locator(".legal-seal")).toBeVisible();
         expect(
-          await page
+          await documentTab
             .locator(".authorized-signature, .legal-seal")
             .evaluateAll((images) =>
               images.every(
@@ -338,10 +346,15 @@ for (const width of [390, 1440]) {
             ),
         ).toBe(true);
         await expect(
-          page.getByText("Настройка производственной линии", { exact: true }),
+          documentTab.getByText("Настройка производственной линии", { exact: true }),
         ).toBeVisible();
-        await shot(page, info, "signed-html");
-        expect(context.pages()).toEqual([page]);
+        await shot(documentTab, info, "signed-html");
+        // The offer page itself is left exactly where it was.
+        expect(page.url()).toBe(offerUrl);
+        await expect(
+          page.getByRole("heading", { name: "КП-ТЕСТ-0042", exact: true }),
+        ).toBeVisible();
+        expect(context.pages()).toEqual([page, documentTab]);
         expect(violations).toEqual([]);
       });
     }

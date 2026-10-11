@@ -90,7 +90,7 @@ describe("inventory box label", () => {
       "^XA\n^PW464\n^LL320\n^FO16,16^GFA,1,1,1,A5^FS\n^FO16,96^BCN,64,N,N,N^FD>;>800046006820000621515^FS\n^FO16,192^A0N,23,23^FD19.08.2026^FS\n^FO176,192^A0N,23,23^FD18.02.2027^FS\n^FO384,192^GFA,1,1,1,A5^FS\n^XZ\n",
     );
     expect(new TextDecoder("latin1").decode(tspl)).toBe(
-      'SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBITMAP 16,16,1,1,0,Z\nBARCODE 16,96,"128",64,0,0,2,2,"!100046006820000621515"\nTEXT 16,192,"0",0,8,8,"19.08.2026"\nTEXT 176,192,"0",0,8,8,"18.02.2027"\nBITMAP 384,192,1,1,0,Z\nPRINT 1\n',
+      'SIZE 58 mm, 40 mm\nGAP 2 mm, 0 mm\nDIRECTION 1\nCLS\nBITMAP 16,16,1,1,0,Z\nBARCODE 16,96,"EAN128",64,0,0,2,2,"00046006820000621515"\nTEXT 16,192,"0",0,8,8,"19.08.2026"\nTEXT 176,192,"0",0,8,8,"18.02.2027"\nBITMAP 384,192,1,1,0,Z\nPRINT 1\n',
     );
     expect(rasterize).toHaveBeenCalledWith(
       "Пиво 0,45 л",

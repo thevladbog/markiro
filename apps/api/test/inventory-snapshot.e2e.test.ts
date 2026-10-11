@@ -247,6 +247,18 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
     return [...objects.keys()].filter((key) => key.startsWith(prefix)).sort();
   }
 
+  /**
+   * The storage reads that touched one inventory's evidence, whoever's tenant
+   * prefix they carry. `storage.get` is as process-wide as `objects`: a
+   * replayed job from another suite reads through the same mock mid-test (a
+   * National Catalog image preparation fetching its `.webp` failed the
+   * "never read" assertion below on CI), so counting every call is the same
+   * coin flip.
+   */
+  function evidenceReads(inventoryId: string) {
+    return storage.get.mock.calls.filter(([key]) => key.includes(`/inventories/${inventoryId}/`));
+  }
+
   async function importRow(importId: string) {
     const [row] = await db
       .select()
@@ -309,10 +321,9 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
       },
     });
     expect(JSON.stringify(snapshot)).not.toMatch(/objectKey|fileName|canonicalRaw|SYNTHETIC/i);
-    expect(storage.get).toHaveBeenCalledTimes(6);
-    expect(
-      storage.get.mock.calls.every(([, options]) => options?.maxBytes === CHZ_MAX_INPUT_BYTES),
-    ).toBe(true);
+    const reads = evidenceReads(inventoryId);
+    expect(reads).toHaveLength(6);
+    expect(reads.every(([, options]) => options?.maxBytes === CHZ_MAX_INPUT_BYTES)).toBe(true);
 
     const [storedSnapshot] = await db
       .select()
@@ -563,7 +574,7 @@ describe.skipIf(!ready)("inventory immutable snapshot fixation e2e", () => {
       .send(selectionBody(imports))
       .expect(404);
     await other.post("/inventories/not-a-uuid/snapshots").send(selectionBody(imports)).expect(400);
-    expect(storage.get).not.toHaveBeenCalled();
+    expect(evidenceReads(owned.inventoryId)).toEqual([]);
   });
 
   it("rejects duplicates within one selected import without deleting source evidence", async () => {

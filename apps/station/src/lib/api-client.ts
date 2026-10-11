@@ -1,4 +1,10 @@
-import { PRODUCT_LABEL_PROTOCOL, VALIDATION_REPROCESSING_PROTOCOL } from "@markiro/domain";
+import {
+  WAREHOUSE_REPRINT_PROTOCOL,
+  THERMAL_LABEL_BRANDING_PROTOCOL,
+  PRODUCT_LABEL_PROTOCOL,
+  VALIDATION_REPROCESSING_PROTOCOL,
+  PALLET_SHEET_PROTOCOL,
+} from "@markiro/domain";
 import type { StationConfig } from "./config.js";
 import {
   rejectCredentialGeneration,
@@ -45,6 +51,7 @@ export interface StationGetOptions {
 }
 
 export interface StationClient {
+  readonly palletSheetSupported?: boolean;
   get<T>(path: string, options?: StationGetOptions): Promise<T>;
   download(path: string): Promise<Blob>;
   post<T>(path: string, body?: unknown): Promise<T>;
@@ -57,6 +64,8 @@ export interface StationClient {
 }
 
 export interface StationClientOptions {
+  /** True only after the running native bridge confirms Windows A4 support. */
+  palletSheetSupported?: boolean;
   /** Reports whether a Station API response was received for a request. */
   onReachabilityChange?: (state: Exclude<ServerReachability, "checking">) => void;
   /** Present only for the normal, durably enrolled authenticated client. */
@@ -91,7 +100,7 @@ export interface StationClientOptions {
  * another turn.
  */
 export const REQUEST_TIMEOUT_MS = 30_000;
-export const STATION_CAPABILITIES = `subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,${PRODUCT_LABEL_PROTOCOL},${VALIDATION_REPROCESSING_PROTOCOL}`;
+export const STATION_CAPABILITIES = `subscription-state-v1,station-recovery-v1,replacement-boundary-v1,replacement-readiness-v1,replacement-evidence-recovery-v1,${THERMAL_LABEL_BRANDING_PROTOCOL},${PRODUCT_LABEL_PROTOCOL},${VALIDATION_REPROCESSING_PROTOCOL},${WAREHOUSE_REPRINT_PROTOCOL}`;
 
 /** Constant-cost presence heartbeat; the handler does no work beyond TenantGuard. */
 const HEARTBEAT_PATH = "/station/heartbeat";
@@ -169,6 +178,10 @@ export function createStationClient(
   options: StationClientOptions = {},
 ): StationClient {
   const base = (cfg.serverUrl ?? "").replace(/\/+$/, "");
+  const capabilities =
+    options.palletSheetSupported === true
+      ? `${STATION_CAPABILITIES},${PALLET_SHEET_PROTOCOL}`
+      : STATION_CAPABILITIES;
   const credentialBoundary = options.credentialBoundary;
   let latestRequestSequence = 0;
 
@@ -237,7 +250,7 @@ export function createStationClient(
         method,
         headers: {
           "Content-Type": "application/json",
-          "x-station-capabilities": STATION_CAPABILITIES,
+          "x-station-capabilities": capabilities,
           ...(cfg.apiKey ? { "x-api-key": cfg.apiKey } : {}),
         },
         signal: controller.signal,
@@ -264,6 +277,7 @@ export function createStationClient(
   }
 
   return {
+    palletSheetSupported: options.palletSheetSupported === true,
     get: (path, options) => request("GET", path, { displayOnly: options?.displayOnly }),
     // Binary media is an optional display enhancement. Generic image/CDN
     // failures must not seal the line's credential generation, but an explicit
@@ -277,7 +291,7 @@ export function createStationClient(
       try {
         const res = await fetch(`${base}${path}`, {
           headers: {
-            "x-station-capabilities": STATION_CAPABILITIES,
+            "x-station-capabilities": capabilities,
             ...(cfg.apiKey ? { "x-api-key": cfg.apiKey } : {}),
           },
           signal: controller.signal,

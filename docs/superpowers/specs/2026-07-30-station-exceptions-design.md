@@ -68,6 +68,8 @@ exceptions: Array<{
 
 Processed inside the same `applyBatch` transaction, **after** `items` and `boxes` — so an exception targeting an item or closure carried in the very same batch always applies to a row that already exists. A device can never enqueue an exception fact ahead of the scan it corrects: the fact is only ever created after the operator has already made the scan, so its mirror row is always inserted later and drained no earlier.
 
+The reverse dependency exists too (revision 2026-09-26): a device releases a code and then scans it again — takes a box apart and re-packs it, clears a box and starts over, undoes a scan and scans the code into another box. When the release and the re-scan share a batch, the re-scan first loses its claim to the scan the batch releases only afterwards, and the code would end up in no box while the device holds it. After the exceptions, `reclaimReleasedCodes` settles every code the batch released as if the release had arrived first: the earliest scan the batch still holds claims the code and its membership becomes live, and the batch's own conflicts that named the released scan are withdrawn from the response and from `code_conflicts`.
+
 Application logic lives in a new narrow module next to `box-membership.ts` and `conflict-resolution.ts` (not inline in the already-large `station-scans.service.ts`):
 
 - **`undo`**: release the code (see above), then `UPDATE box_items SET removed_at = now() WHERE box/codeHash match AND displaced_at IS NULL AND removed_at IS NULL`.

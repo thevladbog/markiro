@@ -22,6 +22,10 @@ function productLabelJobDisplayState(job: ProductLabelHistoryRow): ProductLabelJ
   return job.status;
 }
 
+function requiresAttention(job: ProductLabelHistoryRow) {
+  return job.status !== "completed" || job.verificationOutcome === "pending";
+}
+
 /**
  * The original bug this branch exists for: "Отправлено на принтер" (`sent`,
  * derived from `job.status === "completed"`) rendered a flat `Badge
@@ -121,6 +125,7 @@ export function ProductLabelHistory({ shiftId }: { shiftId: string }) {
   const { t, i18n } = useTranslation();
   const history = useProductLabelHistory(shiftId);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [visibility, setVisibility] = useState<"auto" | "all" | "closed">("auto");
   if (history.isPending)
     return (
       <section className="mk-shift-details__section">
@@ -141,15 +146,35 @@ export function ProductLabelHistory({ shiftId }: { shiftId: string }) {
     );
   const summary = history.data.pages[0]?.summary;
   const rows = history.data.pages.flatMap((page) => page.items);
+  const hasAttention = (summary?.unresolvedJobs ?? 0) > 0 || rows.some(requiresAttention);
+  const journalOpen = visibility === "all" || (visibility === "auto" && hasAttention);
+  const visibleRows = journalOpen ? rows : [];
   return (
     <section className="mk-shift-details__section">
-      <h3>{t("pages.shifts.productLabels.title")}</h3>
-      <p className="mk-shift-details__empty">{t("pages.shifts.productLabels.hint")}</p>
+      <div className="mk-product-label-history__heading">
+        <div>
+          <h3>{t("pages.shifts.productLabels.title")}</h3>
+          <p className="mk-shift-details__empty">{t("pages.shifts.productLabels.hint")}</p>
+        </div>
+        {rows.length ? (
+          <Button
+            variant="secondary"
+            aria-expanded={journalOpen}
+            onClick={() => setVisibility(journalOpen ? "closed" : "all")}
+          >
+            {t(
+              journalOpen
+                ? "pages.shifts.productLabels.closeHistory"
+                : "pages.shifts.productLabels.openHistory",
+            )}
+          </Button>
+        ) : null}
+      </div>
       {summary ? (
-        <div className="mk-shift-details__metrics">
+        <div className="mk-product-label-summary">
           {(["sentAttempts", "verifiedAttempts", "unresolvedJobs", "reprintAttempts"] as const).map(
             (key) => (
-              <div className="mk-shift-details__metric" key={key}>
+              <div className="mk-product-label-summary__item" key={key}>
                 <strong>{summary[key].toLocaleString(i18n.language)}</strong>
                 <span>{t(`pages.shifts.productLabels.${key}`)}</span>
               </div>
@@ -160,38 +185,45 @@ export function ProductLabelHistory({ shiftId }: { shiftId: string }) {
       {!rows.length ? (
         <p className="mk-shift-details__empty">{t("pages.shifts.productLabels.empty")}</p>
       ) : null}
-      <div className="mk-product-label-history">
-        {rows.map((job) => {
-          const key = JSON.stringify([shiftId, job.deviceId, job.jobId]);
-          const open = expanded === key;
-          const status = productLabelJobDisplayState(job);
-          return (
-            <article className="mk-product-label-history__job" key={key}>
-              <header>
-                <code>…{job.codeSuffix || "—"}</code>
-                <StatusChip
-                  phase={productLabelJobPhase(status)}
-                  label={t(`pages.shifts.productLabels.states.${status}`)}
-                />
-              </header>
-              <time dateTime={job.acceptedAt}>{formatScanTime(job.acceptedAt, i18n.language)}</time>
-              {job.ownershipConflict ? (
-                <Alert tone="warn" title={t("pages.shifts.productLabels.ownershipConflict")} />
-              ) : null}
-              <Button
-                variant="secondary"
-                aria-expanded={open}
-                aria-label={`${t("pages.shifts.productLabels.attemptHistory")} · …${job.codeSuffix}`}
-                onClick={() => setExpanded(open ? null : key)}
-              >
-                {t("pages.shifts.productLabels.attempts", { count: job.attemptNo })}
-              </Button>
-              {open ? <Events shiftId={shiftId} job={job} /> : null}
-            </article>
-          );
-        })}
-      </div>
-      {history.hasNextPage ? (
+      {hasAttention && journalOpen ? (
+        <Alert tone="warn" title={t("pages.shifts.productLabels.attentionHint")} />
+      ) : null}
+      {journalOpen ? (
+        <div className="mk-product-label-history">
+          {visibleRows.map((job) => {
+            const key = JSON.stringify([shiftId, job.deviceId, job.jobId]);
+            const open = expanded === key;
+            const status = productLabelJobDisplayState(job);
+            return (
+              <article className="mk-product-label-history__job" key={key}>
+                <header>
+                  <code>…{job.codeSuffix || "—"}</code>
+                  <StatusChip
+                    phase={productLabelJobPhase(status)}
+                    label={t(`pages.shifts.productLabels.states.${status}`)}
+                  />
+                </header>
+                <time dateTime={job.acceptedAt}>
+                  {formatScanTime(job.acceptedAt, i18n.language)}
+                </time>
+                {job.ownershipConflict ? (
+                  <Alert tone="warn" title={t("pages.shifts.productLabels.ownershipConflict")} />
+                ) : null}
+                <Button
+                  variant="secondary"
+                  aria-expanded={open}
+                  aria-label={`${t("pages.shifts.productLabels.attemptHistory")} · …${job.codeSuffix}`}
+                  onClick={() => setExpanded(open ? null : key)}
+                >
+                  {t("pages.shifts.productLabels.attempts", { count: job.attemptNo })}
+                </Button>
+                {open ? <Events shiftId={shiftId} job={job} /> : null}
+              </article>
+            );
+          })}
+        </div>
+      ) : null}
+      {journalOpen && history.hasNextPage ? (
         <Button
           variant="secondary"
           disabled={history.isFetchingNextPage}

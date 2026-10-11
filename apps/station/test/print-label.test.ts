@@ -44,6 +44,39 @@ describe("renderLabelBytes", () => {
     expect(text).toContain("PRINT 1");
   });
 
+  it.each([
+    [203, 'BARCODE 40,40,"EAN128",120,0,0,2,2,"00004601234560000017"'],
+    [300, 'BARCODE 59,59,"EAN128",177,0,0,3,3,"00004601234560000017"'],
+  ] as const)("prints SSCC without a literal !1 prefix at %i dpi", async (dpi, command) => {
+    const spec: LabelTemplateSpec = {
+      ...SPEC,
+      elements: [
+        {
+          id: "sscc",
+          kind: "barcode",
+          format: "code128",
+          data: "sscc",
+          xMm: 5,
+          yMm: 5,
+          sizeMm: 15,
+          moduleWidthMm: 0.254,
+        },
+      ],
+    };
+    const bytes = await renderLabelBytes(
+      spec,
+      { ...sampleLabelData(), sscc: "004601234560000017" },
+      "tspl",
+      fakeRasterize,
+      { dpi },
+    );
+    const barcode = new TextDecoder("latin1")
+      .decode(bytes)
+      .split("\n")
+      .find((line) => line.startsWith("BARCODE "));
+    expect(barcode).toBe(command);
+  });
+
   it("ignores the template's own language field", async () => {
     // SPEC declares "zpl"; the printer says TSPL and must win.
     const bytes = await renderLabelBytes(SPEC, sampleLabelData(), "tspl", fakeRasterize);

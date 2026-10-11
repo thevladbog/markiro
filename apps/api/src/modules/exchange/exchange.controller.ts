@@ -254,8 +254,9 @@ function repeatedParamKeys(values: Record<string, string | undefined | null>): s
  * analysis believing `req.body` (read as `unknown` off `express.raw()`'s
  * output, see exchange.module.ts) could still reach `body.length` as an
  * array or a string. Re-declaring the identical check as a LOCAL predicate
- * makes the narrowing visible to both analyses without changing what the
- * check actually verifies.
+ * was meant to make the narrowing visible to both analyses; CodeQL still
+ * flagged `body.length`, so the journal reads `byteLength` instead (see
+ * `post()`). The predicate stays: it is the runtime check that matters.
  */
 function isRequestBuffer(value: unknown): value is Buffer {
   return Buffer.isBuffer(value);
@@ -570,7 +571,11 @@ export class ExchangeController {
         outcome: "ok",
         grain: "session",
         message: `file: получен кусок «${filename}»`,
-        details: { filename, bytes: body.length },
+        // `byteLength`, not `length`: identical for a Buffer, but a string or
+        // array has no such property, so CodeQL's parameter-tampering query
+        // (which the `isRequestBuffer` guard alone did not satisfy) has
+        // nothing left to flag here.
+        details: { filename, bytes: body.byteLength },
       });
       this.text(res, "success");
       return;

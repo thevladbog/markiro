@@ -17,6 +17,7 @@ import { usePlatformPrincipal } from "../../auth/PlatformAuthBoundary.js";
 import { PanelState } from "../../components/PanelState.js";
 import { getTenant, renewOwnerActivation, tenantIdSchema } from "./api.js";
 import { tenantErrorMessageKey } from "./errorMessages.js";
+import { GrantCabinetAccessPanel } from "./GrantCabinetAccessPanel.js";
 import { SubscriptionPanel } from "./SubscriptionPanel.js";
 import { TenantEquipmentPanel } from "./TenantEquipmentPanel.js";
 import { TenantLegalPanel } from "./TenantLegalPanel.js";
@@ -37,6 +38,7 @@ export function TenantPage() {
     enabled: validTenantId.success,
   });
   const [renewOpen, setRenewOpen] = useState(false);
+  const [grantedNotice, setGrantedNotice] = useState(false);
   const [renewMessage, setRenewMessage] = useState<{
     tone: "ok" | "error";
     key: string;
@@ -99,6 +101,9 @@ export function TenantPage() {
   }
 
   const detail = tenant.data;
+  const cabinetEnabled = detail.tenant.cabinetAccess === "enabled";
+  const canGrant =
+    principal.role !== "accountant" && principal.capabilities.includes("tenants.write");
   const canRenew =
     principal.role !== "accountant" &&
     principal.capabilities.includes("tenants.write") &&
@@ -147,7 +152,12 @@ export function TenantPage() {
           </>
         }
       />
-      {createdNotice ? <Alert tone="ok">{t("tenants.detail.createdPending")}</Alert> : null}
+      {createdNotice ? (
+        <Alert tone="ok">
+          {t(cabinetEnabled ? "tenants.detail.createdPending" : "tenants.detail.offline.created")}
+        </Alert>
+      ) : null}
+      {grantedNotice ? <Alert tone="ok">{t("tenants.detail.offline.granted")}</Alert> : null}
       {detail.subscriptionStatus === "pending_activation" ? (
         <Alert tone="warn">{t("tenants.detail.pendingActivation")}</Alert>
       ) : null}
@@ -206,50 +216,62 @@ export function TenantPage() {
                   </dd>
                 </div>
               </dl>
-              <section className="owner-activation" aria-labelledby="owner-activation-title">
-                <h3 id="owner-activation-title">{t("tenants.detail.activation.title")}</h3>
-                {detail.ownerActivation ? (
-                  <>
-                    <strong>{detail.ownerActivation.ownerEmail}</strong>
-                    <span>
-                      {detail.ownerActivation.emailVerified
-                        ? t("tenants.detail.activation.activated")
-                        : t(`tenants.detail.activation.status.${detail.ownerActivation.status}`, {
-                            defaultValue: detail.ownerActivation.status,
-                          })}
-                    </span>
-                    {canRenew ? (
-                      <Button
-                        variant="secondary"
-                        disabled={renewSending}
-                        onClick={() => setRenewOpen(true)}
-                      >
-                        {t("tenants.detail.activation.renew")}
-                      </Button>
+              {cabinetEnabled ? (
+                <section className="owner-activation" aria-labelledby="owner-activation-title">
+                  <h3 id="owner-activation-title">{t("tenants.detail.activation.title")}</h3>
+                  {detail.ownerActivation ? (
+                    <>
+                      <strong>{detail.ownerActivation.ownerEmail}</strong>
+                      <span>
+                        {detail.ownerActivation.emailVerified
+                          ? t("tenants.detail.activation.activated")
+                          : t(`tenants.detail.activation.status.${detail.ownerActivation.status}`, {
+                              defaultValue: detail.ownerActivation.status,
+                            })}
+                      </span>
+                      {canRenew ? (
+                        <Button
+                          variant="secondary"
+                          disabled={renewSending}
+                          onClick={() => setRenewOpen(true)}
+                        >
+                          {t("tenants.detail.activation.renew")}
+                        </Button>
+                      ) : null}
+                      {canRenew && renewSending ? (
+                        <span>{t("tenants.detail.activation.sendingBlocked")}</span>
+                      ) : null}
+                    </>
+                  ) : (
+                    <span>{t("tenants.detail.activation.missing")}</span>
+                  )}
+                  <div className="tenant-operation-status" role="status" aria-live="polite">
+                    {renewMessage ? (
+                      <span data-tone={renewMessage.tone}>{t(renewMessage.key)}</span>
                     ) : null}
-                    {canRenew && renewSending ? (
-                      <span>{t("tenants.detail.activation.sendingBlocked")}</span>
-                    ) : null}
-                  </>
-                ) : (
-                  <span>{t("tenants.detail.activation.missing")}</span>
-                )}
-                <div className="tenant-operation-status" role="status" aria-live="polite">
-                  {renewMessage ? (
-                    <span data-tone={renewMessage.tone}>{t(renewMessage.key)}</span>
-                  ) : null}
-                </div>
-              </section>
+                  </div>
+                </section>
+              ) : (
+                <GrantCabinetAccessPanel
+                  tenantId={detail.tenant.id}
+                  canGrant={canGrant}
+                  onGranted={() => setGrantedNotice(true)}
+                />
+              )}
             </div>
           </Card>
 
-          <SubscriptionPanel
-            detail={detail}
-            canDirectAssign={canDirectAssign}
-            capabilities={principal.capabilities}
-            financialVisible={financialVisible}
-            accountant={principal.role === "accountant"}
-          />
+          {cabinetEnabled ? (
+            <SubscriptionPanel
+              detail={detail}
+              canDirectAssign={canDirectAssign}
+              capabilities={principal.capabilities}
+              financialVisible={financialVisible}
+              accountant={principal.role === "accountant"}
+            />
+          ) : (
+            <Alert tone="info">{t("tenants.detail.offline.documentsNotice")}</Alert>
+          )}
         </div>
       ) : activeTab === "equipment" ? (
         <div id="tenant-equipment-panel" role="tabpanel" className="tenant-tab-panel">

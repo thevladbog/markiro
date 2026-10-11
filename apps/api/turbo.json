@@ -16,7 +16,9 @@
         "KIOSK_ORIGIN",
         "STATION_ORIGIN",
         "PAIRING_CODE_PEPPER",
-        "CHZ_TOKEN_ENCRYPTION_KEY"
+        "CHZ_TOKEN_ENCRYPTION_KEY",
+        "SUPPORT_CHAT_ISOLATED_DB",
+        "SUPPORT_CHAT_TEST_MAINTENANCE_URL"
       ]
     }
   }

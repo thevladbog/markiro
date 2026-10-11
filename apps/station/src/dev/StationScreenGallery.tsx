@@ -1,4 +1,7 @@
+import { WarehouseReprintGallery } from "./WarehouseReprintGallery.js";
+import { PalletClose } from "../components/PalletClose.js";
 import { PalletContents } from "../components/PalletContents.js";
+import { PalletExceptions } from "../components/PalletExceptions.js";
 import { PalletStrip } from "../components/PalletStrip.js";
 import type { ProductLabelJobView } from "../lib/product-labels/types.js";
 import type { ProductLabelWork, ProductLabelWorkState } from "../lib/use-product-label-work.js";
@@ -15,15 +18,24 @@ import {
   useState,
   type CSSProperties,
   type MutableRefObject,
+  type ReactNode,
+  type RefObject,
 } from "react";
-import { Alert, Button, Card, PinPad, SignalOverlay } from "@markiro/ui";
+import { Alert, Button, Card, Pager, PinPad, SignalOverlay } from "@markiro/ui";
 import type { OperatorMirrorRecord } from "@markiro/db/station-sqlite";
-import { SHIFT_CLOSE_REASON_CODES } from "@markiro/domain";
+import {
+  SHIFT_CLOSE_REASON_CODES,
+  buildDuplicateLabelTemplate,
+  buildDatedBoxLabelTemplates,
+  buildPalletLabelTemplates,
+} from "@markiro/domain";
 import type { StationInventoryBundleManifest } from "@markiro/domain";
 
 import { FloorChoiceGroup } from "../ui/FloorChoiceGroup.js";
 import i18n from "../i18n/index.js";
 import type { BoxPrintErrorCode, ClosedBoxSummary } from "../lib/boxes.js";
+import type { ClosedPalletSummary } from "../lib/pallets.js";
+import type { PrinterProfile } from "../lib/printer-routing.js";
 import type { HardwareContract, UsbPrinterInfo } from "../lib/hardware.js";
 import type { HardwareConfig } from "../lib/hardware-config.js";
 import type { SqlExecutor } from "../lib/mirror.js";
@@ -78,6 +90,12 @@ import {
   galleryProductImageExecutor,
   galleryProductImageFor,
 } from "./gallery-product-image.js";
+import {
+  GalleryProfileContext,
+  galleryProfile,
+  useGalleryProfile,
+  type GalleryProfile,
+} from "./gallery-profile.js";
 
 /**
  * The second card on every page carries a studio photo (shot on white) and the
@@ -101,7 +119,6 @@ const COPY = {
   ru: {
     back: "Назад",
     continue: "Продолжить",
-    page: (page: number) => `Страница ${page} из 2`,
     station: "Демо-станция 01",
     line: "Тестовая линия А",
     operator: "Оператор Тестов",
@@ -117,7 +134,6 @@ const COPY = {
   en: {
     back: "Back",
     continue: "Continue",
-    page: (page: number) => `Page ${page} of 2`,
     station: "Demo station 01",
     line: "Test line A",
     operator: "Sample Operator",
@@ -135,6 +151,7 @@ const COPY = {
 export function StationScreenGallery({ request }: StationScreenGalleryProps) {
   const fixture = getGalleryFixture(request.state);
   const copy = COPY[request.locale];
+  const profile = galleryProfile(request.profile ?? "instructions", request.locale);
 
   useLayoutEffect(() => {
     void i18n.changeLanguage(request.locale);
@@ -151,14 +168,16 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
     // clip the PIN keypad's last row (login) or show chrome the pairing
     // screen never has -- a capture artifact the real screens never have.
     return (
-      <div
-        className="station-gallery-capture station-window-frame"
-        data-testid="station-screen-gallery"
-        data-gallery-state={fixture.id}
-        data-gallery-locale={request.locale}
-      >
-        <GalleryState fixture={fixture} locale={request.locale} />
-      </div>
+      <GalleryProfileContext.Provider value={profile}>
+        <div
+          className="station-gallery-capture station-window-frame"
+          data-testid="station-screen-gallery"
+          data-gallery-state={fixture.id}
+          data-gallery-locale={request.locale}
+        >
+          <GalleryState fixture={fixture} locale={request.locale} />
+        </div>
+      </GalleryProfileContext.Provider>
     );
   }
 
@@ -183,9 +202,13 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
   // every variant uniformly (not per-variant), so the collapsed bar and the
   // fabricated shift label can never appear on an inventory screen the way
   // they never can in production.
+  // The box and pallet exception flows and the pallet close dialog are all
+  // WorkScreen states too -- they only ever open while `shift !== null`.
   const rendersActiveShiftWorkScreen =
     fixture.kind === "work" ||
     fixture.kind === "product-label" ||
+    fixture.kind === "exception" ||
+    fixture.kind === "pallet" ||
     (fixture.kind === "box" && fixture.variant === "full") ||
     syncVariant === "offline";
   // Unconditional operatorControl/windowControl/update is a SEPARATE fact
@@ -202,8 +225,27 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
     headerVariant !== null ||
     fixture.kind === "setup" ||
     fixture.kind === "shift" ||
+    fixture.kind === "new-shift" ||
+    fixture.kind === "warehouse-reprint" ||
     fixture.kind === "inventory" ||
     rendersActiveShiftWorkScreen;
+  // App.tsx turns the printer summary into the «Принтеры N / 3» button only
+  // while no floor task is active and setup is closed: the shift list, the
+  // new-shift form and the inventory task list, which the printed
+  // instructions capture.
+  const rendersTaskSelection =
+    fixture.kind === "shift" ||
+    fixture.kind === "new-shift" ||
+    (fixture.kind === "inventory" &&
+      (fixture.variant === "task-selection" || fixture.variant === "other-line-confirmation"));
+  // App.tsx names a shift in the header only while one is active, so the
+  // shift list and the new-shift form carry no shift label.
+  const rendersNoShift =
+    fixture.kind === "warehouse-reprint" ||
+    fixture.kind === "inventory" ||
+    fixture.kind === "setup" ||
+    fixture.kind === "shift" ||
+    fixture.kind === "new-shift";
   const headerControls = !withActiveShiftControls
     ? null
     : {
@@ -235,53 +277,54 @@ export function StationScreenGallery({ request }: StationScreenGalleryProps) {
         ),
       };
   return (
-    <div
-      className="station-gallery-capture"
-      data-testid="station-screen-gallery"
-      data-gallery-state={fixture.id}
-      data-gallery-locale={request.locale}
-    >
-      <FloorShell
-        stationName={headerVariant ? copy.longStation : copy.station}
-        lineName={headerVariant ? copy.longLine : copy.line}
-        operatorName={headerVariant ? copy.longOperator : copy.operator}
-        shiftLabel={
-          headerVariant
-            ? copy.longShift
-            : fixture.kind === "inventory" || fixture.kind === "setup"
-              ? null
-              : copy.shift
-        }
-        serverReachability={syncVariant === "offline" ? "unreachable" : "reachable"}
-        scanner="connected"
-        printerConfigured={fixture.kind !== "setup" || fixture.variant !== "printers-empty"}
-        {...(fixture.kind === "setup"
-          ? {
-              printerSummary: galleryPrinterSummary(fixture.variant, request.locale),
-              onOpenPrinters: () => undefined,
-            }
-          : {})}
-        syncPending={syncVariant === "stuck" ? 18 : syncVariant === "offline" ? 7 : 0}
-        syncStuck={syncVariant === "stuck"}
-        conflicts={fixture.kind === "conflicts" ? 4 : 0}
-        statusBarCollapsible={rendersActiveShiftWorkScreen}
-        {...(headerControls
-          ? {
-              update: headerControls.update,
-              onOpenUpdates: () => undefined,
-              operatorControl: headerControls.operatorControl,
-              windowControl: headerControls.windowControl,
-            }
-          : {})}
+    <GalleryProfileContext.Provider value={profile}>
+      <div
+        className="station-gallery-capture"
+        data-testid="station-screen-gallery"
+        data-gallery-state={fixture.id}
+        data-gallery-locale={request.locale}
       >
-        <GalleryState fixture={fixture} locale={request.locale} />
-      </FloorShell>
-    </div>
+        <FloorShell
+          stationName={headerVariant ? copy.longStation : profile.station}
+          lineName={headerVariant ? copy.longLine : profile.line}
+          operatorName={headerVariant ? copy.longOperator : profile.operator}
+          shiftLabel={headerVariant ? copy.longShift : rendersNoShift ? null : profile.shift}
+          serverReachability={syncVariant === "offline" ? "unreachable" : "reachable"}
+          scanner="connected"
+          printerConfigured={fixture.kind !== "setup" || fixture.variant !== "printers-empty"}
+          {...(fixture.kind === "setup" || rendersTaskSelection
+            ? {
+                printerSummary: galleryPrinterSummary(
+                  fixture.kind === "setup" ? fixture.variant : "printers",
+                  request.locale,
+                ),
+                onOpenPrinters: () => undefined,
+              }
+            : {})}
+          syncPending={syncVariant === "stuck" ? 18 : syncVariant === "offline" ? 7 : 0}
+          syncStuck={syncVariant === "stuck"}
+          conflicts={fixture.kind === "conflicts" ? 4 : 0}
+          statusBarCollapsible={rendersActiveShiftWorkScreen}
+          {...(headerControls
+            ? {
+                update: headerControls.update,
+                onOpenUpdates: () => undefined,
+                operatorControl: headerControls.operatorControl,
+                windowControl: headerControls.windowControl,
+              }
+            : {})}
+        >
+          <GalleryState fixture={fixture} locale={request.locale} />
+        </FloorShell>
+      </div>
+    </GalleryProfileContext.Provider>
   );
 }
 
 function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: GalleryLocale }) {
   switch (fixture.kind) {
+    case "warehouse-reprint":
+      return <WarehouseReprintGallery variant={fixture.variant} />;
     case "system":
       return <SystemFixture locale={locale} />;
     case "credential-recovery":
@@ -300,6 +343,8 @@ function GalleryState({ fixture, locale }: { fixture: GalleryFixture; locale: Ga
       return <ProductLabelFixture variant={fixture.variant} locale={locale} />;
     case "work":
       return <WorkFixture mode={fixture.variant} locale={locale} />;
+    case "pallet":
+      return <PalletFixture variant={fixture.variant} locale={locale} />;
     case "work-overlay":
       return <WorkOverlayFixture overlay={fixture.variant} locale={locale} />;
     case "signal":
@@ -478,6 +523,10 @@ function InventoryTaskSelectionFixture({ locale }: { locale: GalleryLocale }) {
         onShiftSelected={() => undefined}
         onInventorySelected={() => undefined}
         onNew={() => undefined}
+        onWarehouseReprint={() => undefined}
+        // App.tsx passes both, so the footer carries setup and the conflicts list.
+        onSetup={() => undefined}
+        onConflicts={() => undefined}
       />
     </div>
   );
@@ -1157,9 +1206,27 @@ function LoginFixture({ variant, locale }: { variant: string; locale: GalleryLoc
   );
 }
 
-/** Drives the real creation form to a review state. This client cannot create/open shifts. */
+/**
+ * Drives the real creation form to a review state. This client cannot
+ * create/open shifts. "input" leaves the scanner silent so the form waits for
+ * a product; "pallets" stops on the product form with pallet assembly chosen.
+ */
 function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const root = useRef<HTMLDivElement>(null);
+  const aggregation =
+    variant === "template" || variant === "pallet-template" || variant === "pallets";
+  // MKR-INS-01 shows the pallet choice on the demo product of the other printed
+  // frames. The real form validates the check digit, so this GTIN is a valid one.
+  const product =
+    variant === "pallets"
+      ? {
+          gtin14: "04607000000045",
+          name: locale === "ru" ? "Тестовый товар А" : "Sample product A",
+        }
+      : {
+          gtin14: "04600000000015",
+          name: locale === "ru" ? "Кега · тестовый продукт" : "Keg · sample product",
+        };
   const client = useMemo<StationClient>(
     () => ({
       get<T>(path: string): Promise<T> {
@@ -1168,9 +1235,9 @@ function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale:
             items: [
               {
                 id: "11111111-1111-4111-8111-111111111111",
-                gtin14: "04600000000015",
-                name: locale === "ru" ? "Кега · тестовый продукт" : "Keg · sample product",
-                boxCapacity: variant === "pallet-template" ? 10 : null,
+                gtin14: product.gtin14,
+                name: product.name,
+                boxCapacity: aggregation ? 10 : null,
                 palletBoxCapacity: 66,
               },
             ],
@@ -1201,6 +1268,33 @@ function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale:
               "gallery-template",
           } as T);
         }
+        if (path.startsWith("/shifts/label-template-preview")) {
+          const query = new URL(path, "https://gallery.invalid").searchParams;
+          const purpose = query.get("purpose");
+          const template =
+            purpose === "pallet"
+              ? buildPalletLabelTemplates()[0]
+              : purpose === "box"
+                ? buildDatedBoxLabelTemplates()[0]
+                : null;
+          return Promise.resolve({
+            id: query.get("templateId"),
+            name:
+              purpose === "pallet"
+                ? locale === "ru"
+                  ? "Паллета 100×150"
+                  : "Pallet 100×150"
+                : purpose === "box"
+                  ? locale === "ru"
+                    ? "Короб 58×40"
+                    : "Box 58×40"
+                  : locale === "ru"
+                    ? "Внешняя этикетка"
+                    : "Outer label",
+            purpose,
+            spec: template?.spec ?? buildDuplicateLabelTemplate(),
+          } as T);
+        }
         if (path.startsWith("/shifts/planning-config"))
           return Promise.resolve({ validationPrintProtocol: "validation-dm-duplicate-v1" } as T);
         if (path.startsWith("/shifts/product-label-templates"))
@@ -1219,40 +1313,41 @@ function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale:
       },
       post<T>(path: string): Promise<T> {
         if (path === "/products/gtin-check")
-          return Promise.resolve({ gtin14: "04600000000015", owner: "own" } as T);
+          return Promise.resolve({ gtin14: product.gtin14, owner: "own" } as T);
         return Promise.reject(new Error("Shift writes are disabled in the gallery"));
       },
       download: () => Promise.reject(new Error("Gallery download unavailable")),
       whoami: () => Promise.resolve({ ok: true }),
     }),
-    [locale, variant],
+    [aggregation, locale, product.gtin14, product.name],
   );
   const source = useMemo<ScanSource>(
     () => ({
       start(listener) {
-        let active = true;
+        let active = variant !== "input";
         queueMicrotask(() => {
-          if (active) listener("04600000000015");
+          if (active) listener(product.gtin14);
         });
         return () => {
           active = false;
         };
       },
     }),
-    [],
+    [variant, product.gtin14],
   );
   useEffect(() => {
     const container = root.current;
     if (!container) return;
     let step = 0;
     const advance = () => {
-      if (variant === "pallet-template") {
-        const keys = [
-          "shifts.modeAggregation",
-          "shifts.palletsOn",
-          "shifts.start",
-          "shifts.palletNext",
-        ];
+      if (variant === "input") return;
+      if (variant === "template" || variant === "pallet-template" || variant === "pallets") {
+        const keys =
+          variant === "template"
+            ? ["shifts.modeAggregation", "shifts.start"]
+            : variant === "pallets"
+              ? ["shifts.modeAggregation", "shifts.palletsOn"]
+              : ["shifts.modeAggregation", "shifts.palletsOn", "shifts.start", "shifts.palletNext"];
         const key = keys[step];
         if (!key) return;
         const label = i18n.getFixedT(locale)(key);
@@ -1278,6 +1373,13 @@ function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale:
         if (!input || input.disabled) return;
         step = 2;
         if (!input.checked) input.click();
+        return;
+      }
+      if (step === 3 && variant === "print-template") {
+        const choice = container.querySelector<HTMLButtonElement>(".label-template-option");
+        if (!choice || choice.disabled) return;
+        step = 4;
+        choice.click();
         return;
       }
       if (step === 2) {
@@ -1312,7 +1414,13 @@ function NewShiftPlanningFixture({ variant, locale }: { variant: string; locale:
 }
 
 function NewShiftFixture({ view, locale }: { view: string; locale: GalleryLocale }) {
-  if (view.startsWith("print-") || view === "pallet-template")
+  if (
+    view.startsWith("print-") ||
+    view === "input" ||
+    view === "template" ||
+    view === "pallets" ||
+    view === "pallet-template"
+  )
     return <NewShiftPlanningFixture key={view} variant={view} locale={locale} />;
   const ru = locale === "ru";
   const notFound = view === "not-found";
@@ -1398,14 +1506,38 @@ function NewShiftFixture({ view, locale }: { view: string; locale: GalleryLocale
   );
 }
 
+/**
+ * The footer of production `ShiftSelection` as the floor sees it: the new
+ * shift action, then refresh, workstation setup and the code conflicts list.
+ * The printed operator instructions capture this screen, so it must not be a
+ * stand-in.
+ */
+function ShiftListFooter({ locale }: { locale: GalleryLocale }) {
+  const t = i18n.getFixedT(locale);
+  return (
+    <FloorFooter ariaLabel={t("shifts.actions")}>
+      <Button size="floor">{t("shifts.new")}</Button>
+      <div className="shift-selection__secondary-actions">
+        <Button size="floor" variant="secondary">
+          {t("shifts.refresh")}
+        </Button>
+        <Button size="floor" variant="secondary">
+          {t("shell.setup")}
+        </Button>
+        <Button size="floor" variant="secondary">
+          {t("shell.conflicts")}
+        </Button>
+      </div>
+    </FloorFooter>
+  );
+}
+
 function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const ru = locale === "ru";
+  const t = i18n.getFixedT(locale);
   if (variant === "loading" || variant === "read-error" || variant === "empty") {
     return (
-      <StationScreen
-        title={ru ? "Смены" : "Shifts"}
-        actions={<GalleryFooter locale={locale} primary={ru ? "Новая смена" : "New shift"} />}
-      >
+      <StationScreen title={t("shifts.title")} actions={<ShiftListFooter locale={locale} />}>
         <div className="gallery-centered-card">
           {variant === "read-error" ? (
             <Alert
@@ -1491,18 +1623,18 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
         ];
   return (
     <StationScreen
-      title={ru ? "Смены" : "Shifts"}
+      title={t("shifts.title")}
       header={
         <>
           <div className="shift-selection__message" aria-hidden="true" />
           <div className="shift-selection__header-action">
             <Button size="floor" variant="secondary">
-              {ru ? "Складские операции 1" : "Warehouse operations 1"}
+              {t("inventory.categories.warehouse", { count: 1 })}
             </Button>
           </div>
         </>
       }
-      actions={<GalleryFooter locale={locale} primary={ru ? "Новая смена" : "New shift"} />}
+      actions={<ShiftListFooter locale={locale} />}
     >
       <div className="shift-selection__content">
         <div className="shift-selection__slot">
@@ -1515,34 +1647,24 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
                 productFullName={shift.fullName}
                 gtin={shift.gtin}
                 plannedDate={`2026-08-${String(21 - index - (page - 1) * 2).padStart(2, "0")}`}
-                plannedDateLabel={ru ? "Смена" : "Shift"}
+                plannedDateLabel={t("shifts.shiftDateShort")}
                 productionDate={index === 0 ? "2026-08-15" : null}
-                productionDateLabel={ru ? "Производство" : "Produced"}
+                productionDateLabel={t("shifts.productionShort")}
                 locale={locale}
                 plannedQty={shift.plannedQty}
                 mode={shift.mode}
                 palletsEnabled={"palletsEnabled" in shift && shift.palletsEnabled === true}
-                palletsLabel={ru ? "Паллеты" : "Pallets"}
+                palletsLabel={t("shifts.withPallets")}
                 status={shift.active ? "active" : "planned"}
                 modeLabel={
-                  shift.mode === "aggregation"
-                    ? ru
-                      ? "Агрегация"
-                      : "Aggregation"
-                    : ru
-                      ? "Валидация"
-                      : "Validation"
+                  shift.mode === "aggregation" ? t("shifts.aggregation") : t("shifts.validation")
                 }
-                statusLabel={
-                  shift.active ? (ru ? "Активна" : "Active") : ru ? "Запланирована" : "Planned"
-                }
-                plannedLabel={ru ? "план" : "plan"}
-                noPlanLabel={ru ? "без плана" : "no plan"}
+                statusLabel={shift.active ? t("shifts.active") : t("shifts.notStarted")}
+                plannedLabel={t("shifts.planned")}
+                noPlanLabel={t("shifts.noPlan")}
                 counterpartyName={null}
-                counterpartyLabel={ru ? "Для" : "For"}
-                actionLabel={
-                  shift.active ? (ru ? "Присоединиться" : "Join") : ru ? "Открыть" : "Open"
-                }
+                counterpartyLabel={t("shifts.forCounterparty")}
+                actionLabel={shift.active ? t("shifts.rejoin") : t("shifts.open")}
                 active={shift.active}
                 disabled={false}
                 onSelect={() => undefined}
@@ -1553,11 +1675,15 @@ function ShiftFixture({ variant, locale }: { variant: string; locale: GalleryLoc
             ))}
           </div>
         </div>
-        <GalleryPager
+        <Pager
           page={page}
-          previousLabel={ru ? "Назад" : "Previous"}
-          nextLabel={ru ? "Далее" : "Next"}
-          pageLabel={COPY[locale].page(page)}
+          pageCount={2}
+          onPageChange={() => undefined}
+          ariaLabel={t("shifts.pagination")}
+          previousLabel={t("shifts.previousPage")}
+          nextLabel={t("shifts.nextPage")}
+          pageLabel={(current, pageCount) => t("shifts.page", { page: current, pageCount })}
+          className="shift-selection__pager"
         />
       </div>
     </StationScreen>
@@ -1649,18 +1775,25 @@ function ProductLabelFixture({ variant, locale }: { variant: string; locale: Gal
   );
 }
 
-const galleryPalletExecutor: SqlExecutor = {
-  all<T>() {
-    return Promise.resolve(
-      Array.from({ length: 42 }, (_, index) => ({
-        box_id: `gallery-pallet-box-${index}`,
-        sscc: `00460123456${String(42 - index).padStart(7, "0")}`,
-        closed_at: new Date(Date.UTC(2026, 8, 12, 11, 42 - index)).toISOString(),
-      })) as T[],
-    );
-  },
-  async run() {},
-};
+/** The boxes on a gallery pallet, newest first, ending with the strip's last box. */
+function galleryPalletExecutor(boxCount: number, lastSerial: number): SqlExecutor {
+  return {
+    all<T>() {
+      return Promise.resolve(
+        Array.from({ length: boxCount }, (_, index) => ({
+          box_id: `gallery-pallet-box-${index}`,
+          sscc: `00460123456${String(lastSerial - index).padStart(7, "0")}`,
+          closed_at: new Date(Date.UTC(2026, 8, 12, 11, 42 - index)).toISOString(),
+        })) as T[],
+      );
+    },
+    async run() {},
+  };
+}
+// The contents agree with each strip: 42 boxes ending …0000042 on pallet 66,
+// 15 ending …0619998 on the owner's pallet 20.
+const galleryPallet66Executor = galleryPalletExecutor(42, 42);
+const galleryPallet20Executor = galleryPalletExecutor(15, 619998);
 const galleryPalletIdle = async () => {};
 
 const GALLERY_PROGRESS_NOW = Date.parse("2026-09-25T09:00:00.000Z");
@@ -1674,8 +1807,8 @@ function WorkFixture({
   locale: GalleryLocale;
   productLabel?: { job: ProductLabelJobView | null; busy: boolean };
 }) {
+  const profile = useGalleryProfile();
   const [showPalletContents, setShowPalletContents] = useState(false);
-  const ru = locale === "ru";
   const t = i18n.getFixedT(locale);
   // "box-full" is a filled box moments before it closes -- still an ordinary
   // scanning shift, just with the box panel at capacity, so it shares the
@@ -1692,7 +1825,7 @@ function WorkFixture({
   // `SignalFixture`).
   const waiting = mode === "validation" || mode === "aggregation-waiting";
   const workLabels = buildWorkLabels(t, locale, 1);
-  const operations = waiting ? [] : galleryRecentOperations();
+  const operations = waiting ? [] : galleryRecentOperations(profile);
   // Validation-mode shifts carry a plan target the way the shift list's own
   // validation-mode card does (see ShiftFixture's AUG26-041); aggregation-mode
   // shifts in this gallery have no plan, matching the shift list there too.
@@ -1709,7 +1842,7 @@ function WorkFixture({
   // owner's 20-place box.
   const boxCapacity = boxFull ? 120 : pallet20 ? 20 : 10;
   const boxItemCount = boxFull ? 120 : 2;
-  const productName = ru ? "Тестовый товар А" : "Sample product A";
+  const productName = profile.productName;
   const total = shiftTotalView({
     shiftId: "gallery-shift",
     snapshot: pallet20
@@ -1737,8 +1870,8 @@ function WorkFixture({
             productId="gallery-product-berry-syrup"
             image={galleryProductImage}
             productName={productName}
-            counterpartyName={ru ? "ООО «Тестовый производитель»" : "Sample Manufacturer Ltd"}
-            gtin="04607000000042"
+            counterpartyName={profile.counterpartyName}
+            gtin={profile.gtin}
             total={total}
             locale={workLabels.locale}
             labels={workLabels.band}
@@ -1818,7 +1951,7 @@ function WorkFixture({
       />
       {showPalletContents ? (
         <PalletContents
-          exec={galleryPalletExecutor}
+          exec={pallet20 ? galleryPallet20Executor : galleryPallet66Executor}
           shiftId="gallery-shift"
           terminalId="gallery-terminal"
           palletId="gallery-pallet"
@@ -1830,7 +1963,7 @@ function WorkFixture({
   );
 }
 
-function galleryRecentOperations(): RecentOperation[] {
+function galleryRecentOperations(profile: GalleryProfile): RecentOperation[] {
   const identityForSerial = (serial: string) => {
     const crypto = [
       { ai: "91" as const, value: "ABCD" },
@@ -1841,11 +1974,11 @@ function galleryRecentOperations(): RecentOperation[] {
       { ai: "93" as const, value: "XYZ1" },
     ];
     return {
-      gtin14: "04607000000042",
+      gtin14: profile.gtin,
       serial,
       crypto,
       normalized: [
-        "(01)04607000000042",
+        `(01)${profile.gtin}`,
         `(21)${serial}`,
         ...crypto.map(({ ai, value }) => `(${ai})${value}`),
       ].join(" "),
@@ -1855,7 +1988,7 @@ function galleryRecentOperations(): RecentOperation[] {
     verdict: "ok",
     scannedAt: `2026-08-13T14:32:0${8 - index}+03:00`,
     codeSuffix: null,
-    identity: identityForSerial(`DEMO-SERIAL-00012${8 - index}`),
+    identity: identityForSerial(profile.serial(128 - index)),
   }));
 }
 
@@ -2122,7 +2255,7 @@ function galleryExceptionScanSource(): ScanSource {
  * calls for.
  */
 function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLocale }) {
-  const rootRef = useRef<HTMLDivElement>(null);
+  const rootRef = useRef<HTMLElement>(null);
 
   useLayoutEffect(() => {
     if (stage === "action") return;
@@ -2161,7 +2294,7 @@ function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLoc
   }, [stage, locale]);
 
   return (
-    <div ref={rootRef} className="gallery-exception-flow">
+    <ActiveWorkScreenFixture locale={locale} rootRef={rootRef}>
       <ExceptionFlow
         boxes={GALLERY_EXCEPTION_BOXES}
         canUndo
@@ -2188,7 +2321,124 @@ function ExceptionFixture({ stage, locale }: { stage: string; locale: GalleryLoc
           />
         }
       />
+    </ActiveWorkScreenFixture>
+  );
+}
+
+/**
+ * The work screen around a flow WorkScreen shows in place of its instruments
+ * (the box and pallet exception flows). Production keeps the work footer
+ * under those flows, so the gallery does too.
+ */
+function ActiveWorkScreenFixture({
+  locale,
+  rootRef,
+  children,
+}: {
+  locale: GalleryLocale;
+  rootRef?: RefObject<HTMLElement | null>;
+  children: ReactNode;
+}) {
+  const t = i18n.getFixedT(locale);
+  const workLabels = buildWorkLabels(t, locale, 1);
+  return (
+    <main
+      ref={rootRef}
+      className="work-screen"
+      aria-label={locale === "ru" ? "Тестовый товар А" : "Sample product A"}
+    >
+      <div className="work-screen__content">{children}</div>
+      <WorkFooter
+        labels={workLabels.footer}
+        onExceptions={() => undefined}
+        onPause={() => undefined}
+        onClose={() => undefined}
+      />
+    </main>
+  );
+}
+
+/** A closed pallet of the owner's 66-box capacity; the SSCC carries a valid check digit. */
+const GALLERY_CLOSED_PALLET: ClosedPalletSummary = {
+  palletId: "gallery-pallet-closed",
+  sscc: "146012345600000150",
+  boxCount: 66,
+  closedAt: "2026-08-13T14:40:00+03:00",
+};
+
+function PalletFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
+  return variant === "exceptions-reason" ? (
+    <PalletExceptionsFixture locale={locale} />
+  ) : (
+    <PalletCloseFixture unknown={variant === "close-unknown"} locale={locale} />
+  );
+}
+
+/**
+ * The production `PalletClose` dialog. The label's printer line offers
+ * «Сменить принтер» only when the print failed or its outcome is unknown,
+ * exactly as WorkScreen passes `onChoose`.
+ */
+function PalletCloseFixture({ unknown, locale }: { unknown: boolean; locale: GalleryLocale }) {
+  const printers = useMemo(() => galleryPrinterProfiles("printers", locale), [locale]);
+  const [printerId, setPrinterId] = useState(printers[2]?.id ?? null);
+  const printer = printers.find((candidate) => candidate.id === printerId) ?? null;
+  return (
+    <div className="gallery-production-recovery">
+      <PalletClose
+        destination={
+          <PrinterDestination
+            purpose="pallet"
+            printer={printer}
+            printers={printers}
+            {...(unknown
+              ? {
+                  onChoose: (next: PrinterProfile) => {
+                    setPrinterId(next.id);
+                    return Promise.resolve();
+                  },
+                }
+              : {})}
+          />
+        }
+        result={{
+          status: "closed",
+          sscc: GALLERY_CLOSED_PALLET.sscc,
+          boxCount: GALLERY_CLOSED_PALLET.boxCount,
+        }}
+        print={unknown ? "unknown" : "printed"}
+        onRetry={() => undefined}
+        onSetup={() => undefined}
+        onSkip={() => undefined}
+        onConfirmPrinted={() => undefined}
+        onReprint={() => undefined}
+        onContinue={() => undefined}
+      />
     </div>
+  );
+}
+
+/** The production pallet exceptions, driven to the disassembly reasons of a single closed pallet. */
+function PalletExceptionsFixture({ locale }: { locale: GalleryLocale }) {
+  const rootRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const label = i18n.getFixedT(locale)("pallet.disassembleAction");
+    const timer = setTimeout(() => {
+      Array.from(rootRef.current?.querySelectorAll("button") ?? [])
+        .find((button) => button.textContent?.trim() === label)
+        ?.click();
+    }, 0);
+    return () => clearTimeout(timer);
+  }, [locale]);
+  return (
+    <ActiveWorkScreenFixture locale={locale} rootRef={rootRef}>
+      <PalletExceptions
+        pallets={[GALLERY_CLOSED_PALLET]}
+        onReprint={() => Promise.resolve()}
+        onDisassemble={() => Promise.resolve()}
+        onBack={() => undefined}
+      />
+    </ActiveWorkScreenFixture>
   );
 }
 
@@ -2201,40 +2451,45 @@ interface GalleryConflictRow {
   serial: string | null;
 }
 
-const GALLERY_CONFLICT_ROWS: GalleryConflictRow[] = [
-  {
-    code_hash: "gallery-conflict-1",
-    winning_terminal_id: "DEMO-TERM-11",
-    winning_scanned_at: "2026-08-21T09:14:22+03:00",
-    detected_at: "2026-08-21T09:15:03+03:00",
-    gtin14: "04607000000042",
-    serial: "DEMO-SERIAL-000128",
-  },
-  {
-    code_hash: "gallery-conflict-2",
-    winning_terminal_id: "DEMO-TERM-12",
-    winning_scanned_at: "2026-08-21T09:18:47+03:00",
-    detected_at: "2026-08-21T09:19:10+03:00",
-    gtin14: "04607000000042",
-    serial: "DEMO-SERIAL-000129",
-  },
-  {
-    code_hash: "gallery-conflict-3",
-    winning_terminal_id: "DEMO-TERM-21",
-    winning_scanned_at: "2026-08-21T10:02:31+03:00",
-    detected_at: "2026-08-21T10:03:05+03:00",
-    gtin14: "04607000000042",
-    serial: "DEMO-SERIAL-000130",
-  },
-  {
-    code_hash: "gallery-conflict-4",
-    winning_terminal_id: "DEMO-TERM-22",
-    winning_scanned_at: "2026-08-21T10:07:58+03:00",
-    detected_at: "2026-08-21T10:08:40+03:00",
-    gtin14: "04607000000042",
-    serial: "DEMO-SERIAL-000131",
-  },
-];
+/** The four conflict rows the gallery shows, keyed to the active profile's
+ * serial/terminal generators so "landing" never leaks the instructions
+ * profile's `DEMO-*` literals. */
+function galleryConflictRows(profile: GalleryProfile): GalleryConflictRow[] {
+  return [
+    {
+      code_hash: "gallery-conflict-1",
+      winning_terminal_id: profile.terminal(11),
+      winning_scanned_at: "2026-08-21T09:14:22+03:00",
+      detected_at: "2026-08-21T09:15:03+03:00",
+      gtin14: profile.gtin,
+      serial: profile.serial(128),
+    },
+    {
+      code_hash: "gallery-conflict-2",
+      winning_terminal_id: profile.terminal(12),
+      winning_scanned_at: "2026-08-21T09:18:47+03:00",
+      detected_at: "2026-08-21T09:19:10+03:00",
+      gtin14: profile.gtin,
+      serial: profile.serial(129),
+    },
+    {
+      code_hash: "gallery-conflict-3",
+      winning_terminal_id: profile.terminal(21),
+      winning_scanned_at: "2026-08-21T10:02:31+03:00",
+      detected_at: "2026-08-21T10:03:05+03:00",
+      gtin14: profile.gtin,
+      serial: profile.serial(130),
+    },
+    {
+      code_hash: "gallery-conflict-4",
+      winning_terminal_id: profile.terminal(22),
+      winning_scanned_at: "2026-08-21T10:07:58+03:00",
+      detected_at: "2026-08-21T10:08:40+03:00",
+      gtin14: profile.gtin,
+      serial: profile.serial(131),
+    },
+  ];
+}
 
 /** Answers exactly the two queries `readConflicts` issues (see
  * `apps/station/src/lib/conflicts.ts`), so `ConflictList` -- the real
@@ -2242,8 +2497,8 @@ const GALLERY_CONFLICT_ROWS: GalleryConflictRow[] = [
  * "loading" never resolves, reproducing the interstitial for a static
  * capture; "read-error" rejects the count query the way a corrupt local
  * mirror would. */
-function galleryConflictExecutor(variant: string): SqlExecutor {
-  const rows = variant === "empty" ? [] : GALLERY_CONFLICT_ROWS;
+function galleryConflictExecutor(variant: string, profile: GalleryProfile): SqlExecutor {
+  const rows = variant === "empty" ? [] : galleryConflictRows(profile);
   return {
     run: () => Promise.resolve(),
     all<T>(sql: string, params?: unknown[]): Promise<T[]> {
@@ -2273,7 +2528,8 @@ function galleryConflictExecutor(variant: string): SqlExecutor {
  */
 function ConflictFixture({ variant, locale }: { variant: string; locale: GalleryLocale }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const exec = useMemo(() => galleryConflictExecutor(variant), [variant]);
+  const profile = useGalleryProfile();
+  const exec = useMemo(() => galleryConflictExecutor(variant, profile), [variant, profile]);
 
   useLayoutEffect(() => {
     if (variant !== "2") return;
@@ -2687,29 +2943,5 @@ function GalleryFooter({
       </Button>
       {primary ? <Button size="floor">{primary}</Button> : null}
     </FloorFooter>
-  );
-}
-
-function GalleryPager({
-  page,
-  previousLabel,
-  nextLabel,
-  pageLabel,
-}: {
-  page: number;
-  previousLabel: string;
-  nextLabel: string;
-  pageLabel: string;
-}) {
-  return (
-    <nav className="mk-pager gallery-pager" aria-label={pageLabel}>
-      <Button size="floor" variant="secondary" fullWidth disabled={page === 1}>
-        {previousLabel}
-      </Button>
-      <span>{pageLabel}</span>
-      <Button size="floor" variant="secondary" fullWidth disabled={page === 2}>
-        {nextLabel}
-      </Button>
-    </nav>
   );
 }

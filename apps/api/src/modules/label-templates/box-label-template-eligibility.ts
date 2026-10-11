@@ -16,6 +16,7 @@ export type EligibilityDb = Pick<Db, "select">;
 
 export interface LabelTemplateEligibilityRow {
   purpose: LabelTemplatePurpose;
+  format: "label_v1" | "pallet_sheet_v2";
   id: string;
   enabled: boolean;
   chzProductGroupCodes: number[] | null;
@@ -24,6 +25,7 @@ export interface LabelTemplateEligibilityRow {
 const ELIGIBILITY_SELECTION = {
   id: schema.labelTemplates.id,
   purpose: schema.labelTemplates.purpose,
+  format: schema.labelTemplates.format,
   enabled: schema.labelTemplates.enabled,
   chzProductGroupCodes: schema.labelTemplates.chzProductGroupCodes,
 };
@@ -184,4 +186,56 @@ export async function assertKnownProductGroupCodes(
       codes: unknown,
     });
   }
+}
+
+export async function resolveDefaultPalletSheetTemplate(
+  db: EligibilityDb,
+  tenantId: string,
+  chzProductGroupCode: number | null,
+): Promise<BoxLabelTemplateDefault> {
+  const [profile] = await db
+    .select({ defaultPalletSheetTemplateId: schema.orgProfiles.defaultPalletSheetTemplateId })
+    .from(schema.orgProfiles)
+    .where(eq(schema.orgProfiles.tenantId, tenantId));
+  let categoryDefaultId: string | null = null;
+  if (chzProductGroupCode !== null) {
+    const [category] = await db
+      .select({ templateId: schema.orgPalletSheetTemplateDefaults.templateId })
+      .from(schema.orgPalletSheetTemplateDefaults)
+      .where(
+        and(
+          eq(schema.orgPalletSheetTemplateDefaults.tenantId, tenantId),
+          eq(schema.orgPalletSheetTemplateDefaults.chzProductGroupCode, chzProductGroupCode),
+        ),
+      );
+    categoryDefaultId = category?.templateId ?? null;
+  }
+  return resolveBoxLabelTemplateDefault({
+    categoryDefaultId,
+    organizationDefaultId: profile?.defaultPalletSheetTemplateId ?? null,
+  });
+}
+
+export async function findPalletSheetTemplateDefaultUsage(
+  db: EligibilityDb,
+  tenantId: string,
+  templateId: string,
+): Promise<LabelTemplateDefaultUsage> {
+  const [profile] = await db
+    .select({ defaultPalletSheetTemplateId: schema.orgProfiles.defaultPalletSheetTemplateId })
+    .from(schema.orgProfiles)
+    .where(eq(schema.orgProfiles.tenantId, tenantId));
+  const rows = await db
+    .select({ code: schema.orgPalletSheetTemplateDefaults.chzProductGroupCode })
+    .from(schema.orgPalletSheetTemplateDefaults)
+    .where(
+      and(
+        eq(schema.orgPalletSheetTemplateDefaults.tenantId, tenantId),
+        eq(schema.orgPalletSheetTemplateDefaults.templateId, templateId),
+      ),
+    );
+  return {
+    organizationDefault: profile?.defaultPalletSheetTemplateId === templateId,
+    categoryDefaults: rows.map((row) => row.code).sort((a, b) => a - b),
+  };
 }

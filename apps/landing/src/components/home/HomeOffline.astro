@@ -1,0 +1,69 @@
+---
+import { Picture } from "astro:assets";
+
+import { homeScreen } from "../../content/home-images";
+import offlineMarks from "../../content/home-offline.json";
+import type { Locale } from "../../content/pages";
+import { getUiCopy } from "../../content/ui";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const copy = getUiCopy(locale).home.offline;
+const number = (index: number) => String(index + 1).padStart(2, "0");
+// Each point of the list has a mark on the close-up; the capture script measures where.
+const marks = copy.points.map((_, index) => {
+  const mark = offlineMarks[locale][index];
+  if (mark === undefined) throw new Error(`the offline close-up has no mark ${index + 1} for ${locale}`);
+  return {
+    label: number(index),
+    side: mark.side,
+    style: `--x: ${mark.x * 100}%; --y: ${mark.y * 100}%`,
+  };
+});
+---
+
+<section class="section home-offline" id="offline" data-theme="dark" aria-labelledby="offline-title">
+  <div class="container home-offline__grid">
+    <div>
+      <p class="section-index">{copy.kicker}</p>
+      <h2 id="offline-title" class="display-heading display-heading--sentence">
+        {copy.heading[0]}<br />{copy.heading[1]}
+      </h2>
+      <p class="section-lead">{copy.lead}</p>
+      <ul class="home-offline__points" role="list">
+        {copy.points.map(([title, text], index) => (
+          <li>
+            <span class="home-offline__number" aria-hidden="true">{number(index)}</span>
+            <div>
+              <h3>{title}</h3>
+              <p>{text}</p>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+    <figure class="home-offline__visual">
+      <div class="home-offline__closeup">
+        <Picture
+          src={homeScreen(locale, "station-offline")}
+          alt={copy.screenAlt}
+          widths={[640, 960, 1280]}
+          formats={["avif", "webp"]}
+          sizes="(max-width: 1023px) 100vw, 43rem"
+          loading="lazy"
+        />
+        <ol class="home-offline__marks" aria-hidden="true">
+          {marks.map((mark) => (
+            <li data-side={mark.side} style={mark.style}>
+              {mark.label}
+            </li>
+          ))}
+        </ol>
+      </div>
+      <figcaption class="home-caption">{copy.caption}</figcaption>
+    </figure>
+  </div>
+</section>

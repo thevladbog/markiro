@@ -25,6 +25,8 @@ data class RasterOptions(
     val bold: Boolean,
     val maxWidthPx: Int?,
     val maxLines: Int,
+    val lineHeight: Double? = null,
+    val minFontSizePx: Int? = null,
 )
 
 fun interface RasterizeText {

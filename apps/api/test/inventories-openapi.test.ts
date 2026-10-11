@@ -11,6 +11,7 @@ type JsonSchema = {
   type?: string;
   enum?: unknown[];
   oneOf?: JsonSchema[];
+  anyOf?: JsonSchema[];
   format?: string;
   nullable?: boolean;
   minimum?: number;
@@ -501,26 +502,53 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
     exactClosedObject(template, ["id", "name", "spec"], ["id", "name", "spec"]);
     const spec = template.properties!.spec!;
     const specFields = ["widthMm", "heightMm", "dpi", "language", "elements"] as const;
-    exactClosedObject(spec, specFields, specFields);
+    exactClosedObject(spec, [...specFields, "gs1Constraint"], specFields);
     expect(spec.nullable).toBeUndefined();
     expect(spec.properties).toMatchObject({
       widthMm: { type: "number", minimum: 10, maximum: 300 },
       heightMm: { type: "number", minimum: 10, maximum: 300 },
-      dpi: { type: "integer", enum: [203, 300] },
+      dpi: {
+        anyOf: [
+          { type: "number", enum: [203] },
+          { type: "number", enum: [300] },
+        ],
+      },
       language: { type: "string", enum: ["zpl", "tspl"] },
       elements: { type: "array" },
+      gs1Constraint: { type: "string", enum: ["sscc_x_below_distribution_minimum"] },
     });
     const variants = spec.properties!.elements!.items!.oneOf;
-    expect(variants).toHaveLength(5);
+    expect(variants).toHaveLength(6);
     const variantsByKind = new Map(
       variants!.map((variant) => [variant.properties?.kind?.enum?.[0], variant]),
     );
-    expect([...variantsByKind.keys()].sort()).toEqual(["barcode", "box", "field", "line", "text"]);
+    expect([...variantsByKind.keys()].sort()).toEqual([
+      "barcode",
+      "box",
+      "field",
+      "line",
+      "organization_logo",
+      "text",
+    ]);
 
     const text = variantsByKind.get("text")!;
     exactClosedObject(
       text,
-      ["id", "kind", "xMm", "yMm", "text", "fontSizePt", "bold", "align", "maxWidthMm", "maxLines"],
+      [
+        "id",
+        "kind",
+        "xMm",
+        "yMm",
+        "text",
+        "fontSizePt",
+        "bold",
+        "align",
+        "maxWidthMm",
+        "maxLines",
+        "minFontSizePt",
+        "fontFamily",
+        "lineHeight",
+      ],
       ["id", "kind", "xMm", "yMm", "text", "fontSizePt"],
     );
     expect(text.properties).toEqual({
@@ -534,6 +562,9 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       align: { type: "string", enum: ["left", "center", "right"] },
       maxWidthMm: { type: "number", minimum: 0, exclusiveMinimum: true },
       maxLines: { type: "integer", minimum: 1, maximum: 16 },
+      minFontSizePt: { type: "number", minimum: 4, maximum: 72 },
+      fontFamily: { type: "string", enum: ["sans-serif", "monospace"] },
+      lineHeight: { type: "number", minimum: 1, maximum: 2 },
     });
 
     const field = variantsByKind.get("field")!;
@@ -550,6 +581,10 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
         "align",
         "maxWidthMm",
         "maxLines",
+        "minFontSizePt",
+        "fontFamily",
+        "lineHeight",
+        "textFormat",
       ],
       ["id", "kind", "xMm", "yMm", "field", "fontSizePt"],
     );
@@ -559,11 +594,18 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       xMm: { type: "number" },
       yMm: { type: "number" },
       field: { type: "string", enum: [...EXPECTED_LABEL_FIELDS] },
+      textFormat: {
+        type: "string",
+        enum: ["km_without_crypto", "quantity_number", "sscc_with_title", "sscc_spaced"],
+      },
       fontSizePt: { type: "number", minimum: 4, maximum: 72 },
       bold: { type: "boolean" },
       align: { type: "string", enum: ["left", "center", "right"] },
       maxWidthMm: { type: "number", minimum: 0, exclusiveMinimum: true },
       maxLines: { type: "integer", minimum: 1, maximum: 16 },
+      minFontSizePt: { type: "number", minimum: 4, maximum: 72 },
+      fontFamily: { type: "string", enum: ["sans-serif", "monospace"] },
+      lineHeight: { type: "number", minimum: 1, maximum: 2 },
     });
 
     const barcode = variantsByKind.get("barcode")!;
@@ -582,13 +624,13 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       moduleWidthMm: { type: "number", minimum: 0, exclusiveMinimum: true },
     });
     const barcodeData = barcode.properties!.data!;
-    expect(barcodeData.oneOf).toHaveLength(2);
-    expect(barcodeData.oneOf![0]).toEqual({
+    expect(barcodeData.anyOf).toHaveLength(2);
+    expect(barcodeData.anyOf![0]).toEqual({
       type: "string",
       enum: [...EXPECTED_LABEL_FIELDS],
     });
-    exactClosedObject(barcodeData.oneOf![1]!, ["literal"], ["literal"]);
-    expect(barcodeData.oneOf![1]!.properties).toEqual({ literal: { type: "string" } });
+    exactClosedObject(barcodeData.anyOf![1]!, ["literal"], ["literal"]);
+    expect(barcodeData.anyOf![1]!.properties).toEqual({ literal: { type: "string" } });
 
     const line = variantsByKind.get("line")!;
     exactClosedObject(
@@ -620,6 +662,19 @@ describe.skipIf(!ready)("inventories OpenAPI contract", () => {
       widthMm: { type: "number", minimum: 0, exclusiveMinimum: true },
       heightMm: { type: "number", minimum: 0, exclusiveMinimum: true },
       thicknessMm: { type: "number", minimum: 0, exclusiveMinimum: true },
+    });
+    const logo = variantsByKind.get("organization_logo")!;
+    const logoFields = ["id", "kind", "xMm", "yMm", "widthMm", "heightMm", "source", "fallback"];
+    exactClosedObject(logo, logoFields, logoFields);
+    expect(logo.properties).toEqual({
+      id: { type: "string", minLength: 1 },
+      kind: { type: "string", enum: ["organization_logo"] },
+      xMm: { type: "number" },
+      yMm: { type: "number" },
+      widthMm: { type: "number", minimum: 0, exclusiveMinimum: true, maximum: 100 },
+      heightMm: { type: "number", minimum: 0, exclusiveMinimum: true, maximum: 50 },
+      source: { type: "string", enum: ["organization"] },
+      fallback: { type: "string", enum: ["markiro"] },
     });
     expect(JSON.stringify(start)).not.toMatch(
       /startedBy|actorUser|objectKey|fileName|canonicalRaw|rawKm|credential|pinHash|badgeHash/i,

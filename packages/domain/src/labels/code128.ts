@@ -53,9 +53,10 @@ export const EAN13_MODULES = 95;
  *
  * An all-digit `value` of even length is assumed to encode in subset C (one
  * 11-module symbol per digit PAIR) — which is what both emitters actually ask
- * for on the `sscc` field (`zpl.ts` emits `>;`, `tspl.ts` its `!1`
- * equivalent). An odd digit count needs one character encoded outside subset C,
- * so it costs a whole symbol; `Math.ceil` covers that. Anything non-numeric is
+ * for on the `sscc` field (`zpl.ts` emits `>;`, `tspl.ts` uses native
+ * `EAN128` with automatic subset selection). An odd digit count needs one
+ * character encoded outside subset C, so it costs a whole symbol; `Math.ceil`
+ * covers that. Anything non-numeric is
  * costed at subset A/B's one symbol per character.
  *
  * `gs1` adds the FNC1 flag character. Pass it whenever the emitters will —

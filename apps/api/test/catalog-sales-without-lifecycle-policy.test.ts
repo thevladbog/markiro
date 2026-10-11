@@ -215,6 +215,11 @@ describe.skipIf(!process.env.DATABASE_URL)("catalog sales without lifecycle poli
       };
       const offer = await offers.create(actor, { tenantId, lines: [line] }, 3);
       expect((await offers.publish(actor, offer.id, undefined, 3)).status).toBe("published");
+      const [stored] = await db
+        .select({ number: schema.commercialOffers.number })
+        .from(schema.commercialOffers)
+        .where(eq(schema.commercialOffers.id, offer.id));
+      expect(stored?.number).toMatch(/^MRK-CO-\d{6,}$/);
       await buyerOffers.accept(tenantId, buyerId, offer.id, randomUUID());
       const invoiceInput = {
         tenantId,

@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { SerialScannerConfig } from "./hardware-config.js";
 import type { ScanSource } from "./scan-source.js";
+import type { SheetGeometry } from "@markiro/domain";
 
 export type PrintTarget =
   | { kind: "serial"; port: string; baud: number }
@@ -99,6 +100,15 @@ export const tauriHardware: HardwareContract = {
     invoke<void>("print_bytes", { target, payloadBase64: bytesToBase64(bytes) }),
 };
 
+/** Only callers that persist unknown delivery may release a stalled USB send. */
+export function tauriWarehousePrint(target: PrintTarget, bytes: Uint8Array): Promise<void> {
+  return invoke<void>("print_bytes", {
+    target,
+    payloadBase64: bytesToBase64(bytes),
+    deliveryUnknownOnTimeout: true,
+  });
+}
+
 /**
  * Adapts the hardware contract to the same `ScanSource` seam the keyboard
  * wedge implements, so the work screen is identical either way.
@@ -128,4 +138,89 @@ export function createHardwareScanSource(hw: HardwareContract): ScanSource {
       };
     },
   };
+}
+
+export interface WindowsPrintReceipt {
+  queue: string;
+  jobId: number;
+  documentName: string;
+}
+export interface WindowsPrintFailure {
+  code:
+    | "unsupported_platform"
+    | "invalid_artifact"
+    | "queue_unavailable"
+    | "geometry_mismatch"
+    | "driver_failure";
+  phase: "before_start" | "delivery_unknown";
+  receipt?: WindowsPrintReceipt;
+}
+export type WindowsPrintResult =
+  { ok: true; receipt: WindowsPrintReceipt } | { ok: false; error: WindowsPrintFailure };
+export type WindowsPreflight = { ok: true } | { ok: false; error: WindowsPrintFailure };
+export type WindowsJobObservation =
+  | { state: "present"; statusFlags: number }
+  | { state: "absent" | "identity_mismatch" | "unavailable" };
+/** Kept separate so old injected scanner/RAW adapters stay source-compatible. */
+export interface WindowsPageOptions {
+  mode: "a4_sheet";
+  orientation: "portrait" | "landscape";
+}
+export interface WindowsPageGeometry extends SheetGeometry {
+  deviceDpiX: number;
+  deviceDpiY: number;
+  fingerprint: string;
+}
+export interface WindowsSheetRequest {
+  pageOptions: WindowsPageOptions;
+  geometryFingerprint: string;
+}
+export interface WindowsPrinting {
+  supportsWindowsPrinting(): Promise<boolean>;
+  supportsWindowsA4Printing?(): Promise<boolean>;
+  getWindowsPageGeometry?(
+    queue: string,
+    pageOptions: WindowsPageOptions,
+  ): Promise<WindowsPageGeometry>;
+  preflightWindowsRaster(
+    queue: string,
+    bytes: Uint8Array,
+    sheet?: WindowsSheetRequest,
+  ): Promise<WindowsPreflight>;
+  printWindowsRaster(
+    queue: string,
+    bytes: Uint8Array,
+    documentName: string,
+    sheet?: WindowsSheetRequest,
+  ): Promise<WindowsPrintResult>;
+  getWindowsPrintJob(receipt: WindowsPrintReceipt): Promise<WindowsJobObservation>;
+}
+export const tauriWindowsPrinting: WindowsPrinting = {
+  supportsWindowsPrinting: () => invoke<boolean>("supports_windows_printing"),
+  supportsWindowsA4Printing: () => invoke<boolean>("supports_windows_a4_printing"),
+  getWindowsPageGeometry: (queue, pageOptions) =>
+    invoke<WindowsPageGeometry>("get_windows_page_geometry", { queue, pageOptions }),
+  preflightWindowsRaster: (queue, bytes, sheet) =>
+    invoke<WindowsPreflight>("preflight_windows_raster", {
+      queue,
+      payloadBase64: bytesToBase64(bytes),
+      ...sheet,
+    }),
+  printWindowsRaster: (queue, bytes, documentName, sheet) =>
+    invoke<WindowsPrintResult>("print_windows_raster", {
+      queue,
+      payloadBase64: bytesToBase64(bytes),
+      documentName,
+      ...sheet,
+    }),
+  getWindowsPrintJob: (receipt) =>
+    invoke<WindowsJobObservation>("get_windows_print_job", { receipt }),
+};
+/** A missing command is an old shell, never evidence of sheet support. */
+export async function probeWindowsA4Printing(): Promise<boolean> {
+  try {
+    return (await tauriWindowsPrinting.supportsWindowsA4Printing?.()) === true;
+  } catch {
+    return false;
+  }
 }

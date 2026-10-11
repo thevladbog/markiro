@@ -316,6 +316,18 @@ function fixtures(locale: AdminLocale) {
           body: Buffer.from(photoFixtureBase64, "base64"),
         });
       }
+      // Support chat is disabled in these unrelated screen scenarios.
+      if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
+        return route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({
+            statusCode: 503,
+            message: "Support chat unavailable",
+            error: "Service Unavailable",
+          }),
+        });
+      }
       if (path === "/api/access/me") return json(route, ACCESS);
       if (path === "/api/profile") return json(route, PROFILE);
       if (path === "/api/pickup-orders" || path === "/api/counterparties") {

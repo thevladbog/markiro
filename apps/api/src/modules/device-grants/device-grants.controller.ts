@@ -96,6 +96,7 @@ export class DeviceGrantsController {
       identity(req),
       { taskKind: body.taskKind, taskId: body.taskId },
       body.requestId,
+      req.get("x-station-capabilities"),
     );
   }
   @ApiOperation({ summary: "Refresh authenticated offline grant configuration" })

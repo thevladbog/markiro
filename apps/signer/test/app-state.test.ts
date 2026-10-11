@@ -17,6 +17,7 @@ describe("nextSignerView", () => {
         lastTokenExpiresAt: null,
         lastError: null,
         journal: [],
+        storageNotices: [],
       }),
     ).toBe("pairing");
   });
@@ -33,6 +34,7 @@ describe("nextSignerView", () => {
           lastTokenExpiresAt: null,
           lastError: null,
           journal: [],
+          storageNotices: [],
         }),
       ).toBe("ready");
     }

@@ -4,7 +4,7 @@ import { Test } from "@nestjs/testing";
 import type { INestApplication } from "@nestjs/common";
 import request from "supertest";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import {
   buildDuplicateLabelTemplate,
   duplicatePayloadDigest,
@@ -160,6 +160,22 @@ describe.skipIf(!ready)("product label history", () => {
     items,
     productLabelEvents: events,
   });
+  async function insertAcceptedEvents(deviceId: string, events: ProductLabelEvent[]) {
+    await db.insert(schema.productLabelEvents).values(
+      events.map((event) => ({
+        tenantId,
+        deviceId,
+        eventId: event.eventId,
+        jobId: event.jobId,
+        sequence: event.sequence,
+        operatorId: event.operatorId,
+        event: { ...event },
+        payloadDigest: event.payloadDigest,
+        receiveStatus: "accepted" as const,
+        reasonCode: null,
+      })),
+    );
+  }
 
   it("persists an explicit skip once and exposes its actor without increasing verified totals", async () => {
     const f = await fixture();
@@ -300,6 +316,32 @@ describe.skipIf(!ready)("product label history", () => {
     for (const query of ["limit=0", "limit=101", "cursor=bad", "limit=1.2"])
       await agent.get(`/shifts/${f.shiftId}/product-labels?${query}`).expect(400);
   });
+  it("reconstructs epoch-aware full transaction IDs around xid wraparound", async () => {
+    const result = await db.execute<{ fullXid: string; visible: boolean }>(sql`
+      WITH boundary AS (
+        SELECT value,
+          pg_snapshot_xmax(value)::text::bigint AS xmax,
+          (pg_snapshot_xmax(value)::xid)::text::bigint AS xmax32
+        FROM (SELECT '4294967294:4294967302:4294967294,4294967297'::pg_snapshot AS value) snapshot
+      ), samples(ordinal,raw) AS (
+        VALUES (1,4294967293::bigint),(2,4294967294::bigint),(3,0::bigint),(4,1::bigint),(5,6::bigint)
+      )
+      SELECT reconstructed.full_xid::text AS "fullXid",
+        pg_visible_in_snapshot(reconstructed.full_xid,boundary.value) AS visible
+      FROM boundary CROSS JOIN samples
+      CROSS JOIN LATERAL (
+        SELECT (boundary.xmax + ((((samples.raw-boundary.xmax32+2147483648) & 4294967295)-2147483648)))::text::xid8 AS full_xid
+      ) reconstructed
+      ORDER BY samples.ordinal
+    `);
+    expect(result.rows).toEqual([
+      { fullXid: "4294967293", visible: true },
+      { fullXid: "4294967294", visible: false },
+      { fullXid: "4294967296", visible: true },
+      { fullXid: "4294967297", visible: false },
+      { fullXid: "4294967302", visible: false },
+    ]);
+  });
   it("paginates colliding device-local IDs without mixing devices", async () => {
     const f = await fixture();
     await send(batch([f.prepared], [f.item]));
@@ -316,7 +358,9 @@ describe.skipIf(!ready)("product label history", () => {
     await db
       .insert(schema.productLabelJobs)
       .values({ ...original, deviceId: otherStation.deviceId });
+    await insertAcceptedEvents(otherStation.deviceId, [{ ...f.prepared, eventId: randomUUID() }]);
     const first = (await agent.get(`/shifts/${f.shiftId}/product-labels?limit=1`).expect(200)).body;
+    expect(first.nextCursor).toEqual(expect.any(String));
     const second = (
       await agent
         .get(
@@ -335,6 +379,162 @@ describe.skipIf(!ready)("product label history", () => {
         .expect(200)
     ).body;
     expect(scoped.items).toEqual([f.prepared]);
+  });
+  it("paginates unresolved jobs before newer completed jobs", async () => {
+    const f = await fixture();
+    await send(batch([f.prepared], [f.item]));
+    const [unresolved] = await db
+      .select()
+      .from(schema.productLabelJobs)
+      .where(
+        and(
+          eq(schema.productLabelJobs.tenantId, tenantId),
+          eq(schema.productLabelJobs.jobId, f.prepared.jobId),
+        ),
+      );
+    if (!unresolved) throw new Error("job missing");
+    const completedJobId = randomUUID();
+    await db.insert(schema.productLabelJobs).values({
+      ...unresolved,
+      jobId: completedJobId,
+      codeHash: "f".repeat(64),
+      acceptedAt: new Date(Date.parse(f.prepared.acceptedAt) + 1000),
+      projection: {
+        ...unresolved.projection,
+        status: "completed",
+        attemptState: "verified",
+        verificationOutcome: "verified",
+      },
+    });
+    const completedAcceptedAt = new Date(Date.parse(f.prepared.acceptedAt) + 1000).toISOString();
+    await insertAcceptedEvents(
+      station.deviceId,
+      [f.prepared, f.sending, f.sent, f.verified].map((event) => ({
+        ...event,
+        eventId: randomUUID(),
+        jobId: completedJobId,
+        codeHash: "f".repeat(64),
+        acceptedAt: completedAcceptedAt,
+        occurredAt: completedAcceptedAt,
+      })),
+    );
+    const lateJobId = randomUUID();
+    const lateAcceptedAt = new Date(Date.parse(f.prepared.acceptedAt) + 2000).toISOString();
+    let releaseLateTransaction = () => {};
+    let markLateInsertReady = () => {};
+    const lateInsertReady = new Promise<void>((resolve) => {
+      markLateInsertReady = resolve;
+    });
+    const releaseLateInsert = new Promise<void>((resolve) => {
+      releaseLateTransaction = resolve;
+    });
+    const lateCommit = db.transaction(async (tx) => {
+      await tx.insert(schema.productLabelJobs).values({
+        ...unresolved,
+        jobId: lateJobId,
+        codeHash: "d".repeat(64),
+        acceptedAt: new Date(lateAcceptedAt),
+      });
+      const lateEvent: ProductLabelEvent = {
+        ...f.prepared,
+        eventId: randomUUID(),
+        jobId: lateJobId,
+        codeHash: "d".repeat(64),
+        acceptedAt: lateAcceptedAt,
+        occurredAt: lateAcceptedAt,
+      };
+      await tx.insert(schema.productLabelEvents).values({
+        tenantId,
+        deviceId: station.deviceId,
+        eventId: lateEvent.eventId,
+        jobId: lateEvent.jobId,
+        sequence: lateEvent.sequence,
+        operatorId: lateEvent.operatorId,
+        event: { ...lateEvent },
+        payloadDigest: lateEvent.payloadDigest,
+        receiveStatus: "accepted",
+        reasonCode: null,
+      });
+      markLateInsertReady();
+      await releaseLateInsert;
+    });
+    await lateInsertReady;
+    const first = (await agent.get(`/shifts/${f.shiftId}/product-labels?limit=1`).expect(200)).body;
+    releaseLateTransaction();
+    await lateCommit;
+    await send(batch([f.sending, f.sent, f.verified]));
+    const second = (
+      await agent
+        .get(
+          `/shifts/${f.shiftId}/product-labels?limit=1&cursor=${encodeURIComponent(first.nextCursor)}`,
+        )
+        .expect(200)
+    ).body;
+    expect(first.items[0]).toMatchObject({ jobId: f.prepared.jobId, status: "prepared" });
+    expect(second.items[0]).toMatchObject({ jobId: completedJobId, status: "completed" });
+    expect([first.items[0].jobId, second.items[0].jobId]).not.toContain(lateJobId);
+    expect(second.nextCursor).toBeNull();
+  });
+  it("reports completed ownership conflicts without changing print-completion order", async () => {
+    const f = await fixture();
+    await send(batch([f.prepared, f.sending, f.sent, f.verified], [f.item]));
+    const [conflicted] = await db
+      .select()
+      .from(schema.productLabelJobs)
+      .where(
+        and(
+          eq(schema.productLabelJobs.tenantId, tenantId),
+          eq(schema.productLabelJobs.jobId, f.prepared.jobId),
+        ),
+      );
+    if (!conflicted) throw new Error("job missing");
+    const successfulJobId = randomUUID();
+    await db.insert(schema.productLabelJobs).values({
+      ...conflicted,
+      jobId: successfulJobId,
+      codeHash: "e".repeat(64),
+      acceptedAt: new Date(Date.parse(f.prepared.acceptedAt) + 1000),
+    });
+    const successfulAcceptedAt = new Date(Date.parse(f.prepared.acceptedAt) + 1000).toISOString();
+    await insertAcceptedEvents(
+      station.deviceId,
+      [f.prepared, f.sending, f.sent, f.verified].map((event) => ({
+        ...event,
+        eventId: randomUUID(),
+        jobId: successfulJobId,
+        codeHash: "e".repeat(64),
+        acceptedAt: successfulAcceptedAt,
+        occurredAt: successfulAcceptedAt,
+      })),
+    );
+    await db.insert(schema.codeConflicts).values({
+      tenantId,
+      codeHash: conflicted.codeHash,
+      losingShiftId: f.shiftId,
+      losingTerminalId: station.deviceId,
+      losingScannedAt: conflicted.acceptedAt,
+      winningShiftId: f.shiftId,
+      winningTerminalId: otherStation.deviceId,
+      winningScannedAt: conflicted.acceptedAt,
+    });
+    const first = (await agent.get(`/shifts/${f.shiftId}/product-labels?limit=1`).expect(200)).body;
+    const second = (
+      await agent
+        .get(
+          `/shifts/${f.shiftId}/product-labels?limit=1&cursor=${encodeURIComponent(first.nextCursor)}`,
+        )
+        .expect(200)
+    ).body;
+    expect(first.items[0]).toMatchObject({
+      jobId: successfulJobId,
+      status: "completed",
+      ownershipConflict: false,
+    });
+    expect(second.items[0]).toMatchObject({
+      jobId: f.prepared.jobId,
+      status: "completed",
+      ownershipConflict: true,
+    });
   });
   it("shows an ownership rejection without counting rejected transport as a successful print", async () => {
     const f = await fixture();

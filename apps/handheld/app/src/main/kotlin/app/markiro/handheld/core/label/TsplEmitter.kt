@@ -23,6 +23,7 @@ suspend fun generateTspl(
     spec: LabelSpec,
     data: Map<LabelField, String>,
     rasterize: RasterizeText?,
+    logo: RasterResult? = null,
 ): ByteArray {
     val out = ByteArrayOutputStream()
     fun line(text: String) {
@@ -37,14 +38,20 @@ suspend fun generateTspl(
         when (element) {
             is LabelElement.Text -> textLike(
                 spec, element.xMm, element.yMm, element.text, element.fontSizePt, element.bold,
-                element.align, element.maxWidthMm, element.maxLines, rasterize, out, ::line,
+                element.align, element.maxWidthMm, element.maxLines, rasterize, out, ::line, element.fontFamily, element.lineHeight, element.minFontSizePt,
             )
             is LabelElement.Field -> textLike(
                 spec, element.xMm, element.yMm,
                 labelFieldDisplayValue(element.field, data, element.textFormat),
                 element.fontSizePt, element.bold, element.align, element.maxWidthMm, element.maxLines,
-                rasterize, out, ::line,
+                rasterize, out, ::line, element.fontFamily, element.lineHeight, element.minFontSizePt,
             )
+            is LabelElement.OrganizationLogo -> {
+                if (logo == null) continue
+                val fitted = fitLabelLogo(element, spec.dpi, logo)
+                buildBitmapCommand(fitted.x, fitted.y, fitted.raster, out)
+                out.write('\n'.code)
+            }
             is LabelElement.Barcode -> barcode(spec, element, data, out, ::line)
             is LabelElement.Line -> line(bar(spec, element))
             is LabelElement.Box -> line(box(spec, element))
@@ -78,11 +85,12 @@ private suspend fun textLike(
     rasterize: RasterizeText?,
     out: ByteArrayOutputStream,
     line: (String) -> Unit,
+    fontFamily: String?, lineHeight: Double?, minFontSizePt: Double?,
 ) {
     val x = mmToDots(xMm, spec.dpi)
     val y = mmToDots(yMm, spec.dpi)
     val maxWidthDots = maxWidthMm?.let { mmToDots(it, spec.dpi) }
-    if (needsImageRendering(text)) {
+    if (needsImageRendering(text) || lineHeight != null || fontFamily != null) {
         if (rasterize == null) {
             throw LabelRenderException(
                 "label text \"$text\" contains characters outside printable ASCII and needs image rendering, " +
@@ -92,7 +100,9 @@ private suspend fun textLike(
         val raster = rasterize.rasterize(
             text,
             RasterOptions(
-                fontFamily = "sans-serif",
+                fontFamily = fontFamily ?: "sans-serif",
+                lineHeight = lineHeight,
+                minFontSizePx = minFontSizePt?.let { ptToDots(it, spec.dpi) },
                 fontSizePx = ptToDots(fontSizePt, spec.dpi),
                 bold = bold ?: false,
                 maxWidthPx = maxWidthDots,
@@ -152,12 +162,13 @@ private fun barcode(
         is BarcodeSource.Literal -> source.value
     }
     val gs1 = source is BarcodeSource.Field && source.field == LabelField.SSCC
-    // `!1` is this language's GS1 flag and `00` is the application identifier, added here and
-    // nowhere else.
-    val payload = if (gs1) "!100$value" else value
+    // EAN128 supplies FNC1; plain 128 encodes "!1" literally. Only AI 00 is
+    // added to the bare SSCC, matching the shared TypeScript emitter.
+    val barcodeType = if (gs1) "EAN128" else "128"
+    val payload = if (gs1) "00$value" else value
     val narrow = element.moduleWidthMm?.let { max(1, mmToDots(it, spec.dpi)) } ?: DEFAULT_NARROW_DOTS
     // The interpretation line is off, matching the other language.
-    line("BARCODE $x,$y,\"128\",${mmToDots(element.sizeMm, spec.dpi)},0,0,$narrow,$narrow,\"${escape(payload)}\"")
+    line("BARCODE $x,$y,\"$barcodeType\",${mmToDots(element.sizeMm, spec.dpi)},0,0,$narrow,$narrow,\"${escape(payload)}\"")
 }
 
 private fun bar(spec: LabelSpec, element: LabelElement.Line): String {

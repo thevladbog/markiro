@@ -1,7 +1,12 @@
+import {
+  acquireCredentialCommitLease,
+  type CredentialGeneration,
+} from "../lib/credential-recovery.js";
+import { WindowsDeliveryStatus } from "../ui/WindowsDeliveryStatus.js";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, FullScreenDialog } from "@markiro/ui";
-import { sampleLabelData, type LabelTemplateSpec } from "@markiro/domain";
+import { sampleLabelData, parseScannedSscc, type LabelTemplateSpec } from "@markiro/domain";
 import { playSignalTone, saveSoundSettings, type SoundSettings } from "../lib/signal-sound.js";
 import type {
   HardwareContract,
@@ -18,10 +23,19 @@ import {
   type HardwareConfig,
   type PrinterLanguage,
 } from "../lib/hardware-config.js";
-import { renderLabelBytes } from "../lib/print-label.js";
-import { rasterizeText } from "../lib/rasterizer.js";
+import { makeA4TestSscc, prepareA4TestPrint } from "../lib/a4-test-print.js";
+import { renderPrintArtifact } from "../lib/print-artifact.js";
+import {
+  dispatchWindowsDelivery,
+  resolvePrintDelivery,
+  PrintDeliveryBeforeSendError,
+} from "../lib/print-deliveries.js";
+import { tauriWindowsPrinting, probeWindowsA4Printing } from "../lib/hardware.js";
+import { LabelRasterPreview } from "../ui/LabelRasterPreview.js";
+import { rasterizeText, rasterizeDriverText } from "../lib/rasterizer.js";
 import type { SqlExecutor } from "../lib/mirror.js";
 import {
+  printerMode,
   configuredPrinterRouting,
   printerTargetKey,
   parsePrinterProfile,
@@ -37,6 +51,8 @@ import { SoundSetupPanel } from "../ui/setup/SoundSetupPanel.js";
 import { makeSetupTestCode, type SetupCheckResult } from "../ui/setup/test-code.js";
 
 export interface WorkstationSetupProps {
+  printScope?: string;
+  credentialGeneration?: CredentialGeneration;
   hw: HardwareContract;
   exec: SqlExecutor;
   sound: SoundSettings;
@@ -73,6 +89,8 @@ type ConfigResult = { ok: true; config: HardwareConfig } | { ok: false; error: s
 
 /** Sole owner of setup state, persistence, and hardware side effects. */
 export function WorkstationSetup({
+  printScope = "workstation-test",
+  credentialGeneration,
   hw,
   exec,
   sound,
@@ -119,6 +137,19 @@ export function WorkstationSetup({
   const [usbPrinter, setUsbPrinter] = useState("");
   const [printerTransport, setPrinterTransport] = useState<PrintTarget["kind"] | "none">("none");
   const [printerLanguage, setPrinterLanguage] = useState<PrinterLanguage>("zpl");
+  const [printMode, setPrintMode] = useState<"raw" | "windows_driver">("raw");
+  const [windowsSupported, setWindowsSupported] = useState(false);
+  const [a4Supported, setA4Supported] = useState(false);
+  const [printerPaper, setPrinterPaper] = useState<"a4" | undefined>();
+  const [a4TestOrientation, setA4TestOrientation] = useState<"portrait" | "landscape">("portrait");
+  const [rasterPreview, setRasterPreview] = useState<Uint8Array | null>(null);
+  useEffect(() => {
+    void probeWindowsA4Printing().then(setA4Supported);
+    void tauriWindowsPrinting
+      .supportsWindowsPrinting()
+      .then(setWindowsSupported)
+      .catch(() => setWindowsSupported(false));
+  }, []);
   const [printerDpi, setPrinterDpi] = useState<203 | 300 | null>(null);
   const [verifyPrintedLabel, setVerifyPrintedLabel] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -181,7 +212,10 @@ export function WorkstationSetup({
         // exact comparisons — a stale or foreign code must read as a failure,
         // never as «works correctly».
         if (activeTabRef.current === "printer" && printedCodeRef.current !== null) {
-          setPrinterCheck({ ok: raw === printedCodeRef.current, received: raw });
+          setPrinterCheck({
+            ok: raw === printedCodeRef.current || parseScannedSscc(raw) === printedCodeRef.current,
+            received: raw,
+          });
         } else {
           setScannerCheck({ ok: raw === scannerCodeRef.current, received: raw });
         }
@@ -282,6 +316,9 @@ export function WorkstationSetup({
     setPrinterBaud(String(printer?.target.kind === "serial" ? printer.target.baud : DEFAULT_BAUD));
     setUsbPrinter(printer?.target.kind === "usb" ? printer.target.printer : "");
     setPrinterLanguage(printer?.language ?? "zpl");
+    setPrintMode(printer ? printerMode(printer) : "raw");
+    setPrinterPaper(printer?.paper);
+    setRasterPreview(null);
     setPrinterDpi(printer?.dpi ?? null);
     setPrintedTestCode(null);
     setPrinterCheck(null);
@@ -333,6 +370,8 @@ export function WorkstationSetup({
       target,
       language: printerLanguage,
       dpi: printerDpi,
+      ...(printMode === "windows_driver" && printerPaper === "a4" ? { paper: "a4", dpi: 300 } : {}),
+      ...(printMode === "windows_driver" ? { mode: printMode } : {}),
     });
     return printer ? { ok: true, printer } : { ok: false, error: t("setup.printerFieldRequired") };
   }
@@ -346,7 +385,11 @@ export function WorkstationSetup({
         : [...routing.printers, printer],
       assignments:
         routing.printers.length === 0
-          ? { box: printer.id, duplicate: printer.id, pallet: printer.id }
+          ? {
+              box: printer.paper === "a4" ? null : printer.id,
+              duplicate: printer.paper === "a4" ? null : printer.id,
+              pallet: printer.id,
+            }
           : routing.assignments,
     };
   }
@@ -416,6 +459,55 @@ export function WorkstationSetup({
     setTestResult(null);
     try {
       if (!result.printer) throw new Error(t("setup.failed"));
+      if (result.printer.paper === "a4") {
+        if (result.printer.target.kind !== "usb" || !tauriWindowsPrinting.getWindowsPageGeometry)
+          throw new Error(t("palletSheet.unsupported"));
+        setPrintedTestCode(null);
+        setPrinterCheck(null);
+        setRasterPreview(null);
+        const lease = credentialGeneration
+          ? acquireCredentialCommitLease(credentialGeneration)
+          : null;
+        if (credentialGeneration && !lease) throw new Error("Credential is retired");
+        try {
+          const profile = result.printer;
+          const geometry = await tauriWindowsPrinting.getWindowsPageGeometry(
+            result.printer.target.printer,
+            {
+              mode: "a4_sheet",
+              orientation: a4TestOrientation,
+            },
+          );
+          const code = makeA4TestSscc();
+          const artifact = await prepareA4TestPrint(profile, geometry, a4TestOrientation, code, {
+            title: t("palletSheet.testHeader"),
+            product: t("palletSheet.testProduct"),
+          });
+          setRasterPreview(artifact.bytes);
+          const id = crypto.randomUUID();
+          await serializePrinterOutput(profile.target, () =>
+            dispatchWindowsDelivery(
+              exec,
+              { scope: printScope, purpose: "test", jobId: code, attemptId: id },
+              profile,
+              artifact.bytes,
+              tauriWindowsPrinting,
+              () => !credentialGeneration?.sealed,
+              undefined,
+              JSON.stringify(artifact.renderSnapshot),
+            ),
+          );
+          setPrintedTestCode(code);
+          setPrinterCheck(null);
+          setTestResult({
+            tab: "printer",
+            text: t("palletSheet.testPrintSent", { name: profile.name }),
+          });
+        } finally {
+          lease?.release();
+        }
+        return;
+      }
       // A fresh code per print: scanning yesterday's test label must fail the
       // check, because the check certifies THIS print run, not the printer's
       // biography. The barcode makes the check end-to-end — transport,
@@ -444,15 +536,26 @@ export function WorkstationSetup({
         ],
       };
       // The test label prints at the resolution the working labels will use.
-      const bytes = await renderLabelBytes(
+      const artifact = await renderPrintArtifact(
         spec,
         sampleLabelData(),
-        result.printer.language,
-        rasterizeText,
-        { dpi: result.printer.dpi ?? null },
+        result.printer,
+        printMode === "windows_driver" ? rasterizeDriverText : rasterizeText,
       );
       const target = result.printer.target;
-      await serializePrinterOutput(target, () => hw.print(target, bytes));
+      if (printMode === "windows_driver") {
+        setRasterPreview(artifact.bytes);
+        const id = crypto.randomUUID();
+        const profile = result.printer;
+        await serializePrinterOutput(target, () =>
+          dispatchWindowsDelivery(
+            exec,
+            { scope: printScope, purpose: "test", jobId: id, attemptId: id },
+            profile,
+            artifact.bytes,
+          ),
+        );
+      } else await serializePrinterOutput(target, () => hw.print(target, artifact.bytes));
       setPrintedTestCode(code);
       setPrinterCheck(null);
       setTestResult({
@@ -460,7 +563,13 @@ export function WorkstationSetup({
         text: t("setup.testPrintSentTo", { name: result.printer.name }),
       });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : t("setup.failed"));
+      setError(
+        caught instanceof PrintDeliveryBeforeSendError && caught.message === "geometry_mismatch"
+          ? t("palletSheet.geometryMismatch")
+          : caught instanceof Error
+            ? caught.message
+            : t("setup.failed"),
+      );
     } finally {
       setBusy(false);
     }
@@ -568,33 +677,86 @@ export function WorkstationSetup({
       label: t("setup.printer"),
       panel:
         editorId !== null ? (
-          <PrinterSetupPanel
-            name={printerName}
-            onNameChange={setPrinterName}
-            printedCode={printedTestCode}
-            check={printerCheck}
-            transport={printerTransport}
-            host={printerHost}
-            tcpPort={printerTcpPort}
-            serialPort={printerPort}
-            serialBaud={printerBaud}
-            usbPrinters={usbPrinters}
-            usbPrinter={usbPrinter}
-            language={printerLanguage}
-            printerDpi={printerDpi}
-            onPrinterDpiChange={setPrinterDpi}
-            disabled={loading || busy}
-            busy={busy}
-            onTransportChange={setPrinterTransport}
-            onHostChange={setPrinterHost}
-            onTcpPortChange={setPrinterTcpPort}
-            onSerialPortChange={setPrinterPort}
-            onSerialBaudChange={setPrinterBaud}
-            onUsbPrinterChange={setUsbPrinter}
-            onUsbRefresh={() => void refreshUsbPrinters()}
-            onLanguageChange={setPrinterLanguage}
-            onTestPrint={() => void testPrint()}
-          />
+          <>
+            {rasterPreview && printerPaper !== "a4" && (
+              <LabelRasterPreview bytes={rasterPreview} label={t("setup.printerCheckTitle")} />
+            )}
+            {printMode === "windows_driver" && (
+              <WindowsDeliveryStatus
+                exec={exec}
+                scope={printScope}
+                purpose="test"
+                revision={String(busy)}
+                onAcknowledge={async (key) => {
+                  const lease = credentialGeneration
+                    ? acquireCredentialCommitLease(credentialGeneration)
+                    : null;
+                  if (credentialGeneration && !lease) throw new Error("Credential is retired");
+                  try {
+                    await resolvePrintDelivery(exec, key);
+                    await exec.run(
+                      "DELETE FROM printer_deliveries WHERE scope=? AND purpose='test' AND resolved_at IS NOT NULL AND state<>'sending'",
+                      [printScope],
+                    );
+                  } finally {
+                    lease?.release();
+                  }
+                }}
+              />
+            )}
+            <PrinterSetupPanel
+              name={printerName}
+              onNameChange={setPrinterName}
+              printedCode={printedTestCode}
+              check={printerCheck}
+              transport={printerTransport}
+              host={printerHost}
+              tcpPort={printerTcpPort}
+              serialPort={printerPort}
+              serialBaud={printerBaud}
+              usbPrinters={usbPrinters}
+              usbPrinter={usbPrinter}
+              mode={printMode}
+              windowsSupported={windowsSupported}
+              a4Supported={a4Supported}
+              paper={printerPaper}
+              a4RasterPreview={rasterPreview}
+              a4TestOrientation={a4TestOrientation}
+              onA4TestOrientationChange={(orientation) => {
+                setA4TestOrientation(orientation);
+                setPrintedTestCode(null);
+                setPrinterCheck(null);
+                setRasterPreview(null);
+                setTestResult(null);
+              }}
+              onPaperChange={(paper) => {
+                setPrinterPaper(paper);
+                if (paper === "a4") setPrinterDpi(300);
+                setPrintedTestCode(null);
+                setPrinterCheck(null);
+                setRasterPreview(null);
+                setTestResult(null);
+              }}
+              onModeChange={setPrintMode}
+              language={printerLanguage}
+              printerDpi={printerDpi}
+              onPrinterDpiChange={setPrinterDpi}
+              disabled={loading || busy}
+              busy={busy}
+              onTransportChange={(value) => {
+                setPrinterTransport(value);
+                if (value !== "usb") setPrintMode("raw");
+              }}
+              onHostChange={setPrinterHost}
+              onTcpPortChange={setPrinterTcpPort}
+              onSerialPortChange={setPrinterPort}
+              onSerialBaudChange={setPrinterBaud}
+              onUsbPrinterChange={setUsbPrinter}
+              onUsbRefresh={() => void refreshUsbPrinters()}
+              onLanguageChange={setPrinterLanguage}
+              onTestPrint={() => void testPrint()}
+            />
+          </>
         ) : (
           <PrinterRoutingPanel
             routing={routing}

@@ -223,6 +223,10 @@ export const shifts = pgTable(
      * `boxLabelTemplateId` is: category default → organisation default → none.
      */
     palletLabelTemplateId: uuid("pallet_label_template_id"),
+    palletSheetTemplateId: uuid("pallet_sheet_template_id"),
+    palletSheetTemplateSnapshot: jsonb("pallet_sheet_template_snapshot").$type<
+      Record<string, unknown>
+    >(),
     createdFrom: shiftOrigin("created_from").notNull().default("admin"),
     /**
      * The shift's human number, split into its immutable parts: `AUG26` +
@@ -324,6 +328,11 @@ export const shifts = pgTable(
     foreignKey({
       name: "shifts_tenant_pallet_label_template_fk",
       columns: [t.tenantId, t.palletLabelTemplateId],
+      foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
+    }),
+    foreignKey({
+      name: "shifts_tenant_pallet_sheet_template_fk",
+      columns: [t.tenantId, t.palletSheetTemplateId],
       foreignColumns: [labelTemplates.tenantId, labelTemplates.id],
     }),
   ],

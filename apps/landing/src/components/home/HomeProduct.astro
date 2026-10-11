@@ -1,0 +1,86 @@
+---
+import { findFilmPage } from "../../content/film";
+import { homeScreen, type HomeScreenId } from "../../content/home-images";
+import { hubGroupId, hubPath } from "../../content/hubs";
+import type { Locale } from "../../content/pages";
+import { getUiCopy } from "../../content/ui";
+import HandheldFrame from "./HandheldFrame.astro";
+import ScreenFrame from "./ScreenFrame.astro";
+
+interface Props {
+  locale: Locale;
+}
+
+type ProductPartId = "line" | "handheld" | "office" | "kiosk" | "integrations";
+
+const { locale } = Astro.props;
+const copy = getUiCopy(locale).home.productSection;
+const ru = locale === "ru";
+const LINKS: Readonly<Record<ProductPartId, string>> = {
+  line: ru ? "/markirovka-chestny-znak/" : "/en/chestny-znak-serialization/",
+  handheld: `${findFilmPage(locale).path}#warehouse`,
+  // The admin panel instructions are the "Cabinet: …" group of the instructions hub.
+  office: `${hubPath(locale, "instructions")}#${hubGroupId("Cabinet")}`,
+  kiosk: ru ? "/kiosk-samovydachi/" : "/en/self-service-pickup-kiosk/",
+  integrations: ru ? "/integratsiya-1c/" : "/en/1c-integration/",
+};
+const SCREENS: Readonly<Record<ProductPartId, HomeScreenId>> = {
+  line: "station-box",
+  handheld: "handheld",
+  office: "cabinet-shifts",
+  kiosk: "kiosk",
+  integrations: "cabinet-chz",
+};
+---
+
+<section class="section home-product" id="product" aria-labelledby="product-title">
+  <div class="container">
+    <p class="section-index">{copy.kicker}</p>
+    <h2 id="product-title" class="display-heading display-heading--sentence">{copy.heading}</h2>
+
+    {copy.rows.map((row, index) => (
+      <article
+        class:list={["home-product__row", { "home-product__row--reverse": index % 2 === 1 }]}
+        id={`product-${row.id}`}
+        aria-labelledby={`product-${row.id}-title`}
+      >
+        <div class="home-product__text">
+          <p class="home-kicker">{row.kicker}</p>
+          <h3 id={`product-${row.id}-title`}>{row.title}</h3>
+          <p class="home-product__body">{row.text}</p>
+          <ul class="home-list" role="list">{row.bullets.map((bullet) => <li>{bullet}</li>)}</ul>
+          <a class="text-link" href={LINKS[row.id]}>{row.link} <span aria-hidden="true">→</span></a>
+        </div>
+        {row.id === "handheld" ? (
+          <HandheldFrame image={homeScreen(locale, SCREENS[row.id])} alt={row.screenAlt} caption={row.caption} />
+        ) : (
+          <ScreenFrame
+            image={homeScreen(locale, SCREENS[row.id])}
+            alt={row.screenAlt}
+            caption={row.caption}
+            widths={[640, 960, 1520]}
+            sizes="(max-width: 1023px) 100vw, 47.5rem"
+          />
+        )}
+      </article>
+    ))}
+
+    <div class="home-product__cards">
+      {copy.cards.map((card) => (
+        <article class="home-product__card" id={`product-${card.id}`} aria-labelledby={`product-${card.id}-title`}>
+          <p class="home-kicker">{card.kicker}</p>
+          <h3 id={`product-${card.id}-title`}>{card.title}</h3>
+          <p class="home-product__body">{card.text}</p>
+          <ScreenFrame
+            image={homeScreen(locale, SCREENS[card.id])}
+            alt={card.screenAlt}
+            caption={card.caption}
+            widths={[480, 720, 1200]}
+            sizes="(max-width: 1023px) 100vw, 36.75rem"
+          />
+          <a class="text-link" href={LINKS[card.id]}>{card.link} <span aria-hidden="true">→</span></a>
+        </article>
+      ))}
+    </div>
+  </div>
+</section>

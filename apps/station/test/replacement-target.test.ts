@@ -3,6 +3,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { openFileDatabase } from "./support/sqlite-exec.js";
 import { describe, expect, it, vi } from "vitest";
 import { applyMigrations, type SqlExecutor } from "../src/lib/mirror.js";
 import { persistStationProvisioning, type StationProvisioning } from "../src/lib/pairing.js";
@@ -17,7 +18,7 @@ import {
   replacementCanEnterTask,
 } from "../src/lib/device-replacement.js";
 function open(path: string) {
-  const db = new DatabaseSync(path);
+  const db = path === ":memory:" ? new DatabaseSync(path) : openFileDatabase(path);
   const exec: SqlExecutor = {
     run: async (sql, params = []) => {
       db.prepare(sql).run(...(params as never[]));

@@ -235,6 +235,19 @@ export function buildProductLabelFixtures() {
     ]),
   ];
 
+  const rawPrepared = prepared(1, ATTEMPT_1, 1, null);
+  if (rawPrepared.kind !== "prepared") throw new Error("Invalid fixture");
+  const { language: _language, ...rasterCommon } = rawPrepared;
+  void _language;
+  const rasterPrepared = { ...rasterCommon, printFormat: "mono-raster-v1" as const };
+  cases.push(
+    run("raster verified without a printer language", "required", [
+      rasterPrepared,
+      simple(2, ATTEMPT_1, "sending"),
+      simple(3, ATTEMPT_1, "sent"),
+      verified(4, ATTEMPT_1, duplicatePayloadDigest(RAW)),
+    ]),
+  );
   return {
     projection: cases,
     compare: [

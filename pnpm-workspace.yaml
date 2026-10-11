@@ -10,28 +10,33 @@ settings:
   # Do not silently add optional peer dependencies to production images.
   autoInstallPeers: false
 overrides:
-  # React Email's preview CLI pulls Next.js as tooling. 16.3.3 also fixes
-  # GHSA-2xp9-vwfh-vxw4 (AVIF) and GHSA-p293-qw3h-jr36 (Windows RCE).
-  next: "16.3.3"
-  # GHSA-rgj7-g3m4-5g8c: patched libheif for every image-processing consumer.
-  sharp: "0.35.4"
+  # React Email's preview CLI pulls Next.js as tooling. 16.3.3 fixed
+  # GHSA-2xp9-vwfh-vxw4 (AVIF) and GHSA-p293-qw3h-jr36 (Windows RCE); 16.3.6
+  # is the first release patched for GHSA-vcvr-r3jv-pc5j.
+  next: "16.3.6"
+  # GHSA-rgj7-g3m4-5g8c and GHSA-wq5f-xc86-pv6w: patched libheif/libvips for
+  # every image-processing consumer.
+  sharp: "0.35.5"
   # Nest pins multer exactly; updating our direct dependency alone leaves
   # its upload interceptors on the vulnerable copy. Keep the override on 2.x.
-  "multer@2": "2.3.0"
+  # 2.4.0 made `limits.parts` an inclusive maximum (2.3.0 rejected the part
+  # that reached it); apps/api/test/multipart-part-limits.test.ts pins every
+  # route that sets it.
+  "multer@2": "2.4.0"
   # Express/body-parser/superagent and Astro retain older compatible copies
   # in the lockfile. Cover their parser and SVG sanitizer advisories too.
   "qs@6": "6.16.0"
   "svgo@4": "4.1.0"
   postcss: "8.5.23"
-  js-yaml: "5.2.2"
-  undici: "7.29.0"
+  js-yaml: "5.4.1"
+  undici: "7.29.1"
   # GHSA-jqff-g426-hqxp, GHSA-f65p-4m7j-42xc, GHSA-fph4-wmhf-6fwf and
-  # GHSA-5jgf-p345-68v8: host confusion and SSRF in fast-uri < 3.1.6. Reached
-  # only through ajv (nestjs/cli, ajv-formats, @hookform/resolvers,
-  # workbox-build). 3.1.6 is the first patched release and is already older
-  # than the 7-day release-age policy; Dependabot cannot pass this override
+  # GHSA-5jgf-p345-68v8: host confusion and SSRF in fast-uri < 3.1.6, then
+  # GHSA-58mr-gqgx-xq4g, GHSA-qw65-cvwx-89v3 and GHSA-hrr3-gc8f-f4qj, patched
+  # in 3.1.8. Reached only through ajv (nestjs/cli, ajv-formats,
+  # @hookform/resolvers, workbox-build). Dependabot cannot pass this override
   # on its own, so bump it here when the next advisory lands.
-  fast-uri: "3.1.6"
+  fast-uri: "3.1.8"
 
   # GHSA-67mh-4wv8-2f99: esbuild <=0.24.2 lets any website talk to its dev
   # server. Reached only through @esbuild-kit/*, which is deprecated upstream
@@ -66,18 +71,20 @@ overrides:
   # 5.0.9 is the first release that covers both the original length-bound issue
   # and its unbounded-intermediate-array bypass. Older major lines do not offer
   # one release that satisfies the scanner and every consumer used here.
+  # GHSA-q2hr-2g5m-vwhr (unbounded nesting depth and quadratic `{a},b}`
+  # rewrites) then needs 5.0.12, which keeps the same named `expand` export
+  # and adds only the optional `maxDepth`/`maxRewrites` bounds.
   #
-  # minimatch 10 already consumes the named export, so it takes 5.0.9 as-is.
+  # minimatch 10 already consumes the named export, so it takes 5.0.12 as-is.
   # The version is pinned exactly to match how every other override and
-  # dependency here is written; `^5` would also resolve to 5.0.9 today, since
-  # that is `latest`. (An earlier revision of this comment claimed the exact
+  # dependency here is written. (An earlier revision of this comment claimed the exact
   # pin was needed to defeat the 7-day `minimum-release-age` quarantine. It is
   # not: that key sits in `.npmrc` in kebab-case, and pnpm 11 reads only
   # registry and auth settings from `.npmrc` -- `pnpm config get
   # minimumReleaseAge` returns undefined, so the quarantine is inert. Once it
   # is moved to `minimumReleaseAge` here and actually takes effect, an exact
   # pin *will* be required to reach a patch younger than 7 days.)
-  "minimatch@10>brace-expansion": "5.0.9"
+  "minimatch@10>brace-expansion": "5.0.12"
 
   # ...and this moves the last brace-expansion 2.x consumer onto minimatch 10
   # so it picks up that patched line too. filelist is reached only through
@@ -100,7 +107,8 @@ overrides:
   # patchedDependencies). minimatch 3 calls exactly one brace-expansion API,
   # `expand(pattern)` with one argument, which 5.0.9 keeps compatible: a 20k
   # pattern differential between 1.1.16 and 5.0.9 diverges on one input,
-  # `a${b,c}d{e,f}`, where 5.0.9 is the one that matches bash.
-  "minimatch@3>brace-expansion": "5.0.9"
+  # `a${b,c}d{e,f}`, where 5.0.9 is the one that matches bash. 5.0.12 matches
+  # 5.0.9 output exactly on a 50k random-pattern differential.
+  "minimatch@3>brace-expansion": "5.0.12"
 patchedDependencies:
   minimatch@3.1.5: patches/minimatch@3.1.5.patch

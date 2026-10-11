@@ -21,6 +21,8 @@ import type { SqlExecutor } from "../src/lib/mirror.js";
 import type { ScanListener, ScanSource } from "../src/lib/scan-source.js";
 import { addRange } from "../src/lib/sscc-pool.js";
 import { WorkScreen, type WorkScreenProps } from "../src/pages/WorkScreen.js";
+import * as palletSheets from "../src/lib/pallet-sheet-printing.js";
+import { createCredentialGeneration } from "../src/lib/credential-recovery.js";
 
 /**
  * This test file predates neither the interfaces nor the RU/EN copy it
@@ -34,6 +36,7 @@ beforeAll(async () => {
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
 });
 
 function makeExec(): SqlExecutor {
@@ -370,6 +373,97 @@ describe("PalletContents", () => {
 });
 
 describe("PalletClose", () => {
+  it.each(["delivery_unknown", "sent", "geometry_mismatch", "driver_failure"])(
+    "classifies retained A4 failure %s without an automatic resend",
+    async (failure) => {
+      const exec = makeExec();
+      await seedShift(exec, {
+        shiftId: "s1",
+        palletBoxCapacity: 12,
+        palletLabelTemplateSpec: PALLET_LABEL_SPEC,
+      });
+      await seedPallet(exec, {
+        palletId: "p1",
+        shiftId: "s1",
+        terminalId: "dev-1",
+        boxCount: 3,
+        closedAt: "2026-07-29T09:20:00.000Z",
+        sscc: "103460068200000099",
+        printState: "pending",
+        printErrorCode: "transport_failed",
+      });
+      const send = vi
+        .spyOn(palletSheets, "printPalletSheet")
+        .mockRejectedValue(new Error("PRINT_DELIVERY_REQUIRES_RECOVERY"));
+      await exec.run(
+        "INSERT INTO printer_deliveries(scope,purpose,job_id,attempt_id,state,profile_json,artifact_digest,artifact_base64,document_name,error_code,updated_at) VALUES(?,'pallet',?,'old',?,'{}',?,'gA==','doc',?,'now')",
+        [
+          JSON.stringify(["s1", "dev-1"]),
+          "103460068200000099",
+          failure === "delivery_unknown" || failure === "sent" ? failure : "failed_before_send",
+          "a".repeat(64),
+          failure,
+        ],
+      );
+      const profile = {
+        id: "office",
+        name: "Office",
+        mode: "windows_driver" as const,
+        paper: "a4" as const,
+        dpi: 300 as const,
+        language: "zpl" as const,
+        target: { kind: "usb" as const, printer: "Queue" },
+      };
+      render(
+        <WorkScreen
+          exec={exec}
+          shiftId="s1"
+          terminalId="dev-1"
+          tenantId="tenant"
+          operatorId="operator-1"
+          credentialGeneration={createCredentialGeneration("test-a4-key")}
+          verifyPrintedLabel={false}
+          expectedGtin14="04600000000015"
+          productName="Water"
+          source={manualSource()}
+          sound={{ muted: true, volume: 1 }}
+          onExit={() => {}}
+          pendingSync={0}
+          issuerPrefix={TEST_ISSUER_PREFIX}
+          boxCapacity={null}
+          palletBoxCapacity={12}
+          palletPrinting={{ ...profile, profile, print: async () => {} }}
+        />,
+      );
+      fireEvent.click(await screen.findByRole("button", { name: i18n.t("pallet.retry") }));
+      if (failure !== "delivery_unknown" && failure !== "sent") {
+        await screen.findByText(
+          i18n.t(
+            failure === "geometry_mismatch"
+              ? "palletSheet.geometryMismatch"
+              : "palletSheet.layoutFailed",
+          ),
+        );
+        expect(screen.queryByText(i18n.t("palletSheet.unknown"))).toBeNull();
+        expect(screen.queryByRole("button", { name: i18n.t("pallet.confirmPrinted") })).toBeNull();
+        expect(send).toHaveBeenCalledTimes(1);
+        return;
+      }
+      const confirm = await screen.findByRole("button", { name: i18n.t("pallet.confirmPrinted") });
+      expect(send).toHaveBeenCalledTimes(1);
+      fireEvent.click(confirm);
+      await waitFor(async () =>
+        expect(
+          (
+            await exec.all<{ print_verified_at: string | null }>(
+              "SELECT print_verified_at FROM pallets_mirror WHERE pallet_id='p1'",
+            )
+          )[0]?.print_verified_at,
+        ).toBeTruthy(),
+      );
+      expect(send).toHaveBeenCalledTimes(1);
+    },
+  );
   const SSCC = "103460068200000004";
 
   it("names the pallet and its SSCC while its label is printing", () => {

@@ -117,21 +117,111 @@ test("ignores secret-shaped prose in commits outside the Station release scope",
   assert.doesNotMatch(notes, /API key/);
 });
 
-test("still rejects secret-shaped prose in Station release entries", () => {
-  assert.throws(
-    () =>
-      buildStableChangelog(
-        validInput({
-          entries: [
-            {
-              ...validInput().entries[0],
-              body: "Document the API key header.",
-            },
-          ],
-        }),
-      ),
-    /invalid station stable changelog/,
+test("allows credential prose in the unpublished body of a Station release entry", () => {
+  // The body of an ordinary commit never reaches the notes: #641 named the
+  // X-Api-Key header there and blocked the 2.1.0 stable release.
+  const notes = buildStableChangelog(
+    validInput({
+      entries: [
+        {
+          ...validInput().entries[0],
+          body: "A POST-only route that requires X-Api-Key.\nDocument the API key header and pairing_code.",
+        },
+      ],
+    }),
   );
+  assert.match(notes, /feat\(station\): add scan queue/);
+  assert.doesNotMatch(notes, /api[_ -]?key|pairing_code/i);
+});
+
+test("allows bare credential markers in the unpublished body of a Station release entry", () => {
+  const notes = buildStableChangelog(
+    validInput({
+      entries: [
+        {
+          ...validInput().entries[0],
+          body: "Token formats (ghp_, github_pat_, TAURI_SIGNING_PRIVATE_KEY) are checked. Only the subject is published.",
+        },
+      ],
+    }),
+  );
+  assert.match(notes, /feat\(station\): add scan queue/);
+  assert.doesNotMatch(notes, /ghp_|github_pat_|TAURI_SIGNING_PRIVATE_KEY/);
+});
+
+test("still rejects credential values anywhere in a Station release entry", () => {
+  for (const token of [
+    "ghp_example",
+    "github_pat_example",
+    "TAURI_SIGNING_PRIVATE_KEY=synthetic-key",
+  ]) {
+    for (const entry of [
+      { ...validInput().entries[0], body: `Leaked ${token} by mistake.` },
+      { ...validInput().entries[0], subject: `feat(station): add ${token}` },
+      {
+        sha: "1".repeat(40),
+        subject: `Merge pull request #42 from example/${token}`,
+        body: "\nfeat(station): add scanner recovery (#42)",
+        files: ["apps/station/src/scanner.ts"],
+      },
+    ]) {
+      assert.throws(
+        () => buildStableChangelog(validInput({ entries: [entry] })),
+        /invalid station stable changelog/,
+        `${token}: ${entry.subject}`,
+      );
+    }
+  }
+});
+
+test("rejects bare credential markers in every published display line", () => {
+  for (const marker of ["ghp_", "github_pat_", "TAURI_SIGNING_PRIVATE_KEY"]) {
+    for (const entry of [
+      { ...validInput().entries[0], subject: `feat(station): document ${marker}` },
+      {
+        ...validInput().entries[0],
+        subject: "Merge pull request #42 from example/scan",
+        body: `fix(station): document ${marker}\n\nDetails`,
+      },
+    ]) {
+      assert.throws(
+        () => buildStableChangelog(validInput({ entries: [entry] })),
+        /invalid station stable changelog/,
+      );
+    }
+  }
+});
+
+test("rejects quoted and multiline signing key assignments in unpublished bodies", () => {
+  for (const body of [
+    '"TAURI_SIGNING_PRIVATE_KEY": "synthetic-key"',
+    "'TAURI_SIGNING_PRIVATE_KEY'=synthetic-key",
+    "`TAURI_SIGNING_PRIVATE_KEY` = synthetic-key",
+    "TAURI_SIGNING_PRIVATE_KEY:\nsynthetic-key",
+  ]) {
+    assert.throws(
+      () => buildStableChangelog(validInput({ entries: [{ ...validInput().entries[0], body }] })),
+      /invalid station stable changelog/,
+    );
+  }
+});
+
+test("still rejects credential prose in the published line of a Station release entry", () => {
+  for (const entry of [
+    { ...validInput().entries[0], subject: "feat(station): send the API key on pairing" },
+    {
+      sha: "1".repeat(40),
+      subject: "Merge pull request #42 from example/scan",
+      body: "\nfeat(station): print the pairing_code on the card (#42)\n\nDetails",
+      files: ["apps/station/src/scanner.ts"],
+    },
+  ]) {
+    assert.throws(
+      () => buildStableChangelog(validInput({ entries: [entry] })),
+      /invalid station stable changelog/,
+      entry.subject,
+    );
+  }
 });
 
 test("recognizes only the reviewed Station release scope", () => {

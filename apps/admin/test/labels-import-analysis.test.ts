@@ -48,6 +48,15 @@ const JSON_SPEC = {
 const ZPL = ["^XA", "^PW464", "^LL320", "^FO40,40^A0N,34,34^FDПартия^FS", "^XZ"].join("\n");
 
 describe("analyzeImport", () => {
+  it("never strips an unsupported version into an otherwise valid V1 model", () => {
+    const result = analyzeImport({
+      source: JSON.stringify({ ...JSON_SPEC, schemaVersion: 3, kind: "pallet_sheet" }),
+      format: "json",
+      dpi: 203,
+      purpose: "pallet",
+    });
+    expect(result.ok).toBe(false);
+  });
   it("parses JSON with the label's own dpi and language and keeps the elements", () => {
     const outcome = analyzeImport({
       source: JSON.stringify(JSON_SPEC),

@@ -212,8 +212,8 @@ JSON и останавливает ворота.
 Для Admin основатель открывает ту же смену в видимом tenant и сохраняет снимок
 поля даты как `admin-production-date.png`. Для Station он привязывает строку
 матрицы к `manifest.customer`, `manifest.device.id` и shift ID, закрывает Station,
-проверяет существование
-`%APPDATA%\app.markiro.station\station-mirror.db`, запускает команду
+проверяет существование базы по пути из «Данных станции» в Центре обновлений
+(обычно `%LOCALAPPDATA%\app.markiro.station\station-mirror.db`), запускает команду
 `evidence:station-date` из README и затем снова открывает Station. Диагностика
 читает только `id` и `production_date`, требует одну строку и не перезаписывает
 существующий JSON.

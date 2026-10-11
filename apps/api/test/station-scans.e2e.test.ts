@@ -463,6 +463,375 @@ describe.skipIf(!ready)("station-scans e2e", () => {
     ]);
   });
 
+  /**
+   * One closed single-item station box plus the tenant's handheld, which may
+   * later put that box on a warehouse pallet. `stationPallet` is how the
+   * station's own pallet reached the server: not at all, linked by the box
+   * closure, or closed while the box closure carried no link.
+   */
+  async function palletReconciliationFixture(
+    serial: number,
+    stationPallet: "none" | "linked" | "unlinked",
+  ) {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const handheld = await createTestStationDevice(app!, agent, "TSD-1", { kind: "handheld" });
+    const shiftId = await openShift(agent);
+    const boxId = `reconcile-${randomUUID()}`;
+    const palletId = `pallet-${randomUUID()}`;
+    const sscc = buildSscc(0, "034600682", serial);
+    const closedAt = "2026-09-23T00:03:00.000Z";
+    const scan = item(shiftId, 1, { boxId });
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", apiKey)
+      .send({
+        batchId: `reconcile-${randomUUID()}`,
+        items: [scan],
+        boxes: [
+          {
+            boxId,
+            shiftId,
+            terminalId: "t1",
+            sscc,
+            closedAt,
+            operatorId: null,
+            ...(stationPallet === "linked" ? { devicePalletId: palletId } : {}),
+          },
+        ],
+        pallets:
+          stationPallet === "none"
+            ? []
+            : [
+                {
+                  palletId,
+                  shiftId,
+                  terminalId: "t1",
+                  sscc: buildSscc(1, "034600682", serial),
+                  closedAt,
+                  operatorId: null,
+                  printVerifiedAt: null,
+                  printSkippedAt: null,
+                },
+              ],
+      })
+      .expect(201);
+    return {
+      tenantId,
+      apiKey,
+      handheldKey: handheld.apiKey,
+      shiftId,
+      boxId,
+      palletId,
+      sscc,
+      fact: {
+        shiftId,
+        boxId,
+        sscc,
+        closedAt,
+        devicePalletId: stationPallet === "none" ? null : palletId,
+        itemCount: 1,
+        membershipDigest: boxMembershipDigestV1([scan.code!.codeHash]),
+        digestVersion: 1,
+      },
+    };
+  }
+
+  async function putOnWarehousePallet(handheldKey: string, boxSscc: string) {
+    const response = await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", handheldKey)
+      .send({
+        batchId: `warehouse-${randomUUID()}`,
+        items: [],
+        palletMemberships: [
+          { palletId: "w1", boxSscc, addedAt: "2026-09-24T08:00:00.000Z", operatorId: null },
+        ],
+      })
+      .expect(201);
+    return response.body.memberships as unknown;
+  }
+
+  async function reconcileBox(apiKey: string, fact: Record<string, unknown>) {
+    const response = await request(app!.getHttpServer())
+      .post("/station/boxes/reconciliation")
+      .set("x-api-key", apiKey)
+      .send({ boxes: [fact] })
+      .expect(200);
+    return response.body.results as unknown;
+  }
+
+  async function serverPalletLink(tenantId: string, boxId: string) {
+    const [row] = await db
+      .select({
+        palletId: schema.boxes.palletId,
+        palletKind: schema.pallets.kind,
+        registryVersion: schema.boxes.registryVersion,
+      })
+      .from(schema.boxes)
+      .leftJoin(
+        schema.pallets,
+        and(
+          eq(schema.pallets.tenantId, schema.boxes.tenantId),
+          eq(schema.pallets.id, schema.boxes.palletId),
+        ),
+      )
+      .where(and(eq(schema.boxes.tenantId, tenantId), eq(schema.boxes.deviceBoxId, boxId)));
+    return row;
+  }
+
+  it("confirms a pallet-less box that a handheld later put on a warehouse pallet", async () => {
+    const box = await palletReconciliationFixture(1590, "none");
+    expect(await putOnWarehousePallet(box.handheldKey, box.sscc)).toEqual([
+      { palletId: "w1", boxSscc: box.sscc, status: "accepted" },
+    ]);
+    const aggregated = await serverPalletLink(box.tenantId, box.boxId);
+    expect(aggregated?.palletKind).toBe("warehouse");
+
+    expect(await reconcileBox(box.apiKey, box.fact)).toEqual([
+      { boxId: box.boxId, status: "confirmed", reasonCode: "matched", serverItemCount: 1 },
+    ]);
+    expect(await serverPalletLink(box.tenantId, box.boxId)).toEqual(aggregated);
+  });
+
+  it("confirms a box moved to a warehouse pallet after its station pallet was taken apart", async () => {
+    const box = await palletReconciliationFixture(1591, "linked");
+    await request(app!.getHttpServer())
+      .post("/station/scans")
+      .set("x-api-key", box.apiKey)
+      .send({
+        batchId: `disassemble-${randomUUID()}`,
+        items: [],
+        palletExceptions: [
+          {
+            kind: "disassemble",
+            palletId: box.palletId,
+            shiftId: box.shiftId,
+            terminalId: "t1",
+            operatorId: null,
+            reason: "Пересборка на складе",
+            occurredAt: "2026-09-24T07:00:00.000Z",
+          },
+        ],
+      })
+      .expect(201);
+    expect(await putOnWarehousePallet(box.handheldKey, box.sscc)).toEqual([
+      { palletId: "w1", boxSscc: box.sscc, status: "accepted" },
+    ]);
+    const moved = await serverPalletLink(box.tenantId, box.boxId);
+    expect(moved?.palletKind).toBe("warehouse");
+
+    expect(await reconcileBox(box.apiKey, box.fact)).toEqual([
+      { boxId: box.boxId, status: "confirmed", reasonCode: "matched", serverItemCount: 1 },
+    ]);
+    expect(await serverPalletLink(box.tenantId, box.boxId)).toEqual(moved);
+  });
+
+  it("keeps a pallet conflict when no later aggregation explains the other link", async () => {
+    // The station reports no pallet, yet its own closure linked the box to one.
+    const linked = await palletReconciliationFixture(1592, "linked");
+    expect(await reconcileBox(linked.apiKey, { ...linked.fact, devicePalletId: null })).toEqual([
+      {
+        boxId: linked.boxId,
+        status: "identity_conflict",
+        reasonCode: "pallet_conflict",
+        serverItemCount: 1,
+      },
+    ]);
+
+    // The station's pallet still stands, but the box it names went onto a
+    // warehouse pallet while the server had no link for it.
+    const standing = await palletReconciliationFixture(1593, "unlinked");
+    expect(await putOnWarehousePallet(standing.handheldKey, standing.sscc)).toEqual([
+      { palletId: "w1", boxSscc: standing.sscc, status: "accepted" },
+    ]);
+    const aggregated = await serverPalletLink(standing.tenantId, standing.boxId);
+    expect(await reconcileBox(standing.apiKey, standing.fact)).toEqual([
+      {
+        boxId: standing.boxId,
+        status: "identity_conflict",
+        reasonCode: "pallet_conflict",
+        serverItemCount: 1,
+      },
+    ]);
+    expect(await serverPalletLink(standing.tenantId, standing.boxId)).toEqual(aggregated);
+  });
+
+  /**
+   * A station box of two codes and what the operator does next with the same
+   * two codes: releases them at 10:04 and scans them again at 10:05. Each test
+   * decides how those facts are split into sync batches.
+   */
+  async function repackFixture(serial: number) {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    const apiKey = await deviceKey(agent);
+    const shiftId = await openShift(agent);
+    const oldBox = `repack-old-${randomUUID()}`;
+    const newBox = `repack-new-${randomUUID()}`;
+    const oldSscc = buildSscc(0, "034600682", serial);
+    const newSscc = buildSscc(0, "034600682", serial + 1);
+    const post = async (body: Record<string, unknown>) =>
+      request(app!.getHttpServer())
+        .post("/station/scans")
+        .set("x-api-key", apiKey)
+        .send({ batchId: `repack-${randomUUID()}`, items: [], ...body })
+        .expect(201);
+    const closure = (boxId: string, sscc: string, closedAt: string) => ({
+      boxId,
+      shiftId,
+      terminalId: "t1",
+      sscc,
+      closedAt,
+      operatorId: null,
+    });
+    const release = (kind: "clear" | "disassemble", boxId: string) => ({
+      kind,
+      boxId,
+      codeHash: null,
+      shiftId,
+      terminalId: "t1",
+      operatorId: null,
+      reason: kind === "disassemble" ? "Пересборка" : null,
+      occurredAt: "2026-07-28T10:04:00.000Z",
+    });
+    const rescan = (boxId: string) =>
+      [1, 2].map((n) => item(shiftId, n, { boxId, scannedAt: `2026-07-28T10:05:0${n}.000Z` }));
+    const fact = (boxId: string, sscc: string, scans: ScanItemDto[]) => ({
+      shiftId,
+      boxId,
+      sscc,
+      closedAt: "2026-07-28T10:06:00.000Z",
+      devicePalletId: null,
+      itemCount: scans.length,
+      membershipDigest: boxMembershipDigestV1(scans.map((scan) => scan.code!.codeHash)),
+      digestVersion: 1,
+    });
+    /** Both codes are held by their re-scans, as if the release had come first. */
+    const expectHeldBy = async (
+      delivered: { body: { conflicts?: unknown } },
+      boxId: string,
+      sscc: string,
+    ) => {
+      expect(delivered.body.conflicts).toEqual([]);
+      const scans = rescan(boxId);
+      const owners = await Promise.all(
+        scans.map((scan) => registryOwner(tenantId, scan.code!.codeHash)),
+      );
+      expect(owners.map((owner) => owner?.scannedAt.toISOString())).toEqual(
+        scans.map((scan) => scan.scannedAt),
+      );
+      expect(await reconcileBox(apiKey, fact(boxId, sscc, scans))).toEqual([
+        { boxId, status: "confirmed", reasonCode: "matched", serverItemCount: 2 },
+      ]);
+    };
+    return {
+      tenantId,
+      apiKey,
+      shiftId,
+      oldBox,
+      newBox,
+      oldSscc,
+      newSscc,
+      post,
+      closure,
+      release,
+      rescan,
+      fact,
+      expectHeldBy,
+      packed: [1, 2].map((n) => item(shiftId, n, { boxId: oldBox })),
+    };
+  }
+
+  it("keeps codes re-packed in the same batch that takes their old box apart", async () => {
+    const box = await repackFixture(1600);
+    await box.post({
+      items: box.packed,
+      boxes: [box.closure(box.oldBox, box.oldSscc, "2026-07-28T10:01:00.000Z")],
+    });
+    const delivered = await box.post({
+      exceptions: [box.release("disassemble", box.oldBox)],
+      items: box.rescan(box.newBox),
+      boxes: [box.closure(box.newBox, box.newSscc, "2026-07-28T10:06:00.000Z")],
+    });
+    await box.expectHeldBy(delivered, box.newBox, box.newSscc);
+  });
+
+  it("keeps codes packed, taken apart and re-packed within one offline batch", async () => {
+    const box = await repackFixture(1602);
+    const delivered = await box.post({
+      items: [...box.packed, ...box.rescan(box.newBox)],
+      boxes: [
+        box.closure(box.oldBox, box.oldSscc, "2026-07-28T10:01:00.000Z"),
+        box.closure(box.newBox, box.newSscc, "2026-07-28T10:06:00.000Z"),
+      ],
+      exceptions: [box.release("disassemble", box.oldBox)],
+    });
+    await box.expectHeldBy(delivered, box.newBox, box.newSscc);
+  });
+
+  it("keeps codes scanned again into the box the same batch cleared", async () => {
+    const box = await repackFixture(1604);
+    await box.post({ items: box.packed });
+    const delivered = await box.post({
+      exceptions: [box.release("clear", box.oldBox)],
+      items: box.rescan(box.oldBox),
+      boxes: [box.closure(box.oldBox, box.oldSscc, "2026-07-28T10:06:00.000Z")],
+    });
+    await box.expectHeldBy(delivered, box.oldBox, box.oldSscc);
+  });
+
+  it("keeps codes re-packed after their old box's disassembly was delivered", async () => {
+    const box = await repackFixture(1606);
+    await box.post({
+      items: box.packed,
+      boxes: [box.closure(box.oldBox, box.oldSscc, "2026-07-28T10:01:00.000Z")],
+    });
+    await box.post({ exceptions: [box.release("disassemble", box.oldBox)] });
+    const delivered = await box.post({
+      items: box.rescan(box.newBox),
+      boxes: [box.closure(box.newBox, box.newSscc, "2026-07-28T10:06:00.000Z")],
+    });
+    await box.expectHeldBy(delivered, box.newBox, box.newSscc);
+  });
+
+  it("does not revive a re-scan that the same batch undoes", async () => {
+    const box = await repackFixture(1608);
+    await box.post({
+      items: box.packed,
+      boxes: [box.closure(box.oldBox, box.oldSscc, "2026-07-28T10:01:00.000Z")],
+    });
+    const [undone, kept] = box.rescan(box.newBox) as [ScanItemDto, ScanItemDto];
+    const delivered = await box.post({
+      exceptions: [
+        box.release("disassemble", box.oldBox),
+        {
+          kind: "undo",
+          boxId: box.newBox,
+          codeHash: undone.code!.codeHash,
+          targetScannedAt: undone.scannedAt,
+          shiftId: box.shiftId,
+          terminalId: "t1",
+          operatorId: null,
+          reason: null,
+          occurredAt: "2026-07-28T10:05:30.000Z",
+        },
+      ],
+      items: [undone, kept],
+      boxes: [box.closure(box.newBox, box.newSscc, "2026-07-28T10:06:00.000Z")],
+    });
+
+    expect(delivered.body.conflicts).toEqual([]);
+    expect(await registryOwner(box.tenantId, undone.code!.codeHash)).toBeUndefined();
+    expect((await registryOwner(box.tenantId, kept.code!.codeHash))?.scannedAt.toISOString()).toBe(
+      kept.scannedAt,
+    );
+    expect(await reconcileBox(box.apiKey, box.fact(box.newBox, box.newSscc, [kept]))).toEqual([
+      { boxId: box.newBox, status: "confirmed", reasonCode: "matched", serverItemCount: 1 },
+    ]);
+  });
+
   it("does not expose another station's box or accept a cabinet session", async () => {
     const agent = request.agent(app!.getHttpServer());
     await signUpAndActivate(agent);

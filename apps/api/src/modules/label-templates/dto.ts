@@ -1,10 +1,14 @@
 import { z } from "zod";
-import type { SchemaObject } from "@nestjs/swagger";
+import { ApiProperty, type SchemaObject } from "@nestjs/swagger";
 import {
   DomainError,
   labelTemplateSpecSchema,
-  parseLabelTemplate,
-  type LabelTemplateSpec,
+  parseStoredLabelTemplate,
+  isPalletSheetSpec,
+  palletSheetSpecSchema,
+  sheetNodeSchema,
+  type SheetNode,
+  type StoredLabelTemplateSpec,
   type LabelTemplatePurpose,
 } from "@markiro/domain";
 import { zodApiSchema } from "../../lib/openapi";
@@ -20,9 +24,11 @@ import { zodApiSchema } from "../../lib/openapi";
  * overall regardless of this return value once ctx.addIssue has been
  * called), or the parsed, typed spec otherwise.
  */
-function parseSpecOrAddIssues(spec: unknown, ctx: z.RefinementCtx): LabelTemplateSpec {
+function parseSpecOrAddIssues(spec: unknown, ctx: z.RefinementCtx): StoredLabelTemplateSpec {
   try {
-    return parseLabelTemplate(spec);
+    if (Buffer.byteLength(JSON.stringify(spec) ?? "", "utf8") > 256 * 1024)
+      throw new DomainError("LABEL_CODE_TOO_LARGE", "Template JSON exceeds 256 KiB");
+    return parseStoredLabelTemplate(spec);
   } catch (error) {
     if (!(error instanceof DomainError)) {
       throw error;
@@ -57,6 +63,7 @@ function parseSpecOrAddIssues(spec: unknown, ctx: z.RefinementCtx): LabelTemplat
  * `LabelTemplatesService.updateLabelTemplate` still refuses to change an
  * existing template's purpose at all.
  */
+const formatSchema = z.enum(["label_v1", "pallet_sheet_v2"]);
 const purposeSchema = z.enum(["box", "product_duplicate", "pallet"]);
 
 /** Non-empty, duplicate-free ЧЗ product-group codes; `null` means every category. */
@@ -80,16 +87,33 @@ export const createLabelTemplateSchema = z
     name: z.string().min(1).max(200),
     spec: z.unknown(),
     purpose: purposeSchema.default("box"),
+    format: formatSchema.optional(),
     enabled: z.boolean().optional(),
     chzProductGroupCodes: productGroupCodesSchema.optional(),
   })
-  .transform((data, ctx) => ({
-    name: data.name,
-    purpose: data.purpose,
-    spec: parseSpecOrAddIssues(data.spec, ctx),
-    enabled: data.enabled ?? true,
-    chzProductGroupCodes: data.chzProductGroupCodes ?? null,
-  }));
+  .transform((data, ctx) => {
+    const spec = parseSpecOrAddIssues(data.spec, ctx);
+    const format: "label_v1" | "pallet_sheet_v2" = isPalletSheetSpec(spec)
+      ? "pallet_sheet_v2"
+      : "label_v1";
+    if (data.format !== undefined && data.format !== format)
+      ctx.addIssue({ code: "custom", path: ["format"], message: "Format does not match spec" });
+    if (format === "pallet_sheet_v2" && data.purpose !== "pallet")
+      ctx.addIssue({
+        code: "custom",
+        path: ["purpose"],
+        message: "A4 sheets are pallet templates",
+      });
+    return {
+      name: data.name,
+      purpose: data.purpose,
+      spec,
+      format,
+      enabled: data.enabled ?? true,
+      chzProductGroupCodes: data.chzProductGroupCodes ?? null,
+    };
+  });
+
 export type CreateLabelTemplateDto = z.infer<typeof createLabelTemplateSchema>;
 
 /** PATCH /label-templates/:id schema -- partial update, preserves untouched fields. */
@@ -98,6 +122,8 @@ export const updateLabelTemplateSchema = z
     name: z.string().min(1).max(200).optional(),
     spec: z.unknown().optional(),
     purpose: purposeSchema.optional(),
+    format: formatSchema.optional(),
+    expectedRevision: z.number().int().positive().optional(),
     enabled: z.boolean().optional(),
     chzProductGroupCodes: productGroupCodesSchema.optional(),
   })
@@ -105,10 +131,14 @@ export const updateLabelTemplateSchema = z
     const result: {
       name?: string;
       purpose?: LabelTemplatePurpose;
-      spec?: LabelTemplateSpec;
+      spec?: StoredLabelTemplateSpec;
+      format?: "label_v1" | "pallet_sheet_v2";
+      expectedRevision?: number;
       enabled?: boolean;
       chzProductGroupCodes?: number[] | null;
     } = {};
+    if (data.format !== undefined) result.format = data.format;
+    if (data.expectedRevision !== undefined) result.expectedRevision = data.expectedRevision;
     if (data.name !== undefined) result.name = data.name;
     if (data.purpose !== undefined) result.purpose = data.purpose;
     if (data.spec !== undefined) result.spec = parseSpecOrAddIssues(data.spec, ctx);
@@ -125,7 +155,9 @@ export interface LabelTemplateDto {
   purpose: LabelTemplatePurpose;
   id: string;
   name: string;
-  spec: LabelTemplateSpec;
+  spec: StoredLabelTemplateSpec;
+  format?: "label_v1" | "pallet_sheet_v2";
+  revision?: number;
   enabled: boolean;
   /** `null` means every category; otherwise ЧЗ product-group codes. */
   chzProductGroupCodes: number[] | null;
@@ -134,7 +166,7 @@ export interface LabelTemplateDto {
 }
 
 /** Projected summary DTO for the list endpoint -- avoids shipping full specs to the library screen. */
-export interface LabelTemplateSummaryDto {
+export interface LegacyLabelTemplateSummaryDto {
   purpose: LabelTemplatePurpose;
   id: string;
   name: string;
@@ -142,10 +174,25 @@ export interface LabelTemplateSummaryDto {
   heightMm: number;
   dpi: 203 | 300;
   language: "zpl" | "tspl";
+  format?: "label_v1";
+  revision?: number;
   enabled: boolean;
   chzProductGroupCodes: number[] | null;
   updatedAt: Date;
 }
+export interface PalletSheetTemplateSummaryDto {
+  purpose: "pallet";
+  id: string;
+  name: string;
+  format: "pallet_sheet_v2";
+  revision: number;
+  page: { size: "A4"; orientation: "portrait" | "landscape"; copies: 1 | 2 };
+  dpi: 300;
+  enabled: boolean;
+  chzProductGroupCodes: number[] | null;
+  updatedAt: Date;
+}
+export type LabelTemplateSummaryDto = LegacyLabelTemplateSummaryDto | PalletSheetTemplateSummaryDto;
 
 /** GET /label-templates response. */
 export interface ListLabelTemplatesResponseDto {
@@ -193,6 +240,8 @@ export const labelTemplateOpenApiSchema: SchemaObject = {
     id: uuidSchema,
     name: { type: "string", minLength: 1, maxLength: 200 },
     spec: labelTemplateSpecOpenApiSchema,
+    format: { type: "string", enum: ["label_v1"] },
+    revision: { type: "integer", minimum: 1 },
     purpose: { type: "string", enum: ["box", "product_duplicate", "pallet"] },
     enabled: { type: "boolean" },
     chzProductGroupCodes: productGroupCodesOpenApiSchema,
@@ -219,6 +268,8 @@ export const labelTemplateSummaryOpenApiSchema: SchemaObject = {
   properties: {
     id: uuidSchema,
     name: { type: "string", minLength: 1, maxLength: 200 },
+    format: { type: "string", enum: ["label_v1"] },
+    revision: { type: "integer", minimum: 1 },
     widthMm: { type: "number", minimum: 10, maximum: 300 },
     heightMm: { type: "number", minimum: 10, maximum: 300 },
     dpi: {
@@ -253,3 +304,112 @@ export const listLabelTemplatesOpenApiSchema: SchemaObject = {
   required: ["items"],
   properties: { items: { type: "array", items: labelTemplateSummaryOpenApiSchema } },
 };
+
+/** The recursive node schema lives in a registered component. Inline JSON Schema
+ * definitions would otherwise point outside the enclosing OpenAPI document. */
+export class PalletSheetNodeDocument {
+  declare value: SheetNode;
+}
+const nodeReference = "#/components/schemas/PalletSheetNodeDocument/properties/value";
+function sheetSchemaForOpenApi(schema: z.ZodType): SchemaObject {
+  const generated = zodApiSchema(schema);
+  Reflect.deleteProperty(generated, "definitions");
+  return JSON.parse(
+    JSON.stringify(generated)
+      .replaceAll('"$ref":"#/definitions/__schema0"', `"$ref":"${nodeReference}"`)
+      .replaceAll('"$ref":"#"', `"$ref":"${nodeReference}"`),
+  ) as SchemaObject;
+}
+ApiProperty({ oneOf: sheetSchemaForOpenApi(sheetNodeSchema).oneOf ?? [], type: Object })(
+  PalletSheetNodeDocument.prototype,
+  "value",
+);
+export const palletSheetOpenApiSchema = sheetSchemaForOpenApi(palletSheetSpecSchema);
+export const createStoredTemplateBodyOpenApiSchema: SchemaObject = {
+  ...zodApiSchema(createLabelTemplateSchema),
+  properties: {
+    ...zodApiSchema(createLabelTemplateSchema).properties,
+    spec: { oneOf: [labelTemplateSpecOpenApiSchema, palletSheetOpenApiSchema] },
+  },
+};
+export const updateStoredTemplateBodyOpenApiSchema: SchemaObject = {
+  ...zodApiSchema(updateLabelTemplateSchema),
+  properties: {
+    ...zodApiSchema(updateLabelTemplateSchema).properties,
+    spec: { oneOf: [labelTemplateSpecOpenApiSchema, palletSheetOpenApiSchema] },
+  },
+};
+export const storedLabelTemplateOpenApiSchema: SchemaObject = {
+  oneOf: [
+    labelTemplateOpenApiSchema,
+    {
+      ...labelTemplateOpenApiSchema,
+      required: [...(labelTemplateOpenApiSchema.required ?? []), "format", "revision"],
+      properties: {
+        ...labelTemplateOpenApiSchema.properties,
+        format: { type: "string", enum: ["pallet_sheet_v2"] },
+        revision: { type: "integer", minimum: 1 },
+        purpose: { type: "string", enum: ["pallet"] },
+        spec: palletSheetOpenApiSchema,
+      },
+    },
+  ],
+};
+export const storedLabelTemplatesListOpenApiSchema: SchemaObject = {
+  ...listLabelTemplatesOpenApiSchema,
+  properties: {
+    items: {
+      type: "array",
+      items: {
+        oneOf: [
+          labelTemplateSummaryOpenApiSchema,
+          {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "id",
+              "name",
+              "purpose",
+              "format",
+              "revision",
+              "page",
+              "dpi",
+              "enabled",
+              "chzProductGroupCodes",
+              "updatedAt",
+            ],
+            properties: {
+              id: uuidSchema,
+              name: { type: "string" },
+              purpose: { type: "string", enum: ["pallet"] },
+              format: { type: "string", enum: ["pallet_sheet_v2"] },
+              revision: { type: "integer", minimum: 1 },
+              page: {
+                type: "object",
+                required: ["size", "orientation", "copies"],
+                properties: {
+                  size: { type: "string", enum: ["A4"] },
+                  orientation: { type: "string", enum: ["portrait", "landscape"] },
+                  copies: { type: "integer", enum: [1, 2] },
+                },
+              },
+              dpi: { type: "integer", enum: [300] },
+              enabled: { type: "boolean" },
+              chzProductGroupCodes: productGroupCodesOpenApiSchema,
+              updatedAt: dateTimeSchema,
+            },
+          },
+        ],
+      },
+    },
+  },
+};
+export function supportsPalletSheets(header: unknown): boolean {
+  return (
+    typeof header === "string" &&
+    header
+      .split(",")
+      .map((s) => s.trim())
+      .includes("pallet-sheet-v2")
+  );
+}

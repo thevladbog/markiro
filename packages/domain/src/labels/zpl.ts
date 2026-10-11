@@ -1,3 +1,5 @@
+import { renderLabelLogo } from "./label-logo.js";
+import type { MonoBitmap } from "./mono-compose.js";
 import { DomainError } from "../errors.js";
 import { rasterizeGs1DataMatrix } from "../barcodes/gs1-data-matrix.js";
 import {
@@ -14,6 +16,7 @@ import {
 } from "./model.js";
 import { buildGfaCommand, rasterAlignOffsetDots, type RasterizeTextFn } from "./raster-types.js";
 import { needsImageRendering } from "./text.js";
+import { buildZplBox, buildZplDocument } from "./printer-commands.js";
 
 export { buildGfaCommand, rasterAlignOffsetDots } from "./raster-types.js";
 export type { RasterResult, RasterizeTextFn } from "./raster-types.js";
@@ -24,6 +27,7 @@ export { needsImageRendering } from "./text.js";
 
 export interface GenerateZplDeps {
   rasterizeText?: RasterizeTextFn;
+  logo?: MonoBitmap | null;
   /** Opt-in duplicate layout: sizeMm is the full symbol square, not a module size. */
   kmDataMatrix?: "native" | "raster";
 }
@@ -149,7 +153,11 @@ async function renderTextLikeElement(
   const x = mmToDots(element.xMm, spec.dpi);
   const y = mmToDots(element.yMm, spec.dpi);
 
-  if (needsImageRendering(text)) {
+  if (
+    needsImageRendering(text) ||
+    element.lineHeight !== undefined ||
+    element.fontFamily !== undefined
+  ) {
     if (!deps.rasterizeText) {
       throw new DomainError(
         "RASTER_REQUIRED",
@@ -169,7 +177,11 @@ async function renderTextLikeElement(
     // long Cyrillic product name prints off the right edge of the label
     // (`RasterizeTextOptions`'s doc comment has the full story).
     const raster = await deps.rasterizeText(text, {
-      fontFamily: "sans-serif",
+      fontFamily: element.fontFamily ?? "sans-serif",
+      ...(element.minFontSizePt === undefined
+        ? {}
+        : { minFontSizePx: ptToDots(element.minFontSizePt, spec.dpi) }),
+      ...(element.lineHeight === undefined ? {} : { lineHeight: element.lineHeight }),
       fontSizePx,
       bold: element.bold ?? false,
       maxWidthPx: maxWidthDots,
@@ -242,10 +254,11 @@ function barWidthCommand(element: LabelBarcodeElement, dpi: LabelTemplateSpec["d
   return `^BY${moduleDots}`;
 }
 
-function renderBarcodeElement(
+export function renderZplBarcodeElement(
   element: LabelBarcodeElement,
   data: Record<LabelField, string>,
   dpi: LabelTemplateSpec["dpi"],
+  options: { ean13IncludeText?: boolean } = {},
 ): string {
   const x = mmToDots(element.xMm, dpi);
   const y = mmToDots(element.yMm, dpi);
@@ -276,7 +289,7 @@ function renderBarcodeElement(
     case "ean13": {
       const heightDots = mmToDots(element.sizeMm, dpi);
       const { fh, data: escaped } = escapeFdData(value);
-      return `^FO${x},${y}${barWidthCommand(element, dpi)}^BEN,${heightDots}${fh}^FD${escaped}^FS`;
+      return `^FO${x},${y}${barWidthCommand(element, dpi)}^BEN,${heightDots}${options.ean13IncludeText === false ? ",N" : ""}${fh}^FD${escaped}^FS`;
     }
     case "datamatrix": {
       const moduleDots = mmToDots(element.sizeMm, dpi);
@@ -325,7 +338,7 @@ function renderLineElement(element: LabelLineElement, dpi: LabelTemplateSpec["dp
   const heightDots = Math.max(spanYDots, thicknessDots);
   const originXDots = mmToDots(Math.min(element.xMm, element.x2Mm), dpi);
   const originYDots = mmToDots(Math.min(element.yMm, element.y2Mm), dpi);
-  return `^FO${originXDots},${originYDots}^GB${widthDots},${heightDots},${thicknessDots}^FS`;
+  return buildZplBox(originXDots, originYDots, widthDots, heightDots, thicknessDots);
 }
 
 function renderBoxElement(element: LabelBoxElement, dpi: LabelTemplateSpec["dpi"]): string {
@@ -334,7 +347,7 @@ function renderBoxElement(element: LabelBoxElement, dpi: LabelTemplateSpec["dpi"
   const widthDots = mmToDots(element.widthMm, dpi);
   const heightDots = mmToDots(element.heightMm, dpi);
   const thicknessDots = mmToDots(element.thicknessMm, dpi);
-  return `^FO${x},${y}^GB${widthDots},${heightDots},${thicknessDots}^FS`;
+  return buildZplBox(x, y, widthDots, heightDots, thicknessDots);
 }
 
 /**
@@ -353,13 +366,19 @@ export async function generateZpl(
   const widthDots = mmToDots(spec.widthMm, spec.dpi);
   const heightDots = mmToDots(spec.heightMm, spec.dpi);
 
-  const lines: string[] = ["^XA", `^PW${widthDots}`, `^LL${heightDots}`];
+  const lines: string[] = [];
 
   // Sequential (not Promise.all): keeps element order deterministic in the
   // emitted document regardless of how fast/slow individual rasterizeText
   // calls resolve, and keeps a test double's call order predictable.
   for (const element of spec.elements) {
     switch (element.kind) {
+      case "organization_logo": {
+        if (!deps.logo) break; // Decorative: preserve the empty reserved space offline.
+        const { xDots, yDots, raster } = renderLabelLogo(element, spec.dpi, deps.logo);
+        lines.push(`^FO${xDots},${yDots}${buildGfaCommand(raster)}^FS`);
+        break;
+      }
       case "text":
         lines.push(await renderTextLikeElement(element, element.text, spec, deps));
         break;
@@ -387,7 +406,7 @@ export async function generateZpl(
             `^FO${mmToDots(element.xMm, spec.dpi)},${mmToDots(element.yMm, spec.dpi)}${buildGfaCommand(raster)}^FS`,
           );
         } else {
-          lines.push(renderBarcodeElement(element, data, spec.dpi));
+          lines.push(renderZplBarcodeElement(element, data, spec.dpi));
         }
         break;
       case "line":
@@ -399,6 +418,5 @@ export async function generateZpl(
     }
   }
 
-  lines.push("^XZ");
-  return lines.join("\n") + "\n";
+  return buildZplDocument(widthDots, heightDots, lines);
 }

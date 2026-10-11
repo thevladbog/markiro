@@ -5,6 +5,8 @@
  * (test/sqlite-schema.test.ts) applies these and round-trips a row to catch
  * drift. `drizzle.sqlite.config.ts` exists for regeneration parity only.
  */
+import { WAREHOUSE_REPRINT_SOURCE_MIGRATIONS } from "./warehouse-reprint-source-migrations.js";
+import { WAREHOUSE_REPRINT_MIGRATIONS } from "./warehouse-reprint-migrations.js";
 export const STATION_MIGRATIONS: string[] = [
   `CREATE TABLE IF NOT EXISTS station_meta (
      key TEXT PRIMARY KEY,
@@ -4793,6 +4795,292 @@ export const STATION_MIGRATIONS: string[] = [
      ON scan_events_mirror(shift_id,verdict);`,
   `CREATE INDEX IF NOT EXISTS codes_mirror_shift_idx
      ON codes_mirror(shift_id);`,
+  // A box taken apart is never reconciled again, so the issue it carried could
+  // never be confirmed away. Its retirement drops the issue in the same
+  // statement. IF NOT EXISTS for the reason station-sqlite-314 has it: the DROP
+  // and the CREATE can land on different pooled connections, and a plain
+  // CREATE parsed against a stale schema fails with "already exists" where IF
+  // NOT EXISTS re-prepares against the current schema and creates the trigger.
+  `DROP TRIGGER IF EXISTS box_exception_disassemble_local;`,
+  `CREATE TRIGGER IF NOT EXISTS box_exception_disassemble_local
+     AFTER INSERT ON box_exceptions_mirror
+     WHEN NEW.kind = 'disassemble'
+     BEGIN
+       DELETE FROM codes_mirror WHERE box_id = NEW.box_id;
+       UPDATE boxes_mirror SET disassembled_at = NEW.at WHERE box_id = NEW.box_id;
+       DELETE FROM box_reconciliation_issues WHERE box_id = NEW.box_id;
+     END;`,
+  // Issues an older station left on boxes it had already taken apart.
+  `DELETE FROM box_reconciliation_issues
+    WHERE box_id IN (SELECT box_id FROM boxes_mirror WHERE disassembled_at IS NOT NULL);`,
+  ...WAREHOUSE_REPRINT_MIGRATIONS,
+  `ALTER TABLE product_mirror ADD COLUMN chz_product_group_code INTEGER CHECK(chz_product_group_code IS NULL OR (typeof(chz_product_group_code)='integer' AND chz_product_group_code>=0));`,
+  `DROP TRIGGER IF EXISTS warehouse_reprint_safe_cleanup;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_safe_cleanup BEFORE DELETE ON warehouse_reprint_jobs BEGIN
+    SELECT RAISE(ABORT,'WAREHOUSE_RETENTION_BLOCKED') WHERE OLD.state NOT IN ('sent','verified')
+      OR EXISTS(SELECT 1 FROM warehouse_reprint_events WHERE owner=OLD.owner AND job_id=OLD.job_id AND receive_status<>'accepted')
+      OR NOT EXISTS(SELECT 1 FROM warehouse_reprint_sessions s WHERE s.owner=OLD.owner AND s.session_id=OLD.session_id AND s.status='paused'
+        AND s.rowid<(SELECT MAX(rowid) FROM warehouse_reprint_sessions WHERE owner=OLD.owner));
+    DELETE FROM warehouse_reprint_events WHERE owner=OLD.owner AND job_id=OLD.job_id;
+    DELETE FROM warehouse_reprint_attempts WHERE owner=OLD.owner AND job_id=OLD.job_id;
+    DELETE FROM printer_destinations WHERE scope=OLD.owner AND job_id=OLD.job_id AND purpose=CASE OLD.source_kind WHEN 'box' THEN 'box' ELSE 'duplicate' END;
+  END;`,
+  ...WAREHOUSE_REPRINT_SOURCE_MIGRATIONS,
+  `CREATE TABLE IF NOT EXISTS warehouse_reprint_history_acknowledgements (
+    owner TEXT NOT NULL, event_id TEXT NOT NULL, digest TEXT NOT NULL,
+    rejection_code TEXT NOT NULL, operator_id TEXT NOT NULL, acknowledged_at TEXT NOT NULL,
+    PRIMARY KEY(owner,event_id),
+    FOREIGN KEY(owner,event_id) REFERENCES warehouse_reprint_events(owner,event_id) ON DELETE CASCADE);`,
+  `ALTER TABLE warehouse_reprint_local_boxes ADD COLUMN group_override_json TEXT;`,
+  `CREATE INDEX IF NOT EXISTS warehouse_reprint_jobs_source_idx ON warehouse_reprint_jobs(owner,source_kind,identity);`,
+  `ALTER TABLE warehouse_reprint_local_boxes ADD COLUMN cached_at TEXT NOT NULL DEFAULT '';`,
+  // Unknown historical ages start at the upgrade; never rewrite original fields.
+  `UPDATE warehouse_reprint_local_boxes SET cached_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE cached_at='';`,
+  `CREATE INDEX IF NOT EXISTS warehouse_reprint_local_boxes_retention_idx ON warehouse_reprint_local_boxes(owner,cached_at);`,
+  `CREATE INDEX IF NOT EXISTS inventory_repack_boxes_mirror_reprint_source_idx ON inventory_repack_boxes_mirror(box_id,new_sscc);`,
+  // Finishing is a separate durable fact: legacy active/paused JSON stays valid,
+  // and navigation cleanup cannot turn a completed session into resumable work.
+  `CREATE TABLE IF NOT EXISTS warehouse_reprint_session_closures (
+    owner TEXT NOT NULL, session_id TEXT NOT NULL, operator_id TEXT NOT NULL,
+    closed_at TEXT NOT NULL, PRIMARY KEY(owner,session_id),
+    FOREIGN KEY(owner,session_id) REFERENCES warehouse_reprint_sessions(owner,session_id));`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_session_close_guard
+    BEFORE INSERT ON warehouse_reprint_session_closures
+    WHEN NOT EXISTS(SELECT 1 FROM warehouse_reprint_session_closures
+      WHERE owner=NEW.owner AND session_id=NEW.session_id) BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_OPERATOR_DENIED') WHERE NOT EXISTS(
+        SELECT 1 FROM operators_mirror WHERE operator_id=NEW.operator_id AND active=1);
+      SELECT RAISE(ABORT,'WAREHOUSE_RECOVERY_REQUIRED') WHERE EXISTS(
+        SELECT 1 FROM warehouse_reprint_jobs j
+        WHERE (j.owner=NEW.owner OR j.owner IN (
+          SELECT related.credential_hash FROM station_device_owners related
+          JOIN station_device_owners original ON original.owner_json=related.owner_json
+          WHERE original.credential_hash=NEW.owner))
+        AND j.state IN ('prepared','sending','delivery_unknown','failed_before_send'));
+    END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_session_closure_no_update
+    BEFORE UPDATE ON warehouse_reprint_session_closures BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_SESSION_CLOSED');
+    END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_session_closure_no_delete
+    BEFORE DELETE ON warehouse_reprint_session_closures BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_SESSION_CLOSED');
+    END;`,
+  // These guards participate in the existing prepare/event command statement.
+  // A delayed preparation or explicit reprint rolls back its events and attempts.
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_closed_session_no_prepare
+    BEFORE INSERT ON warehouse_reprint_commands
+    WHEN NEW.kind='prepare' AND EXISTS(SELECT 1 FROM warehouse_reprint_session_closures
+      WHERE owner=NEW.owner AND session_id=json_extract(NEW.payload_json,'$.input.sessionId')) BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_SESSION_CLOSED');
+    END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_closed_session_no_job
+    BEFORE INSERT ON warehouse_reprint_jobs
+    WHEN EXISTS(SELECT 1 FROM warehouse_reprint_session_closures
+      WHERE owner=NEW.owner AND session_id=NEW.session_id) BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_SESSION_CLOSED');
+    END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_closed_session_no_reopen
+    BEFORE UPDATE OF state ON warehouse_reprint_jobs
+    WHEN NEW.state IN ('prepared','sending','delivery_unknown','failed_before_send')
+      AND EXISTS(SELECT 1 FROM warehouse_reprint_session_closures
+        WHERE owner=NEW.owner AND session_id=NEW.session_id) BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_SESSION_CLOSED');
+    END;`,
+  // Preserve the existing acknowledged-job retention gate in the same commit.
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_session_close_pause
+    AFTER INSERT ON warehouse_reprint_session_closures BEGIN
+      UPDATE warehouse_reprint_sessions SET status='paused',
+        session_json=json_set(session_json,'$.status','paused')
+        WHERE owner=NEW.owner AND session_id=NEW.session_id;
+    END;`,
+  `CREATE TABLE IF NOT EXISTS printer_deliveries (
+    scope TEXT NOT NULL, purpose TEXT NOT NULL CHECK(purpose IN ('test','box','pallet','duplicate')),
+    job_id TEXT NOT NULL, attempt_id TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('prepared','sending','sent','failed_before_send','delivery_unknown')),
+    profile_json TEXT NOT NULL CHECK(json_valid(profile_json)), artifact_digest TEXT NOT NULL,
+    artifact_base64 TEXT, document_name TEXT NOT NULL,
+    receipt_json TEXT CHECK(receipt_json IS NULL OR json_valid(receipt_json)),
+    error_code TEXT, updated_at TEXT NOT NULL, resolved_at TEXT,
+    PRIMARY KEY(scope,purpose,job_id,attempt_id),
+    CHECK ((purpose='duplicate' AND artifact_base64 IS NULL) OR
+      (purpose<>'duplicate' AND artifact_base64 IS NOT NULL AND length(artifact_base64)<=2796204))
+  );`,
+  `CREATE TRIGGER IF NOT EXISTS printer_deliveries_guard_destination BEFORE DELETE ON printer_destinations
+    WHEN EXISTS(SELECT 1 FROM printer_deliveries d WHERE d.scope=OLD.scope AND d.purpose=OLD.purpose AND d.job_id=OLD.job_id AND d.attempt_id=OLD.attempt_id AND d.state IN ('prepared','sending','delivery_unknown') AND d.resolved_at IS NULL)
+    BEGIN SELECT RAISE(ABORT,'PRINT_DELIVERY_UNRESOLVED'); END;`,
+  `CREATE TRIGGER IF NOT EXISTS printer_deliveries_cleanup AFTER DELETE ON printer_destinations
+    BEGIN DELETE FROM printer_deliveries WHERE scope=OLD.scope AND purpose=OLD.purpose AND job_id=OLD.job_id AND attempt_id=OLD.attempt_id; END;`,
+  `CREATE TRIGGER IF NOT EXISTS boxes_mirror_resolve_windows_delivery AFTER UPDATE OF print_verified_at,print_skipped_at ON boxes_mirror
+    WHEN NEW.print_verified_at IS NOT NULL OR NEW.print_skipped_at IS NOT NULL
+    BEGIN UPDATE printer_deliveries SET resolved_at=COALESCE(NEW.print_verified_at,NEW.print_skipped_at)
+      WHERE scope=json_array(NEW.shift_id,NEW.terminal_id) AND purpose='box' AND job_id=NEW.sscc AND state<>'sending'; END;`,
+  `CREATE TRIGGER IF NOT EXISTS pallets_mirror_resolve_windows_delivery AFTER UPDATE OF print_verified_at,print_skipped_at ON pallets_mirror
+    WHEN NEW.print_verified_at IS NOT NULL OR NEW.print_skipped_at IS NOT NULL
+    BEGIN UPDATE printer_deliveries SET resolved_at=COALESCE(NEW.print_verified_at,NEW.print_skipped_at)
+      WHERE scope=json_array(NEW.shift_id,NEW.terminal_id) AND purpose='pallet' AND job_id=NEW.sscc AND state<>'sending'; END;`,
+  `CREATE TRIGGER IF NOT EXISTS product_label_resolve_windows_delivery AFTER UPDATE OF projection_json ON product_label_jobs
+    WHEN json_extract(NEW.projection_json,'$.verificationOutcome') IN ('verified','skipped')
+    BEGIN UPDATE printer_deliveries SET resolved_at=NEW.updated_at WHERE scope=NEW.credential_ownership AND purpose='duplicate' AND job_id=NEW.job_id AND state<>'sending'; END;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_resolve_windows_delivery AFTER UPDATE OF projection_json ON warehouse_reprint_jobs
+    WHEN NEW.state='verified' OR NEW.attempt_id<>OLD.attempt_id
+    BEGIN UPDATE printer_deliveries SET resolved_at=NEW.updated_at
+      WHERE scope=NEW.owner AND job_id=NEW.job_id AND purpose=CASE NEW.source_kind WHEN 'box' THEN 'box' ELSE 'duplicate' END
+      AND (NEW.state='verified' OR attempt_id=OLD.attempt_id) AND state<>'sending'; END;`,
+
+  `CREATE TRIGGER IF NOT EXISTS product_label_reprint_resolve_windows_delivery AFTER UPDATE OF projection_json ON product_label_jobs
+    WHEN json_extract(NEW.projection_json,'$.attemptId')<>json_extract(OLD.projection_json,'$.attemptId')
+    BEGIN UPDATE printer_deliveries SET resolved_at=NEW.updated_at WHERE scope=NEW.credential_ownership AND purpose='duplicate' AND job_id=NEW.job_id
+      AND attempt_id=json_extract(OLD.projection_json,'$.attemptId') AND state<>'sending'; END;`,
+  // Empty payload is a tombstone; keep digest/receipt/state for audit and diagnostics.
+  // Uncertain or in-flight output retains the original bytes until explicit resolution.
+  `CREATE TRIGGER IF NOT EXISTS printer_deliveries_release_raster AFTER UPDATE OF state,resolved_at ON printer_deliveries
+    WHEN NEW.purpose<>'duplicate' AND NEW.artifact_base64<>'' AND
+      (NEW.state IN ('sent','failed_before_send') OR (NEW.resolved_at IS NOT NULL AND NEW.state<>'sending'))
+    BEGIN UPDATE printer_deliveries SET artifact_base64='' WHERE scope=NEW.scope AND purpose=NEW.purpose
+      AND job_id=NEW.job_id AND attempt_id=NEW.attempt_id; END;`,
+  `UPDATE printer_deliveries SET artifact_base64='' WHERE purpose<>'duplicate'
+    AND (state IN ('sent','failed_before_send') OR (resolved_at IS NOT NULL AND state<>'sending'));`,
+
+  `ALTER TABLE warehouse_reprint_jobs ADD COLUMN raster_json TEXT CHECK(raster_json IS NULL OR json_valid(raster_json));`,
+  `DROP TRIGGER IF EXISTS warehouse_reprint_event;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_event AFTER INSERT ON warehouse_reprint_commands
+    WHEN NEW.kind='event' BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_STALE_EVENT') WHERE NOT EXISTS (
+        SELECT 1 FROM warehouse_reprint_jobs WHERE owner=NEW.owner AND job_id=NEW.job_id
+        AND latest_sequence=json_extract(NEW.payload_json,'$.previousSequence')
+        AND state=json_extract(NEW.payload_json,'$.previousState')
+        AND session_id=json_extract(NEW.payload_json,'$.event.sessionId'));
+      SELECT RAISE(ABORT,'WAREHOUSE_EVENT_REPLAY_MISMATCH') WHERE EXISTS (
+        SELECT 1 FROM warehouse_reprint_events WHERE owner=NEW.owner AND event_id=NEW.command_id);
+      INSERT INTO warehouse_reprint_events(owner,event_id,job_id,sequence,event_json,digest)
+        VALUES(NEW.owner,NEW.command_id,NEW.job_id,json_extract(NEW.payload_json,'$.event.sequence'),
+        json_extract(NEW.payload_json,'$.event'),json_extract(NEW.payload_json,'$.eventDigest'));
+      INSERT INTO warehouse_reprint_attempts(owner,job_id,attempt_id,attempt_no,state,reason)
+        SELECT NEW.owner,NEW.job_id,json_extract(NEW.payload_json,'$.event.attemptId'),
+        json_extract(NEW.payload_json,'$.event.attemptNo'),'prepared',json_extract(NEW.payload_json,'$.event.reason')
+        WHERE json_extract(NEW.payload_json,'$.event.kind')='reprint_prepared';
+      UPDATE warehouse_reprint_attempts SET state=json_extract(NEW.payload_json,'$.projection.state')
+        WHERE owner=NEW.owner AND job_id=NEW.job_id AND attempt_id=json_extract(NEW.payload_json,'$.event.attemptId');
+      UPDATE warehouse_reprint_jobs SET raster_json=COALESCE(json_extract(NEW.payload_json,'$.raster'),raster_json),
+        projection_json=json_extract(NEW.payload_json,'$.projection'),
+        state=json_extract(NEW.payload_json,'$.projection.state'),latest_sequence=json_extract(NEW.payload_json,'$.event.sequence'),
+        attempt_id=json_extract(NEW.payload_json,'$.event.attemptId'),updated_at=json_extract(NEW.payload_json,'$.event.occurredAt')
+        WHERE owner=NEW.owner AND job_id=NEW.job_id;
+      UPDATE warehouse_reprint_sessions SET sent_count=sent_count+1 WHERE owner=NEW.owner
+        AND session_id=json_extract(NEW.payload_json,'$.event.sessionId')
+        AND (json_extract(NEW.payload_json,'$.event.kind')='sent' OR
+        (json_extract(NEW.payload_json,'$.event.kind')='verified' AND json_extract(NEW.payload_json,'$.previousState')='delivery_unknown'));
+      DELETE FROM warehouse_reprint_commands WHERE owner=NEW.owner AND command_id=NEW.command_id;
+    END;`,
+  `UPDATE warehouse_reprint_jobs SET projection_json=json_set(projection_json,'$.raster',
+      json_object('bytesDigest',json_extract(job_json,'$.bytesDigest'),'dpi',json_extract(job_json,'$.preparedEvent.dpi')))
+    WHERE json_extract(job_json,'$.preparedEvent.printFormat')='mono-raster-v1'
+      AND json_type(projection_json,'$.raster') IS NULL;`,
+  // Upgrade already-installed closure guards to the same active-roster snapshot
+  // used by sign-in and offline admission. Never authorize from the inactive slot.
+  `DROP TRIGGER IF EXISTS warehouse_reprint_session_close_guard;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_session_close_guard
+    BEFORE INSERT ON warehouse_reprint_session_closures
+    WHEN NOT EXISTS(SELECT 1 FROM warehouse_reprint_session_closures
+      WHERE owner=NEW.owner AND session_id=NEW.session_id) BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_OPERATOR_DENIED') WHERE NOT EXISTS(
+        SELECT 1 FROM operators_mirror WHERE operator_id=NEW.operator_id AND active=1
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_slot'),'a')<>'b'
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_blocked'),'0')<>'1'
+        UNION ALL
+        SELECT 1 FROM operators_mirror_b WHERE operator_id=NEW.operator_id AND active=1
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_slot'),'a')='b'
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_blocked'),'0')<>'1');
+      SELECT RAISE(ABORT,'WAREHOUSE_RECOVERY_REQUIRED') WHERE EXISTS(
+        SELECT 1 FROM warehouse_reprint_jobs j
+        WHERE (j.owner=NEW.owner OR j.owner IN (
+          SELECT related.credential_hash FROM station_device_owners related
+          JOIN station_device_owners original ON original.owner_json=related.owner_json
+          WHERE original.credential_hash=NEW.owner))
+        AND j.state IN ('prepared','sending','delivery_unknown','failed_before_send'));
+    END;`,
+  `DROP TRIGGER IF EXISTS warehouse_reprint_prepare;`,
+  `CREATE TRIGGER IF NOT EXISTS warehouse_reprint_prepare AFTER INSERT ON warehouse_reprint_commands
+    WHEN NEW.kind='prepare' BEGIN
+      SELECT RAISE(ABORT,'WAREHOUSE_DUPLICATE') WHERE EXISTS (
+        SELECT 1 FROM warehouse_reprint_jobs WHERE owner=NEW.owner
+        AND session_id=json_extract(NEW.payload_json,'$.input.sessionId')
+        AND source_kind=json_extract(NEW.payload_json,'$.input.source.kind')
+        AND identity=json_extract(NEW.payload_json,'$.input.source.identity'));
+      SELECT RAISE(ABORT,'WAREHOUSE_BUSY') WHERE EXISTS (
+        SELECT 1 FROM warehouse_reprint_jobs WHERE owner=NEW.owner AND state IN ('prepared','sending','delivery_unknown','failed_before_send'));
+      SELECT RAISE(ABORT,'WAREHOUSE_SESSION_UNAVAILABLE') WHERE NOT EXISTS (
+        SELECT 1 FROM warehouse_reprint_sessions WHERE owner=NEW.owner
+        AND session_id=json_extract(NEW.payload_json,'$.input.sessionId') AND status='active'
+        AND operator_id=json_extract(NEW.payload_json,'$.input.operatorId'));
+      SELECT RAISE(ABORT,'WAREHOUSE_OPERATOR_DENIED') WHERE NOT EXISTS(
+        SELECT 1 FROM operators_mirror
+        WHERE operator_id=json_extract(NEW.payload_json,'$.input.operatorId') AND active=1
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_slot'),'a')<>'b'
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_blocked'),'0')<>'1'
+        UNION ALL
+        SELECT 1 FROM operators_mirror_b
+        WHERE operator_id=json_extract(NEW.payload_json,'$.input.operatorId') AND active=1
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_slot'),'a')='b'
+          AND COALESCE((SELECT value FROM station_meta WHERE key='operators_blocked'),'0')<>'1');
+      INSERT INTO warehouse_reprint_jobs(owner,job_id,session_id,identity,source_kind,job_json,projection_json,state,latest_sequence,attempt_id,updated_at)
+        VALUES(NEW.owner,NEW.job_id,json_extract(NEW.payload_json,'$.input.sessionId'),
+        json_extract(NEW.payload_json,'$.input.source.identity'),json_extract(NEW.payload_json,'$.input.source.kind'),
+        json_extract(NEW.payload_json,'$.input'),json_extract(NEW.payload_json,'$.projection'),'prepared',1,
+        json_extract(NEW.payload_json,'$.input.preparedEvent.attemptId'),json_extract(NEW.payload_json,'$.input.preparedEvent.occurredAt'));
+      INSERT INTO warehouse_reprint_attempts(owner,job_id,attempt_id,attempt_no,state,reason)
+        VALUES(NEW.owner,NEW.job_id,json_extract(NEW.payload_json,'$.input.preparedEvent.attemptId'),1,'prepared',json_extract(NEW.payload_json,'$.input.reason'));
+      INSERT INTO warehouse_reprint_events(owner,event_id,job_id,sequence,event_json,digest)
+        VALUES(NEW.owner,json_extract(NEW.payload_json,'$.input.preparedEvent.eventId'),NEW.job_id,1,
+        json_extract(NEW.payload_json,'$.input.preparedEvent'),json_extract(NEW.payload_json,'$.eventDigest'));
+      DELETE FROM warehouse_reprint_commands WHERE owner=NEW.owner AND command_id=NEW.command_id;
+    END;`,
+  `ALTER TABLE shift_mirror ADD COLUMN pallet_sheet_template_id TEXT;`,
+  `ALTER TABLE shift_mirror ADD COLUMN pallet_sheet_template_snapshot TEXT
+    CONSTRAINT shift_mirror_pallet_sheet_snapshot_json_check CHECK (CASE
+      WHEN pallet_sheet_template_snapshot IS NULL THEN pallet_sheet_template_id IS NULL
+      WHEN NOT json_valid(pallet_sheet_template_snapshot) THEN 0
+      ELSE COALESCE(json_extract(pallet_sheet_template_snapshot,'$.id') = pallet_sheet_template_id
+        AND json_type(pallet_sheet_template_snapshot,'$.revision') = 'integer'
+        AND json_extract(pallet_sheet_template_snapshot,'$.revision') > 0
+        AND json_extract(pallet_sheet_template_snapshot,'$.spec.schemaVersion') = 2
+        AND json_extract(pallet_sheet_template_snapshot,'$.spec.kind') = 'pallet_sheet'
+        AND length(json_extract(pallet_sheet_template_snapshot,'$.digest')) = 64
+        AND json_extract(pallet_sheet_template_snapshot,'$.digest') NOT GLOB '*[^0-9a-f]*',0) END);`,
+  `CREATE TABLE IF NOT EXISTS station_organization_branding (
+    tenant_id TEXT NOT NULL,
+    owner_digest TEXT NOT NULL CHECK(length(owner_digest)=64 AND owner_digest NOT GLOB '*[^0-9a-f]*'),
+    snapshot_json TEXT NOT NULL CHECK(length(snapshot_json)<=131072 AND CASE
+      WHEN NOT json_valid(snapshot_json) THEN 0
+      ELSE COALESCE(json_extract(snapshot_json,'$.schemaVersion')=1
+        AND json_extract(snapshot_json,'$.tenantId')=tenant_id
+        AND json_extract(snapshot_json,'$.ownerDigest')=owner_digest,0) END),
+    PRIMARY KEY(tenant_id,owner_digest)
+  );`,
+  `ALTER TABLE printer_deliveries ADD COLUMN render_snapshot_json TEXT CHECK(render_snapshot_json IS NULL OR (length(render_snapshot_json)<=700000 AND json_valid(render_snapshot_json)));`,
+  `CREATE TABLE IF NOT EXISTS pallet_sheet_branding_resources (
+    digest TEXT PRIMARY KEY NOT NULL CHECK(length(digest)=64 AND digest NOT GLOB '*[^0-9a-f]*'),
+    snapshot_json TEXT NOT NULL CHECK(length(CAST(snapshot_json AS BLOB))<=131072 AND CASE
+      WHEN NOT json_valid(snapshot_json) THEN 0
+      ELSE COALESCE(json_extract(snapshot_json,'$.schemaVersion')=1 AND json_extract(snapshot_json,'$.digest')=digest,0) END)
+  );`,
+  `ALTER TABLE printer_deliveries ADD COLUMN sheet_branding_digest TEXT REFERENCES pallet_sheet_branding_resources(digest)
+    CHECK(sheet_branding_digest IS NULL OR (render_snapshot_json IS NOT NULL AND COALESCE(json_extract(render_snapshot_json,'$.brandingResourceDigest')=sheet_branding_digest,0)));`,
+  `INSERT INTO pallet_sheet_branding_resources(digest,snapshot_json)
+    SELECT json_extract(json_extract(render_snapshot_json,'$.brandingJson'),'$.digest'),json_extract(render_snapshot_json,'$.brandingJson') FROM printer_deliveries
+    WHERE render_snapshot_json IS NOT NULL AND CASE
+      WHEN NOT json_valid(json_extract(render_snapshot_json,'$.brandingJson')) THEN 0
+      ELSE COALESCE(json_extract(json_extract(render_snapshot_json,'$.brandingJson'),'$.schemaVersion')=1
+        AND length(CAST(json_extract(render_snapshot_json,'$.brandingJson') AS BLOB))<=131072
+        AND length(json_extract(json_extract(render_snapshot_json,'$.brandingJson'),'$.digest'))=64
+        AND json_extract(json_extract(render_snapshot_json,'$.brandingJson'),'$.digest') NOT GLOB '*[^0-9a-f]*',0) END
+    ON CONFLICT(digest) DO NOTHING;`,
+  `UPDATE printer_deliveries SET
+    sheet_branding_digest=json_extract(json_extract(render_snapshot_json,'$.brandingJson'),'$.digest'),
+    render_snapshot_json=json_set(json_remove(render_snapshot_json,'$.brandingJson'),'$.brandingResourceDigest',json_extract(json_extract(render_snapshot_json,'$.brandingJson'),'$.digest'))
+    WHERE render_snapshot_json IS NOT NULL AND EXISTS(SELECT 1 FROM pallet_sheet_branding_resources r
+      WHERE r.snapshot_json=json_extract(printer_deliveries.render_snapshot_json,'$.brandingJson'));`,
 ];
 
 export interface StationMigrationEntry {

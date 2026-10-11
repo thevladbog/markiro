@@ -1,4 +1,27 @@
 export { platformErrorSchema } from "./errors.js";
+export {
+  platformSupportChatContracts,
+  supportChatContracts,
+  supportEpisodeViewSchema,
+  supportMessageSchema,
+  supportOwnerSchema,
+  supportProposalSchema,
+  supportRequestRefSchema,
+  supportSyncSchema,
+  supportTranscriptContracts,
+  supportTranscriptPageSchema,
+  supportTranscriptNotice,
+} from "./support-chat.js";
+export type {
+  SupportEpisodeView,
+  SupportMessage,
+  SupportOwner,
+  SupportProposal,
+  SupportRequestRef,
+  SupportTranscriptPage,
+  SupportTranscriptNoticeLocale,
+} from "./support-chat.js";
+export type { BillingRequestStatus } from "./commercial.js";
 export * from "./offer-draft.js";
 export type { PlatformError } from "./errors.js";
 export {
@@ -16,6 +39,8 @@ export type {
   PlatformUuid,
 } from "./primitives.js";
 export {
+  isPlatformEvidenceReportType,
+  platformEvidenceReportTypes,
   platformReportContracts,
   platformReportErrorCodeSchema,
   platformReportInputSchema,
@@ -25,7 +50,11 @@ export {
   platformReportStatusSchema,
   platformReportTypeSchema,
 } from "./platform-reports.js";
-export type { PlatformReport, PlatformReportInput } from "./platform-reports.js";
+export type {
+  PlatformEvidenceReportType,
+  PlatformReport,
+  PlatformReportInput,
+} from "./platform-reports.js";
 export {
   approveOfflineGrantPolicySchema,
   createOfflineGrantPolicySchema,
@@ -194,8 +223,11 @@ export {
   assignableCatalogVersionSchema,
   assignAddonSchema,
   assignPlanSchema,
+  cabinetAccessSchema,
   createTenantResponseSchema,
   createTenantSchema,
+  grantCabinetAccessResponseSchema,
+  grantCabinetAccessSchema,
   planAssignmentResponseSchema,
   platformTenantContracts,
   renewTenantActivationResponseSchema,
@@ -218,8 +250,12 @@ export type {
   AssignAddonInput,
   AssignPlanDto,
   AssignPlanInput,
+  CabinetAccess,
   CreateTenantDto,
   CreateTenantInput,
+  GrantCabinetAccessDto,
+  GrantCabinetAccessInput,
+  GrantCabinetAccessResult,
   CreateTenantResponse,
   CreateTenantResult,
   DetailPlanVersion,

@@ -1,3 +1,4 @@
+import { printerMode } from "../../lib/printer-routing.js";
 import { useTranslation } from "react-i18next";
 import { Button, Select } from "@markiro/ui";
 import {
@@ -53,7 +54,11 @@ export function PrinterRoutingPanel({
                   <div className="setup-printer-row__detail">
                     <h3>{printer.name}</h3>
                     <p className="setup-printer-row__connection">
-                      {printerConnectionLabel(printer)} · {printer.language.toUpperCase()} ·{" "}
+                      {printerConnectionLabel(printer)} ·{" "}
+                      {printerMode(printer) === "windows_driver"
+                        ? t("setup.printModeWindows")
+                        : printer.language.toUpperCase()}{" "}
+                      ·{" "}
                       {printer.dpi === null
                         ? t("setup.printerResolutionUnknown")
                         : `${printer.dpi} dpi`}
@@ -94,7 +99,9 @@ export function PrinterRoutingPanel({
             disabled={disabled}
             options={[
               { value: "", label: t("setup.printerNotAssigned") },
-              ...routing.printers.map((printer) => ({ value: printer.id, label: printer.name })),
+              ...routing.printers
+                .filter((printer) => purpose === "pallet" || printer.paper !== "a4")
+                .map((printer) => ({ value: printer.id, label: printer.name })),
             ]}
             onValueChange={(value) => onAssign(purpose, value || null)}
           />

@@ -103,6 +103,17 @@ for (const width of [390, 1280]) {
       await page.addInitScript((value) => localStorage.setItem("markiro.theme", value), theme);
       await page.route(`${origin}/api/**`, async (route) => {
         const path = new URL(route.request().url()).pathname;
+        // Support chat is disabled in these unrelated cabinet scenarios.
+        if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
+          return route.fulfill({
+            status: 503,
+            json: {
+              statusCode: 503,
+              message: "Support chat unavailable",
+              error: "Service Unavailable",
+            },
+          });
+        }
         if (path.includes("/images/")) {
           await route.fulfill({
             contentType: "image/webp",

@@ -3,12 +3,22 @@ import { useTranslation } from "react-i18next";
 import { Button, Input, Select } from "@markiro/ui";
 import type { PrintTarget, UsbPrinterInfo } from "../../lib/hardware.js";
 import type { PrinterLanguage } from "../../lib/hardware-config.js";
+import { LabelRasterPreview } from "../LabelRasterPreview.js";
 import { TestBarcode } from "./TestBarcode.js";
 import type { SetupCheckResult } from "./test-code.js";
 
 type PrinterTransport = PrintTarget["kind"] | "none";
 
 export interface PrinterSetupPanelProps {
+  mode?: "raw" | "windows_driver";
+  windowsSupported?: boolean;
+  a4Supported?: boolean;
+  paper?: "a4" | undefined;
+  a4RasterPreview?: Uint8Array | null;
+  a4TestOrientation?: "portrait" | "landscape";
+  onA4TestOrientationChange?: (orientation: "portrait" | "landscape") => void;
+  onPaperChange?: (paper: "a4" | undefined) => void;
+  onModeChange?: (mode: "raw" | "windows_driver") => void;
   name?: string;
   onNameChange?: (value: string) => void;
   /** The code on the last test label sent to the printer; null before any test print. */
@@ -39,6 +49,15 @@ export interface PrinterSetupPanelProps {
 }
 
 export function PrinterSetupPanel({
+  mode = "raw",
+  windowsSupported = false,
+  a4Supported = false,
+  paper,
+  a4RasterPreview,
+  a4TestOrientation = "portrait",
+  onA4TestOrientationChange,
+  onPaperChange,
+  onModeChange,
   name,
   onNameChange,
   printedCode,
@@ -114,7 +133,7 @@ export function PrinterSetupPanel({
             label={t("setup.printerResolution")}
             aria-describedby={dpiHintId}
             value={printerDpi?.toString() ?? ""}
-            disabled={disabled || transport === "none"}
+            disabled={disabled || transport === "none" || paper === "a4"}
             options={[
               { value: "", label: t("setup.printerResolutionUnknown") },
               { value: "203", label: "203 dpi" },
@@ -207,7 +226,47 @@ export function PrinterSetupPanel({
               <p className="setup-panel__empty">{t("setup.noPrinterHint")}</p>
             )}
           </div>
-          <fieldset className="setup-choice-group setup-choice-group--printer-language">
+          {transport === "usb" && (
+            <Select
+              native
+              size="floor"
+              label={t("setup.printMode")}
+              value={mode}
+              options={[
+                { value: "raw", label: t("setup.printModeRaw") },
+                ...(windowsSupported
+                  ? [{ value: "windows_driver", label: t("setup.printModeWindows") }]
+                  : []),
+              ]}
+              disabled={disabled}
+              onValueChange={(value) => {
+                if (value === "raw" || value === "windows_driver") onModeChange?.(value);
+              }}
+            />
+          )}
+          {mode === "windows_driver" && (a4Supported || paper === "a4") && (
+            <Select
+              native
+              size="floor"
+              label={t("palletSheet.paper")}
+              value={paper ?? "label"}
+              options={[
+                { value: "label", label: t("palletSheet.labelPaper") },
+                ...(a4Supported || paper === "a4"
+                  ? [{ value: "a4", label: t("palletSheet.a4Paper") }]
+                  : []),
+              ]}
+              disabled={disabled}
+              onValueChange={(value) => onPaperChange?.(value === "a4" ? "a4" : undefined)}
+            />
+          )}
+          {mode === "windows_driver" && (
+            <p className="setup-windows-hint">{t("setup.windowsDriverHint")}</p>
+          )}
+          <fieldset
+            hidden={mode === "windows_driver"}
+            className="setup-choice-group setup-choice-group--printer-language"
+          >
             <legend>{t("setup.printerLanguage")}</legend>
             <div className="setup-choice-group__options setup-choice-group__options--compact">
               {(["zpl", "tspl"] as const).map((value) => (
@@ -238,6 +297,22 @@ export function PrinterSetupPanel({
         <p id={dpiHintId} className="setup-card__dpi-hint">
           {t("setup.printerDpiHint")}
         </p>
+        {paper === "a4" && (
+          <Select
+            native
+            size="floor"
+            label={t("palletSheet.testOrientation")}
+            value={a4TestOrientation}
+            options={[
+              { value: "portrait", label: t("palletSheet.portrait") },
+              { value: "landscape", label: t("palletSheet.landscape") },
+            ]}
+            disabled={disabled || busy}
+            onValueChange={(value) =>
+              onA4TestOrientationChange?.(value === "landscape" ? "landscape" : "portrait")
+            }
+          />
+        )}
         <Button size="floor" disabled={!printReady} onClick={onTestPrint}>
           {t("setup.testPrint")}
         </Button>
@@ -246,7 +321,16 @@ export function PrinterSetupPanel({
           <>
             <div className="setup-label-preview" data-testid="printer-test-label">
               <span className="setup-label-preview__name">MARKIRO · TEST</span>
-              <TestBarcode code={printedCode} label={t("setup.printerCheckTitle")} />
+              {paper === "a4" && a4RasterPreview ? (
+                <div className="setup-a4-preview">
+                  <LabelRasterPreview
+                    bytes={a4RasterPreview}
+                    label={t("setup.printerCheckTitle")}
+                  />
+                </div>
+              ) : (
+                <TestBarcode code={printedCode} label={t("setup.printerCheckTitle")} />
+              )}
               <code>{printedCode}</code>
             </div>
             {check ? (
