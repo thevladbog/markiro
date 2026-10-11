@@ -15,6 +15,7 @@ import {
   MAX_RASTER_DOTS,
   RasterTooLargeError,
   RasterUnavailableError,
+  rasterizeSheetText,
   rasterizeText,
 } from "../src/labels/rasterizer.js";
 
@@ -582,6 +583,92 @@ describe("the text rasterizer's line height and shrink-to-fit (#703)", () => {
       minFontSizePx: 10,
     });
     expect(surfaces[0]?.font).toBe("400 17px IBM Plex Sans, sans-serif");
+  });
+});
+
+describe("overflow: error (A4 sheets, plan А4)", () => {
+  const LONG = "очень длинное название продукта";
+  const BOX = {
+    fontFamily: "sans-serif",
+    fontSizePx: 20,
+    bold: false,
+    maxWidthPx: 60,
+    maxLines: 1,
+  };
+
+  it("refuses a text that needs more lines than allowed instead of cutting it", async () => {
+    fakeCanvases({ charWidth: 10 });
+    await expect(rasterizeText(LONG, { ...BOX, overflow: "error" })).rejects.toThrow();
+  });
+
+  it("keeps the ellipsis of a label by default and when asked for", async () => {
+    fakeCanvases({ charWidth: 10 });
+    await expect(rasterizeText(LONG, BOX)).resolves.toMatchObject({ height: 30 });
+    await expect(rasterizeText(LONG, { ...BOX, overflow: "ellipsis" })).resolves.toMatchObject({
+      height: 30,
+    });
+  });
+
+  it("places a text that fits in full, in error mode too", async () => {
+    fakeCanvases({ charWidth: 10 });
+    await expect(rasterizeText("мед", { ...BOX, overflow: "error" })).resolves.toMatchObject({
+      width: 30,
+      height: 30,
+    });
+  });
+});
+
+describe("the sheet rasterizer (plan А4)", () => {
+  const LONG = "очень длинное название продукта";
+  const BOX = {
+    fontFamily: "sans-serif",
+    fontSizePx: 20,
+    bold: false,
+    maxWidthPx: 60,
+    maxLines: 1,
+  };
+
+  function loadedFonts() {
+    const load = vi.fn(async () => [{}]);
+    const check = vi.fn(() => true);
+    Object.defineProperty(document, "fonts", { configurable: true, value: { load, check } });
+    return { load, check };
+  }
+
+  afterEach(() => {
+    Reflect.deleteProperty(document, "fonts");
+  });
+
+  it("refuses a text it cannot place unless the caller asks for the ellipsis", async () => {
+    fakeCanvases({ charWidth: 10 });
+    loadedFonts();
+    await expect(rasterizeSheetText(LONG, BOX)).rejects.toThrow();
+    await expect(rasterizeSheetText(LONG, { ...BOX, overflow: "ellipsis" })).resolves.toMatchObject(
+      { height: 30 },
+    );
+  });
+
+  it("loads the face for the text and refuses to draw without it", async () => {
+    fakeCanvases({ charWidth: 10 });
+    const { load, check } = loadedFonts();
+    await rasterizeSheetText("мед", BOX);
+    expect(load).toHaveBeenCalledWith("400 20px IBM Plex Sans, sans-serif", "мед");
+    expect(check).toHaveBeenCalledWith("400 20px IBM Plex Sans, sans-serif", "мед");
+    await rasterizeSheetText("", BOX);
+    expect(load).toHaveBeenLastCalledWith("400 20px IBM Plex Sans, sans-serif", "Аа");
+
+    Reflect.deleteProperty(document, "fonts");
+    await expect(rasterizeSheetText("мед", BOX)).rejects.toBeInstanceOf(RasterUnavailableError);
+    Object.defineProperty(document, "fonts", {
+      configurable: true,
+      value: { load: async () => [], check: () => true },
+    });
+    await expect(rasterizeSheetText("мед", BOX)).rejects.toBeInstanceOf(RasterUnavailableError);
+    Object.defineProperty(document, "fonts", {
+      configurable: true,
+      value: { load: async () => [{}], check: () => false },
+    });
+    await expect(rasterizeSheetText("мед", BOX)).rejects.toBeInstanceOf(RasterUnavailableError);
   });
 });
 
