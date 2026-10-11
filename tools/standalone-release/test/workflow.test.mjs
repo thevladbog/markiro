@@ -130,6 +130,26 @@ test("the installer is kept for thirty days, as prepare.mjs wrote it and nothing
   assert.doesNotMatch(prepare.run, /ProgramData|Markiro\\Host/u);
 });
 
+test("the release evidence names the pull request's head, given through env and never inline", () => {
+  // On `pull_request` GITHUB_SHA is the synthetic merge commit, which is on
+  // no branch; the head is the commit that was reviewed.
+  const prepare = stepRunning("prepare.mjs");
+  assert.deepEqual(prepare.env, {
+    PR_HEAD_SHA: "${{ github.event.pull_request.head.sha || github.sha }}",
+  });
+  assert.match(prepare.run, /--source-sha "\$env:PR_HEAD_SHA"/u);
+  assert.doesNotMatch(prepare.run, /GITHUB_SHA/u);
+});
+
+test("the export tool's tests run once the domain they compare with is built", () => {
+  const build = runs.findIndex(
+    (run) => run === "pnpm turbo build --filter '@markiro/standalone...'",
+  );
+  const exportTests = runs.findIndex((run) => run === "pnpm test:standalone-export");
+  assert.ok(build >= 0, "the workspace build is there");
+  assert.ok(exportTests > build, `the export tests come after it: ${build} < ${exportTests}`);
+});
+
 test("the smoke test runs where PowerShell 7 and administrator rights are", () => {
   assert.equal(job["runs-on"], "windows-latest");
   assert.equal(stepRunning("smoke.ps1").shell, "pwsh");
