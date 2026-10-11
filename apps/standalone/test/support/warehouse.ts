@@ -2,15 +2,11 @@ import {
   buildDefaultLabelTemplates,
   buildDuplicateLabelTemplate,
   buildPalletLabelTemplates,
-  type LabelTemplateSpec,
 } from "@markiro/domain";
 import type { DatabaseSync } from "node:sqlite";
 
-import {
-  latin1ToBytes,
-  type LabelFields,
-  type LabelPrinter,
-} from "../../src/floor/print/label-render.js";
+import { latin1ToBytes } from "../../src/floor/print/label-render.js";
+import type { RenderWarehouseLabel } from "../../src/floor/warehouse/warehouse-work.js";
 import type { WarehouseSource } from "../../src/host/protocol.js";
 import { ENTITY_SET } from "../../src/local/reference-sync.js";
 import { DEVICE_ID, HOST_ID } from "./fixtures.js";
@@ -124,21 +120,10 @@ export function seedWarehouseCopies(db: DatabaseSync, options: { operator?: bool
 }
 
 /**
- * The shape of the warehouse render (plan СКЛ task 5 names it `RenderWarehouseLabel` in
- * `warehouse-work.ts`, which does not exist yet; `warehouseRender` is assignable to it).
- */
-type WarehouseRender = (
-  spec: LabelTemplateSpec,
-  fields: LabelFields,
-  printer: LabelPrinter,
-  options: { kmDataMatrix?: "native" | "raster" },
-) => Promise<Uint8Array>;
-
-/**
  * A render that writes what it was asked in plain ASCII: the language, the resolution,
  * the layout's size, the SSCC (or `km` for a unit) and how the code is drawn.
  */
-export const warehouseRender: WarehouseRender = async (spec, fields, printer, options) =>
+export const warehouseRender: RenderWarehouseLabel = async (spec, fields, printer, options) =>
   latin1ToBytes(
     `^XA ${printer.language} ${printer.dpi} ${spec.widthMm}x${spec.heightMm} ` +
       `${fields.sscc === "" ? "km" : fields.sscc} ${options.kmDataMatrix ?? "native"} ^XZ`,
