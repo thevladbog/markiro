@@ -47,6 +47,17 @@ for (const width of [390, 1280]) {
     await page.setViewportSize({ width, height: 900 });
     await page.route("http://127.0.0.1:43183/api/**", async (route) => {
       const path = new URL(route.request().url()).pathname;
+      // Support chat is disabled in these unrelated cabinet scenarios.
+      if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
+        return route.fulfill({
+          status: 503,
+          json: {
+            statusCode: 503,
+            message: "Support chat unavailable",
+            error: "Service Unavailable",
+          },
+        });
+      }
       if (route.request().method() !== "GET") throw new Error(`Unexpected write: ${path}`);
       if (path === `/api/products/${product.id}/image/${image.checksum}`) {
         await route.fulfill({ contentType: "image/webp", body: photo });

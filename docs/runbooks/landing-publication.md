@@ -83,11 +83,11 @@
 
 ### Гейт 4. Включить только API и выполнить контролируемую доставку
 
-1. Оставить `PUBLIC_DEMO_SUBMISSION_ENABLED=false`. Задать API `LANDING_DEMO_SUBMISSION_ENABLED=true`, утверждённый `LANDING_ORIGIN`, `LANDING_DEMO_RECIPIENT=hello@v-b.tech`, публичный Reply-To и SmartCaptcha server key; перезапустить API тем же immutable release. Версия согласия берётся из того же release `@markiro/legal-documents`.
+1. Оставить `PUBLIC_DEMO_SUBMISSION_ENABLED=false`. Задать API `LANDING_DEMO_SUBMISSION_ENABLED=true`, утверждённый `LANDING_ORIGIN`, `LANDING_DEMO_RECIPIENT=hello@markiro.app`, публичный Reply-To `LANDING_DEMO_REPLY_TO=hello@markiro.app` и SmartCaptcha server key; перезапустить API тем же immutable release. Версия согласия берётся из того же release `@markiro/legal-documents`.
 2. Убедиться, что публичная HTML-форма всё ещё отсутствует, а контролируемый `POST /api/demo-requests` теперь проходит только с валидным production captcha token.
 3. Из контролируемых почтовых ящиков отправить контролируемую RU/EN пару: ровно одну RU- и одну EN-заявку. Не фиксировать в evidence значения полей формы, captcha tokens или адреса посетителей.
 4. Для каждой заявки создать отдельный обезличенный request UUID и убедиться, что один и тот же request UUID связывает заявку, ровно две durable mail delivery rows и ровно две durable outbox rows. Обе доставки должны пройти из `queued` (или наблюдаемого `retrying`) в `sent`; состояние `failed` блокирует переход дальше.
-5. Проверить получение внутреннего письма на `hello@v-b.tech` и confirmation в соответствующем контролируемом ящике посетителя. Проверить папки spam/junk и направление Reply-To: внутреннее письмо отвечает посетителю, confirmation отвечает на публичный адрес Markiro.
+5. Проверить получение внутреннего письма на `hello@markiro.app` и confirmation в соответствующем контролируемом ящике посетителя. Проверить папки spam/junk и направление Reply-To: внутреннее письмо отвечает посетителю, confirmation отвечает на публичный адрес Markiro.
 
 **Критерий выхода:** RU и EN запросы получили 202, для каждого создано и отправлено ровно два письма, оба адресата подтвердили arrival и Reply-To, spam/junk проверены.
 

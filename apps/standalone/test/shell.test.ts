@@ -183,7 +183,29 @@ describe("nextShellView", () => {
     const office = paired({
       device: { kind: "ready", status: { ...NEW_STATION, kind: "office" } },
     });
-    expect(nextShellView(office, ADDRESS)).toEqual({ kind: "floor" });
+    expect(nextShellView(office, ADDRESS)).toEqual({ kind: "office_login", notice: null });
+  });
+
+  it("gives an office PC the office sign-in for a home, never the floor", () => {
+    const officePc = paired({
+      device: { kind: "ready", status: { ...DEVICE_STATUS, kind: "office" } },
+    });
+    expect(nextShellView(officePc, ADDRESS)).toEqual({ kind: "office_login", notice: null });
+    expect(
+      nextShellView(
+        { ...officePc, office: { kind: "signing_in", notice: "session_ended" } },
+        ADDRESS,
+      ),
+    ).toEqual({ kind: "office_login", notice: "session_ended" });
+    expect(
+      nextShellView({ ...officePc, office: { kind: "open", session: SESSION } }, ADDRESS),
+    ).toEqual({ kind: "office", session: SESSION });
+    // Leaving the office comes back to the sign-in.
+    const left = shellReducer(
+      { ...officePc, office: { kind: "open", session: SESSION } },
+      { type: "office_closed" },
+    );
+    expect(nextShellView(left, ADDRESS)).toEqual({ kind: "office_login", notice: null });
   });
 
   it("puts a rejected device before everything else", () => {
@@ -318,6 +340,26 @@ describe("shellReducer", () => {
     expect(shellReducer(forgotten, { type: "device_refreshed", status: NEW_STATION })).toBe(
       forgotten,
     );
+  });
+
+  it("takes the host's new address only for its own pairing", () => {
+    const remote = paired({
+      device: {
+        kind: "ready",
+        status: { ...DEVICE_STATUS, hostAddress: "https://192.168.1.10:45710" },
+      },
+    });
+    const moved = { ...DEVICE_STATUS, hostAddress: "https://192.168.1.20:45710" };
+    expect(shellReducer(remote, { type: "address_changed", status: moved }).device).toEqual({
+      kind: "ready",
+      status: moved,
+    });
+    const otherDevice = { ...moved, deviceId: "5d2f0a1c-3b4e-4f6a-8c9d-0e1f2a3b4c5d" };
+    expect(shellReducer(remote, { type: "address_changed", status: otherDevice })).toBe(remote);
+    const otherHost = { ...moved, hostId: "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f" };
+    expect(shellReducer(remote, { type: "address_changed", status: otherHost })).toBe(remote);
+    const forgotten = shellReducer(remote, { type: "forgotten" });
+    expect(shellReducer(forgotten, { type: "address_changed", status: moved })).toBe(forgotten);
   });
 
   it("retries a failed pairing", () => {
@@ -883,6 +925,28 @@ describe("the operator session: every action and every late answer", () => {
         survives: true,
       },
     ],
+    // A new address of the same host keeps the pairing, the line and the
+    // operator (plan УСТ); one of another pairing changes nothing.
+    address_changed: [
+      {
+        action: {
+          type: "address_changed",
+          status: { ...DEVICE_STATUS, hostAddress: "https://192.168.1.20:45710" },
+        },
+        survives: true,
+      },
+      {
+        action: {
+          type: "address_changed",
+          status: {
+            ...DEVICE_STATUS,
+            deviceId: OTHER_DEVICE,
+            hostAddress: "https://192.168.1.20:45710",
+          },
+        },
+        survives: true,
+      },
+    ],
     // A sign-in never replaces a session that is running: the answer of
     // another check, or of the same operator again, is refused.
     operator_signed_in: [
@@ -1152,20 +1216,23 @@ describe("the operator session: every action and every late answer", () => {
     expect(shellReducer(back, signIn).operator).toEqual(ANNA_SESSION);
   });
 
-  it("signs in a device of the office or the handheld kind without a line", () => {
-    for (const kind of ["office", "handheld"] as const) {
-      const state = paired({
-        device: { kind: "ready", status: { ...DEVICE_STATUS, kind, lineId: null } },
-      });
-      const floor = shellReducer(state, { ...signIn, lineId: null });
-      expect(floor.operator).toEqual(ANNA_SESSION);
-      expect(nextShellView(floor, ADDRESS)).toEqual({
-        kind: "floor_operator",
-        operator: ANNA_SESSION,
-      });
-      // An answer that began on a line is not this device's: it has none.
-      expect(shellReducer(state, signIn)).toBe(state);
-    }
+  it("signs in a handheld without a line, and nobody on an office PC", () => {
+    const handheld = paired({
+      device: { kind: "ready", status: { ...DEVICE_STATUS, kind: "handheld", lineId: null } },
+    });
+    const floor = shellReducer(handheld, { ...signIn, lineId: null });
+    expect(floor.operator).toEqual(ANNA_SESSION);
+    expect(nextShellView(floor, ADDRESS)).toEqual({
+      kind: "floor_operator",
+      operator: ANNA_SESSION,
+    });
+    // An answer that began on a line is not this device's: it has none.
+    expect(shellReducer(handheld, signIn)).toBe(handheld);
+    // An office PC has no floor (plan УСТ): no answer signs anybody in there.
+    const officePc = paired({
+      device: { kind: "ready", status: { ...DEVICE_STATUS, kind: "office", lineId: null } },
+    });
+    expect(shellReducer(officePc, { ...signIn, lineId: null })).toBe(officePc);
   });
 
   it("forgets the sign-out reason with the next sign-in, the office, a new pairing and a forget", () => {

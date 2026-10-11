@@ -1,0 +1,12 @@
+{
+  "bundle": {
+    "externalBin": ["binaries/markiro-host"],
+    "windows": {
+      "nsis": {
+        "installMode": "perMachine",
+        "languages": ["Russian"],
+        "installerHooks": "windows/installer-hooks.nsh"
+      }
+    }
+  }
+}

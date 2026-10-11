@@ -47,6 +47,9 @@ enum class LabelField(val wire: String) {
 
 enum class TextFormat(val wire: String) {
     KM_WITHOUT_CRYPTO("km_without_crypto"),
+    QUANTITY_NUMBER("quantity_number"),
+    SSCC_WITH_TITLE("sscc_with_title"),
+    SSCC_SPACED("sscc_spaced"),
     ;
 
     companion object {
@@ -101,6 +104,9 @@ sealed interface LabelElement {
         val align: LabelAlign? = null,
         val maxWidthMm: Double? = null,
         val maxLines: Int? = null,
+        val fontFamily: String? = null,
+        val lineHeight: Double? = null,
+        val minFontSizePt: Double? = null,
     ) : LabelElement
 
     data class Field(
@@ -114,6 +120,17 @@ sealed interface LabelElement {
         val align: LabelAlign? = null,
         val maxWidthMm: Double? = null,
         val maxLines: Int? = null,
+        val fontFamily: String? = null,
+        val lineHeight: Double? = null,
+        val minFontSizePt: Double? = null,
+    ) : LabelElement
+
+    data class OrganizationLogo(
+        override val id: String,
+        override val xMm: Double,
+        override val yMm: Double,
+        val widthMm: Double,
+        val heightMm: Double,
     ) : LabelElement
 
     data class Barcode(

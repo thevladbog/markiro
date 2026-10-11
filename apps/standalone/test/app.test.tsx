@@ -229,6 +229,13 @@ function fakeDevice(
       if (!paired) throw new DeviceError("not_paired", "not paired");
       return paired;
     }),
+    // A development build's answer; a test sets the installer's role.
+    installRole: vi.fn<DeviceApi["installRole"]>(async () => null),
+    changeAddress: vi.fn<DeviceApi["changeAddress"]>(async (address) => {
+      if (!paired) throw new DeviceError("not_paired", "not paired");
+      paired = { ...paired, hostAddress: address };
+      return paired;
+    }),
   };
 }
 
@@ -3783,5 +3790,292 @@ describe("the outbox in the app", () => {
     expect(await screen.findByText(/Хост не принимает записи смены/)).toBeTruthy();
     expect(await screen.findByText(/Самая старая запись ждёт отправки уже/)).toBeTruthy();
     expect(barValue("Не отправлено")).toBe("2");
+  });
+});
+
+describe("an office PC and the host's address (plan УСТ)", () => {
+  /** An office PC paired with the host on the station PC. */
+  const OFFICE_PC: DeviceStatus = {
+    ...DEVICE_STATUS,
+    hostAddress: REMOTE_ADDRESS,
+    kind: "office",
+    lineId: null,
+  };
+
+  function officePc() {
+    const device = fakeDevice(OFFICE_PC);
+    device.installRole.mockResolvedValue("office");
+    return device;
+  }
+
+  it("never locks an office PC, opens on the office sign-in and comes back to it", async () => {
+    const kiosk = recordingLockdown();
+    const device = officePc();
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost(), lockdown: kiosk.lockdown });
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "В цех" })).toBeNull();
+    await signIn();
+    expect(await screen.findByText("Вы вошли как Ирина Смирнова.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Выйти в цех" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Выйти" }));
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    expect(screen.queryByText("Цех")).toBeNull();
+    expect(device.installRole).toHaveBeenCalled();
+    expect(kiosk.commands).toEqual([]);
+  });
+
+  it("still locks a station when the shell reports no role", async () => {
+    const kiosk = recordingLockdown();
+    renderApp({
+      probe: probeAnswering(true),
+      device: fakeDevice(DEVICE_STATUS),
+      host: fakeHost(),
+      lockdown: kiosk.lockdown,
+    });
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
+  });
+
+  it("locks a station whose role the shell could not tell", async () => {
+    const kiosk = recordingLockdown();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.installRole.mockRejectedValue(new DeviceError("invalid_response", "role"));
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost(), lockdown: kiosk.lockdown });
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
+  });
+
+  it("moves the pairing to the host's new address from the office sign-in", async () => {
+    const device = officePc();
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
+    expect(await screen.findByText(`Хост: ${REMOTE_ADDRESS}`)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Сменить адрес хоста" }));
+    fireEvent.change(await screen.findByLabelText("Адрес хоста"), {
+      target: { value: "192.168.1.20" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и сохранить" }));
+    expect(
+      await screen.findByText("Адрес хоста изменён: https://192.168.1.20:45710."),
+    ).toBeTruthy();
+    expect(device.changeAddress).toHaveBeenCalledWith("https://192.168.1.20:45710");
+    expect(screen.getByText("Хост: https://192.168.1.20:45710")).toBeTruthy();
+    expect(screen.queryByText("Новый адрес хоста")).toBeNull();
+  });
+
+  it("keeps the dialog open and explains an address that is not the paired host or answers nothing", async () => {
+    const device = officePc();
+    device.changeAddress.mockRejectedValueOnce(
+      new DeviceError("address_other_host", "another certificate"),
+    );
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
+    fireEvent.click(await screen.findByRole("button", { name: "Сменить адрес хоста" }));
+    const field = await screen.findByLabelText("Адрес хоста");
+    fireEvent.change(field, { target: { value: "адрес хоста" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и сохранить" }));
+    expect(
+      await screen.findByText(
+        "Введите IP-адрес или имя ПК хоста, при необходимости с портом через двоеточие.",
+      ),
+    ).toBeTruthy();
+    expect(device.changeAddress).not.toHaveBeenCalled();
+
+    fireEvent.change(field, { target: { value: "192.168.1.30" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и сохранить" }));
+    expect(
+      await screen.findByText(
+        "По этому адресу отвечает другой хост: его сертификат не совпадает с сохранённым при подключении. Проверьте адрес на ПК хоста.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Новый адрес хоста")).toBeTruthy();
+    expect(screen.getByText(`Хост: ${REMOTE_ADDRESS}`)).toBeTruthy();
+
+    // Nothing answers there: about the address, not about this computer's service.
+    device.changeAddress.mockRejectedValueOnce(new DeviceError("unreachable", "no answer"));
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и сохранить" }));
+    expect(
+      await screen.findByText(
+        "По этому адресу хост не отвечает. Проверьте адрес, сеть и что ПК хоста включён.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("Служба хоста на этом компьютере не отвечает.")).toBeNull();
+  });
+
+  it("treats a key the host no longer accepts at the new address as a rejected device", async () => {
+    const device = officePc();
+    device.changeAddress.mockRejectedValueOnce(new DeviceError("key_rejected", "revoked"));
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
+    fireEvent.click(await screen.findByRole("button", { name: "Сменить адрес хоста" }));
+    fireEvent.change(await screen.findByLabelText("Адрес хоста"), {
+      target: { value: "192.168.1.20" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и сохранить" }));
+    expect(await screen.findByText("Хост не принимает это устройство")).toBeTruthy();
+  });
+
+  it("offers no address change for the host on this computer", async () => {
+    renderApp({ probe: probeAnswering(true), device: fakeDevice(DEVICE_STATUS), host: fakeHost() });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Сменить адрес хоста" })).toBeNull();
+    expect(screen.getByRole("button", { name: "В цех" })).toBeTruthy();
+  });
+
+  it("keeps the window unlocked until the shell has named the role, then locks a station", async () => {
+    const kiosk = recordingLockdown();
+    const device = fakeDevice(DEVICE_STATUS);
+    let answer: (role: "station") => void = () => undefined;
+    device.installRole.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          answer = resolve;
+        }),
+    );
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost(), lockdown: kiosk.lockdown });
+    expect(await screen.findByText("Цех")).toBeTruthy();
+    await waitFor(() => expect(device.installRole).toHaveBeenCalled());
+    expect(kiosk.commands).toEqual([]);
+    act(() => answer("station"));
+    await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
+  });
+
+  it.each(["host", "station"] as const)(
+    "keeps a %s PC locked even when its disk holds an office pairing",
+    async (role) => {
+      const kiosk = recordingLockdown();
+      const device = fakeDevice(OFFICE_PC);
+      device.installRole.mockResolvedValue(role);
+      renderApp({
+        probe: probeAnswering(true),
+        device,
+        host: fakeHost(),
+        lockdown: kiosk.lockdown,
+      });
+      await waitFor(() => expect(kiosk.commands).toEqual(["enter_lockdown"]));
+    },
+  );
+
+  it("shows no floor on an office PC whose disk holds a station pairing", async () => {
+    const kiosk = recordingLockdown();
+    const device = fakeDevice(DEVICE_STATUS);
+    device.installRole.mockResolvedValue("office");
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost(), lockdown: kiosk.lockdown });
+    // Never the operator's sign-in, the line choice or the station's bar.
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    expect(screen.queryByText("Цех")).toBeNull();
+    expect(screen.queryByRole("button", { name: "В цех" })).toBeNull();
+    await signIn();
+    fireEvent.click(await screen.findByRole("button", { name: "Выйти" }));
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    expect(screen.queryByText("Цех")).toBeNull();
+    expect(kiosk.commands).toEqual([]);
+  });
+
+  it("shows no line choice on an office PC either", async () => {
+    const device = fakeDevice({ ...DEVICE_STATUS, lineId: null });
+    device.installRole.mockResolvedValue("office");
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
+    expect(await screen.findByText("Вход в офис")).toBeTruthy();
+    expect(screen.queryByText("Выбор линии")).toBeNull();
+  });
+
+  it("gives a station PC paired with a remote host «В цех» and «Выйти в цех», and the address change", async () => {
+    const device = fakeDevice({ ...DEVICE_STATUS, hostAddress: REMOTE_ADDRESS });
+    device.installRole.mockResolvedValue("station");
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
+    fireEvent.click(await screen.findByRole("button", { name: "Офис" }));
+    expect(await screen.findByText(`Хост: ${REMOTE_ADDRESS}`)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Сменить адрес хоста" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "В цех" })).toBeTruthy();
+    await signIn();
+    expect(await screen.findByRole("button", { name: "Выйти в цех" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Выйти" })).toBeNull();
+  });
+
+  it("tells a malformed address the shell refused in plain words, not as a broken app", async () => {
+    const device = officePc();
+    device.changeAddress.mockRejectedValueOnce(new DeviceError("invalid_request", "bad address"));
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
+    fireEvent.click(await screen.findByRole("button", { name: "Сменить адрес хоста" }));
+    fireEvent.change(await screen.findByLabelText("Адрес хоста"), {
+      target: { value: "192.168.1.20" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и сохранить" }));
+    expect(
+      await screen.findByText(
+        "Введите IP-адрес или имя ПК хоста, при необходимости с портом через двоеточие.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText("Приложение сформировало недопустимый запрос.")).toBeNull();
+    expect(screen.getByText("Новый адрес хоста")).toBeTruthy();
+  });
+
+  it("clears the earlier complaint with the next try, and opens the dialog empty again", async () => {
+    const device = officePc();
+    device.changeAddress.mockRejectedValueOnce(new DeviceError("unreachable", "no answer"));
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
+    const open = await screen.findByRole("button", { name: "Сменить адрес хоста" });
+    fireEvent.click(open);
+    const field = await screen.findByLabelText("Адрес хоста");
+    fireEvent.change(field, { target: { value: "192.168.1.20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и сохранить" }));
+    const unreachable =
+      "По этому адресу хост не отвечает. Проверьте адрес, сеть и что ПК хоста включён.";
+    expect(await screen.findByText(unreachable)).toBeTruthy();
+
+    // A new try that cannot be sent takes the old answer off the screen.
+    fireEvent.change(field, { target: { value: "адрес хоста" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и сохранить" }));
+    const invalid =
+      "Введите IP-адрес или имя ПК хоста, при необходимости с портом через двоеточие.";
+    expect(await screen.findByText(invalid)).toBeTruthy();
+    expect(screen.queryByText(unreachable)).toBeNull();
+
+    // An address that can be sent takes the complaint about the spelling off,
+    // whatever the host then answers.
+    device.changeAddress.mockRejectedValueOnce(new DeviceError("address_other_host", "other"));
+    fireEvent.change(field, { target: { value: "192.168.1.21" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и сохранить" }));
+    expect(await screen.findByText(/отвечает другой хост/)).toBeTruthy();
+    expect(screen.queryByText(invalid)).toBeNull();
+
+    fireEvent.change(field, { target: { value: "192.168.1.20" } });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и сохранить" }));
+    expect(
+      await screen.findByText("Адрес хоста изменён: https://192.168.1.20:45710."),
+    ).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: "Сменить адрес хоста" }));
+    expect((await screen.findByLabelText<HTMLInputElement>("Адрес хоста")).value).toBe("");
+  });
+
+  it("announces the new address in a live region and gives the focus back to its button", async () => {
+    const device = officePc();
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
+    const open = await screen.findByRole("button", { name: "Сменить адрес хоста" });
+    open.focus();
+    fireEvent.click(open);
+    fireEvent.change(await screen.findByLabelText("Адрес хоста"), {
+      target: { value: "192.168.1.20" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Проверить и сохранить" }));
+    const done = await screen.findByText("Адрес хоста изменён: https://192.168.1.20:45710.");
+    // The region was there before the text came, and the alert does not shout twice.
+    expect(done.closest("[aria-live='polite']")).not.toBeNull();
+    expect(done.closest("[role='presentation']")).not.toBeNull();
+    expect(done.closest("[role='alert']")).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(open));
+  });
+
+  it("closes the dialog on «Отмена» and changes nothing", async () => {
+    const device = officePc();
+    renderApp({ probe: probeAnswering(true), device, host: fakeHost() });
+    const open = await screen.findByRole("button", { name: "Сменить адрес хоста" });
+    open.focus();
+    fireEvent.click(open);
+    fireEvent.click(await screen.findByRole("button", { name: "Отмена" }));
+    await waitFor(() => expect(screen.queryByText("Новый адрес хоста")).toBeNull());
+    expect(device.changeAddress).not.toHaveBeenCalled();
+    expect(screen.getByText(`Хост: ${REMOTE_ADDRESS}`)).toBeTruthy();
+    expect(document.activeElement).toBe(open);
   });
 });

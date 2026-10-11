@@ -35,6 +35,8 @@ export const helloSchema = z
     version: z.string().min(1),
     time: z.iso.datetime(),
     initialized: z.boolean(),
+    /** A new UUID at every restore of the host from a copy (plan РК); absent before the first. */
+    restoreEpoch: z.uuid().optional(),
   })
   .strict();
 export type Hello = z.infer<typeof helloSchema>;
@@ -596,6 +598,159 @@ export const officeShiftSchema = z.object({
 export type OfficeShift = z.infer<typeof officeShiftSchema>;
 
 /**
+ * Mirrors `markiro_proto::ShiftExportRows`: `GET /v1/office/shifts/{id}/export-source`
+ * (plan ЧЗ), what a shift's exports are built from, in one snapshot of the
+ * host. `codes` are the codes the shift owns with their owning scans'
+ * canonical text; `boxes` every box of the shift; `items` the live items of
+ * those boxes only; `pallets` every pallet of the shift. A device's ids,
+ * SSCCs and codes are read as plain text: the ported source rules and the
+ * domain's renderer say what is wrong with one (`INVALID_BOX_SSCC`,
+ * `INVALID_CIS`), as the cloud's export does, instead of the whole answer
+ * failing as an invalid response.
+ */
+export const shiftExportRowsSchema = z.object({
+  shift: z.object({
+    id: z.uuid(),
+    number: z.string().min(1),
+    status: shiftStatusSchema,
+    productionDate: civilDateTextSchema,
+    productName: z.string(),
+    palletsEnabled: z.boolean(),
+    closedAt: z.iso.datetime().nullable(),
+    stationClosedAt: z.iso.datetime().nullable(),
+    lateDataAt: z.iso.datetime().nullable(),
+  }),
+  organization: z.object({ name: z.string(), inn: z.string().nullable() }),
+  codes: z.array(
+    z.object({ codeHash: z.string(), scannedAt: z.iso.datetime(), canonical: z.string() }),
+  ),
+  boxes: z.array(
+    z.object({
+      id: z.string(),
+      sscc: z.string().nullable(),
+      openedAt: z.iso.datetime(),
+      closedAt: z.iso.datetime().nullable(),
+      disassembledAt: z.iso.datetime().nullable(),
+      palletId: z.string().nullable(),
+    }),
+  ),
+  items: z.array(z.object({ boxId: z.string(), codeHash: z.string() })),
+  pallets: z.array(
+    z.object({
+      id: z.string(),
+      sscc: z.string().nullable(),
+      openedAt: z.iso.datetime(),
+      closedAt: z.iso.datetime().nullable(),
+      disassembledAt: z.iso.datetime().nullable(),
+    }),
+  ),
+});
+export type ShiftExportRows = z.infer<typeof shiftExportRowsSchema>;
+
+/**
+ * Mirrors `markiro_proto::OfficeBox`: a box of `GET /v1/office/shifts/{id}/boxes`
+ * (plan ЧЗ, for the shift's card of plan О-Ф). `units` are its live items
+ * now; `itemCountReported` and `digestMatches` are what the station's close
+ * said and how it compared then, stale once the box is taken apart.
+ */
+export const officeBoxSchema = z.object({
+  id: z.string(),
+  deviceId: z.uuid(),
+  sscc: z.string().nullable(),
+  openedAt: z.iso.datetime(),
+  closedAt: z.iso.datetime().nullable(),
+  disassembledAt: z.iso.datetime().nullable(),
+  palletId: z.string().nullable(),
+  units: z.number().int().nonnegative(),
+  itemCountReported: z.number().int().nonnegative().nullable(),
+  digestMatches: z.boolean().nullable(),
+  printVerifiedAt: z.iso.datetime().nullable(),
+  printSkippedAt: z.iso.datetime().nullable(),
+});
+export type OfficeBox = z.infer<typeof officeBoxSchema>;
+
+/**
+ * Mirrors `markiro_proto::OfficePallet`: a pallet of `GET
+ * /v1/office/shifts/{id}/pallets` (plan ЧЗ, for plan О-Ф). `boxes` are its
+ * closed boxes not taken apart and `units` their live items, derived when
+ * read; `boxCountReported` is what the station's close counted.
+ */
+export const officePalletSchema = z.object({
+  id: z.string(),
+  deviceId: z.uuid(),
+  sscc: z.string().nullable(),
+  openedAt: z.iso.datetime(),
+  closedAt: z.iso.datetime().nullable(),
+  disassembledAt: z.iso.datetime().nullable(),
+  boxes: z.number().int().nonnegative(),
+  units: z.number().int().nonnegative(),
+  boxCountReported: z.number().int().positive().nullable(),
+  printVerifiedAt: z.iso.datetime().nullable(),
+  printSkippedAt: z.iso.datetime().nullable(),
+});
+export type OfficePallet = z.infer<typeof officePalletSchema>;
+
+/**
+ * Mirrors `markiro_proto::BoxReportRows`: `GET /v1/office/boxes/{id}/report-data`
+ * (plan О-Ф), what «Состав короба» prints of one box, in one snapshot of the
+ * host: the codes the cloud's form prints (the live ones, and of a box taken
+ * apart those its disassembly took out), ordered by GTIN and serial, each
+ * with the canonical text its DataMatrix encodes. Codes and SSCCs are plain
+ * text, as in the export source.
+ */
+export const boxReportRowsSchema = z.object({
+  id: z.string(),
+  shiftId: z.uuid(),
+  sscc: z.string().nullable(),
+  openedAt: z.iso.datetime(),
+  closedAt: z.iso.datetime().nullable(),
+  disassembledAt: z.iso.datetime().nullable(),
+  productName: z.string(),
+  organization: z.object({ name: z.string(), inn: z.string().nullable() }),
+  items: z.array(z.object({ gtin14: z.string(), serial: z.string(), canonical: z.string() })),
+});
+export type BoxReportRows = z.infer<typeof boxReportRowsSchema>;
+
+/**
+ * Mirrors `markiro_proto::PalletReportRows`: `GET
+ * /v1/office/shifts/{id}/pallet-report-data` (plan О-Ф), what «Состав паллеты»
+ * and «Ярлык паллеты» print of the shift's pallets, in one snapshot: the
+ * shift's number, date and product now, and every pallet opened first first
+ * with every box that stood on it closed first first, the boxes taken apart
+ * too; a box's `units` are its live items now.
+ */
+export const palletReportRowsSchema = z.object({
+  shift: z.object({
+    id: z.uuid(),
+    number: z.string().min(1),
+    productionDate: civilDateTextSchema,
+    productName: z.string(),
+    gtin14: z.string(),
+    shelfLifeDays: z.number().int().positive().nullable(),
+  }),
+  organization: z.object({ name: z.string(), inn: z.string().nullable() }),
+  pallets: z.array(
+    z.object({
+      id: z.string(),
+      sscc: z.string().nullable(),
+      openedAt: z.iso.datetime(),
+      closedAt: z.iso.datetime().nullable(),
+      disassembledAt: z.iso.datetime().nullable(),
+      boxes: z.array(
+        z.object({
+          id: z.string(),
+          sscc: z.string().nullable(),
+          closedAt: z.iso.datetime(),
+          disassembledAt: z.iso.datetime().nullable(),
+          units: z.number().int().nonnegative(),
+        }),
+      ),
+    }),
+  ),
+});
+export type PalletReportRows = z.infer<typeof palletReportRowsSchema>;
+
+/**
  * The product as a shift froze it when a station opened it
  * (`markiro_proto::ShiftSnapshotProduct`); only an active product opens a
  * shift, so it has a group.
@@ -1094,6 +1249,27 @@ export const shiftCloseSchema = z
   .object({ reason: z.string(), expectedRev: z.number().int() })
   .strict();
 export type ShiftClose = z.infer<typeof shiftCloseSchema>;
+
+/**
+ * Mirrors `markiro_proto::ShiftExportRecord`: `POST /v1/office/shifts/{id}/exports`
+ * (plan ЧЗ), the record of an export the office saved. Built only by
+ * `shiftExportRecord` (`src/host/requests.ts`).
+ */
+export const shiftExportRecordSchema = z
+  .object({
+    formatId: z.string(),
+    formatVersion: z.number().int(),
+    maxLines: z.number().int().nullable(),
+    palletId: z.string().nullable(),
+    documentId: z.uuid(),
+    partCount: z.number().int(),
+    codeCount: z.number().int(),
+    boxCount: z.number().int(),
+    palletCount: z.number().int(),
+    openPalletSuppressedBoxCount: z.number().int(),
+  })
+  .strict();
+export type ShiftExportRecord = z.infer<typeof shiftExportRecordSchema>;
 
 /**
  * `POST /v1/device/shifts` (`markiro_proto::DeviceShiftCreate`): a station's

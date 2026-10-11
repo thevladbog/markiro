@@ -16,6 +16,7 @@ import { MailDeliveryService } from "../src/modules/mail/mail-delivery.service";
 import { MailJobsService } from "../src/modules/mail/mail-jobs.service";
 import { ObjectStorageService } from "../src/modules/storage/object-storage.service";
 import { listenOnLoopback } from "./support/listen-loopback";
+import { requireOwner } from "./support/provisioned-owner";
 
 const ready = process.env.LOCAL_INFRA_SMOKE === "1";
 
@@ -93,16 +94,18 @@ describe.skipIf(!ready)("local Mailpit and S3 product lifecycle", () => {
     const suffix = crypto.randomUUID();
     const email = `infra-owner-${suffix}@example.com`;
     const password = `Owner-${suffix}!Aa1`;
-    const result = await provisionTenantOwner({
-      db: setup.db,
-      mail: new MailDeliveryService(new MailCryptoService(env.MAIL_PAYLOAD_ENCRYPTION_KEY)),
-      adminOrigin: env.ADMIN_ORIGIN,
-      input: {
-        email,
-        tenantName: "Infrastructure smoke tenant",
-        tenantSlug: `infra-smoke-${suffix}`,
-      },
-    });
+    const result = requireOwner(
+      await provisionTenantOwner({
+        db: setup.db,
+        mail: new MailDeliveryService(new MailCryptoService(env.MAIL_PAYLOAD_ENCRYPTION_KEY)),
+        adminOrigin: env.ADMIN_ORIGIN,
+        input: {
+          email,
+          tenantName: "Infrastructure smoke tenant",
+          tenantSlug: `infra-smoke-${suffix}`,
+        },
+      }),
+    );
 
     await jobs.processDelivery(result.deliveryId);
     const activationHtml = await waitForCapturedHtml(email);

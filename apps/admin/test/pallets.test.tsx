@@ -490,6 +490,14 @@ const FORMATS = [
     boxMode: "boxes",
   },
   {
+    id: "shift_txt_boxes_reversed",
+    version: 1,
+    label: "[TXT][С коробами][Обратная] Отчет смены",
+    extension: "txt",
+    mimeType: "text/plain; charset=utf-8",
+    boxMode: "boxes",
+  },
+  {
     id: "shift_txt_pallets",
     version: 1,
     label: "[TXT][Паллеты] Отчет смены",
@@ -589,6 +597,7 @@ describe("pallet export formats", () => {
     renderExports({ ...SHIFT, palletsEnabled: false });
 
     expect(await screen.findByLabelText("[TXT][С коробами] Отчет смены")).toBeDefined();
+    expect(screen.getByLabelText("[TXT][С коробами][Обратная] Отчет смены")).toBeDefined();
     expect(screen.queryByText(/паллет/i)).toBeNull();
   });
 

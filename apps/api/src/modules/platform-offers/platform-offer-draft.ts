@@ -9,6 +9,7 @@ import {
 } from "../billing/commercial-line-terms";
 import type { CommercialLineTermsV4 } from "@markiro/platform-contracts";
 import type { CreateOfferDto } from "./dto";
+import { assertKindAllowedForTenant } from "../../subscriptions/tenant-cabinet-access";
 import { calculateOfferAmounts } from "./offer-totals";
 import { normalizeOfferTerms } from "./offer-terms";
 
@@ -44,6 +45,7 @@ export async function prepareOfferDraft(
     priceOverrideReason: string | null;
   }> = [];
   for (const line of input.lines) {
+    await assertKindAllowedForTenant(tx, input.tenantId, line.kind);
     if (!line.catalogVersionId) {
       if (line.kind !== "service") {
         throw new BadRequestException({ code: "offer_catalog_version_invalid" });

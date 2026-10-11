@@ -26,6 +26,7 @@ import {
   bitmapToZplHex,
   convertToMonochrome,
   wrapTextToWidth,
+  wrapTextToWidthStrict,
   type RasterizeTextFn,
   type RasterizeTextOptions,
 } from "@markiro/domain";
@@ -129,17 +130,42 @@ function buildFontShorthand(fontFamily: string, fontSizePx: number, bold: boolea
  */
 function rasterizeTextSync(
   text: string,
-  { fontFamily, fontSizePx, bold, maxWidthPx, maxLines }: RasterizeTextOptions,
+  {
+    fontFamily,
+    fontSizePx,
+    bold,
+    maxWidthPx,
+    maxLines,
+    overflow,
+    lineHeight: lineHeightEm,
+    minFontSizePx,
+  }: RasterizeTextOptions,
 ) {
-  const font = buildFontShorthand(fontFamily, fontSizePx, bold);
+  let font = buildFontShorthand(fontFamily, fontSizePx, bold);
 
   const measureCtx = getCanvas2dContext(1, 1);
   measureCtx.font = font;
   const measure = (s: string) => measureCtx.measureText(s).width;
 
   const bounded = maxWidthPx !== undefined && maxWidthPx > 0;
-  const lines = bounded ? wrapTextToWidth(text, measure, maxWidthPx, maxLines ?? 1) : [text];
-  const lineHeight = Math.ceil(fontSizePx * 1.5);
+  if (bounded && minFontSizePx !== undefined) {
+    while (measure(text) > maxWidthPx && fontSizePx > minFontSizePx) {
+      fontSizePx--;
+      font = buildFontShorthand(fontFamily, fontSizePx, bold);
+      measureCtx.font = font;
+    }
+    if (measure(text) > maxWidthPx)
+      throw new Error("Label quantity exceeds its box at minimum font size");
+  }
+  const lines = bounded
+    ? (overflow === "error" ? wrapTextToWidthStrict : wrapTextToWidth)(
+        text,
+        measure,
+        maxWidthPx,
+        maxLines ?? 1,
+      )
+    : [text];
+  const lineHeight = Math.ceil(fontSizePx * (lineHeightEm ?? 1.5));
   const naturalWidth = Math.ceil(Math.max(...lines.map(measure)));
   // Clamped as well as wrapped: `measure` is fractional and `wrapTextToWidth`
   // only guarantees each line is <= maxWidthPx BEFORE the ceil, so a line
@@ -182,8 +208,12 @@ export const rasterizeText: RasterizeTextFn = async (text, opts) => {
   const font = buildFontShorthand(opts.fontFamily, opts.fontSizePx, opts.bold);
   try {
     // Load the actual script subset; the default space only loads Latin.
-    await document.fonts?.load(font, text);
-  } catch {
+    const loaded = await document.fonts?.load(font, text);
+    if (opts.overflow === "error" && (!loaded?.length || !document.fonts.check(font, text)))
+      throw new Error("Bundled label font is unavailable");
+  } catch (caught) {
+    if (opts.overflow === "error")
+      throw caught instanceof Error ? caught : new Error(String(caught));
     // Best-effort only -- see this function's doc comment above.
   }
 
@@ -197,4 +227,14 @@ export const rasterizeText: RasterizeTextFn = async (text, opts) => {
     // `@typescript-eslint/prefer-promise-reject-errors` requires elsewhere.
     throw err instanceof Error ? err : new Error(String(err));
   }
+};
+
+/** Driver pages must not freeze pixels from a fallback font into a saved job. */
+export const rasterizeDriverText: RasterizeTextFn = async (text, opts) => {
+  const font = buildFontShorthand(opts.fontFamily, opts.fontSizePx, opts.bold);
+  if (!document.fonts) throw new RasterUnavailableError("Font loading is unavailable");
+  const loaded = await document.fonts.load(font, text || "Аа");
+  if (loaded.length === 0 || !document.fonts.check(font, text || "Аа"))
+    throw new RasterUnavailableError("Bundled label font is unavailable");
+  return rasterizeTextSync(text, opts);
 };

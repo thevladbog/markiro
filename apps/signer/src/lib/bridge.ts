@@ -17,7 +17,20 @@ export interface AgentStatus {
   lastTokenExpiresAt: string | null;
   lastError: string | null;
   journal: JournalEntry[];
+  /** Storage facts the operator should see; `storage.*` in i18n words them. */
+  storageNotices: StorageNotice[];
 }
+
+/** Mirrors `signer_core::storage_location::StorageNotice`. */
+export type StorageNotice =
+  | {
+      kind: "localLessDurable";
+      reason: "temporaryProfile" | "mandatoryProfile" | "deleteRoamingCache";
+    }
+  | { kind: "movePostponed" }
+  | { kind: "legacyCleanupPending" }
+  | { kind: "roamedCopyPresent"; sameAgent: boolean }
+  | { kind: "credentialUnreadable" };
 
 export interface JournalEntry {
   occurredAt: string;

@@ -48,6 +48,7 @@ object LabelSpecCodec {
             fontSizePt = o.num("fontSizePt"), bold = o.boolOrNull("bold"),
             align = o.strOrNull("align")?.let(LabelAlign::fromWire),
             maxWidthMm = o.numOrNull("maxWidthMm"), maxLines = o.intOrNull("maxLines"),
+            fontFamily = o.strOrNull("fontFamily"), lineHeight = o.numOrNull("lineHeight"), minFontSizePt = o.numOrNull("minFontSizePt"),
         )
         "field" -> LabelElement.Field(
             id = o.str("id"), xMm = o.num("xMm"), yMm = o.num("yMm"),
@@ -56,7 +57,12 @@ object LabelSpecCodec {
             fontSizePt = o.num("fontSizePt"), bold = o.boolOrNull("bold"),
             align = o.strOrNull("align")?.let(LabelAlign::fromWire),
             maxWidthMm = o.numOrNull("maxWidthMm"), maxLines = o.intOrNull("maxLines"),
+            fontFamily = o.strOrNull("fontFamily"), lineHeight = o.numOrNull("lineHeight"), minFontSizePt = o.numOrNull("minFontSizePt"),
         )
+        "organization_logo" -> {
+            if (o.str("source") != "organization" || o.str("fallback") != "markiro") throw LabelRenderException("invalid logo source")
+            LabelElement.OrganizationLogo(o.str("id"), o.num("xMm"), o.num("yMm"), o.num("widthMm"), o.num("heightMm"))
+        }
         "barcode" -> LabelElement.Barcode(
             id = o.str("id"), xMm = o.num("xMm"), yMm = o.num("yMm"),
             format = BarcodeFormat.fromWire(o.str("format")),

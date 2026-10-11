@@ -32,6 +32,7 @@ const tenant = {
   name: "Завод Север",
   slug: "sever-factory",
   createdAt: "2026-08-01T00:00:00.000Z",
+  cabinetAccess: "enabled",
   subscriptionStatus: "unmanaged",
 } satisfies TenantListItem;
 

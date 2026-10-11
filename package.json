@@ -21,6 +21,7 @@
     "test:yandex-runtime": "node --test deploy/yandex/test/*.test.mjs",
     "test:station-release:contract": "node --test tools/station-release/test/*.test.mjs",
     "test:signer-release:contract": "node --test tools/signer-release/test/*.test.mjs",
+    "test:standalone-release:contract": "node --test tools/standalone-release/test/*.test.mjs",
     "test:handheld-release:contract": "node --test tools/handheld-release/test/*.test.mjs",
     "verify:station-production-cors": "node tools/station-release/verify-api-cors.mjs https://admin.markiro.app",
     "test:yandex-runbooks:contract": "node --test infra/yandex/test/runbook-contract.test.mjs",
@@ -37,7 +38,8 @@
     "evidence:verify": "node tools/evidence-package/verify.mjs",
     "test:evidence-package": "node --test tools/evidence-package/test/*.test.mjs",
     "rospatent:deposit": "node tools/rospatent/build-deposit.mjs",
-    "test:rospatent": "node --test tools/rospatent/test/*.test.mjs"
+    "test:rospatent": "node --test tools/rospatent/test/*.test.mjs",
+    "test:standalone-export": "node --test tools/standalone-export/test/*.test.mjs"
   },
   "devDependencies": {
     "@aws-sdk/client-s3": "3.1114.0",
@@ -46,7 +48,7 @@
     "eslint-config-prettier": "10.1.8",
     "eslint-plugin-react-hooks": "7.1.1",
     "globals": "17.11.0",
-    "js-yaml": "5.2.2",
+    "js-yaml": "5.4.1",
     "prettier": "3.9.6",
     "turbo": "2.10.11",
     "typescript": "6.0.3",

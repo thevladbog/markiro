@@ -84,4 +84,36 @@ describe.skipIf(!ready)("unmanaged tenant reconciliation report", () => {
     await connection.db.delete(schema.organization).where(eq(schema.organization.id, tenantB));
     await connection.db.delete(schema.user).where(eq(schema.user.id, ownerId));
   });
+
+  it("does not report a tenant without a cabinet as unmanaged", async () => {
+    const suffix = randomUUID();
+    const offline = randomUUID();
+    const managedless = randomUUID();
+    await connection.db.insert(schema.organization).values([
+      {
+        id: offline,
+        name: "Report offline",
+        slug: `report-offline-${suffix}`,
+        createdAt: new Date(),
+        cabinetAccess: "none",
+      },
+      {
+        id: managedless,
+        name: "Report cabinet",
+        slug: `report-cabinet-${suffix}`,
+        createdAt: new Date(),
+      },
+    ]);
+    try {
+      const report = await reportUnmanagedTenants(connection.db);
+      const ids = report.tenants.map((tenant) => tenant.tenantId);
+      expect(ids).not.toContain(offline);
+      expect(ids).toContain(managedless);
+    } finally {
+      await connection.db.delete(schema.organization).where(eq(schema.organization.id, offline));
+      await connection.db
+        .delete(schema.organization)
+        .where(eq(schema.organization.id, managedless));
+    }
+  });
 });

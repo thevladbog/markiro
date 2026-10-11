@@ -92,7 +92,13 @@ and a template's `spec`: they are named in `changed` without a value
 because it may be 256 KB. A station's writes (shift create and open, SSCC
 blocks) carry the device as the actor (`Actor::Device`), and a request a
 station repeats (a create, a re-entry, a block) writes no row.
-Details never hold pairing codes, keys, tokens, passwords, salts or hashes, and
+Backups (plan РК) write `backup.create` (the host or the office user who asked;
+`failed` when a folder did not get the copy), `backup.settings.update`,
+`host.restore` (the host), `host.restore.resume` and `sscc.block.register`
+(the station).
+Details never hold pairing codes, keys, tokens, passwords, salts or hashes (the
+SHA-256 of a copy's file in `backup.create` and `host.restore` is a checksum to
+compare with the manifest, not a credential hash), and
 a refused login never records the typed login. An attempt refused by a rate
 limiter writes no row, so a flood cannot fill the log. An office write the host
 refuses (`validation_failed`, `forbidden`, `not_found`, `stale_revision`,
@@ -100,8 +106,13 @@ refuses (`validation_failed`, `forbidden`, `not_found`, `stale_revision`,
 writer since plan 1b1: the `denied` rows are refused sign-ins, password
 changes and pairing claims. `office_user.password` covers
 both an administrator's reset and a user's own change (`actor_id ==
-target_id`). Tests assert the exact actor, action, target, result and parsed
-details.
+target_id`). `shift.export` (plan ЧЗ) is the one row that records no change:
+the office saved an export's files and then wrote it (`POST
+/v1/office/shifts/{id}/exports`), every office role, no revision, the
+shift as its target and the record's fields as its details. The host cannot
+check those counts against the files, which it never sees: the row says what
+the office session reported it wrote, and it is no evidence of the bytes.
+Tests assert the exact actor, action, target, result and parsed details.
 
 ## Databases
 
@@ -1011,8 +1022,13 @@ A feed from another host than the paired one stops the sync with
 `other_host` and applies nothing. `createSyncScheduler` runs one sync at a time: triggers during a
 run ask for exactly one more, and a failed run waits for the next trigger;
 `run` must report its own failure, since the scheduler swallows every
-rejection. A host restored from a copy that has already passed the
-device's revision goes unnoticed until the feed carries an epoch (plan 5).
+rejection. A host restored from a copy answers the revision of the copy plus
+one (`markiro-host restore`, plan РК), below what the station last read, so a
+station whose cursor passed it sees `rev < since` and starts again from zero;
+that is best effort. A station whose cursor is at or below the copy's next
+revision does not notice, nor does one that reconnects only after the host's
+later writes passed its cursor. The station does not read `hello.restoreEpoch`
+yet: the epoch wipe is plan РК-С's, written after plans 2a5 and 2a6.
 
 ## Protocol
 
@@ -1486,28 +1502,27 @@ synchronous in the shell, so the window itself is hung then, and a timeout
 that let the next command overlap could leave the window locked while the
 webview believes it is not.
 
-`App` enters kiosk mode whenever no office session is open: at start, when
-the office closes («Выйти в цех») and when the session ends (below: when a
-call to the host finds it expired). That covers every screen that is not the
+`App` enters kiosk mode (on every PC but an office PC, below) whenever no
+office session is open: at start, when the office closes («Выйти в цех») and
+when the session ends (below: when a call to the host finds it expired). That covers every screen that is not the
 office, the first-run wizard and the repair screens (pairing, host not found,
 pairing failed) included: on a fresh install, or while the host service is
 down, nothing inside the app leads out of the locked window until setup is
 finished and an administrator signs in.
 
-Kiosk mode locks EVERY PC that runs the app, not only the floor's stations:
-whenever no office session is open, the host's own PC and a PC used only for
-the office are behind the borderless, topmost, unclosable window too, and a
-technologist cannot leave it (only an administrator can). Stage 1 always pairs
-the app as a station (`DeviceKind::Station` in `device.rs`; `DeviceKind::Office`
-exists in `proto` and nothing uses it), so the app has no way to tell a floor
-station from an office PC. This is the plan's decision («whenever no office
-session is open»), not a choice the owner made, and it is an open owner
-question to settle before the Windows trial at a customer, where someone will
-install the app on the host's PC. Options: accept it; lock only a window that
-is a floor station (for example only once the device has a line, or leave the
-line-selection screen unlocked); a per-device kiosk switch the administrator
-sets in «Устройства» (host, `proto` and `device.json` change); a local
-«office PC» flag in `device.json` set by an administrator.
+Kiosk mode locks every PC except an office PC (plan УСТ; owner question П11,
+answered as recommended until the owner says otherwise). An office PC is one
+the installer gave the role «только офис» (`installation.json`, see
+«Installer and service»), or one paired as a device of kind `office`: `App`
+asks the shell for the role first (`install_role`) and enters kiosk mode only
+once the answer came and says it is not an office PC; an answer the shell
+cannot give counts as a station, so the floor stays locked. The role wins over
+the pairing: a PC the installer made a host or a station stays locked even if
+its disk holds an office pairing, and an office-role PC never shows the floor,
+the line choice or the operator sign-in even if its disk holds a station
+pairing. The host's own PC is the site's station (pilot spec §3) and stays
+locked. A technologist on a station cannot leave the locked window (only an
+administrator can).
 
 An office session opens with the window still locked; the way out is «Оконный
 режим» (`src/office/WindowModeButton.tsx`, in the office header), shown only
@@ -1564,6 +1579,128 @@ keep the lockout counters out of what `clear_copies` empties, so a forget does
 not reset them; the second would be one change with making the buttons 64 px.
 The buttons of these shell screens are of ordinary size, not 64 px, although
 kiosk mode shows them on the station.
+
+## Installer and service
+
+Plan УСТ ships the app with one NSIS installer for Windows 10/11 x64 and
+three roles: `host` (the `MarkiroHost` service and the station), `station`
+(a station that pairs with a host on another PC) and `office` (the office
+only). The operator's guide is `docs/runbooks/standalone-install.md`; the
+pilot spec's «Уточнения плана УСТ» records the decisions and the deviations
+from §10. Nothing in this section has run on Windows: the installer, the NSIS
+hooks and `smoke.ps1` are covered by text and fake-based tests only, and the
+first real run is the `standalone-windows-build` job.
+
+`markiro-host install`, `uninstall`, `stop-service` and `network-check
+[--make-private]` (`host/src/main.rs`) are the installer's tools; the first
+three refuse outside Windows. `install::install_host` (`host/src/install.rs`)
+creates the data directory, then `install::install` makes Administrators the
+owner of it, of everything in it (`/setowner *S-1-5-32-544 /T /C`) and of its
+parent when that is the `Markiro` folder (a user who made the folder first
+would otherwise keep the right to change its access list), and hardens it with
+`icacls` by SID — inheritance off, SYSTEM and Administrators full control,
+LocalService modify, so no user reads the database or `tls/key.der`, which
+hold the PIN and badge hashes and the host's private key; stops a service an earlier version
+left running; creates or rewrites `MarkiroHost` («Markiro Хост», own process,
+automatic start, `NT AUTHORITY\LocalService`, `"<exe>" service`, restarts
+after 5, 30 and 60 s with the count reset after a day, failure actions on a
+non-crash exit too, which `service.rs`'s `ServiceSpecific(1)` needs; an
+existing service keeps its account — `ServiceSpec.account` is `None` and
+ChangeServiceConfigW gets NULL — so an account the customer's IT chose for
+the backup share, see `docs/runbooks/standalone-backup-restore.md`, survives
+every update, and a service created without one still gets LocalService,
+never LocalSystem); replaces the firewall rule `MarkiroHost` (TCP,
+`host.json`'s port or 45710 as of that moment, private and domain networks,
+`LocalSubnet`, no `-Program`); starts the service and waits up to 30 s. A fresh
+install that fails before the start is taken back (service and rule removed);
+a failed upgrade keeps the service it found, and a service that was started
+and then did not come up stays registered. `uninstall` stops and deletes the
+service and the rule and never touches the data directory. The service
+manager is behind `install::Services` (`install_windows.rs` on
+`windows-service`) and external programs behind `install::Commands`
+(`icacls.exe` and `powershell.exe` by their absolute path under
+`%SystemRoot%\System32`, and PowerShell takes its script as `-EncodedCommand`,
+so no quoting rule can change it), so `host/tests/install.rs` and
+`host/tests/network_profile.rs` pin the order of the steps, the exact command
+lines and the bounded waits with fakes on any OS; `install_windows.rs`
+compiles only for Windows. `network-check` lists `Get-NetConnectionProfile`
+(the category as text, UTF-8) and exits 3 while a network is public;
+`--make-private` makes the public ones private first. Exit codes: `install` 0
+running, 1 failed, 4 registered but did not stay up or still starting after
+the 30 s wait (usually an unfinished `restore`: `host.restore-intent` makes
+`start` refuse, and Windows keeps retrying every 60 s, so a `restore` may meet
+«locked» once and be repeated; or a big first migration);
+`network-check` 0, 3, 1; a bad command line 2.
+
+The installer build is `tauri build --config src-tauri/tauri.installer.conf.json
+--bundles nsis` after `markiro-host.exe` was copied to
+`src-tauri/binaries/markiro-host-x86_64-pc-windows-msvc.exe` (ignored by git).
+The overlay adds the sidecar (`bundle.externalBin`), the per-machine install
+and the Russian installer. Never move `externalBin` into `tauri.conf.json` or
+a `tauri.windows.conf.json`: `tauri-build` copies the sidecar at compile time
+and reads `tauri.windows.conf.json` on every Windows build, so `cargo test`
+would fail without the binary. The hooks (`src-tauri/windows/installer-hooks.nsh`,
+UTF-8 with a byte order mark, or NSIS reads the Russian text in the build
+machine's code page) take the role from `/ROLE=`, else from
+`HKLM\Software\Markiro\Standalone\Role`, else from two questions; a silent
+install without a role fails, and a role never changes on reinstall. NSIS
+compares strings without regard to case, so the hook maps the role to the
+exact lower-case literal before it writes `{"role":"host|station|office"}` to
+`installation.json`: that file must carry no other key, or the app's reader
+refuses it and the PC becomes a locked-down station. Before files are copied
+an existing host binary stops its service; afterwards the host role runs
+`install` (a failure fails the installation; exit code 4 is only a warning
+with the restore hint) and `network-check`, offering to make a public network
+private; the other roles delete `markiro-host.exe`; every role but `office`
+opens the app at sign-in (`HKLM\…\Run\MarkiroStandalone`). Uninstalling
+ignores Tauri's «delete app data» checkbox (the station's local database may
+hold unsent facts); a real uninstall (not Tauri's `/UPDATE`) runs
+`markiro-host uninstall` and removes the role, the autostart and
+`installation.json`, and an update only stops the service. A failed
+`uninstall` or `stop-service` in the hooks is only logged, so files can go
+while the service stays registered; the runbook tells the operator to check.
+The Tauri template's facts the hooks rely on (hook positions, `$UpdateMode`,
+`$DeleteAppDataCheckboxState`, `GetOptions`) come from the signer's hooks, not
+from the template, which was not available to read, and no `makensis` has
+compiled the hooks.
+
+The app reads its role from `installation.json` beside its executable
+(`src-tauri/src/installation.rs`; `Program Files` is writable by
+administrators only, so nobody at the station can make it an office PC). A
+missing or unreadable file is no role: the app works as a station. An office
+PC pairs by code as a device of kind `office` (`DeviceState::claim`) and the
+shell refuses its `host_local_pair`, so it can never obtain a station key; its
+home is the office sign-in, which has no «В цех», its header says «Выйти»
+(`OfficeSessionValue.exitTo`), and nobody signs in on its floor. It still
+syncs the reference copies like a station (see «Перенесено» of plan УСТ).
+
+`device_change_address` (`DeviceState::change_address`) moves a pairing to
+the host's new address: the address is first reduced to `https://host[:port]`
+(no user name, password, path, query, fragment or white space, `host_origin`),
+and the pairing is kept only when that address presents the pinned
+certificate and the host still accepts the device key (`GET /v1/device`), so
+the key never reaches another machine; another certificate is
+`address_other_host`, a refused key is `key_rejected` (a rejected device), and
+nothing changes but `hostAddress` and the connection task's link. The office
+sign-in of a pairing with a remote host offers it («Сменить адрес хоста»,
+`src/app/HostAddressDialog.tsx`, the address typed as for pairing).
+
+`standalone-windows-build` builds the release host and the installer, runs
+`tools/standalone-release/smoke.ps1` on its runner (the three roles and a
+silent install without one, the service's account, start mode, restart
+policy and a restart after a killed process, the firewall rule, the data
+directory's access list, a reinstall that keeps the host's identity and
+certificate, a reinstall over an unfinished restore, a refused role change,
+uninstalls that keep the data, one with the host running), then
+`tools/standalone-release/prepare.mjs` writes the installer under its
+release name with `release-evidence.json` (version, commit, roles, hash and
+size, `Get-AuthenticodeSignature`'s status) and `SHA256SUMS`, uploaded as
+`standalone-installer-<sha>` for 30 days. `pnpm test:standalone-release:contract`
+pins the overlay, the hooks, the job's step order and the smoke test's checks.
+The installer is not signed (owner question П12); `sign-overlay.mjs` builds
+the Tauri overlay for a certificate in the build machine's store, and no
+signing material ever reaches CI. Prettier does not cover `smoke.ps1` or the
+`.nsh` hooks.
 
 ## Office pages
 
@@ -2098,14 +2235,14 @@ kiosk mode shows them on the station.
   first show) and the shift's devices, named from `listDevices` for an
   administrator (a revoked one marked «(отозвано)») and by the first eight
   characters of the id for a technologist, for an id the list lacks or while
-  the list does not load, with a note saying why. The full card of a shift is
-  stage 4. A shift carries ids,
-  so the page names them from `listProducts`,
-  `listLines` and `listCounterparties`, an archived record marked «(в архиве)»,
-  and one a list lacks or that did not load by the first eight characters of
-  its id («Товар 5e6f7081…»). A lookup that fails leaves the list in place with
-  one warning (names that are missing are shown by the start of their codes,
-  and the marks of shifts that will not open may be missing) and «Повторить»,
+  the list does not load, with a note saying why. The number opens the shift's
+  card (plan О-Ф, see "Shift card and printed forms"). A shift carries ids, so
+  the page names them from `listProducts`, `listLines` and
+  `listCounterparties`, an archived record marked «(в архиве)», and one a list
+  lacks or that did not load by the first eight characters of its id («Товар
+  5e6f7081…»). A lookup that fails leaves the list in place with one warning
+  (names that are missing are shown by the start of their codes, and the marks
+  of shifts that will not open may be missing) and «Повторить»,
   which reads again only what failed; the retry of a failed list of shifts
   reads the failed lookups too.
 - A planned shift a station will refuse to open is marked from the page's own
@@ -2142,7 +2279,14 @@ kiosk mode shows them on the station.
   the organization's, the first that fits; none, and the person chooses); it
   also clears an earlier refusal of those two fields. The template offers what
   fits the product's group and has no «Не выбран»; the line offers active
-  lines; the counterparty is optional. When the template defaults do not load,
+  lines; the counterparty is optional. «С паллетами» (plan О-Ф) is offered for
+  a product with a pallet capacity: turned on, it takes that capacity and the
+  pallet template by the same rule for the purpose `pallet`
+  (`suggestPalletTemplate`), both changeable and both required; another
+  product chosen takes its own, and one without a pallet capacity turns the
+  pallets off. A shift without pallets sends neither field, and a change that
+  turns them off sends `palletsEnabled: false` alone (the host clears the
+  two). When the template defaults do not load,
   a note under the template says it comes from the product alone. While a write is on its way every
   control of the dialog is off. A refused field takes the focus, the first in
   the form's order (`SHIFT_FIELD_ORDER`), the selects and the date included.
@@ -2168,8 +2312,10 @@ kiosk mode shows them on the station.
   host counts them (`closeReasonRule`), sent trimmed with the loaded revision;
   a line break is a control character, so Enter writes none (the hint says
   «одной строкой»; an Enter that confirms an input method's word is left alone)
-  and a pasted one is refused with `rules.controlCharacter`, nothing sent. A
-  closed shift has no action.
+  and a pasted one is refused with `rules.controlCharacter`, nothing sent. An
+  active or closed shift also has «Выгрузка», for every role (plan ЧЗ, see
+  "Shift exports"); a closed shift has no other action than «Итоги» and
+  «Выгрузка».
 - Every change and close sends the opened row's revision; a delete sends none
   (the host takes no `expectedRev` on `DELETE`, only the status), so it removes
   a planned shift whatever was changed in it meanwhile, and a create has no
@@ -3266,7 +3412,8 @@ Known limits of the retention, and who carries each:
   print jobs. A migration with `outbox (host_id, device_id, shift_id)` and
   `floor_exceptions (host_id, device_id, shift_id)` would remove both. Plan
   ПЛ-Ц's migration `0008_floor_pallets` did not add them (it adds only
-  `floor_pallets_shift`); plan РК or the owner decides. `floor_pallet_exceptions`
+  `floor_pallets_shift`), and plan РК, which brought the backups, added no station
+  migration either: the owner decides. `floor_pallet_exceptions`
   is read whole by the delete in the same way, and its scan is pinned in both
   engines' plan lists.
 - A refused or conflicting record of a shift whose close was accepted is
@@ -3428,12 +3575,388 @@ Known limits of the pallets, and who carries each:
 - Pallets of several stations on one shift and the revocation of pallet blocks
   are stage 2b (plan ПЛ-Х, «Перенесено»).
 
+## Shift exports
+
+Plan ЧЗ ports the cloud's shift exports into the office; the bytes of every
+file are the cloud's for the same facts, and that is the acceptance rule.
+
+- The host only reads and records. `GET /v1/office/shifts/{id}/export-source`
+  (`routes/office_exports.rs`, every office role) answers `ShiftExportRows`
+  in one read transaction: the shift with its number, status, production
+  date, the product's name now (the cloud's export joins the live product),
+  `closedAt` (the host's whole seconds) and `stationClosedAt` (the accepted
+  `shift_close_events.closed_at`, the device's instant), the organization's
+  name and INN, the codes the shift owns with their owning scans' canonical
+  text, every box, the live items of those boxes only and every pallet. Each
+  query searches by an index (`every_query_of_the_source_searches_by_an_index`
+  runs `EXPLAIN QUERY PLAN` on them), so a year of facts costs one shift's
+  export nothing. `GET …/boxes` and `…/pallets` (`routes/office_boxes.rs`)
+  list a shift's boxes and pallets with their live units and boxes, derived
+  as the cloud's pallet card derives them, for the card of plan О-Ф; a taken-
+  apart pallet still lists its boxes there (the box→pallet link stays on the
+  host), so a consumer shows `disassembledAt`, not those counts.
+- The office ports the cloud's source (`src/office/exports/export-source.ts`,
+  the cloud's `shift-export-source.service.ts`) and its runner's mapping of
+  failures (`run-export.ts`), and renders through `@markiro/domain`
+  (`renderShiftExport`, `renderPalletAggregationExport`). Two rules are the
+  standalone's own and change no cloud byte: `operation_date_time` is the
+  station's close instant when a station closed the shift (the cloud's
+  `shifts.closed_at` is that instant; the host keeps whole seconds), and the
+  pallets taken apart that a pallets format still writes are counted for a
+  warning. The cloud writes such a pallet as a pallet (its pallet query reads
+  no `disassembled_at`), so the port does too, contrary to plan ПЛ-Х's
+  contract; a single pallet's document refuses it (`PALLET_DISASSEMBLED`).
+  Whether that stays is an OWNER DECISION still open: if the owner wants
+  «boxes without a pallet», the cloud and the port change together, one line
+  in each (the cloud's `toPalletsSource`, the port's `palletsSource`), or the
+  golden below drifts.
+  A failure that is not a domain refusal becomes `GENERATION_FAILED` with a
+  `reason` (the domain's code, or the error's kind such as `RangeError`,
+  never its message); the dialog shows it and nothing logs it.
+- Parity is a test on both sides over the same cases:
+  `packages/domain/test/fixtures/shift-export-parity/cases.json` holds the
+  facts, `golden.json` the cloud's bytes (text, length, SHA-256), file names,
+  counts and refusals. `apps/api/test/standalone-export-parity.test.ts` runs
+  the cloud's own source and runner over them (no database), and
+  `test/export-parity.test.ts` runs the office's port over the same facts as
+  the host would answer them. A legitimate change of the cloud's export
+  regenerates the golden from the cloud's test alone
+  (`EXPORT_PARITY_WRITE=1`), and the port follows in the same change. The
+  location under `packages/domain` makes `tools/ci/affected.mjs` run both
+  suites on any change of the cases.
+  A new cloud format is a host change too: the host takes only the formats of
+  `SHIFT_FORMATS` (`routes/office_exports.rs`) and `proto/fixtures/export-formats.json`,
+  which `test/protocol.test.ts` compares with `SHIFT_EXPORT_FORMATS` (order
+  included) and the host's `the_formats_the_host_takes_are_the_fixtures` with
+  the Rust list. Both now carry the eleven shift formats, among them
+  `shift_txt_boxes_reversed` (1), the cloud's #681 (the codes of a box, then
+  its SSCC); the golden's 218 older entries did not change when its 21 keys
+  were added.
+- The dialog (`ExportDialog.tsx`, from «Смены» and from the shift's card)
+  offers the cloud's formats (the pallets formats only for a shift with
+  pallets), each with what its source would refuse now, the line limit
+  (2–1 000 000, 2000 by default), the warnings (late data, boxes on a pallet
+  still open, pallets taken apart in the document, a pallet's count that
+  differs from its boxes) and a ЧЗ document for each closed pallet, also of an
+  active shift. A late box and a taken-apart pallet are shown as two facts:
+  `late_boxes` also counts a box on a taken-apart pallet, which is still
+  written as a pallet. Forming reads the rows
+  again, saves the parts and only then records the export; a record the host
+  did not take is said, with «Записать снова», and the files stay.
+  `document_id` is a new UUID each time and `file_date_time` the moment of
+  forming, so two exports of one shift are two documents. The late-data
+  warning cannot see a code that an earlier scan of another shift took after
+  the close (displacement marks no shift late, as in the cloud). A box closed
+  later than its pallet (the host joins it silently, plan ПЛ-Х) is named by
+  the `late_boxes` warning of the pallets formats and of that pallet's own
+  document, so it is not taken for a part of the pallet as it closed.
+- The dialog yields to the interface between steps (one format check, the
+  counts, the forming of one document) and can be cancelled until the files
+  start to be saved. A single step still blocks as long as it takes: about
+  0.5–2 s at 200 000 codes, measured in jsdom on a loaded machine, and so
+  does the Zod parse of the host's answer, which is tens of megabytes at that
+  size. A worker is the real fix and is not done; the answer's size over
+  WebView2's IPC is not measured. The dialog uses the office's `md` and
+  `compact` controls, not the 64 px of the floor and station screens; an
+  office on a touch panel is a cross-cutting change the owner may want.
+- Files go through the shell (`src-tauri/src/office_files.rs`):
+  `save_office_files` writes them, byte for byte, into a new folder
+  `Документы\Markiro\Выгрузки\<номер смены>\<дата_время>_<формат>` (the
+  number as a file name's segment, the moment in the organization's zone; a
+  folder that exists gets « (2)»), checks every name before writing and
+  takes the folder back on a failure; `open_office_folder` shows it in
+  Explorer. No file dialog and no new dependency (pilot question П16).
+  `Формы` is the second root (plan О-Ф uses it, see "Shift card and printed
+  forms"). A name is a short allowlist
+  (plain characters, the extensions csv, txt, xml and html, at most 150
+  characters, no link or look-alike character, at most 8 segments); a name or
+  a path over 240 UTF-16 units is `invalid_request`, which a long product
+  name under a long Documents path reaches, and the dialog says so in plain
+  words. `COM0` and `LPT0` are accepted as plain names, and a partial file is
+  cleaned by removing the call's own folder, not by writing to a temporary
+  file and renaming. None of this is verified on Windows: Explorer's quoting,
+  junctions, OneDrive-redirected «Документы» and a path near MAX_PATH ran
+  only on macOS temporary folders.
+
+## Shift card and printed forms
+
+Plan О-Ф gives the office the card of a shift and the cloud's printed forms
+of a shift (pilot spec §5.5): «Бланк смены», «Состав короба», «Состав
+паллеты», «Ярлык паллеты» (A4 or A5) and «Ярлыки паллет смены». The forms
+are `@markiro/domain`'s `print-forms`, the cloud's own renderers, so what
+makes a standalone form the cloud's for the same facts is the data and its
+mapping; the bytes are the acceptance rule.
+
+- The card (`src/office/shifts/ShiftCardPage.tsx`, route `shifts/:id`,
+  opened by the number in «Смены») reads the shift afresh (`getShift`) and
+  shows its fields, its status and marks as the list does, its boxes
+  (`GET …/boxes`, fifty a page, filtered by the SSCC's last digits; the state,
+  the pallet, the label check the station sent last, a close whose digest did
+  not match) and its pallets (`GET …/pallets`; a station's count that differs
+  from the boxes standing is marked, never fixed). «Итоги» opens
+  `ShiftTotalsDialog`, «Выгрузка» `ExportDialog` (plan ЧЗ) and «Закрыть»
+  `CloseShiftDialog` (`planShifts`), all as the list opens them; a close
+  reads the card and every list again. Every role prints. The card does not
+  refresh itself: an active shift's lists are as of opening, and the pallet
+  list is not paged (fine at hundreds; page it at about a thousand).
+- The host only reads, one snapshot a route, each query by an index
+  (`EXPLAIN QUERY PLAN` in `host/tests/office_reports.rs`):
+  `GET /v1/office/boxes/{id}/report-data` (`BoxReportRows`) gives a box's
+  codes as the cloud's `boxReportData` prints them — the live items, and of a
+  box taken apart the items its disassembly took out (`removed_at` equal to
+  the box's `disassembled_at`: the host writes both from the fact's one
+  instant), through the scans of the box's shift, since no index names a
+  box's items that are no longer live — each with its scan's GTIN, serial and
+  canonical text, by GTIN and serial byte for byte (the cloud sorts by its
+  database's collation: a serial of mixed case may stand elsewhere there);
+  `GET /v1/office/shifts/{id}/pallet-report-data` (`PalletReportRows`) gives
+  the shift's number, date and product now and every pallet with every box
+  that stood on it (closed first, then by id), a box's units its live items
+  (a box taken apart has none; no form prints or counts them). Both name the
+  organization. The product is the one now, as the cloud joins it. A box
+  still open on a pallet cannot be reached on the host (a box joins the
+  pallet as it closes). A box's request for a box of a shift of a hundred
+  thousand scans reads the shift's scans (about 0.14 s measured under load);
+  an index on the box's items is a host migration, not made.
+- The office maps these rows to the cloud's inputs
+  (`src/office/forms/form-data.ts`) and draws with `renderForm`
+  (`render-form.ts`): SSCCs with `00`, the state as the cloud derives it, no
+  logo (pilot question П15) and no photo; times in the organization's zone
+  (`formTimeZone`, this PC's when it is not known), except «Сформирован» of
+  the blank, which the domain always prints in Moscow time (the cloud's bytes
+  are the same). The cloud's refusals stay: a placard needs a closed pallet
+  with an SSCC (one taken apart prints with the watermark), «Ярлыки паллет
+  смены» print the closed standing pallets closed first and need one, «Бланк
+  смены» is for a planned or an active shift and takes the shift's one date as
+  both its dates (stage 2a spec, question В3).
+- Parity: `packages/domain/test/fixtures/print-forms-parity/cases.json` holds
+  each case's input as the cloud's loader returns it (`cloud`) and the same
+  facts as the host answers them (`host`); `golden.json` the HTML the cloud's
+  controllers answer for `cloud`
+  (`apps/api/test/standalone-forms-parity.test.ts`, which writes it with
+  `FORMS_PARITY_WRITE=1`), and `test/forms-parity.test.ts` draws `host`
+  through `renderForm` to the same bytes. The cloud's loaders themselves are
+  not run (they are SQL against Postgres): their rules are ported and held by
+  the host's tests. A change of a cloud form regenerates the golden in the
+  same change; a change of a cloud loader is ported by hand.
+- Printing (`print-form.ts`, `PrintFormDialog.tsx`): each press reads the
+  rows again (the blank its five records) and draws the form from them, so a
+  dialog left open never prints a box as it was; only the card's button for
+  the shift's placards decides from the card's cached pallet list, while the
+  dialog itself reads fresh. «Печать» writes the HTML into one
+  hidden same-origin frame of the office's window and prints that frame
+  (WebView2's print dialog, the paper by the form's `@page`); «Открыть в
+  браузере» saves it, UTF-8, into a new folder
+  `Документы\Markiro\Формы\<номер смены>\<дата_время>_<форма>` and the
+  shell's `open_office_file` opens it in the default browser
+  (`explorer.exe`, a `.html` of the office's folder only, so no file the
+  webview names starts as a program). Both are offered side by side: a print
+  dialog that did not open cannot be seen. The forms load nothing from the
+  network (inline SVG barcodes, system Arial). The saved HTML carries no
+  Content-Security-Policy (the bytes are the domain's, for parity) and relies
+  on the domain's escaping of the data. The domain draws synchronously: a box
+  of thousands of codes freezes the window for seconds (about 8 ms a code in
+  jsdom under load), and a press already inside `openInBrowser` cannot be
+  cancelled by closing the dialog; a worker is the real fix.
+
+## Backups and restore
+
+Plan РК (`docs/superpowers/plans/2026-10-09-standalone-rk-backups.md`, the
+pilot spec's §11 and §22; the procedure is
+`docs/runbooks/standalone-backup-restore.md`). One worker task
+(`backup/worker.rs`, started by `crate::start`) makes every copy of the
+master database, one at a time, on a connection of its own:
+
+- a copy is `VACUUM INTO <name>.db.partial` while the host runs (a reader:
+  it waits for no writer and holds no uncommitted change), then
+  `PRAGMA integrity_check` on that file opened read-only and immutable, its
+  size and SHA-256, the rename to `markiro-host-<UTC time>-<tag>.db` and a
+  manifest `<name>.json` beside it (`backup/copy.rs`; the copy is flushed
+  before its rename through `copy::sync_file`, a handle opened for writing,
+  because Windows' FlushFileBuffers refuses a read-only one — the restore
+  uses the same helper); a failure leaves
+  nothing of the copy behind, and a copy never replaces one of its name. On
+  Unix the copy, the manifest and the second folder's replica are `0600`
+  (they hold what `host.db` holds: PIN and badge hashes, pairing keys); on
+  Windows they take the folder's ACL, which is the installer's job for the
+  data folder and the administrator's for the second folder;
+- scheduled: at most one copy per UTC hour, in the first minute of an hour
+  in which the database changed since the last good copy
+  (`PRAGMA data_version` of the worker's connection, which the worker's own
+  audit row does not move) or in which today (UTC) has no copy yet;
+  a host that starts copies at once; «Сделать копию сейчас» wakes the worker
+  at once. One attempt per hour: a failed hour is not retried before the next.
+  A clock that goes back starts the schedule over without a copy of its own;
+- the local folder is `<data dir>/backups`; the second folder is the office
+  setting `backup_settings.second_dir` (`0011`). A copy reaches the second
+  folder only after the local one checked out: copied as `.partial`, synced,
+  read back and compared with the manifest by size and SHA-256, then renamed;
+  the host never creates the second folder, so an unplugged drive or a share
+  that is off is `destination_unavailable`, not a new folder somewhere. A
+  failing replica removes only what it wrote, never a replica already there;
+- each folder keeps the newest 24 copies, the newest copy of each of the 14
+  newest days and of each of the 12 newest months (UTC; `backup/retention.rs`),
+  and loses only names that start with `markiro-host-`. Rotation runs only
+  after a verified copy joined the folder. A `.partial` file and a `.db`
+  without its manifest are leftovers of a broken copy; the worker removes them
+  before each copy, in both folders (the only caller of `folder::clean`, and
+  one task, so it never meets a copy in flight). Retention is relative to the
+  copies' own times, so `folder::rotate` takes the copy the run just made and
+  never deletes it: with the clock set back, the copies made before are newer
+  and the rule alone would drop the fresh one first. The office warns
+  `clockBehind` when the newest copy of either folder is more than an hour
+  later than the host's clock;
+- a run's outcome per folder is in memory (`Backups::state`, the office's
+  `GET /v1/office/backups`: gone after a restart until the first copy) and in
+  one `backup.create` audit row (the host as the actor for a scheduled copy,
+  the office user for a manual one; `failed` when any folder did not get the
+  copy; `details` hold the failure codes, never an error text). A run is a
+  task of its own, so a panic is that run's `internal` failure and the worker
+  goes on (a panic in the folder task leaves the copy lists the status holds); a host that stops waits up to 10 s for a copy in progress, and
+  `shutdown_runtime` (`main.rs`, `service.rs`) then waits at most 5 s more for
+  a blocking thread stuck on a dead share. The host does not check free space
+  (it would need a dependency): a full disk is a `disk_full` failure of that
+  copy.
+
+The office (`routes/backups.rs`): every role reads the state; administrators
+ask for a copy (`202`, `conflict` on `backup_running` while one runs or
+waits; the request itself writes no audit row, the worker's run does; the
+settings and the hold are read before the copy is queued, so a failed read is
+a 500 with no copy behind it, and the answer is built from memory) and set or
+clear the second folder with
+`expectedRev`. A folder is tried before it is saved, off the async threads and
+for at most 8 s: missing, not a folder, no right to write, unwritable, timed
+out, or inside the data folder is a `conflict` on `backup_dir` with
+`details.reason`; a path that is not absolute, has a control character, a `..`
+part or a Windows device namespace (`\\?\`, `\\.\`) is `validation_failed` on
+`secondDir` (so a share is named `\\PC\Share`, never `\\?\UNC\…`), and the path
+is never echoed back. A service sees no mapped drive letters, so a share is
+named by its UNC path. A probe thread stuck on a dead share cannot be cancelled.
+«Резервные копии» (`src/office/backups/`) shows both folders, the copies on
+the host and the held restore; it reads the state with its own polling loop
+(1 s while a copy runs, slower when idle, paused while the window is hidden)
+and writes times in the organization's zone. «Обзор» repeats the warnings (a
+held restore, a failed copy, no copy, a newest copy older than 26 hours by the
+host's clock, no second folder, a host clock behind the newest copy, a copy
+running for more than 30 minutes). No
+station code keeps count of returned blocks, so neither does the page.
+
+`markiro-host restore <copy> [--data-dir] [--without-manifest]` runs with the
+service stopped (the data folder's lock says so; the lock is let go slightly
+before the process ends, so the runbook waits for `STATE: STOPPED`) and
+changes nothing until the copy checked out: the manifest's size and SHA-256,
+`integrity_check`, every migration known to this build with its checksum, a
+finished wizard (a copy with a WAL beside it is refused with a manifest and
+read with the WAL folded in, in a private folder, without one). It reads the
+current database read-only if it opens (retrying a lock; a WAL a stopped host
+left counts too; a `-wal` or `-shm` that reading created is removed again; a
+database another program holds is refused, not treated as lost), and every
+`restore-*/host.db` too. Then it builds the new database BESIDE the current
+one (`host.db.partial`: the copy, migrated by this build, changed in one
+transaction on one connection that is closed before the swap):
+
+- every SSCC counter is raised to two blocks of its extension above the
+  highest serial either database knew (counter, block ends, box and pallet
+  serials; never past the prefix's last serial); when the current database is
+  not the copy's known history it is also at least 100 000 above the copy's,
+  rounded up to 10 000 (about 1 % of a 9-digit prefix's serials per restore).
+  The history is known only when the current database was read, its wizard
+  was done (`site.initialized_at`) and its `host.json` is the copy's host's: a
+  new PC's installer starts the host once and leaves a migrated database
+  without a wizard, and another host's numbers say nothing of what the copy's
+  host issued. Otherwise the audit sequence also jumps by 1 000 000, no
+  revocations are carried and the summary says «the current database is not
+  this copy's history»; the live numbers still count as floors; every month's shift
+  number is raised by 10 above both, from the copy's month to the current one;
+- the revision is the copy's next one, BELOW what the current database
+  reached: a station whose cursor passed it sees the host go back and starts
+  again from zero. Best effort until the stations read the epoch. The audit
+  sequence is raised above both databases (an audit id never names two
+  events);
+- the revocations of the current database are carried over (a device and a
+  badge stay revoked, an operator and an office user stay turned off; nothing
+  the copy lacks comes back); every office session is ended; a password
+  changed after the copy is not carried; the copy's devices are not revoked
+  when it came from another host. When the current database was not read or
+  is not the copy's history, the summary says what is active again;
+- a new `site.restore_epoch` (a UUID), `site.facts_held_since`, one
+  `host.restore` row (the host as the actor; `carried` and `sessionsEnded` are
+  part of its details).
+
+The intent marker `host.restore-intent` is written (synced) after the new
+database is checked and before the first rename, and removed after the last.
+The swap moves the current files into `restore-<UTC time>/` (never deleted),
+renames the new database into place (each rename retried against a virus
+scanner, the folders synced) and puts everything back if a rename fails.
+`crate::start` refuses while the marker is there (`restore::refuse_unfinished`,
+before the database opens): the next `restore` rolls back, finishes or, when
+the files fit neither, refuses and leaves them for support. A data folder
+without `host.json` gets a new identity after the new database is checked:
+every device pairs again. `markiro-host verify-copy` runs the same checks.
+`restore_crashing` and `CrashPoint` are `#[doc(hidden)]` test hooks that stop
+the real restore dead after a rename; production passes `None`.
+
+`hello` names `restoreEpoch` once there was a restore. A station that sees it
+change is meant to send every block it holds to `POST
+/v1/device/sscc/blocks/known` (`routes/known_blocks.rs`): a block the host
+has is `known`, or `refused` `block_mismatch` if it differs; a lost one is
+`registered` under the station with its own id as the request id and moves its
+counter forward, unless it names no counter (`prefix_unknown`; an extension
+above 9, which no serial can carry, is `range_invalid`), is no range of its
+prefix (`range_invalid`) or shares a serial with any block, revoked ones
+included (`block_overlap`). One revision when anything was registered, one
+`sscc.block.register` row per block; the station is marked for the epoch
+(`devices.known_blocks_epoch`) whatever became of each block. Only a station,
+only after a restore (`conflict` on `no_restore`), 1-64 blocks.
+
+A receipt is kept for good (plan 2a2), and a copy may lack the shift, the
+participant row or the block a station's fact names. So from a restore until
+an administrator resumes (`POST /v1/office/backups/resume`, «Возобновить
+приём данных станций»), a layer over the whole router answers
+`POST /v1/device/facts` and `GET /v1/device/codes/{…}` with `restore_pending`
+(503, `Retry-After: 60`, `details.since`) before any route or device check,
+and the station sends them again later (the station's own retry backs off to
+60 s; it does not read `Retry-After`); blocks, shifts and the feed are not
+held. The office lists every unrevoked station and whether it sent its blocks
+back; resuming is the administrator's call, behind a dialog that asks for an
+explicit confirmation of the runbook's SSCC checks (a station on a dead
+computer never returns blocks), and writes one `host.restore.resume` row with
+how many did.
+
+The station's side is NOT written. Plan РК-С, written after plans 2a5 and 2a6
+(plan 2a6 leaves it to plan РК), is to: keep the last seen epoch; on a new one
+sync the copies from zero, send every block it holds in parts of 64 before it
+resumes delivery, honour `Retry-After`, and show refused blocks and the hold in
+the status bar. Until then no station returns a block, `reconciled` stays 0,
+the epoch wipe of the copies is best effort (above), and a shift a station
+opened or created after the copy has no re-registration (its facts are refused
+once the facts resume: `unknown_shift`, `not_entered`). The checks that make up
+for it are the runbook's, done by a person before the resume.
+
+Migration `0011` may be applied after `0012` on a database that already had
+it (sqlx accepts a lower version not yet applied; the test builds a
+`Migrator` from doc-hidden fields, which a sqlx upgrade may touch).
+
+What no automated test shows: the Windows service and its account writing to
+another PC's share, UNC and USB behaviour, antivirus against a rename, folder
+flush and ACL inheritance, `sc start` refusing while the marker is there, a
+really full disk, WebView2 for the page. The runbook's last section lists them
+as the manual test.
+
 ## Marking rules
 
 GS1, KM, SSCC and label rules stay in `@markiro/domain`; the host stores and
 arbitrates but does not reimplement them.
 
 ## Logs
+
+The routes of a shift's exports and of its forms' data answer with codes and
+SSCCs and log none of them; `no_secrets_in_logs.rs` reads the export source,
+both lists, a box's and the pallets' form data and records an export; the form
+data it reads must hold the walk's own code, serial and SSCCs, or the walk
+would prove nothing about these routes. The shell's file commands log a
+failure by its code and the I/O error's kind, never a path (it names the
+Windows user), and the export dialog logs nothing.
 
 Never log device keys, session tokens, pairing codes, passwords, PINs, badge
 codes (a scan is one: the sign-in neither logs nor keeps it, and
@@ -3569,7 +4092,11 @@ either; a file log is stage 5.
     TCP 9100, a COM port and a USB spooler queue: the label's size and
     position, a long Cyrillic name (IBM Plex through the WebView2 canvas,
     including a canvas near 4096 dots), the dates, and the printed SSCC and
-    barcode read back by the client's scanner and equal to the box's; the same
+    barcode read back by the client's scanner and equal to the box's (since the
+    cloud's #692 the domain writes the TSPL SSCC as the native `EAN128` barcode
+    holding `00` and the 18 digits, no longer a `128` with a literal `!1`: on
+    a TSC the scan must read `00` + the SSCC and no `!1`; ZPL is unchanged;
+    no TSC has been tried); the same
     template matches the office preview; the size of a stock label's stored
     base64 at each resolution;
   - the test print and its scan back on each printer and each connection;
@@ -3597,9 +4124,12 @@ either; a file log is stage 5.
     window, and the idle sign-out from the setup.
 - The Windows service and DPAPI run only in the `standalone-windows-build`
   job: it compiles the service and the Tauri app for Windows, and its cargo
-  tests round-trip a key through DPAPI. A real Windows user profile, the
-  service at runtime and kiosk mode still need a manual check on Windows; a
-  run on macOS proves none of it.
+  tests round-trip a key through DPAPI. Since plan УСТ it also builds the
+  installer and runs its smoke test on the runner (see «Installer and
+  service»). A real Windows user profile, two PCs over Wi-Fi, kiosk mode and
+  the installer's windows still need a manual check on Windows
+  (`docs/runbooks/standalone-install.md`, «Ручная проверка на Windows»); a run
+  on macOS proves none of it.
 - The `windows-sys` features of kiosk mode, the spooler and the power request,
   `serialport`, `base64` for every system and `libudev-dev` in `standalone-rust`
   came with plan 2a4's owner step (its Task 1, which also closed plan 1f2's).
@@ -3725,3 +4255,9 @@ either; a file log is stage 5.
   of 366 days. The «Итоги» window and the «Выпуск» column have run only
   against fixture totals: never against a host's subqueries over real facts,
   nor with the time of the last fact written by WebView2's `Intl`.
+- The shift's card and its printed forms (plan О-Ф) have run only under jsdom,
+  printing into a mock: never WebView2's print dialog for the hidden frame,
+  A4 and A5 paper by `@page` on a real printer, the default browser that
+  `explorer.exe` opens for a form's `.html`, Cyrillic and DataMatrix on paper,
+  nor a card of thousands of boxes; «Бланк смены»'s DataMatrix scanned by a
+  station is plan 2a5's.

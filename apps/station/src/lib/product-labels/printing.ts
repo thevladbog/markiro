@@ -1,5 +1,14 @@
+import { tauriWindowsPrinting } from "../hardware.js";
+import {
+  dispatchWindowsDelivery,
+  resolvePrintDelivery,
+  preparePrintDelivery,
+  type WindowsDeliveryPreflight,
+} from "../print-deliveries.js";
 import { z } from "zod";
 import {
+  productLabelPrintFormat,
+  productLabelPrintIdentity,
   compareDuplicateKm,
   DomainError,
   type ProductLabelEvent,
@@ -19,6 +28,7 @@ import {
   discardUncommittedPrintDestination,
 } from "../print-destinations.js";
 import {
+  printerFormat,
   outputPrinterProfile,
   serializePrinterOutput,
   type PrinterProfile,
@@ -69,7 +79,7 @@ async function sendPreparedBody(
   if (
     target === null ||
     !printer?.dpi ||
-    printer.language !== job.projection.language ||
+    printerFormat(printer) !== productLabelPrintFormat(job.projection) ||
     printer.dpi !== job.projection.dpi
   ) {
     await appendProductLabelEvent(exec, credentialOwnership, {
@@ -78,6 +88,37 @@ async function sendPreparedBody(
       errorCode: target === null || !printer?.dpi ? "printer_unconfigured" : "printer_changed",
     });
     return presentProductLabelJob(await requireProductLabelJob(exec, credentialOwnership, jobId));
+  }
+  const frozenBytes = Uint8Array.from(atob(job.bytesBase64), (char) => char.charCodeAt(0));
+  let preflighted: WindowsDeliveryPreflight | undefined;
+  if (printerFormat(printer) === "mono-raster-v1") {
+    const key = {
+      scope: job.credentialOwnership,
+      purpose: "duplicate" as const,
+      jobId,
+      attemptId: job.projection.attemptId,
+    };
+    let ready = false;
+    try {
+      if (printer.target.kind === "usb")
+        ready = (
+          await tauriWindowsPrinting.preflightWindowsRaster(printer.target.printer, frozenBytes)
+        ).ok;
+      if (ready) {
+        await preparePrintDelivery(exec, key, printer, frozenBytes);
+        preflighted = { profileJson: JSON.stringify(printer), bytes: frozenBytes };
+      }
+    } catch {
+      ready = false;
+    }
+    if (!ready) {
+      await appendProductLabelEvent(exec, credentialOwnership, {
+        ...base,
+        kind: "failed_before_send",
+        errorCode: "printer_changed",
+      });
+      return presentProductLabelJob(await requireProductLabelJob(exec, credentialOwnership, jobId));
+    }
   }
   const claimed = await appendProductLabelEvent(
     exec,
@@ -100,14 +141,29 @@ async function sendPreparedBody(
   });
   if (
     !claimedPrinter ||
-    claimedPrinter.language !== job.projection.language ||
+    printerFormat(claimedPrinter) !== productLabelPrintFormat(job.projection) ||
     claimedPrinter.dpi !== job.projection.dpi
   )
     throw new Error("Saved print destination unavailable");
-  const bytes = Uint8Array.from(atob(job.bytesBase64), (char) => char.charCodeAt(0));
+  const bytes = frozenBytes;
   try {
     await serializePrinterOutput(claimedPrinter.target, () =>
-      deps.print(claimedPrinter.target, bytes),
+      printerFormat(claimedPrinter) === "mono-raster-v1"
+        ? dispatchWindowsDelivery(
+            exec,
+            {
+              scope: job.credentialOwnership,
+              purpose: "duplicate",
+              jobId,
+              attemptId: job.projection.attemptId,
+            },
+            claimedPrinter,
+            bytes,
+            undefined,
+            undefined,
+            preflighted,
+          )
+        : deps.print(claimedPrinter.target, bytes),
     );
   } catch {
     await appendProductLabelEvent(exec, credentialOwnership, {
@@ -146,7 +202,10 @@ export async function changePreparedProductLabelPrinter(
     isProductLabelSendActive(owner, jobId)
   )
     throw new Error("Print attempt unavailable");
-  if (printer.language !== job.projection.language || printer.dpi !== job.projection.dpi)
+  if (
+    printerFormat(printer) !== productLabelPrintFormat(job.projection) ||
+    printer.dpi !== job.projection.dpi
+  )
     throw new Error("Incompatible printer");
   const guard = `EXISTS (SELECT 1 FROM product_label_jobs WHERE credential_ownership=? AND job_id=? AND ownership_conflict=0 AND status='prepared' AND json_extract(projection_json,'$.attemptState')='prepared' AND json_extract(projection_json,'$.attemptId')=?)`;
   const guardParams = [job.credentialOwnership, jobId, attemptId];
@@ -193,6 +252,13 @@ export async function verifyProductLabel(
       ? { ...base, kind: "verified", scannedPayloadDigest: projection.payloadDigest }
       : { ...base, kind: "verification_rejected", reason: verdict };
   const result = await appendProductLabelEvent(exec, input.credentialOwnership, event);
+  if (result === "applied" && verdict === "match")
+    await resolvePrintDelivery(exec, {
+      scope: job.credentialOwnership,
+      purpose: "duplicate",
+      jobId: job.jobId,
+      attemptId: job.projection.attemptId,
+    });
   return result === "applied" ? verdict : "stale";
 }
 
@@ -248,7 +314,8 @@ export async function prepareProductLabelReprint(
   const printer = input.printer ?? previousPrinter ?? input.fallbackPrinter ?? null;
   if (
     printer &&
-    (printer.language !== job.projection.language || printer.dpi !== job.projection.dpi)
+    (printerFormat(printer) !== productLabelPrintFormat(job.projection) ||
+      printer.dpi !== job.projection.dpi)
   )
     throw new DomainError(
       "PRODUCT_LABEL_PRINTER_CHANGED",
@@ -265,7 +332,7 @@ export async function prepareProductLabelReprint(
     attemptId,
     attemptNo: job.projection.attemptNo + 1,
     reason,
-    language: job.projection.language,
+    ...productLabelPrintIdentity(job.projection),
     dpi: job.projection.dpi,
     bytesDigest: job.projection.bytesDigest,
   };
@@ -285,5 +352,11 @@ export async function prepareProductLabelReprint(
       "The print attempt changed; refresh the current label",
     );
   }
+  await resolvePrintDelivery(exec, {
+    scope: job.credentialOwnership,
+    purpose: "duplicate",
+    jobId: job.jobId,
+    attemptId: job.projection.attemptId,
+  });
   return attemptId;
 }

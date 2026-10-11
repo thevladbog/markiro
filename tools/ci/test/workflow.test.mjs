@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
@@ -170,6 +178,15 @@ test("every heavy job keeps its id and is gated by its classifier output", () =>
   }
 });
 
+test("production bundle retains both contract suites owning the deployment workflow", () => {
+  const job = workflow.jobs["production-bundle"];
+  for (const command of ["pnpm test:production-bundle:contract", "pnpm test:yandex-runtime"])
+    assert.ok(
+      job.steps.some((step) => step.run === command),
+      `missing deployment gate: ${command}`,
+    );
+});
+
 test("inventory database suites receive the migrated CI database through Turbo", () => {
   const job = workflow.jobs["verify-api-tests"];
   assert.equal(job.env.INVENTORY_TEST_DATABASE_URL, job.env.DATABASE_URL);
@@ -177,6 +194,15 @@ test("inventory database suites receive the migrated CI database through Turbo",
   assert.ok(turbo.tasks.test.env.includes("INVENTORY_TEST_DATABASE_URL"));
   const apiTurbo = JSON.parse(readFileSync("apps/api/turbo.json", "utf8"));
   assert.ok(apiTurbo.tasks.test.env.includes("INVENTORY_TEST_DATABASE_URL"));
+});
+
+test("isolated support chat tests retain explicit scratch database guards through Turbo", () => {
+  for (const file of ["turbo.json", "apps/api/turbo.json"]) {
+    const turbo = JSON.parse(readFileSync(file, "utf8"));
+    assert.ok(turbo.tasks.test.env.includes("SUPPORT_CHAT_ISOLATED_DB"), file);
+    assert.ok(turbo.tasks.test.env.includes("SUPPORT_CHAT_TEST_MAINTENANCE_URL"), file);
+    assert.ok(!turbo.tasks.test.env.includes("SUPPORT_CHAT_BROWSER_CONTROL_DIR"), file);
+  }
 });
 
 test("Signer Windows verification includes the stable release contract", () => {
@@ -272,6 +298,40 @@ test("product-labels browser contract runs in the Chromium job after both app bu
   assert.match(config, /"PRODUCT_LABELS_ADMIN_PORT", 43181/);
   assert.match(config, /"PRODUCT_LABELS_STATION_PORT", 43182/);
   assert.equal(config.match(/--strictPort/g)?.length, 2);
+});
+
+test("production-bundle reserves every browser harness port Linux could hand out as a source port", () => {
+  const job = workflow.jobs["production-bundle"];
+  const reserve = stepByName(job, "Reserve browser harness ports");
+  assert.ok(reserve, "production-bundle must reserve its browser harness ports");
+  const range = /^sudo sysctl -w net\.ipv4\.ip_local_reserved_ports=(\d+)-(\d+)$/.exec(
+    reserve.run.trim(),
+  );
+  assert.ok(range, "the reservation must be one sysctl range");
+  const [low, high] = [Number(range[1]), Number(range[2])];
+  // Before the first suite opens a loopback connection that could take one of them.
+  const firstBrowser = job.steps.findIndex((step) =>
+    /tools\/production-browser|:browser\b/.test(step.run ?? ""),
+  );
+  assert.ok(firstBrowser >= 0 && job.steps.indexOf(reserve) < firstBrowser);
+
+  const ports = new Set();
+  for (const name of readdirSync("tools/production-browser")) {
+    if (!name.endsWith(".playwright.config.ts")) continue;
+    const config = readFileSync(join("tools/production-browser", name), "utf8");
+    for (const match of config.matchAll(
+      /(?:--port[ =]|port = |_PORT", |(?:127\.0\.0\.1|localhost):)(\d[\d_]*)/g,
+    )) {
+      ports.add(Number(match[1].replaceAll("_", "")));
+    }
+  }
+  // The scan must still see the harnesses, or the check below proves nothing.
+  for (const known of [43179, 43182, 43188, 61593]) assert.ok(ports.has(known), `port ${known}`);
+  // ubuntu-latest hands out source ports from 32768-60999.
+  const exposed = [...ports]
+    .filter((port) => port >= 32768 && port <= 60999 && (port < low || port > high))
+    .sort((a, b) => a - b);
+  assert.deepEqual(exposed, []);
 });
 
 test("Android gate verifies original signed and budget fixture byte parity before Gradle", () => {

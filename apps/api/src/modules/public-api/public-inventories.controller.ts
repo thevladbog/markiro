@@ -146,7 +146,8 @@ export class PublicInventoriesController {
     FileInterceptor("file", {
       storage: memoryStorage(),
       defParamCharset: "utf8",
-      limits: { fileSize: CHZ_MAX_INPUT_BYTES, files: 1, fields: 0, fieldSize: 0, parts: 2 },
+      // multer >= 2.4 treats `parts` as the inclusive maximum: exactly the file.
+      limits: { fileSize: CHZ_MAX_INPUT_BYTES, files: 1, fields: 0, fieldSize: 0, parts: 1 },
     }),
   )
   @ApiConsumes("multipart/form-data")

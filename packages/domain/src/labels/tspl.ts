@@ -1,3 +1,5 @@
+import { renderLabelLogo } from "./label-logo.js";
+import type { MonoBitmap } from "./mono-compose.js";
 /**
  * TSPL (TSC TSPL2) label document generator — emits complete, printer-ready
  * TSPL source text compatible with TSC thermal printers.
@@ -58,6 +60,7 @@ import {
 } from "./model.js";
 import { buildBitmapCommand, rasterAlignOffsetDots, type RasterizeTextFn } from "./raster-types.js";
 import { needsImageRendering } from "./text.js";
+import { buildTsplBar, buildTsplBox, buildTsplDocument } from "./printer-commands.js";
 import { rasterizeGs1DataMatrix } from "../barcodes/gs1-data-matrix.js";
 import { estimatedTextWidthMm, LINE_HEIGHT_EM, ptToMm, wrapTextToWidth } from "./wrap.js";
 
@@ -68,6 +71,7 @@ export { needsImageRendering } from "./text.js";
 
 export interface GenerateTsplDeps {
   rasterizeText?: RasterizeTextFn;
+  logo?: MonoBitmap | null;
   /** Product-duplicate layouts use sizeMm as the complete symbol square, including quiet zone. */
   kmDataMatrix?: "native" | "raster";
 }
@@ -234,7 +238,11 @@ async function renderTextLikeElement(
   const x = mmToDots(element.xMm, spec.dpi);
   const y = mmToDots(element.yMm, spec.dpi);
 
-  if (needsImageRendering(text)) {
+  if (
+    needsImageRendering(text) ||
+    element.lineHeight !== undefined ||
+    element.fontFamily !== undefined
+  ) {
     if (!deps.rasterizeText) {
       throw new DomainError(
         "RASTER_REQUIRED",
@@ -247,7 +255,11 @@ async function renderTextLikeElement(
     // `maxWidthPx`/`maxLines` bound the bitmap itself — identical to zpl.ts's
     // raster branch; see `RasterizeTextOptions`'s doc comment.
     const raster = await deps.rasterizeText(text, {
-      fontFamily: "sans-serif",
+      fontFamily: element.fontFamily ?? "sans-serif",
+      ...(element.minFontSizePt === undefined
+        ? {}
+        : { minFontSizePx: ptToDots(element.minFontSizePt, spec.dpi) }),
+      ...(element.lineHeight === undefined ? {} : { lineHeight: element.lineHeight }),
       fontSizePx,
       bold: element.bold ?? false,
       maxWidthPx: maxWidthDots,
@@ -382,7 +394,7 @@ function barWidthParams(element: LabelBarcodeElement, dpi: LabelTemplateSpec["dp
   return `${narrow},${narrow}`;
 }
 
-function renderBarcodeElement(
+export function renderTsplBarcodeElement(
   element: LabelBarcodeElement,
   data: Record<LabelField, string>,
   dpi: LabelTemplateSpec["dpi"],
@@ -394,16 +406,13 @@ function renderBarcodeElement(
   switch (element.format) {
     case "code128": {
       const heightDots = mmToDots(element.sizeMm, dpi);
-      // A code128 bound to `sscc` is a GS1-128, not a plain Code 128: TSPL's
-      // `"128"` barcode type takes FNC1 as the two literal characters `!1`
-      // inside the data (per TSC's TSPL2 manual, code-page permitting) —
-      // the TSPL equivalent of `zpl.ts`'s `>;>8` (subset-C-select + FNC1)
-      // in its own `code128` case; see that comment for the full
-      // rationale. The AI (`00`) is added HERE and nowhere else — storage
-      // and transport carry the bare 18 digits.
-      const payload = field === "sscc" ? `!100${value}` : value;
+      // TSC's native EAN128 type supplies the leading FNC1. Plain "128"
+      // encodes "!1" literally, corrupting the scanned SSCC. Add only AI 00;
+      // storage and transport continue to carry the bare 18 digits.
+      const barcodeType = field === "sscc" ? "EAN128" : "128";
+      const payload = field === "sscc" ? `00${value}` : value;
       const bars = barWidthParams(element, dpi);
-      return `BARCODE ${x},${y},"128",${heightDots},0,0,${bars},"${escapeTsplString(payload)}"`;
+      return `BARCODE ${x},${y},"${barcodeType}",${heightDots},0,0,${bars},"${escapeTsplString(payload)}"`;
     }
     case "ean13": {
       const heightDots = mmToDots(element.sizeMm, dpi);
@@ -436,7 +445,7 @@ function renderLineElement(element: LabelLineElement, dpi: LabelTemplateSpec["dp
   const heightDots = Math.max(spanYDots, thicknessDots);
   const originXDots = mmToDots(Math.min(element.xMm, element.x2Mm), dpi);
   const originYDots = mmToDots(Math.min(element.yMm, element.y2Mm), dpi);
-  return `BAR ${originXDots},${originYDots},${widthDots},${heightDots}`;
+  return buildTsplBar(originXDots, originYDots, widthDots, heightDots);
 }
 
 /**
@@ -451,10 +460,10 @@ function renderLineElement(element: LabelLineElement, dpi: LabelTemplateSpec["dp
 function renderBoxElement(element: LabelBoxElement, dpi: LabelTemplateSpec["dpi"]): string {
   const x = mmToDots(element.xMm, dpi);
   const y = mmToDots(element.yMm, dpi);
-  const xEnd = x + mmToDots(element.widthMm, dpi);
-  const yEnd = y + mmToDots(element.heightMm, dpi);
+  const widthDots = mmToDots(element.widthMm, dpi);
+  const heightDots = mmToDots(element.heightMm, dpi);
   const thicknessDots = mmToDots(element.thicknessMm, dpi);
-  return `BOX ${x},${y},${xEnd},${yEnd},${thicknessDots}`;
+  return buildTsplBox(x, y, widthDots, heightDots, thicknessDots);
 }
 
 /**
@@ -477,18 +486,19 @@ export async function generateTspl(
   data: Record<LabelField, string>,
   deps: GenerateTsplDeps = {},
 ): Promise<string> {
-  const lines: string[] = [
-    `SIZE ${spec.widthMm} mm, ${spec.heightMm} mm`,
-    "GAP 2 mm, 0 mm",
-    "DIRECTION 1",
-    "CLS",
-  ];
+  const lines: string[] = [];
 
   // Sequential (not Promise.all) — see generateZpl's identical rationale:
   // deterministic element order in the document and predictable mock
   // call order in tests, regardless of individual rasterizeText timing.
   for (const element of spec.elements) {
     switch (element.kind) {
+      case "organization_logo": {
+        if (!deps.logo) break; // Decorative: preserve the empty reserved space offline.
+        const { xDots, yDots, raster } = renderLabelLogo(element, spec.dpi, deps.logo);
+        lines.push(buildBitmapCommand(xDots, yDots, raster));
+        break;
+      }
       case "text":
         lines.push(await renderTextLikeElement(element, element.text, spec, deps));
         break;
@@ -520,7 +530,7 @@ export async function generateTspl(
             ),
           );
         } else {
-          lines.push(renderBarcodeElement(element, data, spec.dpi));
+          lines.push(renderTsplBarcodeElement(element, data, spec.dpi));
         }
         break;
       case "line":
@@ -532,6 +542,5 @@ export async function generateTspl(
     }
   }
 
-  lines.push("PRINT 1");
-  return lines.join("\n") + "\n";
+  return buildTsplDocument(spec.widthMm, spec.heightMm, lines);
 }

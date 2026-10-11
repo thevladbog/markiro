@@ -1,3 +1,5 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { paintThermalThumbnail } from "./thermal-thumbnail.js";
 /**
  * Plan 04 Task 8: label template library screen -- per-card thumbnail.
  *
@@ -14,6 +16,7 @@
  * simply skipped there -- this component renders a normal (empty) canvas
  * element instead of throwing.
  */
+import { isPalletSheetSpec, type PalletSheetSpecV2 } from "@markiro/domain";
 import { useEffect, useRef } from "react";
 
 import { labelPreviewData, labelRenderOptions } from "./preview-data.js";
@@ -28,6 +31,40 @@ const TRACK_HEIGHT_PX = 130;
 const MAX_LABEL_WIDTH_PX = 150;
 const MAX_LABEL_HEIGHT_PX = 110;
 
+/** Library overview only; the editor and print dialog provide the exact shared-renderer preview. */
+function drawSheetThumbnail(
+  ctx: CanvasRenderingContext2D,
+  spec: PalletSheetSpecV2,
+  width: number,
+  height: number,
+): void {
+  ctx.clearRect(0, 0, width, height);
+  const cell = width / spec.page.copies;
+  for (let copy = 0; copy < spec.page.copies; copy++) {
+    const left = cell * copy + cell * 0.08,
+      contentWidth = cell * 0.84;
+    ctx.fillStyle = "#b0b0b0";
+    ctx.fillRect(left, height * 0.08, contentWidth * 0.35, height * 0.07);
+    for (let line = 0; line < 4; line++)
+      ctx.fillRect(
+        left,
+        height * (0.23 + line * 0.1),
+        contentWidth * (line === 0 ? 1 : 0.75),
+        height * 0.025,
+      );
+    ctx.fillStyle = "#303030";
+    ctx.fillRect(left, height * 0.76, contentWidth, height * 0.15);
+  }
+  if (spec.page.cutLine) {
+    ctx.setLineDash([2, 2]);
+    ctx.beginPath();
+    ctx.moveTo(cell, 0);
+    ctx.lineTo(cell, height);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+}
+
 export interface TemplateThumbProps {
   id: string;
   widthMm: number;
@@ -36,6 +73,7 @@ export interface TemplateThumbProps {
 
 export function TemplateThumb({ id, widthMm, heightMm }: TemplateThumbProps) {
   const { data } = useLabelTemplate(id);
+  const queryClient = useQueryClient();
   const canvasRef = useRef<HTMLCanvasElement>(null);
 
   // Fit the label's own aspect ratio inside a fixed-size track, same
@@ -44,17 +82,33 @@ export function TemplateThumb({ id, widthMm, heightMm }: TemplateThumbProps) {
   const widthPx = widthMm * scale;
   const heightPx = heightMm * scale;
 
-  // Redraws on every render (no dependency array): a plain imperative paint
-  // surface with no internal state, cheap to repaint unconditionally, and
-  // this sidesteps having to depend on a fresh `sampleLabelData()` object
-  // identity.
+  // A4 cards show a bounded schematic; full print rendering belongs to the editor/print preview.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !data) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    if (isPalletSheetSpec(data.spec)) {
+      drawSheetThumbnail(ctx, data.spec, canvas.width, canvas.height);
+      return;
+    }
+    if (data.spec.elements.some((e) => e.kind === "organization_logo")) {
+      let cancelled = false;
+      void paintThermalThumbnail(
+        canvas,
+        data.spec,
+        data.purpose,
+        () => !cancelled,
+        queryClient,
+      ).catch(() => {
+        if (!cancelled) ctx.clearRect(0, 0, canvas.width, canvas.height);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
     draw(data.spec, ctx, scale, labelPreviewData(data.purpose), labelRenderOptions(data.purpose));
-  });
+  }, [data, scale, queryClient]);
 
   return (
     <div

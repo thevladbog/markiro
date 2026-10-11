@@ -1,0 +1,2 @@
+ALTER TABLE "label_templates" DROP CONSTRAINT "label_templates_sheet_purpose_check";--> statement-breakpoint
+ALTER TABLE "label_templates" ADD CONSTRAINT "label_templates_sheet_purpose_check" CHECK ("label_templates"."format" <> 'pallet_sheet_v2' OR COALESCE(("label_templates"."purpose" = 'pallet' AND "label_templates"."spec"->'schemaVersion' = '2'::jsonb AND "label_templates"."spec"->>'kind' = 'pallet_sheet'), false));

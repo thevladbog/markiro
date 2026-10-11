@@ -680,6 +680,30 @@ describe("Enrollment", () => {
     expect(screen.queryByLabelText("Device key")).toBeNull();
     expect(invokeMock).not.toHaveBeenCalledWith("write_config", expect.anything());
   });
+
+  it("warns against pairing on a profile that Windows discards at sign-out", () => {
+    const warning =
+      "Windows loaded a temporary or mandatory profile: after sign-out the station would lose its pairing and data. Do not pair it on this profile; contact your administrator.";
+    const { rerender } = render(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://api.factory.example"
+        storageNotices={[{ kind: "local_less_durable", reason: "temporary_profile" }]}
+      />,
+    );
+    expect(screen.getByText(warning)).toBeDefined();
+
+    rerender(
+      <Enrollment
+        machineId="machine-1"
+        onEnrolled={() => {}}
+        pairingServerUrl="https://api.factory.example"
+        storageNotices={[{ kind: "local_less_durable", reason: "delete_roaming_cache" }]}
+      />,
+    );
+    expect(screen.queryByText(warning)).toBeNull();
+  });
 });
 
 it.each([false, true])(

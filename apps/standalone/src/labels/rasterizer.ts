@@ -85,22 +85,45 @@ function fontShorthand(family: string, sizePx: number, bold: boolean): string {
  * Measures the text on a throwaway context, wraps it to `maxWidthPx` and
  * `maxLines` with the same measure (the emitters never clip a bitmap, so this
  * keeps a long name on the label; what still does not fit ends in «…»),
- * draws each line black on white in a box of `ceil(sizePx × 1.5)` and packs
- * the pixels. The width is clamped too: a line that fills the box exactly
- * could round one dot past it.
+ * draws each line black on white in a box of `ceil(sizePx × lineHeight)`
+ * (1.5 em unless the element names its own) and packs the pixels. The width is
+ * clamped too: a line that fills the box exactly could round one dot past it.
+ *
+ * An element with a `minFontSizePx` (the standard labels' quantity, #703) is
+ * first made to fit its box on one line: the font shrinks a dot at a time down
+ * to that minimum, and a text that still does not fit there is refused rather
+ * than cut, so a printed quantity is never truncated.
  */
 function rasterizeTextSync(
   text: string,
-  { fontFamily, fontSizePx, bold, maxWidthPx, maxLines }: RasterizeTextOptions,
+  {
+    fontFamily,
+    fontSizePx,
+    bold,
+    maxWidthPx,
+    maxLines,
+    lineHeight: lineHeightEm,
+    minFontSizePx,
+  }: RasterizeTextOptions,
 ) {
-  const font = fontShorthand(fontFamily, fontSizePx, bold);
+  let font = fontShorthand(fontFamily, fontSizePx, bold);
   const measureContext = canvas2d(1, 1);
   measureContext.font = font;
   const measure = (line: string) => measureContext.measureText(line).width;
 
   const bounded = maxWidthPx !== undefined && maxWidthPx > 0;
+  if (bounded && minFontSizePx !== undefined) {
+    while (measure(text) > maxWidthPx && fontSizePx > minFontSizePx) {
+      fontSizePx -= 1;
+      font = fontShorthand(fontFamily, fontSizePx, bold);
+      measureContext.font = font;
+    }
+    if (measure(text) > maxWidthPx) {
+      throw new Error("Label quantity exceeds its box at minimum font size");
+    }
+  }
   const lines = bounded ? wrapTextToWidth(text, measure, maxWidthPx, maxLines ?? 1) : [text];
-  const lineHeight = Math.ceil(fontSizePx * 1.5);
+  const lineHeight = Math.ceil(fontSizePx * (lineHeightEm ?? 1.5));
   const naturalWidth = Math.ceil(Math.max(...lines.map(measure)));
   const width = Math.max(1, bounded ? Math.min(maxWidthPx, naturalWidth) : naturalWidth);
   const height = lineHeight * lines.length;

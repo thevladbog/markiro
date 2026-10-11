@@ -21,7 +21,10 @@ import {
   collapseClaims,
   conflictsAgainstOwner,
   displacedIncumbents,
+  heldScans,
   sameScan,
+  type BatchScan,
+  type ClaimItem,
   type OwnerRow,
 } from "./conflict-resolution";
 import { insertFreshDisplacedMemberships, type MembershipRow } from "./box-membership";
@@ -733,6 +736,10 @@ export class StationScansService {
         // batch that loses no claims of its own.
         const batchConflicts: BatchConflictDto[] = [];
         let validationOccurrences: ValidationOccurrenceOutcome[] = [];
+        // This batch's claims with their boxes, and the scan behind each of its
+        // own echoed conflicts, for `reclaimReleasedCodes` after the exceptions.
+        const batchScans: BatchScan[] = [];
+        const conflictLosers = new Map<BatchConflictDto, ClaimItem>();
 
         // Serialize every mutation of a device box before taking any registry
         // locks. The box row may not exist yet, so a transaction advisory lock
@@ -882,6 +889,17 @@ export class StationScansService {
               terminalId: i.terminalId,
               scannedAt: new Date(i.scannedAt),
             }));
+          batchScans.push(
+            ...coded
+              .filter((i) => !validationItems.has(i))
+              .map((i) => ({
+                codeHash: i.code.codeHash,
+                shiftId: i.shiftId,
+                terminalId: i.terminalId,
+                scannedAt: new Date(i.scannedAt),
+                boxId: i.boxId,
+              })),
+          );
 
           if (claimItems.length > 0) {
             // Sorted here, once, as the single source of truth for lock/claim
@@ -1024,13 +1042,15 @@ export class StationScansService {
             // batch's own scans -- so all of them, and only them, are this
             // batch's own losses; `displaced` names a scan from a batch other
             // than this one and must never be echoed back here.
-            batchConflicts.push(
-              ...ownLosses.map((c) => ({
+            for (const c of ownLosses) {
+              const conflict = {
                 codeHash: c.codeHash,
                 winningTerminalId: c.winning.terminalId,
                 winningScannedAt: c.winning.scannedAt.toISOString(),
-              })),
-            );
+              };
+              conflictLosers.set(conflict, { codeHash: c.codeHash, ...c.losing });
+              batchConflicts.push(conflict);
+            }
 
             // Box membership (Task 10). A boxed item is, by construction,
             // always a coded one -- `boxed` below is a subset of `coded` -- so
@@ -1904,6 +1924,14 @@ export class StationScansService {
             authenticatedTerminalId,
             sortExceptions(body.exceptions),
           );
+          await this.reclaimReleasedCodes(
+            tx,
+            tenantId,
+            batchScans,
+            body.exceptions,
+            batchConflicts,
+            conflictLosers,
+          );
         }
 
         // Pallet exceptions last, alongside the box exceptions and for the same
@@ -2304,6 +2332,147 @@ export class StationScansService {
         occurredAt: new Date(ex.occurredAt),
       });
     }
+  }
+
+  /**
+   * Settles the codes this batch's own exceptions released as if each release
+   * had arrived before the scans that follow it.
+   *
+   * Exceptions run after items so they can reach a scan in the same batch, but
+   * a device also releases a code and then scans it again: takes a box apart
+   * and re-packs it, clears a box and starts over. Each such re-scan lost its
+   * claim to the scan the batch released only afterwards, which left the code
+   * in no box while the device holds it. For every released code the batch
+   * still holds, the earliest held scan claims it and its membership is live
+   * again. The batch's own conflicts for the code named the released scan as
+   * winner, so they are withdrawn from the response and from the ledger; a
+   * later held scan of the code now loses to the new holder instead.
+   */
+  private async reclaimReleasedCodes(
+    tx: Pick<Db, "select" | "insert" | "update" | "delete">,
+    tenantId: string,
+    scans: readonly BatchScan[],
+    exceptions: readonly ExceptionDto[],
+    batchConflicts: BatchConflictDto[],
+    conflictLosers: ReadonlyMap<BatchConflictDto, ClaimItem>,
+  ): Promise<void> {
+    const hashes = [...new Set(scans.map((scan) => scan.codeHash))].sort();
+    if (hashes.length === 0) return;
+    const owned = await tx
+      .select({ codeHash: schema.codeRegistry.codeHash })
+      .from(schema.codeRegistry)
+      .where(
+        and(
+          eq(schema.codeRegistry.tenantId, tenantId),
+          inArray(schema.codeRegistry.codeHash, hashes),
+        ),
+      );
+    const ownedHashes = new Set(owned.map((row) => row.codeHash));
+    const released = new Set(hashes.filter((hash) => !ownedHashes.has(hash)));
+    if (released.size === 0) return;
+    const releasedScans = scans.filter((scan) => released.has(scan.codeHash));
+
+    for (let index = batchConflicts.length - 1; index >= 0; index -= 1) {
+      const loser = conflictLosers.get(batchConflicts[index]!);
+      if (loser !== undefined && released.has(loser.codeHash)) batchConflicts.splice(index, 1);
+    }
+    for (const scan of releasedScans) {
+      await tx.delete(schema.codeConflicts).where(
+        and(
+          eq(schema.codeConflicts.tenantId, tenantId),
+          eq(schema.codeConflicts.codeHash, scan.codeHash),
+          eq(schema.codeConflicts.losingShiftId, scan.shiftId),
+          scan.terminalId === null
+            ? isNull(schema.codeConflicts.losingTerminalId)
+            : eq(schema.codeConflicts.losingTerminalId, scan.terminalId),
+          eq(schema.codeConflicts.losingScannedAt, scan.scannedAt),
+          // Written by this transaction, never an earlier delivery's record.
+          eq(schema.codeConflicts.detectedAt, sql`now()`),
+        ),
+      );
+    }
+
+    const held = [...heldScans(releasedScans, exceptions).entries()].sort(([a], [b]) =>
+      a.localeCompare(b),
+    );
+    const deviceBoxIds = [
+      ...new Set(held.flatMap(([, list]) => (list[0]?.boxId == null ? [] : [list[0].boxId]))),
+    ];
+    const boxRows =
+      deviceBoxIds.length === 0
+        ? []
+        : await tx
+            .select({
+              id: schema.boxes.id,
+              shiftId: schema.boxes.shiftId,
+              terminalId: schema.boxes.terminalId,
+              deviceBoxId: schema.boxes.deviceBoxId,
+              disassembledAt: schema.boxes.disassembledAt,
+            })
+            .from(schema.boxes)
+            .where(
+              and(
+                eq(schema.boxes.tenantId, tenantId),
+                inArray(schema.boxes.deviceBoxId, deviceBoxIds),
+              ),
+            );
+    const boxKey = (shiftId: string, terminalId: string | null, deviceBoxId: string) =>
+      `${shiftId}|${terminalId ?? ""}|${deviceBoxId}`;
+    const boxByKey = new Map(
+      boxRows.map((row) => [boxKey(row.shiftId, row.terminalId, row.deviceBoxId), row]),
+    );
+
+    const changedBoxIds = new Set<string>();
+    for (const [codeHash, [holder, ...later]] of held) {
+      if (holder === undefined) continue;
+      let boxId: string | null = null;
+      if (holder.boxId !== null) {
+        const box = boxByKey.get(boxKey(holder.shiftId, holder.terminalId, holder.boxId));
+        // A box the server already retired cannot take the code back.
+        if (box === undefined || box.disassembledAt !== null) continue;
+        boxId = box.id;
+      }
+      const claimed = await tx
+        .insert(schema.codeRegistry)
+        .values({
+          tenantId,
+          codeHash,
+          shiftId: holder.shiftId,
+          terminalId: holder.terminalId,
+          scannedAt: holder.scannedAt,
+        })
+        .onConflictDoNothing()
+        .returning({ codeHash: schema.codeRegistry.codeHash });
+      if (claimed.length === 0) continue;
+      if (boxId !== null) {
+        await tx
+          .insert(schema.boxItems)
+          .values({ tenantId, boxId, codeHash, addedAt: holder.scannedAt })
+          .onConflictDoUpdate({
+            target: [schema.boxItems.tenantId, schema.boxItems.boxId, schema.boxItems.codeHash],
+            set: { addedAt: sql`excluded.added_at`, displacedAt: null, removedAt: null },
+          });
+        changedBoxIds.add(boxId);
+      }
+      for (const loser of later) {
+        await tx.insert(schema.codeConflicts).values({
+          tenantId,
+          codeHash,
+          losingShiftId: loser.shiftId,
+          losingTerminalId: loser.terminalId,
+          losingScannedAt: loser.scannedAt,
+          winningShiftId: holder.shiftId,
+          winningTerminalId: holder.terminalId,
+          winningScannedAt: holder.scannedAt,
+        });
+        batchConflicts.push({
+          codeHash,
+          winningTerminalId: holder.terminalId,
+          winningScannedAt: holder.scannedAt.toISOString(),
+        });
+      }
+    }
+    await this.advanceBoxRegistryVersions(tx, tenantId, changedBoxIds);
   }
 
   /** Releases all active memberships without per-code lock-order races. */

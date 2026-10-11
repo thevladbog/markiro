@@ -216,7 +216,11 @@ test("production deploy is one protected manual GitHub-hosted SSH job", async ()
     "release_run_id",
     "release_sha",
     "landing_demo_submission_state",
+    "scope",
   ]);
+  assert.deepEqual(workflow.on.workflow_dispatch.inputs.scope.options, ["full", "api-only"]);
+  assert.equal(workflow.on.workflow_dispatch.inputs.scope.default, "full");
+  assert.equal(workflow.jobs.deploy.env.MARKIRO_DEPLOY_SCOPE, "${{ inputs.scope }}");
   assert.deepEqual(workflow.on.workflow_dispatch.inputs.landing_demo_submission_state, {
     description: "Expected API demo-submission state during public smoke",
     required: true,
@@ -247,7 +251,7 @@ test("production deploy is one protected manual GitHub-hosted SSH job", async ()
   const cleanup = namedStep(workflow, "deploy", "Remove local deployment credentials");
   assert.ok(deploy.steps.indexOf(delivery) < deploy.steps.indexOf(indexNow));
   assert.ok(deploy.steps.indexOf(indexNow) < deploy.steps.indexOf(cleanup));
-  assert.equal(indexNow.if, "${{ vars.PUBLIC_INDEXNOW_KEY != '' }}");
+  assert.equal(indexNow.if, "${{ inputs.scope != 'api-only' && vars.PUBLIC_INDEXNOW_KEY != '' }}");
   assert.deepEqual(indexNow.env, { PUBLIC_INDEXNOW_KEY: "${{ vars.PUBLIC_INDEXNOW_KEY }}" });
   assert.match(indexNow.run, /^node tools\/indexnow\/submit\.mjs\n?$/);
   assert.doesNotMatch(source, /(?:echo|printf)[^\n]*INDEXNOW/);

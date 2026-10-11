@@ -68,6 +68,7 @@ function AppShellContent() {
               item("acts", t("shell.acts"), "/billing-acts", "08"),
               item("payments", t("shell.payments"), "/payments", "09"),
               item("billing-requests", t("shell.billingRequests"), "/billing-requests", "10"),
+              item("support", t("shell.supportEpisodes"), "/support", "10A"),
             ]
           : []),
       ],

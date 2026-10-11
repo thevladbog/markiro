@@ -10,6 +10,7 @@ export const createShiftExportSchema = z.strictObject({
   formatId: z.enum([
     "shift_txt_flat",
     "shift_txt_boxes",
+    "shift_txt_boxes_reversed",
     "shift_csv_flat",
     "shift_csv_boxes",
     "shift_xml_gismt_aggregation",
@@ -96,6 +97,7 @@ export const shiftExportFormatOpenApiSchema = {
       enum: [
         "shift_txt_flat",
         "shift_txt_boxes",
+        "shift_txt_boxes_reversed",
         "shift_csv_flat",
         "shift_csv_boxes",
         "shift_xml_gismt_aggregation",

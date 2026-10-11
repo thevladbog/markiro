@@ -1,3 +1,4 @@
+import { recoverPrintDeliveries } from "./lib/print-deliveries.js";
 import { useDeviceReplacement } from "./lib/use-device-replacement.js";
 import { readBoxReconciliationSummary } from "./lib/box-reconciliation.js";
 import { createBoxSerialTopUp } from "./lib/box-serial-top-up.js";
@@ -6,6 +7,7 @@ import { SyncDetailsDialog } from "./ui/SyncDetailsDialog.js";
 import { replacementBlocksNewWork, replacementCanEnterTask } from "./lib/device-replacement.js";
 import { configuredPrinterOutput, configuredPrinterRouting } from "./lib/printer-routing.js";
 import { RecoveryWorkSummary } from "./ui/RecoveryWorkSummary.js";
+import { readStorageStatus, type StorageStatusResult } from "./lib/storage-status.js";
 import {
   initializeDeviceRecovery,
   readDeviceRecovery,
@@ -66,6 +68,8 @@ import {
 import {
   createHardwareScanSource,
   tauriHardware,
+  tauriWarehousePrint,
+  probeWindowsA4Printing,
   type ScannerStatus,
   type PrintTarget,
 } from "./lib/hardware.js";
@@ -133,7 +137,8 @@ import type { ShiftEntryLease } from "./lib/shift-entry-lease.js";
 import { ConflictList } from "./pages/ConflictList.js";
 import { Enrollment } from "./pages/Enrollment.js";
 import { OperatorLogin } from "./pages/OperatorLogin.js";
-import { TaskSelection } from "./pages/TaskSelection.js";
+import { WarehouseReprint } from "./pages/WarehouseReprint.js";
+import { TaskSelection, type TaskSelectionView } from "./pages/TaskSelection.js";
 import { NewShift, type NewShiftDraft } from "./pages/NewShift.js";
 import { WorkScreen } from "./pages/WorkScreen.js";
 import { InventoryWorkScreen } from "./pages/InventoryWorkScreen.js";
@@ -258,15 +263,29 @@ export function scannerIndicator(
 }
 
 export function App() {
+  const [palletSheetSupported, setPalletSheetSupported] = useState(false);
+  useEffect(() => {
+    let active = true;
+    void probeWindowsA4Printing().then((supported) => {
+      if (active) setPalletSheetSupported(supported);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
   const { t } = useTranslation();
   const [config, setConfig] = useState<StationConfig | null>(null);
   const [deviceRecovery, setDeviceRecovery] = useState<DeviceRecoveryView | null>(null);
   const [startupRecoveryFailed, setStartupRecoveryFailed] = useState(false);
   const [savedWork, setSavedWork] = useState<SealedWorkSummary | undefined>();
+  const [storageRead, setStorageRead] = useState<StorageStatusResult>({ kind: "unknown" });
+  const storageStatus = storageRead.kind === "ready" ? storageRead.status : null;
+  const storageBlockedReason = storageRead.kind === "blocked" ? storageRead.reason : null;
   const configRef = useRef<StationConfig | null>(null);
   const configTransitions = useRef(new ConfigTransitionCoordinator());
   const [operator, setOperator] = useState<OperatorMirrorRecord | null>(null);
-  const [floorView, setFloorView] = useState<"select" | "new">("select");
+  const [floorView, setFloorView] = useState<"select" | "new" | "reprint">("select");
+  const [taskSelectionView, setTaskSelectionView] = useState<TaskSelectionView>("production");
   const [activeFloorTask, setActiveFloorTask] = useState<ActiveFloorTask | null>(null);
   const [floorRouteReady, setFloorRouteReady] = useState(false);
   const shift = activeFloorTask?.kind === "production" ? activeFloorTask.shift : null;
@@ -278,7 +297,12 @@ export function App() {
   const [shiftEntryPending, setShiftEntryPending] = useState(false);
   const [offlineGrantNotice, setOfflineGrantNotice] = useState<string | null>(null);
   const updateOperationBlocked = useCallback(() => shiftEntryLeaseRef.current !== null, []);
-  const activeShiftGuard = useCallback(() => activeShiftIdRef.current !== null, []);
+  const warehouseActiveRef = useRef(false);
+  warehouseActiveRef.current = floorView === "reprint";
+  const activeShiftGuard = useCallback(
+    () => activeShiftIdRef.current !== null || warehouseActiveRef.current,
+    [],
+  );
   const shiftEntryGenerationRef = useRef(0);
   const [shiftBundleRevision, setShiftBundleRevision] = useState(0);
   const [browserOnline, setBrowserOnline] = useState(() => navigator.onLine);
@@ -665,6 +689,19 @@ export function App() {
     };
   }, [shift, shiftBundleRevision]);
 
+  // Diagnostics only: `readStorageStatus` never rejects, and a blocked
+  // storage already stops startup through `readConfig`; its reason is shown
+  // on the recovery screen.
+  useEffect(() => {
+    let cancelled = false;
+    void readStorageStatus().then((result) => {
+      if (!cancelled) setStorageRead(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -674,6 +711,7 @@ export function App() {
       // rest of the flow (config read, enrollment) still proceeds.
       try {
         await applyMigrations(tauriExecutor);
+        await recoverPrintDeliveries(tauriExecutor);
       } catch (err) {
         console.error("station: applyMigrations failed", err);
         if (!cancelled) setStartupRecoveryFailed(true);
@@ -894,6 +932,7 @@ export function App() {
       return null;
     }
     return createStationClient(config, {
+      palletSheetSupported,
       onReachabilityChange: (state) => {
         // A request from a replaced credential/client may settle after the
         // new session has already proved its own reachability. Only the
@@ -920,8 +959,21 @@ export function App() {
     onCredentialRejected,
     reportServerReachability,
     verifiedClient,
+    palletSheetSupported,
   ]);
   const authenticatedClient = credentialRecovery ? null : credentialBoundClient;
+  const sheetBrandingOwner = useMemo(
+    () =>
+      config?.tenantId && credentialGeneration
+        ? {
+            exec: tauriExecutor,
+            tenantId: config.tenantId,
+            generation: credentialGeneration,
+            isCurrent: () => !credentialGeneration.sealed,
+          }
+        : undefined,
+    [config?.tenantId, credentialGeneration],
+  );
   const [replacementAuthorityEpoch, setReplacementAuthorityEpoch] = useState(0);
   const replacement = useDeviceReplacement({
     exec: tauriExecutor,
@@ -1008,6 +1060,7 @@ export function App() {
     exec: tauriExecutor,
     client: authenticatedClient,
     machineId: config?.machineId,
+    ...(config?.tenantId ? { brandingTenantId: config.tenantId } : {}),
     ...(credentialGeneration ? { credentialGeneration } : {}),
     onCredentialRejected,
   });
@@ -1162,7 +1215,7 @@ export function App() {
     enabled: config !== null,
     updateCenterVisible: showUpdates,
     exec: tauriExecutor,
-    activeShift: activeFloorTask !== null,
+    activeShift: activeFloorTask !== null || floorView === "reprint",
     pendingOutbox: syncState.pending,
     port: tauriStationUpdater,
     updateOperationBlocked,
@@ -1395,7 +1448,7 @@ export function App() {
 
   const windowModeControlProps = {
     snapshot: lockdownSnapshot,
-    activeShift: activeFloorTask !== null,
+    activeShift: activeFloorTask !== null || floorView === "reprint",
     disabled: operatorSwitchState !== "idle" || floorRecoveryBlocked || shiftEntryPending,
     onEnter: enterLockdown,
     onExit: exitLockdown,
@@ -1421,8 +1474,14 @@ export function App() {
       <main className="station-centered-screen">
         <Card style={{ maxWidth: 720, padding: 32 }}>
           <h1>{t("enroll.recoveryTitle")}</h1>
-          <p role="alert">
-            {t(startupRecoveryFailed ? "enroll.recoveryFailed" : "enroll.errors.owner_unresolved")}
+          <p role="alert" className="station-blocked-reason">
+            {storageBlockedReason !== null
+              ? t("storage.blocked", { reason: storageBlockedReason })
+              : t(
+                  startupRecoveryFailed
+                    ? "enroll.recoveryFailed"
+                    : "enroll.errors.owner_unresolved",
+                )}
           </p>
           <RecoveryWorkSummary {...(savedWork ? { summary: savedWork } : {})} />
         </Card>
@@ -1461,6 +1520,7 @@ export function App() {
           runConfigTransition={runEnrollmentConfigTransition}
           scanSource={scanSource}
           pairingServerUrl={pairingServerUrl(config, configuredStationApiUrl())}
+          {...(storageStatus ? { storageNotices: storageStatus.notices } : {})}
         />,
       );
     }
@@ -1553,6 +1613,12 @@ export function App() {
     if (showSetup) {
       return withWindowChrome(
         <WorkstationSetup
+          {...(credentialGeneration ? { credentialGeneration } : {})}
+          printScope={JSON.stringify([
+            "setup",
+            config.tenantId ?? null,
+            config.deviceId ?? config.machineId,
+          ])}
           initialTab={setupPrinterTab ? "printer" : "scanner"}
           hw={tauriHardware}
           exec={tauriExecutor}
@@ -1578,6 +1644,7 @@ export function App() {
         onSetup={() => setShowSetup(true)}
         scanSource={scanSource}
         pairingServerUrl={pairingServerUrl(config, configuredStationApiUrl())}
+        {...(storageStatus ? { storageNotices: storageStatus.notices } : {})}
       />,
     );
   }
@@ -1842,6 +1909,7 @@ export function App() {
     try {
       await pauseSyncAndWaitForIdle();
       await applyMigrations(tauriExecutor);
+      await recoverPrintDeliveries(tauriExecutor);
       if (!expected) {
         const recoveryTerminalId = configRef.current?.deviceId ?? null;
         const [ctx, mirror] = await Promise.all([
@@ -1989,6 +2057,7 @@ export function App() {
           controller={updater}
           activeShift={activeFloorTask !== null}
           pendingOutbox={syncState.pending}
+          storageStatus={storageStatus}
           onBack={() => {
             void updater.cancel();
             setShowUpdates(false);
@@ -1996,6 +2065,12 @@ export function App() {
         />
       ) : showSetup ? (
         <WorkstationSetup
+          {...(credentialGeneration ? { credentialGeneration } : {})}
+          printScope={JSON.stringify([
+            "setup",
+            config.tenantId ?? null,
+            config.deviceId ?? config.machineId,
+          ])}
           initialTab={setupPrinterTab ? "printer" : "scanner"}
           hw={tauriHardware}
           exec={tauriExecutor}
@@ -2081,6 +2156,7 @@ export function App() {
             </FullScreenDialog>
           ) : shiftContext && shift ? (
             <WorkScreen
+              {...(config?.tenantId ? { tenantId: config.tenantId } : {})}
               exec={tauriExecutor}
               offlineGrantNotice={offlineGrantNotice}
               {...(floorGeneration ? { credentialGeneration: floorGeneration } : {})}
@@ -2353,8 +2429,38 @@ export function App() {
           <Button onClick={() => setShowConflicts(true)}>{t("replacement.conflicts")}</Button>
           <Button onClick={() => setShowSetup(true)}>{t("replacement.setup")}</Button>
         </Card>
+      ) : floorView === "reprint" ? (
+        config.deviceId && floorGeneration ? (
+          <WarehouseReprint
+            exec={tauriExecutor}
+            client={activeClient}
+            deviceId={config.deviceId}
+            operatorId={operator.operatorId}
+            credentialGeneration={floorGeneration}
+            source={scanSource}
+            hardwareConfig={hardwareConfig}
+            print={tauriWarehousePrint}
+            onExit={() => setFloorView("select")}
+            onJournalChange={nudgeSync}
+            onSetup={() => {
+              setSetupPrinterTab(true);
+              setShowSetup(true);
+            }}
+            onFloorWorkRegister={registerFloorWorkBarrier}
+          />
+        ) : (
+          <Card style={{ padding: 32 }}>
+            <h1>{t("warehouse.title")}</h1>
+            <p role="alert">{t("warehouse.entryUnavailable")}</p>
+            <Button size="floor" onClick={() => setFloorView("select")}>
+              {t("shifts.back")}
+            </Button>
+          </Card>
+        )
       ) : floorView === "select" ? (
         <TaskSelection
+          initialView={taskSelectionView}
+          onViewChange={setTaskSelectionView}
           client={activeClient}
           exec={tauriExecutor}
           acquireShiftEntry={acquireShiftEntry}
@@ -2363,6 +2469,9 @@ export function App() {
           currentLineName={config.lineName ?? null}
           onShiftSelected={handleShiftEntered}
           onInventorySelected={handleInventoryEntered}
+          {...(config.deviceId && floorGeneration
+            ? { onWarehouseReprint: () => setFloorView("reprint") }
+            : {})}
           isCurrent={() =>
             floorGeneration ? credentialGenerationIsCurrent(floorGeneration) : false
           }
@@ -2378,6 +2487,7 @@ export function App() {
         />
       ) : (
         <NewShift
+          {...(sheetBrandingOwner ? { sheetBrandingOwner } : {})}
           client={activeClient}
           hardwareConfig={hardwareConfig}
           onSetup={(draft) => {

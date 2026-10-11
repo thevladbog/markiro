@@ -35,6 +35,9 @@ export const labelTemplates = pgTable(
     tenantId: tenantId(),
     name: text("name").notNull(),
     spec: jsonb("spec").notNull(),
+    format: text("format").$type<"label_v1" | "pallet_sheet_v2">().notNull().default("label_v1"),
+    revision: integer("revision").notNull().default(1),
+    seedKey: text("seed_key"),
     purpose: text("purpose")
       .$type<"box" | "product_duplicate" | "pallet">()
       .notNull()
@@ -61,6 +64,13 @@ export const labelTemplates = pgTable(
   // see Task 7) target a same-tenant row via a composite FK.
   (t) => [
     unique("label_templates_tenant_id_uq").on(t.tenantId, t.id),
+    unique("label_templates_tenant_seed_key_uq").on(t.tenantId, t.seedKey),
+    check("label_templates_format_check", sql`${t.format} IN ('label_v1', 'pallet_sheet_v2')`),
+    check("label_templates_revision_check", sql`${t.revision} >= 1`),
+    check(
+      "label_templates_sheet_purpose_check",
+      sql`${t.format} <> 'pallet_sheet_v2' OR COALESCE((${t.purpose} = 'pallet' AND ${t.spec}->'schemaVersion' = '2'::jsonb AND ${t.spec}->>'kind' = 'pallet_sheet'), false)`,
+    ),
     check(
       "label_templates_purpose_check",
       sql`${t.purpose} IN ('box', 'product_duplicate', 'pallet')`,

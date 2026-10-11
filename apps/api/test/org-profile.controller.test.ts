@@ -71,7 +71,7 @@ describe("OrgProfileController logo multipart boundary", () => {
       fileSize: 5 * 1024 * 1024,
       files: 1,
       fields: 0,
-      parts: 2,
+      parts: 1,
     });
   });
 

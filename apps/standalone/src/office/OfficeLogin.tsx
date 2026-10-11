@@ -6,6 +6,7 @@ import { z } from "zod";
 
 import { Alert, Button, Card, Input } from "@markiro/ui";
 
+import { HostAddressDialog } from "../app/HostAddressDialog.js";
 import type { OfficeLoginNotice } from "../app/shell.js";
 import { errorMessageKey } from "../host/errors.js";
 import type { OfficeLoginRequest } from "../host/protocol.js";
@@ -32,7 +33,15 @@ export interface OfficeLoginProps {
    * `@typescript-eslint/unbound-method`.
    */
   onLogin: (request: OfficeLoginRequest) => Promise<void>;
-  onBack: () => void;
+  /** Back to the floor; `null` on an office PC, which has no floor (plan УСТ). */
+  onBack: (() => void) | null;
+  /**
+   * The paired host's address when it is another computer's, with
+   * «Сменить адрес хоста» (plan УСТ); `null` (the default) shows neither.
+   */
+  hostAddress?: string | null;
+  /** Moves the pairing to a new address; rejects with a `DeviceError`. */
+  onChangeAddress?: (address: string) => Promise<void>;
 }
 
 const NOTICE_TEXT: Readonly<Record<OfficeLoginNotice, string>> = {
@@ -40,9 +49,17 @@ const NOTICE_TEXT: Readonly<Record<OfficeLoginNotice, string>> = {
   already_initialized: "office.login.alreadyInitialized",
 };
 
-export function OfficeLogin({ notice, onLogin, onBack }: OfficeLoginProps) {
+export function OfficeLogin({
+  notice,
+  onLogin,
+  onBack,
+  hostAddress = null,
+  onChangeAddress,
+}: OfficeLoginProps) {
   const { t } = useTranslation();
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [addressOpen, setAddressOpen] = useState(false);
+  const [addressChanged, setAddressChanged] = useState<string | null>(null);
   const {
     register,
     handleSubmit,
@@ -82,14 +99,43 @@ export function OfficeLogin({ notice, onLogin, onBack }: OfficeLoginProps) {
           {...register("password")}
         />
         <div className="standalone-form__actions">
-          <Button variant="secondary" onClick={onBack} disabled={isSubmitting}>
-            {t("office.login.back")}
-          </Button>
+          {onBack && (
+            <Button variant="secondary" onClick={onBack} disabled={isSubmitting}>
+              {t("office.login.back")}
+            </Button>
+          )}
           <Button type="submit" loading={isSubmitting}>
             {t("office.login.submit")}
           </Button>
         </div>
       </form>
+      {hostAddress !== null && onChangeAddress && (
+        <div className="standalone-form">
+          <div aria-live="polite">
+            {addressChanged && (
+              <Alert tone="ok" role="presentation">
+                {t("office.login.address.done", { address: addressChanged })}
+              </Alert>
+            )}
+          </div>
+          <p>{t("office.login.address.current", { address: hostAddress })}</p>
+          <div className="standalone-form__actions">
+            <Button variant="secondary" onClick={() => setAddressOpen(true)}>
+              {t("office.login.address.open")}
+            </Button>
+          </div>
+        </div>
+      )}
+      {addressOpen && onChangeAddress && (
+        <HostAddressDialog
+          onChange={async (address) => {
+            await onChangeAddress(address);
+            setAddressOpen(false);
+            setAddressChanged(address);
+          }}
+          onClose={() => setAddressOpen(false)}
+        />
+      )}
     </Card>
   );
 }

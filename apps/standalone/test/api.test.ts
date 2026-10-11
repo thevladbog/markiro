@@ -29,6 +29,7 @@ import {
   productUpdateSchema,
   shiftCloseSchema,
   shiftCreateSchema,
+  shiftExportRecordSchema,
   shiftUpdateSchema,
   ssccBlockRequestSchema,
   templateCreateSchema,
@@ -97,9 +98,11 @@ const DEFAULTS_UPDATE = templateDefaultsUpdateSchema.parse(
   fixture("template-defaults-update.json"),
 );
 const SHIFT_ID = "0b8f4e2a-6c1d-4f3e-9a7b-2d5c8e1f4a6b";
+const BOX_ID = "b0000000-0000-4000-8000-000000000001";
 const SHIFT_CREATE = shiftCreateSchema.parse(fixture("shift-create.json"));
 const SHIFT_UPDATE = shiftUpdateSchema.parse(fixture("shift-update.json"));
 const SHIFT_CLOSE = shiftCloseSchema.parse(fixture("shift-close.json"));
+const EXPORT_RECORD = shiftExportRecordSchema.parse(fixture("shift-export-record.json"));
 
 type Case = [
   name: string,
@@ -421,6 +424,46 @@ const CASES: Case[] = [
     { method: "POST", path: `/v1/office/shifts/${SHIFT_ID}/close`, body: SHIFT_CLOSE },
   ],
   [
+    "getShiftExportSource",
+    fixture("shift-export-rows.json"),
+    (api) => api.getShiftExportSource(TOKEN, SHIFT_ID),
+    { method: "GET", path: `/v1/office/shifts/${SHIFT_ID}/export-source`, body: undefined },
+  ],
+  [
+    "listShiftBoxes",
+    fixture("office-boxes.json"),
+    (api) => api.listShiftBoxes(TOKEN, SHIFT_ID),
+    { method: "GET", path: `/v1/office/shifts/${SHIFT_ID}/boxes`, body: undefined },
+  ],
+  [
+    "listShiftPallets",
+    fixture("office-pallets.json"),
+    (api) => api.listShiftPallets(TOKEN, SHIFT_ID),
+    { method: "GET", path: `/v1/office/shifts/${SHIFT_ID}/pallets`, body: undefined },
+  ],
+  [
+    "recordShiftExport",
+    null,
+    (api) => api.recordShiftExport(TOKEN, SHIFT_ID, EXPORT_RECORD),
+    { method: "POST", path: `/v1/office/shifts/${SHIFT_ID}/exports`, body: EXPORT_RECORD },
+  ],
+  [
+    "getBoxReportRows",
+    fixture("box-report-rows.json"),
+    (api) => api.getBoxReportRows(TOKEN, BOX_ID),
+    { method: "GET", path: `/v1/office/boxes/${BOX_ID}/report-data`, body: undefined },
+  ],
+  [
+    "getPalletReportRows",
+    fixture("pallet-report-rows.json"),
+    (api) => api.getPalletReportRows(TOKEN, SHIFT_ID),
+    {
+      method: "GET",
+      path: `/v1/office/shifts/${SHIFT_ID}/pallet-report-data`,
+      body: undefined,
+    },
+  ],
+  [
     "setUserPassword",
     null,
     (api) => api.setUserPassword(TOKEN, USER_ID, { password: "a new long password" }),
@@ -499,6 +542,15 @@ describe("HostApi shifts", () => {
       Object.entries(shift as object).filter(([key]) => key !== "totals"),
     );
     await expect(recording(withoutTotals).api.getShift(TOKEN, SHIFT_ID)).rejects.toThrow();
+  });
+
+  it("resolves a recorded export with nothing, and rejects an answer that carries a body", async () => {
+    await expect(
+      recording(null).api.recordShiftExport(TOKEN, SHIFT_ID, EXPORT_RECORD),
+    ).resolves.toBeUndefined();
+    await expect(
+      recording(shift).api.recordShiftExport(TOKEN, SHIFT_ID, EXPORT_RECORD),
+    ).rejects.toThrow();
   });
 
   it("resolves a delete with nothing, and rejects an answer that carries a body", async () => {

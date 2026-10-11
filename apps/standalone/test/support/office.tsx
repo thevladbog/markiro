@@ -14,6 +14,7 @@ import { RasterUnavailableError } from "../../src/labels/rasterizer.js";
 import { Office, type OfficeProps } from "../../src/office/Office.js";
 import type { OfficeSessionValue } from "../../src/office/office-session.js";
 import type { LabelRendering } from "../../src/office/templates/label-rendering.js";
+import { HEALTHY_BACKUPS } from "./backups.js";
 import { SESSION } from "./fixtures.js";
 
 /** A `HostApi` of mocks. */
@@ -89,6 +90,12 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     updateShift: vi.fn<HostApi["updateShift"]>(() => unexpected("updateShift")),
     deleteShift: vi.fn<HostApi["deleteShift"]>(() => unexpected("deleteShift")),
     closeShift: vi.fn<HostApi["closeShift"]>(() => unexpected("closeShift")),
+    getShiftExportSource: vi.fn<HostApi["getShiftExportSource"]>(() =>
+      unexpected("getShiftExportSource"),
+    ),
+    listShiftBoxes: vi.fn<HostApi["listShiftBoxes"]>(() => unexpected("listShiftBoxes")),
+    listShiftPallets: vi.fn<HostApi["listShiftPallets"]>(() => unexpected("listShiftPallets")),
+    recordShiftExport: vi.fn<HostApi["recordShiftExport"]>(() => unexpected("recordShiftExport")),
     // The floor reads its shifts whenever it reads its device record; a test
     // about something else gets none.
     getDeviceShifts: vi.fn<HostApi["getDeviceShifts"]>(async () => []),
@@ -97,6 +104,17 @@ export function fakeHostApi(overrides: Partial<FakeHostApi> = {}): FakeHostApi {
     requestSsccBlock: vi.fn<HostApi["requestSsccBlock"]>(() => unexpected("requestSsccBlock")),
     checkCode: vi.fn<HostApi["checkCode"]>(() => unexpected("checkCode")),
     sendFacts: vi.fn<HostApi["sendFacts"]>(() => unexpected("sendFacts")),
+    getBoxReportRows: vi.fn<HostApi["getBoxReportRows"]>(() => unexpected("getBoxReportRows")),
+    getPalletReportRows: vi.fn<HostApi["getPalletReportRows"]>(() =>
+      unexpected("getPalletReportRows"),
+    ),
+    // «Обзор» reads the copies on every office test: healthy ones warn of nothing.
+    getBackups: vi.fn<HostApi["getBackups"]>(async () => HEALTHY_BACKUPS),
+    startBackup: vi.fn<HostApi["startBackup"]>(() => unexpected("startBackup")),
+    updateBackupSettings: vi.fn<HostApi["updateBackupSettings"]>(() =>
+      unexpected("updateBackupSettings"),
+    ),
+    resumeFacts: vi.fn<HostApi["resumeFacts"]>(() => unexpected("resumeFacts")),
     ...overrides,
   };
 }

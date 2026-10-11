@@ -10,7 +10,7 @@ import {
   INVENTORY_PROGRESS_CURSOR_PATTERN,
   inventoryEventBatchSchema,
   inventoryProgressCursorSchema,
-  LABEL_FIELDS,
+  labelTemplateSpecStrictSchema,
   parseLabelTemplate,
   type InventoryEventBatch,
   type InventoryEventBatchResponse,
@@ -493,80 +493,16 @@ export type LegacyStationInventoryManifest = Omit<
   "snapshotFixedAt" | "contentDigest"
 >;
 
-const storedLabelElementBaseShape = {
-  id: z.string().min(1),
-  xMm: z.number(),
-  yMm: z.number(),
-};
-
-const storedLabelTextShape = {
-  fontSizePt: z.number().min(4).max(72),
-  bold: z.boolean().optional(),
-  align: z.enum(["left", "center", "right"]).optional(),
-  maxWidthMm: z.number().positive().optional(),
-  maxLines: z.number().int().min(1).max(16).optional(),
-};
-
-const storedLabelElementSchema = z.discriminatedUnion("kind", [
-  z.strictObject({
-    ...storedLabelElementBaseShape,
-    kind: z.literal("text"),
-    text: z.string(),
-    ...storedLabelTextShape,
-  }),
-  z.strictObject({
-    ...storedLabelElementBaseShape,
-    kind: z.literal("field"),
-    field: z.enum(LABEL_FIELDS),
-    ...storedLabelTextShape,
-  }),
-  z.strictObject({
-    ...storedLabelElementBaseShape,
-    kind: z.literal("barcode"),
-    format: z.enum(["datamatrix", "code128", "ean13", "qr"]),
-    data: z.union([
-      z.enum(LABEL_FIELDS),
-      z.strictObject({
-        literal: z.string(),
-      }),
-    ]),
-    sizeMm: z.number().positive(),
-    moduleWidthMm: z.number().positive().optional(),
-  }),
-  z.strictObject({
-    ...storedLabelElementBaseShape,
-    kind: z.literal("line"),
-    x2Mm: z.number(),
-    y2Mm: z.number(),
-    thicknessMm: z.number().positive(),
-  }),
-  z.strictObject({
-    ...storedLabelElementBaseShape,
-    kind: z.literal("box"),
-    widthMm: z.number().positive(),
-    heightMm: z.number().positive(),
-    thicknessMm: z.number().positive(),
-  }),
-]);
-
-const closedStoredLabelTemplateSpecSchema = z.strictObject({
-  widthMm: z.number().min(10).max(300),
-  heightMm: z.number().min(10).max(300),
-  dpi: z.union([z.literal(203), z.literal(300)]),
-  language: z.enum(["zpl", "tspl"]),
-  elements: z.array(storedLabelElementSchema),
+// Reuse the strict domain contract for frozen print specs. Device read projection
+// negotiates extensions without modifying the stored manifest or code digests.
+const storedLabelTemplateSpecSchema = labelTemplateSpecStrictSchema.transform((value, context) => {
+  try {
+    return parseLabelTemplate(value);
+  } catch {
+    context.addIssue({ code: "custom", message: "invalid label template spec" });
+    return z.NEVER;
+  }
 });
-
-const storedLabelTemplateSpecSchema = closedStoredLabelTemplateSpecSchema.transform(
-  (value, context) => {
-    try {
-      return parseLabelTemplate(value);
-    } catch {
-      context.addIssue({ code: "custom", message: "invalid label template spec" });
-      return z.NEVER;
-    }
-  },
-);
 
 const storedStationInventoryManifestSchema = z
   .object({
@@ -667,106 +603,11 @@ export function parseLegacyStationInventoryManifest(
   return legacy;
 }
 
-const labelElementBaseProperties = {
-  id: { type: "string", minLength: 1 },
-  xMm: { type: "number" },
-  yMm: { type: "number" },
-} satisfies Record<string, SchemaObject>;
-
-const labelTextProperties = {
-  fontSizePt: { type: "number", minimum: 4, maximum: 72 },
-  bold: { type: "boolean" },
-  align: { type: "string", enum: ["left", "center", "right"] },
-  maxWidthMm: { type: "number", minimum: 0, exclusiveMinimum: true },
-  maxLines: { type: "integer", minimum: 1, maximum: 16 },
-} satisfies Record<string, SchemaObject>;
-
-const labelElementOpenApiSchema: SchemaObject = {
-  oneOf: [
-    {
-      type: "object",
-      additionalProperties: false,
-      required: ["id", "kind", "xMm", "yMm", "text", "fontSizePt"],
-      properties: {
-        ...labelElementBaseProperties,
-        kind: { type: "string", enum: ["text"] },
-        text: { type: "string" },
-        ...labelTextProperties,
-      },
-    },
-    {
-      type: "object",
-      additionalProperties: false,
-      required: ["id", "kind", "xMm", "yMm", "field", "fontSizePt"],
-      properties: {
-        ...labelElementBaseProperties,
-        kind: { type: "string", enum: ["field"] },
-        field: { type: "string", enum: [...LABEL_FIELDS] },
-        ...labelTextProperties,
-      },
-    },
-    {
-      type: "object",
-      additionalProperties: false,
-      required: ["id", "kind", "xMm", "yMm", "format", "data", "sizeMm"],
-      properties: {
-        ...labelElementBaseProperties,
-        kind: { type: "string", enum: ["barcode"] },
-        format: { type: "string", enum: ["datamatrix", "code128", "ean13", "qr"] },
-        data: {
-          oneOf: [
-            { type: "string", enum: [...LABEL_FIELDS] },
-            {
-              type: "object",
-              additionalProperties: false,
-              required: ["literal"],
-              properties: { literal: { type: "string" } },
-            },
-          ],
-        },
-        sizeMm: { type: "number", minimum: 0, exclusiveMinimum: true },
-        moduleWidthMm: { type: "number", minimum: 0, exclusiveMinimum: true },
-      },
-    },
-    {
-      type: "object",
-      additionalProperties: false,
-      required: ["id", "kind", "xMm", "yMm", "x2Mm", "y2Mm", "thicknessMm"],
-      properties: {
-        ...labelElementBaseProperties,
-        kind: { type: "string", enum: ["line"] },
-        x2Mm: { type: "number" },
-        y2Mm: { type: "number" },
-        thicknessMm: { type: "number", minimum: 0, exclusiveMinimum: true },
-      },
-    },
-    {
-      type: "object",
-      additionalProperties: false,
-      required: ["id", "kind", "xMm", "yMm", "widthMm", "heightMm", "thicknessMm"],
-      properties: {
-        ...labelElementBaseProperties,
-        kind: { type: "string", enum: ["box"] },
-        widthMm: { type: "number", minimum: 0, exclusiveMinimum: true },
-        heightMm: { type: "number", minimum: 0, exclusiveMinimum: true },
-        thicknessMm: { type: "number", minimum: 0, exclusiveMinimum: true },
-      },
-    },
-  ],
-};
-
-export const stationInventoryLabelTemplateSpecOpenApiSchema: SchemaObject = {
-  type: "object",
-  additionalProperties: false,
-  required: ["widthMm", "heightMm", "dpi", "language", "elements"],
-  properties: {
-    widthMm: { type: "number", minimum: 10, maximum: 300 },
-    heightMm: { type: "number", minimum: 10, maximum: 300 },
-    dpi: { type: "integer", enum: [203, 300] },
-    language: { type: "string", enum: ["zpl", "tspl"] },
-    elements: { type: "array", items: labelElementOpenApiSchema },
-  },
-};
+// Task-form rendering imports this DTO in the browser; keep NestJS out of its runtime graph.
+export const stationInventoryLabelTemplateSpecOpenApiSchema: SchemaObject = z.toJSONSchema(
+  labelTemplateSpecStrictSchema,
+  { target: "openapi-3.0", io: "input" },
+) as SchemaObject;
 
 export const stationInventoryManifestOpenApiSchema: SchemaObject = {
   type: "object",

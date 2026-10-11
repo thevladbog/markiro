@@ -1,9 +1,9 @@
-import { OPERATOR_PROFILES } from "@markiro/legal-documents";
-
+import { SITE_CONTACTS } from "../content/contacts";
 import { LEGAL_SEARCH_PAGES } from "../content/legal-pages";
 import { ARTICLE_SEARCH_PAGES, type ArticlePageDefinition } from "../content/articles";
 import { HUB_SEARCH_PAGES, findHubPage, hubPath, type HubPageDefinition } from "../content/hubs";
 import { articlesForLocale } from "../content/articles";
+import { FILM_SEARCH_PAGES, type FilmPageDefinition } from "../content/film";
 import { mirrorPathFor } from "./mirror-path.ts";
 
 export { mirrorPathFor };
@@ -15,10 +15,11 @@ import {
 } from "../content/pages";
 
 const SITE_URL = "https://markiro.app";
-const ORGANIZATION_EMAIL = OPERATOR_PROFILES["operator-2026-08-15"].email;
+const ORGANIZATION_EMAIL = SITE_CONTACTS.email;
 const ORGANIZATION_LOGO_PATH = "/brand/markiro-logo.svg";
 const INDEXABLE_PAGES: readonly SearchPageRecord[] = [
   ...MARKETING_SEARCH_PAGES,
+  ...FILM_SEARCH_PAGES,
   ...HUB_SEARCH_PAGES,
   ...ARTICLE_SEARCH_PAGES,
   ...LEGAL_SEARCH_PAGES,
@@ -28,9 +29,10 @@ const SOFTWARE_FACTS = {
     helpPath: "/instruktsii/",
     features: [
       "Проверка кодов маркировки Data Matrix на линии",
-      "Агрегация единиц в короба с SSCC",
+      "Агрегация в короба и паллеты с SSCC",
       "Печать этикеток ZPL и TSPL",
       "Офлайн-работа станции с локальным журналом",
+      "Сборка паллет и инвентаризация на ТСД с Android",
       "Обмен с 1С по CommerceML",
       "Выгрузки отчётов смены для ГИС МТ",
     ],
@@ -39,9 +41,10 @@ const SOFTWARE_FACTS = {
     helpPath: "/en/instructions/",
     features: [
       "Data Matrix code verification on the line",
-      "Item-to-case aggregation with SSCC",
+      "Case and pallet aggregation with SSCC",
       "ZPL and TSPL label printing",
       "Offline station with a local journal",
+      "Pallet building and inventory on an Android handheld",
       "1C exchange over CommerceML",
       "Shift report exports for GIS MT",
     ],
@@ -187,7 +190,7 @@ export function buildPageGraph(page: SeoPageDefinition): PageGraph {
       name: "Markiro",
       url: `${SITE_URL}/`,
       applicationCategory: "BusinessApplication",
-      operatingSystem: "Windows, Web",
+      operatingSystem: "Windows, Android, Web",
       description: homePage?.description,
       inLanguage: page.locale,
       featureList: [...facts.features],
@@ -288,6 +291,27 @@ export function buildHubPageGraph(hub: HubPageDefinition, items: readonly HubIte
           name: item.name,
           url: absoluteUrl(item.path),
         })),
+      },
+    ],
+  };
+}
+
+export function buildFilmPageGraph(page: FilmPageDefinition): PageGraph {
+  const pageUrl = absoluteUrl(page.path);
+  return {
+    "@context": "https://schema.org",
+    "@graph": [
+      websiteNode(),
+      organizationNode(),
+      {
+        "@type": "WebPage",
+        "@id": `${pageUrl}#webpage`,
+        url: pageUrl,
+        name: page.title,
+        description: page.description,
+        inLanguage: page.locale,
+        dateModified: page.reviewedAt,
+        isPartOf: { "@id": `${SITE_URL}/#website` },
       },
     ],
   };
@@ -472,14 +496,15 @@ export function renderLlmsTxt(): string {
 
 ## Коротко о продукте
 
-- Что это: производственная система маркировки «Честный знак» для линий розлива. Коды Data Matrix проверяются на станции при сканировании, единицы собираются в короба с SSCC, этикетки печатаются в ZPL или TSPL, каждое действие остаётся в журнале.
-- Товарная группа сейчас: пиво, напитки на основе пива и слабоалкогольные напитки, включая сидр. Новые товарные группы добавляются поэтапно.
-- Уровень агрегации: единица → короб. Паллетная агрегация запланирована отдельным этапом.
+- Что это: производственная система маркировки «Честный знак». Коды Data Matrix проверяются на станции при сканировании, единицы собираются в короба и паллеты с SSCC, этикетки печатаются в ZPL или TSPL, каждое действие остаётся в журнале.
+- Товарные группы: любая маркируемая продукция, например соки и вода, молочная продукция, пиво, косметика. Правила конкретной товарной группы сверяются до запуска.
+- Уровни агрегации: единица → короб → паллета. Паллеты собирают на станции и на ТСД.
+- ТСД: терминал на Android собирает паллеты, снимает с них коробы и проводит инвентаризацию у стеллажа.
 - Рабочее место: станция для Windows x64, сканер как клавиатурный ввод или через COM-порт, принтер ZPL или TSPL по сети, через COM-порт или USB.
 - Офлайн: станция работает без сети с локальным журналом SQLite и отправляет очередь после восстановления связи с ключом идемпотентности.
 - Интеграции: обмен с 1С по CommerceML, публичный REST API с OpenAPI, выгрузки отчётов смены TXT, CSV и XML агрегации для ГИС МТ, чтение статусов кодов через True API «Честного знака».
 - Киоск выбытия: сотрудник сканирует бейдж и коды, заявка проводится в кабинете через кассу или списанием.
-- Контакт: hello@v-b.tech. Демонстрация на сценарии вашей линии: ${absoluteUrl("/#demo")}
+- Контакт: ${ORGANIZATION_EMAIL}. Демонстрация на сценарии вашей линии: ${absoluteUrl("/#demo")}
 
 ${links("ru", "/")}
 
@@ -489,14 +514,15 @@ ${links("ru", "/")}
 
 ## About the product
 
-- What it is: a Chestny ZNAK production serialization system for bottling lines. Data Matrix codes are validated on the station at scan time, items are aggregated into cases with SSCC, labels print in ZPL or TSPL, and every action stays in the log.
-- Current product group: beer, beer-based beverages and low-alcohol beverages, including cider. Additional product groups are added gradually.
-- Aggregation level: item-to-case. Pallet aggregation is planned as a separate stage.
+- What it is: a Chestny ZNAK production serialization system. Data Matrix codes are validated on the station at scan time, items are aggregated into cases and pallets with SSCC, labels print in ZPL or TSPL, and every action stays in the log.
+- Product groups: any marked goods, for example juice and water, dairy, beer and cosmetics. The rules of a specific product group are checked before launch.
+- Aggregation levels: item → case → pallet. Pallets are built on the station and on the handheld.
+- Handheld: an Android terminal builds pallets, removes cases from them and runs inventory at the rack.
 - Workstation: a Windows x64 station, a scanner as keyboard input or over a COM port, a ZPL or TSPL printer over the network, COM port or USB.
 - Offline: the station works without a network with a local SQLite journal and submits its queue after reconnecting with an idempotency key.
 - Integrations: 1C exchange over CommerceML, a public REST API with OpenAPI, shift report exports as TXT, CSV and aggregation XML for GIS MT, code status reads through the Chestny ZNAK True API.
 - Disposal kiosk: an employee scans a badge and codes, and the request is processed in the cabinet through the register or as a write-off.
-- Contact: hello@v-b.tech. Demonstration on your line's workflow: ${absoluteUrl("/en/#demo")}
+- Contact: ${ORGANIZATION_EMAIL}. Demonstration on your line's workflow: ${absoluteUrl("/en/#demo")}
 
 ${links("en", "/en/")}
 

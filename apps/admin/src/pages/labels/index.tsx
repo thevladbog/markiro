@@ -5,13 +5,22 @@ import { Link } from "react-router";
 import { Alert, Badge, Button, EmptyState, PageHeader, Spinner, StatusChip } from "@markiro/ui";
 import type { BadgeTone } from "@markiro/ui";
 
-import { CABINET_CAPABILITY, type LabelTemplatePurpose } from "@markiro/domain";
+import {
+  CABINET_CAPABILITY,
+  buildPalletSheetPresets,
+  type LabelTemplatePurpose,
+} from "@markiro/domain";
 
 import { useCan } from "../../access/context.js";
 import { ApiRequestError } from "../../api/client.js";
 import { toast } from "../../lib/toast.js";
 import { useChzProductGroups, type ChzProductGroupDto } from "../catalog/api.js";
-import { useLabelTemplates, useUpdateLabelTemplate, type LabelTemplateSummaryDto } from "./api.js";
+import {
+  useLabelTemplates,
+  useUpdateLabelTemplate,
+  templatePaperSize,
+  type LabelTemplateSummaryDto,
+} from "./api.js";
 import { describeDefaultConflict, describeTemplateScope } from "./scope.js";
 import { TemplateThumb } from "./TemplateThumb.js";
 
@@ -112,12 +121,19 @@ function TemplateCard({
 }) {
   const { t } = useTranslation();
   const update = useUpdateLabelTemplate();
+  const paper = templatePaperSize(item);
   const scope = describeTemplateScope(item.chzProductGroupCodes, groups, t);
 
   async function toggle(): Promise<void> {
     const enabled = !item.enabled;
     try {
-      await update.mutateAsync({ id: item.id, input: { enabled } });
+      await update.mutateAsync({
+        id: item.id,
+        input: {
+          enabled,
+          ...(item.format === "pallet_sheet_v2" ? { expectedRevision: item.revision } : {}),
+        },
+      });
       toast(
         "ok",
         t(enabled ? "pages.labels.toasts.enableSuccess" : "pages.labels.toasts.disableSuccess"),
@@ -138,7 +154,7 @@ function TemplateCard({
   // toggle <button> never nests inside an <a>.
   const body = (
     <>
-      <TemplateThumb id={item.id} widthMm={item.widthMm} heightMm={item.heightMm} />
+      <TemplateThumb id={item.id} widthMm={paper.widthMm} heightMm={paper.heightMm} />
       <span style={{ font: "600 14px/20px var(--font-ui)", color: "var(--fg-1)" }}>
         {item.name}
       </span>
@@ -164,10 +180,15 @@ function TemplateCard({
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <Badge mono>
           {t("pages.labels.sizeBadge", {
-            width: item.widthMm.toFixed(1),
-            height: item.heightMm.toFixed(1),
+            width: paper.widthMm.toFixed(1),
+            height: paper.heightMm.toFixed(1),
           })}
         </Badge>
+        {item.format === "pallet_sheet_v2" ? (
+          <Badge tone="steel">
+            {t("pages.labels.sheet.formatBadge", { copies: item.page.copies })}
+          </Badge>
+        ) : null}
         <Badge tone={PURPOSE_TO_TONE[item.purpose]}>{t(PURPOSE_BADGE_KEY[item.purpose])}</Badge>
         <Badge
           tone="steel"
@@ -202,13 +223,16 @@ function TemplateCard({
 export function LabelTemplatesPage() {
   const { t } = useTranslation();
   const canWrite = useCan(CABINET_CAPABILITY.OPERATIONS_WRITE);
-  const { data, isPending, isError } = useLabelTemplates({ enabled: "all" });
+  const { data, isPending, isError } = useLabelTemplates({ enabled: "all", includeSheets: true });
   const groupsQuery = useChzProductGroups();
   const [filter, setFilter] = useState<LibraryFilter>("all");
+  const [formatFilter, setFormatFilter] = useState<"all" | "label_v1" | "pallet_sheet_v2">("all");
   const items = data ?? [];
   const groups = groupsQuery.data ?? [];
-  const visible = items.filter((item) =>
-    filter === "all" ? true : filter === "enabled" ? item.enabled : !item.enabled,
+  const visible = items.filter(
+    (item) =>
+      (filter === "all" ? true : filter === "enabled" ? item.enabled : !item.enabled) &&
+      (formatFilter === "all" || (item.format ?? "label_v1") === formatFilter),
   );
 
   return (
@@ -224,6 +248,31 @@ export function LabelTemplatesPage() {
         }
       />
 
+      {canWrite ? (
+        <div className="label-sheet-presets">
+          {buildPalletSheetPresets().map((preset) => (
+            <Link key={preset.key} to={`/labels/new?format=pallet_sheet_v2&preset=${preset.key}`}>
+              {preset.name}
+            </Link>
+          ))}
+          <Link to="/labels/new?format=pallet_sheet_v2&preset=blank">
+            {t("pages.labels.sheet.blank")}
+          </Link>
+        </div>
+      ) : null}
+      <div role="group" aria-label={t("pages.labels.sheet.formatFilter")}>
+        {(["all", "label_v1", "pallet_sheet_v2"] as const).map((value) => (
+          <Button
+            key={value}
+            type="button"
+            variant={formatFilter === value ? "primary" : "secondary"}
+            aria-pressed={formatFilter === value}
+            onClick={() => setFormatFilter(value)}
+          >
+            {t(`pages.labels.sheet.filters.${value}`)}
+          </Button>
+        ))}
+      </div>
       {isPending ? (
         <div style={{ display: "flex", justifyContent: "center", padding: 48 }}>
           <Spinner label={t("common.loading")} />

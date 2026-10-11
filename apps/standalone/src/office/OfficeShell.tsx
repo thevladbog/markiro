@@ -86,7 +86,7 @@ export function OfficeShell() {
               {t("office.password.open")}
             </Button>
             <Button variant="secondary" onClick={session.logout}>
-              {t("office.header.logout")}
+              {t(session.exitTo === "sign_in" ? "office.header.signOut" : "office.header.logout")}
             </Button>
           </div>
         </header>

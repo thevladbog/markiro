@@ -20,6 +20,7 @@ export const API_ERROR_CODES = [
   "pairing_code_invalid",
   "pairing_code_expired",
   "sscc_exhausted",
+  "restore_pending",
 ] as const;
 
 const API_CODES: ReadonlySet<string> = new Set(API_ERROR_CODES);

@@ -4,8 +4,10 @@
 //! up to 256 KB it stays out of the log too, a shift's snapshot that carries
 //! one included. Nor does a fact's code of marking, its crypto tail, its
 //! hash, a box's SSCC or the words of a reason (stage 2a spec §4.11): a
-//! rejected record is logged by its id and its receipt code alone. Its own
-//! binary, because it installs the global tracing subscriber.
+//! rejected record is logged by its id and its receipt code alone; nor do the
+//! routes of a shift's exports (plan ЧЗ) and of its printed forms (plan О-Ф),
+//! which answer with codes and SSCCs. Its own binary, because it installs the
+//! global tracing subscriber.
 
 mod support;
 
@@ -1428,6 +1430,82 @@ async fn secrets_never_reach_the_process_log() {
     assert_eq!(
         shift_two_read["totals"]["closedBoxes"], 1,
         "{shift_two_read}"
+    );
+    // The office reads the shift's export source and its lists, which carry
+    // the codes and the SSCCs, and records an export (plan ЧЗ): none of them
+    // reaches the log either.
+    let office_get = |path: String| {
+        client
+            .get(format!("{base}{path}"))
+            .header(protocol.0, &protocol.1)
+            .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+            .bearer_auth(&key)
+            .send()
+    };
+    let source = office_get(format!("/v1/office/shifts/{shift_id}/export-source"))
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        source.contains(&pallet_sscc) && source.contains(&sscc_one),
+        "{source}"
+    );
+    for list in ["boxes", "pallets"] {
+        let listed = office_get(format!("/v1/office/shifts/{shift_id}/{list}"))
+            .await
+            .unwrap();
+        assert_eq!(listed.status(), 200);
+    }
+    let recorded = client
+        .post(format!("{base}/v1/office/shifts/{shift_id}/exports"))
+        .header(protocol.0, &protocol.1)
+        .header(markiro_proto::OFFICE_SESSION_HEADER, &token)
+        .bearer_auth(&key)
+        .json(&json!({
+            "formatId": "shift_txt_boxes", "formatVersion": 2, "maxLines": null,
+            "palletId": null, "documentId": "5d6e7f80-9a1b-4c2d-8e3f-4a5b6c7d8e9f",
+            "partCount": 1, "codeCount": 1, "boxCount": 1, "palletCount": 0,
+            "openPalletSuppressedBoxCount": 0
+        }))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(recorded.status(), 204);
+    // The data of the shift's printed forms carries the codes and the SSCCs
+    // too (plan О-Ф): «Состав короба» of the box and the pallets' forms. Each
+    // answer must hold what the log is searched for below, or the walk would
+    // prove nothing about these routes.
+    let box_form = office_get(format!("/v1/office/boxes/{box1}/report-data"))
+        .await
+        .unwrap();
+    assert_eq!(box_form.status(), 200);
+    let box_form: serde_json::Value = box_form.json().await.unwrap();
+    assert_eq!(box_form["sscc"], sscc_one.as_str(), "{box_form}");
+    let box_items = box_form["items"].as_array().unwrap();
+    assert!(
+        box_items.iter().any(|item| {
+            item["canonical"] == km_a.canonical.as_str()
+                && item["serial"] == km_a.serial.as_str()
+                && item["canonical"].as_str().unwrap().contains(&km_a.tail)
+        }),
+        "{box_form}"
+    );
+    let pallet_forms = office_get(format!("/v1/office/shifts/{shift_id}/pallet-report-data"))
+        .await
+        .unwrap();
+    assert_eq!(pallet_forms.status(), 200);
+    let pallet_forms: serde_json::Value = pallet_forms.json().await.unwrap();
+    assert_eq!(
+        pallet_forms["pallets"][0]["sscc"],
+        pallet_sscc.as_str(),
+        "{pallet_forms}"
+    );
+    assert_eq!(
+        pallet_forms["pallets"][0]["boxes"][0]["sscc"],
+        sscc_one.as_str(),
+        "{pallet_forms}"
     );
 
     // A wrong device key and a wrong session token are both rejected...

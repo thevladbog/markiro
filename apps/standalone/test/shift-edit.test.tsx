@@ -18,6 +18,7 @@ import {
   OLD_BOX,
   OLD_LINE,
   openShifts,
+  PALLET,
   pickDate,
   PLANNED,
   shiftRow,
@@ -100,7 +101,7 @@ describe("office shifts: changing a shift", () => {
     vi.useRealTimers();
   });
 
-  it("offers a planned shift's change and delete, an active one's figures, plan and close, and a closed one's figures alone, to both roles", async () => {
+  it("offers a planned shift's change and delete, an active one's figures, plan, close and export, and a closed one's figures and export alone, to both roles", async () => {
     for (const user of [undefined, TECHNOLOGIST]) {
       const view = await openShifts(shiftsSession(undefined, user));
       expect(
@@ -116,12 +117,14 @@ describe("office shifts: changing a shift", () => {
         "Итоги смены OCT26-004",
         "Изменить план смены OCT26-004",
         "Закрыть смену OCT26-004",
+        "Выгрузка смены OCT26-004",
       ]);
+      // A closed shift only reads: its figures and its export (plan ЧЗ).
       expect(
         within(shiftRow(CLOSED.number))
           .getAllByRole("button")
           .map((button) => button.getAttribute("aria-label")),
-      ).toEqual(["Итоги смены OCT26-001/S"]);
+      ).toEqual(["Итоги смены OCT26-001/S", "Выгрузка смены OCT26-001/S"]);
       view.unmount();
     }
   });
@@ -407,6 +410,137 @@ describe("office shifts: changing a shift, the edges", () => {
       counterpartyId: NORTH.id,
       expectedRev: 72,
     });
+  });
+
+  it("turns a planned shift's pallets on with the product's capacity and the rule's template, and off by the switch alone (plan О-Ф)", async () => {
+    const session = shiftsSession();
+    const withPallets: OfficeShift = {
+      ...PLANNED,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: PALLET.id,
+    };
+    session.api.updateShift.mockResolvedValue(withPallets);
+    let name = await openEdit(session, PLANNED);
+    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
+    expect(valueOf(name, "Коробов на паллете")).toBe("40");
+    expect(valueOf(name, "Шаблон этикетки паллеты")).toBe(PALLET.id);
+    // The list read again after the save has the shift with its pallets.
+    session.api.listShifts.mockResolvedValue([withPallets, ACTIVE, CLOSED]);
+    fireEvent.click(save(name));
+    await screen.findByText("Изменения сохранены.");
+    expect(session.api.updateShift).toHaveBeenLastCalledWith(TOKEN, PLANNED.id, {
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: PALLET.id,
+      expectedRev: 72,
+    });
+    await waitFor(() => expect(session.api.listShifts).toHaveBeenCalledTimes(2));
+    fireEvent.click(
+      await screen.findByRole("button", { name: `Изменить смену ${PLANNED.number}` }),
+    );
+    name = `Смена ${PLANNED.number}`;
+    await screen.findByRole("dialog", { name });
+    await waitFor(() => expect(valueOf(name, "Коробов на паллете")).toBe("40"));
+    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
+    expect(within(dialog(name)).queryByLabelText("Коробов на паллете")).toBeNull();
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(session.api.updateShift).toHaveBeenLastCalledWith(TOKEN, PLANNED.id, {
+        palletsEnabled: false,
+        expectedRev: 72,
+      }),
+    );
+  });
+
+  // Added by the task 8 implementer: the plan's test leaves these edges of a shift with pallets unpinned.
+  it("lets a shift with pallets turn them off even when its product no longer has a pallet capacity", async () => {
+    const withPallets: OfficeShift = {
+      ...PLANNED,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: PALLET.id,
+    };
+    const session = shiftsSession([withPallets, ACTIVE, CLOSED]);
+    session.api.listProducts.mockResolvedValue([{ ...WATER, palletBoxCapacity: null }]);
+    session.api.updateShift.mockResolvedValue(PLANNED);
+    const name = await openEdit(session, withPallets);
+    const pallets = within(dialog(name)).getByRole("checkbox", { name: "С паллетами" });
+    expect(pallets.getAttribute("aria-checked")).toBe("true");
+    expect(isDisabled(pallets)).toBe(false);
+    expect(valueOf(name, "Коробов на паллете")).toBe("40");
+    expect(valueOf(name, "Шаблон этикетки паллеты")).toBe(PALLET.id);
+    // Nothing was changed: nothing is saved.
+    expect(save(name).disabled).toBe(true);
+    fireEvent.click(pallets);
+    // Once off, a product without a pallet capacity cannot have them back.
+    expect(isDisabled(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }))).toBe(
+      true,
+    );
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, withPallets.id, {
+        palletsEnabled: false,
+        expectedRev: 72,
+      }),
+    );
+  });
+
+  it("sends only the pallet capacity of a shift with pallets that changed, and puts a refusal of it under its field", async () => {
+    const withPallets: OfficeShift = {
+      ...PLANNED,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: PALLET.id,
+    };
+    const session = shiftsSession([withPallets, ACTIVE, CLOSED]);
+    session.api.updateShift.mockRejectedValue(
+      api("validation_failed", { field: "palletBoxCapacity" }),
+    );
+    const name = await openEdit(session, withPallets);
+    fireEvent.change(field(name, "Коробов на паллете"), { target: { value: " 32 " } });
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(messageOf(name, "Коробов на паллете")).toBe(
+        "Хост не принял это значение. Проверьте его.",
+      ),
+    );
+    expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, withPallets.id, {
+      palletBoxCapacity: 32,
+      expectedRev: 72,
+    });
+    // An edit of the plan alone names no pallet field.
+    fireEvent.change(field(name, "Коробов на паллете"), { target: { value: "40" } });
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    session.api.updateShift.mockResolvedValue(withPallets);
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(session.api.updateShift).toHaveBeenLastCalledWith(TOKEN, withPallets.id, {
+        plannedQty: 900,
+        expectedRev: 72,
+      }),
+    );
+  });
+
+  it("leaves the pallet template off and says so when the templates do not load", async () => {
+    const withPallets: OfficeShift = {
+      ...PLANNED,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: PALLET.id,
+    };
+    const session = shiftsSession([withPallets, ACTIVE, CLOSED]);
+    session.api.listTemplates.mockRejectedValue(api("internal"));
+    await openShifts(session);
+    fireEvent.click(screen.getByRole("button", { name: `Изменить смену ${withPallets.number}` }));
+    const name = `Смена ${withPallets.number}`;
+    await screen.findByRole("dialog", { name });
+    await waitFor(() =>
+      expect(messageOf(name, "Шаблон этикетки паллеты")).toBe(
+        "Список шаблонов не загрузился. Закройте окно и откройте его снова.",
+      ),
+    );
+    expect(isDisabled(field(name, "Шаблон этикетки паллеты"))).toBe(true);
   });
 
   it("switches «Сохранить» off again when an edit is undone", async () => {

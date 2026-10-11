@@ -239,7 +239,7 @@ class DuplicateJobs(
                     payloadDigest = event.payloadDigest,
                     bytesBase64 = Base64.encodeToString(bytes, Base64.NO_WRAP),
                     bytesDigest = projection.bytesDigest,
-                    language = projection.language,
+                    language = requireNotNull(projection.language),
                     dpi = projection.dpi,
                     latestSequence = projection.latestSequence,
                     attemptId = projection.attemptId,

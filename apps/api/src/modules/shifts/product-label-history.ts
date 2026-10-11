@@ -1,4 +1,5 @@
 import { BadRequestException, NotFoundException } from "@nestjs/common";
+import { deflateRawSync, inflateRawSync } from "node:zlib";
 import { z } from "zod";
 import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
@@ -11,7 +12,7 @@ import {
 
 export const productLabelHistoryQuerySchema = z.strictObject({
   limit: z.coerce.number().int().min(1).max(100).default(50),
-  cursor: z.string().max(512).optional(),
+  cursor: z.string().min(1).optional(),
 });
 export const productLabelEventsQuerySchema = z.strictObject({
   afterSequence: z.coerce.number().int().min(0).max(Number.MAX_SAFE_INTEGER).default(0),
@@ -21,6 +22,12 @@ export const productLabelEventsQuerySchema = z.strictObject({
 export type ProductLabelHistoryQuery = z.infer<typeof productLabelHistoryQuerySchema>;
 export type ProductLabelEventsQuery = z.infer<typeof productLabelEventsQuerySchema>;
 const cursorSchema = z.strictObject({
+  snapshot: z
+    .string()
+    .min(3)
+    .max(1_000_000)
+    .regex(/^[0-9:,]+$/),
+  attentionRank: z.number().int().min(0).max(1),
   acceptedAt: z.iso.datetime(),
   jobId: z.uuid(),
   deviceId: z.uuid(),
@@ -28,7 +35,11 @@ const cursorSchema = z.strictObject({
 function cursorOf(raw: string | undefined) {
   if (raw === undefined) return null;
   try {
-    return cursorSchema.parse(JSON.parse(Buffer.from(raw, "base64url").toString("utf8")));
+    return cursorSchema.parse(
+      JSON.parse(
+        inflateRawSync(Buffer.from(raw, "base64url"), { maxOutputLength: 1_048_576 }).toString(),
+      ),
+    );
   } catch {
     throw new BadRequestException("Invalid product label history cursor");
   }
@@ -52,6 +63,14 @@ export async function readProductLabelHistory(
         .from(schema.shifts)
         .where(and(eq(schema.shifts.tenantId, tenantId), eq(schema.shifts.id, shiftId)));
       if (!shift) throw new NotFoundException("Shift not found");
+      let snapshot = cursor?.snapshot;
+      if (!snapshot) {
+        const currentSnapshot = await tx.execute<{ snapshot: string }>(
+          sql`SELECT pg_current_snapshot()::text AS snapshot`,
+        );
+        snapshot = currentSnapshot.rows[0]?.snapshot;
+        if (!snapshot) throw new Error("Product label history database snapshot is missing");
+      }
       const summary = await tx.execute(sql`
    SELECT
     (SELECT count(DISTINCT (event.device_id,event.event->>'attemptId'))::int FROM product_label_events event JOIN product_label_jobs job ON job.tenant_id=event.tenant_id AND job.device_id=event.device_id AND job.job_id=event.job_id WHERE job.tenant_id=${tenantId} AND job.shift_id=${shiftId} AND event.receive_status='accepted' AND event.event->>'kind'='sent') AS "sentAttempts",
@@ -59,6 +78,8 @@ export async function readProductLabelHistory(
     (SELECT count(*)::int FROM product_label_jobs job WHERE job.tenant_id=${tenantId} AND job.shift_id=${shiftId} AND job.projection->>'status'<>'completed') AS "unresolvedJobs",
     (SELECT count(DISTINCT (event.device_id,event.event->>'attemptId'))::int FROM product_label_events event JOIN product_label_jobs job ON job.tenant_id=event.tenant_id AND job.device_id=event.device_id AND job.job_id=event.job_id WHERE job.tenant_id=${tenantId} AND job.shift_id=${shiftId} AND event.receive_status='accepted' AND event.event->>'kind'='prepared' AND (event.event->>'attemptNo')::bigint>1) AS "reprintAttempts"
   `);
+      // Heap xmin is a wrapping 32-bit xid. Rebuild its full xid8 by applying the
+      // nearest signed 32-bit delta to the saved snapshot's epoch-aware xmax.
       const rows = await tx.execute<{
         jobId: string;
         deviceId: string;
@@ -68,25 +89,56 @@ export async function readProductLabelHistory(
         verificationOutcome: unknown;
         attemptNo: number;
         ownershipConflict: boolean;
+        attentionRank: number;
       }>(sql`
-   SELECT job.job_id AS "jobId",job.device_id AS "deviceId",COALESCE(right(code.serial,6),'') AS "codeSuffix",job.accepted_at AS "acceptedAt",
-     job.projection->>'status' AS status,job.projection->>'verificationOutcome' AS "verificationOutcome",(job.projection->>'attemptNo')::int AS "attemptNo",
-     (EXISTS (SELECT 1 FROM code_conflicts conflict WHERE conflict.tenant_id=job.tenant_id AND conflict.losing_shift_id=job.shift_id AND conflict.losing_terminal_id=job.device_id::text AND conflict.code_hash=job.code_hash AND conflict.losing_scanned_at=job.accepted_at) OR EXISTS (SELECT 1 FROM station_sync_quarantine denied WHERE denied.tenant_id=job.tenant_id AND denied.terminal_id=job.device_id AND denied.shift_id=job.shift_id AND denied.record_kind='product_label_event' AND denied.reason='ownership_conflict' AND denied.payload->>'jobId'=job.job_id::text)) AS "ownershipConflict"
-   FROM product_label_jobs job
-   LEFT JOIN codes code ON code.tenant_id=job.tenant_id AND code.shift_id=job.shift_id AND code.code_hash=job.code_hash AND code.scanned_at=job.accepted_at
-   WHERE job.tenant_id=${tenantId} AND job.shift_id=${shiftId}
-   ${cursor ? sql`AND (job.accepted_at,job.job_id,job.device_id)<(${cursor.acceptedAt}::timestamptz,${cursor.jobId}::uuid,${cursor.deviceId}::uuid)` : sql``}
-   ORDER BY job.accepted_at DESC,job.job_id DESC,job.device_id DESC LIMIT ${query.limit + 1}
+   WITH snapshot_boundary AS (
+     SELECT value,
+       pg_snapshot_xmax(value)::text::bigint AS xmax,
+       (pg_snapshot_xmax(value)::xid)::text::bigint AS xmax32
+     FROM (SELECT ${snapshot}::pg_snapshot AS value) parsed_snapshot
+   ), snapshot_jobs AS (
+     SELECT job.job_id AS "jobId",job.device_id AS "deviceId",COALESCE(right(code.serial,6),'') AS "codeSuffix",job.accepted_at AS "acceptedAt",
+       CASE COALESCE(state_event.kind,job.projection->>'status')
+         WHEN 'verified' THEN 'completed'
+         WHEN 'verification_skipped' THEN 'completed'
+         WHEN 'sent' THEN CASE WHEN job.projection->>'verification'='required' THEN 'awaiting_verification' ELSE 'completed' END
+         WHEN 'failed_before_send' THEN 'attention'
+         WHEN 'delivery_unknown' THEN 'attention'
+         ELSE COALESCE(state_event.kind,job.projection->>'status')
+       END AS status,
+       CASE COALESCE(state_event.kind,job.projection->>'status')
+         WHEN 'verified' THEN 'verified'
+         WHEN 'verification_skipped' THEN 'skipped'
+         ELSE CASE WHEN job.projection->>'verification'='required' THEN 'pending' ELSE 'not_required' END
+       END AS "verificationOutcome",
+       COALESCE((prepared_event.event->>'attemptNo')::int,(job.projection->>'attemptNo')::int) AS "attemptNo",
+       (EXISTS (SELECT 1 FROM code_conflicts conflict WHERE conflict.tenant_id=job.tenant_id AND conflict.losing_shift_id=job.shift_id AND conflict.losing_terminal_id=job.device_id::text AND conflict.code_hash=job.code_hash AND conflict.losing_scanned_at=job.accepted_at) OR EXISTS (SELECT 1 FROM station_sync_quarantine denied WHERE denied.tenant_id=job.tenant_id AND denied.terminal_id=job.device_id AND denied.shift_id=job.shift_id AND denied.record_kind='product_label_event' AND denied.reason='ownership_conflict' AND denied.payload->>'jobId'=job.job_id::text)) AS "ownershipConflict"
+     FROM product_label_jobs job
+     CROSS JOIN snapshot_boundary boundary
+     LEFT JOIN codes code ON code.tenant_id=job.tenant_id AND code.shift_id=job.shift_id AND code.code_hash=job.code_hash AND code.scanned_at=job.accepted_at
+     JOIN LATERAL (SELECT event.event->>'kind' AS kind FROM product_label_events event WHERE event.tenant_id=job.tenant_id AND event.device_id=job.device_id AND event.job_id=job.job_id AND event.receive_status='accepted' AND pg_visible_in_snapshot((boundary.xmax + ((((event.xmin::text::bigint-boundary.xmax32+2147483648) & 4294967295)-2147483648)))::text::xid8,boundary.value) AND event.event->>'kind'<>'verification_rejected' ORDER BY event.sequence DESC LIMIT 1) state_event ON true
+     JOIN LATERAL (SELECT event.event FROM product_label_events event WHERE event.tenant_id=job.tenant_id AND event.device_id=job.device_id AND event.job_id=job.job_id AND event.receive_status='accepted' AND pg_visible_in_snapshot((boundary.xmax + ((((event.xmin::text::bigint-boundary.xmax32+2147483648) & 4294967295)-2147483648)))::text::xid8,boundary.value) AND event.event->>'kind'='prepared' ORDER BY event.sequence DESC LIMIT 1) prepared_event ON true
+     WHERE job.tenant_id=${tenantId} AND job.shift_id=${shiftId}
+   ), ranked_jobs AS (
+     SELECT snapshot_jobs.*,CASE WHEN status<>'completed' THEN 1 ELSE 0 END AS "attentionRank" FROM snapshot_jobs
+   )
+   SELECT * FROM ranked_jobs
+   ${cursor ? sql`WHERE ("attentionRank","acceptedAt","jobId","deviceId")<(${cursor.attentionRank}::int,${cursor.acceptedAt}::timestamptz,${cursor.jobId}::uuid,${cursor.deviceId}::uuid)` : sql``}
+   ORDER BY "attentionRank" DESC,"acceptedAt" DESC,"jobId" DESC,"deviceId" DESC LIMIT ${query.limit + 1}
   `);
-      const items = rows.rows
-        .slice(0, query.limit)
-        .map((row) => ({ ...row, acceptedAt: new Date(row.acceptedAt).toISOString() }));
-      const last = items.at(-1);
+      const pageRows = rows.rows.slice(0, query.limit);
+      const items = pageRows.map(({ attentionRank: _attentionRank, ...row }) => ({
+        ...row,
+        acceptedAt: new Date(row.acceptedAt).toISOString(),
+      }));
+      const last = pageRows.at(-1);
       const nextCursor =
         rows.rows.length > query.limit && last
-          ? Buffer.from(
+          ? deflateRawSync(
               JSON.stringify({
-                acceptedAt: last.acceptedAt,
+                snapshot,
+                attentionRank: last.attentionRank,
+                acceptedAt: new Date(last.acceptedAt).toISOString(),
                 jobId: last.jobId,
                 deviceId: last.deviceId,
               }),

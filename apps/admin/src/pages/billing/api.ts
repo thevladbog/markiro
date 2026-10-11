@@ -184,7 +184,7 @@ export function useServicePeriod(id: string) {
 }
 
 export type BillingRequestType =
-  "renewal" | "capacity_change" | "additional_service" | "documents" | "other";
+  "renewal" | "capacity_change" | "additional_service" | "documents" | "other" | "support";
 export type BillingRequestStatus =
   | "new"
   | "under_review"
@@ -271,7 +271,7 @@ export interface BillingRequestQuery {
 }
 
 export interface CreateBillingRequestPayload {
-  type: BillingRequestType;
+  type: Exclude<BillingRequestType, "support">;
   description: string;
   desiredAt?: string;
   context?: { type: string; id: string };

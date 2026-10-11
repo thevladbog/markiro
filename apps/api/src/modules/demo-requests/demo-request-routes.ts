@@ -8,6 +8,7 @@ export const DEMO_SOURCE_PATHS = [
   "/integratsiya-1c/",
   "/oflayn-rabota/",
   "/faq/",
+  "/kak-rabotaet/",
   "/en/",
   "/en/chestny-znak-serialization/",
   "/en/sscc-and-aggregation/",
@@ -16,6 +17,7 @@ export const DEMO_SOURCE_PATHS = [
   "/en/1c-integration/",
   "/en/offline-production/",
   "/en/faq/",
+  "/en/how-it-works/",
 ] as const;
 
 export type DemoSourcePath = (typeof DEMO_SOURCE_PATHS)[number];

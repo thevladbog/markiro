@@ -38,6 +38,7 @@ data class ProductLabelEvent(
     /** The reprint reason on `prepared`, the rejection reason on `verification_rejected`. */
     val reason: String? = null,
     val language: String? = null,
+    val printFormat: String? = null,
     val dpi: Int? = null,
     val bytesDigest: String? = null,
     val errorCode: String? = null,
@@ -71,7 +72,13 @@ fun ProductLabelEvent.toWireJson(): JsonObject = buildJsonObject {
         EventKind.PREPARED -> {
             put("attemptNo", requireNotNull(attemptNo))
             if (reason == null) put("reason", JsonNull) else put("reason", reason)
-            put("language", requireNotNull(language))
+            if (printFormat == "mono-raster-v1") {
+                require(language == null)
+                put("printFormat", printFormat)
+            } else {
+                require(printFormat == null && language in setOf("zpl", "tspl"))
+                put("language", requireNotNull(language))
+            }
             put("dpi", requireNotNull(dpi))
             put("bytesDigest", requireNotNull(bytesDigest))
         }
@@ -92,7 +99,8 @@ data class ProductLabelProjection(
     val templateDigest: String,
     val payloadDigest: String,
     val bytesDigest: String,
-    val language: String,
+    val language: String?,
+    val printFormat: String? = null,
     val dpi: Int,
     val latestSequence: Int,
     val attemptId: String,
@@ -193,7 +201,7 @@ fun canApplyProductLabelEvent(current: ProductLabelProjection, event: ProductLab
             event.attemptNo == current.attemptNo + 1 &&
             event.reason != null &&
             event.bytesDigest == current.bytesDigest &&
-            event.language == current.language &&
+            event.language == current.language && event.printFormat == current.printFormat &&
             event.dpi == current.dpi
     }
     if (event.attemptId != current.attemptId || (current.verificationOutcome == VerificationOutcome.VERIFIED || current.verificationOutcome == VerificationOutcome.SKIPPED)) {
@@ -228,6 +236,10 @@ fun applyProductLabelEvent(
         VerificationOutcome.NOT_REQUIRED
     }
 
+    if (event.kind == EventKind.PREPARED && !(
+        (event.printFormat == "mono-raster-v1" && event.language == null) ||
+        (event.printFormat == null && event.language in setOf("zpl", "tspl"))
+    )) invalidTransition()
     if (current == null) {
         if (event.kind != EventKind.PREPARED || event.sequence != 1 || event.attemptNo != 1 || event.reason != null) {
             invalidTransition()
@@ -241,7 +253,8 @@ fun applyProductLabelEvent(
             templateDigest = event.templateDigest,
             payloadDigest = event.payloadDigest,
             bytesDigest = event.bytesDigest ?: invalidTransition(),
-            language = event.language ?: invalidTransition(),
+            language = event.language,
+            printFormat = event.printFormat,
             dpi = event.dpi ?: invalidTransition(),
             latestSequence = 1,
             attemptId = event.attemptId,

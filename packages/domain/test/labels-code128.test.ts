@@ -64,24 +64,23 @@ describe("barcode moduleWidthMm", () => {
   it("emits ^BY in ZPL and the narrow/wide pair in TSPL, in whole dots", async () => {
     const spec = specWith({ ...base, moduleWidthMm: 0.2502 });
     expect(await generateZpl(spec, sampleLabelData())).toContain("^BY2^BCN,");
-    expect(await generateTspl(spec, sampleLabelData())).toContain('"128",40,0,0,2,2,');
+    expect(await generateTspl(spec, sampleLabelData())).toContain('"EAN128",40,0,0,2,2,');
 
     const spec300 = specWith({ ...base, moduleWidthMm: 0.254 }, 300);
     expect(await generateZpl(spec300, sampleLabelData())).toContain("^BY3^BCN,");
-    expect(await generateTspl(spec300, sampleLabelData())).toContain('"128",59,0,0,3,3,');
+    expect(await generateTspl(spec300, sampleLabelData())).toContain('"EAN128",59,0,0,3,3,');
   });
 
   /**
-   * The compatibility contract: an element that declares no module width must
-   * emit byte-identically to what shipped before the field existed — no `^BY`
-   * at all in ZPL, TSPL's historical fixed `2,2`.
+   * An element that declares no module width keeps the historical bar-width
+   * defaults: no `^BY` in ZPL and a fixed `2,2` in TSPL.
    */
-  it("emits exactly the previous output when no module width is declared", async () => {
+  it("keeps the default bar widths when no module width is declared", async () => {
     const spec = specWith(base);
     const zpl = await generateZpl(spec, sampleLabelData());
     expect(zpl).not.toContain("^BY");
     expect(zpl).toContain("^FO40,40^BCN,40,N,N,N");
-    expect(await generateTspl(spec, sampleLabelData())).toContain('"128",40,0,0,2,2,');
+    expect(await generateTspl(spec, sampleLabelData())).toContain('"EAN128",40,0,0,2,2,');
   });
 
   it("reports a real printed width in bounds once a module width is known", () => {

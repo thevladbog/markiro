@@ -23,6 +23,7 @@ import {
   useBillingRequest,
 } from "./api.js";
 import { formatBillingDate, formatBillingDateTime } from "./format.js";
+import { SupportTranscript } from "../support/SupportTranscript.js";
 
 interface ReplyAttempt {
   body: string;
@@ -378,6 +379,7 @@ export function RequestDetailPage() {
           ))}
         </ol>
       </Card>
+      {request.type === "support" ? <SupportTranscript requestId={request.id} /> : null}
       {canMutate && request.status === "clarification_required" ? (
         <Card title={t("pages.billing.requests.detail.replyTitle")} titleAs="h3">
           {replyError ? (

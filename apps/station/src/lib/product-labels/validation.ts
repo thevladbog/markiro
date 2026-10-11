@@ -1,4 +1,5 @@
 import {
+  decodeMonoRaster,
   applyProductLabelEvent,
   assertDuplicateTemplate,
   DomainError,
@@ -65,6 +66,11 @@ export function parseProductLabelAcceptance(input: unknown): PreparedProductLabe
     preparedEvent.templateDigest !== policy.snapshot.digest ||
     preparedEvent.payloadDigest !== duplicatePayloadDigest(km.raw) ||
     preparedEvent.bytesDigest !== productLabelBytesDigest(bytes)
+  )
+    invalidAcceptance();
+  if (
+    preparedEvent.printFormat === "mono-raster-v1" &&
+    decodeMonoRaster(bytes).dpi !== preparedEvent.dpi
   )
     invalidAcceptance();
   assertDuplicateTemplate(policy.snapshot.spec);

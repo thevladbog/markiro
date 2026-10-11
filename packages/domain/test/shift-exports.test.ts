@@ -90,6 +90,14 @@ describe("shift export formats", () => {
         boxMode: "boxes",
       },
       {
+        id: "shift_txt_boxes_reversed",
+        version: 1,
+        label: "[TXT][С коробами][Обратная] Отчет смены",
+        extension: "txt",
+        mimeType: "text/plain; charset=utf-8",
+        boxMode: "boxes",
+      },
+      {
         id: "shift_csv_flat",
         version: 1,
         label: "[CSV][Без коробов] Отчет смены",
@@ -516,6 +524,68 @@ describe("boxes format version 2 (00-prefixed SSCC)", () => {
       },
     });
     expect(new TextDecoder().decode(parts[0]!.bytes)).toBe("0012345678901234\nKM-1\n\n");
+  });
+});
+
+describe("reversed boxes TXT format (codes before the box)", () => {
+  function renderReversed(source: ShiftExportSource, maxLines: number | null = null) {
+    return renderShiftExport({
+      formatId: "shift_txt_boxes_reversed",
+      formatVersion: 1,
+      productName: "Вода",
+      shiftDate: "2026-08-13",
+      maxLines,
+      source,
+    });
+  }
+
+  it("writes each box's codes, then its 00-prefixed SSCC, then a blank line", () => {
+    const [part] = renderReversed(boxes);
+
+    expect(decode(part!.bytes)).toBe(
+      "KM-1\nKM-2\n00001234567890123456\n\nKM-3\n00009876543210123456\n\n",
+    );
+    expect(part).toMatchObject({
+      partNumber: 1,
+      physicalLineCount: 7,
+      codeCount: 3,
+      boxCount: 2,
+      palletCount: 0,
+      filename: "Вода_3pcs_2box_2026-08-13.txt",
+    });
+  });
+
+  it("keeps a box indivisible when splitting into parts", () => {
+    expect(
+      renderReversed(boxes, 5).map((part) => ({
+        physicalLineCount: part.physicalLineCount,
+        body: decode(part.bytes),
+        filename: part.filename,
+      })),
+    ).toEqual([
+      {
+        physicalLineCount: 4,
+        body: "KM-1\nKM-2\n00001234567890123456\n\n",
+        filename: "Вода_2pcs_1box_2026-08-13_часть_1.txt",
+      },
+      {
+        physicalLineCount: 3,
+        body: "KM-3\n00009876543210123456\n\n",
+        filename: "Вода_1pcs_1box_2026-08-13_часть_2.txt",
+      },
+    ]);
+    expect(() => renderReversed(boxes, 3)).toThrow(
+      new ShiftExportDomainError("BOX_EXCEEDS_LINE_LIMIT"),
+    );
+  });
+
+  it("rejects a malformed box SSCC and needs no pallets", () => {
+    expect(() =>
+      renderReversed({ mode: "boxes", boxes: [{ sscc: "0012345678901234", codes: ["KM-1"] }] }),
+    ).toThrow(new ShiftExportDomainError("INVALID_BOX_SSCC"));
+    expect(
+      shiftExportFormatRequiresPallets(getShiftExportFormat("shift_txt_boxes_reversed", 1)),
+    ).toBe(false);
   });
 });
 

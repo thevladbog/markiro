@@ -1,0 +1,30 @@
+.platform-support-page {
+  min-width: 0;
+}
+
+.platform-support-page form {
+  display: grid;
+  gap: 12px;
+  max-width: 680px;
+}
+
+.platform-support-page form button {
+  justify-self: start;
+}
+
+.platform-support-page ol,
+.platform-support-page ul {
+  display: grid;
+  gap: 12px;
+  padding-left: 20px;
+}
+
+.platform-support-page li {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.platform-support-page li p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}

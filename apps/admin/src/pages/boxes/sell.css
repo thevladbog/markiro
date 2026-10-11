@@ -7,7 +7,7 @@
   max-width: 480px;
   margin: 0 auto;
   min-height: calc(100dvh - 120px);
-  padding: 0 12px;
+  padding: 0 12px max(12px, env(safe-area-inset-bottom));
 }
 .mk-sell--center {
   align-items: center;

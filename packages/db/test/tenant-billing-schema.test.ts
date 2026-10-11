@@ -42,6 +42,7 @@ describe("tenant billing workflow schema", () => {
       "additional_service",
       "documents",
       "other",
+      "support",
     ]);
     expect(schema.BILLING_REQUEST_STATUSES).toEqual([
       "new",

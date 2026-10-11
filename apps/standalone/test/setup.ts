@@ -2,6 +2,16 @@
 // mode) before any test renders a component that calls useTranslation.
 import "../src/i18n/index.js";
 
+import { configure } from "@testing-library/react";
+
+// A findBy*/waitFor waits up to the test's own timeout, not Testing Library's 1 s: on a loaded
+// machine the first paint of a heavy dialog takes longer, and `--testTimeout` does not move the
+// 1 s. The wait is no assertion about speed, and no test here asserts that something does NOT
+// appear within one (no `.rejects` on a findBy/waitFor, no waitForElementToBeRemoved), so only
+// the time to a genuine failure grows. This is not a weakened test: the gate stays the timeout of
+// the test itself. The file is also loaded for suites that opt into `@vitest-environment node`.
+configure({ asyncUtilTimeout: 15_000 });
+
 // @markiro/ui's RadioGroup and Checkbox (Radix) render a hidden native input
 // inside a <form> so the control still participates in native form
 // submission; that hidden input sizes itself with `useSize`, which reads

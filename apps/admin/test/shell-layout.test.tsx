@@ -27,6 +27,7 @@ const ACTIVE_SESSION: SessionData = {
 };
 
 const ORGANIZATIONS: OrganizationSummary[] = [{ id: "org_1", name: "Марка Ко", slug: "marka-co" }];
+let supportResponse: () => Promise<Response>;
 
 /** Minimal Response stand-in -- only what apps/admin/src/api/client.ts reads. */
 function jsonResponse(status: number, body: unknown): Response {
@@ -94,6 +95,7 @@ function dashboardOverviewFixture(): DashboardOverviewDto {
 
 beforeEach(() => {
   localStorage.clear();
+  supportResponse = async () => jsonResponse(200, { items: [], nextCursor: null });
   // AppShell's nav badge reads usePendingOrderCount() (Task 14), which fires
   // a GET /pickup-orders?status=pending on every render regardless of route
   // -- stub it to an empty list so these layout/navigation tests don't hit
@@ -102,6 +104,7 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
+      if (url.endsWith("/api/support-chat/episodes")) return supportResponse();
       if (url.endsWith("/api/profile")) {
         return jsonResponse(200, {
           firstName: "Елена",
@@ -197,6 +200,37 @@ function renderApp(client: AuthClientLike, initialPath = "/") {
 }
 
 describe("app shell layout", () => {
+  it("hides support in desktop and mobile navigation when the episode list returns 503", async () => {
+    supportResponse = async () => jsonResponse(503, { message: "Support chat disabled" });
+    renderApp(createFakeAuthClient());
+    const desktop = await screen.findByRole("navigation", { name: "Основная навигация" });
+    await userEvent
+      .setup()
+      .click(screen.getByRole("button", { name: "Открыть мобильную навигацию" }));
+    expect(within(desktop).queryByRole("link", { name: "Поддержка" })).toBeNull();
+    expect(
+      within(screen.getByRole("navigation", { name: "Мобильная навигация" })).queryByRole("link", {
+        name: "Поддержка",
+      }),
+    ).toBeNull();
+  });
+
+  it("shows support only after the episode list confirms availability", async () => {
+    let confirm: ((value: Response) => void) | undefined;
+    supportResponse = () =>
+      new Promise<Response>((resolve) => {
+        confirm = resolve;
+      });
+    renderApp(createFakeAuthClient());
+    const desktop = await screen.findByRole("navigation", { name: "Основная навигация" });
+    expect(within(desktop).queryByRole("link", { name: "Поддержка" })).toBeNull();
+    await waitFor(() => expect(confirm).toBeDefined());
+    await act(async () => {
+      confirm!(jsonResponse(200, { items: [], nextCursor: null }));
+    });
+    expect(await within(desktop).findByRole("link", { name: "Поддержка" })).toBeDefined();
+  });
+
   it("keeps the desktop sidebar and exposes only authorized links in mobile navigation", async () => {
     const user = userEvent.setup();
     renderApp(createFakeAuthClient());
@@ -261,15 +295,16 @@ describe("app shell layout", () => {
       ["Операторы и сотрудники", "/employees"],
       ["Этикетки", "/labels"],
       ["Выбытие", "/pickup"],
+      ["Поддержка", "/support"],
     ];
     for (const [label, href] of expectedLinks) {
-      const link = within(desktopNav).getByRole("link", { name: label });
+      const link = await within(desktopNav).findByRole("link", { name: label });
       expect(link.getAttribute("href")).toBe(href);
     }
     expect(within(desktopNav).getByText("Производство")).toBeDefined();
     expect(within(desktopNav).getByText("Справочники")).toBeDefined();
     expect(within(desktopNav).getByText("Оборудование и обмен")).toBeDefined();
-    expect(within(desktopNav).queryByText("Организация")).toBeNull();
+    expect(within(desktopNav).getByText("Организация")).toBeDefined();
     expect(within(desktopNav).queryByRole("link", { name: "Интеграции" })).toBeNull();
     expect(within(desktopNav).queryByRole("link", { name: "Настройки" })).toBeNull();
 

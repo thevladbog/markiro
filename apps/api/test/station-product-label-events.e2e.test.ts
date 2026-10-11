@@ -176,6 +176,26 @@ describe.skipIf(!ready)("station product label events", () => {
     quarantined: rejected,
   });
 
+  it.each(["zpl", "mono-raster-v1"] as const)(
+    "accepts printer DPI independent of snapshot for %s",
+    async (format) => {
+      const f = await fixture();
+      if (f.prepared.kind !== "prepared") throw new Error("Invalid fixture");
+      const { language: _language, ...common } = f.prepared;
+      void _language;
+      const prepared = {
+        ...common,
+        dpi: 300 as const,
+        ...(format === "zpl"
+          ? { language: "zpl" as const }
+          : { printFormat: "mono-raster-v1" as const }),
+      };
+      const body = batch([prepared], [f.item]);
+      expect((await send(body)).body.productLabelReceipt).toEqual(receipt([prepared]));
+      expect((await send(body)).body.productLabelReceipt).toEqual(receipt([prepared]));
+    },
+  );
+
   it("accepts the scan and prepared fact atomically with exact device, operator and immutable audit fields", async () => {
     const f = await fixture();
     const body = batch([f.prepared], [f.item]);
@@ -318,7 +338,7 @@ describe.skipIf(!ready)("station product label events", () => {
     ).toHaveLength(0);
   });
 
-  it.each(["parent", "policy", "crypto", "operator", "sequence", "dpi"])(
+  it.each(["parent", "policy", "crypto", "operator", "sequence", "template"])(
     "quarantines invalid %s facts while preserving other jobs",
     async (kind) => {
       const bad = await fixture();
@@ -332,7 +352,7 @@ describe.skipIf(!ready)("station product label events", () => {
         };
       if (kind === "operator") event = { ...event, operatorId: randomUUID() };
       if (kind === "sequence") event = { ...event, sequence: 2 };
-      if (kind === "dpi") event = { ...event, dpi: 300 };
+      if (kind === "template") event = { ...event, templateDigest: "a".repeat(64) };
       const code =
         kind === "parent"
           ? "parent_missing"

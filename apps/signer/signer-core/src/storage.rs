@@ -1,9 +1,11 @@
-//! On-disk agent state under `%APPDATA%\app.markiro.signer\signer.json`.
+//! On-disk agent state: `signer.json` in `%LOCALAPPDATA%\app.markiro.signer\`,
+//! moved once from the roaming `%APPDATA%` folder by `storage_location`.
 //!
 //! The agent secret is never stored in the clear: `agent_secret_protected`
-//! holds a base64 DPAPI blob (see `storage_dpapi.rs`), which is bound to the
-//! Windows user account, so copying the file to another machine or profile
-//! yields nothing.
+//! holds a base64 user-scope DPAPI blob (see `storage_dpapi.rs`). Another
+//! Windows user cannot decrypt it, but the same user can on any computer that
+//! has their DPAPI keys, which a roaming profile or redirected AppData
+//! provides. That is why this file must stay in non-roaming storage.
 
 use std::fs;
 use std::io::Write as _;
@@ -13,7 +15,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::SignerError;
 
-const CONFIG_FILE: &str = "signer.json";
+/// The agent state file. `storage_location` moves it; nothing else names it.
+pub(crate) const CONFIG_FILE: &str = "signer.json";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -53,19 +56,25 @@ pub fn read_config(dir: &Path) -> Result<AgentConfig, SignerError> {
     }
 }
 
+/// Writes `bytes` to `dir/file_name` through a temp file and an atomic rename,
+/// so a crash mid-write leaves the previous content intact rather than a
+/// truncated file. `storage_location` writes its move record the same way.
+pub(crate) fn write_atomic(dir: &Path, file_name: &str, bytes: &[u8]) -> std::io::Result<()> {
+    fs::create_dir_all(dir)?;
+    let temp = dir.join(format!(".{file_name}.tmp"));
+    {
+        let mut file = fs::File::create(&temp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+    }
+    fs::rename(&temp, dir.join(file_name))
+}
+
 /// Writes through a temp file and an atomic rename so a crash mid-write leaves
 /// the previous config intact rather than a truncated one.
 pub fn write_config(dir: &Path, config: &AgentConfig) -> Result<(), SignerError> {
-    fs::create_dir_all(dir).map_err(|e| SignerError::Storage(e.to_string()))?;
     let text = serde_json::to_string_pretty(config).map_err(|e| SignerError::Storage(e.to_string()))?;
-    let temp = dir.join(format!(".{CONFIG_FILE}.tmp"));
-    {
-        let mut file = fs::File::create(&temp).map_err(|e| SignerError::Storage(e.to_string()))?;
-        file.write_all(text.as_bytes())
-            .map_err(|e| SignerError::Storage(e.to_string()))?;
-        file.sync_all().map_err(|e| SignerError::Storage(e.to_string()))?;
-    }
-    fs::rename(&temp, config_path(dir)).map_err(|e| SignerError::Storage(e.to_string()))
+    write_atomic(dir, CONFIG_FILE, text.as_bytes()).map_err(|e| SignerError::Storage(e.to_string()))
 }
 
 /// Drops everything tied to the cloud identity but keeps what the operator

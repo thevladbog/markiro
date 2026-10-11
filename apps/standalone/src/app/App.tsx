@@ -25,6 +25,7 @@ import {
   type ClaimInput,
   type DeviceApi,
   type DeviceErrorCode,
+  type InstallRole,
 } from "../host/device.js";
 import { createTauriHostProbe, HostProbeError, type HostProbe } from "../host/probe.js";
 import {
@@ -181,6 +182,9 @@ export function App({
   );
   const kioskSnapshot = useSyncExternalStore(kiosk.subscribe, kiosk.getSnapshot);
   const [state, dispatch] = useReducer(shellReducer, initialShellState);
+  // The installer's role, `"unknown"` until the shell answers (plan УСТ). It
+  // comes from the shell alone: nothing the page can write sets it.
+  const [role, setRole] = useState<InstallRole | "unknown">("unknown");
   const [probeAttempt, setProbeAttempt] = useState(0);
   const [repairState, setRepairState] = useState<"idle" | "busy" | DeviceErrorCode>("idle");
   // A forget the shell refused for records not yet sent, how many there are,
@@ -189,7 +193,16 @@ export function App({
     records: number | null;
     view: ShellView["kind"];
   } | null>(null);
-  const view = nextShellView(state, address);
+  // An office PC has no floor: whatever pairing its disk holds, the station's
+  // screens are not shown there, and the office sign-in is the home (plan УСТ).
+  const shellView = nextShellView(state, address);
+  const view: ShellView =
+    role === "office" &&
+    (shellView.kind === "floor" ||
+      shellView.kind === "floor_operator" ||
+      shellView.kind === "line_select")
+      ? { kind: "office_login", notice: null }
+      : shellView;
   const unsentHere = unsent !== null && unsent.view === view.kind ? unsent : null;
   const localName = t("device.localName");
   const pairedStatus = state.device.kind === "ready" ? state.device.status : null;
@@ -242,6 +255,22 @@ export function App({
       },
       () => {
         if (!cancelled) dispatch({ type: "device_unreadable" });
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [deviceApi]);
+
+  useEffect(() => {
+    let cancelled = false;
+    deviceApi.installRole().then(
+      (installed) => {
+        if (!cancelled) setRole(installed);
+      },
+      // An answer the shell could not give: work as a station, kiosk mode included.
+      () => {
+        if (!cancelled) setRole(null);
       },
     );
     return () => {
@@ -312,6 +341,23 @@ export function App({
       try {
         dispatch({ type: "line_selected", status: await deviceApi.selectLine(lineId) });
       } catch (error) {
+        const reason = deviceRejection(error);
+        if (reason !== null) {
+          dispatch({ type: "device_rejected", reason });
+          return;
+        }
+        throw error;
+      }
+    },
+    [deviceApi],
+  );
+
+  const changeAddress = useCallback(
+    async (newAddress: string) => {
+      try {
+        dispatch({ type: "address_changed", status: await deviceApi.changeAddress(newAddress) });
+      } catch (error) {
+        // The key no longer works there: the device is refused, as anywhere.
         const reason = deviceRejection(error);
         if (reason !== null) {
           dispatch({ type: "device_rejected", reason });
@@ -449,13 +495,21 @@ export function App({
 
   const session = view.kind === "office" ? view.session : null;
 
+  // An office PC (the installer's role «только офис») has no floor and is
+  // never locked (plan УСТ, owner question П11). The role is the shell's; a
+  // device paired as an office one counts only where the shell gave no role,
+  // so a station or host PC with a stale office pairing stays locked.
+  const officePc =
+    role === "office" || (role !== "host" && role !== "station" && pairedStatus?.kind === "office");
   // Kiosk mode whenever no office session is open: at start, when the office
-  // closes and when its session ends. Only an open session's administrator
-  // turns it off («Оконный режим»), and only until that session ends.
+  // closes and when its session ends — once the role is known, and never on
+  // an office PC. Only an open session's administrator turns it off
+  // («Оконный режим»), and only until that session ends.
   const officeOpen = session !== null;
+  const roleKnown = role !== "unknown";
   useEffect(() => {
-    if (!officeOpen) void kiosk.enter();
-  }, [kiosk, officeOpen]);
+    if (!officeOpen && roleKnown && !officePc) void kiosk.enter();
+  }, [kiosk, officeOpen, roleKnown, officePc]);
   const leaveKiosk = useCallback(async (): Promise<boolean> => {
     await kiosk.exit();
     const { mode, error } = kiosk.getSnapshot();
@@ -503,6 +557,7 @@ export function App({
       api: hostApi,
       call,
       refreshUser,
+      exitTo: officePc ? "sign_in" : "floor",
       logout: () => {
         dispatch({ type: "office_closed" });
         // The token is already gone from this device; if the host cannot be
@@ -510,7 +565,7 @@ export function App({
         void hostApi.officeLogout(session.token).catch(() => undefined);
       },
     };
-  }, [session, hostApi]);
+  }, [session, hostApi, officePc]);
 
   if (session && officeSession) {
     return (
@@ -664,7 +719,9 @@ export function App({
         <OfficeLogin
           notice={view.notice}
           onLogin={login}
-          onBack={() => dispatch({ type: "office_closed" })}
+          onBack={officePc ? null : () => dispatch({ type: "office_closed" })}
+          hostAddress={remoteAddress}
+          onChangeAddress={changeAddress}
         />
       )}
     </main>

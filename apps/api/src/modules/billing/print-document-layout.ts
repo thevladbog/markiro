@@ -21,6 +21,55 @@ export function resolvePrintVariant(
   return printVariant;
 }
 
+const initial = (word: string) => `${word.charAt(0).toUpperCase()}.`;
+
+/**
+ * «Фамилия Имя Отчество» → «И. О. Фамилия»; «Фамилия Имя» → «И. Фамилия». A compound given
+ * name keeps hyphenated initials («А.-М.»). Anything else (one word, more than three) is
+ * printed as entered rather than guessing initials; empty input prints nothing.
+ */
+export function formatSignerName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const words = value.split(/\s+/).filter(Boolean);
+  if (words.length === 0) return null;
+  const [surname, ...given] = words;
+  if (surname === undefined || given.length === 0 || given.length > 2) return words.join(" ");
+  const initials = given.map((word) => word.split("-").map(initial).join("-"));
+  return `${initials.join(" ")} ${surname}`;
+}
+
+export type SealPlacement = "none" | "slot" | "column";
+
+export interface SignaturePlan {
+  signed: boolean;
+  signerName: string | null;
+  seal: SealPlacement;
+}
+
+function signerNameOf(model: PrintDocumentModel): string | null {
+  const contact = model.seller.contact;
+  return typeof contact === "object" && contact !== null && "name" in contact
+    ? formatSignerName(contact.name)
+    : null;
+}
+
+/**
+ * What the signature block prints. Both renderers draw from this plan, so the name and the
+ * seal position cannot diverge between HTML and PDF. The name comes from the seller contact
+ * frozen with the document; without one the decoding stays a blank line.
+ */
+export function signaturePlan(
+  model: PrintDocumentModel,
+  variant: PrintDocumentVariant,
+): SignaturePlan {
+  if (variant !== "signed") return { signed: false, signerName: null, seal: "none" };
+  return {
+    signed: true,
+    signerName: signerNameOf(model),
+    seal: model.kind === "act" ? "column" : "slot",
+  };
+}
+
 export function formatPrintDate(value: Date | null): string {
   return value
     ? new Intl.DateTimeFormat("ru-RU", {
@@ -83,13 +132,28 @@ export function documentVatLabel(model: PrintDocumentModel): string {
   return rates.length === 0 ? "Без НДС" : `НДС ${rates.map((rate) => `${rate}%`).join(", ")}`;
 }
 
+const NPD_VAT_BASIS =
+  "Без НДС: Исполнитель применяет НПД; основание — часть 9 статьи 2 Федерального закона от 27.11.2018 № 422-ФЗ.";
+
+/** The statutory basis for «Без НДС», read from the seller tax policy frozen with the document. */
+export function documentVatBasis(model: PrintDocumentModel): string | null {
+  const policy = model.seller.taxPolicy;
+  return policy?.kind === "without_vat" &&
+    policy.regime === "npd" &&
+    documentVatLabel(model) === "Без НДС"
+    ? NPD_VAT_BASIS
+    : null;
+}
+
 export function paymentPurpose(model: PrintDocumentModel): string {
   const vat = Number(model.vatTotal);
   const label = documentVatLabel(model);
   const vatText =
     label !== "НДС"
       ? label === "Без НДС"
-        ? "Без НДС."
+        ? documentVatBasis(model)
+          ? "Без НДС (НПД)."
+          : "Без НДС."
         : `В том числе ${label} ${formatMoney(model.vatTotal)}.`
       : Number.isFinite(vat) && vat > 0
         ? `В том числе НДС ${formatMoney(model.vatTotal)}.`
@@ -241,7 +305,9 @@ export function profileIdentity(profile: BillingProfileSnapshot): string {
   return [
     profile.taxId ? `ИНН ${profile.taxId}` : null,
     profile.kpp ? `КПП ${profile.kpp}` : null,
-    profile.registrationId ? `ОГРН ${profile.registrationId}` : null,
+    profile.registrationId
+      ? `${profile.registrationKind === "ogrnip" ? "ОГРНИП" : "ОГРН"} ${profile.registrationId}`
+      : null,
   ]
     .filter(Boolean)
     .join(" · ");

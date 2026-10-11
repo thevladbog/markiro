@@ -191,6 +191,18 @@ async function installStrictApi(page: Page, scenario = "ready") {
   await page.route(/^http:\/\/127\.0\.0\.1:\d+\/api\//, async (route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
+    // Support chat is disabled in these unrelated screen scenarios.
+    if (route.request().method() === "GET" && path === "/api/support-chat/episodes") {
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          statusCode: 503,
+          message: "Support chat unavailable",
+          error: "Service Unavailable",
+        }),
+      });
+    }
     if (path === "/api/profile") {
       return json(route, {
         firstName: "Елена",

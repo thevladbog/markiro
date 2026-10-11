@@ -64,7 +64,7 @@ class TsplEmitterTest {
         val document = text(
             spec(LabelElement.Barcode("b1", 4.0, 12.0, BarcodeFormat.CODE128, BarcodeSource.Field(LabelField.SSCC), 15.0, 0.25)),
         )
-        assertTrue(document.contains("BARCODE 32,96,\"128\",120,0,0,2,2,\"!100346006820000000014\""))
+        assertTrue(document.contains("BARCODE 32,96,\"EAN128\",120,0,0,2,2,\"00346006820000000014\""))
     }
 
     @Test

@@ -326,6 +326,11 @@ function Fixture() {
 }
 async function bootstrap() {
   await i18n.changeLanguage(query.get("locale") === "en" ? "en" : "ru");
+  // NewShift uses the routed API and scanner; it has no local print history.
+  if (query.get("screen") === "newshift") {
+    renderFixture();
+    return;
+  }
   await credentialGenerationOwnership(generation);
   await applyMigrations(exec);
   if (!(await exec.all("SELECT id FROM shift_mirror")).length)
@@ -414,6 +419,9 @@ async function bootstrap() {
     };
     await refreshValidationHistory(exec, { get: async <T,>() => page as T }, shiftId, productId);
   }
+  renderFixture();
+}
+function renderFixture() {
   const root = document.getElementById("root");
   if (!root) throw new Error("fixture root missing");
   createRoot(root).render(

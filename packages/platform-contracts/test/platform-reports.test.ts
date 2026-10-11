@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { platformCapabilitiesForRole, platformReportContracts } from "../src/index.js";
+import {
+  isPlatformEvidenceReportType,
+  platformCapabilitiesForRole,
+  platformEvidenceReportTypes,
+  platformReportContracts,
+} from "../src/index.js";
 
 const tenantA = "tenant-a";
 const tenantB = "tenant-b";
@@ -153,5 +158,95 @@ describe("platform operational report contracts", () => {
         expect(platformCapabilitiesForRole[role]).not.toContain(capability);
       }
     }
+  });
+
+  describe("usage, quality and commercial report types", () => {
+    const evidenceTypes = ["usage", "quality", "commercial"] as const;
+
+    it.each(evidenceTypes)(
+      "accepts %s with tenants, dates, timezone and privacy only",
+      (reportType) => {
+        expect(
+          platformReportContracts.create.body.safeParse({ ...valid, reportType }).success,
+        ).toBe(true);
+      },
+    );
+
+    it.each(evidenceTypes)(
+      "rejects every optional filter and production_date for %s",
+      (reportType) => {
+        const overrides = [
+          { lineId: uuid },
+          { productId: uuid },
+          { gtin14: "04601234567890" },
+          { operatorId: uuid },
+          { status: "closed" },
+          { outcome: "ok" },
+          { periodBasis: "production_date" },
+        ];
+        for (const override of overrides) {
+          expect(
+            platformReportContracts.create.body.safeParse({ ...valid, reportType, ...override })
+              .success,
+          ).toBe(false);
+        }
+      },
+    );
+
+    it("reports the unsupported filter at its own path", () => {
+      const result = platformReportContracts.create.body.safeParse({
+        ...valid,
+        reportType: "usage",
+        lineId: uuid,
+      });
+      expect(result.error?.issues).toEqual([
+        { code: "custom", path: ["lineId"], message: "Filter is not supported" },
+      ]);
+    });
+
+    it("keeps the existing types unchanged", () => {
+      expect(
+        platformReportContracts.create.body.safeParse({
+          ...valid,
+          reportType: "shifts",
+          lineId: uuid,
+        }).success,
+      ).toBe(true);
+    });
+
+    it("exposes the evidence type list and its guard", () => {
+      expect(platformEvidenceReportTypes).toEqual(["usage", "quality", "commercial"]);
+      for (const reportType of platformEvidenceReportTypes)
+        expect(isPlatformEvidenceReportType(reportType)).toBe(true);
+      for (const reportType of [
+        "shifts",
+        "shift_operators",
+        "inventories",
+        "summary",
+        "commerceml",
+      ] as const)
+        expect(isPlatformEvidenceReportType(reportType)).toBe(false);
+    });
+
+    it("parses stored parameters of the new types into the report DTO", () => {
+      const parameters = (({ idempotencyKey: _, ...rest }) => rest)({
+        ...valid,
+        reportType: "commercial" as const,
+      });
+      const report = platformReportContracts.create.response.parse({
+        id: uuid,
+        parameters,
+        status: "queued",
+        createdAt: "2026-09-30T08:00:00Z",
+        snapshotAt: null,
+        completedAt: null,
+        expiresAt: "2026-10-07T08:00:00Z",
+        errorCode: null,
+        rowCount: null,
+        byteSize: null,
+        filename: null,
+      });
+      expect(report.parameters.reportType).toBe("commercial");
+    });
   });
 });

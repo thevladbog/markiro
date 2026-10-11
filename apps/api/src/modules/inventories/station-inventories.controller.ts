@@ -1,3 +1,4 @@
+import { projectThermalInventoryManifest } from "./thermal-label-policy";
 import { AllowReplacementEvidenceRecovery } from "../device-licensing/replacement-recovery-policy";
 import {
   Body,
@@ -131,13 +132,13 @@ export class StationInventoriesController {
   @ApiOkResponse({ schema: stationInventoryBundleManifestOpenApiSchema })
   @ApiZodValidationError()
   @ApiHttpErrors(401, 403)
-  join(
+  async join(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
     @Body(new ZodValidationPipe(joinStationInventorySchema)) body: JoinStationInventoryDto,
   ): Promise<StationInventoryBundleManifestDto> {
     if (!req.deviceId) throw new Error("Station device identity is missing");
-    return this.access.join(
+    const manifest = await this.access.join(
       req.tenantId!,
       req.deviceId,
       req.deviceLineId ?? null,
@@ -145,6 +146,7 @@ export class StationInventoriesController {
       id,
       body,
     );
+    return projectThermalInventoryManifest(manifest, req.get("x-station-capabilities"));
   }
 
   @Get("inventories/:id/bundle/manifest")
@@ -157,12 +159,15 @@ export class StationInventoriesController {
   @ApiOkResponse({ schema: stationInventoryBundleManifestOpenApiSchema })
   @ApiZodValidationError()
   @ApiHttpErrors(401, 403, 409)
-  manifest(
+  async manifest(
     @Req() req: RequestWithTenant,
     @Param("id", new ZodValidationPipe(inventoryIdSchema)) id: string,
   ): Promise<StationInventoryBundleManifestDto> {
     if (!req.deviceId) throw new Error("Station device identity is missing");
-    return this.bundles.getManifest(req.tenantId!, id, req.deviceId);
+    return projectThermalInventoryManifest(
+      await this.bundles.getManifest(req.tenantId!, id, req.deviceId),
+      req.get("x-station-capabilities"),
+    );
   }
 
   @Get("inventories/:id/bundle/codes")

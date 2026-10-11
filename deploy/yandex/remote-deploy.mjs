@@ -5,6 +5,7 @@ import { join } from "node:path";
 import process from "node:process";
 
 import { parseReleaseManifest } from "../production/release-manifest.mjs";
+import { validReleaseScope } from "../production/release-scope.mjs";
 import { validateProductionDomains } from "../production/production-domain.mjs";
 import {
   landingDemoSubmissionState,
@@ -319,7 +320,8 @@ function parseCandidate(output) {
       candidate.state !== "pending" ||
       !/^[0-9a-f]{40}$/.test(candidate.tag) ||
       !/^ghcr\.io\/thevladbog\/markiro-api@sha256:[0-9a-f]{64}$/.test(candidate.apiDigest) ||
-      !/^ghcr\.io\/thevladbog\/markiro-edge@sha256:[0-9a-f]{64}$/.test(candidate.edgeDigest)
+      !/^ghcr\.io\/thevladbog\/markiro-edge@sha256:[0-9a-f]{64}$/.test(candidate.edgeDigest) ||
+      !validReleaseScope(candidate)
     )
       throw new Error();
     return candidate;
@@ -388,6 +390,8 @@ export async function deployRelease(dependencies, manifestText) {
 }
 
 async function runRemoteDeploymentInternal(environment, supplied) {
+  const scope = environment.MARKIRO_DEPLOY_SCOPE ?? "full";
+  if (!["full", "api-only"].includes(scope)) throw new Error("invalid deployment scope");
   const system = {
     readFile,
     stat,
@@ -492,6 +496,7 @@ async function runRemoteDeploymentInternal(environment, supplied) {
           `--working-directory=${releaseDirectory}`,
           "env",
           `MARKIRO_IMAGE_TAG=${manifest.commit}`,
+          `MARKIRO_DEPLOY_SCOPE=${scope}`,
           `MARKIRO_API_IMAGE_DIGEST=${apiDigest}`,
           `MARKIRO_EDGE_IMAGE_DIGEST=${edgeDigest}`,
           "MARKIRO_COMPOSE_PROJECT=markiro-production",
@@ -604,7 +609,7 @@ async function runRemoteDeploymentInternal(environment, supplied) {
             "markiro-runtime-env.service",
           ]),
         prepare: async () => parseCandidate(await remoteStage("prepare")),
-        smoke: () => {
+        smoke: (candidate) => {
           const baseUrls = productionBaseUrls({
             MARKIRO_DOMAIN: domain,
             MARKIRO_SAAS_ADMIN_DOMAIN: saasAdminDomain,
@@ -617,7 +622,7 @@ async function runRemoteDeploymentInternal(environment, supplied) {
             saasAdminBaseUrl: baseUrls.saasAdmin,
             kioskBaseUrl: baseUrls.kiosk,
             landingBaseUrl: baseUrls.landing,
-            expectedReleaseSha: manifest.commit,
+            expectedReleaseSha: candidate.edgeReleaseSha ?? manifest.commit,
             landingDemoSubmissionState: expectedDemoSubmissionState,
           });
         },

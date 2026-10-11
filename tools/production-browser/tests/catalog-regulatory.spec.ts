@@ -63,6 +63,18 @@ async function installApi(page: Page, group: number, readonly = false) {
     const path = new URL(request.url()).pathname;
     const json = (body: unknown, status = 200) =>
       route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
+    // Support chat is disabled in these unrelated screen scenarios.
+    if (request.method() === "GET" && path === "/api/support-chat/episodes") {
+      return route.fulfill({
+        status: 503,
+        contentType: "application/json",
+        body: JSON.stringify({
+          statusCode: 503,
+          message: "Support chat unavailable",
+          error: "Service Unavailable",
+        }),
+      });
+    }
     if (path === "/api/profile")
       return json({ firstName: "Игорь", middleName: null, lastName: "Волков", hasAvatar: false });
     if (path === "/api/access/me")

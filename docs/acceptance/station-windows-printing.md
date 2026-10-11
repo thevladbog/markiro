@@ -1,0 +1,162 @@
+# Station printing through Windows
+
+Status: implementation under local validation; Windows application and physical
+printer acceptance remain separate release gates.
+
+In Settings → Printers select an installed Windows queue and “Through Windows”.
+Install the vendor's driver first. Configure paper dimensions and printer DPI
+(203 or 300); print the test label and scan its unique code. RAW ZPL/TSPL remains
+available for Windows queues, TCP/IP and serial/COM, including existing Bluetooth
+serial connections. Existing profiles keep RAW behavior. There is no BLE pairing
+or automatic conversion of old print jobs.
+
+The universal layer is the Windows driver, so support depends on a working driver
+that accepts the exact label geometry. A printer without a compatible Windows
+driver is not covered by this mode.
+
+## Output and recovery
+
+The station renders one complete monochrome page locally, including bundled-font
+text and full GS1 data. No cloud rendering, fit-to-page or automatic rotation is
+used. Preflight checks actual DPI, physical size, printable area and mandatory
+barcode whitespace. A failed check requires correcting the queue settings.
+
+Every Windows attempt persists its frozen profile, artifact digest and sending
+claim before hardware output. A process failure or transport exception leaves an
+unknown result, never an automatic retry. Reprints require an operator action;
+product duplicates keep their existing reason and full-code verification rules.
+Old ZPL/TSPL jobs replay their original bytes on a compatible RAW profile.
+
+Box and pallet attempts regenerate from their label model after proven pre-send failure
+or after a successful send or operator resolution whose payload has been retired.
+Unresolved unknown delivery retains its original raster and requires a compatible DPI. The sidecar retains digest, receipt
+and state but clears settled raster payloads; SQLite can reuse the freed pages.
+
+For warehouse jobs, a proven `failed_before_send` permits an explicit new attempt
+with corrected DPI or format (Windows raster, ZPL or TSPL) from the saved source fields
+and template. The original prepared snapshot remains immutable. The new artifact and
+`reprint_prepared.rerender` event commit atomically, and server history/audit records
+the new digest, DPI and format. Legacy DPI-only events retain their raster meaning.
+Sent/unknown warehouse jobs and product-duplicate jobs still replay their frozen bytes.
+Deploy this expanded warehouse event contract on the API before Station.
+
+Status widgets do not recover or clean journals on mount. They read metadata and load
+the saved raster only when the operator opens the preview. Setup acknowledgement is
+an explicit controller action under the current credential lease.
+
+The local receipt contains queue, job ID and a unique document name. A queue lookup
+checks all three. “Absent” is only a spooler observation; scan the paper label to
+confirm the result. Review an unknown result at the physical printer before
+requesting another copy. Test labels use a fresh code on every print.
+
+Unresolved Windows deliveries prevent parent destination/byte cleanup. Operator
+verification or an explicit recovery decision resolves the local uncertainty.
+Local receipts do not change immutable server event digests or pinned old batches.
+
+## Automated gates
+
+- Domain codec vectors, full-page GS1 decode, strict RAW/raster event parsing.
+- SQLite upgrades, claim races, restart, receipt identity and retained old jobs.
+- Station preparation/output/reprint/verification and RAW regressions.
+- API events/history and tenant/actor/policy checks against isolated PostgreSQL.
+- Kotlin shared-fixture parity; Android build/lint remain distinct from devices.
+- `cargo test --manifest-path tools/station-printer-tests/Cargo.toml --locked` runs
+  the actual printer core without Tauri/WebView2. Windows CI also compiles the full
+  Station application. A macOS test or Windows target typecheck is not Windows IO.
+
+## Required physical acceptance
+
+Record Windows version, driver version, printer model, connection, DPI, stock size
+and the exact Station source SHA. Exercise at least two driver families, USB and
+network-installed queues, plus RAW ZPL and TSPL controls.
+
+1. Test, box, pallet, inventory and product-duplicate labels, plus warehouse reprints.
+2. 203/300 DPI, Cyrillic, long text, dates, QR, EAN-13, Code 128/SSCC and full
+   product Data Matrix including group separators and crypto tail.
+3. Measure label size; scan the codes independently and compare exact payloads.
+4. Wrong DPI/paper/printable margins must fail before document submission.
+   Correct a failed box/pallet destination and retry. For warehouse jobs, correct the
+   DPI and explicitly request a new attempt; confirm the original attempt remains in
+   history and a changed DPI is still rejected after unknown delivery.
+   After a proven driver rejection, also switch to RAW ZPL/TSPL and explicitly retry;
+   verify the saved source/template, attempt history and printed label. Test RAW to
+   driver recovery before send as well. Format changes after sent/unknown are rejected.
+   Resolve an unknown box/pallet attempt by an explicit operator action, then reprint
+   it after its raster was released; confirm the label is regenerated.
+5. Offline/stopped queue, service interruption and Station restart during sending
+   must expose uncertainty without an unsolicited extra label.
+6. Change current catalog/template/printer settings, then reprint a saved product
+   job; its artifact digest and full payload must remain unchanged.
+7. Check job disappearance and reused IDs do not mark a label verified.
+
+Publish the compatible API before Station. Do not downgrade while raster jobs are
+unresolved. No release, deployment or physical acceptance is implied by local tests.
+
+Win32 references: [DEVMODE](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-devmodew),
+[device capabilities](https://learn.microsoft.com/en-us/windows/win32/api/wingdi/nf-wingdi-getdevicecaps),
+[GDI printing](https://learn.microsoft.com/en-us/windows/win32/printdocs/gdi-printing).
+
+## Local validation on 2026-10-10
+
+Implementation branch: `codex/station-windows-printing`, based on
+`0ebdcb5a498c64a37cf0e3de57a2ce2efdf0e11e`. Results below describe local validation before PR publication.
+
+Passed on the final implementation:
+
+- Station: 152 files, 2075 tests; domain: 74 files, 1019 tests.
+- Printing API events: 38 tests against a disposable PostgreSQL database.
+- SQLite schema: 76 tests; focused driver recovery/retention/receipt/UI tests.
+- Station, domain, DB, API and admin lint/typecheck/build; repository formatting
+  and whitespace checks. Admin history consumer tests also passed.
+- Browser setup: 5 checks; 1024×768 screenshot inspected, including mode switching,
+  remembered RAW language, DPI and footer reachability. Native capability was
+  simulated for this browser check.
+- Android unit tests, lint and debug APK build.
+- Host Rust: 160 tests; standalone printer core: 6 tests; actual driver core
+  typechecked for `x86_64-pc-windows-msvc` with real Windows bindings.
+- Production bundle: 580 checks; affected-CI selection: 23 checks.
+
+The broad DB run had 656 passing tests and two timeout failures. The SQLite
+schema rerun passed; the unchanged legacy PostgreSQL migration fixture still
+exceeded its 20-second test budget. Executing that exact fixture separately
+completed successfully in 39.1 seconds. The timeout was not increased.
+
+The broad API run was stopped after timing failures in inventory-documents and
+exchange-import. Exchange-import passed a focused rerun. The long inventory
+lifecycle still exceeded its 5-second budget and interfered with subsequent
+shared-fixture cases. These general gates are **not** claimed green.
+
+The complete Windows application could not be cross-built on macOS because the
+C toolchain lacked the Windows SDK headers required by `ring`. The Windows-target
+printer-core check does not replace that build. Windows CI, real driver/queue
+behavior, printed dimensions and independent physical scanning remain required.
+No release, deployment or physical printing was performed during this validation.
+
+## Review follow-up validation on 2026-10-10
+
+- Station: 152 files / 2091 tests; domain: 74 files / 1022 tests.
+- SQLite schema and upgrade checks: 77 tests; warehouse API history: 12 tests
+  against task-owned PostgreSQL, including legacy projection recovery and exact audit.
+- Lint, typecheck and build for Station, domain, DB and API passed through Turbo;
+  five browser setup checks and repository formatting also passed.
+- Regression tests cover corrected-DPI box/pallet printing, immutable warehouse
+  source/template history, interrupted commit responses, retained unknown output,
+  lazy read-only status, one product preflight and QR sizing parity.
+- Broad DB/API runs were not repeated; their initial timeout limitations above
+  remain open. Native Rust was unchanged. Real Windows-driver and paper acceptance
+  remain unrun in this macOS environment.
+
+### Resolved-attempt and format-change follow-up
+
+- Both additional findings reproduced before the fix. Resolved prepared/unknown
+  box attempts now regenerate after their raster was released; unresolved unknown
+  attempts still replay saved bytes.
+- Station: 152 files / 2104 tests; domain: 74 files / 1025 tests; warehouse API:
+  14 tests against task-owned PostgreSQL. Lint, typecheck and build passed for
+  Station, domain, DB and API.
+- Coverage includes all six transitions between Windows raster, ZPL and TSPL after
+  proven non-send, immutable saved source/template and initial prepared event,
+  current-format status/audit, subsequent byte replay, rejection after sent/unknown,
+  and restoration of each replacement format after a lost SQLite commit response.
+- This follow-up changes no native code or DDL. Broad DB/API, browser and physical
+  Windows/printer checks were not rerun; the earlier limitations remain.

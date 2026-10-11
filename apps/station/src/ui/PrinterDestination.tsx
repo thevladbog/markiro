@@ -1,3 +1,5 @@
+import { WindowsDeliveryStatus } from "./WindowsDeliveryStatus.js";
+import { printerMode } from "../lib/printer-routing.js";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Select } from "@markiro/ui";
@@ -32,6 +34,15 @@ export function PrinterDestination({
       <p>
         <span>{t(`setup.printPurpose.${purpose}`)} · </span>
         <strong>{printer?.name ?? t("printerRouting.legacyDestination")}</strong>
+        {printer && (
+          <span>
+            {" "}
+            ·{" "}
+            {printerMode(printer) === "windows_driver"
+              ? t("setup.printModeWindows")
+              : printer.language.toUpperCase()}
+          </span>
+        )}
       </p>
       {error ? <Alert tone="error" title={t("printerRouting.changeFailed")} /> : null}
       {onChoose && !editing ? (
@@ -56,7 +67,9 @@ export function PrinterDestination({
             disabled={disabled || busy}
             options={[
               { value: "", label: t("printerRouting.selectPrinter") },
-              ...printers.map((item) => ({ value: item.id, label: item.name })),
+              ...printers
+                .filter((item) => purpose === "pallet" || item.paper !== "a4")
+                .map((item) => ({ value: item.id, label: item.name })),
             ]}
             onValueChange={setSelected}
           />
@@ -137,5 +150,18 @@ export function SavedPrinterDestination({
   ]);
   if (state?.key !== key) return <p role="status">{t("printerRouting.loading")}</p>;
   if (state.error) return <Alert tone="error" title={t("printerRouting.changeFailed")} />;
-  return <PrinterDestination {...props} purpose={destination.purpose} printer={state.printer} />;
+  return (
+    <>
+      <PrinterDestination {...props} purpose={destination.purpose} printer={state.printer} />
+      {state.printer && printerMode(state.printer) === "windows_driver" && (
+        <WindowsDeliveryStatus
+          exec={exec}
+          scope={destination.scope}
+          purpose={destination.purpose}
+          jobId={destination.jobId}
+          revision={revision}
+        />
+      )}
+    </>
+  );
 }

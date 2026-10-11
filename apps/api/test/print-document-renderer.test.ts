@@ -60,6 +60,31 @@ const baseInvoice: PrintDocumentModel = {
   termsHtml: null,
 };
 
+const npdVatBasis =
+  "Без НДС: Исполнитель применяет НПД; основание — часть 9 статьи 2 Федерального закона от 27.11.2018 № 422-ФЗ.";
+
+const withoutVatInvoice = (regime: "npd" | "other"): PrintDocumentModel => ({
+  ...baseInvoice,
+  seller: { ...baseInvoice.seller, taxPolicy: { kind: "without_vat", regime } },
+  lines: [
+    {
+      ...baseLine,
+      vatRate: null,
+      vatIncluded: false,
+      commercialTerms: {
+        version: 1,
+        subject: "service",
+        documentNameRu: "Разовая услуга",
+        documentNameEn: null,
+        sellerPolicyRevision: 1,
+        billingPeriod: null,
+        billingTimezone: null,
+        activationRule: null,
+      },
+    },
+  ],
+});
+
 const count = (value: string, needle: string) => value.split(needle).length - 1;
 const countPdfPages = (pdf: Buffer) =>
   (pdf.toString("latin1").match(/\/Type\s*\/Page\b/g) ?? []).length;
@@ -157,7 +182,58 @@ describe("print document HTML renderer", () => {
     expect(paymentPurpose(baseInvoice)).toContain("Без НДС");
   });
 
-  it("renders signed offers with supplier images and no counterparty stamp placeholder", async () => {
+  it("prints the frozen NPD tax basis under totals and in the payment purpose", () => {
+    const npd = withoutVatInvoice("npd");
+    const html = renderPrintHtml(npd);
+
+    expect(paymentPurpose(npd)).toBe("Оплата по счёту № 184 от 24.08.2026. Без НДС (НПД).");
+    expect(paymentQrPayload(npd)).toContain(
+      "Purpose=Оплата по счёту № 184 от 24.08.2026. Без НДС (НПД).",
+    );
+    expect(count(html, npdVatBasis)).toBe(1);
+    expect(html.indexOf(npdVatBasis)).toBeGreaterThan(html.indexOf("ИТОГО"));
+    expect(html.indexOf(npdVatBasis)).toBeLessThan(html.indexOf("НАЗНАЧЕНИЕ ПЛАТЕЖА"));
+    expect(html).toContain("<span>Без НДС</span>");
+    for (const kind of ["offer", "act"] as const) {
+      expect(count(renderPrintHtml({ ...npd, kind, status: "published" }), npdVatBasis)).toBe(1);
+    }
+  });
+
+  it("keeps plain without-VAT wording for a seller outside NPD", () => {
+    const other = withoutVatInvoice("other");
+
+    expect(paymentPurpose(other)).toBe("Оплата по счёту № 184 от 24.08.2026. Без НДС.");
+    expect(renderPrintHtml(other)).toContain("<span>Без НДС</span>");
+    expect(renderPrintHtml(other)).not.toContain("НПД");
+    expect(renderPrintHtml(baseInvoice)).not.toContain("НПД");
+  });
+
+  it("renders the NPD tax basis into deterministic PDF bytes", async () => {
+    const npd = await renderPrintPdf(withoutVatInvoice("npd"));
+    const retry = await renderPrintPdf(withoutVatInvoice("npd"));
+    const other = await renderPrintPdf(withoutVatInvoice("other"));
+
+    expect(npd.equals(retry)).toBe(true);
+    expect(npd.equals(other)).toBe(false);
+  });
+
+  it("labels a sole proprietor registration number as ОГРНИП", () => {
+    const html = renderPrintHtml({
+      ...baseInvoice,
+      seller: {
+        ...baseInvoice.seller,
+        registrationId: "324237500123456",
+        registrationKind: "ogrnip",
+      },
+      buyer: { ...baseInvoice.buyer, registrationKind: "ogrn" },
+    });
+
+    expect(html).toContain("ОГРНИП 324237500123456");
+    expect(html).not.toContain("ОГРН 324237500123456");
+    expect(html).toContain("ОГРН 1000000000000");
+  });
+
+  it("renders signed offers with supplier images and the seal in the right-hand slot", async () => {
     const offer = {
       ...baseInvoice,
       kind: "offer" as const,
@@ -166,6 +242,7 @@ describe("print document HTML renderer", () => {
     const html = renderPrintHtml(offer, { printVariant: "signed" });
     expect(count(html, 'class="authorized-signature"')).toBe(1);
     expect(count(html, 'class="legal-seal"')).toBe(1);
+    expect(html).toContain('class="stamp stamp--sealed"');
     expect(renderPrintHtml(offer, { printVariant: "clean" })).toContain("МЕСТО ДЛЯ ПЕЧАТИ");
     expect(html).not.toContain("МЕСТО ДЛЯ ПЕЧАТИ");
     await expect(renderPrintPdf(offer, { printVariant: "signed" })).resolves.toBeInstanceOf(Buffer);

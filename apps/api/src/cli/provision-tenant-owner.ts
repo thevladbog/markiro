@@ -7,10 +7,12 @@ import {
   type TenantProvisioningOptions,
   type TenantProvisioningResult,
 } from "../modules/platform-tenants/tenant-provisioning.service";
-import { provisionTenantSchema, type ProvisionTenantDto } from "../modules/platform-tenants/dto";
+import { provisionTenantSchema, type ProvisionTenantInput } from "../modules/platform-tenants/dto";
 import { PlatformAuditService } from "../platform-auth/platform-audit.service";
 
-export type ProvisionTenantOwnerInput = ProvisionTenantDto;
+// The raw (pre-parse) shape: the service validates it and defaults
+// `cabinetAccess` to "enabled", so owner-only callers need not repeat it.
+export type ProvisionTenantOwnerInput = ProvisionTenantInput;
 export type ProvisionTenantOwnerResult = TenantProvisioningResult;
 
 interface ProvisionTenantOwnerOptions extends TenantProvisioningOptions {
@@ -71,6 +73,8 @@ export function parseProvisionTenantOwnerArgs(argv: string[]): ProvisionTenantOw
     email: values["--email"],
     tenantName: values["--tenant-name"],
     tenantSlug: values["--tenant-slug"],
+    // The CLI provisions an owner; it never creates a tenant without cabinet.
+    cabinetAccess: "enabled",
   });
 }
 

@@ -46,7 +46,7 @@ const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE
           <li data-key-takeaway>Every scan, case, and exception must enter a durable local journal before joining the outgoing queue.</li>
           <li data-key-takeaway>A retry must retain the original operation identity because a missing response does not prove rejection.</li>
           <li data-key-takeaway>Local duplicates can be stopped immediately; cross-station conflicts may surface only after synchronization.</li>
-          <li data-key-takeaway>Markiro currently controls item → case → SSCC; a direct SUZ or GIS MT connection is a separately accepted integration.</li>
+          <li data-key-takeaway>Markiro currently controls item → case → pallet: each case and pallet has its own SSCC; a direct SUZ or GIS MT connection is a separately accepted integration.</li>
         </ul>
       </aside>
 
@@ -125,7 +125,7 @@ const config = readPublicSiteConfig({ PUBLIC_PHONE: import.meta.env.PUBLIC_PHONE
       <section id="markiro" aria-labelledby="markiro-title">
         <p class="section-index">08 / Markiro</p><h2 id="markiro-title">The current Markiro operating boundary</h2>
         <p><strong>The Markiro station retains its working context locally, appends scans to a durable journal, creates an outgoing queue, and delivers it in retry-safe batches.</strong> SSCC ranges are preallocated per terminal so independent stations do not issue the same case number. The local registry blocks a repeat on one device, while cross-station conflicts become visible after synchronization.</p>
-        <p>The current product boundary is <strong>item → case → SSCC</strong>. External-system reporting uses the agreed export or integration layer for the specific deployment. A direct Markiro connection to SUZ or GIS MT must not be treated as live until it has been separately configured and accepted. This boundary lets a smaller producer start with a modern compact workstation and add automation as line volume grows.</p>
+        <p>The current product boundary is <strong>item → case → pallet</strong>: each case and pallet has its own SSCC, and pallets can be built on the packing workstation or the handheld. External-system reporting uses the agreed export or integration layer for the specific deployment. A direct Markiro connection to SUZ or GIS MT must not be treated as live until it has been separately configured and accepted. This boundary lets a smaller producer start with a modern compact workstation and add automation as line volume grows.</p>
       </section>
 
       <section class="article-conclusion" aria-labelledby="conclusion-title">

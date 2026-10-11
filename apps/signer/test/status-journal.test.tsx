@@ -28,6 +28,7 @@ const status: AgentStatus = {
     message: `Событие ${index + 1}`,
     detail: index === 20 ? "Подробности последнего события" : null,
   })),
+  storageNotices: [],
 };
 
 describe("Status journal", () => {

@@ -1,0 +1,34 @@
+---
+import type { ImageMetadata } from "astro";
+import { getImage } from "astro:assets";
+
+interface Props {
+  wide: ImageMetadata;
+  tall: ImageMetadata;
+  eager: boolean;
+}
+
+const { wide, tall, eager } = Astro.props;
+const [wideAvif, wideWebp, tallAvif, tallWebp] = await Promise.all([
+  getImage({ src: wide, widths: [800, 1200, 1600], format: "avif" }),
+  getImage({ src: wide, widths: [800, 1200, 1600], format: "webp" }),
+  getImage({ src: tall, widths: [390, 780], format: "avif" }),
+  getImage({ src: tall, widths: [390, 780], format: "webp" }),
+]);
+---
+
+<picture>
+  <source media="(max-width: 860px)" type="image/avif" srcset={tallAvif.srcSet.attribute} sizes="100vw" />
+  <source media="(max-width: 860px)" type="image/webp" srcset={tallWebp.srcSet.attribute} sizes="100vw" />
+  <source type="image/avif" srcset={wideAvif.srcSet.attribute} sizes="100vw" />
+  <source type="image/webp" srcset={wideWebp.srcSet.attribute} sizes="100vw" />
+  <img
+    src={wideWebp.src}
+    width={wide.width}
+    height={wide.height}
+    alt=""
+    loading={eager ? "eager" : "lazy"}
+    fetchpriority={eager ? "high" : "auto"}
+    decoding={eager ? "sync" : "async"}
+  />
+</picture>

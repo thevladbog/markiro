@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, FullScreenDialog } from "@markiro/ui";
-import type { BoxPrintErrorCode } from "../lib/boxes.js";
+import type { PalletPrintErrorCode } from "../lib/pallets.js";
 
 /**
  * The pallet label's print outcome, as this screen presents it:
@@ -30,7 +30,7 @@ export interface PalletCloseProps {
   result: PalletCloseResult;
   print: PalletPrintState;
   /** Only meaningful when `print === "failed"`. */
-  errorCode?: BoxPrintErrorCode | null;
+  errorCode?: PalletPrintErrorCode | null;
   /** An action (retry/skip/confirm/reprint) is in flight; disables every button. */
   pending?: boolean;
   /** `print === "failed"`: try the same bytes again. */
@@ -47,7 +47,12 @@ export interface PalletCloseProps {
   onContinue?: () => void;
 }
 
-const ERROR_KEYS: Record<BoxPrintErrorCode, string> = {
+const ERROR_KEYS: Record<PalletPrintErrorCode, string> = {
+  sheet_template_missing: "palletSheet.templateMissing",
+  sheet_branding_missing: "palletSheet.brandingMissing",
+  sheet_geometry_mismatch: "palletSheet.geometryMismatch",
+  sheet_delivery_unknown: "palletSheet.unknown",
+  sheet_layout_failed: "palletSheet.layoutFailed",
   persistence_failed: "printerRouting.storageFailed",
   template_missing: "box.printRecovery.errors.templateMissing",
   printer_unconfigured: "box.printRecovery.errors.printerUnconfigured",
@@ -80,7 +85,10 @@ export function PalletClose({
   onContinue,
 }: PalletCloseProps) {
   const { t } = useTranslation();
-  const canOpenSetup = errorCode === "printer_unconfigured" || errorCode === "transport_failed";
+  const canOpenSetup =
+    errorCode === "printer_unconfigured" ||
+    errorCode === "transport_failed" ||
+    errorCode === "sheet_geometry_mismatch";
 
   const header =
     print === "failed"

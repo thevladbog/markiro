@@ -110,6 +110,7 @@ describe("shift exports OpenAPI contract", () => {
       expect(property(create, "formatId").enum).toEqual([
         "shift_txt_flat",
         "shift_txt_boxes",
+        "shift_txt_boxes_reversed",
         "shift_csv_flat",
         "shift_csv_boxes",
         "shift_xml_gismt_aggregation",
@@ -136,6 +137,7 @@ describe("shift exports OpenAPI contract", () => {
       expect(property(descriptor, "id").enum).toEqual([
         "shift_txt_flat",
         "shift_txt_boxes",
+        "shift_txt_boxes_reversed",
         "shift_csv_flat",
         "shift_csv_boxes",
         "shift_xml_gismt_aggregation",
@@ -202,6 +204,7 @@ describe("shift exports OpenAPI contract", () => {
       expect(property(created, "formatId").enum).toEqual([
         "shift_txt_flat",
         "shift_txt_boxes",
+        "shift_txt_boxes_reversed",
         "shift_csv_flat",
         "shift_csv_boxes",
         "shift_xml_gismt_aggregation",

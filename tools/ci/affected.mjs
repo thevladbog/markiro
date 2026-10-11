@@ -107,7 +107,11 @@ function isRootToolchainPath(path) {
 }
 
 function jobsForPath(path) {
+  if (path.startsWith("tools/station-printer-tests/")) return stationJobs;
   if (isDocumentation(path)) return [];
+  // This protected deployment workflow is covered by the bundle's production
+  // and Yandex contract suites. CI policy and other workflows still fail closed.
+  if (path === ".github/workflows/deploy-production.yml") return ["production_bundle"];
   if (isRootToolchainPath(path)) return HEAVY_JOBS;
 
   if (
@@ -147,6 +151,12 @@ function jobsForPath(path) {
     /^apps\/handheld\/app\/src\/test\/resources\/offline-grants?[-.]/u.test(path)
   ) {
     return [...sharedJobs.domain, "handheld_android"];
+  }
+
+  // The landing render suite checks every page with a demo form against this
+  // allow-list, so editing it must also run the app suites.
+  if (path === "apps/api/src/modules/demo-requests/demo-request-routes.ts") {
+    return [...appJobs.api, "verify_app_tests"];
   }
 
   if (path.startsWith("apps/signer/")) {
@@ -201,6 +211,8 @@ function jobsForPath(path) {
 
   if (path.startsWith("tools/signer-release/")) return signerJobs;
   if (path.startsWith("tools/station-release/")) return stationJobs;
+  // The installer's contracts and smoke test run in the standalone Windows job.
+  if (path.startsWith("tools/standalone-release/")) return standaloneJobs;
   // Node contracts for the Android release, so they run in the Node job -- the
   // handheld job is Gradle-only and has no pnpm.
   if (path.startsWith("tools/handheld-release/")) return ["verify_static"];

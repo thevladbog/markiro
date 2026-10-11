@@ -1,5 +1,6 @@
 import { AUTHORIZED_CREDENTIAL_OWNERS_SQL } from "../device-recovery.js";
 import {
+  productLabelPrintIdentity,
   applyProductLabelEvent,
   DomainError,
   productLabelEventSchema,
@@ -146,12 +147,13 @@ export async function hasUnresolvedProductLabelJob(
 export function presentProductLabelJob(job: StoredProductLabelJob): ProductLabelJobView {
   return {
     ...(job.printer ? { printer: job.printer } : {}),
+    ...(job.projection.printFormat ? { printScope: job.credentialOwnership } : {}),
     jobId: job.jobId,
     shiftId: job.shiftId,
     codeSuffix: Array.from(job.serial).slice(-6).join(""),
     attemptId: job.projection.attemptId,
     attemptNo: job.projection.attemptNo,
-    language: job.projection.language,
+    ...productLabelPrintIdentity(job.projection),
     dpi: job.projection.dpi,
     status: job.projection.status,
     attemptState: job.projection.attemptState,

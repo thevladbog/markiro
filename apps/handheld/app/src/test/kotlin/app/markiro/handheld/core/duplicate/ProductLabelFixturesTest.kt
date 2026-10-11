@@ -70,7 +70,8 @@ class ProductLabelFixturesTest {
             assertEquals("$name: latestSequence", o.getValue("latestSequence").jsonPrimitive.int, p.latestSequence)
             assertEquals("$name: attemptId", o.getValue("attemptId").jsonPrimitive.content, p.attemptId)
             assertEquals("$name: bytesDigest", o.getValue("bytesDigest").jsonPrimitive.content, p.bytesDigest)
-            assertEquals("$name: language", o.getValue("language").jsonPrimitive.content, p.language)
+            assertEquals("$name: language", o["language"]?.jsonPrimitive?.content, p.language)
+            assertEquals("$name: print format", o["printFormat"]?.jsonPrimitive?.content, p.printFormat)
             assertEquals("$name: dpi", o.getValue("dpi").jsonPrimitive.int, p.dpi)
         }
     }

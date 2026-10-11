@@ -49,6 +49,7 @@ import {
   renderMarkiroSymbolPng,
   renderMarkiroSymbolSvg,
 } from "./brand.js";
+import { isLegacyUpdateFieldsRelease } from "./legacy-update-fields.js";
 import { isLegacyWordmarkRelease } from "./legacy-wordmark.js";
 import { assertLegalArtifactRequest, type LegalArtifactRequest } from "./names.js";
 
@@ -124,6 +125,13 @@ export interface LegalDocxDraft extends LegalDocxMeta {
    * `legacy-wordmark.ts`.
    */
   readonly legacyWordmark?: boolean;
+  /**
+   * Keeps `w:updateFields` in the settings, which makes Word offer to update
+   * fields every time the file opens. Only for releases whose DOCX was
+   * published with it and keeps the bytes its revision pins. See
+   * `legacy-update-fields.ts`.
+   */
+  readonly legacyUpdateFields?: boolean;
   readonly operatorProfileId: LegalOperatorProfileId;
   readonly content: LegalDocumentLocaleContent;
 }
@@ -183,6 +191,7 @@ export async function renderLegalDocx(
           : copy[input.locale].documentClass,
       operatorProfileId: release.operatorProfileId,
       legacyWordmark: isLegacyWordmarkRelease(input.code, input.revision),
+      legacyUpdateFields: isLegacyUpdateFieldsRelease(input.code, input.revision),
       content: requireLegalContent(findLegalDocument(input.code, input.revision), input.locale),
     },
     assets,
@@ -364,6 +373,7 @@ async function renderLegalDocxShell(
     readonly operatorProfileId: LegalOperatorProfileId;
     readonly identityLabel?: string;
     readonly legacyWordmark?: boolean;
+    readonly legacyUpdateFields?: boolean;
   },
   title: string,
   summary: string,
@@ -384,7 +394,9 @@ async function renderLegalDocxShell(
     lastModifiedBy: "Markiro legal artifact generator",
     description: summary,
     revision: 1,
-    features: { updateFields: true },
+    // docx writes `w:updateFields w:val="false"` for false, so the setting is
+    // left out entirely unless a published release pins it.
+    ...(input.legacyUpdateFields === true ? { features: { updateFields: true } } : {}),
     styles: createStyles(),
     numbering: {
       config: [

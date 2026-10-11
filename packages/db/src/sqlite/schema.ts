@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+export * from "./warehouse-reprint-schema.js";
 import {
   check,
   foreignKey,
@@ -15,6 +16,27 @@ export const stationMeta = sqliteTable("station_meta", {
   key: text("key").primaryKey(),
   value: text("value"),
 });
+
+/** A complete validated branding publication, isolated by tenant and device-key owner. */
+export const stationOrganizationBranding = sqliteTable(
+  "station_organization_branding",
+  {
+    tenantId: text("tenant_id").notNull(),
+    ownerDigest: text("owner_digest").notNull(),
+    snapshotJson: text("snapshot_json").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.tenantId, t.ownerDigest] }),
+    check(
+      "station_organization_branding_owner_check",
+      sql`length(${t.ownerDigest})=64 AND ${t.ownerDigest} NOT GLOB '*[^0-9a-f]*'`,
+    ),
+    check(
+      "station_organization_branding_snapshot_check",
+      sql`length(${t.snapshotJson})<=131072 AND CASE WHEN NOT json_valid(${t.snapshotJson}) THEN 0 ELSE COALESCE(json_extract(${t.snapshotJson},'$.schemaVersion')=1 AND json_extract(${t.snapshotJson},'$.tenantId')=${t.tenantId} AND json_extract(${t.snapshotJson},'$.ownerDigest')=${t.ownerDigest},0) END`,
+    ),
+  ],
+);
 
 /** Printer snapshots are local metadata, excluded from print-event digests and sync. */
 export const printerDestinations = sqliteTable(
@@ -122,6 +144,8 @@ export const shiftMirror = sqliteTable(
     boxLabelTemplateSpec: text("box_label_template_spec"),
     /** The PALLET label's own template spec; null for a shift without pallets. */
     palletLabelTemplateSpec: text("pallet_label_template_spec"),
+    palletSheetTemplateId: text("pallet_sheet_template_id"),
+    palletSheetTemplateSnapshot: text("pallet_sheet_template_snapshot"),
     // Human-readable shift number (`AUG26-003`, `/S` = station-created) --
     // composed server-side; see migrations.ts's trailing ALTER.
     number: text("number"),
@@ -131,6 +155,19 @@ export const shiftMirror = sqliteTable(
     executionScopeJson: text("execution_scope_json"),
   },
   (table) => [
+    check(
+      "shift_mirror_pallet_sheet_snapshot_json_check",
+      sql`CASE
+      WHEN ${table.palletSheetTemplateSnapshot} IS NULL THEN ${table.palletSheetTemplateId} IS NULL
+      WHEN NOT json_valid(${table.palletSheetTemplateSnapshot}) THEN 0
+      ELSE COALESCE(json_extract(${table.palletSheetTemplateSnapshot},'$.id') = ${table.palletSheetTemplateId}
+        AND json_type(${table.palletSheetTemplateSnapshot},'$.revision') = 'integer'
+        AND json_extract(${table.palletSheetTemplateSnapshot},'$.revision') > 0
+        AND json_extract(${table.palletSheetTemplateSnapshot},'$.spec.schemaVersion') = 2
+        AND json_extract(${table.palletSheetTemplateSnapshot},'$.spec.kind') = 'pallet_sheet'
+        AND length(json_extract(${table.palletSheetTemplateSnapshot},'$.digest')) = 64
+        AND json_extract(${table.palletSheetTemplateSnapshot},'$.digest') NOT GLOB '*[^0-9a-f]*',0) END`,
+    ),
     check(
       "shift_mirror_validation_print_context_json_check",
       sql`${table.validationPrintContext} IS NULL OR json_valid(${table.validationPrintContext})`,
@@ -145,6 +182,7 @@ export const productMirror = sqliteTable("product_mirror", {
   name: text("name").notNull(),
   printName: text("print_name"),
   productGroup: text("product_group"),
+  chzProductGroupCode: integer("chz_product_group_code"),
   boxCapacity: integer("box_capacity"),
   /** Units-valued predecessor, left in place and unread — see `shift_mirror`. */
   palletCapacity: integer("pallet_capacity"),
@@ -762,6 +800,7 @@ export const inventoryRepackBoxesMirror = sqliteTable(
       table.ownerDeviceId,
       table.state,
     ),
+    index("inventory_repack_boxes_mirror_reprint_source_idx").on(table.boxId, table.newSscc),
   ],
 );
 
@@ -1582,6 +1621,75 @@ export const deviceReplacementDrain = sqliteTable(
     check(
       "device_replacement_drain_request",
       sql`(${table.requestId} IS NULL)=(${table.bodyJson} IS NULL)`,
+    ),
+  ],
+);
+
+/** Local Windows spooler facts; server events never infer physical verification. */
+export const palletSheetBrandingResources = sqliteTable(
+  "pallet_sheet_branding_resources",
+  {
+    digest: text("digest").primaryKey().notNull(),
+    snapshotJson: text("snapshot_json").notNull(),
+  },
+  (t) => [
+    check(
+      "pallet_sheet_branding_digest_check",
+      sql`length(${t.digest})=64 AND ${t.digest} NOT GLOB '*[^0-9a-f]*'`,
+    ),
+    check(
+      "pallet_sheet_branding_json_check",
+      sql`length(CAST(${t.snapshotJson} AS BLOB))<=131072 AND CASE WHEN NOT json_valid(${t.snapshotJson}) THEN 0 ELSE COALESCE(json_extract(${t.snapshotJson},'$.schemaVersion')=1 AND json_extract(${t.snapshotJson},'$.digest')=${t.digest},0) END`,
+    ),
+  ],
+);
+
+export const printerDeliveries = sqliteTable(
+  "printer_deliveries",
+  {
+    scope: text("scope").notNull(),
+    purpose: text("purpose").notNull(),
+    jobId: text("job_id").notNull(),
+    attemptId: text("attempt_id").notNull(),
+    state: text("state").notNull(),
+    profileJson: text("profile_json").notNull(),
+    artifactDigest: text("artifact_digest").notNull(),
+    renderSnapshotJson: text("render_snapshot_json"),
+    sheetBrandingDigest: text("sheet_branding_digest").references(
+      () => palletSheetBrandingResources.digest,
+    ),
+    artifactBase64: text("artifact_base64"),
+    documentName: text("document_name").notNull(),
+    receiptJson: text("receipt_json"),
+    errorCode: text("error_code"),
+    updatedAt: text("updated_at").notNull(),
+    resolvedAt: text("resolved_at"),
+  },
+  (t) => [
+    primaryKey({ columns: [t.scope, t.purpose, t.jobId, t.attemptId] }),
+    check(
+      "printer_deliveries_purpose_check",
+      sql`${t.purpose} IN ('test','box','pallet','duplicate')`,
+    ),
+    check(
+      "printer_deliveries_state_check",
+      sql`${t.state} IN ('prepared','sending','sent','failed_before_send','delivery_unknown')`,
+    ),
+    check(
+      "printer_deliveries_json_check",
+      sql`json_valid(${t.profileJson}) AND (${t.receiptJson} IS NULL OR json_valid(${t.receiptJson}))`,
+    ),
+    check(
+      "printer_deliveries_render_snapshot_check",
+      sql`${t.renderSnapshotJson} IS NULL OR (length(${t.renderSnapshotJson})<=700000 AND json_valid(${t.renderSnapshotJson}))`,
+    ),
+    check(
+      "printer_deliveries_branding_reference_check",
+      sql`${t.sheetBrandingDigest} IS NULL OR (${t.renderSnapshotJson} IS NOT NULL AND COALESCE(json_extract(${t.renderSnapshotJson},'$.brandingResourceDigest')=${t.sheetBrandingDigest},0))`,
+    ),
+    check(
+      "printer_deliveries_artifact_check",
+      sql`(${t.purpose}='duplicate' AND ${t.artifactBase64} IS NULL) OR (${t.purpose}<>'duplicate' AND ${t.artifactBase64} IS NOT NULL AND length(${t.artifactBase64})<=2796204)`,
     ),
   ],
 );

@@ -1,3 +1,17 @@
+import { printerMode } from "../lib/printer-routing.js";
+import type { PalletPrintErrorCode } from "../lib/pallets.js";
+import { printPalletSheet } from "../lib/pallet-sheet-printing.js";
+import { preparePalletSheet } from "../lib/pallet-sheet-print-snapshot.js";
+import { loadOrganizationBranding, loadThermalLabelLogo } from "../lib/organization-branding.js";
+import { readShiftExecutionProjection } from "../lib/offline-grants/semantic.js";
+import { tauriWindowsPrinting } from "../lib/hardware.js";
+import { rasterizeDriverText } from "../lib/rasterizer.js";
+import type { LabelField } from "@markiro/domain";
+import { cacheWarehouseClosedBox } from "../lib/warehouse-reprint/sources.js";
+import {
+  acquireCredentialCommitLease,
+  credentialGenerationOwnership,
+} from "../lib/credential-recovery.js";
 import { SavedPrinterDestination } from "../ui/PrinterDestination.js";
 import { FloorChoiceGroup } from "../ui/FloorChoiceGroup.js";
 import {
@@ -41,7 +55,6 @@ import {
   markPrintVerified,
   openBox,
   reprintBox,
-  type BoxPrintErrorCode,
   type ClosedBoxSummary,
   type DeviceBox,
   type UnresolvedBoxPrint,
@@ -118,6 +131,7 @@ export interface WorkScreenProps {
   productLabelEnvironment?: ProductLabelWorkEnvironment;
   shiftId: string;
   terminalId: string | null;
+  tenantId?: string;
   operatorId: string;
   /** Current API-key generation whose lease fences every grant-backed local commit. */
   credentialGeneration?: CredentialGeneration;
@@ -249,6 +263,7 @@ export function WorkScreen({
   terminalId,
   operatorId,
   credentialGeneration,
+  tenantId,
   offlineGrantNotice,
   expectedGtin14,
   productName,
@@ -567,7 +582,7 @@ export function WorkScreen({
     boxCount: number;
     closedAt: string;
     print: PalletPrintState;
-    errorCode: BoxPrintErrorCode | null;
+    errorCode: PalletPrintErrorCode | null;
     pending: boolean;
   };
   const [palletClose, setPalletCloseState] = useState<PalletCloseScreenState | null>(null);
@@ -672,15 +687,126 @@ export function WorkScreen({
   /** The pallet-label equivalent of `attemptClosedBoxPrint` below, defined here
    * (rather than there) only because it needs `palletLabelSpecRef`/`Ready`,
    * declared alongside the rest of this pallet section. */
-  async function attemptClosedPalletPrint(result: {
-    sscc: string;
-    boxCount: number;
-    itemCount: number;
-    closedAt: string;
-  }) {
+  async function attemptClosedPalletPrint(
+    result: {
+      sscc: string;
+      boxCount: number;
+      itemCount: number;
+      closedAt: string;
+    },
+    explicitRetry = false,
+  ) {
     await palletLabelSpecReady.current;
     const currentPrinting = palletPrintingRef.current;
+    const candidate = currentPrinting ? outputPrinterProfile(currentPrinting) : null;
+    const key = {
+      scope: JSON.stringify([shiftId, terminalId]),
+      purpose: "pallet" as const,
+      jobId: result.sscc,
+      attemptId: "label",
+    };
+    const bound = (await readPrintDestination(exec, key)) ?? candidate;
+    if (bound?.paper !== "a4") {
+      const [historical] = await exec.all<{ render_snapshot_json: string | null }>(
+        "SELECT render_snapshot_json FROM printer_deliveries WHERE scope=? AND purpose='pallet' AND job_id=? ORDER BY updated_at DESC,rowid DESC LIMIT 1",
+        [key.scope, key.jobId],
+      );
+      if (historical?.render_snapshot_json)
+        return { kind: "failed" as const, code: "printer_unconfigured" as const };
+    }
+    if (bound?.paper === "a4") {
+      if (!credentialGeneration || !tenantId)
+        return { kind: "failed" as const, code: "persistence_failed" as const };
+      const lease = acquireCredentialCommitLease(credentialGeneration);
+      if (!lease) return { kind: "failed" as const, code: "persistence_failed" as const };
+      try {
+        const ownerDigest = await credentialGenerationOwnership(credentialGeneration);
+        if (!ownerDigest) throw new Error("Sheet owner unavailable");
+        const bytes = await serializePrinterOutput(bound.target, () =>
+          printPalletSheet({
+            exec,
+            key,
+            profile: bound,
+            owner: { tenantId, ownerDigest },
+            explicitRetry,
+            isCurrent: () => !credentialGeneration.sealed,
+            prepare: async () => {
+              const { scope } = await readShiftExecutionProjection(exec, shiftId);
+              const template = scope.shift.palletSheetTemplateSnapshot;
+              if (!template) throw new Error("Sheet template unavailable");
+              const branding = await loadOrganizationBranding({
+                exec,
+                tenantId,
+                generation: credentialGeneration,
+                isCurrent: () => !credentialGeneration.sealed,
+              });
+              if (!branding) throw new Error("Sheet branding unavailable");
+              if (bound.target.kind !== "usb" || !tauriWindowsPrinting.getWindowsPageGeometry)
+                throw new Error("Sheet printer unavailable");
+              const geometry = await tauriWindowsPrinting.getWindowsPageGeometry(
+                bound.target.printer,
+                { mode: "a4_sheet", orientation: template.spec.page.orientation },
+              );
+              return preparePalletSheet(
+                {
+                  profile: bound,
+                  template,
+                  branding,
+                  geometry,
+                  facts: {
+                    sscc: result.sscc,
+                    boxCount: result.boxCount,
+                    itemCount: result.itemCount,
+                    productPrintName: scope.product.printName || scope.product.name,
+                    gtin14: scope.product.gtin14,
+                    egaisCode: scope.product.egaisCode,
+                    shelfLifeDays: scope.product.shelfLifeDays,
+                    productionDate: scope.shift.productionDate,
+                    shiftNumber: scope.shift.number,
+                  },
+                },
+                rasterizeDriverText,
+              );
+            },
+          }),
+        );
+        setPrinterDestinationRevision((value) => value + 1);
+        return { kind: "printed" as const, bytes };
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "";
+        const [delivery] = await exec
+          .all<{ state: string; error_code: string | null }>(
+            "SELECT state,error_code FROM printer_deliveries WHERE scope=? AND purpose='pallet' AND job_id=? ORDER BY updated_at DESC,rowid DESC LIMIT 1",
+            [key.scope, key.jobId],
+          )
+          .catch(() => []);
+        const code: PalletPrintErrorCode =
+          message === "Sheet template unavailable"
+            ? "sheet_template_missing"
+            : message === "Sheet branding unavailable"
+              ? "sheet_branding_missing"
+              : delivery?.state === "delivery_unknown" ||
+                  delivery?.state === "sending" ||
+                  (delivery?.state !== "failed_before_send" &&
+                    message === "PRINT_DELIVERY_REQUIRES_RECOVERY")
+                ? "sheet_delivery_unknown"
+                : delivery?.error_code === "geometry_mismatch" ||
+                    (typeof error === "object" &&
+                      error !== null &&
+                      "code" in error &&
+                      error.code === "geometry_mismatch")
+                  ? "sheet_geometry_mismatch"
+                  : "sheet_layout_failed";
+        return { kind: "failed" as const, code };
+      } finally {
+        lease.release();
+      }
+    }
     return attemptBoxPrint({
+      ...(credentialGeneration
+        ? { loadLogo: () => loadThermalLabelLogo(exec, credentialGeneration) }
+        : {}),
+      explicitRetry,
       destination: {
         exec,
         key: {
@@ -701,8 +827,11 @@ export function WorkScreen({
             print: (target, bytes) => serializePrint(() => currentPrinting.print(target, bytes)),
           }
         : null,
-      render: (template, fields, language, dpi) =>
-        renderLabelBytes(template, fields, language, rasterizeText, { dpi }),
+      render: (template, fields, language, dpi, logo) =>
+        renderLabelBytes(template, fields, language, rasterizeText, {
+          dpi,
+          ...(logo ? { logo } : {}),
+        }),
     });
   }
 
@@ -721,18 +850,27 @@ export function WorkScreen({
     sscc: string,
     boxCount: number,
     closedAt: string,
+    explicitRetry = false,
   ): Promise<void> {
-    let itemCount = 0;
+    let itemCount: number;
     try {
       itemCount = await palletItemCount(exec, palletId);
     } catch (err) {
       console.error("station: failed to read the pallet's item count", err);
+      if (palletCloseRef.current?.palletId === palletId)
+        updatePalletClose({
+          ...palletCloseRef.current,
+          print: "failed",
+          errorCode: "persistence_failed",
+          pending: false,
+        });
+      return;
     }
     const resultPending =
       palletCloseRef.current?.palletId === palletId && palletCloseRef.current.resultPending;
     const attempt = resultPending
       ? { kind: "printed" as const }
-      : await attemptClosedPalletPrint({ sscc, boxCount, itemCount, closedAt });
+      : await attemptClosedPalletPrint({ sscc, boxCount, itemCount, closedAt }, explicitRetry);
 
     if (attempt.kind === "failed") {
       try {
@@ -743,7 +881,7 @@ export function WorkScreen({
       if (palletCloseRef.current?.palletId === palletId) {
         updatePalletClose({
           ...palletCloseRef.current,
-          print: "failed",
+          print: attempt.code === "sheet_delivery_unknown" ? "unknown" : "failed",
           errorCode: attempt.code,
           pending: false,
         });
@@ -828,14 +966,16 @@ export function WorkScreen({
     const cur = palletCloseRef.current;
     if (!cur || cur.pending) return;
     updatePalletClose({ ...cur, print: "printing", pending: true });
-    void attemptPalletPrintNow(cur.palletId, cur.sscc, cur.boxCount, cur.closedAt).then(() => {
-      // `attemptPalletPrintNow` already clears `pending` via the branch it
-      // takes; this only guards the (unreachable in practice) case where
-      // neither branch matched because the screen moved on in the meantime.
-      if (palletCloseRef.current?.palletId === cur.palletId && palletCloseRef.current.pending) {
-        updatePalletClose({ ...palletCloseRef.current, pending: false });
-      }
-    });
+    void attemptPalletPrintNow(cur.palletId, cur.sscc, cur.boxCount, cur.closedAt, true).then(
+      () => {
+        // `attemptPalletPrintNow` already clears `pending` via the branch it
+        // takes; this only guards the (unreachable in practice) case where
+        // neither branch matched because the screen moved on in the meantime.
+        if (palletCloseRef.current?.palletId === cur.palletId && palletCloseRef.current.pending) {
+          updatePalletClose({ ...palletCloseRef.current, pending: false });
+        }
+      },
+    );
   }
 
   function skipPalletPrint(): void {
@@ -1622,7 +1762,7 @@ export function WorkScreen({
     sscc: string;
     itemCount: number;
     closedAt: string;
-  }): Record<string, string> {
+  }): Record<LabelField, string> {
     return boxLabelFields({
       sscc: result.sscc,
       itemCount: result.itemCount,
@@ -1639,14 +1779,43 @@ export function WorkScreen({
     });
   }
 
-  async function attemptClosedBoxPrint(result: {
-    sscc: string;
-    itemCount: number;
-    closedAt: string;
-  }) {
+  async function attemptClosedBoxPrint(
+    result: {
+      sscc: string;
+      itemCount: number;
+      closedAt: string;
+    },
+    explicitRetry = false,
+  ) {
     await labelSpecReady.current;
     const currentPrinting = printingRef.current;
+    if (credentialGeneration) {
+      const owner = await credentialGenerationOwnership(credentialGeneration);
+      const lease = acquireCredentialCommitLease(credentialGeneration);
+      if (lease) {
+        try {
+          const [closed] = await exec.all<{ box_id: string }>(
+            "SELECT box_id FROM boxes_mirror WHERE sscc=? AND shift_id=? AND closed_at IS NOT NULL AND disassembled_at IS NULL",
+            [result.sscc, shiftId],
+          );
+          if (closed && owner)
+            await cacheWarehouseClosedBox(exec, owner, {
+              sourceId: closed.box_id,
+              sourceShiftId: shiftId,
+              fields: fieldsForClosedBox(result),
+            });
+        } catch {
+          console.warn("station: warehouse closed-box copy unavailable");
+        } finally {
+          lease.release();
+        }
+      }
+    }
     return attemptBoxPrint({
+      ...(credentialGeneration
+        ? { loadLogo: () => loadThermalLabelLogo(exec, credentialGeneration) }
+        : {}),
+      explicitRetry,
       destination: {
         exec,
         key: {
@@ -1667,16 +1836,22 @@ export function WorkScreen({
             print: (target, bytes) => serializePrint(() => currentPrinting.print(target, bytes)),
           }
         : null,
-      render: (template, fields, language, dpi) =>
-        renderLabelBytes(template, fields, language, rasterizeText, { dpi }),
+      render: (template, fields, language, dpi, logo) =>
+        renderLabelBytes(template, fields, language, rasterizeText, {
+          dpi,
+          ...(logo ? { logo } : {}),
+        }),
     });
   }
 
-  async function attemptRecoveryPrint(job: PrintRecoveryState): Promise<void> {
+  async function attemptRecoveryPrint(
+    job: PrintRecoveryState,
+    explicitRetry = false,
+  ): Promise<void> {
     updatePrintRecovery({ ...job, pending: true });
     const attempt = job.printedBytes
       ? { kind: "printed" as const, bytes: job.printedBytes }
-      : await attemptClosedBoxPrint(job);
+      : await attemptClosedBoxPrint(job, explicitRetry);
 
     if (attempt.kind === "failed") {
       try {
@@ -2484,7 +2659,7 @@ export function WorkScreen({
   function retryPrintRecovery(): void {
     const job = printRecoveryRef.current;
     if (!job || job.pending) return;
-    if (!queue.enqueueJob(() => attemptRecoveryPrint(job))) {
+    if (!queue.enqueueJob(() => attemptRecoveryPrint(job, true))) {
       console.error("station: box print retry was not admitted");
     }
   }
@@ -2675,6 +2850,7 @@ export function WorkScreen({
 
       {productLabels.work && productLabelsBlocked && !showExceptions ? (
         <ProductLabelVerification
+          exec={exec}
           state={productLabels.state}
           work={productLabels.work}
           onSkipped={() => live.current.onScanRecorded?.()}
@@ -2989,6 +3165,12 @@ export function WorkScreen({
                 );
                 const output = printTransport ?? printing?.print;
                 if (!printer || !output) return "printer_unconfigured";
+                if (printerMode(printer) === "windows_driver") {
+                  const attempt = await attemptClosedBoxPrint(verification, true);
+                  if (attempt.kind === "failed") return attempt.code;
+                  setPrinterDestinationRevision((value) => value + 1);
+                  return undefined;
+                }
                 const reprintBytes = verification.bytes;
                 await serializePrinterOutput(printer.target, () =>
                   serializePrint(() => output(printer.target, reprintBytes)),
@@ -2996,7 +3178,7 @@ export function WorkScreen({
                 setPrinterDestinationRevision((value) => value + 1);
                 return undefined;
               }
-              const attempt = await attemptClosedBoxPrint(verification);
+              const attempt = await attemptClosedBoxPrint(verification, true);
               if (attempt.kind === "failed") {
                 console.error("station: box label reprint failed");
                 return attempt.code;

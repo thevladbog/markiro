@@ -41,6 +41,26 @@ export {
 } from "./gs1/sscc.js";
 export type { ParsedSscc } from "./gs1/sscc.js";
 export { classifyScan } from "./scan/classify.js";
+export {
+  resolveWarehouseReprintScan,
+  compareWarehouseReprintLabel,
+} from "./warehouse-reprint/scan.js";
+export type { WarehouseReprintScan, WarehouseScanRepair } from "./warehouse-reprint/scan.js";
+export * from "./warehouse-reprint/contracts.js";
+export { applyWarehouseReprintEvent } from "./warehouse-reprint/state.js";
+export {
+  buildWarehouseCodeOnlyBoxTemplate,
+  buildWarehouseCodeOnlyLabelTemplate,
+} from "./warehouse-reprint/template.js";
+export type {
+  WarehouseReprintState,
+  WarehouseReprintProjection,
+} from "./warehouse-reprint/state.js";
+export {
+  warehouseBoxSource,
+  warehouseBoxTemplate,
+  warehousePreparedEvent,
+} from "./warehouse-reprint/fixtures.js";
 export type { ScanInput } from "./scan/classify.js";
 export { validatePickupKm } from "./scan/pickup.js";
 export type { PickupKmResult } from "./scan/pickup.js";
@@ -51,6 +71,7 @@ export {
   LABEL_FIELDS,
   labelFieldDisplayValue,
   labelTemplateSpecSchema,
+  labelTemplateSpecStrictSchema,
   mmToDots,
   parseLabelTemplate,
   ptToDots,
@@ -393,3 +414,101 @@ export type { ShiftTaskFormData } from "./print-forms/shift-task-form.js";
 // and friends are generic names that should not crowd the package root, and
 // contents-report.ts has a different `escapeHtml` of its own.
 export * as taskFormChrome from "./print-forms/task-form-chrome.js";
+
+export {
+  createLabelRenderPlan,
+  emitLabelRenderPlan,
+  labelRasterSvgPath,
+} from "./labels/render-plan.js";
+export type { LabelRenderPlan, LabelRenderElement } from "./labels/render-plan.js";
+
+export {
+  encodeMonoRaster,
+  decodeMonoRaster,
+  MONO_RASTER_MAX_BYTES,
+  MONO_RASTER_HEADER_BYTES,
+} from "./labels/mono-raster.js";
+export type { MonoRaster, MonoRasterBounds } from "./labels/mono-raster.js";
+
+export { productLabelPrintFormat, productLabelPrintIdentity } from "./product-labels/contracts.js";
+export type { ProductLabelPrintIdentity } from "./product-labels/contracts.js";
+export { renderMonoLabel } from "./labels/mono-render.js";
+
+export {
+  palletSheetSpecSchema,
+  sheetNodeSchema,
+  parsePalletSheetSpec,
+  ssccWidthMm,
+  PALLET_SHEET_FIELDS,
+  PALLET_SHEET_DPI,
+  PALLET_SHEET_MAX_NODES,
+  PALLET_SHEET_MAX_DEPTH,
+  GS1_128_MAX_WIDTH_MM,
+  GS1_128_QUIET_MODULES,
+  SSCC_SYMBOL_MODULES,
+} from "./labels/pallet-sheet-model.js";
+export type {
+  PalletSheetSpecV2,
+  PalletSheetField,
+  SheetNode,
+  SheetFlowNode,
+  SheetCanvasNode,
+  SheetTextNode,
+  SheetFieldNode,
+  SheetFieldRowNode,
+  SheetLogoNode,
+  SheetLineNode,
+  SheetBoxNode,
+  SheetSpacerNode,
+  SheetMargins,
+  SheetSsccFooter,
+} from "./labels/pallet-sheet-model.js";
+export {
+  parseStoredLabelTemplate,
+  parseStoredLabelJson,
+  serializeStoredLabelJson,
+  isPalletSheetSpec,
+} from "./labels/stored-template.js";
+export type {
+  StoredLabelTemplateSpec,
+  StoredTemplateJson,
+  StoredLabelJsonOptions,
+} from "./labels/stored-template.js";
+
+export { wrapTextToWidthStrict } from "./labels/wrap.js";
+export { buildPalletSheetPresets } from "./labels/pallet-sheet-defaults.js";
+export type { PalletSheetPreset } from "./labels/pallet-sheet-defaults.js";
+export {
+  renderPalletSheet,
+  nominalSheetGeometry,
+  resolvePalletSheetGeometry,
+} from "./labels/pallet-sheet-render.js";
+export type {
+  PalletSheetContext,
+  SheetGeometry,
+  ResolvedSheetGeometry,
+  SheetElementRegion,
+  SheetLogo,
+} from "./labels/pallet-sheet-render.js";
+export type { MonoBitmap } from "./labels/mono-compose.js";
+export {
+  PALLET_SHEET_PROTOCOL,
+  palletSheetTemplateSnapshotSchema,
+  createPalletSheetSnapshot,
+  parsePalletSheetSnapshot,
+} from "./labels/pallet-sheet-snapshot.js";
+export type { PalletSheetTemplateSnapshot } from "./labels/pallet-sheet-snapshot.js";
+export {
+  organizationBrandingDescriptorSchema,
+  organizationLogoDescriptorSchema,
+  logoFromRgba,
+} from "./labels/pallet-sheet-branding.js";
+export type { OrganizationBrandingDescriptor } from "./labels/pallet-sheet-branding.js";
+export { validateMonoBitmap } from "./labels/mono-compose.js";
+export { sheetLogoFingerprint } from "./labels/pallet-sheet-branding.js";
+
+export {
+  projectThermalLabelForClient,
+  THERMAL_LABEL_BRANDING_PROTOCOL,
+} from "./labels/thermal-compatibility.js";
+export { renderLabelLogo } from "./labels/label-logo.js";

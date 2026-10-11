@@ -205,10 +205,13 @@ describe.skipIf(!databaseUrl)("pallets migration", () => {
 
   it("accepts 'pallet' as a label template purpose", async () => {
     const { rows } = await pool.query(
-      "SELECT count(*)::int AS n FROM label_templates WHERE tenant_id=$1 AND purpose='pallet'",
+      "SELECT format,count(*)::int AS n FROM label_templates WHERE tenant_id=$1 AND purpose='pallet' GROUP BY format ORDER BY format",
       [tenantId],
     );
-    expect(rows[0]!.n).toBe(2);
+    expect(rows).toEqual([
+      { format: "label_v1", n: 3 },
+      { format: "pallet_sheet_v2", n: 3 },
+    ]);
   });
 
   it("seeds both stock pallet labels for every existing tenant, without duplicates", async () => {
@@ -216,6 +219,7 @@ describe.skipIf(!databaseUrl)("pallets migration", () => {
       for (const [index, name] of [
         PALLET_LABEL_TEMPLATE_NAME,
         PALLET_LABEL_58X40_TEMPLATE_NAME,
+        "Палета 75×120",
       ].entries()) {
         const { rows } = await pool.query(
           "SELECT spec FROM label_templates WHERE tenant_id=$1 AND name=$2 AND purpose='pallet'",

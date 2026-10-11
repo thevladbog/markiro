@@ -4,6 +4,13 @@ import { createMemoryRouter, RouterProvider } from "react-router";
 
 import type { SyncState } from "../app/shell.js";
 import type { HostStatus } from "../host/protocol.js";
+import { OfficeFilesProvider, TAURI_OFFICE_FILES } from "./exports/office-files-context.js";
+import type { OfficeFilesApi } from "./exports/office-files.js";
+import {
+  FRAME_PRINT_FORM,
+  FormPrinterProvider,
+  type PrintForm,
+} from "./forms/form-printer-context.js";
 import { OfficeLinkProvider } from "./office-link.js";
 import { createOfficeQueryClient } from "./office-query.js";
 import { OfficeSessionProvider, type OfficeSessionValue } from "./office-session.js";
@@ -40,6 +47,16 @@ export interface OfficeProps {
    */
   labels?: LabelRendering;
   /**
+   * Where the office saves its files (exports, plan ЧЗ): the shell's
+   * commands by default; a test passes its own.
+   */
+  files?: OfficeFilesApi;
+  /**
+   * How the office prints a form (plan О-Ф): a hidden frame of its own
+   * window by default; a test passes its own.
+   */
+  printForm?: PrintForm;
+  /**
    * Kiosk mode, for the administrator's «Оконный режим» in the header;
    * `null` (the default) shows no such control.
    */
@@ -58,6 +75,8 @@ export function Office({
   hostRevision = null,
   deviceId = null,
   labels = BROWSER_LABEL_RENDERING,
+  files = TAURI_OFFICE_FILES,
+  printForm = FRAME_PRINT_FORM,
   windowMode = null,
 }: OfficeProps) {
   const [router] = useState(() => createMemoryRouter(officeRoutes, { initialEntries: ["/"] }));
@@ -79,9 +98,13 @@ export function Office({
         <OfficeLinkProvider value={officeLink}>
           <ThisDeviceProvider deviceId={deviceId}>
             <LabelRenderingProvider value={labels}>
-              <WindowModeProvider value={windowMode}>
-                <RouterProvider router={router} />
-              </WindowModeProvider>
+              <OfficeFilesProvider value={files}>
+                <FormPrinterProvider value={printForm}>
+                  <WindowModeProvider value={windowMode}>
+                    <RouterProvider router={router} />
+                  </WindowModeProvider>
+                </FormPrinterProvider>
+              </OfficeFilesProvider>
             </LabelRenderingProvider>
           </ThisDeviceProvider>
         </OfficeLinkProvider>

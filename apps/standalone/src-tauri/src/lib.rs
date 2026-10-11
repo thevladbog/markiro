@@ -7,8 +7,10 @@ pub mod device;
 pub mod device_config;
 pub mod host_client;
 pub mod host_probe;
+pub mod installation;
 pub mod local_db;
 pub mod lockdown;
+pub mod office_files;
 pub mod power;
 pub mod printer;
 pub mod scanner;
@@ -25,6 +27,7 @@ use tokio::sync::watch;
 use connection::{Backoff, ConnectionState, HostRevision, HostStatus, LinkEvents};
 use device::{DeviceError, DeviceState, DeviceStatus, HostLink};
 use host_client::HostResponse;
+use installation::InstallRole;
 use local_db::{LocalDbError, LocalDbState, LocalStatement, OpenFailure, UnsentGuard};
 
 /// The host service on this computer.
@@ -122,6 +125,26 @@ async fn device_select_line(
 ) -> Result<DeviceStatus, String> {
     state
         .select_line(&line_id)
+        .await
+        .map_err(|error| error.code().to_owned())
+}
+
+/// The installer's role for this computer: `"host"`, `"station"`,
+/// `"office"`, or `null` in a development build (plan УСТ).
+#[tauri::command]
+fn install_role(state: tauri::State<'_, DeviceState>) -> Option<InstallRole> {
+    state.install_role()
+}
+
+/// Reach the paired host at a new address with the same certificate
+/// (`DeviceState::change_address`).
+#[tauri::command]
+async fn device_change_address(
+    state: tauri::State<'_, DeviceState>,
+    address: String,
+) -> Result<DeviceStatus, String> {
+    state
+        .change_address(&address)
         .await
         .map_err(|error| error.code().to_owned())
 }
@@ -261,6 +284,8 @@ pub fn invoke_handler<R: tauri::Runtime>(
         device_select_line,
         device_refresh,
         device_forget,
+        device_change_address,
+        install_role,
         local_query,
         local_transaction,
         connection_status,
@@ -272,23 +297,30 @@ pub fn invoke_handler<R: tauri::Runtime>(
         scanner::list_serial_ports,
         scanner::configure_scanners,
         scanner::get_scanner_connections,
-        scanner::close_scanners
+        scanner::close_scanners,
+        office_files::save_office_files,
+        office_files::open_office_folder,
+        office_files::open_office_file
     ]
 }
 
 /// Manages every state the commands read: the device, the local database
 /// (opened here, before the window shows; when it cannot open, the app still
 /// starts and the local commands say so), the connection status, the scanner
-/// manager (it needs the app's handle for its events), kiosk mode and the
-/// awake lease. Returns the device's link, which the connection task watches.
+/// manager (it needs the app's handle for its events), kiosk mode, the
+/// awake lease and the office's folder under the documents folder (plan ЧЗ).
+/// `role` is the installer's role for this computer
+/// (`installation::read_beside_executable` in `run`). Returns the device's
+/// link, which the connection task watches.
 /// `run`'s `setup` calls it, and `tests/ipc.rs` calls it on a mock app (the
 /// mock builder does not run `setup`), so a state a command reads cannot go
 /// missing here with only a compile to notice.
 pub fn manage_state<R: Runtime>(
     app: &tauri::AppHandle<R>,
     dir: &Path,
+    role: Option<InstallRole>,
 ) -> watch::Receiver<Option<Arc<HostLink>>> {
-    let device = DeviceState::load(dir.to_path_buf());
+    let device = DeviceState::load(dir.to_path_buf()).with_install_role(role);
     let link = device.watch_link();
     app.manage(device);
     app.manage(tauri::async_runtime::block_on(LocalDbState::open(dir)));
@@ -296,6 +328,9 @@ pub fn manage_state<R: Runtime>(
     app.manage(scanner::manager(app.clone()));
     app.manage(lockdown::LockdownState::default());
     app.manage(power::SystemAwakeState::default());
+    app.manage(office_files::OfficeFilesState::from_documents(
+        app.path().document_dir().ok(),
+    ));
     link
 }
 
@@ -308,7 +343,7 @@ pub fn run() {
             // config directory: the device identity must stay on this
             // computer and never follow a Windows user profile elsewhere.
             let dir = app.path().app_local_data_dir()?;
-            let link = manage_state(app.handle(), &dir);
+            let link = manage_state(app.handle(), &dir, installation::read_beside_executable());
             let status = app.state::<ConnectionState>().inner().clone();
             tauri::async_runtime::spawn(connection::supervise(
                 link,

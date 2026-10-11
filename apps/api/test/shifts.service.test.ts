@@ -4,6 +4,7 @@ import type { SQL } from "drizzle-orm";
 import { PgDialect } from "drizzle-orm/pg-core";
 import { describe, expect, it, vi } from "vitest";
 import { schema, type Db } from "@markiro/db";
+import { buildPalletSheetPresets, createPalletSheetSnapshot } from "@markiro/domain";
 import { ShiftsService } from "../src/modules/shifts/shifts.service";
 import type { OperatorsService } from "../src/modules/operators/operators.service";
 import type { SsccService } from "../src/modules/sscc/sscc.service";
@@ -83,6 +84,8 @@ const SHIFT_ROW: typeof schema.shifts.$inferSelect = {
   palletBoxCapacity: null,
   palletsEnabled: false,
   palletLabelTemplateId: null,
+  palletSheetTemplateId: null,
+  palletSheetTemplateSnapshot: null,
   createdFrom: "admin",
   numberMonthKey: "AUG26",
   numberSeq: 1,
@@ -178,6 +181,56 @@ describe("ShiftsService.getReferenceBundle product-group mapping", () => {
 
     expect(bundle.product.productGroup).toBeNull();
   });
+});
+
+describe("ShiftsService bundle pallet sheet selection", () => {
+  it.each(["boxes-only", "thermal-pallet", "sheet-pallet"] as const)(
+    "keeps the shift selection consistent with the snapshot for %s",
+    async (mode) => {
+      const preset = buildPalletSheetPresets()[0];
+      if (!preset) throw new Error("Missing pallet sheet preset");
+      const sheetId = "8d47946b-1c1c-4589-8ec4-70a3e7ff0024";
+      const snapshot =
+        mode === "sheet-pallet"
+          ? createPalletSheetSnapshot({ id: sheetId, name: "A4", revision: 1, spec: preset.spec })
+          : null;
+      const { db } = fakeDb(
+        new Map<unknown, unknown[]>([
+          [
+            schema.shifts,
+            [
+              {
+                ...SHIFT_ROW,
+                createdFrom: "station",
+                palletsEnabled: mode !== "boxes-only",
+                palletBoxCapacity: mode === "boxes-only" ? null : 48,
+                palletSheetTemplateId: snapshot?.id ?? null,
+                palletSheetTemplateSnapshot: snapshot,
+              },
+            ],
+          ],
+          [schema.products, [PRODUCT_ROW]],
+        ]),
+      );
+      const service = new ShiftsService(
+        db,
+        fakeOperatorsService(),
+        {} as SsccService,
+        {} as EntitlementsService,
+        {} as EntitlementAdmissionService,
+      );
+
+      for (const bundle of [
+        await service.getReferenceBundle("tenant-1", "shift-1"),
+        await service.getBundle("tenant-1", "shift-1", null),
+      ]) {
+        // Station rejects an omitted selection even when the snapshot is null,
+        // leaving a new shift without the local context needed to open its floor.
+        expect(bundle.shift.palletSheetTemplateId).toBe(mode === "sheet-pallet" ? sheetId : null);
+        expect(bundle.palletSheetTemplate).toEqual(snapshot);
+      }
+    },
+  );
 });
 
 describe("ShiftsService box-template snapshot boundary", () => {

@@ -1,10 +1,18 @@
-import type { LabelTemplateSpec, PrinterDpi } from "@markiro/domain";
+import { renderPrintArtifact } from "./print-artifact.js";
+import { rasterizeDriverText } from "./rasterizer.js";
+import {
+  dispatchWindowsDelivery,
+  prepareWindowsReprint,
+  type DeliveryKey,
+} from "./print-deliveries.js";
+import type { LabelTemplateSpec, PrinterDpi, MonoBitmap } from "@markiro/domain";
 import type { BoxPrintErrorCode } from "./boxes.js";
 import type { PrintTarget } from "./hardware.js";
 import type { PrinterLanguage } from "./hardware-config.js";
 import type { SqlExecutor } from "./mirror.js";
 import { bindPrintDestination, type PrintDestinationKey } from "./print-destinations.js";
 import {
+  printerMode,
   outputPrinterProfile,
   serializePrinterOutput,
   type PrinterProfile,
@@ -14,6 +22,8 @@ export type BoxPrintAttempt =
   { kind: "printed"; bytes: Uint8Array } | { kind: "failed"; code: BoxPrintErrorCode };
 
 export interface BoxPrintInput {
+  explicitRetry?: boolean;
+  loadLogo?: () => Promise<MonoBitmap | null>;
   template: LabelTemplateSpec | null;
   fields: Record<string, string>;
   destination?: {
@@ -38,6 +48,7 @@ export interface BoxPrintInput {
     fields: Record<string, string>,
     language: PrinterLanguage,
     dpi: PrinterDpi | null,
+    logo?: MonoBitmap | null,
   ) => Promise<Uint8Array>;
 }
 
@@ -56,16 +67,71 @@ export async function attemptBoxPrint(input: BoxPrintInput): Promise<BoxPrintAtt
   const print = input.destination?.print ?? input.printing?.print;
   if (!printer || !print) return { kind: "failed", code: "printer_unconfigured" };
 
+  const template = input.template;
   let bytes: Uint8Array;
+  let deliveryKey: DeliveryKey | undefined = input.destination?.key;
   try {
-    bytes = await input.render(input.template, input.fields, printer.language, printer.dpi);
+    const logoOptions = async () => {
+      if (!template.elements.some((e) => e.kind === "organization_logo")) return {};
+      return input.loadLogo ? { logo: await input.loadLogo() } : {};
+    };
+    const render = async () =>
+      (
+        await renderPrintArtifact(
+          template,
+          input.fields,
+          printer,
+          rasterizeDriverText,
+          await logoOptions(),
+        )
+      ).bytes;
+    const retry =
+      input.explicitRetry && input.destination && printerMode(printer) === "windows_driver"
+        ? await prepareWindowsReprint(
+            input.destination.exec,
+            input.destination.key,
+            printer,
+            render,
+          )
+        : null;
+    if (retry) {
+      bytes = retry.bytes;
+      deliveryKey = retry.key;
+    } else
+      bytes =
+        printerMode(printer) === "windows_driver"
+          ? (
+              await renderPrintArtifact(
+                input.template,
+                input.fields,
+                printer,
+                rasterizeDriverText,
+                await logoOptions(),
+              )
+            ).bytes
+          : template.elements.some((e) => e.kind === "organization_logo")
+            ? await input.render(
+                template,
+                input.fields,
+                printer.language,
+                printer.dpi,
+                (await logoOptions()).logo,
+              )
+            : await input.render(template, input.fields, printer.language, printer.dpi);
   } catch {
     console.error("station: box label render failed");
     return { kind: "failed", code: "render_failed" };
   }
 
   try {
-    await serializePrinterOutput(printer.target, () => print(printer.target, bytes));
+    if (printerMode(printer) === "windows_driver") {
+      const destination = input.destination;
+      if (!destination || !deliveryKey) return { kind: "failed", code: "persistence_failed" };
+      const key = deliveryKey;
+      await serializePrinterOutput(printer.target, () =>
+        dispatchWindowsDelivery(destination.exec, key, printer, bytes),
+      );
+    } else await serializePrinterOutput(printer.target, () => print(printer.target, bytes));
   } catch {
     console.error("station: box label transport failed");
     return { kind: "failed", code: "transport_failed" };

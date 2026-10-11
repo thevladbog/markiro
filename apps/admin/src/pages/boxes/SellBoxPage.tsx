@@ -65,7 +65,7 @@ export function SellBoxPage() {
   }, [data, finished]);
 
   const handleDetected = useCallback((raw: string) => {
-    const parsed = parseScannedSscc(raw);
+    const parsed = parseScannedSscc(raw, { allowLegacyBangOnePrefix: true });
     if (parsed === null) {
       setInputError("invalidSscc");
       return;

@@ -25,6 +25,7 @@ import {
   type FloorWorkBarrier,
 } from "../lib/credential-recovery.js";
 import { parseStationInventoryBundleManifest, SHIFT_TASK_BARCODE_PREFIX } from "@markiro/domain";
+import { BarcodeIcon } from "../ui/BarcodeIcon.js";
 import { InventoryTaskConfirmation } from "./InventoryTaskConfirmation.js";
 import {
   ShiftSelection,
@@ -34,7 +35,7 @@ import {
 } from "./ShiftSelection.js";
 
 const INVENTORY_PAGE_SIZE = 3;
-type TaskCategory = "production" | "warehouse";
+export type TaskSelectionView = "production" | "warehouse" | "additional";
 interface SelectionRouteIntentRecord {
   token: symbol;
   client: StationClient;
@@ -47,6 +48,8 @@ interface SelectionRouteIntentRecord {
 }
 
 export interface TaskSelectionProps {
+  initialView?: TaskSelectionView;
+  onViewChange?: (view: TaskSelectionView) => void;
   client: StationClient;
   exec: SqlExecutor;
   acquireShiftEntry?: ShiftSelectionProps["acquireShiftEntry"];
@@ -56,6 +59,7 @@ export interface TaskSelectionProps {
   onShiftSelected: ShiftSelectionProps["onSelected"];
   onInventorySelected: (task: InventoryFloorTask, lease?: ShiftEntryLease) => void | Promise<void>;
   onNew: () => void;
+  onWarehouseReprint?: () => void;
   onSetup?: () => void;
   onConflicts?: () => void;
   isCurrent?: () => boolean;
@@ -84,6 +88,8 @@ function taskMatchesManifest(
 }
 
 export function TaskSelection({
+  initialView = "production",
+  onViewChange,
   client,
   exec,
   acquireShiftEntry,
@@ -93,6 +99,7 @@ export function TaskSelection({
   onShiftSelected,
   onInventorySelected,
   onNew,
+  onWarehouseReprint,
   onSetup,
   onConflicts,
   isCurrent,
@@ -101,7 +108,13 @@ export function TaskSelection({
   offlineGrantNotice,
 }: TaskSelectionProps) {
   const { t } = useTranslation();
-  const [category, setCategory] = useState<TaskCategory>("production");
+  const [selectionView, setSelectionView] = useState<TaskSelectionView>(initialView);
+  const category = selectionView === "production" ? "production" : "warehouse";
+  const additionalOperations = selectionView === "additional";
+  const changeView = (next: TaskSelectionView) => {
+    setSelectionView(next);
+    onViewChange?.(next);
+  };
   const [tasks, setTasks] = useState<StationInventoryTask[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -495,6 +508,7 @@ export function TaskSelection({
   );
 
   useEffect(() => {
+    if (additionalOperations) return;
     return source.start((barcode) => {
       // The shift panel owns this namespace and subscribes to the same source
       // -- but only while the shifts tab is showing (`!alternateActive`
@@ -551,7 +565,7 @@ export function TaskSelection({
         }
       })();
     });
-  }, [category, client, joinTask, source, t]);
+  }, [additionalOperations, category, client, joinTask, source, t]);
 
   const pageCount = Math.max(1, Math.ceil(tasks.length / INVENTORY_PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
@@ -567,7 +581,7 @@ export function TaskSelection({
   const inventoryPanel = (
     <section className="inventory-task-selection" aria-labelledby="inventory-task-selection-title">
       <div className="inventory-task-selection__scan">
-        <span className="inventory-task-selection__scan-mark" aria-hidden="true" />
+        <BarcodeIcon className="inventory-task-selection__scan-mark" />
         <div>
           <h2 id="inventory-task-selection-title">{t("inventory.scanTitle")}</h2>
           <p>{t("inventory.scanHint")}</p>
@@ -630,6 +644,31 @@ export function TaskSelection({
     </section>
   );
 
+  const operationsPanel = (
+    <section className="warehouse-operations">
+      <p>{t("warehouse.operationsHint")}</p>
+      {onWarehouseReprint ? (
+        <article className="inventory-task-card warehouse-entry">
+          <div>
+            <strong>{t("warehouse.title")}</strong>
+            <span>{t("warehouse.entryHint")}</span>
+          </div>
+          <Button
+            size="floor"
+            disabled={busy || routePending}
+            onClick={() => {
+              void retireSelectionLifecycle().then(() => {
+                if (!credentialGeneration?.sealed && isCurrentRef.current?.() !== false)
+                  onWarehouseReprint();
+              });
+            }}
+          >
+            {t("warehouse.entryButton")}
+          </Button>
+        </article>
+      ) : null}
+    </section>
+  );
   return (
     <>
       <ShiftSelection
@@ -645,13 +684,21 @@ export function TaskSelection({
         onRouteIntent={acquireRouteIntent}
         routeControlsDisabled={routePending}
         onCoordinatedRefresh={refreshInventoryTasks}
-        title={category === "warehouse" ? t("inventory.warehouseTitle") : t("shifts.title")}
+        title={
+          category === "warehouse"
+            ? t(
+                additionalOperations
+                  ? "warehouse.additionalOperations"
+                  : "inventory.warehouseTitle",
+              )
+            : t("shifts.title")
+        }
         actionsLabel={category === "warehouse" ? t("inventory.actions") : t("shifts.actions")}
         refreshLabel={category === "warehouse" ? t("inventory.refresh") : t("shifts.refresh")}
         {...(offlineGrantNotice !== undefined ? { offlineGrantNotice } : {})}
         productionActionsVisible={category === "production"}
         alternateActive={category === "warehouse"}
-        alternateContent={inventoryPanel}
+        alternateContent={additionalOperations ? operationsPanel : inventoryPanel}
         headerAction={(openShiftCount) =>
           category === "production" ? (
             <Button
@@ -659,20 +706,36 @@ export function TaskSelection({
               variant="secondary"
               disabled={routePending}
               data-floor-category="warehouse"
-              onClick={() => setCategory("warehouse")}
+              onClick={() => changeView("warehouse")}
             >
               {t("inventory.categories.warehouse", { count: tasks.length })}
             </Button>
           ) : (
-            <Button
-              size="floor"
-              variant="secondary"
-              disabled={routePending}
-              data-floor-category="production"
-              onClick={() => setCategory("production")}
-            >
-              {t("inventory.categories.backToShifts", { count: openShiftCount })}
-            </Button>
+            <div className="warehouse-navigation">
+              <Button
+                size="floor"
+                variant="secondary"
+                disabled={busy || routePending}
+                onClick={() => changeView(additionalOperations ? "warehouse" : "additional")}
+              >
+                {t(
+                  additionalOperations
+                    ? "warehouse.backToInventory"
+                    : "warehouse.additionalOperations",
+                )}
+              </Button>
+              <Button
+                size="floor"
+                variant="secondary"
+                disabled={routePending}
+                data-floor-category="production"
+                onClick={() => {
+                  changeView("production");
+                }}
+              >
+                {t("inventory.categories.backToShifts", { count: openShiftCount })}
+              </Button>
+            </div>
           )
         }
       />

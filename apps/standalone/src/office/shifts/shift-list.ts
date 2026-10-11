@@ -46,17 +46,19 @@ export function recordLabel(
 }
 
 /** Why a planned shift will not open on a station (`shift.open` refuses it). */
-export type OpenBlocker = "product_archived" | "product_draft" | "template_unfit";
+export type OpenBlocker =
+  "product_archived" | "product_draft" | "template_unfit" | "pallet_template_unfit";
 
 /**
  * Why a planned shift would be refused when a station opens it, by the lists
  * the office read: its product archived or a draft (`product_inactive`), its
  * box template switched off, narrowed or no longer of the product's group
- * (`template_not_fit`). `null` when it opens, or while a list it needs is not
- * loaded or lacks the record: then nothing is claimed.
+ * (`template_not_fit`), its pallet template so too (`pallet_template_not_fit`,
+ * plan О-Ф). `null` when it opens, or while a list it needs is not loaded or
+ * lacks the record: then nothing is claimed.
  */
 export function openBlocker(
-  shift: Pick<OfficeShift, "status" | "productId" | "boxTemplateId">,
+  shift: Pick<OfficeShift, "status" | "productId" | "boxTemplateId" | "palletTemplateId">,
   products: readonly OfficeProduct[] | undefined,
   templates: readonly LabelTemplateSummary[] | undefined,
 ): OpenBlocker | null {
@@ -71,7 +73,14 @@ export function openBlocker(
     purpose: "box",
     chzProductGroupCode: product.chzProductGroupCode,
   });
-  return fits ? null : "template_unfit";
+  if (!fits) return "template_unfit";
+  const pallet = templates?.find((each) => each.id === shift.palletTemplateId);
+  if (pallet === undefined) return null;
+  const palletFits = templateFitsSlot(pallet, {
+    purpose: "pallet",
+    chzProductGroupCode: product.chzProductGroupCode,
+  });
+  return palletFits ? null : "pallet_template_unfit";
 }
 
 /** What the filters of the list hold. */

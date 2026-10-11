@@ -48,8 +48,13 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
           {
             kind: "step",
             title: "Перейдите к настройке оборудования",
-            text: "После сообщения «Станция подключена» станция сама перейдёт к работе. Настройку оборудования открывайте кнопкой «Настройка оборудования» на экране подключения (до ввода кода) или кнопкой «Настройка рабочего места» на экране выбора смены. Настройте сканер, принтер и звук (разделы 3–5).",
+            text: "После сообщения «Станция подключена» станция сама перейдёт к работе. Настройку оборудования открывайте кнопкой «Настройка оборудования» на экране подключения (до ввода кода) или кнопкой «Настройка рабочего места» на экране выбора смены. Настройте сканер, принтеры и звук (разделы 3–5).",
             image: { id: "pairing-success", caption: "Станция подключена к кабинету" },
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "Настройки сканера и принтеров сохраняет кнопка «Готово» внизу экрана; «Далее» переходит на следующую вкладку, а «Назад» закрывает настройку без сохранения. Звук применяется сразу.",
           },
           {
             kind: "callout",
@@ -76,31 +81,48 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
             kind: "paragraph",
             text: "Если сканер работает в режиме клавиатуры (эмуляция ввода), выберите «Без последовательного сканера (клавиатурный)» — порт и скорость в этом режиме не настраиваются.",
           },
+          {
+            kind: "paragraph",
+            text: "Если на рабочем месте несколько сканеров, добавьте каждый кнопкой «Добавить сканер» и укажите его порт и скорость. Все сохранённые порты работают вместе: переключаться между сканерами не нужно, а связь восстанавливается автоматически.",
+          },
         ],
       },
       {
         id: "printer",
-        heading: "4. Принтер",
+        heading: "4. Принтеры",
         blocks: [
           {
+            kind: "paragraph",
+            text: "Станция печатает этикетки трёх видов — «Короб», «Дубль кода» и «Паллета» — и для каждого вида назначается свой принтер из списка принтеров этой станции. Один принтер может печатать все три вида. Вкладку «Принтеры» открывает и кнопка «Принтеры» в шапке экрана выбора смены — на ней видно, сколько видов уже назначено, например 3 / 3.",
+          },
+          {
             kind: "step",
-            title: "Выберите подключение принтера",
-            text: "На вкладке «Принтер» в блоке «Подключение» укажите «Подключение принтера»: «Сеть (TCP)» — «Адрес принтера» и «TCP-порт принтера»; «COM-порт» — порт и скорость; «Windows (USB)» — выберите установленный принтер Windows из списка (кнопка «Обновить список» перечитывает его). Затем выберите «Язык принтера» — ZPL или TSPL, по документации принтера. Если на этом рабочем месте этикетки не печатают, оставьте «Без принтера».",
+            title: "Добавьте принтер",
+            text: "На вкладке «Принтеры» нажмите «Добавить принтер». Задайте «Название принтера» — по нему принтер выбирают в назначениях. В «Подключение принтера» выберите: «Сеть (TCP)» — «Адрес принтера» и «TCP-порт принтера»; «COM-порт» — «Порт принтера» и «Скорость принтера (бод)»; «Windows (USB)» — установленный принтер из списка «Принтер Windows» (кнопка «Обновить список» перечитывает его). «Язык принтера» — ZPL или TSPL, по документации принтера. «Разрешение принтера» — 203 или 300 dpi по паспорту: пока оно не указано, коробочные этикетки печатаются в разрешении шаблона, а печать дубликатов недоступна.",
             image: {
               id: "setup-printer",
-              caption: "Настройка принтера: подключение и проверка печати",
+              caption: "Карточка принтера: подключение и проверка печати",
             },
           },
           {
             kind: "step",
             title: "Пройдите проверку печати",
-            text: "В блоке «Проверка печати» станция просит: «Напечатайте тестовую этикетку и отсканируйте её». Нажмите «Тестовая печать» — сообщение «Тестовая этикетка отправлена на принтер» подтверждает только отправку. Затем отсканируйте код с вышедшей этикетки: при успехе появится «Этикетка напечатана и распознана — принтер работает». Так проверяется вся цепочка сразу — подключение, язык принтера, качество печати и сканер.",
+            text: "В блоке «Проверка печати» станция просит: «Напечатайте тестовую этикетку и отсканируйте её». Нажмите «Тестовая печать» — сообщение об отправке подтверждает только отправку. Затем отсканируйте код с вышедшей этикетки: при успехе появится «Этикетка напечатана и распознана — принтер работает». Так проверяется вся цепочка сразу — подключение, язык принтера, качество печати и сканер. Затем нажмите «Сохранить принтер» — он появится в списке «Принтеры этой станции».",
             expected: "«Этикетка напечатана и распознана — принтер работает».",
+          },
+          {
+            kind: "step",
+            title: "Назначьте, куда печатать",
+            text: "В блоке «Куда печатать» выберите принтер для каждого вида этикеток. Первый добавленный принтер станция сразу назначает на все три вида. Вид, который на этом рабочем месте не печатают, оставьте «Не назначен». Кнопка «Настроить» у принтера в списке снова открывает его карточку; там же — «Удалить принтер». Новые назначения действуют для новых этикеток: уже подготовленные этикетки печатаются на прежнем принтере.",
+            image: {
+              id: "setup-printers",
+              caption: "Принтеры этой станции и назначения по видам этикеток",
+            },
           },
           {
             kind: "callout",
             tone: "info",
-            text: "Флажок «Проверять каждую распечатанную этикетку сканированием» включает обязательную сверку этикетки короба после печати (описана в инструкции по рабочему циклу). Рекомендуется держать включённым на местах агрегации.",
+            text: "Флажок «Проверять этикетку короба обратным сканированием» под списком принтеров включает обязательную сверку этикетки короба после печати (описана в инструкции по рабочему циклу). Он доступен, когда для вида «Короб» назначен принтер; на местах агрегации держите его включённым.",
           },
         ],
       },
@@ -111,7 +133,7 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
           {
             kind: "step",
             title: "Включите звук станции",
-            text: "В блоке «Звук» включите звуковые сигналы. Операторы на линии полагаются на звук вердиктов сканирования — без него легко пропустить дубль или ошибку, не глядя на экран.",
+            text: "На вкладке «Звук» снимите флажок «Без звука», выставьте «Громкость» и нажмите «Проверить звук». Операторы на линии полагаются на звук вердиктов сканирования — без него легко пропустить дубль или ошибку, не глядя на экран.",
             image: { id: "setup-sound", caption: "Настройка звука станции" },
           },
         ],
@@ -123,7 +145,7 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
           {
             kind: "step",
             title: "Проверьте версию станции",
-            text: "Откройте «Обновления станции» (индикатор «Обновления» на экране выбора смены) и нажмите «Проверить обновления». Если версия актуальна, станция сообщит: «На станции установлена актуальная версия.»",
+            text: "Откройте «Обновления станции» кнопкой обновлений в шапке экрана выбора смены — значок ↻, а когда вышла новая версия, восклицательный знак с точкой — и нажмите «Проверить обновления». Если версия актуальна, станция сообщит: «На станции установлена актуальная версия.»",
             image: { id: "update-current", caption: "Центр обновлений: версия актуальна" },
           },
           {
@@ -177,7 +199,12 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
               {
                 term: "Установленные принтеры Windows не найдены",
                 detail:
-                  "Установите драйвер принтера средствами Windows, затем нажмите «Обновить список» в блоке «Принтер».",
+                  "Установите драйвер принтера средствами Windows, затем нажмите «Обновить список» в карточке принтера с подключением «Windows (USB)».",
+              },
+              {
+                term: "Дубликаты кодов не печатаются",
+                detail:
+                  "Проверьте, что для вида «Дубль кода» назначен принтер и у этого принтера указано «Разрешение принтера»: без разрешения печать дубликатов недоступна.",
               },
               {
                 term: "Тестовая этикетка не вышла или не распознаётся",
@@ -251,8 +278,13 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
           {
             kind: "step",
             title: "Move on to hardware setup",
-            text: "After the “Station connected” message the station proceeds to work by itself. Open the hardware setup with the “Equipment setup” button on the connection screen (before entering the code) or the “Workstation setup” button on the shift selection screen. Configure the scanner, the printer and the sound (sections 3–5).",
+            text: "After the “Station connected” message the station proceeds to work by itself. Open the hardware setup with the “Equipment setup” button on the connection screen (before entering the code) or the “Workstation setup” button on the shift selection screen. Configure the scanner, the printers and the sound (sections 3–5).",
             image: { id: "pairing-success", caption: "The station is connected to the cabinet" },
+          },
+          {
+            kind: "callout",
+            tone: "info",
+            text: "The scanner and printer settings are saved by the “Done” button at the bottom of the screen; “Next” moves to the next tab, and “Back” closes the setup without saving. Sound applies immediately.",
           },
           {
             kind: "callout",
@@ -279,31 +311,48 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
             kind: "paragraph",
             text: "If the scanner works in keyboard mode (input emulation), choose “No serial scanner (keyboard-wedge)” — the port and the baud rate are not configured in this mode.",
           },
+          {
+            kind: "paragraph",
+            text: "If the workstation has several scanners, add each one with “Add scanner” and set its port and baud rate. All saved ports work together: there is no need to switch between scanners, and connections restore automatically.",
+          },
         ],
       },
       {
         id: "printer",
-        heading: "4. Printer",
+        heading: "4. Printers",
         blocks: [
           {
+            kind: "paragraph",
+            text: "The station prints three types of labels — “Box”, “Code duplicate” and “Pallet” — and each type is assigned a printer from this station's printer list. One printer can print all three types. The “Printers” tab also opens from the “Printers” button in the header of the shift selection screen, which shows how many types are assigned, for example 3 / 3.",
+          },
+          {
             kind: "step",
-            title: "Choose the printer connection",
-            text: "On the “Printer” tab, in the “Connection” block, set the “Printer connection”: “Network (TCP)” — the “Printer address” and the “Printer TCP port”; “Serial (COM port)” — the port and the baud rate; “Windows (USB)” — pick an installed Windows printer from the list (the “Refresh list” button re-reads it). Then choose the “Printer language” — ZPL or TSPL, per the printer's documentation. If this workstation does not print labels, keep “No printer”.",
+            title: "Add a printer",
+            text: "On the “Printers” tab, tap “Add printer”. Set the “Printer name” — the assignments list printers by it. Under “Printer connection” choose: “Network (TCP)” — the “Printer address” and the “Printer TCP port”; “Serial (COM port)” — the “Printer port” and the “Printer baud rate”; “Windows (USB)” — an installed printer from the “Windows printer” list (the “Refresh list” button re-reads it). The “Printer language” is ZPL or TSPL, per the printer's documentation. The “Printer resolution” is 203 or 300 dpi, per the datasheet: until it is set, box labels print at the template's resolution and duplicate printing is unavailable.",
             image: {
               id: "setup-printer",
-              caption: "Printer setup: connection and the print check",
+              caption: "The printer card: connection and the print check",
             },
           },
           {
             kind: "step",
             title: "Pass the print check",
-            text: "In the “Print check” block the station asks you to “Print a test label, then scan it”. Tap “Test print” — the “Test label sent to the printer” message only confirms the sending. Then scan the code from the label that came out: on success you will see “Label printed and recognized — the printer works”. This checks the whole chain at once — the connection, the printer language, the print quality and the scanner.",
+            text: "In the “Print check” block the station asks you to “Print a test label, then scan it”. Tap “Test print” — the message that the label was sent only confirms the sending. Then scan the code from the label that came out: on success you will see “Label printed and recognized — the printer works”. This checks the whole chain at once — the connection, the printer language, the print quality and the scanner. Then tap “Save printer” — it appears in the “Printers on this station” list.",
             expected: "“Label printed and recognized — the printer works”.",
+          },
+          {
+            kind: "step",
+            title: "Assign where labels print",
+            text: "In the “Label destinations” block, choose a printer for each label type. The station assigns the first printer you add to all three types at once. Leave a type this workstation does not print as “Not assigned”. The “Edit” button next to a printer in the list opens its card again; “Remove printer” is there too. New assignments apply to new labels: labels already prepared print on their original printer.",
+            image: {
+              id: "setup-printers",
+              caption: "The station's printers and the assignments by label type",
+            },
           },
           {
             kind: "callout",
             tone: "info",
-            text: "The “Verify each printed label by scanning it back” checkbox enables the mandatory box label verification after printing (covered by the work cycle instruction). Keeping it on is recommended for aggregation workstations.",
+            text: "The “Verify each box label by scanning it back” checkbox under the printer list enables the mandatory box label verification after printing (covered by the work cycle instruction). It is available once a printer is assigned to the “Box” type; keep it on at aggregation workstations.",
           },
         ],
       },
@@ -314,7 +363,7 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
           {
             kind: "step",
             title: "Turn the station sound on",
-            text: "In the “Sound” block, enable the audio signals. Line operators rely on the scan verdict sounds — without them it is easy to miss a duplicate or an error while not looking at the screen.",
+            text: "On the “Sound” tab, clear the “Mute” checkbox, set the “Volume” and tap “Test sound”. Line operators rely on the scan verdict sounds — without them it is easy to miss a duplicate or an error while not looking at the screen.",
             image: { id: "setup-sound", caption: "Station sound setup" },
           },
         ],
@@ -326,7 +375,7 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
           {
             kind: "step",
             title: "Check the station version",
-            text: "Open “Station updates” (the “Updates” indicator on the shift selection screen) and tap “Check for updates”. If the version is current, the station reports: “This station is up to date.”",
+            text: "Open “Station updates” with the updates button in the header of the shift selection screen — the ↻ icon, or an exclamation mark with a dot once a new version is out — and tap “Check for updates”. If the version is current, the station reports: “This station is up to date.”",
             image: { id: "update-current", caption: "The update center: the version is current" },
           },
           {
@@ -380,7 +429,12 @@ export const STATION_WORKSTATION_SETUP_CONTENT = {
               {
                 term: "No installed Windows printers found",
                 detail:
-                  "Install the printer driver through Windows, then tap “Refresh list” in the “Printer” block.",
+                  "Install the printer driver through Windows, then tap “Refresh list” on the card of a printer with the “Windows (USB)” connection.",
+              },
+              {
+                term: "Code duplicates do not print",
+                detail:
+                  "Check that a printer is assigned to the “Code duplicate” type and that this printer has its “Printer resolution” set: without a resolution, duplicate printing is unavailable.",
               },
               {
                 term: "The test label did not come out or is not recognized",

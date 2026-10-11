@@ -18,6 +18,12 @@ on:
         options:
           - disabled
           - enabled
+      scope:
+        description: Update the full bundle or only API and migrations, preserving running web applications
+        required: true
+        type: choice
+        default: full
+        options: [full, api-only]
 
 permissions: {}
 
@@ -43,6 +49,7 @@ jobs:
       MARKIRO_KIOSK_DOMAIN: ${{ vars.MARKIRO_KIOSK_DOMAIN }}
       MARKIRO_LANDING_DOMAIN: ${{ vars.MARKIRO_LANDING_DOMAIN }}
       MARKIRO_LANDING_DEMO_SUBMISSION_STATE: ${{ inputs.landing_demo_submission_state }}
+      MARKIRO_DEPLOY_SCOPE: ${{ inputs.scope }}
       ACME_EMAIL: ${{ vars.ACME_EMAIL }}
       YC_APP_DEPLOY_LOGIN: markiro-deploy
     steps:
@@ -124,7 +131,7 @@ jobs:
           node deploy/yandex/remote-deploy.mjs run
 
       - name: Submit changed landing URLs to IndexNow
-        if: ${{ vars.PUBLIC_INDEXNOW_KEY != '' }}
+        if: ${{ inputs.scope != 'api-only' && vars.PUBLIC_INDEXNOW_KEY != '' }}
         env:
           PUBLIC_INDEXNOW_KEY: ${{ vars.PUBLIC_INDEXNOW_KEY }}
         run: node tools/indexnow/submit.mjs

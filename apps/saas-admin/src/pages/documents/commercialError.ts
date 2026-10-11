@@ -16,6 +16,7 @@ const codes = new Set([
   "commercial_sale_already_fulfilled",
   "commercial_plan_quantity_invalid",
   "commercial_line_terms_invalid",
+  "catalog_kind_not_allowed_for_offline_tenant",
 ]);
 export function commercialErrorKey(error: unknown, fallback: string): string {
   return error instanceof ApiRequestError && error.code && codes.has(error.code)

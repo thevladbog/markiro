@@ -67,6 +67,8 @@ private const val OTHER_LINE = "l2"
  * point of these tests is the view model's local resolution, not HTTP framing.
  */
 private class FakeStationApi(shifts: List<ShiftDto>) : StationApi {
+    override suspend fun printBranding(): kotlinx.serialization.json.JsonObject = error("unused")
+    override suspend fun printBrandingLogo(revision: String): okhttp3.ResponseBody = error("unused")
     override suspend fun replacementIntent(knownIntentId: String?): kotlinx.serialization.json.JsonObject? = null
     override suspend fun replacementRecoveryReadiness(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = error("unused")
     override suspend fun replacementReadiness(body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject = error("unused")

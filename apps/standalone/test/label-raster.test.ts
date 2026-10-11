@@ -92,7 +92,10 @@ beforeEach(() => {
 function fakeCanvases({
   charWidth = 10,
   measureFails,
-}: { charWidth?: number; measureFails?: () => never } = {}): FakeSurface[] {
+}: {
+  charWidth?: number | ((fontPx: number) => number);
+  measureFails?: () => never;
+} = {}): FakeSurface[] {
   const surfaces: FakeSurface[] = [];
   Object.defineProperty(HTMLCanvasElement.prototype, "getContext", {
     configurable: true,
@@ -110,7 +113,10 @@ function fakeCanvases({
         reads: [],
         measureText: (line) => {
           if (measureFails) measureFails();
-          return { width: line.length * charWidth };
+          // The width follows the font set on this very context, as a real one's does.
+          const fontPx = Number(/(\d+)px/.exec(surface.font)?.[1] ?? 0);
+          const perChar = typeof charWidth === "function" ? charWidth(fontPx) : charWidth;
+          return { width: line.length * perChar };
         },
         fillRect: (...rect) => {
           surface.rects.push({ rect, fillStyle: surface.fillStyle });
@@ -439,6 +445,143 @@ describe("the text rasterizer's drawing", () => {
   it("says what is missing, and keeps a message it was given", () => {
     expect(new RasterUnavailableError().message).toContain("2D canvas");
     expect(new RasterUnavailableError("gone").message).toBe("gone");
+  });
+});
+
+describe("the text rasterizer's line height and shrink-to-fit (#703)", () => {
+  // A character is half the font's size wide: 8 characters are 84 dots at 21 px, 68 at 17 px.
+  const halfFont = (fontPx: number) => fontPx / 2;
+  const options = { fontFamily: "sans-serif", bold: false } as const;
+
+  it("sizes each line box by the element's line height, and keeps 1.5 em without one", async () => {
+    const own = fakeCanvases();
+    await rasterizeText("aaaa bbbb cccc", {
+      ...options,
+      fontSizePx: 20,
+      maxWidthPx: 100,
+      maxLines: 2,
+      lineHeight: 1.2,
+    });
+    // ceil(20 x 1.2) = 24 a line, two lines.
+    expect([own[1]?.width, own[1]?.height]).toEqual([90, 48]);
+    expect(own[1]?.texts.map((t) => [t.text, t.y])).toEqual([
+      ["aaaa bbbb", 12],
+      ["cccc", 36],
+    ]);
+
+    const plain = fakeCanvases();
+    await rasterizeText("aaaa bbbb cccc", {
+      ...options,
+      fontSizePx: 20,
+      maxWidthPx: 100,
+      maxLines: 2,
+    });
+    expect(plain[1]?.height).toBe(60); // 2 x ceil(20 x 1.5)
+    expect(plain[1]?.texts.map((t) => t.y)).toEqual([15, 45]);
+  });
+
+  it("rounds the line box up to a whole dot", async () => {
+    const surfaces = fakeCanvases();
+    await rasterizeText("aaaa", { ...options, fontSizePx: 21, lineHeight: 1.1 });
+    expect(surfaces[1]?.height).toBe(24); // ceil(23.1)
+  });
+
+  it("shrinks the font one dot at a time until the text fits its box, and draws at that size", async () => {
+    const surfaces = fakeCanvases({ charWidth: halfFont });
+    const raster = await rasterizeText("abcdefgh", {
+      ...options,
+      fontSizePx: 21,
+      maxWidthPx: 70,
+      minFontSizePx: 14,
+    });
+    // 84, 80, 76, 72 dots at 21..18 px do not fit 70; 68 at 17 px does.
+    expect(surfaces.map((s) => s.font)).toEqual([
+      "400 17px IBM Plex Sans, sans-serif",
+      "400 17px IBM Plex Sans, sans-serif",
+    ]);
+    expect([raster.width, raster.height]).toEqual([68, 26]); // ceil(17 x 1.5)
+    expect(surfaces[1]?.texts.map((t) => t.text)).toEqual(["abcdefgh"]);
+  });
+
+  it("takes a line height from the shrunk size, not the requested one", async () => {
+    const surfaces = fakeCanvases({ charWidth: halfFont });
+    await rasterizeText("abcdefgh", {
+      ...options,
+      fontSizePx: 21,
+      maxWidthPx: 70,
+      minFontSizePx: 14,
+      lineHeight: 1.2,
+    });
+    expect(surfaces[1]?.height).toBe(21); // ceil(17 x 1.2)
+  });
+
+  it("keeps the requested size when the text already fits, and when it fits exactly", async () => {
+    const fits = fakeCanvases({ charWidth: halfFont });
+    await rasterizeText("abcdefgh", {
+      ...options,
+      fontSizePx: 21,
+      maxWidthPx: 84,
+      minFontSizePx: 14,
+    });
+    expect(fits[1]?.font).toBe("400 21px IBM Plex Sans, sans-serif");
+    // 68 dots in a 68-dot box fit: only a wider text shrinks.
+    const exact = fakeCanvases({ charWidth: halfFont });
+    await rasterizeText("abcdefgh", {
+      ...options,
+      fontSizePx: 17,
+      maxWidthPx: 68,
+      minFontSizePx: 14,
+    });
+    expect(exact[1]?.font).toBe("400 17px IBM Plex Sans, sans-serif");
+  });
+
+  it("shrinks down to the minimum, which is itself allowed", async () => {
+    const surfaces = fakeCanvases({ charWidth: halfFont });
+    await rasterizeText("abcdefgh", {
+      ...options,
+      fontSizePx: 21,
+      maxWidthPx: 56,
+      minFontSizePx: 14,
+    });
+    // 8 x 7 = 56 dots at 14 px: the minimum fits exactly.
+    expect(surfaces[1]?.font).toBe("400 14px IBM Plex Sans, sans-serif");
+  });
+
+  it("throws when the text still does not fit at the minimum size, and never goes below it", async () => {
+    const surfaces = fakeCanvases({ charWidth: halfFont });
+    await expect(
+      rasterizeText("abcdefgh", { ...options, fontSizePx: 21, maxWidthPx: 70, minFontSizePx: 18 }),
+    ).rejects.toThrow("Label quantity exceeds its box at minimum font size");
+    // 72 dots at 18 px, which is the floor: 17 px would have fitted, and was not tried.
+    expect(surfaces).toHaveLength(1);
+    expect(surfaces[0]?.font).toBe("400 18px IBM Plex Sans, sans-serif");
+  });
+
+  it("does not shrink, nor throw, without a minimum: the text wraps and ends in an ellipsis", async () => {
+    const surfaces = fakeCanvases({ charWidth: halfFont });
+    await rasterizeText("abcdefgh", { ...options, fontSizePx: 21, maxWidthPx: 70 });
+    expect(surfaces[1]?.font).toBe("400 21px IBM Plex Sans, sans-serif");
+    expect(surfaces[1]?.texts.map((t) => t.text)).toEqual(["abcde…"]);
+  });
+
+  it("does not shrink an unbounded text", async () => {
+    const surfaces = fakeCanvases({ charWidth: halfFont });
+    await rasterizeText("abcdefgh", { ...options, fontSizePx: 21, minFontSizePx: 14 });
+    expect(surfaces[1]?.font).toBe("400 21px IBM Plex Sans, sans-serif");
+    expect(surfaces[1]?.width).toBe(84);
+  });
+
+  it("measures the next size on the context it measures with", async () => {
+    // The measure must follow the shrinking font; if it stayed at 21 px every size would
+    // look too wide, and the loop would run to the floor.
+    const surfaces = fakeCanvases({ charWidth: halfFont });
+    await rasterizeText("abcdefgh", {
+      ...options,
+      fontSizePx: 21,
+      maxWidthPx: 70,
+      minFontSizePx: 10,
+    });
+    expect(surfaces[0]?.font).toBe("400 17px IBM Plex Sans, sans-serif");
   });
 });
 

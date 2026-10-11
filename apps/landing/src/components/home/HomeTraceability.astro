@@ -1,0 +1,30 @@
+---
+import { homeScreen } from "../../content/home-images";
+import type { Locale } from "../../content/pages";
+import { getUiCopy } from "../../content/ui";
+import ScreenFrame from "./ScreenFrame.astro";
+
+interface Props {
+  locale: Locale;
+}
+
+const { locale } = Astro.props;
+const copy = getUiCopy(locale).home.traceability;
+---
+
+<section class="section home-traceability" id="traceability" aria-labelledby="traceability-title">
+  <div class="container home-traceability__grid">
+    <div>
+      <p class="section-index">{copy.kicker}</p>
+      <h2 id="traceability-title" class="display-heading display-heading--sentence">{copy.heading}</h2>
+      <p class="section-lead">{copy.lead}</p>
+    </div>
+    <ScreenFrame
+      image={homeScreen(locale, "station-conflicts")}
+      alt={copy.screenAlt}
+      caption={copy.caption}
+      widths={[720, 1080, 1440]}
+      sizes="(max-width: 1023px) 100vw, 45rem"
+    />
+  </div>
+</section>

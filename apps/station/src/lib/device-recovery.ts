@@ -110,7 +110,7 @@ export async function initializeDeviceRecovery(
     : null;
   if (!saved) {
     const [history] = await exec.all<{ count: number }>(`SELECT
-      (SELECT COUNT(*) FROM outbox)+(SELECT COUNT(*) FROM inventory_outbox)+
+      (SELECT COUNT(*) FROM outbox)+(SELECT COUNT(*) FROM warehouse_reprint_events)+(SELECT COUNT(*) FROM inventory_outbox)+
       (SELECT COUNT(*) FROM product_label_jobs)+(SELECT COUNT(*) FROM boxes_mirror)+
       (SELECT COUNT(*) FROM codes_mirror)+(SELECT COUNT(*) FROM validation_occurrences)+(SELECT COUNT(*) FROM shift_close_outbox)+
       (SELECT COUNT(*) FROM box_exceptions_mirror)+(SELECT COUNT(*) FROM inventory_task_mirror)+

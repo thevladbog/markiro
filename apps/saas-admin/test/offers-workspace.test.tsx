@@ -230,6 +230,8 @@ function install(
         if (failRevise) return jsonResponse(503, { code: "offer_unavailable" });
         return jsonResponse(200, data.offer);
       }
+      if (path.endsWith("/download"))
+        return jsonResponse(200, { url: "https://objects.example.test/offers/document.html" });
       if (path.endsWith("/documents") && method === "POST")
         return jsonResponse(200, { revision: 2, documents: [] });
       if (path.endsWith("/documents")) return jsonResponse(200, data.documents);
@@ -598,6 +600,71 @@ describe("offers workspace", () => {
     );
     expect(screen.getByRole("button", { name: "Открыть HTML" })).toBeDefined();
   });
+  function publishedWithReadyHtml() {
+    const data = workspace();
+    data.offer = {
+      ...data.offer,
+      status: "published",
+      number: "MRK-CO-000001",
+      publishedAt: NOW,
+      publishedByPlatformUserId: "platform-accountant",
+      paidAt: null,
+    };
+    data.actions = { ...data.actions, publish: false };
+    data.documents = [
+      {
+        id: ID,
+        revision: 2,
+        format: "html",
+        printVariant: "clean",
+        status: "ready",
+        contentType: "text/html",
+        byteSize: 1200,
+        sha256: fingerprint,
+        errorCode: null,
+        createdAt: NOW,
+        updatedAt: NOW,
+      },
+    ];
+    return data;
+  }
+
+  it("opens a ready offer document in a new tab and leaves the offer page in place", async () => {
+    install(publishedWithReadyHtml());
+    const target = { opener: {}, location: { replace: vi.fn() }, close: vi.fn() };
+    const open = vi.fn().mockReturnValue(target);
+    vi.stubGlobal("open", open);
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/offers/${ID}` });
+
+    await user.click(await screen.findByRole("button", { name: "Открыть HTML" }));
+
+    expect(open).toHaveBeenCalledWith("about:blank", "_blank");
+    await waitFor(() =>
+      expect(target.location.replace).toHaveBeenCalledWith(
+        "https://objects.example.test/offers/document.html",
+      ),
+    );
+    expect(target.opener).toBeNull();
+    expect(screen.getByRole("button", { name: "Открыть HTML" })).toBeDefined();
+  });
+
+  it("reports a blocked offer document tab", async () => {
+    install(publishedWithReadyHtml());
+    vi.stubGlobal(
+      "open",
+      vi.fn(() => null),
+    );
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/offers/${ID}` });
+
+    await user.click(await screen.findByRole("button", { name: "Открыть HTML" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "Браузер заблокировал открытие печатной формы",
+    );
+  });
+
   it("shows server names, saved line summary, localized money and server count without row detail requests", async () => {
     const calls = install();
     renderSaasApp({ initialEntry: "/offers" });

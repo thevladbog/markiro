@@ -583,9 +583,9 @@ export class InventoriesController {
         files: 1,
         fields: 0,
         fieldSize: 0,
-        // Busboy emits `partsLimit` when its boundary counter reaches the
-        // configured value, so 2 admits the first actual part and rejects a second.
-        parts: 2,
+        // multer >= 2.4 treats `parts` as the inclusive maximum (it hands busboy
+        // `parts + 1`), so 1 admits the file part and rejects any second part.
+        parts: 1,
       },
     }),
   )

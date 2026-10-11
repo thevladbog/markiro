@@ -62,8 +62,18 @@ function textOf(element: TextLikeElement, data: Record<LabelField, string>): str
 }
 
 /**
+ * Whether the print draws an element's text as a bitmap whatever the text is:
+ * an element that names its own line height or family opts into the bundled
+ * fonts (the domain's `renderTextLikeElement`, #703), ASCII included.
+ */
+function asksForBitmap(element: TextLikeElement): boolean {
+  return element.lineHeight !== undefined || element.fontFamily !== undefined;
+}
+
+/**
  * The text elements the print rasterizes with `data`: those whose text is not
- * printable ASCII only (`needsImageRendering`, Cyrillic above all).
+ * printable ASCII only (`needsImageRendering`, Cyrillic above all), and those
+ * that ask for a bitmap themselves (`asksForBitmap`).
  */
 export function rasterTextElements(
   spec: LabelTemplateSpec,
@@ -72,7 +82,7 @@ export function rasterTextElements(
   return spec.elements.filter(
     (element): element is TextLikeElement =>
       (element.kind === "text" || element.kind === "field") &&
-      needsImageRendering(textOf(element, data)),
+      (asksForBitmap(element) || needsImageRendering(textOf(element, data))),
   );
 }
 
@@ -120,7 +130,7 @@ function drawText(
   scale: number,
 ): void {
   const fontPx = ptToMm(element.fontSizePt) * scale;
-  canvas.font = `${element.bold ? 700 : 400} ${fontPx}px sans-serif`;
+  canvas.font = `${element.bold ? 700 : 400} ${fontPx}px ${element.fontFamily ?? PRINT_FONT_FAMILY}`;
   canvas.fillStyle = INK;
   canvas.textBaseline = "top";
   const xPx = element.xMm * scale;
@@ -142,7 +152,7 @@ function drawText(
     boxPx,
     element.maxLines ?? 1,
   );
-  const lineHeightPx = ptToMm(element.fontSizePt) * LINE_HEIGHT_EM * scale;
+  const lineHeightPx = ptToMm(element.fontSizePt) * (element.lineHeight ?? LINE_HEIGHT_EM) * scale;
   lines.forEach((line, index) => {
     canvas.fillText(line, drawX, yPx + index * lineHeightPx, boxPx);
   });
@@ -308,6 +318,10 @@ export function drawLabel(
       case "box":
         drawBox(canvas, element, scale);
         break;
+      case "organization_logo":
+        // The area stays white: this app has no organization logo to draw (pilot
+        // question П15), and a print without a logo leaves it empty too.
+        break;
     }
   }
 }
@@ -382,7 +396,11 @@ export async function compositeTextRasters(
     let raster: RasterResult | null;
     try {
       raster = await rasterizeText(text, {
-        fontFamily: PRINT_FONT_FAMILY,
+        fontFamily: element.fontFamily ?? PRINT_FONT_FAMILY,
+        ...(element.minFontSizePt === undefined
+          ? {}
+          : { minFontSizePx: ptToDots(element.minFontSizePt, spec.dpi) }),
+        ...(element.lineHeight === undefined ? {} : { lineHeight: element.lineHeight }),
         fontSizePx: ptToDots(element.fontSizePt, spec.dpi),
         bold: element.bold ?? false,
         maxWidthPx: maxWidthDots,

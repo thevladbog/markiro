@@ -49,6 +49,7 @@ afterEach(() => {
 
 function installOfferEditorApi({
   createStatus = 201,
+  createCode = "offer_conflict",
   retireOnRefresh = false,
   failCatalogRefresh = false,
   tenantItems = [TENANT_LIST_ITEM],
@@ -60,6 +61,7 @@ function installOfferEditorApi({
   requestOfferGate,
 }: {
   createStatus?: number;
+  createCode?: string;
   retireOnRefresh?: boolean;
   failCatalogRefresh?: boolean;
   tenantItems?: Array<Record<string, unknown>>;
@@ -175,7 +177,7 @@ function installOfferEditorApi({
         };
         calls.push({ method, path: url, body });
         if (createStatus === 403) return jsonResponse(403, { code: "forbidden" });
-        if (createStatus === 409) return jsonResponse(409, { code: "offer_conflict" });
+        if (createStatus === 409) return jsonResponse(409, { code: createCode });
         return jsonResponse(
           201,
           offerRecord({
@@ -523,6 +525,23 @@ describe("offer editor route", () => {
     );
     expect(api.calls()).toEqual([]);
     expect(screen.getByDisplayValue("15000.00")).toBeDefined();
+  });
+
+  it("explains that a tenant without a cabinet can be offered services only", async () => {
+    installOfferEditorApi({
+      createStatus: 409,
+      createCode: "catalog_kind_not_allowed_for_offline_tenant",
+    });
+    const user = userEvent.setup();
+    renderSaasApp({ initialEntry: `/offers/new?tenantId=${TENANT_ID}` });
+
+    await screen.findByRole("combobox", { name: "Тенант" });
+    await addPosition(user, "Базовый", "Базовый · plan-basic · v1");
+    await user.click(screen.getByRole("button", { name: "Создать черновик предложения" }));
+
+    expect((await screen.findByRole("alert")).textContent).toContain(
+      "У тенанта нет кабинета: ему можно продать только услуги.",
+    );
   });
 
   it("fetches and appends a prefilled tenant that is outside the first page", async () => {

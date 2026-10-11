@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildTenantAgreement } from "../src/documents/tenant-agreement.js";
 import type { TenantAgreementFields } from "../src/documents/tenant-agreement-fields.js";
+import { referredAs } from "../src/documents/tenant-agreement-ru.js";
 
 const ORG_CUSTOMER: TenantAgreementFields["customer"] = {
   kind: "legal_entity",
@@ -27,6 +28,14 @@ const IP_CUSTOMER: TenantAgreementFields["customer"] = {
   kpp: null,
   ogrn: "312770000000001",
 };
+
+const CONTRACTOR: NonNullable<TenantAgreementFields["contractor"]> = {
+  ...IP_CUSTOMER,
+  name: "ИП Богатырев Владислав Сергеевич",
+  inn: "230400000001",
+};
+
+const withName = (name: string): TenantAgreementFields["customer"] => ({ ...ORG_CUSTOMER, name });
 
 const flatten = (fields: TenantAgreementFields): string =>
   buildTenantAgreement(fields, "ru")
@@ -117,6 +126,37 @@ describe("buildTenantAgreement", () => {
     expect(text).not.toContain("[наименование, ИНН, адрес]");
   });
 
+  it("names the processor in the dative in appendix 3 · 1", () => {
+    const text = flatten({ customer: ORG_CUSTOMER, contractor: CONTRACTOR });
+    // "поручает ИП Богатырев …, ИНН … обработку" left the processor in the
+    // nominative, so the sentence had no addressee.
+    expect(text).toContain(
+      "— поручает Исполнителю (ИП Богатырев Владислав Сергеевич, ИНН 230400000001) обработку перечисленных ниже персональных данных",
+    );
+    expect(text).not.toContain("поручает ИП Богатырев");
+  });
+
+  it("agrees the customer's participle in the preamble with its legal form", () => {
+    const suffix = "именуемое «Заказчик», а в лицензионных отношениях — «Лицензиат»";
+    expect(
+      flatten({ customer: withName("Общество с ограниченной ответственностью «Атолл»") }),
+    ).toContain(`, ${suffix}`);
+    expect(flatten({ customer: withName("Компания «Пример Лтд»") })).toContain(
+      "именуемая «Заказчик», а в лицензионных отношениях — «Лицензиат»",
+    );
+    expect(flatten({ customer: IP_CUSTOMER })).toContain(
+      "именуемый «Заказчик», а в лицензионных отношениях — «Лицензиат»",
+    );
+    // The contractor is always a sole proprietor, whatever the customer is.
+    expect(
+      flatten({ customer: withName("Общество с ограниченной ответственностью «Атолл»") }),
+    ).toContain("именуемый «Исполнитель»");
+    // Customers are routinely entered under the abbreviated form.
+    expect(flatten({ customer: ORG_CUSTOMER })).toContain(
+      "именуемое «Заказчик», а в лицензионных отношениях — «Лицензиат»",
+    );
+  });
+
   it("starts the requisites on their own page", () => {
     const section = buildTenantAgreement({ customer: ORG_CUSTOMER }, "ru").sections.find(
       (candidate) => candidate.id === "rekvizity",
@@ -144,5 +184,50 @@ describe("buildTenantAgreement", () => {
     expect(en.sections).toHaveLength(
       buildTenantAgreement({ customer: ORG_CUSTOMER }, "ru").sections.length,
     );
+  });
+});
+
+describe("referredAs", () => {
+  it.each([
+    ["Общество с ограниченной ответственностью «Атолл»", "именуемое"],
+    ["Акционерное общество «Завод»", "именуемое"],
+    ["Публичное акционерное общество «Сбербанк России»", "именуемое"],
+    ["Товарищество собственников жилья «Дом»", "именуемое"],
+    ["Партнёрство «Союз»", "именуемое"],
+    ["ООО «Пример»", "именуемое"],
+    ["АО «Завод»", "именуемое"],
+    ["ПАО «Сбербанк России»", "именуемое"],
+    ["Компания «Пример Лтд»", "именуемая"],
+    ["Фирма «Весна»", "именуемая"],
+    ["Корпорация «Ростех»", "именуемая"],
+    ["Организация «Пример»", "именуемая"],
+  ])("reads %s as %s", (name, participle) => {
+    expect(referredAs(withName(name))).toBe(participle);
+  });
+
+  it("matches the legal form regardless of case and ё", () => {
+    // ЕГРЮЛ spells full names in capitals, and «партнерство» is routinely typed without ё.
+    expect(referredAs(withName("ОБЩЕСТВО С ОГРАНИЧЕННОЙ ОТВЕТСТВЕННОСТЬЮ «АТОЛЛ»"))).toBe(
+      "именуемое",
+    );
+    expect(referredAs(withName("  Партнерство «Союз»"))).toBe("именуемое");
+  });
+
+  it("matches a whole word, not a prefix of a longer one", () => {
+    expect(referredAs(withName("Фирмачи «Пример»"))).toBe("именуемый");
+    // «АО» is two letters, so a name merely starting with them must not match.
+    expect(referredAs(withName("Аорта «Мед»"))).toBe("именуемый");
+  });
+
+  it("keeps the masculine form for a person and for an unknown legal form", () => {
+    expect(referredAs(IP_CUSTOMER)).toBe("именуемый");
+    expect(referredAs({ ...IP_CUSTOMER, kind: "individual", name: "Иванова Анна Петровна" })).toBe(
+      "именуемый",
+    );
+    // A sole proprietor named like an organisation is still a person.
+    expect(referredAs({ ...IP_CUSTOMER, name: "Общество «Не юрлицо»" })).toBe("именуемый");
+    expect(referredAs(withName("Кооператив «Урожай»"))).toBe("именуемый");
+    // The blank template has no name to agree with.
+    expect(referredAs(withName(""))).toBe("именуемый");
   });
 });

@@ -1,9 +1,12 @@
+import { parseLabelTemplate, projectThermalLabelForClient } from "@markiro/domain";
+import { projectThermalInventoryManifest } from "../inventories/thermal-label-policy";
 import { and, asc, eq } from "drizzle-orm";
 import { z } from "zod";
 import { schema } from "@markiro/db";
 import {
   grantEventBudget,
   inventorySnapshotContentDigest,
+  parsePalletSheetSnapshot,
   type BudgetLine,
   type GrantEventType,
   type GrantOwner,
@@ -12,6 +15,24 @@ import type { SubscriptionTransaction } from "../../subscriptions/entitlements.t
 import { entitlementDigest } from "../../subscriptions/entitlement-snapshot-reader";
 import { parseStationInventoryManifest } from "../inventories/station-inventory.dto";
 import type { ApprovedGrantPolicy, GrantTaskBounds } from "./grant-policy";
+import { assertPalletSheetEntry, supportsPalletSheetClient } from "../shifts/pallet-sheet-policy";
+
+export function frozenPalletSheetScope(
+  shift: {
+    palletLabelTemplateId: string | null;
+    palletSheetTemplateId: string | null;
+    palletSheetTemplateSnapshot: unknown;
+  },
+  deviceKind: string,
+  capabilities?: string,
+) {
+  const caller = { kind: "device" as const, deviceKind, capabilities };
+  assertPalletSheetEntry(shift, caller);
+  if (!shift.palletSheetTemplateId || !supportsPalletSheetClient(caller)) return {};
+  const snapshot = parsePalletSheetSnapshot(shift.palletSheetTemplateSnapshot);
+  if (snapshot.id !== shift.palletSheetTemplateId) throw new Error("Invalid pallet sheet binding");
+  return { palletSheetTemplateId: snapshot.id, palletSheetTemplateSnapshot: snapshot };
+}
 
 export interface FrozenGrantTask {
   taskKind: "shift" | "inventory" | "pickup";
@@ -64,6 +85,7 @@ export async function freezeGrantTask(
   owner: GrantOwner,
   reference: { taskKind: FrozenGrantTask["taskKind"]; taskId: string },
   policy: ApprovedGrantPolicy,
+  capabilities?: string,
 ): Promise<Denial | (Ready & { sourceId: string })> {
   const missing: Denial = { status: "denied", reason: "task_not_frozen" };
   let scope: Record<string, unknown>;
@@ -245,7 +267,7 @@ export async function freezeGrantTask(
         .for("share");
       if (inventorySnapshotContentDigest(codes) !== manifest.contentDigest) return missing;
       scope = serializable({
-        manifest,
+        manifest: projectThermalInventoryManifest(manifest, capabilities),
         snapshotId: snapshot.id,
         combinedDigest: snapshot.combinedDigest,
         contentDigest: manifest.contentDigest,
@@ -272,6 +294,12 @@ export async function freezeGrantTask(
         )
         .for("update");
       if (!shift || shift.status !== "active") return missing;
+      let sheetScope;
+      try {
+        sheetScope = frozenPalletSheetScope(shift, device.kind, capabilities);
+      } catch {
+        return missing;
+      }
       const [participant] = await tx
         .select()
         .from(schema.shiftDeviceParticipants)
@@ -306,7 +334,18 @@ export async function freezeGrantTask(
           )
           .for("share");
         if (!template) return missing;
-        templates.push({ id: template.id, spec: template.spec });
+        try {
+          const thermal = id === shift.boxLabelTemplateId || id === shift.palletLabelTemplateId;
+          const parsed = thermal ? parseLabelTemplate(template.spec) : null;
+          const projected = parsed ? projectThermalLabelForClient(parsed, capabilities) : null;
+          // Preserve historical raw V1 facts when no read projection is needed.
+          templates.push({
+            id: template.id,
+            spec: projected && projected !== parsed ? projected : template.spec,
+          });
+        } catch {
+          return missing;
+        }
       }
       const [product] = await tx
         .select()
@@ -349,6 +388,7 @@ export async function freezeGrantTask(
           labelTemplateId: shift.labelTemplateId,
           boxLabelTemplateId: shift.boxLabelTemplateId,
           palletLabelTemplateId: shift.palletLabelTemplateId,
+          ...sheetScope,
           validationPrintMode: shift.validationPrintMode,
           allowPreviouslyAcceptedCodes: shift.allowPreviouslyAcceptedCodes,
           validationPrintVerification: shift.validationPrintVerification,

@@ -8,6 +8,13 @@ import retrofit2.http.Query
 
 /** Station-only endpoints; the handheld authenticates exactly like a station (`x-api-key`). */
 interface StationApi {
+    @GET("station/handheld-branding")
+    suspend fun printBranding(): kotlinx.serialization.json.JsonObject
+
+    @retrofit2.http.Streaming
+    @GET("station/handheld-branding/logo/{revision}")
+    suspend fun printBrandingLogo(@Path("revision") revision: String): okhttp3.ResponseBody
+
     @GET("station/device-replacement-intent/v1")
     suspend fun replacementIntent(@Query("knownIntentId") knownIntentId: String? = null): kotlinx.serialization.json.JsonObject?
 

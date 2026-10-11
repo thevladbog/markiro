@@ -1,15 +1,19 @@
 import { useState, type ReactElement } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, Button, Card, Input } from "@markiro/ui";
-import type { PairOutcome } from "../lib/bridge.js";
+import { StorageNotices } from "../components/StorageNotices.js";
+import type { PairOutcome, StorageNotice } from "../lib/bridge.js";
+import { concernsPairing } from "../lib/storage-notices.js";
 
 interface PairingProps {
   hostname: string;
   onPair: (code: string) => Promise<PairOutcome>;
   onPaired?: () => void;
+  /** All current notices; the screen shows only the ones about pairing. */
+  notices?: readonly StorageNotice[];
 }
 
-export function Pairing({ hostname, onPair, onPaired }: PairingProps): ReactElement {
+export function Pairing({ hostname, onPair, onPaired, notices = [] }: PairingProps): ReactElement {
   const { t } = useTranslation();
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
@@ -37,6 +41,7 @@ export function Pairing({ hostname, onPair, onPaired }: PairingProps): ReactElem
     <Card title={t("pairing.title")} className="signer-pairing">
       <div className="signer-pairing__content">
         <p className="signer-pairing__hint">{t("pairing.hint", { hostname })}</p>
+        <StorageNotices notices={notices.filter(concernsPairing)} />
         <Input
           label={t("pairing.codeLabel")}
           value={code}

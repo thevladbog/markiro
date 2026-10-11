@@ -5,7 +5,7 @@ const port = 61_594;
 
 export default defineConfig({
   testDir: "./tests",
-  testMatch: "production.visual.spec.ts",
+  testMatch: ["production.visual.spec.ts", "box-sell.spec.ts"],
   outputDir: join(import.meta.dirname, "../../.superpowers/sdd/production-browser-output"),
   fullyParallel: false,
   forbidOnly: Boolean(process.env.CI),

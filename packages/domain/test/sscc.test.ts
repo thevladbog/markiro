@@ -83,6 +83,7 @@ describe("parseScannedSscc", () => {
     [`]C1(00)${sscc}`, sscc],
   ])("normalizes scanner SSCC %s", (raw, expected) => {
     expect(parseScannedSscc(raw)).toBe(expected);
+    expect(parseScannedSscc(raw, { allowLegacyBangOnePrefix: true })).toBe(expected);
   });
 
   it.each([
@@ -106,6 +107,25 @@ describe("parseScannedSscc", () => {
 
   it("rejects an empty payload", () => {
     expect(parseScannedSscc("")).toBeNull();
+  });
+
+  it.each([`!1${sscc}`, `!100${sscc}`, `!1(00)${sscc}`, `]C1!100${sscc}`, `]C1!1(00)${sscc}`])(
+    "accepts legacy label prefix only when explicitly enabled: %s",
+    (raw) => {
+      expect(parseScannedSscc(raw)).toBeNull();
+      expect(parseScannedSscc(raw, { allowLegacyBangOnePrefix: true })).toBe(sscc);
+    },
+  );
+
+  it.each([
+    `!100${sscc.slice(0, -1)}0`,
+    `!100${sscc}0`,
+    `!101${sscc}`,
+    `!1!100${sscc}`,
+    `00!1${sscc}`,
+    "!1",
+  ])("still rejects malformed legacy labels: %s", (raw) => {
+    expect(parseScannedSscc(raw, { allowLegacyBangOnePrefix: true })).toBeNull();
   });
 
   it("rejects a wrong application identifier", () => {

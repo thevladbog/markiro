@@ -1,0 +1,44 @@
+[
+  {
+    "id": "b0000000-0000-4000-8000-000000000001",
+    "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "sscc": "046006820000015000",
+    "openedAt": "2026-10-08T06:05:12.031Z",
+    "closedAt": "2026-10-08T06:06:01.118Z",
+    "disassembledAt": null,
+    "palletId": "a0000000-0000-4000-8000-000000000001",
+    "units": 2,
+    "itemCountReported": 2,
+    "digestMatches": true,
+    "printVerifiedAt": "2026-10-08T06:06:09.540Z",
+    "printSkippedAt": null
+  },
+  {
+    "id": "b0000000-0000-4000-8000-000000000002",
+    "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "sscc": "046006820000015017",
+    "openedAt": "2026-10-08T06:06:40.507Z",
+    "closedAt": "2026-10-08T06:07:15.902Z",
+    "disassembledAt": null,
+    "palletId": null,
+    "units": 1,
+    "itemCountReported": 1,
+    "digestMatches": true,
+    "printVerifiedAt": null,
+    "printSkippedAt": "2026-10-08T06:07:20.001Z"
+  },
+  {
+    "id": "b0000000-0000-4000-8000-000000000003",
+    "deviceId": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+    "sscc": null,
+    "openedAt": "2026-10-08T06:08:02.244Z",
+    "closedAt": null,
+    "disassembledAt": null,
+    "palletId": null,
+    "units": 0,
+    "itemCountReported": null,
+    "digestMatches": null,
+    "printVerifiedAt": null,
+    "printSkippedAt": null
+  }
+]

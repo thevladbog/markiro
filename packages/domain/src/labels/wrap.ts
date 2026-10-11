@@ -1,3 +1,4 @@
+import { DomainError } from "../errors.js";
 /**
  * Width-bounded line breaking for label text.
  *
@@ -170,4 +171,29 @@ export function estimatedLineCount(
   if (maxWidthMm === undefined || !(maxWidthMm > 0)) return 1;
   const measure = (s: string) => estimatedTextWidthMm(s, fontSizePt);
   return wrapTextToWidth(text, measure, maxWidthMm, limit).length;
+}
+
+/** Sheet printing never turns missing text into a plausible truncated value. */
+export function wrapTextToWidthStrict(
+  text: string,
+  measure: (s: string) => number,
+  maxWidth: number,
+  maxLines: number,
+): string[] {
+  if (
+    !Number.isFinite(maxWidth) ||
+    maxWidth <= 0 ||
+    !Number.isSafeInteger(maxLines) ||
+    maxLines < 1
+  )
+    throw new DomainError("LABEL_TEXT_OVERFLOW", "Invalid text layout bounds");
+  const lines = text
+    .split(/\r?\n/)
+    .flatMap((line) => wrapTextToWidth(line, measure, maxWidth, Number.MAX_SAFE_INTEGER));
+  if (lines.length > maxLines || lines.some((line) => measure(line) > maxWidth))
+    throw new DomainError(
+      "LABEL_TEXT_OVERFLOW",
+      "Complete text does not fit its declared lines and width",
+    );
+  return lines;
 }

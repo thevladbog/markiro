@@ -1,5 +1,6 @@
 import type { RouteObject } from "react-router";
 
+import { BackupsPage } from "./backups/BackupsPage.js";
 import { CounterpartiesPage } from "./counterparties/CounterpartiesPage.js";
 import { DevicesPage } from "./devices/DevicesPage.js";
 import { LinesPage } from "./lines/LinesPage.js";
@@ -9,6 +10,7 @@ import { OperatorsPage } from "./operators/OperatorsPage.js";
 import { OrgProfilePage } from "./org/OrgProfilePage.js";
 import { ProductsPage } from "./products/ProductsPage.js";
 import { RequireRole } from "./RequireRole.js";
+import { ShiftCardPage } from "./shifts/ShiftCardPage.js";
 import { ShiftsPage } from "./shifts/ShiftsPage.js";
 import { SsccPage } from "./sscc/SsccPage.js";
 import { TemplateDefaultsPage } from "./templates/TemplateDefaultsPage.js";
@@ -32,6 +34,7 @@ export const officeRoutes: RouteObject[] = [
       { path: "counterparties", element: <CounterpartiesPage /> },
       { path: "lines", element: <LinesPage /> },
       { path: "shifts", element: <ShiftsPage /> },
+      { path: "shifts/:id", element: <ShiftCardPage /> },
       {
         path: "operators",
         element: (
@@ -62,6 +65,7 @@ export const officeRoutes: RouteObject[] = [
           </RequireRole>
         ),
       },
+      { path: "backups", element: <BackupsPage /> },
     ],
   },
 ];

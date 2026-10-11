@@ -24,6 +24,8 @@ export interface CategoryBoxLabelTemplateDefaultDto {
 export type CategoryPalletLabelTemplateDefaultDto = CategoryBoxLabelTemplateDefaultDto;
 
 export interface OrgProfileDto {
+  defaultPalletSheetTemplateId?: string | null;
+  categoryPalletSheetTemplateDefaults?: CategoryPalletLabelTemplateDefaultDto[];
   defaultBoxLabelTemplateId: string | null;
   categoryBoxLabelTemplateDefaults: CategoryBoxLabelTemplateDefaultDto[];
   defaultPalletLabelTemplateId: string | null;
@@ -42,6 +44,8 @@ export interface OrgProfileDto {
 export type PutOrgProfileInput = Partial<
   Pick<
     OrgProfileDto,
+    | "defaultPalletSheetTemplateId"
+    | "categoryPalletSheetTemplateDefaults"
     | "defaultBoxLabelTemplateId"
     | "categoryBoxLabelTemplateDefaults"
     | "defaultPalletLabelTemplateId"
@@ -147,6 +151,7 @@ export function useUploadOrganizationLogo(): UseMutationResult<OrganizationLogoD
       queryClient.setQueryData<OrgProfileDto>(ORG_PROFILE_QUERY_KEY, (current) =>
         current ? { ...current, ...logo } : current,
       );
+      void queryClient.invalidateQueries({ queryKey: ORG_PROFILE_QUERY_KEY });
     },
   });
 }
@@ -159,6 +164,7 @@ export function useDeleteOrganizationLogo(): UseMutationResult<void, Error, void
       queryClient.setQueryData<OrgProfileDto>(ORG_PROFILE_QUERY_KEY, (current) =>
         current ? { ...current, logoUrl: null, logoRevision: null } : current,
       );
+      void queryClient.invalidateQueries({ queryKey: ORG_PROFILE_QUERY_KEY });
     },
   });
 }

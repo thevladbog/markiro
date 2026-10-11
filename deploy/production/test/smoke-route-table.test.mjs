@@ -818,6 +818,32 @@ test("landing smoke permits the exact stable Station download as an outbound lin
   );
 });
 
+test("landing smoke permits the exact sales Telegram link as an outbound link", async () => {
+  const client = smokeClient();
+  const original = client.request;
+  client.request = async (url, init) => {
+    const parsed = new URL(url);
+    if (parsed.hostname === "markiro.example" && parsed.pathname === "/")
+      return landingResponse({
+        body: landingShell().replace(
+          "</main>",
+          '<a href="https://t.me/thevladbog">Telegram @thevladbog</a></main>',
+        ),
+        headers: { "cache-control": "no-cache", "content-type": "text/html" },
+      });
+    return original(url, init);
+  };
+
+  await runPublicSmoke(
+    {
+      adminBaseUrl: "https://app.markiro.example",
+      kioskBaseUrl: "https://kiosk.markiro.example",
+      landingBaseUrl: "https://markiro.example",
+    },
+    client,
+  );
+});
+
 test("landing smoke permits only the public canonical URL outside the deployment origin", async (t) => {
   for (const [name, mutate, expected] of [
     [
@@ -833,6 +859,16 @@ test("landing smoke permits only the public canonical URL outside the deployment
           "</main>",
           '<a href="https://releases.markiro.app/station/other">Station</a></main>',
         ),
+      /external origin/,
+    ],
+    [
+      "different Telegram account",
+      (body) => body.replace("</main>", '<a href="https://t.me/someone-else">Telegram</a></main>'),
+      /external origin/,
+    ],
+    [
+      "sales Telegram link used as an image",
+      (body) => body.replace("</main>", '<img src="https://t.me/thevladbog" alt=""></main>'),
       /external origin/,
     ],
     [

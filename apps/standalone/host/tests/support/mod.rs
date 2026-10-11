@@ -5,6 +5,7 @@
 #![allow(dead_code)]
 
 pub mod app;
+pub mod backup;
 
 use std::sync::Arc;
 

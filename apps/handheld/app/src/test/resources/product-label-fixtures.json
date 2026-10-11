@@ -1674,6 +1674,98 @@
         "verificationOutcome": "pending",
         "status": "awaiting_verification"
       }
+    },
+    {
+      "name": "raster verified without a printer language",
+      "verification": "required",
+      "events": [
+        {
+          "eventId": "77777777-7777-4777-8777-000000000001",
+          "jobId": "11111111-1111-4111-8111-111111111111",
+          "attemptId": "22222222-2222-4222-8222-222222222222",
+          "sequence": 1,
+          "shiftId": "44444444-4444-4444-8444-444444444444",
+          "codeHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "acceptedAt": "2026-09-11T08:00:00.000Z",
+          "policyRevision": "66666666-6666-4666-8666-666666666666",
+          "templateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "payloadDigest": "e357543304454bfbe9abee2d0522a0965ae0ba75af4a51b2bf5288aa3efac7bb",
+          "operatorId": "55555555-5555-4555-8555-555555555555",
+          "occurredAt": "2026-09-11T08:00:01.000Z",
+          "kind": "prepared",
+          "attemptNo": 1,
+          "reason": null,
+          "dpi": 203,
+          "bytesDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "printFormat": "mono-raster-v1"
+        },
+        {
+          "eventId": "77777777-7777-4777-8777-000000000002",
+          "jobId": "11111111-1111-4111-8111-111111111111",
+          "attemptId": "22222222-2222-4222-8222-222222222222",
+          "sequence": 2,
+          "shiftId": "44444444-4444-4444-8444-444444444444",
+          "codeHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "acceptedAt": "2026-09-11T08:00:00.000Z",
+          "policyRevision": "66666666-6666-4666-8666-666666666666",
+          "templateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "payloadDigest": "e357543304454bfbe9abee2d0522a0965ae0ba75af4a51b2bf5288aa3efac7bb",
+          "operatorId": "55555555-5555-4555-8555-555555555555",
+          "occurredAt": "2026-09-11T08:00:01.000Z",
+          "kind": "sending"
+        },
+        {
+          "eventId": "77777777-7777-4777-8777-000000000003",
+          "jobId": "11111111-1111-4111-8111-111111111111",
+          "attemptId": "22222222-2222-4222-8222-222222222222",
+          "sequence": 3,
+          "shiftId": "44444444-4444-4444-8444-444444444444",
+          "codeHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "acceptedAt": "2026-09-11T08:00:00.000Z",
+          "policyRevision": "66666666-6666-4666-8666-666666666666",
+          "templateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "payloadDigest": "e357543304454bfbe9abee2d0522a0965ae0ba75af4a51b2bf5288aa3efac7bb",
+          "operatorId": "55555555-5555-4555-8555-555555555555",
+          "occurredAt": "2026-09-11T08:00:01.000Z",
+          "kind": "sent"
+        },
+        {
+          "eventId": "77777777-7777-4777-8777-000000000004",
+          "jobId": "11111111-1111-4111-8111-111111111111",
+          "attemptId": "22222222-2222-4222-8222-222222222222",
+          "sequence": 4,
+          "shiftId": "44444444-4444-4444-8444-444444444444",
+          "codeHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+          "acceptedAt": "2026-09-11T08:00:00.000Z",
+          "policyRevision": "66666666-6666-4666-8666-666666666666",
+          "templateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "payloadDigest": "e357543304454bfbe9abee2d0522a0965ae0ba75af4a51b2bf5288aa3efac7bb",
+          "operatorId": "55555555-5555-4555-8555-555555555555",
+          "occurredAt": "2026-09-11T08:00:01.000Z",
+          "kind": "verified",
+          "scannedPayloadDigest": "e357543304454bfbe9abee2d0522a0965ae0ba75af4a51b2bf5288aa3efac7bb"
+        }
+      ],
+      "invalidAt": null,
+      "projection": {
+        "jobId": "11111111-1111-4111-8111-111111111111",
+        "shiftId": "44444444-4444-4444-8444-444444444444",
+        "codeHash": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "acceptedAt": "2026-09-11T08:00:00.000Z",
+        "policyRevision": "66666666-6666-4666-8666-666666666666",
+        "templateDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "payloadDigest": "e357543304454bfbe9abee2d0522a0965ae0ba75af4a51b2bf5288aa3efac7bb",
+        "bytesDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "printFormat": "mono-raster-v1",
+        "dpi": 203,
+        "latestSequence": 4,
+        "attemptId": "22222222-2222-4222-8222-222222222222",
+        "attemptNo": 1,
+        "attemptState": "sent",
+        "verification": "required",
+        "verificationOutcome": "verified",
+        "status": "completed"
+      }
     }
   ],
   "compare": [

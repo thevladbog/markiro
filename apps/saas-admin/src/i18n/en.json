@@ -100,6 +100,7 @@
     "openHtml": "Open HTML",
     "downloadPdf": "Download PDF",
     "htmlHint": "Ready HTML can be printed using the browser.",
+    "popupBlocked": "The browser blocked the print form. Allow pop-ups and try again.",
     "fileState": {
       "ready": "Ready",
       "pending": "Generating",
@@ -385,6 +386,12 @@
     }
   },
   "offers": {
+    "createOfflineTenant": {
+      "button": "Create tenant without cabinet",
+      "title": "Tenant without cabinet",
+      "hint": "No owner, email, or demo is created; fill in the requisites on the tenant card.",
+      "submit": "Create tenant"
+    },
     "title": "Commercial offers",
     "description": "Commercial terms before an invoice is issued.",
     "registryEyebrow": "Sales pipeline",
@@ -624,7 +631,8 @@
       "capacity_change": "Capacity change",
       "additional_service": "Additional service",
       "documents": "Documents",
-      "other": "Other"
+      "other": "Other",
+      "support": "Support"
     },
     "status": {
       "new": "New",
@@ -1056,7 +1064,10 @@
       "shift_operators": "Shift operators",
       "inventories": "Inventories",
       "summary": "Summary",
-      "commerceml": "CommerceML"
+      "commerceml": "CommerceML",
+      "usage": "Platform usage",
+      "quality": "Quality and offline behaviour",
+      "commercial": "Commercial activity"
     },
     "basis": {
       "events": "Events in period",
@@ -1108,8 +1119,9 @@
     "help": {
       "title": "What the export means",
       "metrics": "Confirmed labels use print_verified_at; reprint requests are separate facts. Inventory values are current projections, not historical snapshots.",
-      "metadata": "The ZIP includes CSV and definitions.json with parameters, snapshot time and definitions. Dates are inclusive in the selected timezone; event timestamps remain UTC.",
-      "commerceml": "CommerceML reports the journal and current temporary upload presence. A historical source file can be unavailable and is not reconstructed."
+      "metadata": "The ZIP includes data.csv and metadata.json with parameters, snapshot time, definitions version, the SHA-256 of data.csv and definitions. Dates are inclusive in the selected timezone; event timestamps remain UTC.",
+      "commerceml": "CommerceML reports the journal and current temporary upload presence. A historical source file can be unavailable and is not reconstructed.",
+      "evidence": "Usage, quality and commercial exports have one row per tenant and local day (in aggregate mode, one row per local day summed across the selected tenants); a day with no recorded facts has no row. Values are additive counts, and amounts are RUB kopecks. Figures can be restated by late device sync, so compare exports by snapshot time and definitions version."
     },
     "history": "Generation history",
     "previous": "Previous",
@@ -1129,7 +1141,12 @@
     "createError": "Could not queue the report. The delivery can be retried safely.",
     "loadError": "Could not load report history.",
     "validationError": "Check required fields, period, timezone, and filter compatibility.",
-    "downloadError": "Could not obtain a link. History was refreshed; check status and retry."
+    "downloadError": "Could not obtain a link. History was refreshed; check status and retry.",
+    "privacyHelpTenant": {
+      "identified": "Includes tenant names and IDs. Requires the identified-data capability.",
+      "pseudonymous": "Tenants are replaced with export-local labels (tenant-01, tenant-02…). Volumes can still identify a tenant.",
+      "aggregate": "Tenant columns are removed and days are summed across the selected tenants. A small selection can still permit inference."
+    }
   },
   "shell": {
     "routeLoading": "Loading section",
@@ -1154,6 +1171,7 @@
     "acts": "Acts",
     "payments": "Payments",
     "billingRequests": "Requests",
+    "supportEpisodes": "Support chats",
     "monitoring": "Monitoring",
     "nationalCatalog": "National Catalog",
     "team": "Team",
@@ -1649,6 +1667,9 @@
       "project": "Project",
       "session": "Session",
       "package": "Package",
+      "service": "Service",
+      "right": "Right",
+      "work": "Work",
       "other": "Other"
     },
     "vat": {
@@ -1676,6 +1697,7 @@
     "validation": {
       "required": "This field is required",
       "money": "Enter an amount in 0.00 format",
+      "code": "Item code: lowercase Latin letters, digits and hyphens, starting with a letter, up to 64 characters",
       "positiveOrEmpty": "Enter a positive integer or leave the field empty",
       "positive": "Enter a positive integer",
       "integer32OrEmpty": "Enter an integer from 1 to 2147483647 or leave the field empty",
@@ -1691,6 +1713,7 @@
     "form": {
       "identity": "Version parameters",
       "code": "Item code",
+      "codeHint": "Lowercase Latin letters, digits and hyphens; must start with a letter. It cannot be changed later.",
       "nameRu": "Russian name",
       "nameEn": "English name",
       "descriptionRu": "Russian description",
@@ -1825,6 +1848,7 @@
     "createForm": {
       "title": "New tenant",
       "ownerTitle": "Organization and first owner",
+      "offlineTitle": "Organization",
       "demoNotice": "The demo starts only after owner activation. No password is created here and no activation link is shown.",
       "name": "Name",
       "slug": "Slug",
@@ -1835,8 +1859,13 @@
         "nameTooLong": "Use no more than 300 characters",
         "slugTooLong": "Use no more than 128 characters",
         "slug": "Use lowercase Latin letters, digits, and hyphens only",
-        "email": "Enter a valid address"
-      }
+        "email": "Enter a valid address",
+        "emailNotAllowed": "A tenant without a cabinet takes no email"
+      },
+      "cabinetAccess": "Cabinet access",
+      "cabinetAccessHint": "Clear this for an offline-product customer: no cabinet, owner or demo is created, and access can be granted later.",
+      "offlineNotice": "Tenant without a cabinet: no owner, activation email or demo is created. Licenses are unavailable, only services. You send invoices and acts yourself.",
+      "submitOffline": "Create tenant without a cabinet"
     },
     "unsaved": {
       "title": "Unsaved changes",
@@ -1964,7 +1993,17 @@
         "quantity": "Quantity: {{quantity}}"
       },
       "historyTitle": "Subscription history",
-      "historyEmpty": "No events yet"
+      "historyEmpty": "No events yet",
+      "offline": {
+        "title": "Cabinet not granted",
+        "body": "This tenant has no owner or cabinet users. Access can be granted later: the owner will receive an activation email, and the default demo subscription is created with the grant. The demo starts when the owner activates.",
+        "grant": "Grant cabinet access",
+        "email": "Owner email",
+        "submit": "Grant and send activation",
+        "granted": "Access granted; the activation email is queued.",
+        "created": "Tenant created without a cabinet.",
+        "documentsNotice": "The platform sends this tenant no documents or notifications. Download invoices and acts and send them to the customer yourself."
+      }
     },
     "usage": {
       "lines": "Lines",
@@ -2069,7 +2108,15 @@
       "subscription_addon_timeline_changed": "The add-on timeline changed. Refresh the page and review again.",
       "create_failed": "Could not create the tenant",
       "renew_failed": "Could not renew activation",
-      "assignment_failed": "Could not save the assignment"
+      "assignment_failed": "Could not save the assignment",
+      "cabinet_access_already_enabled": "This tenant already has cabinet access",
+      "tenant_cabinet_access_mismatch": "A tenant with this slug already exists with a different cabinet access mode",
+      "grant_owner_conflict": "This tenant already has another cabinet member",
+      "tenant_not_found": "Tenant not found",
+      "grant_failed": "Could not grant cabinet access"
+    },
+    "cabinet": {
+      "none": "No cabinet"
     }
   },
   "commercial": {
@@ -2108,6 +2155,7 @@
       "commercial_plan_quantity_invalid": "A plan quantity must be 1.",
       "commercial_amount_out_of_range": "A line, tax or document amount exceeds the supported limit. Reduce the price or quantity.",
       "commercial_line_terms_invalid": "Review the commercial subject and license period.",
+      "catalog_kind_not_allowed_for_offline_tenant": "This tenant has no cabinet: only services can be ordered for it.",
       "commercial_subject_required": "Select the commercial subject.",
       "document_name_required": "Enter the document name."
     }
@@ -2342,6 +2390,41 @@
     "confirmUncertainRateLimit": "Too many requests. The previous confirmation’s outcome is still unknown. Wait and retry the same confirmation.",
     "retryConfirm": "Retry confirmation",
     "successRefreshError": "The prepared model was saved. Current access is unchanged. The displayed data could not be refreshed."
+  },
+  "support": {
+    "title": "Support chats",
+    "episode": "Support conversation",
+    "back": "Back to conversations",
+    "tenant": "Organization ID",
+    "filter": "Show",
+    "question": "Question",
+    "empty": "No conversations yet",
+    "more": "Next page",
+    "loading": "Loading conversation…",
+    "loadError": "Could not load conversation",
+    "retry": "Retry",
+    "forbidden": "No access to support chats",
+    "history": "Public conversation",
+    "older": "Earlier messages",
+    "olderError": "Could not load earlier messages.",
+    "retryOlder": "Retry loading",
+    "request": "Request",
+    "propose": "Propose a support request",
+    "proposalTitle": "Request title",
+    "proposalSummary": "Short description",
+    "actionError": "Could not complete the action. Check your connection.",
+    "syncPending": "History is syncing",
+    "syncError": "History sync failed",
+    "noticeReview": "This history lacks a confirmed access notice. An operator must review it; retrying sync cannot restore consent.",
+    "retrySync": "Retry sync",
+    "side": { "customer": "Customer", "operator": "Operator" },
+    "proposal": {
+      "pending": "Awaiting customer decision",
+      "accepted": "Customer accepted",
+      "declined": "Customer declined"
+    },
+    "transcript": "Request conversation",
+    "transcriptEmpty": "History has not synced yet"
   },
   "deviceReplacement": {
     "title": "Device replacement",

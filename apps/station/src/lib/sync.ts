@@ -1,3 +1,5 @@
+import { purgeWarehouseJobs } from "./warehouse-reprint/retention.js";
+import { syncWarehouseEvents } from "./warehouse-reprint/sync.js";
 import {
   applyValidationOutcomes,
   parseValidationOutcomes,
@@ -18,7 +20,7 @@ import {
 } from "./offline-grants/evidence-store.js";
 import { readStationChannelEvidence } from "./offline-grants/scan-evidence.js";
 import type { SavedStationEvidenceLink } from "./offline-grants/evidence.js";
-import { deviceRecoveryAllowsWork } from "./device-recovery.js";
+import { AUTHORIZED_CREDENTIAL_OWNERS_SQL, deviceRecoveryAllowsWork } from "./device-recovery.js";
 import { purgeCompletedProductLabelJobs } from "./product-labels/retention.js";
 import {
   MAX_BOX_CLOSURES_PER_SYNC_BATCH,
@@ -1308,6 +1310,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
     ]);
     const boxPending = boxPendingRows[0]?.n ?? 0;
     const palletPending = palletPendingRows[0]?.n ?? 0;
+    const [warehousePending] = owner
+      ? await deps.exec.all<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM warehouse_reprint_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'`,
+          [owner],
+        )
+      : [];
     const pending =
       scanPending +
       exceptionPending +
@@ -1315,7 +1323,8 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
       (closePending[0]?.n ?? 0) +
       boxPending +
       palletPending +
-      labels.count;
+      labels.count +
+      (warehousePending?.n ?? 0);
     // Nothing queued is never "stuck", however long the link has been down.
     let stuck = false;
     if (pending > 0) {
@@ -1651,6 +1660,41 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             }
             if (credentialGeneration.sealed) break;
             continue;
+          }
+          if (owner && !pauseInvalidated() && !credentialGeneration.sealed) {
+            const warehouseExec: SqlExecutor = {
+              ...deps.exec,
+              all: deps.exec.all.bind(deps.exec),
+              run: async (sql, params) => {
+                if (pauseInvalidated()) throw new Error("warehouse sync retired");
+                const lease = acquireCredentialCommitLease(credentialGeneration);
+                if (!lease) throw new Error("warehouse credential sealed");
+                try {
+                  await deps.exec.run(sql, params);
+                } finally {
+                  lease.release();
+                }
+              },
+            };
+            try {
+              await purgeWarehouseJobs(
+                warehouseExec,
+                owner,
+                new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+              );
+              while (
+                await syncWarehouseEvents(
+                  warehouseExec,
+                  deps.client,
+                  owner,
+                  () => !stopped && !pauseInvalidated() && !credentialGeneration.sealed,
+                )
+              ) {
+                /* Drain immutable prefixes only. */
+              }
+            } catch {
+              console.warn("station: warehouse print history retained for retry");
+            }
           }
           break;
         }
@@ -2175,6 +2219,7 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
               undefined,
               200,
               new Date(now() - 120_000).toISOString(),
+              () => !pauseInvalidated() && !credentialGeneration.sealed,
             );
             if (facts.length > 0 && !pauseInvalidated() && !credentialGeneration.sealed) {
               const raw = await deps.client.post("/station/boxes/reconciliation", {
@@ -2200,7 +2245,12 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
                         credentialGeneration,
                         owner,
                       );
-                      await applyBoxReconciliationResults(writer, facts, response.results);
+                      await applyBoxReconciliationResults(
+                        writer,
+                        facts,
+                        response.results,
+                        () => !pauseInvalidated() && !credentialGeneration.sealed,
+                      );
                       if (response.results.some((result) => result.status === "replay_required"))
                         requested = true;
                       else if (facts.length === 200) requested = true;
