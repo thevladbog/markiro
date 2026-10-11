@@ -18,7 +18,15 @@ import {
   SHIFT_PREFIX_SQL,
   UNSENT_COUNT_SQL,
 } from "../src/floor/outbox-status.js";
-import { REFUSED_CLOSES_SQL } from "../src/floor/close/shift-close.js";
+import { CLOSE_SUMMARY_SQL, REFUSED_CLOSES_SQL } from "../src/floor/close/shift-close.js";
+import {
+  BOX_ONTO_PALLET_SQL,
+  CLOSE_PALLET_SQL,
+  JOIN_PALLET_SQL,
+  OPEN_PALLET_GUARD_SQL,
+  OPEN_PALLET_SQL,
+} from "../src/floor/pallets/pallets.js";
+import { OPEN_JOB_READ_SQL } from "../src/floor/print/print-jobs.js";
 import { BLOCKS_WITH_ROOM_SQL } from "../src/floor/work/block-supply.js";
 import { BOX_CODES_SQL, CLOSED_BOX_SQL } from "../src/floor/work/box-close.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
@@ -773,6 +781,46 @@ describe("the shape of the production tables (migration 0006)", () => {
     for (const sql of [NEWEST_CODE_SCAN_SQL, BOX_STATE_SQL, LAST_BOX_JOB_SQL]) {
       expect(plan(sql), sql).not.toContain("TEMP B-TREE");
     }
+    // The pallets (plan ПЛ-Ц), read and written on every box close and render of a shift with
+    // pallets: the open pallet with its two counts through the shift's open pallet and the
+    // pallet's boxes; a pallet's close and a box joining it by their keys (the close counts the
+    // pallet's boxes through the same index); the shift close's check and its summary, which
+    // search the open pallet and its boxes instead of the pairing's boxes (the planner walked
+    // `floor_boxes_shift` of the whole pairing for a join); and the label queue's read through
+    // the shift's jobs, sorted for the few that wait: the one temporary structure allowed.
+    const OPEN_PALLET_INDEX = "floor_pallets_open (host_id=? AND device_id=? AND shift_id=?)";
+    const PALLET_BOXES_INDEX = "floor_boxes_pallet (pallet_id=?)";
+    const SHIFT_KEY = "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)";
+    for (const [sql, keys] of [
+      [OPEN_PALLET_SQL, [OPEN_PALLET_INDEX, PALLET_BOXES_INDEX]],
+      [CLOSE_PALLET_SQL, ["sqlite_autoindex_floor_pallets_1 (id=?)", PALLET_BOXES_INDEX]],
+      [JOIN_PALLET_SQL, ["sqlite_autoindex_floor_pallets_1 (id=?)"]],
+      [BOX_ONTO_PALLET_SQL, ["sqlite_autoindex_floor_boxes_1 (id=?)"]],
+      [OPEN_PALLET_GUARD_SQL, [SHIFT_KEY, OPEN_PALLET_INDEX, PALLET_BOXES_INDEX]],
+      [CLOSE_SUMMARY_SQL, [SHIFT_KEY, OPEN_PALLET_INDEX, PALLET_BOXES_INDEX]],
+      [OPEN_JOB_READ_SQL, ["floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"]],
+    ] as const) {
+      for (const key of keys) expect(plan(sql), sql).toContain(key);
+      expect(
+        plan(sql)
+          .split("\n")
+          .filter((step) => step.startsWith("SCAN ")),
+        sql,
+      ).toEqual([]);
+    }
+    expect(
+      plan(OPEN_JOB_READ_SQL)
+        .split("\n")
+        .filter((step) => step.includes("TEMP")),
+    ).toEqual(["USE TEMP B-TREE FOR ORDER BY"]);
+    for (const sql of [
+      OPEN_PALLET_SQL,
+      CLOSE_PALLET_SQL,
+      OPEN_PALLET_GUARD_SQL,
+      CLOSE_SUMMARY_SQL,
+    ]) {
+      expect(plan(sql), sql).not.toContain("floor_boxes_shift (host_id=? AND device_id=?)");
+    }
     // The scan pipeline's own reads and its one UPDATE, on every scan: the
     // station's registry of a code (the key of `floor_codes`), the open box of
     // a shift, and the open box's count by the box's own key.
@@ -1012,8 +1060,15 @@ describe("the shape of the production tables (migration 0006)", () => {
       CLOSED_BOXES_SQL,
       BOX_STATE_SQL,
       LAST_BOX_JOB_SQL,
+      OPEN_PALLET_SQL,
+      CLOSE_PALLET_SQL,
+      JOIN_PALLET_SQL,
+      BOX_ONTO_PALLET_SQL,
+      OPEN_PALLET_GUARD_SQL,
+      CLOSE_SUMMARY_SQL,
+      OPEN_JOB_READ_SQL,
     ];
-    expect(new Set(statements).size).toBe(13);
+    expect(new Set(statements).size).toBe(20);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
     // The retention pass's statements, as `tests/local_db.rs` plans them (the refused closes' read
     // among them): the long ones as constants, the deletes of the tables with an index by shift as literals, the three that read

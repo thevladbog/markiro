@@ -1,5 +1,6 @@
 import {
   boxLabelFields,
+  palletLabelFields,
   withPrinterDpi,
   type LabelField,
   type LabelTemplateSpec,
@@ -55,6 +56,36 @@ export function boxLabelData(
     operatorName,
     counterpartyName,
     closedAt: box.closedAt,
+    productionDate: shift.copy.productionDate,
+    shiftNumber: shift.copy.number,
+  });
+}
+
+/**
+ * The fields of a pallet's label (pilot spec §6.1, the domain's
+ * `palletLabelFields`) from the shift's snapshot, like a box's: the pallet's
+ * SSCC, its boxes (`qty.boxes`) and their units (`qty`), the time it closed —
+ * kept with the pallet, so a reprint stamps the same dates — and the
+ * operator who closed it.
+ */
+export function palletLabelData(
+  shift: WorkShift,
+  pallet: { sscc: string; boxCount: number; itemCount: number; closedAt: string },
+  operatorName: string | null,
+): LabelFields {
+  const { product, counterpartyName } = shift.snapshot;
+  return palletLabelFields({
+    sscc: pallet.sscc,
+    boxCount: pallet.boxCount,
+    itemCount: pallet.itemCount,
+    productName: product.name,
+    productPrintName: product.printName,
+    gtin14: product.gtin14,
+    egaisCode: null,
+    shelfLifeDays: product.shelfLifeDays,
+    operatorName,
+    counterpartyName,
+    closedAt: pallet.closedAt,
     productionDate: shift.copy.productionDate,
     shiftNumber: shift.copy.number,
   });

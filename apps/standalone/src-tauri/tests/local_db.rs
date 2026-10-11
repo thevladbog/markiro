@@ -984,6 +984,57 @@ const REFUSED_CLOSES: &str =
     "SELECT shift_id, outcome_code AS code FROM outbox WHERE host_id = ? AND device_id = ? \
      AND kind = 'shift_closed' AND outcome = 'rejected' ORDER BY seq";
 
+/// The pallets' statements (plan ПЛ-Ц; `src/floor/pallets/pallets.ts`, `src/floor/close/shift-close.ts`,
+/// `src/floor/print/print-jobs.ts`; `test/floor-schema.test.ts` checks the texts agree): the open
+/// pallet and its counts, a pallet's close, a box joining it, the shift close's check and
+/// summary, and the label queue's read.
+const OPEN_PALLET: &str =
+    "SELECT p.id, p.opened_at, (SELECT count(*) FROM floor_boxes b WHERE b.host_id = \
+     p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id AND b.disassembled_at \
+     IS NULL) AS boxes, (SELECT coalesce(sum(b.item_count), 0) FROM floor_boxes b WHERE \
+     b.host_id = p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id AND \
+     b.disassembled_at IS NULL) AS items FROM floor_pallets p WHERE p.host_id = ? AND \
+     p.device_id = ? AND p.shift_id = ? AND p.closed_at IS NULL";
+const CLOSE_PALLET: &str =
+    "UPDATE floor_pallets AS p SET closed_at = ?, sscc = ?, block_id = ?, serial = ?, \
+     closed_by = ? WHERE p.id = ? AND p.host_id = ? AND p.device_id = ? AND p.closed_at IS \
+     NULL AND (SELECT count(*) FROM floor_boxes b WHERE b.host_id = p.host_id AND \
+     b.device_id = p.device_id AND b.pallet_id = p.id AND b.disassembled_at IS NULL) = ?";
+const JOIN_PALLET: &str =
+    "UPDATE floor_pallets SET id = id WHERE id = ? AND host_id = ? AND device_id = ? AND \
+     closed_at IS NULL";
+const BOX_ONTO_PALLET: &str =
+    "UPDATE floor_boxes SET pallet_id = ? WHERE id = ? AND host_id = ? AND device_id = ? \
+     AND closed_at IS NOT NULL AND pallet_id IS NULL";
+const OPEN_PALLET_GUARD: &str =
+    "UPDATE floor_shifts AS s SET local_state = local_state WHERE s.host_id = ? AND \
+     s.device_id = ? AND s.id = ? AND NOT EXISTS (SELECT 1 FROM floor_pallets p WHERE \
+     p.host_id = s.host_id AND p.device_id = s.device_id AND p.shift_id = s.id AND \
+     p.closed_at IS NULL AND EXISTS (SELECT 1 FROM floor_boxes b WHERE b.host_id = \
+     p.host_id AND b.device_id = p.device_id AND b.pallet_id = p.id AND b.disassembled_at \
+     IS NULL))";
+const CLOSE_SUMMARY: &str =
+    "SELECT s.local_state, (SELECT count(*) FROM floor_codes c WHERE c.host_id = s.host_id \
+     AND c.device_id = s.device_id AND c.shift_id = s.id) AS actual, (SELECT count(*) FROM \
+     floor_boxes b WHERE b.host_id = s.host_id AND b.device_id = s.device_id AND b.shift_id \
+     = s.id AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL) AS closed, (SELECT \
+     coalesce(sum(b.item_count), 0) FROM floor_boxes b WHERE b.host_id = s.host_id AND \
+     b.device_id = s.device_id AND b.shift_id = s.id AND b.closed_at IS NULL) AS \
+     open_items, (SELECT count(*) FROM floor_print_jobs j WHERE j.host_id = s.host_id AND \
+     j.device_id = s.device_id AND j.shift_id = s.id AND (state IN ('prepared', 'sending', \
+     'failed', 'unknown') OR (state = 'sent' AND verify = 1))) AS waiting, (SELECT \
+     coalesce(sum((SELECT count(*) FROM floor_boxes b WHERE b.host_id = p.host_id AND \
+     b.device_id = p.device_id AND b.pallet_id = p.id AND b.disassembled_at IS NULL)), 0) \
+     FROM floor_pallets p WHERE p.host_id = s.host_id AND p.device_id = s.device_id AND \
+     p.shift_id = s.id AND p.closed_at IS NULL) AS pallet_boxes FROM floor_shifts s WHERE \
+     s.host_id = ? AND s.device_id = ? AND s.id = ?";
+const OPEN_JOB_READ: &str =
+    "SELECT id, shift_id, purpose, subject_id, sscc, state, verify, template_id, \
+     template_rev, fields, printer, bytes_base64, error_code, attempts, operator_id, \
+     created_at, updated_at FROM floor_print_jobs WHERE host_id = ? AND device_id = ? AND \
+     shift_id = ? AND (state IN ('prepared', 'sending', 'failed', 'unknown') OR (state = \
+     'sent' AND verify = 1)) ORDER BY created_at, purpose, id LIMIT 1";
+
 /// The reads the floor repeats on every scan and box close search an index
 /// instead of reading every row of the pairing (migration `0006`). The plans
 /// are those of the SQLite the shell bundles; `test/floor-schema.test.ts`
@@ -998,7 +1049,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 51] = [
+    let reads: [(&str, &str); 64] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1258,6 +1309,40 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             "DELETE FROM floor_pallets WHERE host_id = ? AND device_id = ? AND shift_id = ?",
             "floor_pallets_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        // The pallets (plan ПЛ-Ц): the open pallet and its two counts on every box close and render,
+        // a pallet's close and a box joining it by their keys, the shift close's check and summary,
+        // and the label queue's read through the shift's jobs.
+        (
+            OPEN_PALLET,
+            "floor_pallets_open (host_id=? AND device_id=? AND shift_id=?)",
+        ),
+        (OPEN_PALLET, "floor_boxes_pallet (pallet_id=?)"),
+        (CLOSE_PALLET, "sqlite_autoindex_floor_pallets_1 (id=?)"),
+        (CLOSE_PALLET, "floor_boxes_pallet (pallet_id=?)"),
+        (JOIN_PALLET, "sqlite_autoindex_floor_pallets_1 (id=?)"),
+        (BOX_ONTO_PALLET, "sqlite_autoindex_floor_boxes_1 (id=?)"),
+        (
+            OPEN_PALLET_GUARD,
+            "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
+        ),
+        (
+            OPEN_PALLET_GUARD,
+            "floor_pallets_open (host_id=? AND device_id=? AND shift_id=?)",
+        ),
+        (OPEN_PALLET_GUARD, "floor_boxes_pallet (pallet_id=?)"),
+        (
+            CLOSE_SUMMARY,
+            "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
+        ),
+        (
+            CLOSE_SUMMARY,
+            "floor_pallets_open (host_id=? AND device_id=? AND shift_id=?)",
+        ),
+        (CLOSE_SUMMARY, "floor_boxes_pallet (pallet_id=?)"),
+        (
+            OPEN_JOB_READ,
+            "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)",
         ),
     ];
     for (sql, index) in reads {

@@ -9,6 +9,7 @@ import type { ShiftClosedFact } from "../../host/protocol.js";
 import { LocalDbError, type LocalExecutor, type LocalStatement } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
 import { outboxStatement, shiftClosedRecord } from "../facts.js";
+import { LIVE_BOXES } from "../pallets/pallets.js";
 import { OPEN_JOB_SQL } from "../print/print-jobs.js";
 import { readShiftCopy } from "../shifts/shift-copies.js";
 import type { BoxContext } from "../work/box-close.js";
@@ -18,12 +19,15 @@ import type { BoxContext } from "../work/box-close.js";
  * with codes, which the operator closes or clears first; a label of the
  * shift that still waits for the printer or the operator (plan 2a7's
  * `shiftLabelsSettled`: a label decided after the close would reach the host
- * after `shift_closed` and mark the station's own shift late); or this
- * station has closed it already. The pallets' plan (ПЛ-Ц) adds an open
- * pallet with boxes.
+ * after `shift_closed` and mark the station's own shift late); an open
+ * pallet with boxes (plan ПЛ-Ц), which «Закрыть паллету и смену» closes
+ * first; or this station has closed it already.
  */
 export type CloseBlocker =
-  { kind: "open_box"; items: number } | { kind: "label" } | { kind: "closed" };
+  | { kind: "open_box"; items: number }
+  | { kind: "label" }
+  | { kind: "open_pallet"; boxes: number }
+  | { kind: "closed" };
 
 /** The summary of the close (the cloud's close summary), from this station's own records. */
 export interface CloseSummary {
@@ -44,6 +48,7 @@ const summaryRow = z.object({
   closed: z.number().int().nonnegative(),
   open_items: z.number().int().nonnegative(),
   waiting: z.number().int().nonnegative(),
+  pallet_boxes: z.number().int().nonnegative(),
 });
 
 /** The counts of the shift's codes and closed boxes, as one statement's guard compares them. */
@@ -54,10 +59,27 @@ const COUNTS =
   "AND b.shift_id = s.id AND b.closed_at IS NOT NULL AND b.disassembled_at IS NULL) AS closed";
 
 /**
+ * The summary's one read; parameters: host id, device id, shift id. It runs
+ * whenever the close panel opens or its inputs change, so its plan is pinned
+ * in both lists of plans.
+ */
+export const CLOSE_SUMMARY_SQL =
+  `SELECT s.local_state, ${COUNTS}, ` +
+  "(SELECT coalesce(sum(b.item_count), 0) FROM floor_boxes b WHERE b.host_id = s.host_id " +
+  "AND b.device_id = s.device_id AND b.shift_id = s.id AND b.closed_at IS NULL) AS open_items, " +
+  "(SELECT count(*) FROM floor_print_jobs j WHERE j.host_id = s.host_id " +
+  `AND j.device_id = s.device_id AND j.shift_id = s.id AND ${OPEN_JOB_SQL}) AS waiting, ` +
+  `(SELECT coalesce(sum((SELECT count(*) ${LIVE_BOXES})), 0) FROM floor_pallets p ` +
+  "WHERE p.host_id = s.host_id AND p.device_id = s.device_id AND p.shift_id = s.id " +
+  "AND p.closed_at IS NULL) AS pallet_boxes " +
+  "FROM floor_shifts s WHERE s.host_id = ? AND s.device_id = ? AND s.id = ?";
+
+/**
  * Reads the summary of the shift's close: the plan from this station's copy
  * now, the actual quantity and the closed boxes from its own records, and
  * what keeps it from closing. Every label is counted, not read: a waiting
- * job this build cannot read still keeps the shift open.
+ * job this build cannot read still keeps the shift open. An open pallet keeps
+ * it open only while it holds a box not taken apart (plan ПЛ-Ц).
  */
 export async function readCloseSummary(
   local: LocalExecutor,
@@ -66,12 +88,7 @@ export async function readCloseSummary(
 ): Promise<CloseSummary> {
   const copy = await readShiftCopy(local, pairing, shiftId);
   const [row] = await local.query(
-    `SELECT s.local_state, ${COUNTS}, ` +
-      "(SELECT coalesce(sum(b.item_count), 0) FROM floor_boxes b WHERE b.host_id = s.host_id " +
-      "AND b.device_id = s.device_id AND b.shift_id = s.id AND b.closed_at IS NULL) AS open_items, " +
-      "(SELECT count(*) FROM floor_print_jobs j WHERE j.host_id = s.host_id " +
-      `AND j.device_id = s.device_id AND j.shift_id = s.id AND ${OPEN_JOB_SQL}) AS waiting ` +
-      "FROM floor_shifts s WHERE s.host_id = ? AND s.device_id = ? AND s.id = ?",
+    CLOSE_SUMMARY_SQL,
     [pairing.hostId, pairing.deviceId, shiftId],
     summaryRow,
   );
@@ -91,7 +108,9 @@ export async function readCloseSummary(
         ? { kind: "open_box", items: row.open_items }
         : row.waiting > 0
           ? { kind: "label" }
-          : null;
+          : row.pallet_boxes > 0
+            ? { kind: "open_pallet", boxes: row.pallet_boxes }
+            : null;
   return {
     plannedQty: copy.plannedQty,
     actualQty: row.actual,

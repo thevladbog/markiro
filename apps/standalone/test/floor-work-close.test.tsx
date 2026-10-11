@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { averagePerBox, deviation, sameSummary } from "../src/floor/close/ShiftClosePanel.js";
 import type { CloseSummary } from "../src/floor/close/shift-close.js";
+import { OPEN_JOB_READ_SQL } from "../src/floor/print/print-jobs.js";
 import { LocalDbError, type LocalExecutor } from "../src/local/executor.js";
 import {
   ENTERED,
@@ -1016,7 +1017,7 @@ describe("the close of a shift on the work screen, in its races", () => {
     let unreadable = false;
     const local: LocalExecutor = {
       query: (sql, params, row) =>
-        unreadable && sql.includes("ORDER BY created_at, id LIMIT 1")
+        unreadable && sql === OPEN_JOB_READ_SQL
           ? Promise.reject(new LocalDbError("statement_failed", "the job is unreadable"))
           : at.local.query(sql, params, row),
       transaction: (statements) => at.local.transaction(statements),

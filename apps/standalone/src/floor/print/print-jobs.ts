@@ -201,15 +201,29 @@ export async function readPrintJob(
   return row === undefined ? null : toJob(row);
 }
 
-/** The oldest job of the shift that waits for the printer or the operator, or `null`. */
+/**
+ * The reading of `readOpenJob`; parameters: host id, device id, shift id. It
+ * runs whenever a label may be due, so its plan is pinned in both lists of
+ * plans: the shift's jobs through `floor_print_jobs_shift`, sorted for the
+ * few that wait.
+ */
+export const OPEN_JOB_READ_SQL =
+  `SELECT ${COLUMNS} FROM floor_print_jobs WHERE host_id = ? AND device_id = ? ` +
+  `AND shift_id = ? AND ${OPEN_JOB_SQL} ORDER BY created_at, purpose, id LIMIT 1`;
+
+/**
+ * The oldest job of the shift that waits for the printer or the operator, or
+ * `null`. A box's job before a pallet's of the same moment (`purpose`): the
+ * box that fills a pallet writes both in its close (plan ПЛ-Ц), and the box's
+ * label goes first.
+ */
 export async function readOpenJob(
   local: LocalExecutor,
   pairing: Pairing,
   shiftId: string,
 ): Promise<PrintJob | null> {
   const [row] = await local.query(
-    `SELECT ${COLUMNS} FROM floor_print_jobs WHERE host_id = ? AND device_id = ? ` +
-      `AND shift_id = ? AND ${OPEN_JOB_SQL} ORDER BY created_at, id LIMIT 1`,
+    OPEN_JOB_READ_SQL,
     [pairing.hostId, pairing.deviceId, shiftId],
     jobRow,
   );

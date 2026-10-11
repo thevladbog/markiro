@@ -103,6 +103,78 @@ describe("the supply of SSCC serials", () => {
     await expect(remainingSerials(executor, PAIRING, PREFIX)).resolves.toBe(2000);
   });
 
+  it("asks for a pallet block of extension 1 by the half rule of the pallet blocks alone (plan ПЛ-Ц)", async () => {
+    const { db, executor } = openLocalDb();
+    // A box block with serials to spare does not count for the pallets.
+    seedBlock(db, { blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b", from: 1, to: 2000, next: 1 });
+    const pallets = (fromSerial: number) => (request: SsccBlockRequest) => ({
+      ...blockFor(request, fromSerial),
+      toSerial: fromSerial + 199,
+    });
+    const requestBlock = vi.fn(async (request: SsccBlockRequest) => pallets(0)(request));
+    const supply = createBlockSupply(supplyContext(executor, { extension: 1, requestBlock }));
+    await expect(supply.topUp()).resolves.toEqual({ kind: "stored", blockId: BLOCK_ID });
+    expect(requestBlock.mock.calls).toEqual([
+      [{ requestId: FIRST_REQUEST, issuerPrefix: PREFIX, extension: 1 }],
+    ]);
+    await expect(remainingSerials(executor, PAIRING, PREFIX, 1)).resolves.toBe(200);
+    await expect(remainingSerials(executor, PAIRING, PREFIX)).resolves.toBe(2000);
+    // Half of the 200 left: enough; one serial less than half: the next block.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 100 WHERE block_id = ?").run(BLOCK_ID);
+    await expect(supply.topUp()).resolves.toEqual({ kind: "enough" });
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 101 WHERE block_id = ?").run(BLOCK_ID);
+    requestBlock.mockImplementation(async (request) => ({
+      ...pallets(200)(request),
+      id: "8a7b6c5d-4e3f-4a2b-9c1d-0e9f8a7b6c5d",
+    }));
+    await expect(supply.topUp()).resolves.toEqual({
+      kind: "stored",
+      blockId: "8a7b6c5d-4e3f-4a2b-9c1d-0e9f8a7b6c5d",
+    });
+    expect(requestBlock).toHaveBeenLastCalledWith({
+      requestId: SECOND_REQUEST,
+      issuerPrefix: PREFIX,
+      extension: 1,
+    });
+    // A box block answered to a pallet request is never filed.
+    db.prepare(
+      "UPDATE floor_sscc_blocks SET next_serial = to_serial + 1 WHERE extension = 1",
+    ).run();
+    requestBlock.mockImplementation(async (request) => ({ ...blockFor(request), extension: 0 }));
+    await expect(supply.topUp()).resolves.toEqual({ kind: "failed" });
+    await expect(remainingSerials(executor, PAIRING, PREFIX, 1)).resolves.toBe(0);
+  });
+
+  it("repeats its own waiting request alone: a pallet supply leaves a box's request waiting, and a box supply a pallet's (plan ПЛ-Ц)", async () => {
+    const { db, executor } = openLocalDb();
+    const boxRequest = "9a0b0000-0000-4000-8000-000000000001";
+    const palletRequest = "9a0b0000-0000-4000-8000-000000000002";
+    seedRequest(db, { id: boxRequest, extension: 0 });
+    const requestBlock = vi.fn(async (request: SsccBlockRequest) => ({
+      ...blockFor(request, 0),
+      toSerial: 199,
+    }));
+    await expect(
+      createBlockSupply(supplyContext(executor, { extension: 1, requestBlock })).topUp(),
+    ).resolves.toEqual({ kind: "stored", blockId: BLOCK_ID });
+    expect(requestBlock.mock.calls).toEqual([
+      [{ requestId: FIRST_REQUEST, issuerPrefix: PREFIX, extension: 1 }],
+    ]);
+    expect(requests(db)).toEqual([{ request_id: boxRequest, issuer_prefix: PREFIX, extension: 0 }]);
+    // A pallet request the answer of which was lost is repeated by the pallet supply only.
+    db.prepare("DELETE FROM floor_block_requests").run();
+    db.prepare("DELETE FROM floor_sscc_blocks").run();
+    seedRequest(db, { id: palletRequest, extension: 1 });
+    requestBlock.mockClear();
+    await createBlockSupply(supplyContext(executor, { requestBlock })).topUp();
+    expect(requestBlock.mock.calls).toEqual([
+      [{ requestId: FIRST_REQUEST, issuerPrefix: PREFIX, extension: 0 }],
+    ]);
+    expect(requests(db)).toEqual([
+      { request_id: palletRequest, issuer_prefix: PREFIX, extension: 1 },
+    ]);
+  });
+
   it("asks once the newest block has less than half left, and not at half", async () => {
     const { db, executor } = openLocalDb();
     seedBlock(db, { blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b", from: 1, to: 2000, next: 1 });

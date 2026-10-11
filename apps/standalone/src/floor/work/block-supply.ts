@@ -12,6 +12,8 @@ export interface BlockContext {
   pairing: Pairing;
   /** The shift's snapshot's issuer prefix: the blocks of a box are of it. */
   issuerPrefix: string;
+  /** The extension the blocks are of: 0, a box's (the default); 1, a pallet's (plan ПЛ-Ц). */
+  extension?: number;
   /** The link is `online` right now: only then is the host asked. */
   online: () => boolean;
   /** `HostApi.requestSsccBlock`. */
@@ -108,7 +110,7 @@ async function blockWanted(context: BlockContext): Promise<boolean> {
     "SELECT from_serial, to_serial, next_serial FROM floor_sscc_blocks " +
       "WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ? " +
       "ORDER BY from_serial DESC LIMIT 1",
-    [pairing.hostId, pairing.deviceId, issuerPrefix, BOX_EXTENSION],
+    [pairing.hostId, pairing.deviceId, issuerPrefix, extensionOf(context)],
     newestRow,
   );
   if (newest === undefined) return true;
@@ -117,14 +119,19 @@ async function blockWanted(context: BlockContext): Promise<boolean> {
   return left * 2 < size;
 }
 
-/** The request this pairing keeps for the prefix and has no answer to, oldest first. */
+/** The extension of the context's blocks: a box's unless it names a pallet's. */
+function extensionOf(context: BlockContext): number {
+  return context.extension ?? BOX_EXTENSION;
+}
+
+/** The request this pairing keeps for the prefix and the extension and has no answer to, oldest first. */
 async function waitingRequest(context: BlockContext): Promise<SsccBlockRequest | null> {
   const { local, pairing, issuerPrefix } = context;
   const [row] = await local.query(
     "SELECT request_id, issuer_prefix, extension FROM floor_block_requests " +
       "WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ? " +
       "ORDER BY requested_at, request_id LIMIT 1",
-    [pairing.hostId, pairing.deviceId, issuerPrefix, BOX_EXTENSION],
+    [pairing.hostId, pairing.deviceId, issuerPrefix, extensionOf(context)],
     requestRow,
   );
   return row === undefined
@@ -166,7 +173,7 @@ async function keepRequest(context: BlockContext): Promise<SsccBlockRequest> {
   const request: SsccBlockRequest = {
     requestId: context.newId(),
     issuerPrefix: context.issuerPrefix,
-    extension: BOX_EXTENSION,
+    extension: extensionOf(context),
   };
   await context.local.transaction([
     {
@@ -230,7 +237,9 @@ async function storeBlock(
 }
 
 /**
- * The supply of SSCC serials for a shift's boxes (stage 2a spec §5.7.4): when
+ * The supply of SSCC serials for a shift's boxes (stage 2a spec §5.7.4), or
+ * for its pallets with `extension` 1 (plan ПЛ-Ц; pilot spec §6.2: stricter
+ * than the cloud, which brings a pallet block only with the shift): when
  * the work screen opens, after every close and when the link comes back, a
  * block is asked for by the half rule, while the link is online. A request
  * is kept before it is sent and repeated whole until its block is kept, so
