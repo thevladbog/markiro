@@ -11,9 +11,12 @@ use std::time::Duration;
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
+use markiro_host::config::{HostConfig, HostPaths};
 use markiro_host::install::{
-    self, encode_command, firewall_close_script, firewall_open_script, icacls_args, service_spec,
-    CommandOutput, Commands, InstallError, ServiceSpec, ServiceState, Services, POLL_EVERY,
+    self, delete_refusal_is_harmless, encode_command, firewall_close_script, firewall_open_script,
+    icacls_args, service_error_text, service_spec, start_refusal_is_harmless,
+    stop_refusal_is_harmless, system_program, trusted_system_root, CommandOutput, Commands,
+    InstallError, ServiceSpec, ServiceState, Services, POLL_EVERY,
 };
 
 type Log = Rc<RefCell<Vec<String>>>;
@@ -638,4 +641,193 @@ fn a_start_that_fails_after_the_wait_points_at_a_restore_that_was_not_finished()
     let text = InstallError::StoppedAfterStart.to_string();
     assert!(text.contains("markiro-host restore"), "{text}");
     assert!(text.contains("logs"), "{text}");
+}
+
+// ---------------------------------------------------------------------------
+// Task 2: what the Windows adapter and the `install` subcommand rely on, kept
+// in code that runs on every OS (the adapter itself compiles only on Windows).
+// ---------------------------------------------------------------------------
+
+#[test]
+fn windows_own_programs_are_run_by_their_absolute_path() {
+    assert_eq!(
+        system_program("icacls", r"C:\Windows"),
+        Some(r"C:\Windows\System32\icacls.exe".to_owned())
+    );
+    assert_eq!(
+        system_program("powershell.exe", r"D:\WINNT"),
+        Some(r"D:\WINNT\System32\WindowsPowerShell\v1.0\powershell.exe".to_owned())
+    );
+    // Whatever else is asked for is not ours to resolve.
+    assert_eq!(system_program("cmd.exe", r"C:\Windows"), None);
+    assert_eq!(system_program("icacls.exe.bak", r"C:\Windows"), None);
+}
+
+#[test]
+fn only_a_plain_absolute_windows_directory_is_trusted() {
+    assert_eq!(trusted_system_root(Some(r"D:\WINDOWS")), r"D:\WINDOWS");
+    assert_eq!(trusted_system_root(Some(r"C:\Windows\")), r"C:\Windows");
+    assert_eq!(trusted_system_root(Some(r"c:\Win dows")), r"c:\Win dows");
+    for untrusted in [
+        None,
+        Some(""),
+        Some("Windows"),
+        Some(r"C:Windows"),
+        Some(r"1:\Windows"),
+        Some(r"\\server\share\Windows"),
+        Some(r"C:\Windows\..\Temp"),
+        Some(r"C:\..\Windows"),
+        Some(r"C:\"),
+        Some("C:\\Win\x07dows"),
+    ] {
+        assert_eq!(
+            trusted_system_root(untrusted),
+            r"C:\Windows",
+            "{untrusted:?}"
+        );
+    }
+    // Every character a path cannot hold, or that joins two paths, on its own.
+    for forbidden in ['"', '<', '>', '|', '?', '*', ';', '/'] {
+        let root = format!(r"C:\Win{forbidden}dows");
+        assert_eq!(trusted_system_root(Some(&root)), r"C:\Windows", "{root}");
+    }
+    // A name that only contains dots is no parent directory.
+    assert_eq!(trusted_system_root(Some(r"C:\Win..dows")), r"C:\Win..dows");
+}
+
+#[test]
+fn the_service_managers_refusals_are_told_apart_by_their_number() {
+    // A stop for a service that is not running, or one that is changing state
+    // right now (a service refuses a stop while it is starting).
+    assert!(stop_refusal_is_harmless(1062));
+    assert!(stop_refusal_is_harmless(1061));
+    assert!(!stop_refusal_is_harmless(5));
+    assert!(!stop_refusal_is_harmless(1060));
+    assert!(start_refusal_is_harmless(1056));
+    assert!(!start_refusal_is_harmless(1062));
+    assert!(!start_refusal_is_harmless(5));
+    assert!(delete_refusal_is_harmless(1072));
+    assert!(!delete_refusal_is_harmless(1060));
+    assert!(!delete_refusal_is_harmless(5));
+}
+
+#[test]
+fn a_refusal_a_person_can_act_on_says_what_to_do() {
+    let denied = service_error_text("OpenSCManager failed".to_owned(), Some(5));
+    assert!(denied.starts_with("OpenSCManager failed"), "{denied}");
+    assert!(denied.contains("administrator"), "{denied}");
+    let marked = service_error_text("CreateService failed".to_owned(), Some(1072));
+    assert!(marked.contains("Services"), "{marked}");
+    assert!(marked.contains("restart the computer"), "{marked}");
+    assert_eq!(
+        service_error_text("something else".to_owned(), Some(2)),
+        "something else"
+    );
+    assert_eq!(
+        service_error_text("no number".to_owned(), None),
+        "no number"
+    );
+}
+
+/// A stop the service refuses while it is starting (its status accepts no
+/// control until it runs) is sent again until it is accepted.
+#[test]
+fn a_stop_refused_while_the_service_starts_is_asked_again_until_it_is_accepted() {
+    let log = Log::default();
+    let mut services = FakeServices::new(
+        &log,
+        &[
+            Some(ServiceState::StartPending),
+            Some(ServiceState::StartPending),
+            Some(ServiceState::Running),
+            Some(ServiceState::StopPending),
+            Some(ServiceState::Stopped),
+        ],
+    );
+    let sleeps = Rc::new(RefCell::new(Vec::new()));
+    assert_eq!(
+        install::stop(&mut services, &mut counting_sleep(&sleeps)),
+        Ok(true)
+    );
+    assert_eq!(
+        *log.borrow(),
+        [
+            "state", "stop", // the first ask: refused quietly while it starts
+            "state", "stop", // still starting
+            "state", "stop",  // now running: this one is accepted
+            "state", // stopping: wait, do not ask again
+            "state", // stopped
+        ]
+    );
+    assert_eq!(sleeps.borrow().len(), 3);
+}
+
+/// The data directory must exist when `icacls` runs, and the firewall gets the
+/// port the host will listen on.
+struct IcaclsSeesTheDirectory {
+    inner: FakeCommands,
+    directory_existed: Vec<bool>,
+}
+
+impl Commands for IcaclsSeesTheDirectory {
+    fn run(&mut self, program: &str, args: &[String]) -> Result<CommandOutput, InstallError> {
+        if program == "icacls" {
+            self.directory_existed.push(Path::new(&args[0]).is_dir());
+        }
+        self.inner.run(program, args)
+    }
+}
+
+fn install_host_in(
+    paths: &HostPaths,
+    log: &Log,
+) -> (Result<(), markiro_host::BoxError>, IcaclsSeesTheDirectory) {
+    let mut services = FakeServices::new(log, &[None, Some(ServiceState::Running)]);
+    let mut commands = IcaclsSeesTheDirectory {
+        inner: FakeCommands::new(log),
+        directory_existed: Vec::new(),
+    };
+    let result = install::install_host(
+        paths,
+        Path::new(EXE),
+        &mut services,
+        &mut commands,
+        &mut |_| (),
+    );
+    (result, commands)
+}
+
+#[test]
+fn install_creates_the_data_directory_before_icacls_reads_it_and_opens_the_default_port() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(root.path().join("ProgramData").join("Markiro").join("Host"));
+    assert!(!paths.data_dir.exists());
+    let log = Log::default();
+    let (result, commands) = install_host_in(&paths, &log);
+    result.unwrap();
+    assert_eq!(commands.directory_existed, [true]);
+    assert!(paths.logs_dir().is_dir() && paths.tls_dir().is_dir());
+    assert_eq!(
+        commands.inner.runs[0].1[0],
+        paths.data_dir.display().to_string()
+    );
+    assert_eq!(
+        script_of(&commands.inner.runs[1].1),
+        firewall_open_script(45710)
+    );
+}
+
+#[test]
+fn install_opens_the_port_the_host_was_configured_with() {
+    let root = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(root.path().join("Host"));
+    paths.ensure().unwrap();
+    HostConfig::load_or_create(&paths, Some(46123)).unwrap();
+    let log = Log::default();
+    let (result, commands) = install_host_in(&paths, &log);
+    result.unwrap();
+    assert_eq!(
+        script_of(&commands.inner.runs[1].1),
+        firewall_open_script(46123)
+    );
 }

@@ -17,6 +17,8 @@ use std::time::Duration;
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine;
 
+use crate::config::{HostConfig, HostPaths};
+
 /// The service name; `service.rs` dispatches under the same one.
 pub const SERVICE_NAME: &str = "MarkiroHost";
 /// The firewall rule's name (`Get-NetFirewallRule -Name MarkiroHost`).
@@ -100,7 +102,9 @@ pub trait Services {
     fn configure(&mut self, spec: &ServiceSpec) -> Result<(), InstallError>;
     /// Asks a stopped service to start; a running one stays as it is.
     fn start(&mut self) -> Result<(), InstallError>;
-    /// Asks a running service to stop; a stopped one stays as it is.
+    /// Asks a running service to stop. A service that cannot take the request
+    /// now (stopped, starting, already stopping) is no error: [`stop`] reads
+    /// the state and asks again.
     fn stop(&mut self) -> Result<(), InstallError>;
     /// Removes the registration; Windows finishes once the last handle closes.
     fn delete(&mut self) -> Result<(), InstallError>;
@@ -198,6 +202,36 @@ pub fn install(
     wait_until_running(services, sleep)
 }
 
+/// The `install` subcommand: creates the data directory (and the folders in
+/// it), which `icacls` needs to exist, then [`install`] with the port the host
+/// is configured for (`host.json`, else the default).
+pub fn install_host(
+    paths: &HostPaths,
+    executable: &Path,
+    services: &mut dyn Services,
+    commands: &mut dyn Commands,
+    sleep: &mut dyn FnMut(Duration),
+) -> Result<(), crate::BoxError> {
+    paths.ensure()?;
+    install(
+        &paths.data_dir,
+        executable,
+        configured_port(paths),
+        services,
+        commands,
+        sleep,
+    )?;
+    Ok(())
+}
+
+/// The host's port for the firewall: `host.json`'s when the host has started
+/// before (a `--port` it was given), the default otherwise.
+pub fn configured_port(paths: &HostPaths) -> u16 {
+    HostConfig::load(paths)
+        .map(|config| config.port)
+        .unwrap_or(markiro_proto::DEFAULT_PORT)
+}
+
 /// The steps that can leave a half-made registration behind.
 fn register_and_start(
     executable: &Path,
@@ -250,7 +284,9 @@ pub fn uninstall(
 }
 
 /// Stop the service and wait until it has stopped; `Ok(false)` when there is
-/// no such service. The installer calls it before it replaces the binary.
+/// no such service. The installer calls it before it replaces the binary. A
+/// service that is still starting refuses the stop, so it is asked again at
+/// every read until it is stopping.
 pub fn stop(
     services: &mut dyn Services,
     sleep: &mut dyn FnMut(Duration),
@@ -263,7 +299,15 @@ pub fn stop(
     for _ in 0..polls() {
         match services.state()? {
             None | Some(ServiceState::Stopped) => return Ok(true),
-            Some(_) => sleep(POLL_EVERY),
+            Some(ServiceState::StopPending) => sleep(POLL_EVERY),
+            // The host's status accepts no control while it starts
+            // (`service.rs`), and the service manager then refuses the stop;
+            // `WindowsServices::stop` reports that as no error. So the ask is
+            // repeated until the service has come up and takes it.
+            Some(_) => {
+                services.stop()?;
+                sleep(POLL_EVERY);
+            }
         }
     }
     Err(InstallError::Timeout {
@@ -356,13 +400,104 @@ pub fn firewall_close_script() -> String {
     format!("Remove-NetFirewallRule -Name '{FIREWALL_RULE}' -ErrorAction SilentlyContinue; exit 0")
 }
 
+/// `winerror.h`: the service manager's answers `WindowsServices` has to tell
+/// apart. Numbers, not text: the text is translated on a Russian Windows.
+pub const ERROR_ACCESS_DENIED: i32 = 5;
+pub const ERROR_SERVICE_DOES_NOT_EXIST: i32 = 1060;
+pub const ERROR_SERVICE_CANNOT_ACCEPT_CTRL: i32 = 1061;
+pub const ERROR_SERVICE_NOT_ACTIVE: i32 = 1062;
+pub const ERROR_SERVICE_ALREADY_RUNNING: i32 = 1056;
+pub const ERROR_SERVICE_MARKED_FOR_DELETE: i32 = 1072;
+
+/// A refused stop that leaves nothing to do: the service is not running, or it
+/// is changing state right now (it refuses a stop while it starts or stops;
+/// [`stop`] asks again until the service is stopping).
+pub fn stop_refusal_is_harmless(code: i32) -> bool {
+    code == ERROR_SERVICE_NOT_ACTIVE || code == ERROR_SERVICE_CANNOT_ACCEPT_CTRL
+}
+
+/// A refused start that leaves nothing to do: the service already runs.
+pub fn start_refusal_is_harmless(code: i32) -> bool {
+    code == ERROR_SERVICE_ALREADY_RUNNING
+}
+
+/// A refused delete that leaves nothing to do: the service is already going.
+pub fn delete_refusal_is_harmless(code: i32) -> bool {
+    code == ERROR_SERVICE_MARKED_FOR_DELETE
+}
+
+/// The service manager's own text for a refusal, and for the two that a person
+/// can fix, what to do about it.
+pub fn service_error_text(text: String, code: Option<i32>) -> String {
+    match code {
+        Some(ERROR_ACCESS_DENIED) => format!(
+            "{text} (run the command from an administrator session: right-click, \
+             \"Run as administrator\")"
+        ),
+        Some(ERROR_SERVICE_MARKED_FOR_DELETE) => format!(
+            "{text} (an earlier removal is not finished because a program still has the service \
+             open: close the Services and Event Viewer windows, or restart the computer, and \
+             run the command again)"
+        ),
+        _ => text,
+    }
+}
+
+/// Where Windows keeps its own programs when the environment does not say, or
+/// says something that is not a plain absolute directory.
+const DEFAULT_SYSTEM_ROOT: &str = r"C:\Windows";
+
+/// `%SystemRoot%` as given (`None` when unset), when it is a plain absolute
+/// path with a drive letter: no `..`, no characters a path cannot hold, no
+/// relative or UNC form. Otherwise `C:\Windows`. The installer runs elevated,
+/// so a program found through a changed `PATH` or a changed variable would run
+/// with administrator rights.
+pub fn trusted_system_root(value: Option<&str>) -> String {
+    let Some(value) = value else {
+        return DEFAULT_SYSTEM_ROOT.to_owned();
+    };
+    let bytes = value.as_bytes();
+    let absolute =
+        bytes.len() > 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && bytes[2] == b'\\';
+    let clean = !value.contains(['"', '<', '>', '|', '?', '*', ';', '/'])
+        && !value.chars().any(char::is_control)
+        && !value.split('\\').any(|part| part == "..");
+    if absolute && clean {
+        value.trim_end_matches('\\').to_owned()
+    } else {
+        DEFAULT_SYSTEM_ROOT.to_owned()
+    }
+}
+
+/// The absolute path of the Windows program the installer means by `program`
+/// (`icacls`, `powershell.exe`), under `system_root`; `None` for any other
+/// name, which is then run as given.
+pub fn system_program(program: &str, system_root: &str) -> Option<String> {
+    match program {
+        "icacls" => Some(format!(r"{system_root}\System32\icacls.exe")),
+        "powershell.exe" => Some(format!(
+            r"{system_root}\System32\WindowsPowerShell\v1.0\powershell.exe"
+        )),
+        _ => None,
+    }
+}
+
 /// External programs through `std::process::Command`, without a console
-/// window on Windows (the installer is a window of its own).
+/// window on Windows (the installer is a window of its own). On Windows the
+/// installer's own programs run from `%SystemRoot%\System32` by absolute path.
 pub struct SystemCommands;
 
 impl Commands for SystemCommands {
     fn run(&mut self, program: &str, args: &[String]) -> Result<CommandOutput, InstallError> {
-        let mut command = std::process::Command::new(program);
+        #[cfg(windows)]
+        let resolved = system_program(
+            program,
+            &trusted_system_root(std::env::var("SystemRoot").ok().as_deref()),
+        )
+        .unwrap_or_else(|| program.to_owned());
+        #[cfg(not(windows))]
+        let resolved = program.to_owned();
+        let mut command = std::process::Command::new(resolved);
         command.args(args);
         #[cfg(windows)]
         {

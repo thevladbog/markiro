@@ -11,8 +11,11 @@ pub mod error;
 pub mod facts;
 pub mod feed;
 pub mod install;
+#[cfg(windows)]
+pub mod install_windows;
 pub mod logging;
 pub mod network;
+pub mod network_profile;
 pub mod pairing_code;
 pub mod rate_limit;
 pub mod restore;
