@@ -1,5 +1,6 @@
 //! Driver printing never sends a printer language through the RAW spooler.
 use crate::printer_raster::{decode, Raster, MAX_BYTES};
+use crate::printer_sheet::{WindowsPageGeometry, WindowsPageOptions};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 
@@ -64,6 +65,14 @@ fn artifact(payload: &str) -> Result<Vec<u8>, Failure> {
     Ok(bytes)
 }
 pub fn preflight(queue: String, payload_base64: String) -> Preflight {
+    preflight_page(queue, payload_base64, None, None)
+}
+pub fn preflight_page(
+    queue: String,
+    payload_base64: String,
+    options: Option<WindowsPageOptions>,
+    fingerprint: Option<String>,
+) -> Preflight {
     let result = (|| {
         let bytes = artifact(&payload_base64)?;
         let page = decode(&bytes).map_err(|_| Failure::before("invalid_artifact"))?;
@@ -72,11 +81,12 @@ pub fn preflight(queue: String, payload_base64: String) -> Preflight {
         }
         #[cfg(windows)]
         {
-            native::Device::open(&queue, &page).map(|_| ())
+            native::Device::open_page(&queue, Some(&page), options, fingerprint.as_deref())
+                .map(|_| ())
         }
         #[cfg(not(windows))]
         {
-            let _ = page;
+            let _ = (page, options, fingerprint);
             Err(Failure::before("unsupported_platform"))
         }
     })();
@@ -86,6 +96,15 @@ pub fn preflight(queue: String, payload_base64: String) -> Preflight {
     }
 }
 pub fn print(queue: String, payload_base64: String, document_name: String) -> Outcome {
+    print_page(queue, payload_base64, document_name, None, None)
+}
+pub fn print_page(
+    queue: String,
+    payload_base64: String,
+    document_name: String,
+    options: Option<WindowsPageOptions>,
+    fingerprint: Option<String>,
+) -> Outcome {
     let result = (|| {
         let bytes = artifact(&payload_base64)?;
         let page = decode(&bytes).map_err(|_| Failure::before("invalid_artifact"))?;
@@ -100,12 +119,13 @@ pub fn print(queue: String, payload_base64: String, document_name: String) -> Ou
         }
         #[cfg(windows)]
         {
-            let mut device = native::Device::open(&queue, &page)?;
+            let mut device =
+                native::Device::open_page(&queue, Some(&page), options, fingerprint.as_deref())?;
             submit(&mut device, &page, &queue, &document_name)
         }
         #[cfg(not(windows))]
         {
-            let _ = page;
+            let _ = (page, options, fingerprint);
             Err(Failure::before("unsupported_platform"))
         }
     })();
@@ -125,6 +145,25 @@ pub fn observe(receipt: Receipt) -> Observation {
     #[cfg(not(windows))]
     {
         Observation::Unavailable
+    }
+}
+pub fn page_geometry(
+    queue: String,
+    options: WindowsPageOptions,
+) -> Result<WindowsPageGeometry, Failure> {
+    if !valid_name(&queue) {
+        return Err(Failure::before("queue_unavailable"));
+    }
+    #[cfg(windows)]
+    {
+        let device = native::Device::open_page(&queue, None, Some(options), None)?;
+        crate::printer_sheet::sheet_geometry(&queue, options, device.caps)
+            .map_err(|_| Failure::before("geometry_mismatch"))
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = options;
+        Err(Failure::before("unsupported_platform"))
     }
 }
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -202,7 +241,8 @@ mod native {
     }
     pub(super) struct Device {
         dc: HDC,
-        caps: Caps,
+        pub(super) caps: Caps,
+        sheet_plan: Option<crate::printer_sheet::DrawPlan>,
     }
     impl Drop for Device {
         fn drop(&mut self) {
@@ -212,8 +252,14 @@ mod native {
         }
     }
     impl Device {
-        pub fn open(name: &str, p: &Raster<'_>) -> Result<Self, Failure> {
+        pub fn open_page(
+            name: &str,
+            page: Option<&Raster<'_>>,
+            options: Option<WindowsPageOptions>,
+            fingerprint: Option<&str>,
+        ) -> Result<Self, Failure> {
             unsafe {
+                let queue_name = name;
                 let q = queue(name)?;
                 let name = wide(name);
                 let needed =
@@ -233,24 +279,45 @@ mod native {
                 {
                     return Err(Failure::before("driver_failure"));
                 }
-                (*dm).dmFields = ((*dm).dmFields & !DM_FORMNAME)
-                    | DM_ORIENTATION
-                    | DM_PAPERSIZE
-                    | DM_PAPERWIDTH
-                    | DM_PAPERLENGTH
-                    | DM_COPIES
-                    | DM_PRINTQUALITY
-                    | DM_YRESOLUTION
-                    | DM_SCALE;
-                let v = &mut (*dm).Anonymous1.Anonymous1;
-                v.dmOrientation = DMORIENT_PORTRAIT as i16;
-                v.dmPaperSize = DMPAPER_USER as i16;
-                v.dmPaperWidth = (p.width_mm * 10.).round() as i16;
-                v.dmPaperLength = (p.height_mm * 10.).round() as i16;
-                v.dmCopies = 1;
-                v.dmScale = 100;
-                v.dmPrintQuality = p.dpi as i16;
-                (*dm).dmYResolution = p.dpi as i16;
+                let orientation = options.map_or(DMORIENT_PORTRAIT, |o| match o.orientation {
+                    crate::printer_sheet::Orientation::Portrait => DMORIENT_PORTRAIT,
+                    crate::printer_sheet::Orientation::Landscape => DMORIENT_LANDSCAPE,
+                });
+                if options.is_some() {
+                    (*dm).dmFields = ((*dm).dmFields
+                        & !(DM_FORMNAME | DM_PAPERWIDTH | DM_PAPERLENGTH))
+                        | DM_ORIENTATION
+                        | DM_PAPERSIZE
+                        | DM_COPIES
+                        | DM_SCALE
+                        | DM_DUPLEX;
+                    let v = &mut (*dm).Anonymous1.Anonymous1;
+                    v.dmOrientation = orientation as i16;
+                    v.dmPaperSize = DMPAPER_A4 as i16;
+                    v.dmCopies = 1;
+                    v.dmScale = 100;
+                    (*dm).dmDuplex = DMDUP_SIMPLEX as i16;
+                } else {
+                    let p = page.ok_or_else(|| Failure::before("invalid_artifact"))?;
+                    (*dm).dmFields = ((*dm).dmFields & !DM_FORMNAME)
+                        | DM_ORIENTATION
+                        | DM_PAPERSIZE
+                        | DM_PAPERWIDTH
+                        | DM_PAPERLENGTH
+                        | DM_COPIES
+                        | DM_PRINTQUALITY
+                        | DM_YRESOLUTION
+                        | DM_SCALE;
+                    let v = &mut (*dm).Anonymous1.Anonymous1;
+                    v.dmOrientation = DMORIENT_PORTRAIT as i16;
+                    v.dmPaperSize = DMPAPER_USER as i16;
+                    v.dmPaperWidth = (p.width_mm * 10.).round() as i16;
+                    v.dmPaperLength = (p.height_mm * 10.).round() as i16;
+                    v.dmCopies = 1;
+                    v.dmScale = 100;
+                    v.dmPrintQuality = p.dpi as i16;
+                    (*dm).dmYResolution = p.dpi as i16;
+                }
                 // Separate output buffer preserves the complete driver-private tail.
                 let mut output = buffer.clone();
                 let out = output.as_mut_ptr().cast::<DEVMODEW>();
@@ -266,9 +333,18 @@ mod native {
                     return Err(Failure::before("driver_failure"));
                 }
                 let v = (*out).Anonymous1.Anonymous1;
-                if v.dmOrientation != DMORIENT_PORTRAIT as i16
+                if ((*out).dmSize as usize) < size_of::<DEVMODEW>()
+                    || (*out).dmSize as usize + (*out).dmDriverExtra as usize > needed as usize
+                {
+                    return Err(Failure::before("driver_failure"));
+                }
+                if v.dmOrientation != orientation as i16
                     || v.dmCopies != 1
                     || v.dmScale != 100
+                    || (options.is_some()
+                        && (v.dmPaperSize != DMPAPER_A4 as i16
+                            || ((*out).dmFields & DM_DUPLEX != 0
+                                && (*out).dmDuplex != DMDUP_SIMPLEX as i16)))
                 {
                     return Err(Failure::before("geometry_mismatch"));
                 }
@@ -287,8 +363,33 @@ mod native {
                     printable_width: cap(HORZRES),
                     printable_height: cap(VERTRES),
                 };
-                let device = Self { dc, caps };
-                check_geometry(p, caps).map_err(|_| Failure::before("geometry_mismatch"))?;
+                let mut device = Self {
+                    dc,
+                    caps,
+                    sheet_plan: None,
+                };
+                if let Some(options) = options {
+                    crate::printer_sheet::sheet_geometry(queue_name, options, caps)
+                        .map_err(|_| Failure::before("geometry_mismatch"))?;
+                    if let Some(p) = page {
+                        device.sheet_plan = Some(
+                            crate::printer_sheet::sheet_draw_plan(
+                                p,
+                                queue_name,
+                                options,
+                                caps,
+                                fingerprint.ok_or_else(|| Failure::before("geometry_mismatch"))?,
+                            )
+                            .map_err(|_| Failure::before("geometry_mismatch"))?,
+                        );
+                    }
+                } else {
+                    check_geometry(
+                        page.ok_or_else(|| Failure::before("invalid_artifact"))?,
+                        caps,
+                    )
+                    .map_err(|_| Failure::before("geometry_mismatch"))?;
+                }
                 Ok(device)
             }
         }
@@ -345,6 +446,30 @@ mod native {
                 ],
             };
             let data = dib_pixels(p);
+            if let Some(plan) = &self.sheet_plan {
+                // COLORONCOLOR drops/replicates complete bits; no interpolation or fit.
+                if unsafe { SetStretchBltMode(self.dc, COLORONCOLOR) } == 0 {
+                    return Err(());
+                }
+                let drawn = unsafe {
+                    StretchDIBits(
+                        self.dc,
+                        plan.x,
+                        plan.y,
+                        plan.width,
+                        plan.height,
+                        0,
+                        0,
+                        p.width,
+                        p.height,
+                        data.as_ptr().cast(),
+                        (&info as *const Info).cast(),
+                        DIB_RGB_COLORS,
+                        SRCCOPY,
+                    )
+                };
+                return if drawn > 0 { Ok(()) } else { Err(()) };
+            }
             let c = self.caps;
             let w = (p.width - c.offset_x).min(c.printable_width);
             let h = (p.height - c.offset_y).min(c.printable_height);

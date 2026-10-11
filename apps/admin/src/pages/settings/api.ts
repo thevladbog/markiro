@@ -24,6 +24,8 @@ export interface CategoryBoxLabelTemplateDefaultDto {
 export type CategoryPalletLabelTemplateDefaultDto = CategoryBoxLabelTemplateDefaultDto;
 
 export interface OrgProfileDto {
+  defaultPalletSheetTemplateId?: string | null;
+  categoryPalletSheetTemplateDefaults?: CategoryPalletLabelTemplateDefaultDto[];
   defaultBoxLabelTemplateId: string | null;
   categoryBoxLabelTemplateDefaults: CategoryBoxLabelTemplateDefaultDto[];
   defaultPalletLabelTemplateId: string | null;
@@ -42,6 +44,8 @@ export interface OrgProfileDto {
 export type PutOrgProfileInput = Partial<
   Pick<
     OrgProfileDto,
+    | "defaultPalletSheetTemplateId"
+    | "categoryPalletSheetTemplateDefaults"
     | "defaultBoxLabelTemplateId"
     | "categoryBoxLabelTemplateDefaults"
     | "defaultPalletLabelTemplateId"

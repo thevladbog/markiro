@@ -1,6 +1,45 @@
 import { describe, expect, it } from "vitest";
-import { buildFrozenGrantTask } from "../src/modules/device-grants/frozen-task";
+import {
+  buildFrozenGrantTask,
+  frozenPalletSheetScope,
+} from "../src/modules/device-grants/frozen-task";
+import { buildPalletSheetPresets, createPalletSheetSnapshot } from "@markiro/domain";
 describe("frozen productive scope", () => {
+  it("binds the saved A4 revision only for an actual capable station, preserving legacy scope", () => {
+    const preset = buildPalletSheetPresets()[0];
+    if (!preset) throw new Error("Missing preset");
+    const snapshot = createPalletSheetSnapshot({
+      id: "a1111111-1111-4111-8111-111111111111",
+      name: "A4",
+      revision: 1,
+      spec: preset.spec,
+    });
+    const shift = {
+      palletLabelTemplateId: "fallback",
+      palletSheetTemplateId: snapshot.id,
+      palletSheetTemplateSnapshot: snapshot,
+    };
+    expect(frozenPalletSheetScope(shift, "station", undefined)).toEqual({});
+    expect(frozenPalletSheetScope(shift, "handheld", "pallet-sheet-v2")).toEqual({});
+    expect(frozenPalletSheetScope(shift, "station", "pallet-sheet-v2")).toEqual({
+      palletSheetTemplateId: snapshot.id,
+      palletSheetTemplateSnapshot: snapshot,
+    });
+    expect(() =>
+      frozenPalletSheetScope(
+        { ...shift, palletLabelTemplateId: null },
+        "handheld",
+        "pallet-sheet-v2",
+      ),
+    ).toThrow();
+    expect(() =>
+      frozenPalletSheetScope(
+        { ...shift, palletSheetTemplateSnapshot: { ...snapshot, revision: 2 } },
+        "station",
+        "pallet-sheet-v2",
+      ),
+    ).toThrow();
+  });
   const scope = { snapshotId: "saved-snapshot", contentDigest: "a".repeat(64), mode: "check" };
   it("requires every productive event dimension without synthesizing quantity", () => {
     expect(

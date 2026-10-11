@@ -11,6 +11,9 @@ type PrinterTransport = PrintTarget["kind"] | "none";
 export interface PrinterSetupPanelProps {
   mode?: "raw" | "windows_driver";
   windowsSupported?: boolean;
+  a4Supported?: boolean;
+  paper?: "a4" | undefined;
+  onPaperChange?: (paper: "a4" | undefined) => void;
   onModeChange?: (mode: "raw" | "windows_driver") => void;
   name?: string;
   onNameChange?: (value: string) => void;
@@ -44,6 +47,9 @@ export interface PrinterSetupPanelProps {
 export function PrinterSetupPanel({
   mode = "raw",
   windowsSupported = false,
+  a4Supported = false,
+  paper,
+  onPaperChange,
   onModeChange,
   name,
   onNameChange,
@@ -120,7 +126,7 @@ export function PrinterSetupPanel({
             label={t("setup.printerResolution")}
             aria-describedby={dpiHintId}
             value={printerDpi?.toString() ?? ""}
-            disabled={disabled || transport === "none"}
+            disabled={disabled || transport === "none" || paper === "a4"}
             options={[
               { value: "", label: t("setup.printerResolutionUnknown") },
               { value: "203", label: "203 dpi" },
@@ -231,6 +237,22 @@ export function PrinterSetupPanel({
               }}
             />
           )}
+          {mode === "windows_driver" && (a4Supported || paper === "a4") && (
+            <Select
+              native
+              size="floor"
+              label={t("palletSheet.paper")}
+              value={paper ?? "label"}
+              options={[
+                { value: "label", label: t("palletSheet.labelPaper") },
+                ...(a4Supported || paper === "a4"
+                  ? [{ value: "a4", label: t("palletSheet.a4Paper") }]
+                  : []),
+              ]}
+              disabled={disabled}
+              onValueChange={(value) => onPaperChange?.(value === "a4" ? "a4" : undefined)}
+            />
+          )}
           {mode === "windows_driver" && (
             <p className="setup-windows-hint">{t("setup.windowsDriverHint")}</p>
           )}
@@ -269,7 +291,7 @@ export function PrinterSetupPanel({
           {t("setup.printerDpiHint")}
         </p>
         <Button size="floor" disabled={!printReady} onClick={onTestPrint}>
-          {t("setup.testPrint")}
+          {paper === "a4" ? t("palletSheet.checkGeometry") : t("setup.testPrint")}
         </Button>
 
         {printedCode ? (

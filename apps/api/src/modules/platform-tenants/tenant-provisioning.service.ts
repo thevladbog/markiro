@@ -10,6 +10,7 @@ import {
   buildWarehouseCodeOnlyLabelTemplate,
   buildWarehouseCodeOnlyBoxTemplate,
   buildPalletLabelTemplates,
+  buildPalletSheetPresets,
 } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import type { PlatformPrincipal } from "../../platform-auth/platform-access-policy";
@@ -202,6 +203,22 @@ export class TenantProvisioningService {
         throw new Error(
           `No seeded label template matched PALLET_LABEL_TEMPLATE_NAME (${PALLET_LABEL_TEMPLATE_NAME})`,
         );
+      }
+      for (const { key, name, spec } of buildPalletSheetPresets()) {
+        await tx
+          .insert(schema.labelTemplates)
+          .values({
+            id: createId(),
+            tenantId: tenant.id,
+            name,
+            spec,
+            purpose: "pallet",
+            format: "pallet_sheet_v2",
+            seedKey: key,
+          })
+          .onConflictDoNothing({
+            target: [schema.labelTemplates.tenantId, schema.labelTemplates.seedKey],
+          });
       }
       await tx.insert(schema.orgProfiles).values({
         tenantId: tenant.id,

@@ -13,6 +13,9 @@ import {
 } from "@nestjs/common";
 import {
   ApiCreatedResponse,
+  ApiHeader,
+  ApiExtraModels,
+  ApiBody,
   ApiOkResponse,
   ApiOperation,
   ApiParam,
@@ -23,7 +26,6 @@ import { CABINET_CAPABILITY } from "@markiro/domain";
 import {
   ApiCabinetAuth,
   ApiHttpErrors,
-  ApiZodBody,
   ApiZodQuery,
   ApiZodValidationError,
 } from "../../lib/openapi";
@@ -38,9 +40,13 @@ import {
 import { SubscriptionAccessGuard } from "../../subscriptions/subscription-access.guard";
 import {
   createLabelTemplateSchema,
+  PalletSheetNodeDocument,
+  createStoredTemplateBodyOpenApiSchema,
+  updateStoredTemplateBodyOpenApiSchema,
   labelTemplateIsDefaultOpenApiSchema,
-  labelTemplateOpenApiSchema,
-  listLabelTemplatesOpenApiSchema,
+  storedLabelTemplateOpenApiSchema,
+  supportsPalletSheets,
+  storedLabelTemplatesListOpenApiSchema,
   listLabelTemplatesQuerySchema,
   updateLabelTemplateSchema,
   type CreateLabelTemplateDto,
@@ -52,7 +58,14 @@ import {
 import { LabelTemplatesService } from "./label-templates.service";
 
 @ApiTags("label-templates")
+@ApiExtraModels(PalletSheetNodeDocument)
 @ApiCabinetAuth()
+@ApiHeader({
+  name: "x-label-template-formats",
+  required: false,
+  description: "Opt in to pallet-sheet-v2; absent header retains legacy label-v1 reads",
+  schema: { type: "string", example: "label-v1,pallet-sheet-v2" },
+})
 @Controller("label-templates")
 // The station never calls this module. Cabinet authorization keeps a station
 // api-key out even though TenantGuard accepts it for tenant resolution.
@@ -70,27 +83,35 @@ export class LabelTemplatesController {
       "Disabled templates are hidden unless `enabled=all` or `enabled=false` is requested.",
   })
   @ApiZodQuery(listLabelTemplatesQuerySchema)
-  @ApiOkResponse({ schema: listLabelTemplatesOpenApiSchema })
+  @ApiOkResponse({ schema: storedLabelTemplatesListOpenApiSchema })
   @ApiZodValidationError()
   @ApiHttpErrors(401, 403)
   async listLabelTemplates(
     @Req() req: RequestWithTenant,
     @Query(new ZodValidationPipe(listLabelTemplatesQuerySchema)) query: ListLabelTemplatesQueryDto,
   ): Promise<ListLabelTemplatesResponseDto> {
-    return this.labelTemplatesService.listLabelTemplates(req.tenantId!, query);
+    return this.labelTemplatesService.listLabelTemplates(
+      req.tenantId!,
+      query,
+      supportsPalletSheets(req.headers["x-label-template-formats"]),
+    );
   }
 
   @Get(":id")
   @RequirePermissions(CABINET_CAPABILITY.OPERATIONS_READ)
   @ApiOperation({ summary: "Get a label template" })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
-  @ApiOkResponse({ schema: labelTemplateOpenApiSchema })
+  @ApiOkResponse({ schema: storedLabelTemplateOpenApiSchema })
   @ApiHttpErrors(401, 403, 404)
   async getLabelTemplate(
     @Req() req: RequestWithTenant,
     @Param("id") id: string,
   ): Promise<LabelTemplateDto> {
-    return this.labelTemplatesService.getLabelTemplate(req.tenantId!, id);
+    return this.labelTemplatesService.getLabelTemplate(
+      req.tenantId!,
+      id,
+      supportsPalletSheets(req.headers["x-label-template-formats"]),
+    );
   }
 
   @Post()
@@ -101,8 +122,8 @@ export class LabelTemplatesController {
     description:
       "spec is validated against the @markiro/domain label model; every issue is reported in the 400 body's message list.",
   })
-  @ApiZodBody(createLabelTemplateSchema)
-  @ApiCreatedResponse({ schema: labelTemplateOpenApiSchema })
+  @ApiBody({ schema: createStoredTemplateBodyOpenApiSchema })
+  @ApiCreatedResponse({ schema: storedLabelTemplateOpenApiSchema })
   @ApiZodValidationError()
   @ApiHttpErrors(401, 403)
   async createLabelTemplate(
@@ -121,8 +142,8 @@ export class LabelTemplatesController {
       "Partial update; untouched fields are preserved. Purpose is immutable, and product duplicate specs retain their required Data Matrix.",
   })
   @ApiParam({ name: "id", schema: { type: "string", format: "uuid" } })
-  @ApiZodBody(updateLabelTemplateSchema)
-  @ApiOkResponse({ schema: labelTemplateOpenApiSchema })
+  @ApiBody({ schema: updateStoredTemplateBodyOpenApiSchema })
+  @ApiOkResponse({ schema: storedLabelTemplateOpenApiSchema })
   @ApiZodValidationError()
   @ApiResponse({
     status: 409,

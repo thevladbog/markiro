@@ -1,4 +1,11 @@
 import type { BoxPrintErrorCode } from "./boxes.js";
+export type PalletPrintErrorCode =
+  | BoxPrintErrorCode
+  | "sheet_template_missing"
+  | "sheet_branding_missing"
+  | "sheet_geometry_mismatch"
+  | "sheet_delivery_unknown"
+  | "sheet_layout_failed";
 import type { SqlExecutor } from "./mirror.js";
 
 /**
@@ -42,7 +49,7 @@ export interface UnresolvedPalletPrint {
    * (Task 15 review, Finding 5).
    */
   state: "pending";
-  errorCode: BoxPrintErrorCode | null;
+  errorCode: PalletPrintErrorCode | null;
 }
 
 /**
@@ -206,7 +213,7 @@ export async function markPalletPrinted(exec: SqlExecutor, palletId: string): Pr
 export async function markPalletPrintFailed(
   exec: SqlExecutor,
   palletId: string,
-  code: BoxPrintErrorCode,
+  code: PalletPrintErrorCode,
 ): Promise<void> {
   await exec.run(
     `UPDATE pallets_mirror
@@ -505,7 +512,7 @@ export async function findUnresolvedPalletPrint(
     // is the only value a returned row can ever carry (Task 15 review,
     // Finding 5) -- see `UnresolvedPalletPrint.state`'s own doc comment.
     print_state: "pending";
-    print_error_code: BoxPrintErrorCode | null;
+    print_error_code: PalletPrintErrorCode | null;
   }>(
     `SELECT p.pallet_id AS pallet_id, p.sscc AS sscc,
             (SELECT COUNT(*) FROM boxes_mirror b

@@ -5,6 +5,12 @@ import {
 } from "@markiro/domain";
 import { projectDeviceValidationPrint, projectDeviceShiftOutput } from "./validation-print-policy";
 import {
+  assertPalletSheetClient,
+  supportsPalletSheetClient,
+  projectPalletSheetFields,
+  type PalletSheetCaller,
+} from "./pallet-sheet-policy";
+import {
   validationCodeHistoryQuerySchema,
   validationCodeHistorySchema,
   type ValidationCodeHistoryQuery,
@@ -32,6 +38,7 @@ import {
 } from "@nestjs/common";
 import {
   ApiBody,
+  ApiExtraModels,
   ApiCreatedResponse,
   ApiHeader,
   ApiOkResponse,
@@ -104,13 +111,58 @@ import {
   type ShiftEntryDto,
   shiftLabelTemplatePreviewQuerySchema,
   shiftLabelTemplatePreviewSchema,
+  palletSheetSnapshotOpenApiSchema,
+  shiftPalletSheetTemplatesOpenApiSchema,
+  palletSheetTemplatePreviewQuerySchema,
+  type PalletSheetTemplatePreviewQueryDto,
   type ShiftLabelTemplatePreviewQueryDto,
   type ShiftLabelTemplatePreviewDto,
 } from "./dto";
 import { ShiftsService, type EffectiveListShiftsQuery } from "./shifts.service";
 import { renderShiftTaskFormHtml } from "./shift-task-form";
+import { PalletSheetNodeDocument } from "../label-templates/dto";
+
+function sheetCaller(req: RequestWithTenant): PalletSheetCaller {
+  return req.authKind === "station"
+    ? {
+        kind: "device",
+        deviceKind: req.deviceKind,
+        capabilities: req.get("x-station-capabilities"),
+      }
+    : { kind: "cabinet" };
+}
+
+function includesSheets(req: RequestWithTenant): boolean {
+  return req.authKind === "station"
+    ? supportsPalletSheetClient(sheetCaller(req))
+    : Boolean(
+        req
+          .get("x-label-template-formats")
+          ?.split(",")
+          .map((token) => token.trim())
+          .includes("pallet-sheet-v2"),
+      );
+}
+
+function projectShift(
+  req: RequestWithTenant,
+  shift: ShiftDto,
+  includeSheets = includesSheets(req),
+): ShiftDto {
+  const projected = projectPalletSheetFields(shift, sheetCaller(req), includeSheets);
+  return req.authKind === "station"
+    ? projectDeviceValidationPrint(projected, req.get("x-station-capabilities"))
+    : projected;
+}
 
 @ApiTags("shifts")
+@ApiExtraModels(PalletSheetNodeDocument)
+@ApiHeader({
+  name: "x-label-template-formats",
+  required: false,
+  description:
+    "Cabinet clients opt into optional A4 fields with label-v1,pallet-sheet-v2. Devices negotiate x-station-capabilities instead.",
+})
 @Controller("shifts")
 @UseGuards(TenantGuard, AuthorizationGuard, SubscriptionAccessGuard)
 @AllowSubscriptionReadOnly("read")
@@ -138,14 +190,7 @@ export class ShiftsController {
         ? { ...query, lineId: req.deviceLineId, includeUnassigned: true }
         : query;
     const result = await this.shiftsService.listShifts(req.tenantId!, effectiveQuery);
-    return req.authKind === "station"
-      ? {
-          ...result,
-          items: result.items.map((item) =>
-            projectDeviceValidationPrint(item, req.get("x-station-capabilities")),
-          ),
-        }
-      : result;
+    return { ...result, items: result.items.map((item) => projectShift(req, item)) };
   }
 
   @Get("product-label-templates")
@@ -185,7 +230,11 @@ export class ShiftsController {
     @Query(new ZodValidationPipe(boxLabelTemplateProductQuerySchema))
     query: BoxLabelTemplateProductQueryDto,
   ): Promise<ShiftPlanningConfigDto> {
-    const result = await this.shiftsService.getPlanningConfig(req.tenantId!, query.productId);
+    const result = await this.shiftsService.getPlanningConfig(
+      req.tenantId!,
+      query.productId,
+      includesSheets(req),
+    );
     if (
       req.authKind === "station" &&
       !req
@@ -243,6 +292,42 @@ export class ShiftsController {
     query: BoxLabelTemplateProductQueryDto,
   ): Promise<ShiftPalletLabelTemplatesDto> {
     return this.shiftsService.listPalletLabelTemplates(req.tenantId!, query.productId);
+  }
+
+  @Get("pallet-sheet-templates")
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "List compatible editable A4 pallet templates for shift planning" })
+  @ApiCabinetOrStationAuth()
+  @ApiZodQuery(boxLabelTemplateProductQuerySchema)
+  @ApiOkResponse({ schema: shiftPalletSheetTemplatesOpenApiSchema })
+  @ApiHttpErrors(400, 401, 403, 404, 409)
+  async listPalletSheetTemplates(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(boxLabelTemplateProductQuerySchema))
+    query: BoxLabelTemplateProductQueryDto,
+  ) {
+    assertPalletSheetClient(sheetCaller(req));
+    return this.shiftsService.listPalletSheetTemplates(req.tenantId!, query.productId);
+  }
+
+  @Get("pallet-sheet-template-preview")
+  @AllowStationOrPermissions(CABINET_CAPABILITY.OPERATIONS_READ)
+  @ApiOperation({ summary: "Read a selected A4 pallet template snapshot for planning preview" })
+  @ApiCabinetOrStationAuth()
+  @ApiZodQuery(palletSheetTemplatePreviewQuerySchema)
+  @ApiOkResponse({ schema: palletSheetSnapshotOpenApiSchema })
+  @ApiHttpErrors(400, 401, 403, 404, 409)
+  async getPalletSheetTemplatePreview(
+    @Req() req: RequestWithTenant,
+    @Query(new ZodValidationPipe(palletSheetTemplatePreviewQuerySchema))
+    query: PalletSheetTemplatePreviewQueryDto,
+  ) {
+    assertPalletSheetClient(sheetCaller(req));
+    return this.shiftsService.getPalletSheetPreview(
+      req.tenantId!,
+      query.productId,
+      query.templateId,
+    );
   }
 
   @Get("label-template-preview")
@@ -400,7 +485,7 @@ export class ShiftsController {
   @ApiOkResponse({ schema: shiftOpenApiSchema })
   @ApiHttpErrors(401, 403, 404)
   async getShift(@Req() req: RequestWithTenant, @Param("id") id: string): Promise<ShiftDto> {
-    return this.shiftsService.getShift(req.tenantId!, id);
+    return projectShift(req, await this.shiftsService.getShift(req.tenantId!, id));
   }
 
   @Post()
@@ -426,7 +511,8 @@ export class ShiftsController {
     @Body(new ZodValidationPipe(createShiftSchema)) body: CreateShiftDto,
   ) {
     if (req.authKind === "station") {
-      return projectDeviceValidationPrint(
+      return projectShift(
+        req,
         await this.shiftsService.createShift(
           req.tenantId!,
           {
@@ -436,15 +522,21 @@ export class ShiftsController {
           { domain: "station_device", id: req.deviceId! },
           "station",
           req.get("x-station-capabilities"),
+          includesSheets(req),
         ),
-        req.get("x-station-capabilities"),
       );
     }
-    return this.shiftsService.createShift(
-      req.tenantId!,
-      body,
-      { domain: "cabinet", id: req.userId! },
-      "admin",
+    return projectShift(
+      req,
+      await this.shiftsService.createShift(
+        req.tenantId!,
+        body,
+        { domain: "cabinet", id: req.userId! },
+        "admin",
+        undefined,
+        includesSheets(req),
+      ),
+      includesSheets(req) || body.palletSheetTemplateId !== undefined,
     );
   }
 
@@ -467,7 +559,11 @@ export class ShiftsController {
     @Param("id") id: string,
     @Body(new ZodValidationPipe(updateShiftSchema)) body: UpdateShiftDto,
   ): Promise<ShiftDto> {
-    return this.shiftsService.updateShift(req.tenantId!, req.userId!, id, body);
+    return projectShift(
+      req,
+      await this.shiftsService.updateShift(req.tenantId!, req.userId!, id, body),
+      includesSheets(req) || body.palletSheetTemplateId !== undefined,
+    );
   }
 
   @Delete(":id")
@@ -538,9 +634,7 @@ export class ShiftsController {
       req.get("x-station-capabilities"),
       body.entryMethod,
     );
-    return req.authKind === "station"
-      ? projectDeviceValidationPrint(result, req.get("x-station-capabilities"))
-      : result;
+    return projectShift(req, result);
   }
 
   @Post(":id/enter")
@@ -576,7 +670,7 @@ export class ShiftsController {
       req.get("x-station-capabilities"),
       body.entryMethod,
     );
-    return projectDeviceValidationPrint(result, req.get("x-station-capabilities"));
+    return projectShift(req, result);
   }
 
   @Get(":id/bundle")
@@ -603,12 +697,10 @@ export class ShiftsController {
       req.deviceId ?? null,
       req.get("x-station-capabilities"),
     );
-    return req.authKind === "station"
-      ? {
-          ...result,
-          shift: projectDeviceValidationPrint(result.shift, req.get("x-station-capabilities")),
-        }
-      : result;
+    return {
+      ...projectPalletSheetFields(result, sheetCaller(req), includesSheets(req)),
+      shift: projectShift(req, result.shift),
+    };
   }
 
   @Post(":id/sscc/top-up")
@@ -651,12 +743,17 @@ export class ShiftsController {
       id,
       req.authKind === "station",
       req.get("x-station-capabilities"),
+      req.deviceKind,
     );
-    return req.authKind === "station"
-      ? {
-          ...result,
-          shift: projectDeviceValidationPrint(result.shift, req.get("x-station-capabilities")),
-        }
-      : result;
+    return {
+      ...projectPalletSheetFields(result, sheetCaller(req), includesSheets(req)),
+      shift: projectPalletSheetFields(
+        req.authKind === "station"
+          ? projectDeviceValidationPrint(result.shift, req.get("x-station-capabilities"))
+          : result.shift,
+        sheetCaller(req),
+        includesSheets(req),
+      ),
+    };
   }
 }

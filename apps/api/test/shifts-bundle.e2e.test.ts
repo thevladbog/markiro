@@ -1,3 +1,4 @@
+import { buildPalletSheetPresets } from "@markiro/domain";
 import { randomUUID } from "node:crypto";
 import express from "express";
 import { Test } from "@nestjs/testing";
@@ -134,6 +135,278 @@ describe.skipIf(!ready)("shifts open + bundle e2e", () => {
     });
     return createManagedSubscription(db, { tenantId, planVersionId, startsAt, endsAt });
   }
+
+  it("captures A4 revision once and denies legacy or forged handheld entry before allocating SSCC", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    await attachManagedSubscription(
+      tenantId,
+      new Date(Date.now() - 60_000),
+      new Date(Date.now() + 86_400_000),
+    );
+    const productId = await seedProduct(tenantId, {
+      status: "active",
+      chzProductGroupCode: 15,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+    const boxId = await seedLabelTemplate(tenantId, "Box");
+    const preset = buildPalletSheetPresets()[0];
+    if (!preset) throw new Error("Missing preset");
+    const sheetId = randomUUID();
+    await db.insert(schema.labelTemplates).values({
+      id: sheetId,
+      tenantId,
+      name: "Frozen A4",
+      purpose: "pallet",
+      format: "pallet_sheet_v2",
+      revision: 1,
+      spec: preset.spec,
+    });
+    await agent
+      .put("/org/profile")
+      .send({ gln: "6291041500213", gs1Prefixes: ["629104150"] })
+      .expect(200);
+    const created = await agent
+      .post("/shifts")
+      .send({
+        productId,
+        mode: "aggregation",
+        palletsEnabled: true,
+        boxLabelTemplateId: boxId,
+        palletLabelTemplateId: null,
+        palletSheetTemplateId: sheetId,
+      })
+      .expect(201);
+    const shiftId = String(created.body.id);
+    expect(created.body.palletSheetTemplateId).toBe(sheetId);
+    await agent.patch(`/shifts/${shiftId}`).send({ plannedQty: 120 }).expect(200);
+    const removed = await agent
+      .patch(`/shifts/${shiftId}`)
+      .send({ palletSheetTemplateId: null })
+      .expect(422);
+    expect(removed.body.code).toBe("PALLET_LABEL_TEMPLATE_REQUIRED");
+    const old = await createTestStationDevice(app!, agent, "Old station"),
+      current = await createTestStationDevice(app!, agent, "New Windows station"),
+      handheld = await createTestStationDevice(app!, agent, "Handheld", { kind: "handheld" });
+    for (const device of [old, handheld]) {
+      const caps = device === handheld ? "pallet-sheet-v2" : "";
+      const transport = request(app!.getHttpServer());
+      await transport
+        .get(`/shifts/pallet-sheet-templates?productId=${productId}`)
+        .set("x-api-key", device.apiKey)
+        .set("x-station-capabilities", caps)
+        .expect(409);
+      await transport
+        .get(`/shifts/pallet-sheet-template-preview?productId=${productId}&templateId=${sheetId}`)
+        .set("x-api-key", device.apiKey)
+        .set("x-station-capabilities", caps)
+        .expect(409);
+      await transport
+        .post("/shifts")
+        .set("x-api-key", device.apiKey)
+        .set("x-station-capabilities", caps)
+        .send({
+          productId,
+          mode: "aggregation",
+          palletsEnabled: true,
+          boxLabelTemplateId: boxId,
+          palletLabelTemplateId: null,
+          palletSheetTemplateId: sheetId,
+        })
+        .expect(409);
+      const listed = await transport
+        .get("/shifts")
+        .set("x-api-key", device.apiKey)
+        .set("x-station-capabilities", caps)
+        .expect(200);
+      expect(
+        listed.body.items.find((item: { id: string }) => item.id === shiftId),
+      ).not.toHaveProperty("palletSheetTemplateId");
+      await request(app!.getHttpServer())
+        .post(`/shifts/${shiftId}/enter`)
+        .set("x-api-key", device.apiKey)
+        .set("x-station-capabilities", caps)
+        .send({ entryMethod: "list" })
+        .expect(409);
+      await request(app!.getHttpServer())
+        .get(`/shifts/${shiftId}/bundle`)
+        .set("x-api-key", device.apiKey)
+        .set("x-station-capabilities", caps)
+        .expect(409);
+      expect(
+        await db
+          .select()
+          .from(schema.ssccBlocks)
+          .where(eq(schema.ssccBlocks.deviceId, device.deviceId)),
+      ).toHaveLength(0);
+      expect(
+        await db
+          .select()
+          .from(schema.shiftDeviceParticipants)
+          .where(
+            and(
+              eq(schema.shiftDeviceParticipants.shiftId, shiftId),
+              eq(schema.shiftDeviceParticipants.deviceId, device.deviceId),
+            ),
+          ),
+      ).toHaveLength(0);
+    }
+    const preview = await request(app!.getHttpServer())
+      .get(`/shifts/pallet-sheet-template-preview?productId=${productId}&templateId=${sheetId}`)
+      .set("x-api-key", current.apiKey)
+      .set("x-station-capabilities", "pallet-sheet-v2")
+      .expect(200);
+    expect(preview.body).toMatchObject({ id: sheetId, revision: 1, spec: preset.spec });
+    const oldCabinet = await agent.get(`/shifts/${shiftId}`).expect(200);
+    expect(oldCabinet.body).not.toHaveProperty("palletSheetTemplateId");
+    const newCabinet = await agent
+      .get(`/shifts/${shiftId}`)
+      .set("x-label-template-formats", "label-v1,pallet-sheet-v2")
+      .expect(200);
+    expect(newCabinet.body).toMatchObject({
+      palletSheetTemplateId: sheetId,
+      palletSheetTemplateRevision: 1,
+    });
+    await agent
+      .patch(`/label-templates/${sheetId}`)
+      .send({ expectedRevision: 1, name: "Later A4", spec: { ...preset.spec, body: [] } })
+      .expect(200);
+    await agent
+      .patch(`/label-templates/${sheetId}`)
+      .send({ expectedRevision: 2, enabled: false })
+      .expect(200);
+    await agent.delete(`/label-templates/${sheetId}`).expect(409);
+    await request(app!.getHttpServer())
+      .post(`/shifts/${shiftId}/enter`)
+      .set("x-api-key", current.apiKey)
+      .set("x-station-capabilities", "pallet-sheet-v2")
+      .send({ entryMethod: "list" })
+      .expect(200);
+    const downloaded = await request(app!.getHttpServer())
+      .get(`/shifts/${shiftId}/bundle`)
+      .set("x-api-key", current.apiKey)
+      .set("x-station-capabilities", "pallet-sheet-v2")
+      .expect(200);
+    expect(downloaded.body.palletSheetTemplate).toMatchObject({
+      id: sheetId,
+      name: "Frozen A4",
+      revision: 1,
+      spec: preset.spec,
+    });
+    expect(downloaded.body.palletLabelTemplate).toBeNull();
+    await agent.patch(`/shifts/${shiftId}`).send({ palletSheetTemplateId: sheetId }).expect(400);
+    await agent
+      .patch(`/label-templates/${sheetId}`)
+      .send({ expectedRevision: 3, enabled: true })
+      .expect(200);
+    const reselected = await agent
+      .patch(`/shifts/${shiftId}`)
+      .send({ palletSheetTemplateId: sheetId })
+      .expect(200);
+    expect(reselected.body.palletSheetTemplateRevision).toBe(4);
+    const audits = await db
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "shift.pallet_sheet.changed"),
+          eq(schema.tenantAuditEvents.targetId, shiftId),
+        ),
+      );
+    expect(audits).toHaveLength(1);
+    expect(audits[0]).toMatchObject({
+      organizationId: tenantId,
+      outcome: "success",
+      targetType: "shift",
+      targetId: shiftId,
+      before: {
+        templateId: sheetId,
+        revision: 1,
+        digest: downloaded.body.palletSheetTemplate.digest,
+      },
+      after: { templateId: sheetId, revision: 4 },
+    });
+    const [member] = await db
+      .select({ userId: schema.member.userId })
+      .from(schema.member)
+      .where(eq(schema.member.organizationId, tenantId));
+    expect(audits[0]?.actorUserId).toBe(member?.userId);
+  });
+
+  it("keeps a V1 fallback and projects A4 out of legacy bundle/picker/default responses", async () => {
+    const agent = request.agent(app!.getHttpServer());
+    const tenantId = await signUpAndActivate(agent);
+    await attachManagedSubscription(
+      tenantId,
+      new Date(Date.now() - 60_000),
+      new Date(Date.now() + 86_400_000),
+    );
+    const productId = await seedProduct(tenantId, {
+      status: "active",
+      chzProductGroupCode: 15,
+      boxCapacity: 12,
+      palletBoxCapacity: 48,
+    });
+    const boxId = await seedLabelTemplate(tenantId, "Box"),
+      palletId = await seedLabelTemplate(tenantId, "Pallet RAW");
+    await db
+      .update(schema.labelTemplates)
+      .set({ purpose: "pallet" })
+      .where(eq(schema.labelTemplates.id, palletId));
+    const preset = buildPalletSheetPresets()[0];
+    if (!preset) throw new Error("Missing preset");
+    const sheetId = randomUUID();
+    await db.insert(schema.labelTemplates).values({
+      id: sheetId,
+      tenantId,
+      name: "A4",
+      purpose: "pallet",
+      format: "pallet_sheet_v2",
+      spec: preset.spec,
+    });
+    const created = await agent
+      .post("/shifts")
+      .send({
+        productId,
+        mode: "aggregation",
+        palletsEnabled: true,
+        boxLabelTemplateId: boxId,
+        palletLabelTemplateId: palletId,
+        palletSheetTemplateId: sheetId,
+      })
+      .expect(201);
+    const old = await createTestStationDevice(app!, agent, "Legacy fallback");
+    const bundle = await request(app!.getHttpServer())
+      .get(`/shifts/${String(created.body.id)}/reference-bundle`)
+      .set("x-api-key", old.apiKey)
+      .expect(200);
+    expect(bundle.body.palletLabelTemplate.id).toBe(palletId);
+    expect(bundle.body).not.toHaveProperty("palletSheetTemplate");
+    expect(bundle.body.shift).not.toHaveProperty("palletSheetTemplateId");
+    const denied = await request(app!.getHttpServer())
+      .get(`/shifts/pallet-sheet-templates?productId=${productId}`)
+      .set("x-api-key", old.apiKey)
+      .expect(409);
+    expect(denied.body.code).toBe("PALLET_SHEET_UNSUPPORTED");
+    const defaultOld = await request(app!.getHttpServer())
+      .get(`/shifts/planning-config?productId=${productId}`)
+      .set("x-api-key", old.apiKey)
+      .expect(200);
+    expect(defaultOld.body).not.toHaveProperty("defaultPalletSheetTemplateId");
+    const disabled = await agent
+      .patch(`/shifts/${created.body.id}`)
+      .set("x-label-template-formats", "label-v1,pallet-sheet-v2")
+      .send({ palletsEnabled: false })
+      .expect(200);
+    expect(disabled.body.palletSheetTemplateId).toBeNull();
+    const disabledBundle = await agent
+      .get(`/shifts/${created.body.id}/reference-bundle`)
+      .set("x-label-template-formats", "label-v1,pallet-sheet-v2")
+      .expect(200);
+    expect(disabledBundle.body.palletSheetTemplate).toBeNull();
+  });
 
   it("POST /shifts/:id/open flips planned->active and sets openedAt; 409 if not planned", async () => {
     const agent = request.agent(app!.getHttpServer());

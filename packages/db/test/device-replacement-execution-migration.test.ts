@@ -1,3 +1,4 @@
+import { closeFixturePool } from "./support/close-pool.js";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -102,8 +103,8 @@ describe.skipIf(!databaseUrl)("replacement execution forward migration", () => {
   }, 120_000);
 
   afterAll(async () => {
-    await pool.end();
-    if (created) await maintenance.query(`DROP DATABASE "${name}" WITH (FORCE)`);
+    await closeFixturePool(pool);
+    if (created) await maintenance.query(`DROP DATABASE "${name}"`);
     await maintenance.end();
     if (temporaryRoot) await rm(temporaryRoot, { recursive: true, force: true });
   });

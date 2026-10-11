@@ -409,3 +409,76 @@ export type { MonoRaster, MonoRasterBounds } from "./labels/mono-raster.js";
 export { productLabelPrintFormat, productLabelPrintIdentity } from "./product-labels/contracts.js";
 export type { ProductLabelPrintIdentity } from "./product-labels/contracts.js";
 export { renderMonoLabel } from "./labels/mono-render.js";
+
+export {
+  palletSheetSpecSchema,
+  sheetNodeSchema,
+  parsePalletSheetSpec,
+  ssccWidthMm,
+  PALLET_SHEET_FIELDS,
+  PALLET_SHEET_DPI,
+  PALLET_SHEET_MAX_NODES,
+  PALLET_SHEET_MAX_DEPTH,
+  GS1_128_MAX_WIDTH_MM,
+  GS1_128_QUIET_MODULES,
+  SSCC_SYMBOL_MODULES,
+} from "./labels/pallet-sheet-model.js";
+export type {
+  PalletSheetSpecV2,
+  PalletSheetField,
+  SheetNode,
+  SheetFlowNode,
+  SheetCanvasNode,
+  SheetTextNode,
+  SheetFieldNode,
+  SheetFieldRowNode,
+  SheetLogoNode,
+  SheetLineNode,
+  SheetBoxNode,
+  SheetSpacerNode,
+  SheetMargins,
+  SheetSsccFooter,
+} from "./labels/pallet-sheet-model.js";
+export {
+  parseStoredLabelTemplate,
+  parseStoredLabelJson,
+  serializeStoredLabelJson,
+  isPalletSheetSpec,
+} from "./labels/stored-template.js";
+export type {
+  StoredLabelTemplateSpec,
+  StoredTemplateJson,
+  StoredLabelJsonOptions,
+} from "./labels/stored-template.js";
+
+export { wrapTextToWidthStrict } from "./labels/wrap.js";
+export { buildPalletSheetPresets } from "./labels/pallet-sheet-defaults.js";
+export type { PalletSheetPreset } from "./labels/pallet-sheet-defaults.js";
+export {
+  renderPalletSheet,
+  nominalSheetGeometry,
+  resolvePalletSheetGeometry,
+} from "./labels/pallet-sheet-render.js";
+export type {
+  PalletSheetContext,
+  SheetGeometry,
+  ResolvedSheetGeometry,
+  SheetElementRegion,
+  SheetLogo,
+} from "./labels/pallet-sheet-render.js";
+export type { MonoBitmap } from "./labels/mono-compose.js";
+export {
+  PALLET_SHEET_PROTOCOL,
+  palletSheetTemplateSnapshotSchema,
+  createPalletSheetSnapshot,
+  parsePalletSheetSnapshot,
+} from "./labels/pallet-sheet-snapshot.js";
+export type { PalletSheetTemplateSnapshot } from "./labels/pallet-sheet-snapshot.js";
+export {
+  organizationBrandingDescriptorSchema,
+  organizationLogoDescriptorSchema,
+  logoFromRgba,
+} from "./labels/pallet-sheet-branding.js";
+export type { OrganizationBrandingDescriptor } from "./labels/pallet-sheet-branding.js";
+export { validateMonoBitmap } from "./labels/mono-compose.js";
+export { sheetLogoFingerprint } from "./labels/pallet-sheet-branding.js";

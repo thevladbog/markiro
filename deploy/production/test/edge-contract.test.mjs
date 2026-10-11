@@ -538,6 +538,8 @@ function assertAuthorityContract(adapted, { alb }) {
       "/shifts/product-label-templates",
       "/shifts/box-label-templates",
       "/shifts/pallet-label-templates",
+      "/shifts/pallet-sheet-templates",
+      "/shifts/pallet-sheet-template-preview",
       "/shifts/label-template-preview",
       "/products",
       "/products/gtin-check",
@@ -549,6 +551,8 @@ function assertAuthorityContract(adapted, { alb }) {
       "/shifts/product-label-templates",
       "/shifts/box-label-templates",
       "/shifts/pallet-label-templates",
+      "/shifts/pallet-sheet-templates",
+      "/shifts/pallet-sheet-template-preview",
       "/shifts/label-template-preview",
       "/products",
       "/products/gtin-check",
@@ -1450,6 +1454,8 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
     "/shifts",
     "/shifts/planning-config",
     "/shifts/product-label-templates",
+    "/shifts/pallet-sheet-templates",
+    "/shifts/pallet-sheet-template-preview",
     "/shifts/label-template-preview",
     "/products",
     // Opening /lines to the handheld must not take the cabinet's own page away
@@ -1490,6 +1496,16 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
     {
       method: "GET",
       path: "/shifts/pallet-label-templates",
+      headers: { "x-api-key": "station-test-key" },
+    },
+    {
+      method: "GET",
+      path: "/shifts/pallet-sheet-templates",
+      headers: { "x-api-key": "station-test-key" },
+    },
+    {
+      method: "GET",
+      path: "/shifts/pallet-sheet-template-preview",
       headers: { "x-api-key": "station-test-key" },
     },
     {
@@ -1554,6 +1570,8 @@ test("direct Caddy adapter keeps bare admin routes static and routes exact Stati
     { method: "OPTIONS", path: "/shifts/product-label-templates" },
     { method: "OPTIONS", path: "/shifts/box-label-templates" },
     { method: "OPTIONS", path: "/shifts/pallet-label-templates" },
+    { method: "OPTIONS", path: "/shifts/pallet-sheet-templates" },
+    { method: "OPTIONS", path: "/shifts/pallet-sheet-template-preview" },
     { method: "OPTIONS", path: "/shifts/label-template-preview" },
     { method: "OPTIONS", path: "/products" },
     { method: "OPTIONS", path: "/products/gtin-check" },

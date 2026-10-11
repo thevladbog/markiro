@@ -626,6 +626,7 @@ describe("credential rejection recovery", () => {
       { sql: "DELETE FROM shift_mirror", params: [] },
       { sql: "DELETE FROM product_mirror", params: [] },
       { sql: "DELETE FROM station_product_images", params: [] },
+      { sql: "DELETE FROM station_organization_branding", params: [] },
       {
         sql: "DELETE FROM station_meta WHERE key = ?",
         params: ["active_inventory_floor_task_v1"],

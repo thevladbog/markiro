@@ -220,9 +220,10 @@ describe("shift template preview eligibility", () => {
         params: [tenantId, productId],
       });
       expect(conditions[0]?.sql).toContain('"products"."tenant_id"');
+      expect(conditions[1]?.sql).toContain('"label_templates"."format"');
       expect(conditions[1]).toMatchObject({
         table: schema.labelTemplates,
-        params: [tenantId, templateId, purpose, true],
+        params: [tenantId, templateId, purpose, "label_v1", true],
       });
       expect(conditions[1]?.sql).toContain('"label_templates"."tenant_id"');
     },

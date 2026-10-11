@@ -182,6 +182,16 @@ export const STATION_PREFLIGHTS = Object.freeze([
     headers: "content-type,x-api-key,x-station-capabilities",
   },
   {
+    path: "/station/branding",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/station/branding/logo/a1111111-1111-4111-8111-111111111111",
+    method: "GET",
+    headers: "x-api-key,x-station-capabilities",
+  },
+  {
     path: "/station/warehouse-reprint/event-batches",
     method: "POST",
     headers: "content-type,x-api-key,x-station-capabilities",
@@ -205,6 +215,16 @@ export const STATION_PREFLIGHTS = Object.freeze([
   },
   {
     path: "/shifts/pallet-label-templates",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/shifts/pallet-sheet-templates",
+    method: "GET",
+    headers: "content-type,x-api-key,x-station-capabilities",
+  },
+  {
+    path: "/shifts/pallet-sheet-template-preview",
     method: "GET",
     headers: "content-type,x-api-key,x-station-capabilities",
   },

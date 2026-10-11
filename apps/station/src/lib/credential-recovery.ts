@@ -455,6 +455,7 @@ export async function clearRejectedCredentialState({
   await exec.run("DELETE FROM shift_mirror");
   await exec.run("DELETE FROM product_mirror");
   await clearStationProductImages(exec);
+  await exec.run("DELETE FROM station_organization_branding");
   if (rejectedOwnership === null) {
     await exec.run("DELETE FROM station_meta WHERE key = ?", ["active_inventory_floor_task_v1"]);
     await exec.run("DELETE FROM inventory_snapshot_codes_mirror");

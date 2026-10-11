@@ -67,7 +67,9 @@ export function PrinterDestination({
             disabled={disabled || busy}
             options={[
               { value: "", label: t("printerRouting.selectPrinter") },
-              ...printers.map((item) => ({ value: item.id, label: item.name })),
+              ...printers
+                .filter((item) => purpose === "pallet" || item.paper !== "a4")
+                .map((item) => ({ value: item.id, label: item.name })),
             ]}
             onValueChange={setSelected}
           />

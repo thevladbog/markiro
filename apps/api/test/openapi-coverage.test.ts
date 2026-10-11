@@ -55,7 +55,9 @@ let controllerModules: ControllerModule[] = [];
 beforeAll(async () => {
   const files = findControllerFiles(SRC_DIR).sort();
   controllerModules = [];
-  for (const file of files) controllerModules.push({ file, exports: await import(file) });
+  controllerModules = await Promise.all(
+    files.map(async (file) => ({ file, exports: await import(file) })),
+  );
 });
 
 function collectProblems(): RouteProblem[] {

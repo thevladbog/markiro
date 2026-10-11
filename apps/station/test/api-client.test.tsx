@@ -31,6 +31,20 @@ afterEach(() => {
 });
 
 describe("createStationClient", () => {
+  it("advertises A4 only after native support was established", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(
+        async () => new Response("{}", { headers: { "Content-Type": "application/json" } }),
+      );
+    const config = { apiKey: "test-key", serverUrl: "https://example.test" };
+    await createStationClient(config).get("/shifts");
+    await createStationClient(config, { palletSheetSupported: true }).get("/shifts");
+    const oldHeaders = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    const newHeaders = new Headers(fetchMock.mock.calls[1]?.[1]?.headers);
+    expect(oldHeaders.get("x-station-capabilities")).not.toContain("pallet-sheet-v2");
+    expect(newHeaders.get("x-station-capabilities")).toContain("pallet-sheet-v2");
+  });
   it("sends the x-api-key header and base-URLs from config", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ ok: true }), {

@@ -1,3 +1,4 @@
+use crate::printer_sheet::{WindowsPageGeometry, WindowsPageOptions};
 use crate::printer_windows::{self, Failure, Observation, Outcome, Preflight, Receipt};
 use std::time::Duration;
 
@@ -22,13 +23,42 @@ pub fn supports_windows_printing() -> bool {
     cfg!(windows)
 }
 #[tauri::command]
+pub fn supports_windows_a4_printing() -> bool {
+    cfg!(windows)
+}
+#[tauri::command]
+pub async fn get_windows_page_geometry(
+    queue: String,
+    page_options: WindowsPageOptions,
+) -> Result<WindowsPageGeometry, Failure> {
+    await_driver(
+        tauri::async_runtime::spawn_blocking(move || {
+            printer_windows::page_geometry(queue, page_options)
+        }),
+        DRIVER_WAIT,
+    )
+    .await
+    .unwrap_or(Err(Failure {
+        code: "driver_failure",
+        phase: "before_start",
+        receipt: None,
+    }))
+}
+#[tauri::command]
 pub async fn preflight_windows_raster(
     queue: String,
     payload_base64: String,
+    page_options: Option<WindowsPageOptions>,
+    geometry_fingerprint: Option<String>,
 ) -> Result<Preflight, String> {
     Ok(await_driver(
         tauri::async_runtime::spawn_blocking(move || {
-            printer_windows::preflight(queue, payload_base64)
+            printer_windows::preflight_page(
+                queue,
+                payload_base64,
+                page_options,
+                geometry_fingerprint,
+            )
         }),
         DRIVER_WAIT,
     )
@@ -47,10 +77,18 @@ pub async fn print_windows_raster(
     queue: String,
     payload_base64: String,
     document_name: String,
+    page_options: Option<WindowsPageOptions>,
+    geometry_fingerprint: Option<String>,
 ) -> Result<Outcome, String> {
     Ok(await_driver(
         tauri::async_runtime::spawn_blocking(move || {
-            printer_windows::print(queue, payload_base64, document_name)
+            printer_windows::print_page(
+                queue,
+                payload_base64,
+                document_name,
+                page_options,
+                geometry_fingerprint,
+            )
         }),
         DRIVER_WAIT,
     )

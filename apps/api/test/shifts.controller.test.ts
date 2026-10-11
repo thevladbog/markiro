@@ -150,6 +150,7 @@ describe("ShiftsController.createShift", () => {
       { domain: "station_device", id: "device-1" },
       "station",
       "validation-dm-duplicate-v1",
+      false,
     );
   });
 });
@@ -256,8 +257,9 @@ describe("shift owner identity and device policy projection", () => {
               actor,
               "station",
               capabilities,
+              false,
             ]
-          : ["tenant-owner", body, actor, "admin"],
+          : ["tenant-owner", body, actor, "admin", undefined, false],
       ]);
       // Projection must not mutate the persisted policy, snapshot, or split count result.
       expect(saved.validationPrint).toEqual(policy);

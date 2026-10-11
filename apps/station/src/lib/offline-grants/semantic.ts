@@ -1,4 +1,8 @@
-import { formatShiftNumber } from "@markiro/domain";
+import {
+  formatShiftNumber,
+  palletSheetTemplateSnapshotSchema,
+  type PalletSheetTemplateSnapshot,
+} from "@markiro/domain";
 import { z } from "zod";
 import type { SqlExecutor } from "../mirror.js";
 
@@ -21,6 +25,8 @@ export interface ShiftExecutionProjection {
       labelTemplateId: string | null;
       boxLabelTemplateId: string | null;
       palletLabelTemplateId: string | null;
+      palletSheetTemplateId?: string | undefined;
+      palletSheetTemplateSnapshot?: PalletSheetTemplateSnapshot | undefined;
       validationPrintMode: string | null;
       allowPreviouslyAcceptedCodes: boolean;
       validationPrintVerification: string | null;
@@ -51,31 +57,42 @@ export type ExecutionProjection = InventoryExecutionProjection | ShiftExecutionP
 
 const nullableString = z.string().nullable();
 const shiftExecutionScopeSchema = z.strictObject({
-  shift: z.strictObject({
-    id: z.string().min(1),
-    productId: z.string().min(1),
-    mode: z.string().min(1),
-    lineId: nullableString,
-    counterpartyId: nullableString,
-    counterpartyName: nullableString,
-    labelTemplateId: nullableString,
-    boxLabelTemplateId: nullableString,
-    palletLabelTemplateId: nullableString,
-    validationPrintMode: nullableString,
-    allowPreviouslyAcceptedCodes: z.boolean(),
-    validationPrintVerification: nullableString,
-    validationPrintTemplateId: nullableString,
-    validationPrintSnapshot: z.unknown().nullable(),
-    validationPrintPolicyRevision: nullableString,
-    boxCapacity: z.number().int().positive().nullable(),
-    palletsEnabled: z.boolean(),
-    palletBoxCapacity: z.number().int().positive().nullable(),
-    stationClosePolicy: nullableString,
-    stationCloseOwnerDeviceId: nullableString,
-    plannedDate: nullableString,
-    productionDate: nullableString,
-    number: z.string().min(1),
-  }),
+  shift: z
+    .strictObject({
+      id: z.string().min(1),
+      productId: z.string().min(1),
+      mode: z.string().min(1),
+      lineId: nullableString,
+      counterpartyId: nullableString,
+      counterpartyName: nullableString,
+      labelTemplateId: nullableString,
+      boxLabelTemplateId: nullableString,
+      palletLabelTemplateId: nullableString,
+      palletSheetTemplateId: z.uuid().optional(),
+      palletSheetTemplateSnapshot: palletSheetTemplateSnapshotSchema.optional(),
+      validationPrintMode: nullableString,
+      allowPreviouslyAcceptedCodes: z.boolean(),
+      validationPrintVerification: nullableString,
+      validationPrintTemplateId: nullableString,
+      validationPrintSnapshot: z.unknown().nullable(),
+      validationPrintPolicyRevision: nullableString,
+      boxCapacity: z.number().int().positive().nullable(),
+      palletsEnabled: z.boolean(),
+      palletBoxCapacity: z.number().int().positive().nullable(),
+      stationClosePolicy: nullableString,
+      stationCloseOwnerDeviceId: nullableString,
+      plannedDate: nullableString,
+      productionDate: nullableString,
+      number: z.string().min(1),
+    })
+    .superRefine((shift, ctx) => {
+      if (shift.palletSheetTemplateId !== shift.palletSheetTemplateSnapshot?.id)
+        ctx.addIssue({
+          code: "custom",
+          path: ["palletSheetTemplateSnapshot"],
+          message: "Sheet snapshot selection mismatch",
+        });
+    }),
   product: z.strictObject({
     id: z.string().min(1),
     gtin14: z.string().min(1),
@@ -233,7 +250,17 @@ export function assertExecutionScopeMatches(
     throw new Error("offline grant active shift mismatch");
   }
   const expected = {
-    shift: { ...project(signedShift, SHIFT_KEYS), number },
+    shift: {
+      ...project(signedShift, SHIFT_KEYS),
+      number,
+      ...(signedShift.palletSheetTemplateId !== undefined ||
+      signedShift.palletSheetTemplateSnapshot !== undefined
+        ? {
+            palletSheetTemplateId: signedShift.palletSheetTemplateId,
+            palletSheetTemplateSnapshot: signedShift.palletSheetTemplateSnapshot,
+          }
+        : {}),
+    },
     product: project(signedProduct, PRODUCT_KEYS),
     templates: scope.templates,
   };

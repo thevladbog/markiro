@@ -99,7 +99,9 @@ export function PrinterRoutingPanel({
             disabled={disabled}
             options={[
               { value: "", label: t("setup.printerNotAssigned") },
-              ...routing.printers.map((printer) => ({ value: printer.id, label: printer.name })),
+              ...routing.printers
+                .filter((printer) => purpose === "pallet" || printer.paper !== "a4")
+                .map((printer) => ({ value: printer.id, label: printer.name })),
             ]}
             onValueChange={(value) => onAssign(purpose, value || null)}
           />

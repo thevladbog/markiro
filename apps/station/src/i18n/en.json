@@ -1,4 +1,19 @@
 {
+  "palletSheet": {
+    "readyRequired": "Wait for a ready A4 preview. Check organization branding and printer settings, then retry.",
+    "paper": "Paper type",
+    "labelPaper": "Label — custom size",
+    "a4Paper": "A4 — pallet labels only",
+    "checkGeometry": "Check A4 settings",
+    "geometryChecked": "The driver confirmed A4 in both orientations. Physical printing has not been checked.",
+    "unsupported": "A4 requires an updated Station on Windows.",
+    "templateMissing": "This shift has no downloaded A4 pallet template.",
+    "brandingMissing": "Organization and logo data are not downloaded yet. Connect the station to the server.",
+    "geometryMismatch": "The driver changed paper size, resolution or margins. Check A4 settings.",
+    "unknown": "Delivery is unknown. Check the printer before explicitly reprinting.",
+    "layoutFailed": "The A4 layout does not fit or the saved renderer is unsupported. Check the template.",
+    "preview": "A4 pallet preview: {{name}}"
+  },
   "app": {
     "title": "Markiro — Station",
     "booting": "Loading station…",

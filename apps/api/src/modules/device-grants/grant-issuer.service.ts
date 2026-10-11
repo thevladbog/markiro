@@ -61,8 +61,9 @@ export class GrantIssuerService {
     identity: GrantCredentialIdentity,
     task: TaskReference,
     requestId: string,
+    capabilities?: string,
   ): Promise<GrantIssueResult> {
-    return this.issue(identity, requestId, task);
+    return this.issue(identity, requestId, task, capabilities);
   }
   async keyset(identity: GrantCredentialIdentity) {
     return this.db.transaction(async (tx) => {
@@ -248,6 +249,7 @@ export class GrantIssuerService {
     identity: GrantCredentialIdentity,
     requestId: string,
     task: TaskReference | null,
+    capabilities?: string,
   ): Promise<GrantIssueResult> {
     const operation = task ? "task" : "device";
     const result = await this.db.transaction(
@@ -348,7 +350,9 @@ export class GrantIssuerService {
             ),
           };
         }
-        const frozen = task ? await freezeGrantTask(tx, owner, task, initial.policy) : null;
+        const frozen = task
+          ? await freezeGrantTask(tx, owner, task, initial.policy, capabilities)
+          : null;
         if (frozen?.status === "denied") return deny(frozen.reason);
         if (!(await lockCurrentGrantOwner(tx, identity, this.clock())))
           throw new UnauthorizedException();

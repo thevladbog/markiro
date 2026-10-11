@@ -50,6 +50,10 @@ export const putOrgProfileSchema = z.object({
    * seeded template would be permanently undisableable for every tenant.
    */
   defaultPalletLabelTemplateId: z.string().uuid().nullable().optional(),
+  defaultPalletSheetTemplateId: z.string().uuid().nullable().optional(),
+  categoryPalletSheetTemplateDefaults: categoryLabelTemplateDefaultsSchema(
+    "categoryPalletSheetTemplateDefaults",
+  ).optional(),
   /** Full replacement of the per-category pallet-label defaults; omitted keeps the current list. */
   categoryPalletLabelTemplateDefaults: categoryLabelTemplateDefaultsSchema(
     "categoryPalletLabelTemplateDefaults",
@@ -74,6 +78,8 @@ export interface OrgProfileDto {
   defaultBoxLabelTemplateId: string | null;
   categoryBoxLabelTemplateDefaults: CategoryBoxLabelTemplateDefaultDto[];
   defaultPalletLabelTemplateId: string | null;
+  defaultPalletSheetTemplateId: string | null;
+  categoryPalletSheetTemplateDefaults: CategoryPalletLabelTemplateDefaultDto[];
   categoryPalletLabelTemplateDefaults: CategoryPalletLabelTemplateDefaultDto[];
   /** Distinct ЧЗ product-group codes of non-archived products, ascending. A UI hint only. */
   productGroupsInUse: number[];
@@ -142,6 +148,8 @@ export const orgProfileOpenApiSchema: SchemaObject = {
     "defaultBoxLabelTemplateId",
     "categoryBoxLabelTemplateDefaults",
     "defaultPalletLabelTemplateId",
+    "defaultPalletSheetTemplateId",
+    "categoryPalletSheetTemplateDefaults",
     "categoryPalletLabelTemplateDefaults",
     "productGroupsInUse",
     "pickupLimitsEnabled",
@@ -155,6 +163,8 @@ export const orgProfileOpenApiSchema: SchemaObject = {
     defaultBoxLabelTemplateId: { ...uuidSchema, nullable: true },
     categoryBoxLabelTemplateDefaults: { ...categoryLabelTemplateDefaultsOpenApiSchema },
     defaultPalletLabelTemplateId: { ...uuidSchema, nullable: true },
+    defaultPalletSheetTemplateId: { ...uuidSchema, nullable: true },
+    categoryPalletSheetTemplateDefaults: { ...categoryLabelTemplateDefaultsOpenApiSchema },
     categoryPalletLabelTemplateDefaults: { ...categoryLabelTemplateDefaultsOpenApiSchema },
     productGroupsInUse: { type: "array", items: { type: "integer" } },
     pickupLimitsEnabled: { type: "boolean" },

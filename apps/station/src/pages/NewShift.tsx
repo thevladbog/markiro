@@ -14,6 +14,8 @@ import {
   validationPrintInputSchema,
   validationPrintPolicySchema,
   labelTemplateSpecSchema,
+  parsePalletSheetSnapshot,
+  type PalletSheetTemplateSnapshot,
   type ProductLabelTemplateList,
   type ValidationPrintInput,
 } from "@markiro/domain";
@@ -26,11 +28,16 @@ import { FloorFooter } from "../ui/FloorFooter.js";
 import { StationScreen } from "../ui/StationScreen.js";
 import { TemplateChoiceList } from "../ui/labels/TemplateChoiceList.js";
 import { LabelPreview } from "../ui/warehouse-reprint/LabelPreview.js";
+import { PalletSheetPreview, type SheetBrandingOwner } from "../ui/PalletSheetPreview.js";
+import { refreshOrganizationBranding } from "../lib/organization-branding.js";
 
 interface ResolvedProduct {
   id: string;
   gtin14: string;
   name: string;
+  printName?: string | null;
+  egaisCode?: string | null;
+  shelfLifeDays?: number | null;
   boxCapacity: number | null;
   palletBoxCapacity?: number | null;
 }
@@ -54,6 +61,7 @@ const templatePreviewSchema = z.strictObject({
 });
 
 export interface NewShiftProps {
+  sheetBrandingOwner?: SheetBrandingOwner;
   client: StationClient;
   source: ScanSource;
   acquireShiftEntry?: AcquireShiftEntry;
@@ -118,6 +126,7 @@ export function NewShift({
   onSetup,
   isCurrent,
   initialDraft,
+  sheetBrandingOwner,
 }: NewShiftProps) {
   const { i18n, t } = useTranslation();
   const [raw, setRaw] = useState("");
@@ -161,11 +170,59 @@ export function NewShift({
   const [palletTemplates, setPalletTemplates] = useState<BoxLabelTemplateOption[]>([]);
   const [defaultPalletTemplateId, setDefaultPalletTemplateId] = useState<string | null>(null);
   const [palletTemplateId, setPalletTemplateId] = useState<string | null>(null);
+  const palletPrinter = useMemo(() => resolvePrinter(hardwareConfig, "pallet"), [hardwareConfig]);
+  const palletSheetMode = palletPrinter?.paper === "a4";
+  const [sheetPreview, setSheetPreview] = useState<PalletSheetTemplateSnapshot | null>(null);
+  const [previewRetry, setPreviewRetry] = useState(0);
+  const sheetReadinessSource = useMemo(
+    () => ({
+      sheetPreview,
+      palletPrinter,
+      sheetBrandingOwner,
+      product,
+      productionDate,
+      view,
+      previewRetry,
+    }),
+    [sheetPreview, palletPrinter, sheetBrandingOwner, product, productionDate, view, previewRetry],
+  );
+  const [sheetReadiness, setSheetReadiness] = useState<{
+    source: typeof sheetReadinessSource;
+    ready: boolean;
+  } | null>(null);
+  const onSheetReadyChange = useCallback(
+    (ready: boolean) => setSheetReadiness({ source: sheetReadinessSource, ready }),
+    [sheetReadinessSource],
+  );
+  const sheetReady = sheetReadiness?.source === sheetReadinessSource && sheetReadiness.ready;
+  async function retrySheetPreview() {
+    setSheetReadiness(null);
+    if (sheetBrandingOwner)
+      await refreshOrganizationBranding({ ...sheetBrandingOwner, client }).catch(() => {});
+    setPreviewRetry((value) => value + 1);
+  }
+  useEffect(() => {
+    setSheetPreview(null);
+    if (view !== "palletTemplate" || !palletSheetMode || !product || !palletTemplateId) return;
+    let active = true;
+    void client
+      .get<unknown>(
+        `/shifts/pallet-sheet-template-preview?productId=${encodeURIComponent(product.id)}&templateId=${encodeURIComponent(palletTemplateId)}`,
+        { displayOnly: true },
+      )
+      .then((response) => {
+        const parsed = parsePalletSheetSnapshot(response);
+        if (active && parsed.id === palletTemplateId) setSheetPreview(parsed);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [view, palletSheetMode, product, palletTemplateId, client, previewRetry]);
   const [templates, setTemplates] = useState<BoxLabelTemplateOption[]>([]);
   const [defaultTemplateId, setDefaultTemplateId] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const [templateSearch, setTemplateSearch] = useState("");
-  const [previewRetry, setPreviewRetry] = useState(0);
   const resolving = useRef(false);
   const mounted = useRef(true);
   const isCurrentRef = useRef(isCurrent);
@@ -174,7 +231,7 @@ export function NewShift({
   const previewPurpose =
     view === "template"
       ? "box"
-      : view === "palletTemplate"
+      : view === "palletTemplate" && !palletSheetMode
         ? "pallet"
         : view === "productTemplate"
           ? "product_duplicate"
@@ -355,6 +412,38 @@ export function NewShift({
     setBusy(true);
     setError(null);
     try {
+      if (palletSheetMode) {
+        if (!client.palletSheetSupported) throw new Error(t("palletSheet.unsupported"));
+        const config = await client.get<{
+          items: {
+            id: string;
+            name: string;
+            revision: number;
+            page: { orientation: "portrait" | "landscape" };
+          }[];
+          defaultPalletSheetTemplateId: string | null;
+        }>(`/shifts/pallet-sheet-templates?productId=${encodeURIComponent(product.id)}`);
+        if (!current()) return;
+        setPalletTemplates(
+          config.items.map((item) => ({
+            id: item.id,
+            name: item.name,
+            widthMm: item.page.orientation === "portrait" ? 210 : 297,
+            heightMm: item.page.orientation === "portrait" ? 297 : 210,
+            dpi: 300,
+            language: "",
+          })),
+        );
+        setDefaultPalletTemplateId(config.defaultPalletSheetTemplateId);
+        setPalletTemplateId(
+          config.items.some((item) => item.id === palletTemplateId)
+            ? palletTemplateId
+            : config.defaultPalletSheetTemplateId,
+        );
+        setTemplateSearch("");
+        setView("palletTemplate");
+        return;
+      }
       const config = await client.get<{
         items: BoxLabelTemplateOption[];
         defaultPalletLabelTemplateId: string | null;
@@ -487,6 +576,10 @@ export function NewShift({
         return;
       }
       if (!palletTemplateId) return;
+      if (palletSheetMode && !sheetReady) {
+        setError(t("palletSheet.readyRequired"));
+        return;
+      }
     }
     const operation = ++shiftEntryOperation.current;
     let lease: ShiftEntryLease | null = null;
@@ -564,7 +657,15 @@ export function NewShift({
           : {}),
         ...(mode === "aggregation" ? { boxLabelTemplateId: selectedTemplateId } : {}),
         ...(mode === "aggregation" && palletsEnabled
-          ? { palletsEnabled: true, palletLabelTemplateId: palletTemplateId }
+          ? {
+              palletsEnabled: true,
+              ...(palletSheetMode
+                ? { palletSheetTemplateId: palletTemplateId, palletLabelTemplateId: null }
+                : {
+                    palletLabelTemplateId: palletTemplateId,
+                    ...(client.palletSheetSupported ? { palletSheetTemplateId: null } : {}),
+                  }),
+            }
           : {}),
       };
       const requestDigest = productLabelValueDigest(createInput);
@@ -809,7 +910,7 @@ export function NewShift({
               size="floor"
               fullWidth
               loading={busy}
-              disabled={!selectedId}
+              disabled={!selectedId || (palletLabels && palletSheetMode && !sheetReady)}
               onClick={() => void (productLabels ? applyPrintSettings() : start())}
             >
               {t(
@@ -867,7 +968,19 @@ export function NewShift({
                 onSearch={setTemplateSearch}
               />
               <div className="label-template-preview">
-                {currentPreview?.template ? (
+                {palletLabels && palletSheetMode && sheetPreview ? (
+                  <PalletSheetPreview
+                    template={sheetPreview}
+                    profile={palletPrinter}
+                    owner={sheetBrandingOwner}
+                    productName={product.printName || product.name}
+                    gtin14={product.gtin14}
+                    productionDate={productionDate || null}
+                    egaisCode={product.egaisCode ?? null}
+                    shelfLifeDays={product.shelfLifeDays ?? null}
+                    onReadyChange={onSheetReadyChange}
+                  />
+                ) : currentPreview?.template ? (
                   <LabelPreview
                     template={currentPreview.template}
                     {...(previewPrinter?.dpi ? { dpi: previewPrinter.dpi } : {})}
@@ -896,6 +1009,16 @@ export function NewShift({
                   </div>
                 )}
               </div>
+              {palletLabels && palletSheetMode ? (
+                <Button
+                  size="floor"
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => void retrySheetPreview()}
+                >
+                  {t("warehouse.previewRetry")}
+                </Button>
+              ) : null}
             </div>
           )}
           {messageSlot}
