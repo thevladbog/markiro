@@ -19,6 +19,9 @@
 //! send buffer, the COM driver, the spooler's queue). A network printer
 //! sends no receipt, so a label that was buffered and then lost with the
 //! connection is not seen here.
+//!
+//! Printing through a Windows printer driver (a `mono-raster-v1` page drawn
+//! with GDI, plan ДРВ) lives in `printer/driver.rs`; this module stays RAW.
 
 use std::io::Write;
 use std::net::{IpAddr, SocketAddr, TcpStream, ToSocketAddrs};
@@ -31,6 +34,9 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod driver;
+pub mod driver_commands;
+pub mod raster;
 pub mod spooler;
 
 /// The longest label `print_bytes` takes: 32 MiB of decoded bytes (a 100 x 150
