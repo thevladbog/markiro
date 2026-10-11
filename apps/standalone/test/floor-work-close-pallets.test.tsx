@@ -559,7 +559,7 @@ describe("the pallet's label and the pallet's serial inside the close", () => {
 
   it("says the pallet did not close when its serial was lost, keeps the shift open, and takes the next serial on «Повторить»", async () => {
     const at = await palletStation({ capacity: 40, boxCapacity: 1 });
-    holdSscc(at, 0);
+    for (const serial of [0, 1, 2]) holdSscc(at, serial);
     const work = await twoBoxesThenClose(at);
     await work.press("Закрыть паллету и смену");
     expect(screen.getByText("Паллета не закрыта")).toBeTruthy();
@@ -578,7 +578,7 @@ describe("the pallet's label and the pallet's serial inside the close", () => {
 
   it("keeps saying the shift is not closed on «Повторить» and when the link brings a block that cannot label a pallet", async () => {
     const at = await palletStation({ capacity: 40, boxCapacity: 1, palletBlock: false });
-    holdSscc(at, 0);
+    for (const serial of [0, 1, 2]) holdSscc(at, serial);
     const work = await twoBoxesThenClose(at);
     await work.press("Закрыть паллету и смену");
     expect(screen.getByText("Нет номеров SSCC паллет: паллета не закрыта")).toBeTruthy();
