@@ -2965,7 +2965,16 @@ dots on a side (`RasterTooLargeError`) before it makes it. No printer assigned f
 boxes — the job is `failed` `printer_unconfigured`; no render — `failed`
 `render_failed` with the printer kept; the box closes either way, and no job
 exists for a box that did not close. The shift's number and production date come
-from the shift copy (the host's last list), because the snapshot has neither.
+from the shift copy as entered (`keepEnteredShift`; the snapshot has neither), and
+they are stable: the host refuses to change the production date, the line, the box
+or pallet template, the counterparty, the capacity or the pallets of an `Active`
+shift (`update_shift`, `host/src/routes/office_shifts.rs` lines 398–432:
+`fixed_changed` on an `Active` shift answers `status_conflict`; pinned by
+`an_active_shift_takes_only_its_plan_and_a_closed_one_nothing` in
+`host/tests/office_shifts.rs`, the `productionDate` case answers 409), the shift's
+number is drawn at creation and never updated, and each job stores its `fields`
+(date and expiry included), which a reprint replays. So a printed fact is never
+recalculated and a box keeps the SSCC and date it was closed with.
 
 A job (`floor_print_jobs`, `print-jobs.ts`) walks `prepared → sending → sent`,
 then `verified` or `skipped` when the job asks for the label check (`verify`, the
@@ -3003,7 +3012,9 @@ host's fixture), built from the panel's buttons and written as a `reprint`
 exception (`floor_exceptions` and its `box_exception` record, no words) in the
 transaction that marks the job `sending`. Before a reprint is confirmed the panel
 names the printer it goes to, and says so when the job's own printer was deleted
-from the settings and the purpose's printer takes its place. Printing again keeps
+from the settings and the purpose's printer takes its place (adding, for a label
+that may exist, that it may lie at the deleted one; a failed job left the computer
+with nothing, so it does not say that). Printing again keeps
 the job's bytes when the printer's language and resolution are the job's and
 renders again from the snapshot's template revision otherwise (`printAgain`); no
 printer or no render changes and sends nothing. A check that waits takes the scan
@@ -3042,7 +3053,11 @@ the settings). A save whose shell step is refused keeps the settings and keeps
 «Сохранить» active to give the shell the set again. «Назад» leaves at once and
 says when it drops a change. A scanner's line is «Подключится после сохранения»,
 «Проверяем связь…» until the shell's first answer, then connected or not as
-`watchScanners` reports (the shell's snapshot has no other state). The test print
+`watchScanners` reports (the shell's snapshot has no other state). Every text
+field of the setup tells the scan source it takes typing (focus and blur; the
+source is told again when the printer form opens or closes or the setup goes, as a
+removed field sends no blur), so what is typed there is never a scan, and a test
+label that went clears what was typed ahead. The test print
 sends a 58 × 40 label of ASCII only («MARKIRO TEST» and a random `MKR-` code in
 Code 128, `testLabelSpec`; no product data) through the same runtime and checks
 the scan of its code; a scan that is not that code is never shown (it may be a
@@ -3085,11 +3100,35 @@ What plan 2a7 accepted and left open, none of it verified on a printer:
   When it lands, restore the reference in the text with a test that the reprint is
   really reachable there, and change the test «promises nothing the screen does not
   have…» in `floor-work-print.test.tsx`.
-- Open for the final review: the production date and the shift number of a label
-  come from the shift copy, so what the host lets an active shift edit after
-  entry decides whether the label rule (do not recalculate a persisted fact)
-  requires snapshotting them; the size of the stock label's bytes was not
-  measured.
+- A job keeps its label's bytes in `bytes_base64`, and the `CHECK` of `0007`
+  requires them in `sending`, `sent`, `unknown` and `verified` (loosening it later
+  is a table rebuild). Measured at the final review on a synthetic worst case (every
+  text bitmap at its full `maxWidthPx × maxLines`, random bits; real Cyrillic is
+  smaller, and a fake rasterizer is no IBM Plex on a WebView2 canvas), stock dated
+  templates through `renderLabel`, in base64: 58 × 40 ZPL 20.7 KB at 203 dpi and
+  45.2 KB at 300 dpi (TSPL 10.6 and 22.9 KB); 75 × 120 ZPL 34.5 and 73.4 KB;
+  100 × 100 and 100 × 150 ZPL 59.9 and 128.6 KB (TSPL 30.2 and 64.5 KB). The
+  controller's decision: keep the `CHECK` as it is (the bytes are what «Напечатать
+  снова» sends again). At 500 boxes per shift, two shifts a day and the 30 days of
+  retention that is up to about 30 000 jobs, roughly 0.6–1.3 GB at the 58 × 40
+  sizes, so clearing them is plan 2a8's retention duty: it deletes a shift's
+  `floor_print_jobs` rows with the shift's other records (`RETAINED_TABLES` lists
+  the table).
+- A forget (`clear_copies`) keeps the `floor_print_jobs` rows (`DeviceData`), while the
+  pairing they belong to is gone, and every job read is pairing-scoped. A label that waited (`failed` or `unknown`)
+  when the device was forgotten and paired again stays in the database, shown by no
+  screen of the new pairing, and its box has no `box_label` record on the host.
+  Nothing is sent twice and no row is lost; it is a recovery nobody can reach.
+  Plan 2b should count the pairing's open jobs in the forget's warning beside the
+  unsent facts (`count_unsent` counts `outbox` only).
+- The panel decides what to show from the job and from `printing.isInFlight` at
+  each render. When a send times out and the final write of `unknown` then fails
+  with an error that is not a stale one, the job stays `sending` while the stuck
+  shell call holds it, and the panel shows the pending view («Этикетка
+  отправляется…», no button). When the call ends nothing re-renders it, so the
+  stalled check appears only after another render or a leave and a return
+  (recovery then finds the job out of flight). «Выйти из смены» stays open and
+  nothing is sent. If it is wanted later, `PrintRuntime` can announce a settle.
 - `FloorApp` reads the saved sound level once when it opens (a read slower than a
   whole setup visit could overwrite a newer level); a spooler queue whose port is a
   COM port is not known to the app.
