@@ -63,7 +63,7 @@ class AndroidTextRasterizer @Inject constructor() : RasterizeText {
                 color = Color.BLACK
             }
             var fitted = options
-            if (options.maxWidthPx != null && options.minFontSizePx != null) {
+            if (options.maxLines <= 1 && options.maxWidthPx != null && options.minFontSizePx != null) {
                 while (paint.measureText(text) > options.maxWidthPx && fitted.fontSizePx > options.minFontSizePx) {
                     fitted = fitted.copy(fontSizePx = fitted.fontSizePx - 1)
                     paint.textSize = fitted.fontSizePx.toFloat()

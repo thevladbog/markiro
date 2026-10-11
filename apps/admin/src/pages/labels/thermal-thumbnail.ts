@@ -1,3 +1,4 @@
+import type { QueryClient } from "@tanstack/react-query";
 import {
   renderMonoLabel,
   type LabelTemplateSpec,
@@ -15,8 +16,15 @@ export async function paintThermalThumbnail(
   spec: LabelTemplateSpec,
   purpose: LabelTemplatePurpose,
   isCurrent: () => boolean,
+  queryClient: QueryClient,
 ): Promise<void> {
-  const branding = await loadCabinetSheetBranding();
+  // AuthQueryBoundary owns the cache; profile/logo mutations invalidate its prefix.
+  const branding = await queryClient.fetchQuery({
+    queryKey: ["org-profile", "print-branding"],
+    queryFn: () => loadCabinetSheetBranding(),
+    staleTime: 60_000,
+    retry: false,
+  });
   if (!isCurrent()) return;
   const raster = await renderMonoLabel(spec, labelPreviewData(purpose), rasterizeText, {
     logo: branding.logo,

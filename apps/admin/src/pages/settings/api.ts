@@ -151,6 +151,7 @@ export function useUploadOrganizationLogo(): UseMutationResult<OrganizationLogoD
       queryClient.setQueryData<OrgProfileDto>(ORG_PROFILE_QUERY_KEY, (current) =>
         current ? { ...current, ...logo } : current,
       );
+      void queryClient.invalidateQueries({ queryKey: ORG_PROFILE_QUERY_KEY });
     },
   });
 }
@@ -163,6 +164,7 @@ export function useDeleteOrganizationLogo(): UseMutationResult<void, Error, void
       queryClient.setQueryData<OrgProfileDto>(ORG_PROFILE_QUERY_KEY, (current) =>
         current ? { ...current, logoUrl: null, logoRevision: null } : current,
       );
+      void queryClient.invalidateQueries({ queryKey: ORG_PROFILE_QUERY_KEY });
     },
   });
 }
