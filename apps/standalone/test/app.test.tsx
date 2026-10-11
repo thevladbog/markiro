@@ -3180,6 +3180,98 @@ describe("the operator on the floor", () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("closes the shift while the host is away; its close goes last once the host is back, and the list lets it go", async () => {
+    const link = fakeConnection();
+    const host = fakeHost();
+    host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+    host.getDeviceShifts.mockResolvedValue([PLANNED]);
+    host.enterShift.mockResolvedValue(OPENED);
+    host.requestSsccBlock.mockImplementation(async (request) => ({
+      id: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+      issuerPrefix: request.issuerPrefix,
+      extension: request.extension,
+      fromSerial: 1500,
+      toSerial: 3499,
+    }));
+    // The panels guard a press for 400 ms after their view changed (a double tap): the
+    // test lets that time pass by moving the clock they read, never by waiting.
+    const realNow = performance.now.bind(performance);
+    let elapsed = 0;
+    const clock = vi.spyOn(performance, "now").mockImplementation(() => realNow() + elapsed);
+    // The pause comes before the press, and nothing is awaited after it: what the press sets
+    // off settles inside the next `findBy*`, not between two awaits outside `act`.
+    const afterPause = async (name: string) => {
+      const button = await screen.findByRole("button", { name });
+      elapsed += 1_000;
+      return button;
+    };
+    try {
+      renderApp({
+        probe: probeAnswering(true),
+        device: fakeDevice(DEVICE_STATUS),
+        host,
+        connection: link.connection,
+      });
+      await screen.findByText(PROMPT);
+      scan("MRK-000742");
+      fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+      expect(await screen.findByText("Смена OCT26-005/S")).toBeTruthy();
+      // The block arrived with the link up; then the host goes away.
+      await waitFor(() => expect(host.requestSsccBlock).toHaveBeenCalled());
+      host.sendFacts.mockRejectedValue(
+        new HostError({ kind: "transport", code: "unreachable", message: "host away" }),
+      );
+      await link.status({ state: "offline", lastContactAt: 1, lastError: "unreachable", seq: 2 });
+      for (const serial of ["A1", "A2"]) {
+        scan(km(serial));
+        await screen.findByText(`Принято: в коробе ${serial.slice(1)} из 12.`);
+      }
+      fireEvent.click(await afterPause("Закрыть короб"));
+      fireEvent.click(await afterPause("Закрыть короб"));
+      // No printer on this computer: the label fails, and the operator goes on without it.
+      expect(await screen.findByText("Этикетка короба не напечатана")).toBeTruthy();
+      fireEvent.click(await afterPause("Продолжить без этикетки"));
+      expect(await screen.findByText("Продолжить без этикетки?")).toBeTruthy();
+      fireEvent.click(await afterPause("Продолжить без этикетки"));
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Закрыть смену" }).hasAttribute("disabled")).toBe(
+          false,
+        ),
+      );
+      fireEvent.click(await afterPause("Закрыть смену"));
+      fireEvent.click(await afterPause("Подтвердить закрытие"));
+      expect(
+        await screen.findByText(
+          "Смена закрыта на этой станции. Данные будут отправлены автоматически.",
+        ),
+      ).toBeTruthy();
+      const bar = screen.getByRole("region", { name: "Строка состояния цеха" });
+      const unsent = () => within(bar).getByText("Не отправлено").nextElementSibling?.textContent;
+      await waitFor(() => expect(unsent()).toBe("5"));
+      fireEvent.click(await afterPause("К списку смен"));
+      expect(await screen.findByRole("button", { name: "Закрывается" })).toBeTruthy();
+      host.sendFacts.mockImplementation(async (records) =>
+        records.map((record) => ({
+          id: (record as { id: string }).id,
+          outcome: "accepted" as const,
+        })),
+      );
+      await link.status({ ...ONLINE, seq: 3 });
+      await waitFor(() => expect(unsent()).toBe("0"));
+      const delivered = host.sendFacts.mock.calls.at(-1)?.[0] ?? [];
+      expect(delivered.map((record) => (record as { kind: string }).kind)).toEqual([
+        "scan",
+        "scan",
+        "box_closed",
+        "box_label",
+        "shift_closed",
+      ]);
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Закрывается" })).toBeNull());
+    } finally {
+      clock.mockRestore();
+    }
+  });
 });
 
 /**

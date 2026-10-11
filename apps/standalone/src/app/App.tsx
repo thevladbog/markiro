@@ -626,6 +626,7 @@ export function App({
               link={state.link}
               sync={state.sync}
               shiftReads={state.shiftReads}
+              outboxVersion={state.outboxVersion}
               lineChangePending={state.pendingDevice !== null}
               rejectionPending={state.pendingRejection !== null || state.pendingOtherHost}
               enter={hostApi.enterShift}

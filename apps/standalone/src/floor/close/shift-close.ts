@@ -203,3 +203,24 @@ export async function closeShift(
   }
   return { kind: "closed", record: data };
 }
+
+const refusalRow = z.object({ shift_id: z.string(), code: z.string().nullable() });
+
+/**
+ * The shifts of this pairing whose close the host refused, with the code of
+ * the refusal (`null` — none given). A refused record is refused for good
+ * (plan 2a2): the shift stays `closing` on this station, and the office
+ * closes it on the host.
+ */
+export async function readRefusedCloses(
+  local: LocalExecutor,
+  pairing: Pairing,
+): Promise<Map<string, string | null>> {
+  const rows = await local.query(
+    "SELECT shift_id, outcome_code AS code FROM outbox WHERE host_id = ? AND device_id = ? " +
+      "AND kind = 'shift_closed' AND outcome = 'rejected' ORDER BY seq",
+    [pairing.hostId, pairing.deviceId],
+    refusalRow,
+  );
+  return new Map(rows.map((row) => [row.shift_id, row.code]));
+}

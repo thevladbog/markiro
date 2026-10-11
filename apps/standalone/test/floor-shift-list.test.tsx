@@ -65,6 +65,7 @@ interface Options {
   shiftReads?: { done: number; failed: boolean };
   notice?: ShiftListNotice | null;
   enter?: (id: string) => Promise<EnteredShift>;
+  outboxVersion?: number;
   /** The workstation setup's entry (plan 2a7); none — no button. */
   onSetup?: () => void;
 }
@@ -79,6 +80,7 @@ function listOf(local: LocalExecutor, handlers: ReturnType<typeof handlersOf>, o
         operator={ANNA}
         online={options.online ?? true}
         shiftReads={options.shiftReads ?? READ}
+        outboxVersion={options.outboxVersion ?? 0}
         notice={options.notice ?? null}
         enter={options.enter ?? handlers.enter}
         onEntered={handlers.onEntered}
@@ -393,6 +395,74 @@ describe("the shifts of the station's line", () => {
     );
   });
 
+  it("says a close the host refused, and lets a close go once the host took it", async () => {
+    const { db, executor } = await copiesOf([PLANNED, MINE], [ENTERED_MINE]);
+    await keepEnteredShift(executor, PAIRING, { ...OPENED }, "2026-10-09T06:00:00.000Z", SEEN);
+    db.prepare("UPDATE floor_shifts SET local_state = 'closing' WHERE id = ?").run(PLANNED.id);
+    const record = (id: string, shiftId: string) =>
+      `{"id":"${id}","kind":"shift_closed","shiftId":"${shiftId}","operatorId":null,"data":{}}`;
+    db.prepare(
+      "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, " +
+        "outcome_code, acked_at) VALUES (?, ?, ?, 'shift_closed', ?, ?, '2026-10-09T08:00:00.000Z', " +
+        "'rejected', 'invalid_record', '2026-10-09T08:00:01.000Z')",
+    ).run(
+      "11111111-1111-4111-8111-111111111111",
+      HOST_ID,
+      DEVICE_ID,
+      PLANNED.id,
+      record("11111111-1111-4111-8111-111111111111", PLANNED.id),
+    );
+    // A refusal of a shift that is not closing here (its close was never written) is not shown.
+    db.prepare(
+      "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, " +
+        "outcome_code, acked_at) VALUES (?, ?, ?, 'shift_closed', ?, ?, '2026-10-09T08:00:00.000Z', " +
+        "'rejected', 'invalid_record', '2026-10-09T08:00:01.000Z')",
+    ).run(
+      "22222222-2222-4222-8222-222222222222",
+      HOST_ID,
+      DEVICE_ID,
+      MINE.id,
+      record("22222222-2222-4222-8222-222222222222", MINE.id),
+    );
+    const handlers = handlersOf();
+    const view = render(listOf(executor, handlers, {}));
+    await screen.findByText("OCT26-005/S");
+    expect(
+      within(card("OCT26-005/S")).getByText(
+        "Хост не принял закрытие смены (код invalid_record). Смену закроют в офисе.",
+      ),
+    ).toBeTruthy();
+    expect(within(card(MINE.number)).queryByText(/Хост не принял/)).toBeNull();
+    db.prepare("UPDATE floor_shifts SET local_state = 'closed' WHERE id = ?").run(MINE.id);
+    view.rerender(listOf(executor, handlers, { outboxVersion: 1 }));
+    await waitFor(() => expect(screen.queryByText(MINE.number)).toBeNull());
+    expect(screen.getByText("OCT26-005/S")).toBeTruthy();
+  });
+
+  it("says a refusal that came without a code with a dash", async () => {
+    const { db, executor } = await copiesOf([PLANNED]);
+    await keepEnteredShift(executor, PAIRING, { ...OPENED }, "2026-10-09T06:00:00.000Z", SEEN);
+    db.prepare("UPDATE floor_shifts SET local_state = 'closing'").run();
+    db.prepare(
+      "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, " +
+        "acked_at) VALUES (?, ?, ?, 'shift_closed', ?, ?, '2026-10-09T08:00:00.000Z', " +
+        "'rejected', '2026-10-09T08:00:01.000Z')",
+    ).run(
+      "33333333-3333-4333-8333-333333333333",
+      HOST_ID,
+      DEVICE_ID,
+      PLANNED.id,
+      `{"id":"33333333-3333-4333-8333-333333333333","kind":"shift_closed"}`,
+    );
+    renderList(executor);
+    await screen.findByText("OCT26-005/S");
+    expect(
+      within(card("OCT26-005/S")).getByText(
+        "Хост не принял закрытие смены (код —). Смену закроют в офисе.",
+      ),
+    ).toBeTruthy();
+  });
+
   it("reads its copies again after every read of the host's list", async () => {
     const { executor } = await copiesOf([]);
     const handlers = handlersOf();
@@ -590,9 +660,11 @@ describe("the shifts of the station's line", () => {
     let release: () => void = () => undefined;
     const racy: LocalExecutor = {
       query: async (sql, params, row) => {
-        calls += 1;
+        // Only the read of the copies is counted: the list reads the refused closes beside it.
+        const ofCopies = sql.includes("FROM floor_shifts");
+        if (ofCopies) calls += 1;
         const result = await real.query(sql, params, row);
-        if (calls === 1) {
+        if (ofCopies && calls === 1) {
           await new Promise<void>((resolve) => {
             release = resolve;
           });

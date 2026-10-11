@@ -2,6 +2,8 @@ import type { DatabaseSync } from "node:sqlite";
 
 import { describe, expect, it, vi } from "vitest";
 
+import { closeShift, readRefusedCloses } from "../src/floor/close/shift-close.js";
+import { keepEnteredShift } from "../src/floor/shifts/shift-copies.js";
 import { processScan } from "../src/floor/work/scan-pipeline.js";
 import { HostError } from "../src/host/client.js";
 import type { FactReceipt } from "../src/host/protocol.js";
@@ -9,6 +11,7 @@ import { LocalDbError } from "../src/local/executor.js";
 import { MAX_BATCH_BYTES, ReceiptMismatchError, sendFactBatch } from "../src/local/facts-sender.js";
 import {
   countingIds,
+  ENTERED,
   enteredShift,
   SECOND,
   km,
@@ -22,6 +25,10 @@ import {
 import { openLocalDb } from "./support/local-db.js";
 
 const OTHER_PAIRING = { ...PAIRING, deviceId: "9b2d4f61-3a5c-4e7d-8f90-1a2b3c4d5e6f" };
+/** A third shift this station entered. */
+const THIRD = { ...ENTERED, id: "5f8b2d0e-3c6a-4e9f-b4d7-0a1c2e3f4d5b", number: "OCT26-006/S" };
+/** A fourth one, still working on this station. */
+const WORKING = { ...ENTERED, id: "6a9c3e1f-4d7b-4fa0-8c5e-1b2d3f4a5c6e", number: "OCT26-007/S" };
 const WINNER = {
   shiftId: "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
   shiftNumber: "OCT26-003",
@@ -443,5 +450,123 @@ describe("what a batch weighs", () => {
       more: true,
     });
     expect(sentIds(send, 0)).toEqual(["big"]);
+  });
+
+  it("makes the station's close closed once the host takes it, `alreadyClosed` too, and leaves a refused one closing", async () => {
+    const { db, executor } = openLocalDb();
+    const shifts = [ENTERED, SECOND, THIRD];
+    for (const shift of shifts) {
+      const work = await enteredShift(executor, shift);
+      const result = await closeShift(
+        scanContext(executor, work, { newId: () => crypto.randomUUID() }),
+        "production_order_changed",
+      );
+      expect(result.kind).toBe("closed");
+    }
+    await keepEnteredShift(executor, PAIRING, WORKING, "2026-10-08T06:02:00.000Z", 1);
+    await keepEnteredShift(executor, OTHER_PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    db.prepare("UPDATE floor_shifts SET local_state = 'closing' WHERE device_id = ?").run(
+      OTHER_PAIRING.deviceId,
+    );
+    // Records of other kinds ride in the same batch: only a `shift_closed` closes a shift or
+    // names a refusal. The other station's settled refusal is not this one's.
+    const keep = db.prepare(
+      "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, " +
+        "outcome_code, acked_at) VALUES (?, ?, ?, ?, ?, ?, '2026-10-08T07:00:00.000Z', ?, ?, ?)",
+    );
+    const payloadOf = (id: string, kind: string, shiftId: string) =>
+      JSON.stringify({ id, kind, shiftId });
+    for (const [id, shiftId] of [
+      ["22222222-2222-4222-8222-222222222221", THIRD.id],
+      ["22222222-2222-4222-8222-222222222222", ENTERED.id],
+    ] as const) {
+      keep.run(
+        id,
+        PAIRING.hostId,
+        PAIRING.deviceId,
+        "scan",
+        shiftId,
+        payloadOf(id, "scan", shiftId),
+        null,
+        null,
+        null,
+      );
+    }
+    // A receipt of a close for a shift that is not closing here closes nothing.
+    const stray = "22222222-2222-4222-8222-222222222224";
+    keep.run(
+      stray,
+      PAIRING.hostId,
+      PAIRING.deviceId,
+      "shift_closed",
+      WORKING.id,
+      payloadOf(stray, "shift_closed", WORKING.id),
+      null,
+      null,
+      null,
+    );
+    const settled = "22222222-2222-4222-8222-222222222223";
+    keep.run(
+      settled,
+      PAIRING.hostId,
+      OTHER_PAIRING.deviceId,
+      "shift_closed",
+      ENTERED.id,
+      payloadOf(settled, "shift_closed", ENTERED.id),
+      "rejected",
+      "other_station",
+      "2026-10-08T07:00:01.000Z",
+    );
+    const send = vi.fn(async (records: readonly unknown[]): Promise<FactReceipt[]> =>
+      records.map((record) => {
+        const { id, kind, shiftId } = record as { id: string; kind: string; shiftId: string };
+        if (kind === "scan") {
+          return shiftId === ENTERED.id
+            ? { id, outcome: "rejected", code: "invalid_record", details: { field: "data" } }
+            : { id, outcome: "accepted" };
+        }
+        if (shiftId === SECOND.id) {
+          return { id, outcome: "accepted", details: { alreadyClosed: true } };
+        }
+        if (shiftId === THIRD.id) {
+          return { id, outcome: "rejected", code: "invalid_record", details: { field: "data" } };
+        }
+        return { id, outcome: "accepted" };
+      }),
+    );
+    await sendFactBatch(executor, PAIRING, send, steppingClock());
+    expect(
+      rows(db, "SELECT id, device_id, local_state FROM floor_shifts ORDER BY device_id, id"),
+    ).toEqual([
+      { id: ENTERED.id, device_id: PAIRING.deviceId, local_state: "closed" },
+      { id: SECOND.id, device_id: PAIRING.deviceId, local_state: "closed" },
+      { id: THIRD.id, device_id: PAIRING.deviceId, local_state: "closing" },
+      { id: WORKING.id, device_id: PAIRING.deviceId, local_state: null },
+      { id: ENTERED.id, device_id: OTHER_PAIRING.deviceId, local_state: "closing" },
+    ]);
+    expect(await readRefusedCloses(executor, PAIRING)).toEqual(
+      new Map([[THIRD.id, "invalid_record"]]),
+    );
+  });
+
+  it("leaves the close closing while its record has no receipt", async () => {
+    const { db, executor } = openLocalDb();
+    const work = await enteredShift(executor);
+    await closeShift(
+      scanContext(executor, work, { newId: () => crypto.randomUUID() }),
+      "material_shortage",
+    );
+    const down = new HostError({ kind: "transport", code: "unreachable", message: "down" });
+    await expect(
+      sendFactBatch(
+        executor,
+        PAIRING,
+        async () => {
+          throw down;
+        },
+        steppingClock(),
+      ),
+    ).rejects.toBe(down);
+    expect(rows(db, "SELECT local_state FROM floor_shifts")).toEqual([{ local_state: "closing" }]);
   });
 });

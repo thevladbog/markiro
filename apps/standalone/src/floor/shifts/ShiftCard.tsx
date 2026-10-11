@@ -39,6 +39,8 @@ const PHASE: Record<"planned" | "active" | "closing", TagPhase> = {
 
 export interface ShiftCardProps {
   copy: ShiftCopy;
+  /** The host refused this station's close of the shift, with the refusal's code (plan 2a8). */
+  refusal?: { code: string | null } | null;
   action: CardAction;
   /** Another entry runs, or this one: every card waits. */
   busy: boolean;
@@ -46,7 +48,7 @@ export interface ShiftCardProps {
 }
 
 /** One shift of the line (the cloud station's `ShiftCard` without the photo panel). */
-export function ShiftCard({ copy, action, busy, onAction }: ShiftCardProps) {
+export function ShiftCard({ copy, refusal = null, action, busy, onAction }: ShiftCardProps) {
   const { t } = useTranslation();
   const phase =
     copy.localState === "closing" ? "closing" : copy.status === "active" ? "active" : "planned";
@@ -81,6 +83,11 @@ export function ShiftCard({ copy, action, busy, onAction }: ShiftCardProps) {
         {t(`floor.shifts.action.${action.kind}`)}
       </Button>
       {needsLink && <p className="shift-card__hint">{t("floor.shifts.needsLink")}</p>}
+      {refusal !== null && (
+        <p className="shift-card__hint">
+          {t("floor.shifts.closeRefused", { code: refusal.code ?? "—" })}
+        </p>
+      )}
     </Card>
   );
 }

@@ -74,6 +74,8 @@ export interface FloorAppProps {
   sync: SyncState;
   /** `ShellState.shiftReads`. */
   shiftReads: { done: number; failed: boolean };
+  /** `ShellState.outboxVersion`: the list reads its copies again after every write and receipt. */
+  outboxVersion?: number;
   /** The office moved the station to another line, and the move waits for the work (`pendingDevice`). */
   lineChangePending: boolean;
   /**
@@ -132,6 +134,7 @@ export function FloorApp({
   link,
   sync,
   shiftReads,
+  outboxVersion = 0,
   lineChangePending,
   rejectionPending,
   enter,
@@ -455,6 +458,7 @@ export function FloorApp({
       operator={operator}
       online={online}
       shiftReads={shiftReads}
+      outboxVersion={outboxVersion}
       notice={view.notice}
       enter={enter}
       onEntered={entered}

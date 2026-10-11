@@ -848,7 +848,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 36] = [
+    let reads: [(&str, &str); 37] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -918,6 +918,15 @@ async fn the_floors_repeating_reads_search_an_index() {
              AND box_id IS NOT NULL AND id IN (SELECT value ->> 'id' FROM json_each(?) \
              WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'conflict'))",
             "sqlite_autoindex_floor_scans_1 (id=?)",
+        ),
+        // The close a receipt gives its shift (plan 2a8): by the records' own key, not through
+        // `outbox_settled`, which holds every settled record of the pairing.
+        (
+            "UPDATE floor_shifts SET local_state = 'closed' WHERE host_id = ? AND device_id = ? \
+             AND local_state = 'closing' AND id IN (SELECT shift_id FROM outbox \
+             WHERE +host_id = ? AND +device_id = ? AND kind = 'shift_closed' AND +outcome = 'accepted' \
+             AND id IN (SELECT value ->> 'id' FROM json_each(?)))",
+            "sqlite_autoindex_outbox_1 (id=?)",
         ),
         (
             "SELECT count(*) FROM floor_codes WHERE host_id = ? AND device_id = ? AND shift_id = ?",

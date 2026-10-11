@@ -823,7 +823,7 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(plan(attempt.sql)).toContain(
       "SEARCH outbox USING INDEX sqlite_autoindex_outbox_1 (id=?)",
     );
-    const [settle, mark, fix] = receiptStatements(pairing, "[]", "x");
+    const [settle, mark, fix, close] = receiptStatements(pairing, "[]", "x");
     expect(plan(settle?.sql ?? "")).toContain(
       "SEARCH outbox USING INDEX sqlite_autoindex_outbox_1 (id=?)",
     );
@@ -836,7 +836,15 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(plan(fix?.sql ?? "")).toContain(
       "SEARCH floor_scans USING INDEX sqlite_autoindex_floor_scans_1 (id=?)",
     );
-    for (const statement of [attempt, settle, mark, fix]) {
+    // The close a receipt gives its shift (plan 2a8) looks the batch's records up by their key
+    // too: the planner would rather walk `outbox_settled`, every settled record of the pairing.
+    expect(plan(close?.sql ?? "")).toContain(
+      "SEARCH outbox USING INDEX sqlite_autoindex_outbox_1 (id=?)",
+    );
+    expect(plan(close?.sql ?? "")).toContain(
+      "SEARCH floor_shifts USING INDEX sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
+    );
+    for (const statement of [attempt, settle, mark, fix, close]) {
       for (const slow of [
         "outbox_unsent",
         "outbox_settled",
@@ -907,7 +915,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       attemptStatement(pairing, "[]", "x").sql,
       ...receiptStatements(pairing, "[]", "x").map((statement) => statement.sql),
     ];
-    expect(statements).toHaveLength(5);
+    expect(statements).toHaveLength(6);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
   });
 });

@@ -7,6 +7,7 @@ import type { FloorSession } from "../../app/shell.js";
 import type { EnteredShift } from "../../host/protocol.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import type { Pairing } from "../../local/reference-sync.js";
+import { readRefusedCloses } from "../close/shift-close.js";
 import { readShiftCopies, type ShiftCopy, type WorkShift } from "./shift-copies.js";
 import { enterShift, type EntryRefusal } from "./shift-entry.js";
 import { cardAction, ShiftCard } from "./ShiftCard.js";
@@ -24,6 +25,11 @@ export interface ShiftListProps {
   online: boolean;
   /** `ShellState.shiftReads`: the list reads its copies again after every read. */
   shiftReads: { done: number; failed: boolean };
+  /**
+   * `ShellState.outboxVersion`: the list reads its copies again after every
+   * write and every batch of receipts, so a close the host took leaves it.
+   */
+  outboxVersion?: number;
   notice: ShiftListNotice | null;
   /** `HostApi.enterShift`. */
   enter: (shiftId: string) => Promise<EnteredShift>;
@@ -36,7 +42,10 @@ export interface ShiftListProps {
   onSetup?: () => void;
 }
 
-type Copies = { kind: "loading" } | { kind: "failed" } | { kind: "ready"; copies: ShiftCopy[] };
+type Copies =
+  | { kind: "loading" }
+  | { kind: "failed" }
+  | { kind: "ready"; copies: ShiftCopy[]; refused: Map<string, string | null> };
 
 /**
  * The shifts of the station's line (stage 2a spec §5.7.1, the cloud station's
@@ -59,6 +68,7 @@ export function ShiftList({
   operator,
   online,
   shiftReads,
+  outboxVersion = 0,
   notice,
   enter,
   onEntered,
@@ -95,9 +105,10 @@ export function ShiftList({
 
   useEffect(() => {
     let cancelled = false;
-    readShiftCopies(local, { hostId, deviceId }, lineId).then(
-      (read) => {
-        if (!cancelled) setCopies({ kind: "ready", copies: read });
+    const pairing = { hostId, deviceId };
+    Promise.all([readShiftCopies(local, pairing, lineId), readRefusedCloses(local, pairing)]).then(
+      ([read, refused]) => {
+        if (!cancelled) setCopies({ kind: "ready", copies: read, refused });
       },
       () => {
         if (!cancelled) setCopies({ kind: "failed" });
@@ -106,7 +117,7 @@ export function ShiftList({
     return () => {
       cancelled = true;
     };
-  }, [local, hostId, deviceId, lineId, shiftReads.done, attempt]);
+  }, [local, hostId, deviceId, lineId, shiftReads.done, outboxVersion, attempt]);
 
   const choose = async (copy: ShiftCopy) => {
     if (running.current) return;
@@ -190,6 +201,11 @@ export function ShiftList({
           <ShiftCard
             key={copy.id}
             copy={copy}
+            refusal={
+              copy.localState === "closing" && copies.refused.has(copy.id)
+                ? { code: copies.refused.get(copy.id) ?? null }
+                : null
+            }
             action={cardAction(copy, deviceId, online)}
             busy={busy}
             onAction={() => void choose(copy)}

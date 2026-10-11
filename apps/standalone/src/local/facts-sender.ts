@@ -70,11 +70,13 @@ export function attemptStatement(pairing: Pairing, ids: string, sentAt: string):
  * The write of a batch's receipts, as ONE transaction (`answers` is a JSON
  * array of `{ id, kind, outcome, code?, details? }`, one per record sent):
  * the outcome on every record that still waits for its receipt, and the
- * marks a `conflict` of a scan leaves on the scan and on its box.
+ * marks a `conflict` of a scan leaves on the scan and on its box, and the
+ * `closed` a receipt of the station's close gives its shift (plan 2a8).
  *
- * The unary pluses on `host_id`, `device_id` and `acked_at` are deliberate
- * (measured on node:sqlite 3.53 with 100,000 records): without them the
- * planner walks the `(host_id, device_id, …)` prefix of `outbox_unsent`,
+ * The unary pluses on `host_id`, `device_id`, `acked_at` and `outcome` are
+ * deliberate (measured on node:sqlite 3.53 with 100,000 records): without
+ * them the planner walks the `(host_id, device_id, …)` prefix of
+ * `outbox_unsent`, `outbox_settled` (every settled record of the pairing),
  * `floor_scans_shift` and `floor_boxes_shift` — every unsent record, scan
  * and box of the pairing for each batch, 9 s for the outbox's own statement
  * — instead of looking the batch's few records up by their own key, which
@@ -111,6 +113,14 @@ export function receiptStatements(
         "WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'conflict'))",
       values: [hostId, deviceId, hostId, deviceId, answers],
     },
+    {
+      sql:
+        "UPDATE floor_shifts SET local_state = 'closed' WHERE host_id = ? AND device_id = ? " +
+        "AND local_state = 'closing' AND id IN (SELECT shift_id FROM outbox " +
+        "WHERE +host_id = ? AND +device_id = ? AND kind = 'shift_closed' AND +outcome = 'accepted' " +
+        "AND id IN (SELECT value ->> 'id' FROM json_each(?)))",
+      values: [hostId, deviceId, hostId, deviceId, answers],
+    },
   ];
 }
 
@@ -123,8 +133,11 @@ export function receiptStatements(
  * the host could not read, matched by its place) — and applied in ONE
  * transaction through `json_each`: the outcome, its code and details, and
  * the time on every record; a `conflict` of a scan marks the scan and its
- * box for review (`floor_scans.conflict`, `floor_boxes.needs_fix`); a
- * `rejected` record stays in the outbox with its code, for the queue screen.
+ * box for review (`floor_scans.conflict`, `floor_boxes.needs_fix`); an
+ * `accepted` `shift_closed` — `alreadyClosed` too, a shift the office closed
+ * first — makes this station's close `closed` (plan 2a8); a `rejected`
+ * record stays in the outbox with its code, for the queue screen, and a
+ * refused close leaves the shift `closing`.
  * A failed send or an answer that does not fit rejects and keeps nothing:
  * the same batch goes again, and the host answers it with the same receipts.
  * A record is never deleted, and one with a receipt never goes again.
