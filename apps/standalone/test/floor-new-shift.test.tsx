@@ -175,6 +175,413 @@ const CREATED_BODY: DeviceShiftCreate = {
   counterpartyId: null,
 };
 
+/** Two pallet templates for the milk's group (8) and one for another group (plan ПЛ-Ц). */
+const PALLET_TEMPLATE = "c4d5e6f7-a8b9-4c0d-9e1f-2a3b4c5d6e7f";
+const OTHER_PALLET_TEMPLATE = "d5e6f7a8-b9c0-4d1e-8f2a-3b4c5d6e7f8a";
+function palletTemplate(
+  id: string,
+  name: string,
+  codes: number[] | null,
+  extra: Record<string, unknown> = {},
+): ChangeItem {
+  return item("label_templates", id, 102, {
+    name,
+    purpose: "pallet",
+    enabled: true,
+    chzProductGroupCodes: codes,
+    stock: false,
+    spec: {
+      widthMm: 100,
+      heightMm: 150,
+      dpi: 203,
+      language: "zpl",
+      elements: [
+        { kind: "field", id: "boxes", xMm: 5, yMm: 5, field: "qty.boxes", fontSizePt: 24 },
+      ],
+    },
+    ...extra,
+  });
+}
+const PALLET_COPIES = [
+  ...CATALOG,
+  palletTemplate(PALLET_TEMPLATE, "Паллета 100×150", [8]),
+  palletTemplate("e6f7a8b9-c0d1-4e2f-9a3b-4c5d6e7f8a9b", "Паллета для воды", [13]),
+];
+/** What the host makes of the milk's form with pallets (the first request of its id). */
+const MADE_PALLETS: DeviceShift = {
+  ...MADE,
+  palletsEnabled: true,
+  palletBoxCapacity: 40,
+  palletTemplateId: PALLET_TEMPLATE,
+};
+/** The milk of the catalog with the fields of its copy changed. */
+function milkWith(extra: Record<string, unknown>): ChangeItem {
+  return item("products", MILK, 103, {
+    gtin14: "04600682000013",
+    name: "Молоко 3,2% 0,9 л",
+    printName: "Молоко 3,2%",
+    chzProductGroupCode: 8,
+    boxCapacity: 12,
+    palletBoxCapacity: 40,
+    shelfLifeDays: 10,
+    defaultBoxTemplateId: MILK_TEMPLATE,
+    defaultPalletTemplateId: null,
+    archived: false,
+    status: "active",
+    ...extra,
+  });
+}
+
+describe("a new shift with pallets on the station (plan ПЛ-Ц)", () => {
+  it("offers pallets for a product with boxes per pallet and a pallet template that fits, on, and sends them", async () => {
+    const { handlers, view } = renderNew(await copiesOf(PALLET_COPIES), {
+      create: async () => MADE_PALLETS,
+    });
+    await chooseMilk();
+    expect(screen.getByRole("button", { name: "С паллетами" }).getAttribute("aria-pressed")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Без паллет" }).getAttribute("aria-pressed")).toBe(
+      "false",
+    );
+    expect(screen.getByText("Коробов на паллете: 40")).toBeTruthy();
+    // One pallet template fits the milk's group: the rule leaves nothing to choose.
+    expect(screen.getByText("Шаблон этикетки паллеты: Паллета 100×150")).toBeTruthy();
+    for (const button of view.container.querySelectorAll("button")) {
+      expect(button.className).toContain("mk-btn--floor");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.onEntered).toHaveBeenCalledTimes(1));
+    expect(handlers.create.mock.calls).toEqual([
+      [
+        {
+          ...CREATED_BODY,
+          palletsEnabled: true,
+          palletBoxCapacity: 40,
+          palletTemplateId: PALLET_TEMPLATE,
+        },
+      ],
+    ]);
+  });
+
+  it("creates a shift without pallets once the operator turns them off, and back on again", async () => {
+    const { handlers } = renderNew(await copiesOf(PALLET_COPIES));
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Без паллет" }));
+    expect(screen.queryByText("Коробов на паллете: 40")).toBeNull();
+    expect(screen.queryByText(/Шаблон этикетки паллеты/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "С паллетами" }));
+    expect(screen.getByText("Коробов на паллете: 40")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Без паллет" }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(handlers.create.mock.calls[0]?.[0]).toEqual(CREATED_BODY);
+  });
+
+  it("asks for the pallet template when several fit, and creates nothing until one is chosen", async () => {
+    const { handlers } = renderNew(
+      await copiesOf([
+        ...PALLET_COPIES,
+        palletTemplate(OTHER_PALLET_TEMPLATE, "Паллета 120×80", [8]),
+      ]),
+    );
+    await chooseMilk();
+    expect(screen.getByText("Выберите шаблон этикетки паллеты.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Создать и открыть" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    // The box template is fixed; the pallet's undecided choice does not hold a shift without pallets.
+    fireEvent.click(screen.getByRole("button", { name: "Паллета 120×80" }));
+    expect(
+      screen.getByRole("button", { name: "Паллета 120×80" }).getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(
+      screen.getByRole("button", { name: "Паллета 100×150" }).getAttribute("aria-pressed"),
+    ).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(handlers.create.mock.calls[0]?.[0]).toMatchObject({
+      palletTemplateId: OTHER_PALLET_TEMPLATE,
+    });
+  });
+
+  it("lets a shift without pallets be created while the pallet template is still to choose", async () => {
+    const { handlers } = renderNew(
+      await copiesOf([
+        ...PALLET_COPIES,
+        palletTemplate(OTHER_PALLET_TEMPLATE, "Паллета 120×80", [8]),
+      ]),
+    );
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Без паллет" }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(handlers.create.mock.calls[0]?.[0]).toEqual(CREATED_BODY);
+  });
+
+  it("takes the pallet template of the product's preference, then the organization's, from the rule", async () => {
+    const both = [
+      palletTemplate(PALLET_TEMPLATE, "Паллета 100×150", [8]),
+      palletTemplate(OTHER_PALLET_TEMPLATE, "Паллета 120×80", null),
+    ];
+    const preferred = renderNew(
+      await copiesOf([
+        ...CATALOG.filter((each) => each.id !== MILK),
+        milkWith({ defaultPalletTemplateId: OTHER_PALLET_TEMPLATE }),
+        ...both,
+      ]),
+    );
+    await chooseMilk();
+    expect(screen.getByText("Шаблон этикетки паллеты: Паллета 120×80")).toBeTruthy();
+    expect(screen.queryByText("Выберите шаблон этикетки паллеты.")).toBeNull();
+    preferred.view.unmount();
+    // No preference: the two fit, the rule finds none, and the operator chooses.
+    renderNew(await copiesOf([...CATALOG, ...both]));
+    await chooseMilk();
+    expect(screen.getByText("Выберите шаблон этикетки паллеты.")).toBeTruthy();
+  });
+
+  it("takes the category's pallet default, then the organization's, when the product has no preference", async () => {
+    const both = [
+      palletTemplate(PALLET_TEMPLATE, "Паллета 100×150", [8]),
+      palletTemplate(OTHER_PALLET_TEMPLATE, "Паллета 120×80", null),
+    ];
+    const organization = CATALOG.find((each) => each.entity === "org_profile");
+    if (organization === undefined) throw new Error("the catalog has no organization");
+    const withOrganization = (id: string): ChangeItem[] =>
+      CATALOG.map((each) =>
+        each === organization
+          ? { ...each, data: { ...(each.data as object), defaultPalletTemplateId: id } }
+          : each,
+      );
+    // The organization's default alone.
+    const first = renderNew(await copiesOf([...withOrganization(OTHER_PALLET_TEMPLATE), ...both]));
+    await chooseMilk();
+    expect(screen.getByText("Шаблон этикетки паллеты: Паллета 120×80")).toBeTruthy();
+    first.view.unmount();
+    // The category's pallet default wins over it, and a category default for boxes is no pallet default.
+    const categoryDefault = (purpose: string, templateId: string): ChangeItem =>
+      item("category_template_defaults", `8:${purpose}`, 104, {
+        chzProductGroupCode: 8,
+        purpose,
+        templateId,
+      });
+    const second = renderNew(
+      await copiesOf([
+        ...withOrganization(OTHER_PALLET_TEMPLATE),
+        ...both,
+        categoryDefault("pallet", PALLET_TEMPLATE),
+      ]),
+    );
+    await chooseMilk();
+    expect(screen.getByText("Шаблон этикетки паллеты: Паллета 100×150")).toBeTruthy();
+    second.view.unmount();
+    renderNew(
+      await copiesOf([...CATALOG, ...both, categoryDefault("pallet", OTHER_PALLET_TEMPLATE)]),
+    );
+    await chooseMilk();
+    expect(screen.getByText("Шаблон этикетки паллеты: Паллета 120×80")).toBeTruthy();
+  });
+
+  it("keeps the pallet template buttons from changing once the host has made the shift", async () => {
+    renderNew(
+      await copiesOf([
+        ...PALLET_COPIES,
+        palletTemplate(OTHER_PALLET_TEMPLATE, "Паллета 120×80", [8]),
+      ]),
+      {
+        create: async () => ({ ...MADE_PALLETS, palletTemplateId: OTHER_PALLET_TEMPLATE }),
+        enter: () =>
+          Promise.reject(new HostError({ kind: "transport", code: "timeout", message: "x" })),
+      },
+    );
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Паллета 120×80" }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await screen.findByRole("button", { name: /Открыть смену/ });
+    expect(screen.getByRole("button", { name: "Паллета 120×80" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Паллета 100×150" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+  });
+
+  it("offers no pallets for a product without boxes per pallet, or without a pallet template that fits", async () => {
+    // Without a pallet template at all, the catalog's milk has its boxes per pallet.
+    const first = renderNew(await copiesOf(CATALOG));
+    await chooseMilk();
+    expect(screen.queryByRole("button", { name: "С паллетами" })).toBeNull();
+    first.view.unmount();
+    const noCapacity = milkWith({ palletBoxCapacity: null });
+    const second = renderNew(
+      await copiesOf([
+        ...CATALOG.filter((each) => each.id !== MILK),
+        noCapacity,
+        ...PALLET_COPIES.slice(CATALOG.length),
+      ]),
+    );
+    await chooseMilk();
+    expect(screen.queryByRole("button", { name: "С паллетами" })).toBeNull();
+    expect(screen.queryByText(/Коробов на паллете/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(second.handlers.create).toHaveBeenCalledTimes(1));
+    expect(second.handlers.create.mock.calls[0]?.[0]).toEqual(CREATED_BODY);
+  });
+
+  it("offers pallets only for boxes per pallet the host takes: 1 to 10 000", async () => {
+    const templates = PALLET_COPIES.slice(CATALOG.length);
+    const others = CATALOG.filter((each) => each.id !== MILK);
+    for (const [capacity, offered] of [
+      [0, false],
+      [1, true],
+      [10_000, true],
+      [10_001, false],
+    ] as const) {
+      const { view } = renderNew(
+        await copiesOf([...others, milkWith({ palletBoxCapacity: capacity }), ...templates]),
+      );
+      await chooseMilk();
+      expect(screen.queryByRole("button", { name: "С паллетами" }) !== null, String(capacity)).toBe(
+        offered,
+      );
+      view.unmount();
+    }
+  });
+
+  it("offers no pallets when the pallet template is off, narrowed away from the group, or no pallet one", async () => {
+    for (const templates of [
+      [palletTemplate(PALLET_TEMPLATE, "Выключенная", [8], { enabled: false })],
+      [palletTemplate(PALLET_TEMPLATE, "Для воды", [13])],
+      [palletTemplate(PALLET_TEMPLATE, "Короб", [8], { purpose: "box" })],
+    ]) {
+      const { view } = renderNew(await copiesOf([...CATALOG, ...templates]));
+      await chooseMilk();
+      expect(screen.queryByRole("button", { name: "С паллетами" })).toBeNull();
+      expect(screen.queryByRole("button", { name: "Без паллет" })).toBeNull();
+      view.unmount();
+    }
+  });
+
+  it("says the host refused the pallet template, and gives the choice back to the operator", async () => {
+    const refused = new HostError({
+      kind: "api",
+      code: "validation_failed",
+      status: 400,
+      message: "no",
+      details: { field: "palletTemplateId" },
+    });
+    renderNew(await copiesOf(PALLET_COPIES), { create: async () => Promise.reject(refused) });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    expect(
+      await screen.findByText(
+        "Шаблон этикетки паллеты больше не подходит товару. Выберите другой шаблон или обратитесь в офис.",
+      ),
+    ).toBeTruthy();
+    // The rule's choice is withdrawn: the operator chooses among those that fit.
+    expect(screen.getByText("Выберите шаблон этикетки паллеты.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Создать и открыть" })).toHaveProperty(
+      "disabled",
+      true,
+    );
+    expect(screen.getByRole("button", { name: "Паллета 100×150" })).toBeTruthy();
+  });
+
+  it("names the box template when the host refuses that, not the pallet template", async () => {
+    const refused = new HostError({
+      kind: "api",
+      code: "validation_failed",
+      status: 400,
+      message: "no",
+      details: { field: "boxTemplateId" },
+    });
+    renderNew(await copiesOf(PALLET_COPIES), { create: async () => Promise.reject(refused) });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    expect(
+      await screen.findByText(
+        "Шаблон этикетки больше не подходит товару. Выберите другой шаблон или обратитесь в офис.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getByText("Шаблон этикетки паллеты: Паллета 100×150")).toBeTruthy();
+  });
+
+  it("freezes the pallets once the host has made the shift", async () => {
+    const { handlers } = renderNew(await copiesOf(PALLET_COPIES), {
+      create: async () => MADE_PALLETS,
+      enter: () =>
+        Promise.reject(new HostError({ kind: "transport", code: "timeout", message: "x" })),
+    });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await screen.findByRole("button", { name: /Открыть смену/ });
+    expect(handlers.create).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "С паллетами" })).toHaveProperty("disabled", true);
+    expect(screen.getByRole("button", { name: "Без паллет" })).toHaveProperty("disabled", true);
+  });
+
+  it("does not enter in silence a shift that a repeated request brings back with other pallets", async () => {
+    // The first request of this id made a shift WITHOUT pallets; the form now asks for pallets.
+    const { handlers } = renderNew(await copiesOf(PALLET_COPIES), { create: async () => MADE });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(handlers.create.mock.calls[0]?.[0]).toMatchObject({ palletsEnabled: true });
+    expect(
+      await screen.findByText(
+        "Смена OCT26-005/S уже была создана раньше: дата 10.10.2026, в коробе 12 шт., план не задан, без паллет. Откройте её или выберите другой товар.",
+      ),
+    ).toBeTruthy();
+    expect(handlers.enter).not.toHaveBeenCalled();
+    expect(handlers.onEntered).not.toHaveBeenCalled();
+  });
+
+  it("does not enter a shift with pallets that the form without pallets did not ask for either", async () => {
+    // The switch alone makes the shift another, whatever the two fields beside it say.
+    const switchOnly = renderNew(await copiesOf(PALLET_COPIES), {
+      create: async () => ({ ...MADE, palletsEnabled: true }),
+    });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Без паллет" }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await screen.findByText(/уже была создана раньше/);
+    expect(switchOnly.handlers.enter).not.toHaveBeenCalled();
+    switchOnly.view.unmount();
+    const { handlers } = renderNew(await copiesOf(PALLET_COPIES), {
+      create: async () => MADE_PALLETS,
+    });
+    await chooseMilk();
+    fireEvent.click(screen.getByRole("button", { name: "Без паллет" }));
+    fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+    await waitFor(() => expect(handlers.create).toHaveBeenCalledTimes(1));
+    expect(
+      await screen.findByText(
+        "Смена OCT26-005/S уже была создана раньше: дата 10.10.2026, в коробе 12 шт., план не задан, паллеты по 40 коробов. Откройте её или выберите другой товар.",
+      ),
+    ).toBeTruthy();
+    expect(handlers.enter).not.toHaveBeenCalled();
+  });
+
+  it("does not enter a shift of other pallet capacity or pallet template than the form's", async () => {
+    for (const other of [
+      { ...MADE_PALLETS, palletBoxCapacity: 41 },
+      { ...MADE_PALLETS, palletTemplateId: OTHER_PALLET_TEMPLATE },
+      // The switch itself, whatever the two fields beside it say.
+      { ...MADE_PALLETS, palletsEnabled: false },
+    ]) {
+      const { handlers, view } = renderNew(await copiesOf(PALLET_COPIES), {
+        create: async () => other,
+      });
+      await chooseMilk();
+      fireEvent.click(screen.getByRole("button", { name: "Создать и открыть" }));
+      expect(await screen.findByText(/уже была создана раньше/)).toBeTruthy();
+      expect(handlers.enter).not.toHaveBeenCalled();
+      view.unmount();
+    }
+  });
+});
+
 describe("a new shift on the station", () => {
   it("finds a product in use by its name and starts from its template, today and its capacity", async () => {
     renderNew(await copiesOf(CATALOG));

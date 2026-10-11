@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   suggestBoxTemplate,
+  suggestPalletTemplate,
   type BoxTemplateCandidate,
   type BoxTemplateDefaults,
 } from "../src/lib/box-template-choice.js";
@@ -85,5 +86,77 @@ describe("the box template a new shift starts with", () => {
   it("counts only the preference while the defaults are not read", () => {
     expect(suggestBoxTemplate(MILK, TEMPLATES, null)).toBe(PREFERRED);
     expect(suggestBoxTemplate({ ...MILK, defaultBoxTemplateId: null }, TEMPLATES, null)).toBeNull();
+  });
+});
+
+describe("the pallet template a new shift with pallets starts with (plan ПЛ-Ц)", () => {
+  const pallet = (id: string, scope: Partial<BoxTemplateCandidate> = {}): BoxTemplateCandidate =>
+    box(id, { purpose: "pallet", ...scope });
+  const PALLETS = [
+    pallet(PREFERRED),
+    pallet(CATEGORY, { chzProductGroupCodes: [8] }),
+    pallet(ORGANIZATION),
+    box(OTHER),
+  ];
+  const PALLET_DEFAULTS = {
+    defaultPalletTemplateId: ORGANIZATION,
+    categories: [
+      { chzProductGroupCode: 8, purpose: "box", templateId: OTHER },
+      { chzProductGroupCode: 8, purpose: "pallet", templateId: CATEGORY },
+    ],
+  };
+
+  it("takes the product's pallet preference, then its category's pallet default, then the organization's", () => {
+    const milk = { chzProductGroupCode: 8, defaultPalletTemplateId: PREFERRED };
+    expect(suggestPalletTemplate(milk, PALLETS, PALLET_DEFAULTS)).toBe(PREFERRED);
+    expect(
+      suggestPalletTemplate({ ...milk, defaultPalletTemplateId: null }, PALLETS, PALLET_DEFAULTS),
+    ).toBe(CATEGORY);
+    expect(
+      suggestPalletTemplate(
+        { chzProductGroupCode: 13, defaultPalletTemplateId: null },
+        PALLETS,
+        PALLET_DEFAULTS,
+      ),
+    ).toBe(ORGANIZATION);
+  });
+
+  it("passes over a pallet preference that is off, of another purpose, narrowed away or gone", () => {
+    const milk = { chzProductGroupCode: 8, defaultPalletTemplateId: PREFERRED };
+    for (const preferred of [
+      pallet(PREFERRED, { enabled: false }),
+      box(PREFERRED),
+      pallet(PREFERRED, { chzProductGroupCodes: [13] }),
+    ]) {
+      const templates = [preferred, ...PALLETS.slice(1)];
+      expect(
+        suggestPalletTemplate(milk, templates, PALLET_DEFAULTS),
+        JSON.stringify(preferred),
+      ).toBe(CATEGORY);
+    }
+    expect(suggestPalletTemplate(milk, PALLETS.slice(1), PALLET_DEFAULTS)).toBe(CATEGORY);
+    // The category default off or gone: the organization's.
+    expect(
+      suggestPalletTemplate(
+        { ...milk, defaultPalletTemplateId: null },
+        [pallet(CATEGORY, { enabled: false, chzProductGroupCodes: [8] }), pallet(ORGANIZATION)],
+        PALLET_DEFAULTS,
+      ),
+    ).toBe(ORGANIZATION);
+    // A product without a group has no category default.
+    expect(
+      suggestPalletTemplate(
+        { chzProductGroupCode: null, defaultPalletTemplateId: null },
+        PALLETS,
+        PALLET_DEFAULTS,
+      ),
+    ).toBe(ORGANIZATION);
+  });
+
+  it("never takes a box template, and leaves the choice when none fits", () => {
+    const milk = { chzProductGroupCode: 8, defaultPalletTemplateId: OTHER };
+    expect(
+      suggestPalletTemplate(milk, [box(OTHER)], { defaultPalletTemplateId: OTHER, categories: [] }),
+    ).toBeNull();
   });
 });

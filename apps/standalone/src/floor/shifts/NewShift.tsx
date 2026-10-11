@@ -5,7 +5,7 @@ import { Alert, Button, Card, Input } from "@markiro/ui";
 
 import type { DeviceShift, DeviceShiftCreate, EnteredShift } from "../../host/protocol.js";
 import type { DeviceShiftInput } from "../../host/requests.js";
-import { suggestBoxTemplate } from "../../lib/box-template-choice.js";
+import { suggestBoxTemplate, suggestPalletTemplate } from "../../lib/box-template-choice.js";
 import { civilToday, isKnownTimeZone } from "../../lib/civil-date.js";
 import { plannedQtyRule, shiftBoxCapacityRule, toCount } from "../../lib/rules.js";
 import type { LocalExecutor } from "../../local/executor.js";
@@ -15,8 +15,10 @@ import {
   createdCopy,
   createStationShift,
   findScannedProduct,
+  fittingPalletTemplates,
   fittingTemplates,
   isShiftOfRequest,
+  palletCapacityOffered,
   readNewShiftChoices,
   type CreateRefusal,
   type NewShiftChoices,
@@ -66,6 +68,11 @@ interface Form {
   productionDate: string;
   plannedQty: string;
   boxCapacity: string;
+  /** «С паллетами» (plan ПЛ-Ц): on by default when the product offers pallets (`palletCapacityOffered`). */
+  pallets: boolean;
+  palletTemplateId: string | null;
+  /** The rule chose the pallet template, or only one fits. */
+  palletTemplateFixed: boolean;
   /**
    * The shift the host has answered for this form's request id. From then on
    * the form is frozen (a repeated id brings this shift back whatever the form
@@ -78,10 +85,33 @@ interface Form {
 type Problem =
   | { kind: "scan"; key: string; gtin: string | null }
   | { kind: "create"; reason: CreateRefusal }
-  | { kind: "existing"; shift: DeviceShift }
+  | { kind: "existing"; shift: DeviceShift; pallets: boolean }
   | { kind: "enter"; number: string; reason: EntryRefusal };
 
 type Step = { kind: "product" } | { kind: "form"; form: Form };
+
+/**
+ * The pallets a form asks of the host (plan ПЛ-Ц): none, pallets (the product's
+ * boxes per pallet and a pallet template that fits it), or pallets the shift
+ * cannot have, which is no shift to ask for: a shift the work screen would
+ * refuse (no capacity, no layout) is never made. One answer for the button
+ * and the request.
+ */
+function palletsOf(
+  form: Form,
+  from: NewShiftChoices,
+):
+  | { kind: "none" }
+  | { kind: "unavailable" }
+  | { kind: "pallets"; pallets: NonNullable<DeviceShiftInput["pallets"]> } {
+  if (!form.pallets) return { kind: "none" };
+  const boxCapacity = palletCapacityOffered(form.product, from.palletTemplates);
+  const template = fittingPalletTemplates(form.product, from.palletTemplates).find(
+    (each) => each.id === form.palletTemplateId,
+  );
+  if (boxCapacity === null || template === undefined) return { kind: "unavailable" };
+  return { kind: "pallets", pallets: { boxCapacity, templateId: template.id } };
+}
 
 function letters(text: string): number {
   return Array.from(text).filter((character) => /\p{L}/u.test(character)).length;
@@ -93,7 +123,9 @@ function letters(text: string): number {
  * marking, or by name, among the products in use; the box template by the
  * rule of decision 7 (`suggestBoxTemplate`), chosen by the operator when the
  * rule leaves several; the production date, today in the organization's
- * zone; the plan, optional; the capacity from the product. It needs the host:
+ * zone; the plan, optional; the capacity from the product; and, for a product
+ * with boxes per pallet and a pallet template that fits, «С паллетами» with
+ * the pallet template by the same rule (plan ПЛ-Ц). It needs the host:
  * the host numbers the shift, then the station enters it at once. One
  * request id per form, kept through retries, so a retry after a lost answer
  * makes no second shift.
@@ -159,6 +191,11 @@ export function NewShift({
       const suggested = suggestBoxTemplate(product, ready.templates, ready.defaults);
       const [only] = fitting;
       const fixed = suggested ?? (fitting.length === 1 && only !== undefined ? only.id : null);
+      const palletFitting = fittingPalletTemplates(product, ready.palletTemplates);
+      const [onlyPallet] = palletFitting;
+      const palletFixed =
+        suggestPalletTemplate(product, ready.palletTemplates, ready.defaults) ??
+        (palletFitting.length === 1 && onlyPallet !== undefined ? onlyPallet.id : null);
       setProblem(null);
       setErrors({});
       setStep({
@@ -171,6 +208,9 @@ export function NewShift({
           productionDate: civilToday(ready.timeZone, current.current.now()),
           plannedQty: "",
           boxCapacity: product.boxCapacity === null ? "" : String(product.boxCapacity),
+          pallets: palletCapacityOffered(product, ready.palletTemplates) !== null,
+          palletTemplateId: palletFixed,
+          palletTemplateFixed: palletFixed !== null,
           created: null,
         },
       });
@@ -264,6 +304,9 @@ export function NewShift({
       // The template the rule fixed is refused: the choice is the operator's
       // now, among the templates that fit.
       if (created.reason === "template") update({ templateId: null, templateFixed: false });
+      if (created.reason === "pallet_template") {
+        update({ palletTemplateId: null, palletTemplateFixed: false });
+      }
       setProblem({ kind: "create", reason: created.reason });
       return;
     }
@@ -274,7 +317,7 @@ export function NewShift({
     if (!matches) {
       // A repeated request id brought back an earlier shift of other fields:
       // not the one on the screen, so not entered in silence.
-      setProblem({ kind: "existing", shift: created.shift });
+      setProblem({ kind: "existing", shift: created.shift, pallets: input.pallets !== undefined });
       return;
     }
     await open(created.shift);
@@ -282,6 +325,8 @@ export function NewShift({
 
   const submit = async (form: Form) => {
     if (running.current || form.templateId === null) return;
+    const pallets = ready === null ? { kind: "unavailable" as const } : palletsOf(form, ready);
+    if (pallets.kind === "unavailable") return;
     if (form.created !== null) {
       // Made already, here or by an earlier request: only the entry is left.
       const { shift } = form.created;
@@ -305,8 +350,18 @@ export function NewShift({
       productionDate: form.productionDate,
       boxCapacity: toCount(capacity.data) ?? 0,
       plannedQty: toCount(plan.data),
+      ...(pallets.kind === "pallets" ? { pallets: pallets.pallets } : {}),
     };
     await run("creating", () => make(input));
+  };
+
+  /** What the shift an earlier request made says of pallets, when it differs from nothing asked. */
+  const existingPallets = (shown: { shift: DeviceShift; pallets: boolean }): string => {
+    const capacity = shown.shift.palletBoxCapacity;
+    if (shown.shift.palletsEnabled && capacity !== undefined) {
+      return t("floor.newShift.existingPallets", { capacity: formatQuantity(capacity) });
+    }
+    return shown.pallets ? t("floor.newShift.existingNoPallets") : "";
   };
 
   const problemText = (shown: Problem): string => {
@@ -324,6 +379,7 @@ export function NewShift({
             shown.shift.plannedQty === null
               ? t("floor.newShift.existingNoPlan")
               : t("floor.newShift.existingPlan", { qty: formatQuantity(shown.shift.plannedQty) }),
+          pallets: existingPallets(shown),
         });
       case "enter":
         return `${t("floor.newShift.notEntered", { number: shown.number })} ${t(
@@ -399,6 +455,10 @@ export function NewShift({
   const formStep = (form: Form, from: NewShiftChoices) => {
     const fitting = fittingTemplates(form.product, from.templates);
     const chosen = fitting.find((template) => template.id === form.templateId) ?? null;
+    const palletFitting = fittingPalletTemplates(form.product, from.palletTemplates);
+    const palletChosen =
+      palletFitting.find((template) => template.id === form.palletTemplateId) ?? null;
+    const palletCapacity = palletCapacityOffered(form.product, from.palletTemplates);
     const zoneKnown = from.timeZone !== null && isKnownTimeZone(from.timeZone);
     // Once the host has made the shift its fields are not the form's to change.
     const frozen = busy !== null || form.created !== null;
@@ -427,6 +487,58 @@ export function NewShift({
               </Button>
             ))}
           </div>
+        )}
+        {palletCapacity !== null && (
+          <div className="new-shift__choice" role="group" aria-label={t("floor.newShift.pallets")}>
+            <Button
+              size="floor"
+              variant={form.pallets ? "secondary" : "primary"}
+              aria-pressed={!form.pallets}
+              disabled={frozen}
+              onClick={() => update({ pallets: false })}
+            >
+              {t("floor.newShift.withoutPallets")}
+            </Button>
+            <Button
+              size="floor"
+              variant={form.pallets ? "primary" : "secondary"}
+              aria-pressed={form.pallets}
+              disabled={frozen}
+              onClick={() => update({ pallets: true })}
+            >
+              {t("floor.newShift.withPallets")}
+            </Button>
+          </div>
+        )}
+        {form.pallets && palletCapacity !== null && (
+          <>
+            <p>
+              {t("floor.newShift.palletCapacity", { quantity: formatQuantity(palletCapacity) })}
+            </p>
+            {form.palletTemplateFixed && palletChosen !== null ? (
+              <p>{t("floor.newShift.palletTemplateChosen", { name: palletChosen.name })}</p>
+            ) : (
+              <div
+                className="new-shift__choice"
+                role="group"
+                aria-label={t("floor.newShift.palletTemplate")}
+              >
+                {palletChosen === null && <p>{t("floor.newShift.palletTemplateChoose")}</p>}
+                {palletFitting.map((template) => (
+                  <Button
+                    key={template.id}
+                    size="floor"
+                    variant={template.id === form.palletTemplateId ? "primary" : "secondary"}
+                    aria-pressed={template.id === form.palletTemplateId}
+                    disabled={frozen}
+                    onClick={() => update({ palletTemplateId: template.id })}
+                  >
+                    {template.name}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </>
         )}
         <div
           className="new-shift__date"
@@ -481,7 +593,9 @@ export function NewShift({
           <Button
             size="floor"
             loading={busy !== null}
-            disabled={!online || form.templateId === null}
+            disabled={
+              !online || form.templateId === null || palletsOf(form, from).kind === "unavailable"
+            }
             onClick={() => void submit(form)}
           >
             {form.created === null

@@ -5,7 +5,12 @@ import { shellActionFor } from "../../app/shell.js";
 import { HostError } from "../../host/client.js";
 import type { DeviceShift, DeviceShiftCreate } from "../../host/protocol.js";
 import { deviceShiftCreate, type DeviceShiftInput } from "../../host/requests.js";
-import type { BoxTemplateCandidate, BoxTemplateDefaults } from "../../lib/box-template-choice.js";
+import type {
+  BoxTemplateCandidate,
+  BoxTemplateDefaults,
+  PalletTemplateDefaults,
+} from "../../lib/box-template-choice.js";
+import { MAX_PALLET_BOX_CAPACITY } from "../../lib/rules.js";
 import { templateFitsSlot } from "../../lib/template-eligibility.js";
 import type { LocalExecutor } from "../../local/executor.js";
 import { copiesReady, type Pairing } from "../../local/reference-sync.js";
@@ -19,6 +24,9 @@ export interface ShiftProduct {
   chzProductGroupCode: number | null;
   boxCapacity: number | null;
   defaultBoxTemplateId: string | null;
+  /** Boxes per pallet: a product without them offers no shift with pallets (plan ПЛ-Ц). */
+  palletBoxCapacity: number | null;
+  defaultPalletTemplateId: string | null;
 }
 
 /** A box template of the copies, with what decides whether it fits. */
@@ -30,7 +38,9 @@ export interface ShiftTemplate extends BoxTemplateCandidate {
 export interface NewShiftChoices {
   products: ShiftProduct[];
   templates: ShiftTemplate[];
-  defaults: BoxTemplateDefaults;
+  /** The pallet templates of the copies (plan ПЛ-Ц). */
+  palletTemplates: ShiftTemplate[];
+  defaults: BoxTemplateDefaults & PalletTemplateDefaults;
   timeZone: string | null;
 }
 
@@ -41,6 +51,8 @@ const productRow = z.object({
   chz_group_code: z.number().nullable(),
   box_capacity: z.number().nullable(),
   default_box_template_id: z.string().nullable(),
+  pallet_box_capacity: z.number().nullable(),
+  default_pallet_template_id: z.string().nullable(),
 });
 const templateRow = z.object({
   id: z.string(),
@@ -57,14 +69,16 @@ const defaultRow = z.object({
 const orgRow = z.object({
   time_zone: z.string(),
   default_box_template_id: z.string().nullable(),
+  default_pallet_template_id: z.string().nullable(),
 });
 const codesSchema = z.array(z.number().int());
 
 /**
  * What a new shift is chosen from, out of this pairing's copies once a sync
  * has begun to fill them (`copiesReady`); `null` before that. Products in use
- * and not archived only, by name; box templates only (the rule of decision 7
- * reads them, `suggestBoxTemplate`), by name.
+ * and not archived only, by name; box templates (the rule of decision 7
+ * reads them, `suggestBoxTemplate`) and pallet templates (plan ПЛ-Ц,
+ * `suggestPalletTemplate`), by name.
  */
 export async function readNewShiftChoices(
   local: LocalExecutor,
@@ -72,14 +86,15 @@ export async function readNewShiftChoices(
 ): Promise<NewShiftChoices | null> {
   if (!(await copiesReady(local, pairing))) return null;
   const products = await local.query(
-    "SELECT id, gtin14, name, chz_group_code, box_capacity, default_box_template_id " +
+    "SELECT id, gtin14, name, chz_group_code, box_capacity, default_box_template_id, " +
+      "pallet_box_capacity, default_pallet_template_id " +
       "FROM ref_products WHERE status = 'active' AND archived = 0 ORDER BY name, id",
     [],
     productRow,
   );
   const templates = await local.query(
     "SELECT id, name, purpose, enabled, category_codes FROM ref_templates " +
-      "WHERE purpose = 'box' ORDER BY name, id",
+      "WHERE purpose IN ('box', 'pallet') ORDER BY name, id",
     [],
     templateRow,
   );
@@ -89,7 +104,7 @@ export async function readNewShiftChoices(
     defaultRow,
   );
   const [org] = await local.query(
-    "SELECT time_zone, default_box_template_id FROM ref_org",
+    "SELECT time_zone, default_box_template_id, default_pallet_template_id FROM ref_org",
     [],
     orgRow,
   );
@@ -101,17 +116,14 @@ export async function readNewShiftChoices(
       chzProductGroupCode: row.chz_group_code,
       boxCapacity: row.box_capacity,
       defaultBoxTemplateId: row.default_box_template_id,
+      palletBoxCapacity: row.pallet_box_capacity,
+      defaultPalletTemplateId: row.default_pallet_template_id,
     })),
-    templates: templates.map((row) => ({
-      id: row.id,
-      name: row.name,
-      purpose: row.purpose,
-      enabled: row.enabled === 1,
-      chzProductGroupCodes:
-        row.category_codes === null ? null : codesSchema.parse(JSON.parse(row.category_codes)),
-    })),
+    templates: templates.filter((row) => row.purpose === "box").map(toTemplate),
+    palletTemplates: templates.filter((row) => row.purpose === "pallet").map(toTemplate),
     defaults: {
       defaultBoxTemplateId: org?.default_box_template_id ?? null,
+      defaultPalletTemplateId: org?.default_pallet_template_id ?? null,
       categories: categories.map((row) => ({
         chzProductGroupCode: row.chz_group_code,
         purpose: row.purpose,
@@ -119,6 +131,18 @@ export async function readNewShiftChoices(
       })),
     },
     timeZone: org?.time_zone ?? null,
+  };
+}
+
+/** A template of the copies, with what decides whether it fits. */
+function toTemplate(row: z.infer<typeof templateRow>): ShiftTemplate {
+  return {
+    id: row.id,
+    name: row.name,
+    purpose: row.purpose,
+    enabled: row.enabled === 1,
+    chzProductGroupCodes:
+      row.category_codes === null ? null : codesSchema.parse(JSON.parse(row.category_codes)),
   };
 }
 
@@ -160,15 +184,54 @@ export function fittingTemplates(
 }
 
 /**
+ * The pallet templates that fit `product`'s group (`templates::fits`), in the
+ * copies' order (plan ПЛ-Ц). Only an enabled template of the pallet purpose
+ * covering the group: the host refuses any other (`palletTemplateId`).
+ */
+export function fittingPalletTemplates(
+  product: ShiftProduct,
+  templates: readonly ShiftTemplate[],
+): ShiftTemplate[] {
+  return templates.filter((template) =>
+    templateFitsSlot(template, {
+      purpose: "pallet",
+      chzProductGroupCode: product.chzProductGroupCode,
+    }),
+  );
+}
+
+/**
+ * The boxes per pallet a new shift of `product` may start with, or `null` when
+ * the product offers no shift with pallets: a capacity the host takes (1 to
+ * `MAX_PALLET_BOX_CAPACITY`, `pallet_request`) and a pallet
+ * template that fits. A shift the host accepts but the work screen would
+ * refuse (`shiftPallets` is `null` without a capacity) is never made here.
+ */
+export function palletCapacityOffered(
+  product: ShiftProduct,
+  templates: readonly ShiftTemplate[],
+): number | null {
+  const capacity = product.palletBoxCapacity;
+  if (capacity === null || capacity < 1 || capacity > MAX_PALLET_BOX_CAPACITY) return null;
+  return fittingPalletTemplates(product, templates).length > 0 ? capacity : null;
+}
+
+/**
  * Why the host did not create the shift: no answer (`no_link`), the product
  * was turned off or archived since the copies (`product_inactive`), the
- * template no longer fits it (`template`), another field it refused
- * (`invalid`), the station has no line (`no_line`), or anything else
- * (`failed`). A product the host does not know (`validation_failed` on
+ * template no longer fits it (`template`), nor the pallet template
+ * (`pallet_template`, plan ПЛ-Ц), another field it refused (`invalid`), the
+ * station has no line (`no_line`), or anything else (`failed`). A product the host does not know (`validation_failed` on
  * `productId`) is `product_inactive`, a line it does not take is `no_line`.
  */
 export type CreateRefusal =
-  "no_link" | "product_inactive" | "template" | "invalid" | "no_line" | "failed";
+  | "no_link"
+  | "product_inactive"
+  | "template"
+  | "pallet_template"
+  | "invalid"
+  | "no_line"
+  | "failed";
 
 export type CreateResult =
   | { kind: "created"; shift: DeviceShift }
@@ -213,7 +276,9 @@ export async function createStationShift(
       // not fields the operator can mend: they are the refusals of their own.
       if (error.field === "productId") return { kind: "refused", reason: "product_inactive" };
       if (error.field === "lineId") return { kind: "refused", reason: "no_line" };
-      return { kind: "refused", reason: error.field === "boxTemplateId" ? "template" : "invalid" };
+      if (error.field === "boxTemplateId") return { kind: "refused", reason: "template" };
+      if (error.field === "palletTemplateId") return { kind: "refused", reason: "pallet_template" };
+      return { kind: "refused", reason: "invalid" };
     }
     return { kind: "refused", reason: "failed" };
   }
@@ -227,7 +292,9 @@ export async function createStationShift(
  * Whether the shift the host answered is the one the form asked for. The host
  * answers a repeated request id with the FIRST shift made for it and does not
  * read the body again, so after a lost answer the answer may be a shift of
- * other fields than the form shows now.
+ * other fields than the form shows now. The pallets are fields of the form
+ * too (plan ПЛ-Ц): a shift with pallets is not the form's without them, nor
+ * with another capacity or pallet template, and the other way round.
  */
 export function isShiftOfRequest(shift: DeviceShift, input: DeviceShiftInput): boolean {
   return (
@@ -235,7 +302,10 @@ export function isShiftOfRequest(shift: DeviceShift, input: DeviceShiftInput): b
     shift.boxTemplateId === input.boxTemplateId &&
     shift.productionDate === input.productionDate &&
     shift.boxCapacity === input.boxCapacity &&
-    shift.plannedQty === input.plannedQty
+    shift.plannedQty === input.plannedQty &&
+    shift.palletsEnabled === (input.pallets !== undefined) &&
+    shift.palletBoxCapacity === input.pallets?.boxCapacity &&
+    shift.palletTemplateId === input.pallets?.templateId
   );
 }
 
