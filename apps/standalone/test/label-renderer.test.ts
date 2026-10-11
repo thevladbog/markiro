@@ -1,17 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  buildDefaultLabelTemplates,
   buildDuplicateLabelTemplate,
+  buildDuplicateLabelTemplates,
+  buildPalletLabelTemplates,
   elementBoundsMm,
   generateTspl,
   generateZpl,
   INTERIOR_MODULES,
+  labelFieldDisplayValue,
   mmToDots,
   ptToMm,
   QUIET_ZONE_MODULES,
   rasterizeGs1DataMatrix,
   TOTAL_MODULES,
   type LabelBarcodeElement,
+  type LabelElement,
   type LabelTemplateSpec,
   type RasterizeTextOptions,
   type RasterResult,
@@ -920,5 +925,214 @@ describe("bitmaps and the print at other resolutions", () => {
     await compositeTextRasters(SPEC_300, canvas, 3, BOX_DATA, {}, rasterize, () => cancelled);
     expect(rasterize).toHaveBeenCalledTimes(1);
     expect(canvas.ops).toEqual([]);
+  });
+});
+
+describe("the standard layouts' text model (#703)", () => {
+  const FORMATTED = {
+    sscc: labelFieldDisplayValue("sscc", BOX_DATA),
+    qty: labelFieldDisplayValue("qty", BOX_DATA),
+  };
+  const logo: LabelElement = {
+    kind: "organization_logo",
+    id: "organization-logo",
+    source: "organization",
+    fallback: "markiro",
+    xMm: 4,
+    yMm: 3,
+    widthMm: 32,
+    heightMm: 7.3,
+  };
+  const withElements = (...elements: LabelElement[]): LabelTemplateSpec => ({
+    ...LAYOUT,
+    elements,
+  });
+  const ascii: LabelElement = {
+    kind: "field",
+    id: "sscc",
+    field: "sscc",
+    xMm: 4,
+    yMm: 20,
+    fontSizePt: 10,
+  };
+
+  it("rasterizes an ASCII-only text that asks for a line height or a font, as the print does, and no other", async () => {
+    const plain = recordingRasterizer();
+    await compositeTextRasters(
+      withElements(ascii, { ...ascii, id: "b", yMm: 24, field: "date" }),
+      recordingCanvas(),
+      3,
+      BOX_DATA,
+      {},
+      plain.rasterize,
+      () => false,
+    );
+    expect(plain.calls).toEqual([]);
+
+    const spec = withElements(
+      { ...ascii, id: "own-height", lineHeight: 1 },
+      { ...ascii, id: "own-font", yMm: 24, fontFamily: "monospace" },
+      { ...ascii, id: "neither", yMm: 28 },
+      { kind: "text", id: "t", xMm: 4, yMm: 32, text: "BOX", fontSizePt: 9, lineHeight: 1.2 },
+    );
+    const preview = recordingRasterizer();
+    await compositeTextRasters(
+      spec,
+      recordingCanvas(),
+      3,
+      BOX_DATA,
+      {},
+      preview.rasterize,
+      () => false,
+    );
+    expect(preview.calls.map(([text]) => text)).toEqual([FORMATTED.sscc, FORMATTED.sscc, "BOX"]);
+    const print = recordingRasterizer();
+    await generateZpl(spec, BOX_DATA, { rasterizeText: print.rasterize });
+    expect(preview.calls).toEqual(print.calls);
+  });
+
+  it("hands the rasterizer the element's own family, line height and minimum size, at the layout's resolution", async () => {
+    const spec: LabelTemplateSpec = {
+      ...withElements({
+        kind: "field",
+        id: "q",
+        field: "qty",
+        xMm: 4,
+        yMm: 20,
+        fontSizePt: 17,
+        minFontSizePt: 13,
+        lineHeight: 1.13,
+        fontFamily: "monospace",
+        maxWidthMm: 27,
+        bold: true,
+      }),
+      dpi: 300,
+    };
+    const { calls, rasterize } = recordingRasterizer();
+    await compositeTextRasters(spec, recordingCanvas(), 3, BOX_DATA, {}, rasterize, () => false);
+    expect(calls).toEqual([
+      [
+        FORMATTED.qty,
+        {
+          fontFamily: "monospace",
+          fontSizePx: 71,
+          minFontSizePx: 54,
+          lineHeight: 1.13,
+          bold: true,
+          maxWidthPx: 319,
+          maxLines: 1,
+        },
+      ],
+    ]);
+  });
+
+  it("asks what the print of either language asks, for every stock template of every purpose", async () => {
+    const stock = [
+      ...buildDefaultLabelTemplates().map(({ spec }) => ["box", spec] as const),
+      ...buildDuplicateLabelTemplates().map(({ spec }) => ["product_duplicate", spec] as const),
+      ...buildPalletLabelTemplates().map(({ spec }) => ["pallet", spec] as const),
+    ];
+    // What the wizard seeds: 16 box, 2 duplicate and 3 pallet templates.
+    expect(stock).toHaveLength(21);
+    let asked = 0;
+    for (const [purpose, spec] of stock) {
+      const data = labelSampleData(purpose);
+      const options = labelRenderOptions(purpose);
+      const preview = recordingRasterizer();
+      await compositeTextRasters(
+        spec,
+        recordingCanvas(),
+        3,
+        data,
+        options,
+        preview.rasterize,
+        () => false,
+      );
+      const zpl = recordingRasterizer();
+      await generateZpl(spec, data, { rasterizeText: zpl.rasterize, ...options });
+      const tspl = recordingRasterizer();
+      await generateTspl({ ...spec, language: "tspl" }, data, {
+        rasterizeText: tspl.rasterize,
+        ...options,
+      });
+      expect(preview.calls).toEqual(zpl.calls);
+      expect(preview.calls).toEqual(tspl.calls);
+      asked += preview.calls.length;
+    }
+    // The standard layouts alone ask for a bitmap of every text.
+    expect(asked).toBeGreaterThan(100);
+  });
+
+  it("spaces the lines of a wrapped text by its own line height, in the family it asks for", () => {
+    const spec = withElements({
+      kind: "field",
+      id: "name",
+      field: "product.printName",
+      xMm: 4,
+      yMm: 10,
+      fontSizePt: 13,
+      maxWidthMm: 5,
+      maxLines: 3,
+      lineHeight: 1.13,
+      fontFamily: "monospace",
+    });
+    const canvas = recordingCanvas();
+    drawLabel(spec, canvas, 2, BOX_DATA, {});
+    const texts = canvas.ops.filter((op) => op[0] === "fillText");
+    expect(texts.length).toBeGreaterThan(1);
+    const step = ptToMm(13) * 1.13 * 2;
+    expect(texts.map((op) => op[3])).toEqual(texts.map((_, i) => 20 + i * step));
+    expect(texts.every((op) => op[5] === `400 ${ptToMm(13) * 2}px monospace`)).toBe(true);
+    // Without one, the 1.5 em of the print's default.
+    const plain = recordingCanvas();
+    drawLabel(
+      withElements({
+        kind: "field",
+        id: "name",
+        field: "product.printName",
+        xMm: 4,
+        yMm: 10,
+        fontSizePt: 13,
+        maxWidthMm: 5,
+        maxLines: 3,
+      }),
+      plain,
+      2,
+      BOX_DATA,
+      {},
+    );
+    const base = plain.ops.filter((op) => op[0] === "fillText");
+    expect(base.map((op) => op[3])).toEqual(base.map((_, i) => 20 + i * ptToMm(13) * 1.5 * 2));
+    expect(base.every((op) => op[5] === `400 ${ptToMm(13) * 2}px sans-serif`)).toBe(true);
+  });
+
+  it("leaves the organization logo's area empty: nothing is drawn, nothing rasterized, nothing printed", async () => {
+    const without = withElements(...LAYOUT.elements);
+    const withLogo = withElements(logo, ...LAYOUT.elements);
+    const bare = recordingCanvas();
+    const marked = recordingCanvas();
+    drawLabel(without, bare, 3, BOX_DATA, {});
+    expect(() => drawLabel(withLogo, marked, 3, BOX_DATA, {})).not.toThrow();
+    expect(marked.ops).toEqual(bare.ops);
+
+    const a = recordingRasterizer();
+    const b = recordingRasterizer();
+    const canvasA = recordingCanvas();
+    const canvasB = recordingCanvas();
+    await compositeTextRasters(without, canvasA, 3, BOX_DATA, {}, a.rasterize, () => false);
+    await compositeTextRasters(withLogo, canvasB, 3, BOX_DATA, {}, b.rasterize, () => false);
+    expect(b.calls).toEqual(a.calls);
+    expect(canvasB.ops).toEqual(canvasA.ops);
+
+    for (const language of ["zpl", "tspl"] as const) {
+      const emit = language === "zpl" ? generateZpl : generateTspl;
+      const base = await emit({ ...without, language }, BOX_DATA, {
+        rasterizeText: recordingRasterizer().rasterize,
+      });
+      const printed = await emit({ ...withLogo, language }, BOX_DATA, {
+        rasterizeText: recordingRasterizer().rasterize,
+      });
+      expect(printed).toBe(base);
+    }
   });
 });
