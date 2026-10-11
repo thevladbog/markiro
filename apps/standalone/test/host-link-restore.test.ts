@@ -49,11 +49,15 @@ const HELD = new HostError({
   details: { since: "2026-10-09T15:00:00Z" },
 });
 
-/** The shell's link as the test drives it: `watch` reports `first` at once. */
-function fakeConnection(first: HostStatus) {
+/**
+ * The shell's link as the test drives it: `watch` reports `first` at once,
+ * or fails without a status when `first` is `"watch_fails"`.
+ */
+function fakeConnection(first: HostStatus | "watch_fails") {
   let handlers: ConnectionHandlers | null = null;
   const connection: ConnectionApi = {
     watch: vi.fn(async (next: ConnectionHandlers) => {
+      if (first === "watch_fails") throw new Error("no events");
       handlers = next;
       next.onStatus(first);
       return () => {
@@ -86,7 +90,7 @@ function knownAll(request: KnownBlocksRequest): Promise<KnownBlocksResponse> {
 
 /** The link over `db` with the station's block and two records waiting; `order` says what reached the host when. */
 async function link(options: {
-  first: HostStatus;
+  first: HostStatus | "watch_fails";
   register?: (request: KnownBlocksRequest) => Promise<KnownBlocksResponse>;
   send?: (records: readonly unknown[]) => Promise<FactReceipt[]>;
   database?: { db: DatabaseSync; executor: LocalExecutor };
@@ -583,6 +587,74 @@ describe("the link's guards around a restore", () => {
     await settle();
     expect(station.register).toHaveBeenCalledTimes(1);
     expect(station.send).not.toHaveBeenCalled();
+    station.hook.unmount();
+  });
+});
+
+describe("the outbox before the link is online", () => {
+  const CONNECTING: HostStatus = {
+    state: "connecting",
+    lastContactAt: null,
+    lastError: null,
+    seq: 1,
+  };
+  const OFFLINE: HostStatus = { ...ONLINE, state: "offline", lastError: "unreachable", seq: 2 };
+
+  it("sends no record until the link is online, so a restored host's blocks go back first", async () => {
+    const station = await link({ first: CONNECTING });
+    await station.connection.status({ ...RESTORED, seq: 2 });
+    await waitFor(() => expect(station.unsent()).toBe(0));
+    const answered = station.order.indexOf("blocks answered");
+    expect(answered).toBeGreaterThan(-1);
+    expect(station.order.indexOf("facts"), station.order.join(", ")).toBeGreaterThan(answered);
+    station.hook.unmount();
+  });
+
+  it("keeps a local write while the link is connecting or offline, and sends it once online", async () => {
+    const station = await link({ first: CONNECTING });
+    await settle();
+    station.hook.result.current.requestFacts();
+    await settle();
+    expect(station.send).not.toHaveBeenCalled();
+    await station.connection.status(OFFLINE);
+    station.hook.result.current.requestFacts();
+    await settle();
+    expect(station.send).not.toHaveBeenCalled();
+    expect(station.unsent()).toBe(2);
+    // Online, and no revision follows: going online alone sends the outbox.
+    await station.connection.status({ ...ONLINE, seq: 3 });
+    await waitFor(() => expect(station.unsent()).toBe(0));
+    expect(station.send).toHaveBeenCalledTimes(1);
+    station.hook.unmount();
+  });
+
+  it("still sends when the shell's link cannot be watched at all", async () => {
+    const station = await link({ first: "watch_fails" });
+    await waitFor(() => expect(station.unsent()).toBe(0));
+    expect(station.send).toHaveBeenCalledTimes(1);
+    station.hook.unmount();
+  });
+
+  it("does not knock again on a repeated online status before the retry's wait", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    let fail = true;
+    const station = await link({
+      first: ONLINE,
+      send: async (records) => {
+        if (fail) throw new HostError({ kind: "api", code: "internal", status: 500, message: "" });
+        return acceptAll(records);
+      },
+    });
+    await waitFor(() => expect(station.failures()).toHaveLength(1));
+    await station.connection.status({ ...ONLINE, seq: 2 });
+    await settle();
+    expect(station.send).toHaveBeenCalledTimes(1);
+    fail = false;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2_000);
+    });
+    await waitFor(() => expect(station.unsent()).toBe(0));
+    expect(station.send).toHaveBeenCalledTimes(2);
     station.hook.unmount();
   });
 });

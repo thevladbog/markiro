@@ -102,7 +102,7 @@ export interface HostLinkOptions {
 /** What the link offers the screens: a sync and both reads now, and the outbox's delivery now. */
 export interface HostLinkControls {
   requestSync: () => void;
-  /** Sends the outbox now (after a local write); nothing goes while the link is stopped. */
+  /** Sends the outbox now (after a local write); nothing goes while the link is stopped or not online. */
   requestFacts: () => void;
 }
 
@@ -132,7 +132,9 @@ export interface HostLinkControls {
  * epoch: the pairing notes it and owes the host its blocks, a sync from zero
  * and its recent records again (`reconcileRestore`), at once and at every
  * link event until that is settled, retried like the reads above; no record
- * goes meanwhile. While the host holds the facts (`restore_pending`) a send
+ * goes meanwhile, and none goes before the link's first online status has
+ * said whether there is an epoch (only when `watch` itself failed does the
+ * outbox go without one). While the host holds the facts (`restore_pending`) a send
  * waits `RESTORE_HOLD_RETRY_MS` — no other trigger (a local write, a
  * revision) asks the host again before that — and the floor goes on offline.
  * Returns the requests for a sync and for the delivery.
@@ -155,8 +157,14 @@ export function useHostLink({
     if (hostId === null || deviceId === null) return;
     // Nothing reaches the shell state after the pairing changed or ended.
     let active = true;
-    // The link's latest status is `online`: only then is a retry worth it.
+    // The link's latest status is `online`: only then is a retry worth it,
+    // and only then does the outbox go (see `factSender`).
     let online = false;
+    // `watch` failed: no status will ever come, so the outbox goes without one.
+    let watchFailed = false;
+    // `watch` resolved: a status before that is followed by `everything()`
+    // anyway, so going online need not send the outbox a second time.
+    let watching = false;
     let running = false;
     // Failed runs in a row; a successful run starts the count again.
     let failures = 0;
@@ -378,6 +386,10 @@ export function useHostLink({
       if (!active) return;
       // The host said when to ask again: nothing else asks before.
       if (factsHeld) return;
+      // Only an online status names a restored host's epoch: a record sent
+      // before the link knows it could reach the host ahead of the blocks.
+      // Going online sends the outbox (`onStatus`).
+      if (!online && !watchFailed) return;
       cancelFactRetry();
       try {
         // A restored host gets this station's blocks back first: a box closed
@@ -475,6 +487,7 @@ export function useHostLink({
         onStatus: (status) => {
           if (!active) return;
           dispatch({ type: "link_status", status });
+          const wasOnline = online;
           online = status.state === "online";
           if (!online) {
             // Nothing to retry against: the first revision event after the
@@ -498,7 +511,10 @@ export function useHostLink({
           // The same for a failed read of this device and of its shifts.
           if (refreshFailures > 0 && refreshRetry === null) refresher.trigger();
           if (shiftFailures > 0 && shiftRetry === null) shiftReader.trigger();
-          if (factFailures > 0 && factRetry === null) factSender.trigger();
+          // The outbox waits for the link (`factSender`): going online sends it.
+          if ((watching && !wasOnline) || (factFailures > 0 && factRetry === null)) {
+            factSender.trigger();
+          }
           if (reconcileFailures > 0 && reconcileRetry === null) reconciler.trigger();
         },
         onRevision: (rev) => {
@@ -514,6 +530,7 @@ export function useHostLink({
             return;
           }
           unwatch = stop;
+          watching = true;
           // Sync only now: revisions announced before `watch` resolved are
           // not replayed, so a sync started earlier could miss a commit that
           // landed between its fetch and the listener.
@@ -522,8 +539,10 @@ export function useHostLink({
         () => {
           // Without events the copies sync and the device and its shifts are
           // read once here, and again on request. `online` never becomes true,
-          // so no failed run is retried on its own.
+          // so no failed run is retried on its own, and the outbox goes
+          // without the link's status: there is none to wait for.
           if (!active) return;
+          watchFailed = true;
           everything();
         },
       );
