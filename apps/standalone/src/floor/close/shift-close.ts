@@ -127,6 +127,22 @@ export type CloseResult =
  * same (a code scanned, taken out or freed since changes them). From then on
  * the shift takes no record (`outboxStatement`). The receipt `accepted` of
  * the record makes it `closed` (`sendFactBatch`).
+ *
+ * The caller runs this as ONE queued, tracked job of the work screen (plan
+ * 2a5 N9, 2a6 N13): a scan queued before it lands first and is counted (or
+ * makes the close `stale`), and one queued after it must see the `closed` stop
+ * before it reaches `processScan`. The summary is read apart from the write,
+ * which is safe because the write re-checks it, but the queue is what keeps
+ * an in-flight scan from surfacing as a raw `changes_mismatch` system error.
+ * The caller therefore:
+ * (a) sends `closeShift` through the work queue and `track`;
+ * (b) makes a scan or an exception queued behind it check the `closed` stop
+ *     first, or it fails with `changes_mismatch` from the guard;
+ * (c) re-reads the summary when the write throws (the answer may be lost after
+ *     the commit): `blocked` with `closed` after a press means closed, so it
+ *     shows the `closed` stop, not an error;
+ * (d) re-reads and re-shows the summary on `stale`, keeping the reason chosen
+ *     only while the plan still needs one.
  */
 export async function closeShift(
   context: BoxContext,
