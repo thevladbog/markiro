@@ -21,6 +21,7 @@ import type { LocalExecutor } from "../../local/executor.js";
 import { renderLabel } from "../print/label-render.js";
 import { settleOutcome, type PrintJobCode, type RenderLabel } from "../print/print-jobs.js";
 import type { PrintRuntime } from "../print/print-runtime.js";
+import { printerFormatText } from "../print/printer-format.js";
 import type { ScanSource } from "../scan-source.js";
 import { playSignalTone } from "../work/signal-sound.js";
 import { draftOf, NEW_PRINTER, profileOf, type PrinterDraft } from "./printer-draft.js";
@@ -31,6 +32,7 @@ import {
   isPortName,
   MAX_SCANNERS,
   PRINT_PURPOSES,
+  printerMode,
   printerTargetKey,
   readWorkstationSettings,
   saveWorkstationSettings,
@@ -91,9 +93,11 @@ const WAITING_STYLE: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
 /**
  * The workstation setup (stage 2a spec §5.7.8): the printers of this
  * computer — where each is, its language and resolution — which one prints
- * which label, and a test print whose code is scanned back; the COM scanners
- * with their connection as the shell reports it; the tones' level; the check
- * of a printed label. Nothing is stored until «Сохранить», which then gives
+ * which label — for a Windows queue, whether it prints in the printer's
+ * language or through the Windows driver (plan ДРВ, offered where the shell
+ * prints through Windows) — and a test print whose code is scanned back; the
+ * COM scanners with their connection as the shell reports it; the tones'
+ * level; the check of a printed label. Nothing is stored until «Сохранить», which then gives
  * the shell the whole set of scanners — a set it would refuse is never
  * stored, so a scanner that works is not dropped for a bad one; «Назад»
  * leaves at once and says when it drops a change, so the setup never holds
@@ -118,6 +122,8 @@ export function WorkstationSetup({
   const [usbPrinters, setUsbPrinters] = useState<UsbPrinter[] | null>(null);
   const [usbFailed, setUsbFailed] = useState(false);
   const [usbAsking, setUsbAsking] = useState(false);
+  // The shell prints through Windows drivers: the choice of the way of printing is offered only then.
+  const [windowsDriver, setWindowsDriver] = useState(false);
   const [test, setTestState] = useState<TestState | null>(null);
   const [status, setStatus] = useState<Status | null>(null);
   const [saving, setSaving] = useState(false);
@@ -219,6 +225,16 @@ export function WorkstationSetup({
     onBlur: () => source.setManualTextEntryActive(false),
   };
   useLayoutEffect(() => () => source.setManualTextEntryActive(false), [source, editing]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void printing.supportsWindowsDriver().then((supported) => {
+      if (!cancelled) setWindowsDriver(supported);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [printing]);
 
   // Only the newest ask is heard: an older answer that comes late is dropped.
   const usbAsk = useRef(0);
@@ -362,7 +378,9 @@ export function WorkstationSetup({
       setTest({ kind: "render_failed" });
       return;
     }
-    const settled = settleOutcome(await printing.send(null, printer.target, bytes));
+    const settled = settleOutcome(
+      await printing.send(null, printer.target, bytes, printerMode(printer)),
+    );
     // What was typed ahead (a letter on a list) would join the code of the label.
     source.clearPendingInput();
     setTest(
@@ -423,7 +441,7 @@ export function WorkstationSetup({
           ? t("floor.setup.printers.summary.serial", { port: target.port, baud: target.baud })
           : t("floor.setup.printers.summary.usb", { printer: target.printer });
     return `${where} · ${t("floor.setup.printers.format", {
-      language: printer.language.toUpperCase(),
+      language: printerFormatText(t, printer),
       dpi: printer.dpi,
     })}`;
   };
@@ -554,17 +572,34 @@ export function WorkstationSetup({
             </Button>
           </>
         )}
-        <Select
-          native
-          size="floor"
-          label={t("floor.setup.printers.editor.language")}
-          value={form.language}
-          options={[
-            { value: "zpl", label: "ZPL (Zebra)" },
-            { value: "tspl", label: "TSPL (TSC)" },
-          ]}
-          onValueChange={(language) => set({ language })}
-        />
+        {form.kind === "usb" && (windowsDriver || form.mode === "windows_driver") && (
+          <Select
+            native
+            size="floor"
+            label={t("floor.setup.printers.editor.mode")}
+            value={form.mode}
+            options={(["raw", "windows_driver"] as const).map((mode) => ({
+              value: mode,
+              label: t(`floor.setup.printers.editor.modes.${mode}`),
+            }))}
+            onValueChange={(mode) => set({ mode })}
+          />
+        )}
+        {form.kind === "usb" && form.mode === "windows_driver" ? (
+          <p>{t("floor.setup.printers.editor.driverHint")}</p>
+        ) : (
+          <Select
+            native
+            size="floor"
+            label={t("floor.setup.printers.editor.language")}
+            value={form.language}
+            options={[
+              { value: "zpl", label: "ZPL (Zebra)" },
+              { value: "tspl", label: "TSPL (TSC)" },
+            ]}
+            onValueChange={(language) => set({ language })}
+          />
+        )}
         <Select
           native
           size="floor"

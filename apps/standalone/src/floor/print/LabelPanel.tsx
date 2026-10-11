@@ -6,9 +6,15 @@ import { useTranslation } from "react-i18next";
 import { Alert, Button } from "@markiro/ui";
 
 import { REPRINT_REASONS } from "../exception-reasons.js";
-import type { PrinterProfile, WorkstationSettings } from "../setup/workstation-settings.js";
+import {
+  printerMode,
+  type PrinterProfile,
+  type WorkstationSettings,
+} from "../setup/workstation-settings.js";
 import type { PrintJob } from "./print-jobs.js";
 import { awaitsCheck, printerForAgain, type PrintAgain } from "./print-resolution.js";
+import type { WindowsQueueCheck } from "./print-runtime.js";
+import { printerFormatText } from "./printer-format.js";
 
 /** What the panel says under the label: a scan that did not match, a decision that could not be done. */
 export type LabelNote =
@@ -41,6 +47,13 @@ export interface LabelPanelProps {
    * sends nothing.
    */
   onRecover?: () => void;
+  /**
+   * «Проверить очередь Windows» (plan ДРВ): the spooler's word on the job's
+   * newest driver send. Offered only for a printer in driver mode, while the
+   * label may exist (unknown, or a check waits); diagnostic only — it decides
+   * nothing and never confirms a printed label.
+   */
+  checkQueue?: () => Promise<WindowsQueueCheck>;
   /** Milliseconds from a clock that does not go back; the guard after a view change reads it. */
   clock?: () => number;
 }
@@ -114,7 +127,7 @@ function targetText(
       : "floor.print.target.replacedFailed";
   return t(key, {
     name: printer.name,
-    language: printer.language.toUpperCase(),
+    language: printerFormatText(t, printer),
     dpi: printer.dpi,
     former: former?.name ?? "",
   });
@@ -142,6 +155,7 @@ export function LabelPanel({
   onSkip,
   onSetup,
   onRecover,
+  checkQueue,
   clock = realClock,
 }: LabelPanelProps) {
   const { t } = useTranslation();
@@ -155,6 +169,13 @@ export function LabelPanel({
   // A label that may already be on a box: a second one needs a reason.
   const mayExist = checking || job.state === "unknown";
   const pallet = job.purpose === "pallet";
+  const [queue, setQueue] = useState<WindowsQueueCheck | "asking" | null>(null);
+  const askQueue =
+    checkQueue !== undefined &&
+    job.printer !== null &&
+    printerMode(job.printer) === "windows_driver"
+      ? checkQueue
+      : null;
   const sscc = t(pallet ? "floor.print.pallet.sscc" : "floor.print.sscc", {
     sscc: formatSsccHri(job.sscc),
   });
@@ -238,6 +259,29 @@ export function LabelPanel({
     </Button>
   );
 
+  const queueText =
+    askQueue !== null && queue !== null ? (
+      <p>
+        {queue === "asking"
+          ? t("floor.print.queue.checking")
+          : t(`floor.print.queue.${queue.state}`)}
+      </p>
+    ) : null;
+  const queueButton =
+    askQueue !== null ? (
+      <Button
+        size="floor"
+        variant="secondary"
+        {...press(() => {
+          if (queue === "asking") return;
+          setQueue("asking");
+          void askQueue().then(setQueue, () => setQueue({ state: "unavailable" }));
+        })}
+      >
+        {t("floor.print.queue.check")}
+      </Button>
+    ) : null;
+
   let body: ReactNode;
   if (mode.kind === "reason") {
     const target = targetText(t, job, settings, mode.printer, mayExist);
@@ -285,7 +329,7 @@ export function LabelPanel({
             <Button key={printer.id} size="floor" {...press(() => again(printer))}>
               {t("floor.print.printers.option", {
                 name: printer.name,
-                language: printer.language.toUpperCase(),
+                language: printerFormatText(t, printer),
                 dpi: printer.dpi,
               })}
             </Button>
@@ -363,10 +407,12 @@ export function LabelPanel({
         <p>{t(pallet ? "floor.print.pallet.checkBody" : "floor.print.check.body")}</p>
         <p>{sscc}</p>
         {note !== null && <p>{noteText(note, t, pallet)}</p>}
+        {queueText}
         <div className="standalone-form__actions">
           <Button size="floor" variant="secondary" {...press(() => again(null))}>
             {t("floor.print.printAgain")}
           </Button>
+          {queueButton}
           <Button size="floor" variant="secondary" {...press(onSkip)}>
             {t("floor.print.check.skip")}
           </Button>
@@ -398,12 +444,14 @@ export function LabelPanel({
         <p>{sscc}</p>
         {target !== null && <p>{target}</p>}
         {note !== null && <p>{noteText(note, t, pallet)}</p>}
+        {job.state === "unknown" && queueText}
         <div className="standalone-form__actions">
           {job.state === "unknown" && (
             <Button size="floor" {...press(onPrinted)}>
               {t("floor.print.printed")}
             </Button>
           )}
+          {job.state === "unknown" && queueButton}
           <Button size="floor" {...press(() => again(null))}>
             {t("floor.print.printAgain")}
           </Button>

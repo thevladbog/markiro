@@ -2290,6 +2290,7 @@ export function WorkScreen(props: WorkScreenProps) {
               onPrintAgain={decideAgain}
               onPrinted={() => decide((job) => confirmPrinted(printContextOf(live), job), false)}
               onSkip={() => decide((job) => skipLabel(printContextOf(live), job), false)}
+              checkQueue={() => props.printing.checkWindowsJob(stop.job.id)}
               {...(stop.job.state === "sending" && !props.printing.isInFlight(stop.job.id)
                 ? { onRecover: () => decide(recoverStalled, false) }
                 : {})}
