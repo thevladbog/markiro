@@ -11,6 +11,14 @@ import {
   undoLastCode,
   type ReprintContext,
 } from "../src/floor/exceptions/box-exceptions.js";
+import { disassemblePallet, reprintPallet } from "../src/floor/exceptions/pallet-exceptions.js";
+import {
+  closeOpenPallet,
+  openPalletGuard,
+  palletStep,
+  shiftPallets,
+  type PalletContext,
+} from "../src/floor/pallets/pallets.js";
 import {
   boxLabelStep,
   readOpenJob,
@@ -26,7 +34,6 @@ import type { FactReceipt } from "../src/host/protocol.js";
 import { sendFactBatch } from "../src/local/facts-sender.js";
 import {
   countingIds,
-  ENTERED,
   enteredShift,
   km,
   OPERATOR_ID,
@@ -38,6 +45,7 @@ import {
 } from "./support/floor-work.js";
 import { fakeHardware } from "./support/hardware.js";
 import { openLocalDb } from "./support/local-db.js";
+import { PALLET_BLOCK, PALLETS_ENTERED } from "./support/pallets.js";
 import { fakeRender, manualRuntime, setUpPrinting } from "./support/printing.js";
 
 // See test/protocol.test.ts: bind import.meta.url before building the URL.
@@ -45,6 +53,9 @@ const testModuleUrl = import.meta.url;
 
 /** The block the station holds: the host's first block of a new site, 1500–3499. */
 const BLOCK = "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a";
+/** The pallet block it holds (plan ПЛ-Ц): the host's first pallet block of a new site, 40–239. */
+const PALLET_FROM = 40;
+const PALLET_TO = 239;
 
 /** How a send of the outbox ended: the host's receipts, no host at all, or an answer lost on its way back. */
 type Answer = "receipts" | "unreachable" | "lost";
@@ -55,14 +66,17 @@ type Answer = "receipts" | "unreachable" | "lost";
  * record it wrote, in the outbox's order, and every send of the outbox — the
  * records' ids and how the send ended. `host/tests/floor_scenario.rs` sends
  * the same batches to the host's router and checks that it takes every
- * record and ends with the same numbers.
+ * record and ends with the same numbers. The shift has pallets (plan ПЛ-Ц):
+ * the station's pallet block and its closed pallets are named too.
  */
 const scenarioSchema = z.object({
   station: z.object({
     shiftId: z.string(),
     blockId: z.string(),
+    palletBlockId: z.string(),
     acceptedUnits: z.number(),
     closedBoxes: z.number(),
+    closedPallets: z.number(),
   }),
   records: z.array(z.object({ id: z.string() }).loose()),
   sends: z.array(
@@ -101,25 +115,44 @@ function scenarioHost() {
 }
 
 /**
- * One shift on one PC, with a stepping clock and counting ids so that it
- * writes the same records every time: three codes fill a box, whose label
- * is printed and checked, and the outbox goes to the host. Then the host is
- * away: two codes, the last one taken out and scanned again, the box
- * cleared; three more codes fill it, its label printed and checked; the
- * first box taken apart; the second box's label printed again with a
+ * One shift with pallets of two boxes on one PC, with a stepping clock and
+ * counting ids so that it writes the same records every time: three codes
+ * fill a box, which opens a pallet, whose label is printed and checked, and
+ * the outbox goes to the host. Then the host is away: two codes, the last
+ * one taken out and scanned again, the box cleared; three more codes fill
+ * it, it fills the pallet, which closes with it, and both labels are printed
+ * and checked; the first box taken apart; the second box's label printed
+ * again with a reason, and checked; the pallet's label printed again with a
  * reason, and checked; two of the freed codes in a third box, closed
- * incomplete with its label; the shift closed with a reason — all on this
- * station alone. The host comes back: a send that finds no host, one whose
- * answer is lost, and one that is answered.
+ * incomplete with its label, on a second pallet; «Закрыть паллету и смену»:
+ * the second pallet closed early with its label, then taken apart, and the
+ * shift closed with a reason — all on this station alone. The host comes
+ * back: a send that finds no host, one whose answer is lost, and one that
+ * is answered.
  */
 async function runScenario() {
   const { db, executor: local } = openLocalDb();
-  const shift = await enteredShift(local, { ...ENTERED, boxCapacity: 3 });
+  const shift = await enteredShift(local, {
+    ...PALLETS_ENTERED,
+    boxCapacity: 3,
+    palletBoxCapacity: 2,
+  });
+  const pallets = shiftPallets(shift);
+  if (pallets === null) throw new Error("the shift has no pallets");
   seedBlock(db, { blockId: BLOCK, from: 1500, to: 3499 });
-  const settings = await setUpPrinting(local, { verifyPrintedLabel: true });
+  seedBlock(db, { blockId: PALLET_BLOCK, from: PALLET_FROM, to: PALLET_TO, extension: 1 });
+  const settings = await setUpPrinting(local, {
+    verifyPrintedLabel: true,
+    assignments: { box: "zebra", pallet: "zebra", duplicate: null },
+  });
   const now = steppingClock();
   const newId = countingIds();
   const context = scanContext(local, shift, { now, newId });
+  const palletContext: PalletContext = {
+    ...context,
+    operatorName: "Анна Кузнецова",
+    render: fakeRender,
+  };
   const { runtime } = manualRuntime(fakeHardware().hardware);
   const print: ReprintContext = {
     local,
@@ -130,14 +163,17 @@ async function runScenario() {
     newId,
     shift,
   };
-  const label = boxLabelStep({
-    local,
-    pairing: PAIRING,
-    shift,
-    operatorName: "Анна Кузнецова",
-    newId,
-    render: fakeRender,
-  });
+  const steps = [
+    boxLabelStep({
+      local,
+      pairing: PAIRING,
+      shift,
+      operatorName: "Анна Кузнецова",
+      newId,
+      render: fakeRender,
+    }),
+    palletStep(palletContext, pallets),
+  ];
   const host = scenarioHost();
 
   /** The label that waits goes to the printer and is checked by a scan of its SSCC. */
@@ -148,13 +184,17 @@ async function runScenario() {
     const checked = await checkLabel(print, sent, `]C100${sent.sscc}`);
     if (checked.kind !== "verified") throw new Error(checked.kind);
   };
+  /** Every label that waits, the box's before its pallet's. */
+  const printAndCheckAll = async () => {
+    while ((await readOpenJob(local, PAIRING, shift.copy.id)) !== null) await printAndCheck(null);
+  };
   const scan = async (serial: string) => {
     const outcome = await processScan(context, km(serial));
     if (outcome.kind !== "accepted") throw new Error(`${serial}: ${outcome.kind}`);
-    const closed = await closeIfFull(context, [label]);
+    const closed = await closeIfFull(context, steps);
     if (closed !== null) {
       if (closed.kind !== "closed") throw new Error(closed.kind);
-      await printAndCheck(null);
+      await printAndCheckAll();
     }
   };
   const deliver = async () => {
@@ -186,11 +226,35 @@ async function runScenario() {
     fakeRender,
   );
   await printAndCheck(reprinted);
+  const [firstPallet] = rows(db, "SELECT id FROM floor_pallets WHERE serial = ?", PALLET_FROM);
+  const reprintedPallet = await reprintPallet(
+    print,
+    pallets,
+    String(firstPallet?.["id"]),
+    { code: "unreadable_label", text: null },
+    settings,
+    fakeRender,
+  );
+  await printAndCheck(reprintedPallet);
   for (const serial of ["A1", "A2"]) await scan(serial);
-  const third = await closeOpenBox(context, [label]);
+  const third = await closeOpenBox(context, steps);
   if (third.kind !== "closed") throw new Error(third.kind);
-  await printAndCheck(null);
-  expect(await closeShift(context, "production_order_changed")).toMatchObject({ kind: "closed" });
+  await printAndCheckAll();
+  // «Закрыть паллету и смену»: the second pallet first, with its label.
+  const secondPallet = await closeOpenPallet(palletContext, pallets);
+  if (secondPallet.kind !== "closed") throw new Error(secondPallet.kind);
+  await printAndCheckAll();
+  expect(
+    await disassemblePallet(context, secondPallet.pallet.palletId, {
+      code: "other",
+      text: "Собрана не на тот заказ",
+    }),
+  ).toMatchObject({ kind: "done" });
+  expect(
+    await closeShift(context, "production_order_changed", [
+      openPalletGuard(PAIRING, shift.copy.id),
+    ]),
+  ).toMatchObject({ kind: "closed" });
 
   host.answerNext("unreachable");
   await deliver();
@@ -205,12 +269,18 @@ async function runScenario() {
       .parse(JSON.parse(String(row["payload"]))),
   );
   const totals = await readWorkTotals(local, PAIRING, shift.copy.id);
+  const [closedPallets] = rows(
+    db,
+    "SELECT count(*) AS n FROM floor_pallets WHERE closed_at IS NOT NULL AND disassembled_at IS NULL",
+  );
   const scenario: Scenario = {
     station: {
       shiftId: shift.copy.id,
       blockId: BLOCK,
+      palletBlockId: PALLET_BLOCK,
       acceptedUnits: totals.accepted,
       closedBoxes: totals.closedBoxes,
+      closedPallets: Number(closedPallets?.["n"]),
     },
     records,
     sends: host.sends,
@@ -218,7 +288,7 @@ async function runScenario() {
   return { db, scenario };
 }
 
-describe("one shift on one PC, from the first code to the close, with the host away", () => {
+describe("one shift with pallets on one PC, from the first code to the close, with the host away", () => {
   it("writes the records of the shared scenario, sends them in its batches, and ends closed", async () => {
     const { db, scenario } = await runScenario();
     const fixture = scenarioSchema.parse(
@@ -244,14 +314,21 @@ describe("one shift on one PC, from the first code to the close, with the host a
       "scan",
       "scan",
       "box_closed",
+      "pallet_closed",
       "box_label",
+      "pallet_label",
       "box_exception",
       "box_exception",
       "box_label",
+      "pallet_exception",
+      "pallet_label",
       "scan",
       "scan",
       "box_closed",
       "box_label",
+      "pallet_closed",
+      "pallet_label",
+      "pallet_exception",
       "shift_closed",
     ]);
   });
