@@ -207,6 +207,16 @@ export async function closeShift(
 const refusalRow = z.object({ shift_id: z.string(), code: z.string().nullable() });
 
 /**
+ * The reading of `readRefusedCloses`; parameters: host id, device id. It runs
+ * on every bump of the outbox while the shift list is shown, so its plan is
+ * pinned (`outbox_settled`, the pairing's refused records only) in both lists
+ * of plans.
+ */
+export const REFUSED_CLOSES_SQL =
+  "SELECT shift_id, outcome_code AS code FROM outbox WHERE host_id = ? AND device_id = ? " +
+  "AND kind = 'shift_closed' AND outcome = 'rejected' ORDER BY seq";
+
+/**
  * The shifts of this pairing whose close the host refused, with the code of
  * the refusal (`null` — none given). A refused record is refused for good
  * (plan 2a2): the shift stays `closing` on this station, and the office
@@ -217,8 +227,7 @@ export async function readRefusedCloses(
   pairing: Pairing,
 ): Promise<Map<string, string | null>> {
   const rows = await local.query(
-    "SELECT shift_id, outcome_code AS code FROM outbox WHERE host_id = ? AND device_id = ? " +
-      "AND kind = 'shift_closed' AND outcome = 'rejected' ORDER BY seq",
+    REFUSED_CLOSES_SQL,
     [pairing.hostId, pairing.deviceId],
     refusalRow,
   );

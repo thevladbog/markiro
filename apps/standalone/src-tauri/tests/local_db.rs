@@ -858,6 +858,14 @@ const PURGE_COPY: &str =
      (state IN ('prepared', 'sending', 'failed', 'unknown') OR (state = 'sent' AND \
      verify = 1)))";
 
+/// The shift list's read of the refused closes (`readRefusedCloses` in `src/floor/close/shift-close.ts`,
+/// plan 2a8): it runs again on every bump of the outbox while the list is shown, a reconnect's every
+/// batch included. `test/floor-schema.test.ts` plans the same text on the Node runtime's SQLite and
+/// checks that it appears here word for word.
+const REFUSED_CLOSES: &str =
+    "SELECT shift_id, outcome_code AS code FROM outbox WHERE host_id = ? AND device_id = ? \
+     AND kind = 'shift_closed' AND outcome = 'rejected' ORDER BY seq";
+
 /// The reads the floor repeats on every scan and box close search an index
 /// instead of reading every row of the pairing (migration `0006`). The plans
 /// are those of the SQLite the shell bundles; `test/floor-schema.test.ts`
@@ -872,7 +880,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 49] = [
+    let reads: [(&str, &str); 50] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1112,6 +1120,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         (PURGE_COPY, "outbox_unsent (host_id=? AND device_id=?)"),
         (PURGE_COPY, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
         (PURGE_COPY, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
+        (REFUSED_CLOSES, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
         (
             "DELETE FROM floor_scans WHERE host_id = ? AND device_id = ? AND shift_id = ?",
             "floor_scans_shift (host_id=? AND device_id=? AND shift_id=?",
@@ -1188,6 +1197,28 @@ async fn the_floors_repeating_reads_search_an_index() {
         temporary,
         ["USE TEMP B-TREE FOR DISTINCT"],
         "its plan is {plan:?}"
+    );
+    // The refused closes are read through `outbox_settled` in `seq` order with no sort of their own.
+    let text = format!("EXPLAIN QUERY PLAN {REFUSED_CLOSES}");
+    let mut explain = sqlx::query(&text);
+    for _ in 0..REFUSED_CLOSES.matches('?').count() {
+        explain = explain.bind("x");
+    }
+    let plan: Vec<String> = explain
+        .fetch_all(&mut raw)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.get::<String, _>("detail"))
+        .collect();
+    assert_eq!(
+        plan.first().map(String::as_str),
+        Some("SEARCH outbox USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
+        "the refused closes should be read from the settled records, its plan is {plan:?}"
+    );
+    assert!(
+        !plan.iter().any(|step| step.contains("TEMP")),
+        "the refused closes should need no sort, its plan is {plan:?}"
     );
     // The one read of the floor that names no index: a pairing's waiting block
     // requests. The table holds at most one row per pairing and issuer prefix

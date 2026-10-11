@@ -348,6 +348,26 @@ describe("the close of a shift on the station", () => {
     expect(await readPrintJob(at.local, PAIRING, job.id)).toMatchObject({ state: "sent" });
   });
 
+  // The receipt of the shift's close turns the copy from `closing` to `closed`
+  // (plan 2a8): the guard is "no `local_state`", not "not `closing`", so a record
+  // written after the receipt is refused as much as one written before it.
+  it("lets no record of the shift follow its close once the host has answered it either", async () => {
+    const at = await station(null);
+    await closedBoxWithLabel(at);
+    const context = closer(at);
+    expect(await closeShift(context, null)).toMatchObject({ kind: "closed" });
+    at.db.exec("UPDATE floor_shifts SET local_state = 'closed'");
+    expect(localState(at)).toBe("closed");
+    const kinds = outboxKinds(at);
+    const scans = rows(at.db, "SELECT count(*) AS n FROM floor_scans");
+    const writer = closer(at, { newId: () => crypto.randomUUID() });
+    await expect(processScan(writer, km("Z2"))).rejects.toMatchObject({
+      code: "changes_mismatch",
+    });
+    expect(outboxKinds(at)).toEqual(kinds);
+    expect(rows(at.db, "SELECT count(*) AS n FROM floor_scans")).toEqual(scans);
+  });
+
   // A pairing that differs in the host only (a restored host, plan РК) and one that
   // differs in the device only (an old pairing kept by a forget): each holds a copy
   // of the same shift id, closing, and refuses its own records, never this one's.

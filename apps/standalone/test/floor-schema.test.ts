@@ -18,6 +18,7 @@ import {
   SHIFT_PREFIX_SQL,
   UNSENT_COUNT_SQL,
 } from "../src/floor/outbox-status.js";
+import { REFUSED_CLOSES_SQL } from "../src/floor/close/shift-close.js";
 import { BLOCKS_WITH_ROOM_SQL } from "../src/floor/work/block-supply.js";
 import { BOX_CODES_SQL, CLOSED_BOX_SQL } from "../src/floor/work/box-close.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
@@ -915,6 +916,14 @@ describe("the shape of the production tables (migration 0006)", () => {
       ).toEqual([]);
     }
     expect(plan(PURGE_COPY_SQL)).not.toContain("TEMP");
+    // The refused closes of the shift list (plan 2a8), read again on every bump of the outbox
+    // while the list is shown, a reconnect's every batch included: the pairing's refused records
+    // through `outbox_settled`, in `seq` order with no sort of its own.
+    const refused = plan(REFUSED_CLOSES_SQL).split("\n");
+    expect(refused[0], REFUSED_CLOSES_SQL).toBe(
+      "SEARCH outbox USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+    );
+    expect(refused.filter((step) => step.startsWith("SCAN ") || step.includes("TEMP"))).toEqual([]);
     // The deletes of a purged shift's records: the tables with an index by shift search it; the
     // outbox and the exceptions carry the shift only as a column, so each costs one read of its
     // table, once for a shift done with for 30 days (not on a scan).
@@ -970,17 +979,18 @@ describe("the shape of the production tables (migration 0006)", () => {
     ];
     expect(new Set(statements).size).toBe(13);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
-    // The retention pass's statements, as `tests/local_db.rs` plans them: the two long ones as
-    // constants, the deletes of the tables with an index by shift as literals, the two that read
+    // The retention pass's statements, as `tests/local_db.rs` plans them (the refused closes' read
+    // among them): the long ones as constants, the deletes of the tables with an index by shift as literals, the two that read
     // their whole table from one format string.
     const retention = [
       DUE_SHIFTS_SQL,
       PURGE_COPY_SQL,
+      REFUSED_CLOSES_SQL,
       ...(["floor_scans", "floor_codes", "floor_print_jobs", "floor_boxes"] as const).map(
         purgeTableSql,
       ),
     ];
-    expect(new Set(retention).size).toBe(6);
+    expect(new Set(retention).size).toBe(7);
     for (const sql of retention) expect(source).toContain(`"${sql}"`);
     expect(source).toContain('for table in ["outbox", "floor_exceptions"] {');
     expect(source).toContain(`"${purgeTableSql("outbox").replace("outbox", "{table}")}"`);

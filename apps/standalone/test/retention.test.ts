@@ -211,6 +211,25 @@ describe("the retention of a shift's records on the station", () => {
     expect(kept(at, SECOND.id)).toEqual(NONE);
   });
 
+  // A shift the office closed and this station then finished: its close is
+  // answered `accepted` with `alreadyClosed`, the copy turns `closed`, and the
+  // retention takes it like any other (plan 2a8, spec §22).
+  it("deletes a finished office-closed shift too: an accepted close answered alreadyClosed counts", async () => {
+    const at = await printStation();
+    await finished(at, ENTERED, "A", CUTOFF);
+    at.db
+      .prepare(
+        "UPDATE outbox SET outcome_details = '{\"alreadyClosed\":true}' WHERE shift_id = ? AND kind = 'shift_closed'",
+      )
+      .run(ENTERED.id);
+    expect(
+      rows(at.db, "SELECT outcome, outcome_details FROM outbox WHERE kind = 'shift_closed'"),
+    ).toEqual([{ outcome: "accepted", outcome_details: '{"alreadyClosed":true}' }]);
+    expect(await dueIds(at)).toEqual([ENTERED.id]);
+    expect(await purgeAcknowledged(at.local, PAIRING, NOW)).toBe(1);
+    expect(kept(at, ENTERED.id)).toEqual(NONE);
+  });
+
   it("keeps a shift whose close the host refused, or has not answered", async () => {
     const at = await printStation();
     await finished(at, ENTERED, "A", "2026-09-01T00:00:00.000Z", "rejected");
