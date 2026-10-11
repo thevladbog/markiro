@@ -841,10 +841,15 @@ async fn a_code_that_was_never_accepted_is_not_found_not_released() {
 /// by rolling back (it writes nothing).
 #[test]
 fn the_lookup_reads_inside_one_transaction_that_it_rolls_back() {
-    let source = std::fs::read_to_string(
+    let whole = std::fs::read_to_string(
         std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/routes/warehouse.rs"),
     )
     .unwrap();
+    // The lookup is the first half of the file; the records (a write
+    // transaction of their own) follow it.
+    let (source, _) = whole
+        .split_once("/// The body as the host reads it")
+        .unwrap();
     assert_eq!(source.matches("state.pool.begin()").count(), 1);
     assert_eq!(source.matches("tx.rollback()").count(), 1);
     assert_eq!(source.matches("tx.commit()").count(), 0);
@@ -854,4 +859,1034 @@ fn the_lookup_reads_inside_one_transaction_that_it_rolls_back() {
         "a read outside the transaction"
     );
     assert_eq!(source.matches("&mut tx").count(), 2);
+}
+
+const SESSION: &str = "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f";
+const JOB: &str = "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a";
+
+/// Record `n` of a reprint of `subject_id`/`identity` of `kind`, sent.
+fn reprint(n: u32, kind: &str, subject_id: &str, identity: &str) -> Value {
+    json!({
+        "id": record_id(n), "sessionId": SESSION, "jobId": JOB, "attempt": 1,
+        "subjectKind": kind, "subjectId": subject_id, "identity": identity,
+        "reasonCode": "damaged", "repair": null, "templateId": "template-1", "templateRev": 3,
+        "outcome": "sent", "errorCode": null, "operatorId": null, "occurredAt": instant(20, 0)
+    })
+}
+
+async fn send_records(admin: &Admin, key: &str, records: &[Value]) -> Vec<Value> {
+    let (status, body) = post(
+        admin,
+        key,
+        "/v1/device/warehouse/reprints",
+        json!({ "records": records }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    body["receipts"].as_array().unwrap().clone()
+}
+
+async fn reprint_rows(admin: &Admin) -> Vec<(String, String, String, i64, Option<String>)> {
+    sqlx::query_as(
+        "SELECT record_id, subject_kind, outcome, attempt, error_code FROM warehouse_reprints \
+         ORDER BY record_id",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap()
+}
+
+#[tokio::test]
+async fn records_are_kept_once_and_answered_like_facts() {
+    let (admin, _floor, asking, _) = closed_shift_with_a_box().await;
+    let (_, unit) = lookup(&admin, &asking, json!({ "codeHash": code_hash(1) })).await;
+    let scan = unit["source"]["subjectId"].as_str().unwrap().to_owned();
+    let mut unknown = reprint(2, "unit", &scan, &code_hash(1));
+    unknown["outcome"] = json!("unknown");
+    unknown["errorCode"] = json!("timeout");
+    unknown["attempt"] = json!(2);
+    let first = [reprint(1, "box", &box_id(1), &sscc(1500)), unknown.clone()];
+    assert_eq!(
+        send_records(&admin, &asking, &first).await,
+        vec![accepted(&record_id(1)), accepted(&record_id(2))]
+    );
+    // The same records again: the same receipts, nothing written twice.
+    assert_eq!(
+        send_records(&admin, &asking, &first).await,
+        vec![accepted(&record_id(1)), accepted(&record_id(2))]
+    );
+    assert_eq!(
+        reprint_rows(&admin).await,
+        vec![
+            (record_id(1), "box".into(), "sent".into(), 1, None),
+            (
+                record_id(2),
+                "unit".into(),
+                "unknown".into(),
+                2,
+                Some("timeout".into())
+            ),
+        ]
+    );
+    // Other content under a kept id; a subject the host does not have; a
+    // record it cannot read, with and without a readable id.
+    let mut changed = reprint(1, "box", &box_id(1), &sscc(1500));
+    changed["reasonCode"] = json!("lost");
+    let mut foreign = reprint(3, "box", &box_id(7), &sscc(1500));
+    foreign["subjectId"] = json!(box_id(7));
+    let mut broken = reprint(4, "box", &box_id(1), &sscc(1500));
+    broken["outcome"] = json!("failed");
+    assert_eq!(
+        send_records(
+            &admin,
+            &asking,
+            &[changed, foreign, broken, json!({ "id": 5 })]
+        )
+        .await,
+        vec![
+            json!({ "id": record_id(1), "outcome": "rejected", "code": "payload_mismatch" }),
+            json!({ "id": record_id(3), "outcome": "rejected", "code": "subject_unknown" }),
+            json!({ "id": record_id(4), "outcome": "rejected", "code": "invalid_record" }),
+            json!({ "id": null, "outcome": "rejected", "code": "invalid_record" }),
+        ]
+    );
+    assert_eq!(reprint_rows(&admin).await.len(), 2);
+    // A reprint changes nothing of what it printed.
+    let (verified, skipped): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT print_verified_at, print_skipped_at FROM boxes WHERE id = ?")
+            .bind(box_id(1))
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!((verified, skipped), (None, None));
+}
+
+#[tokio::test]
+async fn each_field_of_a_record_keeps_its_rule() {
+    let (admin, _floor, asking, _) = closed_shift_with_a_box().await;
+    let good = reprint(1, "box", &box_id(1), &sscc(1500));
+    let bad: Vec<(&str, Value)> = vec![
+        ("id", json!("not-a-uuid")),
+        ("sessionId", json!("X")),
+        ("attempt", json!(-1)),
+        ("subjectKind", json!("crate")),
+        ("subjectId", json!("")),
+        ("identity", json!("12345")),
+        ("reasonCode", json!("other")),
+        ("repair", json!("trim")),
+        ("templateRev", json!(-1)),
+        ("outcome", json!("printed")),
+        ("errorCode", json!("timeout")),
+        ("operatorId", json!("anna")),
+        ("occurredAt", json!("2026-10-08T06:00:20Z")),
+    ];
+    let mut records = Vec::new();
+    for (n, (field, value)) in bad.iter().enumerate() {
+        let mut record = good.clone();
+        record["id"] = json!(record_id(100 + u32::try_from(n).unwrap()));
+        record[*field] = value.clone();
+        records.push(record);
+    }
+    let answered = send_records(&admin, &asking, &records).await;
+    for (receipt, (field, _)) in answered.iter().zip(&bad) {
+        assert_eq!(receipt["code"], "invalid_record", "{field}: {receipt}");
+    }
+    // A legacy repair only on a box or a pallet; a unit with one is refused.
+    let mut unit = reprint(200, "unit", "scan-1", &code_hash(1));
+    unit["repair"] = json!("legacy_tspl_fnc1_literal");
+    assert_eq!(
+        send_records(&admin, &asking, &[unit]).await[0]["code"],
+        "invalid_record"
+    );
+    let (status, body) = post(
+        &admin,
+        &asking,
+        "/v1/device/warehouse/reprints",
+        json!({ "records": [] }),
+    )
+    .await;
+    assert_eq!(
+        (status, &body["error"]["details"]["field"]),
+        (StatusCode::BAD_REQUEST, &json!("records"))
+    );
+    assert!(reprint_rows(&admin).await.is_empty());
+}
+
+// Tests beyond the plan's own for the records: what each row keeps, the
+// identity of the subject, one station's ids against another's, the batch's
+// edges, who may record, the nullable keys against the Zod schema, the CHECKs
+// of the table, the plans, the shape of the write, and the migration order.
+
+/// Every column of the one row of `record_id`, as text, in table order.
+async fn reprint_row(admin: &Admin, device_id: &str, record_id: &str) -> Vec<Option<String>> {
+    let row = sqlx::query("SELECT * FROM warehouse_reprints WHERE device_id = ? AND record_id = ?")
+        .bind(device_id)
+        .bind(record_id)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    use sqlx::Row as _;
+    (0..row.columns().len())
+        .map(|index| match row.try_get::<Option<String>, _>(index) {
+            Ok(text) => text,
+            Err(_) => Some(row.get::<i64, _>(index).to_string()),
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn a_record_of_each_kind_is_kept_exactly_as_sent_and_changes_nothing() {
+    let (admin, _floor) = a_pallet_of_two_boxes().await;
+    let (station, key) = pair_device(&admin.app, "station").await;
+    let (_, unit) = lookup(&admin, &key, json!({ "codeHash": code_hash(1) })).await;
+    let scan = unit["source"]["subjectId"].as_str().unwrap().to_owned();
+    let operator = "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b";
+    let mut unit_record = reprint(1, "unit", &scan, &code_hash(1));
+    unit_record["operatorId"] = json!(operator);
+    let mut box_record = reprint(2, "box", &box_id(1), &sscc(1500));
+    box_record["repair"] = json!("legacy_tspl_fnc1_literal");
+    box_record["attempt"] = json!(0);
+    box_record["reasonCode"] = json!("not_printed");
+    let mut pallet_record = reprint(3, "pallet", &pallet_id(1), &pallet_sscc(40));
+    pallet_record["outcome"] = json!("failed");
+    pallet_record["errorCode"] = json!("printer_offline");
+    pallet_record["reasonCode"] = json!("lost");
+    pallet_record["templateRev"] = json!(0);
+    let records = [
+        unit_record.clone(),
+        box_record.clone(),
+        pallet_record.clone(),
+    ];
+    let facts_before = support::app::fact_rows(&admin.app).await;
+    let audit = || async {
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM audit_log")
+            .fetch_one(&admin.app.state.pool)
+            .await
+            .unwrap()
+    };
+    let audit_before = audit().await;
+    let revision = support::app::host_revision(&admin.app).await;
+    assert_eq!(
+        send_records(&admin, &key, &records).await,
+        vec![
+            accepted(&record_id(1)),
+            accepted(&record_id(2)),
+            accepted(&record_id(3))
+        ]
+    );
+    let received_at = admin.app.state.timestamp();
+    for record in &records {
+        let text = |name: &str| record[name].as_str().map(str::to_owned);
+        let number = |name: &str| Some(record[name].as_i64().unwrap().to_string());
+        let id = record["id"].as_str().unwrap();
+        assert_eq!(
+            reprint_row(&admin, &station, id).await,
+            vec![
+                Some(station.clone()),
+                text("id"),
+                Some(markiro_host::facts::rules::record_digest(record)),
+                text("sessionId"),
+                text("jobId"),
+                number("attempt"),
+                text("subjectKind"),
+                text("subjectId"),
+                text("identity"),
+                text("reasonCode"),
+                text("repair"),
+                text("templateId"),
+                number("templateRev"),
+                text("outcome"),
+                text("errorCode"),
+                text("operatorId"),
+                text("occurredAt"),
+                Some(received_at.clone()),
+            ],
+            "{record}"
+        );
+    }
+    // Facts, boxes, pallets, codes, the audit trail and the revision are as
+    // they were: a reprint is a trail, not a change of what it printed.
+    assert_eq!(support::app::fact_rows(&admin.app).await, facts_before);
+    assert_eq!(audit().await, audit_before);
+    assert_eq!(support::app::host_revision(&admin.app).await, revision);
+}
+
+#[tokio::test]
+async fn a_record_names_its_subject_by_id_and_identity_together() {
+    let (admin, _floor) = a_pallet_of_two_boxes().await;
+    let (_, key) = pair_device(&admin.app, "station").await;
+    let (_, unit) = lookup(&admin, &key, json!({ "codeHash": code_hash(1) })).await;
+    let scan = unit["source"]["subjectId"].as_str().unwrap().to_owned();
+    // The right id with another (well-formed) identity, and the right
+    // identity with another id, for each kind.
+    let records = [
+        reprint(1, "unit", &scan, &code_hash(2)),
+        reprint(2, "unit", &record_id(77), &code_hash(1)),
+        reprint(3, "box", &box_id(1), &sscc(1501)),
+        reprint(4, "box", &box_id(2), &sscc(1500)),
+        reprint(5, "pallet", &pallet_id(1), &pallet_sscc(41)),
+        reprint(6, "pallet", &pallet_id(2), &pallet_sscc(40)),
+        // A box's id with a pallet kind, and a pallet's SSCC with a box kind.
+        reprint(7, "pallet", &box_id(1), &sscc(1500)),
+        reprint(8, "box", &pallet_id(1), &pallet_sscc(40)),
+    ];
+    let answered = send_records(&admin, &key, &records).await;
+    for (n, receipt) in answered.iter().enumerate() {
+        assert_eq!(
+            receipt,
+            &json!({ "id": record_id(u32::try_from(n).unwrap() + 1), "outcome": "rejected",
+                     "code": "subject_unknown" }),
+        );
+    }
+    assert!(reprint_rows(&admin).await.is_empty());
+    // And the matching ones are kept.
+    let right = [
+        reprint(11, "unit", &scan, &code_hash(1)),
+        reprint(12, "box", &box_id(2), &sscc(1501)),
+        reprint(13, "pallet", &pallet_id(1), &pallet_sscc(40)),
+    ];
+    assert!(send_records(&admin, &key, &right)
+        .await
+        .iter()
+        .all(|receipt| receipt["outcome"] == "accepted"));
+    assert_eq!(reprint_rows(&admin).await.len(), 3);
+}
+
+#[tokio::test]
+async fn a_box_taken_apart_and_a_freed_code_still_leave_the_trail_of_their_reprint() {
+    // The host keeps what the station printed even if the box was taken
+    // apart (or a code freed) since: the record is history, the lookup is
+    // what refuses to print again.
+    let (admin, _floor, asking, _) = closed_shift_with_a_box().await;
+    sqlx::query("UPDATE boxes SET disassembled_at = '2026-10-08T07:00:00Z' WHERE id = ?")
+        .bind(box_id(1))
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        send_records(
+            &admin,
+            &asking,
+            &[reprint(1, "box", &box_id(1), &sscc(1500))]
+        )
+        .await,
+        vec![accepted(&record_id(1))]
+    );
+}
+
+#[tokio::test]
+async fn one_stations_record_ids_are_not_anothers() {
+    let (admin, _floor, first, _) = closed_shift_with_a_box().await;
+    let (second_id, second) = pair_device(&admin.app, "station").await;
+    let record = reprint(1, "box", &box_id(1), &sscc(1500));
+    let mut other = record.clone();
+    other["reasonCode"] = json!("lost");
+    // The first station keeps id 1; the second keeps its own record under
+    // the same id with other content, and neither is told it clashes.
+    assert_eq!(
+        send_records(&admin, &first, &[record.clone()]).await,
+        vec![accepted(&record_id(1))]
+    );
+    assert_eq!(
+        send_records(&admin, &second, &[other.clone()]).await,
+        vec![accepted(&record_id(1))]
+    );
+    let rows: Vec<(String, String)> =
+        sqlx::query_as("SELECT device_id, reason_code FROM warehouse_reprints WHERE record_id = ?")
+            .bind(record_id(1))
+            .fetch_all(&admin.app.state.pool)
+            .await
+            .unwrap();
+    assert_eq!(rows.len(), 2, "{rows:?}");
+    assert!(rows.contains(&(second_id, "lost".into())), "{rows:?}");
+    // Each is still held to its own content.
+    assert_eq!(
+        send_records(&admin, &first, &[other]).await[0]["code"],
+        "payload_mismatch"
+    );
+    assert_eq!(
+        send_records(&admin, &second, &[record]).await[0]["code"],
+        "payload_mismatch"
+    );
+}
+
+#[tokio::test]
+async fn a_batch_answers_each_record_in_order_even_with_a_repeat_inside_it() {
+    let (admin, _floor, asking, _) = closed_shift_with_a_box().await;
+    let first = reprint(1, "box", &box_id(1), &sscc(1500));
+    let mut clash = first.clone();
+    clash["attempt"] = json!(2);
+    let mut broken = reprint(2, "box", &box_id(1), &sscc(1500));
+    broken["identity"] = json!("short");
+    let batch = [
+        first.clone(),
+        first,
+        clash,
+        broken,
+        json!("not an object"),
+        json!(null),
+        reprint(3, "box", &box_id(1), &sscc(1500)),
+    ];
+    assert_eq!(
+        send_records(&admin, &asking, &batch).await,
+        vec![
+            accepted(&record_id(1)),
+            accepted(&record_id(1)),
+            json!({ "id": record_id(1), "outcome": "rejected", "code": "payload_mismatch" }),
+            json!({ "id": record_id(2), "outcome": "rejected", "code": "invalid_record" }),
+            json!({ "id": null, "outcome": "rejected", "code": "invalid_record" }),
+            json!({ "id": null, "outcome": "rejected", "code": "invalid_record" }),
+            accepted(&record_id(3)),
+        ]
+    );
+    assert_eq!(
+        reprint_rows(&admin)
+            .await
+            .into_iter()
+            .map(|row| row.0)
+            .collect::<Vec<_>>(),
+        vec![record_id(1), record_id(3)]
+    );
+}
+
+#[tokio::test]
+async fn a_batch_is_one_to_a_hundred_records_of_nothing_else() {
+    let (admin, _floor, asking, _) = closed_shift_with_a_box().await;
+    let path = "/v1/device/warehouse/reprints";
+    let hundred: Vec<Value> = (1..=100)
+        .map(|n| reprint(n, "box", &box_id(1), &sscc(1500)))
+        .collect();
+    let answered = send_records(&admin, &asking, &hundred).await;
+    assert_eq!(answered.len(), 100);
+    assert!(answered
+        .iter()
+        .all(|receipt| receipt["outcome"] == "accepted"));
+    assert_eq!(reprint_rows(&admin).await.len(), 100);
+    let mut too_many = hundred.clone();
+    too_many.push(reprint(101, "box", &box_id(1), &sscc(1500)));
+    let (status, body) = post(&admin, &asking, path, json!({ "records": too_many })).await;
+    assert_eq!(
+        (status, &body["error"]["details"]["field"]),
+        (StatusCode::BAD_REQUEST, &json!("records"))
+    );
+    assert_eq!(
+        reprint_rows(&admin).await.len(),
+        100,
+        "nothing of 101 is kept"
+    );
+    for body in [
+        json!({ "records": {} }),
+        json!({ "records": "x" }),
+        json!({}),
+        json!({ "records": [reprint(1, "box", &box_id(1), &sscc(1500))], "extra": 1 }),
+        json!([]),
+    ] {
+        let (status, answer) = post(&admin, &asking, path, body.clone()).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{body}: {answer}");
+    }
+}
+
+#[tokio::test]
+async fn only_a_live_station_records_and_a_refused_batch_keeps_nothing() {
+    let (admin, _floor, asking, _) = closed_shift_with_a_box().await;
+    let record = reprint(1, "box", &box_id(1), &sscc(1500));
+    let path = "/v1/device/warehouse/reprints";
+    for kind in ["office", "handheld"] {
+        // A handheld pairs by a code, not locally: pair an office device and
+        // store its kind as the other.
+        let (id, other) = pair_device(&admin.app, "office").await;
+        sqlx::query("UPDATE devices SET kind = ? WHERE id = ?")
+            .bind(kind)
+            .bind(&id)
+            .execute(&admin.app.state.pool)
+            .await
+            .unwrap();
+        let (status, body) = post(&admin, &other, path, json!({ "records": [record] })).await;
+        assert_eq!(status, StatusCode::FORBIDDEN, "{kind}: {body}");
+        assert_eq!(body["error"]["code"], "forbidden", "{kind}");
+        assert!(!body.to_string().contains(&sscc(1500)), "{body}");
+    }
+    let (status, _) = admin
+        .app
+        .send(json_request(
+            request("POST", path),
+            json!({ "records": [record] }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    let (status, _) = post(&admin, "not-a-key", path, json!({ "records": [record] })).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    // A station revoked since pairing is no station.
+    let (revoked, revoked_key) = pair_device(&admin.app, "station").await;
+    sqlx::query("UPDATE devices SET revoked_at = '2026-10-08T07:00:00Z' WHERE id = ?")
+        .bind(&revoked)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, _) = post(&admin, &revoked_key, path, json!({ "records": [record] })).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+    assert!(reprint_rows(&admin).await.is_empty());
+    // A live station is answered.
+    assert_eq!(
+        send_records(&admin, &asking, &[record]).await,
+        vec![accepted(&record_id(1))]
+    );
+}
+
+/// The bounds the host keeps beyond the Zod schema, which takes any text and
+/// any non-negative number: what a station's real records never reach, and a
+/// record that does is a bad record, not a stored one.
+#[tokio::test]
+async fn the_bounds_of_a_records_text_codes_and_counts() {
+    let (admin, _floor, asking, _) = closed_shift_with_a_box().await;
+    let good = reprint(1, "box", &box_id(1), &sscc(1500));
+    let failed = |code: &str| {
+        let mut record = good.clone();
+        record["outcome"] = json!("failed");
+        record["errorCode"] = json!(code);
+        record
+    };
+    let with = |field: &str, value: Value| {
+        let mut record = good.clone();
+        record[field] = value;
+        record
+    };
+    let long = "t".repeat(64);
+    let accepted_ones = [
+        with("attempt", json!(10_000)),
+        with("templateId", json!(long.clone())),
+        with("templateId", json!("a")),
+        with("templateId", json!("Шаблон 1")),
+        failed("timeout"),
+        failed("printer_offline"),
+        failed(&"e".repeat(64)),
+        failed("_"),
+    ];
+    let refused = [
+        with("attempt", json!(10_001)),
+        with("attempt", json!(u32::MAX)),
+        with("attempt", json!(u64::from(u32::MAX) + 1)),
+        with("templateId", json!(format!("{long}t"))),
+        with("templateId", json!("")),
+        with("templateId", json!(" t")),
+        with("templateId", json!("t ")),
+        with("templateId", json!("t\nt")),
+        with("templateId", json!("t\u{7}")),
+        with("subjectId", json!(format!("{long}t"))),
+        with("subjectId", json!(" ")),
+        with("subjectId", json!("a\tb")),
+        with("templateRev", json!(i64::MIN)),
+        failed(""),
+        failed("Timeout"),
+        failed("time-out"),
+        failed("time out"),
+        failed("timeout2"),
+        failed(&"e".repeat(65)),
+        failed("тайм"),
+        // The identity of a kind is its own: a hash is not a box's, an SSCC
+        // is not a unit's, and a full code is nobody's.
+        with("identity", json!(code_hash(1))),
+        with("identity", json!(format!("{}0", sscc(1500)))),
+        with("identity", json!(&sscc(1500)[1..])),
+        with("identity", json!("04600682000001500x")),
+        with("identity", json!("")),
+        with("subjectKind", json!("unit")),
+        with("operatorId", json!("8A3C1F0E-2B4D-4E6F-9A1B-3C5D7E9F1A2B")),
+        with("operatorId", json!("8a3c1f0e2b4d4e6f9a1b3c5d7e9f1a2b")),
+        with("id", json!("00000000-0000-4000-8000-00000000000G")),
+        with("jobId", json!("not-a-uuid")),
+    ];
+    let mut records = Vec::new();
+    for (n, record) in accepted_ones.iter().chain(&refused).enumerate() {
+        let mut record = record.clone();
+        // The record under test keeps its own id unless it is the field under
+        // test; every record is a distinct one.
+        if record["id"] == good["id"] {
+            record["id"] = json!(record_id(300 + u32::try_from(n).unwrap()));
+        }
+        records.push(record);
+    }
+    let answered = send_records(&admin, &asking, &records).await;
+    for (n, receipt) in answered.iter().enumerate() {
+        if n < accepted_ones.len() {
+            assert_eq!(
+                receipt["outcome"], "accepted",
+                "#{n}: {receipt} of {}",
+                records[n]
+            );
+        } else {
+            assert_eq!(
+                receipt["code"], "invalid_record",
+                "#{n}: {receipt} of {}",
+                records[n]
+            );
+        }
+    }
+    // A unit with a hash identity is a record too.
+    let (_, unit) = lookup(&admin, &asking, json!({ "codeHash": code_hash(1) })).await;
+    let scan = unit["source"]["subjectId"].as_str().unwrap().to_owned();
+    let mut unit_record = reprint(400, "unit", &scan, &code_hash(1));
+    let mut with_sscc = unit_record.clone();
+    with_sscc["id"] = json!(record_id(401));
+    with_sscc["identity"] = json!(sscc(1500));
+    let mut upper = unit_record.clone();
+    upper["id"] = json!(record_id(402));
+    upper["identity"] = json!("A".repeat(64));
+    let mut short = unit_record.clone();
+    short["id"] = json!(record_id(403));
+    short["identity"] = json!(&code_hash(1)[1..]);
+    unit_record["outcome"] = json!("unknown");
+    unit_record["errorCode"] = json!("timeout");
+    let answered = send_records(&admin, &asking, &[unit_record, with_sscc, upper, short]).await;
+    assert_eq!(answered[0], accepted(&record_id(400)));
+    for receipt in &answered[1..] {
+        assert_eq!(receipt["code"], "invalid_record", "{receipt}");
+    }
+}
+
+#[tokio::test]
+async fn every_reason_and_outcome_the_station_records_is_kept() {
+    let (admin, _floor, asking, _) = closed_shift_with_a_box().await;
+    let mut records = Vec::new();
+    for (n, reason) in ["not_printed", "damaged", "lost"].iter().enumerate() {
+        let mut record = reprint(
+            1 + u32::try_from(n).unwrap(),
+            "box",
+            &box_id(1),
+            &sscc(1500),
+        );
+        record["reasonCode"] = json!(reason);
+        records.push(record);
+    }
+    for (n, outcome) in ["sent", "unknown", "failed", "verified", "cancelled"]
+        .iter()
+        .enumerate()
+    {
+        let mut record = reprint(
+            10 + u32::try_from(n).unwrap(),
+            "box",
+            &box_id(1),
+            &sscc(1500),
+        );
+        record["outcome"] = json!(outcome);
+        if *outcome == "unknown" || *outcome == "failed" {
+            record["errorCode"] = json!("timeout");
+        }
+        records.push(record);
+    }
+    let answered = send_records(&admin, &asking, &records).await;
+    assert!(
+        answered
+            .iter()
+            .all(|receipt| receipt["outcome"] == "accepted"),
+        "{answered:?}"
+    );
+    assert_eq!(reprint_rows(&admin).await.len(), 8);
+}
+
+#[tokio::test]
+async fn a_refusal_names_the_record_only_when_its_id_is_a_uuid() {
+    let (admin, _floor, asking, _) = closed_shift_with_a_box().await;
+    let mut bad_id = reprint(1, "box", &box_id(1), &sscc(1500));
+    bad_id["id"] = json!("not-a-uuid");
+    let mut upper_id = reprint(2, "box", &box_id(1), &sscc(1500));
+    upper_id["id"] = json!("B0000000-0000-4000-8000-000000000002");
+    upper_id["identity"] = json!("short");
+    let mut broken = reprint(3, "box", &box_id(1), &sscc(1500));
+    broken["identity"] = json!("short");
+    let answered = send_records(&admin, &asking, &[bad_id, upper_id, broken]).await;
+    assert_eq!(
+        answered,
+        vec![
+            json!({ "id": null, "outcome": "rejected", "code": "invalid_record" }),
+            json!({ "id": null, "outcome": "rejected", "code": "invalid_record" }),
+            json!({ "id": record_id(3), "outcome": "rejected", "code": "invalid_record" }),
+        ]
+    );
+}
+
+/// The cases of `test/warehouse-protocol.test.ts` («refuses a record with
+/// %s»): each is refused by the Zod schema there and by the host here. A
+/// `None` is a key the record does not have (Zod's `undefined`). The names
+/// are looked up in that file, so the two lists cannot drift apart.
+fn refused_by_zod_and_host() -> Vec<(&'static str, &'static str, Option<Value>)> {
+    vec![
+        ("a record id that is no uuid", "id", Some(json!("x"))),
+        (
+            "a session id that is no uuid",
+            "sessionId",
+            Some(json!("x")),
+        ),
+        ("a job id that is no uuid", "jobId", Some(json!("x"))),
+        ("a negative attempt", "attempt", Some(json!(-1))),
+        ("a fractional attempt", "attempt", Some(json!(0.5))),
+        (
+            "a subject kind the host does not print",
+            "subjectKind",
+            Some(json!("pack")),
+        ),
+        ("an empty subject id", "subjectId", Some(json!(""))),
+        ("an empty identity", "identity", Some(json!(""))),
+        (
+            "a repair the station does not make",
+            "repair",
+            Some(json!("other")),
+        ),
+        ("a repair that is missing", "repair", None),
+        ("an empty template id", "templateId", Some(json!(""))),
+        (
+            "a negative template revision",
+            "templateRev",
+            Some(json!(-1)),
+        ),
+        (
+            "a fractional template revision",
+            "templateRev",
+            Some(json!(1.5)),
+        ),
+        (
+            "an outcome the station does not record",
+            "outcome",
+            Some(json!("queued")),
+        ),
+        ("an error code that is missing", "errorCode", None),
+        (
+            "an operator id that is no uuid",
+            "operatorId",
+            Some(json!("x")),
+        ),
+        ("an operator id that is missing", "operatorId", None),
+        ("an instant that is missing", "occurredAt", None),
+    ]
+}
+
+#[tokio::test]
+async fn the_host_refuses_what_the_zod_schema_refuses_of_the_shared_fixture() {
+    let (admin, _floor, asking, _) = closed_shift_with_a_box().await;
+    let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"));
+    let fixture: Value = serde_json::from_str(
+        &std::fs::read_to_string(root.join("../proto/fixtures/warehouse-records-request.json"))
+            .unwrap(),
+    )
+    .unwrap();
+    let zod = std::fs::read_to_string(root.join("../test/warehouse-protocol.test.ts")).unwrap();
+    let records = fixture["records"].as_array().unwrap();
+    // The fixture as it stands is readable: the host asks whether it has the
+    // subjects. Its box is this host's box 1 (the fixture was cut from the
+    // same shapes), its unit is not here.
+    let fixture_receipts = send_records(&admin, &asking, records).await;
+    assert_eq!(
+        fixture_receipts[0],
+        accepted(records[0]["id"].as_str().unwrap())
+    );
+    assert_eq!(fixture_receipts[1]["code"], "subject_unknown");
+    for (name, field, value) in refused_by_zod_and_host() {
+        assert!(
+            zod.contains(&format!("[\"{name}\"")),
+            "the Zod test has no case {name:?}"
+        );
+        let broken: Vec<Value> = records
+            .iter()
+            .enumerate()
+            .map(|(n, record)| {
+                let mut record = record.clone();
+                record["id"] = json!(record_id(500 + u32::try_from(n).unwrap()));
+                match &value {
+                    None => {
+                        record.as_object_mut().unwrap().remove(field);
+                    }
+                    Some(value) => record[field] = value.clone(),
+                }
+                record
+            })
+            .collect();
+        for receipt in send_records(&admin, &asking, &broken).await {
+            assert_eq!(receipt["code"], "invalid_record", "{name}: {receipt}");
+        }
+    }
+    assert_eq!(
+        reprint_rows(&admin).await.len(),
+        1,
+        "only the fixture's own box"
+    );
+    // The edges Zod accepts are not refused as invalid by the host: attempt
+    // 0 and revision 0 on the fixture's own records.
+    let mut edge = records[0].clone();
+    edge["id"] = json!(record_id(600));
+    edge["attempt"] = json!(0);
+    edge["templateRev"] = json!(0);
+    assert_eq!(
+        send_records(&admin, &asking, &[edge]).await,
+        vec![accepted(&record_id(600))]
+    );
+}
+
+#[tokio::test]
+async fn the_table_refuses_the_rows_no_record_may_leave() {
+    let (admin, _floor, _asking, _) = closed_shift_with_a_box().await;
+    let (station, _) = pair_device(&admin.app, "station").await;
+    // A valid row with `overrides` set (a JSON null is SQL NULL).
+    let insert = |overrides: Vec<(&'static str, Value)>| {
+        let (station, admin) = (station.clone(), &admin);
+        async move {
+            let mut row = json!({
+                "device_id": station, "record_id": record_id(900),
+                "digest": "d".repeat(64), "session_id": SESSION, "job_id": JOB,
+                "attempt": 1, "subject_kind": "box", "subject_id": box_id(1),
+                "identity": sscc(1500), "reason_code": "damaged", "repair": null,
+                "template_id": "t", "template_rev": 1, "outcome": "sent",
+                "error_code": null, "operator_id": null,
+                "occurred_at": instant(20, 0), "received_at": "2026-10-08T06:01:00Z"
+            });
+            for (column, value) in overrides {
+                row[column] = value;
+            }
+            let names: Vec<String> = row.as_object().unwrap().keys().cloned().collect();
+            let sql = format!(
+                "INSERT INTO warehouse_reprints ({}) VALUES ({})",
+                names.join(", "),
+                vec!["?"; names.len()].join(", ")
+            );
+            let mut query = sqlx::query(&sql);
+            for name in &names {
+                query = match &row[name.as_str()] {
+                    Value::Null => query.bind(None::<String>),
+                    Value::String(text) => query.bind(text.clone()),
+                    other => query.bind(other.as_i64().unwrap()),
+                };
+            }
+            let result = query.execute(&admin.app.state.pool).await;
+            sqlx::query("DELETE FROM warehouse_reprints")
+                .execute(&admin.app.state.pool)
+                .await
+                .unwrap();
+            result
+        }
+    };
+    let legacy = || ("repair", json!("legacy_tspl_fnc1_literal"));
+    // What the table allows.
+    for allowed in [
+        vec![],
+        vec![legacy()],
+        vec![legacy(), ("subject_kind", json!("pallet"))],
+        vec![("attempt", json!(0)), ("template_rev", json!(0))],
+        vec![
+            ("outcome", json!("failed")),
+            ("error_code", json!("timeout")),
+        ],
+        vec![
+            ("outcome", json!("unknown")),
+            ("error_code", json!("timeout")),
+        ],
+        vec![("outcome", json!("verified"))],
+        vec![("outcome", json!("cancelled"))],
+        vec![("subject_kind", json!("unit"))],
+        vec![("reason_code", json!("not_printed"))],
+        vec![("reason_code", json!("lost"))],
+    ] {
+        let shown = format!("{allowed:?}");
+        let result = insert(allowed).await;
+        assert!(result.is_ok(), "{shown}: {result:?}");
+    }
+    // What it holds against.
+    for refused in [
+        vec![("digest", json!("short"))],
+        vec![("attempt", json!(-1))],
+        vec![("subject_kind", json!("crate"))],
+        vec![("reason_code", json!("other"))],
+        vec![("repair", json!("trim"))],
+        vec![legacy(), ("subject_kind", json!("unit"))],
+        vec![("template_rev", json!(-1))],
+        vec![("outcome", json!("printed"))],
+        vec![("outcome", json!("failed"))],
+        vec![("outcome", json!("unknown"))],
+        vec![("error_code", json!("timeout"))],
+        vec![
+            ("outcome", json!("verified")),
+            ("error_code", json!("timeout")),
+        ],
+        vec![("device_id", json!("no-such-device"))],
+        vec![("record_id", Value::Null)],
+        vec![("identity", Value::Null)],
+        vec![("received_at", Value::Null)],
+    ] {
+        let shown = format!("{refused:?}");
+        let error = insert(refused).await.unwrap_err().to_string();
+        assert!(
+            error.contains("CHECK") || error.contains("FOREIGN KEY") || error.contains("NOT NULL"),
+            "{shown}: {error}"
+        );
+    }
+    // One record id once per device: the key.
+    let mut tx = admin.app.state.pool.begin().await.unwrap();
+    let insert_one = "INSERT INTO warehouse_reprints (device_id, record_id, digest, session_id, \
+         job_id, attempt, subject_kind, subject_id, identity, reason_code, template_id, \
+         template_rev, outcome, occurred_at, received_at) VALUES (?, ?, ?, ?, ?, 1, 'box', ?, ?, \
+         'damaged', 't', 1, 'sent', ?, ?)";
+    for round in 0..2 {
+        let result = sqlx::query(insert_one)
+            .bind(&station)
+            .bind(record_id(901))
+            .bind("d".repeat(64))
+            .bind(SESSION)
+            .bind(JOB)
+            .bind(box_id(1))
+            .bind(sscc(1500))
+            .bind(instant(20, 0))
+            .bind("2026-10-08T06:01:00Z")
+            .execute(&mut *tx)
+            .await;
+        match round {
+            0 => assert!(result.is_ok(), "{result:?}"),
+            _ => assert!(
+                result.unwrap_err().to_string().contains("UNIQUE"),
+                "the same device and record id twice"
+            ),
+        }
+    }
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn every_query_of_a_record_searches_by_an_index() {
+    let admin = admin().await;
+    use markiro_host::routes::warehouse::{
+        BOX_EXISTS_SQL, PALLET_EXISTS_SQL, STORED_SQL, UNIT_EXISTS_SQL,
+    };
+    for (sql, index) in [
+        (
+            STORED_SQL,
+            "warehouse_reprints USING INDEX sqlite_autoindex_warehouse_reprints_1 (device_id=? AND record_id=?)",
+        ),
+        (
+            UNIT_EXISTS_SQL,
+            "scans USING INDEX sqlite_autoindex_scans_1 (id=?)",
+        ),
+        (
+            BOX_EXISTS_SQL,
+            "boxes USING INDEX sqlite_autoindex_boxes_1 (id=?)",
+        ),
+        (
+            PALLET_EXISTS_SQL,
+            "pallets USING INDEX sqlite_autoindex_pallets_1 (id=?)",
+        ),
+    ] {
+        let steps: Vec<String> = sqlx::query_as::<_, (i64, i64, i64, String)>(&format!(
+            "EXPLAIN QUERY PLAN {sql}"
+        ))
+        .bind("a")
+        .bind("b")
+        .fetch_all(&admin.app.state.pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|(_, _, _, step)| step)
+            .collect();
+        assert!(
+            steps.iter().all(|step| !step.starts_with("SCAN")),
+            "{sql}: {steps:?}"
+        );
+        assert!(
+            steps.iter().any(|step| step.contains(index)),
+            "{sql}: no {index} in {steps:?}"
+        );
+    }
+}
+
+/// The office's history of one label reads by what was printed.
+#[tokio::test]
+async fn the_history_of_one_label_is_read_by_its_identity_through_an_index() {
+    let admin = admin().await;
+    let steps: Vec<String> = sqlx::query_as::<_, (i64, i64, i64, String)>(
+        "EXPLAIN QUERY PLAN SELECT record_id FROM warehouse_reprints WHERE identity = ?",
+    )
+    .bind("x")
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .map(|(_, _, _, step)| step)
+    .collect();
+    assert!(
+        steps
+            .iter()
+            .any(|step| step.contains("USING INDEX warehouse_reprints_identity (identity=?)")),
+        "{steps:?}"
+    );
+}
+
+/// The records are written in ONE write transaction taken up front
+/// (`BEGIN IMMEDIATE`), after the device is checked inside it, and committed
+/// once: a database error in the middle of a batch leaves none of it.
+#[test]
+fn the_records_are_written_in_one_immediate_transaction_after_the_station_is_checked() {
+    let whole = std::fs::read_to_string(
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src/routes/warehouse.rs"),
+    )
+    .unwrap();
+    let (_, source) = whole
+        .split_once("/// The body as the host reads it")
+        .unwrap();
+    assert_eq!(source.matches("begin_write(&state.pool)").count(), 1);
+    assert_eq!(source.matches("state.pool").count(), 1);
+    assert_eq!(source.matches("tx.commit()").count(), 1);
+    assert_eq!(source.matches("tx.rollback()").count(), 0);
+    let begun = source.find("begin_write(").unwrap();
+    let checked = source.find("require_station_in(&mut tx").unwrap();
+    let first_record = source.find("receive(&mut tx").unwrap();
+    let committed = source.find("tx.commit()").unwrap();
+    assert!(begun < checked && checked < first_record && first_record < committed);
+}
+
+/// `0015` is numbered above `0013` and `0014` (other plans, other
+/// streams): a host that has not got them takes `0015` all the same, and
+/// takes them late when they come, as `0011` came after `0012`.
+#[tokio::test]
+async fn a_database_without_0013_and_0014_takes_0015_and_the_others_late() {
+    use sqlx::migrate::Migrator;
+    use sqlx::{Connection, SqliteConnection};
+
+    let lacking = Migrator {
+        migrations: markiro_host::db::MIGRATOR
+            .iter()
+            .filter(|migration| migration.version != 13 && migration.version != 14)
+            .cloned()
+            .collect::<Vec<_>>()
+            .into(),
+        ..Migrator::DEFAULT
+    };
+    let mut old = SqliteConnection::connect("sqlite::memory:").await.unwrap();
+    lacking.run(&mut old).await.unwrap();
+    let versions: Vec<i64> =
+        sqlx::query_scalar("SELECT version FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(&mut old)
+            .await
+            .unwrap();
+    assert!(
+        versions.contains(&15) && !versions.contains(&13) && !versions.contains(&14),
+        "{versions:?}"
+    );
+    sqlx::query("UPDATE site SET initialized_at = '2026-10-09T15:00:00Z' WHERE id = 1")
+        .execute(&mut old)
+        .await
+        .unwrap();
+    markiro_host::db::MIGRATOR.run(&mut old).await.unwrap();
+    let applied: Vec<(i64, bool)> =
+        sqlx::query_as("SELECT version, success FROM _sqlx_migrations ORDER BY version")
+            .fetch_all(&mut old)
+            .await
+            .unwrap();
+    assert!(applied.contains(&(15, true)), "{applied:?}");
+    assert_eq!(applied.len(), markiro_host::db::MIGRATOR.iter().count());
+    assert!(applied.iter().all(|(_, success)| *success));
+    let kept: (Option<String>,) = sqlx::query_as("SELECT initialized_at FROM site WHERE id = 1")
+        .fetch_one(&mut old)
+        .await
+        .unwrap();
+    assert_eq!(kept.0.as_deref(), Some("2026-10-09T15:00:00Z"));
+    let rows: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM warehouse_reprints")
+        .fetch_one(&mut old)
+        .await
+        .unwrap();
+    assert_eq!(rows, 0);
 }

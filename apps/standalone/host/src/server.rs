@@ -222,6 +222,10 @@ fn protected_routes() -> Router<AppState> {
             "/v1/device/warehouse/lookup",
             post(crate::routes::warehouse::lookup),
         )
+        .route(
+            "/v1/device/warehouse/reprints",
+            post(crate::routes::warehouse::receive_records),
+        )
         .route("/v1/changes", get(crate::routes::changes::changes))
         .route("/v1/changes/stream", get(crate::routes::changes::stream))
         .route(
