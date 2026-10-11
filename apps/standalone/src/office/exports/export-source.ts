@@ -219,6 +219,8 @@ function eligibleBoxes(
   >();
   for (const row of eligible) {
     const code = authoritativeByHash.get(row.codeHash);
+    // The backstop of the coverage check above (every item's code is one the shift owns): were
+    // its `every` conditions ever loosened, this line alone still refuses an unowned item.
     if (code === undefined) return null;
     const existing = rowsByBox.get(row.boxId);
     if (existing) {
