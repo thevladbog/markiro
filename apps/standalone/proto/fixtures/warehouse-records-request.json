@@ -1,0 +1,38 @@
+{
+  "records": [
+    {
+      "id": "6e7f8a9b-0c1d-4e2f-8a3b-4c5d6e7f8a9b",
+      "sessionId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+      "jobId": "4d5e6f7a-8b9c-4d0e-9f1a-2b3c4d5e6f7a",
+      "attempt": 1,
+      "subjectKind": "box",
+      "subjectId": "b0000000-0000-4000-8000-000000000001",
+      "identity": "046006820000015000",
+      "reasonCode": "damaged",
+      "repair": "legacy_tspl_fnc1_literal",
+      "templateId": "d1d1d1d1-0000-4000-8000-000000000002",
+      "templateRev": 4,
+      "outcome": "sent",
+      "errorCode": null,
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "occurredAt": "2026-10-09T07:15:02.120Z"
+    },
+    {
+      "id": "7f8a9b0c-1d2e-4f3a-9b4c-5d6e7f8a9b0c",
+      "sessionId": "3c4d5e6f-7a8b-4c9d-8e0f-1a2b3c4d5e6f",
+      "jobId": "5e6f7a8b-9c0d-4e1f-8a2b-3c4d5e6f7a8b",
+      "attempt": 1,
+      "subjectKind": "unit",
+      "subjectId": "5c6d7e8f-9a0b-4c1d-8e2f-3a4b5c6d7e8f",
+      "identity": "7a6ad5f358a3f6d800e0550c5bc16079d73004e9766bfc13c572778c62a6657d",
+      "reasonCode": "not_printed",
+      "repair": null,
+      "templateId": "d1d1d1d1-0000-4000-8000-000000000001",
+      "templateRev": 4,
+      "outcome": "unknown",
+      "errorCode": "timeout",
+      "operatorId": "8a3c1f0e-2b4d-4e6f-9a1b-3c5d7e9f1a2b",
+      "occurredAt": "2026-10-09T07:16:40.005Z"
+    }
+  ]
+}

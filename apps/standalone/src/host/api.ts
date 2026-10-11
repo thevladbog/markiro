@@ -42,6 +42,7 @@ import {
   ssccCounterSchema,
   ssccStateSchema,
   templateDefaultsSchema,
+  warehouseLookupResultSchema,
   type BadgeCreate,
   type BadgeInfo,
   type BadgeSalt,
@@ -102,6 +103,8 @@ import {
   type TemplateDefaults,
   type TemplateDefaultsUpdate,
   type TemplateUpdate,
+  type WarehouseLookup,
+  type WarehouseLookupResult,
 } from "./protocol.js";
 
 /** An SSCC counter's address: its issuer prefix and extension digit (0 box, 1 pallet). */
@@ -247,6 +250,14 @@ export interface HostApi {
    * `timeout`, and the station decides on its own copy.
    */
   checkCode: (codeHash: string) => Promise<CodeCheck>;
+  /**
+   * What a label is printed again from (plan СКЛ): a unit by its code's hash,
+   * a box or a pallet by its SSCC, of any station and any shift of this site.
+   * The full code comes only in the answer's body.
+   */
+  warehouseLookup: (lookup: WarehouseLookup) => Promise<WarehouseLookupResult>;
+  /** The warehouse reprint records (1–100); a receipt per record, in their order. */
+  sendWarehouseRecords: (records: readonly unknown[]) => Promise<FactReceipt[]>;
   /**
    * The outbox's records as kept (1-100, `FactRecord` each); a receipt per
    * record, in their order. A failed call is no receipt: the batch is sent
@@ -542,6 +553,18 @@ export function createHostApi(client: HostClient): HostApi {
         timeoutMs: CODE_CHECK_TIMEOUT_MS,
         schema: codeCheckSchema,
       }),
+    warehouseLookup: (lookup) =>
+      client.request("POST", "/v1/device/warehouse/lookup", {
+        body: lookup,
+        schema: warehouseLookupResultSchema,
+      }),
+    sendWarehouseRecords: async (records) =>
+      (
+        await client.request("POST", "/v1/device/warehouse/reprints", {
+          body: { records },
+          schema: factReceiptsSchema,
+        })
+      ).receipts,
     sendFacts: async (records) =>
       (
         await client.request("POST", "/v1/device/facts", {

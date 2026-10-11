@@ -2113,6 +2113,141 @@ pub enum CodeCheck {
     Taken { owner: CodeOwner },
 }
 
+/// What a station looks up to print a label again (plan СКЛ, pilot spec
+/// §30): `POST /v1/device/warehouse/lookup` with exactly one of the hash of
+/// a unit's code (`kmHash`, 64 lower-case hex digits) and the 18 digits of a
+/// box's or a pallet's SSCC. The full code never travels this way: the host
+/// answers it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WarehouseLookup {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub code_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sscc: Option<String>,
+}
+
+/// What a warehouse reprint prints: a unit's code, a box's or a pallet's
+/// label.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WarehouseSubjectKind {
+    Unit,
+    Box,
+    Pallet,
+}
+
+impl WarehouseSubjectKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            WarehouseSubjectKind::Unit => "unit",
+            WarehouseSubjectKind::Box => "box",
+            WarehouseSubjectKind::Pallet => "pallet",
+        }
+    }
+}
+
+/// Why a record the host has is not printed again: its code was freed by an
+/// exception (`released`), or the box or the pallet was taken apart
+/// (`disassembled`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WarehouseUnavailable {
+    Released,
+    Disassembled,
+}
+
+/// A record the host found, with what its label is rendered from: the
+/// product and the counterparty as the shift froze them, the shift's number
+/// and production date, `at` — the instant the label dates from (a unit's
+/// scan, a box's or a pallet's close) — the counts it was printed with, the
+/// name of the operator who scanned or closed it, and the station. A unit
+/// carries its full canonical code (GS separators and crypto tail
+/// included), a box and a pallet their SSCC; `identity` is what was asked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WarehouseSource {
+    pub kind: WarehouseSubjectKind,
+    pub subject_id: String,
+    pub identity: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sscc: Option<String>,
+    pub product: ShiftSnapshotProduct,
+    pub counterparty_name: Option<String>,
+    pub shift_id: String,
+    pub shift_number: String,
+    pub production_date: String,
+    pub at: String,
+    pub item_count: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub box_count: Option<u32>,
+    pub operator_name: Option<String>,
+    pub device_id: String,
+}
+
+/// The answer of `POST /v1/device/warehouse/lookup`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum WarehouseLookupResult {
+    Found { source: WarehouseSource },
+    NotFound,
+    Unavailable { reason: WarehouseUnavailable },
+}
+
+/// Why a station prints a label again (the cloud's `warehouseReasonSchema`).
+pub const WAREHOUSE_REASONS: &[&str] = &["not_printed", "damaged", "lost"];
+
+/// Where one attempt of a reprint ended, as the station recorded it.
+pub const WAREHOUSE_OUTCOMES: &[&str] = &["sent", "unknown", "failed", "verified", "cancelled"];
+
+/// The codes of a refused warehouse record
+/// (`proto/fixtures/warehouse-receipt-codes.json`).
+pub mod warehouse_receipt_codes {
+    /// The record could not be read, or a field breaks its rule.
+    pub const INVALID_RECORD: &str = "invalid_record";
+    /// A record with this id was received before with other content.
+    pub const PAYLOAD_MISMATCH: &str = "payload_mismatch";
+    /// No unit, box or pallet of the host has this id and identity.
+    pub const SUBJECT_UNKNOWN: &str = "subject_unknown";
+    pub const ALL: &[&str] = &[INVALID_RECORD, PAYLOAD_MISMATCH, SUBJECT_UNKNOWN];
+}
+
+/// One attempt of a warehouse reprint, as the station recorded it: which
+/// session and job, the attempt's number (0 — a job that never reached a
+/// printer), what was printed (`subjectKind`, the host's `subjectId` and the
+/// `identity` looked up: a code's hash or an SSCC, never a full code), why,
+/// on which template revision, how it ended (`errorCode` exactly for
+/// `failed` and `unknown`), by whom and when (a device instant).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WarehouseRecord {
+    pub id: String,
+    pub session_id: String,
+    pub job_id: String,
+    pub attempt: u32,
+    pub subject_kind: WarehouseSubjectKind,
+    pub subject_id: String,
+    pub identity: String,
+    pub reason_code: String,
+    pub repair: Option<String>,
+    pub template_id: String,
+    pub template_rev: i64,
+    pub outcome: String,
+    pub error_code: Option<String>,
+    pub operator_id: Option<String>,
+    pub occurred_at: String,
+}
+
+/// `POST /v1/device/warehouse/reprints`: 1–100 records; the answer is
+/// [`FactReceipts`], a receipt per record in their order.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WarehouseBatch {
+    pub records: Vec<WarehouseRecord>,
+}
+
 /// `POST /v1/office/shifts/{id}/exports` (plan ЧЗ): the office saved the
 /// files of an export and records it in the audit trail; nothing else
 /// changes. `formatId` and `formatVersion` are a format `@markiro/domain`
