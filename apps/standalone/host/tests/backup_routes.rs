@@ -391,6 +391,11 @@ async fn a_held_host_lists_its_stations_and_which_gave_their_blocks_back() {
         body["restoreHold"],
         json!({ "since": "2026-10-09T15:00:00Z", "epoch": epoch, "stations": stations })
     );
+    // «Сделать копию сейчас» answers the same hold, read before the copy is
+    // asked for.
+    let (status, started) = admin.call("POST", "/v1/office/backups", None).await;
+    assert_eq!(status, StatusCode::ACCEPTED, "{started}");
+    assert_eq!(started["restoreHold"], body["restoreHold"]);
 }
 
 // ---- Beyond the brief: the path is the administrator's text, the gates are
