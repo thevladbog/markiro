@@ -703,6 +703,9 @@ jobs:
       - run: pnpm test:standalone-release:contract
       - name: Build standalone webview + workspace deps
         run: pnpm turbo build --filter '@markiro/standalone...'
+      # The export tool compares its SSCC rules with packages/domain, built
+      # by the step above (the test skips without it).
+      - run: pnpm test:standalone-export
       # The Windows service entry point and its installer seam only compile on
       # Windows, so this is the only job that exercises them.
       - name: cargo test (Windows paths)
@@ -724,6 +727,10 @@ jobs:
         run: ./tools/standalone-release/smoke.ps1 -BundleDir apps/standalone/target/release/bundle/nsis
       - name: Prepare the installer artifact
         shell: pwsh
+        # On pull_request GITHUB_SHA is the synthetic merge commit: the
+        # evidence names the head that was reviewed.
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: |
           $installer = Get-ChildItem apps/standalone/target/release/bundle/nsis/*-setup.exe
           $status = (Get-AuthenticodeSignature $installer.FullName).Status.ToString()
@@ -731,7 +738,7 @@ jobs:
             --bundle-dir apps/standalone/target/release/bundle/nsis `
             --output-dir "$env:RUNNER_TEMP/standalone-installer" `
             --source-repository "$env:GITHUB_REPOSITORY" `
-            --source-sha "$env:GITHUB_SHA" `
+            --source-sha "$env:PR_HEAD_SHA" `
             --authenticode $status
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

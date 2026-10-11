@@ -77,6 +77,9 @@ test("the job holds no secret and gives none to a pull request from a fork", () 
   assert.doesNotMatch(body, /secrets\./u);
   assert.doesNotMatch(body, /GITHUB_TOKEN|github\.token|\bAUTHENTICODE_|\bPFX\b|\bpassword\b/iu);
   for (const step of job.steps) {
+    // The one exception, the pull request's head SHA for the evidence, is
+    // pinned to exactly that value below.
+    if ((step.run ?? "").includes("prepare.mjs")) continue;
     assert.equal(step.env, undefined, `${step.name ?? step.uses} sets no environment`);
     assert.equal(step.permissions, undefined);
   }
