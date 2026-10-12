@@ -9,6 +9,9 @@ import {
   PALLET_REPRINT_PROTOCOL,
   PALLET_REPRINT_V2_PROTOCOL,
   warehouseBoxTemplate,
+  buildWarehouseCodeOnlyLabelTemplate,
+  UNIFIED_REPRINT_PROTOCOL,
+  palletDataFromLegacySource,
 } from "../../../packages/domain/src/index.js";
 const scenarios = [1024, 1280].flatMap((width) =>
   ["ru", "en"].flatMap((lang) =>
@@ -16,7 +19,7 @@ const scenarios = [1024, 1280].flatMap((width) =>
   ),
 );
 for (const scenario of scenarios)
-  test(`full pallet reprint ${scenario.lang} ${scenario.theme} ${scenario.width} previews whole A4 and sends only after confirmation`, async ({
+  test(`full pallet reprint ${scenario.lang} ${scenario.theme} ${scenario.width} selects templates before intake and prints A4 immediately`, async ({
     page,
   }, testInfo) => {
     const preset = buildPalletSheetPresets()[0];
@@ -120,6 +123,16 @@ for (const scenario of scenarios)
       }),
     );
     const box = warehouseBoxTemplate();
+    const { digest: oldDigest, ...unitBody } = {
+      ...box,
+      id: randomUUID(),
+      purpose: "product_duplicate",
+      name: "Code only",
+      spec: buildWarehouseCodeOnlyLabelTemplate().spec,
+    };
+    void oldDigest;
+    const unit = { ...unitBody, digest: productLabelValueDigest(unitBody) };
+    const data = palletDataFromLegacySource(source);
     const templates = buildPalletSheetPresets().map((p) => {
       const snapshot = createPalletSheetSnapshot({
         id: randomUUID(),
@@ -140,16 +153,22 @@ for (const scenario of scenarios)
       const path = new URL(route.request().url()).pathname;
       return route.fulfill({
         json: path.endsWith("source-capabilities")
-          ? { protocols: [PALLET_REPRINT_PROTOCOL, PALLET_REPRINT_V2_PROTOCOL] }
+          ? {
+              protocols: [
+                PALLET_REPRINT_PROTOCOL,
+                PALLET_REPRINT_V2_PROTOCOL,
+                UNIFIED_REPRINT_PROTOCOL,
+              ],
+            }
           : path.endsWith("pallet-templates-v2")
             ? { protocol: PALLET_REPRINT_V2_PROTOCOL, templates }
             : path.endsWith("/templates")
               ? {
                   protocol: "warehouse-label-reprint-v1",
-                  revision: "a".repeat(64),
-                  templates: [box],
+                  revision: productLabelValueDigest([unit, box]),
+                  templates: [unit, box],
                 }
-              : unavailable && path.endsWith("pallet-lookup-v2")
+              : unavailable && path.endsWith("lookup-v3")
                 ? {
                     status: "unavailable",
                     code: "delivery_unresolved",
@@ -163,11 +182,13 @@ for (const scenario of scenarios)
                       shiftId: source.shiftId,
                     },
                   }
-                : { status: "found", source },
+                : { status: "found", kind: "pallet", data },
       });
     });
-    await page.route("**/api/station/config*", (route) =>
-      route.fulfill({ json: { defaultBoxLabelTemplateId: box.id } }),
+    await page.route("**/api/shifts/box-label-templates*", (route) =>
+      route.fulfill({
+        json: { items: [], defaultBoxLabelTemplateId: box.id, defaultSource: "organization" },
+      }),
     );
     await page.setViewportSize({ width: scenario.width, height: scenario.height });
     await page.goto(
@@ -175,110 +196,81 @@ for (const scenario of scenarios)
     );
     await expect(page.locator("html")).toHaveAttribute("data-ready", "true");
     const ru = scenario.lang === "ru";
-    await expect(
-      page.getByRole("button", { name: ru ? "Палета" : "Pallet", exact: true }),
-    ).toBeEnabled();
-    await expect(page.getByTestId("warehouse-reprint-screen")).toBeVisible();
-    await page.getByRole("button", { name: ru ? "Палета" : "Pallet", exact: true }).click();
-    const main = page.getByTestId("warehouse-pallet-screen");
+    const main = page.getByTestId("warehouse-reprint-screen");
     await expect(main).toBeVisible();
-    expect(
-      await page
-        .locator(".warehouse-reprint-mode-panel")
-        .evaluate((el) => Number.parseFloat(getComputedStyle(el).paddingLeft)),
-    ).toBeGreaterThan(0);
+    await page.getByRole("button", { name: ru ? "Выбрать шаблоны" : "Choose templates" }).click();
+    await page.getByRole("button", { name: ru ? "Палеты · SSCC" : "Pallets · SSCC" }).click();
+    const landscape = templates[1],
+      split = templates[2];
+    if (!landscape || !split) throw new Error("Missing A4 presets");
+    const canvas = page.locator(".warehouse-sheet-choice-preview canvas");
+    await page.getByRole("radio", { name: templates[0]?.name ?? "Missing" }).click();
+    await expect(canvas).toHaveAttribute("height", "800");
+    await expect(canvas).toHaveAttribute("width", "566");
+    await page.getByRole("radio", { name: split.name }).click();
+    await expect(canvas).toHaveAttribute("width", "800");
+    await expect(canvas).toHaveAttribute("height", "566");
+    expect(printed).toBe(0);
+    await page.screenshot({ path: testInfo.outputPath("selected-two-a5.png") });
+    await page.getByRole("radio", { name: landscape.name }).click();
+    await expect(canvas).toHaveAttribute("width", "800");
+    await page.getByRole("button", { name: ru ? "Применить шаблоны" : "Apply templates" }).click();
+    await page
+      .getByRole("button", { name: ru ? "Начать перепечатку" : "Start reprinting", exact: true })
+      .click();
+    await expect(
+      page.getByText(
+        ru ? "Отсканируйте код продукции, короба или палеты" : "Scan a product, box or pallet code",
+      ),
+    ).toBeVisible();
+    await expect(
+      main
+        .locator(".warehouse-footer")
+        .getByRole("button", { name: ru ? "Завершить сеанс" : "Finish session" }),
+    ).toBeInViewport();
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       scenario.width,
     );
-    await expect(main.locator(".warehouse-session-panel")).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: ru ? "Завершить сеанс" : "Finish session", exact: true }),
-    ).toBeInViewport();
-    const manual = page.getByRole("button", {
+    const manual = page.locator("header").getByRole("button", {
       name: ru ? "Ввести код вручную" : "Enter code manually",
       exact: true,
     });
     const lookup = async () => {
       await manual.click();
-      await page.screenshot({ path: testInfo.outputPath("manual-dialog.png"), fullPage: true });
       await page
         .getByRole("textbox", {
-          name: ru
-            ? "SSCC палеты, короба или код продукции"
-            : "Pallet SSCC, box SSCC or product code",
+          name: ru ? "Номер короба или полный код единицы" : "Box number or full unit code",
         })
         .fill(source.sscc);
       await page
-        .getByRole("button", { name: ru ? "Найти палету" : "Find pallet", exact: true })
+        .getByRole("button", {
+          name: ru ? "Найти и перепечатать" : "Find and reprint",
+          exact: true,
+        })
         .click();
     };
     await lookup();
-    const canvas = page.getByRole("img", {
-      name: scenario.lang === "ru" ? "Сохранённая этикетка палеты" : "Saved pallet label",
-    });
-    await expect(canvas).toHaveAttribute("width", "2480");
-    await expect(canvas).toHaveAttribute("height", "3508");
-    await expect(page.getByText("48", { exact: true })).toBeVisible();
-    expect(printed).toBe(0);
-    await page.screenshot({ path: testInfo.outputPath("pallet-confirmation.png"), fullPage: true });
-    await page.getByRole("button", { name: ru ? "Отмена" : "Cancel", exact: true }).click();
-    expect(printed).toBe(0);
-    await expect(canvas).toHaveCount(0);
-    await lookup();
-    await expect(canvas).toBeVisible();
-    await page.getByRole("button", { name: ru ? "Выбрать шаблоны" : "Choose templates" }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
-    const landscape = templates[1],
-      split = templates[2];
-    if (!landscape || !split) throw new Error("Missing A4 presets");
-    await page.getByRole("button", { name: split.name, exact: false }).click();
-    await page.getByRole("button", { name: ru ? "Применить шаблоны" : "Apply templates" }).click();
-    await expect(canvas).toHaveAttribute("width", "3508");
-    await expect(canvas).toHaveAttribute("height", "2480");
-    await expect(
-      page.getByText(ru ? "А4 · 1 лист · Этикеток палеты: 2" : "A4 · 1 sheet · Pallet labels: 2"),
-    ).toBeVisible();
-    expect(printed).toBe(0);
-    const cardBounds = await main.locator(".warehouse-pallet-card").boundingBox();
-    const footerBounds = await main.locator(".warehouse-footer").boundingBox();
-    if (!cardBounds || !footerBounds) throw new Error("Missing layout bounds");
-    expect(cardBounds.y + cardBounds.height).toBeLessThanOrEqual(footerBounds.y);
-    await page.screenshot({ path: testInfo.outputPath("selected-two-a5.png"), fullPage: true });
-    await page.getByRole("button", { name: ru ? "Выбрать шаблоны" : "Choose templates" }).click();
-    await page.getByRole("button", { name: landscape.name, exact: false }).click();
-    await page.getByRole("button", { name: ru ? "Применить шаблоны" : "Apply templates" }).click();
-    await expect(canvas).toHaveAttribute("width", "3508");
-    await expect(canvas).toHaveAttribute("height", "2480");
-    await page.screenshot({ path: testInfo.outputPath("selected-landscape.png"), fullPage: true });
-    await page
-      .getByRole("button", { name: ru ? "Подтвердить печать" : "Confirm printing" })
-      .click();
     await expect.poll(() => printed).toBe(1);
-    await expect(
-      page.getByText(ru ? "Передано на принтер" : "Sent to printer", { exact: true }),
-    ).toBeVisible();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
     await expect(main.locator(".warehouse-sent-count")).toHaveText("1");
-    await page.getByRole("button", { name: ru ? "Изменить причину" : "Change reason" }).click();
-    await expect(page.getByRole("dialog")).toBeVisible();
-    await page.getByRole("button", { name: ru ? "Применить причину" : "Apply reason" }).click();
+    await expect(
+      page.getByRole("button", { name: ru ? "Подтвердить печать" : "Confirm printing" }),
+    ).toHaveCount(0);
+    await page.screenshot({ path: testInfo.outputPath("pallet-sent.png") });
     unavailable = true;
     await lookup();
     await expect(
       page.getByText(
         ru
-          ? "На станции исходной печати подтвердите готовую этикетку сканированием SSCC или закройте попытку без подтверждения, если этикетка не вышла."
-          : "On the original station, scan the printed SSCC to confirm the label, or close the attempt without confirmation if no label came out.",
+          ? "Неизвестно, вышла ли исходная этикетка палеты. На станции исходной печати подтвердите её сканированием или отметьте пропуск, затем отсканируйте палету снова."
+          : "The original pallet label may have printed. On its originating station, scan it to confirm or record a skip, then scan the pallet again.",
       ),
     ).toBeVisible();
-    await expect(main.locator(".warehouse-pallet-card")).toHaveCount(0);
     await expect(
       main.getByRole("button", {
         name: ru ? "Подтвердить исходный отпечаток" : "Confirm original print",
       }),
     ).toHaveCount(0);
-    await page.screenshot({
-      path: testInfo.outputPath("original-delivery-diagnostic.png"),
-      fullPage: true,
-    });
     expect(printed).toBe(1);
+    await page.screenshot({ path: testInfo.outputPath("original-delivery-diagnostic.png") });
   });

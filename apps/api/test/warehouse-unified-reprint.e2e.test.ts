@@ -224,6 +224,17 @@ describe.skipIf(!databaseUrl)("unified pallet data admission", () => {
       ).body.results[0].status,
     ).toBe("conflict");
 
+    const v2Lookup = await post(h.a.apiKey, "pallet-lookup-v2", {
+      protocol: "warehouse-pallet-reprint-v2",
+      operatorId: h.a.operatorId,
+      raw: sscc,
+    });
+    expect(v2Lookup.status).toBe(200);
+    expect(v2Lookup.body).toMatchObject({
+      status: "unavailable",
+      code: "snapshot_missing",
+      diagnostic: { shiftId: data.shiftId },
+    });
     const delivery = {
       sourceRevision: data.revision,
       sequence: 1,
@@ -252,6 +263,29 @@ describe.skipIf(!databaseUrl)("unified pallet data admission", () => {
       outcome: "confirmed",
       scannedSscc: sscc,
     };
+    await h.db
+      .update(schema.palletLabelSources)
+      .set({ value: { ...data, revision: "c".repeat(64) } })
+      .where(
+        and(
+          eq(schema.palletLabelSources.tenantId, h.a.tenantId),
+          eq(schema.palletLabelSources.sscc, sscc),
+        ),
+      );
+    const corruptResolution = await post(h.a.apiKey, "pallet-production-resolutions", {
+      protocol: "warehouse-pallet-production-resolution-v1",
+      entries: [{ ...resolution, eventId: randomUUID() }],
+    }).expect(200);
+    expect(corruptResolution.body.results[0].status).toBe("conflict");
+    await h.db
+      .update(schema.palletLabelSources)
+      .set({ value: data })
+      .where(
+        and(
+          eq(schema.palletLabelSources.tenantId, h.a.tenantId),
+          eq(schema.palletLabelSources.sscc, sscc),
+        ),
+      );
     expect(
       (
         await post(h.a.apiKey, "pallet-production-resolutions", {

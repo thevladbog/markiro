@@ -393,6 +393,7 @@ export async function sendWarehousePalletJob(input: {
   isCurrent: () => boolean;
   print: (target: PrintTarget, bytes: Uint8Array) => Promise<void>;
   retry?: boolean;
+  reason?: z.infer<typeof palletReprintEventSchema>["reason"];
   tenantId?: string;
   hardware?: WindowsPrinting;
 }): Promise<void> {
@@ -449,6 +450,7 @@ export async function sendWarehousePalletJob(input: {
         eventId: crypto.randomUUID(),
         attemptId: crypto.randomUUID(),
         operatorId: input.operatorId,
+        reason: input.reason ?? event.reason,
         state: "prepared",
         bytesDigest: productLabelBytesDigest(bytes),
         printFormat:

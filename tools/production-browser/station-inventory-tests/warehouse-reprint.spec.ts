@@ -73,7 +73,7 @@ for (const viewport of [
     if (recovery && footer) expect(recovery.y + recovery.height).toBeLessThanOrEqual(footer.y);
     await page.screenshot({ path: testInfo.outputPath(`warehouse-legacy-${viewport.width}.png`) });
   });
-test("unknown recovery remains explicit in English", async ({ page }, testInfo) => {
+test("unknown recovery remains explicit in English", async ({ page }) => {
   await page.goto("/?gallery=1&state=warehouse-reprint-unknown&locale=en");
   await expect(page.getByText("Label delivery is unknown")).toBeVisible();
   await expect(page.getByRole("button", { name: "Print again" })).toBeVisible();

@@ -86,7 +86,9 @@ export function palletDataFromLegacySource(input: unknown): PalletDataV3 {
   } else {
     const facts = saved.facts;
     productionDate = facts.productionDate;
-    expiryDate = productionDate ? shelfLifeExpiryDate(productionDate, facts.shelfLifeDays) : null;
+    expiryDate = productionDate
+      ? shelfLifeExpiryDate(productionDate, facts.shelfLifeDays) || null
+      : null;
     fields = fieldsSchema.parse(Object.fromEntries(LABEL_FIELDS.map((name) => [name, ""])));
     Object.assign(fields, {
       sscc: source.sscc,

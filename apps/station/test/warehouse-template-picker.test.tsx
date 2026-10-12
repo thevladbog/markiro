@@ -127,3 +127,40 @@ it("adds the third choice before the session and filters pallet paper by the con
   fireEvent.click(screen.getByRole("button", { name: "Применить шаблоны" }));
   expect(apply).toHaveBeenCalledWith(unit, box, thermal);
 });
+
+it("allows the two existing choices when the pallet catalog is unavailable", () => {
+  const box = warehouseBoxTemplate();
+  const { digest, ...value } = {
+    ...box,
+    id: "00000000-0000-4000-8000-000000000040",
+    name: "Unit",
+    purpose: "product_duplicate" as const,
+    spec: buildWarehouseCodeOnlyLabelTemplate().spec,
+  };
+  void digest;
+  const unit = { ...value, digest: productLabelValueDigest(value) },
+    apply = vi.fn();
+  render(
+    <TemplatePicker
+      catalog={{
+        protocol: WAREHOUSE_REPRINT_PROTOCOL,
+        revision: productLabelValueDigest([unit, box]),
+        templates: [unit, box],
+      }}
+      unitTemplate={unit}
+      boxTemplate={box}
+      palletCatalog={null}
+      onApply={apply}
+      onCancel={vi.fn()}
+      unitDpi={203}
+      boxDpi={203}
+      unitLanguage="tspl"
+      boxLanguage="tspl"
+    />,
+  );
+  expect(screen.queryByRole("button", { name: "Палеты · SSCC" })).toBeNull();
+  const button = screen.getByRole<HTMLButtonElement>("button", { name: "Применить шаблоны" });
+  expect(button.disabled).toBe(false);
+  fireEvent.click(button);
+  expect(apply).toHaveBeenCalledWith(unit, box);
+});

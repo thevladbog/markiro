@@ -27,6 +27,7 @@ import {
   palletMembership,
   samePalletComposition,
   storedPalletData,
+  tryStoredPalletData,
 } from "./pallet.service";
 
 @Injectable()
@@ -104,7 +105,8 @@ export class WarehouseUnifiedService {
         ),
       );
     if (!saved) return { status: "unavailable", code: "snapshot_missing" };
-    const data = storedPalletData(saved.value, saved.revision);
+    const data = tryStoredPalletData(saved.value, saved.revision);
+    if (!data) return { status: "unavailable", code: "snapshot_missing" };
     if (
       data.sscc !== scan.sscc ||
       data.shiftId !== membership.pallet.shiftId ||

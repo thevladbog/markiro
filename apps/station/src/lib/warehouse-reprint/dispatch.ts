@@ -9,8 +9,7 @@ import {
   type PalletDataV3,
 } from "@markiro/domain";
 import type { SqlExecutor } from "../mirror.js";
-import type { StationClient } from "../api-client.js";
-import { StationApiError } from "../api-client.js";
+import { StationApiError, type StationClient } from "../api-client.js";
 import { AUTHORIZED_CREDENTIAL_OWNERS_SQL } from "../device-recovery.js";
 import { palletMembership } from "./pallet-sources.js";
 import {
@@ -123,11 +122,11 @@ export async function resolveReprintTarget(
       }),
     );
   } catch (error) {
-    if (
-      warehouseNetworkUnavailable(error) ||
-      (error instanceof StationApiError && error.status === 404)
-    )
-      return offline();
+    if (warehouseNetworkUnavailable(error)) return offline();
+    // A legacy box lookup remains authoritative for boxes. A missing V3 route
+    // never permits a cached pallet to dispatch or create an unsyncable V3 job.
+    if (error instanceof StationApiError && error.status === 404 && !membership && !local)
+      return { kind: "box" };
     throw error;
   }
   if (result.status !== "found") {

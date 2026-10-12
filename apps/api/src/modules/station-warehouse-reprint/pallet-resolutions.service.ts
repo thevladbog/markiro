@@ -10,7 +10,7 @@ import {
 } from "@markiro/domain";
 import { DB } from "../../auth/auth.module";
 import { assertWarehouseDevice, assertWarehouseOperator } from "./access";
-import { storedPalletData, palletMembership, samePalletComposition } from "./pallet.service";
+import { tryStoredPalletData, palletMembership, samePalletComposition } from "./pallet.service";
 @Injectable()
 export class WarehousePalletResolutionsService {
   constructor(@Inject(DB) private readonly db: Db) {}
@@ -96,7 +96,7 @@ export class WarehousePalletResolutionsService {
               eq(schema.palletProductionResolutions.attemptId, value.attemptId),
             ),
           );
-        const data = storedPalletData(source.value, source.revision);
+        const data = tryStoredPalletData(source.value, source.revision);
         if (
           !data ||
           previous ||

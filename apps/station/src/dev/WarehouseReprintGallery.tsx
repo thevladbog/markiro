@@ -35,7 +35,7 @@ export function WarehouseReprintGallery({ variant }: { variant: string }) {
     };
     void digest;
     const unit = { ...value, digest: productLabelValueDigest(value) };
-    const preset = buildPalletLabelTemplates()[0];
+    const preset = buildPalletLabelTemplates()[2];
     if (!preset) throw new Error("Missing pallet preset");
     let pallet: PalletTemplateChoice = {
       kind: "thermal",

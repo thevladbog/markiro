@@ -287,13 +287,13 @@ export function createWarehouseWork(o: WarehouseWorkOptions, unified = false) {
     await refresh(state.job?.jobId);
   };
   const refreshPalletCatalog = async () => {
-    const catalog = await loadPalletTemplates(o.client, guarded, owner);
+    const catalog = await loadPalletTemplates(o.client, guarded, owner, UNIFIED_REPRINT_PROTOCOL);
     publish({ palletCatalog: catalog });
     const session = state.session;
     if (
       session?.palletTemplate &&
       catalog &&
-      !palletJob &&
+      (!palletJob || ["sent", "verified", "skipped"].includes(palletJob.state)) &&
       !catalog.templates.some(
         (t) =>
           t.id === session.palletTemplate?.id &&
@@ -328,7 +328,7 @@ export function createWarehouseWork(o: WarehouseWorkOptions, unified = false) {
     }
     await refresh(jobId);
   };
-  const printingPallet = async (retry = false) => {
+  const printingPallet = async (retry = false, reason?: WarehouseSession["reason"]) => {
     if (!palletJob) return;
     if (!current() || !(await deviceRecoveryAllowsWork(o.exec, o.generation)))
       throw new Error("WAREHOUSE_OWNER_CHANGED");
@@ -348,6 +348,7 @@ export function createWarehouseWork(o: WarehouseWorkOptions, unified = false) {
         isCurrent: current,
         print: (target, bytes) => o.print(target, bytes),
         retry,
+        ...(reason ? { reason } : {}),
         tenantId: recovery?.owner?.tenantId ?? "",
       });
     } finally {
@@ -538,7 +539,7 @@ export function createWarehouseWork(o: WarehouseWorkOptions, unified = false) {
           ["prepared", "sending", "delivery_unknown", "failed_before_send"].includes(
             state.job.state,
           );
-        if (unified && !recovering) {
+        if (unified && state.palletCatalog && !recovering) {
           const choice = state.session.palletTemplate;
           if (
             !choice ||
@@ -584,7 +585,11 @@ export function createWarehouseWork(o: WarehouseWorkOptions, unified = false) {
         await assertOperator();
         if (palletJob && state.verification) {
           const scanned = resolveWarehouseReprintScan(raw);
-          if (scanned.kind !== "box" || scanned.sscc !== palletJob.source.sscc)
+          if (
+            scanned.kind !== "box" ||
+            scanned.repair !== null ||
+            scanned.sscc !== palletJob.source.sscc
+          )
             throw new Error("WAREHOUSE_VERIFY_MISMATCH");
           await settleWarehousePalletJob(guarded, owner, palletJob.jobId, o.operatorId, "verified");
           publish({ verification: false, duplicate: false });
@@ -804,6 +809,24 @@ export function createWarehouseWork(o: WarehouseWorkOptions, unified = false) {
           if (["sent", "verified", "skipped"].includes(palletJob.state)) {
             const session = state.session;
             if (!session) throw new Error("WAREHOUSE_OPERATION_FAILED");
+            const found = await resolveReprintTarget(
+              o.client,
+              guarded,
+              owner,
+              palletJob.source.sscc,
+              o.operatorId,
+            );
+            if (found.kind !== "pallet") throw new Error("WAREHOUSE_PALLET_COMPOSITION_CHANGED");
+            const source = found.data;
+            if (
+              !session.palletTemplate ||
+              !state.palletCatalog?.templates.some(
+                (t) =>
+                  t.id === session.palletTemplate?.id &&
+                  t.snapshotDigest === session.palletTemplate.snapshotDigest,
+              )
+            )
+              throw new Error("WAREHOUSE_TEMPLATES_REQUIRED");
             const profile = resolvePrinter(o.hardware(), "pallet");
             if (!profile) throw new Error("WAREHOUSE_PRINTER_UNCONFIGURED");
             await assertOperator();
@@ -815,25 +838,13 @@ export function createWarehouseWork(o: WarehouseWorkOptions, unified = false) {
               operatorId: o.operatorId,
               reason,
               sessionId: session.sessionId,
-              source:
-                palletJob.source.version === 3
-                  ? palletJob.source
-                  : palletDataFromLegacySource(palletJob.source),
-              rendering: session.palletTemplate
-                ? renderingFromPalletData(
-                    palletJob.source.version === 3
-                      ? palletJob.source
-                      : palletDataFromLegacySource(palletJob.source),
-                    session.palletTemplate,
-                  )
-                : (() => {
-                    throw new Error("WAREHOUSE_TEMPLATES_REQUIRED");
-                  })(),
+              source,
+              rendering: renderingFromPalletData(source, session.palletTemplate),
               profile,
               tenantId: recovery?.owner?.tenantId ?? "",
             });
             await printingPallet();
-          } else await printingPallet(true);
+          } else await printingPallet(true, reason);
         } else if (state.job) await printing(state.job.jobId, reason);
       }),
     sendPrepared: () =>

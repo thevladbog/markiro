@@ -222,7 +222,7 @@ export function WarehouseReprintView(
                   !editable ||
                   !session?.unitTemplate ||
                   !session.boxTemplate ||
-                  !session.palletTemplate
+                  (state.palletCatalog != null && !session.palletTemplate)
                 }
                 onClick={() => {
                   if (session)

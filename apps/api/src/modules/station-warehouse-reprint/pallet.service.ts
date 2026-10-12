@@ -42,6 +42,17 @@ export function storedPalletData(value: unknown, expectedRevision?: string): Pal
     throw new Error("WAREHOUSE_SOURCE_CORRUPT");
   return palletDataFromLegacySource(legacy);
 }
+/** Corrupt persisted JSON is a per-record conflict, not a failed sync batch. */
+export function tryStoredPalletData(
+  value: unknown,
+  expectedRevision?: string,
+): PalletDataV3 | null {
+  try {
+    return storedPalletData(value, expectedRevision);
+  } catch {
+    return null;
+  }
+}
 function sourceBranding(source: PalletLabelSourceV1 | PalletDataV3): string | null {
   return source.version === 1 ? source.rendering.brandingJson : source.brandingJson;
 }
@@ -426,6 +437,9 @@ export class WarehousePalletService {
             ? ("snapshot_missing" as const)
             : ("delivery_unresolved" as const),
       };
+    const parsedSource = palletLabelSourceSchema.safeParse(saved.value);
+    if (!parsedSource.success)
+      return { status: "unavailable" as const, code: "snapshot_missing" as const };
     const [latestDelivery] = await this.db
       .select()
       .from(schema.palletProductionDeliveries)
@@ -468,9 +482,6 @@ export class WarehousePalletService {
     );
     if (delivery?.state !== "sent" && !resolved && !explicitlyResolved)
       return { status: "unavailable" as const, code: "delivery_unresolved" as const };
-    const parsedSource = palletLabelSourceSchema.safeParse(saved.value);
-    if (!parsedSource.success)
-      return { status: "unavailable" as const, code: "snapshot_missing" as const };
     const source = parsedSource.data;
     if (
       source.sscc !== sscc ||
@@ -568,7 +579,7 @@ export class WarehousePalletService {
         }
         const sourceRevision =
           protocol === UNIFIED_REPRINT_PROTOCOL
-            ? storedPalletData(source.value, source.revision).revision
+            ? tryStoredPalletData(source.value, source.revision)?.revision
             : source.revision;
         if (sourceRevision !== event.sourceRevision) {
           await reject();

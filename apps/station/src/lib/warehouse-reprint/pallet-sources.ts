@@ -7,6 +7,7 @@ import {
 import { z } from "zod";
 import {
   palletDataFromLegacySource,
+  palletDataSchema,
   makePalletLabelSource,
   palletCompositionDigest,
   labelTemplateSpecSchema,
@@ -113,7 +114,6 @@ export async function retainProductionPalletSource(
     `SELECT 1 FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? LIMIT 1`,
     [owner, sscc],
   );
-  if (existing) return;
   const membership = await palletMembership(exec, sscc);
   if (!membership?.pallet.closed_at) throw new Error("WAREHOUSE_PALLET_COMPOSITION_CHANGED");
   if (rendering.kind === "thermal") {
@@ -134,6 +134,7 @@ export async function retainProductionPalletSource(
     rendering,
     originalAttempt,
   });
+  if (existing) return source;
   if (canonical) {
     const data = palletDataFromLegacySource(source);
     await exec.run(
@@ -156,8 +157,8 @@ export async function retainPalletClosureSource(
   );
   if (saved) {
     const parsed = palletLabelSourceSchema.safeParse(JSON.parse(saved.value_json));
-    if (canonical && !parsed.success) return null;
-    return palletLabelSourceSchema.parse(JSON.parse(saved.value_json));
+    if (parsed.success) return parsed.data;
+    palletDataSchema.parse(JSON.parse(saved.value_json));
   }
   const [closure] = await exec.all<{ context_json: string }>(
     "SELECT context_json FROM warehouse_pallet_closures WHERE sscc=?",
@@ -237,7 +238,7 @@ export async function retainPalletClosureSource(
         null,
         canonical,
       );
-      if (canonical) return created ?? null;
+      if (canonical || saved) return created ?? null;
       const [row] = await exec.all<{ value_json: string }>(
         `SELECT value_json FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND sscc=? ORDER BY rowid ASC LIMIT 1`,
         [owner, sscc],

@@ -45,7 +45,7 @@ vi.mock("../src/lib/rasterizer.js", () => ({
   }),
 }));
 afterEach(() => vi.unstubAllGlobals());
-async function fixture() {
+async function fixture(palletAvailable = true, unifiedAvailable = true) {
   const db = new DatabaseSync(":memory:"),
     exec = makeRotatingExec([db, db]);
   await applyMigrations(exec);
@@ -96,6 +96,7 @@ async function fixture() {
     revision: productLabelValueDigest([unit, box]),
     templates: [unit, box],
   };
+  let palletCatalogChoices = [pallet, palletB];
   vi.stubGlobal(
     "fetch",
     vi.fn(async (info: RequestInfo | URL, init?: RequestInit) => {
@@ -104,9 +105,13 @@ async function fixture() {
       );
       let response: unknown;
       if (url.pathname.endsWith("source-capabilities"))
-        response = { protocols: [PALLET_REPRINT_V2_PROTOCOL, UNIFIED_REPRINT_PROTOCOL] };
+        response = {
+          protocols: palletAvailable
+            ? [PALLET_REPRINT_V2_PROTOCOL, ...(unifiedAvailable ? [UNIFIED_REPRINT_PROTOCOL] : [])]
+            : [],
+        };
       else if (url.pathname.endsWith("pallet-templates-v2"))
-        response = { protocol: PALLET_REPRINT_V2_PROTOCOL, templates: [pallet, palletB] };
+        response = { protocol: PALLET_REPRINT_V2_PROTOCOL, templates: palletCatalogChoices };
       else if (url.pathname === "/shifts/box-label-templates")
         response = { items: [], defaultBoxLabelTemplateId: box.id, defaultSource: "organization" };
       else if (url.pathname.endsWith("templates")) {
@@ -174,7 +179,23 @@ async function fixture() {
     },
   };
   const work = workModule.createUnifiedWarehouseWork(options);
-  return { db, exec, work, box, unit, pallet, palletB, data, raw, delivered, hardware, options };
+  return {
+    db,
+    exec,
+    work,
+    box,
+    unit,
+    pallet,
+    palletB,
+    data,
+    raw,
+    delivered,
+    hardware,
+    options,
+    replacePalletCatalog: (choices: typeof palletCatalogChoices) => {
+      palletCatalogChoices = choices;
+    },
+  };
 }
 it("starts with three templates and prints unit, box and pallet scans immediately in one session", async () => {
   const h = await fixture();
@@ -297,6 +318,9 @@ it("restores an unknown pallet attempt in the same session and blocks an unrelat
     expect(restored.getSnapshot().error).toBe("WAREHOUSE_RECOVERY_REQUIRED");
     expect(await restored.finish()).toBe(false);
     restored.requestVerification();
+    await restored.scan(`!100${h.data.sscc}`);
+    expect(restored.getSnapshot().error).toBe("WAREHOUSE_VERIFY_MISMATCH");
+    expect(restored.getSnapshot().job?.state).toBe("delivery_unknown");
     await restored.scan(`]C100${h.data.sscc}`);
     expect(restored.getSnapshot().job?.state).toBe("verified");
     expect(await restored.finish()).toBe(true);
@@ -404,6 +428,103 @@ it("uses the current pallet choice for a new explicit repeat and preserves the o
       "SELECT json_extract(rendering_json,'$.choice.id') choice FROM warehouse_pallet_jobs ORDER BY rowid",
     );
     expect(rows.map((r) => r.choice)).toEqual([h.pallet.id, h.palletB.id]);
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+
+it("allows unit and box intake without a pallet catalog but keeps pallet intake blocked", async () => {
+  const h = await fixture(false);
+  try {
+    await h.work.initialize();
+    await h.work.configure("damaged", h.unit, h.box, null);
+    await h.work.start();
+    expect(h.work.getSnapshot().session?.status).toBe("active");
+    await h.work.scan(h.raw);
+    await h.work.scan(warehouseBoxSource().identity);
+    expect(h.delivered).toHaveLength(2);
+    await h.work.scan(h.data.sscc);
+    expect(h.work.getSnapshot().error).toBe("WAREHOUSE_TEMPLATES_REQUIRED");
+    expect(h.delivered).toHaveLength(2);
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+it("revalidates a completed pallet before an explicit new print", async () => {
+  const h = await fixture();
+  try {
+    await h.work.initialize();
+    await h.work.configure("damaged", h.unit, h.box, h.pallet);
+    await h.work.start();
+    await h.work.scan(h.data.sscc);
+    vi.mocked(fetch).mockResolvedValueOnce(
+      new Response(JSON.stringify({ status: "unavailable", code: "composition_changed" }), {
+        status: 200,
+      }),
+    );
+    await h.work.reprint("lost");
+    expect(h.delivered).toHaveLength(1);
+    expect(h.work.getSnapshot().error).toBe("WAREHOUSE_PALLET_COMPOSITION_CHANGED");
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+it("records a newly chosen reason when retrying an unknown pallet attempt", async () => {
+  const h = await fixture();
+  try {
+    await h.work.initialize();
+    await h.work.configure("damaged", h.unit, h.box, h.pallet);
+    await h.work.start();
+    const sending = h.options.print;
+    h.options.print = async () => {
+      throw new Error("unknown");
+    };
+    await h.work.scan(h.data.sscc);
+    h.options.print = sending;
+    await h.work.reprint("lost");
+    expect(h.work.getSnapshot().job?.state).toBe("sent");
+    const [last] = await h.exec.all<{ reason: string }>(
+      "SELECT json_extract(value_json,'$.reason') reason FROM warehouse_pallet_events ORDER BY rowid DESC LIMIT 1",
+    );
+    expect(last?.reason).toBe("lost");
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+
+it("invalidates a changed pallet selection after a completed attempt", async () => {
+  const h = await fixture();
+  try {
+    await h.work.initialize();
+    await h.work.configure("damaged", h.unit, h.box, h.pallet);
+    await h.work.start();
+    await h.work.scan(h.data.sscc);
+    const snapshot = { ...h.pallet.snapshot, widthMm: 80 };
+    h.replacePalletCatalog([
+      { ...h.pallet, snapshot, snapshotDigest: productLabelValueDigest(snapshot) },
+    ]);
+    await h.work.refreshCatalog();
+    expect(h.work.getSnapshot().session?.palletTemplate).toBeNull();
+    expect(h.work.getSnapshot().session?.status).toBe("paused");
+    expect(h.work.getSnapshot().job?.state).toBe("sent");
+  } finally {
+    await h.work.close();
+    h.db.close();
+  }
+});
+
+it("does not require pallet selection on a server advertising only the old pallet protocol", async () => {
+  const h = await fixture(true, false);
+  try {
+    await h.work.initialize();
+    expect(h.work.getSnapshot().palletCatalog).toBeNull();
+    await h.work.configure("damaged", h.unit, h.box, null);
+    await h.work.start();
+    expect(h.work.getSnapshot().session?.status).toBe("active");
   } finally {
     await h.work.close();
     h.db.close();

@@ -218,3 +218,45 @@ it("uploads data-only production sources through V3 and does not downgrade them 
     h.db.close();
   }
 });
+
+it("does not treat an unavailable V3 route as offline permission", async () => {
+  const h = await fixture();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("{}", { status: 404 })),
+  );
+  try {
+    await expect(
+      dispatch.resolveReprintTarget(
+        h.client,
+        h.exec,
+        "owner",
+        h.data.sscc,
+        "00000000-0000-4000-8000-000000000004",
+      ),
+    ).rejects.toThrow();
+  } finally {
+    h.db.close();
+  }
+});
+
+it("keeps legacy box lookup available when V3 is absent without granting a pallet fallback", async () => {
+  const h = await fixture();
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response("{}", { status: 404 })),
+  );
+  try {
+    expect(
+      await dispatch.resolveReprintTarget(
+        h.client,
+        h.exec,
+        "owner",
+        "346006820000000014",
+        "00000000-0000-4000-8000-000000000004",
+      ),
+    ).toEqual({ kind: "box" });
+  } finally {
+    h.db.close();
+  }
+});

@@ -89,12 +89,12 @@ export function TemplatePicker({
             Boolean(error) ||
             !valid(unit, "product_duplicate") ||
             !valid(box, "box") ||
-            (palletCatalog !== undefined && !selectedPallet)
+            (palletCatalog != null && !selectedPallet)
           }
           onClick={() => {
             if (unit && box) {
-              if (palletCatalog !== undefined && selectedPallet) onApply(unit, box, selectedPallet);
-              else if (palletCatalog === undefined) onApply(unit, box);
+              if (palletCatalog != null && selectedPallet) onApply(unit, box, selectedPallet);
+              else if (palletCatalog == null) onApply(unit, box);
             }
           }}
         >
@@ -123,7 +123,7 @@ export function TemplatePicker({
         >
           {t("warehouse.boxTab")}
         </Button>
-        {palletCatalog !== undefined ? (
+        {palletCatalog != null ? (
           <Button
             size="floor"
             variant={tab === "pallet" ? "primary" : "secondary"}
@@ -219,7 +219,7 @@ export function TemplatePicker({
         <p>
           {t("warehouse.unitSelected", { name: unit?.name ?? "—" })} ·{" "}
           {t("warehouse.boxSelected", { name: box?.name ?? "—" })}
-          {palletCatalog !== undefined
+          {palletCatalog != null
             ? ` · ${t("warehouse.palletSelected", { name: selectedPallet?.name ?? "—" })}`
             : null}
         </p>

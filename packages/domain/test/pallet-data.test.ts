@@ -100,3 +100,19 @@ it("reports missing production date for a template that requires that field", ()
     "WAREHOUSE_SOURCE_DATE",
   );
 });
+
+it("adapts dated A4 data without shelf life as an absent expiry", () => {
+  const source = a4PalletSource();
+  if (source.rendering.kind !== "a4") throw new Error("Expected A4");
+  const { revision, ...body } = source;
+  expect(revision).toHaveLength(64);
+  const saved = domain.makePalletLabelSource({
+    ...body,
+    rendering: { ...source.rendering, facts: { ...source.rendering.facts, shelfLifeDays: null } },
+  });
+  expect(domain.palletDataFromLegacySource(saved)).toMatchObject({
+    productionDate: "2026-10-11",
+    expiryDate: null,
+    fields: { date: "11.10.2026", expiry: "" },
+  });
+});
