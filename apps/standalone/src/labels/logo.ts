@@ -152,29 +152,36 @@ export async function decodeLogoImage(
   maxSourcePixels = Number.POSITIVE_INFINITY,
 ): Promise<MonoBitmap> {
   const image = new Image();
-  try {
-    await new Promise<void>((resolve, reject) => {
-      image.onload = () => {
-        resolve();
-      };
-      image.onerror = () => {
-        reject(new Error("the picture did not load"));
-      };
-      image.src = src;
-    });
-  } catch {
-    throw new LogoDecodeError("decode_failed");
-  }
-  if (image.naturalWidth < 1 || image.naturalHeight < 1) throw new LogoDecodeError("empty");
-  // Before anything decodes the pixels or allocates a canvas for them.
-  if (image.naturalWidth * image.naturalHeight > maxSourcePixels) {
-    throw new LogoDecodeError("too_many_pixels");
+  if (maxSourcePixels === Number.POSITIVE_INFINITY) {
+    // No limit (the bundled logo, an SVG): `decode()` loads it, and a webview
+    // that cannot load it refuses rather than leaves the print waiting.
+    image.src = src;
+  } else {
+    // A limited picture: its size, known once it has loaded, is checked
+    // before anything decodes its pixels or allocates a canvas for them.
+    try {
+      await new Promise<void>((resolve, reject) => {
+        image.onload = () => {
+          resolve();
+        };
+        image.onerror = () => {
+          reject(new Error("the picture did not load"));
+        };
+        image.src = src;
+      });
+    } catch {
+      throw new LogoDecodeError("decode_failed");
+    }
+    if (image.naturalWidth * image.naturalHeight > maxSourcePixels) {
+      throw new LogoDecodeError("too_many_pixels");
+    }
   }
   try {
     await image.decode();
   } catch {
     throw new LogoDecodeError("decode_failed");
   }
+  if (image.naturalWidth < 1 || image.naturalHeight < 1) throw new LogoDecodeError("empty");
   const size = fitLogoSize(image.naturalWidth * scale, image.naturalHeight * scale);
   const canvas = document.createElement("canvas");
   canvas.width = size.width;

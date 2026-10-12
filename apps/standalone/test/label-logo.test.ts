@@ -171,8 +171,11 @@ function stubBrowser({
   naturalHeight?: number;
   decode?: () => Promise<void>;
   context?: boolean;
-  /** Whether the picture loads (`onload`) or not (`onerror`) once its `src` is set. */
-  loads?: boolean;
+  /**
+   * Whether the picture loads (`onload`), does not (`onerror`) or never says
+   * (`"never"`, as jsdom) once its `src` is set.
+   */
+  loads?: boolean | "never";
 } = {}) {
   const calls: string[] = [];
   const surfaces: { width: number; height: number }[] = [];
@@ -193,8 +196,8 @@ function stubBrowser({
       this.#src = value;
       // As a webview: the size is known once the picture has loaded, later.
       queueMicrotask(() => {
-        if (loads) this.onload?.();
-        else this.onerror?.();
+        if (loads === true) this.onload?.();
+        else if (loads === false) this.onerror?.();
       });
     }
   }
@@ -267,9 +270,11 @@ describe("decodeLogoImage", () => {
     });
   });
 
-  it("refuses a picture that does not load, without decoding it", async () => {
+  it("refuses a limited picture that does not load, without decoding it", async () => {
     const { calls, surfaces } = stubBrowser({ loads: false });
-    await expect(decodeLogoImage("blob:x")).rejects.toMatchObject({ code: "decode_failed" });
+    await expect(decodeLogoImage("blob:x", 1, MAX_LOGO_SOURCE_PIXELS)).rejects.toMatchObject({
+      code: "decode_failed",
+    });
     expect(calls).toEqual([]);
     expect(surfaces).toHaveLength(0);
   });
@@ -294,11 +299,29 @@ describe("decodeLogoImage", () => {
     expect([vector.width, vector.height]).toEqual([512, 512]);
   });
 
+  it("waits for no load event without a limit: `decode()` alone loads the bundled logo", async () => {
+    // A webview (jsdom) that never fires `load`: an unlimited decode still settles.
+    stubBrowser({ loads: "never" });
+    const bitmap = await decodeLogoImage("blob:x", 2);
+    expect([bitmap.width, bitmap.height]).toEqual([560, 128]);
+    vi.restoreAllMocks();
+    stubBrowser({
+      loads: "never",
+      decode: async () => {
+        throw new Error("EncodingError");
+      },
+    });
+    await expect(decodeLogoImage("blob:x")).rejects.toMatchObject({ code: "decode_failed" });
+  });
+
   it("refuses a picture with no size and a webview with no canvas", async () => {
     stubBrowser({ naturalWidth: 0, naturalHeight: 10 });
     await expect(decodeLogoImage("blob:x")).rejects.toMatchObject({ code: "empty" });
     stubBrowser({ naturalWidth: 10, naturalHeight: 0 });
     await expect(decodeLogoImage("blob:x")).rejects.toMatchObject({ code: "empty" });
+    await expect(decodeLogoImage("blob:x", 1, MAX_LOGO_SOURCE_PIXELS)).rejects.toMatchObject({
+      code: "empty",
+    });
     vi.restoreAllMocks();
     stubBrowser({ context: false });
     await expect(decodeLogoImage("blob:x")).rejects.toMatchObject({ code: "canvas_unavailable" });
