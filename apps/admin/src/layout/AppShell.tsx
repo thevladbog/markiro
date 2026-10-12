@@ -8,8 +8,10 @@ import { Badge, Button, Sidebar, cn, type SidebarItem } from "@markiro/ui";
 import { useCan } from "../access/context.js";
 import { useAuthClient } from "../auth/client.js";
 import { useBillingAttention } from "../pages/billing/api.js";
+import { useActiveInventoryCount } from "../pages/inventory/api.js";
 import { usePendingOrderCount } from "../pages/pickup/api.js";
 import { useAvatarUrl, useProfile } from "../pages/profile/api.js";
+import { useActiveShiftCount } from "../pages/shifts/api.js";
 import { useSupportChatAvailability } from "../pages/support/api.js";
 import { Header } from "./Header.js";
 import { SubscriptionBanner } from "../subscription/SubscriptionBanner.js";
@@ -173,6 +175,8 @@ export function AppShell() {
   const canManageSettings = useCan(C.TENANT_SETTINGS_MANAGE);
   const canManageMembers = useCan(C.MEMBERS_MANAGE);
   const pendingOrderCount = usePendingOrderCount(canReadOperations);
+  const activeShiftCount = useActiveShiftCount(canReadOperations);
+  const activeInventoryCount = useActiveInventoryCount(canReadOperations);
   const billingAttention = useBillingAttention(canReadBilling);
   const billingAttentionCount = billingAttention.data?.count ?? 0;
   const profile = useProfile();
@@ -198,6 +202,8 @@ export function AppShell() {
     labelKey: t(key),
     section: t(sectionKey),
     ...(to === "/pickup" && pendingOrderCount > 0 ? { badge: pendingOrderCount } : {}),
+    ...(to === "/shifts" && activeShiftCount > 0 ? { badge: activeShiftCount } : {}),
+    ...(to === "/inventory" && activeInventoryCount > 0 ? { badge: activeInventoryCount } : {}),
     ...(to === "/billing" && billingAttentionCount > 0 ? { badge: billingAttentionCount } : {}),
   }));
 
