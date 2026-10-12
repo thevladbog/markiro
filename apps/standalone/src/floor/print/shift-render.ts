@@ -1,7 +1,7 @@
 import type { MonoBitmap, RasterizeTextFn } from "@markiro/domain";
 
 import { labelLogo, loadBundledMarkiroLogo, sheetLogoOf } from "../../labels/logo.js";
-import { rasterizeSheetText, rasterizeText } from "../../labels/rasterizer.js";
+import { rasterizeSheetText } from "../../labels/rasterizer.js";
 import { renderSheetBytes } from "../../labels/sheet-render.js";
 import type { WorkShift } from "../shifts/shift-copies.js";
 import { renderLabel, type LabelFields } from "./label-render.js";
@@ -16,6 +16,11 @@ export const LOGO_UNAVAILABLE_LINE = "station: label logo unavailable, printing 
 
 /** What a shift's render may be given instead of the app's own; tests give their own. */
 export interface ShiftRenderDeps {
+  /**
+   * The text of a label; left out, `renderLabel` picks the app's own per
+   * path: `rasterizeDriverText` (the bundled face or a refusal) for a driver
+   * page, `rasterizeText` for a RAW label (plan ДРВ).
+   */
   rasterize?: RasterizeTextFn;
   /** The logo of a label: the shift's own, else a fallback; the app's is `labelLogo`. */
   loadLogo?: (own: MonoBitmap | null) => Promise<MonoBitmap | null>;
@@ -84,7 +89,6 @@ export async function renderShiftSheet(
  * empty and one diagnostic line says so (`LOGO_UNAVAILABLE_LINE`).
  */
 export function shiftLabelRender(shift: WorkShift, deps: ShiftRenderDeps = {}): RenderLabel {
-  const rasterize = deps.rasterize ?? rasterizeText;
   const report = deps.report ?? ((line: string) => console.error(line));
   const loadLogo =
     deps.loadLogo ??
@@ -103,6 +107,8 @@ export function shiftLabelRender(shift: WorkShift, deps: ShiftRenderDeps = {}): 
         report(LOGO_UNAVAILABLE_LINE);
       }
     }
-    return renderLabel(spec, fields, printer, rasterize, logo);
+    // The caller's rasterizer as it is: none lets `renderLabel` keep a driver
+    // page to the bundled face (ДРВ), which a default here would bypass.
+    return renderLabel(spec, fields, printer, deps.rasterize, logo);
   };
 }
