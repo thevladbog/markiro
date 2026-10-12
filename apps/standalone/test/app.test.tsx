@@ -2248,6 +2248,29 @@ describe("the operator on the floor", () => {
     expect(screen.getByText(SIGNED_IN)).toBeTruthy();
   });
 
+  it("opens the warehouse reprint from the list of shifts and asks the host about a scanned box (plan СКЛ)", async () => {
+    const { host } = await onTheFloor();
+    host.warehouseLookup.mockResolvedValue({ status: "not_found" });
+    scan("MRK-000742");
+    await screen.findByText(SIGNED_IN);
+    // The screen takes no press and no scan for 400 ms after its view changed.
+    const pause = () =>
+      act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 450));
+      });
+    fireEvent.click(await screen.findByRole("button", { name: "Повторная печать этикеток" }));
+    await screen.findByRole("heading", { name: "Повторная печать этикеток" });
+    await pause();
+    fireEvent.click(await screen.findByRole("button", { name: "Повреждена" }));
+    await pause();
+    fireEvent.click(await screen.findByRole("button", { name: "Начать перепечатку" }));
+    await screen.findByText("Отсканируйте код единицы, короба или паллеты.");
+    await pause();
+    scan("046006820000015000");
+    await waitFor(() => expect(host.warehouseLookup).toHaveBeenCalledTimes(1));
+    expect(host.warehouseLookup).toHaveBeenCalledWith({ sscc: "046006820000015000" });
+  });
+
   it("signs the operator out after the idle timeout and says so", async () => {
     await onTheFloor(50);
     scan("MRK-000742");

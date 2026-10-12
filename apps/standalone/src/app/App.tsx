@@ -748,6 +748,7 @@ export function App({
               create={hostApi.createDeviceShift}
               checkCode={hostApi.checkCode}
               requestBlock={hostApi.requestSsccBlock}
+              warehouseLookup={hostApi.warehouseLookup}
               requestFacts={requestFacts}
               source={scanner}
               printing={printing}
