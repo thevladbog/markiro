@@ -4070,6 +4070,11 @@ by «Сменить адрес хоста» (plan УСТ, `device_change_address
 pairing only where the pinned certificate answers and the host takes the
 key; an office session ends with the restore, so the office signs in again);
 the certificate is not reissued — devices pin its SHA-256, not its names.
+The flip side: a device revoked after the copy is valid again on a new PC
+(revocations are not carried, the certificate is the same) and reconnects by
+itself once the service answers at the old address, so the runbook (section 6
+step 7, check 3) re-revokes under another address first and gives the new PC
+the old IP only then.
 Still lost on a new PC: stations paired after the copy (the copy does not
 know them, their key is refused, they pair again; as on any restore), and
 the station that ran on the dead host PC itself. A copy without the identity
