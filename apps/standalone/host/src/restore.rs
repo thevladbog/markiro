@@ -393,7 +393,8 @@ pub enum IdentityOutcome {
 pub enum Interrupted {
     /// Its new database never took the place: the previous one was put back.
     RolledBack,
-    /// Its new database had taken the place: only its marker was left.
+    /// Its new database had taken the place: it was completed (the copy's
+    /// identity put in place when it carried one, the marker removed).
     Finished,
 }
 
@@ -1584,7 +1585,7 @@ impl Made {
                 " The interrupted restore found first was rolled back: the database it had replaced is in place again."
             }
             Some(Interrupted::Finished) => {
-                " The interrupted restore found first had finished: only its marker was removed."
+                " The interrupted restore found first had finished: it was completed (its marker removed)."
             }
         };
         if made.is_empty() && earlier.is_empty() {
@@ -2399,7 +2400,7 @@ pub fn summary(report: &RestoreReport) -> Vec<String> {
             former_port,
         } => {
             lines.push(format!(
-                "the copy's host identity was put in place (host {host_id}, certificate {}): devices paired with that host keep their pairing; at a new address, give this computer the old one's address or change the host address on each device (Офис → «Изменить адрес хоста»)",
+                "the copy's host identity was put in place (host {host_id}, certificate {}): devices paired with that host keep their pairing; at a new address, give this computer the old one's address or change the host address on each device («Сменить адрес хоста»)",
                 markiro_proto::display_fingerprint(fingerprint)
             ));
             if let Some(replaced) = replaced {
@@ -2773,6 +2774,19 @@ mod tests {
     }
 
     #[test]
+    fn a_refusal_after_an_interrupted_restore_was_finished_says_it_was_completed() {
+        let paths = HostPaths::new(Path::new("/data"));
+        let made = Made {
+            interrupted: Some(Interrupted::Finished),
+            ..Made::default()
+        };
+        assert_eq!(
+            made.unchanged(&paths, "refused").to_string(),
+            "refused. The database was not changed by this run. The interrupted restore found first had finished: it was completed (its marker removed)."
+        );
+    }
+
+    #[test]
     fn a_swap_that_fails_puts_every_file_of_the_old_database_back() {
         let (dir, db) = folder_with_a_database();
         // The new database is missing: the last rename fails, after the three
@@ -3018,10 +3032,10 @@ mod tests {
         assert!(port_lines(&lines).is_empty(), "{lines:#?}");
         assert!(lines.contains(&"the identity this data folder had (host host-b) was replaced; its files are in /data/restore-1/identity".to_owned()), "{lines:#?}");
         assert!(
-            lines.iter().any(|line| line.starts_with(&format!(
-                "the copy's host identity was put in place (host host-a, certificate {})",
+            lines.contains(&format!(
+                "the copy's host identity was put in place (host host-a, certificate {}): devices paired with that host keep their pairing; at a new address, give this computer the old one's address or change the host address on each device («Сменить адрес хоста»)",
                 markiro_proto::display_fingerprint(&"ab".repeat(32))
-            ))),
+            )),
             "{lines:#?}"
         );
         // Another port than the folder's: the installer opens it.

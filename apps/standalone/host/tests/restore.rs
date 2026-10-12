@@ -2111,6 +2111,42 @@ async fn a_new_computer_takes_the_copys_identity_and_keeps_the_unread_margins() 
     );
 }
 
+/// A new computer's restore whose swap fails before it moved anything (a
+/// link nobody can follow stands where the aside folder is to be made):
+/// every file is back, and the copy's identity staged for it goes with the
+/// marker instead of waiting in `identity.partial/` for the next restore.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_swap_undone_whole_leaves_no_staged_identity_behind() {
+    let admin = admin().await;
+    let (copy_path, _, _) = copy_with_identity(&admin.app).await;
+    let fresh = tempfile::tempdir().unwrap();
+    let paths = HostPaths::new(fresh.path());
+    let installer = installed(&paths).await;
+    let database = std::fs::read(paths.database_file()).unwrap();
+    std::os::unix::fs::symlink(
+        fresh.path().join("nowhere"),
+        fresh.path().join("restore-20261009T150000Z"),
+    )
+    .unwrap();
+
+    let error = restore(&paths, &copy_path, false, at(NOW))
+        .await
+        .unwrap_err()
+        .to_string();
+
+    assert!(
+        error.contains("the new database could not be put in place")
+            && error.contains("The previous database was put back"),
+        "{error}"
+    );
+    assert!(!fresh.path().join("identity.partial").exists(), "{error}");
+    assert!(!paths.restore_intent_file().exists());
+    assert!(!fresh.path().join("host.db.partial").exists());
+    assert_eq!(std::fs::read(paths.database_file()).unwrap(), database);
+    assert!(HostIdentity::read(&paths).unwrap().same_as(&installer));
+}
+
 /// A copy of host A over a working host B: the identity waits for the
 /// engineer's `--take-identity`, B's identity is kept aside, and the margins
 /// stay those of a database that is not the copy's history. (A `foreign`
