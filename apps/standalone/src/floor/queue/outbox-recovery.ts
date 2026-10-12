@@ -16,20 +16,42 @@ export const QUEUE_UNSENT_SQL =
   "WHERE host_id = ? AND device_id = ? AND acked_at IS NULL GROUP BY kind";
 
 /**
- * The refused and conflicting records nobody resolved yet, with the number of
- * their shift and the SSCC of the box or pallet they name (never a code of
- * marking); parameters: host id, device id. Sorted by `seq` in memory: a person
- * resolves them one by one, so they are few.
+ * The most refused records, and the most conflicts, of one shift the queue
+ * screen lists; the rest it counts (`QUEUE_TALLY_SQL`). After a restore of the
+ * host a shift the copy does not know is refused on every record — thousands —
+ * and the screen reads again on every batch of receipts.
+ */
+export const QUEUE_LISTED_PER_SHIFT = 20;
+
+/**
+ * The first refused and the first conflicting records nobody resolved yet of
+ * each shift, at most the bound given of each, in the order they were kept,
+ * with the number of their shift and the SSCC of the box or pallet they name
+ * (never a code of marking); parameters: host id, device id, the bound. Only
+ * the records listed are joined and their payloads read; sorted by `seq` in
+ * memory.
  */
 export const QUEUE_SETTLED_SQL =
   "SELECT o.id, o.seq, o.kind, o.shift_id, s.number AS shift_number, o.created_at, o.outcome, " +
   "o.outcome_code AS code, coalesce(o.payload ->> '$.data.sscc', b.sscc, p.sscc) AS sscc " +
-  "FROM outbox o LEFT JOIN floor_shifts s ON s.host_id = o.host_id " +
+  "FROM (SELECT seq, row_number() OVER (PARTITION BY shift_id, outcome ORDER BY seq) AS place " +
+  "FROM outbox WHERE host_id = ? AND device_id = ? AND outcome IN ('rejected', 'conflict') " +
+  "AND resolved_at IS NULL) AS f JOIN outbox o ON o.seq = f.seq " +
+  "LEFT JOIN floor_shifts s ON s.host_id = o.host_id " +
   "AND s.device_id = o.device_id AND s.id = o.shift_id " +
   "LEFT JOIN floor_boxes b ON b.id = (o.payload ->> '$.data.boxId') " +
   "LEFT JOIN floor_pallets p ON p.id = (o.payload ->> '$.data.palletId') " +
-  "WHERE o.host_id = ? AND o.device_id = ? AND o.outcome IN ('rejected', 'conflict') " +
-  "AND o.resolved_at IS NULL";
+  "WHERE f.place <= ?";
+
+/**
+ * How many refused and conflicting records nobody resolved each shift holds,
+ * by kind — all of them, also the ones the list leaves out; parameters: host
+ * id, device id.
+ */
+export const QUEUE_TALLY_SQL =
+  "SELECT shift_id, outcome, kind, count(*) AS n FROM outbox WHERE host_id = ? " +
+  "AND device_id = ? AND outcome IN ('rejected', 'conflict') AND resolved_at IS NULL " +
+  "GROUP BY shift_id, outcome, kind";
 
 /** A shift's refused records nobody resolved, in the order they were kept; parameters: host id, device id, shift id. */
 export const RESEND_READ_SQL =
@@ -66,6 +88,16 @@ export const RESEND_MARK_SQL =
 export const DISMISS_SQL =
   "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = ? " +
   "WHERE host_id = ? AND device_id = ? AND id = ? AND outcome IN ('rejected', 'conflict') " +
+  "AND kind <> 'shift_closed' AND resolved_at IS NULL";
+
+/**
+ * Every refused record of one shift taken off the queue at once by a person —
+ * never its close, which only goes again, and never a conflict; parameters:
+ * the instant, the operator, host id, device id, shift id.
+ */
+export const DISMISS_SHIFT_SQL =
+  "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = ? " +
+  "WHERE host_id = ? AND device_id = ? AND shift_id = ? AND outcome = 'rejected' " +
   "AND kind <> 'shift_closed' AND resolved_at IS NULL";
 
 /**
@@ -121,9 +153,20 @@ export interface SettledRecord {
   sscc: string | null;
 }
 
+/** How many unresolved records of one outcome and kind a shift holds. */
+export interface SettledTally {
+  shiftId: string;
+  outcome: "rejected" | "conflict";
+  kind: string;
+  count: number;
+}
+
 export interface QueueView {
   unsent: UnsentKind[];
+  /** At most `QUEUE_LISTED_PER_SHIFT` refused and as many conflicting records of each shift. */
   settled: SettledRecord[];
+  /** Every unresolved refused and conflicting record, counted by shift, outcome and kind. */
+  tallies: SettledTally[];
   stranded: number;
 }
 
@@ -152,6 +195,12 @@ const settledRow = z.object({
   code: z.string().nullable(),
   sscc: z.string().nullable(),
 });
+const tallyRow = z.object({
+  shift_id: z.string(),
+  outcome: z.enum(["rejected", "conflict"]),
+  kind: z.string(),
+  n: z.number().int().positive(),
+});
 const payloadRow = z.object({ id: z.string(), payload: z.string() });
 const countRow = z.object({ n: z.number().int().nonnegative() });
 
@@ -163,15 +212,20 @@ export async function readStrandedRecords(local: LocalExecutor, pairing: Pairing
 
 /**
  * What the queue screen shows (pilot spec §9.3, plan ОЧ): this pairing's
- * records waiting for the host by kind, oldest kind first; its refused and
- * conflicting records nobody resolved, in the order they were kept; and the
- * records older pairings left unsent. A failed read rejects.
+ * records waiting for the host by kind, oldest kind first; the first refused
+ * and conflicting records nobody resolved of each shift
+ * (`QUEUE_LISTED_PER_SHIFT` of each), in the order they were kept, and how many
+ * there are of each kind; and the records older pairings left unsent. The reads
+ * are separate statements: a receipt between them can make a count differ from
+ * the list, and a decision taken on a count that no longer holds is a
+ * `StaleQueueError`. A failed read rejects.
  */
 export async function readQueue(local: LocalExecutor, pairing: Pairing): Promise<QueueView> {
   const key = [pairing.hostId, pairing.deviceId];
-  const [unsent, settled, stranded] = await Promise.all([
+  const [unsent, settled, tallies, stranded] = await Promise.all([
     local.query(QUEUE_UNSENT_SQL, key, unsentRow),
-    local.query(QUEUE_SETTLED_SQL, key, settledRow),
+    local.query(QUEUE_SETTLED_SQL, [...key, QUEUE_LISTED_PER_SHIFT], settledRow),
+    local.query(QUEUE_TALLY_SQL, key, tallyRow),
     readStrandedRecords(local, pairing),
   ]);
   return {
@@ -191,6 +245,12 @@ export async function readQueue(local: LocalExecutor, pairing: Pairing): Promise
         sscc: row.sscc,
       }))
       .sort((a, b) => a.seq - b.seq),
+    tallies: tallies.map((row) => ({
+      shiftId: row.shift_id,
+      outcome: row.outcome,
+      kind: row.kind,
+      count: row.n,
+    })),
     stranded,
   };
 }
@@ -294,6 +354,47 @@ export async function dismissRecord(context: RecoveryContext, recordId: string):
   } catch (error) {
     if (error instanceof LocalDbError && error.code === "changes_mismatch") {
       throw new StaleQueueError("the record is resolved already, or a close");
+    }
+    throw error;
+  }
+}
+
+/**
+ * «Снять с очереди все отказы смены» (plan ОЧ, after a restore of the host):
+ * every unresolved refused record of the shift — never its close, never a
+ * conflict, never another pairing's — is marked `dismissed` with who and when
+ * in one statement, so a shift the restored host does not know is not taken
+ * off record by record. `expected` is the number the person confirmed: any
+ * other number of records (a refusal that arrived since, one resolved
+ * meanwhile), or none at all, writes nothing and is a `StaleQueueError`. A
+ * refused close stays: it only goes again (О3).
+ */
+export async function dismissShiftRefusals(
+  context: RecoveryContext,
+  shiftId: string,
+  expected: number,
+): Promise<void> {
+  if (expected < 1) {
+    throw new StaleQueueError("no refused record of the shift to take off");
+  }
+  const { local, pairing } = context;
+  try {
+    await local.transaction([
+      {
+        sql: DISMISS_SHIFT_SQL,
+        values: [
+          context.now().toISOString(),
+          context.operatorId,
+          pairing.hostId,
+          pairing.deviceId,
+          shiftId,
+        ],
+        expectedChanges: expected,
+      },
+    ]);
+  } catch (error) {
+    if (error instanceof LocalDbError && error.code === "changes_mismatch") {
+      throw new StaleQueueError("the shift's refusals changed meanwhile");
     }
     throw error;
   }

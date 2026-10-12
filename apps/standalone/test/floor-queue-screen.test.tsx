@@ -566,8 +566,8 @@ describe("the queue screen", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Снять с очереди" }));
     await confirmation();
     const buttons = screen.getAllByRole("button");
-    // Back, send again, take off, settle, and the confirmation's two.
-    expect(buttons).toHaveLength(6);
+    // Back, send again, take off, take off the shift's, settle, and the confirmation's two.
+    expect(buttons).toHaveLength(7);
     for (const button of buttons)
       expect(button.className, button.textContent ?? "").toContain("mk-btn--floor");
   });
@@ -749,5 +749,224 @@ describe("the queue screen", () => {
       "scan",
       "shift_closed",
     ]);
+  });
+});
+
+// The final review's I-1: after a restore of the host a shift the copy does not know is refused
+// on every record. The screen lists a bounded part of each shift and counts the rest, and one
+// decision takes off all of a shift's refusals but its close.
+describe("the queue screen after a restore: a shift refused whole", () => {
+  const BULK = "Снять с очереди все отказы смены";
+
+  function refuseClose(db: ReturnType<typeof openLocalDb>["db"]) {
+    db.prepare(
+      "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, outcome_code, acked_at) " +
+        "VALUES ('close', ?, ?, 'shift_closed', ?, '{}', '2026-10-08T06:20:00.000Z', 'rejected', 'unknown_shift', '2026-10-08T06:30:00.000Z')",
+    ).run(PAIRING.hostId, PAIRING.deviceId, SHIFT_ID);
+  }
+
+  async function refusedWhole(n: number, withClose = true) {
+    const { db, local } = await station();
+    const ids = await unsentScans(local, n);
+    for (const id of ids) refuse(db, id, "rejected", "unknown_shift");
+    if (withClose) refuseClose(db);
+    return { db, local, ids };
+  }
+
+  it("lists the first 20 refused records of a shift and says how many more there are", async () => {
+    const { local } = await refusedWhole(25);
+    view(local);
+    expect(await screen.findByText("…и ещё 6")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Снять с очереди" })).toHaveLength(20);
+    expect(screen.getAllByText("Хост не знает эту смену")).toHaveLength(20);
+  });
+
+  it("says no more when the shift's records are all listed", async () => {
+    const { local } = await refusedWhole(19);
+    view(local);
+    await screen.findByRole("button", { name: BULK });
+    expect(screen.queryByText(/и ещё/)).toBeNull();
+    // Twenty listed, the close the twentieth: the button is never offered for it.
+    expect(screen.getAllByText("Хост не знает эту смену")).toHaveLength(20);
+    expect(screen.getAllByRole("button", { name: "Снять с очереди" })).toHaveLength(19);
+  });
+
+  it("counts every refused record of the shift in the question of «Отправить снова», also the ones not listed", async () => {
+    const { local } = await refusedWhole(25);
+    view(local);
+    fireEvent.click(await screen.findByRole("button", { name: "Отправить снова" }));
+    const confirm = await confirmation();
+    expect(within(confirm).getByText(/записи смены \(26\)/)).toBeTruthy();
+    expect(
+      within(confirm).getByText(`Смена ${ENTERED.number}: Скан — 25, Закрытие смены — 1.`),
+    ).toBeTruthy();
+  });
+
+  it("takes off every refusal of the shift but its close on one confirmation that names how many, the shift and that it cannot be undone", async () => {
+    const { db, local } = await refusedWhole(25);
+    const { onChanged } = view(local);
+    fireEvent.click(await screen.findByRole("button", { name: BULK }));
+    const confirm = await confirmation();
+    expect(
+      within(confirm).getByText(
+        `Снять с очереди все отказы смены ${ENTERED.number} (25), не отправляя? Хост их так и не получит. Вернуть их в очередь будет нельзя; станция запомнит, кто и когда их снял.`,
+      ),
+    ).toBeTruthy();
+    expect(within(confirm).getByText(`Смена ${ENTERED.number}: Скан — 25.`)).toBeTruthy();
+    expect(within(confirm).getByText(/закрытие смены этим не снимается/i)).toBeTruthy();
+    expect(within(confirm).getByText(/его можно только отправить снова/)).toBeTruthy();
+    const take = within(confirm).getByRole("button", { name: "Снять все (25)" });
+    expect(take.className).toContain("mk-btn--destructive");
+    expect(rows(db, "SELECT count(*) AS n FROM outbox WHERE resolution IS NOT NULL")).toEqual([
+      { n: 0 },
+    ]);
+    fireEvent.click(take);
+    const notice = await screen.findByText("Отказы смены сняты с очереди.");
+    await waitFor(() => expect(screen.queryByRole("button", { name: BULK })).toBeNull());
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    expect(
+      rows(
+        db,
+        "SELECT kind, resolution, resolved_by, resolved_at, count(*) AS n FROM outbox GROUP BY kind, resolution",
+      ),
+    ).toEqual([
+      {
+        kind: "scan",
+        resolution: "dismissed",
+        resolved_by: OPERATOR_ID,
+        resolved_at: NOW.toISOString(),
+        n: 25,
+      },
+      { kind: "shift_closed", resolution: null, resolved_by: null, resolved_at: null, n: 1 },
+    ]);
+    // The close is what stays, to be sent again.
+    expect(screen.getByText(/^Закрытие смены · /)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Отправить снова" })).toBeTruthy();
+    expect(screen.queryByText(/и ещё/)).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(notice));
+  });
+
+  it("says nothing of a close when the shift's close is not refused", async () => {
+    const { local } = await refusedWhole(2, false);
+    view(local);
+    fireEvent.click(await screen.findByRole("button", { name: BULK }));
+    const confirm = await confirmation();
+    expect(within(confirm).getByText(/все отказы смены .* \(2\)/)).toBeTruthy();
+    expect(within(confirm).queryByText(/закрытие смены/i)).toBeNull();
+  });
+
+  it("offers no taking off at once for a shift whose only refusal is its close", async () => {
+    const { local } = await refusedWhole(0);
+    view(local);
+    expect(await screen.findByText(/^Закрытие смены · /)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: BULK })).toBeNull();
+  });
+
+  it("writes nothing when a refusal arrived after the question opened, says the queue changed and reads it again", async () => {
+    const { db, local } = await refusedWhole(2, false);
+    const [late = ""] = await unsentScans(local, 1, PAIRING, 500);
+    const { onChanged } = view(local);
+    fireEvent.click(await screen.findByRole("button", { name: BULK }));
+    const confirm = await confirmation();
+    expect(within(confirm).getByRole("button", { name: "Снять все (2)" })).toBeTruthy();
+    refuse(db, late, "rejected", "unknown_shift");
+    fireEvent.click(within(confirm).getByRole("button", { name: "Снять все (2)" }));
+    expect(
+      await screen.findByText(
+        "Очередь изменилась, пока вы решали: список обновлён, проверьте его ещё раз.",
+      ),
+    ).toBeTruthy();
+    expect(rows(db, "SELECT count(*) AS n FROM outbox WHERE resolution IS NOT NULL")).toEqual([
+      { n: 0 },
+    ]);
+    expect(onChanged).toHaveBeenCalledTimes(1);
+    // Read again: three now, and a new question names them.
+    fireEvent.click(await screen.findByRole("button", { name: BULK }));
+    expect(
+      within(await confirmation()).getByRole("button", { name: "Снять все (3)" }),
+    ).toBeTruthy();
+  });
+
+  it("ignores a press on its confirmation for 400 ms after it opened", async () => {
+    const { db, local } = await refusedWhole(2, false);
+    const clock = { now: 20_000 };
+    view(local, { clock: () => clock.now });
+    fireEvent.click(await screen.findByRole("button", { name: BULK }));
+    const take = within(await confirmation()).getByRole("button", { name: "Снять все (2)" });
+    clock.now = 20_399;
+    fireEvent.click(take);
+    await act(async () => undefined);
+    expect(rows(db, "SELECT count(*) AS n FROM outbox WHERE resolution IS NOT NULL")).toEqual([
+      { n: 0 },
+    ]);
+    clock.now = 20_400;
+    fireEvent.click(take);
+    expect(await screen.findByText("Отказы смены сняты с очереди.")).toBeTruthy();
+    expect(rows(db, "SELECT count(*) AS n FROM outbox WHERE resolution = 'dismissed'")).toEqual([
+      { n: 2 },
+    ]);
+  });
+
+  it("closes its question when the shift's refusals were taken off meanwhile, and says the queue changed", async () => {
+    const { db, local } = await refusedWhole(2);
+    const { again } = view(local);
+    fireEvent.click(await screen.findByRole("button", { name: BULK }));
+    await confirmation();
+    db.prepare(
+      "UPDATE outbox SET resolution = 'dismissed', resolved_at = 'x', resolved_by = 'y' WHERE kind = 'scan'",
+    ).run();
+    again({ outboxVersion: 1 });
+    expect(
+      await screen.findByText(
+        "Очередь изменилась, пока вы решали: список обновлён, проверьте его ещё раз.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByRole("group", { name: "Подтверждение" })).toBeNull();
+    // The close stays.
+    expect(screen.getByText(/^Закрытие смены · /)).toBeTruthy();
+  });
+
+  it("never counts a shift below what it lists, though its count was read before a refusal landed", async () => {
+    const { db, local } = await refusedWhole(3, false);
+    // The counts answer as if none of the shift's refusals were there yet.
+    const early: LocalExecutor = {
+      query: async (sql, params, row) =>
+        sql.includes("GROUP BY shift_id, outcome, kind") ? [] : local.query(sql, params, row),
+      transaction: (statements) => local.transaction(statements),
+    };
+    view(early);
+    fireEvent.click(await screen.findByRole("button", { name: "Отправить снова" }));
+    expect(within(await confirmation()).getByText(/записи смены \(3\)/)).toBeTruthy();
+    // Nothing counted, nothing to take off at once.
+    expect(screen.queryByRole("button", { name: BULK })).toBeNull();
+    expect(rows(db, "SELECT count(*) AS n FROM outbox WHERE resolution IS NOT NULL")).toEqual([
+      { n: 0 },
+    ]);
+  });
+
+  it("names a shift's kinds in the order of their first record listed, the kinds not listed last", async () => {
+    const { db, local } = await refusedWhole(2, false);
+    db.prepare(
+      "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, outcome_code, acked_at) " +
+        "VALUES ('box', ?, ?, 'box_closed', ?, '{}', '2026-10-08T06:20:00.000Z', 'rejected', 'unknown_shift', '2026-10-08T06:30:00.000Z')",
+    ).run(PAIRING.hostId, PAIRING.deviceId, SHIFT_ID);
+    view(local);
+    fireEvent.click(await screen.findByRole("button", { name: BULK }));
+    expect(
+      within(await confirmation()).getByText(
+        `Смена ${ENTERED.number}: Скан — 2, Закрытие короба — 1.`,
+      ),
+    ).toBeTruthy();
+  });
+
+  it("lists the first 20 conflicts of a shift and says how many more there are", async () => {
+    const { db, local } = await station();
+    const ids = await unsentScans(local, 22);
+    for (const id of ids) refuse(db, id, "conflict", null);
+    view(local);
+    expect(await screen.findByText("…и ещё 2")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Разобрано" })).toHaveLength(20);
+    // A conflict is never taken off with a shift's refusals.
+    expect(screen.queryByRole("button", { name: BULK })).toBeNull();
   });
 });

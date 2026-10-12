@@ -14,12 +14,14 @@ import { VIEW_GUARD_MS } from "../print/LabelPanel.js";
 import { formatQuantity } from "../shifts/shift-text.js";
 import {
   dismissRecord,
+  dismissShiftRefusals,
   readQueue,
   resendRefused,
   StaleQueueError,
   UnreadableRecordError,
   type QueueView,
   type SettledRecord,
+  type SettledTally,
 } from "./outbox-recovery.js";
 
 export interface QueueScreenProps {
@@ -39,10 +41,17 @@ export interface QueueScreenProps {
   clock?: () => number;
 }
 
-/** What a person is asked: the refused records of a shift, or one record, by id. */
-type Pending = { kind: "resend"; shiftId: string } | { kind: "dismiss"; recordId: string };
+/**
+ * What a person is asked: the refused records of a shift sent again or all
+ * taken off but its close, or one record, by id.
+ */
+type Pending =
+  | { kind: "resend"; shiftId: string }
+  | { kind: "dismissShift"; shiftId: string }
+  | { kind: "dismiss"; recordId: string };
 
-type NoticeKind = "resent" | "dismissed" | "settled" | "stale" | "unreadable" | "local";
+type NoticeKind =
+  "resent" | "dismissed" | "dismissedShift" | "settled" | "stale" | "unreadable" | "local";
 /** `id` tells two notices of one kind apart: each takes the focus. */
 interface Notice {
   kind: NoticeKind;
@@ -97,11 +106,27 @@ function recordText(t: TFunction, record: SettledRecord): string {
 interface ShiftGroup {
   shiftId: string;
   shiftNumber: string | null;
+  /** The records listed: at most `QUEUE_LISTED_PER_SHIFT`. */
   records: SettledRecord[];
+  /** Every unresolved refused record of the shift, by kind, in the order of the first listed. */
+  kinds: SettledTally[];
+  /** How many refused records the shift holds: listed or not. */
+  total: number;
+  /** How many of them one decision takes off: every one but the close. */
+  dismissible: number;
+  /** Whether the shift's close is among them: it stays when the rest are taken off. */
+  closeRefused: boolean;
 }
 
-/** The refused records of each shift, in the order they were kept; the shift of the oldest first. */
-function byShift(records: readonly SettledRecord[]): ShiftGroup[] {
+/**
+ * The listed refused records of each shift, in the order they were kept, the
+ * shift of the oldest first, with the counts of all of them. The counts are
+ * another read than the list: a shift is never counted below what it lists.
+ */
+function byShift(
+  records: readonly SettledRecord[],
+  tallies: readonly SettledTally[],
+): ShiftGroup[] {
   const groups = new Map<string, ShiftGroup>();
   for (const record of records) {
     const group = groups.get(record.shiftId);
@@ -110,23 +135,60 @@ function byShift(records: readonly SettledRecord[]): ShiftGroup[] {
         shiftId: record.shiftId,
         shiftNumber: record.shiftNumber,
         records: [record],
+        kinds: [],
+        total: 0,
+        dismissible: 0,
+        closeRefused: false,
       });
     } else {
       group.records.push(record);
     }
   }
+  for (const group of groups.values()) {
+    const order = [...new Set(group.records.map((record) => record.kind))];
+    group.kinds = tallies
+      .filter((tally) => tally.shiftId === group.shiftId && tally.outcome === "rejected")
+      .sort((a, b) => rank(order, a.kind) - rank(order, b.kind) || a.kind.localeCompare(b.kind));
+    const counted = group.kinds.reduce((sum, tally) => sum + tally.count, 0);
+    group.total = Math.max(counted, group.records.length);
+    group.dismissible = group.kinds
+      .filter((tally) => tally.kind !== "shift_closed")
+      .reduce((sum, tally) => sum + tally.count, 0);
+    group.closeRefused = group.kinds.some((tally) => tally.kind === "shift_closed");
+  }
   return [...groups.values()];
 }
 
-/** How many records of each kind a shift's group holds, as words: «Скан — 2, Закрытие смены — 1». */
-function kindsText(t: TFunction, records: readonly SettledRecord[]): string {
-  const counts = new Map<string, number>();
-  for (const record of records) counts.set(record.kind, (counts.get(record.kind) ?? 0) + 1);
-  return [...counts]
-    .map(([kind, n]) =>
-      t("floor.queue.kindCount", { kind: kindText(t, kind), n: formatQuantity(n) }),
+/** A kind listed first comes first; one not listed at all, after every listed one. */
+function rank(order: readonly string[], kind: string): number {
+  const at = order.indexOf(kind);
+  return at < 0 ? order.length : at;
+}
+
+/** How many records of each kind, as words: «Скан — 2, Закрытие смены — 1». */
+function kindsText(t: TFunction, kinds: readonly SettledTally[]): string {
+  return kinds
+    .map((tally) =>
+      t("floor.queue.kindCount", { kind: kindText(t, tally.kind), n: formatQuantity(tally.count) }),
     )
     .join(", ");
+}
+
+/** How many conflicts the list leaves out: each shift's count beyond the ones it lists. */
+function conflictsBeyond(
+  listed: readonly SettledRecord[],
+  tallies: readonly SettledTally[],
+): number {
+  const counted = new Map<string, number>();
+  for (const tally of tallies) {
+    if (tally.outcome !== "conflict") continue;
+    counted.set(tally.shiftId, (counted.get(tally.shiftId) ?? 0) + tally.count);
+  }
+  const shown = new Map<string, number>();
+  for (const record of listed) shown.set(record.shiftId, (shown.get(record.shiftId) ?? 0) + 1);
+  let beyond = 0;
+  for (const [shiftId, n] of counted) beyond += Math.max(0, n - (shown.get(shiftId) ?? 0));
+  return beyond;
 }
 
 /**
@@ -135,8 +197,13 @@ function kindsText(t: TFunction, records: readonly SettledRecord[]): string {
  * refused records by shift, each with its reason in words, and its conflicts —
  * never a code of marking, the SSCC of the box or pallet only; and the records
  * an older pairing left, which are read only (they cannot be sent from here).
+ * Each shift lists its first `QUEUE_LISTED_PER_SHIFT` refused records and
+ * says how many more there are («и ещё N»; the conflicts the same way), so a
+ * shift a restored host refuses whole stays readable.
  * A person resolves them: «Отправить снова» sends a shift's refused records
- * again, «Снять с очереди» takes a refused record off (never a close), and
+ * again, «Снять с очереди» takes a refused record off (never a close),
+ * «Снять с очереди все отказы смены» takes off every refused record of the
+ * shift but its close in one decision that names how many, and
  * «Разобрано» settles a conflict — each only after a confirmation that says
  * what is done to what and what follows, which takes the focus (Escape and
  * «Отмена» leave it, giving the focus back) and ignores a press for
@@ -208,17 +275,26 @@ export function QueueScreen({
     view === null ? [] : view.settled.filter((record) => record.outcome === "rejected");
   const conflicts =
     view === null ? [] : view.settled.filter((record) => record.outcome === "conflict");
-  const groups = byShift(refused);
+  const groups = byShift(refused, view?.tallies ?? []);
+  const conflictsHidden = view === null ? 0 : conflictsBeyond(conflicts, view.tallies);
 
   // What the question names, as the queue holds it now: `null` when it is gone.
   const resending =
     pending?.kind === "resend" ? (groups.find((g) => g.shiftId === pending.shiftId) ?? null) : null;
+  const clearing =
+    pending?.kind === "dismissShift"
+      ? (groups.find((g) => g.shiftId === pending.shiftId && g.dismissible > 0) ?? null)
+      : null;
   const dismissing =
     pending?.kind === "dismiss"
       ? (view?.settled.find((record) => record.id === pending.recordId) ?? null)
       : null;
   const targetGone =
-    pending !== null && queue !== "loading" && resending === null && dismissing === null;
+    pending !== null &&
+    queue !== "loading" &&
+    resending === null &&
+    clearing === null &&
+    dismissing === null;
   const unreadable = queue === "failed";
 
   const say = useCallback((kind: NoticeKind) => {
@@ -268,6 +344,10 @@ export function QueueScreen({
       if (step.kind === "resend") {
         await resendRefused(context, step.shiftId);
         outcome = "resent";
+      } else if (step.kind === "dismissShift") {
+        // The number the confirmation names: any other number now writes nothing.
+        await dismissShiftRefusals(context, step.shiftId, clearing?.dismissible ?? 0);
+        outcome = "dismissedShift";
       } else {
         await dismissRecord(context, step.recordId);
         outcome = dismissing?.outcome === "conflict" ? "settled" : "dismissed";
@@ -370,6 +450,13 @@ export function QueueScreen({
                         </li>
                       ))}
                     </ul>
+                    {group.total > group.records.length && (
+                      <p>
+                        {t("floor.queue.more", {
+                          n: formatQuantity(group.total - group.records.length),
+                        })}
+                      </p>
+                    )}
                     <Button
                       size="floor"
                       disabled={busy}
@@ -379,6 +466,18 @@ export function QueueScreen({
                     >
                       {t("floor.queue.resend")}
                     </Button>
+                    {group.dismissible > 0 && (
+                      <Button
+                        size="floor"
+                        variant="secondary"
+                        disabled={busy}
+                        onClick={(event) =>
+                          ask({ kind: "dismissShift", shiftId: group.shiftId }, event.currentTarget)
+                        }
+                      >
+                        {t("floor.queue.dismissShift")}
+                      </Button>
+                    )}
                   </section>
                 ))
               )}
@@ -410,10 +509,13 @@ export function QueueScreen({
                   ))}
                 </ul>
               )}
+              {conflictsHidden > 0 && (
+                <p>{t("floor.queue.more", { n: formatQuantity(conflictsHidden) })}</p>
+              )}
             </section>
           </>
         )}
-        {pending !== null && (resending !== null || dismissing !== null) && (
+        {pending !== null && (resending !== null || clearing !== null || dismissing !== null) && (
           <div
             ref={confirmRef}
             tabIndex={-1}
@@ -423,15 +525,32 @@ export function QueueScreen({
           >
             {resending !== null ? (
               <>
-                <p>
-                  {t("floor.queue.confirmResend", { n: formatQuantity(resending.records.length) })}
-                </p>
+                <p>{t("floor.queue.confirmResend", { n: formatQuantity(resending.total) })}</p>
                 <p>
                   {t("floor.queue.confirmResendWhat", {
                     number: resending.shiftNumber ?? "—",
-                    kinds: kindsText(t, resending.records),
+                    kinds: kindsText(t, resending.kinds),
                   })}
                 </p>
+              </>
+            ) : clearing !== null ? (
+              <>
+                <p>
+                  {t("floor.queue.confirmDismissShift", {
+                    number: clearing.shiftNumber ?? "—",
+                    n: formatQuantity(clearing.dismissible),
+                  })}
+                </p>
+                <p>
+                  {t("floor.queue.confirmResendWhat", {
+                    number: clearing.shiftNumber ?? "—",
+                    kinds: kindsText(
+                      t,
+                      clearing.kinds.filter((tally) => tally.kind !== "shift_closed"),
+                    ),
+                  })}
+                </p>
+                {clearing.closeRefused && <p>{t("floor.queue.confirmDismissShiftClose")}</p>}
               </>
             ) : dismissing !== null ? (
               <>
@@ -454,7 +573,7 @@ export function QueueScreen({
               <Button
                 size="floor"
                 variant={
-                  dismissing !== null && dismissing.outcome === "rejected"
+                  clearing !== null || (dismissing !== null && dismissing.outcome === "rejected")
                     ? "destructive"
                     : "primary"
                 }
@@ -463,9 +582,13 @@ export function QueueScreen({
               >
                 {resending !== null
                   ? t("floor.queue.resendConfirm")
-                  : dismissing?.outcome === "conflict"
-                    ? t("floor.queue.settleConfirm")
-                    : t("floor.queue.dismissConfirm")}
+                  : clearing !== null
+                    ? t("floor.queue.dismissShiftConfirm", {
+                        n: formatQuantity(clearing.dismissible),
+                      })
+                    : dismissing?.outcome === "conflict"
+                      ? t("floor.queue.settleConfirm")
+                      : t("floor.queue.dismissConfirm")}
               </Button>
               <Button size="floor" variant="secondary" disabled={busy} onClick={cancel}>
                 {t("floor.queue.cancel")}

@@ -13,6 +13,8 @@ import {
 } from "../src/floor/facts.js";
 import {
   dismissRecord,
+  dismissShiftRefusals,
+  QUEUE_LISTED_PER_SHIFT,
   readQueue,
   readStrandedRecords,
   RESEND_CHUNK,
@@ -785,6 +787,234 @@ describe("«Снять с очереди», beyond the plan's example", () => {
     await sendFactBatch(local, PAIRING, send, steppingClock());
     await sendFactBatch(local, PAIRING, send, steppingClock());
     expect(sent).toEqual([[waiting, "00000000-0000-4000-8000-f00000000001"]]);
+  });
+});
+
+// The final review's I-1: after a restore of the host a shift the copy does not know is refused
+// on every record. The screen lists a bounded part of it and counts the rest; one decision takes
+// off all of a shift's refusals but its close.
+async function keepClose(local: LocalExecutor, id = CLOSE_ID, shiftId = SHIFT_ID): Promise<string> {
+  return keep(
+    local,
+    shiftClosedRecord(
+      { id, shiftId, operatorId: OPERATOR_ID },
+      {
+        plannedQtySnapshot: 1200,
+        actualQty: 0,
+        closedBoxCount: 0,
+        reasonCode: null,
+        closedAt: AT,
+      },
+    ),
+  );
+}
+
+describe("the queue screen's bounded list and its counts (final review I-1)", () => {
+  it("lists the first QUEUE_LISTED_PER_SHIFT refused records of each shift in the order kept, and counts every one by kind", async () => {
+    const { db, local } = await station();
+    const ids = await unsentScans(local, QUEUE_LISTED_PER_SHIFT + 5, PAIRING, 1000);
+    const close = await keepClose(local);
+    const elsewhere = await keep(
+      local,
+      scanOf("00000000-0000-4000-8000-0000000000a1", OTHER_SHIFT),
+    );
+    settle(db, [...ids, close, elsewhere], "rejected", "unknown_shift");
+    const view = await readQueue(local, PAIRING);
+    expect(view.settled.map((record) => record.id)).toEqual([
+      ...ids.slice(0, QUEUE_LISTED_PER_SHIFT),
+      elsewhere,
+    ]);
+    expect(
+      [...view.tallies].sort(
+        (a, b) => a.shiftId.localeCompare(b.shiftId) || a.kind.localeCompare(b.kind),
+      ),
+    ).toEqual(
+      [
+        { shiftId: OTHER_SHIFT, outcome: "rejected", kind: "scan", count: 1 },
+        { shiftId: SHIFT_ID, outcome: "rejected", kind: "scan", count: ids.length },
+        { shiftId: SHIFT_ID, outcome: "rejected", kind: "shift_closed", count: 1 },
+      ].sort((a, b) => a.shiftId.localeCompare(b.shiftId) || a.kind.localeCompare(b.kind)),
+    );
+  });
+
+  it("bounds the refused records and the conflicts of a shift each on their own", async () => {
+    const { db, local } = await station();
+    const refused = await unsentScans(local, QUEUE_LISTED_PER_SHIFT + 1, PAIRING, 1100);
+    // Kept after every refusal: bound together with them it would be the 22nd of the shift.
+    const conflicts = await unsentScans(local, QUEUE_LISTED_PER_SHIFT + 1, PAIRING, 1200);
+    settle(db, refused, "rejected", "not_entered");
+    settle(db, conflicts, "conflict");
+    const view = await readQueue(local, PAIRING);
+    expect(view.settled.map((record) => record.id)).toEqual([
+      ...refused.slice(0, QUEUE_LISTED_PER_SHIFT),
+      ...conflicts.slice(0, QUEUE_LISTED_PER_SHIFT),
+    ]);
+    expect(view.tallies.map((tally) => [tally.outcome, tally.count]).sort()).toEqual([
+      ["conflict", QUEUE_LISTED_PER_SHIFT + 1],
+      ["rejected", QUEUE_LISTED_PER_SHIFT + 1],
+    ]);
+  });
+
+  it("counts nothing resolved, nothing waiting or accepted, and nothing of another pairing", async () => {
+    const { db, local } = await station();
+    const [refused = "", resolved = "", accepted = ""] = await unsentScans(local, 4, PAIRING, 1300);
+    const [theirs = ""] = await unsentScans(local, 1, OTHER_PAIRING, 1350);
+    const [otherHost = ""] = await unsentScans(local, 1, OTHER_HOST_PAIRING, 1360);
+    settle(db, [refused, resolved, theirs, otherHost], "rejected", "not_entered");
+    settle(db, [accepted], "accepted");
+    db.prepare(
+      "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = ? WHERE id = ?",
+    ).run(AT, OPERATOR_ID, resolved);
+    const view = await readQueue(local, PAIRING);
+    expect(view.tallies).toEqual([
+      { shiftId: SHIFT_ID, outcome: "rejected", kind: "scan", count: 1 },
+    ]);
+    expect(view.settled.map((record) => record.id)).toEqual([refused]);
+  });
+});
+
+describe("«Снять с очереди все отказы смены» (final review I-1)", () => {
+  it("takes off every refused record of the shift in one statement, with who and when, and leaves its close", async () => {
+    const { db, local } = await station();
+    const ids = await unsentScans(local, QUEUE_LISTED_PER_SHIFT + 5, PAIRING, 2000);
+    const close = await keepClose(local);
+    settle(db, [...ids, close], "rejected", "unknown_shift");
+    const transaction = vi.spyOn(local, "transaction");
+    await dismissShiftRefusals(context(local), SHIFT_ID, ids.length);
+    expect(transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.mock.calls[0]?.[0]).toHaveLength(1);
+    expect(
+      rows(
+        db,
+        "SELECT DISTINCT resolution, resent_as, resolved_at, resolved_by FROM outbox WHERE kind = 'scan'",
+      ),
+    ).toEqual([
+      {
+        resolution: "dismissed",
+        resent_as: null,
+        resolved_at: NOW.toISOString(),
+        resolved_by: OPERATOR_ID,
+      },
+    ]);
+    expect(
+      rows(db, "SELECT resolution, resolved_at, resolved_by FROM outbox WHERE id = ?", close),
+    ).toEqual([{ resolution: null, resolved_at: null, resolved_by: null }]);
+    expectTied(db);
+    const view = await readQueue(local, PAIRING);
+    expect(view.settled.map((record) => record.id)).toEqual([close]);
+    expect(view.tallies).toEqual([
+      { shiftId: SHIFT_ID, outcome: "rejected", kind: "shift_closed", count: 1 },
+    ]);
+  });
+
+  it("takes nothing of another pairing or another shift, nothing resolved, waiting, accepted or in conflict", async () => {
+    const { db, local } = await station();
+    const [mine = "", resent = "", dismissed = "", waiting = "", accepted = "", conflict = ""] =
+      await unsentScans(local, 6, PAIRING, 2100);
+    const [theirs = ""] = await unsentScans(local, 1, OTHER_PAIRING, 2150);
+    const [otherHost = ""] = await unsentScans(local, 1, OTHER_HOST_PAIRING, 2160);
+    const elsewhere = await keep(
+      local,
+      scanOf("00000000-0000-4000-8000-0000000000a1", OTHER_SHIFT),
+    );
+    settle(db, [mine, resent, dismissed, theirs, otherHost, elsewhere], "rejected", "not_entered");
+    settle(db, [accepted], "accepted");
+    settle(db, [conflict], "conflict");
+    db.prepare(
+      "UPDATE outbox SET resolution = 'resent', resent_as = 'copy', resolved_at = ?, resolved_by = 'earlier' WHERE id = ?",
+    ).run(AT, resent);
+    db.prepare(
+      "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = 'earlier' WHERE id = ?",
+    ).run(AT, dismissed);
+    const before = rows(db, "SELECT * FROM outbox WHERE id <> ? ORDER BY seq", mine);
+    await dismissShiftRefusals(context(local), SHIFT_ID, 1);
+    expect(rows(db, "SELECT * FROM outbox WHERE id <> ? ORDER BY seq", mine)).toEqual(before);
+    expect(rows(db, "SELECT resolution FROM outbox WHERE id = ?", mine)).toEqual([
+      { resolution: "dismissed" },
+    ]);
+    // The record still waiting for its receipt is among the untouched.
+    expect(rows(db, "SELECT outcome, resolution FROM outbox WHERE id = ?", waiting)).toEqual([
+      { outcome: null, resolution: null },
+    ]);
+  });
+
+  it("writes nothing when the number confirmed no longer holds: a refusal arrived since, or one was resolved", async () => {
+    const { db, local } = await station();
+    const [one = "", two = "", three = ""] = await unsentScans(local, 3, PAIRING, 2200);
+    settle(db, [one, two], "rejected", "unknown_shift");
+    // The person saw two; a third refusal landed before the press.
+    settle(db, [three], "rejected", "unknown_shift");
+    await expect(dismissShiftRefusals(context(local), SHIFT_ID, 2)).rejects.toBeInstanceOf(
+      StaleQueueError,
+    );
+    expect(count(db, "resolution IS NOT NULL")).toBe(0);
+    // And one fewer than confirmed.
+    db.prepare(
+      "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = ? WHERE id = ?",
+    ).run(AT, OPERATOR_ID, three);
+    await expect(dismissShiftRefusals(context(local), SHIFT_ID, 3)).rejects.toBeInstanceOf(
+      StaleQueueError,
+    );
+    expect(count(db, "resolution IS NOT NULL")).toBe(1);
+    expectTied(db);
+  });
+
+  it("takes off a shift's refusals once: two presses together write one decision, the second finds the queue changed", async () => {
+    const { db, local } = await station();
+    const ids = await unsentScans(local, 3, PAIRING, 2300);
+    settle(db, ids, "rejected", "unknown_shift");
+    const results = await Promise.allSettled([
+      dismissShiftRefusals(context(local), SHIFT_ID, 3),
+      dismissShiftRefusals({ ...context(local), operatorId: "someone-else" }, SHIFT_ID, 3),
+    ]);
+    expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
+    const lost = results.find((result) => result.status === "rejected");
+    expect(lost?.status === "rejected" ? lost.reason : null).toBeInstanceOf(StaleQueueError);
+    expect(rows(db, "SELECT DISTINCT resolved_by FROM outbox")).toHaveLength(1);
+    expectTied(db);
+  });
+
+  it("is never a success for nothing: a shift with only its refused close, or a number below one, writes nothing", async () => {
+    const { db, local } = await station();
+    const close = await keepClose(local);
+    settle(db, [close], "rejected", "unknown_shift");
+    for (const expected of [0, -1]) {
+      await expect(
+        dismissShiftRefusals(context(local), SHIFT_ID, expected),
+        String(expected),
+      ).rejects.toBeInstanceOf(StaleQueueError);
+    }
+    await expect(dismissShiftRefusals(context(local), SHIFT_ID, 1)).rejects.toBeInstanceOf(
+      StaleQueueError,
+    );
+    expect(count(db, "resolution IS NOT NULL")).toBe(0);
+  });
+
+  it("passes a failure of the database on as it is", async () => {
+    const { db, local } = await station();
+    const ids = await unsentScans(local, 2, PAIRING, 2400);
+    settle(db, ids, "rejected", "unknown_shift");
+    const failing: LocalExecutor = {
+      query: (sql, params, row) => local.query(sql, params, row),
+      transaction: async () => {
+        throw new LocalDbError("statement_failed", "the disk went away");
+      },
+    };
+    await expect(
+      dismissShiftRefusals({ ...context(local), local: failing }, SHIFT_ID, 2),
+    ).rejects.toBeInstanceOf(LocalDbError);
+    expect(count(db, "resolution IS NOT NULL")).toBe(0);
+  });
+
+  it("never sends what it took off", async () => {
+    const { db, local } = await station();
+    const ids = await unsentScans(local, 2, PAIRING, 2500);
+    settle(db, ids, "rejected", "unknown_shift");
+    await dismissShiftRefusals(context(local), SHIFT_ID, 2);
+    const send = vi.fn(async (): Promise<FactReceipt[]> => []);
+    await sendFactBatch(local, PAIRING, send, steppingClock());
+    expect(send).not.toHaveBeenCalled();
+    expect(count(db, "acked_at IS NULL")).toBe(0);
   });
 });
 

@@ -40,8 +40,10 @@ import {
 } from "../src/floor/pallets/pallets.js";
 import { OPEN_JOB_READ_SQL } from "../src/floor/print/print-jobs.js";
 import {
+  DISMISS_SHIFT_SQL,
   DISMISS_SQL,
   QUEUE_SETTLED_SQL,
+  QUEUE_TALLY_SQL,
   QUEUE_UNSENT_SQL,
   RESEND_INSERT_SQL,
   RESEND_MARK_SQL,
@@ -1326,16 +1328,31 @@ describe("the shape of the production tables (migration 0006)", () => {
     expect(unsent.filter((step) => step.startsWith("SCAN ") || step.includes("TEMP"))).toEqual([
       "USE TEMP B-TREE FOR GROUP BY",
     ]);
-    const settled = plan(QUEUE_SETTLED_SQL);
-    for (const index of [
-      "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
-      "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
-      "sqlite_autoindex_floor_boxes_1 (id=?)",
-      "sqlite_autoindex_floor_pallets_1 (id=?)",
-    ]) {
-      expect(settled.join("\n"), index).toContain(index);
-    }
-    expect(settled.filter((step) => step.startsWith("SCAN ") || step.includes("TEMP"))).toEqual([]);
+    // The bounded list (final review I-1): the pairing's unresolved refused and conflicting
+    // records from their partial index, numbered per shift and outcome in one sort; only the
+    // rows within the bound are looked up by `seq` and joined. Its only walks are over the
+    // numbered rows themselves.
+    expect(plan(QUEUE_SETTLED_SQL)).toEqual([
+      "CO-ROUTINE f",
+      "CO-ROUTINE (subquery-3)",
+      "SEARCH outbox USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+      "USE TEMP B-TREE FOR ORDER BY",
+      "SCAN (subquery-3)",
+      "SCAN f",
+      "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)",
+      "SEARCH s USING INDEX sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?) LEFT-JOIN",
+      "SEARCH b USING INDEX sqlite_autoindex_floor_boxes_1 (id=?) LEFT-JOIN",
+      "SEARCH p USING INDEX sqlite_autoindex_floor_pallets_1 (id=?) LEFT-JOIN",
+    ]);
+    // The counts beside it, and the decision on a whole shift: the same partial index, the
+    // pairing's refused (or conflicting) records only, never the shift's accepted ones.
+    expect(plan(QUEUE_TALLY_SQL)).toEqual([
+      "SEARCH outbox USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+      "USE TEMP B-TREE FOR GROUP BY",
+    ]);
+    expect(plan(DISMISS_SHIFT_SQL)).toEqual([
+      "SEARCH outbox USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+    ]);
     for (const sql of [RESEND_INSERT_SQL, RESEND_MARK_SQL, DISMISS_SQL]) {
       expect(plan(sql).join("\n"), sql).toContain("sqlite_autoindex_outbox_1 (id=?)");
     }
@@ -1361,8 +1378,10 @@ describe("the shape of the production tables (migration 0006)", () => {
       RESEND_MARK_SQL,
       DISMISS_SQL,
       STRANDED_COUNT_SQL,
+      QUEUE_TALLY_SQL,
+      DISMISS_SHIFT_SQL,
     ];
-    expect(new Set(statements).size).toBe(7);
+    expect(new Set(statements).size).toBe(9);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
   });
 });

@@ -3503,7 +3503,14 @@ with the oldest one's wait, its refused records by shift with the reason in
 words (`floor.queue.code.*`, one per `FACT_RECEIPT_CODES` entry; a test fails
 for a code without words) and its conflicts — never a code of marking, only the
 SSCC of the box or pallet a record names — and the records an older pairing
-left unsent.
+left unsent. Each shift lists its first `QUEUE_LISTED_PER_SHIFT` (20) refused
+records and as many conflicts, then «…и ещё N»: the list is numbered per shift
+and outcome in SQL (`QUEUE_SETTLED_SQL`, a window over the partial index
+`outbox_settled`; only the rows within the bound are joined and their payloads
+read) and the counts come from their own statement (`QUEUE_TALLY_SQL`), both
+pinned on both SQLite builds. A restored host refuses a shift its copy does
+not know on every record, thousands, and the screen reads again on every batch
+of receipts.
 
 A person resolves them (`src/floor/queue/outbox-recovery.ts`, migration
 `0013`), always after a confirmation that says what follows and takes the
@@ -3524,7 +3531,22 @@ focus, and the row keeps who and when (`resolution`, `resolved_by`,
   `targetScannedAt` and a clear by its cutoff (plan 2a2).
 - «Снять с очереди» (a refused record) and «Разобрано» (a conflict) —
   `dismissRecord` — mark the record `dismissed`; a shift's close cannot be
-  taken off (its card names the refusal; the office closes the shift).
+  taken off (its card names the refusal). The office can close a shift the
+  host knows; a close refused `unknown_shift` or `not_entered` after a restore
+  names a shift the host does not have, so nobody can close it there and
+  sending it again is refused again: it stays on the station, holds the shift
+  from the retention and counts on the status bar. Whether such a close may be
+  taken off is an open owner question; the runbook sends the engineer to the
+  developer.
+- «Снять с очереди все отказы смены» (`dismissShiftRefusals`) takes off every
+  unresolved refused record of one shift but its close, of this pairing only,
+  in one guarded `UPDATE` (`DISMISS_SHIFT_SQL`, `outbox_settled`) that writes
+  `resolution`, `resolved_at` and `resolved_by` together. Its confirmation
+  names the shift and the count, says the close stays and that it cannot be
+  undone; the count is the statement's `expectedChanges`, so a refusal that
+  arrived since or one resolved meanwhile writes nothing (`StaleQueueError`),
+  and a count below one is never a success. Conflicts are never taken off with
+  it.
 
 A resolved record no longer counts on the status bar, is not named as a
 refused close, is not reopened by a restore's reconciliation (`REOPEN_SQL`),
@@ -3559,7 +3581,9 @@ Known limits of the queue screen, none of it hidden by a green test:
 - The stock texts say «меньше четверти / десятой части» while the threshold is
   inclusive (exactly 25 % or 10 % warns); the tests pin the thresholds.
 - A queue screen's refusal list cannot send a single record again, nor take
-  off a refused close; both are out of scope (the office closes the shift).
+  off a refused close. The office closes a shift the host knows; a close
+  refused because the restored host does not know the shift stays (one per
+  such shift) until the owner decides whether it may be taken off.
 - Not run: Windows, WebView2, a real touch panel (the 64 px of the floor
   buttons is asserted by class in jsdom and pinned by the
   `tools/production-browser` contract, which this plan did not run), a real

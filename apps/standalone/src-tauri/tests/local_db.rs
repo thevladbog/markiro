@@ -1473,15 +1473,29 @@ const RESTORE_SETTLE: &str =
 const QUEUE_UNSENT: &str =
     "SELECT kind, count(*) AS n, min(created_at) AS oldest FROM outbox WHERE host_id = ? \
      AND device_id = ? AND acked_at IS NULL GROUP BY kind";
+/// The bounded list (the final review's I-1): at most the bound of each shift's refused and of its
+/// conflicting records, numbered in one sort; only those are looked up and joined.
 const QUEUE_SETTLED: &str =
     "SELECT o.id, o.seq, o.kind, o.shift_id, s.number AS shift_number, o.created_at, o.outcome, \
      o.outcome_code AS code, coalesce(o.payload ->> '$.data.sscc', b.sscc, p.sscc) AS sscc \
-     FROM outbox o LEFT JOIN floor_shifts s ON s.host_id = o.host_id \
+     FROM (SELECT seq, row_number() OVER (PARTITION BY shift_id, outcome ORDER BY seq) AS place \
+     FROM outbox WHERE host_id = ? AND device_id = ? AND outcome IN ('rejected', 'conflict') \
+     AND resolved_at IS NULL) AS f JOIN outbox o ON o.seq = f.seq \
+     LEFT JOIN floor_shifts s ON s.host_id = o.host_id \
      AND s.device_id = o.device_id AND s.id = o.shift_id \
      LEFT JOIN floor_boxes b ON b.id = (o.payload ->> '$.data.boxId') \
      LEFT JOIN floor_pallets p ON p.id = (o.payload ->> '$.data.palletId') \
-     WHERE o.host_id = ? AND o.device_id = ? AND o.outcome IN ('rejected', 'conflict') \
-     AND o.resolved_at IS NULL";
+     WHERE f.place <= ?";
+/// Every unresolved refused and conflicting record counted by shift, outcome and kind.
+const QUEUE_TALLY: &str =
+    "SELECT shift_id, outcome, kind, count(*) AS n FROM outbox WHERE host_id = ? \
+     AND device_id = ? AND outcome IN ('rejected', 'conflict') AND resolved_at IS NULL \
+     GROUP BY shift_id, outcome, kind";
+/// Every refused record of one shift taken off at once, never its close.
+const QUEUE_DISMISS_SHIFT: &str =
+    "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = ? \
+     WHERE host_id = ? AND device_id = ? AND shift_id = ? AND outcome = 'rejected' \
+     AND kind <> 'shift_closed' AND resolved_at IS NULL";
 const QUEUE_RESEND_READ: &str =
     "SELECT id, payload FROM outbox WHERE host_id = ? AND device_id = ? AND shift_id = ? \
      AND outcome = 'rejected' AND resolved_at IS NULL ORDER BY seq";
@@ -1608,7 +1622,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 98] = [
+    let reads: [(&str, &str); 99] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -2033,7 +2047,11 @@ async fn the_floors_repeating_reads_search_an_index() {
             "outbox_unsent (host_id=? AND device_id=?)",
         ),
         (
-            QUEUE_SETTLED,
+            QUEUE_TALLY,
+            "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+        ),
+        (
+            QUEUE_DISMISS_SHIFT,
             "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
         ),
         (
@@ -2144,6 +2162,38 @@ async fn the_floors_repeating_reads_search_an_index() {
         plan,
         ["SCAN outbox USING INDEX outbox_unsent"],
         "the stranded count should walk the unsent records only, its plan is {plan:?}"
+    );
+    // The queue screen's bounded list (the final review's I-1): the pairing's unresolved refused
+    // and conflicting records from their partial index, numbered per shift and outcome in one
+    // sort; its only walks are over the numbered rows, and only the rows within the bound are
+    // looked up by `seq` and joined.
+    let text = format!("EXPLAIN QUERY PLAN {QUEUE_SETTLED}");
+    let mut explain = sqlx::query(&text);
+    for _ in 0..QUEUE_SETTLED.matches('?').count() {
+        explain = explain.bind("x");
+    }
+    let plan: Vec<String> = explain
+        .fetch_all(&mut raw)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.get::<String, _>("detail"))
+        .collect();
+    assert_eq!(
+        plan,
+        [
+            "CO-ROUTINE f",
+            "CO-ROUTINE (subquery-3)",
+            "SEARCH outbox USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+            "USE TEMP B-TREE FOR ORDER BY",
+            "SCAN (subquery-3)",
+            "SCAN f",
+            "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH s USING INDEX sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?) LEFT-JOIN",
+            "SEARCH b USING INDEX sqlite_autoindex_floor_boxes_1 (id=?) LEFT-JOIN",
+            "SEARCH p USING INDEX sqlite_autoindex_floor_pallets_1 (id=?) LEFT-JOIN",
+        ],
+        "the bounded list should number the settled records only, its plan is {plan:?}"
     );
     // The one read of the floor that names no index: a pairing's waiting block
     // requests. The table holds at most one row per pairing and issuer prefix
