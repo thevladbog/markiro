@@ -101,6 +101,16 @@ const requestRow = z.object({
 });
 
 /**
+ * The newest block of the prefix and extension (the half rule's, and the
+ * status bar's measure of the stock); its text is pinned in both query-plan
+ * lists. Parameters: host id, device id, prefix, extension.
+ */
+export const NEWEST_BLOCK_SQL =
+  "SELECT from_serial, to_serial, next_serial FROM floor_sscc_blocks " +
+  "WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ? " +
+  "ORDER BY from_serial DESC LIMIT 1";
+
+/**
  * The half rule (stage 2a spec §5.7.4, decision 9): a block is wanted when
  * the station has none for the prefix, or the newest has less than half of
  * its serials left.
@@ -108,9 +118,7 @@ const requestRow = z.object({
 async function blockWanted(context: BlockContext): Promise<boolean> {
   const { local, pairing, issuerPrefix } = context;
   const [newest] = await local.query(
-    "SELECT from_serial, to_serial, next_serial FROM floor_sscc_blocks " +
-      "WHERE host_id = ? AND device_id = ? AND issuer_prefix = ? AND extension = ? " +
-      "ORDER BY from_serial DESC LIMIT 1",
+    NEWEST_BLOCK_SQL,
     [pairing.hostId, pairing.deviceId, issuerPrefix, extensionOf(context)],
     newestRow,
   );

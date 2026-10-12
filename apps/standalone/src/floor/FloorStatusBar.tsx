@@ -11,14 +11,17 @@ import type { LocalExecutor } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
 import { readRestoreStatus, type RestoreStatus } from "../local/restore-reconcile.js";
 import { readFloorPlace, type FloorPlace } from "./floor-status.js";
+import { readStrandedRecords } from "./queue/outbox-recovery.js";
 import {
+  readBlockDrops,
   readDeliveryStuck,
   readOutboxStatus,
-  readSerialsLeft,
-  SERIALS_LOW,
+  readShiftStock,
   waitUnits,
   type DeliveryStuck,
   type OutboxStatus,
+  type SerialStock,
+  type ShiftStock,
 } from "./outbox-status.js";
 import { readShiftCopy } from "./shifts/shift-copies.js";
 import { formatQuantity } from "./shifts/shift-text.js";
@@ -95,6 +98,19 @@ function stuckText(t: TFunction, stuck: DeliveryStuck): string {
       });
 }
 
+/** The warning of a stock of serials below `ok`, in the tone its level calls for. */
+function stockAlert(t: TFunction, what: "box" | "pallet", stock: SerialStock) {
+  if (stock.level === "ok") return null;
+  return (
+    <Alert
+      tone={stock.level === "last" || stock.level === "none" ? "error" : "warn"}
+      role="presentation"
+    >
+      {t(`floor.status.stock.${what}.${stock.level}`, { n: formatQuantity(stock.left) })}
+    </Alert>
+  );
+}
+
 /**
  * The floor's status bar (stage 1 spec §5.6, plan 1f2), after the cloud
  * station's `StatusBar` (`apps/station/src/ui/StatusBar.tsx`): the
@@ -117,7 +133,11 @@ function stuckText(t: TFunction, stuck: DeliveryStuck): string {
  * the failure does, and that the serials are running out or gone. Plan РК-С
  * adds, in the same region, that a host restored from a copy holds the
  * records, that the station still owes it its blocks, and how many blocks it
- * refused (their serials are no longer used), read with the outbox. While
+ * refused (their serials are no longer used), read with the outbox. Plan ОЧ:
+ * the serials of the boxes and, in a shift with pallets, of the pallets, warned
+ * at a quarter and a tenth of the newest block, at the last serial and at none;
+ * the blocks the host gave that the station did not take; and, as an item, the
+ * records an older pairing left unsent. While
  * the host's refusal waits nothing is sent, so the failure of an earlier send
  * is not news. A failed read of the copies leaves the names out, and of the
  * outbox or the serials their figures; the floor works on.
@@ -195,16 +215,16 @@ export function FloorStatusBar({
 
   // While delivery is stuck or the serials are running out the bar reads again on a timer.
   const [tick, setTick] = useState(0);
-  const [serials, setSerials] = useState<{ shiftId: string; left: number | null } | null>(null);
+  const [stock, setStock] = useState<{ shiftId: string; stock: ShiftStock | null } | null>(null);
   useEffect(() => {
     if (shiftId === null) return;
     let cancelled = false;
-    readSerialsLeft(local, { hostId, deviceId }, shiftId).then(
-      (left) => {
-        if (!cancelled) setSerials({ shiftId, left });
+    readShiftStock(local, { hostId, deviceId }, shiftId).then(
+      (next) => {
+        if (!cancelled) setStock({ shiftId, stock: next });
       },
       () => {
-        if (!cancelled) setSerials(null);
+        if (!cancelled) setStock(null);
       },
     );
     return () => {
@@ -212,8 +232,45 @@ export function FloorStatusBar({
     };
   }, [local, hostId, deviceId, shiftId, outboxVersion, tick]);
   // Only the shift on screen's serials: none after it is left.
-  const serialsLeft = serials !== null && serials.shiftId === shiftId ? serials.left : null;
-  const serialsRunningOut = serialsLeft !== null && serialsLeft <= SERIALS_LOW;
+  const shiftStock = stock !== null && stock.shiftId === shiftId ? stock.stock : null;
+  const serialsRunningOut =
+    shiftStock !== null &&
+    (shiftStock.boxes.level !== "ok" ||
+      (shiftStock.pallets !== null && shiftStock.pallets.level !== "ok"));
+
+  // The blocks the host gave and the station did not take (plan ОЧ), read with
+  // the outbox; the records an older pairing left unsent, read once per pairing
+  // (a walk of every pairing's unsent records, too dear for every scan).
+  const [drops, setDrops] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    readBlockDrops(local, { hostId, deviceId }).then(
+      (next) => {
+        if (!cancelled) setDrops(next);
+      },
+      () => {
+        if (!cancelled) setDrops(0);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [local, hostId, deviceId, outboxVersion]);
+  const [stranded, setStranded] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    readStrandedRecords(local, { hostId, deviceId }).then(
+      (next) => {
+        if (!cancelled) setStranded(next);
+      },
+      () => {
+        if (!cancelled) setStranded(0);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [local, hostId, deviceId]);
 
   const failing = factsFailure !== null;
   const [stuck, setStuck] = useState<DeliveryStuck | null>(null);
@@ -299,10 +356,16 @@ export function FloorStatusBar({
             <dd>{shiftNumber}</dd>
           </div>
         )}
-        {serialsLeft !== null && (
+        {shiftStock !== null && (
           <div className="floor-status__item">
             <dt>{t("floor.status.serials")}</dt>
-            <dd>{formatQuantity(serialsLeft)}</dd>
+            <dd>{formatQuantity(shiftStock.boxes.left)}</dd>
+          </div>
+        )}
+        {shiftStock !== null && shiftStock.pallets !== null && (
+          <div className="floor-status__item">
+            <dt>{t("floor.status.palletSerials")}</dt>
+            <dd>{formatQuantity(shiftStock.pallets.left)}</dd>
           </div>
         )}
         {outbox !== null && (
@@ -321,6 +384,12 @@ export function FloorStatusBar({
           <div className="floor-status__item">
             <dt>{t("floor.status.conflicts")}</dt>
             <dd>{formatQuantity(outbox.conflicts)}</dd>
+          </div>
+        )}
+        {stranded > 0 && (
+          <div className="floor-status__item">
+            <dt>{t("floor.status.stranded")}</dt>
+            <dd>{formatQuantity(stranded)}</dd>
           </div>
         )}
       </dl>
@@ -380,14 +449,13 @@ export function FloorStatusBar({
               {stuckText(t, stuck)}
             </Alert>
           )}
-          {serialsLeft !== null && serialsLeft === 0 && (
+          {shiftStock !== null && stockAlert(t, "box", shiftStock.boxes)}
+          {shiftStock !== null &&
+            shiftStock.pallets !== null &&
+            stockAlert(t, "pallet", shiftStock.pallets)}
+          {drops > 0 && (
             <Alert tone="error" role="presentation">
-              {t("floor.status.serialsNone")}
-            </Alert>
-          )}
-          {serialsLeft !== null && serialsLeft > 0 && serialsLeft <= SERIALS_LOW && (
-            <Alert tone="warn" role="presentation">
-              {t("floor.status.serialsLow", { n: serialsLeft })}
+              {t("floor.status.blockDrops", { n: formatQuantity(drops) })}
             </Alert>
           )}
         </div>

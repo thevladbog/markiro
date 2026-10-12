@@ -20,11 +20,12 @@ import {
 } from "../src/floor/exceptions/pallet-exceptions.js";
 import { outboxStatement, shiftClosedRecord } from "../src/floor/facts.js";
 import {
+  BLOCK_DROPS_COUNT_SQL,
   CONFLICT_COUNT_SQL,
   HEAD_RECORD_SQL,
   RECONCILED_AT_SQL,
   REJECTED_COUNT_SQL,
-  SHIFT_PREFIX_SQL,
+  SHIFT_STOCK_SQL,
   UNSENT_COUNT_SQL,
 } from "../src/floor/outbox-status.js";
 import { CLOSE_SUMMARY_SQL, REFUSED_CLOSES_SQL } from "../src/floor/close/shift-close.js";
@@ -47,7 +48,7 @@ import {
   RESEND_READ_SQL,
   STRANDED_COUNT_SQL,
 } from "../src/floor/queue/outbox-recovery.js";
-import { BLOCKS_WITH_ROOM_SQL } from "../src/floor/work/block-supply.js";
+import { BLOCKS_WITH_ROOM_SQL, NEWEST_BLOCK_SQL } from "../src/floor/work/block-supply.js";
 import { BOX_CODES_SQL, CLOSED_BOX_SQL } from "../src/floor/work/box-close.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
 import { attemptStatement, receiptStatements, UNSENT_SQL } from "../src/local/facts-sender.js";
@@ -73,14 +74,6 @@ const testModuleUrl = import.meta.url;
 
 const OTHER_DEVICE = "0e2b1f7a-6c1d-4b8e-9f3a-2d4c5b6a7e8f";
 const AT = "2026-10-09T08:00:00.000Z";
-/**
- * The count of the blocks a pairing's station did not take (migration `0013`, plan ОЧ): the
- * status bar's own statement comes with the plan's later task, and its reach is pinned here on
- * the table's key, the same text on the shell's SQLite in `tests/local_db.rs`.
- */
-const BLOCK_DROPS_COUNT_SQL =
-  "SELECT count(*) AS n FROM floor_block_drops WHERE host_id = ? AND device_id = ?";
-
 /** The tables of this device's own records (migrations `0006`–`0008` and `0013`; `TableClass::DeviceData`). */
 const DEVICE_TABLES = [
   "floor_block_drops",
@@ -786,7 +779,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       expect(plan(sql)).toContain("outbox_settled (host_id=? AND device_id=? AND outcome=?)");
     }
     expect(plan(HEAD_RECORD_SQL)).toContain("outbox_unsent (host_id=? AND device_id=?)");
-    expect(plan(SHIFT_PREFIX_SQL)).toContain(
+    expect(plan(SHIFT_STOCK_SQL)).toContain(
       "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
     );
     expect(plan(BLOCKS_WITH_ROOM_SQL)).toContain(
@@ -800,8 +793,9 @@ describe("the shape of the production tables (migration 0006)", () => {
       REJECTED_COUNT_SQL,
       CONFLICT_COUNT_SQL,
       HEAD_RECORD_SQL,
-      SHIFT_PREFIX_SQL,
+      SHIFT_STOCK_SQL,
       BLOCKS_WITH_ROOM_SQL,
+      BLOCK_DROPS_COUNT_SQL,
     ]) {
       expect(
         plan(sql)
@@ -994,12 +988,16 @@ describe("the shape of the production tables (migration 0006)", () => {
     // small table of requests (below).
     const prefixIndex =
       "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)";
+    expect(plan(NEWEST_BLOCK_SQL)).toContain(prefixIndex);
+    // The newest block is searched by the prefix's index and sorted by `from_serial` (a temp
+    // b-tree over the handful of blocks one prefix and extension of one pairing has ever been
+    // given, as the half rule has read it since plan 2a6; the status bar reads it alongside the
+    // count): a scan of the table is what must never appear.
     expect(
-      plan(
-        "SELECT from_serial, to_serial, next_serial FROM floor_sscc_blocks WHERE host_id = ? " +
-          "AND device_id = ? AND issuer_prefix = ? AND extension = ? ORDER BY from_serial DESC LIMIT 1",
-      ),
-    ).toContain(prefixIndex);
+      plan(NEWEST_BLOCK_SQL)
+        .split("\n")
+        .filter((step) => step.startsWith("SCAN ")),
+    ).toEqual([]);
     expect(
       plan(
         "SELECT 1 AS n FROM floor_sscc_blocks WHERE host_id = ? AND device_id = ? " +
@@ -1195,7 +1193,7 @@ describe("the shape of the production tables (migration 0006)", () => {
       REJECTED_COUNT_SQL,
       CONFLICT_COUNT_SQL,
       HEAD_RECORD_SQL,
-      SHIFT_PREFIX_SQL,
+      SHIFT_STOCK_SQL,
       BLOCKS_WITH_ROOM_SQL,
       CLOSED_BOX_SQL,
       BOX_CODES_SQL,
@@ -1220,8 +1218,9 @@ describe("the shape of the production tables (migration 0006)", () => {
       LAST_PALLET_JOB_SQL,
       NEWEST_PALLET_JOB_GUARD_SQL,
       BLOCK_DROPS_COUNT_SQL,
+      NEWEST_BLOCK_SQL,
     ];
-    expect(new Set(statements).size).toBe(29);
+    expect(new Set(statements).size).toBe(30);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
     // The retention pass's statements, as `tests/local_db.rs` plans them (the refused closes' read
     // among them): the long ones as constants, every table's delete by shift as a literal (each

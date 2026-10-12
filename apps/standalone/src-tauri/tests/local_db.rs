@@ -1800,7 +1800,7 @@ async fn the_floors_repeating_reads_search_an_index() {
             "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
         ),
         (
-            "SELECT snapshot ->> 'issuerPrefix' AS prefix FROM floor_shifts \
+            "SELECT snapshot ->> 'issuerPrefix' AS prefix, pallets_enabled FROM floor_shifts \
              WHERE host_id = ? AND device_id = ? AND id = ?",
             "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
         ),

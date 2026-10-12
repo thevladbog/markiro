@@ -4,8 +4,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   readDeliveryStuck,
+  readBlockDrops,
   readOutboxStatus,
-  readSerialsLeft,
+  readShiftStock,
+  stockLevel,
   waitUnits,
 } from "../src/floor/outbox-status.js";
 import { keepEnteredShift } from "../src/floor/shifts/shift-copies.js";
@@ -285,8 +287,8 @@ describe("the serials left for a shift", () => {
       to: 300,
       deviceId: OTHER_DEVICE.deviceId,
     });
-    await expect(readSerialsLeft(executor, PAIRING, ENTERED.id)).resolves.toBe(990);
-    await expect(readSerialsLeft(executor, OTHER_DEVICE, ENTERED.id)).resolves.toBe(70);
+    expect((await readShiftStock(executor, PAIRING, ENTERED.id))?.boxes.left).toBe(990);
+    expect((await readShiftStock(executor, OTHER_DEVICE, ENTERED.id))?.boxes.left).toBe(70);
   });
 
   it("are counted for boxes, not pallets, and a used-up block has none", async () => {
@@ -303,17 +305,17 @@ describe("the serials left for a shift", () => {
       to: 99,
       extension: 1,
     });
-    await expect(readSerialsLeft(executor, PAIRING, ENTERED.id)).resolves.toBe(0);
+    expect((await readShiftStock(executor, PAIRING, ENTERED.id))?.boxes.left).toBe(0);
   });
 
   it("are not known for a shift without a snapshot or without a copy", async () => {
     const { db, executor } = await twoPairings();
     seedBlock(db, { blockId: "00000000-0000-4000-8000-0000000000a1", from: 1, to: 100 });
-    await expect(readSerialsLeft(executor, PAIRING, "no-such-shift")).resolves.toBeNull();
+    await expect(readShiftStock(executor, PAIRING, "no-such-shift")).resolves.toBeNull();
     db.prepare(
       "UPDATE floor_shifts SET snapshot = NULL, entered_at = NULL WHERE device_id = ?",
     ).run(PAIRING.deviceId);
-    await expect(readSerialsLeft(executor, PAIRING, ENTERED.id)).resolves.toBeNull();
+    await expect(readShiftStock(executor, PAIRING, ENTERED.id)).resolves.toBeNull();
   });
 });
 
@@ -333,5 +335,135 @@ describe("resolved records (plan ОЧ)", () => {
       rejected: 1,
       conflicts: 1,
     });
+  });
+});
+
+describe("the stock of serials (pilot spec §9.3, plan ОЧ)", () => {
+  it("is low at a quarter and a tenth of the newest block, then at the last serial, then gone", () => {
+    expect(stockLevel(501, 2000)).toBe("ok");
+    expect(stockLevel(500, 2000)).toBe("quarter");
+    expect(stockLevel(201, 2000)).toBe("quarter");
+    expect(stockLevel(200, 2000)).toBe("tenth");
+    expect(stockLevel(2, 2000)).toBe("tenth");
+    expect(stockLevel(1, 2000)).toBe("last");
+    expect(stockLevel(0, 2000)).toBe("none");
+    // No block to measure by: only the last serial and none say anything.
+    expect(stockLevel(5, null)).toBe("ok");
+    expect(stockLevel(1, null)).toBe("last");
+  });
+
+  it("holds its boundaries on blocks of other sizes and on a count below zero", () => {
+    // A tenth and a quarter are compared whole, not rounded: 3 of 30 is a tenth, 4 of 30 a quarter.
+    expect(stockLevel(3, 30)).toBe("tenth");
+    expect(stockLevel(4, 30)).toBe("quarter");
+    expect(stockLevel(7, 30)).toBe("quarter");
+    expect(stockLevel(8, 30)).toBe("ok");
+    // A block of one: its one serial is the last one, not a tenth.
+    expect(stockLevel(1, 1)).toBe("last");
+    // A block with no size to measure by says nothing but the last serial and none.
+    expect(stockLevel(5, 0)).toBe("ok");
+    expect(stockLevel(5, -3)).toBe("ok");
+    expect(stockLevel(0, null)).toBe("none");
+    expect(stockLevel(-1, 2000)).toBe("none");
+    expect(stockLevel(0, 0)).toBe("none");
+  });
+
+  it("reads the boxes' serials of the shift and, for a shift with pallets, the pallets'", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, {
+      blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+      from: 1,
+      to: 2000,
+      next: 1601,
+    });
+    await expect(readShiftStock(executor, PAIRING, ENTERED.id)).resolves.toEqual({
+      boxes: { left: 400, level: "quarter" },
+      pallets: null,
+    });
+    db.prepare("UPDATE floor_shifts SET pallets_enabled = 1 WHERE id = ?").run(ENTERED.id);
+    seedBlock(db, {
+      blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b",
+      from: 1,
+      to: 200,
+      next: 200,
+      extension: 1,
+    });
+    await expect(readShiftStock(executor, PAIRING, ENTERED.id)).resolves.toEqual({
+      boxes: { left: 400, level: "quarter" },
+      pallets: { left: 1, level: "last" },
+    });
+    await expect(readShiftStock(executor, PAIRING, "no-such-shift")).resolves.toBeNull();
+  });
+
+  it("measures the level by the newest block of the prefix and the extension, its size whole", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    // An old block of 100 with 50 left and the newest of 2 000 with 101: 151 in all, a tenth of the newest.
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 100, next: 51 });
+    seedBlock(db, {
+      blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b",
+      from: 101,
+      to: 2100,
+      next: 2000,
+    });
+    const stock = await readShiftStock(executor, PAIRING, ENTERED.id);
+    expect(stock?.boxes).toEqual({ left: 151, level: "tenth" });
+    // The block's size counts its first serial: 500 of 2 000 is a quarter, 501 is not.
+    db.prepare(
+      "UPDATE floor_sscc_blocks SET next_serial = to_serial + 1 WHERE from_serial = 1",
+    ).run();
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1601 WHERE from_serial = 101").run();
+    expect((await readShiftStock(executor, PAIRING, ENTERED.id))?.boxes).toEqual({
+      left: 500,
+      level: "quarter",
+    });
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1600 WHERE from_serial = 101").run();
+    expect((await readShiftStock(executor, PAIRING, ENTERED.id))?.boxes).toEqual({
+      left: 501,
+      level: "ok",
+    });
+  });
+
+  it("does not take the boxes' blocks for the pallets', nor another prefix's or pairing's", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    db.prepare("UPDATE floor_shifts SET pallets_enabled = 1 WHERE id = ?").run(ENTERED.id);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
+    // Pallet blocks that are not this pairing's, nor of this prefix: none counts.
+    seedBlock(db, {
+      blockId: "00000000-0000-4000-8000-0000000000c1",
+      from: 1,
+      to: 300,
+      extension: 1,
+      deviceId: OTHER_DEVICE.deviceId,
+    });
+    seedBlock(db, {
+      blockId: "00000000-0000-4000-8000-0000000000c2",
+      from: 1,
+      to: 300,
+      extension: 1,
+      prefix: "4607004650",
+    });
+    await expect(readShiftStock(executor, PAIRING, ENTERED.id)).resolves.toEqual({
+      boxes: { left: 2000, level: "ok" },
+      pallets: { left: 0, level: "none" },
+    });
+  });
+
+  it("counts the blocks this pairing did not take, and no other pairing's", async () => {
+    const { db, executor } = openLocalDb();
+    const drop = db.prepare(
+      "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, issuer_prefix, " +
+        "extension, from_serial, to_serial, reason, dropped_at) VALUES (?, ?, ?, 'r', '460068200', " +
+        "0, 1, 10, 'overlap', '2026-10-11T08:00:00.000Z')",
+    );
+    await expect(readBlockDrops(executor, PAIRING)).resolves.toBe(0);
+    drop.run(PAIRING.hostId, PAIRING.deviceId, "b-1");
+    drop.run(PAIRING.hostId, PAIRING.deviceId, "b-2");
+    drop.run(OTHER_DEVICE.hostId, OTHER_DEVICE.deviceId, "b-3");
+    drop.run(OTHER_HOST.hostId, OTHER_HOST.deviceId, "b-4");
+    await expect(readBlockDrops(executor, PAIRING)).resolves.toBe(2);
+    await expect(readBlockDrops(executor, OTHER_DEVICE)).resolves.toBe(1);
   });
 });

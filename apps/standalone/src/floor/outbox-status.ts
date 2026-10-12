@@ -2,7 +2,9 @@ import { z } from "zod";
 
 import type { LocalExecutor } from "../local/executor.js";
 import type { Pairing } from "../local/reference-sync.js";
-import { remainingSerials } from "./work/block-supply.js";
+import { PALLET_EXTENSION } from "./pallets/pallets.js";
+import { NEWEST_BLOCK_SQL, remainingSerials } from "./work/block-supply.js";
+import { BOX_EXTENSION } from "./work/box-close.js";
 
 /**
  * What the floor's status bar says of the outbox (stage 2a spec §5.5): this
@@ -152,39 +154,102 @@ export function waitUnits(ms: number): { unit: "day" | "hour" | "minute"; n: num
 }
 
 /**
- * The statement that finds the issuer prefix of a shift this pairing entered;
- * `NULL` for a shift it only listed.
+ * The issuer prefix of a shift this pairing entered (`NULL` for a shift it only
+ * listed) and whether it has pallets.
  */
-export const SHIFT_PREFIX_SQL =
-  "SELECT snapshot ->> 'issuerPrefix' AS prefix FROM floor_shifts " +
+export const SHIFT_STOCK_SQL =
+  "SELECT snapshot ->> 'issuerPrefix' AS prefix, pallets_enabled FROM floor_shifts " +
   "WHERE host_id = ? AND device_id = ? AND id = ?";
 
-const prefixRow = z.object({ prefix: z.string().nullable() });
+const stockRow = z.object({ prefix: z.string().nullable(), pallets_enabled: z.number().int() });
+const newestRow = z.object({
+  from_serial: z.number().int(),
+  to_serial: z.number().int(),
+  next_serial: z.number().int(),
+});
+
+/** How low a stock of serials is (pilot spec §9.3, plan ОЧ). */
+export type StockLevel = "ok" | "quarter" | "tenth" | "last" | "none";
+
+/** A quarter and a tenth of a block: the thresholds of pilot spec §9.3. */
+const QUARTER = 4;
+const TENTH = 10;
 
 /**
- * The SSCC serials this pairing has left for the boxes of a shift it entered
- * (the snapshot's issuer prefix), counted the way a box's close takes them
- * (`remainingSerials`); `null` for a shift without a snapshot.
+ * The level of `left` serials against the newest block's size: none, the last
+ * one, a tenth of the block or less, a quarter or less. Online the station asks
+ * for a block at half (stage 2a spec §5.7.4), so a level below `ok` means the
+ * host did not answer, has no serials, or the link is down. Without a block to
+ * measure by only the last serial and none say anything.
  */
-export async function readSerialsLeft(
+export function stockLevel(left: number, blockSize: number | null): StockLevel {
+  if (left <= 0) return "none";
+  if (left === 1) return "last";
+  if (blockSize === null || blockSize <= 0) return "ok";
+  if (left * TENTH <= blockSize) return "tenth";
+  if (left * QUARTER <= blockSize) return "quarter";
+  return "ok";
+}
+
+export interface SerialStock {
+  left: number;
+  level: StockLevel;
+}
+
+/** The serials of a shift's boxes and, in a shift with pallets, of its pallets. */
+export interface ShiftStock {
+  boxes: SerialStock;
+  pallets: SerialStock | null;
+}
+
+async function serialStock(
   local: LocalExecutor,
   pairing: Pairing,
-  shiftId: string,
-): Promise<number | null> {
-  const [row] = await local.query(
-    SHIFT_PREFIX_SQL,
-    [pairing.hostId, pairing.deviceId, shiftId],
-    prefixRow,
-  );
-  if (row === undefined || row.prefix === null) return null;
-  return remainingSerials(local, pairing, row.prefix);
+  prefix: string,
+  extension: number,
+): Promise<SerialStock> {
+  const [left, [newest]] = await Promise.all([
+    remainingSerials(local, pairing, prefix, extension),
+    local.query(NEWEST_BLOCK_SQL, [pairing.hostId, pairing.deviceId, prefix, extension], newestRow),
+  ]);
+  const size = newest === undefined ? null : newest.to_serial - newest.from_serial + 1;
+  return { left, level: stockLevel(left, size) };
 }
 
 /**
- * This many serials or fewer are left: the bar warns. A box takes one, and the
- * station asks for a block when the newest has less than half left (stage 2a
- * spec §5.7.4), so a count this low means the host did not answer in time,
- * has no serials left, or the link is down; at zero the station cannot close
- * a box.
+ * The SSCC serials this pairing has left for a shift it entered, counted the
+ * way a close takes them (`remainingSerials`): its boxes', and its pallets'
+ * when it has pallets, each with its level; `null` for a shift without a
+ * snapshot.
  */
-export const SERIALS_LOW = 100;
+export async function readShiftStock(
+  local: LocalExecutor,
+  pairing: Pairing,
+  shiftId: string,
+): Promise<ShiftStock | null> {
+  const [row] = await local.query(
+    SHIFT_STOCK_SQL,
+    [pairing.hostId, pairing.deviceId, shiftId],
+    stockRow,
+  );
+  if (row === undefined || row.prefix === null) return null;
+  const boxes = await serialStock(local, pairing, row.prefix, BOX_EXTENSION);
+  const pallets =
+    row.pallets_enabled === 1
+      ? await serialStock(local, pairing, row.prefix, PALLET_EXTENSION)
+      : null;
+  return { boxes, pallets };
+}
+
+/** The blocks the host gave this pairing that the station did not take (plan ОЧ). */
+export const BLOCK_DROPS_COUNT_SQL =
+  "SELECT count(*) AS n FROM floor_block_drops WHERE host_id = ? AND device_id = ?";
+
+export async function readBlockDrops(local: LocalExecutor, pairing: Pairing): Promise<number> {
+  const [row] = await local.query(
+    BLOCK_DROPS_COUNT_SQL,
+    [pairing.hostId, pairing.deviceId],
+    countRow,
+  );
+  return row?.n ?? 0;
+}

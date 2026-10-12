@@ -584,49 +584,261 @@ describe("the outbox and the serials on the floor's status bar", () => {
     await waitFor(() => expect(shown("Номеров SSCC")).toBeNull());
   });
 
-  it("warns, in the polite region that was there before, when the serials run out, and says so at zero", async () => {
+  it("warns, in the polite region that was there before, at a quarter and a tenth of the block, at the last serial, and says so at zero (plan ОЧ)", async () => {
     const { db, executor } = openLocalDb();
     await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
-    // 101 left: 1..1000 with the cursor at 900.
+    // A block of 2 000 with 501 left: nothing to say yet.
     seedBlock(db, {
       blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
       from: 1,
-      to: 1000,
-      next: 900,
+      to: 2000,
+      next: 1500,
     });
-    const low = (n: string) =>
-      `Номера SSCC на исходе: осталось ${n}. Новые номера выдаёт хост, станция должна быть с ним на связи.`;
-    const none =
-      "Номера SSCC закончились: короб не закрыть, пока хост не выдаст станции новый блок. Нужна связь с хостом.";
     const view = render(bar({ local: executor, shiftId: ENTERED.id }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("101"));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("501"));
     const before = politeRegions();
-    expect(screen.queryByText(/Номера SSCC на исходе/)).toBeNull();
-    expect(screen.queryByText(none)).toBeNull();
+    expect(screen.queryByText(/Номеров SSCC для коробов осталось/)).toBeNull();
 
-    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 901").run();
-    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
-    const warning = await screen.findByText(low("100"));
-    expect(heardOnce(before, warning)).toBe(true);
-    expect(screen.queryByText(none)).toBeNull();
-
-    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1000").run();
-    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 2 }));
-    expect(await screen.findByText(low("1"))).toBeTruthy();
-
-    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1001").run();
-    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 3 }));
-    const gone = await screen.findByText(none);
+    const step = async (next: number, version: number) => {
+      db.prepare("UPDATE floor_sscc_blocks SET next_serial = ?").run(next);
+      view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: version }));
+    };
+    await step(1501, 1);
+    const quarter = await screen.findByText(
+      "Номеров SSCC для коробов осталось 500 — меньше четверти блока. Новые номера выдаёт хост: станция должна быть с ним на связи.",
+    );
+    expect(heardOnce(before, quarter)).toBe(true);
+    await step(1801, 2);
+    expect(
+      await screen.findByText(
+        "Номеров SSCC для коробов осталось 200 — меньше десятой части блока. Без связи с хостом короба скоро не закрыть.",
+      ),
+    ).toBeTruthy();
+    // One warning at a time: the quarter's words are gone.
+    expect(screen.queryByText(/меньше четверти блока/)).toBeNull();
+    await step(2000, 3);
+    const last = await screen.findByText(
+      "Остался последний номер SSCC для коробов: следующий короб без связи с хостом не закрыть.",
+    );
+    expect(heardOnce(before, last)).toBe(true);
+    expect(screen.queryByText(/меньше десятой части блока/)).toBeNull();
+    await step(2001, 4);
+    const gone = await screen.findByText(
+      "Номера SSCC для коробов закончились: короб не закрыть, пока хост не выдаст станции новый блок. Нужна связь с хостом.",
+    );
     expect(heardOnce(before, gone)).toBe(true);
-    expect(screen.queryByText(/Номера SSCC на исходе/)).toBeNull();
+    expect(screen.queryByText(/Остался последний номер/)).toBeNull();
     expect(shown("Номеров SSCC")).toBe("0");
 
     // A block arrives: the warnings go.
-    seedBlock(db, { blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b", from: 1001, to: 3000 });
-    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 4 }));
+    seedBlock(db, { blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b", from: 2001, to: 4000 });
+    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 5 }));
     await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
-    expect(screen.queryByText(none)).toBeNull();
-    expect(screen.queryByText(/Номера SSCC на исходе/)).toBeNull();
+    expect(screen.queryByText(/Номера SSCC для коробов закончились/)).toBeNull();
+    expect(screen.queryByText(/Номеров SSCC для коробов осталось/)).toBeNull();
+  });
+
+  it("calls the warnings by their weight: a warning at a quarter and a tenth, an error at the last serial and at none", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, {
+      blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a",
+      from: 1,
+      to: 2000,
+      next: 1501,
+    });
+    const view = render(bar({ local: executor, shiftId: ENTERED.id }));
+    const toneOf = (text: RegExp): string =>
+      (screen.getByText(text).closest(".mk-alert")?.className ?? "").replace(
+        /^.*(mk-alert--\w+).*$/,
+        "$1",
+      );
+    const step = (next: number, version: number) => {
+      db.prepare("UPDATE floor_sscc_blocks SET next_serial = ?").run(next);
+      view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: version }));
+    };
+    await screen.findByText(/меньше четверти блока/);
+    expect(toneOf(/меньше четверти блока/)).toBe("mk-alert--warn");
+    step(1801, 1);
+    await screen.findByText(/меньше десятой части блока/);
+    expect(toneOf(/меньше десятой части блока/)).toBe("mk-alert--warn");
+    step(2000, 2);
+    await screen.findByText(/Остался последний номер/);
+    expect(toneOf(/Остался последний номер/)).toBe("mk-alert--error");
+    step(2001, 3);
+    await screen.findByText(/Номера SSCC для коробов закончились/);
+    expect(toneOf(/Номера SSCC для коробов закончились/)).toBe("mk-alert--error");
+  });
+
+  it("shows and warns of the pallets' serials only in a shift with pallets (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
+    seedBlock(db, {
+      blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b",
+      from: 1,
+      to: 200,
+      next: 181,
+      extension: 1,
+    });
+    const view = render(bar({ local: executor, shiftId: ENTERED.id }));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0000"));
+    expect(shown("Номеров SSCC паллет")).toBeNull();
+    expect(screen.queryByText(/Номеров SSCC для паллет/)).toBeNull();
+    db.prepare("UPDATE floor_shifts SET pallets_enabled = 1 WHERE id = ?").run(ENTERED.id);
+    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
+    await waitFor(() => expect(shown("Номеров SSCC паллет")).toBe("20"));
+    expect(
+      screen.getByText(
+        "Номеров SSCC для паллет осталось 20 — меньше десятой части блока. Без связи с хостом полную паллету скоро не закрыть.",
+      ),
+    ).toBeTruthy();
+    // The boxes' stock is plentiful: nothing is said of it.
+    expect(screen.queryByText(/Номеров SSCC для коробов/)).toBeNull();
+    // The pallets' last serial and none have their own words.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 200 WHERE extension = 1").run();
+    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 2 }));
+    expect(
+      await screen.findByText(
+        "Остался последний номер SSCC для паллет: следующую полную паллету без связи с хостом не закрыть.",
+      ),
+    ).toBeTruthy();
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 201 WHERE extension = 1").run();
+    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 3 }));
+    expect(
+      await screen.findByText(
+        "Номера SSCC для паллет закончились: полную паллету не закрыть, пока хост не выдаст станции новый блок. Нужна связь с хостом.",
+      ),
+    ).toBeTruthy();
+    expect(shown("Номеров SSCC паллет")).toBe("0");
+    // Pallets are off again: nothing of them.
+    db.prepare("UPDATE floor_shifts SET pallets_enabled = 0 WHERE id = ?").run(ENTERED.id);
+    view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 4 }));
+    await waitFor(() => expect(shown("Номеров SSCC паллет")).toBeNull());
+    expect(screen.queryByText(/Номера SSCC для паллет закончились/)).toBeNull();
+  });
+
+  it("says the blocks the host gave and the station did not take, and the records an older pairing left (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    db.prepare(
+      "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, issuer_prefix, " +
+        "extension, from_serial, to_serial, reason, dropped_at) VALUES (?, ?, 'b-1', 'r', " +
+        "'460068200', 0, 1, 10, 'overlap', '2026-10-11T08:00:00.000Z')",
+    ).run(PAIRING.hostId, PAIRING.deviceId);
+    await unsentScans(executor, 3, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 50);
+    const view = render(bar({ local: executor }));
+    const before = politeRegions();
+    const drops = await screen.findByText(/станции блоков номеров SSCC, которые она не приняла: 1/);
+    // Heard once in the region that was there before, and called an error in words, not by colour alone.
+    expect(heardOnce(before, drops)).toBe(true);
+    expect(drops.closest(".mk-alert")?.classList.contains("mk-alert--error")).toBe(true);
+    await waitFor(() => expect(shown("Не отправлено прежним подключением")).toBe("3"));
+    // The records of the other pairing are not this pairing's unsent ones.
+    expect(shown("Не отправлено")).toBe("0");
+    // The drops are read again with the outbox, the stranded records are not (a walk too dear for every scan).
+    db.prepare(
+      "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, issuer_prefix, " +
+        "extension, from_serial, to_serial, reason, dropped_at) VALUES (?, ?, 'b-2', 'r', " +
+        "'460068200', 0, 11, 20, 'mismatch', '2026-10-11T08:01:00.000Z')",
+    ).run(PAIRING.hostId, PAIRING.deviceId);
+    await unsentScans(executor, 2, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 90);
+    view.rerender(bar({ local: executor, outboxVersion: 1 }));
+    expect(
+      await screen.findByText(/станции блоков номеров SSCC, которые она не приняла: 2/),
+    ).toBeTruthy();
+    expect(shown("Не отправлено прежним подключением")).toBe("3");
+  });
+
+  it("says nothing of dropped blocks or older records when there are none", async () => {
+    const { executor } = openLocalDb();
+    // Records of the pairing itself are not an older pairing's.
+    await unsentScans(executor, 2);
+    render(bar({ local: executor }));
+    await waitFor(() => expect(shown("Не отправлено")).toBe("2"));
+    await flushEffects();
+    expect(shown("Не отправлено прежним подключением")).toBeNull();
+    expect(screen.queryByText(/которые она не приняла/)).toBeNull();
+  });
+
+  it("keeps the drops and the older records of the newest read when an older one lands late", async () => {
+    const { db, executor } = openLocalDb();
+    const drop = db.prepare(
+      "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, issuer_prefix, " +
+        "extension, from_serial, to_serial, reason, dropped_at) VALUES (?, ?, ?, 'r', '460068200', " +
+        "0, 1, 10, 'overlap', '2026-10-11T08:00:00.000Z')",
+    );
+    drop.run(PAIRING.hostId, PAIRING.deviceId, "b-1");
+    const heldDrops = holdingFirstRead(executor, (sql) => sql.includes("FROM floor_block_drops"));
+    const view = render(bar({ local: heldDrops.executor }));
+    await waitFor(() => expect(heldDrops.started()).toBe(true));
+    drop.run(PAIRING.hostId, PAIRING.deviceId, "b-2");
+    view.rerender(bar({ local: heldDrops.executor, outboxVersion: 1 }));
+    expect(await screen.findByText(/которые она не приняла: 2/)).toBeTruthy();
+    await act(async () => {
+      heldDrops.release();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(screen.queryByText(/которые она не приняла: 1/)).toBeNull();
+    expect(screen.queryByText(/которые она не приняла: 2/)).toBeTruthy();
+    view.unmount();
+
+    // The older records are read per pairing: an answer for the pairing left must not land on the next.
+    await unsentScans(executor, 3, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 50);
+    const heldOld = holdingFirstRead(executor, (sql) => sql.includes("INDEXED BY"));
+    const second = render(bar({ local: heldOld.executor }));
+    await waitFor(() => expect(heldOld.started()).toBe(true));
+    // Another pairing (the one that left the records) sees none of its own as an older one's.
+    second.rerender(
+      bar({ local: heldOld.executor, pairing: { hostId: HOST_ID, deviceId: OTHER_DEVICE } }),
+    );
+    await flushEffects();
+    expect(shown("Не отправлено прежним подключением")).toBeNull();
+    await act(async () => {
+      heldOld.release();
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    });
+    expect(shown("Не отправлено прежним подключением")).toBeNull();
+  });
+
+  it("drops the older records it said when the next read of them fails, and what a failed read of the drops said", async () => {
+    const { executor } = openLocalDb();
+    await unsentScans(executor, 3, { hostId: HOST_ID, deviceId: OTHER_DEVICE }, 50);
+    let failing = false;
+    const flaky: LocalExecutor = {
+      query: (sql, params, row) =>
+        failing && sql.includes("INDEXED BY")
+          ? Promise.reject(new Error("disk"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    const view = render(bar({ local: flaky }));
+    await waitFor(() => expect(shown("Не отправлено прежним подключением")).toBe("3"));
+    failing = true;
+    view.rerender(bar({ local: flaky, pairing: { hostId: OTHER_HOST, deviceId: DEVICE_ID } }));
+    await waitFor(() => expect(shown("Не отправлено прежним подключением")).toBeNull());
+  });
+
+  it("drops what a failed read of the dropped blocks said", async () => {
+    const { db, executor } = openLocalDb();
+    db.prepare(
+      "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, issuer_prefix, " +
+        "extension, from_serial, to_serial, reason, dropped_at) VALUES (?, ?, 'b-1', 'r', " +
+        "'460068200', 0, 1, 10, 'overlap', '2026-10-11T08:00:00.000Z')",
+    ).run(PAIRING.hostId, PAIRING.deviceId);
+    let failing = false;
+    const local: LocalExecutor = {
+      query: (sql, params, row) =>
+        failing && sql.includes("floor_block_drops")
+          ? Promise.reject(new Error("disk"))
+          : executor.query(sql, params, row),
+      transaction: (statements) => executor.transaction(statements),
+    };
+    const view = render(bar({ local }));
+    expect(await screen.findByText(/которые она не приняла: 1/)).toBeTruthy();
+    failing = true;
+    view.rerender(bar({ local, outboxVersion: 1 }));
+    await waitFor(() => expect(screen.queryByText(/которые она не приняла/)).toBeNull());
+    expect(shown("Не отправлено прежним подключением")).toBeNull();
   });
 
   it("says nothing of serials outside a shift, though the pairing has none", async () => {
@@ -1003,7 +1215,7 @@ describe("the outbox and the serials on the floor's status bar", () => {
       await vi.advanceTimersByTimeAsync(1_500);
     });
     await waitFor(() => expect(shown("Номеров SSCC")).toBe("2\u00a0050"));
-    expect(screen.queryByText(/Номера SSCC на исходе/)).toBeNull();
+    expect(screen.queryByText(/Номеров SSCC для коробов осталось/)).toBeNull();
     await flushEffects();
     expect(vi.getTimerCount()).toBe(0);
     low.unmount();
@@ -1015,20 +1227,53 @@ describe("the outbox and the serials on the floor's status bar", () => {
     const { db, executor } = openLocalDb();
     await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
     seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
-    // 101 left: no warning, no timer.
-    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1900").run();
+    // 501 left, over a quarter of the block: no warning, no timer.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1500").run();
     const view = render(bar({ local: executor, shiftId: ENTERED.id }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("101"));
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("501"));
     await flushEffects();
     expect(vi.getTimerCount()).toBe(0);
-    // 100 left: the warning stands, and so does the timer.
-    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1901").run();
+    // 500 left: the warning stands, and so does the timer.
+    db.prepare("UPDATE floor_sscc_blocks SET next_serial = 1501").run();
     view.rerender(bar({ local: executor, shiftId: ENTERED.id, outboxVersion: 1 }));
-    await waitFor(() => expect(shown("Номеров SSCC")).toBe("100"));
-    expect(await screen.findByText(/Номера SSCC на исходе: осталось 100\./)).toBeTruthy();
+    await waitFor(() => expect(shown("Номеров SSCC")).toBe("500"));
+    expect(await screen.findByText(/Номеров SSCC для коробов осталось 500 —/)).toBeTruthy();
     // (Not inside `waitFor`: its own polling is a timer too.)
     await flushEffects();
     expect(vi.getTimerCount()).toBe(1);
+  });
+
+  it("keeps reading by itself while only the pallets' serials are low, and stops when they are not", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"], shouldAdvanceTime: true });
+    const { db, executor } = openLocalDb();
+    await keepEnteredShift(executor, PAIRING, ENTERED, "2026-10-08T06:02:00.000Z", 1);
+    db.prepare("UPDATE floor_shifts SET pallets_enabled = 1 WHERE id = ?").run(ENTERED.id);
+    seedBlock(db, { blockId: "5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a", from: 1, to: 2000 });
+    seedBlock(db, {
+      blockId: "6e5d4c3b-2a1f-4e0d-9c8b-7a6f5e4d3c2b",
+      from: 1,
+      to: 200,
+      next: 181,
+      extension: 1,
+    });
+    const view = render(bar({ local: executor, shiftId: ENTERED.id }));
+    await waitFor(() => expect(shown("Номеров SSCC паллет")).toBe("20"));
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(1);
+    // A block of pallets' serials arrives with no record written: the next tick finds out.
+    seedBlock(db, {
+      blockId: "7f6e5d4c-3b2a-4f1e-8d9c-8b7a6f5e4d3d",
+      from: 201,
+      to: 400,
+      extension: 1,
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10_500);
+    });
+    await waitFor(() => expect(shown("Номеров SSCC паллет")).toBe("220"));
+    await flushEffects();
+    expect(vi.getTimerCount()).toBe(0);
+    view.unmount();
   });
 
   const isRestoreStatus = (sql: string): boolean => sql.includes("floor_restore_epochs");
