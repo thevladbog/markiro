@@ -2,6 +2,7 @@ import {
   buildDefaultLabelTemplates,
   buildDuplicateLabelTemplate,
   buildPalletLabelTemplates,
+  shelfLifeExpiryDate,
   type LabelTemplateSpec,
 } from "@markiro/domain";
 import { describe, expect, it, vi } from "vitest";
@@ -305,6 +306,33 @@ describe("the scan and the host's answer (plan СКЛ task 5)", () => {
     await lookUp(ask, { kind: "code", codeHash: CODE_HASH });
     await lookUp(ask, { kind: "sscc", sscc: BOX_SSCC, repair: null });
     expect(ask.mock.calls).toEqual([[{ codeHash: CODE_HASH }], [{ sscc: BOX_SSCC }]]);
+  });
+
+  it("takes no answer of another kind than the scan: a unit for a code, a box or pallet for an SSCC", async () => {
+    const answer = (source: typeof BOX_SOURCE) => async (): Promise<WarehouseLookupResult> => ({
+      status: "found",
+      source,
+    });
+    const code = { kind: "code", codeHash: CODE_HASH } as const;
+    const box = { kind: "sscc", sscc: BOX_SSCC, repair: null } as const;
+    // The identity matches, the kind does not.
+    expect(await lookUp(answer({ ...BOX_SOURCE, identity: CODE_HASH }), code)).toEqual({
+      kind: "lookup_failed",
+    });
+    expect(
+      await lookUp(answer({ ...PALLET_SOURCE, identity: CODE_HASH, sscc: CODE_HASH }), code),
+    ).toEqual({ kind: "lookup_failed" });
+    expect(await lookUp(answer({ ...UNIT_SOURCE, identity: BOX_SSCC }), box)).toEqual({
+      kind: "lookup_failed",
+    });
+    // The kinds that fit.
+    expect(await lookUp(answer(UNIT_SOURCE), code)).toEqual({ kind: "found", source: UNIT_SOURCE });
+    expect(await lookUp(answer(BOX_SOURCE), box)).toEqual({ kind: "found", source: BOX_SOURCE });
+    const pallet = { kind: "sscc", sscc: PALLET_SSCC, repair: null } as const;
+    expect(await lookUp(answer(PALLET_SOURCE), pallet)).toEqual({
+      kind: "found",
+      source: PALLET_SOURCE,
+    });
   });
 
   it("hands the shell its own refusals and calls every other failure by what it is", async () => {
@@ -1166,6 +1194,46 @@ describe("the label's fields from the record (plan СКЛ task 5)", () => {
     expect(unit.qty).toBe("1");
     expect(unit.sscc).toBe("");
     expect(unit["km.code"]).toBe(KM);
+  });
+
+  // Final review of plan СКЛ, m3: a record whose own instant falls on another day than its
+  // shift's production date (a night shift, a box closed days later) prints the shift's date,
+  // and its expiry by the inclusive rule (`shelfLifeExpiryDate`: production day is day one).
+  it.each([
+    [
+      "a night shift's record after midnight in Moscow",
+      "2026-10-08",
+      "2026-10-08T22:30:00.000Z",
+      10,
+    ],
+    [
+      "a record closed a week after the production date",
+      "2026-10-08",
+      "2026-10-15T09:00:00.000Z",
+      10,
+    ],
+    ["a one-day shelf life", "2026-10-08", "2026-10-09T01:00:00.000Z", 1],
+    ["a shelf life across a leap day", "2028-02-28", "2028-03-01T03:00:00.000Z", 2],
+  ])("prints the shift's production date and its expiry for %s", (_name, date, at, days) => {
+    const civil = (iso: string) => iso.split("-").reverse().join(".");
+    const expiry = shelfLifeExpiryDate(date, days);
+    expect(expiry).not.toBe("");
+    for (const source of [UNIT_SOURCE, BOX_SOURCE, PALLET_SOURCE]) {
+      const fields = sourceFields({
+        ...source,
+        productionDate: date,
+        at,
+        product: { ...source.product, shelfLifeDays: days },
+      });
+      expect(fields.date, source.kind).toBe(civil(date));
+      expect(fields.expiry, source.kind).toBe(civil(expiry));
+    }
+  });
+
+  it("pins the inclusive expiry of the night shift by its literal dates", () => {
+    const fields = sourceFields({ ...BOX_SOURCE, at: "2026-10-08T22:30:00.000Z" });
+    expect(fields.date).toBe("08.10.2026");
+    expect(fields.expiry).toBe("17.10.2026");
   });
 
   it("does not print the code of another product", () => {

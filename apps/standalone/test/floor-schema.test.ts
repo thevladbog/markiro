@@ -42,6 +42,7 @@ import { BLOCKS_WITH_ROOM_SQL } from "../src/floor/work/block-supply.js";
 import { BOX_CODES_SQL, CLOSED_BOX_SQL } from "../src/floor/work/box-close.js";
 import type { LocalExecutor, LocalStatement } from "../src/local/executor.js";
 import { attemptStatement, receiptStatements, UNSENT_SQL } from "../src/local/facts-sender.js";
+import { FORGET_UNSENT_ANY_SQL, FORGET_UNSENT_SQL } from "../src/local/outbox.js";
 import {
   BLOCKS_SQL,
   DUE_SQL,
@@ -1713,6 +1714,64 @@ describe("the warehouse reprint's statements (migration 0012)", () => {
       ).toEqual([]);
     }
     expect(plan(JOB_BY_IDENTITY_SQL).filter((step) => step.includes("TEMP"))).toEqual([]);
+  });
+
+  // Final review of plan СКЛ, m5: the counts that stop a forget — the webview's (both outboxes in
+  // one statement) and the shell's own `count_unsent` over `wh_outbox` — read only the partial
+  // `*_unsent` indexes; the every-pairing form walks those indexes whole, which hold only the
+  // records still waiting. Pinned on the shell's SQLite too
+  // (`the_forget_counts_read_only_the_unsent_indexes`), with the same texts.
+  const SHELL_COUNT_SQL =
+    "SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL AND host_id = ? AND device_id = ?";
+  const SHELL_COUNT_ANY_SQL = "SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL";
+
+  it("count the records that stop a forget through the unsent indexes only", () => {
+    const { db } = openLocalDb();
+    const plan = (sql: string): string[] =>
+      db
+        .prepare(`EXPLAIN QUERY PLAN ${sql}`)
+        .all(...Array.from({ length: sql.split("?").length - 1 }, () => "x"))
+        .map((step) => String(step["detail"]));
+    expect(plan(FORGET_UNSENT_SQL)).toEqual([
+      "SCAN CONSTANT ROW",
+      "SCALAR SUBQUERY 1",
+      "SEARCH outbox USING INDEX outbox_unsent (host_id=? AND device_id=?)",
+      "SCALAR SUBQUERY 2",
+      "SEARCH wh_outbox USING INDEX wh_outbox_unsent (host_id=? AND device_id=?)",
+    ]);
+    expect(plan(FORGET_UNSENT_ANY_SQL)).toEqual([
+      "SCAN CONSTANT ROW",
+      "SCALAR SUBQUERY 1",
+      "SCAN outbox USING INDEX outbox_unsent",
+      "SCALAR SUBQUERY 2",
+      "SCAN wh_outbox USING INDEX wh_outbox_unsent",
+    ]);
+    expect(plan(SHELL_COUNT_SQL)).toEqual([
+      "SEARCH wh_outbox USING INDEX wh_outbox_unsent (host_id=? AND device_id=?)",
+    ]);
+    expect(plan(SHELL_COUNT_ANY_SQL)).toEqual(["SCAN wh_outbox USING INDEX wh_outbox_unsent"]);
+  });
+
+  it("count the records that stop a forget with the texts the shell runs and pins", () => {
+    const collapse = (path: string) =>
+      readFileSync(new URL(path, testModuleUrl), "utf8")
+        // A line continuation of a Rust string drops the newline and the next line's indent.
+        .replace(/\\\n\s*/g, "");
+    const pins = collapse("../src-tauri/tests/local_db.rs");
+    for (const sql of [
+      FORGET_UNSENT_SQL,
+      FORGET_UNSENT_ANY_SQL,
+      SHELL_COUNT_SQL,
+      SHELL_COUNT_ANY_SQL,
+    ]) {
+      expect(pins).toContain(`"${sql}"`);
+    }
+    // The shell's `count_unsent` builds its two counts with `format!` over its tables.
+    const shell = collapse("../src-tauri/src/local_db.rs");
+    for (const sql of [SHELL_COUNT_SQL, SHELL_COUNT_ANY_SQL]) {
+      expect(shell).toContain(`"${sql.replace("wh_outbox", "{table}")}"`);
+    }
+    expect(shell).toContain('const UNSENT_TABLES: [&str; 2] = ["outbox", "wh_outbox"];');
   });
 
   it("are pinned on the shell's SQLite with the same texts", () => {

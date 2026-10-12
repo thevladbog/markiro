@@ -381,16 +381,31 @@ async fn a_lookup_of_another_shape_is_refused_by_field() {
 #[tokio::test]
 async fn only_a_station_looks_up_and_without_a_key_nothing_is_answered() {
     let (admin, _, asking, _) = closed_shift_with_a_box().await;
-    let (_, office) = pair_device(&admin.app, "office").await;
-    let (status, answer) = lookup(&admin, &office, json!({ "codeHash": code_hash(1) })).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{answer}");
-    assert_eq!(answer["error"]["code"], "forbidden");
-    assert!(
-        !answer
-            .to_string()
-            .contains(&code(1)["canonical"].as_str().unwrap()[..20]),
-        "{answer}"
-    );
+    for kind in ["office", "handheld"] {
+        // A handheld pairs by a code, not locally: pair an office device and
+        // store its kind as the other (the answer would carry a full code).
+        let (id, other) = pair_device(&admin.app, "office").await;
+        sqlx::query("UPDATE devices SET kind = ? WHERE id = ?")
+            .bind(kind)
+            .bind(&id)
+            .execute(&admin.app.state.pool)
+            .await
+            .unwrap();
+        for body in [
+            json!({ "codeHash": code_hash(1) }),
+            json!({ "sscc": sscc(1500) }),
+        ] {
+            let (status, answer) = lookup(&admin, &other, body).await;
+            assert_eq!(status, StatusCode::FORBIDDEN, "{kind}: {answer}");
+            assert_eq!(answer["error"]["code"], "forbidden", "{kind}");
+            assert!(
+                !answer
+                    .to_string()
+                    .contains(&code(1)["canonical"].as_str().unwrap()[..20]),
+                "{kind}: {answer}"
+            );
+        }
+    }
     let (status, answer) = admin
         .app
         .send(json_request(

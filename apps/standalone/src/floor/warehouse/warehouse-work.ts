@@ -156,8 +156,11 @@ export async function lookUp(
       scan.kind === "code" ? { codeHash: scan.codeHash } : { sscc: scan.sscc },
     );
     if (result.status === "found") {
-      // An answer for something else is no answer for this label.
-      return result.source.identity === identity
+      // An answer for something else is no answer for this label: another
+      // identity, or a box or pallet for a code, a unit for an SSCC.
+      const fits =
+        scan.kind === "code" ? result.source.kind === "unit" : result.source.kind !== "unit";
+      return result.source.identity === identity && fits
         ? { kind: "found", source: result.source }
         : { kind: "lookup_failed" };
     }

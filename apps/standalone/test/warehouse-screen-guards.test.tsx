@@ -178,6 +178,48 @@ describe("work in hand", () => {
     ).toBe(null);
   });
 
+  // Final review of plan СКЛ, m4: the typed code goes through the same queue and the same
+  // tracking as a scan, so a leave waits for its lookup and print.
+  it("holds a typed code's lookup as work in hand, and a leave's drain waits for it", async () => {
+    let release: (result: WarehouseLookupResult) => void = () => undefined;
+    const at = await startedWarehouse({
+      lookup: () =>
+        new Promise<WarehouseLookupResult>((resolve) => {
+          release = resolve;
+        }),
+    });
+    await at.press("Ввести код вручную");
+    fireEvent.change(screen.getByLabelText(/Номер короба или паллеты/), {
+      target: { value: BOX_SSCC },
+    });
+    const touches = vi.mocked(at.props.touch).mock.calls.length;
+    await act(async () => {
+      at.clock.now += PRESS_PAUSE_MS;
+      fireEvent.click(screen.getByRole("button", { name: "Найти и напечатать" }));
+    });
+    await waitFor(() => expect(at.lookup).toHaveBeenCalledWith({ sscc: BOX_SSCC }));
+    expect(at.gate.pending()).toBeGreaterThan(0);
+    expect(vi.mocked(at.props.touch).mock.calls.length).toBeGreaterThan(touches);
+    at.clock.now += PRESS_PAUSE_MS;
+    const finish = screen.getByRole("button", { name: "Завершить сеанс" });
+    await waitFor(() => expect(finish.getAttribute("aria-disabled")).toBe("true"));
+    let drained = false;
+    const draining = at.gate.drain().then(() => {
+      drained = true;
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(drained).toBe(false);
+    await act(async () => {
+      release({ status: "found", source: BOX_SOURCE });
+      await draining;
+    });
+    expect(drained).toBe(true);
+    expect(await screen.findByText(/Этикетка передана на принтер/)).toBeTruthy();
+    expect(at.gate.pending()).toBe(0);
+  });
+
   it("runs scans one at a time: a second scan waits for the first one's print", async () => {
     const at = await startedWarehouse();
     at.shell.holdSends();

@@ -2850,3 +2850,71 @@ async fn the_warehouse_reads_search_an_index() {
     }
     raw.close().await.unwrap();
 }
+
+/// The counts of records without a receipt that stop a forget (final review of plan СКЛ, m5):
+/// the webview's `countUnsentRecords` (`src/local/outbox.ts`, `FORGET_UNSENT_*_SQL`: the outbox
+/// and `wh_outbox` in one statement) and this shell's own `count_unsent` over `wh_outbox` (its
+/// `format!` with `{table}`, pinned by text in `test/floor-schema.test.ts`), each for one pairing
+/// and for every pairing. Each reads the partial `*_unsent` indexes only: the every-pairing form
+/// walks those indexes whole, which hold only the records still waiting.
+/// `test/floor-schema.test.ts` plans the same texts on the Node runtime's SQLite.
+#[tokio::test]
+async fn the_forget_counts_read_only_the_unsent_indexes() {
+    let (dir, db) = open().await;
+    drop(db);
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .connect()
+        .await
+        .unwrap();
+    let counts: [(&str, &[&str]); 4] = [
+        (
+            "SELECT (SELECT count(*) FROM outbox WHERE acked_at IS NULL AND host_id = ? \
+             AND device_id = ?) + (SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL \
+             AND host_id = ? AND device_id = ?) AS n",
+            &[
+                "SCAN CONSTANT ROW",
+                "SCALAR SUBQUERY 1",
+                "SEARCH outbox USING INDEX outbox_unsent (host_id=? AND device_id=?)",
+                "SCALAR SUBQUERY 2",
+                "SEARCH wh_outbox USING INDEX wh_outbox_unsent (host_id=? AND device_id=?)",
+            ],
+        ),
+        (
+            "SELECT (SELECT count(*) FROM outbox WHERE acked_at IS NULL) + \
+             (SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL) AS n",
+            &[
+                "SCAN CONSTANT ROW",
+                "SCALAR SUBQUERY 1",
+                "SCAN outbox USING INDEX outbox_unsent",
+                "SCALAR SUBQUERY 2",
+                "SCAN wh_outbox USING INDEX wh_outbox_unsent",
+            ],
+        ),
+        (
+            "SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL AND host_id = ? \
+             AND device_id = ?",
+            &["SEARCH wh_outbox USING INDEX wh_outbox_unsent (host_id=? AND device_id=?)"],
+        ),
+        (
+            "SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL",
+            &["SCAN wh_outbox USING INDEX wh_outbox_unsent"],
+        ),
+    ];
+    for (sql, expected) in counts {
+        let text = format!("EXPLAIN QUERY PLAN {sql}");
+        let mut explain = sqlx::query(&text);
+        for _ in 0..sql.matches('?').count() {
+            explain = explain.bind("x");
+        }
+        let plan: Vec<String> = explain
+            .fetch_all(&mut raw)
+            .await
+            .unwrap()
+            .iter()
+            .map(|row| row.get::<String, _>("detail"))
+            .collect();
+        assert_eq!(plan, expected, "{sql}");
+    }
+    raw.close().await.unwrap();
+}
