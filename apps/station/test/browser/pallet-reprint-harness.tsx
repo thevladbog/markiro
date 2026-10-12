@@ -1,7 +1,6 @@
 import "@markiro/ui/styles.css";
 import "../../src/station.css";
 import "../../src/i18n/index.js";
-import { useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { ThemeProvider } from "@markiro/ui";
 import { applyMigrations, type SqlExecutor } from "../../src/lib/mirror.js";
@@ -9,8 +8,8 @@ import { initializeDeviceRecovery } from "../../src/lib/device-recovery.js";
 import { createCredentialGeneration } from "../../src/lib/credential-recovery.js";
 import { createStationClient } from "../../src/lib/api-client.js";
 import { DEFAULT_HARDWARE_CONFIG } from "../../src/lib/hardware-config.js";
-import { createWarehousePalletWork } from "../../src/lib/warehouse-reprint/pallet-work.js";
-import { PalletConfirmation } from "../../src/ui/warehouse-reprint/PalletConfirmation.js";
+import i18n from "../../src/i18n/index.js";
+import { WarehouseReprint } from "../../src/pages/WarehouseReprint.js";
 const id = new URLSearchParams(location.search).get("id");
 if (!id) throw new Error("Fixture ID missing");
 async function sql<T>(
@@ -45,7 +44,7 @@ const config = {
 };
 await initializeDeviceRecovery(exec, config);
 await exec.run(
-  "INSERT INTO operators_mirror(operator_id,name,role,pin_hash,active) VALUES(?,'Fixture operator','operator','synthetic',1)",
+  "INSERT INTO operators_mirror(operator_id,name,role,pin_hash,active) VALUES(?,'Fixture operator','operator','synthetic',1) ON CONFLICT(operator_id) DO UPDATE SET active=1",
   [operatorId],
 );
 await exec.run("UPDATE station_meta SET value='0' WHERE key='operators_blocked'");
@@ -71,42 +70,29 @@ const hardwareConfig = {
 const print = async () => {
   throw new Error("RAW forbidden in A4 fixture");
 };
-const work = createWarehousePalletWork({
-  exec,
-  client,
-  generation,
-  deviceId,
-  operatorId,
-  hardware: () => hardwareConfig,
-  print,
-});
-await work.initialize();
+const params = new URLSearchParams(location.search);
+await i18n.changeLanguage(params.get("lang") === "en" ? "en" : "ru");
 function View() {
-  const state = useSyncExternalStore(work.subscribe, work.getSnapshot);
   return (
-    <PalletConfirmation
-      exec={exec}
-      client={client}
-      deviceId={deviceId}
-      operatorId={operatorId}
-      credentialGeneration={generation}
-      hardwareConfig={hardwareConfig}
-      source={{ start: () => () => {} }}
-      print={print}
-      onExit={() => {}}
-      state={state}
-      work={work}
-      onFinish={async () => {
-        await work.finish();
-      }}
-      modeBusy={false}
-    />
+    <div style={{ height: "100dvh" }}>
+      <WarehouseReprint
+        exec={exec}
+        client={client}
+        deviceId={deviceId}
+        operatorId={operatorId}
+        credentialGeneration={generation}
+        hardwareConfig={hardwareConfig}
+        source={{ start: () => () => {} }}
+        print={print}
+        onExit={() => {}}
+      />
+    </div>
   );
 }
 const root = document.getElementById("root");
 if (!root) throw new Error("Root missing");
 createRoot(root).render(
-  <ThemeProvider defaultTheme="dark">
+  <ThemeProvider defaultTheme={params.get("theme") === "light" ? "light" : "dark"}>
     <View />
   </ThemeProvider>,
 );
