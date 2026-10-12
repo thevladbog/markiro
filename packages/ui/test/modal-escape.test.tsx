@@ -3,7 +3,7 @@ import { userEvent } from "@testing-library/user-event";
 import type { ReactNode } from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
-import { Combobox, DatePicker, Modal, Select } from "../src/components/index.js";
+import { Combobox, DatePicker, Drawer, Modal, Select } from "../src/components/index.js";
 
 beforeAll(() => {
   Object.defineProperties(HTMLElement.prototype, {
@@ -33,6 +33,14 @@ const hosts: ReadonlyArray<readonly [string, Host]> = [
       <Modal open title="Settings" onClose={onClose}>
         {children}
       </Modal>
+    ),
+  ],
+  [
+    "Drawer",
+    ({ onClose, children }) => (
+      <Drawer open title="Settings" onClose={onClose}>
+        {children}
+      </Drawer>
     ),
   ],
 ];
