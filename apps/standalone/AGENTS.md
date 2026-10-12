@@ -3603,16 +3603,23 @@ waiting job; a finished session is never continued (`wh_sessions_open`).
 A scan or a typed code is read by the domain's warehouse rule
 (`resolveWarehouseReprintScan`: a KM by its `kmHash`, an SSCC, and the old
 TSPL label `!100` + SSCC repaired once, never anything looser) and looked up on
-the host, `POST /v1/device/warehouse/lookup` (`routes/warehouse.rs`, any live
-device, `{ codeHash }` or `{ sscc }`): the code's owner in `code_owners`, a
+the host, `POST /v1/device/warehouse/lookup` (`routes/warehouse.rs`, a live
+STATION only: an office device or a handheld is `forbidden`, on this route and
+on the records' one, because the answer carries a unit's full code;
+`{ codeHash }` or `{ sscc }`): the code's owner in `code_owners`, a
 closed box by `boxes.sscc`, a closed pallet by `pallets.sscc`, of any station
 and any shift; the label's fields come from the shift's snapshot, number and
 production date, the record's own instant and counts and its operator's name,
-and a unit's full canonical code (GS and crypto tail) comes only in the
-answer's body. A code freed by an exception is `released`, a box or pallet
-taken apart `disassembled`. Without the link nothing is looked up and the
-screen says so; an old host (404) is «обновите хост»; a restored host holds the
-route (`restore_pending`).
+and a unit's full canonical code (GS and crypto tail) comes in the answer's
+body, never in a record or a log. The station keeps it in the job's frozen
+fields (`wh_jobs.fields`, `km.code`) to check a new label against and to render
+again, as the floor journal keeps `canonical`; the job's `identity` is the
+hash. A pallet's label mixes two eras on purpose (decision Р15): its box count
+is the one reported at its close (`box_count_reported`), its unit count the sum
+of its boxes not taken apart now. A code freed by an exception is `released`,
+a box or pallet taken apart `disassembled`. Without the link nothing is looked
+up and the screen says so; an old host (404) is «обновите хост»; a restored
+host holds the route (`restore_pending`).
 
 The station makes a job (`wh_jobs`, shell migration `0012`): the operator
 checked against the copies, the template checked (enabled, readable, covering
@@ -3671,6 +3678,14 @@ shell migration, which belongs to plan ОЧ («Очередь отправки»
 reprints, the A4 pallet sheets and the printing through the Windows driver
 (plan ДРВ; this branch has no such path: a reprint goes through
 `PrintRuntime` and `renderLabel` as a shift's label does) are also not here.
+
+Also recorded: the record of an automatic outcome (`unknown` with
+`interrupted` after a restart, a failed write's `unknown`) names the operator
+who opened the screen or whose work met it, not necessarily the one who sent:
+`wh_jobs` keeps the job's operator, not one per attempt. A session that is
+never finished, or one left open under a pairing since replaced, is never
+purged (the retention takes finished sessions only), so its jobs and records
+stay; a later stage carries that.
 
 ## Shift exports
 
