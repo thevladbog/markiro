@@ -356,6 +356,8 @@ export function templateDefaultsUpdate(
 export interface ShiftPallets {
   boxCapacity: number;
   templateId: string;
+  /** The A4 sheet (plan А4); left out — the organization's default. */
+  sheetId?: string;
 }
 
 /**
@@ -396,6 +398,9 @@ export function shiftCreate(shift: ShiftInput): ShiftCreate {
           palletsEnabled: true,
           palletBoxCapacity: shift.pallets.boxCapacity,
           palletTemplateId: shift.pallets.templateId,
+          ...(shift.pallets.sheetId === undefined
+            ? {}
+            : { palletSheetTemplateId: shift.pallets.sheetId }),
         }),
   };
 }
@@ -432,6 +437,7 @@ export function shiftUpdate(
     | "palletsEnabled"
     | "palletBoxCapacity"
     | "palletTemplateId"
+    | "palletSheetTemplateId"
     | "rev"
   >,
   next: ShiftChange,
@@ -462,6 +468,12 @@ export function shiftUpdate(
     }
     if (next.pallets.templateId !== shift.palletTemplateId) {
       update.palletTemplateId = next.pallets.templateId;
+    }
+    if (
+      next.pallets.sheetId !== undefined &&
+      next.pallets.sheetId !== shift.palletSheetTemplateId
+    ) {
+      update.palletSheetTemplateId = next.pallets.sheetId;
     }
   }
   return update;

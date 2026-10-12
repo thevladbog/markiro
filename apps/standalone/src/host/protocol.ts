@@ -664,6 +664,7 @@ export const officeShiftSchema = z.object({
   boxTemplateId: z.uuid(),
   palletBoxCapacity: z.number().int().positive().nullable(),
   palletTemplateId: z.uuid().nullable(),
+  palletSheetTemplateId: z.uuid().nullable(),
   ownerDeviceId: z.uuid().nullable(),
   openedAt: z.iso.datetime().nullable(),
   closedAt: z.iso.datetime().nullable(),
@@ -856,6 +857,23 @@ export const shiftSnapshotTemplateSchema = z.object({
   spec: templateSpecSchema,
 });
 
+/** Mirrors `markiro_proto::ShiftSnapshotSheet`: the A4 sheet a shift froze (plan А4). */
+export const shiftSnapshotSheetSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  revision: z.number().int().positive(),
+  spec: z.unknown(),
+});
+
+/** Mirrors `markiro_proto::ShiftSnapshotOrganization`: the organization a shift froze (plan А4). */
+export const shiftSnapshotOrganizationSchema = z.object({
+  name: z.string(),
+  inn: z.string().nullable(),
+  logo: z
+    .object({ width: z.number().int(), height: z.number().int(), pixelsBase64: z.string() })
+    .nullable(),
+});
+
 /**
  * What a shift freezes when a station opens it (`markiro_proto::ShiftSnapshot`):
  * the station prints and reprints from this alone. A response type, so a
@@ -868,6 +886,8 @@ export const shiftSnapshotSchema = z.object({
   issuerPrefix: z.string(),
   counterpartyName: z.string().nullable(),
   palletTemplate: shiftSnapshotTemplateSchema.optional(),
+  palletSheet: shiftSnapshotSheetSchema.optional(),
+  organization: shiftSnapshotOrganizationSchema.optional(),
 });
 export type ShiftSnapshot = z.infer<typeof shiftSnapshotSchema>;
 
@@ -1295,6 +1315,7 @@ export const shiftCreateSchema = z
     palletsEnabled: z.boolean().optional(),
     palletBoxCapacity: z.number().int().positive().optional(),
     palletTemplateId: z.uuid().optional(),
+    palletSheetTemplateId: z.uuid().optional(),
   })
   .strict();
 export type ShiftCreate = z.infer<typeof shiftCreateSchema>;
@@ -1318,6 +1339,7 @@ export const shiftUpdateSchema = z
     palletsEnabled: z.boolean().optional(),
     palletBoxCapacity: z.number().int().positive().optional(),
     palletTemplateId: z.uuid().optional(),
+    palletSheetTemplateId: z.uuid().optional(),
     expectedRev: z.number().int(),
   })
   .strict();
@@ -1370,6 +1392,7 @@ export const deviceShiftCreateSchema = z
     palletsEnabled: z.boolean().optional(),
     palletBoxCapacity: z.number().int().positive().optional(),
     palletTemplateId: z.uuid().optional(),
+    palletSheetTemplateId: z.uuid().optional(),
   })
   .strict();
 export type DeviceShiftCreate = z.infer<typeof deviceShiftCreateSchema>;

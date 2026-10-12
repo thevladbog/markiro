@@ -1544,3 +1544,52 @@ fn a_shifts_totals_carry_both_pallet_counts_as_required_whole_numbers() {
         }
     }
 }
+
+/// A shift with an A4 sheet (plan А4): the office's request names it, and the
+/// entry freezes the sheet with the organization.
+#[test]
+fn a_shift_with_a_sheet_freezes_it_with_the_organization() {
+    let create: ShiftCreate = round_trip("shift-create-pallet-sheet.json");
+    assert!(create.pallets_enabled && create.pallet_sheet_template_id.is_some());
+    let entered: DeviceShift = round_trip("device-shift-entered-sheet.json");
+    let snapshot = entered.snapshot.expect("an entry carries the snapshot");
+    let sheet = snapshot.pallet_sheet.expect("the shift froze its sheet");
+    assert_eq!(Some(sheet.id), create.pallet_sheet_template_id);
+    let organization = snapshot
+        .organization
+        .expect("the shift froze the organization");
+    assert_eq!(organization.logo.map(|logo| logo.width), Some(10));
+    let plain: DeviceShift =
+        serde_json::from_value(fixture("device-shift-entered-pallets.json")).unwrap();
+    let plain = plain.snapshot.expect("snapshot");
+    assert_eq!((plain.pallet_sheet, plain.organization), (None, None));
+}
+
+/// The sheet is optional in every request that carries it and is sent only
+/// when set; a shift of the office always answers it (`null` for none).
+#[test]
+fn the_sheet_is_left_out_of_a_request_that_names_none() {
+    let plain: ShiftCreate = round_trip("shift-create-pallets.json");
+    assert_eq!(plain.pallet_sheet_template_id, None);
+    let office: OfficeShift = round_trip("office-shift.json");
+    assert_eq!(office.pallet_sheet_template_id, None);
+    let named = serde_json::json!({ "palletSheetTemplateId": "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b", "expectedRev": 3 });
+    let update: ShiftUpdate = serde_json::from_value(named.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&update).unwrap(), named);
+    let none: ShiftUpdate =
+        serde_json::from_value(serde_json::json!({ "expectedRev": 3 })).unwrap();
+    assert_eq!(
+        serde_json::to_value(&none).unwrap(),
+        serde_json::json!({ "expectedRev": 3 })
+    );
+    let station: DeviceShiftCreate = serde_json::from_value(serde_json::json!({
+        "requestId": "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5c",
+        "productId": "f1e2d3c4-b5a6-4978-8a6b-5c4d3e2f1a0b",
+        "boxTemplateId": "a3b4c5d6-e7f8-4a9b-8c0d-1e2f3a4b5c6d",
+        "productionDate": "2026-10-08",
+        "palletSheetTemplateId": "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b"
+    }))
+    .unwrap();
+    assert!(station.pallet_sheet_template_id.is_some());
+    assert!(serde_json::to_value(&station).unwrap()["palletSheetTemplateId"].is_string());
+}

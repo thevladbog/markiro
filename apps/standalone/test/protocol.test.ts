@@ -294,6 +294,7 @@ const RESPONSES = [
   ["device-shifts.json", deviceShiftsSchema],
   ["device-shift-entered.json", enteredShiftSchema],
   ["device-shift-entered-pallets.json", enteredShiftSchema],
+  ["device-shift-entered-sheet.json", enteredShiftSchema],
   ["sscc-block.json", ssccBlockSchema],
   ["code-check-free.json", codeCheckSchema],
   ["code-check-taken.json", codeCheckSchema],
@@ -331,6 +332,7 @@ const REQUESTS = [
   ["bootstrap-request-templates.json", bootstrapRequestSchema],
   ["shift-create.json", shiftCreateSchema],
   ["shift-create-pallets.json", shiftCreateSchema],
+  ["shift-create-pallet-sheet.json", shiftCreateSchema],
   ["shift-update.json", shiftUpdateSchema],
   ["shift-close.json", shiftCloseSchema],
   ["shift-export-record.json", shiftExportRecordSchema],
@@ -786,6 +788,19 @@ describe("request builders produce their fixtures exactly", () => {
     }
   });
 
+  it("takes the A4 sheet in a station's request as the host does, though a station of this build names none (plan А4)", () => {
+    const shift = deviceShiftCreateSchema.parse(fixture("device-shift-create-pallets.json"));
+    const sheet = "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b";
+    const named = { ...shift, palletSheetTemplateId: sheet };
+    expect(deviceShiftCreateSchema.parse(named)).toStrictEqual(named);
+    expect(
+      deviceShiftCreateSchema.safeParse({ ...shift, palletSheetTemplateId: "6" }).success,
+    ).toBe(false);
+    expect(
+      deviceShiftCreateSchema.safeParse({ ...shift, palletSheetTemplateId: null }).success,
+    ).toBe(false);
+  });
+
   it("the record of an export names every field and sums its parts' counts (plan ЧЗ)", () => {
     const written = {
       formatId: "shift_xml_gismt_aggregation_pallets",
@@ -1148,6 +1163,7 @@ describe("request builders send only what changes", () => {
       palletsEnabled: false,
       palletBoxCapacity: null,
       palletTemplateId: null,
+      palletSheetTemplateId: null,
       rev: 71,
     };
     const same = {
@@ -1239,6 +1255,22 @@ describe("request builders send only what changes", () => {
     });
     expect(shiftCreateSchema.parse(withPallets)).toStrictEqual(withPallets);
     expect(JSON.stringify(withPallets)).toBe(fixtureText("shift-create-pallets.json"));
+    // The A4 sheet (plan А4) goes only when the form chose one.
+    const withSheet = shiftCreate({
+      ...input,
+      counterpartyId: null,
+      pallets: {
+        boxCapacity: 40,
+        templateId: template,
+        sheetId: "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b",
+      },
+    });
+    expect(JSON.stringify(withSheet)).toBe(fixtureText("shift-create-pallet-sheet.json"));
+    expect(shiftCreateSchema.parse(withSheet)).toStrictEqual(withSheet);
+    expect(withPallets).not.toHaveProperty("palletSheetTemplateId");
+    expect(shiftCreateSchema.safeParse({ ...withSheet, palletSheetTemplateId: "6" }).success).toBe(
+      false,
+    );
     // An edit of something else names no pallet field, with pallets or without.
     const shift = officeShiftSchema.parse(fixture("office-shift.json"));
     const enabled = {
@@ -1290,6 +1322,38 @@ describe("request builders send only what changes", () => {
       ],
       [shiftUpdate(withPallets, {}), { expectedRev: 71 }],
     ] as const;
+    // The A4 sheet (plan А4): named when chosen and different, never when the
+    // form leaves it to the default, and pallets turned on can carry it.
+    const sheet = "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b";
+    const sheeted = { ...withPallets, palletSheetTemplateId: sheet };
+    const keep = { boxCapacity: 40, templateId: template };
+    const sheetBodies = [
+      [
+        shiftUpdate(withPallets, { pallets: { ...keep, sheetId: sheet } }),
+        { palletSheetTemplateId: sheet, expectedRev: 71 },
+      ],
+      [shiftUpdate(sheeted, { pallets: { ...keep, sheetId: sheet } }), { expectedRev: 71 }],
+      [shiftUpdate(sheeted, { pallets: keep }), { expectedRev: 71 }],
+      [
+        shiftUpdate(sheeted, { pallets: { ...keep, sheetId: other } }),
+        { palletSheetTemplateId: other, expectedRev: 71 },
+      ],
+      [
+        shiftUpdate(without, { pallets: { ...keep, sheetId: sheet } }),
+        {
+          palletsEnabled: true,
+          palletBoxCapacity: 40,
+          palletTemplateId: template,
+          palletSheetTemplateId: sheet,
+          expectedRev: 71,
+        },
+      ],
+      [shiftUpdate(sheeted, { pallets: null }), { palletsEnabled: false, expectedRev: 71 }],
+    ] as const;
+    for (const [body, expected] of sheetBodies) {
+      expect(body).toStrictEqual(expected);
+      expect(shiftUpdateSchema.parse(body)).toStrictEqual(body);
+    }
     for (const [body, expected] of bodies) {
       expect(body).toStrictEqual(expected);
       expect(shiftUpdateSchema.parse(body)).toStrictEqual(body);
@@ -1613,6 +1677,65 @@ describe("shift shapes", () => {
       expect(enteredShiftSchema.safeParse({ ...entered, palletBoxCapacity }).success).toBe(false);
     }
     expect(enteredShiftSchema.safeParse({ ...entered, palletTemplateId: "42" }).success).toBe(
+      false,
+    );
+  });
+
+  it("read the A4 sheet and the organization a shift froze, tolerate a snapshot without them and refuse a malformed one (plan А4)", () => {
+    const entered = enteredShiftSchema.parse(fixture("device-shift-entered-sheet.json"));
+    expect(entered.snapshot.palletSheet).toMatchObject({
+      id: "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b",
+      revision: 1,
+      spec: { schemaVersion: 2, kind: "pallet_sheet", dpi: 300 },
+    });
+    expect(entered.snapshot.organization).toStrictEqual({
+      name: "ООО «Молочный завод»",
+      inn: "7701234567",
+      logo: { width: 10, height: 2, pixelsBase64: "8MAPQA==" },
+    });
+    // The snapshot of a host before plan А4 has neither.
+    const old = enteredShiftSchema.parse(fixture("device-shift-entered-pallets.json"));
+    expect(old.snapshot.palletSheet).toBeUndefined();
+    expect(old.snapshot.organization).toBeUndefined();
+    const withOrganization = (organization: unknown) => ({
+      ...entered,
+      snapshot: { ...entered.snapshot, organization },
+    });
+    const withSheet = (palletSheet: unknown) => ({
+      ...entered,
+      snapshot: { ...entered.snapshot, palletSheet },
+    });
+    expect(
+      enteredShiftSchema.safeParse(withOrganization({ name: "О", inn: null, logo: null })).success,
+    ).toBe(true);
+    for (const organization of [
+      { name: "О", inn: null },
+      { name: "О", logo: null },
+      { inn: null, logo: null },
+      { name: "О", inn: 7, logo: null },
+      { name: "О", inn: null, logo: { width: 1.5, height: 2, pixelsBase64: "AA==" } },
+      { name: "О", inn: null, logo: { width: 8, height: 2 } },
+    ]) {
+      expect(enteredShiftSchema.safeParse(withOrganization(organization)).success).toBe(false);
+    }
+    const sheet = entered.snapshot.palletSheet;
+    for (const palletSheet of [
+      { ...sheet, id: "42" },
+      { ...sheet, revision: 0 },
+      { ...sheet, name: 7 },
+      { id: sheet?.id, name: "Лист", revision: 1 },
+    ]) {
+      const parsed = enteredShiftSchema.safeParse(withSheet(palletSheet));
+      expect(parsed.success).toBe(false);
+    }
+    // The office's shift names its sheet or `null`, never nothing.
+    const office = officeShiftSchema.parse(fixture("office-shift.json"));
+    expect(office.palletSheetTemplateId).toBeNull();
+    const bare = Object.fromEntries(
+      Object.entries(office).filter(([key]) => key !== "palletSheetTemplateId"),
+    );
+    expect(officeShiftSchema.safeParse(bare).success).toBe(false);
+    expect(officeShiftSchema.safeParse({ ...office, palletSheetTemplateId: "x" }).success).toBe(
       false,
     );
   });

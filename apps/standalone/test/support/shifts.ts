@@ -172,6 +172,7 @@ export const ACTIVE: OfficeShift = {
   boxTemplateId: MILK_BOX.id,
   palletBoxCapacity: null,
   palletTemplateId: null,
+  palletSheetTemplateId: null,
   ownerDeviceId: "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   openedAt: "2026-10-08T06:02:00Z",
   closedAt: null,

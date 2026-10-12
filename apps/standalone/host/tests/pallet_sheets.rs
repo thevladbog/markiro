@@ -774,6 +774,105 @@ async fn a_sheet_a_planned_shift_names_is_not_deleted_but_an_opened_one_is() {
     );
 }
 
+/// The shifts planned through the office name the sheet (task 4): the sheet
+/// is held while one of them is planned, and let go when the shift moves to
+/// another sheet, turns its pallets off, or is opened by a station.
+#[tokio::test]
+async fn a_sheet_a_planned_shift_names_through_the_office_is_held_until_it_lets_go() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let pallet = pallet_template(&admin).await;
+    let first = create(&admin, stock("pallet-a4-portrait", "Вертикальная")).await;
+    let second = create(&admin, stock("pallet-a4-landscape", "Горизонтальная")).await;
+    let mut body = pallet_shift_body(&setup, &pallet);
+    body["palletSheetTemplateId"] = first["id"].clone();
+    let shift = plan_shift(&admin, body).await;
+    let shift_path = format!("/v1/office/shifts/{}", shift["id"].as_str().unwrap());
+    let (status, refused) = admin.call("DELETE", &path(&first), None).await;
+    assert_eq!(
+        conflict(status, &refused),
+        (
+            StatusCode::CONFLICT,
+            json!("conflict"),
+            json!("template_in_use")
+        )
+    );
+    assert_eq!(
+        refused["error"]["details"]["shiftIds"],
+        json!([shift["id"]])
+    );
+    // Moved to the other sheet, the shift holds that one.
+    let (status, moved) = admin
+        .call(
+            "PUT",
+            &shift_path,
+            Some(json!({ "palletSheetTemplateId": second["id"], "expectedRev": shift["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    let (status, _) = admin.call("DELETE", &path(&second), None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    // Pallets off: it holds none.
+    let (status, off) = admin
+        .call(
+            "PUT",
+            &shift_path,
+            Some(json!({ "palletsEnabled": false, "expectedRev": moved["rev"] })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{off}");
+    let (status, _) = admin.call("DELETE", &path(&second), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    // Opened by a station, a shift holds nothing: its snapshot owns the sheet.
+    let mut body = pallet_shift_body(&setup, &pallet);
+    body["palletSheetTemplateId"] = first["id"].clone();
+    let planned = plan_shift(&admin, body).await;
+    let (status, _) = admin.call("DELETE", &path(&first), None).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    let (status, line) = admin
+        .app
+        .send(support::app::json(
+            with_device(request("PUT", "/v1/device/line"), &admin.key),
+            json!({ "lineId": setup.line }),
+        ))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{line}");
+    let (status, entered) = admin
+        .app
+        .send(empty(with_device(
+            request(
+                "POST",
+                &format!(
+                    "/v1/device/shifts/{}/enter",
+                    planned["id"].as_str().unwrap()
+                ),
+            ),
+            &admin.key,
+        )))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    let (status, _) = admin.call("DELETE", &path(&first), None).await;
+    assert_eq!(status, StatusCode::NO_CONTENT);
+    let (_, again) = admin
+        .app
+        .send(empty(with_device(
+            request(
+                "POST",
+                &format!(
+                    "/v1/device/shifts/{}/enter",
+                    planned["id"].as_str().unwrap()
+                ),
+            ),
+            &admin.key,
+        )))
+        .await;
+    assert_eq!(
+        again["snapshot"]["palletSheet"],
+        entered["snapshot"]["palletSheet"]
+    );
+    assert_eq!(again["snapshot"]["palletSheet"]["id"], first["id"]);
+}
+
 #[tokio::test]
 async fn a_sheet_that_does_not_exist_is_not_found_to_delete() {
     let admin = admin().await;

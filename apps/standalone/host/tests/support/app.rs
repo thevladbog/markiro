@@ -538,6 +538,38 @@ pub fn pallet_shift_body(setup: &ShiftSetup, template: &str) -> Value {
     body
 }
 
+/// The layout of a stock A4 sheet in the tests: a stub of the host's own
+/// bounds (the domain reads the real layout), tagged so a test can tell
+/// the sheets apart.
+pub fn sheet_spec(key: &str) -> Value {
+    serde_json::json!({
+        "schemaVersion": 2, "kind": "pallet_sheet", "dpi": 300, "tag": key
+    })
+}
+
+/// An enabled A4 sheet of the stock key `key` made through the office API;
+/// returns its id.
+pub async fn stock_sheet(admin: &Admin, key: &str) -> String {
+    let body = serde_json::json!({ "name": key, "presetKey": key, "spec": sheet_spec(key) });
+    let (status, sheet) = admin
+        .call("POST", "/v1/office/pallet-sheets", Some(body))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{sheet}");
+    sheet["id"].as_str().unwrap().to_owned()
+}
+
+/// Make the sheet `id` the organization's default.
+pub async fn default_sheet_is(admin: &Admin, id: &str) {
+    let (status, body) = admin
+        .call(
+            "PUT",
+            "/v1/office/pallet-sheet-default",
+            Some(serde_json::json!({ "templateId": id })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
 /// Plan a shift of `body` as the administrator; returns the record.
 pub async fn plan_shift(admin: &Admin, body: Value) -> Value {
     let (status, shift) = admin.call("POST", "/v1/office/shifts", Some(body)).await;

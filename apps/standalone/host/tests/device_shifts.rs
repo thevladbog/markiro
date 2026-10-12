@@ -10,9 +10,10 @@ use markiro_host::routes::device_shifts::{create_device_shift, enter_shift};
 use markiro_proto::{DeviceKind, DeviceShift, DeviceShiftCreate};
 use serde_json::{json, Value};
 use support::app::{
-    admin, audit_rows, audit_trail, empty, host_revision, json as json_request, office_template,
-    pair_device, pallet_shift_body, pallet_template, plan_shift, request, shift_body, shift_setup,
-    with_device, Admin, AuditRow, ShiftSetup, LAN,
+    admin, audit_rows, audit_trail, default_sheet_is, empty, host_revision, json as json_request,
+    office_template, pair_device, pallet_shift_body, pallet_template, plan_shift, request,
+    sheet_spec, shift_body, shift_setup, stock_sheet, with_device, Admin, AuditRow, ShiftSetup,
+    LAN,
 };
 
 /// This station's own id, as the host has it.
@@ -593,7 +594,9 @@ async fn entering_a_planned_shift_opens_it_and_freezes_its_snapshot() {
             "spec": { "widthMm": 58, "heightMm": 40, "dpi": 203, "language": "zpl", "elements": [] }
         },
         "issuerPrefix": "460068200",
-        "counterpartyName": "ООО «Северный берег»"
+        "counterpartyName": "ООО «Северный берег»",
+        // The wizard's organization, without a logo (plan А4).
+        "organization": { "name": "ООО «Атолл»", "inn": "7701234567", "logo": null }
     });
     let mut expected = device_shift(&id, "OCT26-001", &setup);
     for (key, value) in [
@@ -1113,7 +1116,8 @@ async fn a_station_shift_without_a_counterparty_opens_on_a_template_that_names_i
                 "spec": { "widthMm": 58, "heightMm": 40, "dpi": 203, "language": "zpl", "elements": [] }
             },
             "issuerPrefix": "460068200",
-            "counterpartyName": null
+            "counterpartyName": null,
+            "organization": { "name": "ООО «Атолл»", "inn": "7701234567", "logo": null }
         })
     );
     // The number of a shift a station made keeps its `/S` in the audit row.
@@ -2199,4 +2203,429 @@ async fn a_snapshot_of_exactly_the_limit_opens_the_shift_and_one_byte_more_does_
         entry_with_layouts(100_000, 100_000 + room + 1).await,
         (StatusCode::CONFLICT, None)
     );
+}
+
+// The A4 sheet and the organization in a shift's snapshot (plan А4, task 4).
+
+const LOGO: &str = "8MAPQA==";
+
+async fn set_logo(admin: &Admin) {
+    let (status, body) = admin
+        .call(
+            "PUT",
+            "/v1/office/org/logo",
+            Some(json!({ "width": 10, "height": 2, "pixelsBase64": LOGO })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
+/// A station on the first line and a shift with pallets planned on it,
+/// naming `sheet` (the default when `None`), not yet entered.
+async fn planned_with_sheet(
+    admin: &Admin,
+    setup: &ShiftSetup,
+    sheet: Option<&str>,
+) -> (String, Value) {
+    let station = device_id(admin, &admin.key).await;
+    select_line(admin, &admin.key, &setup.line).await;
+    let template = pallet_template(admin).await;
+    let mut body = pallet_shift_body(setup, &template);
+    if let Some(sheet) = sheet {
+        body["palletSheetTemplateId"] = json!(sheet);
+    }
+    (station, plan_shift(admin, body).await)
+}
+
+#[tokio::test]
+async fn the_entry_freezes_the_sheet_and_the_organization_with_its_logo() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    set_logo(&admin).await;
+    let sheet = stock_sheet(&admin, "pallet-a4-portrait").await;
+    default_sheet_is(&admin, &sheet).await;
+    let (station, shift) = planned_with_sheet(&admin, &setup, None).await;
+    let id = shift["id"].as_str().unwrap().to_owned();
+    assert_eq!(shift["palletSheetTemplateId"], json!(sheet));
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    let snapshot = entered["snapshot"].clone();
+    assert_eq!(
+        snapshot["palletSheet"],
+        json!({
+            "id": sheet, "name": "pallet-a4-portrait", "revision": 1,
+            "spec": sheet_spec("pallet-a4-portrait")
+        })
+    );
+    assert_eq!(
+        snapshot["organization"],
+        json!({
+            "name": "ООО «Атолл»", "inn": "7701234567",
+            "logo": { "width": 10, "height": 2, "pixelsBase64": LOGO }
+        })
+    );
+    // The opening's audit row names the sheet and its revision, not its layout.
+    assert_eq!(
+        audit_trail(&admin.app, "shift.open").await,
+        vec![device_row(
+            &station,
+            "shift.open",
+            &id,
+            json!({
+                "number": "OCT26-001", "templateId": setup.template, "templateRev": 2,
+                "palletTemplateId": snapshot["palletTemplate"]["id"],
+                "palletTemplateRev": snapshot["palletTemplate"]["rev"],
+                "palletSheetTemplateId": sheet, "palletSheetRevision": 1
+            })
+        )]
+    );
+    // The first answer and the owner's re-entry carry the same snapshot.
+    let (_, again) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(again["snapshot"], snapshot);
+    let stored: String = sqlx::query_scalar("SELECT snapshot FROM shifts WHERE id = ?")
+        .bind(&id)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap();
+    assert_eq!(serde_json::from_str::<Value>(&stored).unwrap(), snapshot);
+}
+
+/// A later change of the sheet, the organization or the logo never reaches
+/// a shift that is open: its snapshot owns them.
+#[tokio::test]
+async fn a_later_change_of_the_sheet_the_organization_or_the_logo_leaves_an_open_shift_alone() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    set_logo(&admin).await;
+    let sheet = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let (_, shift) = planned_with_sheet(&admin, &setup, Some(&sheet)).await;
+    let (status, entered) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    let snapshot = entered["snapshot"].clone();
+    // Rename, disable (each takes a revision of the sheet).
+    let url = format!("/v1/office/pallet-sheets/{sheet}");
+    let (status, renamed) = admin
+        .call(
+            "PUT",
+            &url,
+            Some(json!({ "name": "Другое имя", "expectedRevision": 1 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{renamed}");
+    let (status, off) = admin
+        .call(
+            "PUT",
+            &url,
+            Some(json!({ "enabled": false, "expectedRevision": 2 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{off}");
+    assert_eq!(off["revision"], 3);
+    let (_, again) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(
+        again["snapshot"], snapshot,
+        "after a rename and a switch off"
+    );
+    // The layout in the table changes under it (the host's update takes no
+    // layout; a restore or a later version might).
+    sqlx::query("UPDATE pallet_sheet_templates SET spec = ? WHERE id = ?")
+        .bind(sheet_spec("other").to_string())
+        .bind(&sheet)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    // The organization is renamed and its logo replaced, then cleared.
+    let (_, org) = admin.call("GET", "/v1/office/org", None).await;
+    let (status, moved) = admin
+        .call(
+            "PUT",
+            "/v1/office/org",
+            Some(json!({
+                "name": "ООО «Новое имя»", "inn": "7707083893", "gln": org["gln"],
+                "gs1Prefixes": org["gs1Prefixes"], "timeZone": org["timeZone"],
+                "expectedRev": org["rev"]
+            })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{moved}");
+    let (status, logo) = admin
+        .call(
+            "PUT",
+            "/v1/office/org/logo",
+            Some(json!({ "width": 8, "height": 1, "pixelsBase64": "/w==" })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{logo}");
+    let (_, again) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(
+        again["snapshot"], snapshot,
+        "after the table, the organization and the logo"
+    );
+    let (status, cleared) = admin.call("DELETE", "/v1/office/org/logo", None).await;
+    assert_eq!(
+        (status, cleared["logo"].clone()),
+        (StatusCode::OK, Value::Null)
+    );
+    // The sheet is deleted: an open shift does not block it.
+    let (status, gone) = admin.call("DELETE", &url, None).await;
+    assert!(status.is_success(), "{gone}");
+    let (_, again) = enter(&admin, &admin.key, &shift).await;
+    assert_eq!(
+        again["snapshot"], snapshot,
+        "after the logo and the sheet are gone"
+    );
+    // The station's own list names no snapshot, and the shift a new station
+    // opens now freezes the new state.
+    let (_, fresh) = planned_with_sheet(&admin, &setup, None).await;
+    let (status, entered) = enter(&admin, &admin.key, &fresh).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert!(entered["snapshot"].get("palletSheet").is_none());
+    assert_eq!(
+        entered["snapshot"]["organization"],
+        json!({ "name": "ООО «Новое имя»", "inn": "7707083893", "logo": null })
+    );
+}
+
+/// A planned shift whose sheet was turned off after planning opens with the
+/// sheet as it is (turning off only stops new shifts from choosing it); a
+/// sheet that is gone (never through the API, which refuses it) opens the
+/// shift with no sheet rather than refusing the entry.
+#[tokio::test]
+async fn a_disabled_sheet_is_frozen_as_it_is_and_a_missing_one_as_none() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    let sheet = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let (station, disabled) = planned_with_sheet(&admin, &setup, Some(&sheet)).await;
+    let (status, _) = admin
+        .call(
+            "PUT",
+            &format!("/v1/office/pallet-sheets/{sheet}"),
+            Some(json!({ "enabled": false, "expectedRevision": 1 })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, entered) = enter(&admin, &admin.key, &disabled).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert_eq!(
+        entered["snapshot"]["palletSheet"],
+        json!({
+            "id": sheet, "name": "pallet-a4-portrait", "revision": 2,
+            "spec": sheet_spec("pallet-a4-portrait")
+        })
+    );
+    // A second station-free shift naming a sheet that is gone from the table.
+    let other = stock_sheet(&admin, "pallet-a4-landscape").await;
+    let (_, missing) = planned_with_sheet(&admin, &setup, Some(&other)).await;
+    sqlx::query("DELETE FROM pallet_sheet_templates WHERE id = ?")
+        .bind(&other)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let before = audit_rows(&admin.app).await;
+    let (status, entered) = enter(&admin, &admin.key, &missing).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert_eq!(entered["status"], "active");
+    assert!(
+        entered["snapshot"].get("palletSheet").is_none(),
+        "{entered}"
+    );
+    assert!(entered["snapshot"]["palletTemplate"].is_object());
+    assert!(entered["snapshot"]["organization"].is_object());
+    // The opening is audited without a sheet.
+    let trail = audit_trail(&admin.app, "shift.open").await;
+    assert_eq!(trail.len(), 2);
+    assert_eq!(audit_rows(&admin.app).await, before + 1);
+    let row = trail
+        .iter()
+        .find(|row| row.4.as_deref() == missing["id"].as_str())
+        .unwrap();
+    assert_eq!(row.0, "device");
+    assert_eq!(row.1.as_deref(), Some(station.as_str()));
+    assert!(row.6.get("palletSheetTemplateId").is_none());
+    assert!(row.6.get("palletSheetRevision").is_none());
+}
+
+#[tokio::test]
+async fn a_shift_with_no_sheet_and_one_without_pallets_freeze_the_organization_only() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    // Pallets, no default sheet.
+    let (_, pallets) = planned_with_sheet(&admin, &setup, None).await;
+    let (status, entered) = enter(&admin, &admin.key, &pallets).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert!(entered["snapshot"].get("palletSheet").is_none());
+    assert_eq!(
+        entered["snapshot"]["organization"],
+        json!({ "name": "ООО «Атолл»", "inn": "7701234567", "logo": null })
+    );
+    // No pallets, a default sheet: none reaches the shift.
+    let sheet = stock_sheet(&admin, "pallet-a4-portrait").await;
+    default_sheet_is(&admin, &sheet).await;
+    let plain = plan_shift(&admin, shift_body(&setup)).await;
+    let (status, entered) = enter(&admin, &admin.key, &plain).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert!(entered["snapshot"].get("palletSheet").is_none());
+    assert!(entered["snapshot"]["organization"].is_object());
+}
+
+/// A station creates a shift with pallets: it names no sheet (decision
+/// А4-3), so the host gives it the default one; the office reads it.
+#[tokio::test]
+async fn a_station_created_shift_with_pallets_takes_the_default_sheet() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let pallet = pallet_template(&admin).await;
+    let portrait = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let landscape = stock_sheet(&admin, "pallet-a4-landscape").await;
+    let mut create = device_create(&setup, REQUEST);
+    create["palletsEnabled"] = json!(true);
+    create["palletTemplateId"] = json!(pallet);
+    let (status, none) = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/shifts",
+        Some(create.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{none}");
+    let (_, office) = admin
+        .call(
+            "GET",
+            &format!("/v1/office/shifts/{}", none["id"].as_str().unwrap()),
+            None,
+        )
+        .await;
+    assert_eq!(office["palletSheetTemplateId"], Value::Null);
+    default_sheet_is(&admin, &portrait).await;
+    create["requestId"] = json!(SECOND_REQUEST);
+    let (status, created) = device_call(
+        &admin,
+        &admin.key,
+        "POST",
+        "/v1/device/shifts",
+        Some(create.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{created}");
+    // The station's own record names no sheet.
+    assert!(created.get("palletSheetTemplateId").is_none());
+    let (_, office) = admin
+        .call(
+            "GET",
+            &format!("/v1/office/shifts/{}", created["id"].as_str().unwrap()),
+            None,
+        )
+        .await;
+    assert_eq!(office["palletSheetTemplateId"], json!(portrait));
+    // The wire accepts a sheet in the request; the host checks it as the
+    // office's.
+    let mut named = create.clone();
+    named["requestId"] = json!("2c3d4e5f-6071-4a82-8c93-a4b5c6d7e8f9");
+    named["palletSheetTemplateId"] = json!(landscape);
+    let (status, made) =
+        device_call(&admin, &admin.key, "POST", "/v1/device/shifts", Some(named)).await;
+    assert_eq!(status, StatusCode::OK, "{made}");
+    let (_, office) = admin
+        .call(
+            "GET",
+            &format!("/v1/office/shifts/{}", made["id"].as_str().unwrap()),
+            None,
+        )
+        .await;
+    assert_eq!(office["palletSheetTemplateId"], json!(landscape));
+    // Its entry freezes that sheet.
+    let (status, entered) = enter(&admin, &admin.key, &made).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    assert_eq!(entered["snapshot"]["palletSheet"]["id"], json!(landscape));
+}
+
+#[tokio::test]
+async fn a_station_create_refuses_a_sheet_without_pallets_or_one_that_is_not_there() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    select_line(&admin, &admin.key, &setup.line).await;
+    let pallet = pallet_template(&admin).await;
+    let sheet = stock_sheet(&admin, "pallet-a4-portrait").await;
+    let rows = audit_rows(&admin.app).await;
+    let revision = host_revision(&admin.app).await;
+    let mut no_pallets = device_create(&setup, REQUEST);
+    no_pallets["palletSheetTemplateId"] = json!(sheet);
+    let mut unknown = device_create(&setup, SECOND_REQUEST);
+    unknown["palletsEnabled"] = json!(true);
+    unknown["palletTemplateId"] = json!(pallet);
+    unknown["palletSheetTemplateId"] = json!("6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a5b");
+    for body in [no_pallets, unknown] {
+        let (status, refused) =
+            device_call(&admin, &admin.key, "POST", "/v1/device/shifts", Some(body)).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST, "{refused}");
+        assert_eq!(
+            refused["error"]["details"]["field"],
+            "palletSheetTemplateId"
+        );
+    }
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(host_revision(&admin.app).await, revision);
+}
+
+/// The sheet and the largest logo count against a shift's 320 KB: a plan
+/// whose layouts fit without them is refused with them, and nothing opens.
+#[tokio::test]
+async fn a_sheet_and_a_logo_that_make_the_snapshot_too_large_refuse_the_entry() {
+    let admin = admin().await;
+    let setup = shift_setup(&admin).await;
+    // The largest logo: 1024 x 512 bits, 87 384 characters of base64.
+    let bits = "AAAA".repeat(21_845) + "AA==";
+    let (status, logo) = admin
+        .call(
+            "PUT",
+            "/v1/office/org/logo",
+            Some(json!({ "width": 1024, "height": 512, "pixelsBase64": bits })),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{logo}");
+    // A box layout of 190 KB, in the table as a long-lived plan would have it.
+    let big = json!({ "widthMm": 58, "heightMm": 40, "dpi": 203, "language": "zpl",
+        "elements": [], "note": "x".repeat(190_000) });
+    sqlx::query("UPDATE label_templates SET spec = ? WHERE id = ?")
+        .bind(big.to_string())
+        .bind(&setup.template)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let sheet = stock_sheet(&admin, "pallet-a4-portrait").await;
+    sqlx::query("UPDATE pallet_sheet_templates SET spec = ? WHERE id = ?")
+        .bind(
+            json!({
+                "schemaVersion": 2, "kind": "pallet_sheet", "dpi": 300, "pad": "y".repeat(65_000)
+            })
+            .to_string(),
+        )
+        .bind(&sheet)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (_, without) = planned_with_sheet(&admin, &setup, None).await;
+    let (_, with) = planned_with_sheet(&admin, &setup, Some(&sheet)).await;
+    // Without the sheet, the box layout, the logo and the pallet layout fit.
+    let (status, entered) = enter(&admin, &admin.key, &without).await;
+    assert_eq!(status, StatusCode::OK, "{entered}");
+    // With it they do not.
+    let revision = host_revision(&admin.app).await;
+    let (status, refused) = enter(&admin, &admin.key, &with).await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+    assert_eq!(
+        refused["error"]["details"]["constraint"],
+        "snapshot_too_large"
+    );
+    assert_eq!(host_revision(&admin.app).await, revision);
+    let (_, still) = admin
+        .call(
+            "GET",
+            &format!("/v1/office/shifts/{}", with["id"].as_str().unwrap()),
+            None,
+        )
+        .await;
+    assert_eq!(still["status"], "planned");
 }
