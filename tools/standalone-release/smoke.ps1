@@ -44,13 +44,31 @@ function Check([bool]$condition, [string]$text) {
   if (-not $condition) { throw "FAILED: $text" }
   Write-Host "ok  $text"
 }
-function Install([string[]]$arguments) {
-  (Start-Process -FilePath $installer -ArgumentList $arguments -Wait -PassThru).ExitCode
+function Processes {
+  Get-CimInstance Win32_Process | ForEach-Object {
+    Write-Host ('{0,6} <- {1,6} {2} {3}' -f $_.ProcessId, $_.ParentProcessId, $_.Name, $_.CommandLine)
+  }
 }
+# Waits for this one process, not for its descendants (the -Wait switch of the
+# starting cmdlet waits for those too, and an installer that starts the app
+# would never end), and for a bounded time: past it the process list says what is still running.
+function Run([string]$file, [string[]]$arguments, [int]$seconds) {
+  $process = Start-Process -FilePath $file -ArgumentList $arguments -PassThru
+  if (-not $process.WaitForExit($seconds * 1000)) {
+    Write-Host "== $file $($arguments -join ' ') did not exit within $seconds s; the processes:"
+    Processes
+    Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+    throw "FAILED: $file did not exit within $seconds s"
+  }
+  $process.WaitForExit()
+  Write-Host "   exit code $($process.ExitCode)"
+  $process.ExitCode
+}
+function Install([string[]]$arguments) { Run $installer $arguments 600 }
 function Uninstall {
-  # `_?=` runs the uninstaller in place, so -Wait waits for the work itself.
+  # `_?=` runs the uninstaller in place, so it waits for the work itself.
   $uninstaller = Join-Path $installDir 'uninstall.exe'
-  (Start-Process -FilePath $uninstaller -ArgumentList @('/S', "_?=$installDir") -Wait -PassThru).ExitCode
+  Run $uninstaller @('/S', "_?=$installDir") 300
 }
 function WaitFor([scriptblock]$condition, [int]$seconds, [string]$what) {
   $deadline = (Get-Date).AddSeconds($seconds)

@@ -236,10 +236,19 @@ test("smoke.ps1 is balanced and written defensively", () => {
   assert.deepEqual(uris, ["https://127.0.0.1:45710/v1/hello"]);
   // The certificate check is skipped on that one call only.
   assert.equal(smoke.match(/-SkipCertificateCheck/gu)?.length, 1);
-  // Every installer and uninstaller run is waited for and its exit code read.
+  // Every installer and uninstaller run goes through one bounded wait for that
+  // process alone (-Wait also waits for its descendants and hung the first
+  // Windows run for 49 minutes) and its exit code is read.
   const starts = [...smoke.matchAll(/Start-Process[^\n]*/gu)].map((match) => match[0]);
-  assert.equal(starts.length, 2);
-  for (const start of starts) assert.match(start, /-Wait -PassThru\)\.ExitCode/u);
+  assert.equal(starts.length, 1);
+  assert.match(starts[0], /-PassThru$/u);
+  assert.doesNotMatch(smoke, /Start-Process[^\n]*-Wait/u);
+  assert.match(smoke, /\$process\.WaitForExit\(\$seconds \* 1000\)/u);
+  assert.match(
+    smoke,
+    /function Install\(\[string\[\]\]\$arguments\) \{ Run \$installer \$arguments 600 \}/u,
+  );
+  assert.match(smoke, /Run \$uninstaller @\('\/S', "_\?=\$installDir"\) 300/u);
   // Nothing the script touches is outside the product's own places.
   assert.doesNotMatch(
     stripped,

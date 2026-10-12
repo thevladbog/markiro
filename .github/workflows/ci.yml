@@ -788,6 +788,9 @@ jobs:
         run: pnpm --filter @markiro/standalone tauri build --config src-tauri/tauri.installer.conf.json --bundles nsis
       - name: Install, crash, reinstall and uninstall on this runner
         shell: pwsh
+        # Each installer run is bounded inside the script; this stops a hang
+        # that is not an installer run (the first Windows run waited 49 minutes).
+        timeout-minutes: 25
         run: ./tools/standalone-release/smoke.ps1 -BundleDir apps/standalone/target/release/bundle/nsis
       - name: Prepare the installer artifact
         shell: pwsh
