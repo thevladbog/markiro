@@ -88,6 +88,13 @@ export function Modal({
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
+      // An Escape a nested popover (Select, Combobox, DatePicker) already
+      // consumed bubbles here through its portal; it must not also close the
+      // dialog. Radix preventDefaults the event when it dismisses.
+      if (event.defaultPrevented) return;
+      if (event.target instanceof Element && event.target.closest("[data-mk-nested-overlay]")) {
+        return;
+      }
       onClose?.();
       return;
     }
