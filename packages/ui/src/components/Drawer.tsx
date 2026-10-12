@@ -81,6 +81,12 @@ export function Drawer({
 
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key === "Escape") {
+      // See Modal: an Escape a nested popover already consumed must not also
+      // close the drawer.
+      if (event.defaultPrevented) return;
+      if (event.target instanceof Element && event.target.closest("[data-mk-nested-overlay]")) {
+        return;
+      }
       onClose();
       return;
     }
