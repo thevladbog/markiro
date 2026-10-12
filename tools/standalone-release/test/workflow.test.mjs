@@ -330,7 +330,13 @@ test("the service is read by numeric states and the role file by its exact text"
   // on a Russian Windows and the numbers are not.
   assert.match(smoke, /\$Stopped = 1/u);
   assert.match(smoke, /\$Running = 4/u);
-  assert.match(smoke, /\[int\]\(Get-Service -Name MarkiroHost/u);
+  // StrictMode throws on .Status of the $null an absent service gives, so the
+  // function answers 0 first (the first Windows run failed on exactly this).
+  assert.match(
+    smoke,
+    /function ServiceState \{[^}]*Get-Service -Name MarkiroHost[^}]*if \(\$null -eq \$found\) \{ return 0 \}[^}]*\[int\]\$found\.Status/u,
+  );
+  assert.doesNotMatch(smoke, /\[int\]\(Get-Service/u);
   assert.doesNotMatch(smoke, /State -(?:eq|ne) '(?:Running|Stopped|Start Pending)'/u);
   // The failure policy is read from the service's registry values as well as
   // from sc.exe's text.

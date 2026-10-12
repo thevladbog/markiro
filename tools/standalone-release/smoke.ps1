@@ -61,7 +61,12 @@ function WaitFor([scriptblock]$condition, [int]$seconds, [string]$what) {
   throw "FAILED: $what within $seconds s"
 }
 function Service { Get-CimInstance Win32_Service -Filter "Name='MarkiroHost'" }
-function ServiceState { [int](Get-Service -Name MarkiroHost -ErrorAction SilentlyContinue).Status }
+function ServiceState {
+  # StrictMode forbids .Status on the $null an absent service gives.
+  $found = Get-Service -Name MarkiroHost -ErrorAction SilentlyContinue
+  if ($null -eq $found) { return 0 }
+  [int]$found.Status
+}
 function HostAnswers {
   try {
     $hello = Invoke-RestMethod -Uri 'https://127.0.0.1:45710/v1/hello' -SkipCertificateCheck -TimeoutSec 5
