@@ -346,20 +346,30 @@ mod tests {
         assert_eq!(panicked.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
+    /// An absolute folder where the test runs: a drive path on Windows (where
+    /// `/srv` is relative to the current drive), a root path elsewhere.
+    #[cfg(windows)]
+    const ROOT: &str = r"C:\srv";
+    #[cfg(not(windows))]
+    const ROOT: &str = "/srv";
+
     #[test]
     fn the_folder_text_is_trimmed_and_checked_without_being_echoed() {
-        assert_eq!(second_dir("  /srv/copies \n").unwrap(), "/srv/copies");
+        assert_eq!(
+            second_dir(&format!("  {ROOT}/copies \n")).unwrap(),
+            format!("{ROOT}/copies")
+        );
         for text in [
-            "",
-            "relative/copies",
-            "/srv/../etc",
-            "/srv/copies/..",
-            "/srv\\..\\etc",
-            "//?/C:/copies",
-            "//./PhysicalDrive0",
-            "/srv/co\u{0}pies",
+            String::new(),
+            "relative/copies".to_owned(),
+            format!("{ROOT}/../etc"),
+            format!("{ROOT}/copies/.."),
+            format!("{ROOT}\\..\\etc"),
+            "//?/C:/copies".to_owned(),
+            "//./PhysicalDrive0".to_owned(),
+            format!("{ROOT}/co\u{0}pies"),
         ] {
-            let error = second_dir(text).unwrap_err();
+            let error = second_dir(&text).unwrap_err();
             assert_eq!(error.code(), "validation_failed", "{text:?}");
             assert_eq!(error.details().unwrap()["field"], json!("secondDir"));
             assert!(
@@ -367,11 +377,24 @@ mod tests {
                 "the message must not echo the text"
             );
         }
-        assert!(second_dir(&format!("/{}", "x".repeat(259))).is_ok());
-        assert!(second_dir(&format!("/{}", "x".repeat(260))).is_err());
+        // 260 characters in all, the root included.
+        let longest = format!("{ROOT}/{}", "x".repeat(260 - ROOT.len() - 1));
+        assert_eq!(longest.chars().count(), 260);
+        assert!(second_dir(&longest).is_ok());
+        assert!(second_dir(&format!("{longest}x")).is_err());
         assert!(
-            second_dir("/srv/a..b/copies").is_ok(),
+            second_dir(&format!("{ROOT}/a..b/copies")).is_ok(),
             "only a whole .. part"
         );
+    }
+
+    /// A Windows host refuses a rooted path without a drive or a share: the
+    /// copies would land on whichever drive the service runs from.
+    #[cfg(windows)]
+    #[test]
+    fn a_rooted_path_without_a_drive_is_not_absolute_on_windows() {
+        let error = second_dir("/srv/copies").unwrap_err();
+        assert_eq!(error.message(), "the folder must be an absolute path");
+        assert!(second_dir(r"\\PC\Share\copies").is_ok());
     }
 }
