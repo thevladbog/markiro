@@ -1074,7 +1074,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     expect(session.api.listPalletSheets).toHaveBeenCalledTimes(1);
     expect(
       within(dialog()).getByText(
-        "Печатается вместо термоэтикетки палеты на станции с принтером А4.",
+        "Печатается вместо термоэтикетки паллеты на станции с принтером А4. Основной лист берётся на момент сохранения смены: его последующая замена смену не меняет.",
       ),
     ).toBeTruthy();
     // Off again: the field goes.
@@ -1196,7 +1196,7 @@ describe("office shifts: the A4 sheet of a new shift (plan А4)", () => {
     fireEvent.click(within(dialog()).getByRole("checkbox", { name: "С паллетами" }));
     // The select shows its hint again, not the refusal.
     expect(messageOf("Лист А4")).toBe(
-      "Печатается вместо термоэтикетки палеты на станции с принтером А4.",
+      "Печатается вместо термоэтикетки паллеты на станции с принтером А4. Основной лист берётся на момент сохранения смены: его последующая замена смену не меняет.",
     );
   });
 

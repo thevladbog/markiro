@@ -15,6 +15,7 @@ import {
   LogoDecodeError,
   MAX_LOGO_BASE64,
   MAX_LOGO_FILE_BYTES,
+  MAX_LOGO_SOURCE_PIXELS,
   sheetLogoOf,
 } from "../src/labels/logo.js";
 
@@ -164,19 +165,38 @@ function stubBrowser({
   naturalHeight = 64,
   decode = async () => undefined,
   context = true,
+  loads = true,
 }: {
   naturalWidth?: number;
   naturalHeight?: number;
   decode?: () => Promise<void>;
   context?: boolean;
+  /** Whether the picture loads (`onload`) or not (`onerror`) once its `src` is set. */
+  loads?: boolean;
 } = {}) {
   const calls: string[] = [];
   const surfaces: { width: number; height: number }[] = [];
   class FakeImage {
-    src = "";
+    onload: (() => void) | null = null;
+    onerror: (() => void) | null = null;
     naturalWidth = naturalWidth;
     naturalHeight = naturalHeight;
-    decode = decode;
+    decode = async () => {
+      calls.push("decode");
+      await decode();
+    };
+    #src = "";
+    get src() {
+      return this.#src;
+    }
+    set src(value: string) {
+      this.#src = value;
+      // As a webview: the size is known once the picture has loaded, later.
+      queueMicrotask(() => {
+        if (loads) this.onload?.();
+        else this.onerror?.();
+      });
+    }
   }
   vi.stubGlobal("Image", FakeImage);
   const original = document.createElement.bind(document);
@@ -218,7 +238,12 @@ describe("decodeLogoImage", () => {
     expect(bitmap.width).toBe(560);
     expect(bitmap.height).toBe(128);
     expect(surfaces[0]).toMatchObject({ width: 560, height: 128 });
-    expect(calls).toEqual(["fillStyle #ffffff", "fillRect 0 0 560 128", "drawImage 0 0 560 128"]);
+    expect(calls).toEqual([
+      "decode",
+      "fillStyle #ffffff",
+      "fillRect 0 0 560 128",
+      "drawImage 0 0 560 128",
+    ]);
     // The black left half is ink (bit set), the white right half is not.
     expect(bitmap.pixels[0]).toBe(0xff);
     expect(bitmap.pixels[bitmap.stride - 1]).toBe(0);
@@ -240,6 +265,33 @@ describe("decodeLogoImage", () => {
       name: "LogoDecodeError",
       code: "decode_failed",
     });
+  });
+
+  it("refuses a picture that does not load, without decoding it", async () => {
+    const { calls, surfaces } = stubBrowser({ loads: false });
+    await expect(decodeLogoImage("blob:x")).rejects.toMatchObject({ code: "decode_failed" });
+    expect(calls).toEqual([]);
+    expect(surfaces).toHaveLength(0);
+  });
+
+  it("refuses a picture that declares more pixels than allowed before decoding it or making a canvas", async () => {
+    const { calls, surfaces } = stubBrowser({ naturalWidth: 8192, naturalHeight: 4097 });
+    await expect(decodeLogoImage("blob:x", 1, MAX_LOGO_SOURCE_PIXELS)).rejects.toMatchObject({
+      name: "LogoDecodeError",
+      code: "too_many_pixels",
+    });
+    expect(calls).toEqual([]);
+    expect(surfaces).toHaveLength(0);
+  });
+
+  it("decodes a picture of exactly the allowed pixels, and any size without a limit", async () => {
+    stubBrowser({ naturalWidth: 8192, naturalHeight: 4096 });
+    const bitmap = await decodeLogoImage("blob:x", 1, MAX_LOGO_SOURCE_PIXELS);
+    expect([bitmap.width, bitmap.height]).toEqual([1024, 512]);
+    vi.restoreAllMocks();
+    stubBrowser({ naturalWidth: 20_000, naturalHeight: 20_000 });
+    const vector = await decodeLogoImage("blob:x");
+    expect([vector.width, vector.height]).toEqual([512, 512]);
   });
 
   it("refuses a picture with no size and a webview with no canvas", async () => {
@@ -271,6 +323,22 @@ describe("decodeLogoFile", () => {
     }
     expect(create).toHaveBeenCalledTimes(4);
     expect(revoke).toHaveBeenCalledTimes(4);
+  });
+
+  it("refuses a raster file that declares a huge picture, and counts no SVG's declared size", async () => {
+    const { revoke } = stubObjectUrls();
+    const { calls, surfaces } = stubBrowser({ naturalWidth: 20_000, naturalHeight: 20_000 });
+    for (const type of ["image/png", "image/jpeg", "image/webp"]) {
+      await expect(decodeLogoFile(new Blob(["x"], { type }))).rejects.toMatchObject({
+        code: "too_many_pixels",
+      });
+    }
+    expect(calls).toEqual([]);
+    expect(surfaces).toHaveLength(0);
+    expect(revoke).toHaveBeenCalledTimes(3);
+    // An SVG is drawn at the logo's size: its declared size is no bomb.
+    const vector = await decodeLogoFile(new Blob(["x"], { type: "image/svg+xml" }));
+    expect([vector.width, vector.height]).toEqual([512, 512]);
   });
 
   it("frees the object URL when the picture does not decode", async () => {

@@ -79,7 +79,7 @@ function session(list: PalletSheets, user?: FakeOfficeSession["user"]): FakeOffi
 async function openSheets(fake: FakeOfficeSession): Promise<void> {
   renderOffice(fake);
   fireEvent.click(await screen.findByRole("link", { name: "Листы А4" }));
-  await screen.findByRole("heading", { name: "Листы палет А4" });
+  await screen.findByRole("heading", { name: "Листы паллет А4" });
   await waitFor(() => expect(screen.queryByText("Загрузка…")).toBeNull());
 }
 
@@ -158,7 +158,7 @@ describe("the A4 sheets page: reading", () => {
   ] as const)("is in the menu for %s and opens the page", async (_who, user) => {
     const fake = session(STOCK, user);
     await openSheets(fake);
-    expect(screen.getByRole("heading", { name: "Листы палет А4" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Листы паллет А4" })).toBeTruthy();
     expect(fake.api.listPalletSheets).toHaveBeenCalledWith(TOKEN);
   });
 
@@ -642,7 +642,7 @@ describe("the A4 sheets page: a sheet from a file", () => {
   it("refuses a file that is a label template, broken, or not JSON, and sends nothing", async () => {
     const fake = session(STOCK);
     await openSheets(fake);
-    const refused = "Файл — не лист палеты А4 или повреждён.";
+    const refused = "Файл — не лист паллеты А4 или повреждён.";
     pickFile(
       new File(
         [JSON.stringify({ name: "x", purpose: "box", spec: { widthMm: 58 } })],
@@ -666,7 +666,7 @@ describe("the A4 sheets page: a sheet from a file", () => {
     });
     const text = vi.spyOn(big, "text");
     pickFile(big);
-    expect(await screen.findByText("Файл больше 256 КБ: это не лист палеты А4.")).toBeTruthy();
+    expect(await screen.findByText("Файл больше 256 КБ: это не лист паллеты А4.")).toBeTruthy();
     expect(text).not.toHaveBeenCalled();
     expect(fake.api.createPalletSheet).not.toHaveBeenCalled();
   });
@@ -677,7 +677,7 @@ describe("the A4 sheets page: a sheet from a file", () => {
     const edge = new File([new Uint8Array(256 * 1024)], "edge.json", { type: "application/json" });
     const text = vi.spyOn(edge, "text");
     pickFile(edge);
-    await screen.findByText("Файл — не лист палеты А4 или повреждён.");
+    await screen.findByText("Файл — не лист паллеты А4 или повреждён.");
     expect(text).toHaveBeenCalledTimes(1);
   });
 

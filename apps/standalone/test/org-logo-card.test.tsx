@@ -216,6 +216,10 @@ describe("picking a logo file", () => {
 
   it.each([
     ["too_large", "Файл больше 4 МБ: выберите файл поменьше."],
+    [
+      "too_many_pixels",
+      "Картинка слишком большая в точках (больше 8192 × 4096): уменьшите её и выберите снова.",
+    ],
     ["unsupported_type", "Подойдут файлы PNG, JPEG, WebP и SVG."],
     [
       "decode_failed",

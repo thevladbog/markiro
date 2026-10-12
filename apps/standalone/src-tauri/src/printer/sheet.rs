@@ -149,8 +149,17 @@ pub fn sheet_orientation(raster: &SheetRaster) -> Result<Orientation, SheetError
 pub fn sheet_draw_plan(raster: &SheetRaster, caps: DeviceCaps) -> Result<DrawPlan, SheetError> {
     let orientation = sheet_orientation(raster)?;
     let c = caps;
-    if !matches!(c.dpi_x, 300 | 600 | 1200)
-        || c.dpi_y != c.dpi_x
+    // The whole-number scale of a 300 dpi sheet on the device, from its
+    // resolution alone: any other resolution is refused here, never drawn at
+    // `dpi / 300` by integer division (360 or 450 dpi would print the sheet at
+    // 83 % or 67 % without a word).
+    let scale = match c.dpi_x {
+        300 => 1,
+        600 => 2,
+        1200 => 4,
+        _ => return Err(SheetError::GeometryMismatch),
+    };
+    if c.dpi_y != c.dpi_x
         || c.width <= 0
         || c.height <= 0
         || c.offset_x < 0
@@ -170,7 +179,6 @@ pub fn sheet_draw_plan(raster: &SheetRaster, caps: DeviceCaps) -> Result<DrawPla
     if (mm(c.width) - width_mm).abs() > 0.5 || (mm(c.height) - height_mm).abs() > 0.5 {
         return Err(SheetError::GeometryMismatch);
     }
-    let scale = c.dpi_x / 300;
     let guard = (0.5 * f64::from(c.dpi_x) / 25.4).ceil() as i64;
     let [left, top, right, bottom] = raster.bounds.map(|px| i64::from(px) * i64::from(scale));
     // The page is exactly A4 (3508 dots at most) and the scale at most 4, so
@@ -470,7 +478,9 @@ mod tests {
                 "{dpi}"
             );
         }
-        for dpi in [150, 203, 299, 301, 400, 1201, 2400] {
+        // Resolutions that are not 300, 600 or 1200, whole multiples of 300 or
+        // not, are refused: none is scaled by integer division.
+        for dpi in [150, 203, 299, 301, 360, 400, 450, 900, 1201, 1800, 2400] {
             assert_eq!(
                 sheet_draw_plan(&portrait(), device(dpi, 0, 0)),
                 Err(SheetError::GeometryMismatch),

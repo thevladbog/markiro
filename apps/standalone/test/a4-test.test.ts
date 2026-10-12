@@ -25,7 +25,7 @@ const text: RasterizeTextFn = async (value, options) => {
     hex: "00".repeat(stride * height),
   };
 };
-const WORDS = { title: "Проверка принтера А4", product: "Тестовый лист — не для палеты" };
+const WORDS = { title: "Проверка принтера А4", product: "Тестовый лист — не для паллеты" };
 
 describe("the A4 test SSCC", () => {
   it("is a valid SSCC of the company prefix 9999, which no production code has", () => {

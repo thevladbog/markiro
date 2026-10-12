@@ -29,11 +29,23 @@ export const MAX_LOGO_HEIGHT = 512;
 export const MAX_LOGO_BASE64 = 90_000;
 
 /**
- * The largest picture file the office decodes as a logo: the file is untrusted
- * and the webview's decoder allocates for its full size before the logo is
- * shrunk to 1024 × 512, so a larger file is refused unread.
+ * The largest picture file the office decodes as a logo; a larger one is
+ * refused unread. The cap bounds the FILE, not what decoding it costs: a
+ * compressed picture of a few kilobytes may declare 20 000 × 20 000 pixels,
+ * which the webview decodes at full size (4 bytes a pixel) before the logo is
+ * shrunk to 1024 × 512 — that is `MAX_LOGO_SOURCE_PIXELS`'s to refuse.
  */
 export const MAX_LOGO_FILE_BYTES = 4 * 1024 * 1024;
+
+/**
+ * The most pixels a raster logo file (PNG, JPEG, WebP) may declare: 8192 ×
+ * 4096, 128 MiB decoded. Its size is read once the file has loaded, before
+ * the picture is decoded or drawn, so a small file that declares a huge
+ * picture (a decompression bomb) is refused instead of taking the office
+ * window down. An SVG is drawn at the logo's own size, so its declared size
+ * is not counted.
+ */
+export const MAX_LOGO_SOURCE_PIXELS = 8192 * 4096;
 
 /** The picture formats a logo may come in (the picked file's MIME type). */
 export const LOGO_FILE_TYPES: readonly string[] = [
@@ -44,7 +56,12 @@ export const LOGO_FILE_TYPES: readonly string[] = [
 ];
 
 export type LogoDecodeFailure =
-  "too_large" | "unsupported_type" | "decode_failed" | "empty" | "canvas_unavailable";
+  | "too_large"
+  | "too_many_pixels"
+  | "unsupported_type"
+  | "decode_failed"
+  | "empty"
+  | "canvas_unavailable";
 
 /**
  * A picture that cannot become a logo, with the reason as a code the office
@@ -125,17 +142,39 @@ export function fitLogoSize(width: number, height: number): { width: number; hei
  * the cloud station's `decodeBrowserLogo`: drawn on white (a transparent
  * logo prints on paper), at `scale` times its natural size and never more
  * than 1024 × 512, then thresholded by `logoFromRgba`. A picture the webview
- * cannot decode, or one with no size, is a `LogoDecodeError`.
+ * cannot load or decode, one with no size, or one that declares more than
+ * `maxSourcePixels` is a `LogoDecodeError`; the size is read from the loaded
+ * picture before `decode()`, which decodes it at full size.
  */
-export async function decodeLogoImage(src: string, scale = 1): Promise<MonoBitmap> {
+export async function decodeLogoImage(
+  src: string,
+  scale = 1,
+  maxSourcePixels = Number.POSITIVE_INFINITY,
+): Promise<MonoBitmap> {
   const image = new Image();
-  image.src = src;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => {
+        resolve();
+      };
+      image.onerror = () => {
+        reject(new Error("the picture did not load"));
+      };
+      image.src = src;
+    });
+  } catch {
+    throw new LogoDecodeError("decode_failed");
+  }
+  if (image.naturalWidth < 1 || image.naturalHeight < 1) throw new LogoDecodeError("empty");
+  // Before anything decodes the pixels or allocates a canvas for them.
+  if (image.naturalWidth * image.naturalHeight > maxSourcePixels) {
+    throw new LogoDecodeError("too_many_pixels");
+  }
   try {
     await image.decode();
   } catch {
     throw new LogoDecodeError("decode_failed");
   }
-  if (image.naturalWidth < 1 || image.naturalHeight < 1) throw new LogoDecodeError("empty");
   const size = fitLogoSize(image.naturalWidth * scale, image.naturalHeight * scale);
   const canvas = document.createElement("canvas");
   canvas.width = size.width;
@@ -155,14 +194,17 @@ export async function decodeLogoImage(src: string, scale = 1): Promise<MonoBitma
 /**
  * A file the office picked (PNG, JPEG, WebP, SVG) as a logo. The file is
  * untrusted: its type must be one of `LOGO_FILE_TYPES` and its size at most
- * `MAX_LOGO_FILE_BYTES`, both checked before the webview reads a byte.
+ * `MAX_LOGO_FILE_BYTES`, both checked before the webview reads a byte, and a
+ * raster picture may declare at most `MAX_LOGO_SOURCE_PIXELS`, checked before
+ * it is decoded.
  */
 export async function decodeLogoFile(file: Blob): Promise<MonoBitmap> {
   if (!LOGO_FILE_TYPES.includes(file.type)) throw new LogoDecodeError("unsupported_type");
   if (file.size > MAX_LOGO_FILE_BYTES) throw new LogoDecodeError("too_large");
   const url = URL.createObjectURL(file);
   try {
-    return await decodeLogoImage(url);
+    const limit = file.type === "image/svg+xml" ? Number.POSITIVE_INFINITY : MAX_LOGO_SOURCE_PIXELS;
+    return await decodeLogoImage(url, 1, limit);
   } finally {
     URL.revokeObjectURL(url);
   }
