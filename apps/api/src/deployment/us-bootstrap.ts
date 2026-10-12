@@ -7,11 +7,13 @@ import { UsRuntime } from "./us-runtime";
 import { mountUsHttp } from "./us-http";
 import { UsHttpAdapter } from "./us-http-adapter";
 import type { UsPlanArtifactS3Transport } from "../modules/traceability/plans/us-plan-artifacts";
+import type { UsRequestHttpResourceDependencies } from "./us-request-http-resources";
 
 export async function createUsDevelopmentApplication(
   raw: NodeJS.ProcessEnv,
   connect: typeof createDb = createDb,
   planArtifactTransport?: UsPlanArtifactS3Transport,
+  requestResourceDeps?: UsRequestHttpResourceDependencies,
 ): Promise<INestApplication> {
   const env = loadUsDevelopmentEnv(raw);
   const connection = connect(env.DATABASE_URL, {
@@ -23,7 +25,10 @@ export async function createUsDevelopmentApplication(
   let app: INestApplication | undefined;
   let runtime: UsRuntime | undefined;
   try {
-    runtime = new UsRuntime(env, connection, planArtifactTransport);
+    runtime = new UsRuntime(env, connection, planArtifactTransport, {
+      source: { ...raw },
+      ...(requestResourceDeps ? { resourceDeps: requestResourceDeps } : {}),
+    });
     app = await NestFactory.create(UsDevelopmentModule.register(runtime), new UsHttpAdapter(), {
       logger: false,
       bodyParser: false,
@@ -34,9 +39,12 @@ export async function createUsDevelopmentApplication(
     app.enableShutdownHooks([], { useProcessExit: true });
     return app;
   } catch (error) {
-    if (app) await app.close();
-    else if (runtime) await runtime.onApplicationShutdown();
-    else await connection.pool.end();
+    try {
+      if (app) await app.close();
+    } finally {
+      if (runtime) await runtime.onApplicationShutdown();
+      else await connection.pool.end();
+    }
     throw error;
   }
 }

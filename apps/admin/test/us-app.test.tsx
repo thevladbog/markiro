@@ -212,6 +212,22 @@ describe("US access and profile application", () => {
       return json({}, 404);
     });
 
+    expect(
+      await screen.findByText(/Requests office workflows are available for local development/),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(/External response delivery and operational readiness remain unverified/),
+    ).toBeTruthy();
+    await userEvent.click(await screen.findByRole("button", { name: "Language" }));
+    expect(
+      await screen.findByText(/Solicitudes están disponibles para desarrollo local/),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        /La entrega externa de respuestas y la preparación operativa siguen sin verificar/,
+      ),
+    ).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Idioma" }));
     await userEvent.click(await screen.findByRole("button", { name: "Open reference data" }));
     expect(await screen.findByRole("heading", { name: "Parties" })).toBeTruthy();
     await userEvent.click(screen.getByRole("button", { name: /Profile/ }));

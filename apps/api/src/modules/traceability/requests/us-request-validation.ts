@@ -4,7 +4,11 @@ import {
   platformUuidSchema,
   usExportInputV1Schema,
   usTraceRequestScopeV1Schema,
+  usRequestValidateHttpBodySchema,
+  usRequestWarningAckHttpBodySchema,
   type UsExportBuildIdentity,
+  type UsRequestValidateHttpBody,
+  type UsRequestWarningAckHttpBody,
 } from "@markiro/platform-contracts";
 import {
   BadRequestException,
@@ -49,7 +53,7 @@ const metadata = (row: UsRequestRow) => ({
 class ValidationConflict extends ConflictException {
   constructor(
     code: string,
-    readonly auditContext: ReturnType<typeof metadata>,
+    readonly auditContext: ReturnType<typeof metadata> & { expectedRevision?: number },
   ) {
     super({ code });
   }
@@ -64,6 +68,8 @@ export class UsRequestValidationStore {
     requestId: string,
     action: string,
     run: (tx: UsMasterDataTransaction, row: UsRequestRow) => Promise<T>,
+    httpRequestId: string | null = null,
+    httpRevision: (() => number) | null = null,
   ): Promise<T> {
     try {
       return await transformationTransaction(this.db, async (tx) => {
@@ -84,6 +90,12 @@ export class UsRequestValidationStore {
           .limit(1)
           .for("update");
         if (!row) throw new NotFoundException({ code: "us_request_not_found" });
+        const expectedRevision = httpRevision?.();
+        if (expectedRevision !== undefined && row.revision !== expectedRevision)
+          throw new ValidationConflict("us_request_revision_conflict", {
+            ...metadata(row),
+            expectedRevision,
+          });
         if (row.status !== "open" || row.scope === null)
           throw new ValidationConflict("us_request_scope_required", metadata(row));
         if (!usTraceRequestScopeV1Schema.safeParse(row.scope).success)
@@ -110,6 +122,7 @@ export class UsRequestValidationStore {
             await tx.insert(schema.tenantAuditEvents).values({
               organizationId: tenantId,
               actorUserId,
+              requestId: httpRequestId,
               action,
               outcome: error instanceof ConflictException ? "conflict" : "rejected",
               targetType: "trace_request",
@@ -129,61 +142,96 @@ export class UsRequestValidationStore {
     requestId: string,
     build: UsExportBuildIdentity,
   ) {
+    return this.validateCommand(tenantId, actorUserId, requestId, build, null, null);
+  }
+  validateHttp(
+    tenantId: string,
+    actorUserId: string,
+    requestId: string,
+    body: UsRequestValidateHttpBody,
+    build: UsExportBuildIdentity,
+    httpRequestId: string,
+  ): ReturnType<UsRequestValidationStore["validate"]> {
+    return this.validateCommand(tenantId, actorUserId, requestId, build, body, httpRequestId);
+  }
+  private async validateCommand(
+    tenantId: string,
+    actorUserId: string,
+    requestId: string,
+    build: UsExportBuildIdentity,
+    httpBody: UsRequestValidateHttpBody | null,
+    httpRequestId: string | null,
+  ) {
     const action = "traceability.request.validated";
-    return this.command(tenantId, actorUserId, requestId, action, async (tx, row) => {
-      const tenantOrigin = await captureUsRequestTenantOrigin(this.db, tx, tenantId);
-      const captured = await captureUsRequestScope(
-        tx,
-        tenantId,
-        actorUserId,
-        row,
-        build,
-        tenantOrigin,
-      );
-      const summary = summarySchema.parse({
-        matchedRevisionCount: captured.snapshot.selection.records.length,
-        findings: captured.snapshot.findings,
-      });
-      const now = new Date();
-      const [saved] = await tx
-        .update(table)
-        .set({
-          lastValidation: summary,
-          lastValidationDigest: captured.digest,
-          lastValidatedAt: now,
-          warningAckDigest: null,
-          warningAckReason: null,
-          warningAckAt: null,
-          warningAckBy: null,
-        })
-        .where(
-          and(eq(table.tenantId, tenantId), eq(table.id, row.id), eq(table.revision, row.revision)),
-        )
-        .returning();
-      if (!saved) throw new ValidationConflict("us_request_revision_conflict", metadata(row));
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId: tenantId,
-        actorUserId,
-        action,
-        outcome: "success",
-        targetType: "trace_request",
-        targetId: row.id,
-        before: metadata(row),
-        after: {
-          ...metadata(saved),
-          matchedRevisionCount: summary.matchedRevisionCount,
-          findingCodes: summary.findings.map((finding) => finding.code),
-        },
-      });
-      return {
-        requestId: row.id,
-        revision: row.revision,
-        digest: captured.digest,
-        byteSize: captured.byteSize,
-        ...summary,
-        validatedAt: now.toISOString(),
-      };
-    });
+    return this.command(
+      tenantId,
+      actorUserId,
+      requestId,
+      action,
+      async (tx, row) => {
+        const tenantOrigin = await captureUsRequestTenantOrigin(this.db, tx, tenantId);
+        const captured = await captureUsRequestScope(
+          tx,
+          tenantId,
+          actorUserId,
+          row,
+          build,
+          tenantOrigin,
+        );
+        const summary = summarySchema.parse({
+          matchedRevisionCount: captured.snapshot.selection.records.length,
+          findings: captured.snapshot.findings,
+        });
+        const now = new Date();
+        const [saved] = await tx
+          .update(table)
+          .set({
+            lastValidation: summary,
+            lastValidationDigest: captured.digest,
+            lastValidatedAt: now,
+            warningAckDigest: null,
+            warningAckReason: null,
+            warningAckAt: null,
+            warningAckBy: null,
+          })
+          .where(
+            and(
+              eq(table.tenantId, tenantId),
+              eq(table.id, row.id),
+              eq(table.revision, row.revision),
+            ),
+          )
+          .returning();
+        if (!saved) throw new ValidationConflict("us_request_revision_conflict", metadata(row));
+        await tx.insert(schema.tenantAuditEvents).values({
+          organizationId: tenantId,
+          actorUserId,
+          requestId: httpRequestId,
+          action,
+          outcome: "success",
+          targetType: "trace_request",
+          targetId: row.id,
+          before: metadata(row),
+          after: {
+            ...metadata(saved),
+            matchedRevisionCount: summary.matchedRevisionCount,
+            findingCodes: summary.findings.map((finding) => finding.code),
+          },
+        });
+        return {
+          requestId: row.id,
+          revision: row.revision,
+          digest: captured.digest,
+          byteSize: captured.byteSize,
+          ...summary,
+          validatedAt: now.toISOString(),
+        };
+      },
+      httpRequestId,
+      httpBody === null
+        ? null
+        : () => parseMasterDataInput(usRequestValidateHttpBodySchema, httpBody).expectedRevision,
+    );
   }
   async acknowledgeWarnings(
     tenantId: string,
@@ -192,48 +240,92 @@ export class UsRequestValidationStore {
     digest: string,
     reason: string,
   ) {
+    return this.acknowledgeCommand(
+      tenantId,
+      actorUserId,
+      requestId,
+      { digest, reason },
+      false,
+      null,
+    );
+  }
+  acknowledgeWarningsHttp(
+    tenantId: string,
+    actorUserId: string,
+    requestId: string,
+    body: UsRequestWarningAckHttpBody,
+    httpRequestId: string,
+  ): ReturnType<UsRequestValidationStore["acknowledgeWarnings"]> {
+    return this.acknowledgeCommand(tenantId, actorUserId, requestId, body, true, httpRequestId);
+  }
+  private async acknowledgeCommand(
+    tenantId: string,
+    actorUserId: string,
+    requestId: string,
+    body: { digest: string; reason: string } | UsRequestWarningAckHttpBody,
+    http: boolean,
+    httpRequestId: string | null,
+  ) {
     const action = "traceability.request.warnings_acknowledged";
-    return this.command(tenantId, actorUserId, requestId, action, async (tx, row) => {
-      const value = parseMasterDataInput(ackSchema, { digest, reason });
-      if (row.lastValidationDigest !== value.digest || !row.lastValidatedAt)
-        throw new ValidationConflict("us_request_validation_stale", metadata(row));
-      const parsed = summarySchema.safeParse(row.lastValidation);
-      if (!parsed.success)
-        throw new ServiceUnavailableException({ code: "us_request_validation_stored_invalid" });
-      if (!parsed.data.findings.some((finding) => finding.severity === "warning"))
-        throw new ValidationConflict("us_request_warnings_required", metadata(row));
-      const now = new Date();
-      const [saved] = await tx
-        .update(table)
-        .set({
-          warningAckDigest: value.digest,
-          warningAckReason: value.reason,
-          warningAckAt: now,
-          warningAckBy: actorUserId,
-        })
-        .where(
-          and(eq(table.tenantId, tenantId), eq(table.id, row.id), eq(table.revision, row.revision)),
-        )
-        .returning();
-      if (!saved) throw new ValidationConflict("us_request_revision_conflict", metadata(row));
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId: tenantId,
-        actorUserId,
-        action,
-        outcome: "success",
-        targetType: "trace_request",
-        targetId: row.id,
-        before: metadata(row),
-        after: metadata(saved),
-      });
-      return {
-        requestId: row.id,
-        revision: row.revision,
-        digest: value.digest,
-        reason: value.reason,
-        acknowledgedAt: now.toISOString(),
-        acknowledgedBy: actorUserId,
-      };
-    });
+    return this.command(
+      tenantId,
+      actorUserId,
+      requestId,
+      action,
+      async (tx, row) => {
+        const httpValue = http
+          ? parseMasterDataInput(usRequestWarningAckHttpBodySchema, body)
+          : null;
+        const value = httpValue ?? parseMasterDataInput(ackSchema, body);
+        if (row.lastValidationDigest !== value.digest || !row.lastValidatedAt)
+          throw new ValidationConflict("us_request_validation_stale", metadata(row));
+        const parsed = summarySchema.safeParse(row.lastValidation);
+        if (!parsed.success)
+          throw new ServiceUnavailableException({ code: "us_request_validation_stored_invalid" });
+        if (!parsed.data.findings.some((finding) => finding.severity === "warning"))
+          throw new ValidationConflict("us_request_warnings_required", metadata(row));
+        const now = new Date();
+        const [saved] = await tx
+          .update(table)
+          .set({
+            warningAckDigest: value.digest,
+            warningAckReason: value.reason,
+            warningAckAt: now,
+            warningAckBy: actorUserId,
+          })
+          .where(
+            and(
+              eq(table.tenantId, tenantId),
+              eq(table.id, row.id),
+              eq(table.revision, row.revision),
+            ),
+          )
+          .returning();
+        if (!saved) throw new ValidationConflict("us_request_revision_conflict", metadata(row));
+        await tx.insert(schema.tenantAuditEvents).values({
+          organizationId: tenantId,
+          actorUserId,
+          requestId: httpRequestId,
+          action,
+          outcome: "success",
+          targetType: "trace_request",
+          targetId: row.id,
+          before: metadata(row),
+          after: metadata(saved),
+        });
+        return {
+          requestId: row.id,
+          revision: row.revision,
+          digest: value.digest,
+          reason: value.reason,
+          acknowledgedAt: now.toISOString(),
+          acknowledgedBy: actorUserId,
+        };
+      },
+      httpRequestId,
+      http
+        ? () => parseMasterDataInput(usRequestWarningAckHttpBodySchema, body).expectedRevision
+        : null,
+    );
   }
 }

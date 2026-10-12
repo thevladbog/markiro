@@ -229,195 +229,201 @@ export function finalizeShipping(
   input: unknown,
   requestId: string,
 ): Promise<ShippingFinalizedRecord> {
-  return shippingTransaction(db, async (tx) => {
-    const profileCode = await authorizeUsMasterData(
-      tx,
-      tenantId,
-      actorUserId,
-      US_CAPABILITY.QA_MANAGE,
-    );
-    const eventId = parseMasterDataInput(platformUuidSchema, id);
-    const value = parseMasterDataInput(finalizeShippingSchema, input);
-    const command = "shipping.finalize";
-    const inputDigest = shippingCommandDigest(command, value, eventId);
-    const receipt = await lockShippingOperation(tx, tenantId, command, value.operationKey);
-    if (receipt) {
-      if (receipt.inputDigest !== inputDigest)
-        throw new ConflictException({ code: "shipping_operation_conflict" });
-      const replay = shippingFinalizedRecordSchema.safeParse(receipt.result);
-      if (!replay.success || replay.data.id !== eventId || receipt.eventId !== eventId)
-        throw unavailable();
-      return replay.data;
-    }
-    const before = await readShippingDraft(tx, tenantId, eventId, "update");
-    if (before.draftVersion !== value.expectedDraftVersion)
-      throw new ConflictException({ code: "shipping_draft_conflict" });
-    const predecessorId = before.lifecycle?.previousRevisionId ?? null;
-    if (
-      before.revision > 1 &&
-      (!predecessorId ||
-        before.lifecycle?.currentEventId !== predecessorId ||
-        before.lifecycle?.pendingDraftId !== eventId)
-    )
-      throw new ConflictException({ code: "shipping_lifecycle_conflict" });
-    const predecessor = predecessorId
-      ? await readShippingSnapshotRecord(tx, tenantId, predecessorId)
-      : null;
-    if (predecessor && predecessor.status !== "finalized")
-      throw new ConflictException({ code: "shipping_lifecycle_conflict" });
-    const newLotIds = before.draft.items
-      .map((line) => line.lotId)
-      .filter((id): id is string => id !== null);
-    const oldLotIds =
-      predecessor?.status === "finalized"
-        ? predecessor.snapshot.items.map((line) => line.lotId)
-        : [];
-    const lotIds = [...new Set([...oldLotIds, ...newLotIds])].sort();
-    if (lotIds.length) {
-      const locked = await tx
-        .select({ id: schema.traceabilityLots.id })
-        .from(schema.traceabilityLots)
-        .where(
-          and(
-            eq(schema.traceabilityLots.tenantId, tenantId),
-            inArray(schema.traceabilityLots.id, lotIds),
-          ),
-        )
-        .orderBy(asc(schema.traceabilityLots.id))
-        .for("update");
-      if (locked.length !== lotIds.length) throw unavailable();
-    }
-    const facts = await readShippingFinalizationContext(tx, tenantId, before, profileCode);
-    if (facts.readiness.state !== "complete")
-      throw new ConflictException({ code: "event_incomplete", issues: facts.readiness.issues });
-    if (facts.readiness.inputDigest !== value.expectedInputDigest)
-      throw new ConflictException({ code: "shipping_readiness_changed" });
-    await bumpLotDependencyVersions(tx, tenantId, lotIds);
-    const now = new Date();
-    const snapshot = freezeSnapshot(before, facts, actorUserId, now.toISOString());
-    await tx
-      .update(schema.shippingEventDetails)
-      .set({ recipientSnapshot: recipientChildSnapshot(snapshot.recipient) })
+  return shippingTransaction(db, (tx) =>
+    finalizeShippingInTransaction(tx, tenantId, actorUserId, id, input, requestId),
+  );
+}
+
+export async function finalizeShippingInTransaction(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  id: unknown,
+  input: unknown,
+  requestId: string,
+): Promise<ShippingFinalizedRecord> {
+  const profileCode = await authorizeUsMasterData(
+    tx,
+    tenantId,
+    actorUserId,
+    US_CAPABILITY.QA_MANAGE,
+  );
+  const eventId = parseMasterDataInput(platformUuidSchema, id);
+  const value = parseMasterDataInput(finalizeShippingSchema, input);
+  const command = "shipping.finalize";
+  const inputDigest = shippingCommandDigest(command, value, eventId);
+  const receipt = await lockShippingOperation(tx, tenantId, command, value.operationKey);
+  if (receipt) {
+    if (receipt.inputDigest !== inputDigest)
+      throw new ConflictException({ code: "shipping_operation_conflict" });
+    const replay = shippingFinalizedRecordSchema.safeParse(receipt.result);
+    if (!replay.success || replay.data.id !== eventId || receipt.eventId !== eventId)
+      throw unavailable();
+    return replay.data;
+  }
+  const before = await readShippingDraft(tx, tenantId, eventId, "update");
+  if (before.draftVersion !== value.expectedDraftVersion)
+    throw new ConflictException({ code: "shipping_draft_conflict" });
+  const predecessorId = before.lifecycle?.previousRevisionId ?? null;
+  if (
+    before.revision > 1 &&
+    (!predecessorId ||
+      before.lifecycle?.currentEventId !== predecessorId ||
+      before.lifecycle?.pendingDraftId !== eventId)
+  )
+    throw new ConflictException({ code: "shipping_lifecycle_conflict" });
+  const predecessor = predecessorId
+    ? await readShippingSnapshotRecord(tx, tenantId, predecessorId)
+    : null;
+  if (predecessor && predecessor.status !== "finalized")
+    throw new ConflictException({ code: "shipping_lifecycle_conflict" });
+  const newLotIds = before.draft.items
+    .map((line) => line.lotId)
+    .filter((id): id is string => id !== null);
+  const oldLotIds =
+    predecessor?.status === "finalized" ? predecessor.snapshot.items.map((line) => line.lotId) : [];
+  const lotIds = [...new Set([...oldLotIds, ...newLotIds])].sort();
+  if (lotIds.length) {
+    const locked = await tx
+      .select({ id: schema.traceabilityLots.id })
+      .from(schema.traceabilityLots)
       .where(
         and(
-          eq(schema.shippingEventDetails.tenantId, tenantId),
-          eq(schema.shippingEventDetails.eventId, eventId),
+          eq(schema.traceabilityLots.tenantId, tenantId),
+          inArray(schema.traceabilityLots.id, lotIds),
+        ),
+      )
+      .orderBy(asc(schema.traceabilityLots.id))
+      .for("update");
+    if (locked.length !== lotIds.length) throw unavailable();
+  }
+  const facts = await readShippingFinalizationContext(tx, tenantId, before, profileCode);
+  if (facts.readiness.state !== "complete")
+    throw new ConflictException({ code: "event_incomplete", issues: facts.readiness.issues });
+  if (facts.readiness.inputDigest !== value.expectedInputDigest)
+    throw new ConflictException({ code: "shipping_readiness_changed" });
+  await bumpLotDependencyVersions(tx, tenantId, lotIds);
+  const now = new Date();
+  const snapshot = freezeSnapshot(before, facts, actorUserId, now.toISOString());
+  await tx
+    .update(schema.shippingEventDetails)
+    .set({ recipientSnapshot: recipientChildSnapshot(snapshot.recipient) })
+    .where(
+      and(
+        eq(schema.shippingEventDetails.tenantId, tenantId),
+        eq(schema.shippingEventDetails.eventId, eventId),
+      ),
+    );
+  for (const line of snapshot.items)
+    await tx
+      .update(schema.shippingEventItems)
+      .set({
+        tlcSnapshot: line.tlc,
+        sourceSnapshot: line.source,
+        productSnapshot: line.product,
+      })
+      .where(
+        and(
+          eq(schema.shippingEventItems.tenantId, tenantId),
+          eq(schema.shippingEventItems.eventId, eventId),
+          eq(schema.shippingEventItems.lineNo, line.lineNo),
         ),
       );
-    for (const line of snapshot.items)
-      await tx
-        .update(schema.shippingEventItems)
-        .set({
-          tlcSnapshot: line.tlc,
-          sourceSnapshot: line.source,
-          productSnapshot: line.product,
-        })
-        .where(
-          and(
-            eq(schema.shippingEventItems.tenantId, tenantId),
-            eq(schema.shippingEventItems.eventId, eventId),
-            eq(schema.shippingEventItems.lineNo, line.lineNo),
-          ),
-        );
-    if (predecessorId)
-      await tx
-        .update(schema.traceabilityEvents)
-        .set({
-          status: "amended",
-          supersededByEventId: eventId,
-          supersededAt: now,
-          supersededBy: actorUserId,
-        })
-        .where(
-          and(
-            eq(schema.traceabilityEvents.tenantId, tenantId),
-            eq(schema.traceabilityEvents.id, predecessorId),
-            eq(schema.traceabilityEvents.type, "shipping"),
-            eq(schema.traceabilityEvents.status, "finalized"),
-          ),
-        );
+  if (predecessorId)
     await tx
       .update(schema.traceabilityEvents)
       .set({
-        status: "finalized",
-        finalizedAt: now,
-        finalizedBy: actorUserId,
-        finalizationSnapshot: snapshot,
-        updatedBy: actorUserId,
-        updatedAt: now,
+        status: "amended",
+        supersededByEventId: eventId,
+        supersededAt: now,
+        supersededBy: actorUserId,
       })
       .where(
         and(
           eq(schema.traceabilityEvents.tenantId, tenantId),
-          eq(schema.traceabilityEvents.id, eventId),
+          eq(schema.traceabilityEvents.id, predecessorId),
           eq(schema.traceabilityEvents.type, "shipping"),
+          eq(schema.traceabilityEvents.status, "finalized"),
         ),
       );
-    await tx
-      .update(schema.shippingEventRoots)
-      .set({
-        currentEventId: eventId,
-        pendingDraftId: null,
-        lifecycleVersion: (before.lifecycle?.lifecycleVersion ?? 1) + 1,
-      })
+  await tx
+    .update(schema.traceabilityEvents)
+    .set({
+      status: "finalized",
+      finalizedAt: now,
+      finalizedBy: actorUserId,
+      finalizationSnapshot: snapshot,
+      updatedBy: actorUserId,
+      updatedAt: now,
+    })
+    .where(
+      and(
+        eq(schema.traceabilityEvents.tenantId, tenantId),
+        eq(schema.traceabilityEvents.id, eventId),
+        eq(schema.traceabilityEvents.type, "shipping"),
+      ),
+    );
+  await tx
+    .update(schema.shippingEventRoots)
+    .set({
+      currentEventId: eventId,
+      pendingDraftId: null,
+      lifecycleVersion: (before.lifecycle?.lifecycleVersion ?? 1) + 1,
+    })
+    .where(
+      and(
+        eq(schema.shippingEventRoots.tenantId, tenantId),
+        eq(schema.shippingEventRoots.id, before.lifecycle?.rootId ?? eventId),
+      ),
+    );
+  const statusEffects: string[] = [];
+  for (const lotId of lotIds) {
+    const balance = await readCurrentShippingBalance(tx, tenantId, lotId);
+    const prior = await tx
+      .select({ status: schema.traceabilityLots.status })
+      .from(schema.traceabilityLots)
       .where(
-        and(
-          eq(schema.shippingEventRoots.tenantId, tenantId),
-          eq(schema.shippingEventRoots.id, before.lifecycle?.rootId ?? eventId),
-        ),
+        and(eq(schema.traceabilityLots.tenantId, tenantId), eq(schema.traceabilityLots.id, lotId)),
       );
-    const statusEffects: string[] = [];
-    for (const lotId of lotIds) {
-      const balance = await readCurrentShippingBalance(tx, tenantId, lotId);
-      const prior = await tx
-        .select({ status: schema.traceabilityLots.status })
-        .from(schema.traceabilityLots)
-        .where(
-          and(
-            eq(schema.traceabilityLots.tenantId, tenantId),
-            eq(schema.traceabilityLots.id, lotId),
-          ),
-        );
-      const context = {
-        actorUserId,
-        requestId,
-        reason: `Shipping ${before.eventNumber} finalized`,
-      };
-      await compensateShippingStatusEffect(tx, tenantId, lotId, eventId, balance, context);
-      if (predecessorId)
-        await transferShippingStatusEffect(
-          tx,
-          tenantId,
-          lotId,
-          predecessorId,
-          eventId,
-          balance,
-          context,
-        );
-      await applyShippingStatusEffect(tx, tenantId, lotId, eventId, balance, context);
-      if (prior[0]?.status === "active" && balance.state === "known" && balance.remaining === "0")
-        statusEffects.push(lotId);
-    }
-    const result = await readShippingFinalizedRecord(tx, tenantId, eventId);
-    await tx.insert(schema.tenantAuditEvents).values({
-      organizationId: tenantId,
+    const context = {
       actorUserId,
-      action: "traceability.shipping.finalized",
-      outcome: "success",
-      targetType: "traceability_event",
-      targetId: eventId,
-      before,
-      after: { ...result, lotIds, statusEffects },
       requestId,
-    });
-    await tx.insert(schema.shippingOperations).values({
-      tenantId,
-      eventId,
-      command,
-      operationKey: value.operationKey,
-      inputDigest,
-      result,
-    });
-    return result;
+      reason: `Shipping ${before.eventNumber} finalized`,
+    };
+    await compensateShippingStatusEffect(tx, tenantId, lotId, eventId, balance, context);
+    if (predecessorId)
+      await transferShippingStatusEffect(
+        tx,
+        tenantId,
+        lotId,
+        predecessorId,
+        eventId,
+        balance,
+        context,
+      );
+    await applyShippingStatusEffect(tx, tenantId, lotId, eventId, balance, context);
+    if (prior[0]?.status === "active" && balance.state === "known" && balance.remaining === "0")
+      statusEffects.push(lotId);
+  }
+  const result = await readShippingFinalizedRecord(tx, tenantId, eventId);
+  await tx.insert(schema.tenantAuditEvents).values({
+    organizationId: tenantId,
+    actorUserId,
+    action: "traceability.shipping.finalized",
+    outcome: "success",
+    targetType: "traceability_event",
+    targetId: eventId,
+    before,
+    after: { ...result, lotIds, statusEffects },
+    requestId,
   });
+  await tx.insert(schema.shippingOperations).values({
+    tenantId,
+    eventId,
+    command,
+    operationKey: value.operationKey,
+    inputDigest,
+    result,
+  });
+  return result;
 }

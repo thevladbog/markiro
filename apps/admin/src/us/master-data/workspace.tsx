@@ -17,6 +17,7 @@ import { emptySearchState } from "../search/filters.js";
 import { TraceView, type TraceEntry } from "../trace/view.js";
 import { traceCopy } from "../trace/copy.js";
 import { PlanView } from "../plans/view.js";
+import { RequestsView, type RequestEntry } from "../requests/view.js";
 import { UsBrandMark } from "../brand-mark.js";
 import { navStyle, type NoticeKind } from "./workspace-shared.js";
 import "./master-data.css";
@@ -38,11 +39,13 @@ type View =
   | "readiness"
   | "search"
   | "trace"
-  | "plans";
+  | "plans"
+  | "requests";
 type Entry =
   | { kind: "parties" | "locations" | "products" | "readiness" | "search" | "plans" }
   | { kind: "lots"; lotId?: string }
   | { kind: "trace"; entry: TraceEntry | null }
+  | { kind: "requests"; entry: RequestEntry }
   | {
       kind: "events";
       target?: ReadinessEventTarget;
@@ -172,7 +175,9 @@ export function MasterDataWorkspace({
   function navigate(next: View | "profile", editorConfirmed = false) {
     if (
       mutationPending ||
-      (!editorConfirmed && editorDirty && !window.confirm(t("md.discardConfirm")))
+      (!editorConfirmed &&
+        editorDirty &&
+        !window.confirm(t(view === "requests" ? "md.discardRequestsConfirm" : "md.discardConfirm")))
     )
       return false;
     setEditorDirty(false);
@@ -181,7 +186,13 @@ export function MasterDataWorkspace({
       return true;
     }
     setView(next);
-    setEntry(next === "trace" ? { kind: "trace", entry: null } : { kind: next });
+    setEntry(
+      next === "trace"
+        ? { kind: "trace", entry: null }
+        : next === "requests"
+          ? { kind: "requests", entry: {} }
+          : { kind: next },
+    );
     setReturnStack([]);
     setViewGeneration((current) => current + 1);
     return true;
@@ -203,20 +214,22 @@ export function MasterDataWorkspace({
 
   const source = returnStack.at(-1)?.entry;
   const backLabel =
-    source?.kind === "plans"
-      ? t("usPlan.back")
-      : source?.kind === "search"
-        ? t("navigation.backSearch")
-        : source?.kind === "trace"
-          ? t("navigation.backTrace")
-          : source?.kind === "readiness"
-            ? t("usReadiness.back")
-            : source?.kind === "lots"
-              ? t("lots.backToLot")
-              : source?.kind === "events" &&
-                  (source.receiving || source.target?.type === "receiving")
-                ? t("receiving.back")
-                : t("events.back");
+    source?.kind === "requests"
+      ? t("usRequest.back")
+      : source?.kind === "plans"
+        ? t("usPlan.back")
+        : source?.kind === "search"
+          ? t("navigation.backSearch")
+          : source?.kind === "trace"
+            ? t("navigation.backTrace")
+            : source?.kind === "readiness"
+              ? t("usReadiness.back")
+              : source?.kind === "lots"
+                ? t("lots.backToLot")
+                : source?.kind === "events" &&
+                    (source.receiving || source.target?.type === "receiving")
+                  ? t("receiving.back")
+                  : t("events.back");
 
   if (capabilities === null) {
     return (
@@ -273,6 +286,18 @@ export function MasterDataWorkspace({
           </span>
         </div>
         <nav aria-label={t("md.referenceData")}>
+          {showPlan ? (
+            <Button
+              variant="secondary"
+              className={`us-md-nav ${view === "requests" ? "is-active" : ""}`}
+              style={navStyle(view === "requests")}
+              disabled={mutationPending}
+              aria-current={view === "requests" ? "page" : undefined}
+              onClick={() => navigate("requests")}
+            >
+              {t("usRequest.title")}
+            </Button>
+          ) : null}
           {showPlan ? (
             <Button
               variant="secondary"
@@ -395,7 +420,30 @@ export function MasterDataWorkspace({
             {backLabel}
           </Button>
         ) : null}
-        {view === "plans" ? (
+        {view === "requests" && entry.kind === "requests" ? (
+          <RequestsView
+            key={`requests-${organization.id}-${viewGeneration}`}
+            client={client}
+            organizationId={organization.id}
+            profile={profile}
+            canRead={canRead}
+            canManageQa={
+              !accessError && !accessPending && capabilities.includes(US_CAPABILITY.QA_MANAGE)
+            }
+            canExport={
+              !accessError && !accessPending && capabilities.includes(US_CAPABILITY.EXPORT_READ)
+            }
+            authorityPending={accessPending || accessError}
+            entry={entry.entry}
+            onEntryChange={(next) => setEntry({ kind: "requests", entry: next })}
+            onForbidden={onForbidden}
+            onSessionLost={onSessionLost}
+            onDirtyChange={setEditorDirty}
+            onMutationPendingChange={setMutationPending}
+            onOpenSource={(target) => openEntry({ kind: "events", target })}
+            onOpenLot={(lotId) => openEntry({ kind: "lots", lotId })}
+          />
+        ) : view === "plans" ? (
           showPlan ? (
             <PlanView
               key={`plans-${viewGeneration}`}

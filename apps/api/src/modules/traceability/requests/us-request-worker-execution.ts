@@ -5,6 +5,11 @@ import {
 } from "@markiro/platform-contracts";
 import { ServiceUnavailableException } from "@nestjs/common";
 import {
+  assertLoadedUsRequestBuildDescriptor,
+  type LoadedUsRequestBuildDescriptor,
+} from "../../../deployment/us-request-build-descriptor";
+import { loadUsDevelopmentEnv } from "../../../deployment/entry-policy";
+import {
   US_REQUEST_PACKAGE_VERSION,
   US_REQUEST_REPORT_PDF_VERSION,
 } from "./us-request-package-types";
@@ -16,6 +21,20 @@ export type UsRequestWorkerExecutionIdentity = Readonly<{
 const loaded = new WeakSet<object>();
 const invalid = () =>
   new ServiceUnavailableException({ code: "us_request_worker_execution_invalid" });
+
+/** Runtime authority is granted only by the checked local descriptor loader. */
+export function createUsRequestRuntimeExecutionIdentity(
+  descriptor: LoadedUsRequestBuildDescriptor,
+  source: NodeJS.ProcessEnv,
+): UsRequestWorkerExecutionIdentity {
+  try {
+    assertLoadedUsRequestBuildDescriptor(descriptor);
+    loadUsDevelopmentEnv(source);
+    return createSyntheticUsRequestExecutionIdentity(descriptor.document.build, source);
+  } catch {
+    throw invalid();
+  }
+}
 
 /** Explicit synthetic seam only. Never derives operational identity from Git or ambient env. */
 export function createSyntheticUsRequestExecutionIdentity(

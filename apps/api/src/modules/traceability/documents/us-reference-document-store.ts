@@ -14,6 +14,7 @@ import {
   escapeLikePattern,
   isUniqueConstraintViolation,
   parseMasterDataInput,
+  type UsMasterDataTransaction,
 } from "../master-data/us-master-data-support";
 import { referenceDocumentResponse } from "./us-reference-document-support";
 
@@ -70,17 +71,26 @@ export class UsReferenceDocumentStore {
     actorUserId: string,
     id: unknown,
   ): Promise<ReferenceDocument> {
-    return this.db.transaction(async (tx) => {
-      await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-      const documentId = parseMasterDataInput(platformUuidSchema, id);
-      const [row] = await tx
-        .select()
-        .from(documents)
-        .where(and(eq(documents.tenantId, tenantId), eq(documents.id, documentId)))
-        .limit(1);
-      if (!row) throw new NotFoundException({ code: "document_not_found" });
-      return referenceDocumentResponse(row);
-    });
+    return this.db.transaction((tx) =>
+      this.getDocumentInTransaction(tx, tenantId, actorUserId, id),
+    );
+  }
+
+  async getDocumentInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+  ): Promise<ReferenceDocument> {
+    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+    const documentId = parseMasterDataInput(platformUuidSchema, id);
+    const [row] = await tx
+      .select()
+      .from(documents)
+      .where(and(eq(documents.tenantId, tenantId), eq(documents.id, documentId)))
+      .limit(1);
+    if (!row) throw new NotFoundException({ code: "document_not_found" });
+    return referenceDocumentResponse(row);
   }
 
   async createDocument(
@@ -89,45 +99,55 @@ export class UsReferenceDocumentStore {
     input: unknown,
     requestId: string,
   ): Promise<ReferenceDocument> {
+    return this.db.transaction((tx) =>
+      this.createDocumentInTransaction(tx, tenantId, actorUserId, input, requestId),
+    );
+  }
+
+  async createDocumentInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    input: unknown,
+    requestId: string,
+  ): Promise<ReferenceDocument> {
     try {
-      return await this.db.transaction(async (tx) => {
-        await authorizeUsMasterData(tx, tenantId, actorUserId, writers);
-        const value = parseMasterDataInput(referenceDocumentInputSchema, input);
-        if (value.partyId !== null) {
-          const [party] = await tx
-            .select({ id: schema.traceabilityParties.id })
-            .from(schema.traceabilityParties)
-            .where(
-              and(
-                eq(schema.traceabilityParties.tenantId, tenantId),
-                eq(schema.traceabilityParties.id, value.partyId),
-                eq(schema.traceabilityParties.archived, false),
-              ),
-            )
-            .limit(1)
-            .for("share");
-          if (!party) throw new NotFoundException({ code: "party_not_found" });
-        }
-        const now = new Date();
-        const [row] = await tx
-          .insert(documents)
-          .values({ ...value, tenantId, createdBy: actorUserId, createdAt: now, updatedAt: now })
-          .returning();
-        if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
-        const result = referenceDocumentResponse(row);
-        await tx.insert(schema.tenantAuditEvents).values({
-          organizationId: tenantId,
-          actorUserId,
-          action: "traceability.reference_document.created",
-          outcome: "success",
-          targetType: "traceability_reference_document",
-          targetId: row.id,
-          before: null,
-          after: result,
-          requestId,
-        });
-        return result;
+      await authorizeUsMasterData(tx, tenantId, actorUserId, writers);
+      const value = parseMasterDataInput(referenceDocumentInputSchema, input);
+      if (value.partyId !== null) {
+        const [party] = await tx
+          .select({ id: schema.traceabilityParties.id })
+          .from(schema.traceabilityParties)
+          .where(
+            and(
+              eq(schema.traceabilityParties.tenantId, tenantId),
+              eq(schema.traceabilityParties.id, value.partyId),
+              eq(schema.traceabilityParties.archived, false),
+            ),
+          )
+          .limit(1)
+          .for("share");
+        if (!party) throw new NotFoundException({ code: "party_not_found" });
+      }
+      const now = new Date();
+      const [row] = await tx
+        .insert(documents)
+        .values({ ...value, tenantId, createdBy: actorUserId, createdAt: now, updatedAt: now })
+        .returning();
+      if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
+      const result = referenceDocumentResponse(row);
+      await tx.insert(schema.tenantAuditEvents).values({
+        organizationId: tenantId,
+        actorUserId,
+        action: "traceability.reference_document.created",
+        outcome: "success",
+        targetType: "traceability_reference_document",
+        targetId: row.id,
+        before: null,
+        after: result,
+        requestId,
       });
+      return result;
     } catch (error) {
       if (
         ["reference_documents_with_party_uq", "reference_documents_without_party_uq"].some(

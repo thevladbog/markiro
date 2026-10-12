@@ -176,48 +176,79 @@ export function createReceivingDraftCommand(
   requestId: string,
   format: Format,
 ): Promise<Result> {
-  return transaction(db, format, async (tx) => {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.RECEIVING_WRITE);
-    const value = parseMasterDataInput(createReceivingDraftSchema, input);
-    const stored = await lockReceivingOperation(
-      tx,
-      tenantId,
+  return transaction(db, format, (tx) =>
+    createReceivingDraftCommandInTransaction(tx, tenantId, actorUserId, input, requestId, format),
+  );
+}
+
+export function createReceivingDraftCommandInTransaction(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  input: unknown,
+  requestId: string,
+  format: "legacy",
+): Promise<ReceivingDraftRecord>;
+export function createReceivingDraftCommandInTransaction(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  input: unknown,
+  requestId: string,
+  format: "versioned",
+): Promise<Result>;
+export function createReceivingDraftCommandInTransaction(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  input: unknown,
+  requestId: string,
+  format: Format,
+): Promise<Result>;
+/** Caller owns commit/rollback and any retry of the complete transaction. */
+export async function createReceivingDraftCommandInTransaction(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  input: unknown,
+  requestId: string,
+  format: Format,
+): Promise<Result> {
+  await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.RECEIVING_WRITE);
+  const value = parseMasterDataInput(createReceivingDraftSchema, input);
+  const stored = await lockReceivingOperation(tx, tenantId, "receiving.create", value.operationKey);
+  const legacyDigest = digest(value);
+  if (stored)
+    return replay(
+      stored,
       "receiving.create",
       value.operationKey,
-    );
-    const legacyDigest = digest(value);
-    if (stored)
-      return replay(
-        stored,
-        "receiving.create",
-        value.operationKey,
-        legacyDigest,
-        receivingLifecycleCommandDigest("receiving.create", stored.eventId, value),
-        format,
-      );
-    const result = await insertReceivingDraft(
-      tx,
-      tenantId,
-      actorUserId,
-      value.draft,
-      requestId,
+      legacyDigest,
+      receivingLifecycleCommandDigest("receiving.create", stored.eventId, value),
       format,
     );
-    const eventId = result.id;
-    const inputDigest =
-      format === "versioned"
-        ? receivingLifecycleCommandDigest("receiving.create", eventId, value)
-        : legacyDigest;
-    return remember(
-      tx,
-      tenantId,
-      "receiving.create",
-      value.operationKey,
-      inputDigest,
-      result,
-      format,
-    );
-  });
+  const result = await insertReceivingDraft(
+    tx,
+    tenantId,
+    actorUserId,
+    value.draft,
+    requestId,
+    format,
+  );
+  const eventId = result.id;
+  const inputDigest =
+    format === "versioned"
+      ? receivingLifecycleCommandDigest("receiving.create", eventId, value)
+      : legacyDigest;
+  return remember(
+    tx,
+    tenantId,
+    "receiving.create",
+    value.operationKey,
+    inputDigest,
+    result,
+    format,
+  );
 }
 
 export function saveOriginalReceivingDraftCommand(

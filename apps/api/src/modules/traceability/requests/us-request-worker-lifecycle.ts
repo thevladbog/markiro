@@ -57,6 +57,7 @@ export interface UsRequestWorkerLifecycleContract {
     scope: UsWorkerScope,
     callerId: string,
     body: UsWorkerRetryBody,
+    httpRequestId?: string | null,
   ): Promise<UsWorkerRetryReceipt>;
   assertActive(tx: Tx, lease: UsWorkerLease): Promise<void>;
 }
@@ -619,6 +620,7 @@ export class UsRequestWorkerLifecycle implements UsRequestWorkerLifecycleContrac
     scopeInput: UsWorkerScope,
     callerId: string,
     bodyInput: UsWorkerRetryBody,
+    httpRequestId: string | null = null,
   ): Promise<UsWorkerRetryReceipt> {
     const scope = parseUsWorkerScope(scopeInput);
     try {
@@ -659,6 +661,25 @@ export class UsRequestWorkerLifecycle implements UsRequestWorkerLifecycleContrac
             saved.expectedLifecycleVersion !== body.expectedLifecycleVersion
           )
             throw conflict();
+          if (httpRequestId !== null)
+            await this.audit(
+              tx,
+              row,
+              null,
+              "retry_replayed",
+              "success",
+              await dbTime(tx),
+              {
+                requestedBy: callerId,
+                reason: saved.reason,
+                idempotencyKey: saved.idempotencyKey,
+                expectedLifecycleVersion: saved.expectedLifecycleVersion,
+                receiptCycle: saved.cycle,
+                receiptLifecycleVersion: saved.lifecycleVersion,
+              },
+              callerId,
+              httpRequestId,
+            );
           return receipt(saved.cycle, saved.lifecycleVersion);
         }
         if (row.status !== "failed" || row.lifecycleVersion !== body.expectedLifecycleVersion)
@@ -712,11 +733,30 @@ export class UsRequestWorkerLifecycle implements UsRequestWorkerLifecycleContrac
             expectedLifecycleVersion: body.expectedLifecycleVersion,
           },
           callerId,
+          httpRequestId,
         );
         return receipt(cycle, version);
       });
     } catch (error) {
-      throw sanitizedUsWorkerError(error);
+      const sanitized = sanitizedUsWorkerError(error);
+      if (httpRequestId !== null && [400, 403, 409].includes(sanitized.getStatus())) {
+        const response = sanitized.getResponse();
+        if (typeof response === "object" && "code" in response && typeof response.code === "string")
+          await this.transaction(async (tx) => {
+            await tx.insert(schema.tenantAuditEvents).values({
+              organizationId: scope.tenantId,
+              actorUserId: callerId,
+              requestId: httpRequestId,
+              action: "traceability.request.worker.retried",
+              outcome: sanitized.getStatus() === 409 ? "conflict" : "rejected",
+              targetType: "trace_export_run",
+              targetId: scope.runId,
+              before: null,
+              after: { code: response.code },
+            });
+          });
+      }
+      throw sanitized;
     }
   }
   private async audit(
@@ -728,10 +768,12 @@ export class UsRequestWorkerLifecycle implements UsRequestWorkerLifecycleContrac
     now: Date,
     extra: Record<string, unknown> = {},
     callerId: string | null = null,
+    httpRequestId: string | null = null,
   ): Promise<void> {
     await tx.insert(schema.tenantAuditEvents).values({
       organizationId: row.tenantId,
       actorUserId: callerId,
+      requestId: httpRequestId,
       action: `traceability.request.worker.${action}`,
       outcome,
       targetType: "trace_export_run",

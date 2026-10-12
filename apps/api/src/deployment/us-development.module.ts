@@ -25,6 +25,8 @@ import { UsShippingController } from "./us-shipping.controller";
 import { UsShippingBalanceController } from "./us-shipping-balance.controller";
 import { UsEventsController } from "./us-events.controller";
 import { UsPlansController } from "./us-plans.controller";
+import { UsRequestsController } from "./us-requests.controller";
+import { UsExportRunsController } from "./us-export-runs.controller";
 
 @Controller()
 class UsDevelopmentController {
@@ -78,6 +80,8 @@ export class UsDevelopmentModule {
         UsSearchLotCardController,
         UsReadinessController,
         UsPlansController,
+        UsRequestsController,
+        UsExportRunsController,
       ],
       providers: [{ provide: UsRuntime, useValue: runtime }, UsSessionGuard],
     };

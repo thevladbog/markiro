@@ -32,4 +32,6 @@ export * from "./schema/traceability-case-bridge.js";
 export * from "./schema/traceability-plans.js";
 export * from "./schema/traceability-requests.js";
 export * from "./schema/traceability-request-worker.js";
+export * from "./schema/traceability-demo-seed.js";
+export * from "./schema/traceability-demo-dataset.js";
 export * from "./schema/us-auth.js";

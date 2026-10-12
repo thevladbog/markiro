@@ -9,7 +9,8 @@ import {
   type UsProduct,
   type UsProductList,
 } from "@markiro/platform-contracts";
-import { and, asc, eq, ilike, or } from "drizzle-orm";
+import { and, asc, eq, ilike, inArray, or } from "drizzle-orm";
+import { orderedMasterDataRows, parseMasterDataIds } from "../master-data/us-master-data-batch";
 import { isDeepStrictEqual } from "node:util";
 import {
   authorizeUsMasterData,
@@ -21,6 +22,14 @@ import {
 import { productResponse } from "./us-catalog-support";
 
 const ACTIVE_GTIN_CONSTRAINT = "products_tenant_gtin_unarchived_uq";
+const productColumns = {
+  id: schema.products.id,
+  name: schema.products.name,
+  gtin14: schema.products.gtin14,
+  archived: schema.products.archived,
+  createdAt: schema.products.createdAt,
+  updatedAt: schema.products.updatedAt,
+};
 
 /** US-only catalog access over the shared product table. */
 export class UsCatalogStore {
@@ -36,14 +45,7 @@ export class UsCatalogStore {
       const value = parseMasterDataInput(listUsProductsQuerySchema, query);
       const search = value.search ? `%${escapeLikePattern(value.search)}%` : undefined;
       const rows = await tx
-        .select({
-          id: schema.products.id,
-          name: schema.products.name,
-          gtin14: schema.products.gtin14,
-          archived: schema.products.archived,
-          createdAt: schema.products.createdAt,
-          updatedAt: schema.products.updatedAt,
-        })
+        .select(productColumns)
         .from(schema.products)
         .where(
           and(
@@ -64,24 +66,42 @@ export class UsCatalogStore {
   }
 
   async getProduct(tenantId: string, actorUserId: string, id: unknown): Promise<UsProduct> {
-    return this.db.transaction(async (tx) => {
-      await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-      const productId = parseMasterDataInput(platformUuidSchema, id);
-      const [row] = await tx
-        .select({
-          id: schema.products.id,
-          name: schema.products.name,
-          gtin14: schema.products.gtin14,
-          archived: schema.products.archived,
-          createdAt: schema.products.createdAt,
-          updatedAt: schema.products.updatedAt,
-        })
-        .from(schema.products)
-        .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)))
-        .limit(1);
-      if (!row) throw new NotFoundException({ code: "product_not_found" });
-      return productResponse(row);
-    });
+    return this.db.transaction((tx) => this.getProductInTransaction(tx, tenantId, actorUserId, id));
+  }
+
+  async getProductInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+  ): Promise<UsProduct> {
+    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+    const productId = parseMasterDataInput(platformUuidSchema, id);
+    const [row] = await tx
+      .select(productColumns)
+      .from(schema.products)
+      .where(and(eq(schema.products.tenantId, tenantId), eq(schema.products.id, productId)))
+      .limit(1);
+    if (!row) throw new NotFoundException({ code: "product_not_found" });
+    return productResponse(row);
+  }
+
+  async getProductsInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    inputIds: unknown,
+  ): Promise<UsProduct[]> {
+    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+    const ids = parseMasterDataIds(inputIds);
+    if (ids.length === 0) return [];
+    const rows = await tx
+      .select(productColumns)
+      .from(schema.products)
+      .where(and(eq(schema.products.tenantId, tenantId), inArray(schema.products.id, ids)));
+    return orderedMasterDataRows(ids, rows, (row) => row.id, "product_not_found").map(
+      productResponse,
+    );
   }
 
   async createProduct(
@@ -90,47 +110,57 @@ export class UsCatalogStore {
     input: unknown,
     requestId: string,
   ): Promise<UsProduct> {
+    return this.db.transaction((tx) =>
+      this.createProductInTransaction(tx, tenantId, actorUserId, input, requestId),
+    );
+  }
+
+  async createProductInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    input: unknown,
+    requestId: string,
+  ): Promise<UsProduct> {
     try {
-      return await this.db.transaction(async (tx) => {
-        const profile = await authorizeUsMasterData(
-          tx,
+      const profile = await authorizeUsMasterData(
+        tx,
+        tenantId,
+        actorUserId,
+        US_CAPABILITY.MASTER_DATA_WRITE,
+      );
+      const value = parseMasterDataInput(createUsProductSchema, input);
+      const now = new Date();
+      const [row] = await tx
+        .insert(schema.products)
+        .values({
           tenantId,
-          actorUserId,
-          US_CAPABILITY.MASTER_DATA_WRITE,
-        );
-        const value = parseMasterDataInput(createUsProductSchema, input);
-        const now = new Date();
-        const [row] = await tx
-          .insert(schema.products)
-          .values({
-            tenantId,
-            gtin14: normalizeCatalogGtin(profile, value.gtin),
-            name: value.name,
-            createdAt: now,
-            updatedAt: now,
-          })
-          .returning({
-            id: schema.products.id,
-            name: schema.products.name,
-            gtin14: schema.products.gtin14,
-            archived: schema.products.archived,
-            createdAt: schema.products.createdAt,
-            updatedAt: schema.products.updatedAt,
-          });
-        if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
-        const response = productResponse(row);
-        await this.writeAudit(
-          tx,
-          tenantId,
-          actorUserId,
-          requestId,
-          row.id,
-          null,
-          response,
-          "created",
-        );
-        return response;
-      });
+          gtin14: normalizeCatalogGtin(profile, value.gtin),
+          name: value.name,
+          createdAt: now,
+          updatedAt: now,
+        })
+        .returning({
+          id: schema.products.id,
+          name: schema.products.name,
+          gtin14: schema.products.gtin14,
+          archived: schema.products.archived,
+          createdAt: schema.products.createdAt,
+          updatedAt: schema.products.updatedAt,
+        });
+      if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
+      const response = productResponse(row);
+      await this.writeAudit(
+        tx,
+        tenantId,
+        actorUserId,
+        requestId,
+        row.id,
+        null,
+        response,
+        "created",
+      );
+      return response;
     } catch (error) {
       if (isUniqueConstraintViolation(error, ACTIVE_GTIN_CONSTRAINT)) {
         throw new ConflictException({ code: "product_gtin_taken" });

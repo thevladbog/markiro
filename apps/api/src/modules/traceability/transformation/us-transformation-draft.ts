@@ -6,9 +6,11 @@ import {
   createTransformationDraftSchema,
   saveTransformationDraftSchema,
   platformUuidSchema,
+  type TransformationDraftRecord,
 } from "@markiro/platform-contracts";
 import { and, eq, sql } from "drizzle-orm";
 import { authorizeUsMasterData, parseMasterDataInput } from "../master-data/us-master-data-support";
+import type { UsMasterDataTransaction } from "../master-data/us-master-data-support";
 import {
   lockTransformationOperation,
   replayTransformationDraft,
@@ -31,76 +33,83 @@ export function createTransformationDraft(
   input: unknown,
   requestId: string,
 ) {
-  return transformationTransaction(db, async (tx) => {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.TRANSFORMATION_WRITE);
-    const value = parseMasterDataInput(createTransformationDraftSchema, input);
-    const command = "transformation.create",
-      inputDigest = transformationCommandDigest(command, value);
-    const stored = await lockTransformationOperation(tx, tenantId, command, value.operationKey);
-    if (stored) return replayTransformationDraft(stored, inputDigest);
-    await assertTransformationReferences(tx, tenantId, value.draft);
-    const [profile] = await tx
-      .select()
-      .from(schema.orgProfiles)
-      .where(eq(schema.orgProfiles.tenantId, tenantId));
-    if (!profile) throw unavailable();
-    const now = new Date(),
-      year = Number(
-        new Intl.DateTimeFormat("en-US", { timeZone: profile.timeZone, year: "numeric" }).format(
-          now,
-        ),
-      );
-    const counters = schema.transformationCounters;
-    const [counter] = await tx
-      .insert(counters)
-      .values({ tenantId, year, sequence: 1 })
-      .onConflictDoUpdate({
-        target: [counters.tenantId, counters.year],
-        set: { sequence: sql`${counters.sequence} + 1` },
-      })
-      .returning();
-    if (!counter) throw unavailable();
-    const eventId = randomUUID(),
-      eventNumber = `TRN-${String(year).slice(-2).padStart(2, "0")}-${String(counter.sequence).padStart(4, "0")}`;
-    await tx
-      .insert(schema.transformationEventRoots)
-      .values({ tenantId, id: eventId, eventNumber, pendingDraftId: eventId });
-    await tx.insert(schema.traceabilityEvents).values({
-      ...transformationHeader(value.draft),
-      id: eventId,
-      rootEventId: eventId,
-      type: "transformation",
-      tenantId,
-      eventNumber,
-      timeZone: profile.timeZone,
-      createdBy: actorUserId,
-      updatedBy: actorUserId,
-      createdAt: now,
-      updatedAt: now,
-    });
-    await replaceTransformationChildren(tx, tenantId, eventId, value.draft);
-    const result = await readTransformationDraft(tx, tenantId, eventId, "update");
-    await tx.insert(schema.tenantAuditEvents).values({
-      organizationId: tenantId,
-      actorUserId,
-      action: "traceability.transformation.draft_created",
-      outcome: "success",
-      targetType: "traceability_event",
-      targetId: eventId,
-      before: null,
-      after: result,
-      requestId,
-    });
-    await tx.insert(schema.transformationOperations).values({
-      tenantId,
-      eventId,
-      command,
-      operationKey: value.operationKey,
-      inputDigest,
-      result,
-    });
-    return result;
+  return transformationTransaction(db, (tx) =>
+    createTransformationDraftInTransaction(tx, tenantId, actorUserId, input, requestId),
+  );
+}
+export async function createTransformationDraftInTransaction(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  input: unknown,
+  requestId: string,
+): Promise<TransformationDraftRecord> {
+  await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.TRANSFORMATION_WRITE);
+  const value = parseMasterDataInput(createTransformationDraftSchema, input);
+  const command = "transformation.create",
+    inputDigest = transformationCommandDigest(command, value);
+  const stored = await lockTransformationOperation(tx, tenantId, command, value.operationKey);
+  if (stored) return replayTransformationDraft(stored, inputDigest);
+  await assertTransformationReferences(tx, tenantId, value.draft);
+  const [profile] = await tx
+    .select()
+    .from(schema.orgProfiles)
+    .where(eq(schema.orgProfiles.tenantId, tenantId));
+  if (!profile) throw unavailable();
+  const now = new Date(),
+    year = Number(
+      new Intl.DateTimeFormat("en-US", { timeZone: profile.timeZone, year: "numeric" }).format(now),
+    );
+  const counters = schema.transformationCounters;
+  const [counter] = await tx
+    .insert(counters)
+    .values({ tenantId, year, sequence: 1 })
+    .onConflictDoUpdate({
+      target: [counters.tenantId, counters.year],
+      set: { sequence: sql`${counters.sequence} + 1` },
+    })
+    .returning();
+  if (!counter) throw unavailable();
+  const eventId = randomUUID(),
+    eventNumber = `TRN-${String(year).slice(-2).padStart(2, "0")}-${String(counter.sequence).padStart(4, "0")}`;
+  await tx
+    .insert(schema.transformationEventRoots)
+    .values({ tenantId, id: eventId, eventNumber, pendingDraftId: eventId });
+  await tx.insert(schema.traceabilityEvents).values({
+    ...transformationHeader(value.draft),
+    id: eventId,
+    rootEventId: eventId,
+    type: "transformation",
+    tenantId,
+    eventNumber,
+    timeZone: profile.timeZone,
+    createdBy: actorUserId,
+    updatedBy: actorUserId,
+    createdAt: now,
+    updatedAt: now,
   });
+  await replaceTransformationChildren(tx, tenantId, eventId, value.draft);
+  const result = await readTransformationDraft(tx, tenantId, eventId, "update");
+  await tx.insert(schema.tenantAuditEvents).values({
+    organizationId: tenantId,
+    actorUserId,
+    action: "traceability.transformation.draft_created",
+    outcome: "success",
+    targetType: "traceability_event",
+    targetId: eventId,
+    before: null,
+    after: result,
+    requestId,
+  });
+  await tx.insert(schema.transformationOperations).values({
+    tenantId,
+    eventId,
+    command,
+    operationKey: value.operationKey,
+    inputDigest,
+    result,
+  });
+  return result;
 }
 export function saveTransformationDraft(
   db: Db,

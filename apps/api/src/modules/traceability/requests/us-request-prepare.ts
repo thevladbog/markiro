@@ -4,9 +4,11 @@ import {
   platformUuidSchema,
   usExportInputV1Schema,
   usTraceRequestPrepareBodySchema,
+  usRequestPrepareHttpBodySchema,
   type ExportSourceRecord,
   type UsExportBuildIdentity,
   type UsTraceRequestPrepareBody,
+  type UsRequestPrepareHttpBody,
 } from "@markiro/platform-contracts";
 import {
   BadRequestException,
@@ -139,11 +141,41 @@ export class UsRequestPrepareStore {
     body: UsTraceRequestPrepareBody,
     build: UsExportBuildIdentity,
   ): Promise<typeof runs.$inferSelect> {
+    return this.prepareCommand(tenantId, actorUserId, requestId, body, build, false, null);
+  }
+  prepareHttp(
+    tenantId: string,
+    actorUserId: string,
+    requestId: string,
+    body: UsRequestPrepareHttpBody,
+    build: UsExportBuildIdentity,
+    httpRequestId: string,
+  ): Promise<typeof runs.$inferSelect> {
+    return this.prepareCommand(tenantId, actorUserId, requestId, body, build, true, httpRequestId);
+  }
+  private async prepareCommand(
+    tenantId: string,
+    actorUserId: string,
+    requestId: string,
+    body: UsTraceRequestPrepareBody | UsRequestPrepareHttpBody,
+    build: UsExportBuildIdentity,
+    http: boolean,
+    httpRequestId: string | null,
+  ): Promise<typeof runs.$inferSelect> {
     try {
       for (let attempt = 0; attempt < 3; attempt++) {
         try {
           return await transformationTransaction(this.db, (tx) =>
-            this.prepareWithinTransaction(tx, tenantId, actorUserId, requestId, body, build),
+            this.prepareWithinTransaction(
+              tx,
+              tenantId,
+              actorUserId,
+              requestId,
+              body,
+              build,
+              http,
+              httpRequestId,
+            ),
           );
         } catch (error) {
           if (
@@ -168,7 +200,9 @@ export class UsRequestPrepareStore {
             ? response.code
             : null;
         const id = platformUuidSchema.safeParse(requestId);
-        const command = usTraceRequestPrepareBodySchema.safeParse(body);
+        const command = http
+          ? usRequestPrepareHttpBodySchema.safeParse(body)
+          : usTraceRequestPrepareBodySchema.safeParse(body);
         if (code && id.success)
           await this.db.transaction(async (tx) => {
             await tx.execute(sql`SET LOCAL lock_timeout='2s'`);
@@ -181,6 +215,7 @@ export class UsRequestPrepareStore {
             await tx.insert(schema.tenantAuditEvents).values({
               organizationId: tenantId,
               actorUserId,
+              requestId: httpRequestId,
               action,
               outcome: error instanceof ConflictException ? "conflict" : "rejected",
               targetType: "trace_request",
@@ -203,8 +238,10 @@ export class UsRequestPrepareStore {
     tenantId: string,
     actorUserId: string,
     requestId: string,
-    body: UsTraceRequestPrepareBody,
+    body: UsTraceRequestPrepareBody | UsRequestPrepareHttpBody,
     build: UsExportBuildIdentity,
+    http: boolean,
+    httpRequestId: string | null,
   ): Promise<typeof runs.$inferSelect> {
     await tx.execute(sql`SET LOCAL lock_timeout='2s'`);
     await tx.execute(sql`SET LOCAL statement_timeout='15s'`);
@@ -213,7 +250,8 @@ export class UsRequestPrepareStore {
     if (profile !== "US_FSMA204_PROCESSOR")
       throw new ForbiddenException({ code: "us_request_profile_unsupported" });
     const id = parseMasterDataInput(platformUuidSchema, requestId);
-    const value = parseMasterDataInput(usTraceRequestPrepareBodySchema, body);
+    const httpValue = http ? parseMasterDataInput(usRequestPrepareHttpBodySchema, body) : null;
+    const value = httpValue ?? parseMasterDataInput(usTraceRequestPrepareBodySchema, body);
     const [request] = await tx
       .select()
       .from(requests)
@@ -244,11 +282,18 @@ export class UsRequestPrepareStore {
     if (stored) {
       if (stored.createdBy !== actorUserId)
         throw new ServiceUnavailableException({ code: "us_request_run_stored_invalid" });
-      verifyUsRequestRunEvidence(stored, tenantId);
+      const frozen = verifyUsRequestRunEvidence(stored, tenantId);
       if (stored.commandDigest !== commandDigest) throw conflict("us_request_idempotency_conflict");
+      if (
+        httpValue !== null &&
+        (frozen.validationSnapshot.request.revision !== httpValue.expectedRevision ||
+          stored.scopedContentDigest !== httpValue.validationDigest)
+      )
+        throw conflict("us_request_idempotency_conflict");
       await tx.insert(schema.tenantAuditEvents).values({
         organizationId: tenantId,
         actorUserId,
+        requestId: httpRequestId,
         action: "traceability.request.prepare_replayed",
         outcome: "success",
         targetType: "trace_request",
@@ -263,6 +308,12 @@ export class UsRequestPrepareStore {
         },
       });
       return stored;
+    }
+    if (httpValue !== null) {
+      if (request.revision !== httpValue.expectedRevision)
+        throw conflict("us_request_revision_conflict");
+      if (request.lastValidationDigest !== httpValue.validationDigest)
+        throw conflict("us_request_validation_stale");
     }
     if (request.status !== "open") throw conflict("us_request_closed");
     if (!request.lastValidationDigest || !request.lastValidatedAt)
@@ -404,6 +455,7 @@ export class UsRequestPrepareStore {
     await tx.insert(schema.tenantAuditEvents).values({
       organizationId: tenantId,
       actorUserId,
+      requestId: httpRequestId,
       action,
       outcome: "success",
       targetType: "trace_request",

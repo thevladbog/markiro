@@ -13,6 +13,9 @@ import {
   shippingRevisionListQuerySchema,
   type ShippingDraft,
   type ShippingDraftRecord,
+  type ShippingReadiness,
+  type ShippingHistoricalRecord,
+  type ShippingFinalizedRecord,
 } from "@markiro/platform-contracts";
 import { ConflictException, NotFoundException, ServiceUnavailableException } from "@nestjs/common";
 import { and, asc, eq, inArray, sql } from "drizzle-orm";
@@ -22,7 +25,7 @@ import {
   type UsMasterDataTransaction,
 } from "../master-data/us-master-data-support";
 import { readShippingReadiness } from "./us-shipping-readiness";
-import { finalizeShipping } from "./us-shipping-finalization";
+import { finalizeShipping, finalizeShippingInTransaction } from "./us-shipping-finalization";
 import { readShippingRecord, readShippingRevisions } from "./us-shipping-history";
 import { executeShippingLifecycle } from "./us-shipping-lifecycle";
 import { readCurrentShippingBalanceProjection } from "./us-shipping-balance";
@@ -321,78 +324,86 @@ export class UsShippingStore {
   constructor(private readonly db: Db) {}
 
   createDraft(tenantId: string, actorUserId: string, input: unknown, requestId: string) {
-    return shippingTransaction(this.db, async (tx) => {
-      await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.SHIPPING_WRITE);
-      const value = parseMasterDataInput(createShippingDraftSchema, input);
-      const command = "shipping.create",
-        inputDigest = shippingCommandDigest(command, value);
-      const stored = await lockShippingOperation(tx, tenantId, command, value.operationKey);
-      if (stored) return replay(stored, inputDigest);
-      await assertReferences(tx, tenantId, value.draft);
-      const [profile] = await tx
-        .select({ timeZone: schema.orgProfiles.timeZone })
-        .from(schema.orgProfiles)
-        .where(eq(schema.orgProfiles.tenantId, tenantId));
-      if (!profile) throw unavailable();
-      const now = new Date();
-      const year = Number(
-        new Intl.DateTimeFormat("en-US", { timeZone: profile.timeZone, year: "numeric" }).format(
-          now,
-        ),
-      );
-      const counters = schema.shippingCounters;
-      const [counter] = await tx
-        .insert(counters)
-        .values({ tenantId, year, sequence: 1 })
-        .onConflictDoUpdate({
-          target: [counters.tenantId, counters.year],
-          set: { sequence: sql`${counters.sequence} + 1` },
-        })
-        .returning();
-      if (!counter || counter.sequence > 9999999999) throw unavailable();
-      const eventId = randomUUID();
-      const eventNumber = `SHP-${String(year).slice(-2).padStart(2, "0")}-${String(counter.sequence).padStart(4, "0")}`;
-      await tx
-        .insert(schema.shippingEventRoots)
-        .values({ tenantId, id: eventId, eventNumber, pendingDraftId: eventId });
-      await tx.insert(schema.traceabilityEvents).values({
-        id: eventId,
-        rootEventId: eventId,
-        tenantId,
-        eventNumber,
-        type: "shipping",
-        timeZone: profile.timeZone,
-        dateReceived: value.draft.eventDate,
-        locationId: value.draft.shipFromLocationId,
-        notes: value.draft.notes,
-        createdBy: actorUserId,
-        updatedBy: actorUserId,
-        createdAt: now,
-        updatedAt: now,
-      });
-      await replaceShippingChildren(tx, tenantId, eventId, value.draft);
-      const result = await readShippingDraft(tx, tenantId, eventId, "update");
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId: tenantId,
-        actorUserId,
-        action: "traceability.shipping.draft_created",
-        outcome: "success",
-        targetType: "traceability_event",
-        targetId: eventId,
-        before: null,
-        after: result,
-        requestId,
-      });
-      await tx.insert(schema.shippingOperations).values({
-        tenantId,
-        eventId,
-        command,
-        operationKey: value.operationKey,
-        inputDigest,
-        result,
-      });
-      return result;
+    return shippingTransaction(this.db, (tx) =>
+      this.createDraftInTransaction(tx, tenantId, actorUserId, input, requestId),
+    );
+  }
+
+  async createDraftInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    input: unknown,
+    requestId: string,
+  ): Promise<ShippingDraftRecord> {
+    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.SHIPPING_WRITE);
+    const value = parseMasterDataInput(createShippingDraftSchema, input);
+    const command = "shipping.create",
+      inputDigest = shippingCommandDigest(command, value);
+    const stored = await lockShippingOperation(tx, tenantId, command, value.operationKey);
+    if (stored) return replay(stored, inputDigest);
+    await assertReferences(tx, tenantId, value.draft);
+    const [profile] = await tx
+      .select({ timeZone: schema.orgProfiles.timeZone })
+      .from(schema.orgProfiles)
+      .where(eq(schema.orgProfiles.tenantId, tenantId));
+    if (!profile) throw unavailable();
+    const now = new Date();
+    const year = Number(
+      new Intl.DateTimeFormat("en-US", { timeZone: profile.timeZone, year: "numeric" }).format(now),
+    );
+    const counters = schema.shippingCounters;
+    const [counter] = await tx
+      .insert(counters)
+      .values({ tenantId, year, sequence: 1 })
+      .onConflictDoUpdate({
+        target: [counters.tenantId, counters.year],
+        set: { sequence: sql`${counters.sequence} + 1` },
+      })
+      .returning();
+    if (!counter || counter.sequence > 9999999999) throw unavailable();
+    const eventId = randomUUID();
+    const eventNumber = `SHP-${String(year).slice(-2).padStart(2, "0")}-${String(counter.sequence).padStart(4, "0")}`;
+    await tx
+      .insert(schema.shippingEventRoots)
+      .values({ tenantId, id: eventId, eventNumber, pendingDraftId: eventId });
+    await tx.insert(schema.traceabilityEvents).values({
+      id: eventId,
+      rootEventId: eventId,
+      tenantId,
+      eventNumber,
+      type: "shipping",
+      timeZone: profile.timeZone,
+      dateReceived: value.draft.eventDate,
+      locationId: value.draft.shipFromLocationId,
+      notes: value.draft.notes,
+      createdBy: actorUserId,
+      updatedBy: actorUserId,
+      createdAt: now,
+      updatedAt: now,
     });
+    await replaceShippingChildren(tx, tenantId, eventId, value.draft);
+    const result = await readShippingDraft(tx, tenantId, eventId, "update");
+    await tx.insert(schema.tenantAuditEvents).values({
+      organizationId: tenantId,
+      actorUserId,
+      action: "traceability.shipping.draft_created",
+      outcome: "success",
+      targetType: "traceability_event",
+      targetId: eventId,
+      before: null,
+      after: result,
+      requestId,
+    });
+    await tx.insert(schema.shippingOperations).values({
+      tenantId,
+      eventId,
+      command,
+      operationKey: value.operationKey,
+      inputDigest,
+      result,
+    });
+    return result;
   }
 
   saveDraft(
@@ -467,11 +478,20 @@ export class UsShippingStore {
   }
 
   getRecord(tenantId: string, actorUserId: string, eventIdInput: unknown) {
-    return shippingTransaction(this.db, async (tx) => {
-      await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-      const eventId = parseMasterDataInput(platformUuidSchema, eventIdInput);
-      return readShippingRecord(tx, tenantId, eventId);
-    });
+    return shippingTransaction(this.db, (tx) =>
+      this.getRecordInTransaction(tx, tenantId, actorUserId, eventIdInput),
+    );
+  }
+
+  async getRecordInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    eventIdInput: unknown,
+  ): Promise<ShippingHistoricalRecord> {
+    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+    const eventId = parseMasterDataInput(platformUuidSchema, eventIdInput);
+    return readShippingRecord(tx, tenantId, eventId);
   }
 
   getLotShippingBalance(
@@ -516,20 +536,25 @@ export class UsShippingStore {
     eventIdInput: unknown,
     queryInput: unknown,
   ) {
-    return shippingTransaction(this.db, async (tx) => {
-      const profileCode = await authorizeUsMasterData(
-        tx,
-        tenantId,
-        actorUserId,
-        US_CAPABILITY.READ,
-      );
-      const eventId = parseMasterDataInput(platformUuidSchema, eventIdInput);
-      const query = parseMasterDataInput(shippingReadinessQuerySchema, queryInput);
-      const saved = await readShippingDraft(tx, tenantId, eventId);
-      if (saved.draftVersion !== query.expectedDraftVersion)
-        throw new ConflictException({ code: "shipping_draft_conflict" });
-      return readShippingReadiness(tx, tenantId, saved, profileCode);
-    });
+    return shippingTransaction(this.db, (tx) =>
+      this.checkReadinessInTransaction(tx, tenantId, actorUserId, eventIdInput, queryInput),
+    );
+  }
+
+  async checkReadinessInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    eventIdInput: unknown,
+    queryInput: unknown,
+  ): Promise<ShippingReadiness> {
+    const profileCode = await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+    const eventId = parseMasterDataInput(platformUuidSchema, eventIdInput);
+    const query = parseMasterDataInput(shippingReadinessQuerySchema, queryInput);
+    const saved = await readShippingDraft(tx, tenantId, eventId);
+    if (saved.draftVersion !== query.expectedDraftVersion)
+      throw new ConflictException({ code: "shipping_draft_conflict" });
+    return readShippingReadiness(tx, tenantId, saved, profileCode);
   }
 
   finalize(
@@ -540,6 +565,17 @@ export class UsShippingStore {
     requestId: string,
   ) {
     return finalizeShipping(this.db, tenantId, actorUserId, eventId, input, requestId);
+  }
+
+  finalizeInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    eventId: unknown,
+    input: unknown,
+    requestId: string,
+  ): Promise<ShippingFinalizedRecord> {
+    return finalizeShippingInTransaction(tx, tenantId, actorUserId, eventId, input, requestId);
   }
 
   amend(

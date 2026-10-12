@@ -137,6 +137,8 @@ import {
 } from "./receiving/command-acknowledgement.js";
 import { matchesReceivingCsvPreview } from "./receiving/csv-integrity.js";
 import { readPlanPdfResponse } from "./plans/pdf-transport.js";
+import { createUsRequestsClient } from "./requests/client.js";
+import type { UsRequestsClientErrorCode } from "./requests/error-codes.js";
 
 const planConflictCode = z.enum([
   "us_plan_revision_conflict",
@@ -158,6 +160,7 @@ type ShippingHttpError = z.infer<typeof shippingHttpErrorSchema>;
 
 export type UsClientErrorCode =
   | PlanErrorCode
+  | UsRequestsClientErrorCode
   | "receiving_export_stale"
   | "export_value_too_large"
   | "receiving_csv_preview_expired"
@@ -759,6 +762,7 @@ export function createUsBrowserClient(send: typeof fetch = globalThis.fetch.bind
     }
   }
   return {
+    requests: createUsRequestsClient(send, (code) => new UsClientError(code)),
     async listPlans() {
       return request(plansPath, usPlanListResponseSchema);
     },

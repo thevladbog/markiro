@@ -8,6 +8,7 @@ import {
   platformUuidSchema,
   receivingOperationReceiptV2Schema,
   type ReceivingLiveRecord,
+  type ReceivingOperationReceiptV2,
 } from "@markiro/platform-contracts";
 import { and, asc, eq } from "drizzle-orm";
 import {
@@ -159,94 +160,115 @@ export function executeReceivingLifecycle(
   input: unknown,
   requestId: string,
 ) {
-  return receivingTransaction(db, async (tx) => {
-    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.QA_MANAGE);
-    const eventId = parseMasterDataInput(platformUuidSchema, id);
-    const value =
-      command === "receiving.amend"
-        ? parseMasterDataInput(amendReceivingSchema, input)
-        : parseMasterDataInput(voidReceivingSchema, input);
-    const inputDigest = receivingLifecycleCommandDigest(command, eventId, value);
-    const stored = await lockReceivingOperation(tx, tenantId, command, value.operationKey);
-    if (stored)
-      return replayReceivingLifecycle(stored, command, eventId, value.operationKey, inputDigest);
-    const root = await lockReceivingRoot(tx, tenantId, eventId);
-    await tx
-      .select({ id: events.id })
-      .from(events)
-      .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId)))
-      .for("update");
-    const before = await readReceivingLiveRecord(tx, tenantId, eventId);
-    if (root.lifecycleVersion !== value.expectedLifecycleVersion) throw conflict(before);
-    const decision = assessReceivingTransition(
-      {
-        id: before.id,
-        status: before.status,
-        revision: before.revision,
-        rootId: root.id,
-        currentEventId: root.currentEventId,
-        pendingDraftId: root.pendingDraftId,
-        supersededByEventId: before.lifecycle.supersededByEventId,
-        lifecycleVersion: root.lifecycleVersion,
-        nextRevision: root.nextRevision,
-      },
-      command === "receiving.amend" ? "amend" : "void",
-    );
-    if (!decision.ok) {
-      if (decision.code === "receiving_pending_amendment")
-        throw new ConflictException({
-          code: decision.code,
-          pendingDraftId: decision.pendingDraftId,
-        });
-      throw conflict(before);
-    }
-    if (
-      "expectedDraftVersion" in value &&
-      value.expectedDraftVersion !== (before.status === "draft" ? before.draftVersion : null)
-    )
-      throw new ConflictException({ code: "receiving_draft_conflict" });
-    const resultId =
-      command === "receiving.amend"
-        ? await startAmendment(tx, tenantId, actorUserId, root, before, value.reason)
-        : await voidRevision(tx, tenantId, actorUserId, root, before, value.reason);
-    const after = await readReceivingLiveRecord(tx, tenantId, resultId);
-    const parsed = receivingOperationReceiptV2Schema.safeParse({
-      receiptVersion: 2,
-      command,
-      operationKey: value.operationKey,
-      inputDigest,
-      eventId: resultId,
-      record: after,
-    });
-    if (!parsed.success) throw unavailable();
-    await tx.insert(schema.tenantAuditEvents).values({
-      organizationId: tenantId,
-      actorUserId,
-      action:
-        command === "receiving.amend"
-          ? "traceability.receiving.amendment_started"
-          : "traceability.receiving.voided",
-      outcome: "success",
-      targetType: "traceability_event",
-      targetId: resultId,
-      before,
-      after: {
-        rootId: root.id,
-        revision: after.revision,
-        reason: value.reason,
-        result: command === "receiving.amend" ? "draft_started" : "voided",
-        record: after,
-      },
-      requestId,
-    });
-    await tx.insert(schema.receivingOperations).values({
+  return receivingTransaction(db, (tx) =>
+    executeReceivingLifecycleInTransaction(
+      tx,
       tenantId,
+      actorUserId,
       command,
-      operationKey: value.operationKey,
-      inputDigest,
-      eventId: resultId,
-      result: parsed.data,
-    });
-    return parsed.data;
+      id,
+      input,
+      requestId,
+    ),
+  );
+}
+
+/** Caller owns commit, rollback, isolation and fresh whole-transaction retry. */
+export async function executeReceivingLifecycleInTransaction(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  command: "receiving.amend" | "receiving.void",
+  id: unknown,
+  input: unknown,
+  requestId: string,
+): Promise<ReceivingOperationReceiptV2> {
+  await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.QA_MANAGE);
+  const eventId = parseMasterDataInput(platformUuidSchema, id);
+  const value =
+    command === "receiving.amend"
+      ? parseMasterDataInput(amendReceivingSchema, input)
+      : parseMasterDataInput(voidReceivingSchema, input);
+  const inputDigest = receivingLifecycleCommandDigest(command, eventId, value);
+  const stored = await lockReceivingOperation(tx, tenantId, command, value.operationKey);
+  if (stored)
+    return replayReceivingLifecycle(stored, command, eventId, value.operationKey, inputDigest);
+  const root = await lockReceivingRoot(tx, tenantId, eventId);
+  await tx
+    .select({ id: events.id })
+    .from(events)
+    .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId)))
+    .for("update");
+  const before = await readReceivingLiveRecord(tx, tenantId, eventId);
+  if (root.lifecycleVersion !== value.expectedLifecycleVersion) throw conflict(before);
+  const decision = assessReceivingTransition(
+    {
+      id: before.id,
+      status: before.status,
+      revision: before.revision,
+      rootId: root.id,
+      currentEventId: root.currentEventId,
+      pendingDraftId: root.pendingDraftId,
+      supersededByEventId: before.lifecycle.supersededByEventId,
+      lifecycleVersion: root.lifecycleVersion,
+      nextRevision: root.nextRevision,
+    },
+    command === "receiving.amend" ? "amend" : "void",
+  );
+  if (!decision.ok) {
+    if (decision.code === "receiving_pending_amendment")
+      throw new ConflictException({
+        code: decision.code,
+        pendingDraftId: decision.pendingDraftId,
+      });
+    throw conflict(before);
+  }
+  if (
+    "expectedDraftVersion" in value &&
+    value.expectedDraftVersion !== (before.status === "draft" ? before.draftVersion : null)
+  )
+    throw new ConflictException({ code: "receiving_draft_conflict" });
+  const resultId =
+    command === "receiving.amend"
+      ? await startAmendment(tx, tenantId, actorUserId, root, before, value.reason)
+      : await voidRevision(tx, tenantId, actorUserId, root, before, value.reason);
+  const after = await readReceivingLiveRecord(tx, tenantId, resultId);
+  const parsed = receivingOperationReceiptV2Schema.safeParse({
+    receiptVersion: 2,
+    command,
+    operationKey: value.operationKey,
+    inputDigest,
+    eventId: resultId,
+    record: after,
   });
+  if (!parsed.success) throw unavailable();
+  await tx.insert(schema.tenantAuditEvents).values({
+    organizationId: tenantId,
+    actorUserId,
+    action:
+      command === "receiving.amend"
+        ? "traceability.receiving.amendment_started"
+        : "traceability.receiving.voided",
+    outcome: "success",
+    targetType: "traceability_event",
+    targetId: resultId,
+    before,
+    after: {
+      rootId: root.id,
+      revision: after.revision,
+      reason: value.reason,
+      result: command === "receiving.amend" ? "draft_started" : "voided",
+      record: after,
+    },
+    requestId,
+  });
+  await tx.insert(schema.receivingOperations).values({
+    tenantId,
+    command,
+    operationKey: value.operationKey,
+    inputDigest,
+    eventId: resultId,
+    result: parsed.data,
+  });
+  return parsed.data;
 }

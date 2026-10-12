@@ -50,6 +50,72 @@ jobs:
         run: pnpm --filter @markiro/domain test && pnpm --filter @markiro/domain build && pnpm --filter @markiro/domain typecheck && pnpm --filter @markiro/domain lint
       - name: Build isolated API dependencies and entry points
         run: pnpm turbo build --filter '@markiro/api...'
+      - name: Verify pure native dataset assembly input
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-native-assembly-contract.test.ts --maxWorkers=1
+      - name: Verify corrected dataset Cases on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-corrected-cases-contract.test.ts test/us-dataset-corrected-cases-seed.e2e.test.ts --maxWorkers=1
+      - name: Verify special dataset event examples on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-special-contract.test.ts test/us-dataset-special-seed.e2e.test.ts test/us-dataset-special-locks.e2e.test.ts test/us-dataset-corrected-transformation-contract.test.ts test/us-dataset-corrected-transformation-seed.e2e.test.ts test/us-dataset-corrected-transformation-locks.e2e.test.ts --maxWorkers=1
+      - name: Verify Receiving lifecycle transaction foundation on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-receiving-lifecycle-transaction.e2e.test.ts --maxWorkers=1
+      - name: Verify regular dataset range orchestration on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-regular-contract.test.ts test/us-dataset-regular-seed.e2e.test.ts --maxWorkers=1
+      - name: Verify Shipping native transaction foundation on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-shipping-transaction-seams.e2e.test.ts test/us-shipping-transaction-locks.e2e.test.ts --maxWorkers=1
+      - name: Check US Case native transaction foundation
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-case-transaction-seams.e2e.test.ts test/us-case-transaction-locks.e2e.test.ts --maxWorkers=1
+      - name: Check US Transformation native transaction foundation
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/us-transformation-transaction-seams.e2e.test.ts test/us-transformation-transaction-locks.e2e.test.ts --maxWorkers=1
+      - name: Verify regular US dataset Transformation on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-transformation-contract.test.ts test/us-dataset-transformation-verify.e2e.test.ts test/us-dataset-transformation-locks.e2e.test.ts test/us-dataset-transformation-seed.e2e.test.ts --maxWorkers=1
+      - name: Verify regular US dataset Cases on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-cases-contract.test.ts test/us-case-demo-command.e2e.test.ts test/us-dataset-cases-prepare.e2e.test.ts test/us-dataset-cases-verify.e2e.test.ts test/us-dataset-cases-locks.e2e.test.ts test/us-dataset-cases-seed.e2e.test.ts --maxWorkers=1
+      - name: Verify regular dataset Shipping on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-shipping-contract.test.ts test/us-dataset-shipping-result.test.ts test/us-dataset-shipping-origin-status.e2e.test.ts test/us-dataset-shipping-seed.e2e.test.ts test/us-dataset-shipping-verify.e2e.test.ts test/us-dataset-shipping-locks.e2e.test.ts --maxWorkers=1
+      - name: Verify pure six-month recipe and compiled timezone identity
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-six-month-references.test.ts test/us-six-month-chains.test.ts test/us-six-month-definition.test.ts --maxWorkers=1
+      - name: Verify US demo descriptor and strict journal codecs
+        run: pnpm --filter @markiro/api exec vitest run test/us-demo-definition.test.ts test/us-demo-journal-contract.test.ts test/us-dataset-contract.test.ts test/us-dataset-reference-contract.test.ts test/us-dataset-receiving-contract.test.ts --maxWorkers=1
+      - name: Verify bounded US dataset progress on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-journal.e2e.test.ts test/us-dataset-atomic-stage.e2e.test.ts --maxWorkers=1
+      - name: Verify regular US dataset Receiving on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-dataset-stage-read.e2e.test.ts test/us-dataset-receiving-verify.e2e.test.ts test/us-dataset-receiving-locks.e2e.test.ts test/us-dataset-receiving-seed.e2e.test.ts --maxWorkers=1
+      - name: Verify exact US demo references and canonical replay on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: corepack pnpm --filter @markiro/api exec vitest run test/us-reference-transaction-seams.e2e.test.ts test/us-demo-atomic-stage.e2e.test.ts test/us-demo-reference-seed.e2e.test.ts test/us-dataset-reference-seed.e2e.test.ts test/us-demo-journal.e2e.test.ts test/us-master-data.e2e.test.ts test/us-catalog.e2e.test.ts test/us-catalog-operational-boundaries.e2e.test.ts test/us-product-profile.e2e.test.ts test/us-reference-document.e2e.test.ts --maxWorkers=1
+      - name: Verify US demo journal schema and migration on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/db exec vitest run test/us-demo-seed-schema.test.ts test/us-demo-seed-migration.e2e.test.ts test/us-demo-dataset-schema.test.ts test/us-demo-dataset-migration.e2e.test.ts --maxWorkers=1
+      - name: Verify guarded US demo journal and trusted owner boundaries
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/us-demo-definition.test.ts test/us-demo-journal-contract.test.ts test/us-demo-journal.e2e.test.ts test/us-owner-command.test.ts test/us-development-owner.e2e.test.ts test/us-profile-store.e2e.test.ts test/us-request-tenant-origin.e2e.test.ts --maxWorkers=1
       - name: Verify API entry boundaries
         run: pnpm --filter @markiro/api exec vitest run test/deployment-entry.test.ts test/us-development.e2e.test.ts test/env.test.ts test/health.e2e.test.ts
       - name: Verify bounded receiving CSV inputs
@@ -122,8 +188,44 @@ jobs:
         env:
           US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
         run: pnpm --filter @markiro/api exec vitest run test/us-request-worker-types.test.ts test/us-request-worker-failures.test.ts test/us-request-worker-execution.test.ts test/us-request-package-artifact-config.test.ts test/us-request-package-artifacts.test.ts test/us-request-worker-lifecycle.e2e.test.ts test/us-request-worker-checkpoint.e2e.test.ts test/us-request-worker-publication.e2e.test.ts test/us-request-worker-cleanup.e2e.test.ts test/us-request-worker.e2e.test.ts test/us-request-worker-recovery.e2e.test.ts --maxWorkers=1
+      - name: Build isolated request worker entry and checked descriptor
+        run: pnpm --filter @markiro/api build:us-request-worker
+      - name: Verify owned US HTTP setup and teardown on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/deployment-entry.test.ts --maxWorkers=1
+      - name: Verify owned US build fixture acquisition and disposal
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/us-request-build-fixture.test.ts --maxWorkers=1
+      - name: Verify strict US Requests HTTP public contracts
+        run: pnpm --filter @markiro/platform-contracts exec vitest run test/us-requests-http.test.ts --maxWorkers=1
+      - name: Verify US Requests HTTP reads, commands, resources and downloads on disposable databases
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/us-request-read.e2e.test.ts test/us-request-publication-read.e2e.test.ts test/us-request-http-commands.e2e.test.ts test/us-request-http-resources.test.ts test/us-request-http-resources.e2e.test.ts test/us-request-download.e2e.test.ts test/us-request-http.e2e.test.ts test/openapi-coverage.test.ts --maxWorkers=1
+      - name: Verify US worker build, loop, runtime and real process recovery
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/us-request-build-descriptor.test.ts test/us-request-build-command.test.ts test/us-request-worker-loop.test.ts test/us-request-worker-runtime.test.ts test/us-request-worker-runtime.e2e.test.ts test/us-request-worker-process.e2e.test.ts --maxWorkers=1
+      - name: Verify compiled request worker refusal and no-listener boundary
+        run: node --test tools/us-development/test/request-worker-entry.smoke.mjs
       - name: Build shared browser components
         run: pnpm --filter @markiro/ui build
+      - name: Verify strict US Requests JSON client
+        run: pnpm --filter @markiro/admin exec vitest run test/us-requests-client.test.ts --maxWorkers=1
+      - name: Verify bounded descriptor-verified US Requests downloads
+        run: pnpm --filter @markiro/admin exec vitest run test/us-requests-download-client.test.ts --maxWorkers=1
+      - name: Verify US Requests time, scope and form policy
+        run: pnpm --filter @markiro/admin exec vitest run test/us-requests-time.test.ts test/us-requests-form.test.ts test/us-requests-copy.test.ts --maxWorkers=1
+      - name: Verify read-only US Requests navigation and saved cards
+        run: pnpm --filter @markiro/admin exec vitest run test/us-requests-navigation.test.tsx test/us-requests-view.test.tsx --maxWorkers=1
+      - name: Verify controlled US Requests editors and recoverable CRUD
+        run: pnpm --filter @markiro/admin exec vitest run test/us-requests-editor.test.tsx test/us-requests-scope.test.tsx test/us-requests-crud.test.tsx --maxWorkers=1
+      - name: Verify fresh US Requests validation, stable preparation and exact sources
+        run: pnpm --filter @markiro/admin exec vitest run test/us-requests-validation.test.tsx test/us-requests-prepare.test.tsx test/us-requests-source.test.ts --maxWorkers=1
+      - name: Verify frozen US Requests runs, bounded polling, stable retry and downloads
+        run: pnpm --filter @markiro/admin exec vitest run test/us-requests-runs.test.tsx test/us-requests-polling.test.ts test/us-requests-retry.test.tsx test/us-requests-download.test.tsx --maxWorkers=1
       - name: Verify US browser flow and contracts
         run: pnpm --filter @markiro/admin exec vitest run test/us-client.test.ts test/us-master-data-client.test.ts test/us-master-data-forms.test.ts test/us-master-data-ui.test.tsx test/us-catalog-client.test.ts test/us-catalog-ui.test.tsx test/us-product-profile-client.test.ts test/us-product-profile-ui.test.tsx test/us-lot-client.test.ts test/us-lots-ui.test.tsx test/us-app.test.tsx
       - name: Verify US Plan cabinet contracts and EN/ES flow
@@ -142,6 +244,18 @@ jobs:
         run: pnpm --filter @markiro/admin exec vitest run test/us-events-client.test.ts test/us-transformation-client.test.ts test/us-cases-client.test.ts test/us-events-ui.test.tsx test/us-transformation-editor.test.tsx test/us-transformation-readiness.test.tsx test/us-transformation-finalization.test.tsx test/us-transformation-detail.test.tsx test/us-transformation-history.test.tsx test/us-transformation-cases.test.tsx test/us-transformation-genealogy.test.tsx
       - name: Verify Shipping office workflow
         run: pnpm --filter @markiro/admin exec vitest run test/us-shipping-client.test.ts test/us-shipping-editor.test.tsx test/us-shipping-readiness.test.tsx test/us-shipping-detail.test.tsx test/us-shipping-history.test.tsx test/us-events-ui.test.tsx
+      - name: Bootstrap pinned Requests browser verification tool
+        run: pnpm --dir tools/production-browser --ignore-workspace install --frozen-lockfile
+      - name: Bootstrap Chromium for isolated Requests verification
+        run: pnpm --dir tools/production-browser --ignore-workspace exec playwright install --with-deps chromium
+      - name: Verify owned Requests cabinet browser fixture
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/us-request-cabinet-browser-fixture.test.ts --maxWorkers=1
+      - name: Verify Requests through real cabinet HTTP and separate worker
+        env:
+          US_TEST_DATABASE_URL: postgres://markiro_us:markiro-us-development-only@127.0.0.1:55432/markiro_us_dev
+        run: pnpm --filter @markiro/api exec vitest run test/us-request-cabinet-browser.e2e.test.ts --maxWorkers=1
       - name: Build local-only US browser entry
         env:
           VITE_DEPLOYMENT_EDITION: US
@@ -195,7 +309,7 @@ jobs:
           pnpm --filter @markiro/api exec vitest run test/us-receiving-amendment-save.e2e.test.ts test/us-receiving-amendment-save-concurrency.e2e.test.ts
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-receiving-revision-readiness.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-receiving-revision-readiness.e2e.test.ts test/us-receiving-revision-readiness-concurrency.e2e.test.ts
-          pnpm --filter @markiro/api exec vitest run test/us-receiving-revision-finalization.e2e.test.ts test/us-receiving-revision-finalization-concurrency.e2e.test.ts
+          pnpm --filter @markiro/api exec vitest run test/us-receiving-revision-finalization.e2e.test.ts test/us-receiving-revision-finalization-concurrency.e2e.test.ts test/us-receiving-transaction-seams.e2e.test.ts --maxWorkers=1
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-receiving-registry.test.ts
           pnpm --filter @markiro/api exec vitest run test/us-receiving-registry.e2e.test.ts
           pnpm --filter @markiro/platform-contracts exec vitest run test/us-receiving-lifecycle-errors.test.ts test/us-receiving-command-contracts.test.ts

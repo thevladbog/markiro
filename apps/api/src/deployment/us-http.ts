@@ -72,7 +72,15 @@ export function mountUsHttp(app: INestApplication, runtime: UsRuntime): void {
         ));
     const parseBody = csvPreviewWrite
       ? parseReceivingCsvJson
-      : receivingWrite || transformationWrite || shippingWrite || planWrite
+      : receivingWrite ||
+          transformationWrite ||
+          shippingWrite ||
+          planWrite ||
+          (request.method === "POST" && request.path === "/traceability/requests") ||
+          (request.method === "PATCH" &&
+            /^\/traceability\/requests\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+              request.path,
+            ))
         ? parseReceivingJson
         : parseJson;
     parseBody(request, response, (error: unknown) => {

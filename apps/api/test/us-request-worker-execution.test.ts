@@ -2,12 +2,43 @@ import { canonicalExportDigest } from "@markiro/domain";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+  captureUsRequestBuildDescriptor,
+  loadUsRequestBuildDescriptor,
+} from "../src/deployment/us-request-build-descriptor";
+import { createUsRequestBuildFixture, localBuildEnv } from "./support/us-request-build-fixture";
 
 const build = { apiVersion: "test-us09-package", gitSha: "a".repeat(40), dirty: false };
 const environment = { NODE_ENV: "test", MARKIRO_DEPLOYMENT_EDITION: "US" };
 const load = () => import("../src/modules/traceability/requests/us-request-worker-execution");
 
 describe("synthetic US worker execution authority", () => {
+  it("accepts only checked descriptor authority and preserves the existing synthetic digest", async () => {
+    const fixture = await createUsRequestBuildFixture();
+    try {
+      const source = await localBuildEnv();
+      await fixture.writeDocument(
+        await captureUsRequestBuildDescriptor(fixture.cleanBuild, fixture.roots),
+      );
+      const descriptor = await loadUsRequestBuildDescriptor(source, fixture.roots);
+      const module = await load();
+      const identity = module.createUsRequestRuntimeExecutionIdentity(descriptor, source);
+      expect(identity).toEqual(
+        module.createSyntheticUsRequestExecutionIdentity(fixture.cleanBuild, source),
+      );
+      expect(() =>
+        module.createUsRequestRuntimeExecutionIdentity({ ...descriptor }, source),
+      ).toThrow();
+      expect(() =>
+        module.createUsRequestRuntimeExecutionIdentity(descriptor, {
+          ...source,
+          NODE_ENV: "production",
+        }),
+      ).toThrow();
+    } finally {
+      await fixture.dispose();
+    }
+  });
   it("copies and freezes build identity and binds pinned byte-path versions", async () => {
     const module = await load();
     const supplied = { ...build };

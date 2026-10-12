@@ -15,6 +15,7 @@ import {
   type ReceivingFinalizationSnapshotV3,
   type ReceivingLiveRecord,
   type FinalizeReceivingCommandInput,
+  type ReceivingFinalizeResult,
 } from "@markiro/platform-contracts";
 import { and, eq } from "drizzle-orm";
 import {
@@ -205,232 +206,275 @@ async function executeFinalization(
   mode: "revision" | "compatible",
 ) {
   try {
-    return await receivingTransaction(db, async (tx) => {
-      const profileCode = await authorizeUsMasterData(
-        tx,
-        tenantId,
-        actorUserId,
-        US_CAPABILITY.QA_MANAGE,
-      );
-      const eventId = parseMasterDataInput(platformUuidSchema, id);
-      const value = parseFinalizationCommand(input, mode);
-      const command = "receiving.finalize";
-      const inputDigest = receivingLifecycleCommandDigest(command, eventId, value);
-      const stored = await lockReceivingOperation(tx, tenantId, command, value.operationKey);
-      if (stored)
-        return mode === "revision"
-          ? replayReceivingLifecycle(stored, command, eventId, value.operationKey, inputDigest)
-          : replayReceivingFinalization(stored, eventId, value, inputDigest);
-      const root = await lockReceivingRoot(tx, tenantId, eventId);
-      if (!("commandVersion" in value))
-        await assertOriginalReceivingWriteTarget(tx, tenantId, eventId);
-      const events = schema.traceabilityEvents,
-        roots = schema.receivingEventRoots;
+    return await receivingTransaction(db, (tx) =>
+      executeFinalizationInTransaction(tx, tenantId, actorUserId, id, input, requestId, mode),
+    );
+  } catch (error) {
+    throwLotConflict(error);
+  }
+}
+
+/** Caller owns commit/rollback and retries; an aborted supplied transaction always throws. */
+export async function finalizeReceivingCommandInTransaction(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  id: unknown,
+  input: unknown,
+  requestId: string,
+): Promise<ReceivingFinalizeResult> {
+  return receivingFinalizeResultSchema.parse(
+    await executeFinalizationInTransaction(
+      tx,
+      tenantId,
+      actorUserId,
+      id,
+      input,
+      requestId,
+      "compatible",
+    ),
+  );
+}
+
+async function executeFinalizationInTransaction(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  id: unknown,
+  input: unknown,
+  requestId: string,
+  mode: "revision" | "compatible",
+) {
+  try {
+    const profileCode = await authorizeUsMasterData(
+      tx,
+      tenantId,
+      actorUserId,
+      US_CAPABILITY.QA_MANAGE,
+    );
+    const eventId = parseMasterDataInput(platformUuidSchema, id);
+    const value = parseFinalizationCommand(input, mode);
+    const command = "receiving.finalize";
+    const inputDigest = receivingLifecycleCommandDigest(command, eventId, value);
+    const stored = await lockReceivingOperation(tx, tenantId, command, value.operationKey);
+    if (stored)
+      return mode === "revision"
+        ? replayReceivingLifecycle(stored, command, eventId, value.operationKey, inputDigest)
+        : replayReceivingFinalization(stored, eventId, value, inputDigest);
+    const root = await lockReceivingRoot(tx, tenantId, eventId);
+    if (!("commandVersion" in value))
+      await assertOriginalReceivingWriteTarget(tx, tenantId, eventId);
+    const events = schema.traceabilityEvents,
+      roots = schema.receivingEventRoots;
+    await tx
+      .select({ id: events.id })
+      .from(events)
+      .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId)))
+      .for("update");
+    const before = await readReceivingLiveRecord(tx, tenantId, eventId);
+    const decision = assessReceivingTransition(
+      {
+        id: before.id,
+        rootId: root.id,
+        status: before.status,
+        revision: before.revision,
+        supersededByEventId: before.lifecycle.supersededByEventId,
+        currentEventId: root.currentEventId,
+        pendingDraftId: root.pendingDraftId,
+        lifecycleVersion: root.lifecycleVersion,
+        nextRevision: root.nextRevision,
+      },
+      "finalize",
+    );
+    if (
+      !decision.ok ||
+      ("commandVersion" in value &&
+        (root.lifecycleVersion !== value.expectedLifecycleVersion ||
+          before.lifecycle.previousRevisionId !== value.previousRevisionId))
+    )
+      throw new ConflictException({
+        code: "receiving_lifecycle_conflict",
+        rootId: root.id,
+        lifecycleVersion: root.lifecycleVersion,
+        currentEventId: root.currentEventId,
+        pendingDraftId: root.pendingDraftId,
+      });
+    if (before.draftVersion !== value.expectedDraftVersion)
+      throw new ConflictException({ code: "receiving_draft_conflict" });
+    const previousRevisionId = before.lifecycle.previousRevisionId;
+    if (previousRevisionId !== null)
       await tx
         .select({ id: events.id })
         .from(events)
-        .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId)))
+        .where(and(eq(events.tenantId, tenantId), eq(events.id, previousRevisionId)))
         .for("update");
-      const before = await readReceivingLiveRecord(tx, tenantId, eventId);
-      const decision = assessReceivingTransition(
-        {
-          id: before.id,
-          rootId: root.id,
-          status: before.status,
-          revision: before.revision,
-          supersededByEventId: before.lifecycle.supersededByEventId,
-          currentEventId: root.currentEventId,
-          pendingDraftId: root.pendingDraftId,
-          lifecycleVersion: root.lifecycleVersion,
-          nextRevision: root.nextRevision,
-        },
-        "finalize",
-      );
-      if (
-        !decision.ok ||
-        ("commandVersion" in value &&
-          (root.lifecycleVersion !== value.expectedLifecycleVersion ||
-            before.lifecycle.previousRevisionId !== value.previousRevisionId))
-      )
-        throw new ConflictException({
-          code: "receiving_lifecycle_conflict",
-          rootId: root.id,
-          lifecycleVersion: root.lifecycleVersion,
-          currentEventId: root.currentEventId,
-          pendingDraftId: root.pendingDraftId,
-        });
-      if (before.draftVersion !== value.expectedDraftVersion)
-        throw new ConflictException({ code: "receiving_draft_conflict" });
-      const previousRevisionId = before.lifecycle.previousRevisionId;
-      if (previousRevisionId !== null)
-        await tx
-          .select({ id: events.id })
-          .from(events)
-          .where(and(eq(events.tenantId, tenantId), eq(events.id, previousRevisionId)))
-          .for("update");
-      // Root and both revision rows precede sorted lot and reference locks.
-      // The same projection produces the read-only check and this locked digest.
-      const context = await readReceivingRevisionContext(
-        tx,
-        tenantId,
-        eventId,
-        value.expectedDraftVersion,
-        profileCode,
-        true,
-      );
-      if (context.readiness.state !== "complete")
-        throw new ConflictException({ code: "event_incomplete", issues: context.readiness.issues });
-      if (context.readiness.inputDigest !== value.expectedInputDigest)
-        throw new ConflictException({ code: "receiving_readiness_changed" });
-      const required = context.readiness.exemptReviewRequiredLines,
-        reviewed = value.reviewedExemptLines ?? [];
-      if (
-        required.length !== reviewed.length ||
-        required.some((line, index) => line !== reviewed[index])
-      ) {
-        const mismatched = [...new Set([...required, ...reviewed])]
-          .filter((line) => required.includes(line) !== reviewed.includes(line))
-          .sort((a, b) => a - b);
-        throw new ConflictException({
-          code: "event_incomplete",
-          issues: mismatched.map((line) => ({
-            severity: "error",
-            group: "lines",
-            line,
-            field: "exemption",
-            code: "exemption_review_required",
-            detail: null,
-          })),
-        });
-      }
-      const now = new Date();
-      const snapshot = planReceivingRevisionSnapshot(context, {
-        actorUserId,
-        finalizedAt: now.toISOString(),
-        reviewedExemptLines: reviewed,
+    // Root and both revision rows precede sorted lot and reference locks.
+    // The same projection produces the read-only check and this locked digest.
+    const context = await readReceivingRevisionContext(
+      tx,
+      tenantId,
+      eventId,
+      value.expectedDraftVersion,
+      profileCode,
+      true,
+    );
+    if (context.readiness.state !== "complete")
+      throw new ConflictException({ code: "event_incomplete", issues: context.readiness.issues });
+    if (context.readiness.inputDigest !== value.expectedInputDigest)
+      throw new ConflictException({ code: "receiving_readiness_changed" });
+    const required = context.readiness.exemptReviewRequiredLines,
+      reviewed = value.reviewedExemptLines ?? [];
+    if (
+      required.length !== reviewed.length ||
+      required.some((line, index) => line !== reviewed[index])
+    ) {
+      const mismatched = [...new Set([...required, ...reviewed])]
+        .filter((line) => required.includes(line) !== reviewed.includes(line))
+        .sort((a, b) => a - b);
+      throw new ConflictException({
+        code: "event_incomplete",
+        issues: mismatched.map((line) => ({
+          severity: "error",
+          group: "lines",
+          line,
+          field: "exemption",
+          code: "exemption_review_required",
+          detail: null,
+        })),
       });
-      const predecessor = context.working.predecessor?.record ?? null;
-      if (predecessor && predecessor.content.kind !== "finalized") throw unavailable();
-      const priorSnapshot =
-        predecessor?.content.kind === "finalized" ? predecessor.content.snapshot : null;
-      const effect = priorSnapshot
-        ? classifyReceivingAmendment(materialRevision(priorSnapshot), materialRevision(snapshot))
-        : null;
-      if (effect && (effect.invalidBindingLineNos.length || effect.identityLockedLineNos.length))
-        throw unavailable();
-      // The locked context includes retained, linked and removed predecessor lots.
-      if (effect?.kind === "material") {
-        const blockers = await listCurrentDownstreamConsumers(tx, tenantId, effect.affectedLotIds);
-        if (blockers.length)
-          throw new ConflictException({ code: "traceability_downstream_blocked", blockers });
-      }
-      await persistLots(tx, tenantId, actorUserId, eventId, requestId, now, context, snapshot);
-      // Newly allocated lots must exist before their first dependency epoch write.
-      if (effect?.kind === "material")
-        await bumpLotDependencyVersions(tx, tenantId, effect.affectedLotIds);
-      const items = schema.receivingEventItems;
-      for (const line of snapshot.items) {
-        const [written] = await tx
-          .update(items)
-          .set({ lotId: line.lotId })
-          .where(
-            and(
-              eq(items.tenantId, tenantId),
-              eq(items.eventId, eventId),
-              eq(items.lineNo, line.lineNo),
-            ),
-          )
-          .returning({ lineNo: items.lineNo });
-        if (!written) throw unavailable();
-      }
-      if (predecessor)
-        await tx
-          .update(events)
-          .set({
-            status: "amended",
-            supersededByEventId: eventId,
-            supersededAt: now,
-            supersededBy: actorUserId,
-          })
-          .where(and(eq(events.tenantId, tenantId), eq(events.id, predecessor.id)));
+    }
+    const now = new Date();
+    const snapshot = planReceivingRevisionSnapshot(context, {
+      actorUserId,
+      finalizedAt: now.toISOString(),
+      reviewedExemptLines: reviewed,
+    });
+    const predecessor = context.working.predecessor?.record ?? null;
+    if (predecessor && predecessor.content.kind !== "finalized") throw unavailable();
+    const priorSnapshot =
+      predecessor?.content.kind === "finalized" ? predecessor.content.snapshot : null;
+    const effect = priorSnapshot
+      ? classifyReceivingAmendment(materialRevision(priorSnapshot), materialRevision(snapshot))
+      : null;
+    if (effect && (effect.invalidBindingLineNos.length || effect.identityLockedLineNos.length))
+      throw unavailable();
+    // The locked context includes retained, linked and removed predecessor lots.
+    if (effect?.kind === "material") {
+      const blockers = await listCurrentDownstreamConsumers(tx, tenantId, effect.affectedLotIds);
+      if (blockers.length)
+        throw new ConflictException({ code: "traceability_downstream_blocked", blockers });
+    }
+    await persistLots(tx, tenantId, actorUserId, eventId, requestId, now, context, snapshot);
+    // Newly allocated lots must exist before their first dependency epoch write.
+    if (effect?.kind === "material")
+      await bumpLotDependencyVersions(tx, tenantId, effect.affectedLotIds);
+    const items = schema.receivingEventItems;
+    for (const line of snapshot.items) {
+      const [written] = await tx
+        .update(items)
+        .set({ lotId: line.lotId })
+        .where(
+          and(
+            eq(items.tenantId, tenantId),
+            eq(items.eventId, eventId),
+            eq(items.lineNo, line.lineNo),
+          ),
+        )
+        .returning({ lineNo: items.lineNo });
+      if (!written) throw unavailable();
+    }
+    if (predecessor)
       await tx
         .update(events)
         .set({
-          status: "finalized",
-          finalizedAt: now,
-          finalizedBy: actorUserId,
-          finalizationSnapshot: snapshot,
-          updatedAt: now,
-          updatedBy: actorUserId,
+          status: "amended",
+          supersededByEventId: eventId,
+          supersededAt: now,
+          supersededBy: actorUserId,
         })
-        .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId)));
-      await tx
-        .update(roots)
-        .set({
-          currentEventId: eventId,
-          pendingDraftId: null,
-          lifecycleVersion: root.lifecycleVersion + 1,
-        })
-        .where(and(eq(roots.tenantId, tenantId), eq(roots.id, root.id)));
-      await bumpReceivingBasisVersions(tx, tenantId, [
-        ...context.basis.map((lot) => lot.lotId),
-        ...snapshot.items.map((line) => line.lotId),
-      ]);
-      const after = await readReceivingLiveRecord(tx, tenantId, eventId);
-      const predecessorAfter = predecessor
-        ? await readReceivingLiveRecord(tx, tenantId, predecessor.id)
-        : null;
-      const parsed = receivingOperationReceiptV2Schema.safeParse({
-        receiptVersion: 2,
-        command,
-        operationKey: value.operationKey,
-        inputDigest,
-        eventId,
-        record: after,
-      });
-      if (!parsed.success) throw unavailable();
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId: tenantId,
-        actorUserId,
-        action: "traceability.receiving.finalized",
-        outcome: "success",
-        targetType: "traceability_event",
-        targetId: eventId,
-        before,
-        after: {
-          rootId: root.id,
-          revision: after.revision,
-          reason: after.lifecycle.amendmentReason,
-          result: "finalized",
-          effect,
-          record: after,
-          predecessor: predecessor ? { before: predecessor, after: predecessorAfter } : null,
-          lineLots: {
-            before: priorSnapshot ? mapping(priorSnapshot) : [],
-            after: mapping(snapshot),
-          },
-        },
-        requestId,
-      });
-      await tx.insert(schema.receivingOperations).values({
-        tenantId,
-        command,
-        operationKey: value.operationKey,
-        inputDigest,
-        eventId,
-        result: parsed.data,
-      });
-      return parsed.data;
+        .where(and(eq(events.tenantId, tenantId), eq(events.id, predecessor.id)));
+    await tx
+      .update(events)
+      .set({
+        status: "finalized",
+        finalizedAt: now,
+        finalizedBy: actorUserId,
+        finalizationSnapshot: snapshot,
+        updatedAt: now,
+        updatedBy: actorUserId,
+      })
+      .where(and(eq(events.tenantId, tenantId), eq(events.id, eventId)));
+    await tx
+      .update(roots)
+      .set({
+        currentEventId: eventId,
+        pendingDraftId: null,
+        lifecycleVersion: root.lifecycleVersion + 1,
+      })
+      .where(and(eq(roots.tenantId, tenantId), eq(roots.id, root.id)));
+    await bumpReceivingBasisVersions(tx, tenantId, [
+      ...context.basis.map((lot) => lot.lotId),
+      ...snapshot.items.map((line) => line.lotId),
+    ]);
+    const after = await readReceivingLiveRecord(tx, tenantId, eventId);
+    const predecessorAfter = predecessor
+      ? await readReceivingLiveRecord(tx, tenantId, predecessor.id)
+      : null;
+    const parsed = receivingOperationReceiptV2Schema.safeParse({
+      receiptVersion: 2,
+      command,
+      operationKey: value.operationKey,
+      inputDigest,
+      eventId,
+      record: after,
     });
+    if (!parsed.success) throw unavailable();
+    await tx.insert(schema.tenantAuditEvents).values({
+      organizationId: tenantId,
+      actorUserId,
+      action: "traceability.receiving.finalized",
+      outcome: "success",
+      targetType: "traceability_event",
+      targetId: eventId,
+      before,
+      after: {
+        rootId: root.id,
+        revision: after.revision,
+        reason: after.lifecycle.amendmentReason,
+        result: "finalized",
+        effect,
+        record: after,
+        predecessor: predecessor ? { before: predecessor, after: predecessorAfter } : null,
+        lineLots: {
+          before: priorSnapshot ? mapping(priorSnapshot) : [],
+          after: mapping(snapshot),
+        },
+      },
+      requestId,
+    });
+    await tx.insert(schema.receivingOperations).values({
+      tenantId,
+      command,
+      operationKey: value.operationKey,
+      inputDigest,
+      eventId,
+      result: parsed.data,
+    });
+    return parsed.data;
   } catch (error) {
-    if (
-      [
-        "traceability_lots_location_tlc_uq",
-        "traceability_lots_reference_tlc_uq",
-        "traceability_lots_missing_source_tlc_uq",
-      ].some((name) => isUniqueConstraintViolation(error, name))
-    )
-      throw new ConflictException({ code: "receiving_lot_conflict" });
-    throw error;
+    throwLotConflict(error);
   }
+}
+
+/** Shared statement/commit error translation; every other failure propagates unchanged. */
+function throwLotConflict(error: unknown): never {
+  if (
+    [
+      "traceability_lots_location_tlc_uq",
+      "traceability_lots_reference_tlc_uq",
+      "traceability_lots_missing_source_tlc_uq",
+    ].some((name) => isUniqueConstraintViolation(error, name))
+  )
+    throw new ConflictException({ code: "receiving_lot_conflict" });
+  throw error;
 }

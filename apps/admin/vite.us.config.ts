@@ -1,6 +1,60 @@
 import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig, type Plugin, type UserConfig, type ViteDevServer } from "vite";
+import { usRequestListQuerySchema, usRequestHistoryQuerySchema } from "@markiro/platform-contracts";
+
+const requestRoot = "/api/us/traceability/requests";
+const runRoot = "/api/us/traceability/export-runs";
+const canonicalUuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
+const requestItem = new RegExp(`^${requestRoot}/${canonicalUuid}$`);
+const requestCommand = new RegExp(
+  `^${requestRoot}/${canonicalUuid}/(?:close|validate|acknowledge-warnings|prepare)$`,
+);
+const requestRuns = new RegExp(`^${requestRoot}/${canonicalUuid}/runs$`);
+const runItem = new RegExp(`^${runRoot}/${canonicalUuid}$`);
+const runAttempts = new RegExp(`^${runRoot}/${canonicalUuid}/attempts$`);
+const runRetry = new RegExp(`^${runRoot}/${canonicalUuid}/retry$`);
+const runArtifact = new RegExp(
+  `^${runRoot}/${canonicalUuid}/artifacts/(?:xlsx|plan_pdf|validation_report|request_report|manifest|package_zip)$`,
+);
+
+/** Validate raw paths before decoding: encoded IDs and slash aliases are denied. */
+export function allowsUsRequestsProxy(method: string, rawUrl: string, hasRange: boolean): boolean {
+  if (hasRange || rawUrl.includes("#")) return false;
+  const [path, search] = rawUrl.split("?");
+  if (
+    rawUrl.split("?").length > 2 ||
+    (search !== undefined &&
+      (search === "" ||
+        search
+          .split("&")
+          .some((field) => !field || !field.includes("=") || /%(?![0-9a-fA-F]{2})/.test(field))))
+  )
+    return false;
+  const valid =
+    (path === requestRoot && ["GET", "POST"].includes(method)) ||
+    (requestItem.test(path ?? "") && ["GET", "PATCH"].includes(method)) ||
+    (requestCommand.test(path ?? "") && method === "POST") ||
+    ((requestRuns.test(path ?? "") ||
+      runItem.test(path ?? "") ||
+      runAttempts.test(path ?? "") ||
+      runArtifact.test(path ?? "")) &&
+      method === "GET") ||
+    (runRetry.test(path ?? "") && method === "POST");
+  if (!valid) return false;
+  const query: Record<string, string> = {};
+  for (const [key, value] of new URLSearchParams(search)) {
+    if (Object.hasOwn(query, key)) return false;
+    Object.defineProperty(query, key, { value, enumerable: true });
+  }
+  const contract =
+    path === requestRoot && method === "GET"
+      ? usRequestListQuerySchema
+      : requestRuns.test(path ?? "") || runAttempts.test(path ?? "")
+        ? usRequestHistoryQuerySchema
+        : null;
+  return contract ? contract.safeParse(query).success : Object.keys(query).length === 0;
+}
 
 /** Local validation only. No inherited .env, RU proxy, public files or dist output. */
 export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
@@ -138,6 +192,11 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
       .join("") +
     `(\\?${casesQueryField}(?:&${casesQueryField}){0,2})?$`;
   const proxy = {
+    [`^/api/us/traceability/(?:requests|export-runs)(?:/[^?#]*)?(?:\\?[^#]*)?$`]: {
+      target: "http://localhost:3100",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/api\/us/, ""),
+    },
     [readinessPath]: {
       target: "http://localhost:3100",
       changeOrigin: true,
@@ -318,23 +377,27 @@ export function createUsAdminConfig(raw: NodeJS.ProcessEnv, mode: string) {
       const path = request.url ?? "/";
       if (
         path.startsWith("/api/") &&
-        (path.startsWith("/api/us/traceability/readiness")
-          ? request.method !== "GET" || !readinessRoute.test(path)
-          : path.startsWith("/api/us/traceability/shipments") || path.includes("/shipping-balance")
-            ? !shippingRoutes.some(
-                (route) =>
-                  route.pattern.test(path) &&
-                  route.methods.includes(request.method ?? "") &&
-                  (!path.includes("expectedDraftVersion=") ||
-                    Number(path.slice(path.lastIndexOf("=") + 1)) <= 2147483647),
-              )
-            : /^\/api\/us\/traceability\/(?:search(?:[/?]|$)|lots\/[^/]+\/card(?:[/?]|$))/.test(
-                  path,
+        (path.startsWith(requestRoot) || path.startsWith(runRoot)
+          ? !allowsUsRequestsProxy(request.method ?? "", path, request.headers.range !== undefined)
+          : path.startsWith("/api/us/traceability/readiness")
+            ? request.method !== "GET" || !readinessRoute.test(path)
+            : path.startsWith("/api/us/traceability/shipments") ||
+                path.includes("/shipping-balance")
+              ? !shippingRoutes.some(
+                  (route) =>
+                    route.pattern.test(path) &&
+                    route.methods.includes(request.method ?? "") &&
+                    (!path.includes("expectedDraftVersion=") ||
+                      Number(path.slice(path.lastIndexOf("=") + 1)) <= 2147483647),
                 )
-              ? request.method !== "GET" || !searchCardRoutes.some((pattern) => pattern.test(path))
-              : /^\/api\/us\/traceability\/lots\/[^/]+\/trace(?:[/?]|$)/.test(path)
-                ? request.method !== "GET" || !traceRoutes.some((pattern) => pattern.test(path))
-                : !Object.keys(proxy).some((pattern) => new RegExp(pattern).test(path)))
+              : /^\/api\/us\/traceability\/(?:search(?:[/?]|$)|lots\/[^/]+\/card(?:[/?]|$))/.test(
+                    path,
+                  )
+                ? request.method !== "GET" ||
+                  !searchCardRoutes.some((pattern) => pattern.test(path))
+                : /^\/api\/us\/traceability\/lots\/[^/]+\/trace(?:[/?]|$)/.test(path)
+                  ? request.method !== "GET" || !traceRoutes.some((pattern) => pattern.test(path))
+                  : !Object.keys(proxy).some((pattern) => new RegExp(pattern).test(path)))
       ) {
         response.writeHead(404, { "Cache-Control": "no-store" });
         response.end();

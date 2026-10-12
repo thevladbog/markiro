@@ -42,9 +42,36 @@ describe("US private plan artifact configuration", () => {
         expect(transport.send).not.toHaveBeenCalled();
         const query = vi.spyOn(connection.pool, "query").mockResolvedValue(undefined);
         await runtime.assertDatabaseReady();
-        expect(query.mock.calls[0]?.[0]).toContain("traceability_plan_versions plan");
-        expect(query.mock.calls[0]?.[0]).toContain("traceability_plan_cleanup_fences plan_fence");
-        expect(query.mock.calls[0]?.[0]).toContain("plan_fence.state");
+        const statements = query.mock.calls
+          .map(([statement]) => statement)
+          .filter((statement): statement is string => typeof statement === "string");
+        const planQueries = statements.filter((statement) =>
+          statement.includes("traceability_plan_versions plan"),
+        );
+        expect(planQueries).toHaveLength(1);
+        const planQuery = planQueries[0];
+        expect(planQuery).toContain("traceability_plan_versions plan");
+        expect(planQuery).toContain("traceability_plan_cleanup_fences plan_fence");
+        expect(planQuery).toContain("plan_fence.state");
+
+        const requestQueries = statements.filter((statement) =>
+          statement.includes("FROM trace_requests request"),
+        );
+        expect(requestQueries).toHaveLength(1);
+        const requestQuery = requestQueries[0];
+        expect(requestQuery).not.toBe(planQuery);
+        for (const table of [
+          "trace_export_runs run",
+          "trace_export_artifacts artifact",
+          "trace_export_attempts attempt",
+          "trace_export_render_checkpoints checkpoint",
+          "trace_export_retry_receipts retry",
+        ])
+          expect(requestQuery).toContain(table);
+        expect(requestQuery).toMatch(/^\s*SELECT\b[\s\S]*\bLIMIT 0\s*$/i);
+        expect(requestQuery).not.toMatch(
+          /\b(?:INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|TRUNCATE|INTO)\b/i,
+        );
       } finally {
         await runtime.onApplicationShutdown();
       }

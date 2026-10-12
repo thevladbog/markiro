@@ -16,28 +16,43 @@ import {
   type ReceivingDraftList,
   type ReceivingDraftRecord,
   type ReceivingReadiness,
+  type ReceivingCreateResult,
+  type ReceivingFinalizeResult,
+  type ReceivingRevisionReadiness,
+  type ReceivingLiveRecord,
+  type ReceivingBasis,
+  type ReceivingOperationReceiptV2,
 } from "@markiro/platform-contracts";
 import { and, desc, eq, ilike, sql } from "drizzle-orm";
 import {
   authorizeUsMasterData,
   escapeLikePattern,
   parseMasterDataInput,
+  type UsMasterDataTransaction,
 } from "../master-data/us-master-data-support";
 import { readReceivingReadiness } from "./us-receiving-readiness";
 import { readReceivingDraft, readReceivingRecord, unavailable } from "./us-receiving-persistence";
 import { finalizeReceiving } from "./us-receiving-finalization";
 import { readReceivingBasis } from "./us-receiving-basis";
 import { readReceivingLiveRecord, readReceivingRevisions } from "./us-receiving-history";
-import { executeReceivingLifecycle } from "./us-receiving-lifecycle";
-import { saveReceivingAmendment } from "./us-receiving-amendment-save";
+import {
+  executeReceivingLifecycle,
+  executeReceivingLifecycleInTransaction,
+} from "./us-receiving-lifecycle";
+import {
+  saveReceivingAmendment,
+  saveReceivingAmendmentInTransaction,
+} from "./us-receiving-amendment-save";
 import { readReceivingRevisionContext } from "./us-receiving-revision-readiness";
 import {
   finalizeReceivingRevision,
   finalizeReceivingCommand,
+  finalizeReceivingCommandInTransaction,
 } from "./us-receiving-revision-finalization";
 import { readReceivingRegistry } from "./us-receiving-registry";
 import {
   createReceivingDraftCommand,
+  createReceivingDraftCommandInTransaction,
   saveOriginalReceivingDraftCommand,
 } from "./us-receiving-draft-commands";
 import { exportReceivingCsv } from "./us-receiving-csv-export";
@@ -64,6 +79,18 @@ export class UsReceivingStore {
     return finalizeReceivingCommand(this.db, tenantId, actorUserId, id, input, requestId);
   }
 
+  /** Caller owns the complete transaction and any retry; no nested transaction is started. */
+  finalizeCommandInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+    input: unknown,
+    requestId: string,
+  ): Promise<ReceivingFinalizeResult> {
+    return finalizeReceivingCommandInTransaction(tx, tenantId, actorUserId, id, input, requestId);
+  }
+
   finalizeRevision(
     tenantId: string,
     actorUserId: string,
@@ -77,27 +104,35 @@ export class UsReceivingStore {
   // Live readiness binds both original and amendment commands to current lifecycle state.
   async checkRevisionReadiness(tenantId: string, actorUserId: string, id: unknown, query: unknown) {
     return this.db.transaction(
-      async (tx) => {
-        const profileCode = await authorizeUsMasterData(
-          tx,
-          tenantId,
-          actorUserId,
-          US_CAPABILITY.READ,
-        );
-        const eventId = parseMasterDataInput(platformUuidSchema, id);
-        const value = parseMasterDataInput(receivingReadinessQuerySchema, query);
-        return (
-          await readReceivingRevisionContext(
-            tx,
-            tenantId,
-            eventId,
-            value.expectedDraftVersion,
-            profileCode,
-          )
-        ).readiness;
-      },
+      (tx) => this.checkRevisionReadinessInTransaction(tx, tenantId, actorUserId, id, query),
       { isolationLevel: "repeatable read" },
     );
+  }
+
+  /**
+   * Multi-statement current-state readers require caller-owned repeatable read or a sufficient
+   * explicit lock protocol. Reading this transaction's own fresh writes does not establish a
+   * general read-committed snapshot guarantee. These readers choose no isolation or global lock.
+   */
+  async checkRevisionReadinessInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+    query: unknown,
+  ): Promise<ReceivingRevisionReadiness> {
+    const profileCode = await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+    const eventId = parseMasterDataInput(platformUuidSchema, id);
+    const value = parseMasterDataInput(receivingReadinessQuerySchema, query);
+    return (
+      await readReceivingRevisionContext(
+        tx,
+        tenantId,
+        eventId,
+        value.expectedDraftVersion,
+        profileCode,
+      )
+    ).readiness;
   }
 
   saveAmendment(
@@ -108,6 +143,58 @@ export class UsReceivingStore {
     requestId: string,
   ) {
     return saveReceivingAmendment(this.db, tenantId, actorUserId, id, input, requestId);
+  }
+
+  /** Caller owns the complete transaction and any retry; no nested transaction is started. */
+  amendInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+    input: unknown,
+    requestId: string,
+  ): Promise<ReceivingOperationReceiptV2> {
+    return executeReceivingLifecycleInTransaction(
+      tx,
+      tenantId,
+      actorUserId,
+      "receiving.amend",
+      id,
+      input,
+      requestId,
+    );
+  }
+
+  /** Caller owns the complete transaction and any retry; no nested transaction is started. */
+  voidInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+    input: unknown,
+    requestId: string,
+  ): Promise<ReceivingOperationReceiptV2> {
+    return executeReceivingLifecycleInTransaction(
+      tx,
+      tenantId,
+      actorUserId,
+      "receiving.void",
+      id,
+      input,
+      requestId,
+    );
+  }
+
+  /** Caller owns the complete transaction and any retry; no nested transaction is started. */
+  saveAmendmentInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+    input: unknown,
+    requestId: string,
+  ): Promise<ReceivingOperationReceiptV2> {
+    return saveReceivingAmendmentInTransaction(tx, tenantId, actorUserId, id, input, requestId);
   }
 
   amend(tenantId: string, actorUserId: string, id: unknown, input: unknown, requestId: string) {
@@ -151,12 +238,20 @@ export class UsReceivingStore {
 
   async getLiveRecord(tenantId: string, actorUserId: string, id: unknown) {
     return this.db.transaction(
-      async (tx) => {
-        await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-        return readReceivingLiveRecord(tx, tenantId, parseMasterDataInput(platformUuidSchema, id));
-      },
+      (tx) => this.getLiveRecordInTransaction(tx, tenantId, actorUserId, id),
       { isolationLevel: "repeatable read" },
     );
+  }
+
+  /** Caller supplies repeatable read or sufficient explicit locks for current-state verification. */
+  async getLiveRecordInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+  ): Promise<ReceivingLiveRecord> {
+    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+    return readReceivingLiveRecord(tx, tenantId, parseMasterDataInput(platformUuidSchema, id));
   }
 
   async listRevisions(tenantId: string, actorUserId: string, id: unknown, query: unknown) {
@@ -174,6 +269,23 @@ export class UsReceivingStore {
     );
   }
 
+  /** Caller supplies repeatable read or sufficient explicit locks for token/count/page consistency. */
+  async getLotReceivingBasisInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    lotId: unknown,
+    query: unknown,
+  ): Promise<ReceivingBasis> {
+    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+    return readReceivingBasis(
+      tx,
+      tenantId,
+      parseMasterDataInput(platformUuidSchema, lotId),
+      parseMasterDataInput(receivingBasisQuerySchema, query),
+    );
+  }
+
   async getLotReceivingBasis(
     tenantId: string,
     actorUserId: string,
@@ -181,15 +293,7 @@ export class UsReceivingStore {
     query: unknown,
   ) {
     return this.db.transaction(
-      async (tx) => {
-        await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-        return readReceivingBasis(
-          tx,
-          tenantId,
-          parseMasterDataInput(platformUuidSchema, lotId),
-          parseMasterDataInput(receivingBasisQuerySchema, query),
-        );
-      },
+      (tx) => this.getLotReceivingBasisInTransaction(tx, tenantId, actorUserId, lotId, query),
       { isolationLevel: "repeatable read" },
     );
   }
@@ -361,6 +465,26 @@ export class UsReceivingStore {
     return receivingCreateResultSchema.parse(
       await createReceivingDraftCommand(
         this.db,
+        tenantId,
+        actorUserId,
+        input,
+        requestId,
+        "versioned",
+      ),
+    );
+  }
+
+  /** Caller owns commit/rollback and any retry of the complete transaction. */
+  async createDraftCommandInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    input: unknown,
+    requestId: string,
+  ): Promise<ReceivingCreateResult> {
+    return receivingCreateResultSchema.parse(
+      await createReceivingDraftCommandInTransaction(
+        tx,
         tenantId,
         actorUserId,
         input,

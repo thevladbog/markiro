@@ -17,7 +17,8 @@ import {
   type UsLocation,
   type UsParty,
 } from "@markiro/platform-contracts";
-import { and, arrayContains, asc, eq, ilike, or } from "drizzle-orm";
+import { and, arrayContains, asc, eq, ilike, inArray, or } from "drizzle-orm";
+import { orderedMasterDataRows, parseMasterDataIds } from "./us-master-data-batch";
 import { isDeepStrictEqual } from "node:util";
 import {
   authorizeUsMasterData,
@@ -29,6 +30,7 @@ import {
   parseMasterDataInput,
   partyResponse,
   type UsLocationList,
+  type UsMasterDataTransaction,
   type UsPartyList,
 } from "./us-master-data-support";
 
@@ -67,22 +69,50 @@ export class UsMasterDataStore {
   }
 
   async getParty(tenantId: string, actorUserId: string, id: unknown): Promise<UsParty> {
-    return this.db.transaction(async (tx) => {
-      await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-      const partyId = parseMasterDataInput(platformUuidSchema, id);
-      const [row] = await tx
-        .select()
-        .from(schema.traceabilityParties)
-        .where(
-          and(
-            eq(schema.traceabilityParties.tenantId, tenantId),
-            eq(schema.traceabilityParties.id, partyId),
-          ),
-        )
-        .limit(1);
-      if (!row) throw new NotFoundException({ code: "party_not_found" });
-      return partyResponse(row);
-    });
+    return this.db.transaction((tx) => this.getPartyInTransaction(tx, tenantId, actorUserId, id));
+  }
+
+  async getPartyInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+  ): Promise<UsParty> {
+    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+    const partyId = parseMasterDataInput(platformUuidSchema, id);
+    const [row] = await tx
+      .select()
+      .from(schema.traceabilityParties)
+      .where(
+        and(
+          eq(schema.traceabilityParties.tenantId, tenantId),
+          eq(schema.traceabilityParties.id, partyId),
+        ),
+      )
+      .limit(1);
+    if (!row) throw new NotFoundException({ code: "party_not_found" });
+    return partyResponse(row);
+  }
+
+  async getPartiesInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    inputIds: unknown,
+  ): Promise<UsParty[]> {
+    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+    const ids = parseMasterDataIds(inputIds);
+    if (ids.length === 0) return [];
+    const rows = await tx
+      .select()
+      .from(schema.traceabilityParties)
+      .where(
+        and(
+          eq(schema.traceabilityParties.tenantId, tenantId),
+          inArray(schema.traceabilityParties.id, ids),
+        ),
+      );
+    return orderedMasterDataRows(ids, rows, (row) => row.id, "party_not_found").map(partyResponse);
   }
 
   async createParty(
@@ -91,30 +121,40 @@ export class UsMasterDataStore {
     input: unknown,
     requestId: string,
   ): Promise<UsParty> {
+    return this.db.transaction((tx) =>
+      this.createPartyInTransaction(tx, tenantId, actorUserId, input, requestId),
+    );
+  }
+
+  async createPartyInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    input: unknown,
+    requestId: string,
+  ): Promise<UsParty> {
     try {
-      return await this.db.transaction(async (tx) => {
-        await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.MASTER_DATA_WRITE);
-        const value = parseMasterDataInput(createUsPartySchema, input);
-        const now = new Date();
-        const [row] = await tx
-          .insert(schema.traceabilityParties)
-          .values({ tenantId, ...value, createdAt: now, updatedAt: now })
-          .returning();
-        if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
-        const response = partyResponse(row);
-        await tx.insert(schema.tenantAuditEvents).values({
-          organizationId: tenantId,
-          actorUserId,
-          action: "traceability.party.created",
-          outcome: "success",
-          targetType: "traceability_party",
-          targetId: row.id,
-          before: null,
-          after: response,
-          requestId,
-        });
-        return response;
+      await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.MASTER_DATA_WRITE);
+      const value = parseMasterDataInput(createUsPartySchema, input);
+      const now = new Date();
+      const [row] = await tx
+        .insert(schema.traceabilityParties)
+        .values({ tenantId, ...value, createdAt: now, updatedAt: now })
+        .returning();
+      if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
+      const response = partyResponse(row);
+      await tx.insert(schema.tenantAuditEvents).values({
+        organizationId: tenantId,
+        actorUserId,
+        action: "traceability.party.created",
+        outcome: "success",
+        targetType: "traceability_party",
+        targetId: row.id,
+        before: null,
+        after: response,
+        requestId,
       });
+      return response;
     } catch (error) {
       if (isPartyNameConflict(error)) {
         throw new ConflictException({ code: "party_name_taken" });
@@ -249,22 +289,54 @@ export class UsMasterDataStore {
   }
 
   async getLocation(tenantId: string, actorUserId: string, id: unknown): Promise<UsLocation> {
-    return this.db.transaction(async (tx) => {
-      await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-      const locationId = parseMasterDataInput(platformUuidSchema, id);
-      const [row] = await tx
-        .select()
-        .from(schema.traceabilityLocations)
-        .where(
-          and(
-            eq(schema.traceabilityLocations.tenantId, tenantId),
-            eq(schema.traceabilityLocations.id, locationId),
-          ),
-        )
-        .limit(1);
-      if (!row) throw new NotFoundException({ code: "location_not_found" });
-      return locationResponse(row);
-    });
+    return this.db.transaction((tx) =>
+      this.getLocationInTransaction(tx, tenantId, actorUserId, id),
+    );
+  }
+
+  async getLocationInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+  ): Promise<UsLocation> {
+    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+    const locationId = parseMasterDataInput(platformUuidSchema, id);
+    const [row] = await tx
+      .select()
+      .from(schema.traceabilityLocations)
+      .where(
+        and(
+          eq(schema.traceabilityLocations.tenantId, tenantId),
+          eq(schema.traceabilityLocations.id, locationId),
+        ),
+      )
+      .limit(1);
+    if (!row) throw new NotFoundException({ code: "location_not_found" });
+    return locationResponse(row);
+  }
+
+  async getLocationsInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    inputIds: unknown,
+  ): Promise<UsLocation[]> {
+    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+    const ids = parseMasterDataIds(inputIds);
+    if (ids.length === 0) return [];
+    const rows = await tx
+      .select()
+      .from(schema.traceabilityLocations)
+      .where(
+        and(
+          eq(schema.traceabilityLocations.tenantId, tenantId),
+          inArray(schema.traceabilityLocations.id, ids),
+        ),
+      );
+    return orderedMasterDataRows(ids, rows, (row) => row.id, "location_not_found").map(
+      locationResponse,
+    );
   }
 
   async createLocation(
@@ -273,52 +345,62 @@ export class UsMasterDataStore {
     input: unknown,
     requestId: string,
   ): Promise<UsLocation> {
-    return this.db.transaction(async (tx) => {
-      await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.MASTER_DATA_WRITE);
-      const value = parseMasterDataInput(createUsLocationSchema, input);
-      const [parent] = await tx
-        .select({
-          id: schema.traceabilityParties.id,
-          archived: schema.traceabilityParties.archived,
-        })
-        .from(schema.traceabilityParties)
-        .where(
-          and(
-            eq(schema.traceabilityParties.tenantId, tenantId),
-            eq(schema.traceabilityParties.id, value.partyId),
-          ),
-        )
-        .limit(1)
-        .for("share");
-      if (!parent) throw new NotFoundException({ code: "party_not_found" });
-      if (parent.archived) throw new ForbiddenException({ code: "party_archived" });
-      const now = new Date();
-      const [row] = await tx
-        .insert(schema.traceabilityLocations)
-        .values({
-          tenantId,
-          ...value,
-          latitude: canonicalCoordinate(value.latitude),
-          longitude: canonicalCoordinate(value.longitude),
-          createdAt: now,
-          updatedAt: now,
-        })
-        .returning();
-      if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
-      const response = locationResponse(row);
-      await tx.insert(schema.tenantAuditEvents).values({
-        organizationId: tenantId,
-        actorUserId,
-        action: "traceability.location.created",
-        outcome: "success",
-        targetType: "traceability_location",
-        targetId: row.id,
-        before: null,
-        after: locationPersistentSnapshot(row),
-        requestId,
-      });
-      return response;
+    return this.db.transaction((tx) =>
+      this.createLocationInTransaction(tx, tenantId, actorUserId, input, requestId),
+    );
+  }
+
+  async createLocationInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    input: unknown,
+    requestId: string,
+  ): Promise<UsLocation> {
+    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.MASTER_DATA_WRITE);
+    const value = parseMasterDataInput(createUsLocationSchema, input);
+    const [parent] = await tx
+      .select({
+        id: schema.traceabilityParties.id,
+        archived: schema.traceabilityParties.archived,
+      })
+      .from(schema.traceabilityParties)
+      .where(
+        and(
+          eq(schema.traceabilityParties.tenantId, tenantId),
+          eq(schema.traceabilityParties.id, value.partyId),
+        ),
+      )
+      .limit(1)
+      .for("share");
+    if (!parent) throw new NotFoundException({ code: "party_not_found" });
+    if (parent.archived) throw new ForbiddenException({ code: "party_archived" });
+    const now = new Date();
+    const [row] = await tx
+      .insert(schema.traceabilityLocations)
+      .values({
+        tenantId,
+        ...value,
+        latitude: canonicalCoordinate(value.latitude),
+        longitude: canonicalCoordinate(value.longitude),
+        createdAt: now,
+        updatedAt: now,
+      })
+      .returning();
+    if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
+    const response = locationResponse(row);
+    await tx.insert(schema.tenantAuditEvents).values({
+      organizationId: tenantId,
+      actorUserId,
+      action: "traceability.location.created",
+      outcome: "success",
+      targetType: "traceability_location",
+      targetId: row.id,
+      before: null,
+      after: locationPersistentSnapshot(row),
+      requestId,
     });
+    return response;
   }
 
   async updateLocation(

@@ -1,0 +1,87 @@
+.us-requests,
+.us-request-card {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.us-requests h1,
+.us-request-card h2 {
+  margin: 0;
+}
+.us-requests h1 {
+  font: var(--text-h1);
+}
+.us-request-card h2 {
+  font: var(--text-h2);
+}
+.us-request-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+}
+.us-request-filters .mk-field {
+  min-width: 12rem;
+  flex: 1;
+}
+.us-request-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.us-request-card {
+  border-top: 1px solid var(--line);
+  padding-top: 20px;
+}
+.us-request-clock {
+  display: grid;
+  gap: 4px;
+  color: var(--fg-2);
+  font-variant-numeric: tabular-nums;
+}
+.us-request-clock--attention {
+  color: var(--warn-fg);
+}
+.us-request-clock--overdue {
+  color: var(--err-fg);
+}
+.us-request-evidence {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: var(--text-code);
+}
+.us-request-card .mk-definition-grid__description {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.us-request-card .font-mono {
+  overflow-wrap: anywhere;
+}
+.us-requests > .mk-table th:nth-child(2),
+.us-requests > .mk-table th:nth-child(3),
+.us-requests > .mk-table td:nth-child(2),
+.us-requests > .mk-table td:nth-child(3) {
+  min-width: 15rem;
+}
+.us-requests :focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 3px;
+}
+.us-request-card [role="tabpanel"] {
+  min-width: 0;
+  padding-top: 12px;
+}
+@media (max-width: 640px) {
+  .us-request-filters .mk-field {
+    min-width: 0;
+    flex-basis: 100%;
+  }
+  .us-requests .mk-table th,
+  .us-requests .mk-table td {
+    max-width: 20rem;
+  }
+  .us-request-card .mk-data-tabs {
+    flex-wrap: wrap;
+  }
+}

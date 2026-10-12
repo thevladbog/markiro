@@ -12,9 +12,11 @@ import { shippingCopy } from "../shipping/copy.js";
 import { usReadinessCopy } from "../readiness/copy.js";
 import { searchCopy } from "../search/copy.js";
 import { planCopy } from "../plans/copy.js";
+import { requestCopy } from "../requests/copy.js";
 
 export const masterDataCopy = {
   "en-US": {
+    usRequest: requestCopy["en-US"],
     usPlan: planCopy["en-US"],
     navigation: { backSearch: "Back to Search", backTrace: "Back to Trace" },
     usSearch: searchCopy["en-US"],
@@ -129,6 +131,8 @@ export const masterDataCopy = {
         "Archive this location? Copied historical descriptions will remain unchanged.",
       restoreLocationConfirm: "Restore this location?",
       discardConfirm: "Discard unsaved changes?",
+      discardRequestsConfirm:
+        "Discard unsaved request changes and leave Requests? Any unresolved original preparation key and body or retry key and body exist only in this view and will be lost; replay state is not durable. Its command outcome may still be unknown. Inspect saved history before leaving.",
       roleSupplier: "Supplier",
       roleProcessor: "Processor",
       roleShipFrom: "Ship-from",
@@ -147,6 +151,7 @@ export const masterDataCopy = {
     },
   },
   "es-US": {
+    usRequest: requestCopy["es-US"],
     usPlan: planCopy["es-US"],
     navigation: { backSearch: "Volver a Buscar", backTrace: "Volver a Trazabilidad" },
     usSearch: searchCopy["es-US"],
@@ -261,6 +266,8 @@ export const masterDataCopy = {
         "¿Archivar esta ubicación? Las descripciones históricas copiadas no cambiarán.",
       restoreLocationConfirm: "¿Restaurar esta ubicación?",
       discardConfirm: "¿Descartar los cambios sin guardar?",
+      discardRequestsConfirm:
+        "¿Descartar los cambios de la solicitud sin guardar y salir de Solicitudes? Cualquier clave y cuerpo originales de una preparación o un reintento sin resolver solo existen en esta vista y se perderán; el estado de repetición no es duradero. Su resultado podría seguir siendo desconocido. Inspeccione el historial guardado antes de salir.",
       roleSupplier: "Proveedor",
       roleProcessor: "Procesador",
       roleShipFrom: "Origen de envío",

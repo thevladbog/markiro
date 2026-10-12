@@ -5,10 +5,12 @@
   "license": "SEE LICENSE IN LICENSE",
   "scripts": {
     "build": "nest build",
+    "build:us-request-worker": "nest build && node scripts/build-us-request-worker.mjs",
     "dev": "nest start --watch",
     "dev:us": "nest start --entryFile main.us --watch",
     "start": "node dist/main.js",
     "start:us": "node dist/main.us.js",
+    "start:us-request-worker": "node dist/main.us-request-worker.js",
     "provision:tenant-owner": "node scripts/provision-tenant-owner.mjs",
     "provision:platform-admin": "node scripts/provision-platform-admin.mjs",
     "report:unmanaged-tenants": "node scripts/report-unmanaged-tenants.mjs",

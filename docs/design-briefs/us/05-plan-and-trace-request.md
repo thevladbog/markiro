@@ -15,6 +15,8 @@
 
 > US-09 correction (2026-10-04): use the [current request/package design](../../superpowers/specs/2026-10-04-us-09-trace-request-current-design.md) for new work. These screens are concepts for the existing US in-cabinet navigation, not RU page/routes or implementation evidence. US-07 supplies the frozen XLSX core; US-09 owns requests, complete scope, package and publication. Without configured private US storage, request editing and validation remain available but preparation/download do not.
 
+> Requests cabinet correction (2026-10-06): the [implemented cabinet contract](../../superpowers/specs/2026-10-05-us-09-requests-cabinet-design.md) supersedes the Requests concepts below. Local list, card, editing, fresh validation, explicit response modes, frozen run history, bounded polling and descriptor-verified downloads are implemented. This is local synthetic verification, not hosted delivery or regulatory acceptance. Remaining conceptual Plan states are not claims about current implementation.
+
 ## Purpose
 
 The request drill defaults to a 24-elapsed-hour deadline and records an agreed alternate time when applicable. This brief makes the response question
@@ -154,15 +156,15 @@ Download PDF); failure ("Approval rejected" with issue codes).
 
 ### 5. Trace request list
 
-Conceptual `/traceability/requests` view inside the US cabinet. Columns: **Request** (`REQ-2026-APPLE-001`), **Requester** (name,
-organization), **Received** (`09/17/2026 9:02 AM PDT`), **Due** — date plus the **countdown chip**,
-**Status** (Open / Validated / Package ready / Export-ready / Closed), **Latest revision** (`r1`),
-**Export-ready** (yes/no with icon), actions. Filters: status, "due before". Primary action **New
-trace request**.
+The implemented **Requests** view uses guarded US cabinet navigation. Its bounded summary list
+shows request number, received/due instants in the tenant time zone, deadline state, Open/Closed
+lifecycle and request revision. Requester name, organization and contact appear only on the
+selected card; the list performs no per-row requester or run enrichment. Filters are exact request
+number and Open/Closed lifecycle. **New request** opens requester/timing entry. Pagination is
+server ordered, defaults to 25, permits at most 50, and uses `hasMore`; no global count is inferred.
 
-Validated/package/export-ready labels are derived from the latest matching validation and run;
-they are not independent stored request statuses. Show the run mode and its separate result in
-the list rather than treating an incomplete package as export-ready.
+Package status belongs to a selected frozen run, with its separate mode and revision. An incomplete
+response may be Ready for download while still recording missing evidence; it is not Export-ready.
 
 The countdown chip is the signature element of the section and must read without color:
 
@@ -188,37 +190,39 @@ Four `DataTabs` steps; the request row is created after step 1 so a reload never
 
 **Step 1 — Requester and timing.** Request number (user-entered, unique per tenant; the demo uses
 `REQ-2026-APPLE-001`), requester name, organization, contact (as given, not normalized),
-**Received at** (defaults to now, entered and shown in tenant timezone), **Due at** pre-filled
-+24 h and shown as a live countdown beside the field. Both are stored as instants (`timestamptz`);
+**Received at** (entered and shown in tenant timezone), and a deadline policy
+defaulting to exactly 24 elapsed hours after receipt. An agreed alternative opens **Due at** and
+its required reason. Both times are stored as instants (`timestamptz`);
 Due at = Received at + exactly 24 elapsed hours, no calendar arithmetic, so a DST day still yields
-24 h (US-09 `defaultDueAt`). Conversion to tenant time happens only for display — the pre-filled
-value, the countdown and an edited Due at are all shown in tenant time and saved as instants. Editing Due at reveals the mandatory **Agreed alternate deadline
-reason** (free text in P0, OQ-US09-12). Due must be after received.
+24 h (US-09 `defaultDueAt`). Entry resolves wall times in the tenant IANA zone: repeated times
+require an explicit UTC offset, and nonexistent times are rejected. Display preserves offset,
+tenant zone and UTC instant. An agreed alternative requires its reason (free text in P0,
+OQ-US09-12), and due must follow receipt. Scope event dates remain civil dates.
 
-**Step 2 — Scope.** Product (combobox), date range, TLC list (chips, paste several), locations.
-Opened from the search page ("Create trace request from results", owned by U.S. brief 04) the
-fields arrive prefilled and a banner says "Scope copied from search: 1 lot, 3 events". A live
-preview line shows matched counts ("2 lots · 3 events · 3 locations") and whether the server
-resolved the **complete** scope. Counts from a limited search page are not export proof. At least
-one selector is required for validation; step 1 may save a request shell without one.
+**Step 2 — Scope.** Save explicit selector fields: product ID/text, TLC or newline TLC list/range,
+saved-lot picker, newline location IDs, source reference URL, document number and civil event-date
+range. Selectors combine by AND, values within a list by OR. Lists allow at most 50 values.
+Step 1 saves a request shell without scope; scope is subsequently saved or explicitly cleared.
+There is no live-preview API or inferred global match count. Explicit validation captures the
+complete saved scope, limited to 500 revisions and 16 MiB; excess is a refusal, never truncation.
 
 **Step 3 — Validation.** Screen 7. **Step 4 — Prepare package.** Screen 8.
 
 States to draw: step 1 default and with the alternate-deadline reason revealed; step 2 empty,
-prefilled-from-search, and "no records match this scope" (not an infrastructure error, but never
+saved scope, and "no records match this scope" (not an infrastructure error, but never
 Export-ready); saving between steps; ES step bar. A scope above the supported server bound shows
 a visible limit finding, never a silent partial count.
 
 ### 7. Dry-run validation results
 
-One **Run validation** button; results grouped by severity (Error / Warning / Info, each with a
-count and icon), then by CTE (Receiving, Transformation, Shipping). A row: code, KDE group and
-field (data-dictionary grouping: Lot, Quantity, Product, Previous source, Receiving location, Date,
-References), message, and a provenance link to the event or lot (`Receiving · rev 2 ·
-OSS-260914-A2`).
+**Validate current sources** explicitly captures fresh server evidence for the saved request
+revision. Results group by Error/Warning/Information and show exact codes, messages and source
+revision/line/field when present. Exact supported event sources open their saved revision.
+Saved validation is labelled "not rechecked"; reopening a card never makes it fresh. Request,
+scope or source changes require a new validation before a new preparation.
 
-Errors block **Prepare export-ready package** and the **Export-ready** badge. Keep a separate
-authorized **Prepare available records — incomplete** action with an **Incomplete** label,
+Errors block **Prepare Export-ready response**. Keep a separate
+authorized **Prepare incomplete response** action with an **Incomplete** label,
 findings, unavailable artifacts and the frozen request revision. Acknowledgement never waives
 errors; preparing or downloading does not fulfil the request. Findings remain readable while
 private storage is unavailable, but package preparation and downloads are disabled. The due
@@ -234,32 +238,36 @@ States: not validated; running; zero errors; errors with source links; warning a
 
 ### 8. Package generation
 
-Primary button **Prepare export-ready package** (never "Generate and submit", never "Send"). The
-secondary **Prepare available records — incomplete** action creates a separately labelled run,
+The implemented primary button is **Prepare Export-ready response**. The
+secondary **Prepare incomplete response** action creates a separately labelled run,
 with available records, validation and manifest; absent Plan or artifacts are explicit. Once a
-run is ready, its downloads appear separately. Reuse the progress/history layout with mode and
-completeness shown in list, detail and downloads. See [CLAR-03](../../us/development-clarifications.md).
-Preconditions surface _before_ the click: no effective Plan → export-ready blocked with a link
-to the Plan list, while incomplete preparation may proceed; no selector or stale validation →
+run is ready, its downloads appear separately. The selected frozen run shows mode and
+completeness beside its immutable evidence and downloads. See [CLAR-03](../../us/development-clarifications.md).
+Preconditions surface _before_ the click: no effective Plan → export-ready blocked with missing-Plan
+findings, while incomplete preparation may proceed; no selector or stale validation →
 both actions blocked; valid selector with zero matches → only a clearly empty incomplete response
 may proceed. Unconfigured private US storage blocks **both** preparation actions and downloads,
 but not editing or validation.
 
-While running: Queued → Processing with a **live elapsed timer** (`00:41`). On **Ready**:
+Selected Queued/Processing runs poll every two seconds while visible and mounted, without
+overlap. Updates pause after three consecutive transient failures or a five-minute window;
+refresh/resume is explicit. Queued does not prove a worker is alive. On **Ready**:
 
-- **Timing panel** (`DefinitionGrid`): Preparation started (operator pressed the button), worker
-  started, report data prepared, report rendered, publication completed, **System elapsed 00:52**, Operator; and
-  **Session age** since the request was created (`11 min 40 s`). These server durations are
-  visible evidence, but neither is labelled active human time. C-013 requires an observed drill.
-- **Artifacts table**, keyed by kind: workbook `.xlsx` when representable, exact pinned Plan PDF
+- **Frozen run facts** (`DefinitionGrid`): requester, scope, request/run revisions, mode, lifecycle,
+  digests, preparation acceptance, actual worker start, report render and completion timestamps.
+  Receipt-to-preparation and worker elapsed values are server evidence, not active human time.
+  C-013 requires an observed drill. Live edits never rewrite these frozen facts.
+- **Artifact download rows**, keyed by kind: workbook `.xlsx` when representable, exact pinned Plan PDF
   when effective, validation report `.json`, request report `.pdf`, `manifest.json`, and the
   **package ZIP** (with `SHA256SUMS` inside). In incomplete mode, absent workbook or Plan rows
-  show an explicit reason, not an invented file/hash. Columns: name, size, **SHA-256** (mono,
-  copy button, full hash on hover), Download. P1 CSV ZIP and canonical JSON are not P0 rows.
-- **Download package (ZIP)** after a ready run; use a bounded authenticated US download, not an
+  show an explicit reason, not an invented file/hash. Each available row shows bytes, exact
+  **SHA-256** and Download. P1 CSV ZIP and canonical JSON are not P0 rows.
+- **Download Package ZIP** after a ready run; use a bounded authenticated US download, not an
   assumed RU presigned URL or a five-minute expiry countdown.
 - **Export-ready** or **Available records — incomplete** chip, never a generic success badge.
-- **Prepare new revision** with the explainer "Freezes current data as r2; r1 stays unchanged".
+- Fresh validation and explicit preparation create another run revision; earlier runs remain
+  unchanged. Run/attempt histories use bounded server pagination. Retry applies only to an
+  authorized failed run and preserves the original memory-only body/key after an ambiguous reply.
 
 States to draw: export-ready blocked (no effective Plan or findings); storage unavailable for
 both actions; queued; processing with timer; ready and export-ready; ready and **incomplete**
@@ -269,10 +277,11 @@ failure; revision history with r1 and r2 side by side.
 
 ### 9. Request detail
 
-Conceptual `/traceability/requests/:id` detail inside the US cabinet. Header: request number, requester, received, due with the
-countdown chip, alternate-deadline note, status. Body: scope summary as chips, latest validation
-summary, **revision history** (per run: revision, mode, result, elapsed, operator, downloads),
-Prepare new revision, Close request ("Runs stay downloadable after closing"). P1 QA decision is
+The selected request card inside the US cabinet displays current requester/timing, scope and
+saved validation separately from frozen package evidence. Its Open/Closed lifecycle is independent
+of selected run status. **Close request** requires explicit confirmation, preserves accepted runs
+and permits authorized history and downloads afterward. It does not record delivery, fulfilment
+or cancellation of queued work. P1 QA decision is
 not shown as a required P0 field.
 
 States to draw: no runs yet; r1 ready; closed; auditor view (downloads only).

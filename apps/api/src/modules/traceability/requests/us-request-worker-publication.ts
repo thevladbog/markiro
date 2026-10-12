@@ -1,22 +1,26 @@
 import { randomUUID } from "node:crypto";
 import { schema, type Db } from "@markiro/db";
 import { US_CAPABILITY } from "@markiro/domain";
-import { ConflictException, ForbiddenException, ServiceUnavailableException } from "@nestjs/common";
+import { ConflictException, ForbiddenException } from "@nestjs/common";
 import { and, asc, eq, sql } from "drizzle-orm";
 import {
   authorizeUsMasterData,
   type UsMasterDataTransaction,
 } from "../master-data/us-master-data-support";
-import {
-  requireUsRequestPackageEvidence,
-  verifyUsRequestRunEvidence,
-  type UsTraceExportRunRow,
-} from "./us-request-run-evidence";
+import { verifyUsRequestRunEvidence, type UsTraceExportRunRow } from "./us-request-run-evidence";
 import { stableStringify } from "./us-request-snapshot";
+import {
+  readUsWorkerPackageExpectation,
+  assertUsWorkerPublicationWinner,
+  assertUsWorkerPublicationObjects,
+  assertUsWorkerPublicationReferences,
+  usWorkerIntentEvidence,
+  usWorkerPublicationInvalid,
+  usWorkerPackageDescriptors as descriptors,
+} from "./us-request-publication-read";
 import { classifyUsWorkerFailure, sanitizedUsWorkerError } from "./us-request-worker-failures";
 import type { UsRequestWorkerLifecycleContract } from "./us-request-worker-lifecycle";
 import {
-  parseUsWorkerCheckpoint,
   parseUsWorkerLease,
   parseUsWorkerObjectEvidence,
   parseUsWorkerPackageExpectation,
@@ -35,8 +39,7 @@ const runs = schema.traceExportRuns,
   intents = schema.traceExportObjectIntents;
 const mismatch = () => new ConflictException({ code: "us_request_worker_checkpoint_mismatch" });
 const lost = () => new ConflictException({ code: "us_request_worker_lease_lost" });
-export const usWorkerPublicationInvalid = () =>
-  new ServiceUnavailableException({ code: "us_request_worker_stored_invalid" });
+export { usWorkerIntentEvidence, usWorkerPublicationInvalid } from "./us-request-publication-read";
 const equal = (a: unknown, b: unknown) => stableStringify(a) === stableStringify(b);
 const runScope = (scope: UsWorkerScope) =>
   and(eq(runs.tenantId, scope.tenantId), eq(runs.id, scope.runId));
@@ -61,20 +64,7 @@ export async function usWorkerPublicationNow(tx: Tx): Promise<Date> {
   if (!Number.isSafeInteger(value)) throw usWorkerPublicationInvalid();
   return new Date(value);
 }
-export function usWorkerIntentEvidence(row: Intent): UsWorkerObjectEvidence {
-  return parseUsWorkerObjectEvidence({
-    tenantId: row.tenantId,
-    runId: row.runId,
-    id: row.id,
-    attemptId: row.attemptId,
-    name: row.name,
-    kind: row.kind,
-    objectKey: row.objectKey,
-    mediaType: row.mediaType,
-    byteSize: usWorkerByteSizeFromDb(row.byteSize),
-    sha256: row.sha256,
-  });
-}
+
 export async function auditUsWorkerPublication(
   tx: Tx,
   row: UsTraceExportRunRow,
@@ -112,11 +102,7 @@ export async function auditUsWorkerPublication(
     createdAt: now,
   });
 }
-function descriptors(expectation: UsWorkerPackageExpectation) {
-  return [...expectation.entries.filter((d) => d.name !== "SHA256SUMS"), expectation.zip].sort(
-    (a, b) => a.name.localeCompare(b.name),
-  );
-}
+
 const kinds = {
   "records.xlsx": "xlsx",
   "plan.pdf": "plan_pdf",
@@ -155,86 +141,7 @@ export class UsRequestWorkerPublication {
     }
   }
   private async expectation(tx: Tx, row: UsTraceExportRunRow): Promise<UsWorkerPackageExpectation> {
-    const [saved] = await tx
-      .select()
-      .from(schema.traceExportRenderCheckpoints)
-      .where(
-        and(
-          eq(schema.traceExportRenderCheckpoints.tenantId, row.tenantId),
-          eq(schema.traceExportRenderCheckpoints.runId, row.id),
-        ),
-      )
-      .limit(1);
-    if (!saved || saved.packageExpectation === null) throw mismatch();
-    const checkpoint = parseUsWorkerCheckpoint({
-      model: saved.model,
-      modelDigest: saved.modelDigest,
-      executionDigest: saved.executionDigest,
-      packageVersion: saved.packageVersion,
-      reportVersion: saved.reportVersion,
-    });
-    const expected = parseUsWorkerPackageExpectation(saved.packageExpectation);
-    const frozen = requireUsRequestPackageEvidence(row, row.tenantId),
-      model = checkpoint.model;
-    if (
-      !equal(model.identity, {
-        tenantId: row.tenantId,
-        requestId: row.requestId,
-        requestRevision: frozen.validationSnapshot.request.revision,
-        runId: row.id,
-        runRevision: row.revision,
-        mode: row.mode,
-        preparedBy: row.createdBy,
-      }) ||
-      !equal(model.request, frozen.validationSnapshot.request) ||
-      !equal(model.scope, frozen.validationSnapshot.selection.scope) ||
-      !equal(model.tenantOrigin, frozen.validationSnapshot.tenantOrigin) ||
-      !equal(model.plan, frozen.validationSnapshot.plan) ||
-      !equal(model.digests, {
-        scopedContentDigest: row.scopedContentDigest,
-        inputDigest: row.inputDigest,
-      }) ||
-      model.timing.preparationStartedAt !== frozen.generatedAt ||
-      !equal(
-        model.preReportFiles,
-        expected.manifest.files.filter((d) => d.name !== "request-report.pdf"),
-      )
-    )
-      throw mismatch();
-    for (const key of [
-      "identity",
-      "timing",
-      "tenantOrigin",
-      "stamps",
-      "selectionSummary",
-      "findingsSummary",
-      "renderFindings",
-      "plan",
-      "digests",
-      "warningAcknowledgement",
-      "missingFiles",
-    ] as const)
-      if (!equal(model[key], expected.manifest[key])) throw mismatch();
-    const [owner] = await tx
-      .select()
-      .from(schema.traceExportAttempts)
-      .where(
-        and(
-          eq(schema.traceExportAttempts.tenantId, row.tenantId),
-          eq(schema.traceExportAttempts.runId, row.id),
-          eq(schema.traceExportAttempts.id, saved.attemptId),
-        ),
-      )
-      .limit(1);
-    if (
-      !owner ||
-      (model.timing.workerStartedAt !== null &&
-        model.timing.workerStartedAt !== owner.startedAt.toISOString()) ||
-      Date.parse(model.timing.reportDataPreparedAt) < owner.startedAt.getTime() ||
-      Date.parse(model.timing.reportDataPreparedAt) > owner.deadlineAt.getTime()
-    )
-      throw mismatch();
-    return expected;
+    return readUsWorkerPackageExpectation(tx, row);
   }
   private async objects(tx: Tx, lease: UsWorkerLease): Promise<Intent[]> {
     return tx
@@ -249,29 +156,7 @@ export class UsRequestWorkerPublication {
     lease: UsWorkerLease,
     expected: UsWorkerPackageExpectation,
   ): void {
-    const files = descriptors(expected);
-    if (rows.length !== files.length) throw mismatch();
-    for (let n = 0; n < files.length; n++) {
-      const row = rows[n],
-        file = files[n];
-      if (!row || !file || file.name === "SHA256SUMS") throw mismatch();
-      const evidence = usWorkerIntentEvidence(row);
-      if (
-        evidence.tenantId !== lease.tenantId ||
-        evidence.runId !== lease.runId ||
-        evidence.attemptId !== lease.attemptId ||
-        !equal(
-          {
-            name: evidence.name,
-            mediaType: evidence.mediaType,
-            byteSize: evidence.byteSize,
-            sha256: evidence.sha256,
-          },
-          file,
-        )
-      )
-        throw mismatch();
-    }
+    assertUsWorkerPublicationObjects(rows, lease, expected);
   }
   async allocate(
     leaseInput: UsWorkerLease,
@@ -363,34 +248,7 @@ export class UsRequestWorkerPublication {
   ): Promise<void> {
     const row = state.run,
       expected = await this.expectation(tx, row);
-    const winners = state.attempts.filter((a) => a.status === "succeeded"),
-      winner = winners[0];
-    if (
-      winners.length !== 1 ||
-      !winner ||
-      !row.completedAt ||
-      !row.reportRenderedAt ||
-      row.failureCode !== null ||
-      row.exportReady !== (row.mode === "export_ready") ||
-      winner.finishedAt?.getTime() !== row.completedAt.getTime() ||
-      winner.reportRenderedAt?.getTime() !== row.reportRenderedAt.getTime() ||
-      row.completedAt.getTime() >= winner.leaseExpiresAt.getTime() ||
-      row.completedAt.getTime() >= winner.deadlineAt.getTime() ||
-      row.reportRenderedAt.getTime() > row.completedAt.getTime() ||
-      row.reportRenderedAt.getTime() < Date.parse(expected.manifest.timing.reportDataPreparedAt) ||
-      winner.attemptNumber !== row.attemptCount ||
-      winner.cycle !== row.retryCycle ||
-      row.leaseAttemptId !== null ||
-      row.leaseToken !== null ||
-      row.leaseExpiresAt !== null ||
-      row.attemptDeadlineAt !== null ||
-      (lease &&
-        (winner.id !== lease.attemptId ||
-          winner.token !== lease.token ||
-          winner.startedAt.toISOString() !== lease.startedAt ||
-          winner.deadlineAt.toISOString() !== lease.deadlineAt))
-    )
-      throw usWorkerPublicationInvalid();
+    const winner = assertUsWorkerPublicationWinner(row, state.attempts, expected, lease);
     const winnerLease: UsWorkerLease = {
       tenantId: row.tenantId,
       runId: row.id,
@@ -424,26 +282,7 @@ export class UsRequestWorkerPublication {
       artifacts.some((artifact) => !state.artifacts.some((saved) => saved.id === artifact.id))
     )
       throw usWorkerPublicationInvalid();
-    for (const object of objects) {
-      const artifact = artifacts.find((a) => a.filename === object.name);
-      if (
-        object.state !== "referenced" ||
-        !object.verifiedAt ||
-        object.fencedAt ||
-        object.deletedAt ||
-        object.referencedAt?.getTime() !== row.completedAt.getTime() ||
-        !artifact ||
-        artifact.tenantId !== row.tenantId ||
-        artifact.runId !== row.id ||
-        artifact.kind !== object.kind ||
-        artifact.objectKey !== object.objectKey ||
-        artifact.mediaType !== object.mediaType ||
-        artifact.byteSize !== object.byteSize ||
-        artifact.sha256 !== object.sha256 ||
-        artifact.publishedAt.getTime() !== row.completedAt.getTime()
-      )
-        throw usWorkerPublicationInvalid();
-    }
+    assertUsWorkerPublicationReferences(row, objects, artifacts);
   }
   async reconcile(scopeInput: UsWorkerScope): Promise<UsWorkerRunState> {
     const scope = parseUsWorkerScope(scopeInput);

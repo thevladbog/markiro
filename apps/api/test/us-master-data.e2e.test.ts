@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { schema } from "@markiro/db";
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { UsMasterDataStore } from "../src/modules/traceability/master-data/us-master-data-store";
@@ -125,7 +125,8 @@ describe.skipIf(!url)("US master-data store with real isolated PostgreSQL", () =
     const audits = await fixture.db
       .select()
       .from(schema.tenantAuditEvents)
-      .where(eq(schema.tenantAuditEvents.organizationId, tenantId));
+      .where(eq(schema.tenantAuditEvents.organizationId, tenantId))
+      .orderBy(desc(schema.tenantAuditEvents.action));
     expect(audits.map(({ action, requestId }) => ({ action, requestId }))).toEqual([
       { action: "traceability.party.created", requestId: "party-create" },
       { action: "traceability.location.created", requestId: "location-create" },

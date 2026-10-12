@@ -71,17 +71,25 @@ export class UsLotStore {
   }
 
   async getLot(tenantId: string, actorUserId: string, id: unknown): Promise<TraceabilityLot> {
-    return this.db.transaction(async (tx) => {
-      await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
-      const lotId = parseMasterDataInput(platformUuidSchema, id);
-      const [row] = await tx
-        .select()
-        .from(lots)
-        .where(and(eq(lots.tenantId, tenantId), eq(lots.id, lotId)))
-        .limit(1);
-      if (!row) throw new NotFoundException({ code: "lot_not_found" });
-      return lotResponse(row);
-    });
+    return this.db.transaction((tx) => this.getLotInTransaction(tx, tenantId, actorUserId, id));
+  }
+
+  /** Uses the supplied transaction; a multi-statement verifier owns its isolation/locks. */
+  async getLotInTransaction(
+    tx: UsMasterDataTransaction,
+    tenantId: string,
+    actorUserId: string,
+    id: unknown,
+  ): Promise<TraceabilityLot> {
+    await authorizeUsMasterData(tx, tenantId, actorUserId, US_CAPABILITY.READ);
+    const lotId = parseMasterDataInput(platformUuidSchema, id);
+    const [row] = await tx
+      .select()
+      .from(lots)
+      .where(and(eq(lots.tenantId, tenantId), eq(lots.id, lotId)))
+      .limit(1);
+    if (!row) throw new NotFoundException({ code: "lot_not_found" });
+    return lotResponse(row);
   }
 
   async createLot(

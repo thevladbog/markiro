@@ -7,6 +7,114 @@ import {
   traceExportRegistryHash,
 } from "../src/traceability/export/registry-v1.js";
 import { canonicalExportDigest } from "../src/traceability/export/canonical.js";
+import * as canonicalExports from "../src/traceability/export/canonical.js";
+
+function exportedCanonicalJson(input: unknown): unknown {
+  const serialize: unknown = Reflect.get(canonicalExports, "canonicalExportJson");
+  expect(serialize, "canonicalExportJson must expose the validated canonical bytes").toBeTypeOf(
+    "function",
+  );
+  if (typeof serialize !== "function") throw new Error("Missing canonicalExportJson");
+  return serialize(input);
+}
+
+describe("canonical JSON extraction", () => {
+  it("preserves alias ownership, null prototypes and legacy array property behavior", () => {
+    const shared = { z: 1 };
+    expect(exportedCanonicalJson({ b: shared, a: shared })).toBe('{"a":{"z":1},"b":{"z":1}}');
+    expect(exportedCanonicalJson(Object.assign(Object.create(null), { b: 2, a: 1 }))).toBe(
+      '{"a":1,"b":2}',
+    );
+    let reads = 0;
+    const array = Object.defineProperty([1], "0", {
+      get() {
+        reads++;
+        return 2;
+      },
+    });
+    Object.defineProperty(array, "hidden", { value: 3 });
+    Object.defineProperty(array, Symbol("legacy"), { value: 4 });
+    Object.setPrototypeOf(array, Object.create(Array.prototype));
+    expect(exportedCanonicalJson(array)).toBe("[2]");
+    expect(reads).toBe(1);
+  });
+  it("preserves rejection classes, messages and object-accessor precedence", () => {
+    let reads = 0;
+    const getter = Object.defineProperty({}, "a", {
+      enumerable: true,
+      get() {
+        reads++;
+        return 1;
+      },
+    });
+    const hiddenGetter = Object.defineProperty(getter, "hidden", { value: 1 });
+    const cycle: Record<string, unknown> = {};
+    cycle["self"] = cycle;
+    const cases: [unknown, string][] = [
+      [undefined, "Export digest requires finite JSON values"],
+      [NaN, "Export digest requires finite JSON values"],
+      [Infinity, "Export digest requires finite JSON values"],
+      [-Infinity, "Export digest requires finite JSON values"],
+      [1n, "Export digest requires finite JSON values"],
+      [Symbol("x"), "Export digest requires finite JSON values"],
+      [() => 1, "Export digest requires finite JSON values"],
+      [cycle, "Export digest cannot contain cycles"],
+      [new Array(1), "Export digest requires dense JSON arrays"],
+      [Object.assign([1], { extra: 2 }), "Export digest requires dense JSON arrays"],
+      [new Date(0), "Export digest requires plain JSON objects"],
+      [Object.create({ x: 1 }), "Export digest requires plain JSON objects"],
+      [{ [Symbol("x")]: 1 }, "Export digest cannot discard hidden or symbol properties"],
+      [hiddenGetter, "Export digest cannot discard hidden or symbol properties"],
+      [
+        Object.defineProperty({}, "a", {
+          enumerable: true,
+          get() {
+            reads++;
+            return 1;
+          },
+        }),
+        "Export digest cannot evaluate getters",
+      ],
+      [
+        Object.defineProperty({ a: undefined }, "z", {
+          enumerable: true,
+          get() {
+            reads++;
+            return 1;
+          },
+        }),
+        "Export digest requires finite JSON values",
+      ],
+    ];
+    for (const [value, message] of cases) {
+      expect(() => exportedCanonicalJson(value)).toThrow(new TypeError(message));
+      expect(() => canonicalExportDigest(value)).toThrow(new TypeError(message));
+    }
+    expect(reads).toBe(0);
+  });
+  it.each([
+    [{ b: 2, a: 1 }, '{"a":1,"b":2}'],
+    [{ 2: "two", 10: "ten", 1: "one" }, '{"1":"one","10":"ten","2":"two"}'],
+    [
+      { events: [2, 1], findings: ["b", "a"], nested: { events: [2, 1] } },
+      '{"events":[1,2],"findings":["a","b"],"nested":{"events":[2,1]}}',
+    ],
+    [
+      { n: -0, text: "é😀\u0000\ud800", escape: '\n\t"\\' },
+      '{"escape":"\\n\\t\\"\\\\","n":0,"text":"é😀\\u0000\\ud800"}',
+    ],
+    [null, "null"],
+    [true, "true"],
+    [[2, 1], "[2,1]"],
+  ])("exposes literal bytes without changing digest: %j", (input, expected) => {
+    expect(exportedCanonicalJson(input)).toBe(expected);
+    expect(canonicalExportDigest(input)).toBe(
+      createHash("sha256")
+        .update(expected as string)
+        .digest("hex"),
+    );
+  });
+});
 
 describe("FDA sortable registry v1", () => {
   it("keeps stable, unambiguous versioned columns for all three CTEs", () => {

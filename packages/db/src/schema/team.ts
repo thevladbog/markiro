@@ -117,5 +117,7 @@ export const tenantAuditEvents = pgTable(
   },
   (table) => [
     index("tenant_audit_events_tenant_created_idx").on(table.organizationId, table.createdAt),
+    index("tenant_audit_events_tenant_action_idx").on(table.organizationId, table.action),
+    index("tenant_audit_events_tenant_request_idx").on(table.organizationId, table.requestId),
   ],
 );

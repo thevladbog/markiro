@@ -5,6 +5,8 @@ import {
 } from "@nestjs/common";
 import type { createDb } from "@markiro/db";
 import type { UsDevelopmentEnv } from "./entry-policy";
+import { UsRequestHttpRuntime } from "./us-request-http-runtime";
+import type { UsRequestHttpResourceDependencies } from "./us-request-http-resources";
 import { createUsAuth, type UsAuth } from "../modules/traceability/auth/us-auth";
 import { UsCatalogStore } from "../modules/traceability/catalog/us-catalog-store";
 import { UsLotStore } from "../modules/traceability/lots/us-lot-store";
@@ -49,11 +51,17 @@ export class UsRuntime implements OnApplicationShutdown {
   readonly planInspection: UsPlanInspectionStore;
   readonly planApproval: UsPlanApprovalStore;
   readonly planArtifactStorage: UsPlanArtifactStore | null;
+  readonly requestHttp: UsRequestHttpRuntime;
+  private shutdown: Promise<void> | undefined;
 
   constructor(
     readonly env: UsDevelopmentEnv,
     readonly connection: ReturnType<typeof createDb>,
     planArtifactTransport?: UsPlanArtifactS3Transport,
+    requestOptions?: {
+      source: NodeJS.ProcessEnv;
+      resourceDeps?: UsRequestHttpResourceDependencies;
+    },
   ) {
     this.auth = createUsAuth(connection.db, {
       secret: env.BETTER_AUTH_SECRET,
@@ -81,18 +89,45 @@ export class UsRuntime implements OnApplicationShutdown {
     this.planDrafts = new UsPlanStore(connection.db);
     this.planInspection = new UsPlanInspectionStore(connection.db, availability);
     this.planApproval = new UsPlanApprovalStore(connection.db, this.planArtifactStorage);
+    this.requestHttp = new UsRequestHttpRuntime(
+      connection.db,
+      requestOptions?.source ?? {},
+      requestOptions?.resourceDeps,
+    );
     // Idle-pool failures must not crash the metadata/liveness process or log SQL.
     connection.pool.on("error", () => {});
   }
 
-  async onApplicationShutdown(): Promise<void> {
-    this.planArtifactStorage?.onModuleDestroy();
-    await this.connection.pool.end();
+  onApplicationShutdown(): Promise<void> {
+    this.shutdown ??= (async () => {
+      try {
+        try {
+          this.requestHttp.dispose();
+        } finally {
+          this.planArtifactStorage?.onModuleDestroy();
+        }
+      } finally {
+        await this.connection.pool.end();
+      }
+    })();
+    return this.shutdown;
   }
 
   /** Read-only preflight. Startup never migrates, seeds or repairs a database. */
   async assertDatabaseReady(): Promise<void> {
     await this.databaseOperation(async () => {
+      await this.connection.pool.query(`
+        SELECT request.revision, request.scope, request.last_validation,
+               run.input_snapshot, run.lifecycle_version,
+               artifact.kind, artifact.object_key, artifact.byte_size, artifact.sha256,
+               attempt.attempt_number, attempt.cycle, attempt.report_rendered_at,
+               checkpoint.model, checkpoint.model_digest,
+               retry.command_digest, retry.lifecycle_version
+        FROM trace_requests request, trace_export_runs run,
+             trace_export_artifacts artifact, trace_export_attempts attempt,
+             trace_export_render_checkpoints checkpoint, trace_export_retry_receipts retry
+        LIMIT 0
+      `);
       // LIMIT 0 validates the columns needed by the newest US migrations too.
       await this.connection.pool.query(`
         SELECT u.two_factor_enabled, f.failed_verification_count, f.locked_until,

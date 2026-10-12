@@ -3,6 +3,8 @@ import { hashPassword, verifyPassword } from "better-auth/crypto";
 import { and, eq, sql } from "drizzle-orm";
 import { schema, type Db } from "@markiro/db";
 
+type Transaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
+
 const SEED_VERSION = "us-development-owner-v1";
 const EMAIL = "owner@us-development.example.test";
 const SLUG = "us-development-demo";
@@ -44,64 +46,91 @@ export class UsDevelopmentOwnerStore {
   async verifyTrustedSeed(
     tenantId: string,
     verifiedAt: Date,
-    transaction?: Parameters<Parameters<Db["transaction"]>[0]>[0],
+    transaction?: Transaction,
   ): Promise<{ seedId: string; verifiedBy: string; verifiedAt: string } | null> {
     if (!Number.isFinite(verifiedAt.getTime())) return null;
-    const read = async (tx: Parameters<Parameters<Db["transaction"]>[0]>[0]) => {
-      const [organization] = await tx
-        .select()
-        .from(schema.organization)
-        .where(and(eq(schema.organization.id, tenantId), eq(schema.organization.slug, SLUG)));
-      if (
-        !organization ||
-        organization.metadata !== METADATA ||
-        organization.name !== "Synthetic US development"
-      )
-        return null;
-      const [user] = await tx.select().from(schema.user).where(eq(schema.user.email, EMAIL));
-      if (!user || user.name !== "Synthetic US development owner") return null;
-      const memberships = await tx
-        .select()
-        .from(schema.member)
-        .where(and(eq(schema.member.organizationId, tenantId), eq(schema.member.userId, user.id)));
-      if (memberships.length !== 1 || memberships[0]?.role !== "owner") return null;
-      const credentials = await tx
-        .select()
-        .from(schema.account)
-        .where(
-          and(eq(schema.account.userId, user.id), eq(schema.account.providerId, "credential")),
-        );
-      if (
-        credentials.length !== 1 ||
-        credentials[0]?.accountId !== user.id ||
-        !credentials[0].password
-      )
-        return null;
-      const audits = await tx
-        .select()
-        .from(schema.tenantAuditEvents)
-        .where(
-          and(
-            eq(schema.tenantAuditEvents.organizationId, tenantId),
-            eq(schema.tenantAuditEvents.action, "us.development.owner.provisioned"),
-          ),
-        );
-      if (audits.length !== 1) return null;
-      const audit = audits[0];
-      if (
-        audit?.actorUserId !== user.id ||
-        audit.outcome !== "success" ||
-        audit.targetType !== "tenant" ||
-        audit.targetId !== tenantId ||
-        audit.before !== null ||
-        JSON.stringify(audit.after) !== METADATA
-      )
-        return null;
-      return { seedId: tenantId, verifiedBy: SEED_VERSION, verifiedAt: verifiedAt.toISOString() };
-    };
+    const read = (tx: Transaction) => this.readTrustedSeed(tx, tenantId, verifiedAt, false);
     return transaction
       ? read(transaction)
       : this.db.transaction(read, { isolationLevel: "repeatable read" });
+  }
+
+  /** Reads each complete native fact under its original provenance share lock. */
+  verifyLockedTrustedSeed(
+    tenantId: string,
+    actorUserId: string,
+    verifiedAt: Date,
+    transaction: Transaction,
+  ): Promise<{ seedId: string; verifiedBy: string; verifiedAt: string } | null> {
+    return this.readTrustedSeed(transaction, tenantId, verifiedAt, true, actorUserId);
+  }
+
+  private async readTrustedSeed(
+    tx: Transaction,
+    tenantId: string,
+    verifiedAt: Date,
+    lock: boolean,
+    actorUserId?: string,
+  ): Promise<{ seedId: string; verifiedBy: string; verifiedAt: string } | null> {
+    if (!Number.isFinite(verifiedAt.getTime())) return null;
+    const organizationQuery = tx
+      .select()
+      .from(schema.organization)
+      .where(and(eq(schema.organization.id, tenantId), eq(schema.organization.slug, SLUG)));
+    const [organization] = await (lock ? organizationQuery.for("share") : organizationQuery);
+    if (
+      !organization ||
+      organization.metadata !== METADATA ||
+      organization.name !== "Synthetic US development"
+    )
+      return null;
+    const userQuery = tx.select().from(schema.user).where(eq(schema.user.email, EMAIL));
+    const [user] = await (lock ? userQuery.for("share") : userQuery);
+    if (
+      !user ||
+      user.name !== "Synthetic US development owner" ||
+      (actorUserId !== undefined && user.id !== actorUserId)
+    )
+      return null;
+    const membershipQuery = tx
+      .select()
+      .from(schema.member)
+      .where(and(eq(schema.member.organizationId, tenantId), eq(schema.member.userId, user.id)));
+    const memberships = await (lock ? membershipQuery.for("share") : membershipQuery);
+    if (memberships.length !== 1 || memberships[0]?.role !== "owner") return null;
+    const credentialQuery = tx
+      .select()
+      .from(schema.account)
+      .where(and(eq(schema.account.userId, user.id), eq(schema.account.providerId, "credential")));
+    const credentials = await (lock ? credentialQuery.for("share") : credentialQuery);
+    if (
+      credentials.length !== 1 ||
+      credentials[0]?.accountId !== user.id ||
+      !credentials[0].password
+    )
+      return null;
+    const auditQuery = tx
+      .select()
+      .from(schema.tenantAuditEvents)
+      .where(
+        and(
+          eq(schema.tenantAuditEvents.organizationId, tenantId),
+          eq(schema.tenantAuditEvents.action, "us.development.owner.provisioned"),
+        ),
+      );
+    const audits = await (lock ? auditQuery.for("share") : auditQuery);
+    if (audits.length !== 1) return null;
+    const audit = audits[0];
+    if (
+      audit?.actorUserId !== user.id ||
+      audit.outcome !== "success" ||
+      audit.targetType !== "tenant" ||
+      audit.targetId !== tenantId ||
+      audit.before !== null ||
+      JSON.stringify(audit.after) !== METADATA
+    )
+      return null;
+    return { seedId: tenantId, verifiedBy: SEED_VERSION, verifiedAt: verifiedAt.toISOString() };
   }
 
   async provision(password: string, requestId: string): Promise<UsDevelopmentOwnerResult> {

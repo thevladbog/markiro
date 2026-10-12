@@ -107,6 +107,7 @@ export class UsRequestStore {
     action: string,
     id: string | null,
     run: (tx: UsMasterDataTransaction) => Promise<T>,
+    httpRequestId: string | null = null,
   ): Promise<T> {
     try {
       return await transformationTransaction(this.db, async (tx) => {
@@ -144,6 +145,7 @@ export class UsRequestStore {
             await tx.insert(schema.tenantAuditEvents).values({
               organizationId: tenantId,
               actorUserId,
+              requestId: httpRequestId,
               action,
               outcome: error instanceof ConflictException ? "conflict" : "rejected",
               targetType: "trace_request",
@@ -167,11 +169,13 @@ export class UsRequestStore {
     action: string,
     row: RequestRow,
     previous: RequestRow | null,
+    httpRequestId: string | null = null,
   ) {
     const result = validatedRow(row);
     await tx.insert(schema.tenantAuditEvents).values({
       organizationId: row.tenantId,
       actorUserId,
+      requestId: httpRequestId,
       action,
       outcome: "success",
       targetType: "trace_request",
@@ -186,25 +190,33 @@ export class UsRequestStore {
     tenantId: string,
     actorUserId: string,
     body: UsTraceRequestCreateBody,
+    httpRequestId: string | null = null,
   ): Promise<UsRequestRow> {
     const action = "traceability.request.created";
-    return this.command(tenantId, actorUserId, action, null, async (tx) => {
-      const value = parseMasterDataInput(usTraceRequestCreateBodySchema, body);
-      const resolved = deadline(value);
-      const [row] = await tx
-        .insert(table)
-        .values({
-          ...value,
-          tenantId,
-          createdBy: actorUserId,
-          receivedAt: new Date(value.receivedAt),
-          dueAt: new Date(resolved.dueAt),
-          alternateDeadlineReason: resolved.alternateDeadlineReason,
-        })
-        .returning();
-      if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
-      return this.success(tx, actorUserId, action, row, null);
-    });
+    return this.command(
+      tenantId,
+      actorUserId,
+      action,
+      null,
+      async (tx) => {
+        const value = parseMasterDataInput(usTraceRequestCreateBodySchema, body);
+        const resolved = deadline(value);
+        const [row] = await tx
+          .insert(table)
+          .values({
+            ...value,
+            tenantId,
+            createdBy: actorUserId,
+            receivedAt: new Date(value.receivedAt),
+            dueAt: new Date(resolved.dueAt),
+            alternateDeadlineReason: resolved.alternateDeadlineReason,
+          })
+          .returning();
+        if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
+        return this.success(tx, actorUserId, action, row, null, httpRequestId);
+      },
+      httpRequestId,
+    );
   }
 
   private async locked(
@@ -232,45 +244,53 @@ export class UsRequestStore {
     actorUserId: string,
     requestId: string,
     body: UsTraceRequestUpdateBody,
+    httpRequestId: string | null = null,
   ): Promise<UsRequestRow> {
     const action = "traceability.request.updated";
-    return this.command(tenantId, actorUserId, action, requestId, async (tx) => {
-      const { expectedRevision, ...patch } = parseMasterDataInput(
-        usTraceRequestUpdateBodySchema,
-        body,
-      );
-      const previous = await this.locked(tx, tenantId, requestId, expectedRevision);
-      const current = editable(previous);
-      const value = parseMasterDataInput(usTraceRequestCreateBodySchema, {
-        ...current,
-        ...patch,
-        // An omitted deadline preserves its policy: default elapsed 24h versus an agreed instant.
-        dueAt:
-          patch.dueAt ?? (previous.alternateDeadlineReason === null ? undefined : current.dueAt),
-      });
-      const resolved = deadline(value);
-      const next = {
-        ...value,
-        receivedAt: new Date(value.receivedAt).toISOString(),
-        dueAt: resolved.dueAt,
-        alternateDeadlineReason: resolved.alternateDeadlineReason,
-      };
-      if (isDeepStrictEqual(current, next)) return previous;
-      const [row] = await tx
-        .update(table)
-        .set({
-          ...next,
-          receivedAt: new Date(next.receivedAt),
-          dueAt: new Date(next.dueAt),
-          revision: previous.revision + 1,
-          updatedAt: new Date(),
-          ...clearedValidation,
-        })
-        .where(scope(tenantId, previous.id))
-        .returning();
-      if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
-      return this.success(tx, actorUserId, action, row, previous);
-    });
+    return this.command(
+      tenantId,
+      actorUserId,
+      action,
+      requestId,
+      async (tx) => {
+        const { expectedRevision, ...patch } = parseMasterDataInput(
+          usTraceRequestUpdateBodySchema,
+          body,
+        );
+        const previous = await this.locked(tx, tenantId, requestId, expectedRevision);
+        const current = editable(previous);
+        const value = parseMasterDataInput(usTraceRequestCreateBodySchema, {
+          ...current,
+          ...patch,
+          // An omitted deadline preserves its policy: default elapsed 24h versus an agreed instant.
+          dueAt:
+            patch.dueAt ?? (previous.alternateDeadlineReason === null ? undefined : current.dueAt),
+        });
+        const resolved = deadline(value);
+        const next = {
+          ...value,
+          receivedAt: new Date(value.receivedAt).toISOString(),
+          dueAt: resolved.dueAt,
+          alternateDeadlineReason: resolved.alternateDeadlineReason,
+        };
+        if (isDeepStrictEqual(current, next)) return previous;
+        const [row] = await tx
+          .update(table)
+          .set({
+            ...next,
+            receivedAt: new Date(next.receivedAt),
+            dueAt: new Date(next.dueAt),
+            revision: previous.revision + 1,
+            updatedAt: new Date(),
+            ...clearedValidation,
+          })
+          .where(scope(tenantId, previous.id))
+          .returning();
+        if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
+        return this.success(tx, actorUserId, action, row, previous, httpRequestId);
+      },
+      httpRequestId,
+    );
   }
 
   async close(
@@ -278,25 +298,33 @@ export class UsRequestStore {
     actorUserId: string,
     requestId: string,
     body: UsTraceRequestCloseBody,
+    httpRequestId: string | null = null,
   ): Promise<UsRequestRow> {
     const action = "traceability.request.closed";
-    return this.command(tenantId, actorUserId, action, requestId, async (tx) => {
-      const value = parseMasterDataInput(usTraceRequestCloseBodySchema, body);
-      const previous = await this.locked(tx, tenantId, requestId, value.expectedRevision);
-      const now = new Date();
-      const [row] = await tx
-        .update(table)
-        .set({
-          status: "closed",
-          closedAt: now,
-          updatedAt: now,
-          revision: previous.revision + 1,
-          ...clearedValidation,
-        })
-        .where(scope(tenantId, previous.id))
-        .returning();
-      if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
-      return this.success(tx, actorUserId, action, row, previous);
-    });
+    return this.command(
+      tenantId,
+      actorUserId,
+      action,
+      requestId,
+      async (tx) => {
+        const value = parseMasterDataInput(usTraceRequestCloseBodySchema, body);
+        const previous = await this.locked(tx, tenantId, requestId, value.expectedRevision);
+        const now = new Date();
+        const [row] = await tx
+          .update(table)
+          .set({
+            status: "closed",
+            closedAt: now,
+            updatedAt: now,
+            revision: previous.revision + 1,
+            ...clearedValidation,
+          })
+          .where(scope(tenantId, previous.id))
+          .returning();
+        if (!row) throw new ServiceUnavailableException({ code: "us_database_unavailable" });
+        return this.success(tx, actorUserId, action, row, previous, httpRequestId);
+      },
+      httpRequestId,
+    );
   }
 }

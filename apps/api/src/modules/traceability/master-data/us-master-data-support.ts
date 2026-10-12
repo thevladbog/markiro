@@ -16,7 +16,7 @@ import {
   type UsLocation,
   type UsParty,
 } from "@markiro/platform-contracts";
-import { and, eq } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 
 export type UsMasterDataTransaction = Parameters<Parameters<Db["transaction"]>[0]>[0];
 export type PartyRow = typeof schema.traceabilityParties.$inferSelect;
@@ -146,6 +146,15 @@ export async function authorizeUsMasterData(
   // An explicit array means any of these capabilities; an empty array denies.
   required: UsCapability | readonly UsCapability[],
 ): Promise<ProvisionUsTraceabilityProfileInput["code"]> {
+  return (await authorizeUsMasterDataDetails(tx, tenantId, actorUserId, required)).code;
+}
+
+export async function authorizeUsMasterDataDetails(
+  tx: UsMasterDataTransaction,
+  tenantId: string,
+  actorUserId: string,
+  required: UsCapability | readonly UsCapability[],
+): Promise<Pick<ProvisionUsTraceabilityProfileInput, "code" | "timeZone">> {
   const [membership] = await tx
     .select({ role: schema.member.role })
     .from(schema.member)
@@ -161,33 +170,47 @@ export async function authorizeUsMasterData(
     throw new ForbiddenException({ code: "insufficient_permission" });
   }
 
-  // Keep the locks on independent rows: PostgreSQL cannot apply FOR SHARE to
-  // the nullable side of the profile store's outer join.
-  const [profile] = await tx
-    .select({
-      code: schema.traceabilityProfiles.code,
-      baselineVersion: schema.traceabilityProfiles.baselineVersion,
-      retentionYears: schema.traceabilityProfiles.retentionYears,
-    })
-    .from(schema.traceabilityProfiles)
-    .where(eq(schema.traceabilityProfiles.tenantId, tenantId))
-    .limit(1)
-    .for("share");
+  // The lateral read depends on the already locked profile row. An absent or
+  // blocked profile cannot acquire the later organization-profile lock.
+  const result = await tx.execute<{
+    code: unknown;
+    baselineVersion: unknown;
+    retentionYears: unknown;
+    timeZone: unknown;
+  }>(sql`
+    WITH locked_profile AS MATERIALIZED (
+      SELECT tenant_id, code, baseline_version, retention_years
+      FROM traceability_profiles WHERE tenant_id = ${tenantId}
+      LIMIT 1 FOR SHARE
+    ), locked_org AS MATERIALIZED (
+      SELECT organization_profile.time_zone
+      FROM locked_profile profile
+      CROSS JOIN LATERAL (
+        SELECT time_zone FROM org_profiles
+        WHERE tenant_id = profile.tenant_id LIMIT 1 FOR SHARE
+      ) organization_profile
+    )
+    SELECT code, baseline_version AS "baselineVersion", retention_years AS "retentionYears",
+      (SELECT time_zone FROM locked_org) AS "timeZone"
+    FROM locked_profile
+  `);
+  const [profile] = result.rows;
   if (!profile) throw new ForbiddenException({ code: "traceability_profile_required" });
-
-  const [organizationProfile] = await tx
-    .select({ timeZone: schema.orgProfiles.timeZone })
-    .from(schema.orgProfiles)
-    .where(eq(schema.orgProfiles.tenantId, tenantId))
-    .limit(1)
-    .for("share");
+  if (
+    typeof profile.code !== "string" ||
+    typeof profile.baselineVersion !== "string" ||
+    typeof profile.retentionYears !== "number" ||
+    typeof profile.timeZone !== "string"
+  ) {
+    throw new ServiceUnavailableException({ code: "traceability_profile_invalid" });
+  }
   const valid = provisionUsTraceabilityProfileSchema.safeParse({
     code: profile.code,
     retentionYears: profile.retentionYears,
-    timeZone: organizationProfile?.timeZone,
+    timeZone: profile.timeZone,
   });
   if (!valid.success || profile.baselineVersion !== BASELINE_VERSION) {
     throw new ServiceUnavailableException({ code: "traceability_profile_invalid" });
   }
-  return valid.data.code;
+  return { code: valid.data.code, timeZone: valid.data.timeZone };
 }
