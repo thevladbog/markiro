@@ -1274,7 +1274,14 @@ codes, and the system's own words go to the shell's stderr only.
   queue's address when the command answers at 30 s, so a later label to the same queue can
   start a second GDI job while the first call still runs: labels can come out of order,
   and a reprint of the `timeout` label can double one when the hung one finally prints).
-  The order of the GDI calls lives
+  A failed driver call leaves one stderr line (`standalone: driver print step=` the call,
+  `error=` the Win32 code, then numbers; step `geometry` sets the page's dots, resolution and
+  bounds against `GetDeviceCaps` and the merged DEVMODE), and a refusal ends with a line
+  `standalone: driver print refused code=… phase=…`;
+  numbers and call names only, never a label's text, a code, a queue or document name or a
+  byte of the page. The lines come from `step_line`/`geometry_line`/`refusal_line`, checked
+  on every OS with a fake and `print_logged`; the Windows calls that produce them are
+  checked only by the probe crate. The order of the GDI calls lives
   in `submit` over `WindowsPrintApi` and is tested on every OS; `mod native` is
   `cfg(windows)` (feature `Win32_Storage_Xps` for `StartDocW`) and compiles only in
   `standalone-windows-build` — plan ДРВ type-checked it with a probe crate outside the

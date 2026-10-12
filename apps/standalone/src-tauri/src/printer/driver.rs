@@ -18,7 +18,7 @@
 //! every OS. Only `native` (everything unsafe) is `cfg(windows)`: it uses
 //! `std` and `windows-sys` only and compiles in `standalone-windows-build`.
 
-use super::raster::{decode, Raster, MAX_BYTES};
+use super::raster::{decode, Caps, Raster, MAX_BYTES};
 use base64::{engine::general_purpose::STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 
@@ -78,6 +78,102 @@ pub enum Observation {
     Unavailable,
 }
 
+/// What a driver call that failed says, for the diagnostic line: the call's
+/// name, the Windows error code it left (`0` when the call itself did not fail
+/// and `detail` says which check refused), and numbers only.
+#[derive(Debug, PartialEq, Eq)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct Step {
+    name: &'static str,
+    error: u32,
+    detail: String,
+}
+
+/// What the driver's merged DEVMODE says of the job, in the driver's own units
+/// (paper width and length in tenths of a millimetre).
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(not(windows), allow(dead_code))]
+struct DriverMode {
+    orientation: i16,
+    copies: i16,
+    scale: i16,
+    paper: i16,
+    paper_width: i16,
+    paper_length: i16,
+    quality: i16,
+    y_resolution: i16,
+}
+
+/// One diagnostic line for a failed driver call, `job` once the spooler has
+/// one. Numbers and call names only: never a label's text, a code, a queue or
+/// document name, or a byte of the page.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn step_line(step: &Step, job: Option<u32>) -> String {
+    let mut line = format!(
+        "standalone: driver print step={} error={}",
+        step.name, step.error
+    );
+    if let Some(job) = job {
+        line.push_str(&format!(" job={job}"));
+    }
+    if !step.detail.is_empty() {
+        line.push(' ');
+        line.push_str(&step.detail);
+    }
+    line
+}
+
+/// The page against what the driver reported: the page's dots, resolution and
+/// required bounds, the device context's `Caps` (unread when the DEVMODE
+/// already refused) and the merged DEVMODE's mode.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn geometry_line(page: &Raster<'_>, caps: Option<Caps>, mode: &DriverMode) -> String {
+    let [l, t, r, b] = page.bounds;
+    let reported = match caps {
+        Some(c) => format!(
+            "caps_dpi={}x{} caps_paper={}x{} caps_offset={},{} caps_printable={}x{}",
+            c.dpi_x,
+            c.dpi_y,
+            c.width,
+            c.height,
+            c.offset_x,
+            c.offset_y,
+            c.printable_width,
+            c.printable_height
+        ),
+        None => "caps=unread".to_owned(),
+    };
+    format!(
+        "standalone: driver print step=geometry error=0 page_dots={}x{} page_dpi={} \
+         page_bounds={l},{t},{r},{b} {reported} mode_orientation={} mode_copies={} \
+         mode_scale={} mode_paper={} mode_paper_size={}x{} mode_quality={} mode_y_resolution={}",
+        page.width,
+        page.height,
+        page.dpi,
+        mode.orientation,
+        mode.copies,
+        mode.scale,
+        mode.paper,
+        mode.paper_width,
+        mode.paper_length,
+        mode.quality,
+        mode.y_resolution
+    )
+}
+
+/// The line of a refusal the print answers with.
+fn refusal_line(error: &Failure) -> String {
+    let job = error
+        .receipt
+        .as_ref()
+        .map(|r| format!(" job={}", r.job_id))
+        .unwrap_or_default();
+    format!(
+        "standalone: driver print refused code={} phase={}{job}",
+        error.code, error.phase
+    )
+}
+
 fn valid_name(s: &str) -> bool {
     !s.trim().is_empty() && s.len() <= 1024 && !s.contains('\0')
 }
@@ -110,6 +206,19 @@ fn artifact(payload: &str) -> Result<Vec<u8>, Failure> {
 /// Prints one page to `queue`, blocking. Every refusal before `StartDocW` is
 /// `before_start`; from `StartDocW` on, `delivery_unknown`. Never retries.
 pub fn print(queue: String, payload_base64: String, document_name: String) -> Outcome {
+    print_logged(queue, payload_base64, document_name, &mut |line| {
+        eprintln!("{line}")
+    })
+}
+
+/// [`print`] with the diagnostic lines going to `log`: one per failed driver
+/// call, then one for the refusal itself.
+fn print_logged(
+    queue: String,
+    payload_base64: String,
+    document_name: String,
+    log: &mut dyn FnMut(String),
+) -> Outcome {
     let result = (|| {
         let bytes = artifact(&payload_base64)?;
         let page = decode(&bytes).map_err(|_| Failure::before("invalid_artifact"))?;
@@ -121,8 +230,8 @@ pub fn print(queue: String, payload_base64: String, document_name: String) -> Ou
         }
         #[cfg(windows)]
         {
-            let mut device = native::Device::open(&queue, &page)?;
-            submit(&mut device, &page, &queue, &document_name)
+            let mut device = native::Device::open(&queue, &page, &mut *log)?;
+            submit(&mut device, &page, &queue, &document_name, &mut *log)
         }
         #[cfg(not(windows))]
         {
@@ -132,7 +241,10 @@ pub fn print(queue: String, payload_base64: String, document_name: String) -> Ou
     })();
     match result {
         Ok(receipt) => Outcome::Success { ok: true, receipt },
-        Err(error) => Outcome::Failed { ok: false, error },
+        Err(error) => {
+            log(refusal_line(&error));
+            Outcome::Failed { ok: false, error }
+        }
     }
 }
 
@@ -154,41 +266,46 @@ pub fn observe(receipt: Receipt) -> Observation {
 /// The GDI calls of one page, in the order [`submit`] makes them.
 #[cfg_attr(not(windows), allow(dead_code))]
 trait WindowsPrintApi {
-    fn begin(&mut self, name: &str) -> Result<u32, ()>;
-    fn page(&mut self) -> Result<(), ()>;
-    fn draw(&mut self, page: &Raster<'_>) -> Result<(), ()>;
-    fn end_page(&mut self) -> Result<(), ()>;
-    fn end(&mut self) -> Result<(), ()>;
+    fn begin(&mut self, name: &str) -> Result<u32, Step>;
+    fn page(&mut self) -> Result<(), Step>;
+    fn draw(&mut self, page: &Raster<'_>) -> Result<(), Step>;
+    fn end_page(&mut self) -> Result<(), Step>;
+    fn end(&mut self) -> Result<(), Step>;
     fn abort(&mut self);
 }
 
 /// One document of one page. A failed `StartDocW` is `delivery_unknown` too:
 /// its RPC answer can be lost after the spooler took the job. After it, the
-/// first failure aborts the document and keeps the receipt.
+/// first failure aborts the document and keeps the receipt. Each failed call
+/// leaves one line in `log` (`step_line`), the first one only.
 #[cfg_attr(not(windows), allow(dead_code))]
 fn submit(
     api: &mut impl WindowsPrintApi,
     page: &Raster<'_>,
     queue: &str,
     name: &str,
+    log: &mut dyn FnMut(String),
 ) -> Result<Receipt, Failure> {
-    let job_id = api.begin(name).map_err(|_| Failure {
-        code: "driver_failure",
-        phase: "delivery_unknown",
-        receipt: None,
+    let job_id = api.begin(name).map_err(|step| {
+        log(step_line(&step, None));
+        Failure {
+            code: "driver_failure",
+            phase: "delivery_unknown",
+            receipt: None,
+        }
     })?;
     let receipt = Receipt {
         queue: queue.into(),
         job_id,
         document_name: name.into(),
     };
-    if api
+    if let Err(step) = api
         .page()
         .and_then(|_| api.draw(page))
         .and_then(|_| api.end_page())
         .and_then(|_| api.end())
-        .is_err()
     {
+        log(step_line(&step, Some(job_id)));
         api.abort();
         return Err(Failure {
             code: "driver_failure",
@@ -226,12 +343,40 @@ mod native {
         }
     }
 
-    fn queue(name: &str) -> Result<Queue, Failure> {
+    /// The Windows error the last call left. Read it before anything else runs.
+    fn last_error() -> u32 {
+        std::io::Error::last_os_error()
+            .raw_os_error()
+            .map_or(0, |n| n as u32)
+    }
+
+    /// The queue's handle, or the Windows error `OpenPrinterW` left.
+    fn queue(name: &str) -> Result<Queue, u32> {
         let mut h = PRINTER_HANDLE::default();
         if unsafe { OpenPrinterW(wide(name).as_ptr(), &mut h, null_mut()) } == 0 {
-            return Err(Failure::before("queue_unavailable"));
+            return Err(last_error());
         }
         Ok(Queue(h))
+    }
+
+    /// A refusal before `StartDocW`: one diagnostic line for the call, then the
+    /// `before_start` failure with `code`.
+    fn refuse(
+        log: &mut dyn FnMut(String),
+        name: &'static str,
+        error: u32,
+        detail: String,
+        code: &'static str,
+    ) -> Failure {
+        log(step_line(
+            &Step {
+                name,
+                error,
+                detail,
+            },
+            None,
+        ));
+        Failure::before(code)
     }
 
     pub(super) struct Device {
@@ -252,26 +397,56 @@ mod native {
         /// user paper of the page's millimetres, portrait, one copy, 100 %,
         /// the page's resolution. The driver-private tail of DEVMODE is kept
         /// (a separate output buffer), and the driver's answer is checked.
-        pub fn open(name: &str, p: &Raster<'_>) -> Result<Self, Failure> {
+        pub fn open(
+            name: &str,
+            p: &Raster<'_>,
+            log: &mut dyn FnMut(String),
+        ) -> Result<Self, Failure> {
             unsafe {
-                let q = queue(name)?;
+                let q = queue(name).map_err(|e| {
+                    refuse(log, "OpenPrinterW", e, String::new(), "queue_unavailable")
+                })?;
                 let name = wide(name);
                 let needed =
                     DocumentPropertiesW(null_mut(), q.0, name.as_ptr(), null_mut(), null(), 0);
                 if needed < size_of::<DEVMODEW>() as i32 || needed > 1024 * 1024 {
-                    return Err(Failure::before("driver_failure"));
+                    let e = last_error();
+                    return Err(refuse(
+                        log,
+                        "DocumentPropertiesW.size",
+                        e,
+                        format!("returned={needed}"),
+                        "driver_failure",
+                    ));
                 }
                 let mut buffer = vec![0u64; (needed as usize).div_ceil(8)];
                 let dm = buffer.as_mut_ptr().cast::<DEVMODEW>();
-                if DocumentPropertiesW(null_mut(), q.0, name.as_ptr(), dm, null(), DM_OUT_BUFFER)
-                    != 1
-                {
-                    return Err(Failure::before("driver_failure"));
+                let got =
+                    DocumentPropertiesW(null_mut(), q.0, name.as_ptr(), dm, null(), DM_OUT_BUFFER);
+                if got != 1 {
+                    let e = last_error();
+                    return Err(refuse(
+                        log,
+                        "DocumentPropertiesW.out",
+                        e,
+                        format!("returned={got}"),
+                        "driver_failure",
+                    ));
                 }
                 if ((*dm).dmSize as usize) < size_of::<DEVMODEW>()
                     || (*dm).dmSize as usize + (*dm).dmDriverExtra as usize > needed as usize
                 {
-                    return Err(Failure::before("driver_failure"));
+                    return Err(refuse(
+                        log,
+                        "DEVMODE.size",
+                        0,
+                        format!(
+                            "dm_size={} dm_driver_extra={} needed={needed}",
+                            (*dm).dmSize,
+                            (*dm).dmDriverExtra
+                        ),
+                        "driver_failure",
+                    ));
                 }
                 (*dm).dmFields = ((*dm).dmFields & !DM_FORMNAME)
                     | DM_ORIENTATION
@@ -293,27 +468,46 @@ mod native {
                 (*dm).dmYResolution = p.dpi as i16;
                 let mut output = buffer.clone();
                 let out = output.as_mut_ptr().cast::<DEVMODEW>();
-                if DocumentPropertiesW(
+                let merged = DocumentPropertiesW(
                     null_mut(),
                     q.0,
                     name.as_ptr(),
                     out,
                     dm,
                     DM_IN_BUFFER | DM_OUT_BUFFER,
-                ) != 1
-                {
-                    return Err(Failure::before("driver_failure"));
+                );
+                if merged != 1 {
+                    let e = last_error();
+                    return Err(refuse(
+                        log,
+                        "DocumentPropertiesW.merge",
+                        e,
+                        format!("returned={merged}"),
+                        "driver_failure",
+                    ));
                 }
                 let v = (*out).Anonymous1.Anonymous1;
+                let mode = DriverMode {
+                    orientation: v.dmOrientation,
+                    copies: v.dmCopies,
+                    scale: v.dmScale,
+                    paper: v.dmPaperSize,
+                    paper_width: v.dmPaperWidth,
+                    paper_length: v.dmPaperLength,
+                    quality: v.dmPrintQuality,
+                    y_resolution: (*out).dmYResolution,
+                };
                 if v.dmOrientation != DMORIENT_PORTRAIT as i16
                     || v.dmCopies != 1
                     || v.dmScale != 100
                 {
+                    log(geometry_line(p, None, &mode));
                     return Err(Failure::before("geometry_mismatch"));
                 }
                 let dc = CreateDCW(wide("WINSPOOL").as_ptr(), name.as_ptr(), null(), out);
                 if dc.is_null() {
-                    return Err(Failure::before("driver_failure"));
+                    let e = last_error();
+                    return Err(refuse(log, "CreateDCW", e, String::new(), "driver_failure"));
                 }
                 let cap = |i| GetDeviceCaps(dc, i as i32);
                 let caps = Caps {
@@ -327,14 +521,17 @@ mod native {
                     printable_height: cap(VERTRES),
                 };
                 let device = Self { dc, caps };
-                check_geometry(p, caps).map_err(|_| Failure::before("geometry_mismatch"))?;
+                if check_geometry(p, caps).is_err() {
+                    log(geometry_line(p, Some(caps), &mode));
+                    return Err(Failure::before("geometry_mismatch"));
+                }
                 Ok(device)
             }
         }
     }
 
     impl WindowsPrintApi for Device {
-        fn begin(&mut self, name: &str) -> Result<u32, ()> {
+        fn begin(&mut self, name: &str) -> Result<u32, Step> {
             let name = wide(name);
             let info = DOCINFOW {
                 cbSize: size_of::<DOCINFOW>() as i32,
@@ -347,19 +544,28 @@ mod native {
             if id > 0 {
                 Ok(id as u32)
             } else {
-                Err(())
+                Err(Step {
+                    name: "StartDocW",
+                    error: last_error(),
+                    detail: format!("returned={id}"),
+                })
             }
         }
 
-        fn page(&mut self) -> Result<(), ()> {
-            if unsafe { StartPage(self.dc) } > 0 {
+        fn page(&mut self) -> Result<(), Step> {
+            let started = unsafe { StartPage(self.dc) };
+            if started > 0 {
                 Ok(())
             } else {
-                Err(())
+                Err(Step {
+                    name: "StartPage",
+                    error: last_error(),
+                    detail: format!("returned={started}"),
+                })
             }
         }
 
-        fn draw(&mut self, p: &Raster<'_>) -> Result<(), ()> {
+        fn draw(&mut self, p: &Raster<'_>) -> Result<(), Step> {
             #[repr(C)]
             struct Info {
                 header: BITMAPINFOHEADER,
@@ -410,23 +616,37 @@ mod native {
             if drawn == h {
                 Ok(())
             } else {
-                Err(())
+                Err(Step {
+                    name: "StretchDIBits",
+                    error: last_error(),
+                    detail: format!("returned={drawn} expected={h} blit={w}x{h}"),
+                })
             }
         }
 
-        fn end_page(&mut self) -> Result<(), ()> {
-            if unsafe { EndPage(self.dc) } > 0 {
+        fn end_page(&mut self) -> Result<(), Step> {
+            let ended = unsafe { EndPage(self.dc) };
+            if ended > 0 {
                 Ok(())
             } else {
-                Err(())
+                Err(Step {
+                    name: "EndPage",
+                    error: last_error(),
+                    detail: format!("returned={ended}"),
+                })
             }
         }
 
-        fn end(&mut self) -> Result<(), ()> {
-            if unsafe { EndDoc(self.dc) } > 0 {
+        fn end(&mut self) -> Result<(), Step> {
+            let ended = unsafe { EndDoc(self.dc) };
+            if ended > 0 {
                 Ok(())
             } else {
-                Err(())
+                Err(Step {
+                    name: "EndDoc",
+                    error: last_error(),
+                    detail: format!("returned={ended}"),
+                })
             }
         }
 
@@ -506,10 +726,14 @@ mod tests {
     }
 
     impl Fake {
-        fn call(&mut self, n: &'static str) -> Result<(), ()> {
+        fn call(&mut self, n: &'static str) -> Result<(), Step> {
             self.calls.push(n);
             if self.fail == Some(n) {
-                Err(())
+                Err(Step {
+                    name: n,
+                    error: 1801,
+                    detail: "returned=0".into(),
+                })
             } else {
                 Ok(())
             }
@@ -517,19 +741,19 @@ mod tests {
     }
 
     impl WindowsPrintApi for Fake {
-        fn begin(&mut self, _: &str) -> Result<u32, ()> {
+        fn begin(&mut self, _: &str) -> Result<u32, Step> {
             self.call("begin").map(|_| 42)
         }
-        fn page(&mut self) -> Result<(), ()> {
+        fn page(&mut self) -> Result<(), Step> {
             self.call("page")
         }
-        fn draw(&mut self, _: &Raster<'_>) -> Result<(), ()> {
+        fn draw(&mut self, _: &Raster<'_>) -> Result<(), Step> {
             self.call("draw")
         }
-        fn end_page(&mut self) -> Result<(), ()> {
+        fn end_page(&mut self) -> Result<(), Step> {
             self.call("end_page")
         }
-        fn end(&mut self) -> Result<(), ()> {
+        fn end(&mut self) -> Result<(), Step> {
             self.call("end")
         }
         fn abort(&mut self) {
@@ -553,7 +777,7 @@ mod tests {
     #[test]
     fn a_whole_page_answers_its_receipt() {
         let mut f = Fake::default();
-        let receipt = submit(&mut f, &page(), "Godex G500", DOCUMENT).unwrap();
+        let receipt = submit(&mut f, &page(), "Godex G500", DOCUMENT, &mut |_| {}).unwrap();
         assert_eq!(
             receipt,
             Receipt {
@@ -572,7 +796,7 @@ mod tests {
                 fail: Some(step),
                 ..Default::default()
             };
-            let e = submit(&mut f, &page(), "Queue", DOCUMENT).unwrap_err();
+            let e = submit(&mut f, &page(), "Queue", DOCUMENT, &mut |_| {}).unwrap_err();
             assert_eq!(e.phase, "delivery_unknown", "{step}");
             assert_eq!(e.receipt.unwrap().job_id, 42);
             assert_eq!(f.calls.last(), Some(&"abort"));
@@ -586,7 +810,7 @@ mod tests {
             fail: Some("begin"),
             ..Default::default()
         };
-        let e = submit(&mut f, &page(), "Queue", DOCUMENT).unwrap_err();
+        let e = submit(&mut f, &page(), "Queue", DOCUMENT, &mut |_| {}).unwrap_err();
         assert_eq!((e.code, e.phase), ("driver_failure", "delivery_unknown"));
         assert!(e.receipt.is_none());
         assert_eq!(f.calls, ["begin"]);
@@ -772,5 +996,176 @@ mod tests {
         }))
         .unwrap();
         assert_eq!((back.queue.as_str(), back.job_id), ("Q", 7));
+    }
+
+    /// What `submit` logs for a driver whose `fail` call refuses.
+    fn logged(fail: &'static str) -> Vec<String> {
+        let mut f = Fake {
+            fail: Some(fail),
+            ..Default::default()
+        };
+        let mut lines = Vec::new();
+        let _ = submit(&mut f, &page(), "Godex G500", DOCUMENT, &mut |l| {
+            lines.push(l)
+        });
+        lines
+    }
+
+    #[test]
+    fn a_failed_start_doc_leaves_one_line_without_a_job() {
+        assert_eq!(
+            logged("begin"),
+            ["standalone: driver print step=begin error=1801 returned=0"]
+        );
+    }
+
+    #[test]
+    fn a_failure_after_start_doc_leaves_one_line_with_the_job() {
+        for step in ["page", "draw", "end_page", "end"] {
+            assert_eq!(
+                logged(step),
+                [format!(
+                    "standalone: driver print step={step} error=1801 job=42 returned=0"
+                )],
+                "{step}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_whole_page_logs_nothing() {
+        let mut lines = Vec::new();
+        let mut f = Fake::default();
+        submit(&mut f, &page(), "Godex G500", DOCUMENT, &mut |l| {
+            lines.push(l)
+        })
+        .unwrap();
+        assert!(lines.is_empty(), "{lines:?}");
+    }
+
+    #[test]
+    fn a_step_line_is_the_call_the_code_and_numbers() {
+        let step = Step {
+            name: "StretchDIBits",
+            error: 0,
+            detail: "returned=12 expected=40 blit=80x40".into(),
+        };
+        assert_eq!(
+            step_line(&step, None),
+            "standalone: driver print step=StretchDIBits error=0 returned=12 expected=40 blit=80x40"
+        );
+        assert_eq!(
+            step_line(&step, Some(7)),
+            "standalone: driver print step=StretchDIBits error=0 job=7 returned=12 expected=40 blit=80x40"
+        );
+        let bare = Step {
+            name: "OpenPrinterW",
+            error: 1801,
+            detail: String::new(),
+        };
+        assert_eq!(
+            step_line(&bare, None),
+            "standalone: driver print step=OpenPrinterW error=1801"
+        );
+    }
+
+    #[test]
+    fn the_geometry_line_sets_the_page_against_what_the_driver_reported() {
+        let mut page = page();
+        page.bounds = [1, 2, 70, 71];
+        let mode = DriverMode {
+            orientation: 1,
+            copies: 1,
+            scale: 100,
+            paper: 256,
+            paper_width: 100,
+            paper_length: 100,
+            quality: 203,
+            y_resolution: 203,
+        };
+        let caps = Caps {
+            dpi_x: 200,
+            dpi_y: 201,
+            width: 79,
+            height: 78,
+            offset_x: 3,
+            offset_y: 4,
+            printable_width: 70,
+            printable_height: 71,
+        };
+        assert_eq!(
+            geometry_line(&page, Some(caps), &mode),
+            "standalone: driver print step=geometry error=0 page_dots=80x80 page_dpi=203 \
+             page_bounds=1,2,70,71 caps_dpi=200x201 caps_paper=79x78 caps_offset=3,4 \
+             caps_printable=70x71 mode_orientation=1 mode_copies=1 mode_scale=100 \
+             mode_paper=256 mode_paper_size=100x100 mode_quality=203 mode_y_resolution=203"
+        );
+        assert!(geometry_line(&page, None, &mode).contains(" caps=unread mode_orientation=1 "));
+    }
+
+    #[test]
+    fn a_refusal_is_one_line_with_its_code_phase_and_job() {
+        assert_eq!(
+            refusal_line(&Failure::before("geometry_mismatch")),
+            "standalone: driver print refused code=geometry_mismatch phase=before_start"
+        );
+        let unknown = Failure {
+            code: "driver_failure",
+            phase: "delivery_unknown",
+            receipt: Some(Receipt {
+                queue: "Q".into(),
+                job_id: 9,
+                document_name: DOCUMENT.into(),
+            }),
+        };
+        assert_eq!(
+            refusal_line(&unknown),
+            "standalone: driver print refused code=driver_failure phase=delivery_unknown job=9"
+        );
+    }
+
+    #[test]
+    fn a_refused_print_logs_its_refusal_once_and_nothing_of_the_label() {
+        let mut lines = Vec::new();
+        let outcome = print_logged(
+            "Godex G500".into(),
+            "AAAA".into(),
+            DOCUMENT.into(),
+            &mut |l| lines.push(l),
+        );
+        assert!(matches!(outcome, Outcome::Failed { .. }));
+        assert_eq!(
+            lines,
+            ["standalone: driver print refused code=invalid_artifact phase=before_start"]
+        );
+        // The queue, the document and the page never reach the log.
+        let mut lines = Vec::new();
+        print_logged("Godex G500".into(), payload(), DOCUMENT.into(), &mut |l| {
+            lines.push(l)
+        });
+        assert!(!lines.is_empty());
+        for line in &lines {
+            assert!(line.starts_with("standalone: driver print "), "{line}");
+            for secret in ["Godex", "Markiro:", &payload()[..16]] {
+                assert!(!line.contains(secret), "{line}");
+            }
+        }
+    }
+
+    #[test]
+    fn off_windows_a_checked_page_logs_only_its_refusal() {
+        // Off Windows a checked page is refused before any start; the refusal is
+        // the only line.
+        #[cfg(not(windows))]
+        {
+            let mut lines = Vec::new();
+            print_logged("Godex G500".into(), payload(), DOCUMENT.into(), &mut |l| {
+                lines.push(l)
+            });
+            assert_eq!(
+                lines,
+                ["standalone: driver print refused code=unsupported_platform phase=before_start"]
+            );
+        }
     }
 }
