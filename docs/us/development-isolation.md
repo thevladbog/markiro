@@ -2414,3 +2414,71 @@ The no-infrastructure whole API run is not green:3368 passed,4805 skipped and
 8 failed files from missing runtime settings; three also report secondary teardown
 errors. No unrelated RU test or runtime configuration was changed to bypass this
 limitation. No publication or operational acceptance is claimed.
+
+### Isolated ordinary API validation (2026-10-13)
+
+The remaining ordinary API setup checks can now run through a test-only launcher:
+
+```bash
+node tools/us-development/run-api-validation.mjs remaining
+node tools/us-development/run-api-validation.mjs full
+```
+
+The launcher validates the tracked synthetic PostgreSQL entry point at
+`127.0.0.1:55432`, database `markiro_us_dev`, user `markiro_us`, including the
+server-reported database and role before creating anything. It creates a random
+`markiro_us_api_<UUID>` child, verifies that identity, and applies the current
+144-migration chain only there. The parent receives administrative queries only.
+Caller database URLs, extra test-selection flags, timeout changes and repair
+options are not accepted.
+
+Tests receive a clean environment with ordinary `DATABASE_URL` pointing at the
+owned child, `NODE_ENV=test`, generated auth/platform/pairing/encryption keys,
+and the same localhost origins as ordinary CI (3000/5173/5473/5373).
+`US_TEST_DATABASE_URL` stays unset. SMTP and S3 defaults are redirected to an
+invocation-owned loopback refusal listener, so existing localhost Mailpit/MinIO
+services are not contacted. No optional live-provider credentials are enabled.
+Generated keys and the database credential are redacted from subprocess output.
+
+The launcher awaits subprocess exit and closes its migration pool before a normal
+`DROP DATABASE`. It never force-drops databases or terminates unknown sessions.
+Cleanup errors retain the original test failure status. A before/after database
+inventory detects residual nested fixtures without deleting unfamiliar targets.
+
+The first actual remaining run passed all eight whole files and 101 tests with
+zero skips in 25.04 seconds. Per-file totals were billing accounts 2, exchange
+credentials 13, exchange import 19, exchange orders 9, exchange protocol 20,
+integrations delete 6, integrations 28, and subscription route inventory 4.
+The child was normally dropped after exit, no new databases remained, and the
+owned service listener received zero connections. The original eight test source
+hashes are preserved; no assertion, deadline, product code or runtime guard was
+changed. This is local API evidence, separate from native 260-chain acceptance,
+remote CI, browser/hardware validation and deployment.
+
+The first full ordinary API run was not green: 329 passed files, one failed file,
+166 skipped files; 4755 passed tests, one failed test and 3419 skipped tests.
+The failing billing-request journey used an offer expiring on `2026-09-30`
+against the real October clock and correctly received `offer_expired`.
+Its test fixture now uses the service's existing protected clock seam fixed at
+August 28, preserving all 77 tests and their assertions, expiry values and production guards.
+Both whole billing files passed afterward: 84 tests, including the unchanged
+expired-offer rejection. The original eight files again passed 101 tests without
+skips under intentionally hostile ambient PG settings.
+
+Parent PostgreSQL configuration is also isolated before driver loading. Deferred
+SIGINT/SIGTERM handling spans creation, migration, test execution and disposal.
+Eleven Node safety tests cover input/environment checks, actual driver options
+and six signal-wrapper cases. A separate real-database interruption smoke sent
+SIGINT after CREATE: migration drained, the owned child was normally removed,
+no nested databases remained, and Vitest did not start. This returned 130 rather
+than killing the launcher before cleanup. SIGKILL or host loss cannot be handled
+by JavaScript; the launcher does not attempt broad recovery of unfamiliar DBs.
+
+The final unfiltered API run exited 0 in 642.16 seconds: 330 files passed and
+166 skipped (496 total); 4756 tests passed and 3419 skipped (8175 total), with
+zero failures. The fresh owned child was normally dropped after subprocess
+exit, no new databases remained, and its refusal socket closed after safely
+rejecting 24 connection attempts. The skipped cases include 3390 US-named
+cases, four US deployment-entry cases, 22 separate inventory-database cases,
+two real local-infrastructure cases and one live National Catalog case. Their
+explicit opt-ins remained unset; this is not a zero-skip or full-CI claim.

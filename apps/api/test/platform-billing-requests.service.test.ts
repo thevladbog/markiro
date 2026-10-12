@@ -158,7 +158,7 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     const application = new BillingApplicationService(connection.db, lifecycle, audit);
     payments = new BillingPaymentsService(connection.db, application, audit);
     offers = new PlatformOffersService(connection.db, audit, notifications);
-    tenantOffers = new TenantBillingOffersService(connection.db);
+    tenantOffers = new FixedClockTenantBillingOffersService(connection.db);
     const storage = {
       putVerified: async (_key: string, body: Buffer, _contentType: string, sha256: string) => ({
         byteSize: body.byteLength,
@@ -1477,6 +1477,12 @@ describe.skipIf(!databaseUrl)("platform billing requests on isolated Postgres", 
     expect(["offer_prepared", "awaiting_payment"]).toContain(storedRequest!.status);
   });
 });
+
+class FixedClockTenantBillingOffersService extends TenantBillingOffersService {
+  protected override now(): Date {
+    return new Date("2026-08-28T12:00:00.000Z");
+  }
+}
 
 function invoiceInput(tenantId: string): CreateInvoiceDto {
   return {

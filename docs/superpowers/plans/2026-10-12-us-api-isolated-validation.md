@@ -66,6 +66,17 @@ authorized continuous implementation and independent stage review.
 - Existing eight tests, production guards/contracts and all deadlines stay frozen
   unless a genuine code bug is reproduced and separately reviewed.
 
+### Evidence-based fixture correction
+
+The first configured whole API run completed with one failure: the existing
+platform-billing-requests.service.test.ts billing journey correctly received
+`offer_expired` at its requestChanges call. Its fixed offer expires on 2026-09-30,
+but the test used the current wall clock. Use the existing protected `now()` seam
+through a test-only subclass with the historical journey date (2026-08-28), as
+analogous billing fixtures do. All assertions, deadlines and production expiry
+checks remain unchanged. Independently review this single additional test path,
+exercise adjacent expired-offer denial, and rerun the unfiltered whole API suite.
+
 The eight whole files are billing-accounts.e2e.test.ts, exchange-credentials.e2e.test.ts,
 exchange-import.e2e.test.ts, exchange-orders.e2e.test.ts, exchange-protocol.e2e.test.ts,
 integrations-delete.e2e.test.ts, integrations.e2e.test.ts and subscription-route-inventory.test.ts.
