@@ -202,10 +202,10 @@ Every table of `src-tauri/migrations` has a class in `TABLE_CLASSES`
 device records itself (plans 2a5–2a8 and ПЛ-Ц: shifts, boxes, scans, the
 outbox, the print jobs, the pallets), each row tagged with the pairing that
 wrote it; `Workstation` — the PC's own settings (plan 2a7), which outlive any
-pairing. Of the 24 tables 12 are `Disposable`, the 8 of migration `0006`,
-`floor_print_jobs` of `0007` and the two pallet tables of `0008` are
-`DeviceData` (below), and `workstation_settings` of `0007` is the one
-`Workstation` table. `tests/local_db.rs` fails on a table without a class and on a class
+pairing. Of the 25 tables 12 are `Disposable`, the 8 of migration `0006`,
+`floor_print_jobs` of `0007`, the two pallet tables of `0008` and
+`floor_block_drops` of `0013` are `DeviceData` (below), and
+`workstation_settings` of `0007` is the one `Workstation` table. `tests/local_db.rs` fails on a table without a class and on a class
 that names no table, so a plan that adds a table classes it in the same
 change. The same file forbids any foreign key between local tables
 (`no_table_has_a_foreign_key`): a plain key fails the forget at its `DELETE`,
@@ -385,6 +385,24 @@ Additive only: `test/floor-shift-indexes.test.ts` (Node's SQLite) and
 `migration_0010_adds_the_shift_indexes_and_keeps_every_row` (`tests/local_db.rs`,
 the shell's own `Migrator`) apply it over a database of `0009`. Every delete of
 `RETAINED_TABLES` searches an index by shift, pinned in both lists of plans.
+
+Migration `0013_outbox_recovery.sql` (plan ОЧ, «Outbox recovery») adds to
+`outbox` the person's resolution of a refused or conflicting record:
+`resolution` (`resent` or `dismissed`, checked), `resent_as` (the id of the
+record written in its place), `resolved_at` and `resolved_by`, all NULL for a
+record nobody resolved; the module writes them together and no check ties
+them. It also creates `floor_block_drops` (`DeviceData`; one row per block the
+host gave and the station did not take, keyed by pairing and block id,
+`reason` `overlap` or `mismatch`). No index was added. The shell's migrations
+of this development line are `0010` (ХП) and `0013`; the other streams take
+`0011` (the A4 sheets, if needed) and `0012` (the warehouse reprint), so the
+numbers have gaps until the streams merge. sqlx applies a version missing from
+the journal whatever its order and fails with `VersionMissing` only when the
+journal holds a version the binary does not know: a development database that
+a build with `0011` or `0012` already opened cannot be opened by a binary
+without those files. That is a hazard of developing on unmerged branches
+(use a fresh database), not a field procedure; the runbook names it for
+developers only.
 
 ## Writes
 
@@ -3063,14 +3081,18 @@ many, each with its record's id or none (matched by its place) — or nothing is
 kept and the batch goes again. They are applied in one transaction through
 `json_each`: the outcome, its code, its details and the time; a scan's
 `conflict` sets `floor_scans.conflict` and its box's `needs_fix`; a `rejected`
-record stays, with its code, for the queue screen of the pilot (plan ОЧ, not
-built yet). The host keeps a refusal for good and answers the same record id
-with it again, so a refused record is never sent again under its id: sending it
-again is a person's act that writes the refused record and its refused
-dependents again under new ids, in their order. A `rejected` receipt flags
-nothing on the floor: a refused scan leaves its code in the local box, which the
-host's later `box_closed` then meets as a digest mismatch (`digest_matches`),
-and the only trace on the station is the bar's count «Отклонено хостом». Making
+record stays, with its code, for the queue screen («Очередь отправки», plan
+ОЧ; see «Outbox recovery»). The host keeps a refusal for good and answers the
+same record id with it again, so a refused record is never sent again under
+its id: sending it again is a person's act on the queue screen that writes the
+shift's refused records again under new ids, data byte for byte, in their
+order. An `accepted` of a scan that was in conflict takes the marks off again
+(`receiptStatements`' fourth and fifth operators: the scan's `conflict` and,
+when no scan of the box is still in conflict, the box's `needs_fix`). A
+`rejected` receipt flags nothing on the floor: a refused scan leaves its code
+in the local box, which the host's later `box_closed` then meets as a digest
+mismatch (`digest_matches`); the station shows it as the bar's count
+«Отклонено хостом» and on the queue screen. Making
 a refused scan mark its box as a conflict does is a one-word change in the two
 `value ->> 'outcome' = 'conflict'` terms of `receiptStatements`, and an owner decision
 (raise it at the pilot review). Any failed send — a transport failure, an
@@ -3087,18 +3109,21 @@ on the status bar. The link sends after it subscribes, after every revision
 event, whenever a screen asks after a local write (`requestFacts`), right away
 again after a full batch, and after a failed send by the sync's waits (2, 4, 8,
 16, 32 s, then 60 s) while online or at once when the link is back; a screen's
-request skips the wait and sends the head batch again, which a LAN allows; a
-refused key ends the link. It lives as long as the link: a refusal or another
+request after a local write does not cut a failed send's pause short
+(`factsNow` returns while `factRetry` is set; going online, a revision, the
+reconciler and the pause's own end still send at once), so the stuck line's
+attempts count retries and not scans; a refused key ends the link. It lives as long as the link: a refusal or another
 host that waits for the operator to leave the shift stops the link and the
 delivery, and the work screen asks the host nothing meanwhile (`FloorApp`'s
 `rejectionPending`). Every local write of the floor and every batch of receipts
 dispatch `outbox_changed` (`ShellState.outboxVersion`), and the status bar reads
 again the records not sent, refused and in conflict (three statements of their
-own, `src/floor/outbox-status.ts`) and, in a shift, the SSCC serials left for
-its boxes (`remainingSerials`, counted as a close takes them), with a warning at
-100 or fewer (`SERIALS_LOW`) and at none; while a send fails or the serials run
-low it reads again every 10 s (`REFRESH_MS`) and says how long the oldest record
-has waited and how often it was sent. The reads the screen repeats, and the
+own, `src/floor/outbox-status.ts`; a record a person resolved on the queue
+screen is not counted) and, in a shift, the SSCC serials left for its boxes and
+pallets (`readShiftStock`, see «Outbox recovery»); while a send fails or the
+serials run below a quarter of the newest block it reads again every 10 s
+(`REFRESH_MS`) and says how long the oldest record has waited and how often it
+was sent. The reads the screen repeats, and the
 receipts' transaction, are pinned in both query-plan lists (see "Local
 database").
 
@@ -3439,10 +3464,17 @@ Known limits of the retention, and who carries each:
   print jobs (138 ms on NVMe; on eMMC or SATA under `synchronous = FULL` likely
   0.5–2 s of stalled floor writes, once or twice a day, with no risk to data).
   The zeroing is kept: it is what takes deleted codes off the disk.
-- A refused or conflicting record of a shift whose close was accepted is
-  purged with it after 30 days: what `rejected` and `quarantined` records
-  should keep is a decision for plan ОЧ and the owner (hold the shift, or state
-  the window).
+- A refused or conflicting record keeps its shift until a person resolves it
+  on the queue screen (plan ОЧ): `DUE_SHIFTS_SQL` and `PURGE_COPY_SQL` take a
+  shift only when none of its `rejected`/`conflict` records has
+  `resolved_at IS NULL`. The outbox has no quarantined state; the reference
+  copies' `sync_quarantine` is not a shift's and the retention never reads it.
+  The clause `r` that says so plans on the index `outbox_shift`, which is not
+  covering, so the hourly pass reads the payload rows
+  of every shift a refusal holds (O(records of that shift) every hour, tens of
+  ms for tens of thousands of records; not measured at 600 000). A covering
+  partial index on the unresolved refusals would take a new shell migration;
+  none was added.
 - A station clock set forward purges early (the cutoff is the clock's);
   checking the clock is not part of plan РК-С and stays open.
 - A pass that fails leaves no trace but the next pass trying again: plan 2b or
@@ -3460,6 +3492,79 @@ and not late (and with the office's close first: every record taken, the
 shift late, the close `alreadyClosed`). A change of what the station writes
 changes the fixture, and both tests read it. Since plan ПЛ-Ц the scenario is a
 shift with pallets (see «Floor pallets»).
+
+## Outbox recovery
+
+Plan ОЧ. «Очередь отправки» (`src/floor/queue/QueueScreen.tsx`) opens from
+the shift list beside «Рабочее место» (never from the status bar, which holds
+nothing to press), so no work of a shift runs while it writes. It shows the
+link (`HostStatusLine`), this pairing's records waiting for the host by kind
+with the oldest one's wait, its refused records by shift with the reason in
+words (`floor.queue.code.*`, one per `FACT_RECEIPT_CODES` entry; a test fails
+for a code without words) and its conflicts — never a code of marking, only the
+SSCC of the box or pallet a record names — and the records an older pairing
+left unsent.
+
+A person resolves them (`src/floor/queue/outbox-recovery.ts`, migration
+`0013`), always after a confirmation that says what follows and takes the
+focus, and the row keeps who and when (`resolution`, `resolved_by`,
+`resolved_at`, written together; a press guard of 400 ms follows the question):
+
+- «Отправить снова» (`resendRefused`) writes every unresolved refused record of
+  the shift again under a new id, its payload byte for byte but the id, after
+  everything kept and in the old `seq` order, in parts of `RESEND_CHUNK` (50);
+  each old record is marked `resent` with `resent_as` in the transaction that
+  writes the new one. The insert goes past `outboxStatement`'s check: a record
+  sent again after its shift's close is late by definition (the host marks the
+  shift late). A refused close goes the same way and its `accepted` makes the
+  shift `closed`. A record this build cannot carry unchanged
+  (`UnreadableRecordError`) stops the whole shift before anything is written; a
+  record resolved meanwhile is a `StaleQueueError` and the screen reads again.
+  A late exception is harmless only because the host matches an undo by its
+  `targetScannedAt` and a clear by its cutoff (plan 2a2).
+- «Снять с очереди» (a refused record) and «Разобрано» (a conflict) —
+  `dismissRecord` — mark the record `dismissed`; a shift's close cannot be
+  taken off (its card names the refusal; the office closes the shift).
+
+A resolved record no longer counts on the status bar, is not named as a
+refused close, is not reopened by a restore's reconciliation (`REOPEN_SQL`),
+and no longer holds its shift from the retention. A scan sent again under a new
+id leaves the floor's marks of the original as they were.
+
+The status bar also warns of the serials left (`readShiftStock`): the boxes'
+and, in a shift with pallets, the pallets', at a quarter and a tenth of the
+newest block of that prefix and extension, at the last serial and at none
+(pilot spec §9.3); it says how many blocks the host gave that the station did
+not take (`floor_block_drops`: a block that shares serials with one kept —
+`overlap` — or is not the one asked for — `mismatch`; written with the drop of
+its request, `TableClass::DeviceData`), and names, as an item, the records an
+older pairing left unsent (read once per pairing). A screen's request to send
+after a local write does not cut a failed send's pause short, so the stuck
+line's attempts count retries.
+
+Known limits of the queue screen, none of it hidden by a green test:
+
+- Its writes run outside the work gate and the work queue (it is opened from
+  the list, when no work runs, like the list's own entry writes). An idle
+  sign-out while a decision is written unmounts the screen; the write still
+  completes (the module is crash-safe and its parts are resumable) and the
+  status bar is told. Judged against N9/N13 and accepted.
+- Offline scans do not count attempts: the outbox sends nothing while the link
+  is not `online` (plan РК-С), and an attempt is counted only when a send goes.
+- A second block with the same id keeps the first one's reason in
+  `floor_block_drops` (`ON CONFLICT DO NOTHING`); `floor_block_drops` has no
+  `shift_id`, so the retention never purges it, and a forget keeps it.
+- The records of an older pairing are only counted and named; nothing sends
+  them (they stay on the PC's disk; the runbook says what to tell support).
+- The stock texts say «меньше четверти / десятой части» while the threshold is
+  inclusive (exactly 25 % or 10 % warns); the tests pin the thresholds.
+- A queue screen's refusal list cannot send a single record again, nor take
+  off a refused close; both are out of scope (the office closes the shift).
+- Not run: Windows, WebView2, a real touch panel (the 64 px of the floor
+  buttons is asserted by class in jsdom and pinned by the
+  `tools/production-browser` contract, which this plan did not run), a real
+  host refusing a record and the same shift sent again after the cause was
+  removed.
 
 ## Floor pallets
 
@@ -3865,7 +3970,8 @@ held restore, a failed copy, no copy, a newest copy older than 26 hours by the
 host's clock, no second folder, a host clock behind the newest copy, a copy
 running for more than 30 minutes). The page lists per station whether it
 sent its blocks back (`reconciled`, plan РК-С); the host sets the flag on the
-first part of a station's blocks it takes.
+last part of a station's blocks (`more` absent), which is empty for a station
+that never got a block.
 
 `markiro-host restore <copy> [--data-dir] [--without-manifest]` runs with the
 service stopped (the data folder's lock says so; the lock is let go slightly
@@ -3932,8 +4038,11 @@ above 9, which no serial can carry, is `range_invalid`), is no range of its
 prefix (`range_invalid`) or shares a serial with any block, revoked ones
 included (`block_overlap`). One revision when anything was registered, one
 `sscc.block.register` row per block; the station is marked for the epoch
-(`devices.known_blocks_epoch`) whatever became of each block. Only a station,
-only after a restore (`conflict` on `no_restore`), 0-64 blocks: an empty list
+(`devices.known_blocks_epoch`) on the LAST part (the request without `more`),
+whatever became of each block. Only a station, only after a restore (`conflict`
+on `no_restore`), 0–64 blocks, none only in the last part (an empty part with
+`more` is `blocks`); every part but the last says `more`, which the last never
+writes (an older host still reads what a new station sends). An empty last part
 (a station that never took a block, plan ХП) only marks the station.
 
 A receipt is kept for good (plan 2a2), and a copy may lack the shift, the
@@ -3993,15 +4102,15 @@ many.
 
 Left open, none of it hidden by a green test:
 
-- A pairing without blocks sends one empty request (plan ХП), so it is marked
-  «Вернула» once it reaches the host. A station paired again leaves its former
-  device's row (from the copy) «Не вернула» until that device is revoked; the
-  office's texts say so (`blocksNote`, `confirmNotReturned`).
-- The host sets `reconciled` on the FIRST part it answers, even when it
-  refused every block of it (refusals show only on the station's status bar),
-  and the oldest blocks go first, so «Вернула» can show before the newest
-  blocks are back; a run that fails between parts leaves the obligation open
-  and the next run sends everything again.
+- A station paired again leaves its former device's row (from the copy) «Не
+  вернула» until that device is revoked; the office's texts say so
+  (`blocksNote`, `confirmNotReturned`).
+- The host sets `reconciled` on the last part it answers, even when it refused
+  every block of it (the count shows only on the station's status bar); a run
+  that fails between parts leaves the obligation open and the next run sends
+  everything again, the host answering `known` for the blocks it took. A
+  station of an older build never sends `more`, so the host marks it after the
+  first part, as before (mixed fleets keep the old guarantee only).
 - The 30-day window is per record, not per shift: with a copy older than the
   window a shift can be split (its close goes again, scans acknowledged before
   the window do not).
@@ -4238,6 +4347,18 @@ either; a file log is stage 5.
   ran against a real host on 127.0.0.1 whose `site.restore_epoch` a test
   wrote, never against `markiro-host restore`, and nothing of it has met
   Windows, WebView2, two stations or a real printer.
+- The outbox recovery (plan ОЧ) by hand, on Windows 10 and 11, with a host on
+  another PC. None of it has been run: the queue screen, the status bar's stock
+  and drop lines and the restore's last-part mark have run only under jsdom and
+  node:sqlite (and the shell's SQLite 3.46 in the `local_db` test) with a fake
+  `HostApi`; the 64 px of the screen's buttons is asserted by class, not
+  measured. Check at least: a real refusal (`unknown_shift` after a restore
+  from an older copy) shown with its reason, «Отправить снова» after the cause
+  was removed and the same shift accepted, the confirmation's focus and the
+  buttons on the touch panel, a host restored from a copy while the station
+  holds several blocks and the office's «Вернула» appearing only after the last
+  part (runbook, section 10), and the records an older pairing left unsent
+  named after «Подключить заново» on a new PC.
 - The Windows service and DPAPI run only in the `standalone-windows-build`
   job: it compiles the service and the Tauri app for Windows, and its cargo
   tests round-trip a key through DPAPI. Since plan УСТ it also builds the
