@@ -956,6 +956,17 @@ impl KeyFileGuard for BreaksTheManifest {
     }
 }
 
+/// What writing a file over a folder of the same name is classified as: Windows
+/// answers it with ERROR_ACCESS_DENIED (a permission error), other systems with
+/// "is a directory" (a plain write failure).
+fn code_of_a_file_written_over_a_folder() -> &'static str {
+    if cfg!(windows) {
+        failure::ACCESS_DENIED
+    } else {
+        failure::WRITE_FAILED
+    }
+}
+
 fn bytes_of(dir: &Path, manifest: &Manifest) -> [Vec<u8>; 3] {
     let db = dir.join(&manifest.file);
     [
@@ -985,7 +996,7 @@ async fn a_copy_that_fails_after_its_identity_leaves_nothing_of_it_and_none_of_t
     )
     .await
     .unwrap_err();
-    assert_eq!(failed.code, failure::WRITE_FAILED);
+    assert_eq!(failed.code, code_of_a_file_written_over_a_folder());
     // Of the failed copy only the folder the guard made is left: no database,
     // no identity, no manifest, no partial file.
     let left = names(dir.path());
@@ -1014,7 +1025,7 @@ async fn a_failed_replication_removes_the_identity_it_put_and_keeps_the_one_that
     let fresh = tempfile::tempdir().unwrap();
     let failed =
         replicate_guarded(local.path(), &manifest, fresh.path(), &BreaksTheManifest).unwrap_err();
-    assert_eq!(failed.code, failure::WRITE_FAILED);
+    assert_eq!(failed.code, code_of_a_file_written_over_a_folder());
     let left = names(fresh.path());
     assert_eq!(left.len(), 1, "{left:?}");
     assert!(left[0].ends_with(".json.partial"));
