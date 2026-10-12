@@ -44,6 +44,7 @@ import {
 } from "./setup/workstation-settings.js";
 import { NewShift } from "./shifts/NewShift.js";
 import { readShiftCopy, readStoredWork, type WorkShift } from "./shifts/shift-copies.js";
+import { QueueScreen } from "./queue/QueueScreen.js";
 import { ShiftList } from "./shifts/ShiftList.js";
 import { readOperatorCopy } from "./sign-in.js";
 import { createWorkGate } from "./work-gate.js";
@@ -75,7 +76,9 @@ type FloorView =
   | { kind: "work"; shift: WorkShift; leaving: boolean; officeClosed: boolean }
   // The warehouse reprint (plan СКЛ): no shift, its work gated like a shift's.
   | { kind: "warehouse"; leaving: boolean }
-  | { kind: "setup"; back: WorkShift | "warehouse" | null };
+  | { kind: "setup"; back: WorkShift | "warehouse" | null }
+  // The queue of what was not sent (plan ОЧ).
+  | { kind: "queue" };
 
 export interface FloorAppProps {
   operator: FloorSession;
@@ -129,7 +132,8 @@ export interface FloorAppProps {
 
 /**
  * The floor after an operator signed in (stage 2a spec §5.1): the shifts of
- * the line and the work screen of the one entered, as a small machine of its
+ * the line, the queue of what was not sent (plan ОЧ) and the work screen of the
+ * one entered, as a small machine of its
  * own like the cloud station's. It belongs to one session (`App` keys it by
  * the session), so nothing of one operator's screen outlives their sign-out.
  *
@@ -480,6 +484,19 @@ export function FloorApp({
       />
     );
   }
+  if (view.kind === "queue") {
+    return (
+      <QueueScreen
+        local={local}
+        pairing={{ hostId, deviceId }}
+        operator={operator}
+        link={link}
+        outboxVersion={outboxVersion}
+        onChanged={recorded}
+        onBack={() => setView({ kind: "list" })}
+      />
+    );
+  }
   if (view.kind === "new_shift") {
     return (
       <NewShift
@@ -513,6 +530,7 @@ export function FloorApp({
       onHostError={hostError}
       onNew={() => setView({ kind: "new_shift" })}
       onSetup={() => setView({ kind: "setup", back: null })}
+      onQueue={() => setView({ kind: "queue" })}
       {...(warehouseLookup === undefined
         ? {}
         : {

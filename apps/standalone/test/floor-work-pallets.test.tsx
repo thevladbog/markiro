@@ -1,11 +1,11 @@
 import { buildSscc, formatSsccHri } from "@markiro/domain";
-import { screen } from "@testing-library/react";
+import { act, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { PALLET_EXTENSION } from "../src/floor/pallets/pallets.js";
 import { processScan } from "../src/floor/work/scan-pipeline.js";
 import { HostError } from "../src/host/client.js";
-import type { SsccBlockRequest } from "../src/host/protocol.js";
+import type { SsccBlock, SsccBlockRequest } from "../src/host/protocol.js";
 import { LocalDbError, type LocalExecutor } from "../src/local/executor.js";
 import { km, PREFIX, rows, seedBlock } from "./support/floor-work.js";
 import { fakeHardware } from "./support/hardware.js";
@@ -32,6 +32,13 @@ function kinds(at: PalletStation): unknown[] {
 function palletLine(): string | null {
   const term = screen.getByText("Паллета", { selector: "dt" });
   return term.nextElementSibling?.textContent ?? null;
+}
+
+/** Lets the work run until `done` holds, for a bounded number of turns of the event loop. */
+async function turnsUntil(done: () => boolean): Promise<void> {
+  for (let turn = 0; turn < 200 && !done(); turn += 1) {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 describe("the work screen of a shift with pallets (plan ПЛ-Ц)", () => {
@@ -110,6 +117,101 @@ describe("the work screen of a shift with pallets (plan ПЛ-Ц)", () => {
     expect(requestBlock).toHaveBeenCalledWith(
       expect.objectContaining({ extension: PALLET_EXTENSION }),
     );
+  });
+
+  it("keeps the line going while the host holds the pallet block's request, and closes the full pallet in a turn of its own once the block comes", async () => {
+    const at = await palletStation({ capacity: 1, boxCapacity: 1, palletBlock: false });
+    let answer: (block: SsccBlock) => void = () => undefined;
+    // The first ask (on entry) finds no host; the next, after a box's close, waits for the test.
+    const requestBlock = vi
+      .fn<(request: SsccBlockRequest) => Promise<SsccBlock>>()
+      .mockRejectedValueOnce(
+        new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+      )
+      .mockImplementation(
+        () =>
+          new Promise<SsccBlock>((resolve) => {
+            answer = resolve;
+          }),
+      );
+    const work = renderWork(at, { overrides: { requestBlock, online: true } });
+    await work.scanner.listening();
+    await work.settled();
+    await act(async () => {
+      work.scanner.emit(km("A1"));
+      work.scanner.emit(km("A2"));
+      await turnsUntil(() => count(at, "floor_boxes", "closed_at IS NOT NULL") === 2);
+      // Both boxes closed while the host held the request: the queue never waited for it.
+      expect(count(at, "floor_boxes", "closed_at IS NOT NULL")).toBe(2);
+      expect(kinds(at)).toEqual(["box_closed", "box_closed"]);
+      answer({
+        id: "8a7b6c5d-4e3f-4a2b-9c1d-0e9f8a7b6c5d",
+        issuerPrefix: PREFIX,
+        extension: PALLET_EXTENSION,
+        fromSerial: 0,
+        toSerial: 199,
+      });
+      await work.gate.drain();
+    });
+    // The block a box's top-up brought closes the full pallet, with both boxes on it.
+    expect(kinds(at)).toEqual(["box_closed", "box_closed", "pallet_closed"]);
+    const [closed] = rows(at.db, "SELECT payload FROM outbox WHERE kind = 'pallet_closed'");
+    expect(JSON.parse(String(closed?.["payload"]))).toMatchObject({ data: { boxCount: 2 } });
+    expect(screen.queryByText("Паллета заполнена, но не закрыта")).toBeNull();
+    expect(palletLine()).toBe("0 из 1 коробов");
+    expect(requestBlock).toHaveBeenCalledWith(
+      expect.objectContaining({ extension: PALLET_EXTENSION }),
+    );
+  });
+
+  it("closes no pallet in the turn a pallet block queues while a stop stands on the line", async () => {
+    // The box has no printer assigned: its label stops the line before the block comes.
+    const at = await palletStation({
+      capacity: 1,
+      boxCapacity: 1,
+      palletBlock: false,
+      settings: { assignments: { box: null, pallet: "zebra", duplicate: null } },
+    });
+    let answer: (block: SsccBlock) => void = () => undefined;
+    const requestBlock = vi
+      .fn<(request: SsccBlockRequest) => Promise<SsccBlock>>()
+      .mockRejectedValueOnce(
+        new HostError({ kind: "transport", code: "unreachable", message: "down" }),
+      )
+      .mockImplementation(
+        () =>
+          new Promise<SsccBlock>((resolve) => {
+            answer = resolve;
+          }),
+      );
+    const work = renderWork(at, { overrides: { requestBlock, online: true } });
+    await work.scanner.listening();
+    await work.settled();
+    await act(async () => {
+      work.scanner.emit(km("A1"));
+      await turnsUntil(() => screen.queryByText("Этикетка короба не напечатана") !== null);
+    });
+    expect(kinds(at)).toEqual(["box_closed"]);
+    expect(screen.getByText("Этикетка короба не напечатана")).toBeTruthy();
+    const toldBefore = vi.mocked(work.props.onRecorded).mock.calls.length;
+    await act(async () => {
+      answer({
+        id: "8a7b6c5d-4e3f-4a2b-9c1d-0e9f8a7b6c5d",
+        issuerPrefix: PREFIX,
+        extension: PALLET_EXTENSION,
+        fromSerial: 0,
+        toSerial: 199,
+      });
+      await work.gate.drain();
+    });
+    // The block is stored, but the pallet waits for the stop to be decided: nothing closed under it.
+    // The stored block is told to the floor, though nothing was closed.
+    expect(vi.mocked(work.props.onRecorded).mock.calls.length).toBe(toldBefore + 1);
+    expect(rows(at.db, "SELECT count(*) AS n FROM floor_sscc_blocks WHERE extension = 1")).toEqual([
+      { n: 1 },
+    ]);
+    expect(kinds(at)).toEqual(["box_closed"]);
+    expect(screen.getByText("Этикетка короба не напечатана")).toBeTruthy();
   });
 
   it("after a restart decides the box's cut label before the pallet's, which is sent right after it and not before", async () => {
@@ -389,9 +491,26 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     expect(kinds(at)).not.toContain("pallet_closed");
   });
 
-  it("says the early close did not take when its serial is lost, and takes the next on «Повторить»", async () => {
+  it("closes early past a serial that cannot label a pallet, losing it, with no stop", async () => {
     const at = await palletStation({ capacity: 40, boxCapacity: 1 });
     holdSscc(at, 0);
+    const work = renderWork(at);
+    await work.scanner.listening();
+    await work.settled();
+    await work.scan(km("A1"));
+    await work.press("Закрыть паллету досрочно");
+    await work.press("Закрыть паллету");
+    expect(screen.queryByText("Паллета не закрыта")).toBeNull();
+    expect(kinds(at).at(-1)).toBe("pallet_closed");
+    expect(palletCursor(at)).toEqual([2]);
+    expect(work.shell.sends.at(-1)?.text).toBe(
+      renderedText(ZEBRA, buildSscc(PALLET_EXTENSION, PREFIX, 1), "100x150"),
+    );
+  });
+
+  it("says the early close did not take after three serials in a row are lost, and takes the next on «Повторить»", async () => {
+    const at = await palletStation({ capacity: 40, boxCapacity: 1 });
+    for (const serial of [0, 1, 2]) holdSscc(at, serial);
     const work = renderWork(at);
     await work.scanner.listening();
     await work.settled();
@@ -407,12 +526,12 @@ describe("the work screen of a shift with pallets: what the plan leaves to its g
     // The early close is not the shift's: nothing is said of the shift.
     expect(screen.queryByText(/Смена не закрыта/)).toBeNull();
     expect(kinds(at)).not.toContain("pallet_closed");
-    expect(palletCursor(at)).toEqual([1]);
+    expect(palletCursor(at)).toEqual([3]);
     await work.press("Повторить");
     expect(kinds(at).at(-1)).toBe("pallet_closed");
     expect(screen.queryByText("Паллета не закрыта")).toBeNull();
     expect(work.shell.sends.at(-1)?.text).toBe(
-      renderedText(ZEBRA, buildSscc(PALLET_EXTENSION, PREFIX, 1), "100x150"),
+      renderedText(ZEBRA, buildSscc(PALLET_EXTENSION, PREFIX, 3), "100x150"),
     );
   });
 

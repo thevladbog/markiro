@@ -16,9 +16,14 @@ export const FORGET_UNSENT_SQL =
   "AND device_id = ?) + (SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL " +
   "AND host_id = ? AND device_id = ?) AS n";
 
-/** The same of every pairing (the pairing file is unreadable): the `*_unsent` indexes whole. */
+/**
+ * The same of every pairing (the pairing file is unreadable): the `*_unsent` indexes whole.
+ * `INDEXED BY`: since migration `0010` (plan ХП) the planner prefers the covering `outbox_shift`,
+ * which walks every record of the table, the settled ones too (the same reason as in
+ * `STRANDED_COUNT_SQL`).
+ */
 export const FORGET_UNSENT_ANY_SQL =
-  "SELECT (SELECT count(*) FROM outbox WHERE acked_at IS NULL) + " +
+  "SELECT (SELECT count(*) FROM outbox INDEXED BY outbox_unsent WHERE acked_at IS NULL) + " +
   "(SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL) AS n";
 
 /**

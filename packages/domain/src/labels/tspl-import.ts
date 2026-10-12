@@ -1,5 +1,11 @@
 import { DomainError } from "../errors.js";
-import { parseLabelTemplate, type LabelElement, type LabelTemplateSpec } from "./model.js";
+import { isValidSscc } from "../gs1/sscc.js";
+import {
+  parseLabelTemplate,
+  type LabelBarcodeElement,
+  type LabelElement,
+  type LabelTemplateSpec,
+} from "./model.js";
 import {
   assertImportInputLimits,
   importedElementId,
@@ -122,6 +128,19 @@ function parseText(
     : { kind: "text", ...common, text: parsed.value };
 }
 
+/**
+ * The data of an `EAN128` barcode: TSC's GS1-128, which the domain writes only for the SSCC
+ * (`renderTsplBarcodeElement`: AI `00` before the 18 digits; the printer adds the leading
+ * FNC1). Read back as the `sscc` field — a code file carries the layout's sample SSCC, never one
+ * to print — whether it holds that sample (`00` and a valid SSCC), the placeholder after the AI
+ * (`00{{sscc}}`) or the placeholder alone. Anything else is no barcode of the label model.
+ */
+function ean128Data(payload: string, line: number, source: string): "sscc" {
+  if (payload === "{{sscc}}" || payload === "00{{sscc}}") return "sscc";
+  if (payload.startsWith("00") && isValidSscc(payload.slice(2))) return "sscc";
+  fail(line, source, "TSPL EAN128 is read only as an SSCC: AI 00 and 18 digits");
+}
+
 function parseBarcode(
   args: string[],
   line: number,
@@ -132,12 +151,20 @@ function parseBarcode(
   const xMm = dotsToMm(numberAt(args, 0, line, source), dpi);
   const yMm = dotsToMm(numberAt(args, 1, line, source), dpi);
   const type = required(args, 2, line, source).toUpperCase();
-  const format = type === "128" ? "code128" : type === "EAN13" ? "ean13" : undefined;
+  const format =
+    type === "128" || type === "EAN128" ? "code128" : type === "EAN13" ? "ean13" : undefined;
   if (!format) fail(line, source, `unsupported TSPL barcode type ${type}`);
   const sizeMm = Math.max(0.1, dotsToMm(numberAt(args, 3, line, source), dpi));
   if (numberAt(args, 5, line, source) !== 0)
     fail(line, source, "only non-rotated TSPL barcodes are supported");
-  const parsed = parseTemplatePayload(required(args, 8, line, source), line);
+  const payload = required(args, 8, line, source);
+  let data: LabelBarcodeElement["data"];
+  if (type === "EAN128") {
+    data = ean128Data(payload, line, source);
+  } else {
+    const parsed = parseTemplatePayload(payload, line);
+    data = parsed.kind === "field" ? parsed.field : { literal: parsed.value };
+  }
   return {
     kind: "barcode",
     id: importedElementId("tspl", ordinal),
@@ -145,7 +172,7 @@ function parseBarcode(
     yMm,
     format,
     sizeMm,
-    data: parsed.kind === "field" ? parsed.field : { literal: parsed.value },
+    data,
   };
 }
 

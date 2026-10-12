@@ -38,7 +38,9 @@ const dueRow = z.object({ id: z.string() });
  * When a shift of the pairing is done with on this station: the host took
  * this station's close (its `shift_closed` answered `accepted`,
  * `alreadyClosed` too — what makes the copy `closed`) at least 30 days
- * before the cutoff, every record of the shift has its receipt, and no
+ * before the cutoff, every record of the shift has its receipt, no refused or
+ * conflicting record of it waits for a person (plan ОЧ: a refusal leaves the
+ * station only when someone resolved it on the queue screen), and no
  * label of it waits. Parameters: host id, device id, the cutoff (an instant
  * as `Date.toISOString` writes it, as `acked_at` is).
  */
@@ -49,6 +51,9 @@ const DONE_WITH =
   "AND o.acked_at <= ?) " +
   "AND NOT EXISTS (SELECT 1 FROM outbox o WHERE o.host_id = s.host_id " +
   "AND o.device_id = s.device_id AND o.shift_id = s.id AND o.acked_at IS NULL) " +
+  "AND NOT EXISTS (SELECT 1 FROM outbox r WHERE r.host_id = s.host_id " +
+  "AND r.device_id = s.device_id AND r.shift_id = s.id " +
+  "AND r.outcome IN ('rejected', 'conflict') AND r.resolved_at IS NULL) " +
   "AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = s.host_id " +
   `AND j.device_id = s.device_id AND j.shift_id = s.id AND ${OPEN_JOB_SQL})`;
 
@@ -69,6 +74,9 @@ export const DUE_SHIFTS_SQL =
   "AND s.device_id = o.device_id AND s.id = o.shift_id) " +
   "AND NOT EXISTS (SELECT 1 FROM outbox u WHERE u.host_id = o.host_id " +
   "AND u.device_id = o.device_id AND u.shift_id = o.shift_id AND u.acked_at IS NULL) " +
+  "AND NOT EXISTS (SELECT 1 FROM outbox r WHERE r.host_id = o.host_id " +
+  "AND r.device_id = o.device_id AND r.shift_id = o.shift_id " +
+  "AND r.outcome IN ('rejected', 'conflict') AND r.resolved_at IS NULL) " +
   "AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = o.host_id " +
   `AND j.device_id = o.device_id AND j.shift_id = o.shift_id AND ${OPEN_JOB_SQL})`;
 

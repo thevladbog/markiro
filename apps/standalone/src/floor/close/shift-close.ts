@@ -233,13 +233,15 @@ const refusalRow = z.object({ shift_id: z.string(), code: z.string().nullable() 
  */
 export const REFUSED_CLOSES_SQL =
   "SELECT shift_id, outcome_code AS code FROM outbox WHERE host_id = ? AND device_id = ? " +
-  "AND kind = 'shift_closed' AND outcome = 'rejected' ORDER BY seq";
+  "AND kind = 'shift_closed' AND outcome = 'rejected' AND resolved_at IS NULL ORDER BY seq";
 
 /**
  * The shifts of this pairing whose close the host refused, with the code of
  * the refusal (`null` — none given). A refused record is refused for good
  * (plan 2a2): the shift stays `closing` on this station, and the office
- * closes it on the host.
+ * closes it on the host. A refused close sent again from the queue screen
+ * (plan ОЧ) is resolved and no longer named; its new record waits like any
+ * other.
  */
 export async function readRefusedCloses(
   local: LocalExecutor,

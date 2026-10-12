@@ -163,6 +163,7 @@ describe("the reconciliation after a restore", () => {
     ).resolves.toEqual({ kind: "reconciled", epoch: EPOCH, registered: 1, known: 64, refused: 0 });
     const sent = register.mock.calls.map(([request]) => request);
     expect(sent.map((request) => request.blocks.length)).toEqual([64, 1]);
+    expect(sent.map((request) => request.more ?? false)).toEqual([true, false]);
     // The station's first block goes exactly as the host's fixture names it.
     expect(sent[0]?.blocks[0]).toEqual(FIXTURE_BLOCK);
     for (const request of sent) expect(knownBlocksRequestSchema.parse(request)).toEqual(request);
@@ -229,8 +230,8 @@ describe("the reconciliation after a restore", () => {
     await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
     const register = answering();
     await reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW });
-    // No block: nothing to ask the host.
-    expect(register).not.toHaveBeenCalled();
+    // No block: one empty request, so the host marks the station (plan ХП).
+    expect(register.mock.calls).toEqual([[{ blocks: [] }]]);
     expect(
       rows(
         db,
@@ -248,6 +249,120 @@ describe("the reconciliation after a restore", () => {
       { id: waiting, outcome: null, outcome_code: null, outcome_details: null, acked_at: null },
     ]);
     expect(fromZero(db)).toEqual([{ value: EPOCH }]);
+  });
+
+  it("sends one empty request for a pairing that holds no block, and settles with nothing refused", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = answering();
+    await expect(
+      reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
+    ).resolves.toEqual({ kind: "reconciled", epoch: EPOCH, registered: 0, known: 0, refused: 0 });
+    expect(register.mock.calls).toEqual([[{ blocks: [] }]]);
+    await expect(restoreDue(executor, PAIRING)).resolves.toBe(false);
+  });
+
+  it("says `more` on every part but the last, and writes no field on the last", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlocks(db, 2 * MAX_KNOWN_BLOCKS);
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = answering();
+    await reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW });
+    const sent = register.mock.calls.map(([request]) => request);
+    expect(sent.map((request) => request.blocks.length)).toEqual([64, 64, 1]);
+    expect(sent.map((request) => request.more ?? false)).toEqual([true, true, false]);
+    // An older host reads the last part as it always did: no `more` key at all.
+    expect(sent.map((request) => "more" in request)).toEqual([true, true, false]);
+  });
+
+  it("writes no `more` on the one empty part of a pairing without blocks", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = answering();
+    await reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW });
+    expect(register.mock.calls.map(([request]) => "more" in request)).toEqual([false]);
+  });
+
+  it("does not settle when the answer to the last part is lost, and sends the whole run again", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlocks(db, MAX_KNOWN_BLOCKS);
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = answering();
+    const answer = register.getMockImplementation();
+    if (answer === undefined) throw new Error("no answer");
+    register.mockImplementationOnce(answer);
+    register.mockImplementationOnce(async () => {
+      throw new HostError({ kind: "transport", code: "unreachable", message: "lost" });
+    });
+    await expect(
+      reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
+    ).rejects.toBeInstanceOf(HostError);
+    // The host may have marked the station already; this one does not know and stays owing.
+    expect(await restoreDue(executor, PAIRING)).toBe(true);
+    expect(epochs(db)).toMatchObject([{ reconciled_at: null }]);
+    await reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW });
+    expect(register.mock.calls.map(([request]) => request.more ?? false)).toEqual([
+      true,
+      false,
+      true,
+      false,
+    ]);
+    expect(await restoreDue(executor, PAIRING)).toBe(false);
+  });
+
+  it("sends exactly 64 blocks in one request, with no empty request after them", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlocks(db, MAX_KNOWN_BLOCKS - 1);
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = answering();
+    await expect(
+      reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
+    ).resolves.toEqual({ kind: "reconciled", epoch: EPOCH, registered: 0, known: 64, refused: 0 });
+    expect(register.mock.calls.map(([request]) => request.blocks.length)).toEqual([64]);
+    expect(register.mock.calls.map(([request]) => request.more ?? false)).toEqual([false]);
+  });
+
+  it("owes nothing more when a host never restored hears the empty request", async () => {
+    const { db, executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = vi.fn(async (): Promise<KnownBlocksResponse> => {
+      throw new HostError({
+        kind: "api",
+        code: "conflict",
+        status: 409,
+        message: "the host was never restored: it lost no block",
+        details: { constraint: "no_restore" },
+      });
+    });
+    await expect(
+      reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
+    ).resolves.toEqual({ kind: "reconciled", epoch: EPOCH, registered: 0, known: 0, refused: 0 });
+    expect(register.mock.calls).toEqual([[{ blocks: [] }]]);
+    expect(fromZero(db)).toEqual([{ value: EPOCH }]);
+  });
+
+  it("keeps owing when the empty request fails", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = vi.fn(async (): Promise<KnownBlocksResponse> => {
+      throw new HostError({ kind: "transport", code: "unreachable", message: "down" });
+    });
+    await expect(
+      reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
+    ).rejects.toBeInstanceOf(HostError);
+    await expect(restoreDue(executor, PAIRING)).resolves.toBe(true);
+  });
+
+  it("keeps owing when the host answers the empty request with a result", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = vi.fn(async () =>
+      knownBlocksResponseSchema.parse({ results: [{ id: "x", outcome: "known", code: null }] }),
+    );
+    await expect(
+      reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
+    ).rejects.toBeInstanceOf(KnownBlocksMismatchError);
+    await expect(restoreDue(executor, PAIRING)).resolves.toBe(true);
   });
 
   it("keeps owing the blocks when a request fails, and the next run sends them all again", async () => {
@@ -285,6 +400,13 @@ describe("the reconciliation after a restore", () => {
       reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
     ).resolves.toEqual({ kind: "reconciled", epoch: EPOCH, registered: 0, known: 64, refused: 1 });
     expect(register.mock.calls.map(([request]) => request.blocks.length)).toEqual([64, 1, 64, 1]);
+    // The failed run's last part was lost; the new run says `more` on the first part again.
+    expect(register.mock.calls.map(([request]) => request.more ?? false)).toEqual([
+      true,
+      false,
+      true,
+      false,
+    ]);
     expect(epochs(db)).toMatchObject([{ reconciled_at: NOW.toISOString(), refused: 1 }]);
     expect(rows(db, "SELECT acked_at FROM outbox")).toEqual([{ acked_at: null }]);
   });
@@ -683,6 +805,35 @@ describe("the records sent again", () => {
     ]);
   });
 
+  it("leaves a record a person resolved settled: a refusal sent again or taken off goes no second time (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    const [resent = "", dismissed = "", open = ""] = await unsentScans(executor, 3);
+    const inWindow = new Date(NOW.getTime() - 60_000).toISOString();
+    db.prepare(
+      "UPDATE outbox SET outcome = 'rejected', outcome_code = 'not_entered', acked_at = ?",
+    ).run(inWindow);
+    db.prepare(
+      "UPDATE outbox SET resolution = 'resent', resent_as = 'y', resolved_at = ?, " +
+        "resolved_by = 'op-1' WHERE id = ?",
+    ).run(inWindow, resent);
+    db.prepare(
+      "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = 'op-1' " +
+        "WHERE id = ?",
+    ).run(inWindow, dismissed);
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: answering(),
+      now: () => NOW,
+    });
+    expect(rows(db, "SELECT id, outcome, outcome_code FROM outbox ORDER BY seq")).toEqual([
+      { id: resent, outcome: "rejected", outcome_code: "not_entered" },
+      { id: dismissed, outcome: "rejected", outcome_code: "not_entered" },
+      { id: open, outcome: null, outcome_code: null },
+    ]);
+  });
+
   it("leaves the records of another pairing as they are", async () => {
     const { db, executor } = openLocalDb();
     const otherDevice = { ...PAIRING, deviceId: OTHER_DEVICE };
@@ -854,6 +1005,35 @@ describe("the warehouse reprint's records sent again (plan СКЛ)", () => {
     expect(await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW)).toBe(false);
     await expect(run()).resolves.toEqual({ kind: "none" });
     expect(rows(db, "SELECT acked_at FROM wh_outbox")).toEqual([{ acked_at: later }]);
+  });
+
+  // Merge of plans ОЧ and СКЛ: one settling transaction holds both reopenings.
+  it("never reopens a record a person resolved, and still reopens the accepted reprint records beside it", async () => {
+    const { db, executor } = openLocalDb();
+    const [resolved = "", unresolved = ""] = await unsentScans(executor, 2);
+    const inWindow = new Date(NOW.getTime() - 60_000).toISOString();
+    db.prepare(
+      "UPDATE outbox SET outcome = 'rejected', outcome_code = 'not_entered', acked_at = ?",
+    ).run(inWindow);
+    db.prepare(
+      "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = 'op-1' " +
+        "WHERE id = ?",
+    ).run(inWindow, resolved);
+    warehouseRecord(db, "a-accepted", "accepted", inWindow);
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: answering(),
+      now: () => NOW,
+    });
+    expect(rows(db, "SELECT id, outcome, acked_at FROM outbox ORDER BY seq")).toEqual([
+      { id: resolved, outcome: "rejected", acked_at: inWindow },
+      { id: unresolved, outcome: null, acked_at: null },
+    ]);
+    expect(rows(db, "SELECT id, outcome, acked_at FROM wh_outbox")).toEqual([
+      { id: "a-accepted", outcome: null, acked_at: null },
+    ]);
   });
 });
 

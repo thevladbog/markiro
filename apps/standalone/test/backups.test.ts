@@ -67,6 +67,24 @@ describe("backup shapes (proto/fixtures)", () => {
     expect(knownBlocksRequestSchema.safeParse(withNext).success).toBe(false);
     const topLevel = { ...(fixture("known-blocks-request.json") as object), epoch: "5d2c8e1a" };
     expect(knownBlocksRequestSchema.safeParse(topLevel).success).toBe(false);
+    // Plan ХП: a station that never took a block sends an empty list; the host takes 0-64.
+    expect(
+      knownBlocksRequestSchema.parse(fixture("known-blocks-request-empty.json")).blocks,
+    ).toEqual([]);
+    // Plan ОЧ: `more` says parts follow; absent is the last part (an older station).
+    expect(knownBlocksRequestSchema.parse(fixture("known-blocks-request-more.json")).more).toBe(
+      true,
+    );
+    expect(knownBlocksRequestSchema.parse({ blocks: [] })).toEqual({ blocks: [] });
+    expect(knownBlocksRequestSchema.parse({ blocks: [], more: false }).more).toBe(false);
+    expect(knownBlocksRequestSchema.safeParse({ blocks: [], more: "yes" }).success).toBe(false);
+    const block = request.blocks[0];
+    expect(knownBlocksRequestSchema.safeParse({ blocks: Array(64).fill(block) }).success).toBe(
+      true,
+    );
+    expect(knownBlocksRequestSchema.safeParse({ blocks: Array(65).fill(block) }).success).toBe(
+      false,
+    );
     const response = knownBlocksResponseSchema.parse(fixture("known-blocks-response.json"));
     expect(response.results.map((each) => each.outcome)).toEqual([
       "registered",

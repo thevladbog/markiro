@@ -110,6 +110,7 @@ describe("local database on node:sqlite", () => {
       z.object({ name: z.string() }),
     );
     expect(tables.map((table) => table.name)).toEqual([
+      "floor_block_drops",
       "floor_block_requests",
       "floor_boxes",
       "floor_codes",

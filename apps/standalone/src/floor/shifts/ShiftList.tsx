@@ -38,6 +38,8 @@ export interface ShiftListProps {
   onSetup?: () => void;
   /** The warehouse reprint (plan СКЛ); none — no button. */
   onWarehouse?: () => void;
+  /** The queue of what was not sent (plan ОЧ); none — no button. */
+  onQueue?: () => void;
 }
 
 type Copies =
@@ -76,6 +78,7 @@ export function ShiftList({
   onSignOut,
   onSetup,
   onWarehouse,
+  onQueue,
 }: ShiftListProps) {
   const { t } = useTranslation();
   const { hostId, deviceId } = pairing;
@@ -235,6 +238,11 @@ export function ShiftList({
           {onWarehouse !== undefined && (
             <Button size="floor" variant="secondary" disabled={busy} onClick={onWarehouse}>
               {t("floor.warehouse.open")}
+            </Button>
+          )}
+          {onQueue !== undefined && (
+            <Button size="floor" variant="secondary" disabled={busy} onClick={onQueue}>
+              {t("floor.shifts.queue")}
             </Button>
           )}
           {/* Never held by an entry: one that never settles must not trap the station here. */}

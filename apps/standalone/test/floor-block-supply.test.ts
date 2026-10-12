@@ -335,6 +335,35 @@ describe("the supply of SSCC serials", () => {
     }
     expect(rows(db, "SELECT count(*) AS n FROM floor_sscc_blocks")).toEqual([{ n: 0 }]);
     expect(requests(db)).toEqual([]);
+    // Kept for the status bar and support (plan ОЧ): the host's block, once per id.
+    expect(
+      rows(
+        db,
+        "SELECT block_id, issuer_prefix, extension, from_serial, to_serial, reason FROM floor_block_drops",
+      ),
+    ).toEqual([
+      {
+        block_id: BLOCK_ID,
+        issuer_prefix: "460068201",
+        extension: 0,
+        from_serial: 3500,
+        to_serial: 5499,
+        reason: "mismatch",
+      },
+    ]);
+  });
+
+  it("keeps nothing of a request the host refused on requestId: no block came (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    const supply = createBlockSupply(
+      supplyContext(executor, {
+        requestBlock: async () => {
+          throw refusal("validation_failed");
+        },
+      }),
+    );
+    await expect(supply.topUp()).resolves.toEqual({ kind: "failed" });
+    expect(rows(db, "SELECT count(*) AS n FROM floor_block_drops")).toEqual([{ n: 0 }]);
   });
 
   it("hands a refused key to the shell", async () => {
@@ -730,6 +759,100 @@ describe("the block that comes", () => {
         { block_id: OLD_BLOCK, from_serial: from, to_serial: to, next_serial: to + 1 },
       ]);
       expect(requests(db)).toEqual([]);
+      expect(rows(db, "SELECT block_id, reason FROM floor_block_drops"), `${from}-${to}`).toEqual([
+        { block_id: BLOCK_ID, reason: "overlap" },
+      ]);
+      db.prepare("DELETE FROM floor_block_drops").run();
+    }
+  });
+
+  it("keeps the dropped block whole, under this pairing and its request, with the instant it was dropped (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlock(db, { blockId: OLD_BLOCK, from: 3000, to: 3500, next: 3501 });
+    await createBlockSupply(supplyContext(executor)).topUp();
+    expect(
+      rows(
+        db,
+        "SELECT host_id, device_id, block_id, request_id, issuer_prefix, extension, from_serial, " +
+          "to_serial, reason, dropped_at FROM floor_block_drops",
+      ),
+    ).toEqual([
+      {
+        host_id: PAIRING.hostId,
+        device_id: PAIRING.deviceId,
+        block_id: BLOCK_ID,
+        request_id: FIRST_REQUEST,
+        issuer_prefix: PREFIX,
+        extension: 0,
+        from_serial: 3500,
+        to_serial: 5499,
+        reason: "overlap",
+        // The request was kept at 06:15:00; the drop is the next instant asked of the clock.
+        dropped_at: "2026-10-08T06:15:01.000Z",
+      },
+    ]);
+  });
+
+  it("calls a block that is not the one asked for a mismatch even when it also overlaps a kept block (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlock(db, { blockId: OLD_BLOCK, from: 3000, to: 6000, next: 6001 });
+    const supply = createBlockSupply(
+      supplyContext(executor, {
+        // An inverted range inside the kept block's serials.
+        requestBlock: async (request) => ({
+          ...blockFor(request),
+          fromSerial: 5000,
+          toSerial: 4000,
+        }),
+      }),
+    );
+    await expect(supply.topUp()).resolves.toEqual({ kind: "failed" });
+    expect(rows(db, "SELECT block_id, reason FROM floor_block_drops")).toEqual([
+      { block_id: BLOCK_ID, reason: "mismatch" },
+    ]);
+  });
+
+  it("keeps the first record of a block the host brings twice, not the second (plan ОЧ)", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlock(db, { blockId: OLD_BLOCK, from: 3000, to: 3500, next: 3501 });
+    const supply = createBlockSupply(supplyContext(executor, { newId: () => crypto.randomUUID() }));
+    await supply.topUp();
+    // The kept block goes; the same block id now comes inverted: it is the same fact once.
+    db.prepare("DELETE FROM floor_sscc_blocks").run();
+    const again = createBlockSupply(
+      supplyContext(executor, {
+        newId: () => crypto.randomUUID(),
+        requestBlock: async (request) => ({ ...blockFor(request), toSerial: 3499 }),
+      }),
+    );
+    await expect(again.topUp()).resolves.toEqual({ kind: "failed" });
+    expect(rows(db, "SELECT block_id, to_serial, reason FROM floor_block_drops")).toEqual([
+      { block_id: BLOCK_ID, to_serial: 5499, reason: "overlap" },
+    ]);
+    expect(requests(db)).toEqual([]);
+  });
+
+  it("is never dropped without the block kept, nor kept without the request gone (plan ОЧ)", async () => {
+    for (const [name, broken] of [
+      ["the block's record fails", /INSERT INTO floor_block_drops/],
+      ["the request's removal fails", /DELETE FROM floor_block_requests/],
+    ] as const) {
+      const { db, executor } = openLocalDb();
+      seedBlock(db, { blockId: OLD_BLOCK, from: 3000, to: 3500, next: 3501 });
+      const breaking = breakingOn(executor, broken);
+      const supply = createBlockSupply(supplyContext(breaking.executor));
+      await expect(supply.topUp(), name).rejects.toMatchObject({ code: "statement_failed" });
+      expect(rows(db, "SELECT count(*) AS n FROM floor_block_drops"), name).toEqual([{ n: 0 }]);
+      expect(requests(db), name).toEqual([
+        { request_id: FIRST_REQUEST, issuer_prefix: PREFIX, extension: 0 },
+      ]);
+      // The same request is asked again; the host's answer is dropped and kept, once.
+      breaking.heal();
+      await expect(supply.topUp(), name).resolves.toEqual({ kind: "failed" });
+      expect(rows(db, "SELECT request_id, reason FROM floor_block_drops"), name).toEqual([
+        { request_id: FIRST_REQUEST, reason: "overlap" },
+      ]);
+      expect(requests(db), name).toEqual([]);
     }
   });
 
@@ -872,6 +995,8 @@ describe("a call to the host that does not end in a block", () => {
       expect(requestBlock).toHaveBeenCalledTimes(1);
       expect(context.onHostError).not.toHaveBeenCalled();
       expect(requests(db)).toEqual([]);
+      // No block came: nothing to keep for the status bar (plan ОЧ).
+      expect(rows(db, "SELECT count(*) AS n FROM floor_block_drops")).toEqual([{ n: 0 }]);
     },
   );
 

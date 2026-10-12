@@ -67,6 +67,7 @@ pub enum TableClass {
 /// database»), and keeping the lockout counters across a forget is an open
 /// owner question.
 pub const TABLE_CLASSES: &[(&str, TableClass)] = &[
+    ("floor_block_drops", TableClass::DeviceData),
     ("floor_block_requests", TableClass::DeviceData),
     ("floor_boxes", TableClass::DeviceData),
     ("floor_codes", TableClass::DeviceData),
@@ -483,8 +484,10 @@ async fn count_unsent(
             .fetch_one(&mut *connection)
             .await
             .map_err(failed)?,
+            // `INDEXED BY`: since migration `0010` the planner prefers the covering
+            // `outbox_shift`, which walks the settled records too (pinned in `tests/local_db.rs`).
             UnsentGuard::AnyPairing => sqlx::query_scalar(&format!(
-                "SELECT count(*) FROM {table} WHERE acked_at IS NULL"
+                "SELECT count(*) FROM {table} INDEXED BY {table}_unsent WHERE acked_at IS NULL"
             ))
             .fetch_one(&mut *connection)
             .await

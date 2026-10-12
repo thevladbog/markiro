@@ -69,6 +69,8 @@ interface Options {
   onSetup?: () => void;
   /** The warehouse reprint's entry (plan СКЛ); none — no button. */
   onWarehouse?: () => void;
+  /** The queue of what was not sent (plan ОЧ); none — no button. */
+  onQueue?: () => void;
 }
 
 function listOf(local: LocalExecutor, handlers: ReturnType<typeof handlersOf>, options: Options) {
@@ -89,6 +91,7 @@ function listOf(local: LocalExecutor, handlers: ReturnType<typeof handlersOf>, o
         onSignOut={handlers.onSignOut}
         {...(options.onSetup === undefined ? {} : { onSetup: options.onSetup })}
         {...(options.onWarehouse === undefined ? {} : { onWarehouse: options.onWarehouse })}
+        {...(options.onQueue === undefined ? {} : { onQueue: options.onQueue })}
       />
     </ThemeProvider>
   );
@@ -939,5 +942,47 @@ describe("the warehouse reprint's entry (plan СКЛ)", () => {
       "disabled",
       false,
     );
+  });
+});
+
+describe("the queue's entry (plan ОЧ)", () => {
+  it("opens the queue of what was not sent, and offers no button without it", async () => {
+    const { executor } = openLocalDb();
+    const onQueue = vi.fn();
+    const { view } = renderList(executor, { onQueue });
+    const queue = await screen.findByRole("button", { name: "Очередь отправки" });
+    expect(queue.className).toContain("mk-btn--floor");
+    fireEvent.click(queue);
+    expect(onQueue).toHaveBeenCalledTimes(1);
+    view.unmount();
+    renderList(executor);
+    await screen.findByRole("button", { name: "Новая смена" });
+    expect(screen.queryByRole("button", { name: "Очередь отправки" })).toBeNull();
+  });
+
+  it("is open without the host: what was not sent is read on this computer", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    const onQueue = vi.fn();
+    renderList(executor, {
+      online: false,
+      onQueue,
+      enter: () => new Promise<EnteredShift>(() => undefined),
+    });
+    const queue = await screen.findByRole("button", { name: "Очередь отправки" });
+    expect(queue).toHaveProperty("disabled", false);
+    fireEvent.click(queue);
+    expect(onQueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("is held while a shift is being entered", async () => {
+    const { executor } = await copiesOf([PLANNED]);
+    renderList(executor, {
+      onQueue: vi.fn(),
+      enter: () => new Promise<EnteredShift>(() => undefined),
+    });
+    const queue = await screen.findByRole("button", { name: "Очередь отправки" });
+    fireEvent.click(await screen.findByRole("button", { name: "Открыть" }));
+    await screen.findByText("Открываем смену…");
+    expect(queue).toHaveProperty("disabled", true);
   });
 });

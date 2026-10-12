@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useEffect, type ComponentType } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -133,6 +133,7 @@ interface Options {
   idleTimeoutMs?: number;
   workScreen?: ComponentType<WorkScreenProps>;
   warehouseLookup?: (lookup: WarehouseLookup) => Promise<WarehouseLookupResult>;
+  outboxVersion?: number;
 }
 
 function floorOf(
@@ -151,6 +152,7 @@ function floorOf(
         shiftReads={options.shiftReads ?? { done: 1, failed: false }}
         lineChangePending={options.lineChangePending ?? false}
         rejectionPending={options.rejectionPending ?? false}
+        {...(options.outboxVersion === undefined ? {} : { outboxVersion: options.outboxVersion })}
         enter={handlers.enter}
         create={handlers.create}
         checkCode={handlers.checkCode}
@@ -767,6 +769,84 @@ describe("the workstation setup on the floor", () => {
       sessionId: 1,
       shiftId: PLANNED.id,
     });
+  });
+});
+
+describe("the queue of what was not sent on the floor (plan ОЧ)", () => {
+  it("opens from the list of shifts and comes back to it, telling the shell of no work", async () => {
+    const handlers = handlersOf();
+    render(floorOf(await floorCopies(), handlers));
+    fireEvent.click(await screen.findByRole("button", { name: "Очередь отправки" }));
+    expect(await screen.findByRole("heading", { name: "Очередь отправки" })).toBeTruthy();
+    expect(await screen.findByText("Все записи отправлены.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Назад" }));
+    expect(await screen.findByRole("heading", { name: "Смены линии" })).toBeTruthy();
+    expect(types(handlers)).not.toContain("work_entered");
+    expect(types(handlers)).not.toContain("work_left");
+  });
+
+  it("tells the shell and asks for the outbox when a decision is written, and shows the link", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: async () => ({ hostId: HOST_ID, rev: 10, hasMore: false, items: [OPERATOR] }),
+      local: executor,
+      ...PAIRING,
+    });
+    await replaceShiftCopies(executor, PAIRING, [PLANNED], SEEN);
+    db.prepare(
+      "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, outcome_code, acked_at) " +
+        "VALUES ('r1', ?, ?, 'scan', ?, '{}', '2026-10-08T06:20:00.000Z', 'rejected', 'not_entered', '2026-10-08T06:30:00.000Z')",
+    ).run(HOST_ID, DEVICE_ID, PLANNED.id);
+    const handlers = handlersOf();
+    render(floorOf(executor, handlers));
+    fireEvent.click(await screen.findByRole("button", { name: "Очередь отправки" }));
+    expect(await screen.findByText("На связи с хостом")).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Снять с очереди" }));
+    const confirm = await screen.findByRole("group", { name: "Подтверждение" });
+    // The press guard of the question: the second tap of a double tap decides nothing.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 450));
+    });
+    fireEvent.click(within(confirm).getByRole("button", { name: "Снять" }));
+    expect(await screen.findByText("Запись снята с очереди.")).toBeTruthy();
+    expect(types(handlers)).toContain("outbox_changed");
+    expect(handlers.requestFacts).toHaveBeenCalledTimes(1);
+    expect(
+      db.prepare("SELECT resolution, resolved_by FROM outbox WHERE id = 'r1'").get(),
+    ).toMatchObject({ resolution: "dismissed", resolved_by: ANNA.id });
+  });
+
+  it("reads the queue again when the shell says the outbox changed", async () => {
+    const { db, executor } = openLocalDb();
+    await syncReferences({
+      changes: async () => ({ hostId: HOST_ID, rev: 10, hasMore: false, items: [OPERATOR] }),
+      local: executor,
+      ...PAIRING,
+    });
+    await replaceShiftCopies(executor, PAIRING, [PLANNED], SEEN);
+    const handlers = handlersOf();
+    const view = render(floorOf(executor, handlers, { outboxVersion: 0 }));
+    fireEvent.click(await screen.findByRole("button", { name: "Очередь отправки" }));
+    await screen.findByText("Отклонённых записей нет.");
+    db.prepare(
+      "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, outcome, outcome_code, acked_at) " +
+        "VALUES ('r2', ?, ?, 'scan', ?, '{}', '2026-10-08T06:20:00.000Z', 'rejected', 'gtin_mismatch', '2026-10-08T06:30:00.000Z')",
+    ).run(HOST_ID, DEVICE_ID, PLANNED.id);
+    view.rerender(floorOf(executor, handlers, { outboxVersion: 1 }));
+    expect(await screen.findByText("Код другого товара, не товара смены")).toBeTruthy();
+  });
+
+  it("signs the operator out as idle in the queue as on the list", async () => {
+    const local = await floorCopies();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const handlers = handlersOf();
+    render(floorOf(local, handlers, { idleTimeoutMs: 3_000 }));
+    fireEvent.click(await screen.findByRole("button", { name: "Очередь отправки" }));
+    await screen.findByRole("heading", { name: "Очередь отправки" });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3_100);
+    });
+    expect(handlers.onSignOut).toHaveBeenCalledWith("idle");
   });
 });
 

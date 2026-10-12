@@ -66,6 +66,7 @@ async fn opening_creates_the_reference_tables_in_wal_mode_and_keeps_data() {
     assert_eq!(
         names,
         [
+            "floor_block_drops",
             "floor_block_requests",
             "floor_boxes",
             "floor_codes",
@@ -372,12 +373,475 @@ async fn migration_0009_keeps_the_rows_of_a_database_of_0008() {
                 .map(|migration| json!({ "version": migration.version, "success": 1 }))
                 .collect()
         ),
-        // Parallel plans take numbers out of order (plan СКЛ takes `0012`
-        // before `0010`/`0011` may land): the journal is the migrator's own list.
-        "every migration is journaled once, in order"
+        // Parallel plans take numbers out of order (plan СКЛ takes `0012` and plan ОЧ `0013`
+        // while `0011` is absent): the journal is the migrator's own list, gaps are legal.
+        "every migration is journaled once, in order (the numbers may have gaps)"
     );
     assert!(MIGRATOR.iter().any(|migration| migration.version == 9));
     assert!(MIGRATOR.iter().any(|migration| migration.version == 12));
+}
+
+/// Migration `0010` over a station's database of `0009` (plan ХП): the shell's own SQLite adds
+/// the three indexes by shift the retention's deletes search, and every row stays as it was.
+#[tokio::test]
+async fn migration_0010_adds_the_shift_indexes_and_keeps_every_row() {
+    let dir = tempfile::tempdir().unwrap();
+    let until_0009: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version <= 9)
+        .cloned()
+        .collect();
+    assert_eq!(until_0009.len(), 9, "migrations 0001 to 0009 exist");
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(until_0009),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    for sql in [
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, acked_at) VALUES ('record-1', 'host', 'device', 'shift_closed', 'shift-1', \
+         '{}', '2026-10-09T08:00:00.000Z', 'accepted', '2026-10-09T08:00:05.000Z')",
+        "INSERT INTO floor_exceptions (id, host_id, device_id, shift_id, kind, box_id, \
+         occurred_at) VALUES ('exception-1', 'host', 'device', 'shift-1', 'clear', 'box-1', \
+         '2026-10-09T08:00:00.000Z')",
+        "INSERT INTO floor_pallet_exceptions (id, host_id, device_id, shift_id, kind, pallet_id, \
+         reason_code, occurred_at) VALUES ('pallet-exception-1', 'host', 'device', 'shift-1', \
+         'reprint', 'pallet-1', 'damaged_label', '2026-10-09T08:00:00.000Z')",
+    ] {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    raw.close().await.unwrap();
+
+    // The application opens the file as it starts: it applies what is pending.
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    let indexes = db
+        .query(
+            "SELECT name, tbl_name FROM sqlite_master WHERE type = 'index' AND name IN \
+             ('outbox_shift', 'floor_exceptions_shift', 'floor_pallet_exceptions_shift') \
+             ORDER BY name",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(indexes.into_iter().map(Value::Object).collect()),
+        json!([
+            { "name": "floor_exceptions_shift", "tbl_name": "floor_exceptions" },
+            { "name": "floor_pallet_exceptions_shift", "tbl_name": "floor_pallet_exceptions" },
+            { "name": "outbox_shift", "tbl_name": "outbox" }
+        ])
+    );
+    for table in ["outbox", "floor_exceptions", "floor_pallet_exceptions"] {
+        assert_eq!(count(&db, table).await, json!(1), "{table} keeps its row");
+    }
+    assert!(MIGRATOR.iter().any(|migration| migration.version == 10));
+}
+
+/// Migration `0013` over a station's database of the migrations before it that holds a refused
+/// record: the record stays as it was with no resolution, a resolution takes only `resent` or
+/// `dismissed`, and the table of the blocks the station did not take exists and is the device's
+/// own data (plan ОЧ, additive). Migrations `0011` and `0012` belong to other plans: the numbers
+/// may have gaps, and the journal lists the migrations there are.
+#[tokio::test]
+async fn migration_0013_keeps_the_outbox_and_adds_its_resolution() {
+    let dir = tempfile::tempdir().unwrap();
+    let before: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version < 13)
+        .cloned()
+        .collect();
+    assert!(before.iter().any(|migration| migration.version == 9));
+    assert!(before.iter().any(|migration| migration.version == 10));
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(before),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    for sql in [
+        // A waiting, an accepted, a refused and a conflicting record: the CHECK on the new
+        // column must take every row that exists.
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) \
+         VALUES ('record-0', 'host', 'device', 'scan', 'shift-1', '{}', \
+         '2026-10-09T07:59:00.000Z')",
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, acked_at) VALUES ('record-2', 'host', 'device', 'scan', 'shift-1', '{}', \
+         '2026-10-09T08:00:30.000Z', 'accepted', '2026-10-09T08:00:35.000Z')",
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, outcome_code, acked_at) VALUES ('record-1', 'host', 'device', 'scan', \
+         'shift-1', '{}', '2026-10-09T08:00:00.000Z', 'rejected', 'not_entered', \
+         '2026-10-09T08:00:05.000Z')",
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, outcome_code, outcome_details, acked_at) VALUES ('record-3', 'host', \
+         'device', 'scan', 'shift-1', '{}', '2026-10-09T08:01:00.000Z', 'conflict', \
+         'duplicate', '{}', '2026-10-09T08:01:05.000Z')",
+    ] {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    raw.close().await.unwrap();
+
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    let records = db
+        .query(
+            "SELECT id, outcome, outcome_code, resolution, resent_as, resolved_at, resolved_by \
+             FROM outbox ORDER BY seq",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(records.into_iter().map(Value::Object).collect()),
+        json!([
+            {
+                "id": "record-0", "outcome": null, "outcome_code": null,
+                "resolution": null, "resent_as": null, "resolved_at": null, "resolved_by": null
+            },
+            {
+                "id": "record-2", "outcome": "accepted", "outcome_code": null,
+                "resolution": null, "resent_as": null, "resolved_at": null, "resolved_by": null
+            },
+            {
+                "id": "record-1", "outcome": "rejected", "outcome_code": "not_entered",
+                "resolution": null, "resent_as": null, "resolved_at": null, "resolved_by": null
+            },
+            {
+                "id": "record-3", "outcome": "conflict", "outcome_code": "duplicate",
+                "resolution": null, "resent_as": null, "resolved_at": null, "resolved_by": null
+            }
+        ])
+    );
+    for word in ["later", "forgotten", "", "Resent"] {
+        assert!(
+            db.transaction(vec![expecting(
+                "UPDATE outbox SET resolution = ? WHERE id = 'record-1'",
+                json!([word]),
+                1,
+            )])
+            .await
+            .is_err(),
+            "{word:?} is no resolution"
+        );
+    }
+    for resolution in ["resent", "dismissed"] {
+        db.transaction(vec![expecting(
+            "UPDATE outbox SET resolution = ?, resolved_at = '2026-10-11T08:00:00.000Z', \
+             resolved_by = 'op-1' WHERE id = 'record-1'",
+            json!([resolution]),
+            1,
+        )])
+        .await
+        .unwrap();
+    }
+    assert_eq!(count(&db, "floor_block_drops").await, json!(0));
+    assert_eq!(
+        table_class("floor_block_drops"),
+        Some(TableClass::DeviceData)
+    );
+    // One row per block and pairing; the reason is `overlap` or `mismatch`; an inverted range
+    // is what such a row may hold.
+    let drop = |block: &str, device: &str, reason: &str| {
+        expecting(
+            "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, \
+             issuer_prefix, extension, from_serial, to_serial, reason, dropped_at) \
+             VALUES ('host', ?, ?, 'request-1', '460068200', 0, 5499, 3500, ?, \
+             '2026-10-11T08:00:00.000Z')",
+            json!([device, block, reason]),
+            1,
+        )
+    };
+    db.transaction(vec![drop("block-1", "device", "mismatch")])
+        .await
+        .unwrap();
+    db.transaction(vec![drop("block-1", "other", "overlap")])
+        .await
+        .unwrap();
+    db.transaction(vec![drop("block-2", "device", "overlap")])
+        .await
+        .unwrap();
+    assert!(db
+        .transaction(vec![statement(
+            "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, \
+             issuer_prefix, extension, from_serial, to_serial, reason, dropped_at) \
+             VALUES ('host', 'device', 'block-5', NULL, '460068200', 0, 1, 2, 'overlap', \
+             '2026-10-11T08:00:00.000Z')",
+            json!([]),
+        )])
+        .await
+        .is_err());
+    assert!(db
+        .transaction(vec![drop("block-1", "device", "overlap")])
+        .await
+        .is_err());
+    assert!(db
+        .transaction(vec![drop("block-6", "device", "lost")])
+        .await
+        .is_err());
+    let journal = db
+        .query(
+            "SELECT version, success FROM _sqlx_migrations ORDER BY version",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(journal.into_iter().map(Value::Object).collect()),
+        Value::Array(
+            MIGRATOR
+                .iter()
+                .map(|migration| json!({ "version": migration.version, "success": 1 }))
+                .collect()
+        ),
+        "every migration there is is journaled once"
+    );
+    assert!(MIGRATOR.iter().any(|migration| migration.version == 13));
+}
+
+/// The upgrade paths of the merged branch (plans ХП, СКЛ and ОЧ take `0010`, `0012` and `0013`;
+/// `0011` is absent): a station of `0009` goes through `0010` and then, in one start, takes
+/// `0012` and `0013` together; a station that was already at `0010` takes the two the same way.
+/// Each path keeps the rows that exist and journals exactly the migrator's own list.
+#[tokio::test]
+async fn a_station_of_0009_or_0010_takes_0012_and_0013_in_one_start() {
+    for until in [9_i64, 10] {
+        let dir = tempfile::tempdir().unwrap();
+        let before: Vec<_> = MIGRATOR
+            .iter()
+            .filter(|migration| migration.version <= until)
+            .cloned()
+            .collect();
+        assert!(
+            before
+                .iter()
+                .all(|migration| migration.version != 12 && migration.version != 13),
+            "the starting database has neither 0012 nor 0013"
+        );
+        let mut raw = SqliteConnectOptions::new()
+            .filename(dir.path().join(FILE_NAME))
+            .create_if_missing(true)
+            .connect()
+            .await
+            .unwrap();
+        sqlx::migrate::Migrator {
+            migrations: std::borrow::Cow::Owned(before),
+            ..sqlx::migrate::Migrator::DEFAULT
+        }
+        .run(&mut raw)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+             outcome, outcome_code, acked_at) VALUES ('record-1', 'host', 'device', 'scan', \
+             'shift-1', '{}', '2026-10-09T08:00:00.000Z', 'rejected', 'not_entered', \
+             '2026-10-09T08:00:05.000Z')",
+        )
+        .execute(&mut raw)
+        .await
+        .unwrap();
+        raw.close().await.unwrap();
+
+        let db = LocalDb::open(dir.path()).await.unwrap();
+        let journal = db
+            .query(
+                "SELECT version, success FROM _sqlx_migrations ORDER BY version",
+                vec![],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            Value::Array(journal.into_iter().map(Value::Object).collect()),
+            Value::Array(
+                MIGRATOR
+                    .iter()
+                    .map(|migration| json!({ "version": migration.version, "success": 1 }))
+                    .collect()
+            ),
+            "from {until}: every migration is journaled once"
+        );
+        assert_eq!(count(&db, "outbox").await, json!(1), "from {until}");
+        assert_eq!(
+            count(&db, "wh_sessions").await,
+            json!(0),
+            "0012 from {until}"
+        );
+        assert_eq!(
+            count(&db, "floor_block_drops").await,
+            json!(0),
+            "0013 from {until}"
+        );
+        let kept = db
+            .query("SELECT resolution, resolved_at FROM outbox", vec![])
+            .await
+            .unwrap();
+        assert_eq!(
+            Value::Array(kept.into_iter().map(Value::Object).collect()),
+            json!([{ "resolution": null, "resolved_at": null }]),
+            "the refusal stays unresolved (from {until})"
+        );
+        let indexes = db
+            .query(
+                "SELECT name FROM sqlite_master WHERE type = 'index' AND name IN \
+                 ('outbox_shift', 'wh_outbox_accepted') ORDER BY name",
+                vec![],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            indexes.len(),
+            2,
+            "from {until}: the indexes of 0010 and 0012 exist"
+        );
+    }
+}
+
+/// And the other way round: a database that already holds `0012` and `0013` (a station of the
+/// two plans without `0010`) takes `0010` late and keeps what is there.
+#[tokio::test]
+async fn a_database_with_0012_and_0013_takes_0010_late() {
+    let dir = tempfile::tempdir().unwrap();
+    let without_0010: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version != 10)
+        .cloned()
+        .collect();
+    assert_eq!(without_0010.len() + 1, MIGRATOR.iter().count());
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(without_0010),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, outcome_code, acked_at, resolution, resolved_at, resolved_by) VALUES \
+         ('record-1', 'host', 'device', 'scan', 'shift-1', '{}', '2026-10-09T08:00:00.000Z', \
+         'rejected', 'not_entered', '2026-10-09T08:00:05.000Z', 'dismissed', \
+         '2026-10-11T08:00:00.000Z', 'op-1')",
+    )
+    .execute(&mut raw)
+    .await
+    .unwrap();
+    raw.close().await.unwrap();
+
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    let journal = db
+        .query(
+            "SELECT version FROM _sqlx_migrations ORDER BY version",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(journal.into_iter().map(Value::Object).collect()),
+        Value::Array(
+            MIGRATOR
+                .iter()
+                .map(|migration| json!({ "version": migration.version }))
+                .collect()
+        ),
+    );
+    let index = db
+        .query(
+            "SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'outbox_shift'",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(index.len(), 1, "0010 ran late");
+    let kept = db
+        .query("SELECT resolution, resolved_by FROM outbox", vec![])
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(kept.into_iter().map(Value::Object).collect()),
+        json!([{ "resolution": "dismissed", "resolved_by": "op-1" }]),
+        "a resolved record stays resolved"
+    );
+}
+
+/// The shell's migrator takes a migration with lower numbers missing and applies a lower one
+/// that arrives later (plan ОЧ takes `0013` while `0011` and `0012` belong to other streams): a
+/// database that holds `0013` but not `0009` is opened by the full list, which applies `0009`
+/// and leaves what is there as it is.
+#[tokio::test]
+async fn a_lower_migration_that_arrives_after_a_higher_one_is_applied() {
+    let dir = tempfile::tempdir().unwrap();
+    let without_0009: Vec<_> = MIGRATOR
+        .iter()
+        .filter(|migration| migration.version != 9)
+        .cloned()
+        .collect();
+    assert!(without_0009.iter().any(|migration| migration.version == 13));
+    let mut raw = SqliteConnectOptions::new()
+        .filename(dir.path().join(FILE_NAME))
+        .create_if_missing(true)
+        .connect()
+        .await
+        .unwrap();
+    sqlx::migrate::Migrator {
+        migrations: std::borrow::Cow::Owned(without_0009),
+        ..sqlx::migrate::Migrator::DEFAULT
+    }
+    .run(&mut raw)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, \
+         outcome, outcome_code, acked_at) VALUES ('record-1', 'host', 'device', 'scan', \
+         'shift-1', '{}', '2026-10-09T08:00:00.000Z', 'rejected', 'not_entered', \
+         '2026-10-09T08:00:05.000Z')",
+    )
+    .execute(&mut raw)
+    .await
+    .unwrap();
+    let missing: Option<(String,)> =
+        sqlx::query_as("SELECT name FROM sqlite_master WHERE name = 'floor_restore_epochs'")
+            .fetch_optional(&mut raw)
+            .await
+            .unwrap();
+    assert_eq!(missing, None, "0009 has not been applied");
+    raw.close().await.unwrap();
+
+    let db = LocalDb::open(dir.path()).await.unwrap();
+    assert_eq!(count(&db, "floor_restore_epochs").await, json!(0));
+    assert_eq!(count(&db, "outbox").await, json!(1));
+    let journal = db
+        .query(
+            "SELECT version FROM _sqlx_migrations ORDER BY version",
+            vec![],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        Value::Array(journal.into_iter().map(Value::Object).collect()),
+        Value::Array(
+            MIGRATOR
+                .iter()
+                .map(|migration| json!({ "version": migration.version }))
+                .collect()
+        ),
+    );
 }
 
 #[tokio::test]
@@ -701,7 +1165,7 @@ async fn every_table_has_a_forget_class() {
         "TABLE_CLASSES names each table of the migrations once, and nothing else"
     );
     // This device's own records are the production tables of `0006`, the
-    // print jobs of `0007` and the pallets of `0008`; the sign-in lockouts
+    // print jobs of `0007`, the pallets of `0008` and the dropped blocks of `0013`; the sign-in lockouts
     // stay with the copies (an open owner question); the workstation's
     // settings belong to the PC.
     let device_data: Vec<&str> = TABLE_CLASSES
@@ -712,6 +1176,7 @@ async fn every_table_has_a_forget_class() {
     assert_eq!(
         device_data,
         [
+            "floor_block_drops",
             "floor_block_requests",
             "floor_boxes",
             "floor_codes",
@@ -840,6 +1305,7 @@ async fn clearing_the_copies_empties_the_disposable_tables_and_nothing_else() {
     // The rows of this device's own stay whatever `TABLE_CLASSES` says, named
     // here once more so the check does not follow the list it checks.
     for table in [
+        "floor_block_drops",
         "floor_block_requests",
         "floor_boxes",
         "floor_codes",
@@ -914,7 +1380,7 @@ fn outbox_record(id: &str, host: &str, device: &str, acked: Option<&str>) -> Loc
 }
 
 /// One row in each table of this device's own records (migrations
-/// `0006`–`0008` and `0012`), each of the pairing `(HOST, DEVICE)`, as the floor's
+/// `0006`–`0008`, `0012` and `0013`), each of the pairing `(HOST, DEVICE)`, as the floor's
 /// writers will write them through `local_transaction`.
 fn device_records() -> Vec<LocalStatement> {
     vec![
@@ -938,6 +1404,13 @@ fn device_records() -> Vec<LocalStatement> {
             "INSERT INTO floor_block_requests (request_id, host_id, device_id, issuer_prefix, \
              extension, requested_at) VALUES ('request-1', ?, ?, '460068200', 0, \
              '2026-10-08T06:02:02.000Z')",
+            json!([HOST, DEVICE]),
+        ),
+        statement(
+            "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, \
+             issuer_prefix, extension, from_serial, to_serial, reason, dropped_at) \
+             VALUES (?, ?, 'block-2', 'request-0', '460068200', 0, 1500, 2000, 'overlap', \
+             '2026-10-08T06:02:03.000Z')",
             json!([HOST, DEVICE]),
         ),
         statement(
@@ -1273,19 +1746,24 @@ const DUE_SHIFTS: &str =
      (SELECT 1 FROM floor_shifts s WHERE s.host_id = o.host_id AND s.device_id = o.device_id \
      AND s.id = o.shift_id) AND NOT EXISTS (SELECT 1 FROM outbox u WHERE u.host_id = \
      o.host_id AND u.device_id = o.device_id AND u.shift_id = o.shift_id AND u.acked_at IS \
-     NULL) AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE j.host_id = o.host_id AND \
-     j.device_id = o.device_id AND j.shift_id = o.shift_id AND (state IN ('prepared', \
-     'sending', 'failed', 'unknown') OR (state = 'sent' AND verify = 1)))";
+     NULL) AND NOT EXISTS (SELECT 1 FROM outbox r WHERE r.host_id = o.host_id AND \
+     r.device_id = o.device_id AND r.shift_id = o.shift_id AND r.outcome IN ('rejected', \
+     'conflict') AND r.resolved_at IS NULL) AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j \
+     WHERE j.host_id = o.host_id AND j.device_id = o.device_id AND j.shift_id = o.shift_id \
+     AND (state IN ('prepared', 'sending', 'failed', 'unknown') OR (state = 'sent' AND \
+     verify = 1)))";
 const PURGE_COPY: &str =
     "DELETE FROM floor_shifts AS s WHERE s.id = ? AND s.host_id = ? AND s.device_id = ? \
      AND EXISTS (SELECT 1 FROM outbox o WHERE o.host_id = s.host_id AND o.device_id = \
      s.device_id AND o.shift_id = s.id AND o.kind = 'shift_closed' AND o.outcome = \
      'accepted' AND o.acked_at <= ?) AND NOT EXISTS (SELECT 1 FROM outbox o WHERE \
      o.host_id = s.host_id AND o.device_id = s.device_id AND o.shift_id = s.id AND \
-     o.acked_at IS NULL) AND NOT EXISTS (SELECT 1 FROM floor_print_jobs j WHERE \
-     j.host_id = s.host_id AND j.device_id = s.device_id AND j.shift_id = s.id AND \
-     (state IN ('prepared', 'sending', 'failed', 'unknown') OR (state = 'sent' AND \
-     verify = 1)))";
+     o.acked_at IS NULL) AND NOT EXISTS (SELECT 1 FROM outbox r WHERE r.host_id = \
+     s.host_id AND r.device_id = s.device_id AND r.shift_id = s.id AND r.outcome IN \
+     ('rejected', 'conflict') AND r.resolved_at IS NULL) AND NOT EXISTS (SELECT 1 FROM \
+     floor_print_jobs j WHERE j.host_id = s.host_id AND j.device_id = s.device_id AND \
+     j.shift_id = s.id AND (state IN ('prepared', 'sending', 'failed', 'unknown') OR \
+     (state = 'sent' AND verify = 1)))";
 
 /// The shift list's read of the refused closes (`readRefusedCloses` in `src/floor/close/shift-close.ts`,
 /// plan 2a8): it runs again on every bump of the outbox while the list is shown, a reconnect's every
@@ -1293,7 +1771,7 @@ const PURGE_COPY: &str =
 /// checks that it appears here word for word.
 const REFUSED_CLOSES: &str =
     "SELECT shift_id, outcome_code AS code FROM outbox WHERE host_id = ? AND device_id = ? \
-     AND kind = 'shift_closed' AND outcome = 'rejected' ORDER BY seq";
+     AND kind = 'shift_closed' AND outcome = 'rejected' AND resolved_at IS NULL ORDER BY seq";
 
 /// What a station owes a host restored from a copy (`src/local/restore-reconcile.ts`, plan РК-С):
 /// the obligation, read on every bump of the status bar, the blocks the station sends back, the
@@ -1314,7 +1792,8 @@ const RESTORE_RETIRE: &str =
      AND block_id IN (SELECT value FROM json_each(?))";
 const RESTORE_REOPEN: &str =
     "UPDATE outbox SET outcome = NULL, outcome_code = NULL, outcome_details = NULL, acked_at = \
-     NULL WHERE host_id = ? AND device_id = ? AND outcome IS NOT NULL AND acked_at >= ?";
+     NULL WHERE host_id = ? AND device_id = ? AND outcome IS NOT NULL AND acked_at >= ? \
+     AND resolved_at IS NULL";
 /// The warehouse reprint's records the host accepted in the window (plan СКЛ), sent again in the
 /// same transaction.
 const RESTORE_REOPEN_WAREHOUSE: &str =
@@ -1327,6 +1806,58 @@ const RESTORE_RECONCILED_AT: &str =
 const RESTORE_SETTLE: &str =
     "UPDATE floor_restore_epochs SET reconciled_at = ?, refused = ?, refused_blocks = ? WHERE \
      host_id = ? AND device_id = ? AND epoch = ? AND reconciled_at IS NULL";
+
+/// The queue screen (plan ОЧ; `src/floor/queue/outbox-recovery.ts`): read on opening, written on a
+/// person's press. `test/floor-schema.test.ts` plans the same texts on the Node runtime's SQLite
+/// and checks that they appear here word for word.
+const QUEUE_UNSENT: &str =
+    "SELECT kind, count(*) AS n, min(created_at) AS oldest FROM outbox WHERE host_id = ? \
+     AND device_id = ? AND acked_at IS NULL GROUP BY kind";
+/// The bounded list (the final review's I-1): at most the bound of each shift's refused and of its
+/// conflicting records, numbered in one sort; only those are looked up and joined.
+const QUEUE_SETTLED: &str =
+    "SELECT o.id, o.seq, o.kind, o.shift_id, s.number AS shift_number, o.created_at, o.outcome, \
+     o.outcome_code AS code, coalesce(o.payload ->> '$.data.sscc', b.sscc, p.sscc) AS sscc \
+     FROM (SELECT seq, row_number() OVER (PARTITION BY shift_id, outcome ORDER BY seq) AS place \
+     FROM outbox WHERE host_id = ? AND device_id = ? AND outcome IN ('rejected', 'conflict') \
+     AND resolved_at IS NULL) AS f JOIN outbox o ON o.seq = f.seq \
+     LEFT JOIN floor_shifts s ON s.host_id = o.host_id \
+     AND s.device_id = o.device_id AND s.id = o.shift_id \
+     LEFT JOIN floor_boxes b ON b.id = (o.payload ->> '$.data.boxId') \
+     LEFT JOIN floor_pallets p ON p.id = (o.payload ->> '$.data.palletId') \
+     WHERE f.place <= ?";
+/// Every unresolved refused and conflicting record counted by shift, outcome and kind.
+const QUEUE_TALLY: &str =
+    "SELECT shift_id, outcome, kind, count(*) AS n FROM outbox WHERE host_id = ? \
+     AND device_id = ? AND outcome IN ('rejected', 'conflict') AND resolved_at IS NULL \
+     GROUP BY shift_id, outcome, kind";
+/// Every refused record of one shift taken off at once, never its close.
+const QUEUE_DISMISS_SHIFT: &str =
+    "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = ? \
+     WHERE host_id = ? AND device_id = ? AND shift_id = ? AND outcome = 'rejected' \
+     AND kind <> 'shift_closed' AND resolved_at IS NULL";
+const QUEUE_RESEND_READ: &str =
+    "SELECT id, payload FROM outbox WHERE host_id = ? AND device_id = ? AND shift_id = ? \
+     AND outcome = 'rejected' AND resolved_at IS NULL ORDER BY seq";
+const QUEUE_RESEND_INSERT: &str =
+    "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at) \
+     SELECT r.value ->> 'newId', o.host_id, o.device_id, o.kind, o.shift_id, \
+     r.value ->> 'payload', ? FROM json_each(?) AS r JOIN outbox AS o ON o.id = r.value ->> 'oldId' \
+     WHERE +o.host_id = ? AND +o.device_id = ? AND +o.outcome = 'rejected' \
+     AND o.resolved_at IS NULL ORDER BY o.seq";
+const QUEUE_RESEND_MARK: &str =
+    "UPDATE outbox SET resolution = 'resent', resent_as = r.value ->> 'newId', resolved_at = ?, \
+     resolved_by = ? FROM json_each(?) AS r WHERE outbox.id = r.value ->> 'oldId' \
+     AND +outbox.host_id = ? AND +outbox.device_id = ? AND +outbox.outcome = 'rejected' \
+     AND outbox.resolved_at IS NULL";
+const QUEUE_DISMISS: &str =
+    "UPDATE outbox SET resolution = 'dismissed', resolved_at = ?, resolved_by = ? \
+     WHERE host_id = ? AND device_id = ? AND id = ? AND outcome IN ('rejected', 'conflict') \
+     AND kind <> 'shift_closed' AND resolved_at IS NULL";
+/// The one walk of the queue screen: the unsent records of every pairing, in their partial index.
+const QUEUE_STRANDED: &str =
+    "SELECT count(*) AS n FROM outbox INDEXED BY outbox_unsent WHERE acked_at IS NULL \
+     AND NOT (host_id = ? AND device_id = ?)";
 
 /// The pallets' statements (plan ПЛ-Ц; `src/floor/pallets/pallets.ts`, `src/floor/close/shift-close.ts`,
 /// `src/floor/print/print-jobs.ts`; `test/floor-schema.test.ts` checks the texts agree): the open
@@ -1431,7 +1962,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 84] = [
+    let reads: [(&str, &str); 100] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1456,12 +1987,12 @@ async fn the_floors_repeating_reads_search_an_index() {
         ),
         (
             "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? \
-             AND outcome = 'rejected'",
+             AND outcome = 'rejected' AND resolved_at IS NULL",
             "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
         ),
         (
             "SELECT count(*) AS n FROM outbox WHERE host_id = ? AND device_id = ? \
-             AND outcome = 'conflict'",
+             AND outcome = 'conflict' AND resolved_at IS NULL",
             "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
         ),
         // What the sender writes, in the exact text it runs (`src/local/facts-sender.ts`;
@@ -1501,6 +2032,34 @@ async fn the_floors_repeating_reads_search_an_index() {
              AND box_id IS NOT NULL AND id IN (SELECT value ->> 'id' FROM json_each(?) \
              WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'conflict'))",
             "sqlite_autoindex_floor_scans_1 (id=?)",
+        ),
+        // Plan ОЧ: an accepted scan takes its conflict off, and its box's mark once no scan of it
+        // is in conflict; each by the records' own key, the box's other scans by its shift.
+        (
+            "UPDATE floor_scans SET conflict = 0 WHERE +host_id = ? AND +device_id = ? AND conflict = 1 \
+             AND id IN (SELECT value ->> 'id' FROM json_each(?) \
+             WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'accepted')",
+            "sqlite_autoindex_floor_scans_1 (id=?)",
+        ),
+        (
+            "UPDATE floor_boxes SET needs_fix = 0 WHERE +host_id = ? AND +device_id = ? AND needs_fix = 1 \
+             AND id IN (SELECT box_id FROM floor_scans WHERE +host_id = ? AND +device_id = ? \
+             AND box_id IS NOT NULL AND id IN (SELECT value ->> 'id' FROM json_each(?) \
+             WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'accepted')) \
+             AND NOT EXISTS (SELECT 1 FROM floor_scans c WHERE c.host_id = floor_boxes.host_id \
+             AND c.device_id = floor_boxes.device_id AND c.shift_id = floor_boxes.shift_id \
+             AND c.box_id = floor_boxes.id AND c.conflict = 1)",
+            "sqlite_autoindex_floor_boxes_1 (id=?)",
+        ),
+        (
+            "UPDATE floor_boxes SET needs_fix = 0 WHERE +host_id = ? AND +device_id = ? AND needs_fix = 1 \
+             AND id IN (SELECT box_id FROM floor_scans WHERE +host_id = ? AND +device_id = ? \
+             AND box_id IS NOT NULL AND id IN (SELECT value ->> 'id' FROM json_each(?) \
+             WHERE value ->> 'kind' = 'scan' AND value ->> 'outcome' = 'accepted')) \
+             AND NOT EXISTS (SELECT 1 FROM floor_scans c WHERE c.host_id = floor_boxes.host_id \
+             AND c.device_id = floor_boxes.device_id AND c.shift_id = floor_boxes.shift_id \
+             AND c.box_id = floor_boxes.id AND c.conflict = 1)",
+            "floor_scans_shift (host_id=? AND device_id=? AND shift_id=?)",
         ),
         // The close a receipt gives its shift (plan 2a8): by the records' own key, not through
         // `outbox_settled`, which holds every settled record of the pairing.
@@ -1595,7 +2154,7 @@ async fn the_floors_repeating_reads_search_an_index() {
             "floor_sscc_blocks_prefix (host_id=? AND device_id=? AND issuer_prefix=? AND extension=?)",
         ),
         (
-            "SELECT snapshot ->> 'issuerPrefix' AS prefix FROM floor_shifts \
+            "SELECT snapshot ->> 'issuerPrefix' AS prefix, pallets_enabled FROM floor_shifts \
              WHERE host_id = ? AND device_id = ? AND id = ?",
             "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
         ),
@@ -1608,6 +2167,12 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             "DELETE FROM floor_block_requests WHERE request_id = ?",
             "sqlite_autoindex_floor_block_requests_1 (request_id=?)",
+        ),
+        // The blocks the station did not take (migration `0013`, plan ОЧ): a pairing's rows by
+        // the table's key (`test/floor-schema.test.ts` pins the same text).
+        (
+            "SELECT count(*) AS n FROM floor_block_drops WHERE host_id = ? AND device_id = ?",
+            "sqlite_autoindex_floor_block_drops_1 (host_id=? AND device_id=?)",
         ),
         // The box exceptions (`src/floor/exceptions/box-exceptions.ts`; `test/floor-schema.test.ts`
         // checks the texts agree): the last code of the open box and the newest scan
@@ -1658,18 +2223,33 @@ async fn the_floors_repeating_reads_search_an_index() {
              AND local_state IS NOT NULL",
             "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)",
         ),
-        // The retention pass (plan 2a8), once an hour: the shifts done with and the delete of a
-        // copy search the shift's key, the unsent records, the settled ones and the shift's
-        // jobs. The due select must walk the settled records once (not once per shift): that is
-        // pinned after the loop. Three of the deletes (not listed) read the whole table (no index by
-        // shift): pinned after the loop too.
+        // The retention pass (plan 2a8), once an hour: the due select walks the settled records
+        // once (pinned after the loop) and searches each close's shift — its unsent records
+        // through `outbox_shift` (migration `0010`, plan ХП), its jobs, its copy by its key; the
+        // delete of a copy searches the one shift's close and unsent records through
+        // `outbox_shift`. Every delete of a shift's rows searches an index by shift.
         (DUE_SHIFTS, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"),
-        (DUE_SHIFTS, "outbox_unsent (host_id=? AND device_id=?)"),
+        (
+            DUE_SHIFTS,
+            "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at=?)",
+        ),
+        // The shift's unresolved refusals (plan ОЧ): its own records through `outbox_shift`.
+        (DUE_SHIFTS, "SEARCH r USING INDEX outbox_shift (shift_id=? AND host_id=? AND device_id=?)"),
         (DUE_SHIFTS, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
         (DUE_SHIFTS, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
         (PURGE_COPY, "sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?)"),
-        (PURGE_COPY, "outbox_unsent (host_id=? AND device_id=?)"),
-        (PURGE_COPY, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
+        (
+            PURGE_COPY,
+            "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at<?)",
+        ),
+        (
+            PURGE_COPY,
+            "outbox_shift (shift_id=? AND host_id=? AND device_id=? AND acked_at=?)",
+        ),
+        (
+            PURGE_COPY,
+            "SEARCH r USING INDEX outbox_shift (shift_id=? AND host_id=? AND device_id=?)",
+        ),
         (PURGE_COPY, "floor_print_jobs_shift (host_id=? AND device_id=? AND shift_id=?)"),
         (REFUSED_CLOSES, "outbox_settled (host_id=? AND device_id=? AND outcome=?)"),
         (
@@ -1691,6 +2271,19 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             "DELETE FROM floor_pallets WHERE host_id = ? AND device_id = ? AND shift_id = ?",
             "floor_pallets_shift (host_id=? AND device_id=? AND shift_id=?",
+        ),
+        (
+            "DELETE FROM outbox WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "outbox_shift (shift_id=? AND host_id=? AND device_id=?",
+        ),
+        (
+            "DELETE FROM floor_exceptions WHERE host_id = ? AND device_id = ? AND shift_id = ?",
+            "floor_exceptions_shift (shift_id=? AND host_id=? AND device_id=?",
+        ),
+        (
+            "DELETE FROM floor_pallet_exceptions WHERE host_id = ? AND device_id = ? \
+             AND shift_id = ?",
+            "floor_pallet_exceptions_shift (shift_id=? AND host_id=? AND device_id=?",
         ),
         // The pallets (plan ПЛ-Ц): the open pallet and its two counts on every box close and render,
         // a pallet's close and a box joining it by their keys, the shift close's check and summary,
@@ -1791,6 +2384,27 @@ async fn the_floors_repeating_reads_search_an_index() {
             RESTORE_REOPEN_WAREHOUSE,
             "wh_outbox_accepted (host_id=? AND device_id=? AND acked_at>?)",
         ),
+        // The queue screen (plan ОЧ): read on opening, written on a person's press;
+        // `test/floor-schema.test.ts` checks the texts agree.
+        (
+            QUEUE_UNSENT,
+            "outbox_unsent (host_id=? AND device_id=?)",
+        ),
+        (
+            QUEUE_TALLY,
+            "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+        ),
+        (
+            QUEUE_DISMISS_SHIFT,
+            "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+        ),
+        (
+            QUEUE_RESEND_READ,
+            "outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+        ),
+        (QUEUE_RESEND_INSERT, "sqlite_autoindex_outbox_1 (id=?)"),
+        (QUEUE_RESEND_MARK, "sqlite_autoindex_outbox_1 (id=?)"),
+        (QUEUE_DISMISS, "sqlite_autoindex_outbox_1 (id=?)"),
     ];
     for (sql, index) in reads {
         let placeholders = sql.matches('?').count();
@@ -1874,6 +2488,57 @@ async fn the_floors_repeating_reads_search_an_index() {
         !plan.iter().any(|step| step.contains("TEMP")),
         "the refused closes should need no sort, its plan is {plan:?}"
     );
+    // The queue screen's count of the records older pairings left: the only walk of the screen,
+    // over the unsent records of every pairing in their partial index, never the whole outbox.
+    let text = format!("EXPLAIN QUERY PLAN {QUEUE_STRANDED}");
+    let mut explain = sqlx::query(&text);
+    for _ in 0..QUEUE_STRANDED.matches('?').count() {
+        explain = explain.bind("x");
+    }
+    let plan: Vec<String> = explain
+        .fetch_all(&mut raw)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.get::<String, _>("detail"))
+        .collect();
+    assert_eq!(
+        plan,
+        ["SCAN outbox USING INDEX outbox_unsent"],
+        "the stranded count should walk the unsent records only, its plan is {plan:?}"
+    );
+    // The queue screen's bounded list (the final review's I-1): the pairing's unresolved refused
+    // and conflicting records from their partial index, numbered per shift and outcome in one
+    // sort; its only walks are over the numbered rows, and only the rows within the bound are
+    // looked up by `seq` and joined.
+    let text = format!("EXPLAIN QUERY PLAN {QUEUE_SETTLED}");
+    let mut explain = sqlx::query(&text);
+    for _ in 0..QUEUE_SETTLED.matches('?').count() {
+        explain = explain.bind("x");
+    }
+    let plan: Vec<String> = explain
+        .fetch_all(&mut raw)
+        .await
+        .unwrap()
+        .iter()
+        .map(|row| row.get::<String, _>("detail"))
+        .collect();
+    assert_eq!(
+        plan,
+        [
+            "CO-ROUTINE f",
+            "CO-ROUTINE (subquery-3)",
+            "SEARCH outbox USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome=?)",
+            "USE TEMP B-TREE FOR ORDER BY",
+            "SCAN (subquery-3)",
+            "SCAN f",
+            "SEARCH o USING INTEGER PRIMARY KEY (rowid=?)",
+            "SEARCH s USING INDEX sqlite_autoindex_floor_shifts_1 (host_id=? AND device_id=? AND id=?) LEFT-JOIN",
+            "SEARCH b USING INDEX sqlite_autoindex_floor_boxes_1 (id=?) LEFT-JOIN",
+            "SEARCH p USING INDEX sqlite_autoindex_floor_pallets_1 (id=?) LEFT-JOIN",
+        ],
+        "the bounded list should number the settled records only, its plan is {plan:?}"
+    );
     // The one read of the floor that names no index: a pairing's waiting block
     // requests. The table holds at most one row per pairing and issuer prefix
     // (a request is kept only when none waits, and goes with its block), so the
@@ -1902,35 +2567,6 @@ async fn the_floors_repeating_reads_search_an_index() {
         ["SCAN floor_block_requests"],
         "{waiting}\n  should scan only the waiting requests, its plan is {plan:?}"
     );
-    // The three deletes of the retention pass with no index by shift: the outbox and the
-    // exceptions (a box's, a pallet's) carry the shift only as a column, so a purged shift costs
-    // one read of each table. They run once for a shift that has been done with for 30 days, not
-    // on a scan.
-    for table in ["outbox", "floor_exceptions", "floor_pallet_exceptions"] {
-        let delete =
-            format!("DELETE FROM {table} WHERE host_id = ? AND device_id = ? AND shift_id = ?");
-        let text = format!("EXPLAIN QUERY PLAN {delete}");
-        let mut explain = sqlx::query(&text);
-        for _ in 0..delete.matches('?').count() {
-            explain = explain.bind("x");
-        }
-        let plan: Vec<String> = explain
-            .fetch_all(&mut raw)
-            .await
-            .unwrap()
-            .iter()
-            .map(|row| row.get::<String, _>("detail"))
-            .collect();
-        let scans: Vec<&String> = plan
-            .iter()
-            .filter(|step| step.starts_with("SCAN "))
-            .collect();
-        assert_eq!(
-            scans,
-            [&format!("SCAN {table}")],
-            "{delete}\n  should read only {table}, its plan is {plan:?}"
-        );
-    }
     raw.close().await.unwrap();
 }
 
@@ -2867,7 +3503,7 @@ async fn the_forget_counts_read_only_the_unsent_indexes() {
         .connect()
         .await
         .unwrap();
-    let counts: [(&str, &[&str]); 4] = [
+    let counts: [(&str, &[&str]); 5] = [
         (
             "SELECT (SELECT count(*) FROM outbox WHERE acked_at IS NULL AND host_id = ? \
              AND device_id = ?) + (SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL \
@@ -2881,7 +3517,7 @@ async fn the_forget_counts_read_only_the_unsent_indexes() {
             ],
         ),
         (
-            "SELECT (SELECT count(*) FROM outbox WHERE acked_at IS NULL) + \
+            "SELECT (SELECT count(*) FROM outbox INDEXED BY outbox_unsent WHERE acked_at IS NULL) + \
              (SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL) AS n",
             &[
                 "SCAN CONSTANT ROW",
@@ -2897,8 +3533,12 @@ async fn the_forget_counts_read_only_the_unsent_indexes() {
             &["SEARCH wh_outbox USING INDEX wh_outbox_unsent (host_id=? AND device_id=?)"],
         ),
         (
-            "SELECT count(*) FROM wh_outbox WHERE acked_at IS NULL",
+            "SELECT count(*) FROM wh_outbox INDEXED BY wh_outbox_unsent WHERE acked_at IS NULL",
             &["SCAN wh_outbox USING INDEX wh_outbox_unsent"],
+        ),
+        (
+            "SELECT count(*) FROM outbox INDEXED BY outbox_unsent WHERE acked_at IS NULL",
+            &["SCAN outbox USING INDEX outbox_unsent"],
         ),
     ];
     for (sql, expected) in counts {

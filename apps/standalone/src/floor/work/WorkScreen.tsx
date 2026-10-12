@@ -340,7 +340,10 @@ export const CUE_MS = 350;
 /** How many times a close that found the box or the block changed is tried in all. */
 const CLOSE_TRIES = 3;
 
-/** How many pallet serials a full pallet's close may lose, one per try, before it waits for the next close. */
+/**
+ * How many pallet serials a pallet's close may lose in a row, one per try: the full pallet's
+ * close then waits for the next close, the early close stops with «Повторить» (plan ХП).
+ */
 const PALLET_SERIAL_TRIES = 3;
 
 /** The stop of a shift that works with pallets and has none to work with. */
@@ -503,6 +506,26 @@ async function closeSettled<Result extends { kind: string } | null>(
 ): Promise<Result> {
   let result = await close();
   for (let attempt = 1; attempt < CLOSE_TRIES && result?.kind === "stale"; attempt += 1) {
+    result = await close();
+  }
+  return result;
+}
+
+/**
+ * A pallet's close again while it lost a serial that cannot label a pallet (`invalid_serial`:
+ * past the prefix's range, or its SSCC held by another pallet): each such answer spent that
+ * serial alone, so the next call takes the next one, `PALLET_SERIAL_TRIES` calls in all — the
+ * full pallet's close and the early close alike (plan ХП).
+ */
+async function closeLosingBadSerials<Result extends { kind: string } | null>(
+  close: () => Promise<Result>,
+): Promise<Result> {
+  let result = await close();
+  for (
+    let tries = 1;
+    tries < PALLET_SERIAL_TRIES && result?.kind === "invalid_serial";
+    tries += 1
+  ) {
     result = await close();
   }
   return result;
@@ -840,12 +863,11 @@ export function WorkScreen(props: WorkScreenProps) {
     }, SIGNAL_MS);
   }, []);
 
-  /** A top-up of serials as a piece of the floor's work: handed to the gate before it starts. */
-  const topUpTracked = useCallback(
-    (blocks: { topUp: () => Promise<SupplyResult> }) =>
-      live.current.track(Promise.resolve().then(() => blocks.topUp())),
-    [],
-  );
+  /**
+   * The turn a pallet block brought by a box's top-up queues (plan ХП); set once
+   * `settlePalletSafely` exists, below. Until then it does nothing.
+   */
+  const palletArrived = useRef<() => Promise<void>>(() => Promise.resolve());
 
   /** After a box closed (also one read back after a lost answer): tell, and keep serials in stock. */
   const afterClosed = useCallback(
@@ -857,17 +879,25 @@ export function WorkScreen(props: WorkScreenProps) {
         // The label's plan answers for its own failures; the box is closed.
       }
       // The half rule after every close: work of its own, not the line's — for the
-      // pallet serials too, in a shift with pallets.
+      // pallet serials too, in a shift with pallets. A pallet block that comes queues the
+      // full pallet's close as a turn of its own (plan ХП): the box's turn never waits for
+      // the host. The gate holds the whole chain, the queued turn included.
       for (const blocks of live.current.pallets === null ? [supply] : [supply, palletSupply]) {
-        void topUpTracked(blocks).then(
-          (topped) => {
-            if (topped.kind === "stored") live.current.onRecorded();
-          },
-          () => undefined,
-        );
+        const pallet = blocks === palletSupply;
+        void live.current
+          .track(
+            Promise.resolve()
+              .then(() => blocks.topUp())
+              .then(async (topped) => {
+                if (topped.kind !== "stored") return;
+                live.current.onRecorded();
+                if (pallet) await palletArrived.current();
+              }),
+          )
+          .catch(() => undefined);
       }
     },
-    [topUpTracked, supply, palletSupply],
+    [supply, palletSupply],
   );
 
   /** The label stop for `job` while it waits; the work goes on when it does not (another stop is left alone). */
@@ -948,35 +978,23 @@ export function WorkScreen(props: WorkScreenProps) {
   const closeFullPallet = useCallback(async (): Promise<PalletCloseResult | null> => {
     const pallets = live.current.pallets;
     if (pallets === null) return null;
-    const attempt = () => closeSettled(() => closePalletIfFull(palletContextOf(live), pallets));
-    let result = await attempt();
-    for (
-      let tries = 1;
-      tries < PALLET_SERIAL_TRIES && result?.kind === "invalid_serial";
-      tries += 1
-    ) {
-      result = await attempt();
-    }
-    return result;
+    return closeLosingBadSerials(() =>
+      closeSettled(() => closePalletIfFull(palletContextOf(live), pallets)),
+    );
   }, []);
 
   /**
    * A full pallet that waited for pallet serials closes once they are here
    * (plan ПЛ-Ц): after a box's close, on entry, and when serials arrive, while
    * no label waits. Without them the screen says the pallet waits and the next
-   * boxes join it — the line never stops for it. The pallet's label goes at
+   * boxes join it — the line never stops for it, and this turn never waits for the host
+   * (plan ХП): the block a box's top-up or the link's return brings queues it again. The
+   * pallet's label goes at
    * once, after the box's. Only from the work queue.
    */
   const settlePallet = useCallback(async (): Promise<void> => {
     if (live.current.pallets === null) return;
-    let result = await closeFullPallet();
-    if (result?.kind === "no_serials") {
-      const supplied = await palletSupply.topUp();
-      if (supplied.kind === "stored") {
-        live.current.onRecorded();
-        result = await closeFullPallet();
-      }
-    }
+    const result = await closeFullPallet();
     if (alive.current) {
       setPalletWaits(
         result?.kind === "no_serials"
@@ -990,7 +1008,7 @@ export function WorkScreen(props: WorkScreenProps) {
       live.current.onRecorded();
       await settleLabel();
     }
-  }, [closeFullPallet, palletSupply, settleLabel]);
+  }, [closeFullPallet, settleLabel]);
 
   /** `settlePallet`, whose failure stops the line with the failed write instead of being lost. */
   const settlePalletSafely = useCallback(async (): Promise<void> => {
@@ -1000,6 +1018,18 @@ export function WorkScreen(props: WorkScreenProps) {
       setStop({ kind: "system_error", cause: "write" });
     }
   }, [settlePallet, setStop]);
+
+  // The turn a pallet block from a box's top-up queues (plan ХП): the full pallet that waited
+  // for serials closes while no stop stands, as the link-back's turn does.
+  useLayoutEffect(() => {
+    palletArrived.current = () =>
+      live.current.track(
+        queue.run(async () => {
+          if (stopRef.current === null) await settlePalletSafely();
+          await refreshQuietly();
+        }),
+      );
+  }, [queue, settlePalletSafely, refreshQuietly]);
 
   /**
    * Closes the box — the full one, or the open one the operator confirmed —
@@ -1621,14 +1651,19 @@ export function WorkScreen(props: WorkScreenProps) {
         await settleSafely();
         return "stopped";
       }
-      const close = () => closeOpenPallet(palletContextOf(live), pallets);
-      let result = await closeSettled(close);
+      // A serial that cannot label a pallet is lost and the next taken, up to three in a row,
+      // as for a full pallet (plan ХП); a stale write is tried again inside each try.
+      const close = () =>
+        closeLosingBadSerials(() =>
+          closeSettled(() => closeOpenPallet(palletContextOf(live), pallets)),
+        );
+      let result = await close();
       let supplied: SupplyResult | null = null;
       if (result.kind === "no_serials") {
         supplied = await palletSupply.topUp();
         if (supplied.kind === "stored") {
           live.current.onRecorded();
-          result = await closeSettled(close);
+          result = await close();
         }
       }
       if (result.kind === "empty") return "empty";
@@ -1646,8 +1681,8 @@ export function WorkScreen(props: WorkScreenProps) {
         setStop({ kind: "pallet_no_serials", reason, fromClose });
         return "stopped";
       }
-      // A serial that could not label a pallet is lost (the next try takes the next),
-      // or the pallet changed under three tries: nothing was closed.
+      // Three serials in a row could not label a pallet (each lost: «Повторить» takes the
+      // next), or the pallet changed under three tries: nothing was closed.
       setStop({ kind: "pallet_failed", fromClose });
       return "stopped";
     },

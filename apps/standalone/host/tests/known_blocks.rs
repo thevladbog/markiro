@@ -42,6 +42,30 @@ async fn send(admin: &Admin, key: &str, blocks: Vec<Value>) -> (StatusCode, Valu
         .await
 }
 
+/// One part of a run (plan ОЧ): `more` says the station has more parts to send.
+async fn send_part(
+    admin: &Admin,
+    key: &str,
+    blocks: Vec<Value>,
+    more: bool,
+) -> (StatusCode, Value) {
+    admin
+        .app
+        .send(json_request(
+            with_device(request("POST", "/v1/device/sscc/blocks/known"), key),
+            json!({ "blocks": blocks, "more": more }),
+        ))
+        .await
+}
+
+async fn known_epoch(admin: &Admin, station: &str) -> Option<String> {
+    sqlx::query_scalar::<_, Option<String>>("SELECT known_blocks_epoch FROM devices WHERE id = ?")
+        .bind(station)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+}
+
 /// A host after a restore, whose station got the block `ISSUED` (1500 …
 /// 3499) before the copy; returns the block as the station holds it.
 async fn restored(admin: &Admin) -> Value {
@@ -268,7 +292,6 @@ async fn only_a_station_after_a_restore_is_heard() {
         (StatusCode::FORBIDDEN, json!("forbidden"))
     );
     for (blocks, field) in [
-        (vec![], "blocks"),
         (vec![block(LOST, PREFIX, 0, 1, 10); 65], "blocks"),
         (
             vec![
@@ -285,6 +308,179 @@ async fn only_a_station_after_a_restore_is_heard() {
             "{body}"
         );
     }
+}
+
+#[tokio::test]
+async fn a_station_without_blocks_is_marked_by_an_empty_list_and_nothing_else_changes() {
+    let admin = admin().await;
+    // Before a restore an empty list is heard as any other: the host lost nothing.
+    let (status, body) = send(&admin, &admin.key, vec![]).await;
+    assert_eq!(
+        (status, body["error"]["details"].clone()),
+        (StatusCode::CONFLICT, json!({ "constraint": "no_restore" }))
+    );
+    restored(&admin).await;
+    let station = device_id(&admin).await;
+    let known_epoch = || async {
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT known_blocks_epoch FROM devices WHERE id = ?",
+        )
+        .bind(&station)
+        .fetch_one(&admin.app.state.pool)
+        .await
+        .unwrap()
+    };
+    let rev = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let blocks = block_rows(&admin).await;
+    for _ in 0..2 {
+        let (status, body) = send(&admin, &admin.key, vec![]).await;
+        assert_eq!((status, body), (StatusCode::OK, json!({ "results": [] })));
+        assert_eq!(
+            known_epoch().await.as_deref(),
+            Some("5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e")
+        );
+    }
+    assert_eq!(host_revision(&admin.app).await, rev);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(block_rows(&admin).await, blocks);
+}
+
+const EPOCH: &str = "5d2c8e1a-7b3f-4c9d-a0e1-2f3a4b5c6d7e";
+
+#[tokio::test]
+async fn a_station_is_marked_by_its_last_part_only_and_an_empty_last_part_marks_one_without_blocks()
+{
+    let admin = admin().await;
+    let issued = restored(&admin).await;
+    let station = device_id(&admin).await;
+    let (status, body) = send_part(&admin, &admin.key, vec![issued.clone()], true).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["outcome"], "known");
+    assert_eq!(
+        known_epoch(&admin, &station).await,
+        None,
+        "a part with more to come marks nothing"
+    );
+    let (status, body) = send_part(&admin, &admin.key, vec![], true).await;
+    assert_eq!(
+        (status, body["error"]["details"]["field"].clone()),
+        (StatusCode::BAD_REQUEST, json!("blocks")),
+        "an empty part is only the last one"
+    );
+    assert_eq!(known_epoch(&admin, &station).await, None);
+    let (status, body) = send_part(&admin, &admin.key, vec![], false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"], json!([]));
+    assert_eq!(known_epoch(&admin, &station).await.as_deref(), Some(EPOCH));
+}
+
+#[tokio::test]
+async fn a_part_with_more_to_come_still_registers_its_blocks_and_marks_nothing() {
+    let admin = admin().await;
+    restored(&admin).await;
+    let station = device_id(&admin).await;
+    let rev = host_revision(&admin.app).await;
+    let (status, body) = send_part(
+        &admin,
+        &admin.key,
+        vec![block(LOST, PREFIX, 0, 3500, 5499)],
+        true,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["outcome"], "registered");
+    assert_eq!(host_revision(&admin.app).await, rev + 1);
+    assert_eq!(known_epoch(&admin, &station).await, None);
+    // The last part, the block already taken: `known`, and the station is marked.
+    let (status, body) = send_part(
+        &admin,
+        &admin.key,
+        vec![block(LOST, PREFIX, 0, 3500, 5499)],
+        false,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["outcome"], "known");
+    assert_eq!(known_epoch(&admin, &station).await.as_deref(), Some(EPOCH));
+}
+
+#[tokio::test]
+async fn a_run_sent_again_after_a_lost_last_answer_is_heard_the_same_and_marks_once() {
+    let admin = admin().await;
+    let issued = restored(&admin).await;
+    let station = device_id(&admin).await;
+    let lost = block(LOST, PREFIX, 0, 3500, 5499);
+    // First run: the first part registers the lost block; the answer to the
+    // last part is lost on the way back, but the host did mark the station.
+    let (status, _) = send_part(&admin, &admin.key, vec![lost.clone()], true).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, _) = send_part(&admin, &admin.key, vec![issued.clone()], false).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(known_epoch(&admin, &station).await.as_deref(), Some(EPOCH));
+    // The station never saw it and sends every part again: `known`, nothing new.
+    let rev = host_revision(&admin.app).await;
+    let rows = audit_rows(&admin.app).await;
+    let blocks = block_rows(&admin).await;
+    let (status, body) = send_part(&admin, &admin.key, vec![lost], true).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["outcome"], "known");
+    let (status, body) = send_part(&admin, &admin.key, vec![issued], false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"][0]["outcome"], "known");
+    assert_eq!(known_epoch(&admin, &station).await.as_deref(), Some(EPOCH));
+    assert_eq!(host_revision(&admin.app).await, rev);
+    assert_eq!(audit_rows(&admin.app).await, rows);
+    assert_eq!(block_rows(&admin).await, blocks);
+}
+
+#[tokio::test]
+async fn a_request_without_more_is_a_last_part_and_a_more_that_is_no_boolean_is_refused() {
+    let admin = admin().await;
+    let issued = restored(&admin).await;
+    let station = device_id(&admin).await;
+    // An older station never writes `more` (`send` does not): the last part, as before.
+    let (status, body) = send(&admin, &admin.key, vec![issued.clone()]).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(known_epoch(&admin, &station).await.as_deref(), Some(EPOCH));
+    // `more: false` is the same spelled out.
+    sqlx::query("UPDATE devices SET known_blocks_epoch = NULL WHERE id = ?")
+        .bind(&station)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, body) = send_part(&admin, &admin.key, vec![issued.clone()], false).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(known_epoch(&admin, &station).await.as_deref(), Some(EPOCH));
+    sqlx::query("UPDATE devices SET known_blocks_epoch = NULL WHERE id = ?")
+        .bind(&station)
+        .execute(&admin.app.state.pool)
+        .await
+        .unwrap();
+    let (status, _) = admin
+        .app
+        .send(json_request(
+            with_device(request("POST", "/v1/device/sscc/blocks/known"), &admin.key),
+            json!({ "blocks": [issued], "more": "yes" }),
+        ))
+        .await;
+    assert!(status.is_client_error(), "{status}");
+    assert_eq!(known_epoch(&admin, &station).await, None);
+}
+
+#[tokio::test]
+async fn a_request_of_the_largest_size_is_heard_and_one_block_more_is_not() {
+    let admin = admin().await;
+    let issued = restored(&admin).await;
+    let (status, body) = send(&admin, &admin.key, vec![issued.clone(); 64]).await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(body["results"].as_array().unwrap().len(), 64);
+    let (status, body) = send(&admin, &admin.key, vec![issued; 65]).await;
+    assert_eq!(
+        (status, body["error"]["details"]["field"].clone()),
+        (StatusCode::BAD_REQUEST, json!("blocks")),
+        "{body}"
+    );
 }
 
 #[tokio::test]

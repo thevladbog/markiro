@@ -719,6 +719,30 @@ describe("the warehouse records' own pause (plan СКЛ)", () => {
     station.hook.unmount();
   });
 
+  // Merge gate of plans СКЛ and ОЧ: ОЧ's `requestFacts` does nothing while a failed send's pause
+  // (`factRetry`) runs, so a warehouse failure must never be written into that pause.
+  it("send a new fact at once after the records' route failed three times in a row, under the outbox queue's guard", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const station = await failedThreeTimes(acceptAll);
+    // The records' next try is 8 s away; the facts were never held.
+    expect(station.facted).not.toHaveBeenCalled();
+    expect(station.types()).not.toContain("facts_failed");
+    await unsentScans(station.local, 1, PAIRING, 100);
+    station.hook.result.current.requestFacts();
+    // No timer advanced: the fact goes at once, the records keep their pause.
+    await waitFor(() => expect(station.facted).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(factsUnsent(station.db)).toBe(0));
+    await settle();
+    expect(station.warehouse).toHaveBeenCalledTimes(3);
+    expect(station.types()).not.toContain("facts_failed");
+    // A second write in the same pause goes at once as well.
+    await unsentScans(station.local, 1, PAIRING, 101);
+    station.hook.result.current.requestFacts();
+    await waitFor(() => expect(station.facted).toHaveBeenCalledTimes(2));
+    expect(station.warehouse).toHaveBeenCalledTimes(3);
+    station.hook.unmount();
+  });
+
   it("keep their pause when the facts fail meanwhile, and wait for it after the facts went", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
     let factsDown = true;
