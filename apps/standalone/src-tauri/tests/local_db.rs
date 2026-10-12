@@ -2710,6 +2710,88 @@ async fn unopened(dir: &std::path::Path, beside: &[&str]) -> LocalDbState {
     local
 }
 
+/// `std::fs::rename`, tried for up to 5 s: on Windows sqlx closes the handle
+/// of a failed open on its own thread after the open returned, and a file
+/// SQLite holds does not move until then.
+fn rename_once_released(from: &std::path::Path, to: &std::path::Path) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        match std::fs::rename(from, to) {
+            Ok(()) => return,
+            Err(_) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(error) => panic!("{} does not move: {error}", from.display()),
+        }
+    }
+}
+
+/// On Windows a database file held the way SQLite holds it (read and write
+/// shared, delete not) cannot move until the handle closes: the set-aside
+/// waits for it instead of failing at once.
+#[cfg(windows)]
+#[tokio::test]
+async fn a_set_aside_waits_for_a_handle_that_still_holds_the_database() {
+    use std::os::windows::fs::OpenOptionsExt;
+    const FILE_SHARE_READ: u32 = 0x1;
+    const FILE_SHARE_WRITE: u32 = 0x2;
+    let dir = tempfile::tempdir().unwrap();
+    let local = unopened(dir.path(), &[]).await;
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+        .open(dir.path().join(FILE_NAME))
+        .unwrap();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        drop(held);
+    });
+
+    let aside = local
+        .set_aside_unopened_at(1_790_000_000_000)
+        .await
+        .unwrap();
+    release.join().unwrap();
+
+    assert_eq!(
+        aside,
+        Some(
+            dir.path()
+                .join(format!("{FILE_NAME}.unreadable-1790000000000"))
+        )
+    );
+    assert!(local.get().is_ok(), "a new database opened in its place");
+}
+
+/// A move the system refuses for a moment is tried again: here a folder that
+/// cannot be written to until a thread makes it writable again, 300 ms on.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_set_aside_tries_a_refused_move_again() {
+    use std::os::unix::fs::PermissionsExt;
+    let dir = tempfile::tempdir().unwrap();
+    let local = unopened(dir.path(), &[]).await;
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+    let folder = dir.path().to_path_buf();
+    let release = std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(0o755)).unwrap();
+    });
+
+    let aside = local.set_aside_unopened_at(1_790_000_000_000).await;
+    release.join().unwrap();
+
+    assert_eq!(
+        aside.unwrap(),
+        Some(
+            dir.path()
+                .join(format!("{FILE_NAME}.unreadable-1790000000000"))
+        )
+    );
+    assert!(local.get().is_ok(), "a new database opened in its place");
+}
+
 /// A database that did not open is moved aside with its side files, nothing
 /// deleted, and a new one opens in its place (stage 2a spec §5.2, question
 /// В7).
@@ -3200,12 +3282,11 @@ async fn a_split_set_aside_is_not_added_to() {
     // The database is aside; its WAL is still at the original name.
     let dir = tempfile::tempdir().unwrap();
     let local = unopened(dir.path(), &["-wal"]).await;
-    std::fs::rename(
-        dir.path().join(FILE_NAME),
-        dir.path()
+    rename_once_released(
+        &dir.path().join(FILE_NAME),
+        &dir.path()
             .join(format!("{FILE_NAME}.unreadable-1790000000000")),
-    )
-    .unwrap();
+    );
     assert!(local
         .set_aside_unopened_at(1_790_000_000_005)
         .await

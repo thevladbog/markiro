@@ -37,6 +37,13 @@ pub const MAX_SQL_BYTES: usize = 64 * 1024;
 pub const MAX_VALUES: usize = 256;
 
 const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
+/// How often a set-aside tries to move a file of the database, and the pause
+/// between tries. On Windows a file SQLite or an antivirus scan still holds
+/// open refuses to move for a moment: sqlx closes the handle of a connection
+/// that failed to open on its own thread, after the open has returned. The
+/// host's restore retries its renames the same way.
+const RENAME_ATTEMPTS: u32 = 5;
+const RENAME_RETRY_DELAY: Duration = Duration::from_millis(200);
 
 /// What a forget (`device_forget`, [`LocalDb::clear_copies`]) does with a
 /// table (stage 2a spec §5.2, decision 30).
@@ -281,7 +288,12 @@ impl LocalDb {
                     .pragma("secure_delete", "ON"),
             )
             .await?;
-        MIGRATOR.run(&writer).await?;
+        if let Err(error) = MIGRATOR.run(&writer).await {
+            // Closed before the error goes back, not left to close on its
+            // own: an open handle keeps the file from moving on Windows.
+            writer.close().await;
+            return Err(error.into());
+        }
         let readers = SqlitePoolOptions::new()
             .max_connections(2)
             .connect_with(
@@ -645,7 +657,10 @@ impl LocalDbState {
                     format!("{} is already there", to.display()),
                 ))
             } else {
-                std::fs::rename(&from, &to)
+                rename_retrying(RENAME_ATTEMPTS, RENAME_RETRY_DELAY, || {
+                    std::fs::rename(&from, &to)
+                })
+                .await
             };
             if let Err(error) = moving {
                 let part = if suffix.is_empty() {
@@ -659,7 +674,11 @@ impl LocalDbState {
                 );
                 for (back, place) in moved.iter().rev() {
                     // Best effort: a file left aside is still kept, not lost.
-                    if let Err(error) = std::fs::rename(place, back) {
+                    let putting_back = rename_retrying(RENAME_ATTEMPTS, RENAME_RETRY_DELAY, || {
+                        std::fs::rename(place, back)
+                    })
+                    .await;
+                    if let Err(error) = putting_back {
                         eprintln!(
                             "standalone: a file of the local database could not be put back after a failed set-aside: {:?}",
                             error.kind()
@@ -685,6 +704,25 @@ impl LocalDbState {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = failure;
         Ok(database)
+    }
+}
+
+/// `rename` tried up to `attempts` times, `delay` apart. A source that is not
+/// there is final at once: nothing will bring it back.
+async fn rename_retrying(
+    attempts: u32,
+    delay: Duration,
+    mut rename: impl FnMut() -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let mut attempt = 1;
+    loop {
+        match rename() {
+            Err(error) if attempt < attempts && error.kind() != std::io::ErrorKind::NotFound => {
+                attempt += 1;
+                tokio::time::sleep(delay).await;
+            }
+            other => return other,
+        }
     }
 }
 
@@ -844,6 +882,44 @@ mod tests {
                 migration.version
             );
         }
+    }
+
+    /// A rename refused for a moment is tried again, up to its attempts; a
+    /// source that is not there is not.
+    #[tokio::test]
+    async fn a_refused_rename_is_tried_again_unless_the_file_is_not_there() {
+        use std::io::{Error, ErrorKind};
+        let delay = Duration::from_millis(1);
+        let mut calls = 0;
+        let moved = rename_retrying(5, delay, || {
+            calls += 1;
+            if calls < 3 {
+                Err(Error::from(ErrorKind::PermissionDenied))
+            } else {
+                Ok(())
+            }
+        })
+        .await;
+        assert!(moved.is_ok());
+        assert_eq!(calls, 3);
+
+        let mut calls = 0;
+        let refused = rename_retrying(5, delay, || {
+            calls += 1;
+            Err(Error::from(ErrorKind::PermissionDenied))
+        })
+        .await;
+        assert_eq!(refused.unwrap_err().kind(), ErrorKind::PermissionDenied);
+        assert_eq!(calls, 5);
+
+        let mut calls = 0;
+        let missing = rename_retrying(5, delay, || {
+            calls += 1;
+            Err(Error::from(ErrorKind::NotFound))
+        })
+        .await;
+        assert_eq!(missing.unwrap_err().kind(), ErrorKind::NotFound);
+        assert_eq!(calls, 1);
     }
 
     #[test]
