@@ -259,9 +259,10 @@ interface RestoreHoldCardProps {
 /**
  * The stations after a restore, each with whether the host marks it as having
  * given its blocks back (plan РК-С: a station does by itself once it is online;
- * the host marks it once it answered the first part, even when it refused
- * some or all of its blocks, which only the station's status bar shows, and
- * marks a station that never took a block by its empty list, plan ХП), and, for an administrator, resuming the facts the host
+ * the host marks it once it received the last part of its blocks, even when it
+ * refused some or all of them, which only the station's status bar shows, and
+ * marks a station that never took a block by its empty last part, plans ХП and
+ * ОЧ), and, for an administrator, resuming the facts the host
  * holds until then. A station on a dead computer never gives them back, so the
  * administrator resumes only after the SSCC checks, and says so in a
  * confirmation that is not one click.

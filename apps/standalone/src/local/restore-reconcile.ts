@@ -196,7 +196,9 @@ export type ReconcileResult =
  * §11), once `noteRestoreEpoch` noted the new epoch:
  *
  * 1. every block it holds goes back, 64 to a request, as the host issued it;
- *    a block the host refuses (`block_overlap`, `block_mismatch`,
+ *    every request but the last says `more` (plan ОЧ), and a pairing without
+ *    blocks sends one empty request, so the host marks the station only once
+ *    all of its blocks are in; a block the host refuses (`block_overlap`, `block_mismatch`,
  *    `prefix_unknown`, `range_invalid`) is never used again — its cursor goes
  *    past its end in the transaction after that answer — so no box closes
  *    with a serial that may be another device's or that the host will refuse;
@@ -212,7 +214,7 @@ export type ReconcileResult =
  * A failed request or write rejects, and the next run sends every block
  * again (the host answers `known` for one it took). A host that says it was
  * never restored owes nothing back. A pairing without blocks sends one empty
- * request: the host marks a station only on a request it answered (plan ХП).
+ * request (plan ХП).
  */
 export async function reconcileRestore(context: ReconcileContext): Promise<ReconcileResult> {
   const { local, pairing, register, now } = context;
@@ -222,10 +224,16 @@ export async function reconcileRestore(context: ReconcileContext): Promise<Recon
   let registered = 0;
   let known = 0;
   const refusedBlocks: RefusedBlock[] = [];
-  // One request per 64 blocks, and one empty request when the pairing holds none.
-  let start = 0;
-  do {
-    const chunk = blocks.slice(start, start + MAX_KNOWN_BLOCKS);
+  // Parts of 64 in the order the blocks arrived; a pairing without blocks
+  // sends one empty part. Every part but the last says `more`, so the host
+  // marks the station only once all of them are in (plan ОЧ).
+  const chunks: (typeof blocks)[] = [];
+  for (let start = 0; start < blocks.length; start += MAX_KNOWN_BLOCKS) {
+    chunks.push(blocks.slice(start, start + MAX_KNOWN_BLOCKS));
+  }
+  if (chunks.length === 0) chunks.push([]);
+  for (const [index, chunk] of chunks.entries()) {
+    const more = index < chunks.length - 1;
     let answer: KnownBlocksResponse;
     try {
       answer = await register({
@@ -236,6 +244,7 @@ export async function reconcileRestore(context: ReconcileContext): Promise<Recon
           fromSerial: block.from_serial,
           toSerial: block.to_serial,
         })),
+        ...(more ? { more: true } : {}),
       });
     } catch (error) {
       if (neverRestored(error)) break;
@@ -261,8 +270,7 @@ export async function reconcileRestore(context: ReconcileContext): Promise<Recon
       await local.transaction([retireStatement(pairing, ids)]);
       refusedBlocks.push(...refusedHere);
     }
-    start += MAX_KNOWN_BLOCKS;
-  } while (start < blocks.length);
+  }
   const refused = refusedBlocks.length;
   const at = now();
   await local.transaction([

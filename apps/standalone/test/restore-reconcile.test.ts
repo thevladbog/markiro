@@ -163,6 +163,7 @@ describe("the reconciliation after a restore", () => {
     ).resolves.toEqual({ kind: "reconciled", epoch: EPOCH, registered: 1, known: 64, refused: 0 });
     const sent = register.mock.calls.map(([request]) => request);
     expect(sent.map((request) => request.blocks.length)).toEqual([64, 1]);
+    expect(sent.map((request) => request.more ?? false)).toEqual([true, false]);
     // The station's first block goes exactly as the host's fixture names it.
     expect(sent[0]?.blocks[0]).toEqual(FIXTURE_BLOCK);
     for (const request of sent) expect(knownBlocksRequestSchema.parse(request)).toEqual(request);
@@ -261,6 +262,54 @@ describe("the reconciliation after a restore", () => {
     await expect(restoreDue(executor, PAIRING)).resolves.toBe(false);
   });
 
+  it("says `more` on every part but the last, and writes no field on the last", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlocks(db, 2 * MAX_KNOWN_BLOCKS);
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = answering();
+    await reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW });
+    const sent = register.mock.calls.map(([request]) => request);
+    expect(sent.map((request) => request.blocks.length)).toEqual([64, 64, 1]);
+    expect(sent.map((request) => request.more ?? false)).toEqual([true, true, false]);
+    // An older host reads the last part as it always did: no `more` key at all.
+    expect(sent.map((request) => "more" in request)).toEqual([true, true, false]);
+  });
+
+  it("writes no `more` on the one empty part of a pairing without blocks", async () => {
+    const { executor } = openLocalDb();
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = answering();
+    await reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW });
+    expect(register.mock.calls.map(([request]) => "more" in request)).toEqual([false]);
+  });
+
+  it("does not settle when the answer to the last part is lost, and sends the whole run again", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlocks(db, MAX_KNOWN_BLOCKS);
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = answering();
+    const answer = register.getMockImplementation();
+    if (answer === undefined) throw new Error("no answer");
+    register.mockImplementationOnce(answer);
+    register.mockImplementationOnce(async () => {
+      throw new HostError({ kind: "transport", code: "unreachable", message: "lost" });
+    });
+    await expect(
+      reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
+    ).rejects.toBeInstanceOf(HostError);
+    // The host may have marked the station already; this one does not know and stays owing.
+    expect(await restoreDue(executor, PAIRING)).toBe(true);
+    expect(epochs(db)).toMatchObject([{ reconciled_at: null }]);
+    await reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW });
+    expect(register.mock.calls.map(([request]) => request.more ?? false)).toEqual([
+      true,
+      false,
+      true,
+      false,
+    ]);
+    expect(await restoreDue(executor, PAIRING)).toBe(false);
+  });
+
   it("sends exactly 64 blocks in one request, with no empty request after them", async () => {
     const { db, executor } = openLocalDb();
     seedBlocks(db, MAX_KNOWN_BLOCKS - 1);
@@ -270,6 +319,7 @@ describe("the reconciliation after a restore", () => {
       reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
     ).resolves.toEqual({ kind: "reconciled", epoch: EPOCH, registered: 0, known: 64, refused: 0 });
     expect(register.mock.calls.map(([request]) => request.blocks.length)).toEqual([64]);
+    expect(register.mock.calls.map(([request]) => request.more ?? false)).toEqual([false]);
   });
 
   it("owes nothing more when a host never restored hears the empty request", async () => {
@@ -350,6 +400,13 @@ describe("the reconciliation after a restore", () => {
       reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
     ).resolves.toEqual({ kind: "reconciled", epoch: EPOCH, registered: 0, known: 64, refused: 1 });
     expect(register.mock.calls.map(([request]) => request.blocks.length)).toEqual([64, 1, 64, 1]);
+    // The failed run's last part was lost; the new run says `more` on the first part again.
+    expect(register.mock.calls.map(([request]) => request.more ?? false)).toEqual([
+      true,
+      false,
+      true,
+      false,
+    ]);
     expect(epochs(db)).toMatchObject([{ reconciled_at: NOW.toISOString(), refused: 1 }]);
     expect(rows(db, "SELECT acked_at FROM outbox")).toEqual([{ acked_at: null }]);
   });

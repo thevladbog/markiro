@@ -20,11 +20,13 @@
 //! One revision when anything was registered, and one
 //! `sscc.block.register` audit row per registered block. The station is
 //! marked as having sent its blocks for the current epoch
-//! (`devices.known_blocks_epoch`), which the office shows before it resumes
-//! the facts. Only a station, only after a restore (`conflict` on
-//! `no_restore` before any), at most [`MAX_BLOCKS`] blocks; an empty list
-//! (a station that never took a block, plan ХП) only marks the station. The
-//! facts' hold does not stop it.
+//! (`devices.known_blocks_epoch`) — on the last part of its run only (`more`
+//! absent; plan ОЧ), which may be empty for a station that never took a block
+//! (plan ХП) — which the office shows before it resumes the facts. Only a
+//! station, only after a restore (`conflict` on `no_restore` before any),
+//! 0 to [`MAX_BLOCKS`] blocks, none only in the last part. A part with more
+//! to come registers its blocks like any other and marks nothing. The facts'
+//! hold does not stop it.
 
 use axum::extract::State;
 use axum::Json;
@@ -172,8 +174,11 @@ pub async fn register_known_blocks(
     if device.kind != DeviceKind::Station {
         return Err(ApiError::forbidden(FORBIDDEN));
     }
-    if request.blocks.len() > MAX_BLOCKS {
-        return Err(ApiError::validation("blocks", "0-64 blocks"));
+    if request.blocks.len() > MAX_BLOCKS || (request.blocks.is_empty() && request.more) {
+        return Err(ApiError::validation(
+            "blocks",
+            "0-64 blocks, none only in the last part",
+        ));
     }
     for (index, block) in request.blocks.iter().enumerate() {
         validate::client_uuid(&format!("blocks.{index}.id"), &block.id)?;
@@ -254,17 +259,22 @@ pub async fn register_known_blocks(
         results.push(outcome);
     }
     // The station gave its blocks back for this epoch, whatever became of
-    // each: the office lists the stations that did not yet.
-    let marked = sqlx::query(
-        "UPDATE devices SET known_blocks_epoch = ?1 WHERE id = ?2 \
-         AND known_blocks_epoch IS NOT ?1",
-    )
-    .bind(&epoch)
-    .bind(&device.id)
-    .execute(&mut *tx)
-    .await
-    .map_err(ApiError::internal)?
-    .rows_affected();
+    // each, once its last part is in (plan ОЧ): the office lists the stations
+    // that did not yet.
+    let marked = if request.more {
+        0
+    } else {
+        sqlx::query(
+            "UPDATE devices SET known_blocks_epoch = ?1 WHERE id = ?2 \
+             AND known_blocks_epoch IS NOT ?1",
+        )
+        .bind(&epoch)
+        .bind(&device.id)
+        .execute(&mut *tx)
+        .await
+        .map_err(ApiError::internal)?
+        .rows_affected()
+    };
     match rev {
         Some(rev) => commit_with_revision(tx, &state.revisions, rev)
             .await

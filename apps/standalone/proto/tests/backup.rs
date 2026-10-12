@@ -75,6 +75,25 @@ fn the_settings_update_is_strict_and_clears_with_null() {
 fn known_blocks_round_trip_and_the_request_is_strict() {
     let request: KnownBlocksRequest = round_trip("known-blocks-request.json");
     assert_eq!(request.blocks[0].to_serial, 5499);
+    assert!(
+        !request.more,
+        "a request without the field is the last part"
+    );
+    let part: KnownBlocksRequest = round_trip("known-blocks-request-more.json");
+    assert!(part.more);
+    let empty: KnownBlocksRequest = serde_json::from_value(json!({ "blocks": [] })).unwrap();
+    assert!(empty.blocks.is_empty() && !empty.more);
+    // `more: false` is the default spelled out; it is read as the last part.
+    let spelled: KnownBlocksRequest =
+        serde_json::from_value(json!({ "blocks": [], "more": false })).unwrap();
+    assert!(!spelled.more);
+    // The last part does not write the field, so an old host reads what a new station sends.
+    assert!(serde_json::to_value(&empty).unwrap().get("more").is_none());
+    assert_eq!(serde_json::to_value(&part).unwrap()["more"], json!(true));
+    assert!(
+        serde_json::from_value::<KnownBlocksRequest>(json!({ "blocks": [], "more": "yes" }))
+            .is_err()
+    );
     // A station that never took a block sends an empty list (plan ХП).
     let empty: KnownBlocksRequest = round_trip("known-blocks-request-empty.json");
     assert!(empty.blocks.is_empty());

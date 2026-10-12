@@ -70,6 +70,13 @@ describe("backup shapes (proto/fixtures)", () => {
     expect(
       knownBlocksRequestSchema.parse(fixture("known-blocks-request-empty.json")).blocks,
     ).toEqual([]);
+    // Plan ОЧ: `more` says parts follow; absent is the last part (an older station).
+    expect(knownBlocksRequestSchema.parse(fixture("known-blocks-request-more.json")).more).toBe(
+      true,
+    );
+    expect(knownBlocksRequestSchema.parse({ blocks: [] })).toEqual({ blocks: [] });
+    expect(knownBlocksRequestSchema.parse({ blocks: [], more: false }).more).toBe(false);
+    expect(knownBlocksRequestSchema.safeParse({ blocks: [], more: "yes" }).success).toBe(false);
     const block = request.blocks[0];
     expect(knownBlocksRequestSchema.safeParse({ blocks: Array(64).fill(block) }).success).toBe(
       true,

@@ -183,6 +183,12 @@ pub struct KnownBlock {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct KnownBlocksRequest {
     pub blocks: Vec<KnownBlock>,
+    /// More parts of this run follow (plan ОЧ): the host marks the station as
+    /// having sent its blocks only on the last part, which may be empty — a
+    /// station that never got a block sends one empty last part. Absent means
+    /// last, as every request before the field was.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub more: bool,
 }
 
 /// What became of one block.
