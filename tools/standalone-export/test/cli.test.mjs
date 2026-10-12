@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   mkdtempSync,
@@ -11,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   CREDENTIAL_WARNING,
@@ -97,9 +99,39 @@ test("the folder of the file is always named: the working directory may be a rep
 });
 
 test("a transfer file written by mistake inside the repository is ignored by git", () => {
-  const lines = readFileSync(new URL("../../../.gitignore", import.meta.url), "utf8").split("\n");
+  // A Windows checkout may turn the file's line ends into CRLF (core.autocrlf).
+  const lines = readFileSync(new URL("../../../.gitignore", import.meta.url), "utf8").split(
+    /\r?\n/u,
+  );
   assert.ok(lines.includes("markiro-cloud-export-*.json"), "the transfer file is not ignored");
   assert.ok(lines.includes(".markiro-cloud-export-*.partial"), "the temporary file is not ignored");
+  // And git itself ignores both, at the root and deep in the tree, by the
+  // repository's own .gitignore (not a user's global excludes).
+  const paths = [
+    "markiro-cloud-export-imp-test-atoll-2026-10-09.json",
+    "apps/standalone/markiro-cloud-export-imp-test-atoll-2026-10-09.json",
+    ".markiro-cloud-export-imp-test-atoll-2026-10-09.1234-0a1b2c3d4e5f.partial",
+    "tools/standalone-export/.markiro-cloud-export-imp-test-atoll-2026-10-09.1234-0a1b2c3d4e5f.partial",
+  ];
+  const checked = spawnSync("git", ["check-ignore", "--no-index", "--verbose", ...paths], {
+    cwd: fileURLToPath(new URL("../../../", import.meta.url)),
+    encoding: "utf8",
+  });
+  assert.equal(checked.status, 0, `git check-ignore: ${checked.stderr}`);
+  // `<source>:<line>:<pattern>\t<path>`; a negated pattern that matched is
+  // reported too, and means the path is not ignored.
+  const matches = checked.stdout
+    .split(/\r?\n/u)
+    .filter(Boolean)
+    .map((line) => {
+      const [match = "", path] = line.split("\t");
+      const [, source, pattern = ""] = /^(.*?):\d+:(.*)$/u.exec(match) ?? [];
+      return [path, source, pattern.startsWith("!") ? "negated" : "ignored"];
+    });
+  assert.deepEqual(
+    matches,
+    paths.map((path) => [path, ".gitignore", "ignored"]),
+  );
 });
 
 /** `FS` with one call replaced. */
