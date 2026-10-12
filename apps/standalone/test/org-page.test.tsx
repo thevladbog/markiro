@@ -24,6 +24,7 @@ async function openProfile(session: FakeOfficeSession): Promise<void> {
 function adminSession(): FakeOfficeSession {
   const session = fakeOfficeSession();
   session.api.getOrg.mockResolvedValue(ORG_PROFILE);
+  session.api.getOrgLogo.mockResolvedValue({ logo: null });
   return session;
 }
 
@@ -35,6 +36,7 @@ describe("organization profile", () => {
   it("shows a technologist the profile without a form", async () => {
     const session = fakeOfficeSession({ user: TECHNOLOGIST });
     session.api.getOrg.mockResolvedValue(ORG_PROFILE);
+    session.api.getOrgLogo.mockResolvedValue({ logo: null });
     await openProfile(session);
     expect(await screen.findByText("ООО «Атолл»")).toBeTruthy();
     expect(screen.getByText("4600682000013")).toBeTruthy();
@@ -170,6 +172,7 @@ describe("organization profile", () => {
         new HostError({ kind: "transport", code: "unreachable", message: "down" }),
       )
       .mockResolvedValueOnce(ORG_PROFILE);
+    session.api.getOrgLogo.mockResolvedValue({ logo: null });
     await openProfile(session);
     expect(
       await screen.findByText(

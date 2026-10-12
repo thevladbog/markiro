@@ -1,6 +1,8 @@
 import { fireEvent, screen, waitFor, within, type RenderResult } from "@testing-library/react";
 import { expect, vi } from "vitest";
 
+import { buildPalletSheetPresets } from "@markiro/domain";
+
 import type {
   CounterpartyRecord,
   LabelTemplateSummary,
@@ -8,6 +10,7 @@ import type {
   OfficeProduct,
   OfficeShift,
   OfficeUser,
+  PalletSheets,
   ShiftTotals,
   TemplateDefaults,
 } from "../../src/host/protocol.js";
@@ -254,6 +257,8 @@ export function shiftsSession(
   session.api.listTemplates.mockResolvedValue([BOX_58, MILK_BOX, OLD_BOX, PALLET]);
   session.api.getOrg.mockResolvedValue(ORG_PROFILE);
   session.api.getTemplateDefaults.mockResolvedValue(DEFAULTS);
+  // A shift with pallets reads the A4 sheets; a test about something else finds none.
+  session.api.listPalletSheets.mockResolvedValue({ sheets: [], defaultId: null });
   return session;
 }
 
@@ -306,4 +311,18 @@ export async function expectFocusedNotice(text: string): Promise<void> {
 export function freezeToday(): void {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-10-09T09:00:00Z"));
+}
+
+/** The stock A4 sheets as the host lists them (plan А4): portrait is the main one. */
+export function stockSheets(): PalletSheets {
+  const presets = buildPalletSheetPresets();
+  const sheets = presets.map((preset, index) => ({
+    id: `${String(index + 1)}a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a50`,
+    name: preset.name,
+    enabled: true,
+    presetKey: preset.key,
+    revision: 1,
+    spec: preset.spec,
+  }));
+  return { sheets, defaultId: sheets[0]?.id ?? null };
 }

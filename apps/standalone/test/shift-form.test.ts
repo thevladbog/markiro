@@ -4,6 +4,7 @@ import { HostError } from "../src/host/client.js";
 import { shiftUpdate } from "../src/host/requests.js";
 import {
   SHIFT_CONFLICTS,
+  SHIFT_FIELD_ORDER,
   SHIFT_FIELDS,
   shiftFields,
   shiftFieldsSchema,
@@ -31,6 +32,7 @@ describe("a shift's form", () => {
       palletsEnabled: false,
       palletBoxCapacity: "",
       palletTemplateId: "",
+      palletSheetTemplateId: "",
       counterpartyId: ACTIVE.counterpartyId,
     });
     const withPallets = {
@@ -130,6 +132,53 @@ describe("a shift's form", () => {
     });
     expect(sort(api("validation_failed", { field: "palletBoxCapacity" }))).toEqual({
       failure: { kind: "field", field: "palletBoxCapacity", message: "rules.rejected" },
+      outdated: false,
+    });
+  });
+
+  it("carries a shift's A4 sheet: the form holds it, an empty choice sends none, a chosen one goes with the pallets (plan А4)", () => {
+    const SHEET = "6a3f0c5e-1b2d-4e8f-9a7b-0c1d2e3f4a50";
+    const withSheet = {
+      ...PLANNED,
+      palletsEnabled: true,
+      palletBoxCapacity: 40,
+      palletTemplateId: PALLET.id,
+      palletSheetTemplateId: SHEET,
+    };
+    expect(shiftFields(withSheet).palletSheetTemplateId).toBe(SHEET);
+    expect(shiftFields(PLANNED).palletSheetTemplateId).toBe("");
+    const pallets = { ...shiftFields(withSheet), palletsEnabled: true };
+    expect(toShiftInput(pallets).pallets).toEqual({
+      boxCapacity: 40,
+      templateId: PALLET.id,
+      sheetId: SHEET,
+    });
+    // «Основной лист организации» sends no sheet at all (never an empty id).
+    const main = toShiftInput({ ...pallets, palletSheetTemplateId: "" }).pallets;
+    expect(main).toEqual({ boxCapacity: 40, templateId: PALLET.id });
+    expect(main).not.toHaveProperty("sheetId");
+    // Pallets off send no sheet, whatever the field still holds.
+    expect(toShiftInput({ ...pallets, palletsEnabled: false }).pallets).toBeNull();
+    // An unchanged form of a shift with a sheet sends nothing back.
+    expect(shiftUpdate(withSheet, toShiftChange(shiftFields(withSheet)))).toStrictEqual({
+      expectedRev: withSheet.rev,
+    });
+    // The sheet needs no check of the form: the host decides.
+    expect(shiftFieldsSchema.safeParse({ ...pallets, palletSheetTemplateId: "" }).success).toBe(
+      true,
+    );
+    expect(SHIFT_FIELD_ORDER.indexOf("palletSheetTemplateId")).toBe(
+      SHIFT_FIELD_ORDER.indexOf("palletTemplateId") + 1,
+    );
+  });
+
+  it("puts a refused A4 sheet under its select (plan А4)", () => {
+    expect(sort(api("validation_failed", { field: "palletSheetTemplateId" }))).toEqual({
+      failure: {
+        kind: "field",
+        field: "palletSheetTemplateId",
+        message: "office.shifts.errors.palletSheetRejected",
+      },
       outdated: false,
     });
   });

@@ -24,6 +24,7 @@ import {
   shiftRow,
   shiftsSession,
   SOUTH_ARCHIVED,
+  stockSheets,
   WATER,
 } from "./support/shifts.js";
 
@@ -1021,5 +1022,183 @@ describe("office shifts: changing an active shift's plan, the edges", () => {
     fireEvent.click(reload);
     await waitFor(() => expect(screen.queryByRole("dialog", { name })).toBeNull());
     expect(session.api.updateShift).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("office shifts: changing the A4 sheet of a planned shift (plan А4)", () => {
+  const SHEETS = stockSheets();
+  const [PORTRAIT, LANDSCAPE, TWO_A5] = SHEETS.sheets as [
+    (typeof SHEETS.sheets)[number],
+    (typeof SHEETS.sheets)[number],
+    (typeof SHEETS.sheets)[number],
+  ];
+  const WITH_PALLETS: OfficeShift = {
+    ...PLANNED,
+    palletsEnabled: true,
+    palletBoxCapacity: 40,
+    palletTemplateId: PALLET.id,
+  };
+  const WITH_SHEET: OfficeShift = { ...WITH_PALLETS, palletSheetTemplateId: LANDSCAPE.id };
+
+  beforeEach(() => {
+    localStorage.removeItem("markiro.theme");
+    freezeToday();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function sessionWith(shift: OfficeShift, sheets = SHEETS): FakeOfficeSession {
+    const session = shiftsSession([shift, ACTIVE, CLOSED]);
+    session.api.listPalletSheets.mockResolvedValue(sheets);
+    session.api.updateShift.mockResolvedValue(shift);
+    return session;
+  }
+
+  it("shows the sheet the shift holds, offers no «main» to it, and sends nothing for it unchanged", async () => {
+    const session = sessionWith(WITH_SHEET);
+    const name = await openEdit(session, WITH_SHEET);
+    await waitFor(() =>
+      expect(options(name, "Лист А4")).toEqual([
+        "Палета А4 · вертикальная",
+        "Палета А4 · горизонтальная",
+        "Палета А4 · две одинаковые А5",
+      ]),
+    );
+    expect(valueOf(name, "Лист А4")).toBe(LANDSCAPE.id);
+    expect(save(name).disabled).toBe(true);
+    // A change of the plan names no sheet.
+    fireEvent.change(field(name, "План, шт"), { target: { value: "900" } });
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, WITH_SHEET.id, {
+        plannedQty: 900,
+        expectedRev: 72,
+      }),
+    );
+  });
+
+  it("sends the other sheet that was chosen, with nothing else", async () => {
+    const session = sessionWith(WITH_SHEET);
+    const name = await openEdit(session, WITH_SHEET);
+    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(3));
+    fireEvent.change(field(name, "Лист А4"), { target: { value: TWO_A5.id } });
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, WITH_SHEET.id, {
+        palletSheetTemplateId: TWO_A5.id,
+        expectedRev: 72,
+      }),
+    );
+  });
+
+  it("keeps a sheet that was switched off after the shift was planned, marked, and does not ask to change it", async () => {
+    const off = { ...SHEETS, sheets: [PORTRAIT, { ...LANDSCAPE, enabled: false }, TWO_A5] };
+    const session = sessionWith(WITH_SHEET, off);
+    const name = await openEdit(session, WITH_SHEET);
+    await waitFor(() =>
+      expect(options(name, "Лист А4")).toContain("Палета А4 · горизонтальная (выключен)"),
+    );
+    expect(valueOf(name, "Лист А4")).toBe(LANDSCAPE.id);
+    expect(options(name, "Лист А4")).toHaveLength(3);
+    expect(save(name).disabled).toBe(true);
+  });
+
+  it("names a sheet that is not in the list by the start of its id, so the select never shows another", async () => {
+    const gone = { ...SHEETS, sheets: [PORTRAIT, TWO_A5] };
+    const session = sessionWith(WITH_SHEET, gone);
+    const name = await openEdit(session, WITH_SHEET);
+    await waitFor(() =>
+      expect(options(name, "Лист А4")).toContain(`Лист ${LANDSCAPE.id.slice(0, 8)}`),
+    );
+    expect(valueOf(name, "Лист А4")).toBe(LANDSCAPE.id);
+  });
+
+  it("offers «main» to a shift with pallets that has no sheet, and a chosen sheet goes alone", async () => {
+    const session = sessionWith(WITH_PALLETS);
+    const name = await openEdit(session, WITH_PALLETS);
+    await waitFor(() =>
+      expect(options(name, "Лист А4")[0]).toBe(
+        "Основной лист организации (Палета А4 · вертикальная)",
+      ),
+    );
+    expect(valueOf(name, "Лист А4")).toBe("");
+    expect(save(name).disabled).toBe(true);
+    fireEvent.change(field(name, "Лист А4"), { target: { value: PORTRAIT.id } });
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, WITH_PALLETS.id, {
+        palletSheetTemplateId: PORTRAIT.id,
+        expectedRev: 72,
+      }),
+    );
+  });
+
+  it("sends the sheet with the pallets a planned shift turns on", async () => {
+    const session = sessionWith(PLANNED);
+    const name = await openEdit(session, PLANNED);
+    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
+    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
+    fireEvent.change(field(name, "Лист А4"), { target: { value: TWO_A5.id } });
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(session.api.updateShift).toHaveBeenLastCalledWith(TOKEN, PLANNED.id, {
+        palletsEnabled: true,
+        palletBoxCapacity: 40,
+        palletTemplateId: PALLET.id,
+        palletSheetTemplateId: TWO_A5.id,
+        expectedRev: 72,
+      }),
+    );
+  });
+
+  it("sends no sheet with the pallets a planned shift turns on when «main» stays", async () => {
+    const session = sessionWith(PLANNED);
+    const name = await openEdit(session, PLANNED);
+    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
+    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(4));
+    expect(valueOf(name, "Лист А4")).toBe("");
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(session.api.updateShift).toHaveBeenLastCalledWith(TOKEN, PLANNED.id, {
+        palletsEnabled: true,
+        palletBoxCapacity: 40,
+        palletTemplateId: PALLET.id,
+        expectedRev: 72,
+      }),
+    );
+  });
+
+  it("sends no sheet when the pallets are turned off", async () => {
+    const session = sessionWith(WITH_SHEET);
+    const name = await openEdit(session, WITH_SHEET);
+    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(3));
+    fireEvent.click(within(dialog(name)).getByRole("checkbox", { name: "С паллетами" }));
+    expect(within(dialog(name)).queryByLabelText("Лист А4")).toBeNull();
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(session.api.updateShift).toHaveBeenCalledWith(TOKEN, WITH_SHEET.id, {
+        palletsEnabled: false,
+        expectedRev: 72,
+      }),
+    );
+  });
+
+  it("puts a refused sheet under its select and reads the sheets again", async () => {
+    const session = sessionWith(WITH_SHEET);
+    session.api.updateShift.mockRejectedValue(
+      api("validation_failed", { field: "palletSheetTemplateId" }),
+    );
+    const name = await openEdit(session, WITH_SHEET);
+    await waitFor(() => expect(options(name, "Лист А4")).toHaveLength(3));
+    fireEvent.change(field(name, "Лист А4"), { target: { value: TWO_A5.id } });
+    fireEvent.click(save(name));
+    await waitFor(() =>
+      expect(messageOf(name, "Лист А4")).toBe(
+        "Лист выключен, удалён или не подходит смене. Выберите другой.",
+      ),
+    );
+    await waitFor(() => expect(session.api.listPalletSheets).toHaveBeenCalledTimes(2));
   });
 });

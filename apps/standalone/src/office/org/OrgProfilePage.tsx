@@ -20,6 +20,7 @@ import { useCan } from "../access.js";
 import { useFieldError, writeFailure, type AlertFailure } from "../form-errors.js";
 import { officeKeys, useOfficeMutation, useOfficeQuery } from "../office-query.js";
 import { LoadError, PageLoading, WriteFailureAlert } from "../page-state.js";
+import { OrgLogoCard } from "./OrgLogoCard.js";
 
 /** The organization profile (spec §5.5): administrators edit it, technologists read it. */
 export function OrgProfilePage() {
@@ -28,6 +29,7 @@ export function OrgProfilePage() {
     <>
       <PageHeader title={t("office.org.title")} />
       <OrgProfileContent />
+      <OrgLogoCard />
     </>
   );
 }

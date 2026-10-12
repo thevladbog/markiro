@@ -8,6 +8,7 @@ import { OfficeOverview } from "./OfficeOverview.js";
 import { OfficeShell } from "./OfficeShell.js";
 import { OperatorsPage } from "./operators/OperatorsPage.js";
 import { OrgProfilePage } from "./org/OrgProfilePage.js";
+import { PalletSheetsPage } from "./sheets/PalletSheetsPage.js";
 import { ProductsPage } from "./products/ProductsPage.js";
 import { RequireRole } from "./RequireRole.js";
 import { ShiftCardPage } from "./shifts/ShiftCardPage.js";
@@ -57,6 +58,7 @@ export const officeRoutes: RouteObject[] = [
       { path: "templates/:id", element: <EditTemplatePage /> },
       { path: "templates/:id/copy", element: <CopyTemplatePage /> },
       { path: "template-defaults", element: <TemplateDefaultsPage /> },
+      { path: "pallet-sheets", element: <PalletSheetsPage /> },
       {
         path: "users",
         element: (
