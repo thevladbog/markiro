@@ -97,8 +97,9 @@ pub struct Caps {
 }
 
 /// The driver prints the page 1:1: the same resolution on both axes, the
-/// paper within one dot of the page, and the page's required bounds (its
-/// barcodes' quiet zones) inside the printable area.
+/// paper within one dot of the page, the printable origin inside the page, and
+/// the page's required bounds (its barcodes' quiet zones) inside the printable
+/// area.
 #[allow(clippy::result_unit_err)]
 pub fn check_geometry(page: &Raster<'_>, c: Caps) -> Result<(), ()> {
     let [l, t, r, b] = page.bounds;
@@ -111,7 +112,11 @@ pub fn check_geometry(page: &Raster<'_>, c: Caps) -> Result<(), ()> {
     {
         return Err(());
     }
-    if c.dpi_x != page.dpi
+    // The blit is `min(page - origin, printable)` dots wide: the origin inside
+    // the page keeps it positive (a negative width would mirror the page).
+    if c.offset_x >= page.width
+        || c.offset_y >= page.height
+        || c.dpi_x != page.dpi
         || c.dpi_y != page.dpi
         || (c.width - page.width).abs() > 1
         || (c.height - page.height).abs() > 1
@@ -540,5 +545,41 @@ mod tests {
             }
         )
         .is_ok());
+    }
+
+    #[test]
+    fn the_printable_origin_lies_inside_the_page_so_the_blit_has_a_size() {
+        // No required bounds, one dot of printable area: only the origin keeps the
+        // blit (page width - origin) positive.
+        let bytes = square([0; 4], &[]);
+        let page = decode(&bytes).unwrap();
+        let base = Caps {
+            dpi_x: 203,
+            dpi_y: 203,
+            width: 80,
+            height: 80,
+            offset_x: 79,
+            offset_y: 79,
+            printable_width: 1,
+            printable_height: 1,
+        };
+        assert!(check_geometry(&page, base).is_ok());
+        for bad in [
+            Caps {
+                offset_x: 80,
+                ..base
+            },
+            Caps {
+                offset_y: 80,
+                ..base
+            },
+            Caps {
+                offset_x: 81,
+                width: 81,
+                ..base
+            },
+        ] {
+            assert!(check_geometry(&page, bad).is_err(), "{bad:?}");
+        }
     }
 }

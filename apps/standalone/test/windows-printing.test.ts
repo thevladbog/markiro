@@ -27,9 +27,16 @@ describe("the driver printing answers the shell sends", () => {
     for (const key of ["windowsPrintSent", "windowsPrintUnknown", "windowsPrintRefused"]) {
       expect(windowsPrintOutcomeSchema.parse(shapes[key]), key).toEqual(shapes[key]);
     }
-    for (const key of ["windowsJobPresent", "windowsJobAbsent"]) {
+    for (const key of [
+      "windowsJobPresent",
+      "windowsJobAbsent",
+      "windowsJobIdentityMismatch",
+      "windowsJobUnavailable",
+    ]) {
       expect(windowsJobObservationSchema.parse(shapes[key]), key).toEqual(shapes[key]);
     }
+    // The file pins two shapes of the scanners/printers and seven driver answers.
+    expect(Object.keys(shapes)).toHaveLength(9);
     expect(
       windowsPrintOutcomeSchema.safeParse({ ok: true, receipt: RECEIPT, extra: 1 }).success,
     ).toBe(false);
