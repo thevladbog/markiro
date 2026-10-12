@@ -10,6 +10,7 @@
     "playwright.config.ts",
     "tests/**/*.ts",
     "station-inventory-tests/**/*.ts",
+    "station-startup-tests/**/*.ts",
     "product-labels-tests/**/*.ts",
     "national-catalog-tests/**/*.ts",
     "reports-tests/**/*.ts",

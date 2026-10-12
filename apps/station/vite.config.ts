@@ -12,5 +12,11 @@ export default defineConfig({
   plugins: [react()],
   clearScreen: false,
   server: { port: 5273, strictPort: true },
-  build: { target: "es2023", outDir: "dist" },
+  build: {
+    target: "es2023",
+    outDir: "dist",
+    // Auto-generated cyclic chunks can initialize domain schemas before Zod constructors.
+    // The offline webview uses one bundle so its module initialization order stays intact.
+    rolldownOptions: { output: { codeSplitting: false } },
+  },
 });
