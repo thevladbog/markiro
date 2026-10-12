@@ -40,3 +40,36 @@ export async function finishProductionPalletDelivery(
     [JSON.stringify(next), owner, sscc, claim.sourceRevision, JSON.stringify(claim)],
   );
 }
+
+/** Recover a legacy send only from the latest exact driver attempt; never infer it from closure. */
+export async function recoverLegacyProductionPalletDeliveries(
+  exec: SqlExecutor,
+  owner: string,
+  sscc: string | null = null,
+) {
+  await exec.run(
+    `WITH legacy AS (
+      SELECT s.rowid source_id,json_object('sourceRevision',s.revision,'sequence',1,
+        'attemptId',d.attempt_id,'bytesDigest',d.artifact_digest,'state','sent',
+        'occurredAt',d.updated_at) value_json
+      FROM warehouse_pallet_sources s
+      JOIN pallets_mirror p ON p.sscc=s.sscc AND p.shift_id=json_extract(s.value_json,'$.shiftId')
+      JOIN printer_deliveries d ON d.rowid=(
+        SELECT rowid FROM printer_deliveries
+        WHERE scope=json_extract(s.value_json,'$.originalAttempt.scope')
+          AND purpose='pallet' AND job_id=s.sscc
+        ORDER BY updated_at DESC,rowid DESC LIMIT 1)
+      WHERE s.owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL})
+        AND (? IS NULL OR s.sscc=?) AND s.production_delivery_json IS NULL
+        AND s.receive_status<>'conflict' AND s.eligibility_denied=0
+        AND p.closed_at IS NOT NULL AND p.disassembled_at IS NULL
+        AND json_extract(s.value_json,'$.originalAttempt.scope')=json_array(p.shift_id,p.terminal_id)
+        AND d.state='sent'
+        AND d.attempt_id=json_extract(s.value_json,'$.originalAttempt.attemptId')
+        AND d.artifact_digest=json_extract(s.value_json,'$.originalAttempt.bytesDigest')
+    ) UPDATE warehouse_pallet_sources
+      SET production_delivery_json=(SELECT value_json FROM legacy WHERE source_id=warehouse_pallet_sources.rowid)
+      WHERE rowid IN (SELECT source_id FROM legacy) AND production_delivery_json IS NULL`,
+    [owner, sscc, sscc],
+  );
+}

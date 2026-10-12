@@ -38,6 +38,7 @@ export interface PalletWorkState {
   catalog: PalletTemplateCatalogV2 | null;
   choice: PalletTemplateChoice | null;
   diagnostic: PalletDeliveryDiagnostic | null;
+  diagnosticShiftNumber?: string | null;
   initialized: boolean;
   busy: boolean;
   reason: WarehouseSession["reason"];
@@ -97,10 +98,20 @@ export function createWarehousePalletWork(o: WarehouseWorkOptions) {
     publish({ busy: true, error: null });
     const task = Promise.resolve()
       .then(run)
-      .catch((error) => {
+      .catch(async (error) => {
+        const diagnostic = error instanceof PalletDeliveryError ? error.diagnostic : null;
+        const [shift] = diagnostic?.shiftId
+          ? await o.exec
+              .all<{ number: string | null }>("SELECT number FROM shift_mirror WHERE id=?", [
+                diagnostic.shiftId,
+              ])
+              .catch(() => [])
+          : [];
         if (current())
           publish({
-            ...(error instanceof PalletDeliveryError ? { diagnostic: error.diagnostic } : {}),
+            ...(error instanceof PalletDeliveryError
+              ? { diagnostic, diagnosticShiftNumber: shift?.number ?? null }
+              : {}),
             error:
               error instanceof Error && error.message.startsWith("WAREHOUSE_")
                 ? error.message

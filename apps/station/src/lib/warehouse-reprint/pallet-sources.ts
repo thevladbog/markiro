@@ -1,3 +1,4 @@
+import { recoverLegacyProductionPalletDeliveries } from "./production-delivery.js";
 import {
   PalletDeliveryError,
   localPalletDiagnostic,
@@ -228,6 +229,7 @@ export async function retainPalletClosureSource(
   return null;
 }
 async function localSource(exec: SqlExecutor, owner: string, sscc: string) {
+  await recoverLegacyProductionPalletDeliveries(exec, owner, sscc);
   const membership = await palletMembership(exec, sscc);
   const [saved] = await exec.all<{
     value_json: string;

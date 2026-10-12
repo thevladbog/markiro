@@ -1,3 +1,4 @@
+import { recoverLegacyProductionPalletDeliveries } from "./production-delivery.js";
 import { z } from "zod";
 import {
   PALLET_REPRINT_PROTOCOL,
@@ -20,6 +21,8 @@ export async function syncWarehousePallets(
   isCurrent: () => boolean,
 ) {
   if (!client.get || !isCurrent()) return 0;
+  await recoverLegacyProductionPalletDeliveries(exec, owner);
+  if (!isCurrent()) return 0;
   const sources = await exec.all<{
     owner: string;
     sscc: string;

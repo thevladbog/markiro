@@ -172,7 +172,7 @@ export function PalletConfirmation(
                     : (diagnostic.originDeviceId ?? "—")}
                 </dd>
                 <dt>{t("warehouse.pallet.shift")}</dt>
-                <dd>{diagnostic.shiftId ?? "—"}</dd>
+                <dd>{state.diagnosticShiftNumber ?? t("warehouse.pallet.shiftUnavailable")}</dd>
                 <dt>{t("warehouse.pallet.attempt")}</dt>
                 <dd>{diagnostic.attemptId ?? "—"}</dd>
               </dl>
@@ -199,9 +199,10 @@ export function PalletConfirmation(
                       {t("warehouse.pallet.resolveSkip")}
                     </Button>
                   </>
-                ) : (
+                ) : diagnostic.originDeviceId !== props.deviceId &&
+                  ["delivery_unknown", "failed_before_send"].includes(diagnostic.kind) ? (
                   <p>{t("warehouse.pallet.resolveAtOrigin")}</p>
-                )}
+                ) : null}
               </div>
             </section>
           ) : null}
@@ -383,7 +384,13 @@ export function PalletConfirmation(
             {t("warehouse.chooseTemplates")}
           </Button>
           {!state.selection ? (
-            <p className="warehouse-session-note">{t("warehouse.pallet.pickAfterLookup")}</p>
+            <p className="warehouse-session-note">
+              {t(
+                diagnostic?.kind === "sync_pending"
+                  ? "warehouse.pallet.pickAfterSync"
+                  : "warehouse.pallet.pickAfterLookup",
+              )}
+            </p>
           ) : !state.catalog ? (
             <p className="warehouse-session-note">{t("warehouse.pallet.v2Unavailable")}</p>
           ) : null}
