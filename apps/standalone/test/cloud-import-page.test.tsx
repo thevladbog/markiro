@@ -1052,3 +1052,101 @@ describe("the notes of the export tool", () => {
     expect(sorted(NOTE_PURPOSES)).toEqual(sorted(Object.keys(words.purposes)));
   });
 });
+
+describe("a rehearsal file or an old file asks twice", () => {
+  const EXPORTED_AT = Date.parse("2026-10-09T18:30:00.000Z");
+  const HOUR = 3_600_000;
+  const CHECKBOX = "Это пробная площадка: она будет удалена до переключения";
+  const AFTER_REHEARSAL =
+    "Это была пробная площадка: удалите её вместе с базой до переключения (памятка переключения, раздел 2.2). На боевую площадку переносится новый файл, выгруженный после заморозки облака.";
+  const DONE = "Данные облака перенесены. Станции получат их при следующей синхронизации.";
+  const stale = (hours: number) =>
+    `Файл выгружен ${hours} ч назад. Для переключения годится только файл, выгруженный после заморозки облака: в более старом файле стартовые номера SSCC могут оказаться ниже номеров, которые облако выдало после выгрузки. Если облако после неё работало, выгрузите заново.`;
+
+  it("imports a rehearsal file only after its checkbox, and says to remove the site after", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(EXPORTED_AT + HOUR);
+    const session = adminSession();
+    session.api.importFromCloud
+      .mockResolvedValueOnce({ ...SUMMARY, dryRun: true })
+      .mockResolvedValueOnce(SUMMARY);
+    const rehearsal = await rewritten((file) => (file.rehearsal = true));
+    await openImport(session);
+    choose(rehearsal);
+    fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
+    await screen.findByText("Проверка пройдена: перенос запишет то, что ниже.");
+    let dialog = await confirm();
+    const submit = () =>
+      within(dialog).getByRole("button", { name: "Перенести" }) as HTMLButtonElement;
+    const box = () => within(dialog).getByRole("checkbox", { name: CHECKBOX });
+    const ticked = () => box().getAttribute("aria-checked");
+    expect(ticked()).toBe("false");
+    expect(submit().disabled).toBe(true);
+    // Not even a submit of the form itself goes through.
+    const form = dialog.querySelector("form");
+    expect(form).not.toBeNull();
+    fireEvent.submit(form!);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(sent(session).map((request) => request.dryRun)).toEqual([true]);
+    fireEvent.click(box());
+    expect(ticked()).toBe("true");
+    expect(submit().disabled).toBe(false);
+    // Closed and opened again, the question is asked again.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Отмена" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    dialog = await confirm();
+    expect(ticked()).toBe("false");
+    expect(submit().disabled).toBe(true);
+    fireEvent.click(box());
+    fireEvent.click(submit());
+    expect(await screen.findByText(DONE)).toBeTruthy();
+    expect(sent(session).map((request) => [request.dryRun, request.rehearsal])).toEqual([
+      [true, true],
+      [false, true],
+    ]);
+    expect(screen.getByText(AFTER_REHEARSAL)).toBeTruthy();
+    expect(screen.queryByText(stale(1))).toBeNull();
+  });
+
+  it("asks nothing more of a file that is not a rehearsal one", async () => {
+    vi.spyOn(Date, "now").mockReturnValue(EXPORTED_AT + HOUR);
+    const session = adminSession();
+    session.api.importFromCloud
+      .mockResolvedValueOnce({ ...SUMMARY, dryRun: true })
+      .mockResolvedValueOnce(SUMMARY);
+    await openImport(session);
+    choose(GOLDEN);
+    fireEvent.click(await screen.findByRole("button", { name: "Проверить" }));
+    await screen.findByText("Проверка пройдена: перенос запишет то, что ниже.");
+    const dialog = await confirm();
+    expect(within(dialog).queryByRole("checkbox")).toBeNull();
+    const submit = within(dialog).getByRole("button", { name: "Перенести" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+    expect(await screen.findByText(DONE)).toBeTruthy();
+    expect(screen.queryByText(AFTER_REHEARSAL)).toBeNull();
+  });
+
+  it("names the age of an export older than 12 hours, and only then", async () => {
+    const now = vi.spyOn(Date, "now");
+    const session = adminSession();
+    await openImport(session);
+    for (const [age, shown] of [
+      [12 * HOUR, null],
+      [-HOUR, null],
+      [12 * HOUR + 60_000, 12],
+      [72 * HOUR + 59 * 60_000, 72],
+    ] as const) {
+      now.mockReturnValue(EXPORTED_AT + age);
+      choose(GOLDEN);
+      await screen.findByRole("button", { name: "Проверить" });
+      for (const hours of [12, 72]) {
+        if (hours === shown) expect(screen.getByText(stale(hours))).toBeTruthy();
+        else expect(screen.queryByText(stale(hours))).toBeNull();
+      }
+      fireEvent.click(screen.getByRole("button", { name: "Убрать файл" }));
+      await waitFor(() => expect(screen.queryByRole("button", { name: "Проверить" })).toBeNull());
+    }
+  });
+});

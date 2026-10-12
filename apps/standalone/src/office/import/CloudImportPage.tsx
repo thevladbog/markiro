@@ -7,6 +7,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   DefinitionGrid,
   FileDropZone,
   PageHeader,
@@ -59,6 +60,15 @@ const PRESS_GUARD_MS = 400;
 /** How many characters of the checksum the page shows. */
 const CHECKSUM_PREFIX_LENGTH = 15;
 
+/**
+ * An export older than this is named with its age: the cut-over's file is
+ * made after the cloud's freeze on the day itself, and an older one (a
+ * rehearsal's, an aborted cut-over's) may start SSCC below serials the cloud
+ * issued since.
+ */
+const STALE_EXPORT_MS = 12 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+
 /** The file as read, held for one import: the only place its hashes live. */
 interface HeldFile {
   file: CloudExportFile;
@@ -71,6 +81,8 @@ interface FileView {
   rehearsal: boolean;
   tenantName: string;
   exportedAt: string;
+  /** Whole hours since the export when it is older than `STALE_EXPORT_MS`, else `null`. */
+  staleHours: number | null;
   checksumPrefix: string;
   org: { name: string; inn: string | null; gln: string };
   counters: CutoverCounter[];
@@ -80,11 +92,13 @@ interface FileView {
 
 type PageProblem = CloudFileProblem | "shape" | "extension" | "unreadable";
 
-function describeFile(t: TFunction, file: CloudExportFile): FileView {
+function describeFile(t: TFunction, file: CloudExportFile, now: number): FileView {
+  const age = now - Date.parse(file.exportedAt);
   return {
     rehearsal: file.rehearsal,
     tenantName: file.source.tenantName,
     exportedAt: file.exportedAt,
+    staleHours: age > STALE_EXPORT_MS ? Math.floor(age / HOUR_MS) : null,
     checksumPrefix: file.checksum.slice(0, CHECKSUM_PREFIX_LENGTH),
     org: {
       name: file.payload.organization.name,
@@ -214,7 +228,7 @@ function CloudImportContent() {
       return;
     }
     held.current = { file: read.file, importId: crypto.randomUUID() };
-    setView(describeFile(t, read.file));
+    setView(describeFile(t, read.file, Date.now()));
   };
 
   const run = async (dryRun: boolean): Promise<void> => {
@@ -358,6 +372,11 @@ function CloudImportContent() {
       {view !== null && (
         <>
           {view.rehearsal && <Alert tone="warn">{t("office.cloudImport.rehearsal")}</Alert>}
+          {view.staleHours !== null && (
+            <Alert tone="warn">
+              {t("office.cloudImport.staleExport", { hours: view.staleHours })}
+            </Alert>
+          )}
           <Card title={t("office.cloudImport.fileTitle")} titleAs="h2">
             <DefinitionGrid
               items={[
@@ -440,6 +459,7 @@ function CloudImportContent() {
                 </Alert>
                 <DefinitionGrid items={counts(done)} />
                 <ul>
+                  {view.rehearsal && <li>{t("office.cloudImport.afterRehearsal")}</li>}
                   <li>{t("office.cloudImport.afterStations")}</li>
                   <li>{t("office.cloudImport.afterDeleteFile")}</li>
                   <li>{t("office.cloudImport.afterCloudCounters")}</li>
@@ -489,18 +509,28 @@ interface ConfirmImportProps {
   onClose: () => void;
 }
 
-/** The last question before the import: it names the counts and says it cannot be undone. */
+/**
+ * The last question before the import: it names the counts and says it
+ * cannot be undone. A rehearsal file asks once more: its box must be ticked
+ * in this opening of the dialog, so a rehearsal file never lands on a
+ * production site by a press of Enter.
+ */
 function ConfirmImport({ trial, rehearsal, failure, onConfirm, onClose }: ConfirmImportProps) {
   const { t } = useTranslation();
   const openedAt = useRef(performance.now());
+  const [acknowledged, setAcknowledged] = useState(false);
+  const blocked = rehearsal && !acknowledged;
   return (
     <FormDialog
       title={t("office.cloudImport.confirmTitle")}
       submitLabel={t("office.cloudImport.import")}
+      submitDisabled={blocked}
       onSubmit={async () => {
         // Under the cursor of the double click that opened this dialog, the
         // submit button must not take that click's second half.
         if (performance.now() - openedAt.current < PRESS_GUARD_MS) return;
+        // A submit that does not come from the button (Enter in the form) asks too.
+        if (blocked) return;
         await onConfirm();
       }}
       onClose={onClose}
@@ -516,7 +546,16 @@ function ConfirmImport({ trial, rehearsal, failure, onConfirm, onClose }: Confir
           badges: trial.badges,
         })}
       </p>
-      {rehearsal && <p>{t("office.cloudImport.confirmRehearsal")}</p>}
+      {rehearsal && (
+        <>
+          <p>{t("office.cloudImport.confirmRehearsal")}</p>
+          <Checkbox
+            label={t("office.cloudImport.confirmRehearsalCheck")}
+            checked={acknowledged}
+            onCheckedChange={setAcknowledged}
+          />
+        </>
+      )}
     </FormDialog>
   );
 }

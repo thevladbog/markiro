@@ -536,6 +536,67 @@ async fn counters_only_move_forward() {
     );
 }
 
+/// The forward-only boundary of the import's SSCC counters: a site counter
+/// equal to the file's start is left as it is (value and revision), and one
+/// a single serial above the file's start is never lowered by one.
+#[tokio::test]
+async fn a_counter_at_or_one_above_the_files_start_is_kept_with_its_revision() {
+    let admin = admin().await;
+    // The file starts boxes at 30 000 and pallets at 10 000.
+    for (extension, next) in [(0, 30_000), (1, 10_001)] {
+        let (_, sscc) = admin.call("GET", "/v1/office/sscc", None).await;
+        let rev = sscc["counters"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|counter| {
+                counter["issuerPrefix"] == "460068200" && counter["extension"] == extension
+            })
+            .unwrap()["rev"]
+            .clone();
+        let (status, body) = admin
+            .call(
+                "PUT",
+                &format!("/v1/office/sscc/counters/460068200/{extension}"),
+                Some(json!({ "nextSerial": next, "expectedRev": rev })),
+            )
+            .await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+    }
+    let before: Vec<(i64, i64, i64)> = sqlx::query_as(
+        "SELECT extension, next_serial, rev FROM sscc_counters \
+         WHERE issuer_prefix = '460068200' ORDER BY extension",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        before.iter().map(|row| (row.0, row.1)).collect::<Vec<_>>(),
+        [(0, 30_000), (1, 10_001)]
+    );
+
+    let (status, summary) = admin
+        .call("POST", IMPORT, Some(cloud_import_request(IMPORT_ID, false)))
+        .await;
+    assert_eq!(status, StatusCode::OK, "{summary}");
+    assert_eq!(
+        summary["ssccCounters"][0],
+        json!({ "issuerPrefix": "460068200", "extension": 0, "nextSerial": 30_000 })
+    );
+    assert_eq!(
+        summary["ssccCounters"][1],
+        json!({ "issuerPrefix": "460068200", "extension": 1, "nextSerial": 10_001 })
+    );
+    let after: Vec<(i64, i64, i64)> = sqlx::query_as(
+        "SELECT extension, next_serial, rev FROM sscc_counters \
+         WHERE issuer_prefix = '460068200' ORDER BY extension",
+    )
+    .fetch_all(&admin.app.state.pool)
+    .await
+    .unwrap();
+    assert_eq!(after, before, "the import rewrote a counter it had to keep");
+}
+
 #[tokio::test]
 async fn only_an_administrator_imports_and_the_role_is_read_again_in_the_write() {
     let admin = admin().await;
