@@ -31,6 +31,7 @@ import {
   saveWorkstationSettings,
 } from "../src/floor/setup/workstation-settings.js";
 import { keepEnteredShift } from "../src/floor/shifts/shift-copies.js";
+import { finishSession, startSession } from "../src/floor/warehouse/warehouse-store.js";
 import type { HardwareApi } from "../src/hardware/hardware.js";
 import type { HostApi } from "../src/host/api.js";
 import { HostError } from "../src/host/client.js";
@@ -3539,6 +3540,199 @@ describe("the operator on the floor", () => {
     await waitFor(() => expect(passes).toBe(1));
     await flush();
     expect(counts).toBe(before);
+  });
+
+  describe("the warehouse reprint's sessions in the hourly pass (plan СКЛ)", () => {
+    const WH_PAIRING = { hostId: HOST_ID, deviceId: DEVICE_ID };
+    const DAY = 24 * 60 * 60 * 1000;
+
+    /** A session finished `age` ms ago, its records answered by `receipts` (`null` — not yet). */
+    async function finishedSession(
+      database: ReturnType<typeof openLocalDb>,
+      id: string,
+      age: number,
+      receipts: readonly (string | null)[],
+    ): Promise<void> {
+      const at = new Date(Date.now() - age).toISOString();
+      await startSession(database.executor, WH_PAIRING, {
+        id,
+        reason: "damaged",
+        templates: { unit: null, box: null, pallet: null },
+        operatorId: "operator-1",
+        at,
+      });
+      await finishSession(database.executor, WH_PAIRING, id, "operator-1", at);
+      receipts.forEach((outcome, index) => {
+        database.db
+          .prepare(
+            "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at, " +
+              "outcome, acked_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          )
+          .run(
+            `${id}-${index}`,
+            HOST_ID,
+            DEVICE_ID,
+            id,
+            JSON.stringify({ id: `${id}-${index}` }),
+            at,
+            outcome,
+            outcome && at,
+          );
+      });
+    }
+
+    const sessions = (database: ReturnType<typeof openLocalDb>) =>
+      rows(database.db, "SELECT id FROM wh_sessions ORDER BY id").map((row) => row["id"]);
+
+    /** The host does not answer the reprint route: a record not yet sent stays so. */
+    function hostWithoutReprintRoute() {
+      const host = fakeHost();
+      host.sendWarehouseRecords.mockRejectedValue(
+        new HostError({ kind: "api", code: "not_found", status: 404, message: "no" }),
+      );
+      host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+      return host;
+    }
+
+    it("sends the records of a reprint to the host once it is on the link", async () => {
+      const database = openLocalDb();
+      await finishedSession(database, "s-waiting", 0, [null]);
+      const host = fakeHost();
+      host.getChanges.mockResolvedValueOnce(feedPage(42, PEOPLE));
+      host.sendWarehouseRecords.mockImplementation(async (records) =>
+        records.map((record) => ({
+          id: (record as { id: string }).id,
+          outcome: "accepted" as const,
+        })),
+      );
+      renderApp({
+        probe: probeAnswering(true),
+        device: fakeDevice(DEVICE_STATUS),
+        host,
+        local: database.executor,
+      });
+      await waitFor(() =>
+        expect(rows(database.db, "SELECT outcome FROM wh_outbox")).toEqual([
+          { outcome: "accepted" },
+        ]),
+      );
+      expect(host.sendWarehouseRecords).toHaveBeenCalledTimes(1);
+    });
+
+    it("removes a session the host answered for 30 days after it ended, and keeps the others", async () => {
+      const database = openLocalDb();
+      await finishedSession(database, "s-accepted", 31 * DAY, ["accepted", "accepted"]);
+      await finishedSession(database, "s-refused", 31 * DAY, ["accepted", "rejected"]);
+      await finishedSession(database, "s-unsent", 31 * DAY, ["accepted", null]);
+      await finishedSession(database, "s-recent", 1 * DAY, ["accepted"]);
+      renderApp({
+        probe: probeAnswering(true),
+        device: fakeDevice(DEVICE_STATUS),
+        host: hostWithoutReprintRoute(),
+        local: database.executor,
+      });
+      await waitFor(() =>
+        expect(sessions(database)).toEqual(["s-recent", "s-refused", "s-unsent"]),
+      );
+      expect(
+        rows(database.db, "SELECT id FROM wh_outbox ORDER BY id").map((row) => row["id"]),
+      ).toEqual(["s-recent-0", "s-refused-0", "s-refused-1", "s-unsent-0", "s-unsent-1"]);
+    });
+
+    it("tells the app the outbox changed when only a session went", async () => {
+      const database = openLocalDb();
+      await finishedSession(database, "s-accepted", 31 * DAY, ["accepted"]);
+      let release: () => void = () => undefined;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let counts = 0;
+      const watching: LocalExecutor = {
+        query: (sql, params, row) => {
+          if (sql === UNSENT_COUNT_SQL) counts += 1;
+          return database.executor.query(sql, params, row);
+        },
+        transaction: async (statements) => {
+          if (statements[0]?.sql.startsWith("DELETE FROM wh_sessions")) await gate;
+          return database.executor.transaction(statements);
+        },
+      };
+      renderApp({
+        probe: probeAnswering(true),
+        device: fakeDevice(DEVICE_STATUS),
+        host: hostWithoutReprintRoute(),
+        local: watching,
+      });
+      await waitFor(() => expect(counts).toBeGreaterThan(0));
+      await flush();
+      const before = counts;
+      release();
+      await waitFor(() => expect(sessions(database)).toEqual([]));
+      // The bar counts again: the purge counts as a change of the outbox.
+      await waitFor(() => expect(counts).toBeGreaterThan(before));
+    });
+
+    it("lets neither purge hold the other back when one of them fails", async () => {
+      for (const failing of ["DELETE FROM floor_shifts", "DELETE FROM wh_sessions"]) {
+        const database = openLocalDb();
+        await keepEnteredShift(
+          database.executor,
+          WH_PAIRING,
+          OPENED,
+          "2026-10-09T06:00:00.000Z",
+          1,
+        );
+        const ackedAt = new Date(Date.now() - 31 * DAY).toISOString();
+        database.db.prepare("UPDATE floor_shifts SET local_state = 'closed'").run();
+        database.db
+          .prepare(
+            "INSERT INTO outbox (id, host_id, device_id, kind, shift_id, payload, created_at, " +
+              "outcome, acked_at) VALUES (?, ?, ?, 'shift_closed', ?, '{}', ?, 'accepted', ?)",
+          )
+          .run(crypto.randomUUID(), HOST_ID, DEVICE_ID, OPENED.id, ackedAt, ackedAt);
+        await finishedSession(database, "s-accepted", 31 * DAY, ["accepted"]);
+        // The shifts' delete waits until the status bar has counted once, so that
+        // a new count can only come from the app being told the outbox changed.
+        let release: () => void = () => undefined;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        let counts = 0;
+        const refusing: LocalExecutor = {
+          query: (sql, params, row) => {
+            if (sql === UNSENT_COUNT_SQL) counts += 1;
+            return database.executor.query(sql, params, row);
+          },
+          transaction: async (statements) => {
+            if (statements[0]?.sql.startsWith("DELETE FROM floor_shifts")) await gate;
+            return statements[0]?.sql.startsWith(failing)
+              ? Promise.reject(new Error("disk"))
+              : database.executor.transaction(statements);
+          },
+        };
+        const view = renderApp({
+          probe: probeAnswering(true),
+          device: fakeDevice(DEVICE_STATUS),
+          host: hostWithoutReprintRoute(),
+          local: refusing,
+        });
+        const shifts = () => rows(database.db, "SELECT id FROM floor_shifts").length;
+        await waitFor(() => expect(counts).toBeGreaterThan(0));
+        await flush();
+        const before = counts;
+        release();
+        if (failing === "DELETE FROM floor_shifts") {
+          await waitFor(() => expect(sessions(database)).toEqual([]));
+          expect(shifts()).toBe(1);
+        } else {
+          await waitFor(() => expect(shifts()).toBe(0));
+          expect(sessions(database)).toEqual(["s-accepted"]);
+        }
+        // What went is told to the app even though the other purge failed.
+        await waitFor(() => expect(counts).toBeGreaterThan(before));
+        view.unmount();
+      }
+    });
   });
 
   it("runs no retention pass for a computer that is not paired", async () => {

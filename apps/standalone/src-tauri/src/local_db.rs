@@ -167,7 +167,8 @@ impl LocalDbError {
 
 /// Which outbox records without a receipt stop a forget (stage 2a spec §5.2,
 /// question В7): a forget never waits for them, it refuses, so the station
-/// sends them first or a person confirms the loss of the link to them.
+/// sends them first or a person confirms the loss of the link to them. The
+/// warehouse reprint's records (`wh_outbox`) count with the shift facts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UnsentGuard<'a> {
     /// This pairing's (host id, device id): records of an earlier pairing
@@ -420,11 +421,11 @@ impl LocalDb {
     }
 }
 
-/// How many outbox records without a receipt (`acked_at IS NULL`) `guard`
-/// protects, counted inside the forget's own transaction, so no record can
-/// arrive between the count and the clear (`outbox`, migration `0006`, is in
-/// every database that opened). An outbox that cannot be counted is an error,
-/// never 0.
+/// How many records without a receipt (`acked_at IS NULL`) `guard` protects,
+/// in the shift facts' `outbox` and the warehouse reprint's `wh_outbox`
+/// ([`UNSENT_TABLES`]), counted inside the forget's own transaction, so no
+/// record can arrive between the count and the clear (both tables are in every
+/// database that opened). An outbox that cannot be counted is an error, never 0.
 async fn unsent_records(
     tx: &mut sqlx::SqliteConnection,
     guard: UnsentGuard<'_>,
@@ -432,45 +433,67 @@ async fn unsent_records(
     if guard == UnsentGuard::Ignore {
         return Ok(0);
     }
-    count_unsent(tx, guard).await
+    count_unsent(tx, guard, false).await
 }
 
-async fn outbox_exists(connection: &mut sqlx::SqliteConnection) -> Result<bool, LocalDbError> {
-    let outbox: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM pragma_table_list WHERE schema = 'main' AND name = 'outbox'",
+/// The tables whose records without a receipt (`acked_at IS NULL`) stop a
+/// forget: the shift facts' `outbox` (migration `0006`) and the warehouse
+/// reprint's `wh_outbox` (migration `0012`, plan СКЛ). A reprint record not yet
+/// sent is a trace the host should still get; the forget refuses for it as for
+/// a fact.
+const UNSENT_TABLES: [&str; 2] = ["outbox", "wh_outbox"];
+
+async fn table_exists(
+    connection: &mut sqlx::SqliteConnection,
+    table: &str,
+) -> Result<bool, LocalDbError> {
+    let found: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM pragma_table_list WHERE schema = 'main' AND name = ?",
     )
+    .bind(table)
     .fetch_one(&mut *connection)
     .await
     .map_err(|_| LocalDbError::StatementFailed)?;
-    Ok(outbox != 0)
+    Ok(found != 0)
 }
 
-/// The count of [`unsent_records`]. [`LocalDbState::unopened_unsent_records`]
-/// calls it once [`outbox_exists`] says the table is there: a database that
-/// did not open may be one an older build left, with no `outbox` at all.
+/// The count of [`unsent_records`], over every table of [`UNSENT_TABLES`].
+/// With `skip_missing` ([`LocalDbState::unopened_unsent_records`]) a table that
+/// is not there counts 0: a database that did not open may be one an older
+/// build left, with no `outbox` or no `wh_outbox` at all. A table that exists
+/// but cannot be counted is an error either way.
 async fn count_unsent(
     connection: &mut sqlx::SqliteConnection,
     guard: UnsentGuard<'_>,
+    skip_missing: bool,
 ) -> Result<u64, LocalDbError> {
     let failed = |_| LocalDbError::StatementFailed;
-    let count: i64 = match guard {
-        UnsentGuard::Pairing(host_id, device_id) => sqlx::query_scalar(
-            "SELECT count(*) FROM outbox WHERE acked_at IS NULL AND host_id = ? AND device_id = ?",
-        )
-        .bind(host_id)
-        .bind(device_id)
-        .fetch_one(&mut *connection)
-        .await
-        .map_err(failed)?,
-        UnsentGuard::AnyPairing => {
-            sqlx::query_scalar("SELECT count(*) FROM outbox WHERE acked_at IS NULL")
-                .fetch_one(&mut *connection)
-                .await
-                .map_err(failed)?
+    let mut total: u64 = 0;
+    for table in UNSENT_TABLES {
+        if skip_missing && !matches!(table_exists(connection, table).await, Ok(true)) {
+            continue;
         }
-        UnsentGuard::Ignore => 0,
-    };
-    Ok(u64::try_from(count).unwrap_or(0))
+        let count: i64 = match guard {
+            UnsentGuard::Pairing(host_id, device_id) => sqlx::query_scalar(&format!(
+                "SELECT count(*) FROM {table} WHERE acked_at IS NULL AND host_id = ? \
+                 AND device_id = ?"
+            ))
+            .bind(host_id)
+            .bind(device_id)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(failed)?,
+            UnsentGuard::AnyPairing => sqlx::query_scalar(&format!(
+                "SELECT count(*) FROM {table} WHERE acked_at IS NULL"
+            ))
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(failed)?,
+            UnsentGuard::Ignore => 0,
+        };
+        total += u64::try_from(count).unwrap_or(0);
+    }
+    Ok(total)
 }
 
 /// Tauri state: the local database, or none when it could not be opened.
@@ -557,10 +580,7 @@ impl LocalDbState {
         else {
             return Ok(0);
         };
-        let counted = match outbox_exists(&mut connection).await {
-            Ok(true) => count_unsent(&mut connection, guard).await,
-            Ok(false) | Err(_) => Ok(0),
-        };
+        let counted = count_unsent(&mut connection, guard, true).await;
         let _ = connection.close().await;
         counted
     }

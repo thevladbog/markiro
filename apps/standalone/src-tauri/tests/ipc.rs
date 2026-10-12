@@ -705,6 +705,55 @@ fn forgetting_the_device_waits_for_this_pairings_unsent_records() {
     assert_eq!(left(), json!([{ "copies": 0, "records": 1 }]));
 }
 
+/// A warehouse reprint record not yet sent (`wh_outbox`) stops the forget as a
+/// fact does (plan СКЛ task 6): `unsent_facts` until the person confirms with
+/// `keepUnsent`, and the record stays on disk.
+#[test]
+fn forgetting_the_device_waits_for_this_pairings_unsent_warehouse_records() {
+    let app_dir = tempfile::tempdir().unwrap();
+    let config = app_dir.path().join("device.json");
+    save_pairing(app_dir.path());
+    let local = tauri::async_runtime::block_on(LocalDbState::open(app_dir.path()));
+    run_raw(
+        app_dir.path(),
+        &[
+            &format!(
+                "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at) \
+                 VALUES ('w1', '{PAIRED_HOST}', '{PAIRED_DEVICE}', 's1', '{{}}', \
+                 '2026-10-09T08:00:00.000Z')"
+            ),
+            "INSERT INTO sync_state (key, value) VALUES ('last_rev', '1')",
+        ],
+    );
+    let (_app, webview) = mock_app_with(DeviceState::load(app_dir.path().to_path_buf()), local);
+    let left = || {
+        invoke(
+            &webview,
+            "local_query",
+            json!({
+                "sql": "SELECT (SELECT count(*) FROM sync_state) AS copies, \
+                        (SELECT count(*) FROM wh_outbox) AS records",
+                "params": []
+            }),
+        )
+        .unwrap()
+    };
+
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({})),
+        Err(json!("unsent_facts"))
+    );
+    assert!(config.exists(), "the pairing stays");
+    assert_eq!(left(), json!([{ "copies": 1, "records": 1 }]));
+
+    assert_eq!(
+        invoke(&webview, "device_forget", json!({ "keepUnsent": true })),
+        Ok(Value::Null)
+    );
+    assert!(!config.exists());
+    assert_eq!(left(), json!([{ "copies": 0, "records": 1 }]));
+}
+
 /// With `device.json` unreadable the current pairing is unknown, so a record
 /// without a receipt of any pairing stops the forget, until the person
 /// confirms.

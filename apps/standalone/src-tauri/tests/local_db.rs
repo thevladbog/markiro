@@ -1095,6 +1095,140 @@ async fn sent_records_and_other_pairings_do_not_stop_a_forget() {
     assert_eq!(db.clear_copies(UnsentGuard::AnyPairing).await, Ok(()));
 }
 
+/// A reprint record of the warehouse (`wh_outbox`, migration `0012`) of the
+/// pairing `(host, device)`, with the host's receipt (`accepted` or `rejected`)
+/// or without one.
+fn wh_record(id: &str, host: &str, device: &str, receipt: Option<&str>) -> LocalStatement {
+    statement(
+        "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at, \
+         outcome, acked_at) VALUES (?, ?, ?, 'wh-session-1', '{}', \
+         '2026-10-09T08:00:00.000Z', ?, ?)",
+        json!([
+            id,
+            host,
+            device,
+            receipt,
+            receipt.map(|_| "2026-10-09T08:00:01.000Z")
+        ]),
+    )
+}
+
+/// The warehouse reprint's records without the host's receipt stop a forget as
+/// the shift facts do (plan СКЛ task 6): this pairing's with `Pairing`, anyone's
+/// with `AnyPairing`, counted together with the facts. A record with a receipt
+/// (`accepted` or `rejected`: the host has answered it) and another pairing's
+/// do not stop this pairing's. Nothing is cleared while one stops it.
+#[tokio::test]
+async fn a_forget_refuses_while_unsent_warehouse_records_remain() {
+    let (_dir, db) = open().await;
+    db.transaction(vec![statement(
+        INSERT_LINE,
+        json!([LINE_1, "Линия 1", 0, 3]),
+    )])
+    .await
+    .unwrap();
+    db.transaction(vec![
+        wh_record("a", HOST, DEVICE, Some("accepted")),
+        wh_record("b", HOST, DEVICE, Some("rejected")),
+        wh_record("c", HOST, OTHER_DEVICE, None),
+        wh_record("d", OTHER_HOST, DEVICE, None),
+    ])
+    .await
+    .unwrap();
+    assert_eq!(
+        db.clear_copies(UnsentGuard::Pairing(HOST, DEVICE)).await,
+        Ok(()),
+        "a record with the host's receipt, and other pairings', do not stop it"
+    );
+    db.transaction(vec![statement(
+        INSERT_LINE,
+        json!([LINE_1, "Линия 1", 0, 3]),
+    )])
+    .await
+    .unwrap();
+
+    db.transaction(vec![wh_record("e", HOST, DEVICE, None)])
+        .await
+        .unwrap();
+    assert_eq!(
+        db.clear_copies(UnsentGuard::Pairing(HOST, DEVICE)).await,
+        Err(LocalDbError::UnsentRecords { count: 1 })
+    );
+    assert_eq!(
+        db.clear_copies(UnsentGuard::AnyPairing).await,
+        Err(LocalDbError::UnsentRecords { count: 3 })
+    );
+    // The facts and the reprint records are told together.
+    db.transaction(vec![outbox_record("f", HOST, DEVICE, None)])
+        .await
+        .unwrap();
+    assert_eq!(
+        db.clear_copies(UnsentGuard::Pairing(HOST, DEVICE)).await,
+        Err(LocalDbError::UnsentRecords { count: 2 })
+    );
+    assert_eq!(
+        count(&db, "ref_lines").await,
+        json!(1),
+        "nothing was cleared"
+    );
+
+    // Confirmed: the copies go, every record stays.
+    assert_eq!(db.clear_copies(UnsentGuard::Ignore).await, Ok(()));
+    assert_eq!(count(&db, "ref_lines").await, json!(0));
+    assert_eq!(count(&db, "wh_outbox").await, json!(5));
+    assert_eq!(count(&db, "outbox").await, json!(1));
+}
+
+/// A `wh_outbox` the forget cannot read fails the forget and clears nothing,
+/// as an unreadable `outbox` does.
+#[tokio::test]
+async fn a_warehouse_outbox_that_cannot_be_counted_stops_a_forget() {
+    let (dir, db) = open().await;
+    db.transaction(vec![statement(
+        INSERT_LINE,
+        json!([LINE_1, "Линия 1", 0, 3]),
+    )])
+    .await
+    .unwrap();
+    run_raw(
+        dir.path(),
+        &[
+            "DROP TABLE wh_outbox",
+            "CREATE TABLE wh_outbox (id TEXT PRIMARY KEY)",
+        ],
+    )
+    .await;
+    for guard in [UnsentGuard::Pairing(HOST, DEVICE), UnsentGuard::AnyPairing] {
+        assert_eq!(
+            db.clear_copies(guard).await,
+            Err(LocalDbError::StatementFailed)
+        );
+    }
+    assert_eq!(count(&db, "ref_lines").await, json!(1), "nothing cleared");
+}
+
+/// In a database that opened, a `wh_outbox` that is gone is not "no records": the
+/// forget cannot count it and clears nothing (only a database that did not open
+/// may lack the table, see `an_unopened_database_counts_its_warehouse_records_too`).
+#[tokio::test]
+async fn a_missing_warehouse_outbox_in_an_open_database_stops_a_forget() {
+    let (dir, db) = open().await;
+    db.transaction(vec![statement(
+        INSERT_LINE,
+        json!([LINE_1, "Линия 1", 0, 3]),
+    )])
+    .await
+    .unwrap();
+    run_raw(dir.path(), &["DROP TABLE wh_outbox"]).await;
+    for guard in [UnsentGuard::Pairing(HOST, DEVICE), UnsentGuard::AnyPairing] {
+        assert_eq!(
+            db.clear_copies(guard).await,
+            Err(LocalDbError::StatementFailed)
+        );
+    }
+    assert_eq!(count(&db, "ref_lines").await, json!(1), "nothing cleared");
+}
+
 /// An outbox the forget cannot read fails the forget and clears nothing,
 /// instead of counting it as empty: a misread must never wipe copies while
 /// records may be waiting.
@@ -2256,6 +2390,83 @@ async fn a_database_that_did_not_open_is_counted_without_being_changed() {
         &[
             "DROP TABLE outbox",
             "CREATE TABLE outbox (id TEXT PRIMARY KEY)",
+        ],
+    )
+    .await;
+    corrupt_the_migrations_table(unreadable.path()).await;
+    let local = LocalDbState::open(unreadable.path()).await;
+    for guard in [UnsentGuard::Pairing(HOST, DEVICE), UnsentGuard::AnyPairing] {
+        assert_eq!(
+            local.unopened_unsent_records(guard).await,
+            Err(LocalDbError::StatementFailed)
+        );
+    }
+}
+
+/// The warehouse reprint's unsent records of a database that did not open are
+/// counted with the facts (plan СКЛ task 6), on a read-only connection: a
+/// database an older build left, without `wh_outbox`, counts its `outbox` only;
+/// a `wh_outbox` that exists and cannot be counted is an error, never 0.
+#[tokio::test]
+async fn an_unopened_database_counts_its_warehouse_records_too() {
+    let dir = tempfile::tempdir().unwrap();
+    database_file(
+        dir.path(),
+        &[
+            &outbox_sql("a", HOST, DEVICE, None),
+            "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at) \
+             VALUES ('w1', 'h', 'd', 's', '{}', '2026-10-09T08:00:00.000Z')",
+            &format!(
+                "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at) \
+                 VALUES ('w2', '{HOST}', '{DEVICE}', 's', '{{}}', '2026-10-09T08:00:00.000Z')"
+            ),
+            &format!(
+                "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at, \
+                 outcome, acked_at) VALUES ('w3', '{HOST}', '{DEVICE}', 's', '{{}}', \
+                 '2026-10-09T08:00:00.000Z', 'rejected', '2026-10-09T08:00:01.000Z')"
+            ),
+        ],
+    )
+    .await;
+    corrupt_the_migrations_table(dir.path()).await;
+    let local = LocalDbState::open(dir.path()).await;
+    assert_eq!(local.open_failure(), Some(OpenFailure::Corrupt));
+    assert_eq!(
+        local
+            .unopened_unsent_records(UnsentGuard::Pairing(HOST, DEVICE))
+            .await,
+        Ok(2),
+        "one fact and one unsent reprint record; the answered one and the other pairing's do not"
+    );
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::AnyPairing).await,
+        Ok(3)
+    );
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::Ignore).await,
+        Ok(0)
+    );
+
+    let older = tempfile::tempdir().unwrap();
+    database_file(
+        older.path(),
+        &[&outbox_sql("a", HOST, DEVICE, None), "DROP TABLE wh_outbox"],
+    )
+    .await;
+    corrupt_the_migrations_table(older.path()).await;
+    let local = LocalDbState::open(older.path()).await;
+    assert_eq!(
+        local.unopened_unsent_records(UnsentGuard::AnyPairing).await,
+        Ok(1),
+        "no wh_outbox: the outbox alone"
+    );
+
+    let unreadable = tempfile::tempdir().unwrap();
+    database_file(
+        unreadable.path(),
+        &[
+            "DROP TABLE wh_outbox",
+            "CREATE TABLE wh_outbox (id TEXT PRIMARY KEY)",
         ],
     )
     .await;

@@ -8,6 +8,7 @@ import { DeviceError } from "../host/device.js";
 import type { ChangesResponse, DeviceShift, DeviceStatus, FactReceipt } from "../host/protocol.js";
 import { LocalDbError, type LocalExecutor } from "../local/executor.js";
 import { sendFactBatch } from "../local/facts-sender.js";
+import { sendWarehouseBatch } from "../local/warehouse-sender.js";
 import {
   createSyncScheduler,
   readQuarantineCount,
@@ -96,6 +97,11 @@ export interface HostLinkOptions {
   sendFacts: (records: readonly unknown[]) => Promise<FactReceipt[]>;
   /** `HostApi.registerKnownBlocks`: this station's blocks back to a host restored from a copy. */
   registerKnownBlocks: (request: KnownBlocksRequest) => Promise<KnownBlocksResponse>;
+  /**
+   * `HostApi.sendWarehouseRecords` (plan СКЛ): the warehouse reprint's records go
+   * after the facts, by the same delivery; none — they wait.
+   */
+  sendWarehouseRecords?: (records: readonly unknown[]) => Promise<FactReceipt[]>;
   dispatch: (action: ShellAction) => void;
 }
 
@@ -149,6 +155,7 @@ export function useHostLink({
   deviceShifts,
   sendFacts,
   registerKnownBlocks,
+  sendWarehouseRecords,
   dispatch,
 }: HostLinkOptions): HostLinkControls {
   const syncNow = useRef<() => void>(() => undefined);
@@ -196,6 +203,9 @@ export function useHostLink({
     };
     // And for sending the outbox.
     let factFailures = 0;
+    // Failed sends of the warehouse records in a row (their own count: a failure of
+    // theirs is not the facts', and never shows as one).
+    let warehouseFailures = 0;
     let factRetry: ReturnType<typeof setTimeout> | null = null;
     // The host holds the facts and the wait it named is running: only that
     // wait's end asks again (it is set exactly when `factRetry` is the
@@ -403,10 +413,47 @@ export function useHostLink({
           () => new Date(),
         );
         if (!active) return;
+        // The warehouse records (plan СКЛ) once no fact waits. Their failure is
+        // not the facts': a refused key or a changed certificate still ends the
+        // link; anything else keeps them for a retry of their own.
+        let warehouse = { sent: 0, more: false };
+        let warehouseFailure: unknown = null;
+        if (!more && sendWarehouseRecords !== undefined) {
+          try {
+            warehouse = await sendWarehouseBatch(
+              local,
+              { hostId, deviceId },
+              sendWarehouseRecords,
+              () => new Date(),
+            );
+            warehouseFailures = 0;
+          } catch (error) {
+            if (shellActionFor(error, null) !== null) throw error;
+            if (!(error instanceof HostError && error.code === "not_paired")) {
+              warehouseFailure = error;
+            }
+          }
+          if (!active) return;
+        }
         factFailures = 0;
         dispatch({ type: "facts_sent" });
-        if (sent > 0) dispatch({ type: "outbox_changed" });
-        if (more) factSender.trigger();
+        if (sent > 0 || warehouse.sent > 0) dispatch({ type: "outbox_changed" });
+        if (more || warehouse.more) factSender.trigger();
+        if (warehouseFailure !== null) {
+          warehouseFailures += 1;
+          if (online) {
+            const held = restoreHeld(warehouseFailure);
+            factRetry = setTimeout(
+              () => {
+                factRetry = null;
+                factsHeld = false;
+                factSender.trigger();
+              },
+              held ? RESTORE_HOLD_RETRY_MS : nextSyncRetryMs(warehouseFailures),
+            );
+            factsHeld = held;
+          }
+        }
       } catch (error) {
         if (!active) return;
         const action = shellActionFor(error, null);
@@ -563,6 +610,7 @@ export function useHostLink({
     deviceShifts,
     sendFacts,
     registerKnownBlocks,
+    sendWarehouseRecords,
     dispatch,
   ]);
   const requestSync = useCallback(() => syncNow.current(), []);

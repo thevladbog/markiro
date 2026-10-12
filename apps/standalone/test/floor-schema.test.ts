@@ -56,6 +56,11 @@ import {
   purgeTableSql,
   RETAINED_TABLES,
 } from "../src/local/retention.js";
+import {
+  WAREHOUSE_ATTEMPT_SQL,
+  WAREHOUSE_RECEIPT_SQL,
+  WAREHOUSE_UNSENT_SQL,
+} from "../src/local/warehouse-sender.js";
 import { DEVICE_ID, HOST_ID, LINE_ID } from "./support/fixtures.js";
 import {
   DUE_SESSIONS_SQL,
@@ -1673,6 +1678,10 @@ describe("the warehouse reprint's statements (migration 0012)", () => {
     [PURGE_SESSION_SQL, "SEARCH wh_sessions USING"],
     [PURGE_JOBS_SQL, "wh_jobs_session (host_id=? AND device_id=? AND session_id=?)"],
     [PURGE_RECORDS_SQL, "wh_outbox_session (session_id=? AND host_id=? AND device_id=?)"],
+    // The sender's statements (task 6): the unsent read, the attempt count and the receipts.
+    [WAREHOUSE_UNSENT_SQL, "wh_outbox_unsent"],
+    [WAREHOUSE_ATTEMPT_SQL, "sqlite_autoindex_wh_outbox_1 (id=?)"],
+    [WAREHOUSE_RECEIPT_SQL, "sqlite_autoindex_wh_outbox_1 (id=?)"],
   ];
 
   it("search an index, never a whole table", () => {
