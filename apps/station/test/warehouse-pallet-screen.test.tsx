@@ -123,6 +123,13 @@ it("shows saved facts and requires confirmation; cancel never prints and scanned
   await work.initialize();
   const view = render(<View />);
   try {
+    expect(
+      screen.getByTestId("warehouse-pallet-screen").querySelector(".warehouse-work-grid"),
+    ).not.toBeNull();
+    expect(
+      screen.getByTestId("warehouse-pallet-screen").querySelector(".warehouse-session-panel"),
+    ).not.toBeNull();
+    expect(screen.getByRole("button", { name: "Ввести код вручную" })).toBeTruthy();
     await act(async () => {
       listener(source.sscc);
       await work.idle();
