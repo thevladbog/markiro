@@ -4,7 +4,7 @@
  * through psql against a RESTORED COPY of the cloud database, builds the
  * import file and writes it next to nothing else:
  *
- *   node tools/standalone-export/cli.mjs --tenant <tenantId> [--out-dir <dir>] [--rehearsal]
+ *   node tools/standalone-export/cli.mjs --tenant <tenantId> --out-dir <dir> [--rehearsal]
  *     [--accept-shared-prefix] [--psql <path>]
  *
  * The connection comes from libpq's environment (PGHOST, PGPORT, PGUSER,
@@ -12,7 +12,9 @@
  * so no password reaches the shell history or a process list. The file
  * holds PIN and badge hashes and the badge salt: it is written owner-only
  * (mode 0600; on Windows the folder's access rules apply, so write into the
- * user's own profile folder) and never over an existing file; it travels on a
+ * user's own profile folder), whole or not at all, never over an existing
+ * file, and only into a folder named with --out-dir (never the working
+ * directory by default, which may be a repository); it travels on a
  * flash drive and is deleted after the import
  * (docs/runbooks/standalone-cloud-cutover.md). Nothing the tool prints, on
  * stdout or stderr, names a hash, a salt or a badge code: the summary holds
@@ -20,8 +22,18 @@
  */
 
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { randomBytes } from "node:crypto";
+import {
+  closeSync,
+  existsSync,
+  fsyncSync,
+  linkSync,
+  openSync,
+  renameSync,
+  unlinkSync,
+  writeSync,
+} from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ExportError, buildExportFile } from "./transform.mjs";
@@ -31,9 +43,10 @@ const EXTENSIONS = { 0: "короба", 1: "паллеты" };
 
 /** What `--help` prints: the options, where the connection comes from, and what the file is. */
 export const USAGE = [
-  "Использование: node tools/standalone-export/cli.mjs --tenant <tenantId> [--out-dir <dir>] [--rehearsal] [--accept-shared-prefix] [--psql <path>]",
+  "Использование: node tools/standalone-export/cli.mjs --tenant <tenantId> --out-dir <dir> [--rehearsal] [--accept-shared-prefix] [--psql <path>]",
   "  --tenant <id>    organization.id организации в облаке (обязательно)",
-  "  --out-dir <dir>  каталог файла переноса (по умолчанию текущий)",
+  "  --out-dir <dir>  каталог файла переноса (обязательно): личная папка, закрытая для других,",
+  "                   не каталог репозитория и не общий диск",
   "  --rehearsal      пробный файл из нечистого облака; не для переключения",
   "  --accept-shared-prefix  выгружать, хотя другой арендатор базы выпускал SSCC под префиксом",
   "                   организации (только по решению владельца, памятка переключения, 4.3)",
@@ -42,7 +55,8 @@ export const USAGE = [
   "Подключение к ВОССТАНОВЛЕННОЙ КОПИИ базы облака только переменными libpq: PGHOST, PGPORT,",
   "PGUSER, PGPASSWORD или ~/.pgpass, PGDATABASE, PGSSLMODE. Пароль в аргументах не принимается.",
   "Файл переноса содержит проверочные значения учётных данных (хеши PIN и бейджей, соль бейджей).",
-  "Он создаётся только для владельца (права 0600 на macOS и Linux) и никогда поверх существующего файла.",
+  "Он создаётся только для владельца (права 0600 на macOS и Linux), целиком или никак (временный файл",
+  "рядом, затем имя) и никогда поверх существующего файла.",
   "На Windows права 0600 не действуют: файл наследует права каталога, поэтому пишите в папку своего",
   "профиля пользователя, а не на общий диск. После переноса файл нужно удалить.",
   "Коды выхода: 0 файл записан; 1 сбой; 2 выгрузка невозможна (в том числе нечистое облако или",
@@ -58,7 +72,7 @@ export const CREDENTIAL_WARNING = [
 export function parseArgs(argv) {
   const options = {
     tenantId: null,
-    outDir: ".",
+    outDir: null,
     rehearsal: false,
     acceptSharedPrefix: false,
     psql: "psql",
@@ -79,7 +93,79 @@ export function parseArgs(argv) {
   if (options.tenantId === null || !/^[A-Za-z0-9_-]{1,64}$/u.test(options.tenantId)) {
     throw new Error("--tenant <tenantId> (letters, digits, _ and -) is required");
   }
+  if (options.outDir === null || options.outDir === "") {
+    throw new Error(
+      "--out-dir <dir> is required: the file holds credential verifiers, so it goes to a folder you name",
+    );
+  }
   return options;
+}
+
+/** The file-system calls `writeWhole` makes; a test replaces one to make it fail. */
+export const FS = {
+  openSync,
+  writeSync,
+  fsyncSync,
+  closeSync,
+  linkSync,
+  renameSync,
+  unlinkSync,
+  existsSync,
+};
+
+/** `linkSync` codes of a file system without hard links (FAT32 or exFAT flash drives). */
+const NO_HARD_LINKS = new Set(["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"]);
+
+/**
+ * Writes `text` to `path` whole or not at all. The bytes go to a temporary
+ * file next to it (owner-only, a name of its own so a file a killed run left
+ * never blocks the next), are flushed to the disk, and only then the file
+ * takes its name: by a hard link, which never replaces a file already there,
+ * or, where the file system has no hard links, by a rename after checking
+ * that nothing is there. Any failure removes the temporary file, so neither a
+ * partial transfer file nor a stray copy of the verifiers stays behind.
+ */
+export function writeWhole(path, text, fs = FS) {
+  const temp = join(
+    dirname(path),
+    `.${basename(path, ".json")}.${process.pid}-${randomBytes(6).toString("hex")}.partial`,
+  );
+  let fd = fs.openSync(temp, "wx", 0o600);
+  try {
+    const bytes = Buffer.from(text, "utf8");
+    for (let offset = 0; offset < bytes.length;) {
+      offset += fs.writeSync(fd, bytes, offset, bytes.length - offset);
+    }
+    fs.fsyncSync(fd);
+    const open = fd;
+    fd = null;
+    fs.closeSync(open);
+    try {
+      fs.linkSync(temp, path);
+    } catch (error) {
+      if (!NO_HARD_LINKS.has(error.code)) throw error;
+      if (fs.existsSync(path)) {
+        throw Object.assign(new Error(`EEXIST: file already exists, ${path}`), { code: "EEXIST" });
+      }
+      fs.renameSync(temp, path);
+      return;
+    }
+    fs.unlinkSync(temp);
+  } catch (error) {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        // The descriptor is gone with the failure; the file below is what matters.
+      }
+    }
+    try {
+      fs.unlinkSync(temp);
+    } catch {
+      // Already renamed into place or never created.
+    }
+    throw error;
+  }
 }
 
 /** `export.sql`'s JSON for `tenantId`, read from psql's stdout into memory. */
@@ -191,7 +277,7 @@ export async function main(argv, deps = {}) {
     now = () => new Date(),
     stdout = (line) => process.stdout.write(`${line}\n`),
     stderr = (line) => process.stderr.write(`${line}\n`),
-    writeFile = (path, text) => writeFileSync(path, text, { flag: "wx", mode: 0o600 }),
+    writeFile = writeWhole,
     env = process.env,
   } = deps;
   if (argv.includes("--help") || argv.includes("-h")) {

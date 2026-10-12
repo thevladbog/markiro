@@ -12,7 +12,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
-import { CREDENTIAL_WARNING, USAGE, fileName, main, parseArgs, runPsql, summary } from "../cli.mjs";
+import {
+  CREDENTIAL_WARNING,
+  FS,
+  USAGE,
+  fileName,
+  main,
+  parseArgs,
+  runPsql,
+  summary,
+  writeWhole,
+} from "../cli.mjs";
 
 const rawText = readFileSync(new URL("./fixtures/raw-cloud.json", import.meta.url), "utf8");
 const golden = JSON.parse(
@@ -41,9 +51,9 @@ async function run(argv, output = rawText) {
 }
 
 test("arguments: a tenant is required and nothing unknown is taken", () => {
-  assert.deepEqual(parseArgs(["--tenant", "imp-test-atoll"]), {
+  assert.deepEqual(parseArgs(["--tenant", "imp-test-atoll", "--out-dir", "/home/me/export"]), {
     tenantId: "imp-test-atoll",
-    outDir: ".",
+    outDir: "/home/me/export",
     rehearsal: false,
     acceptSharedPrefix: false,
     psql: "psql",
@@ -71,6 +81,111 @@ test("arguments: a tenant is required and nothing unknown is taken", () => {
   assert.throws(() => parseArgs(["--tenant", "a'b"]), /--tenant/u);
   assert.throws(() => parseArgs(["--tenant"]), /needs a value/u);
   assert.throws(() => parseArgs(["--tenant", "t1", "--password", "x"]), /unknown argument/u);
+});
+
+test("the folder of the file is always named: the working directory may be a repository", async () => {
+  assert.throws(() => parseArgs(["--tenant", "t1"]), /--out-dir <dir> is required/u);
+  assert.throws(
+    () => parseArgs(["--tenant", "t1", "--out-dir", ""]),
+    /--out-dir <dir> is required/u,
+  );
+  const { code, calls, err, out } = await run(["--tenant", "imp-test-atoll"]);
+  assert.equal(code, 64);
+  assert.deepEqual(calls, [], "psql never ran");
+  assert.deepEqual(out, []);
+  assert.match(err.join("\n"), /--out-dir <dir> is required/u);
+});
+
+test("a transfer file written by mistake inside the repository is ignored by git", () => {
+  const lines = readFileSync(new URL("../../../.gitignore", import.meta.url), "utf8").split("\n");
+  assert.ok(lines.includes("markiro-cloud-export-*.json"), "the transfer file is not ignored");
+  assert.ok(lines.includes(".markiro-cloud-export-*.partial"), "the temporary file is not ignored");
+});
+
+/** `FS` with one call replaced. */
+const failing = (name, error) => ({
+  ...FS,
+  [name]: () => {
+    throw Object.assign(new Error(`${error}: injected`), { code: error });
+  },
+});
+
+test("the file appears whole or not at all, and a failed write leaves nothing behind", () => {
+  const dir = mkdtempSync(join(tmpdir(), "standalone-export-"));
+  try {
+    const path = join(dir, "markiro-cloud-export-1-2026-10-09.json");
+    for (const [name, error] of [
+      ["writeSync", "ENOSPC"],
+      ["fsyncSync", "EIO"],
+      ["closeSync", "EIO"],
+      ["linkSync", "EIO"],
+    ]) {
+      assert.throws(() => writeWhole(path, "{}\n", failing(name, error)), new RegExp(error, "u"));
+      assert.deepEqual(readdirSync(dir), [], `${name} left a file`);
+    }
+    // A write the disk takes only in part is carried on until all of it is down.
+    let chunks = 0;
+    const halves = {
+      ...FS,
+      writeSync: (fd, buffer, offset, length) => {
+        chunks += 1;
+        return FS.writeSync(fd, buffer, offset, Math.min(length, 3));
+      },
+    };
+    writeWhole(path, '{"a": "я"}\n', halves);
+    assert.equal(readFileSync(path, "utf8"), '{"a": "я"}\n');
+    assert.ok(chunks > 3);
+    if (process.platform !== "win32") assert.equal(statSync(path).mode & 0o777, 0o600);
+    assert.deepEqual(readdirSync(dir), ["markiro-cloud-export-1-2026-10-09.json"]);
+    // Never over a file already there, and the temporary file goes too.
+    assert.throws(() => writeWhole(path, "other\n"), /EEXIST/u);
+    assert.equal(readFileSync(path, "utf8"), '{"a": "я"}\n');
+    assert.deepEqual(readdirSync(dir), ["markiro-cloud-export-1-2026-10-09.json"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("without hard links (a FAT flash drive) the file is renamed into place, still never over another", () => {
+  const dir = mkdtempSync(join(tmpdir(), "standalone-export-"));
+  try {
+    const path = join(dir, "markiro-cloud-export-1-2026-10-09.json");
+    for (const code of ["EPERM", "ENOTSUP", "EOPNOTSUPP", "ENOSYS"]) {
+      writeWhole(path, `${code}\n`, failing("linkSync", code));
+      assert.equal(readFileSync(path, "utf8"), `${code}\n`);
+      assert.deepEqual(readdirSync(dir), ["markiro-cloud-export-1-2026-10-09.json"]);
+      assert.throws(() => writeWhole(path, "other\n", failing("linkSync", code)), /EEXIST/u);
+      assert.equal(readFileSync(path, "utf8"), `${code}\n`);
+      assert.deepEqual(readdirSync(dir), ["markiro-cloud-export-1-2026-10-09.json"]);
+      rmSync(path);
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("a write that fails exits 1 with no file, and the run after it writes the file", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "standalone-export-"));
+  try {
+    const argv = ["--tenant", "imp-test-atoll", "--out-dir", dir];
+    const quiet = { stdout: () => {}, now: () => new Date("2026-10-09T18:30:00.000Z") };
+    const err = [];
+    const code = await main(argv, {
+      ...quiet,
+      run: async () => rawText,
+      stderr: (line) => err.push(line),
+      writeFile: (path, text) => writeWhole(path, text, failing("writeSync", "ENOSPC")),
+    });
+    assert.equal(code, 1);
+    assert.deepEqual(err, ["Выгрузка не удалась: ENOSPC: injected"]);
+    assert.deepEqual(readdirSync(dir), []);
+    const again = await run(argv);
+    assert.equal(again.code, 0, again.err.join("\n"));
+    assert.deepEqual(readdirSync(dir), ["markiro-cloud-export-7701234567-2026-10-09.json"]);
+    assert.deepEqual(JSON.parse(readFileSync(join(dir, readdirSync(dir)[0]), "utf8")), golden);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("the file is written owner-only under its name and the summary names no secret", async () => {
@@ -148,7 +263,7 @@ test("a cloud that is not clean writes no file and says why", async () => {
 
 test("output that is not JSON fails without quoting it", async () => {
   const { code, err } = await run(
-    ["--tenant", "imp-test-atoll"],
+    ["--tenant", "imp-test-atoll", "--out-dir", tmpdir()],
     '{"badgeCode": "MRK-SECRET-1" oops',
   );
   assert.equal(code, 1);
@@ -196,6 +311,7 @@ test("--help prints the usage, the libpq connection, 0600 and the Windows rule, 
   assert.match(text, /удалить/u);
   assert.match(text, /--rehearsal/u);
   assert.match(text, /--accept-shared-prefix/u);
+  assert.match(text, /--out-dir <dir>\s+каталог файла переноса \(обязательно\)/u);
   assert.match(text, /sscc_prefix_shared/u);
 });
 
@@ -416,7 +532,7 @@ test(
 );
 
 test("a tenant id is 1 to 64 letters, digits, _ and -, and nothing else reaches psql", () => {
-  const ok = (id) => parseArgs(["--tenant", id]).tenantId;
+  const ok = (id) => parseArgs(["--tenant", id, "--out-dir", "/tmp/x"]).tenantId;
   assert.equal(ok("a"), "a");
   assert.equal(ok("A_b-9".repeat(12) + "abcd"), "A_b-9".repeat(12) + "abcd");
   assert.equal(ok("x".repeat(64)), "x".repeat(64));
@@ -435,7 +551,11 @@ test("a tenant id is 1 to 64 letters, digits, _ and -, and nothing else reaches 
     "ä",
     "a:b",
   ]) {
-    assert.throws(() => parseArgs(["--tenant", id]), /--tenant <tenantId>/u, JSON.stringify(id));
+    assert.throws(
+      () => parseArgs(["--tenant", id, "--out-dir", "/tmp/x"]),
+      /--tenant <tenantId>/u,
+      JSON.stringify(id),
+    );
   }
 });
 

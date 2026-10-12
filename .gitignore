@@ -74,3 +74,8 @@ keystore.properties
 
 # Development data directory of markiro-host (TLS key, database), wherever it is started
 .markiro-host/
+
+# Cloud → standalone transfer files (tools/standalone-export): they hold credential
+# verifiers and must never be committed, wherever the tool was pointed.
+markiro-cloud-export-*.json
+.markiro-cloud-export-*.partial
