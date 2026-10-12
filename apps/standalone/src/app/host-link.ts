@@ -102,7 +102,7 @@ export interface HostLinkOptions {
 /** What the link offers the screens: a sync and both reads now, and the outbox's delivery now. */
 export interface HostLinkControls {
   requestSync: () => void;
-  /** Sends the outbox now (after a local write); nothing goes while the link is stopped or not online. */
+  /** Sends the outbox now (after a local write); nothing goes while the link is stopped or not online, or while a failed send's pause runs (its end sends). */
   requestFacts: () => void;
 }
 
@@ -123,7 +123,7 @@ export interface HostLinkControls {
  * (`replaceShiftCopies`), and a failed read keeps the copies the station has.
  * The outbox goes to the host at the same moments (stage 2a spec §5.5), a
  * batch at a time (`sendFactBatch`), and whenever a screen asks after a local
- * write; a batch of 100 asks for the next at once; a failed send is retried
+ * write — unless a failed send's pause runs, whose end sends (plan ОЧ); a batch of 100 asks for the next at once; a failed send is retried
  * after `nextSyncRetryMs` with a count of its own while the link is online,
  * and at once when the link is back; a refused key ends the link as
  * everywhere. It lives exactly as long as the link: a refusal waiting for the
@@ -480,7 +480,14 @@ export function useHostLink({
       reconciler.trigger();
     };
     syncNow.current = everything;
-    factsNow.current = () => factSender.trigger();
+    // A screen's request after a local write sends at once, unless a failed
+    // send's pause runs: that pause sends, so `attempts` counts retries and not
+    // scans (plan ОЧ; final review of plan 2a6, m8). Going online, a revision
+    // and the pause's end still send at once.
+    factsNow.current = () => {
+      if (factRetry !== null) return;
+      factSender.trigger();
+    };
     let unwatch: (() => void) | null = null;
     connection
       .watch({

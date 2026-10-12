@@ -32,8 +32,9 @@ export interface BlockContext {
  * request the host may have answered stays in `floor_block_requests` and is
  * repeated as it is, next time), or an answer this station does not keep
  * (another prefix or extension, an inverted range, a range that shares serials
- * with a kept block, a `validation_failed`): that request is dropped, and
- * nothing but this result says so.
+ * with a kept block, a `validation_failed`): that request is dropped, and the
+ * block is kept in `floor_block_drops` for the status bar (plan ОЧ); a
+ * `validation_failed` brings no block and leaves no row.
  */
 export type SupplyResult =
   | { kind: "enough" }
@@ -210,6 +211,40 @@ async function dropRequest(context: BlockContext, requestId: string): Promise<vo
 }
 
 /**
+ * A block the station does not keep, kept for the status bar and support with
+ * why (plan ОЧ), in the transaction that drops its request: a block another
+ * answer to the same request brings again is kept once.
+ */
+async function dropBlock(
+  context: BlockContext,
+  request: SsccBlockRequest,
+  block: SsccBlock,
+  reason: "overlap" | "mismatch",
+): Promise<void> {
+  await context.local.transaction([
+    {
+      sql:
+        "INSERT INTO floor_block_drops (host_id, device_id, block_id, request_id, issuer_prefix, " +
+        "extension, from_serial, to_serial, reason, dropped_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) " +
+        "ON CONFLICT (host_id, device_id, block_id) DO NOTHING",
+      values: [
+        context.pairing.hostId,
+        context.pairing.deviceId,
+        block.id,
+        request.requestId,
+        block.issuerPrefix,
+        block.extension,
+        block.fromSerial,
+        block.toSerial,
+        reason,
+        context.now().toISOString(),
+      ],
+    },
+    { sql: "DELETE FROM floor_block_requests WHERE request_id = ?", values: [request.requestId] },
+  ]);
+}
+
+/**
  * The block, kept in the transaction that removes its request: a request is
  * never gone without its block, and a block is filed only under the prefix
  * and extension the request named.
@@ -259,8 +294,8 @@ async function storeBlock(
  * block that is not the one asked for (another prefix or extension, an
  * inverted range) or that shares serials with a block kept is never filed:
  * its request is dropped too, and the result is `failed`, with no report
- * through `onHostError` (a screen for it belongs to the queue, plan ОЧ). A
- * failed write of this computer rejects.
+ * through `onHostError`: the block goes to `floor_block_drops`, and the floor's
+ * status bar says how many (plan ОЧ). A failed write of this computer rejects.
  */
 export function createBlockSupply(context: BlockContext): { topUp: () => Promise<SupplyResult> } {
   const attempt = async (fresh: boolean): Promise<SupplyResult> => {
@@ -287,15 +322,15 @@ export function createBlockSupply(context: BlockContext): { topUp: () => Promise
       context.onHostError(error);
       return { kind: "failed" };
     }
-    if (
+    const mismatch =
       block.issuerPrefix !== request.issuerPrefix ||
       block.extension !== request.extension ||
-      block.toSerial < block.fromSerial ||
-      (await sharesSerials(context, block))
-    ) {
+      block.toSerial < block.fromSerial;
+    if (mismatch || (await sharesSerials(context, block))) {
       // Not the block asked for, or one that shares serials with a block kept
-      // (a serial would label two boxes): never filed, and never asked for again.
-      await dropRequest(context, request.requestId);
+      // (a serial would label two boxes): never filed, never asked for again,
+      // and kept with why for the status bar and support (plan ОЧ).
+      await dropBlock(context, request, block, mismatch ? "mismatch" : "overlap");
       return { kind: "failed" };
     }
     await storeBlock(context, request, block);

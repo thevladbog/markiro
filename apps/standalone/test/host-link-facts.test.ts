@@ -236,6 +236,7 @@ describe("the outbox on the link", () => {
   });
 
   it("says whether a failed send was the link's, the host's or this computer's, until one goes through", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
     const station = await link(
       async () => {
         throw new HostError({ kind: "api", code: "internal", status: 500, message: "boom" });
@@ -247,7 +248,9 @@ describe("the outbox on the link", () => {
       expect(station.deliveries()).toEqual([{ type: "facts_failed", failure: "host" }]),
     );
     station.send.mockImplementation(acceptAll);
+    // A screen's request does not cut the failed send's pause (plan ОЧ): its end sends.
     station.hook.result.current.requestFacts();
+    await elapse(2_100);
     await waitFor(() => expect(station.deliveries().at(-1)).toEqual({ type: "facts_sent" }));
     station.hook.unmount();
   });
@@ -409,19 +412,57 @@ describe("a send that does not go through", () => {
     station.hook.unmount();
   });
 
-  it("sends at once when a screen asks during a pause, and the pause it cut short does not send again", async () => {
+  it("waits out a failed send's pause when a screen asks during it: the pause sends, so attempts count retries, not scans (plan ОЧ)", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
     const station = await link(async () => Promise.reject(DOWN()), HOST_ID, 1);
     await waitFor(() => expect(station.send).toHaveBeenCalledTimes(1));
     await elapse(800);
     station.hook.result.current.requestFacts();
+    station.hook.result.current.requestFacts();
+    await settle();
+    expect(station.send).toHaveBeenCalledTimes(1);
+    // The first pause (2 s) ends here and sends once.
+    await elapse(1_300);
     await waitFor(() => expect(station.send).toHaveBeenCalledTimes(2));
-    // The first pause (2 s) ends here, 800 ms from where the cut-short one began
-    // plus the second failure's own 4 s still ahead: nothing is due.
-    await elapse(1_800);
+    expect(rows(station.db, "SELECT attempts FROM outbox")).toEqual([{ attempts: 2 }]);
+    station.hook.unmount();
+  });
+
+  it("counts one attempt per pause, however often a screen asks; a request with no pause running sends at once (plan ОЧ)", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    const station = await link(async () => Promise.reject(DOWN()), HOST_ID, 1);
+    const attempts = () => rows(station.db, "SELECT attempts FROM outbox");
+    await waitFor(() => expect(station.send).toHaveBeenCalledTimes(1));
+    expect(attempts()).toEqual([{ attempts: 1 }]);
+    // Asks all through the first pause (2 s; 1.3 s of it here, the rest is the margin for a slow run): none sends, none counts.
+    for (const ms of [100, 400, 500, 300]) {
+      await elapse(ms);
+      station.hook.result.current.requestFacts();
+    }
+    await settle();
+    expect(station.send).toHaveBeenCalledTimes(1);
+    expect(attempts()).toEqual([{ attempts: 1 }]);
+    // The pause ends at 2 s: one send, the second attempt, and a longer pause (4 s) begins.
+    await elapse(800);
+    await waitFor(() => expect(station.send).toHaveBeenCalledTimes(2));
+    expect(attempts()).toEqual([{ attempts: 2 }]);
+    for (const ms of [800, 800, 800]) {
+      await elapse(ms);
+      station.hook.result.current.requestFacts();
+    }
+    await settle();
     expect(station.send).toHaveBeenCalledTimes(2);
-    await elapse(3_000);
+    await elapse(1_700);
     await waitFor(() => expect(station.send).toHaveBeenCalledTimes(3));
+    expect(attempts()).toEqual([{ attempts: 3 }]);
+    // A send that goes through ends the pauses: the next request sends at once.
+    station.send.mockImplementation(acceptAll);
+    await elapse(8_100);
+    await waitFor(() => expect(station.unsent()).toBe(0));
+    await unsentScans(station.local, 1, undefined, 10);
+    station.hook.result.current.requestFacts();
+    await waitFor(() => expect(station.unsent()).toBe(0));
+    expect(station.send).toHaveBeenCalledTimes(5);
     station.hook.unmount();
   });
 
