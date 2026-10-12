@@ -313,6 +313,8 @@ jobs:
         run: |
           pnpm turbo run build --filter='@markiro/station^...'
           pnpm test:station-inventory:browser
+      - name: Verify the production Station startup
+        run: pnpm test:station-startup:browser
       - name: Verify the inventory admin gallery contract
         run: |
           pnpm turbo run build --filter='@markiro/admin^...'

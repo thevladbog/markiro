@@ -26,6 +26,7 @@
     "test:yandex-runbooks:contract": "node --test infra/yandex/test/runbook-contract.test.mjs",
     "test:production-bundle:contract": "node --test deploy/production/test/*.test.mjs",
     "test:production-docs:browser": "pnpm --dir tools/production-browser --ignore-workspace test",
+    "test:station-startup:browser": "pnpm --dir tools/production-browser --ignore-workspace exec playwright test --config station-startup.playwright.config.ts",
     "test:station-inventory:browser": "pnpm --dir tools/production-browser --ignore-workspace test:station-inventory",
     "test:inventory:browser": "pnpm --dir tools/production-browser --ignore-workspace test:inventory",
     "test:landing:browser": "pnpm --dir tools/production-browser --ignore-workspace test:landing",
