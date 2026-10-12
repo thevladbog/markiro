@@ -20,6 +20,7 @@ const jobNames = [
   "handheld_android",
   "standalone_rust",
   "standalone_windows_build",
+  "standalone_app_tests",
 ];
 
 const signerOnly = {
@@ -37,6 +38,7 @@ const signerOnly = {
     handheld_android: false,
     standalone_rust: false,
     standalone_windows_build: false,
+    standalone_app_tests: false,
   },
 };
 
@@ -96,7 +98,7 @@ test("Station native and web changes select different downstream work", () => {
   ]);
 });
 
-test("Standalone native and web changes select their jobs", () => {
+test("Standalone native and web changes select their jobs; its Vitest suite has its own job", () => {
   for (const path of [
     "apps/standalone/host/src/server.rs",
     "apps/standalone/src-tauri/src/lib.rs",
@@ -116,7 +118,7 @@ test("Standalone native and web changes select their jobs", () => {
   ]) {
     assert.deepEqual(
       enabledJobs(classifyChangedFiles([path])),
-      ["verify_static", "verify_app_tests", "standalone_rust", "standalone_windows_build"],
+      ["verify_static", "standalone_rust", "standalone_windows_build", "standalone_app_tests"],
       path,
     );
   }
@@ -171,6 +173,7 @@ test("shared packages fan out to their current consumers", () => {
         "signer_windows_build",
         "standalone_rust",
         "standalone_windows_build",
+        "standalone_app_tests",
       ],
     ],
     [
@@ -184,6 +187,7 @@ test("shared packages fan out to their current consumers", () => {
         "station_windows_build",
         "standalone_rust",
         "standalone_windows_build",
+        "standalone_app_tests",
       ],
     ],
     [
@@ -411,6 +415,7 @@ test("CLI writes exact GitHub outputs for a NUL-delimited diff", () => {
       "handheld_android=false",
       "standalone_rust=false",
       "standalone_windows_build=false",
+      "standalone_app_tests=false",
       "",
     ].join("\n"),
   );
@@ -472,6 +477,7 @@ test("offline grant protocol and signed fixture changes exercise every native co
         "handheld_android",
         "standalone_rust",
         "standalone_windows_build",
+        "standalone_app_tests",
       ],
       path,
     );

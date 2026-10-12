@@ -30,6 +30,7 @@ const heavyJobs = [
   ["handheld-android", "handheld_android"],
   ["standalone-rust", "standalone_rust"],
   ["standalone-windows-build", "standalone_windows_build"],
+  ["standalone-app-tests", "standalone_app_tests"],
 ];
 
 function stepByName(job, name) {
@@ -223,6 +224,27 @@ test("the standalone export runs in the Node job after the domain build and its 
   assert.equal(
     apiSteps[sqlRun].env.STANDALONE_EXPORT_TEST_DATABASE_URL,
     workflow.jobs["verify-api-tests"].env.DATABASE_URL,
+  );
+});
+
+test("the standalone app's Vitest suite runs in its own job and in no other app slice", () => {
+  const appSlice = workflow.jobs["verify-app-tests"].steps.filter((step) =>
+    step.run?.startsWith("pnpm turbo test"),
+  );
+  assert.deepEqual(
+    appSlice.map((step) => step.run),
+    [
+      "pnpm turbo test --filter=!@markiro/db --filter=!@markiro/api --filter=!@markiro/standalone --concurrency=1 --force",
+    ],
+  );
+
+  const job = workflow.jobs["standalone-app-tests"];
+  assert.equal(job["runs-on"], "ubuntu-latest");
+  assert.equal(job.env, undefined, "the suite is database-free, like verify-app-tests");
+  assert.ok(Number.isInteger(job["timeout-minutes"]) && job["timeout-minutes"] > 0);
+  assert.deepEqual(
+    job.steps.filter((step) => step.run?.startsWith("pnpm turbo")).map((step) => step.run),
+    ["pnpm turbo test --filter=@markiro/standalone --concurrency=1 --force"],
   );
 });
 

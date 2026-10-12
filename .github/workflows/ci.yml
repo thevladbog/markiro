@@ -37,6 +37,7 @@ jobs:
       handheld_android: ${{ steps.affected.outputs.handheld_android }}
       standalone_rust: ${{ steps.affected.outputs.standalone_rust }}
       standalone_windows_build: ${{ steps.affected.outputs.standalone_windows_build }}
+      standalone_app_tests: ${{ steps.affected.outputs.standalone_app_tests }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -194,8 +195,34 @@ jobs:
       - run: pnpm install --frozen-lockfile
       # No Postgres and no DATABASE_URL on purpose: every suite in this slice
       # is database-free, and a suite that grows a database dependency must
-      # move to verify-api-tests instead of silently skipping here.
-      - run: pnpm turbo test --filter=!@markiro/db --filter=!@markiro/api --concurrency=1 --force
+      # move to verify-api-tests instead of silently skipping here. The
+      # standalone app's suite runs in standalone-app-tests: added to this
+      # slice it ran past the 25-minute budget (run 38221455774).
+      - run: pnpm turbo test --filter=!@markiro/db --filter=!@markiro/api --filter=!@markiro/standalone --concurrency=1 --force
+
+  standalone-app-tests:
+    needs: classify-changes
+    if: needs.classify-changes.outputs.standalone_app_tests == 'true'
+    runs-on: ubuntu-latest
+    # The suite (187 files, 5555 tests) took 130 s locally on 4 workers
+    # against 133 s for the station's, which takes 6 min on a hosted runner
+    # (run 38221455774); run 38221455774 cut it off still running after
+    # 4.6 min. About 6 min of tests plus checkout, install and the domain/ui
+    # builds: a wall-clock budget for the whole job, not a test timeout.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # Database-free like verify-app-tests; Turbo builds the app's workspace
+      # dependencies (domain, ui) first.
+      - run: pnpm turbo test --filter=@markiro/standalone --concurrency=1 --force
 
   tenant-team-infrastructure:
     needs: classify-changes
@@ -820,6 +847,7 @@ jobs:
       - handheld-android
       - standalone-rust
       - standalone-windows-build
+      - standalone-app-tests
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5

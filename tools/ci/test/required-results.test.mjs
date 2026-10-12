@@ -20,6 +20,7 @@ const jobPairs = [
   ["handheld_android", "handheld-android"],
   ["standalone_rust", "standalone-rust"],
   ["standalone_windows_build", "standalone-windows-build"],
+  ["standalone_app_tests", "standalone-app-tests"],
 ];
 
 function needsFixture({
@@ -69,6 +70,21 @@ test("rejects selected jobs that fail or are cancelled", () => {
       new RegExp(`selected job signer-windows-build finished with ${result}`),
     );
   }
+});
+
+test("the standalone app's Vitest job is required: cancelled by its budget or missing, it fails the gate", () => {
+  const selected = ["verify_static", "standalone_app_tests"];
+  assert.doesNotThrow(() => assertRequiredResults(needsFixture({ selected })));
+  assert.throws(
+    () =>
+      assertRequiredResults(
+        needsFixture({ selected, results: { "standalone-app-tests": "cancelled" } }),
+      ),
+    /selected job standalone-app-tests finished with cancelled/,
+  );
+  const missing = needsFixture({ selected });
+  delete missing["standalone-app-tests"];
+  assert.throws(() => assertRequiredResults(missing), /missing result for standalone-app-tests/);
 });
 
 test("rejects an unselected job with a non-success terminal result", () => {

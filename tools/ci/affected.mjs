@@ -15,11 +15,15 @@ export const HEAVY_JOBS = Object.freeze([
   "handheld_android",
   "standalone_rust",
   "standalone_windows_build",
+  "standalone_app_tests",
 ]);
 
 const signerJobs = ["signer_rust", "signer_windows_build"];
 const stationJobs = ["station_rust", "station_windows_build"];
 const standaloneJobs = ["standalone_rust", "standalone_windows_build"];
+// The standalone webview's Vitest suite has a runner of its own: inside
+// verify-app-tests it pushed that job past its wall-clock budget.
+const standaloneAppTests = "standalone_app_tests";
 
 const appJobs = Object.freeze({
   api: ["verify_static", "verify_api_tests", "tenant_team_infrastructure", "production_bundle"],
@@ -37,6 +41,7 @@ const sharedJobs = Object.freeze({
     ...stationJobs,
     ...signerJobs,
     ...standaloneJobs,
+    standaloneAppTests,
   ],
   domain: [
     "verify_static",
@@ -45,6 +50,7 @@ const sharedJobs = Object.freeze({
     "production_bundle",
     ...stationJobs,
     ...standaloneJobs,
+    standaloneAppTests,
   ],
   db: [
     "verify_static",
@@ -177,7 +183,8 @@ function jobsForPath(path) {
 
   // Host and shell crates run only the Rust jobs; everything else in the app
   // (webview, protocol fixtures read by both suites, package files) also runs
-  // the JavaScript gates. Two directories inside the shell crate are also
+  // the JavaScript gates: the static checks and the app's own Vitest job
+  // (verify-app-tests leaves the standalone suite out). Two directories inside the shell crate are also
   // inputs to the webview's Vitest suite, so they must run both: sqlx
   // migrations under `src-tauri/migrations/` are applied to node:sqlite by
   // `test/support/local-db.ts`, and the SQL-rule fixtures under
@@ -188,7 +195,7 @@ function jobsForPath(path) {
       path.startsWith("apps/standalone/src-tauri/migrations/") ||
       path.startsWith("apps/standalone/src-tauri/tests/fixtures/")
     ) {
-      return ["verify_static", "verify_app_tests", ...standaloneJobs];
+      return ["verify_static", ...standaloneJobs, standaloneAppTests];
     }
     if (
       path.startsWith("apps/standalone/host/") ||
@@ -197,7 +204,7 @@ function jobsForPath(path) {
     ) {
       return standaloneJobs;
     }
-    return ["verify_static", "verify_app_tests", ...standaloneJobs];
+    return ["verify_static", ...standaloneJobs, standaloneAppTests];
   }
 
   // The Android app is a Gradle project outside the pnpm workspace: only its own job runs.
