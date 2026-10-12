@@ -81,7 +81,11 @@ export function PalletTemplatePicker({
         </Button>
       }
     >
-      {error ? <Alert tone="error">{error}</Alert> : null}
+      {error ? (
+        <Alert tone="error">
+          {t(["warehouse.errors." + error, "warehouse.errors.WAREHOUSE_OPERATION_FAILED"])}
+        </Alert>
+      ) : null}
       {onRefresh ? (
         <Button size="floor" disabled={busy} onClick={onRefresh}>
           {t("warehouse.pallet.refreshTemplates")}

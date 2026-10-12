@@ -99,8 +99,6 @@ export class WarehousePalletResolutionsService {
           );
         if (
           previous ||
-          receipt.attemptId !== value.attemptId ||
-          receipt.sourceRevision !== value.sourceRevision ||
           latest.sequence > value.productionSequence ||
           !membership ||
           membership.pallet.disassembledAt ||
@@ -117,7 +115,11 @@ export class WarehousePalletResolutionsService {
           results.push({ eventId: value.eventId, status: "retryable" });
           continue;
         }
-        if (receipt.state === "failed_before_send" && value.outcome === "confirmed") {
+        if (
+          receipt.attemptId !== value.attemptId ||
+          receipt.sourceRevision !== value.sourceRevision ||
+          (receipt.state === "failed_before_send" && value.outcome === "confirmed")
+        ) {
           results.push({ eventId: value.eventId, status: "conflict" });
           continue;
         }

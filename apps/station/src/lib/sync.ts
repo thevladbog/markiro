@@ -1325,8 +1325,10 @@ export function createSyncEngine(deps: SyncEngineDeps): SyncEngine {
             SELECT COUNT(*) n FROM warehouse_reprint_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'
             UNION ALL SELECT COUNT(*) FROM unit_label_facts WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'
             UNION ALL SELECT COUNT(*) FROM warehouse_pallet_sources WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND (receive_status='pending' OR (receive_status='accepted' AND COALESCE(json_extract(production_delivery_json,'$.sequence'),0)>production_delivery_acked_sequence))
-            UNION ALL SELECT COUNT(*) FROM warehouse_pallet_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending')`,
-          [owner, owner, owner, owner],
+            UNION ALL SELECT COUNT(*) FROM warehouse_pallet_events WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'
+            UNION ALL SELECT COUNT(*) FROM warehouse_pallet_renderings WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending'
+            UNION ALL SELECT COUNT(*) FROM warehouse_pallet_production_resolutions WHERE owner IN (${AUTHORIZED_CREDENTIAL_OWNERS_SQL}) AND receive_status='pending')`,
+          [owner, owner, owner, owner, owner, owner],
         )
       : [];
     const pending =

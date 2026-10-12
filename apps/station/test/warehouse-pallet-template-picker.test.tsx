@@ -55,3 +55,36 @@ it("offers original outside the catalog and applies an independent landscape sna
     view.unmount();
   }
 });
+
+it.each(["WAREHOUSE_CATALOG_NETWORK", "UNMAPPED_PRIVATE_CODE"])(
+  "localizes picker error %s with a safe fallback",
+  async (error) => {
+    await i18n.changeLanguage("ru");
+    const view = render(
+      <PalletTemplatePicker
+        source={a4PalletSource()}
+        catalog={null}
+        choice={null}
+        profile={null}
+        busy={false}
+        onClose={() => {}}
+        onApply={() => {}}
+        error={error}
+      />,
+    );
+    try {
+      expect(
+        screen.getByText(
+          i18n.t(
+            i18n.exists("warehouse.errors." + error)
+              ? "warehouse.errors." + error
+              : "warehouse.errors.WAREHOUSE_OPERATION_FAILED",
+          ),
+        ),
+      ).toBeTruthy();
+      expect(screen.queryByText(error)).toBeNull();
+    } finally {
+      view.unmount();
+    }
+  },
+);

@@ -407,7 +407,11 @@ describe.skipIf(!databaseUrl)("pallet reprint V2 admission", () => {
       protocol: PALLET_REPRINT_V2_PROTOCOL,
       entries: [event],
     }).expect(403);
-    const aheadResolution = { ...resolution, productionSequence: 2 };
+    const aheadResolution = {
+      ...resolution,
+      attemptId: "next-original-unknown",
+      productionSequence: 2,
+    };
     expect(
       (
         await post(h.a.apiKey, "pallet-production-resolutions", {
@@ -427,7 +431,7 @@ describe.skipIf(!databaseUrl)("pallet reprint V2 admission", () => {
     await post(h.a.apiKey, "pallet-sources", {
       protocol: PALLET_REPRINT_PROTOCOL,
       entries: [source],
-      productionDelivery: { ...delivery, sequence: 2 },
+      productionDelivery: { ...delivery, attemptId: aheadResolution.attemptId, sequence: 2 },
     }).expect(200);
     expect(
       (
