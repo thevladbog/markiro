@@ -9,7 +9,14 @@ import {
 } from "drizzle-orm/sqlite-core";
 export const warehousePalletSettings = sqliteTable(
   "warehouse_pallet_settings",
-  { owner: text("owner").primaryKey(), reason: text("reason").notNull() },
+  {
+    owner: text("owner").primaryKey(),
+    reason: text("reason").notNull(),
+    sessionId: text("session_id"),
+    sessionStatus: text("session_status").notNull().default("finished"),
+    sentCount: integer("sent_count").notNull().default(0),
+    templateChoicesJson: text("template_choices_json").notNull().default("{}"),
+  },
   (t) => [
     check("warehouse_pallet_reason_check", sql`${t.reason} IN ('not_printed','damaged','lost')`),
   ],
@@ -65,6 +72,10 @@ export const warehousePalletJobs = sqliteTable(
     bytesDigest: text("bytes_digest").notNull(),
     renderSnapshotJson: text("render_snapshot_json"),
     claimId: text("claim_id"),
+    renderingJson: text("rendering_json"),
+    renderingRevision: text("rendering_revision"),
+    protocol: text("protocol"),
+    sessionId: text("session_id"),
     state: text("state").notNull(),
     eventJson: text("event_json").notNull(),
   },
@@ -100,4 +111,50 @@ export const warehousePalletEvents = sqliteTable(
       sql`${t.receiveStatus} IN ('pending','accepted','conflict')`,
     ),
   ],
+);
+
+export const warehousePalletRenderings = sqliteTable(
+  "warehouse_pallet_renderings",
+  {
+    owner: text("owner").notNull(),
+    jobId: text("job_id").notNull(),
+    revision: text("revision").notNull(),
+    valueJson: text("value_json").notNull(),
+    receiveStatus: text("receive_status").notNull().default("pending"),
+    lastTriedAt: text("last_tried_at").notNull().default(""),
+  },
+  (t) => [primaryKey({ columns: [t.owner, t.jobId] })],
+);
+export const warehousePalletProductionResolutions = sqliteTable(
+  "warehouse_pallet_production_resolutions",
+  {
+    owner: text("owner").notNull(),
+    eventId: text("event_id").notNull(),
+    sscc: text("sscc").notNull(),
+    sourceRevision: text("source_revision").notNull(),
+    attemptId: text("attempt_id").notNull(),
+    valueJson: text("value_json").notNull(),
+    digest: text("digest").notNull(),
+    receiveStatus: text("receive_status").notNull().default("pending"),
+    lastTriedAt: text("last_tried_at").notNull().default(""),
+  },
+  (t) => [
+    primaryKey({ columns: [t.owner, t.eventId] }),
+    uniqueIndex("warehouse_pallet_resolution_attempt_idx").on(
+      t.owner,
+      t.sscc,
+      t.sourceRevision,
+      t.attemptId,
+    ),
+  ],
+);
+export const warehousePalletSessionSends = sqliteTable(
+  "warehouse_pallet_session_sends",
+  {
+    owner: text("owner").notNull(),
+    sessionId: text("session_id").notNull(),
+    attemptId: text("attempt_id").notNull(),
+    jobId: text("job_id").notNull(),
+  },
+  (t) => [primaryKey({ columns: [t.owner, t.sessionId, t.attemptId] })],
 );

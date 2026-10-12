@@ -7,6 +7,7 @@
  */
 import { WAREHOUSE_REPRINT_SOURCE_MIGRATIONS } from "./warehouse-reprint-source-migrations.js";
 import { WAREHOUSE_REPRINT_MIGRATIONS } from "./warehouse-reprint-migrations.js";
+import { PALLET_REPRINT_V2_MIGRATIONS } from "./pallet-reprint-v2-migrations.js";
 import { PALLET_REPRINT_MIGRATIONS } from "./pallet-reprint-migrations.js";
 import { PRINTING_FOLLOW_UP_MIGRATIONS } from "./printing-follow-up-migrations.js";
 import { LABEL_FACTS_MIGRATIONS } from "./label-facts-migrations.js";
@@ -5087,6 +5088,7 @@ export const STATION_MIGRATIONS: string[] = [
   ...LABEL_FACTS_MIGRATIONS,
   ...PALLET_REPRINT_MIGRATIONS,
   ...PRINTING_FOLLOW_UP_MIGRATIONS,
+  ...PALLET_REPRINT_V2_MIGRATIONS,
 ];
 
 export interface StationMigrationEntry {

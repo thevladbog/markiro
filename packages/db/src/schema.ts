@@ -38,3 +38,6 @@ export * from "./schema/service-periods.js";
 export * from "./schema/label-facts.js";
 
 export * from "./schema/pallet-label-sources.js";
+
+export * from "./schema/pallet-reprint-renderings.js";
+export * from "./schema/pallet-production-resolutions.js";
