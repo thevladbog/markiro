@@ -227,11 +227,9 @@ describe("pallets tab", () => {
         )}&closedTo=${encodeURIComponent(new Date("2026-09-17T23:59:59.999").toISOString())}&limit=100`,
       );
     });
-    expect(screen.getByRole("combobox", { name: "Вид паллеты" }).textContent).toContain(
-      "Складские",
-    );
+    expect(screen.getByRole("combobox", { name: "Вид палеты" }).textContent).toContain("Складские");
 
-    await user.click(screen.getByRole("combobox", { name: "Вид паллеты" }));
+    await user.click(screen.getByRole("combobox", { name: "Вид палеты" }));
     await user.click(await screen.findByRole("option", { name: "Производственные" }));
     expect(currentLocation()).toBe(
       "/pallets?kind=production&product=p1&from=2026-09-01&to=2026-09-17",
@@ -249,7 +247,7 @@ describe("pallets tab", () => {
 
     await user.click(back);
     expect(currentLocation()).toBe("/pallets?kind=warehouse");
-    expect((await screen.findByRole("combobox", { name: "Вид паллеты" })).textContent).toContain(
+    expect((await screen.findByRole("combobox", { name: "Вид палеты" })).textContent).toContain(
       "Складские",
     );
   });
@@ -262,7 +260,7 @@ describe("pallets tab", () => {
     await user.click(await screen.findByRole("tab", { name: "Короба" }));
     await waitFor(() => expect(currentLocation()).toBe("/boxes?shift=s2"));
 
-    await user.click(await screen.findByRole("tab", { name: "Паллеты" }));
+    await user.click(await screen.findByRole("tab", { name: "Палеты" }));
     expect(currentLocation()).toBe("/pallets?kind=warehouse");
   });
 });

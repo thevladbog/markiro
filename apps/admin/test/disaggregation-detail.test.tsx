@@ -230,12 +230,12 @@ describe("DisaggregationDocumentPage", () => {
     expect(applyButton.hasAttribute("disabled")).toBe(false);
   });
 
-  it("renders the Level column: box lines as Короб, pallet lines as Паллета", async () => {
+  it("renders the Level column: box lines as Короб, pallet lines as Палета", async () => {
     renderPage({ ...DOC_DRAFT_READY, lines: [LINE_OK_1, LINE_OK_PALLET] });
 
     await screen.findByText("DSG-26-0001");
     expect(screen.getByText("Короб")).toBeTruthy();
-    expect(screen.getByText("Паллета")).toBeTruthy();
+    expect(screen.getByText("Палета")).toBeTruthy();
   });
 
   it("disables Apply when a line is written_off or the reason is missing", async () => {

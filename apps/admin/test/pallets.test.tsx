@@ -163,7 +163,7 @@ describe("shift panel pallet table", () => {
     );
     renderShiftPanel();
 
-    const section = await screen.findByRole("region", { name: "Паллеты" });
+    const section = await screen.findByRole("region", { name: "Палеты" });
     // Rendered in the same GS1 human-readable form as the box table's SSCC.
     expect(await within(section).findByText("(00)103460068200000004")).toBeDefined();
     expect(within(section).getByText("12")).toBeDefined();
@@ -184,7 +184,7 @@ describe("shift panel pallet table", () => {
     );
     renderShiftPanel();
 
-    const section = await screen.findByRole("region", { name: "Паллеты" });
+    const section = await screen.findByRole("region", { name: "Палеты" });
     expect(await within(section).findByText("Состав изменился после закрытия")).toBeDefined();
   });
 
@@ -223,7 +223,7 @@ describe("shift panel pallet table", () => {
     );
     renderShiftPanel();
 
-    const section = within(await screen.findByRole("region", { name: "Паллеты" }));
+    const section = within(await screen.findByRole("region", { name: "Палеты" }));
     const changedLabel = await section.findByText("Состав изменился после закрытия");
     const disassembledLabel = section.getByText("Разобрана");
 
@@ -250,7 +250,7 @@ describe("shift panel pallet table", () => {
     renderShiftPanel({ ...SHIFT, palletsEnabled: false });
 
     await screen.findByText("Параметры смены");
-    expect(screen.queryByRole("region", { name: "Паллеты" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Палеты" })).toBeNull();
     expect(fetchMock.mock.calls.some((call) => String(call[0]).startsWith("/api/pallets"))).toBe(
       false,
     );
@@ -266,9 +266,9 @@ describe("shift panel pallet table", () => {
     );
     renderShiftPanel();
 
-    const section = within(await screen.findByRole("region", { name: "Паллеты" }));
+    const section = within(await screen.findByRole("region", { name: "Палеты" }));
     await user.click(await section.findByRole("button", { name: "Ярлыки" }));
-    const dialog = within(await screen.findByRole("dialog", { name: "Ярлыки паллет смены" }));
+    const dialog = within(await screen.findByRole("dialog", { name: "Ярлыки палет смены" }));
     await user.click(dialog.getByRole("radio", { name: "A5" }));
     await user.click(dialog.getByRole("button", { name: "Открыть" }));
 
@@ -276,7 +276,7 @@ describe("shift panel pallet table", () => {
     expect(String(openMock.mock.calls[0]?.[0])).toMatch(
       /^\/api\/code-search\/shifts\/11111111-1111-4111-8111-111111111111\/placards\?format=a5&timeZone=/,
     );
-    expect(screen.queryByRole("dialog", { name: "Ярлыки паллет смены" })).toBeNull();
+    expect(screen.queryByRole("dialog", { name: "Ярлыки палет смены" })).toBeNull();
   });
 
   it("offers no placards when the shift has no closed, standing pallet", async () => {
@@ -296,7 +296,7 @@ describe("shift panel pallet table", () => {
     );
     renderShiftPanel();
 
-    const section = within(await screen.findByRole("region", { name: "Паллеты" }));
+    const section = within(await screen.findByRole("region", { name: "Палеты" }));
     expect(await section.findAllByText("(00)103460068200000004")).toHaveLength(2);
     expect(section.queryByRole("button", { name: "Ярлыки" })).toBeNull();
   });
@@ -308,8 +308,8 @@ describe("shift panel pallet table", () => {
     );
     renderShiftPanel();
 
-    const section = await screen.findByRole("region", { name: "Паллеты" });
-    expect(await within(section).findByText("Не удалось загрузить паллеты смены.")).toBeDefined();
+    const section = await screen.findByRole("region", { name: "Палеты" });
+    expect(await within(section).findByText("Не удалось загрузить палеты смены.")).toBeDefined();
   });
 });
 
@@ -334,7 +334,7 @@ const PRODUCT: ProductDto = {
 
 const PALLET_TEMPLATE: LabelTemplateSummaryDto = {
   id: "tpl-pallet",
-  name: "Паллета 100×150",
+  name: "Палета 100×150",
   purpose: "pallet",
   widthMm: 100,
   heightMm: 150,
@@ -402,20 +402,20 @@ describe("shift form pallet configuration", () => {
     const user = userEvent.setup();
     renderShiftForm(AGGREGATION_FORM_VALUES);
 
-    expect(screen.queryByLabelText("Шаблон этикетки паллеты")).toBeNull();
+    expect(screen.queryByLabelText("Шаблон этикетки палеты")).toBeNull();
 
-    await user.click(screen.getByLabelText("Использовать паллеты"));
+    await user.click(screen.getByLabelText("Использовать палеты"));
 
-    expect(await screen.findByLabelText("Шаблон этикетки паллеты")).toBeDefined();
+    expect(await screen.findByLabelText("Шаблон этикетки палеты")).toBeDefined();
   });
 
   it("offers only pallet-purpose templates in the pallet picker", async () => {
     const user = userEvent.setup();
     renderShiftForm({ ...AGGREGATION_FORM_VALUES, palletsEnabled: true });
 
-    await user.click(screen.getByLabelText("Шаблон этикетки паллеты"));
+    await user.click(screen.getByLabelText("Шаблон этикетки палеты"));
 
-    expect(await screen.findByRole("option", { name: "Паллета 100×150" })).toBeDefined();
+    expect(await screen.findByRole("option", { name: "Палета 100×150" })).toBeDefined();
     expect(screen.queryByRole("option", { name: "Короб 58×40" })).toBeNull();
   });
 
@@ -458,10 +458,10 @@ describe("shift form pallet configuration", () => {
       </QueryClientProvider>,
     );
 
-    const picker = screen.getByLabelText("Шаблон этикетки паллеты");
+    const picker = screen.getByLabelText("Шаблон этикетки палеты");
     expect(picker.hasAttribute("disabled")).toBe(false);
     await user.click(picker);
-    await user.click(await screen.findByRole("option", { name: "Паллета 100×150" }));
+    await user.click(await screen.findByRole("option", { name: "Палета 100×150" }));
     const save = screen.getByRole("button", { name: "Сохранить" });
     await waitFor(() => expect(save.hasAttribute("disabled")).toBe(false));
     await user.click(save);
@@ -473,10 +473,10 @@ describe("shift form pallet configuration", () => {
   it("labels the shift capacity field in boxes, not units", () => {
     renderShiftForm({ ...AGGREGATION_FORM_VALUES, palletsEnabled: true });
 
-    expect(screen.getByLabelText("Коробов на паллете")).toBeDefined();
-    expect(screen.queryByLabelText("Вместимость паллеты, шт")).toBeNull();
+    expect(screen.getByLabelText("Коробов на палете")).toBeDefined();
+    expect(screen.queryByLabelText("Вместимость палеты, шт")).toBeNull();
     // The field changed MEANING, not just its name, so the hint has to say so.
-    expect(screen.getByText("Сколько закрытых коробов встаёт на одну паллету.")).toBeDefined();
+    expect(screen.getByText("Сколько закрытых коробов встаёт на одну палету.")).toBeDefined();
   });
 });
 
@@ -500,7 +500,7 @@ const FORMATS = [
   {
     id: "shift_txt_pallets",
     version: 1,
-    label: "[TXT][Паллеты] Отчет смены",
+    label: "[TXT][Палеты] Отчет смены",
     extension: "txt",
     mimeType: "text/plain; charset=utf-8",
     boxMode: "pallets",
@@ -508,7 +508,7 @@ const FORMATS = [
   {
     id: "shift_csv_pallets",
     version: 1,
-    label: "[CSV][Паллеты] Отчет смены",
+    label: "[CSV][Палеты] Отчет смены",
     extension: "csv",
     mimeType: "text/csv; charset=utf-8",
     boxMode: "pallets",
@@ -516,7 +516,7 @@ const FORMATS = [
   {
     id: "shift_xml_gismt_aggregation_pallets",
     version: 1,
-    label: "[XML][ГИСМТ] Паллетная агрегация",
+    label: "[XML][ГИСМТ] Палетная агрегация",
     extension: "xml",
     mimeType: "application/xml; charset=utf-8",
     boxMode: "pallets",
@@ -524,7 +524,7 @@ const FORMATS = [
   {
     id: "shift_txt_pallet_boxes",
     version: 1,
-    label: "[TXT][Паллеты → короба] Отчет смены",
+    label: "[TXT][Палеты → короба] Отчет смены",
     extension: "txt",
     mimeType: "text/plain; charset=utf-8",
     boxMode: "pallet_boxes",
@@ -532,7 +532,7 @@ const FORMATS = [
   {
     id: "shift_xml_gismt_pallet_boxes",
     version: 1,
-    label: "[XML][ГИСМТ] Агрегация паллет без кодов",
+    label: "[XML][ГИСМТ] Агрегация палет без кодов",
     extension: "xml",
     mimeType: "application/xml; charset=utf-8",
     boxMode: "pallet_boxes",
@@ -586,11 +586,11 @@ describe("pallet export formats", () => {
   it("offers the pallet formats for a shift that used pallets", async () => {
     renderExports(SHIFT);
 
-    expect(await screen.findByLabelText("[TXT][Паллеты] Отчет смены")).toBeDefined();
-    expect(screen.getByLabelText("[CSV][Паллеты] Отчет смены")).toBeDefined();
-    expect(screen.getByLabelText("[XML][ГИСМТ] Паллетная агрегация")).toBeDefined();
-    expect(screen.getByLabelText("[TXT][Паллеты → короба] Отчет смены")).toBeDefined();
-    expect(screen.getByLabelText("[XML][ГИСМТ] Агрегация паллет без кодов")).toBeDefined();
+    expect(await screen.findByLabelText("[TXT][Палеты] Отчет смены")).toBeDefined();
+    expect(screen.getByLabelText("[CSV][Палеты] Отчет смены")).toBeDefined();
+    expect(screen.getByLabelText("[XML][ГИСМТ] Палетная агрегация")).toBeDefined();
+    expect(screen.getByLabelText("[TXT][Палеты → короба] Отчет смены")).toBeDefined();
+    expect(screen.getByLabelText("[XML][ГИСМТ] Агрегация палет без кодов")).toBeDefined();
   });
 
   it("hides every pallet format for a shift that never used pallets", async () => {
@@ -598,7 +598,7 @@ describe("pallet export formats", () => {
 
     expect(await screen.findByLabelText("[TXT][С коробами] Отчет смены")).toBeDefined();
     expect(screen.getByLabelText("[TXT][С коробами][Обратная] Отчет смены")).toBeDefined();
-    expect(screen.queryByText(/паллет/i)).toBeNull();
+    expect(screen.queryByText(/палет/i)).toBeNull();
   });
 
   it("explains a pallet export that found no closed pallet", async () => {
@@ -606,7 +606,7 @@ describe("pallet export formats", () => {
 
     expect(
       await screen.findByText(
-        "В смене нет закрытых паллет: коробы не ставились на паллеты либо ни одна паллета ещё не закрыта.",
+        "В смене нет закрытых палет: коробы не ставились на палеты либо ни одна палета ещё не закрыта.",
       ),
     ).toBeDefined();
   });
@@ -616,7 +616,7 @@ describe("pallet export formats", () => {
 
     expect(
       await screen.findByText(
-        "Паллета вместе со своими коробами не помещается в установленное ограничение строк.",
+        "Палета вместе со своими коробами не помещается в установленное ограничение строк.",
       ),
     ).toBeDefined();
   });
@@ -667,12 +667,12 @@ describe("SSCC counters per extension digit", () => {
     renderOrgProfile([BOX_COUNTER, PALLET_COUNTER]);
 
     expect(await screen.findByText("Короба")).toBeDefined();
-    expect(screen.getByText("Паллеты")).toBeDefined();
+    expect(screen.getByText("Палеты")).toBeDefined();
     expect(
       (screen.getByLabelText("Начальный серийный номер короба") as HTMLInputElement).value,
     ).toBe("41");
     expect(
-      (screen.getByLabelText("Начальный серийный номер паллеты") as HTMLInputElement).value,
+      (screen.getByLabelText("Начальный серийный номер палеты") as HTMLInputElement).value,
     ).toBe("7");
   });
 
@@ -691,7 +691,7 @@ describe("SSCC counters per extension digit", () => {
       (screen.getByLabelText("Начальный серийный номер короба") as HTMLInputElement).disabled,
     ).toBe(true);
     expect(
-      (screen.getByLabelText("Начальный серийный номер паллеты") as HTMLInputElement).disabled,
+      (screen.getByLabelText("Начальный серийный номер палеты") as HTMLInputElement).disabled,
     ).toBe(false);
   });
 
@@ -717,10 +717,10 @@ describe("SSCC counters per extension digit", () => {
       </QueryClientProvider>,
     );
 
-    const field = await screen.findByLabelText("Начальный серийный номер паллеты");
+    const field = await screen.findByLabelText("Начальный серийный номер палеты");
     await user.clear(field);
     await user.type(field, "9");
-    await user.click(screen.getByRole("button", { name: "Сохранить счётчик паллет" }));
+    await user.click(screen.getByRole("button", { name: "Сохранить счётчик палет" }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -737,7 +737,7 @@ describe("SSCC counters per extension digit", () => {
     renderOrgProfile([BOX_COUNTER, { ...PALLET_COUNTER, nextSerial: 0 }]);
 
     const field = (await screen.findByLabelText(
-      "Начальный серийный номер паллеты",
+      "Начальный серийный номер палеты",
     )) as HTMLInputElement;
     expect(field.value).toBe("0");
   });
@@ -778,9 +778,9 @@ describe("counterparty SSCC counters", () => {
     );
 
     expect(await screen.findByText("Короба")).toBeDefined();
-    expect(screen.getByText("Паллеты")).toBeDefined();
+    expect(screen.getByText("Палеты")).toBeDefined();
     expect(
-      (screen.getByLabelText("Начальный серийный номер паллеты") as HTMLInputElement).value,
+      (screen.getByLabelText("Начальный серийный номер палеты") as HTMLInputElement).value,
     ).toBe("7");
   });
 });
@@ -825,7 +825,7 @@ describe("pallet label templates in the editor", () => {
 
   const STOCK_PALLET_TEMPLATE = {
     id: "tpl-pallet",
-    name: "Паллета 100×150",
+    name: "Палета 100×150",
     purpose: "pallet",
     spec: buildPalletLabelTemplates()[0]!.spec,
     enabled: true,
@@ -902,7 +902,7 @@ describe("pallet label templates in the editor", () => {
     );
 
     await user.click(await screen.findByLabelText("Назначение"));
-    expect(await screen.findByRole("option", { name: "Паллета" })).toBeDefined();
+    expect(await screen.findByRole("option", { name: "Палета" })).toBeDefined();
   });
 });
 
@@ -949,7 +949,7 @@ describe("box list pallet column", () => {
     renderBoxes([BOX_ON_PALLET, LOOSE_BOX]);
 
     const table = within(await screen.findByRole("table"));
-    expect(table.getByRole("columnheader", { name: "Паллета" })).toBeDefined();
+    expect(table.getByRole("columnheader", { name: "Палета" })).toBeDefined();
     // The same GS1 human-readable form the box's own SSCC uses.
     expect(table.getByText("(00)103460068200000004")).toBeDefined();
 
@@ -1044,7 +1044,7 @@ describe("box card pallet link", () => {
   it("shows the pallet a box stands on and links to its card", async () => {
     renderCodeSearchCards("/codes/box/box-1", () => BOX_CARD);
 
-    expect(await screen.findByText("На паллете")).toBeDefined();
+    expect(await screen.findByText("На палете")).toBeDefined();
     const link = screen.getByRole("link", { name: "(00)103460068200000004" });
     expect(link.getAttribute("href")).toBe("/codes/pallet/pal-1");
   });
@@ -1052,7 +1052,7 @@ describe("box card pallet link", () => {
   it("shows a dash for a box that stands on no pallet", async () => {
     renderCodeSearchCards("/codes/box/box-1", () => ({ ...BOX_CARD, pallet: null }));
 
-    expect(await screen.findByText("На паллете")).toBeDefined();
+    expect(await screen.findByText("На палете")).toBeDefined();
     expect(screen.queryByRole("link", { name: /103460068200000004/ })).toBeNull();
   });
 });
@@ -1095,7 +1095,7 @@ describe("pallet card", () => {
       exceptions: [
         {
           kind: "disassemble",
-          reason: "паллета разобрана на складе",
+          reason: "палета разобрана на складе",
           occurredAt: "2026-09-11T18:00:00.000Z",
           operatorId: null,
           disaggregationDocumentId: null,
@@ -1108,8 +1108,8 @@ describe("pallet card", () => {
     // «Разобрана» timestamp field, exactly as the box card pairs its own
     // status chip with «Расформирован».
     expect(await screen.findAllByText("Разобрана")).toHaveLength(2);
-    expect(screen.getByText("Разбор паллеты")).toBeDefined();
-    expect(screen.getByText("паллета разобрана на складе")).toBeDefined();
+    expect(screen.getByText("Разбор палеты")).toBeDefined();
+    expect(screen.getByText("палета разобрана на складе")).toBeDefined();
   });
 
   it("reports a failed load rather than an empty pallet", async () => {
@@ -1132,7 +1132,7 @@ describe("pallet card", () => {
     expect(await screen.findByText(/Не удалось загрузить данные/)).toBeDefined();
     // An error, never the empty-pallet wording: "no boxes" and "could not
     // ask" are different answers.
-    expect(screen.queryByText("На паллете нет коробов")).toBeNull();
+    expect(screen.queryByText("На палете нет коробов")).toBeNull();
   });
 });
 
@@ -1141,20 +1141,20 @@ describe("pallets entitlement gate on the shift form", () => {
     const user = userEvent.setup();
     renderShiftForm(AGGREGATION_FORM_VALUES, true);
 
-    const checkbox = screen.getByLabelText("Использовать паллеты");
+    const checkbox = screen.getByLabelText("Использовать палеты");
     expect((checkbox as HTMLInputElement).disabled).toBe(false);
     await user.click(checkbox);
-    expect(await screen.findByLabelText("Коробов на паллете")).toBeDefined();
+    expect(await screen.findByLabelText("Коробов на палете")).toBeDefined();
     expect(screen.queryByText(/не входят в текущий тариф/)).toBeNull();
   });
 
   it("blocks the checkbox and explains why when the plan has no pallets", () => {
     renderShiftForm(AGGREGATION_FORM_VALUES, false);
 
-    expect((screen.getByLabelText("Использовать паллеты") as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByLabelText("Использовать палеты") as HTMLInputElement).disabled).toBe(true);
     expect(
       screen.getByText(
-        "Паллеты не входят в текущий тариф. Чтобы включать их в сменах, добавьте функцию в подписку.",
+        "Палеты не входят в текущий тариф. Чтобы включать их в сменах, добавьте функцию в подписку.",
       ),
     ).toBeDefined();
   });
@@ -1164,12 +1164,10 @@ describe("pallets entitlement gate on the shift form", () => {
 
     // The server only asserts the entitlement when pallets are being turned
     // ON, so disabling this control would strand such a shift for good.
-    expect((screen.getByLabelText("Использовать паллеты") as HTMLInputElement).disabled).toBe(
-      false,
-    );
+    expect((screen.getByLabelText("Использовать палеты") as HTMLInputElement).disabled).toBe(false);
     expect(
       screen.getByText(
-        "Паллеты не входят в текущий тариф. Эта смена была запланирована с паллетами: их можно выключить, но включить обратно — нет.",
+        "Палеты не входят в текущий тариф. Эта смена была запланирована с палетами: их можно выключить, но включить обратно — нет.",
       ),
     ).toBeDefined();
   });

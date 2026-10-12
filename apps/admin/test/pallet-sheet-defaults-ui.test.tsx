@@ -1,7 +1,8 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { PalletSheetDefaults } from "../src/pages/settings/PalletSheetDefaults.js";
+import { OrgProfilePage } from "../src/pages/settings/OrgProfilePage.js";
+import { MemoryRouter } from "react-router";
 import type { OrgProfileDto } from "../src/pages/settings/api.js";
 afterEach(() => {
   cleanup();
@@ -42,30 +43,34 @@ it.each([false, true])(
       async (url: string, init?: RequestInit) =>
         new Response(
           JSON.stringify(
-            url.endsWith("chz-product-groups")
-              ? {
-                  items: [
-                    { code: 15, name: "Пиво", alias: "beer" },
-                    { code: 8, name: "Вода", alias: "water" },
-                    { code: 16, name: "Табак", alias: "tobacco" },
-                  ],
-                }
-              : init?.method === "PUT"
-                ? { ...profile, ...JSON.parse(String(init.body)) }
-                : {
-                    items: [
-                      sheet,
-                      {
-                        ...sheet,
-                        id: "legacy",
-                        name: "Legacy",
-                        format: "label_v1",
-                        widthMm: 100,
-                        heightMm: 150,
-                        language: "zpl",
+            url.endsWith("profile/sscc")
+              ? { counters: [] }
+              : url.endsWith("org/profile") && init?.method !== "PUT"
+                ? profile
+                : url.endsWith("chz-product-groups")
+                  ? {
+                      items: [
+                        { code: 15, name: "Пиво", alias: "beer" },
+                        { code: 8, name: "Вода", alias: "water" },
+                        { code: 16, name: "Табак", alias: "tobacco" },
+                      ],
+                    }
+                  : init?.method === "PUT"
+                    ? { ...profile, ...JSON.parse(String(init.body)) }
+                    : {
+                        items: [
+                          sheet,
+                          {
+                            ...sheet,
+                            id: "legacy",
+                            name: "Legacy",
+                            format: "label_v1",
+                            widthMm: 100,
+                            heightMm: 150,
+                            language: "zpl",
+                          },
+                        ],
                       },
-                    ],
-                  },
           ),
           { status: 200 },
         ),
@@ -75,7 +80,9 @@ it.each([false, true])(
       <QueryClientProvider
         client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
       >
-        <PalletSheetDefaults profile={profile} />
+        <MemoryRouter>
+          <OrgProfilePage />
+        </MemoryRouter>
       </QueryClientProvider>,
     );
     const select = await screen.findByRole("combobox", { name: "Шаблон А4 для организации" });
@@ -96,14 +103,18 @@ it.each([false, true])(
     expect(await screen.findByRole("option", { name: "My A4" })).toBeDefined();
     expect(screen.queryByRole("option", { name: "Legacy" })).toBeNull();
     fireEvent.click(screen.getByRole("option", { name: "My A4" }));
-    fireEvent.click(screen.getByRole("button", { name: "Сохранить настройки А4" }));
-    await screen.findByText("Настройки А4 сохранены");
+    expect(screen.queryByRole("button", { name: "Сохранить настройки А4" })).toBeNull();
+    const form = select.closest("form");
+    if (!form) throw new Error("A4 selection must share the profile form");
+    fireEvent.click(within(form).getByRole("button", { name: "Сохранить" }));
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.filter(([, init]) => init?.method === "PUT")).toHaveLength(1),
+    );
     const payload = JSON.parse(
       String(fetchMock.mock.calls.find(([, init]) => init?.method === "PUT")?.[1]?.body),
     );
-    expect(payload).toEqual({
+    expect(payload).toMatchObject({
       defaultPalletSheetTemplateId: "sheet",
-      categoryPalletSheetTemplateDefaults: profile.categoryPalletSheetTemplateDefaults,
     });
     expect(payload).not.toHaveProperty("defaultPalletLabelTemplateId");
   },

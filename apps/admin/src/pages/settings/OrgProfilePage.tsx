@@ -46,7 +46,6 @@ import {
   useDeleteOrganizationLogo,
   type PutOrgProfileInput,
 } from "./api.js";
-import { PalletSheetDefaultsForm } from "./PalletSheetDefaults.js";
 import { OPERATIONAL_TIME_ZONES } from "./time-zones.js";
 import { useChzProductGroups } from "../catalog/api.js";
 import { useLabelTemplates, isLegacyTemplateSummary } from "../labels/api.js";
@@ -69,6 +68,8 @@ const profileFormSchema = z.object({
   defaultBoxLabelTemplateId: z.string(),
   /** ЧЗ product-group code (as a string key) → template id; "" means "same as organisation". */
   categoryDefaults: z.record(z.string(), z.string()),
+  defaultPalletSheetTemplateId: z.string(),
+  categoryPalletSheetDefaults: z.record(z.string(), z.string()),
   defaultPalletLabelTemplateId: z.string(),
   /** Same shape as `categoryDefaults`, for pallet templates. */
   categoryPalletDefaults: z.record(z.string(), z.string()),
@@ -108,6 +109,8 @@ const CATEGORY_CELL_STYLE = {
 const EMPTY_PROFILE_VALUES: ProfileFormValues = {
   defaultBoxLabelTemplateId: "",
   categoryDefaults: {},
+  defaultPalletSheetTemplateId: "",
+  categoryPalletSheetDefaults: {},
   defaultPalletLabelTemplateId: "",
   categoryPalletDefaults: {},
   gln: "",
@@ -155,6 +158,8 @@ function translateFieldError(t: TFunction, message: string | undefined): string 
 interface ProfileChangedFields {
   defaultBoxLabelTemplateId: boolean;
   categoryDefaults: boolean;
+  defaultPalletSheetTemplateId: boolean;
+  categoryPalletSheetDefaults: boolean;
   defaultPalletLabelTemplateId: boolean;
   categoryPalletDefaults: boolean;
 }
@@ -199,12 +204,20 @@ function toProfileInput(
       values.categoryPalletDefaults,
     );
   }
+  if (changed.defaultPalletSheetTemplateId)
+    input.defaultPalletSheetTemplateId = values.defaultPalletSheetTemplateId || null;
+  if (changed.categoryPalletSheetDefaults)
+    input.categoryPalletSheetTemplateDefaults = categoryDefaultsToDto(
+      values.categoryPalletSheetDefaults,
+    );
   return input;
 }
 
 function toProfileFormValues(profile: {
   defaultBoxLabelTemplateId: string | null;
   categoryBoxLabelTemplateDefaults: Array<{ chzProductGroupCode: number; templateId: string }>;
+  defaultPalletSheetTemplateId?: string | null;
+  categoryPalletSheetTemplateDefaults?: Array<{ chzProductGroupCode: number; templateId: string }>;
   defaultPalletLabelTemplateId: string | null;
   categoryPalletLabelTemplateDefaults: Array<{ chzProductGroupCode: number; templateId: string }>;
   gln: string | null;
@@ -216,6 +229,13 @@ function toProfileFormValues(profile: {
     defaultBoxLabelTemplateId: profile.defaultBoxLabelTemplateId ?? "",
     categoryDefaults: Object.fromEntries(
       profile.categoryBoxLabelTemplateDefaults.map((item) => [
+        String(item.chzProductGroupCode),
+        item.templateId,
+      ]),
+    ),
+    defaultPalletSheetTemplateId: profile.defaultPalletSheetTemplateId ?? "",
+    categoryPalletSheetDefaults: Object.fromEntries(
+      (profile.categoryPalletSheetTemplateDefaults ?? []).map((item) => [
         String(item.chzProductGroupCode),
         item.templateId,
       ]),
@@ -267,6 +287,38 @@ export function OrgProfilePage() {
 
   const defaultBoxLabelTemplateId = watchProfile("defaultBoxLabelTemplateId");
   const defaultPalletLabelTemplateId = watchProfile("defaultPalletLabelTemplateId");
+  const defaultPalletSheetTemplateId = watchProfile("defaultPalletSheetTemplateId");
+  const categoryPalletSheetDefaults = watchProfile("categoryPalletSheetDefaults");
+  const sheetTemplates = (labelTemplatesQuery.data ?? []).filter(
+    (template) => template.format === "pallet_sheet_v2",
+  );
+  const sheetOptions = (category: number | null, value: string) => {
+    const eligible = sheetTemplates.filter((template) =>
+      isPalletLabelTemplateEligible(template, category),
+    );
+    return [
+      {
+        value: "",
+        label: t(
+          category === null
+            ? "pages.labels.sheet.defaults.unset"
+            : "pages.labels.sheet.defaults.inherit",
+        ),
+      },
+      ...eligible.map((template) => ({ value: template.id, label: template.name })),
+      ...(value && !eligible.some((template) => template.id === value)
+        ? [{ value, label: t("pages.labels.sheet.defaults.unavailable"), disabled: true }]
+        : []),
+    ];
+  };
+  const savedSheetTemplateIsUnavailable =
+    defaultPalletSheetTemplateId !== "" &&
+    labelTemplatesQuery.data !== undefined &&
+    !sheetTemplates.some(
+      (template) =>
+        template.id === defaultPalletSheetTemplateId &&
+        isPalletLabelTemplateEligible(template, null),
+    );
   const timeZone = watchProfile("timeZone");
   const timeZoneOptions = [
     ...OPERATIONAL_TIME_ZONES,
@@ -332,6 +384,7 @@ export function OrgProfilePage() {
       ...(profileQuery.data?.productGroupsInUse ?? []),
       ...Object.keys(categoryDefaults).map(Number),
       ...Object.keys(categoryPalletDefaults).map(Number),
+      ...Object.keys(categoryPalletSheetDefaults).map(Number),
     ]),
   ]
     .map((code) => ({
@@ -341,7 +394,12 @@ export function OrgProfilePage() {
     .sort((a, b) => a.name.localeCompare(b.name, "ru"));
 
   const submitProfile = handleProfileSubmit(async (values) => {
-    if (savedTemplateIsUnavailable || savedPalletTemplateIsUnavailable) return;
+    if (
+      savedTemplateIsUnavailable ||
+      savedPalletTemplateIsUnavailable ||
+      savedSheetTemplateIsUnavailable
+    )
+      return;
     try {
       const savedProfile = await updateProfile.mutateAsync(
         toProfileInput(values, {
@@ -349,6 +407,8 @@ export function OrgProfilePage() {
           categoryDefaults: profileDirtyFields.categoryDefaults !== undefined,
           defaultPalletLabelTemplateId: profileDirtyFields.defaultPalletLabelTemplateId === true,
           categoryPalletDefaults: profileDirtyFields.categoryPalletDefaults !== undefined,
+          defaultPalletSheetTemplateId: profileDirtyFields.defaultPalletSheetTemplateId === true,
+          categoryPalletSheetDefaults: profileDirtyFields.categoryPalletSheetDefaults !== undefined,
         }),
       );
       resetProfile(toProfileFormValues(savedProfile));
@@ -526,6 +586,22 @@ export function OrgProfilePage() {
                 )}
               </div>
               <Select
+                label={t("pages.labels.sheet.defaults.organization")}
+                searchable
+                options={sheetOptions(null, defaultPalletSheetTemplateId)}
+                value={defaultPalletSheetTemplateId}
+                onValueChange={(value) =>
+                  setProfileValue("defaultPalletSheetTemplateId", value, { shouldDirty: true })
+                }
+              />
+              <p style={{ margin: 0, color: "var(--fg-3)" }}>
+                {t("pages.labels.sheet.defaults.newShifts")}
+              </p>
+              <Link to="/labels">{t("pages.labels.sheet.defaults.createCurrent")}</Link>
+              {savedSheetTemplateIsUnavailable ? (
+                <Alert tone="warn">{t("pages.labels.sheet.defaults.unavailable")}</Alert>
+              ) : null}
+              <Select
                 label={t("pages.settings.profile.defaultPalletLabelTemplateLabel")}
                 hint={t("pages.settings.profile.defaultPalletLabelTemplateScopeHint")}
                 searchable
@@ -586,6 +662,9 @@ export function OrgProfilePage() {
                         <th scope="col" style={CATEGORY_HEADER_STYLE}>
                           {t("pages.settings.profile.categoryPalletDefaultsColumnTemplate")}
                         </th>
+                        <th scope="col" style={CATEGORY_HEADER_STYLE}>
+                          {t("pages.labels.sheet.defaults.organization")}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -641,6 +720,27 @@ export function OrgProfilePage() {
                                 }
                               />
                             </td>
+                            <td style={CATEGORY_CELL_STYLE}>
+                              <Select
+                                aria-label={`${t("pages.labels.sheet.defaults.category")} ${row.name}`}
+                                searchable
+                                options={sheetOptions(
+                                  row.code,
+                                  categoryPalletSheetDefaults[String(row.code)] ?? "",
+                                )}
+                                value={categoryPalletSheetDefaults[String(row.code)] ?? ""}
+                                onValueChange={(next) =>
+                                  setProfileValue(
+                                    "categoryPalletSheetDefaults",
+                                    { ...categoryPalletSheetDefaults, [String(row.code)]: next },
+                                    { shouldDirty: true },
+                                  )
+                                }
+                              />
+                              {!(profileQuery.data?.productGroupsInUse ?? []).includes(row.code) ? (
+                                <span>{t("pages.labels.sheet.defaults.orphan")}</span>
+                              ) : null}
+                            </td>
                           </tr>
                         );
                       })}
@@ -652,7 +752,11 @@ export function OrgProfilePage() {
                 <Button
                   type="submit"
                   loading={updateProfile.isPending}
-                  disabled={savedTemplateIsUnavailable || savedPalletTemplateIsUnavailable}
+                  disabled={
+                    savedTemplateIsUnavailable ||
+                    savedPalletTemplateIsUnavailable ||
+                    savedSheetTemplateIsUnavailable
+                  }
                 >
                   {t("pages.settings.profile.save")}
                 </Button>
@@ -660,7 +764,6 @@ export function OrgProfilePage() {
             </form>
           </Card>
 
-          <PalletSheetDefaultsForm profile={profileQuery.data} templates={labelTemplatesQuery} />
           <PickupPolicyCard enabled={profileQuery.data.pickupLimitsEnabled} />
           <OrganizationLogoCard logoUrl={profileQuery.data.logoUrl} />
 

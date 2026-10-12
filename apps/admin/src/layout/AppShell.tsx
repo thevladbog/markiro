@@ -47,7 +47,7 @@ export const NAV_ITEMS: ReadonlyArray<{
     capability: C.OPERATIONS_READ,
   },
   // "/boxes" and "/pallets" have no sidebar entry of their own: they are
-  // reachable as the "Короба" and "Паллеты" tabs inside the code-search
+  // reachable as the "Короба" and "Палеты" tabs inside the code-search
   // section (see pages/code-search/RegistryTabs.tsx).
   {
     to: "/codes",
@@ -137,7 +137,7 @@ export const NAV_ITEMS: ReadonlyArray<{
 
 /**
  * `/boxes` and `/pallets` have no sidebar entries of their own: they are the
- * "Короба" and "Паллеты" tabs inside the code-search section (see
+ * "Короба" and "Палеты" tabs inside the code-search section (see
  * pages/code-search/RegistryTabs.tsx), so the "Поиск кодов" item stays lit
  * on them too.
  */
