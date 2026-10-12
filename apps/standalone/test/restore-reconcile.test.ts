@@ -706,6 +706,157 @@ describe("the records sent again", () => {
   });
 });
 
+/**
+ * A warehouse reprint record (`wh_outbox`, plan СКЛ) of `pairing`, answered with `outcome` at
+ * `ackedAt` (`null` — not yet answered).
+ */
+function warehouseRecord(
+  db: DatabaseSync,
+  id: string,
+  outcome: "accepted" | "rejected" | null,
+  ackedAt: string | null,
+  pairing: { hostId: string; deviceId: string } = PAIRING,
+) {
+  db.prepare(
+    "INSERT INTO wh_outbox (id, host_id, device_id, session_id, payload, created_at, " +
+      "attempts, sent_at, outcome, outcome_code, acked_at) VALUES (?, ?, ?, 's-1', ?, ?, 2, ?, ?, ?, ?)",
+  ).run(
+    id,
+    pairing.hostId,
+    pairing.deviceId,
+    JSON.stringify({ id }),
+    "2026-10-01T06:00:00.000Z",
+    "2026-10-01T06:00:01.000Z",
+    outcome,
+    outcome === "rejected" ? "subject_unknown" : null,
+    ackedAt,
+  );
+}
+
+function warehouseRecords(db: DatabaseSync) {
+  return rows(
+    db,
+    "SELECT id, outcome, outcome_code, acked_at, attempts, sent_at FROM wh_outbox ORDER BY id",
+  );
+}
+
+describe("the warehouse reprint's records sent again (plan СКЛ)", () => {
+  const since = new Date(NOW.getTime() - RESEND_WINDOW_MS);
+  const sent = { attempts: 2, sent_at: "2026-10-01T06:00:01.000Z" };
+
+  it("takes the accepted records of the window: its first instant is in, the one before is out", async () => {
+    const { db, executor } = openLocalDb();
+    warehouseRecord(db, "a-edge", "accepted", since.toISOString());
+    warehouseRecord(db, "b-before", "accepted", new Date(since.getTime() - 1).toISOString());
+    warehouseRecord(db, "c-recent", "accepted", NOW.toISOString());
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: answering(),
+      now: () => NOW,
+    });
+    // The attempts already made and when the last was sent stay as they were.
+    expect(warehouseRecords(db)).toEqual([
+      { id: "a-edge", outcome: null, outcome_code: null, acked_at: null, ...sent },
+      {
+        id: "b-before",
+        outcome: "accepted",
+        outcome_code: null,
+        acked_at: new Date(since.getTime() - 1).toISOString(),
+        ...sent,
+      },
+      { id: "c-recent", outcome: null, outcome_code: null, acked_at: null, ...sent },
+    ]);
+  });
+
+  it("never sends a refused record again, and leaves one still waiting as it is", async () => {
+    const { db, executor } = openLocalDb();
+    warehouseRecord(db, "a-refused", "rejected", NOW.toISOString());
+    warehouseRecord(db, "b-waiting", null, null);
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: answering(),
+      now: () => NOW,
+    });
+    expect(warehouseRecords(db)).toEqual([
+      {
+        id: "a-refused",
+        outcome: "rejected",
+        outcome_code: "subject_unknown",
+        acked_at: NOW.toISOString(),
+        ...sent,
+      },
+      { id: "b-waiting", outcome: null, outcome_code: null, acked_at: null, ...sent },
+    ]);
+  });
+
+  it("leaves the records of another pairing as they are", async () => {
+    const { db, executor } = openLocalDb();
+    warehouseRecord(db, "a-mine", "accepted", NOW.toISOString());
+    warehouseRecord(db, "b-device", "accepted", NOW.toISOString(), {
+      ...PAIRING,
+      deviceId: OTHER_DEVICE,
+    });
+    warehouseRecord(db, "c-host", "accepted", NOW.toISOString(), {
+      ...PAIRING,
+      hostId: OTHER_HOST,
+    });
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    await reconcileRestore({
+      local: executor,
+      pairing: PAIRING,
+      register: answering(),
+      now: () => NOW,
+    });
+    expect(rows(db, "SELECT id, acked_at FROM wh_outbox ORDER BY id")).toEqual([
+      { id: "a-mine", acked_at: null },
+      { id: "b-device", acked_at: NOW.toISOString() },
+      { id: "c-host", acked_at: NOW.toISOString() },
+    ]);
+  });
+
+  it("goes with the settling: a later epoch noted meanwhile leaves every record answered", async () => {
+    const { db, executor } = openLocalDb();
+    seedBlocks(db);
+    warehouseRecord(db, "a-recent", "accepted", NOW.toISOString());
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const register = vi.fn(async (request: KnownBlocksRequest): Promise<KnownBlocksResponse> => {
+      await noteRestoreEpoch(executor, PAIRING, LATER_EPOCH, NOW);
+      return {
+        results: request.blocks.map((block) => ({ id: block.id, outcome: "known", code: null })),
+      };
+    });
+    await expect(
+      reconcileRestore({ local: executor, pairing: PAIRING, register, now: () => NOW }),
+    ).rejects.toMatchObject({ code: "changes_mismatch" });
+    expect(rows(db, "SELECT acked_at FROM wh_outbox")).toEqual([{ acked_at: NOW.toISOString() }]);
+  });
+
+  it("sends them once per epoch: a record answered again after the settling stays answered", async () => {
+    const { db, executor } = openLocalDb();
+    warehouseRecord(db, "a-recent", "accepted", NOW.toISOString());
+    await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW);
+    const run = () =>
+      reconcileRestore({
+        local: executor,
+        pairing: PAIRING,
+        register: answering(),
+        now: () => NOW,
+      });
+    await expect(run()).resolves.toMatchObject({ kind: "reconciled" });
+    expect(rows(db, "SELECT acked_at FROM wh_outbox")).toEqual([{ acked_at: null }]);
+    // It went and came back accepted; the same epoch noted again is no new restore.
+    const later = new Date(NOW.getTime() + 1000).toISOString();
+    db.prepare("UPDATE wh_outbox SET outcome = 'accepted', acked_at = ?").run(later);
+    expect(await noteRestoreEpoch(executor, PAIRING, EPOCH, NOW)).toBe(false);
+    await expect(run()).resolves.toEqual({ kind: "none" });
+    expect(rows(db, "SELECT acked_at FROM wh_outbox")).toEqual([{ acked_at: later }]);
+  });
+});
+
 describe("the end of a reconciliation", () => {
   it("applies none of it when a later epoch was noted meanwhile: no mark, no record sent again", async () => {
     const { db, executor } = openLocalDb();

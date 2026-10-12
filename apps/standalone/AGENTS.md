@@ -4030,8 +4030,12 @@ with a serial the host refused (the box close keeps the other blocks and asks
 for a new one by the half rule); `conflict` on `no_restore` means nothing is
 owed. Then ONE transaction writes `from_zero` for the sync, puts the records
 acknowledged in the last 30 days (`RESEND_WINDOW_MS`, equal to `RETENTION_MS`,
-decision 31) back in the outbox and settles the epoch with the count of
-refused blocks, only if the epoch is still the one read (a later restore noted
+decision 31) back in the outbox — and the warehouse reprint's records the
+host accepted in those days back in `wh_outbox` (`WAREHOUSE_REOPEN_SQL`, plan
+СКЛ: only `accepted` ones, the refused stay as they are; index
+`wh_outbox_accepted`), so the restored host gets its `warehouse_reprints`
+trail back; they go after the facts, as always — and settles the epoch with
+the count of refused blocks, only if the epoch is still the one read (a later restore noted
 meanwhile fails it with `changes_mismatch` and the next run settles that one);
 which blocks were refused, each with the host's code, are kept beside the count
 (`refused_blocks`, a JSON list for support; a new epoch empties it, and nothing

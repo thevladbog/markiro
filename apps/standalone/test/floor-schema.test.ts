@@ -49,6 +49,7 @@ import {
   RETIRE_SQL,
   SETTLE_SQL,
   STATUS_SQL,
+  WAREHOUSE_REOPEN_SQL,
 } from "../src/local/restore-reconcile.js";
 import {
   DUE_SHIFTS_SQL,
@@ -1244,6 +1245,11 @@ describe("the shape of the production tables (migration 0006)", () => {
       "SEARCH outbox USING INDEX outbox_settled (host_id=? AND device_id=? AND outcome>?)",
     );
     expect(reopen.filter((step) => step.startsWith("SCAN ") || step.includes("TEMP"))).toEqual([]);
+    // The warehouse reprint's records to send again (plan СКЛ) are the pairing's accepted ones
+    // from the window's first instant, not the whole `wh_outbox`.
+    expect(plan(WAREHOUSE_REOPEN_SQL)).toEqual([
+      "SEARCH wh_outbox USING INDEX wh_outbox_accepted (host_id=? AND device_id=? AND acked_at>?)",
+    ]);
   });
 
   it("are pinned on the shell's SQLite with the reconciliation's own statements", () => {
@@ -1256,10 +1262,11 @@ describe("the shape of the production tables (migration 0006)", () => {
       BLOCKS_SQL,
       RETIRE_SQL,
       REOPEN_SQL,
+      WAREHOUSE_REOPEN_SQL,
       SETTLE_SQL,
       RECONCILED_AT_SQL,
     ];
-    expect(new Set(statements).size).toBe(7);
+    expect(new Set(statements).size).toBe(8);
     for (const sql of statements) expect(source).toContain(`"${sql}"`);
   });
 });

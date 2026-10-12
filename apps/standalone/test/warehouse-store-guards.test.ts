@@ -355,6 +355,7 @@ describe("the warehouse tables refuse a row that breaks their rules (migration 0
     expect(indexes).toEqual([
       { tableName: "wh_jobs", name: "wh_jobs_open", isUnique: 1, isPartial: 1 },
       { tableName: "wh_jobs", name: "wh_jobs_session", isUnique: 0, isPartial: 0 },
+      { tableName: "wh_outbox", name: "wh_outbox_accepted", isUnique: 0, isPartial: 1 },
       { tableName: "wh_outbox", name: "wh_outbox_session", isUnique: 0, isPartial: 0 },
       { tableName: "wh_outbox", name: "wh_outbox_unsent", isUnique: 0, isPartial: 1 },
       { tableName: "wh_sessions", name: "wh_sessions_finished", isUnique: 0, isPartial: 1 },
@@ -371,6 +372,7 @@ describe("the warehouse tables refuse a row that breaks their rules (migration 0
     expect(columns("wh_outbox_unsent")).toEqual(["host_id", "device_id", "seq"]);
     // The session leads, so the unsent count (host and device only) is not drawn to it.
     expect(columns("wh_outbox_session")).toEqual(["session_id", "host_id", "device_id"]);
+    expect(columns("wh_outbox_accepted")).toEqual(["host_id", "device_id", "acked_at"]);
   });
 });
 

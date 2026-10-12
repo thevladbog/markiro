@@ -105,3 +105,10 @@ CREATE INDEX wh_outbox_unsent ON wh_outbox (host_id, device_id, seq) WHERE acked
 -- would then walk every record the pairing keeps for 30 days (as `outbox_settled`
 -- in `0006` is partial so as not to attract it).
 CREATE INDEX wh_outbox_session ON wh_outbox (session_id, host_id, device_id);
+-- A restore of the host from a copy sends the records it accepted in the last
+-- 30 days again (`WAREHOUSE_REOPEN_SQL`, `src/local/restore-reconcile.ts`):
+-- they are found by their receipt among the pairing's accepted ones. Partial
+-- on purpose, as `outbox_settled` in `0006`: no other read names
+-- `outcome = 'accepted'`, so it attracts none of them.
+CREATE INDEX wh_outbox_accepted ON wh_outbox (host_id, device_id, acked_at)
+  WHERE outcome = 'accepted';

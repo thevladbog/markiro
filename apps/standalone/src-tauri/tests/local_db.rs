@@ -1315,6 +1315,11 @@ const RESTORE_RETIRE: &str =
 const RESTORE_REOPEN: &str =
     "UPDATE outbox SET outcome = NULL, outcome_code = NULL, outcome_details = NULL, acked_at = \
      NULL WHERE host_id = ? AND device_id = ? AND outcome IS NOT NULL AND acked_at >= ?";
+/// The warehouse reprint's records the host accepted in the window (plan СКЛ), sent again in the
+/// same transaction.
+const RESTORE_REOPEN_WAREHOUSE: &str =
+    "UPDATE wh_outbox SET outcome = NULL, outcome_code = NULL, acked_at = NULL WHERE host_id = ? \
+     AND device_id = ? AND outcome = 'accepted' AND acked_at >= ?";
 /// The stuck line's clamp after a restore (`src/floor/outbox-status.ts`): when the pairing last
 /// settled one, read with every status of a failing delivery.
 const RESTORE_RECONCILED_AT: &str =
@@ -1426,7 +1431,7 @@ async fn the_floors_repeating_reads_search_an_index() {
         .await
         .unwrap();
     // (the read, the index its plan must name)
-    let reads: [(&str, &str); 83] = [
+    let reads: [(&str, &str); 84] = [
         (
             "SELECT id, kind, payload FROM outbox WHERE host_id = ? AND device_id = ? \
              AND acked_at IS NULL ORDER BY seq LIMIT ?",
@@ -1781,6 +1786,10 @@ async fn the_floors_repeating_reads_search_an_index() {
         (
             RESTORE_REOPEN,
             "outbox_settled (host_id=? AND device_id=? AND outcome>?)",
+        ),
+        (
+            RESTORE_REOPEN_WAREHOUSE,
+            "wh_outbox_accepted (host_id=? AND device_id=? AND acked_at>?)",
         ),
     ];
     for (sql, index) in reads {
